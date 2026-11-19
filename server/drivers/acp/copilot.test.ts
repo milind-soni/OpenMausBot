@@ -199,7 +199,7 @@ describe("GitHub Copilot ACP driver", () => {
   it("removes only the session folder the discovery itself left behind", async () => {
     const home = join(scratch, "copilot-home");
     // The fields and their plain-scalar style are Copilot CLI 1.0.105's own workspace.yaml.
-    const session = (id: string, cwd: string, client = "openmausbot-model-discovery") => {
+    const session = (id: string, cwd: string, client = "openindbot-model-discovery") => {
       mkdirSync(join(home, "session-state", id, "checkpoints"), { recursive: true });
       writeFileSync(join(home, "session-state", id, "workspace.yaml"), `id: ${id}\ncwd: ${cwd}\nclient_name: ${client}\nuser_named: false\n`
         + "summary_count: 0\nfork_count: 0\ncreated_at: 2026-10-28T01:45:38.058Z\nupdated_at: 2026-10-28T01:45:38.116Z\n");
@@ -290,16 +290,16 @@ describe("GitHub Copilot ACP driver", () => {
       expect(text).toContain("trigger");
       expect(text).toContain("trigger_info");
       // Copilot refuses functions in its reserved `browser` namespace, so the built-in browser server is renamed for it.
-      expect(text).toContain("maus_browser: agent_browser_open");
+      expect(text).toContain("ind_browser: agent_browser_open");
       const launch = JSON.parse(readFileSync(join(scratch, "launch.json"), "utf8"));
       const path = launch.argv[launch.argv.indexOf("--additional-mcp-config") + 1].slice(1) as string;
-      expect(Object.keys(JSON.parse(readFileSync(path, "utf8")).mcpServers).sort()).toEqual(["agents", "maus_browser"]);
+      expect(Object.keys(JSON.parse(readFileSync(path, "utf8")).mcpServers).sort()).toEqual(["agents", "ind_browser"]);
     } finally { await browser.close(); }
   });
 
   it("keeps Copilot's MCP server names out of its reserved browser and computer namespaces", () => {
-    expect(copilotServerNames(["agents", "browser", "computer", "data"])).toEqual(["agents", "maus_browser", "maus_computer", "data"]);
-    expect(copilotServerNames(["browser", "maus_browser", "Computer"])).toEqual(["maus_browser_2", "maus_browser", "maus_Computer"]);
+    expect(copilotServerNames(["agents", "browser", "computer", "data"])).toEqual(["agents", "ind_browser", "ind_computer", "data"]);
+    expect(copilotServerNames(["browser", "ind_browser", "Computer"])).toEqual(["ind_browser_2", "ind_browser", "ind_Computer"]);
     expect(copilotServerNames(["agents", "my_browser", "computers"])).toEqual(["agents", "my_browser", "computers"]);
   });
 

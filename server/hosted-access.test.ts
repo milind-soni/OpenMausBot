@@ -95,7 +95,7 @@ beforeAll(async () => {
   PORT = await freePortBlock([0, 1], 35_000, 5_000);
   home = mkdtempSync(join(tmpdir(), "omb-hosted-server-"));
   stateFile = join(home, "portal-fixture.json"); state();
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".openindbot");
   const layer = join(home, "enterprise");
   mkdirSync(join(layer, "server"), { recursive: true });
   mkdirSync(join(home, "static"));
@@ -142,7 +142,7 @@ beforeAll(async () => {
 }, 30_000);
 afterAll(async () => {
   await waitForExit(child, { signal: "SIGTERM" });
-  const evidenceDir = join(tmpdir(), "openmausbot-verification-evidence");
+  const evidenceDir = join(tmpdir(), "openindbot-verification-evidence");
   mkdirSync(evidenceDir, { recursive: true });
   const logPath = join(evidenceDir, `hosted-access-${Date.now()}-${process.pid}.log`);
   writeFileSync(logPath, log);
@@ -157,7 +157,7 @@ describe("hosted bridge in the full server", () => {
     expect((await call("/")).location).toBe("/api/auth/hosted/start");
     expect((await call("/pair")).location).toBe("/api/auth/hosted/start");
     expect((await call("/", { local: true })).body).toContain("Fixture workspace");
-    expect((await call("/.well-known/openmausbot/environment")).body.capabilities.emailSignIn).toBe(false);
+    expect((await call("/.well-known/openindbot/environment")).body.capabilities.emailSignIn).toBe(false);
     for (const path of ["/api/auth/pair", "/api/auth/pairing", "/api/auth/email/start", "/api/auth/email/verify"]) {
       expect((await call(path, { method: "POST" })).status).toBe(403);
     }
@@ -270,7 +270,7 @@ describe("hosted bridge in the full server", () => {
   it("uses explicit portal membership without local allow-list synchronization and still revokes quiet streams", async () => {
     await waitForExit(child, { signal: "SIGTERM" });
     state();
-    writeFileSync(join(home, ".openmausbot", "config.json"), JSON.stringify({ signIn: { admins: [], members: [] }, instances: INSTANCES }));
+    writeFileSync(join(home, ".openindbot", "config.json"), JSON.stringify({ signIn: { admins: [], members: [] }, instances: INSTANCES }));
     child = spawn(process.execPath, [join(ROOT, "server/index.ts")], { cwd: ROOT, env: { ...fixtureEnv, OMB_ADMIN_MEMBERSHIP: "portal" }, stdio: ["ignore", "pipe", "pipe"] });
     child.stderr?.on("data", (chunk) => log += chunk);
     await expect.poll(async () => {
@@ -278,7 +278,7 @@ describe("hosted bridge in the full server", () => {
     }, { timeout: 20_000 }).toBe(200);
     const readiness = await call("/api/health/hosted");
     expect(readiness.status).toBe(200);
-    expect(readiness.body).toEqual({ ok: true, service: "openmausbot", membershipAuthority: "portal", workspace: "acme", ...HOSTED_CONTRACT_METADATA });
+    expect(readiness.body).toEqual({ ok: true, service: "openindbot", membershipAuthority: "portal", workspace: "acme", ...HOSTED_CONTRACT_METADATA });
     expect(readiness.contractVersion).toBe("1");
     expect(readiness.cookies).toEqual([]);
     const cookie = await login();

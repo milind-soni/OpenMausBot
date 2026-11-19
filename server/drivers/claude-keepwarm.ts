@@ -78,7 +78,7 @@ export function keepWarmSettings(settings: Record<string, unknown> | null, denyC
   };
 }
 
-export const KEEP_WARM_DENY_HOOK = `process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "OpenMausBot keep-warm ping: no tools" } }));\n`;
+export const KEEP_WARM_DENY_HOOK = `process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: "OpenIndBot keep-warm ping: no tools" } }));\n`;
 
 const count = (value: unknown): number => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
 

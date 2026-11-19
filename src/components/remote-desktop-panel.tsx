@@ -385,7 +385,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
         <RoutineEditor
           bots={[bot]}
           lockedBotId={bot.id}
-          defaultRunOn={cloudRoutineReady ? "cloud" : "maus"}
+          defaultRunOn={cloudRoutineReady ? "cloud" : "ind"}
           onClose={() => setCreatingRoutine(false)}
         />
       )}

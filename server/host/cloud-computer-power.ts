@@ -230,7 +230,7 @@ export function createCloudComputerPower(deps: CloudComputerPowerDeps) {
     if (!answer.ok) throw notAnswering(answer);
   }
 
-  /** A passing failure: the turn's next computer call claims again, however often (`keepsTrying`), since MausBot keeps
+  /** A passing failure: the turn's next computer call claims again, however often (`keepsTrying`), since IndBot keeps
    * bringing the computer back meanwhile. */
   const passing = (why: string) => Object.assign(new Error(why), { status: 503, transient: true, keepsTrying: true });
 

@@ -194,7 +194,7 @@ describe("a bot adding a server that names the server's own files, where bots ar
     }
   });
 
-  it("still takes its own files, an engine OpenMausBot installed, and paths outside the data folder", () => {
+  it("still takes its own files, an engine OpenIndBot installed, and paths outside the data folder", () => {
     const data = dataDir();
     const own = addBotMcpServer({}, { name: "own", ...python(file(join(data, "workspaces", "iris", "tools", "s.py"))) }, "iris", data, true);
     expect(own.ok).toBe(true);

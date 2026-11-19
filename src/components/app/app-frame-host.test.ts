@@ -89,7 +89,7 @@ describe("the bridge on the desktop", () => {
     expect(posted).toHaveBeenCalledTimes(1);
     const [answer, target] = posted.mock.calls[0]! as [any, string];
     expect(target).toBe("*");
-    expect(answer).toMatchObject({ jsonrpc: "2.0", id: 1, result: { hostInfo: { name: "mausbot", version: "9.9.9" }, hostContext: { theme: "dark" } } });
+    expect(answer).toMatchObject({ jsonrpc: "2.0", id: 1, result: { hostInfo: { name: "indbot", version: "9.9.9" }, hostContext: { theme: "dark" } } });
     // a bot's page has no server tools
     expect(answer.result.hostCapabilities.serverTools).toBeUndefined();
     expect(answer.result.hostCapabilities.sandbox).toEqual({ permissions: {}, csp: { connectDomains: doc.network.connect, resourceDomains: doc.network.resources } });
@@ -117,7 +117,7 @@ describe("the bridge on the desktop", () => {
 });
 
 describe("text the person selects in a page", () => {
-  const SELECTION = "mausbot/notifications/selection";
+  const SELECTION = "indbot/notifications/selection";
 
   function page(over: { doc?: typeof doc } = {}) {
     const onSelection = vi.fn();
@@ -177,7 +177,7 @@ describe("text the person selects in a page", () => {
 });
 
 describe("a page's word on whether it opens with a heading", () => {
-  const HEADING = "mausbot/notifications/heading";
+  const HEADING = "indbot/notifications/heading";
 
   it("is passed on each time the page says it, and only from the page's own window", () => {
     const onHeading = vi.fn();

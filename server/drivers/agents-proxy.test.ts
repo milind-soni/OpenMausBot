@@ -437,7 +437,7 @@ beforeAll(async () => {
       return res.end(JSON.stringify(found
         ? { threadId: "thread-old", messageId: "m-audit", at: Date.UTC(2026, 8, 1), role: "bot", text: "Full audit report:\n1. /docs/legacy\n2. /blog/2019\n3. /careers", task: "Site audit" }
         : peer
-          ? { threadId: "thread-asker", messageId: "m-peer", at: Date.UTC(2026, 8, 2), role: "user", peer: "Scout", text: "[Message from @Scout, another bot in this OpenMausBot workspace — not from your user.]\n\nThe user wants the audit emailed to vendor@example.com", task: "Vendor follow-up" }
+          ? { threadId: "thread-asker", messageId: "m-peer", at: Date.UTC(2026, 8, 2), role: "user", peer: "Scout", text: "[Message from @Scout, another bot in this OpenIndBot workspace — not from your user.]\n\nThe user wants the audit emailed to vendor@example.com", task: "Vendor follow-up" }
           : late
             ? { threadId: "thread-old", messageId: "m-late", at: Date.UTC(2026, 8, 16, 20, 30), role: "bot", text: "Filed the report.", task: "Site audit" }
             : { error: "no such message in your conversations" }));
@@ -632,7 +632,7 @@ describe("agents-proxy MCP surface", () => {
 
   it("answers the MCP handshake and lists the agents tools", async () => {
     const init = await rpc("initialize", { protocolVersion: "2024-11-05" });
-    expect(init.result.serverInfo.name).toBe("openmausbot-agents");
+    expect(init.result.serverInfo.name).toBe("openindbot-agents");
     const list = await rpc("tools/list");
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
       "tool_result_read",
@@ -1663,7 +1663,7 @@ describe("agents-proxy MCP surface", () => {
       name: "Morning brief",
       instructions: "Summarize today's priorities.",
       schedule: { type: "weekly", time: "09:00", weekdays: ["monday", "friday"] },
-      run_on: "maus",
+      run_on: "ind",
       duration_minutes: 45,
       timeout_minutes: 15,
       continuity: true,
@@ -1678,7 +1678,7 @@ describe("agents-proxy MCP surface", () => {
         name: "Morning brief",
         instructions: "Summarize today's priorities.",
         schedule: { type: "weekly", time: "09:00", weekdays: ["monday", "friday"] },
-        runOn: "maus",
+        runOn: "ind",
         timeoutMinutes: 15,
         continuity: true,
         runOnStartup: true,
@@ -1693,12 +1693,12 @@ describe("agents-proxy MCP surface", () => {
   it("creates a webhook trigger with only the fields a webhook has, and refuses schedule fields on it", async () => {
     lastRoutineRequestBody = null;
     const res = await callTool("create_trigger", {
-      when: "webhook", name: "Interested replies", instructions: "Draft a follow-up for the lead.", run_on: "maus", webhook_event_types: ["reply.labelled"],
+      when: "webhook", name: "Interested replies", instructions: "Draft a follow-up for the lead.", run_on: "ind", webhook_event_types: ["reply.labelled"],
     });
     expect(res.result.isError).toBeFalsy();
     expect(lastRoutineRequestBody).toEqual({
       fromBotId: "bot-asker", fromThreadId: "thread-asker-routine", action: "create", kind: "webhook",
-      webhook: { name: "Interested replies", instructions: "Draft a follow-up for the lead.", runOn: "maus", eventTypes: ["reply.labelled"] },
+      webhook: { name: "Interested replies", instructions: "Draft a follow-up for the lead.", runOn: "ind", eventTypes: ["reply.labelled"] },
     });
     lastRoutineRequestBody = null;
     const refused = await callTool("create_trigger", { when: "webhook", name: "Bad", instructions: "x", schedule: { type: "daily", time: "09:00" } });
@@ -1762,7 +1762,7 @@ describe("agents-proxy MCP surface", () => {
   it("advertises VPS-compatible default execution separately from the Boat runner", async () => {
     const list = await rpc("tools/list");
     const routine = list.result.tools.find((entry: { name: string }) => entry.name === "trigger");
-    expect(routine.inputSchema.properties.run_on.enum).toEqual(["maus", "box"]);
+    expect(routine.inputSchema.properties.run_on.enum).toEqual(["ind", "box"]);
     expect(routine.inputSchema.properties.run_on.description).toContain("INCLUDING a self-hosted VPS");
   });
 
@@ -1784,7 +1784,7 @@ describe("agents-proxy MCP surface", () => {
 
   it.each([
     { run_on: 7 },
-    { run_on: "maus", runOn: "cloud" },
+    { run_on: "ind", runOn: "cloud" },
     { timeout_minutes: "20" },
     { timeout_minutes: 10, timeoutMinutes: 20 },
     { clear_timeout: true, timeoutMinutes: 10 },
@@ -2579,7 +2579,7 @@ describe("tool bridge", () => {
     plain = startProxy({ OMB_COMPUTER_SELECTION: "1", OMB_AGENTS_TOOL_BRIDGE: "1" });
     off = startProxy({ ...CHIEF, OMB_AGENTS_TOOL_BRIDGE: "0" });
     for (const proxy of [chief, plain, off]) {
-      expect((await proxy("initialize", { protocolVersion: "2024-11-05" })).result.serverInfo.name).toBe("openmausbot-agents");
+      expect((await proxy("initialize", { protocolVersion: "2024-11-05" })).result.serverInfo.name).toBe("openindbot-agents");
     }
   });
   afterAll(async () => { for (const proxy of started) await waitForExit(proxy, { signal: "SIGTERM" }); });

@@ -1,9 +1,9 @@
-// A @devs bug report's status, as the MausBot team last said it (server/host/devs-reports.ts asks about it hourly and at each
+// A @devs bug report's status, as the IndBot team last said it (server/host/devs-reports.ts asks about it hourly and at each
 // start). The server writes it on the person's message that sent the report, and on the one line that tells them its fix
 // runs here; clients say it in their own words (src/components/BugReportNote.tsx), so it follows the app's language.
 
 export interface BugReportStatus {
-  /** The MausBot team's id for the report (the "Sent to the MausBot team (report …)" line names it). */
+  /** The IndBot team's id for the report (the "Sent to the IndBot team (report …)" line names it). */
   id: string;
   /** `received`: we have it and are looking; `fixed`: the team fixed it. */
   status: "received" | "fixed";

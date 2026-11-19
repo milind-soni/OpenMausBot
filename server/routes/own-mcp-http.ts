@@ -1,4 +1,4 @@
-// OpenMausBot's own MCP servers (agents, browser, computer, data, Email, phone) over MCP's Streamable HTTP transport, for
+// OpenIndBot's own MCP servers (agents, browser, computer, data, Email, phone) over MCP's Streamable HTTP transport, for
 // engines that reach MCP servers by URL: one endpoint in this process instead of a stdio proxy process per server in
 // every session. The turn's capability rides the Authorization header, and the endpoints behind these answers check it,
 // as they check the stdio proxies'. Each capability gets the stdio proxy's limits: 16 requests in flight per server, and

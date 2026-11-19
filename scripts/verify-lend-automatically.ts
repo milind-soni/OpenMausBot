@@ -1,5 +1,5 @@
 // This computer working for each Cloud of the person's own, with nothing to set: the menu-bar item's states and its
-// activity window drawn from the real modules, and Settings → MausBot Cloud on this computer's page and on My Cloud's
+// activity window drawn from the real modules, and Settings → IndBot Cloud on this computer's page and on My Cloud's
 // own page in the real app, against a disposable fake-engine server.
 // Run: node --experimental-strip-types scripts/verify-lend-automatically.ts --shots <dir>
 // It photographs each view in a light and a dark look with a headless Chrome in a throwaway profile (OMB_CDP_CHROME,

@@ -30,7 +30,7 @@ async function made(side: Side, name: string): Promise<Bot> {
 }
 /** A turn of `bot`'s on the server at `base` asks for a teammate by name, as coordinate_bots does. */
 async function coordinate(base: string, bot: Bot, name: string): Promise<{ status: number; error: string }> {
-  const minted = await fetch(`${base}/api/testing/internal-capability`, { method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": KEY },
+  const minted = await fetch(`${base}/api/testing/internal-capability`, { method: "POST", headers: { "content-type": "application/json", "x-openindbot-test-capability": KEY },
     body: JSON.stringify({ botId: bot.id, threadId: bot.threadId }) });
   const { token } = await minted.json() as { token: string };
   const asked = await fetch(`${base}/api/internal/coordinate-bots`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -54,7 +54,7 @@ it("a bot asking for a teammate on the person's other place hears where it lives
   const file = join(fx.root, "two-places.json");
   const main = installTwoPlacesMain({
     ipcMain: { handle: () => {} }, guard: (_channel: string, handler: (...args: unknown[]) => unknown) => handler,
-    localRequest: (route: string, init: RequestInit = {}) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { ...init.headers as Record<string, string>, "x-openmausbot-desktop-owner": fx.ownerCapability } }),
+    localRequest: (route: string, init: RequestInit = {}) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { ...init.headers as Record<string, string>, "x-openindbot-desktop-owner": fx.ownerCapability } }),
     fetch: fx.windowFetch, environments: () => [garage.place, family.place], cloud: () => ({ origin: null, asleep: false }),
     oneHome: { journal: () => null, keep: { state: () => ({ shown: false, on: false, moved: false }), set: async () => {} } },
     ownHome: fx.main, tell: () => {},

@@ -99,7 +99,7 @@ describe("the store side of waits", () => {
   it("queues the follow-up as an outside event that joins the chat, except on a Cloud home", () => {
     host.followUp({ ...wait, followUp: "Deploy it." });
     expect(enqueue).toHaveBeenLastCalledWith({ webhookId: "wait:w1", webhookName: "the build", prompt: "[Wait finished: the build] Deploy it.",
-      botId: "bot-1", runOn: "maus", deliveryId: "w1", receivedAt: NOW, eventSource: "wait", resultsThreadId: "t-1" });
+      botId: "bot-1", runOn: "ind", deliveryId: "w1", receivedAt: NOW, eventSource: "wait", resultsThreadId: "t-1" });
     cloudHost.followUp({ ...wait, followUp: "Deploy it." });
     expect(enqueue.mock.lastCall![0]).not.toHaveProperty("resultsThreadId");
     expect(waitRunChat({ botId: "bot-1", resultsThreadId: "t-1" }, () => true, false)).toBe("t-1");

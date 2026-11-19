@@ -21,7 +21,7 @@ type TestTask = { threadId: string; private?: unknown; sharedChat?: unknown; unr
 type TestBot = { id: string; threadId: string; mainThreadId: string; tasks: TestTask[]; messages: unknown[]; yourAccess?: string; hidden?: boolean; defaultBot?: { person: string } };
 const scout = (tasks: Extra[] = [], extra: Extra = {}) =>
   ({ id: "scout", threadId: "scout-main", mainThreadId: "scout-main", tasks: [MAIN, ...tasks], messages: [{ id: "m1" }], ...extra }) as unknown as TestBot;
-const mausbot = (extra: Extra = {}) =>
+const indbot = (extra: Extra = {}) =>
   ({ id: "mine", threadId: "mine-main", mainThreadId: "mine-main", defaultBot: { person: "ada@acme.test" }, tasks: [{ threadId: "mine-main", createdAt: 1 }, { threadId: "mine-2", createdAt: 2 }], messages: [], ...extra }) as unknown as TestBot;
 const room = (extra: Extra = {}) => ({ id: "room-1", unread: false, ...extra });
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -33,7 +33,7 @@ beforeEach(() => { vi.stubGlobal("localStorage", localStorage); stored.clear(); 
 afterEach(() => { setTeamChats(null); vi.unstubAllGlobals(); });
 
 describe("the side of a conversation is the server's answer", () => {
-  it("is Just me only for a conversation the server marked private, one this page made through the private route, or the person's own MausBot", () => {
+  it("is Just me only for a conversation the server marked private, one this page made through the private route, or the person's own IndBot", () => {
     setTeamChats(ADA);
     const bot = scout([{ threadId: "ada-own", private: true, createdAt: 2 }, { threadId: "report", createdAt: 3 }]);
     expect(sideOfThread(bot, "ada-own")).toBe("me");
@@ -42,14 +42,14 @@ describe("the side of a conversation is the server's answer", () => {
     expect(sideOfThread(bot, "never-heard-of"), "unknown is never called private").toBe("team");
     rememberOwnChat("team-acme", "just-made");
     expect(sideOfThread(bot, "just-made"), "made a moment ago, its task not here yet").toBe("me");
-    expect(sideOfThread(mausbot(), "mine-main"), "nobody else is ever sent it").toBe("me");
+    expect(sideOfThread(indbot(), "mine-main"), "nobody else is ever sent it").toBe("me");
   });
 
   it("never calls the shared chat Just me, even if the session lists it among the conversations this person opened", () => {
     setTeamChats({ ...ADA, opened: ["scout-main"] });
     expect(sideOfThread(scout(), "scout-main")).toBe("team");
     expect(teamThreadOf({ tasks: [{ threadId: "t1", sharedChat: true, private: true }] }), "a private chat is never the team thread").toBeNull();
-    expect(teamThreadOf(mausbot()), "a person's own MausBot has none").toBeNull();
+    expect(teamThreadOf(indbot()), "a person's own IndBot has none").toBeNull();
   });
 
   it("moves a conversation its person shared to Team at once, even on a page whose session still lists it as theirs", () => {
@@ -95,16 +95,16 @@ describe("what each side of the sidebar lists", () => {
   });
 
   it("lists under Just me the bots the person can chat with privately, with their private chats only, and no group chat", () => {
-    const view = teamSideView([scout([{ threadId: "ada-own", private: true, createdAt: 2 }]), mausbot()], [room()], ADA, "me");
+    const view = teamSideView([scout([{ threadId: "ada-own", private: true, createdAt: 2 }]), indbot()], [room()], ADA, "me");
     expect(view.switchable).toBe(true);
     expect(ids(view.bots)).toEqual(["scout", "mine"]);
     expect(view.bots[0]!.tasks.map((task) => task.threadId)).toEqual(["ada-own"]);
-    expect(view.bots[1]!.tasks.length, "their own MausBot keeps all its chats").toBe(2);
+    expect(view.bots[1]!.tasks.length, "their own IndBot keeps all its chats").toBe(2);
     expect(view.groups).toEqual([]);
   });
 
   it("lists under Team the bots with a shared chat, with no private chat among their conversations, and the group chats", () => {
-    const view = teamSideView([scout([{ threadId: "ada-own", private: true, createdAt: 2 }, { threadId: "report", createdAt: 3 }]), mausbot()], [room()], ADA, "team");
+    const view = teamSideView([scout([{ threadId: "ada-own", private: true, createdAt: 2 }, { threadId: "report", createdAt: 3 }]), indbot()], [room()], ADA, "team");
     expect(ids(view.bots), "a private-only bot is under Just me only").toEqual(["scout"]);
     expect(view.bots[0]!.tasks.map((task) => task.threadId)).toEqual(["scout-main", "report"]);
     expect(ids(view.groups)).toEqual(["room-1"]);
@@ -112,10 +112,10 @@ describe("what each side of the sidebar lists", () => {
 
   it("shows nothing of a private chat in the Team list, and nothing of a shared one under Just me: not even the preview of the one on screen", () => {
     const privateOnScreen = scout([{ threadId: "ada-own", private: true, createdAt: 2 }], { threadId: "ada-own", messages: [{ id: "secret" }] });
-    expect(teamSideView([privateOnScreen, mausbot()], [], ADA, "team").bots[0]!.messages).toEqual([]);
-    expect(teamSideView([privateOnScreen, mausbot()], [], ADA, "me").bots[0]!.messages).toEqual([{ id: "secret" }]);
+    expect(teamSideView([privateOnScreen, indbot()], [], ADA, "team").bots[0]!.messages).toEqual([]);
+    expect(teamSideView([privateOnScreen, indbot()], [], ADA, "me").bots[0]!.messages).toEqual([{ id: "secret" }]);
     const sharedOnScreen = scout([{ threadId: "ada-own", private: true, createdAt: 2 }]);
-    expect(teamSideView([sharedOnScreen, mausbot()], [], ADA, "me").bots[0]!.messages).toEqual([]);
+    expect(teamSideView([sharedOnScreen, indbot()], [], ADA, "me").bots[0]!.messages).toEqual([]);
   });
 
   it("lists a bot the person can only view under Team alone, unless they have a conversation of their own with it", () => {
@@ -142,7 +142,7 @@ describe("what each side of the sidebar lists", () => {
     const shared = { ...scout([], { yourAccess: "chat" }), id: "payroll", threadId: "payroll-main", mainThreadId: "payroll-main", tasks: [{ ...MAIN, threadId: "payroll-main" }] };
     expect(botOnSide(mine, ADA, "team")).toBe(false);
     expect(botOnSide(mine, ADA, "me")).toBe(true);
-    const me = teamSideView([mine, shared, mausbot()], [], ADA, "me"), team = teamSideView([mine, shared, mausbot()], [], ADA, "team");
+    const me = teamSideView([mine, shared, indbot()], [], ADA, "me"), team = teamSideView([mine, shared, indbot()], [], ADA, "team");
     expect(ids(team.bots)).toEqual(["payroll"]);
     expect(ids(me.bots)).toEqual(["scout", "payroll", "mine"]);
     expect(me.bots[0]!.tasks.map((task) => task.threadId), "nothing of it is left where no list shows it").toEqual(["scout-main", "ada-own"]);
@@ -155,8 +155,8 @@ describe("what each side of the sidebar lists", () => {
     expect(teamThreadToOpen(shared, ADA)).toBe("payroll-main");
 
     const nowShared = { ...mine, access: { everyone: "none", people: { "ben@acme.test": "chat" } } };
-    expect(ids(teamSideView([nowShared, mausbot()], [], ADA, "team").bots), "shared with one person, it is the team's too").toEqual(["scout"]);
-    expect(teamSideView([nowShared, mausbot()], [], ADA, "me").bots[0]!.tasks.map((task) => task.threadId)).toEqual(["ada-own"]);
+    expect(ids(teamSideView([nowShared, indbot()], [], ADA, "team").bots), "shared with one person, it is the team's too").toEqual(["scout"]);
+    expect(teamSideView([nowShared, indbot()], [], ADA, "me").bots[0]!.tasks.map((task) => task.threadId)).toEqual(["ada-own"]);
   });
 
   it("keeps a private bot under Just me whole, a conversation of it shared with someone included; what that conversation says of its readers is still the server's", () => {
@@ -165,37 +165,37 @@ describe("what each side of the sidebar lists", () => {
     expect(sideOfThread(mine, "with-ada"), "read by someone else: never called private").toBe("team");
     expect(listedSide(mine, "with-ada")).toBe("me");
     expect(botOnSide(mine, ADA, "team")).toBe(false);
-    expect(teamSideView([mine, mausbot()], [room()], ADA, "me").bots[0]!.tasks.map((task) => task.threadId)).toEqual(["scout-main", "with-ada", "ada-own"]);
-    expect(ids(teamSideView([mine, mausbot()], [room()], ADA, "team").bots)).toEqual([]);
+    expect(teamSideView([mine, indbot()], [room()], ADA, "me").bots[0]!.tasks.map((task) => task.threadId)).toEqual(["scout-main", "with-ada", "ada-own"]);
+    expect(ids(teamSideView([mine, indbot()], [room()], ADA, "team").bots)).toEqual([]);
     const shared = { ...mine, access: { everyone: "chat" as const, people: {} } };
     expect(listedSide(shared, "with-ada"), "on a shared bot it is on the Team side, as main lists it").toBe("team");
   });
 
   it("offers no switch when the only bots are ones nobody else can use", () => {
     const mine = scout([], { createdBy: "ada@acme.test", yourAccess: "edit", access: { everyone: "none", people: {} } });
-    const view = teamSideView([mine, mausbot()], [], ADA, "me");
+    const view = teamSideView([mine, indbot()], [], ADA, "me");
     expect(view.switchable).toBe(false);
     expect(ids(view.bots)).toEqual(["scout", "mine"]);
   });
 
   it("offers no switch, and hides nothing, when one side would be empty", () => {
-    const onlyMine = teamSideView([mausbot()], [], ADA, "team");
+    const onlyMine = teamSideView([indbot()], [], ADA, "team");
     expect(onlyMine.switchable).toBe(false);
     expect(ids(onlyMine.bots)).toEqual(["mine"]);
     const onlyShared = teamSideView([scout([], { yourAccess: "view" })], [room()], ADA, "me");
     expect(onlyShared.switchable).toBe(false);
     expect(ids(onlyShared.bots)).toEqual(["scout"]);
     expect(ids(onlyShared.groups)).toEqual(["room-1"]);
-    expect(teamSideView([mausbot()], [room()], ADA, "me").switchable, "a group chat alone makes a Team side").toBe(true);
+    expect(teamSideView([indbot()], [room()], ADA, "me").switchable, "a group chat alone makes a Team side").toBe(true);
   });
 
   it("leaves archived bots out of both sides", () => {
-    expect(ids(teamSideView([scout(), mausbot(), scout([], { id: "old", hidden: true })], [], ADA, "team").bots)).toEqual(["scout"]);
+    expect(ids(teamSideView([scout(), indbot(), scout([], { id: "old", hidden: true })], [], ADA, "team").bots)).toEqual(["scout"]);
   });
 });
 
 describe("each side's own unread mark", () => {
-  const unread = (tasks: Extra[], groups = [room()]) => teamSideView([scout(tasks), mausbot()], groups, ADA, "me").unread;
+  const unread = (tasks: Extra[], groups = [room()]) => teamSideView([scout(tasks), indbot()], groups, ADA, "me").unread;
 
   it("marks a side for this person's unread conversations on it, and not for a routine's run or an archived one", () => {
     expect(unread([])).toEqual({ me: false, team: false });
@@ -204,10 +204,10 @@ describe("each side's own unread mark", () => {
     expect(unread([{ threadId: "run", unread: true, routineRunId: "r1" }, { threadId: "old", private: true, unread: true, archivedAt: 5 }])).toEqual({ me: false, team: false });
   });
 
-  it("counts the shared chat and a group chat for Team, the person's own MausBot for Just me", () => {
-    expect(teamSideView([{ ...scout(), tasks: [{ ...MAIN, unread: true }] }, mausbot()], [], ADA, "me").unread).toEqual({ me: false, team: true });
+  it("counts the shared chat and a group chat for Team, the person's own IndBot for Just me", () => {
+    expect(teamSideView([{ ...scout(), tasks: [{ ...MAIN, unread: true }] }, indbot()], [], ADA, "me").unread).toEqual({ me: false, team: true });
     expect(unread([], [room({ unread: true })])).toEqual({ me: false, team: true });
-    expect(teamSideView([scout(), mausbot({ tasks: [{ threadId: "mine-main", unread: true }] })], [], ADA, "team").unread).toEqual({ me: true, team: false });
+    expect(teamSideView([scout(), indbot({ tasks: [{ threadId: "mine-main", unread: true }] })], [], ADA, "team").unread).toEqual({ me: true, team: false });
   });
 });
 
@@ -283,11 +283,11 @@ describe("opening a bot on the side the sidebar shows", () => {
     expect(sideOfThread(scout(), "ada-new"), "and it is Just me from the moment it exists").toBe("me");
   });
 
-  it("opens the person's own MausBot, which has no shared chat, as their own even under Team", async () => {
+  it("opens the person's own IndBot, which has no shared chat, as their own even under Team", async () => {
     setTeamChats(ADA);
     setTeamSide("team");
     const dispatch = vi.fn();
-    openBot(dispatch, mausbot({ tasks: [{ threadId: "mine-main", private: true, createdAt: 1 }] }), false);
+    openBot(dispatch, indbot({ tasks: [{ threadId: "mine-main", private: true, createdAt: 1 }] }), false);
     await settle();
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ threadId: "scout-main" }));
     expect(server.calls).toEqual([]);

@@ -1,4 +1,4 @@
-// MausBot Relay host tokens: `POST /v1/installations/self/relay-token`. The relay checks them offline with the public
+// IndBot Relay host tokens: `POST /v1/installations/self/relay-token`. The relay checks them offline with the public
 // key only, so this Worker's secret is the one thing that can let a computer onto the relay. Wire format: the
 // companion's e2e README, section 9 ("Relay token" and "Control plane endpoint").
 import { z } from "zod";
@@ -11,7 +11,7 @@ export const RELAY_TOKEN_TTL_S = 12 * 60 * 60;
 export const RELAY_REFRESH_AFTER_S = 60 * 60;
 export const RELAY_TOKEN_LIMIT = 60;
 const ADOPTION_WINDOW_MS = 30 * 24 * HOUR_MS;
-const RELAY_HOST = /^relay[1-9][0-9]?\.openmausbot\.com$/;
+const RELAY_HOST = /^relay[1-9][0-9]?\.openindbot\.com$/;
 const KID = /^k[0-9]{1,3}$/;
 const VERSION = /^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$/;
 const UUIDISH = /^[0-9a-f-]{36}$/;

@@ -13,6 +13,6 @@ describe("TeamLibraryPanel", () => {
 
   it("is one gallery: no tabs, and no import, scout, share or backup inside it", () => {
     expect(source).not.toMatch(/role="tab(list)?"/);
-    expect(source).not.toMatch(/teams\/scout|team-library\/github|ShareTeamDialog|openmaus\.backup|type="file"/);
+    expect(source).not.toMatch(/teams\/scout|team-library\/github|ShareTeamDialog|openind\.backup|type="file"/);
   });
 });

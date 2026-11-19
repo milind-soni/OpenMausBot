@@ -106,10 +106,10 @@ describe("theme routes", () => {
     store.save("p_ann", "neon", { name: "Neon", css: '[data-look="app"] { background: url("/api/theme-assets/neon/stars.png") }' });
     store.addAsset("p_ann", "neon", "stars.png", PNG);
     const exported = await callRoute(routes, { method: "GET", path: "/api/themes/neon/export", auth: ann });
-    expect(exported.body.mausbotTheme).toBe(1);
+    expect(exported.body.indbotTheme).toBe(1);
     expect(await callRoute(routes, { method: "POST", path: "/api/themes/import", body: exported.body, auth: bob })).toEqual({ status: 200, body: { id: "neon" } });
     expect(store.asset("p_bob", "neon", "stars.png")?.bytes).toBe(PNG.byteLength);
-    expect(await callRoute(routes, { method: "POST", path: "/api/themes/import", body: { mausbotTheme: 1, theme: { name: "X", css: "a{background:url(https://example.com/a)}" } }, auth: bob })).toMatchObject({ status: 400 });
+    expect(await callRoute(routes, { method: "POST", path: "/api/themes/import", body: { indbotTheme: 1, theme: { name: "X", css: "a{background:url(https://example.com/a)}" } }, auth: bob })).toMatchObject({ status: 400 });
     expect(await callRoute(routes, { method: "POST", path: "/api/themes/import", body: { nope: true }, auth: bob })).toMatchObject({ status: 400 });
   });
 });

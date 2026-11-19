@@ -1,4 +1,4 @@
-// Where a routine lives on a Team Cloud (docs/team-cloud.md "Routines"). One for a member's own MausBot, or that names
+// Where a routine lives on a Team Cloud (docs/team-cloud.md "Routines"). One for a member's own IndBot, or that names
 // someone's private chat (the chat it was made in or the one it reports into), is that person's alone, as the chat is;
 // any other routine is its place's (the bot's, or its group chat's). The chat a routine opened for its own results is
 // not a place the person chose, so it does not make the routine theirs.
@@ -16,7 +16,7 @@ export interface RoutineHomeDeps {
   /** The person a conversation is private to, else null (audience.ts). */
   privateTo(threadId: string): string | null;
   task(botId: string, threadId: string): Pick<TaskRecord, "title" | "askedAt"> | null | undefined;
-  /** The person whose own MausBot this is, else null. */
+  /** The person whose own IndBot this is, else null. */
   ownBot?(botId: string): string | null;
 }
 

@@ -1,6 +1,6 @@
 // Moving a Grok Bot here. Grok Bot keeps a Bot's setup in its own cloud account and has no export button, so the Bot
 // writes its own: the person pastes GROK_EXPORT_PROMPT into its chat and brings back what it wrote. That text becomes an
-// ordinary openmaus.package v2, so the package rules apply (skills off, routines paused, no model, no keys, no grants).
+// ordinary openind.package v2, so the package rules apply (skills off, routines paused, no model, no keys, no grants).
 // Pure text: the renderer and the server both read it.
 //
 // The export's shape, the repairs for what a chat window does to it and its credential refusal adapt an MIT-licensed
@@ -15,7 +15,7 @@ import { normalizeCronSchedule } from "./routine-schedule.ts";
 import { parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES, yamlFrontmatterValue } from "./skill-md.ts";
 
 export const GROK_EXPORT_FORMAT = "grok-bot-export";
-const OLD_EXPORT_FORMAT = "openmaus.grok/1";
+const OLD_EXPORT_FORMAT = "openind.grok/1";
 /** How the file the Bot writes is named, one per Bot. */
 export const GROK_EXPORT_FILE = /^grok-bot-export[^/\\]*\.(?:json|md|txt)$/i;
 export const GROK_EXPORT_MAX_CHARS = 4 * 1024 * 1024;
@@ -207,7 +207,7 @@ function readApp(app: unknown): GrokApp[] {
   }] : [];
 }
 
-/** The current shape, and the fields the earlier openmaus.grok/1 prompt asked for. */
+/** The current shape, and the fields the earlier openind.grok/1 prompt asked for. */
 function readBot(bot: Record<string, unknown>): GrokBot {
   return {
     name: oneLine(first(bot.name)),
@@ -437,7 +437,7 @@ function eventNotes(name: string, routines: readonly GrokRoutine[]): string {
     ...sections].join("\n");
 }
 
-/** One Grok Bot as one bot in an openmaus.package v2 file, and how much of it comes over. `takenServers` holds server names
+/** One Grok Bot as one bot in an openind.package v2 file, and how much of it comes over. `takenServers` holds server names
  * already here: one of those is skipped, never overwritten or shared. */
 export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenServers?: ReadonlySet<string> } = {}): GrokMovePlan {
   const timeZone = options.timeZone?.trim() || "UTC";
@@ -481,7 +481,7 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
       name: jobName,
       agent: agentKey,
       prompt: `${routine.instruction}${usesSkills.length ? `\n\nUse these skills: ${usesSkills.join(", ")}.` : ""}`.slice(0, 20_000),
-      runOn: "maus",
+      runOn: "ind",
       schedule,
       durationMinutes: 30,
       enabledAfterInstall: false,
@@ -530,7 +530,7 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
       category: "Imported",
       author: { name: "Grok Bot" },
       license: "See source",
-      outcomes: [clip(`${name} runs in OpenMausBot with your own engine and apps.`, 240)],
+      outcomes: [clip(`${name} runs in OpenIndBot with your own engine and apps.`, 240)],
       setupMinutes: 5,
       requirements: { apps: [], capabilities: [] },
       team: { name: clip(name, 60) },

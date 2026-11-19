@@ -7,7 +7,7 @@ import { planSkillFolder, SKILL_FOLDER_LIMITS, type FolderEntry, type SkillFolde
 
 const API = "https://api.github.com";
 const RAW_HOST = "raw.githubusercontent.com";
-const USER_AGENT = "OpenMausBot-skills";
+const USER_AGENT = "OpenIndBot-skills";
 const LISTING_MAX_BYTES = 1_048_576;
 // GitHub allows 60 API requests an hour without sign-in; downloads from the raw host are not counted against it.
 const IMPORT_LIMITS = { apiRequests: 128, downloads: 1_000, bytes: 64 * 1_048_576, ms: 120_000 };

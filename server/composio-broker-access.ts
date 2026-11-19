@@ -28,7 +28,7 @@ export function applyManagedBrokerMessage(message: unknown): boolean {
   const parsed = managedBrokerMessageSchema.safeParse(message);
   if (
     !parsed.success ||
-    parsed.data.type !== "openmausbot:managed-composio" ||
+    parsed.data.type !== "openindbot:managed-composio" ||
     !Object.hasOwn(parsed.data, "access")
   ) {
     return false;

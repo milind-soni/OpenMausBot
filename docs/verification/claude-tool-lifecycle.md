@@ -1,13 +1,13 @@
 # Claude coordination and turn-scoped tools
 
-“OpenMausBot: the turn ended” is an approval-broker denial, not evidence of
+“OpenIndBot: the turn ended” is an approval-broker denial, not evidence of
 an internet outage. Browser capabilities also expire when their owning turn
 ends; “unauthorized” after that boundary must not be repaired by giving a
 worker permanent browser credentials.
 
 The Claude driver keeps native background tasks disabled. Native subagents
 can still work within the active turn; asynchronous work across bots is a
-`coordinate_bots` assignment on OpenMausBot's job runtime
+`coordinate_bots` assignment on OpenIndBot's job runtime
 (docs/runtime-contract.md), which owns each recipient's turn, approvals,
 and the report that resumes the requester. Long-running native Bash commands can no longer
 auto-background past the owning turn. This does not change approval modes or

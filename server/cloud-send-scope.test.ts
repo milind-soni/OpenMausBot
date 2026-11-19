@@ -26,11 +26,11 @@ describe("a move of some bots", () => {
   });
 
   it("takes a room only when every bot in it goes, the helper every place has aside", () => {
-    const helper = (id: string) => (id === "maus" ? { defaultBot: { v: 1 } } : {});
+    const helper = (id: string) => (id === "ind" ? { defaultBot: { v: 1 } } : {});
     expect(roomGoes({ memberIds: ["a", "b"] }, new Set(["a", "b"]), helper)).toBe(true);
-    expect(roomGoes({ memberIds: ["a", "maus"] }, new Set(["a"]), helper)).toBe(true);
+    expect(roomGoes({ memberIds: ["a", "ind"] }, new Set(["a"]), helper)).toBe(true);
     expect(roomGoes({ memberIds: ["a", "b"] }, new Set(["a"]), helper), "b stays, and works in it here").toBe(false);
-    expect(roomGoes({ memberIds: ["maus"] }, new Set(["a"]), helper), "none of its bots go").toBe(false);
+    expect(roomGoes({ memberIds: ["ind"] }, new Set(["a"]), helper), "none of its bots go").toBe(false);
   });
 
   it("names any number of bots once, and an answer that names no known choice is never read as all of them", async () => {

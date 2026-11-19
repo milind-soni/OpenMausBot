@@ -1,6 +1,6 @@
 ---
 title: Where are my logs?
-description: Where MausBot writes its logs on Windows, macOS and Linux, what each file holds, and how to share them safely.
+description: Where IndBot writes its logs on Windows, macOS and Linux, what each file holds, and how to share them safely.
 ---
 
 The quickest way: **Settings → General → Diagnostics → Open logs folder**. It opens
@@ -10,12 +10,12 @@ the folder in Explorer or Finder and shows its path.
 
 | | Windows | macOS | Linux |
 |---|---|---|---|
-| **App logs** | `%APPDATA%\OpenMausBot\logs` (that is `C:\Users\<you>\AppData\Roaming\OpenMausBot\logs`) | `~/Library/Logs/OpenMausBot` | `~/.config/OpenMausBot/logs` |
-| **Bots, chats and their history** | `%USERPROFILE%\.openmausbot` (`C:\Users\<you>\.openmausbot`) | `~/.openmausbot` | `~/.openmausbot` |
+| **App logs** | `%APPDATA%\OpenIndBot\logs` (that is `C:\Users\<you>\AppData\Roaming\OpenIndBot\logs`) | `~/Library/Logs/OpenIndBot` | `~/.config/OpenIndBot/logs` |
+| **Bots, chats and their history** | `%USERPROFILE%\.openindbot` (`C:\Users\<you>\.openindbot`) | `~/.openindbot` | `~/.openindbot` |
 
 In the app logs folder:
 
-- **`server.log`**: the app's own messages and everything MausBot's local server
+- **`server.log`**: the app's own messages and everything IndBot's local server
   prints: engines starting and stopping, sign-in problems, errors. This is the one
   support asks for.
 - **`desktop-crashes.log`**: crashes of the app itself. It is emptied when it reaches
@@ -23,7 +23,7 @@ In the app logs folder:
 - **`updater.log`**: what the updater checked, downloaded and installed.
 
 `%APPDATA%` is a hidden folder: paste the path into the address bar of File
-Explorer, or press <kbd>Win</kbd>+<kbd>R</kbd> and type `%APPDATA%\OpenMausBot\logs`.
+Explorer, or press <kbd>Win</kbd>+<kbd>R</kbd> and type `%APPDATA%\OpenIndBot\logs`.
 
 The data folder holds your bots and conversations, including each conversation's
 event history in `events\`. It is not a log to share: it contains what you and your
@@ -43,5 +43,5 @@ for a specific one.
 ## My Cloud
 
 My Cloud keeps its own logs on the Cloud machine, and nothing on your computer holds
-them. MausBot Cloud support can read them for My Cloud: tell them what went wrong
+them. IndBot Cloud support can read them for My Cloud: tell them what went wrong
 and roughly when.

@@ -51,7 +51,7 @@ export function createActivityWindow({ BrowserWindow, icon, background, entries,
         win = new BrowserWindow({
           width: 560, height: 640, minWidth: 380, minHeight: 280, show: false, icon, backgroundColor: background(), autoHideMenuBar: true,
           title: wordsFor(locale())["lending.activity.title"],
-          webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false, partition: "openmausbot-lending-activity" },
+          webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, javascript: false, partition: "openindbot-lending-activity" },
         });
         const opened = win;
         opened.webContents.setWindowOpenHandler(() => ({ action: "deny" }));

@@ -26,7 +26,7 @@ import {
 const temporaryDirectories = [];
 
 function temporaryDirectory() {
-  const directory = mkdtempSync(join(tmpdir(), "openmausbot-locale-test-"));
+  const directory = mkdtempSync(join(tmpdir(), "openindbot-locale-test-"));
   temporaryDirectories.push(directory);
   return directory;
 }
@@ -160,7 +160,7 @@ describe("locale draft validation", () => {
     expect(portuguese).not.toContain("and AI unchanged");
 
     expect(translationPrompt({ first: "One" }, "German", "de")).toContain(
-      "Keep placeholders such as {name} exactly, including duplicates. Keep OpenMausBot, MausBot Cloud, CLI, and AI unchanged.",
+      "Keep placeholders such as {name} exactly, including duplicates. Keep OpenIndBot, IndBot Cloud, CLI, and AI unchanged.",
     );
   });
 });

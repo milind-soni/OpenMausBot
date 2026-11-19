@@ -54,14 +54,14 @@ const bot: Bot = {
 };
 const routine: Routine = {
   id: "brief", name: "Morning brief", prompt: "Summarise my inbox and calendar.", target: "bot", botId: bot.id,
-  runOn: "maus", enabled: true, schedule: { type: "daily", time: "06:30", weekdays: [0, 1, 2, 3, 4, 5, 6] },
+  runOn: "ind", enabled: true, schedule: { type: "daily", time: "06:30", weekdays: [0, 1, 2, 3, 4, 5, 6] },
   durationMinutes: 30, nextRunAt: Date.now() + 3_600_000, createdAt: 0, updatedAt: 0, resultsThreadId: "brief-thread",
 };
 const cronRoutine: Routine = {
   ...routine, id: "cron", name: "Office hours check", schedule: { type: "cron", expression: "*/20 9-17 * * 1-5", timeZone: "UTC" },
 };
 const runAt = (day: number, status: RoutineRun["status"]): RoutineRun => ({
-  id: `run-${day}`, routineId: routine.id, routineName: routine.name, target: "bot", botId: bot.id, runOn: "maus",
+  id: `run-${day}`, routineId: routine.id, routineName: routine.name, target: "bot", botId: bot.id, runOn: "ind",
   scheduledFor: day * 86_400_000, createdAt: day * 86_400_000, startedAt: day * 86_400_000,
   finishedAt: day * 86_400_000 + 95_000, status, manual: false,
 });
@@ -306,7 +306,7 @@ describe("routine editor", () => {
   it("shows a saved startup choice when the simple editor opens", () => {
     const html = editor({ ...routine, runOnStartup: true });
     expect(html).toContain('aria-expanded="true"');
-    expect(html).toMatch(/<input type="checkbox" aria-label="Also run when MausBot starts"[^>]*checked[^>]*>/);
+    expect(html).toMatch(/<input type="checkbox" aria-label="Also run when IndBot starts"[^>]*checked[^>]*>/);
   });
 
   it("offers Remember the last run for a repeating routine, off unless the routine has it", () => {

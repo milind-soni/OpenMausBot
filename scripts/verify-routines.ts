@@ -97,7 +97,7 @@ try {
     enabled: true, schedule: { type: "once", at: Date.now() + 12_000 },
   });
   ui = await mountPreview(fixture, {
-    entry: "/scripts/testing/threads-preview.tsx", route: "/__routines.html", title: "Isolated OpenMaus Routines",
+    entry: "/scripts/testing/threads-preview.tsx", route: "/__routines.html", title: "Isolated OpenInd Routines",
   });
   console.log(JSON.stringify({ ...fixture.info, previewUrl: ui.previewUrl, pepperId: pepper.id, misoId: miso.id, scheduledRoutineId: scheduled.routine.id, manualRoutineId: manual.routine.id, resultsThreadId: resultsTask.threadId, resultsFolderId: resultsFolder.id }));
   await parkUntilSignal();

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { BOT_BUTTON, botButton, botButtonStyle, botButtonTone } from "./bot-button";
 import { contrastRatio, mixSrgb } from "./color-contrast";
-import { MAUS_COLOR_NAMES } from "./mascot";
+import { IND_COLOR_NAMES } from "./mascot";
 import { SKIN_IDS, THEME_SKINS } from "./skins";
 import { userBubbleTone } from "./user-bubble-tone";
 
@@ -40,7 +40,7 @@ function rule(selector: string): string {
 }
 
 describe("a bot's own button", () => {
-  it.each(MAUS_COLOR_NAMES)("paints %s with the very fill and ink of its Simple bubble", (color) => {
+  it.each(IND_COLOR_NAMES)("paints %s with the very fill and ink of its Simple bubble", (color) => {
     const bubble = userBubbleTone(color);
     const tone = botButtonTone(color);
     expect(tone.fill).toBe(bubble.background);
@@ -50,14 +50,14 @@ describe("a bot's own button", () => {
 
   it("covers a light bot colour that needs dark ink", () => {
     expect(botButtonTone("yellow").ink).toBe("#101410");
-    expect(MAUS_COLOR_NAMES.filter((color) => botButtonTone(color).ink !== "#ffffff")).toEqual(["yellow"]);
+    expect(IND_COLOR_NAMES.filter((color) => botButtonTone(color).ink !== "#ffffff")).toEqual(["yellow"]);
   });
 
   it("is a light and a dark theme by default, and every skin is checked below", () => {
     expect(SKIN_IDS).toEqual(expect.arrayContaining([THEME_SKINS.light, THEME_SKINS.dark]));
   });
 
-  it.each(SKIN_IDS.flatMap((id) => MAUS_COLOR_NAMES.map((color) => [id, color] as const)))(
+  it.each(SKIN_IDS.flatMap((id) => IND_COLOR_NAMES.map((color) => [id, color] as const)))(
     "reads at AA for %s × %s, resting, hovered, pressed, focused and disabled",
     (id, color) => {
       const tokens = skin(id);

@@ -170,7 +170,7 @@ function emitSwift(): string {
 // from \`scripts/gen-carved-bodies.ts\`.
 //
 // Paths are absolute \`M\`, \`C\`, \`Z\` only, in a 240-unit square centred on x = 120, with
-// newlines as separators — what \`MausSilhouette.parse\` reads.
+// newlines as separators — what \`IndSilhouette.parse\` reads.
 import CoreGraphics
 
 enum CarvedBodies {
@@ -244,7 +244,7 @@ function emitKotlin(): string {
       `        ),`,
     ].join("\n")
   })
-  return `package com.openmausbot.companion.ui
+  return `package com.openindbot.companion.ui
 
 /**
  * The festival bodies a bot can wear — the Android half of \`shared/carved-bodies.ts\`.
@@ -253,7 +253,7 @@ function emitKotlin(): string {
  * from \`scripts/gen-carved-bodies.ts\`.
  *
  * Paths are absolute \`M\`, \`C\`, \`Z\` only, in a 240-unit square centred on x = 120, with
- * newlines as separators — what [MausSilhouette] parses.
+ * newlines as separators — what [IndSilhouette] parses.
  */
 internal object CarvedBodies {
     data class Eyes(

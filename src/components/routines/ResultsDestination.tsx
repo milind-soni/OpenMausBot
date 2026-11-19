@@ -26,7 +26,7 @@ export function resultsOfPlace(place: RoutinePlace, botId: string | undefined): 
   return shown && shown.private !== true && !shown.routineRunId ? bot!.mainThreadId ?? null : RESULTS_JUST_ME;
 }
 
-/** Whether a routine reporting here is the person's alone: their own MausBot's, "Just me", or one of their private chats. */
+/** Whether a routine reporting here is the person's alone: their own IndBot's, "Just me", or one of their private chats. */
 function onlyMine(bot: Bot, value: string | null | undefined, madeIn?: string): boolean {
   const own = (threadId: string | null | undefined) => typeof threadId === "string" && Boolean(bot.tasks?.some((task) => task.threadId === threadId && task.private === true));
   return Boolean(bot.defaultBot?.person) || value === RESULTS_JUST_ME || own(value) || own(madeIn);

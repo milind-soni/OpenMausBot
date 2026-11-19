@@ -4,14 +4,14 @@
 // default), which on a 1M-token model is nearly always: every model call pays for every connected
 // app's schemas, and a session writes them into the prompt cache again and again. Claude Code
 // 2.1.312 defers by default when nothing is set, but holds a resumed conversation that ran without
-// ToolSearch to the old way ("ENABLE_TOOL_SEARCH=true overrides this"), and OpenMausBot resumes every
+// ToolSearch to the old way ("ENABLE_TOOL_SEARCH=true overrides this"), and OpenIndBot resumes every
 // thread. So a turn runs with ENABLE_TOOL_SEARCH=true unless the person chose otherwise.
 //
 // The value goes in the turn's private --settings file. Claude Code applies a settings file's `env`
 // over its own process environment, so a value in the project's or the person's .claude settings
 // would beat one set on the process; settings passed with --settings beat both.
 //
-// OpenMausBot's own servers stay `alwaysLoad` (claude.ts), so the CLI connects them before the first request:
+// OpenIndBot's own servers stay `alwaysLoad` (claude.ts), so the CLI connects them before the first request:
 // `ogb` (approvals and questions), `agents` (bots, rooms, jobs) and the browser when the turn plans to browse. With
 // tool search on, `agents` sends only a few tools whole and marks the rest deferred (agents-claude-defer.ts).
 import { readFileSync, statSync } from "node:fs";

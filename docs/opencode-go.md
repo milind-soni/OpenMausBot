@@ -1,6 +1,6 @@
 # OpenCode
 
-OpenCode is an optional OpenMausBot engine. OpenMausBot runs the maintained
+OpenCode is an optional OpenIndBot engine. OpenIndBot runs the maintained
 OpenCode CLI through its ACP stdio interface, so sessions, streaming, coding
 tools, permission requests, MCP integrations, resume, and cancellation use the
 same runtime as the other ACP engines.
@@ -10,10 +10,10 @@ same runtime as the other ACP engines.
 1. Install the official CLI using the
    [OpenCode installation guide](https://opencode.ai/docs/).
 2. Connect the providers you want in the OpenCode app, run
-   `opencode auth login`, or save the provider's key in OpenMausBot under
+   `opencode auth login`, or save the provider's key in OpenIndBot under
    Settings → API keys → **Keys for other OpenCode providers**. On an OMB
    Cloud, which has no terminal, save the key there.
-3. Restart OpenMausBot. It reuses OpenCode's existing connections and model
+3. Restart OpenIndBot. It reuses OpenCode's existing connections and model
    configuration automatically.
 
 For OpenRouter, Fireworks AI, DeepSeek, Cline or your own provider, see
@@ -35,13 +35,13 @@ kept in the server's own config, and is passed only to the OpenCode process;
 saving one reloads the engines, so OpenCode lists that provider's models
 straight away. On a Cloud, a hosted team or an organization's desktop,
 OpenCode still never reads provider keys from the server's own environment;
-the keys saved here are the exception. Names OpenMausBot keeps for itself
+the keys saved here are the exception. Names OpenIndBot keeps for itself
 (`OPENCODE_*`, `OMB_*`, and the keys it saves for other engines, such as
 `XAI_API_KEY`) are refused, and up to 20 keys can be saved.
 
-OpenMausBot does not copy or rewrite `auth.json`. The OpenCode CLI remains the
+OpenIndBot does not copy or rewrite `auth.json`. The OpenCode CLI remains the
 owner of provider authentication, and the same Zen or Go connection used by
-the OpenCode desktop/TUI is used by OpenMausBot.
+the OpenCode desktop/TUI is used by OpenIndBot.
 
 ## Models
 
@@ -60,7 +60,7 @@ that list to see it.
 
 Some models take a limited number of tools per request (OpenCode Zen's free
 models refuse more than 128). When a model refuses a turn for that,
-OpenMausBot retries it once with each MCP server listing only its share of
+OpenIndBot retries it once with each MCP server listing only its share of
 what OpenCode's own tools leave, keeps doing so for that model until it
 restarts, and logs how many tools each server left out.
 
@@ -77,7 +77,7 @@ The limit card and the plan panel read Go's rolling, weekly and monthly
 windows from `opencode.ai/zen/go/v1/usage` with the key saved under Settings →
 API keys, or the login `opencode auth login` keeps in `auth.json`. An OpenCode
 2 install keeps its logins in its own database instead, so saving the key in
-OpenMausBot is what makes those windows readable there.
+OpenIndBot is what makes those windows readable there.
 
 ## Testing
 

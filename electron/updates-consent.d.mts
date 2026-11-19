@@ -9,9 +9,9 @@ export interface UpdatesConsentRecord {
 }
 export declare function parseUpdatesConsent(value: unknown): UpdatesConsentRecord | null;
 export declare function parseAccountConsent(result: unknown): { status: UpdatesConsentStatus; textVersion: string } | null;
-/** What a page needs to ask "Get MausBot updates?" once, and to show the Settings switch. */
+/** What a page needs to ask "Get IndBot updates?" once, and to show the Settings switch. */
 export interface UpdatesConsentState {
-  /** False in a branded build or where this app has no MausBot Cloud sign-in: nothing is asked or shown. */
+  /** False in a branded build or where this app has no IndBot Cloud sign-in: nothing is asked or shown. */
   available: boolean;
   /** No answer on this computer, and the signed-in account (if any) has none either. */
   due: boolean;

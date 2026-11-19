@@ -1,5 +1,5 @@
-// A Team Cloud member's own MausBot: its main chat is theirs alone, on a Team Cloud with the synthetic Claude CLI. No
-// admin or other member reads it through any route, and its notes go to the person's own layer. A MausBot made before
+// A Team Cloud member's own IndBot: its main chat is theirs alone, on a Team Cloud with the synthetic Claude CLI. No
+// admin or other member reads it through any route, and its notes go to the person's own layer. A IndBot made before
 // this gets the same at the next start, its earlier notes moved out of the bot's own folder.
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -25,11 +25,11 @@ let fx: CloudSendFixture, team: CloudTeamFixture;
 let olive = "", mira = "", ben = "";
 
 const planPath = () => join(team.home, "plan.json");
-const dataDir = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+const dataDir = (...rest: string[]) => join(team.home, ".openindbot", ...rest);
 const turns = (): Array<{ planKey?: string }> => existsSync(`${planPath()}.evidence.jsonl`)
   ? readFileSync(`${planPath()}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 const botsOf = async (token: string, messages = "") => (await team.as(token, "GET", `/api/bots${messages}`)).body.bots as Bot[];
-const ownMausBot = async (token: string) => (await botsOf(token)).find((bot) => bot.defaultBot?.person)!;
+const ownIndBot = async (token: string) => (await botsOf(token)).find((bot) => bot.defaultBot?.person)!;
 const layer = (bot: Bot, email: string) => dataDir("workspaces", `${bot.id}--member-${personKey({ id: "", email })}`, "MEMORY.md");
 const read = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : "");
 /** Everything a person can fetch about a bot and its main chat, in one string. */
@@ -54,24 +54,24 @@ afterAll(async () => {
 });
 
 it("is the person's own: private on the wire, its notes in their layer, and nobody else reads it through any route", async () => {
-  const maus = await ownMausBot(mira);
-  expect(maus.tasks!.find((task) => task.threadId === maus.threadId)?.private, "her main chat is marked hers").toBe(true);
-  expect((maus as Bot & { mainThreadId?: string }).mainThreadId, "and it is still her MausBot's main chat").toBe(maus.threadId);
-  const other = await team.as(mira, "POST", `/api/bots/${maus.id}/tasks`, { title: "Another chat" });
+  const ind = await ownIndBot(mira);
+  expect(ind.tasks!.find((task) => task.threadId === ind.threadId)?.private, "her main chat is marked hers").toBe(true);
+  expect((ind as Bot & { mainThreadId?: string }).mainThreadId, "and it is still her IndBot's main chat").toBe(ind.threadId);
+  const other = await team.as(mira, "POST", `/api/bots/${ind.id}/tasks`, { title: "Another chat" });
   expect(other.status).toBe(201);
-  expect(((await botsOf(mira)).find((bot) => bot.id === maus.id) as Bot & { mainThreadId?: string }).mainThreadId, "a newer chat of hers doesn't become it").toBe(maus.threadId);
-  writeFileSync(planPath(), JSON.stringify({ [maus.id]: { script: [
+  expect(((await botsOf(mira)).find((bot) => bot.id === ind.id) as Bot & { mainThreadId?: string }).mainThreadId, "a newer chat of hers doesn't become it").toBe(ind.threadId);
+  writeFileSync(planPath(), JSON.stringify({ [ind.id]: { script: [
     { key: "M-NOTE", repeat: true, match: ["MAIN-CHAT-LINE"], reply: "Noted Kestrel19.", steps: [{ tool: "memory_update", arguments: { action: "append", text: NOTE } }] },
   ] } }));
-  expect((await team.as(mira, "POST", `/api/bots/${maus.id}/messages`, { text: SAID, threadId: maus.threadId })).status).toBe(202);
+  expect((await team.as(mira, "POST", `/api/bots/${ind.id}/messages`, { text: SAID, threadId: ind.threadId })).status).toBe(202);
   await expect.poll(() => turns().some((one) => one.planKey === "M-NOTE"), { timeout: 60_000 }).toBe(true);
-  await expect.poll(() => read(layer(maus, MIRA.email)), { timeout: 30_000 }).toContain(NOTE);
-  expect(read(dataDir("workspaces", maus.id, "MEMORY.md"))).not.toContain(NOTE);
+  await expect.poll(() => read(layer(ind, MIRA.email)), { timeout: 30_000 }).toContain(NOTE);
+  expect(read(dataDir("workspaces", ind.id, "MEMORY.md"))).not.toContain(NOTE);
 
-  expect(await everything(mira, maus)).toContain("Kestrel19");
-  expect((await team.as(olive, "GET", `/api/threads/${maus.threadId}/messages?limit=1`)).status, "the Owner").toBe(404);
-  expect((await team.as(ben, "GET", `/api/threads/${maus.threadId}/messages?limit=1`)).status, "another member").toBe(404);
-  for (const token of [olive, ben]) expect(await everything(token, maus)).not.toContain("Kestrel19");
+  expect(await everything(mira, ind)).toContain("Kestrel19");
+  expect((await team.as(olive, "GET", `/api/threads/${ind.threadId}/messages?limit=1`)).status, "the Owner").toBe(404);
+  expect((await team.as(ben, "GET", `/api/threads/${ind.threadId}/messages?limit=1`)).status, "another member").toBe(404);
+  for (const token of [olive, ben]) expect(await everything(token, ind)).not.toContain("Kestrel19");
 }, hostTimeout(120_000));
 
 it.each([
@@ -80,30 +80,30 @@ it.each([
 ])("moves earlier notes to their person's layer in %s when the server is English", async (language, reason) => {
   expect((await team.as(olive, "PUT", "/api/config", { language: "en" })).status).toBe(200);
   expect((await team.as(ben, "POST", "/api/presence/active", { source: "desktop", language })).status).toBe(200);
-  const maus = await ownMausBot(ben);
-  expect((await team.as(ben, "POST", `/api/bots/${maus.id}/messages`, { text: "NO-SCRIPT Heron77 hello", threadId: maus.threadId })).status).toBe(202);
-  await expect.poll(async () => JSON.stringify((await team.as(ben, "GET", `/api/threads/${maus.threadId}/messages?limit=50`)).body), { timeout: 60_000 }).toContain("Heron77");
+  const ind = await ownIndBot(ben);
+  expect((await team.as(ben, "POST", `/api/bots/${ind.id}/messages`, { text: "NO-SCRIPT Heron77 hello", threadId: ind.threadId })).status).toBe(202);
+  await expect.poll(async () => JSON.stringify((await team.as(ben, "GET", `/api/threads/${ind.threadId}/messages?limit=50`)).body), { timeout: 60_000 }).toContain("Heron77");
   // As an earlier version left it: no person for the main chat, and a note in the bot's own folder.
   const starters = JSON.parse(readFileSync(dataDir("thread-starters.json"), "utf8")) as Record<string, string>;
-  delete starters[maus.threadId];
+  delete starters[ind.threadId];
   writeFileSync(dataDir("thread-starters.json"), JSON.stringify(starters));
-  mkdirSync(dataDir("workspaces", maus.id), { recursive: true });
-  writeFileSync(dataDir("workspaces", maus.id, "MEMORY.md"), `# Memory\n\n- ${OLD_NOTE}\n`);
+  mkdirSync(dataDir("workspaces", ind.id), { recursive: true });
+  writeFileSync(dataDir("workspaces", ind.id, "MEMORY.md"), `# Memory\n\n- ${OLD_NOTE}\n`);
   mkdirSync(dataDir("memory-journal"), { recursive: true });
-  writeFileSync(dataDir("memory-journal", `${maus.id}.ndjson`), `${JSON.stringify({ id: `old-${language}`, botId: maus.id, at: Date.now(), path: "MEMORY.md", actor: "bot", after: OLD_NOTE })}\n`);
+  writeFileSync(dataDir("memory-journal", `${ind.id}.ndjson`), `${JSON.stringify({ id: `old-${language}`, botId: ind.id, at: Date.now(), path: "MEMORY.md", actor: "bot", after: OLD_NOTE })}\n`);
 
   await team.relaunch();
   olive = (await team.pair(OLIVE)).token!;
   ben = (await team.pair(BEN)).token!;
   expect((await team.as(olive, "GET", "/api/config")).body.language).toBe("en");
-  await expect.poll(() => read(layer(maus, BEN.email)), { timeout: 30_000 }).toContain(OLD_NOTE);
-  const journal = read(dataDir("memory-journal", `${maus.id}--member-${personKey({ id: "", email: BEN.email })}.ndjson`))
+  await expect.poll(() => read(layer(ind, BEN.email)), { timeout: 30_000 }).toContain(OLD_NOTE);
+  const journal = read(dataDir("memory-journal", `${ind.id}--member-${personKey({ id: "", email: BEN.email })}.ndjson`))
     .trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
   expect(journal.find((row) => row.id === `old-${language}`)).toMatchObject({ before: null, canRevert: false, revertUnavailableReason: reason });
-  expect(read(dataDir("workspaces", maus.id, "MEMORY.md"))).not.toContain(OLD_NOTE);
-  expect(read(dataDir("memory-journal", `${maus.id}.ndjson`))).not.toContain(OLD_NOTE);
-  expect((await ownMausBot(ben)).tasks!.find((task) => task.threadId === maus.threadId)?.private).toBe(true);
-  expect(await everything(ben, maus)).toContain("Heron77");
-  expect((await team.as(olive, "GET", `/api/threads/${maus.threadId}/messages?limit=1`)).status).toBe(404);
-  expect(await everything(olive, maus)).not.toContain("Heron77");
+  expect(read(dataDir("workspaces", ind.id, "MEMORY.md"))).not.toContain(OLD_NOTE);
+  expect(read(dataDir("memory-journal", `${ind.id}.ndjson`))).not.toContain(OLD_NOTE);
+  expect((await ownIndBot(ben)).tasks!.find((task) => task.threadId === ind.threadId)?.private).toBe(true);
+  expect(await everything(ben, ind)).toContain("Heron77");
+  expect((await team.as(olive, "GET", `/api/threads/${ind.threadId}/messages?limit=1`)).status).toBe(404);
+  expect(await everything(olive, ind)).not.toContain("Heron77");
 }, hostTimeout(180_000));

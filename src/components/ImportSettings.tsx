@@ -150,7 +150,7 @@ export function AiAppsImportView({ local, detection, chosen, status, result, onC
     );
   }
   if (settings && !local) {
-    // Only the desktop app on the computer running MausBot can read that computer's AI apps: the row stays, inert.
+    // Only the desktop app on the computer running IndBot can read that computer's AI apps: the row stays, inert.
     return (
       <div data-import-section="apps" className="contents">
         <SettingRow title={t("settings.import.appsTitle")} subtitle={t("settings.import.appsShort")} inert={t("settings.import.appsLocalOnly")} inertText={t("settings.import.appsLocalOnly")}>

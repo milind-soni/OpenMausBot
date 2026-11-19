@@ -15,7 +15,7 @@ const f = vi.hoisted(() => ({ state: {} as Record<string, unknown>, dispatch: vi
   checks: [] as string[] }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }), api: f.api }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn(), setEmailGateDone: vi.fn() }));
-vi.mock("@/components/Avatar", () => ({ BotAvatar: () => null, MausAvatar: () => null }));
+vi.mock("@/components/Avatar", () => ({ BotAvatar: () => null, IndAvatar: () => null }));
 vi.mock("@/components/mascot-clock", () => ({ usePrefersReducedMotion: () => true }));
 vi.mock("@/components/EngineSetup", async (original) => {
   const { createElement: h } = await import("react");
@@ -23,7 +23,7 @@ vi.mock("@/components/EngineSetup", async (original) => {
     EngineSetup: ({ instance }: { instance: InstanceInfo }) => h("div", { "data-engine-setup": instance.instanceId }) };
 });
 vi.mock("@/lib/default-bot", async (original) => ({ ...(await original<typeof import("@/lib/default-bot")>()), useViewerEmail: () => null }));
-vi.mock("@/lib/mausbot-landing", () => ({ FLIGHT_MS: 700, landInSidebar: (input: { botId: string; commit: () => void }) => { f.landed(input.botId); input.commit(); } }));
+vi.mock("@/lib/indbot-landing", () => ({ FLIGHT_MS: 700, landInSidebar: (input: { botId: string; commit: () => void }) => { f.landed(input.botId); input.commit(); } }));
 const { WelcomeFlow } = await import("./WelcomeFlow");
 const { CHIEF_FADE_MS, CHIEF_GUARD_MS } = await import("./ChiefIntro");
 
@@ -37,7 +37,7 @@ const freeOpenCode: InstanceInfo = {
   snapshot: { state: "available", authenticated: true, freeFallback: true }, models: { default: "opencode/big-pickle", options: [] }, aiTest: "passed",
 };
 const signIn = (): InstanceInfo => ({ ...claude(false), snapshot: { state: "available", authenticated: false }, authentication: { method: "paste-code" } } as InstanceInfo);
-const maus = { id: "maus", threadId: "t", name: "MausBot", title: "", description: "", notifications: true, color: "chrome", unread: false,
+const ind = { id: "ind", threadId: "t", name: "IndBot", title: "", description: "", notifications: true, color: "chrome", unread: false,
   modelSelection: { instanceId: "claude", model: "m" }, messages: [], defaultBot: {}, chiefOfStaff: true };
 
 let host: HTMLDivElement, root: Root;
@@ -84,7 +84,7 @@ beforeEach(() => {
     if (path.endsWith("/check")) { f.checks.push(path); return { ok: true }; }
     return path === "/api/instances" ? { instances: f.state.instances } : JSON.parse(init?.body ?? "{}");
   });
-  f.state = { instances: [claude(true)], config: { onboarding: EMPTY_ONBOARDING, profile: { name: "" } }, bots: [maus], cloudAdd: null };
+  f.state = { instances: [claude(true)], config: { onboarding: EMPTY_ONBOARDING, profile: { name: "" } }, bots: [ind], cloudAdd: null };
   stageIntro(null);
   host = document.createElement("div");
   document.body.append(host);
@@ -100,7 +100,7 @@ afterEach(async () => {
 describe("a new install's first run", () => {
   it("is two screens with an AI already working: Next, then Create, and it lands in the Chief's chat", async () => {
     await show();
-    expect(host.querySelector("h1")?.textContent).toBe("Meet MausBot");
+    expect(host.querySelector("h1")?.textContent).toBe("Meet IndBot");
     expect(host.querySelector("[data-demo-composer]")?.textContent, "reduced motion shows the whole sentence").toContain("Hand off any task to your team of bots");
     for (const gone of ["Step 1", "Back", "Skip", "Your name", "Connect an AI", "Set up later"]) expect(text()).not.toContain(gone);
     expect(button("Next")!.disabled).toBe(false);
@@ -115,11 +115,11 @@ describe("a new install's first run", () => {
 
     await tick(CHIEF_GUARD_MS);
     await press("Create Chief of Staff");
-    expect(f.landed).toHaveBeenCalledWith("maus");
-    expect(f.dispatch).toHaveBeenCalledWith({ type: "updateBot", botId: "maus", patch: { welcomed: true } });
+    expect(f.landed).toHaveBeenCalledWith("ind");
+    expect(f.dispatch).toHaveBeenCalledWith({ type: "updateBot", botId: "ind", patch: { welcomed: true } });
     await tick(CHIEF_FADE_MS);
-    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("maus");
-    expect(introStaged("maus"), "its first messages arrive one at a time").toBe(true);
+    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("ind");
+    expect(introStaged("ind"), "its first messages arrive one at a time").toBe(true);
     await act(async () => {});
     expect(saved()).toEqual([{ onboarding: expect.objectContaining({ version: WELCOME_VERSION, hintsSeen: [MET_CHIEF_HINT] }) }]);
   });
@@ -148,17 +148,17 @@ describe("the Chief step", () => {
     expect(chiefStep).toBe(false);
   };
 
-  it("is skipped once MausBot has met the person", async () => {
-    f.state = { ...f.state, bots: [{ ...maus, welcomed: true }] };
+  it("is skipped once IndBot has met the person", async () => {
+    f.state = { ...f.state, bots: [{ ...ind, welcomed: true }] };
     await finishesAtNext();
   });
 
   it("is skipped where another bot is already the Chief", async () => {
-    f.state = { ...f.state, bots: [{ ...maus, chiefOfStaff: false }, { ...maus, id: "research", threadId: "r", name: "Research", defaultBot: undefined, chiefOfStaff: true }] };
+    f.state = { ...f.state, bots: [{ ...ind, chiefOfStaff: false }, { ...ind, id: "research", threadId: "r", name: "Research", defaultBot: undefined, chiefOfStaff: true }] };
     await finishesAtNext();
   });
 
-  it("is skipped where there is no MausBot", async () => {
+  it("is skipped where there is no IndBot", async () => {
     f.state = { ...f.state, bots: [] };
     await finishesAtNext();
   });
@@ -183,7 +183,7 @@ describe("with no AI working yet", () => {
   it("keeps the screen's shape: the pill signs in, and the line under it offers other ways or later", async () => {
     f.state = { ...f.state, instances: [signIn()] };
     await show();
-    expect(host.querySelector("h1")?.textContent).toBe("Meet MausBot");
+    expect(host.querySelector("h1")?.textContent).toBe("Meet IndBot");
     expect(button("Next")).toBeUndefined();
     expect(button("Sign in with Claude")).toBeDefined();
     expect(button("Other ways to connect")).toBeDefined();
@@ -204,7 +204,7 @@ describe("with no AI working yet", () => {
     expect(dialog.querySelector('[data-engine-setup="claude"]')).not.toBeNull();
     await act(async () => { dialog.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     expect(host.querySelector("[data-connect-ai]")).toBeNull();
-    expect(text(), "Escape closed the dialog only").toContain("Meet MausBot");
+    expect(text(), "Escape closed the dialog only").toContain("Meet IndBot");
   });
 
   it("says why an AI didn't answer its test, under the pill and in the dialog with Check again", async () => {
@@ -245,7 +245,7 @@ describe("with no AI working yet", () => {
     await show();
     await key("Enter");
     expect(host.querySelector("[data-connect-ai]"), "Enter pressed Connect Claude").not.toBeNull();
-    expect(text()).toContain("Meet MausBot");
+    expect(text()).toContain("Meet IndBot");
     await act(async () => { host.querySelector("[data-connect-ai]")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
     await key("Escape");
     await tick(100);
@@ -256,7 +256,7 @@ describe("with no AI working yet", () => {
 describe("other first runs", () => {
   it("gives a hosted place's admin the first screen only, then the chat", async () => {
     await show({ hosted: true });
-    expect(text()).toContain("This is your team's shared MausBot");
+    expect(text()).toContain("This is your team's shared IndBot");
     await press("Next");
     expect(text()).not.toContain("Introducing your Chief of Staff");
     expect(f.onDone).toHaveBeenCalledExactlyOnceWith(null);
@@ -270,6 +270,6 @@ describe("other first runs", () => {
     await tick(CHIEF_FADE_MS);
     await act(async () => {});
     expect(saved()[0].onboarding).not.toHaveProperty("hintsSeen");
-    expect(introStaged("maus"), "a replay lands in a chat that may be long under way").toBe(false);
+    expect(introStaged("ind"), "a replay lands in a chat that may be long under way").toBe(false);
   });
 });

@@ -50,7 +50,7 @@ function writeIfChanged(path: string, content: string, mode: number): void {
 /** ssh keeps the first value it sees, so the person's file goes first; -F skips the system file, so it goes last. */
 export function vpsSshConfigText(sshDir: string, userConfig = join(homedir(), ".ssh", "config"), systemConfig = "/etc/ssh/ssh_config"): string {
   return [
-    "# Written by OpenMausBot for its VPS computer connections. Do not edit;",
+    "# Written by OpenIndBot for its VPS computer connections. Do not edit;",
     "# it is regenerated. Your own ~/.ssh/config is included first and wins.",
     ...(existsSync(userConfig) ? [`Include ${JSON.stringify(userConfig)}`] : []),
     "Host *",
@@ -83,7 +83,7 @@ export function prepareVpsSsh(dataDir: string, pathValue: string, platform: Node
   if (!realSsh) return { configPath, path: pathValue };
   const shim = [
     "#!/bin/sh",
-    "# Written by OpenMausBot. docker's SSH transport finds this ssh first, so",
+    "# Written by OpenIndBot. docker's SSH transport finds this ssh first, so",
     "# docker commands share one connection unless the alias turns that off.",
     `exec ${shellQuote(realSsh)} -F ${shellQuote(configPath)} "$@"`,
     "",

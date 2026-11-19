@@ -8,8 +8,8 @@ const B = { people: ["mara@acme.test"] };
 const rooms: RosterMember = { id: "rooms", name: "Rooms", visibility: B };
 const hours: RosterMember = { id: "hours", name: "Staff Hours", visibility: B };
 const books: RosterMember = { id: "books", name: "Bookkeeping", visibility: "admins" };
-const mausbot: RosterMember = { id: "maus", name: "MausBot", visibility: { people: ["olive@acme.test"] }, defaultBot: { person: "olive@acme.test" } };
-const bots = [rooms, hours, books, mausbot];
+const indbot: RosterMember = { id: "ind", name: "IndBot", visibility: { people: ["olive@acme.test"] }, defaultBot: { person: "olive@acme.test" } };
+const bots = [rooms, hours, books, indbot];
 
 function fixture(over: { writer?: string; asked?: string | null; run?: boolean; own?: boolean } = {}) {
   const lines: Array<{ to: string; delivery: Delivery }> = [];
@@ -30,8 +30,8 @@ describe("a routine's refused hand-off", () => {
     }
   });
 
-  it("stays quiet about anything that wasn't the refusal: a hand-off that went through, a typo, the bot itself, someone's own MausBot", () => {
-    for (const [named, status] of [["Staff Hours", 202], ["Staff Hours", 403], ["Bookkeeper", 403], ["Rooms", 403], ["MausBot", 403], ["books", 202]] as const) {
+  it("stays quiet about anything that wasn't the refusal: a hand-off that went through, a typo, the bot itself, someone's own IndBot", () => {
+    for (const [named, status] of [["Staff Hours", 202], ["Staff Hours", 403], ["Bookkeeper", 403], ["Rooms", 403], ["IndBot", 403], ["books", 202]] as const) {
       const { refused } = fixture();
       refused.settled("t", rooms, [named], status);
       expect(refused.take("t"), named).toBeNull();

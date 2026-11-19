@@ -1,6 +1,6 @@
-// Jobs from root on this server: `mausbot-connector job <type> [args]`, run with `docker exec` in the connector's
+// Jobs from root on this server: `indbot-connector job <type> [args]`, run with `docker exec` in the connector's
 // container, sends one job over a Unix socket in the container's own /tmp, which nothing outside the container can
-// open. It goes through the same checks, queue and audit log as a job from MausBot, and is recorded as `local`.
+// open. It goes through the same checks, queue and audit log as a job from IndBot, and is recorded as `local`.
 import { randomBytes } from "node:crypto";
 import { chmodSync, rmSync } from "node:fs";
 import { createConnection, createServer, type Server } from "node:net";

@@ -58,7 +58,7 @@ describe.each(ENGINES.map((driver) => ({ driver, kind: driver.driverKind })))("$
       enabled: true,
       environment: {
         HOME: home, USERPROFILE: home, HERMES_HOME: join(home, ".hermes"), CLINE_DATA_DIR: join(home, "cline"), CLINE_PROVIDER: "openai-compatible", CLINE_MODEL: "fixture-model", CLINE_API_KEY: "fixture-only", KIMI_CODE_HOME: join(home, ".kimi"),
-        OPENMAUSBOT_PROBE_LOCAL_INJECT: "0", OPENCODE_API_KEY: "fixture-only", DEEPSEEK_API_KEY: "fixture-only", KIRO_API_KEY: "fixture-only", FAKE_ACP_AUTOPILOT: "1",
+        OPENINDBOT_PROBE_LOCAL_INJECT: "0", OPENCODE_API_KEY: "fixture-only", DEEPSEEK_API_KEY: "fixture-only", KIRO_API_KEY: "fixture-only", FAKE_ACP_AUTOPILOT: "1",
         FAKE_STREAM_SCRIPT: scripts, FAKE_STREAM_CADENCE: entry.action === "stop" ? "6:5" : "7:0",
       },
       config: { cli: FAKE_CLI, fullAuto: true },

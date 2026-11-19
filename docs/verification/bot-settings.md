@@ -156,7 +156,7 @@ tabbed panel instead, and that one is driven through
 
 ```sh
 node --experimental-strip-types scripts/control-omb.ts ui launch
-H=/tmp/openmausbot-verify-data-XXXXXX/ui.json
+H=/tmp/openindbot-verify-data-XXXXXX/ui.json
 # The preview reads as an existing install, so it starts in Advanced mode.
 pnpm control:omb ui eval --ui $H --js "localStorage.setItem('omb-advanced-mode','0'); location.reload(); 'simple'"
 pnpm control:omb ui click --ui $H --name "Open Pepper's profile"

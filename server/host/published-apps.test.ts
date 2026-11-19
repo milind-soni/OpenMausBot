@@ -15,7 +15,7 @@ const TOKEN = "nfp_published_apps_host_token_0123456789";
 
 const bots = [
   { id: "mira", name: "Mira", threadId: "main", tasks: [{ threadId: "main" }, { threadId: "ada-chat" }, { threadId: "ben-chat" }] },
-  { id: "adas-maus", name: "Ada's MausBot", threadId: "ada-maus-chat", defaultBot: { person: ADA }, tasks: [{ threadId: "ada-maus-chat" }] },
+  { id: "adas-ind", name: "Ada's IndBot", threadId: "ada-ind-chat", defaultBot: { person: ADA }, tasks: [{ threadId: "ada-ind-chat" }] },
   { id: "bens-own", name: "Ledger", threadId: "ledger-main", createdBy: BEN, tasks: [{ threadId: "ledger-main" }] },
 ];
 const rooms = [{ id: "launch", threadId: "room-thread", memberIds: ["mira"] }];
@@ -37,7 +37,7 @@ const site = (name: string, extra: Record<string, unknown> = {}) => ({
   createdAt: "2026-11-10T10:00:00.000Z", publishedAt: "2026-11-10T10:05:00.000Z", access: "public", ...extra,
 });
 const page = (pageId: string, botId: string, threadId: string, updatedAt: number): PublishedPageRecord => ({
-  pageId, url: `https://${pageId}.mausbot.page/`, title: `Page ${pageId.slice(0, 3)}`, botId, source: `/w/${pageId}`, cards: [{ threadId, messageId: `m-${pageId}` }], createdAt: updatedAt, updatedAt,
+  pageId, url: `https://${pageId}.indbot.page/`, title: `Page ${pageId.slice(0, 3)}`, botId, source: `/w/${pageId}`, cards: [{ threadId, messageId: `m-${pageId}` }], createdAt: updatedAt, updatedAt,
 });
 const PAGE_ADA = "adapage0000000000000000", PAGE_TEAM = "teampage000000000000000", PAGE_BEN = "benpage0000000000000000";
 
@@ -80,13 +80,13 @@ beforeEach(() => {
   record("mira", "team-site", site("team-site", { publishedAt: "2026-11-11T09:00:00.000Z", access: "private" }));
   record("mira", "bens-plan", site("bens-plan"));
   record("mira", "room-site", site("room-site"));
-  record("adas-maus", "diary", site("adas-diary"));
+  record("adas-ind", "diary", site("adas-diary"));
   messages = {
     "ada-chat": [{ role: "user", text: "publish my shop" }, { role: "bot", text: "Published: https://adas-shop.netlify.app. The link is public." }],
     main: [{ role: "bot", text: "Team site is live at [team-site](https://team-site.netlify.app/)" }],
     "ben-chat": [{ role: "bot", text: "Done: https://bens-plan.netlify.app" }],
     "room-thread": [{ role: "bot", from: { botId: "mira" }, text: "Here: https://room-site.netlify.app/index.html" }],
-    "ada-maus-chat": [{ role: "bot", text: "https://adas-diary.netlify.app" }],
+    "ada-ind-chat": [{ role: "bot", text: "https://adas-diary.netlify.app" }],
   };
   pages = [page(PAGE_ADA, "mira", "ada-chat", 300), page(PAGE_TEAM, "mira", "main", 200), page(PAGE_BEN, "mira", "ben-chat", 100)];
   tokenAsks = [];
@@ -108,7 +108,7 @@ describe("the list on a person's own server", () => {
       publishedAt: Date.parse("2026-11-11T09:00:00.000Z"), access: "netlify-team", manageUrl: "https://app.netlify.com/projects/team-site", canDelete: true,
     });
     expect(listed.find((app) => app.id === `page-${PAGE_ADA}`)).toEqual({
-      id: `page-${PAGE_ADA}`, source: "page", title: "Page ada", url: `https://${PAGE_ADA}.mausbot.page/`, bot: { id: "mira", name: "Mira" }, threadId: "ada-chat",
+      id: `page-${PAGE_ADA}`, source: "page", title: "Page ada", url: `https://${PAGE_ADA}.indbot.page/`, bot: { id: "mira", name: "Mira" }, threadId: "ada-chat",
       publishedAt: 300, access: "link", canDelete: true,
     });
     expect(listed.every((app) => app.canDelete)).toBe(true);
@@ -120,9 +120,9 @@ describe("the list on a person's own server", () => {
   });
 
   it("puts a record under the bot whose folder holds it, whatever bot the record claims to be", async () => {
-    record("adas-maus", "forged", site("forged", { botId: "mira", botName: "Mira" }));
+    record("adas-ind", "forged", site("forged", { botId: "mira", botName: "Mira" }));
     const forged = (await apps().list(visibleFor(OWNER, false), OWNER)).find((app) => app.title === "forged site")!;
-    expect(forged).toMatchObject({ id: "netlify-adas-maus-id-forged", bot: { id: "adas-maus", name: "Ada's MausBot" } });
+    expect(forged).toMatchObject({ id: "netlify-adas-ind-id-forged", bot: { id: "adas-ind", name: "Ada's IndBot" } });
   });
 
   it("reads each bot's folders once for requests that come together", async () => {
@@ -150,7 +150,7 @@ describe("the list on a Team Cloud", () => {
     const seen = await apps().list(visibleFor(session(BEN), true), session(BEN));
     expect(seen.map((app) => app.title).sort()).toEqual(["Page ben", "bens-plan site", ...TEAM_SHARED].sort());
     const told = JSON.stringify(seen);
-    for (const secret of ["adas-shop", "adas-diary", PAGE_ADA, "ada-chat", "ada-maus-chat", "adas-maus"]) expect(told, secret).not.toContain(secret);
+    for (const secret of ["adas-shop", "adas-diary", PAGE_ADA, "ada-chat", "ada-ind-chat", "adas-ind"]) expect(told, secret).not.toContain(secret);
   });
 
   it("shows an admin what shared bots published in shared conversations, and no member's private project", async () => {
@@ -163,7 +163,7 @@ describe("the list on a Team Cloud", () => {
   it("names the conversation the viewer can read, so the card opens it", async () => {
     const seen = await apps().list(visibleFor(session(ADA), true), session(ADA));
     expect(Object.fromEntries(seen.map((app) => [app.title, app.threadId]))).toEqual({
-      "adas-shop site": "ada-chat", "team-site site": "main", "room-site site": "room-thread", "adas-diary site": "ada-maus-chat", "Page ada": "ada-chat", "Page tea": "main",
+      "adas-shop site": "ada-chat", "team-site site": "main", "room-site site": "room-thread", "adas-diary site": "ada-ind-chat", "Page ada": "ada-chat", "Page tea": "main",
     });
   });
 
@@ -197,10 +197,10 @@ describe("the list on a Team Cloud", () => {
 
   it("answers a hostile member's guesses at another person's project as if it did not exist", async () => {
     const made = apps(), ben = session(BEN), visible = () => visibleFor(ben, true);
-    for (const id of ["netlify-mira-id-adas-shop", "netlify-adas-maus-id-adas-diary", `page-${PAGE_ADA}`, "netlify-mira-id-missing"]) {
+    for (const id of ["netlify-mira-id-adas-shop", "netlify-adas-ind-id-adas-diary", `page-${PAGE_ADA}`, "netlify-mira-id-missing"]) {
       expect(await made.remove(visible(), ben, id), id).toEqual({ status: 404, body: { error: "No such published app.", code: "gone" } });
     }
-    for (const url of ["https://adas-shop.netlify.app/", "https://adas-diary.netlify.app/", `https://${PAGE_ADA}.mausbot.page/`]) expect(await made.lists(visible(), ben, url), url).toBe(false);
+    for (const url of ["https://adas-shop.netlify.app/", "https://adas-diary.netlify.app/", `https://${PAGE_ADA}.indbot.page/`]) expect(await made.lists(visible(), ben, url), url).toBe(false);
     expect(await made.lists(visible(), ben, "https://bens-plan.netlify.app/pricing")).toBe(true);
     expect(calls).toEqual([]);
     expect(tokenAsks).toEqual([]);

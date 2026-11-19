@@ -6,7 +6,7 @@ import type { Bot, BotAnnouncement } from "./store";
 const bot = (overrides: Partial<Bot> = {}): Bot => ({
   id: "bot-1",
   threadId: "thread-1",
-  name: "Maus",
+  name: "Ind",
   title: "Helper",
   description: "",
   notifications: true,

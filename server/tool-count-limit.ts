@@ -6,7 +6,7 @@ import { CHAT_TOOL_LIMIT } from "../shared/tool-budget.ts";
 
 /** The most tools one MCP server lists for this turn, in the environment of each server the turn hands an engine. */
 export const TOOL_LIMIT_ENV = "OMB_TOOL_LIMIT";
-/** The same on OpenMausBot's own MCP endpoints, reached over HTTP. */
+/** The same on OpenIndBot's own MCP endpoints, reached over HTTP. */
 export const TOOL_LIMIT_HEADER = "x-omb-tool-limit";
 
 export function parseToolLimit(value: unknown): number | undefined {

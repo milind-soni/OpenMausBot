@@ -405,7 +405,7 @@
       "id": "r31",
       "set": "clean",
       "room": "infra",
-      "message": "DNS for docs.openmaus.com isn't resolving.",
+      "message": "DNS for docs.openind.com isn't resolving.",
       "gold": [
         "ops"
       ]
@@ -603,7 +603,7 @@
       "id": "rh16",
       "set": "hard",
       "room": "infra",
-      "message": "Cloudflare keeps emailing me about an expiring certificate for api.openmaus.com.",
+      "message": "Cloudflare keeps emailing me about an expiring certificate for api.openind.com.",
       "gold": [
         "ops"
       ]

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { createXRelayClient, TREG_X_ENDPOINTS } from "./x-research.ts";
 
-const post = (id: string, extra: Record<string, unknown> = {}) => ({ id, text: `post ${id}`, authorUsername: "maus", ...extra });
+const post = (id: string, extra: Record<string, unknown> = {}) => ({ id, text: `post ${id}`, authorUsername: "ind", ...extra });
 const page = (ids: string[], nextCursor?: string) => ({ output: { data: { items: ids.map((id) => post(id)), nextCursor } } });
 
 function fixture(responses: unknown[]) {
@@ -23,7 +23,7 @@ describe("X research pagination", () => {
       page(["8", "7"], "third"),
       page(["7", "6"]),
     ]);
-    const result = await client.search({ query: "maus", sort: "latest", limit: 4 });
+    const result = await client.search({ query: "ind", sort: "latest", limit: 4 });
     expect(result.posts.map((item) => item.id)).toEqual(["9", "8", "7", "6"]);
     expect(requests.map((request) => request.body.cursor)).toEqual([undefined, "second", "third"]);
     expect(result).toMatchObject({ newestId: "9", more: false });
@@ -31,7 +31,7 @@ describe("X research pagination", () => {
 
   it("keeps the first occurrence and does not report duplicate rows as truncated results", async () => {
     const { client, requests } = fixture([{ output: { data: { items: [post("5", { text: "first result" }), post("5", { text: "duplicate result" }), post("4")] } } }]);
-    const result = await client.userPosts({ handle: "maus", includeReplies: true, limit: 2 });
+    const result = await client.userPosts({ handle: "ind", includeReplies: true, limit: 2 });
     expect(result.posts.map((item) => item.id)).toEqual(["5", "4"]);
     expect(result.posts[0]!.text).toBe("first result");
     expect(result.more).toBe(false);
@@ -44,7 +44,7 @@ describe("X research pagination", () => {
       page(["8", "7"], "stuck"),
       page(["7", "6"], "stuck"),
     ]);
-    const result = await client.search({ query: "maus", sort: "top", limit: 20 });
+    const result = await client.search({ query: "ind", sort: "top", limit: 20 });
     expect(requests).toHaveLength(2);
     expect(result.posts.map((item) => item.id)).toEqual(["9", "8", "7"]);
     expect(result.more).toBe(true);
@@ -67,7 +67,7 @@ describe("X research pagination", () => {
       page(["9"], "third"),
       page(["8"]),
     ]);
-    const result = await client.search({ query: "maus", sort: "latest", limit: 2 });
+    const result = await client.search({ query: "ind", sort: "latest", limit: 2 });
     expect(requests).toHaveLength(3);
     expect(result.posts.map((item) => item.id)).toEqual(["9", "8"]);
     expect(result.more).toBe(false);

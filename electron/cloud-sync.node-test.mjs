@@ -21,7 +21,7 @@ function setup(t, { origin = "https://omb-u-aaaaaaaaaaaa.fly.dev" } = {}) {
   const clock = { now: AT + 60_000 };
   const service = createCloudFilesService({
     settingsFile: join(dir, "user", "settings.json"), stateFile: join(dir, "user", "state.db"),
-    documentsDir: join(home, "Documents"), localDataDir: join(home, ".openmausbot"), homeDir: home,
+    documentsDir: join(home, "Documents"), localDataDir: join(home, ".openindbot"), homeDir: home,
     platform: process.platform, hostname: "Ash-PC", cloudOrigin: () => current.origin, fetch: async () => { throw new Error("no network in tests"); },
     trashItem: async (file) => rmSync(file), markDownloaded: async () => {},
     createClient: () => holder.cloud.client, watch: () => () => {}, freeBytes: () => 100 * 1024 ** 3, now: () => clock.now,
@@ -30,11 +30,11 @@ function setup(t, { origin = "https://omb-u-aaaaaaaaaaaa.fly.dev" } = {}) {
   return { dir, home, project, cloud, holder, current, clock, service };
 }
 
-test("checks a folder before sharing: too broad, private, MausBot's own, or already shared are refused", async (t) => {
+test("checks a folder before sharing: too broad, private, IndBot's own, or already shared are refused", async (t) => {
   const s = setup(t);
   mkdirSync(join(s.home, ".ssh"), { recursive: true });
-  mkdirSync(join(s.home, ".openmausbot", "files"), { recursive: true });
-  mkdirSync(join(s.home, "Documents", "MausBot"), { recursive: true });
+  mkdirSync(join(s.home, ".openindbot", "files"), { recursive: true });
+  mkdirSync(join(s.home, "Documents", "IndBot"), { recursive: true });
   assert.equal((await s.service.check(s.home)).refusal, "too-broad");
   assert.equal((await s.service.check(join(s.home, ".ssh"))).refusal, "private");
   for (const cli of [".claude", ".codex", ".gemini", ".grok"]) {
@@ -42,7 +42,7 @@ test("checks a folder before sharing: too broad, private, MausBot's own, or alre
     assert.equal((await s.service.check(join(s.home, cli))).refusal, "private");
     assert.equal((await s.service.check(join(s.home, cli, "skills"))).refusal, "private");
   }
-  assert.equal((await s.service.check(join(s.home, ".openmausbot", "files"))).refusal, "app-data");
+  assert.equal((await s.service.check(join(s.home, ".openindbot", "files"))).refusal, "app-data");
   assert.equal((await s.service.check(join(s.home, "Documents"))).refusal, "app-data");
   assert.equal((await s.service.check(join(s.home, "nope"))).refusal, "not-a-folder");
   assert.deepEqual(await s.service.check(s.project), { name: "Clients", pcPath: s.project, files: 1, bytes: 9, partial: false, refusal: null });
@@ -94,7 +94,7 @@ test("repeated output failures reach the Files state and clear after a successfu
   s.cloud.client.download = download;
   await s.service.pass();
   assert.equal(s.service.state().outputs.problem, null);
-  assert.equal(readFileSync(join(s.home, "Documents", "MausBot", "Owl", "Report", "report.md"), "utf8"), "the report");
+  assert.equal(readFileSync(join(s.home, "Documents", "IndBot", "Owl", "Report", "report.md"), "utf8"), "the report");
 });
 
 test("only a folder this computer shared is ever synced: one My Cloud names for it is never read or written", async (t) => {
@@ -175,15 +175,15 @@ test("My Cloud's copy gone: the folder is shared again, and another My Cloud get
   assert.equal(s.holder.cloud.get(again.id, "brief.md"), "the brief");
 });
 
-test("bots' work from now on comes to Documents/MausBot/<bot>/<conversation>; older conversations and a switch turned off stay put", async (t) => {
+test("bots' work from now on comes to Documents/IndBot/<bot>/<conversation>; older conversations and a switch turned off stay put", async (t) => {
   const s = setup(t);
   s.cloud.setBots({ bots: [{ id: "owl", name: "Owl", tasks: [{ threadId: "t1", title: "Q3: plan?" }, { threadId: "t0", title: "Old" }] }], groups: [] });
-  const recent = s.cloud.addFolder({ id: "bot-owl-t1", kind: "bot", botId: "owl", threadId: "t1", cloudPath: "/data/.openmausbot/task-workspaces/owl/t1", newestMs: AT + 120_000 });
-  const old = s.cloud.addFolder({ id: "bot-owl-t0", kind: "bot", botId: "owl", threadId: "t0", cloudPath: "/data/.openmausbot/task-workspaces/owl/t0", newestMs: AT - 86_400_000 });
+  const recent = s.cloud.addFolder({ id: "bot-owl-t1", kind: "bot", botId: "owl", threadId: "t1", cloudPath: "/data/.openindbot/task-workspaces/owl/t1", newestMs: AT + 120_000 });
+  const old = s.cloud.addFolder({ id: "bot-owl-t0", kind: "bot", botId: "owl", threadId: "t0", cloudPath: "/data/.openindbot/task-workspaces/owl/t0", newestMs: AT - 86_400_000 });
   s.cloud.put(recent.id, "plan.md", "the plan");
   s.cloud.put(old.id, "old.md", "old work");
   await s.service.pass();
-  const owl = join(s.home, "Documents", "MausBot", "Owl");
+  const owl = join(s.home, "Documents", "IndBot", "Owl");
   assert.deepEqual(readdirSync(owl), ["Q3- plan-"]);
   assert.equal(readFileSync(join(owl, "Q3- plan-", "plan.md"), "utf8"), "the plan");
   assert.equal(s.service.state().outputs.folders, 1);

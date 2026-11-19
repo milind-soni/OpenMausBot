@@ -69,7 +69,7 @@ export async function mountPreview(
     // A worktree's node_modules may be a link to another checkout's: its files (the fonts) are served from there.
     server: { host: "127.0.0.1", port: 0, fs: { allow: [REPO_ROOT, realpathSync(join(REPO_ROOT, "node_modules"))] }, proxy: {
       "/api": { target: fixture.info.url, ...(proxyHeaders ? { headers: proxyHeaders } : {}) },
-      "/.well-known/openmausbot/environment": { target: fixture.info.url, ...(proxyHeaders ? { headers: proxyHeaders } : {}) },
+      "/.well-known/openindbot/environment": { target: fixture.info.url, ...(proxyHeaders ? { headers: proxyHeaders } : {}) },
     } },
     plugins: [{
       name: "isolated-preview",

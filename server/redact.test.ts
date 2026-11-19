@@ -270,7 +270,7 @@ describe("redactSecretsInText", () => {
   });
 
   it("masks the password in a URL's userinfo, keeping the user and the host", () => {
-    expect(redactSecretsInText("psql postgres://maus:s3cret@db.internal:5432/app")).toBe("psql postgres://maus:«redacted 6 chars»@db.internal:5432/app");
+    expect(redactSecretsInText("psql postgres://ind:s3cret@db.internal:5432/app")).toBe("psql postgres://ind:«redacted 6 chars»@db.internal:5432/app");
     expect(redactSecretsInText("curl https://user:p%40ss@host/path")).toBe("curl https://user:«redacted 6 chars»@host/path");
   });
 

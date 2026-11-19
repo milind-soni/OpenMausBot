@@ -46,7 +46,7 @@ describe("a gallery team's details", () => {
   });
 
   it("reads a legacy team file by its members", () => {
-    expect(templateDetailsOf({ format: "openmaus.team", version: 2, team: { name: "Sales crew", members: [{ key: "a", name: "Lead finder", appearance: { color: "cyan" } }] } }))
+    expect(templateDetailsOf({ format: "openind.team", version: 2, team: { name: "Sales crew", members: [{ key: "a", name: "Lead finder", appearance: { color: "cyan" } }] } }))
       .toMatchObject({ name: "Sales crew", bots: [{ name: "Lead finder", color: "cyan" }] });
   });
 

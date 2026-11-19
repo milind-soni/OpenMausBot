@@ -8,17 +8,17 @@ const render = (text: string) => renderToStaticMarkup(createElement(ChatMarkdown
 
 describe("parseGithubUrl", () => {
   it("reads pull requests, issues and commits", () => {
-    expect(parseGithubUrl("https://github.com/milind-soni/OpenMausBot/pull/2547")).toMatchObject({ kind: "pull", owner: "milind-soni", repo: "OpenMausBot", number: 2547 });
-    expect(parseGithubUrl("https://github.com/milind-soni/OpenMausBot/issues/12#issuecomment-1")).toMatchObject({ kind: "issue", number: 12 });
-    expect(parseGithubUrl("https://github.com/milind-soni/OpenMausBot/pull/2547/files")).toMatchObject({ kind: "pull", number: 2547 });
+    expect(parseGithubUrl("https://github.com/milind-soni/OpenIndBot/pull/2547")).toMatchObject({ kind: "pull", owner: "milind-soni", repo: "OpenIndBot", number: 2547 });
+    expect(parseGithubUrl("https://github.com/milind-soni/OpenIndBot/issues/12#issuecomment-1")).toMatchObject({ kind: "issue", number: 12 });
+    expect(parseGithubUrl("https://github.com/milind-soni/OpenIndBot/pull/2547/files")).toMatchObject({ kind: "pull", number: 2547 });
     expect(parseGithubUrl("https://github.com/octo-org/sample-app/commit/68189CF0a1")).toMatchObject({ kind: "commit", sha: "68189cf0a1" });
   });
 
   it("leaves everything else alone", () => {
     for (const url of [
-      "https://github.com/milind-soni/OpenMausBot",
-      "https://github.com/milind-soni/OpenMausBot/pull/0",
-      "https://github.com/milind-soni/OpenMausBot/pull/abc",
+      "https://github.com/milind-soni/OpenIndBot",
+      "https://github.com/milind-soni/OpenIndBot/pull/0",
+      "https://github.com/milind-soni/OpenIndBot/pull/abc",
       "https://gist.github.com/a/b/pull/1",
       "https://github.com.evil.example/a/b/pull/1",
       "https://example.com/a/b/pull/1",
@@ -29,9 +29,9 @@ describe("parseGithubUrl", () => {
 
 describe("owner/repo#N in text", () => {
   it("finds a reference in running text", () => {
-    const spans = splitShortRefs("fixed in milind-soni/OpenMausBot#2547, see there.");
-    expect(spans.map((span) => span.text)).toEqual(["fixed in ", "milind-soni/OpenMausBot#2547", ", see there."]);
-    expect(spans[1]!.ref).toMatchObject({ kind: "ref", url: "https://github.com/milind-soni/OpenMausBot/issues/2547" });
+    const spans = splitShortRefs("fixed in milind-soni/OpenIndBot#2547, see there.");
+    expect(spans.map((span) => span.text)).toEqual(["fixed in ", "milind-soni/OpenIndBot#2547", ", see there."]);
+    expect(spans[1]!.ref).toMatchObject({ kind: "ref", url: "https://github.com/milind-soni/OpenIndBot/issues/2547" });
   });
 
   it("ignores paths, URLs and plain #N", () => {
@@ -52,8 +52,8 @@ describe("owner/repo#N in text", () => {
 
 describe("rendered references", () => {
   it("draws a bare pull request URL as a left-to-right pill with the address as its tooltip", () => {
-    const html = render("- سحب النافذة https://github.com/milind-soni/OpenMausBot/pull/2547");
-    expect(html).toContain('dir="ltr" title="https://github.com/milind-soni/OpenMausBot/pull/2547" data-github-ref="pull"');
+    const html = render("- سحب النافذة https://github.com/milind-soni/OpenIndBot/pull/2547");
+    expect(html).toContain('dir="ltr" title="https://github.com/milind-soni/OpenIndBot/pull/2547" data-github-ref="pull"');
     expect(html).toContain("<span>#2547</span>");
     expect(html).toContain("unicode-bidi:isolate");
   });

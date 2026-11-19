@@ -19,7 +19,7 @@ review** and the **Data** tab if needed. The printed `ui` path also works with
 the shared [chat UI controls](chat-ui.md):
 
 ```sh
-H=/tmp/openmausbot-verify-data-XXXXXX/ui.json
+H=/tmp/openindbot-verify-data-XXXXXX/ui.json
 pnpm control:omb ui snapshot --ui "$H" --interactive
 pnpm control:omb ui click --ui "$H" --name History
 pnpm control:omb ui snapshot --ui "$H" --interactive

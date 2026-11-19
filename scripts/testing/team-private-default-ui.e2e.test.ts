@@ -28,7 +28,7 @@ const PEOPLE = { olive: "owner", ada: "admin", rui: "member", marta: "member", b
 type Who = keyof typeof PEOPLE;
 const address = (who: Who) => `${who}@acme.test`;
 
-/** A new member is offered their own MausBot in a dialog over the app; this run leaves it for later. */
+/** A new member is offered their own IndBot in a dialog over the app; this run leaves it for later. */
 const DISMISS = `(() => { [...document.querySelectorAll('[role="dialog"] button, dialog button')].find((button) => button.textContent.trim() === "Not now")?.click(); return true; })()`;
 
 type Access = { everyone: string; people: Record<string, string> };

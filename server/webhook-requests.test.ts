@@ -68,7 +68,7 @@ describe("WebhookRequestService", () => {
     const applied = service.submit({ botId: "bot-a", threadId: "thread-a", operation: create });
     expect(applied).toMatchObject({ state: "applied", action: "create" });
     const [webhook] = webhooks.list();
-    expect(webhook).toMatchObject({ id: applied.resultId, botId: "bot-a", enabled: true, prompt: create.webhook.instructions, runOn: "maus" });
+    expect(webhook).toMatchObject({ id: applied.resultId, botId: "bot-a", enabled: true, prompt: create.webhook.instructions, runOn: "ind" });
     const [message] = store.messagesFor("thread-a");
     expect(message!.card).toMatchObject({ answered: "allow", autoApplied: true, dismissed: true, options: [], tool: "create_trigger",
       webhookRequest: { version: 1, botId: "bot-a", threadId: "thread-a", resultId: webhook!.id, operation: { action: "create" } } });

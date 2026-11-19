@@ -589,7 +589,7 @@ async function collectConnectorTools(cfg: AppConfig): Promise<Record<string, Con
     params: {
       protocolVersion: "2025-03-26",
       capabilities: {},
-      clientInfo: { name: "openmausbot-grant-editor", version: "1" },
+      clientInfo: { name: "openindbot-grant-editor", version: "1" },
     },
   });
   if (initialize.status !== 200) {

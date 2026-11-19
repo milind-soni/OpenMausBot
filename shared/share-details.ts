@@ -37,10 +37,10 @@ export function packageDetails(document: PackageDocument, scope?: TemplateScope)
   };
 }
 
-/** A legacy team file (`openmaus.team`) as details; null when the value is not one. */
+/** A legacy team file (`openind.team`) as details; null when the value is not one. */
 export function manifestDetails(value: unknown): TemplateDetails | null {
   const team = (value as { format?: unknown; team?: { name?: unknown; description?: unknown; members?: unknown } } | null);
-  if (team?.format !== "openmaus.team" || typeof team.team?.name !== "string" || !Array.isArray(team.team.members) || !team.team.members.length) return null;
+  if (team?.format !== "openind.team" || typeof team.team?.name !== "string" || !Array.isArray(team.team.members) || !team.team.members.length) return null;
   const members = team.team.members.flatMap((member: unknown, index: number) => {
     const entry = member as { key?: unknown; name?: unknown; title?: unknown; description?: unknown; appearance?: { color?: unknown } } | null;
     if (typeof entry?.name !== "string" || !entry.name.trim()) return [];

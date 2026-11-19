@@ -2,7 +2,7 @@ export type LentMcpServer =
   | { name: string; command: string; args: string[]; env: Record<string, string> }
   | { name: string; url: string; type: "http" | "sse"; headers: Record<string, string> };
 export const LENT_MCP_ACTIONS: ReadonlySet<"mcp_tools" | "mcp_call">;
-export const CALLER_META: "openmausbot/caller";
+export const CALLER_META: "openindbot/caller";
 export function validLentMcpServer(server: unknown): server is LentMcpServer;
 export function validLentMcpJob(operation: { action?: unknown; server?: unknown; caller?: unknown }): boolean;
 export function isLoopbackAddress(url: string): boolean;

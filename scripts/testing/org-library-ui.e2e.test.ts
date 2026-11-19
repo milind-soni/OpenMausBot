@@ -84,10 +84,10 @@ describe("the organization library in the real renderer", () => {
     const blobs = join(info!.dataDir, "org-library", "blobs");
     mkdirSync(blobs, { recursive: true });
     for (const rel of [team, skills]) writeFileSync(join(blobs, `${rel.sha256}.json`), rel.bytes, { mode: 0o600 });
-    const catalog = JSON.stringify({ format: "openmaus.org-library", version: 1, libraryVersion: 1, organization: { id: ORG, name: "Customer Co" },
+    const catalog = JSON.stringify({ format: "openind.org-library", version: 1, libraryVersion: 1, organization: { id: ORG, name: "Customer Co" },
       packages: [team.entry(TEAM_ID), skills.entry(LIBRARY_ID)] });
     const relayed = await fetch(`${info!.url}/api/testing/org-library`, {
-      method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-org-library": key },
+      method: "POST", headers: { "content-type": "application/json", "x-openindbot-test-org-library": key },
       body: JSON.stringify({ library: { adminOrigin: "https://admin.example.com", organizationId: ORG, organizationName: "Customer Co", digest: sha(catalog), catalog } }),
     });
     expect(relayed.status).toBe(200);

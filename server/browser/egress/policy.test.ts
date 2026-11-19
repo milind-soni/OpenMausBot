@@ -78,7 +78,7 @@ describe("what each host lets a bot's browser reach", () => {
     }
   });
 
-  it("never reaches OpenMausBot's own ports, on loopback or on this machine's own addresses", async () => {
+  it("never reaches OpenIndBot's own ports, on loopback or on this machine's own addresses", async () => {
     for (const host of ["desktop", "server", "cloud"] as const) {
       for (const [target, address] of [["127.0.0.1:8799", "127.0.0.1"], ["localhost:8799", "::1"], ["::ffff:7f00:1:8799", "::ffff:7f00:1"], ["192.168.1.5:8799", "192.168.1.5"], ["198.51.100.7:8799", "198.51.100.7"]]) {
         expect(await decide(host, target!, [address!], { allowed: () => true, botPort: async () => true }), `${host} ${target}`).toBe("omb");
@@ -122,7 +122,7 @@ describe("what each host lets a bot's browser reach", () => {
     // The proxy's own interface is this computer: only a name for this machine reaches it, never a public one.
     expect(await decide("desktop", "example.com:443", ["198.18.0.1"])).toBe("rebinding");
     expect(await decide("desktop", "198.18.0.1:8080", ["198.18.0.1"])).toBeNull();
-    // The proxy may route a fake-IP answer to this computer, so OpenMausBot's own ports stay closed through it.
+    // The proxy may route a fake-IP answer to this computer, so OpenIndBot's own ports stay closed through it.
     expect(await decide("desktop", "example.com:8799", ["198.18.0.7"])).toBe("omb");
     for (const host of ["server", "cloud"] as const) {
       expect(await decide(host, "example.com:443", ["198.18.0.7"], { allowed: () => true }), host).toBe("reserved");
@@ -137,7 +137,7 @@ describe("what each host lets a bot's browser reach", () => {
     expect(await decide("cloud", "localhost:9000", ["127.0.0.1"], { allowed: () => true })).toBe("this-computer");
   });
 
-  it("lets a server's owner open this server's own sites and its local network, but never OpenMausBot or metadata", async () => {
+  it("lets a server's owner open this server's own sites and its local network, but never OpenIndBot or metadata", async () => {
     const on = { localNetwork: true };
     expect(await decide("server", "app.example:443", ["198.51.100.7"], on)).toBeNull();
     expect(await decide("server", "localhost:5173", ["127.0.0.1"], on)).toBeNull();

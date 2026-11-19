@@ -1,4 +1,4 @@
-// OpenMausBot's own connection to a command MCP server (an app's page and calls) where the bot box is on: the command is
+// OpenIndBot's own connection to a command MCP server (an app's page and calls) where the bot box is on: the command is
 // one a bot's turns also start, and may be the bot's own, so it starts in the box, where the data folder is an empty one.
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";

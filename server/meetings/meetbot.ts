@@ -790,7 +790,7 @@ for chunk in iter(lambda: sys.stdin.buffer.read(FRAME * 4), b""):
 
 /** Speech-to-text on the computer itself, for a person with no speech key: faster-whisper, installed on first use. */
 function whisperStream(emit: SessionParts["emit"], onWords: (words: Word[]) => void, log: (line: string) => void) {
-  const home = join(process.env.HOME ?? "/tmp", ".mausbot-meet");
+  const home = join(process.env.HOME ?? "/tmp", ".indbot-meet");
   const python = join(home, "venv", "bin", "python");
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, "whisper_worker.py"), WHISPER_WORKER);

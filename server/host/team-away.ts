@@ -1,5 +1,5 @@
 // A Team Cloud tells people what happened while they were away: a teammate mentioned them, a bot waits on their answer,
-// work they asked for finished. The Admin owns their addresses and sends the email (openmaus-cloud docs/team-cloud.md
+// work they asked for finished. The Admin owns their addresses and sends the email (openind-cloud docs/team-cloud.md
 // "When you are away"); this machine decides what is worth one and asks for it with a signed call.
 // Security invariants: what leaves here is names and opaque hashes, never a message's words, a conversation's title or
 // an id; an item from someone's private chat names no bot and no place. The Admin checks every address against the
@@ -14,7 +14,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "../routes/table.ts";
 import type { SessionRecord } from "../sessions.ts";
 
-/** On the Admin; must match openmaus-cloud's TEAM_AWAY_MACHINE_PATH. */
+/** On the Admin; must match openind-cloud's TEAM_AWAY_MACHINE_PATH. */
 export const TEAM_AWAY_ADMIN_PATH = "/api/cloud/machines/team-away";
 /** The person's own switch: `GET` → `{ on }`, `PUT { on }` → `{ on }`. A Team Cloud session only. */
 export const AWAY_EMAILS_PATH = "/api/me/away-emails";
@@ -65,7 +65,7 @@ const answerSchema = z.object({
   off: z.array(z.string().max(320)).max(1_000).optional(),
 });
 
-/** Must match openmaus-cloud's teamAwaySignature. */
+/** Must match openind-cloud's teamAwaySignature. */
 export function teamAwaySignature(secret: string, machineId: string, timestamp: string, nonce: string, body: string): string {
   const bodyHash = createHash("sha256").update(body).digest("base64url");
   return createHmac("sha256", secret).update(`omb-team-away-v1\n${machineId}\n${timestamp}\n${nonce}\n${bodyHash}`).digest("base64url");

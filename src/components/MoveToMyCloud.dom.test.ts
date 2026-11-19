@@ -97,7 +97,7 @@ it("a bot's menu offers Move to My Cloud, and it goes after one confirm", async 
 });
 
 it("a bot's menu leaves it out for the helper, a bot on its way, and when My Cloud can't take bots", async () => {
-  await menu({ id: "maus", name: "Maus", defaultBot: { v: 1 } });
+  await menu({ id: "ind", name: "Ind", defaultBot: { v: 1 } });
   expect(q("[data-item]")).toBeNull();
   await menu({ id: "moving-one", name: "Pip" });
   expect(q("[data-item]")).toBeNull();

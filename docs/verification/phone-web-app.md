@@ -23,7 +23,7 @@ focus zoom with an aligned mention mirror, a real composer send and reload
 without duplicate messages, and the absence of a service worker or offline
 cache. Screenshots and browser results are saved beside the fixture server log.
 `OMB_WEB_APP_BUILD` can select an already-built UI directory. Neither the user's
-browser profile nor live OpenMausBot data is used.
+browser profile nor live OpenIndBot data is used.
 
 These automated checks do not prove physical phone installation. Follow the
 [phone installation guide](../phone-web-app.md) in a disposable workspace for
@@ -60,7 +60,7 @@ phone screenshot.
 
 On 2026-10-11, the production build was tested in a newly created iPhone 17 Pro
 simulator running iOS 26.5 (23F77), hosted on a physical Mac with macOS 26.6.2.
-Safari's **Add to Home Screen** showed the OpenMausBot name and icon with **Open
+Safari's **Add to Home Screen** showed the OpenIndBot name and icon with **Open
 as Web App** enabled. Launching that icon opened a standalone window without a
 Safari address bar. The server and model were disposable loopback fixtures.
 

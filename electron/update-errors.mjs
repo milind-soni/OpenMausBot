@@ -3,11 +3,11 @@ export const UPDATE_TEXT = Object.freeze({
   integrity: "The update failed verification. Download a fresh installer from the official release page.",
   disk: "Not enough disk space to prepare the update. Free some space, then try again.",
   permission: "The update could not write to the app or its cache. Check folder permissions, or use the official installer.",
-  busy: "An update file is in use. Close other copies of OpenMausBot, then try again.",
+  busy: "An update file is in use. Close other copies of OpenIndBot, then try again.",
   feed: "The update files are missing or invalid. Check the official release page, or try again later.",
   network: "The update download was interrupted or the server is unavailable. Check your connection and try again.",
   prepareTimeout: "Preparing the update took too long.",
-  slowRestart: "Restart is taking longer than expected. Quit and reopen OpenMausBot to finish the update.",
+  slowRestart: "Restart is taking longer than expected. Quit and reopen OpenIndBot to finish the update.",
   unavailable: "updater unavailable",
 });
 const NEEDS_PERSON = new Set(["integrity", "disk", "permission", "busy"]);

@@ -33,7 +33,7 @@ function fakeArchive() {
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   const path = join(directory, "workspace.ombbackup");
   writeFileSync(path, "fixture encrypted bytes", { mode: 0o600 });
-  const summary: WorkspaceBackupSummary = { format: "openmaus.workspace-backup", version: 1, id, createdAt: "2026-09-11T00:00:00Z", appVersion: "0.1.71", files: 1, directories: 0, bytes: 23, bots: 0, groups: 0, threads: 0, messages: 0, exclusions: [], warnings: [] };
+  const summary: WorkspaceBackupSummary = { format: "openind.workspace-backup", version: 1, id, createdAt: "2026-09-11T00:00:00Z", appVersion: "0.1.71", files: 1, directories: 0, bytes: 23, bots: 0, groups: 0, threads: 0, messages: 0, exclusions: [], warnings: [] };
   return { id, path, summary };
 }
 

@@ -72,12 +72,12 @@ describe("the Published apps routes", () => {
     expect(await call("GET", `/api/published-apps/framing?url=${encodeURIComponent("https://bakery.netlify.app/menu")}&origin=${origin}`)).toEqual({ status: 200, body: { framing: "allowed" } });
     expect(framing).toHaveBeenCalledWith("https://bakery.netlify.app/menu", "http://127.0.0.1:5173");
     for (const other of ["https://example.com/", "http://169.254.169.254/latest/meta-data", "http://127.0.0.1:8080/", "http://someone.netlify.app/", "https://netlify.app.evil.test/",
-      "https://app.netlify.com/", "https://upload.mausbot.page/", "file:///etc/passwd", "not a url"]) {
+      "https://app.netlify.com/", "https://upload.indbot.page/", "file:///etc/passwd", "not a url"]) {
       expect((await call("GET", `/api/published-apps/framing?url=${encodeURIComponent(other)}&origin=${origin}`)).status, other).toBe(404);
     }
     expect((await call("GET", "/api/published-apps/framing?url=https%3A%2F%2Fbakery.netlify.app%2F")).status).toBe(400);
     expect(framing).toHaveBeenCalledTimes(1);
-    for (const hosted of ["https://linked-in-a-message.netlify.app/", "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/report"]) {
+    for (const hosted of ["https://linked-in-a-message.netlify.app/", "https://abcdefghijklmnopqrstuvwxyz.indbot.page/report"]) {
       expect((await call("GET", `/api/published-apps/framing?url=${encodeURIComponent(hosted)}&origin=${origin}`)).status, hosted).toBe(200);
     }
     expect(framing).toHaveBeenCalledTimes(3);

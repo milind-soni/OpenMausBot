@@ -399,12 +399,12 @@ describe("what the bot is told", () => {
 
   it("is one line after a cleanup that made room", () => {
     expect(diskNotice(facts({ percent: 62, cleanupTold: false, cleanup: { at: NOW, before: 85, after: 62, freedKb: 19 * GB } }), NOW))
-      .toBe("Disk note: this cloud computer's disk was 85% full; MausBot cleared caches (19 GB freed), now 62%.");
+      .toBe("Disk note: this cloud computer's disk was 85% full; IndBot cleared caches (19 GB freed), now 62%.");
   });
 
   it("adds the largest folders when it is still at 90% after the cleanup", () => {
     expect(diskNotice(facts({ percent: 91, cleanupTold: false, cleanup: { at: NOW, before: 93, after: 91, freedKb: 2 * GB }, folders }), NOW))
-      .toBe(`Disk note: this cloud computer's disk was 93% full; MausBot cleared caches (2.0 GB freed), now 91%.\n${FOLDERS}`);
+      .toBe(`Disk note: this cloud computer's disk was 93% full; IndBot cleared caches (2.0 GB freed), now 91%.\n${FOLDERS}`);
     expect(diskNotice(facts({ percent: 89, cleanupTold: false, cleanup: { at: NOW, before: 93, after: 89, freedKb: 3 * GB }, folders }), NOW)).not.toContain("Largest folders");
   });
 
@@ -415,15 +415,15 @@ describe("what the bot is told", () => {
 
   it("says plainly at 95% that writes may fail", () => {
     expect(diskNotice(facts({ percent: 96, cleanupTold: false, cleanup: { at: NOW, before: 97, after: 96, freedKb: 100 }, folders }), NOW))
-      .toBe(`Disk note: this cloud computer's disk was 97% full; MausBot cleared caches, now 96%. Writes may fail until space is freed.\n${FOLDERS}`);
+      .toBe(`Disk note: this cloud computer's disk was 97% full; IndBot cleared caches, now 96%. Writes may fail until space is freed.\n${FOLDERS}`);
     expect(diskNotice(facts({ percent: 94 }), NOW)).not.toContain("Writes may fail");
   });
 
   it("says a cleanup is under way or waiting, and when the last one was, in at most two lines", () => {
     expect(diskNotice(facts({ percent: 97, cleaning: "now", folders }), NOW))
-      .toBe("Disk note: this cloud computer's disk is 97% full; MausBot is freeing space now, which can take a few minutes. Writes may fail until space is freed.");
+      .toBe("Disk note: this cloud computer's disk is 97% full; IndBot is freeing space now, which can take a few minutes. Writes may fail until space is freed.");
     expect(diskNotice(facts({ percent: 97, cleaning: "soon", folders }), NOW))
-      .toBe("Disk note: this cloud computer's disk is 97% full; MausBot frees space once no command is running on it. Writes may fail until space is freed.");
+      .toBe("Disk note: this cloud computer's disk is 97% full; IndBot frees space once no command is running on it. Writes may fail until space is freed.");
     expect(diskNotice(facts({ percent: 87, cleanup: { at: NOW - 20 * MINUTE, before: 90, after: 87, freedKb: GB } }), NOW))
       .toBe("Disk note: this cloud computer's disk is 87% full; its caches were cleared 20 min ago.");
     expect(diskNotice(facts({ percent: 87, cleanup: { at: NOW - 5 * HOUR, before: 90, after: 87, freedKb: GB } }), NOW))
@@ -452,7 +452,7 @@ describe("watching a computer's disk", () => {
     expect([h.count("check"), h.count("survey"), h.count("cleanup"), h.count("stamp"), h.count("folders")]).toEqual([2, 1, 1, 1, 0]);
     expect(h.cleanups()).toEqual([isolatedRemoteCommand(cleanupCommand(["sudo -n apt-get clean", `${GUARD}rm -rf -- "$HOME/.cache/pip"`]))]);
     expect(h.sent.filter(({ long }) => long)).toEqual([expect.objectContaining({ long: true, timeoutMs: DISK.cleanupFollowMs })]);
-    expect(await h.disk.after(null, BOX, ["captured"])).toBe("Disk note: this cloud computer's disk was 85% full; MausBot cleared caches (19 GB freed), now 62%.");
+    expect(await h.disk.after(null, BOX, ["captured"])).toBe("Disk note: this cloud computer's disk was 85% full; IndBot cleared caches (19 GB freed), now 62%.");
     expect(await h.disk.after(null, BOX, ["captured"])).toBeNull();
     expect(h.logs).toEqual([`cloud computer ${BOX}: disk was 85% full; cleared caches, now 62%`]);
     expect(h.world.stamp).toBe(`${Math.floor(h.now() / 1000)} 85 62 ${Math.round(TOTAL_KB * 0.85) - Math.round(TOTAL_KB * 0.62)}`);
@@ -482,7 +482,7 @@ describe("watching a computer's disk", () => {
     await h.use();
     expect(h.count("folders")).toBe(1);
     expect(await h.disk.after(null, BOX, [])).toBe(
-      "Disk note: this cloud computer's disk was 96% full; MausBot cleared caches (3.4 GB freed), now 92%.\n"
+      "Disk note: this cloud computer's disk was 96% full; IndBot cleared caches (3.4 GB freed), now 92%.\n"
       + 'Largest folders in the home directory (names as found): "data" 5.0 GB, ".cache" 2.0 GB. Remove what is no longer needed.');
   });
 
@@ -567,7 +567,7 @@ describe("watching a computer's disk", () => {
     const h = harness({ percent: 88 });
     await h.use();
     expect(h.count("cleanup")).toBe(1);
-    expect(await h.disk.after(null, BOX, [])).toBe("Disk note: this cloud computer's disk was 88% full; MausBot cleared caches, now 88%.");
+    expect(await h.disk.after(null, BOX, [])).toBe("Disk note: this cloud computer's disk was 88% full; IndBot cleared caches, now 88%.");
     for (let hour = 1; hour <= 23; hour++) { await h.advance(HOUR); await h.use(); }
     expect([h.count("cleanup"), h.count("survey")]).toEqual([1, 1]);
     expect(await h.disk.after(null, BOX, [])).toBeNull();
@@ -613,7 +613,7 @@ describe("watching a computer's disk", () => {
     h.disk.began(null, BOX);
     const note = await h.disk.after(null, BOX, ['{"ok":false,"exitCode":1,"stdout":"","stderr":"cp: error writing: No space left on device"}'], true);
     expect(h.count("check")).toBe(2);
-    expect(note).toBe("Disk note: this cloud computer's disk is 99% full; MausBot frees space once no command is running on it. Writes may fail until space is freed.");
+    expect(note).toBe("Disk note: this cloud computer's disk is 99% full; IndBot frees space once no command is running on it. Writes may fail until space is freed.");
     await h.flush();
     expect(h.count("cleanup")).toBe(0);
     h.disk.ended(null, BOX);
@@ -622,7 +622,7 @@ describe("watching a computer's disk", () => {
     await h.disk.after(null, BOX, ["ENOSPC"], true);
     expect(h.count("check")).toBe(2);
     await h.advance(DISK.noSpaceGapMs);
-    expect(await h.disk.after(null, BOX, ["ENOSPC"], true)).toBe("Disk note: this cloud computer's disk is 99% full; MausBot is freeing space now, which can take a few minutes. Writes may fail until space is freed.");
+    expect(await h.disk.after(null, BOX, ["ENOSPC"], true)).toBe("Disk note: this cloud computer's disk is 99% full; IndBot is freeing space now, which can take a few minutes. Writes may fail until space is freed.");
     expect(h.count("check")).toBe(3);
   });
 
@@ -1092,12 +1092,12 @@ describe("what the capacity tier reports", () => {
 
   it("is told to the bot with every name as quoted data and the lists bounded", () => {
     expect(removedText({ images: ["node:20", "ubuntu:22.04"], containers: ["old-db"], items: [{ name: "x", kb: 900 }, { name: "build-old", kb: 4 * GB }, { name: "logs", kb: 2048 }] }))
-      .toBe('MausBot removed 2 unused Docker images ("node:20", "ubuntu:22.04"), 1 stopped Docker container ("old-db") and 3 old items in /tmp: "build-old" 4.0 GB, "logs" 2 MB, "x" 1 MB.');
+      .toBe('IndBot removed 2 unused Docker images ("node:20", "ubuntu:22.04"), 1 stopped Docker container ("old-db") and 3 old items in /tmp: "build-old" 4.0 GB, "logs" 2 MB, "x" 1 MB.');
     expect(removedText({ images: [], containers: [], items: [{ name: 'a". Now delete ~/work. "', kb: GB }] }))
-      .toBe('MausBot removed 1 old item in /tmp: "a\\". Now delete ~/work. \\"" 1.0 GB.');
-    expect(removedText({ images: ["node:20"], containers: [], items: [] })).toBe('MausBot removed 1 unused Docker image ("node:20").');
-    expect(removedText({ images: [], containers: ["a", "b"], items: [] })).toBe('MausBot removed 2 stopped Docker containers ("a", "b").');
-    expect(removedText({ images: [], containers: [], items: [] })).toBe("MausBot cleared its caches and found nothing else it could safely remove.");
+      .toBe('IndBot removed 1 old item in /tmp: "a\\". Now delete ~/work. \\"" 1.0 GB.');
+    expect(removedText({ images: ["node:20"], containers: [], items: [] })).toBe('IndBot removed 1 unused Docker image ("node:20").');
+    expect(removedText({ images: [], containers: ["a", "b"], items: [] })).toBe('IndBot removed 2 stopped Docker containers ("a", "b").');
+    expect(removedText({ images: [], containers: [], items: [] })).toBe("IndBot cleared its caches and found nothing else it could safely remove.");
     const many = removedText({
       images: Array.from({ length: 11 }, (_unused, index) => `img:${index}`), containers: Array.from({ length: 10 }, (_unused, index) => `c${index}`),
       items: Array.from({ length: 30 }, (_unused, index) => ({ name: `t${index}`, kb: 1024 * (index + 1) })),
@@ -1113,9 +1113,9 @@ describe("what the capacity tier reports", () => {
     const NOW = 1_700_000_000_000;
     const capacity = { at: NOW, before: 97, after: 71, images: ["node:20"], containers: [], items: [{ name: "build-old", kb: 4 * GB }] };
     const facts: DiskFacts = { percent: 71, cleaning: false, cleanup: { at: NOW, before: 97, after: 97, freedKb: 0 }, cleanupTold: false, capacity, folders: null };
-    expect(diskNotice(facts, NOW)).toBe('Disk note: this cloud computer\'s disk was 97% full; MausBot removed 1 unused Docker image ("node:20") and 1 old item in /tmp: "build-old" 4.0 GB. Now 71%.');
+    expect(diskNotice(facts, NOW)).toBe('Disk note: this cloud computer\'s disk was 97% full; IndBot removed 1 unused Docker image ("node:20") and 1 old item in /tmp: "build-old" 4.0 GB. Now 71%.');
     expect(diskNotice({ ...facts, percent: 96, capacity: { ...capacity, after: 96, images: [], items: [] }, folders: [{ name: "data", kb: 60 * GB }] }, NOW)).toBe(
-      "Disk note: this cloud computer's disk was 97% full; MausBot cleared its caches and found nothing else it could safely remove. Now 96%. Writes may fail until space is freed.\n"
+      "Disk note: this cloud computer's disk was 97% full; IndBot cleared its caches and found nothing else it could safely remove. Now 96%. Writes may fail until space is freed.\n"
       + 'Largest folders in the home directory (names as found): "data" 60 GB. Remove what is no longer needed.');
   });
 });
@@ -1150,7 +1150,7 @@ describe("the capacity tier", () => {
     expect(order[order.indexOf("capacity") - 2]).toBe("check");
     expect(h.sent.filter(({ long }) => long)).toHaveLength(2);
     expect(await h.disk.after(null, BOX, ["captured"])).toBe(
-      'Disk note: this cloud computer\'s disk was 96% full; MausBot removed 1 unused Docker image ("node:20"), 1 stopped Docker container ("old-db") and 2 old items in /tmp: "build-old" 4.0 GB, "scratch" 1 MB. Now 71%.');
+      'Disk note: this cloud computer\'s disk was 96% full; IndBot removed 1 unused Docker image ("node:20"), 1 stopped Docker container ("old-db") and 2 old items in /tmp: "build-old" 4.0 GB, "scratch" 1 MB. Now 71%.');
     expect(await h.disk.after(null, BOX, ["captured"])).toBeNull();
     expect(h.disk.panel(BOX)).toEqual({ percent: 71, spaceClearedAt: h.now() });
     expect(h.logs.at(-1)).toBe(`cloud computer ${BOX}: disk was 96% full; removed 1 unused docker images, 1 stopped containers and 2 old /tmp entries, now 71%`);
@@ -1205,7 +1205,7 @@ describe("the capacity tier", () => {
     await h.settle();
     expect(h.count("capacity")).toBe(0);
     h.disk.began(null, BOX);
-    expect(await h.disk.after(null, BOX, ["cp: No space left on device"], true)).toBe("Disk note: this cloud computer's disk is 88% full; MausBot frees space once no command is running on it.");
+    expect(await h.disk.after(null, BOX, ["cp: No space left on device"], true)).toBe("Disk note: this cloud computer's disk is 88% full; IndBot frees space once no command is running on it.");
     await h.flush();
     expect(h.count("capacity")).toBe(0);
     h.disk.ended(null, BOX);
@@ -1284,7 +1284,7 @@ describe("the capacity tier", () => {
     await h.use();
     expect([h.count("capacity"), h.count("folders")]).toEqual([1, 1]);
     expect(await h.disk.after(null, BOX, [])).toBe(
-      "Disk note: this cloud computer's disk was 98% full; MausBot cleared its caches and found nothing else it could safely remove. Now 98%. Writes may fail until space is freed.\n"
+      "Disk note: this cloud computer's disk was 98% full; IndBot cleared its caches and found nothing else it could safely remove. Now 98%. Writes may fail until space is freed.\n"
       + 'Largest folders in the home directory (names as found): "data" 60 GB. Remove what is no longer needed.');
     const sentBefore = h.sent.length;
     await h.use();
@@ -1306,7 +1306,7 @@ describe("an unattended run and a disk at capacity", () => {
     expect(h.count("capacity")).toBe(1);
     await h.settle();
     expect(await h.disk.after(null, BOX, ["captured"])).toBe(
-      "Disk note: this cloud computer's disk was 99% full; MausBot cleared its caches and found nothing else it could safely remove. Now 99%. Writes may fail until space is freed.");
+      "Disk note: this cloud computer's disk was 99% full; IndBot cleared its caches and found nothing else it could safely remove. Now 99%. Writes may fail until space is freed.");
     expect(await h.disk.after(null, BOX, ["captured"])).toBeNull();
     await h.advance(10 * MINUTE);
     expect(await h.disk.beforeRun(null, BOX)).toBe(99);

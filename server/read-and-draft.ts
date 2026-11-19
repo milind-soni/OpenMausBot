@@ -1,7 +1,7 @@
 // Security invariant: a read-and-draft routine run is unattended and its prompt carries untrusted mail and invite text
 // beside the person's private data, so it gets no way to act outside or to persist anything. Everything is allow-only:
 // - the engine runs at Ask, and the server answers every request in the run itself: each is refused, never a card;
-// - of OpenMausBot's own routes it may reach only conversation reads, the paging of its own long results, the engine's
+// - of OpenIndBot's own routes it may reach only conversation reads, the paging of its own long results, the engine's
 //   hooks and the connected-apps relay;
 // - through the relay it may only read Gmail and Google Calendar, and write a draft replying in one of the threads its
 //   checks handed it, to that thread's sender, once;
@@ -24,14 +24,14 @@ type Bot = { id: string; name: string; modelSelection: { instanceId: string } };
 /** The system prompt a read-and-draft run keeps: who the person is, where its files are, its connected apps and what a
  * routine run is. No memory, recent work, team notes, skills or tool guides: less to leak, and a smaller turn. */
 export const READ_AND_DRAFT_PARTS: ReadonlySet<string> = new Set(["user-profile", "files", "composio", "routine-execution", "automation-reply", "webhook"]);
-/** The integrations a read-and-draft run keeps: OpenMausBot's own tools (fenced by route), the connected apps (fenced
+/** The integrations a read-and-draft run keeps: OpenIndBot's own tools (fenced by route), the connected apps (fenced
  * by call) and the engine's hooks. */
 export const READ_AND_DRAFT_TOOLS: ReadonlySet<string> = new Set(["agents", "composio", "hooks"]);
 
-export const READ_AND_DRAFT_REFUSAL = "This work reads and drafts only: OpenMausBot refused this. Do not try another way.";
+export const READ_AND_DRAFT_REFUSAL = "This work reads and drafts only: OpenIndBot refused this. Do not try another way.";
 const RULE = "read-and-draft";
 
-/** OpenMausBot's own routes a read-and-draft run may reach. */
+/** OpenIndBot's own routes a read-and-draft run may reach. */
 const ROUTES: ReadonlySet<string> = new Set([
   "GET /api/internal/session-search",
   "GET /api/internal/session-read",

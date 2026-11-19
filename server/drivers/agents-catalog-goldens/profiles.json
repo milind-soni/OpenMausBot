@@ -1269,7 +1269,7 @@
       "app_settings"
     ]
   },
-  "default+mausbot": {
+  "default+indbot": {
     "bytes": 59097,
     "sha256": "ca98f7bacf2b163b0d336cee6933989bd9b016565f94eada630c4ac0bda19c2c",
     "tools": [
@@ -1328,7 +1328,7 @@
       "mark_notifications_read"
     ]
   },
-  "skills+shared+voice+mausbot": {
+  "skills+shared+voice+indbot": {
     "bytes": 64464,
     "sha256": "53ea77f065727abf095363090cfcec000bbab3bfa5cb2503aefff1b18140e17d",
     "tools": [

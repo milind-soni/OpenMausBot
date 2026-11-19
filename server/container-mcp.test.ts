@@ -20,7 +20,7 @@ const posixOnly = describe.skipIf(process.platform === "win32");
 
 posixOnly("Local VM Cua MCP bridge", () => {
   it("passes MCP bytes unchanged to cua-driver mcp over the container runtime", async () => {
-    const bin = await mkdtemp(join(tmpdir(), "openmausbot-container-mcp-"));
+    const bin = await mkdtemp(join(tmpdir(), "openindbot-container-mcp-"));
     temporary.push(bin);
     const fakeDocker = join(bin, "docker");
     await writeFile(
@@ -59,7 +59,7 @@ posixOnly("Local VM Cua MCP bridge", () => {
   });
 
   it("answers ping locally so the bundled cua-driver is not invoked", async () => {
-    const bin = await mkdtemp(join(tmpdir(), "openmausbot-container-mcp-ping-"));
+    const bin = await mkdtemp(join(tmpdir(), "openindbot-container-mcp-ping-"));
     temporary.push(bin);
     const fakeDocker = join(bin, "docker");
     await writeFile(
@@ -112,7 +112,7 @@ posixOnly("Local VM Cua MCP bridge", () => {
     );
   });
   it("never hands an engine an error result that carries a screenshot", async () => {
-    const bin = await mkdtemp(join(tmpdir(), "openmausbot-container-mcp-error-"));
+    const bin = await mkdtemp(join(tmpdir(), "openindbot-container-mcp-error-"));
     temporary.push(bin);
     const fakeDocker = join(bin, "docker");
     // cua-driver 0.37.0 answers a refused action with its error text plus a screenshot; success keeps its screenshot.

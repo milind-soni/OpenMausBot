@@ -9,7 +9,7 @@ import test from "node:test";
 
 import { acquireDataDirLease, tasklistListsPid, windowsCreationFitsLease } from "./data-dir-lease.mjs";
 
-const LEASE_NAME = "openmausbot-server.lease";
+const LEASE_NAME = "openindbot-server.lease";
 const roots = [];
 
 function temporaryDirectory(name = "data") {
@@ -102,7 +102,7 @@ function fakeWindowsHost(t, { epermPids = [], tasklist, powershell = null, creat
   mkdirSync(binDir);
   const script = (name, source) => writeFileSync(name, `#!/bin/sh\n${source}\n`, { mode: 0o755 });
   if (Array.isArray(tasklist)) {
-    const rows = tasklist.map((pid) => `  *"PID eq ${pid}"*) echo '"openmausbot-server.exe","${pid}","Console","1","64,000 K"' ;;`).join("\n");
+    const rows = tasklist.map((pid) => `  *"PID eq ${pid}"*) echo '"openindbot-server.exe","${pid}","Console","1","64,000 K"' ;;`).join("\n");
     script(path.join(binDir, "tasklist"), `case "$*" in\n${rows}\n  *) echo "INFO: No tasks are running which match the specified criteria." ;;\nesac`);
   } else if (tasklist === "error") {
     script(path.join(binDir, "tasklist"), "exit 1");
@@ -136,7 +136,7 @@ function windowsLeaseRecord(pid, createdAt = Date.now() - 60_000) {
 }
 
 function plantWindowsChildLease(dataDir, pid, createdAt) {
-  const childPath = path.join(dataDir, ".openmausbot-server-child", LEASE_NAME);
+  const childPath = path.join(dataDir, ".openindbot-server-child", LEASE_NAME);
   mkdirSync(path.dirname(childPath));
   writeFileSync(childPath, `${JSON.stringify(windowsLeaseRecord(pid, createdAt))}\n`, { mode: 0o600 });
   return childPath;
@@ -217,7 +217,7 @@ test("a Windows owner that can be neither signalled nor listed still fails close
 
 test("tasklist's answer: a CSV row is a running pid, an INFO line is none, no output proves nothing", () => {
   assert.equal(tasklistListsPid('"node.exe","4120","Services","0","41,236 K"\r\n'), true);
-  assert.equal(tasklistListsPid('﻿"openmausbot-server.exe","4120","Console","1","64,000 K"\r\n'), true);
+  assert.equal(tasklistListsPid('﻿"openindbot-server.exe","4120","Console","1","64,000 K"\r\n'), true);
   assert.equal(tasklistListsPid("\r\nINFO: No tasks are running which match the specified criteria.\r\n"), false);
   assert.equal(tasklistListsPid("INFORMATION : aucune tâche en service ne correspond aux critères spécifiés.\r\n"), false);
   assert.equal(tasklistListsPid(""), null);

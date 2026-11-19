@@ -38,8 +38,8 @@ describe("pinned circle order", () => {
   });
 
   it("uses its own drag type and picks the side of the circle in reading order", () => {
-    expect(PINNED_CIRCLE_DRAG_TYPE).not.toBe("application/x-openmausbot-folder");
-    expect(PINNED_CIRCLE_DRAG_TYPE).not.toBe("application/x-openmausbot-sidebar-section");
+    expect(PINNED_CIRCLE_DRAG_TYPE).not.toBe("application/x-openindbot-folder");
+    expect(PINNED_CIRCLE_DRAG_TYPE).not.toBe("application/x-openindbot-sidebar-section");
     const rect = { left: 0, top: 0, width: 80, height: 80 };
     expect(pinnedCircleDropPlace(10, 40, rect)).toEqual({ place: "before", axis: "x" });
     expect(pinnedCircleDropPlace(70, 40, rect)).toEqual({ place: "after", axis: "x" });

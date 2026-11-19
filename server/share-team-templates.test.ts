@@ -170,8 +170,8 @@ describe("GitHub through the connection", () => {
     const card = made().card;
     const published = await request(ADMIN, "POST", `/api/share/${card.id}/publish-repo`, { repo: "acme/playbooks", folder: "templates" });
     expect(published.status, JSON.stringify(published.body)).toBe(200);
-    expect(published.body).toMatchObject({ kind: "pull_request", url: "https://github.com/acme/playbooks/pull/1", branch: expect.stringMatching(/^mausbot-reporter-[a-f0-9]{6}$/) });
-    expect(repo.pulls).toEqual([{ head: published.body.branch, base: "main", title: "Add the Reporter template from MausBot" }]);
+    expect(published.body).toMatchObject({ kind: "pull_request", url: "https://github.com/acme/playbooks/pull/1", branch: expect.stringMatching(/^indbot-reporter-[a-f0-9]{6}$/) });
+    expect(repo.pulls).toEqual([{ head: published.body.branch, base: "main", title: "Add the Reporter template from IndBot" }]);
     const branch = repo.branches.get(published.body.branch)!;
     expect([...branch.keys()].sort()).toEqual(["templates/reporter/bot.md", "templates/reporter/skills/report/SKILL.md", "templates/reporter/skills/report/scripts/report.py"]);
     expect(repo.branches.get("main")!.size).toBe(0);

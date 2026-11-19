@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { fromOklch, parseHex, toOklch } from "./color-contrast";
-import { MAUS_COLORS } from "./mascot";
+import { IND_COLORS } from "./mascot";
 
 describe("oklch", () => {
-  it.each(Object.entries(MAUS_COLORS))("round-trips %s through OKLCH", (_name, hex) => {
+  it.each(Object.entries(IND_COLORS))("round-trips %s through OKLCH", (_name, hex) => {
     const back = parseHex(fromOklch(toOklch(hex)));
     const want = parseHex(hex);
     expect(Math.abs(back.r - want.r)).toBeLessThanOrEqual(1);

@@ -106,7 +106,7 @@ describe("the runtime router", () => {
     { name: "agent_browser_tab_new", arguments: { url: "https://www.reddit.com/" } },
   ];
 
-  it("tells a bot on MausBot Cloud why its browser doesn't open Reddit, on either engine, without reaching it", async () => {
+  it("tells a bot on IndBot Cloud why its browser doesn't open Reddit, on either engine, without reaching it", async () => {
     const { old, chrome, runtime } = onHost("cloud");
     for (const spec of [AGENT_BROWSER, CHROME]) {
       for (const call of OPENS_REDDIT) {

@@ -287,7 +287,7 @@ describe("sharing my New bot defaults as a preset", () => {
     const app = await installation();
     const built = app.presets.presetFromDefaults(defaults({ profile: { name: "Sky", soul: "Use password=Hunter2-Secret-99 for the portal.\n" } }), { name: "Support agent", includeNotes: true });
     const first = app.exporter.createLibraryPackageExport({ published: null, preset: built.value, authorName: "Mira" });
-    expect(first.filename).toBe("support-agent-1.0.0.openmaus.json");
+    expect(first.filename).toBe("support-agent-1.0.0.openind.json");
     expect(first.redacted).toEqual(["presets[new-bot-defaults].bot.soul"]);
     expect(JSON.stringify(first.document)).not.toContain("Hunter2-Secret-99");
     expect(first.document.package).toMatchObject({ id: "support-agent", agents: [], author: { name: "Mira" }, presets: [expect.objectContaining({ skills: ["follow-up"] })] });

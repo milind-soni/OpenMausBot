@@ -129,7 +129,7 @@ describe("bot actions menu viewport placement", () => {
     expect(html).not.toContain("shadow-2xl");
   });
 
-  it("offers no Chief of Staff crown on a team, where each person's MausBot is their Chief", () => {
+  it("offers no Chief of Staff crown on a team, where each person's IndBot is their Chief", () => {
     fixture.advanced = true;
     setTeamPeople({ people: [{ email: "ada@acme.test", name: "Ada", role: "admin", you: true }], me: { email: "ada@acme.test", name: "Ada", role: "admin", you: true }, admin: true, needsYou: [] });
     const html = render();

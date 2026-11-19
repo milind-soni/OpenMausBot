@@ -11,7 +11,7 @@ import { forgetCachedCapacity } from "../src/tunnel-capacity";
 import { rolloutBucket } from "../src/relay";
 import { forgetTunnelRelease } from "../src/tunnel-release";
 
-const BASE_URL = "https://auth.openmausbot.test";
+const BASE_URL = "https://auth.openindbot.test";
 const CONNECTOR_TOKEN = "eyJhbGciOiJIUzI1NiJ9.test-only-connector-token.signature";
 /** An endpoint whose hostname is not under its account's suffix refuses to act. */
 const HOST_SUFFIX = env.COMPANION_HOST_SUFFIX;
@@ -1222,7 +1222,7 @@ describe("managed companion endpoints", () => {
     cloudflare.dns.set(hostname, {
       ...record,
       content: "203.0.113.50",
-      name: "repurposed.openmausbot.test",
+      name: "repurposed.openindbot.test",
       proxied: false,
       type: "A",
     });
@@ -1236,7 +1236,7 @@ describe("managed companion endpoints", () => {
     expect(cloudflare.calls.some((entry) => entry.method === "DELETE")).toBe(false);
     expect(cloudflare.dns.get(hostname)).toMatchObject({
       content: "203.0.113.50",
-      name: "repurposed.openmausbot.test",
+      name: "repurposed.openindbot.test",
       type: "A",
     });
     const retained = await env.DB.prepare(
@@ -2225,7 +2225,7 @@ describe("managed endpoint provider capacity", () => {
     const text = await response.text();
     expect(JSON.parse(text)).toMatchObject({
       ok: true,
-      service: "openmausbot-control-plane",
+      service: "openindbot-control-plane",
       capacity: {
         checkedAt: expect.any(Number),
         dnsRecords: { limit: 3500, used: 400 },
@@ -2259,9 +2259,9 @@ describe("managed endpoint provider capacity", () => {
 const ENDPOINT_PATH = "/v1/installations/self/endpoint";
 const SECOND_ACCOUNT_ID = "2b".repeat(16);
 const SECOND_ZONE_ID = "3c".repeat(16);
-const SECOND_SUFFIX = "mausbot.si";
-const SECOND_TOKEN_SECRET = "CLOUDFLARE_API_TOKEN_MAUSBOT_SI";
-const SECOND_TOKEN = "test-only-mausbot-si-api-token-with-no-real-access";
+const SECOND_SUFFIX = "indbot.si";
+const SECOND_TOKEN_SECRET = "CLOUDFLARE_API_TOKEN_INDBOT_SI";
+const SECOND_TOKEN = "test-only-indbot-si-api-token-with-no-real-access";
 
 interface AccountsFixture {
   env: Env;
@@ -2273,7 +2273,7 @@ interface AccountsFixture {
   worker: TestWorker;
 }
 
-/** The primary account plus mausbot.si in a second account, each with its
+/** The primary account plus indbot.si in a second account, each with its
  * own fake API behind a router that checks every request's token. */
 function twoAccounts(entry: Record<string, unknown> = {}): AccountsFixture {
   const first = new FakeCloudflare();
@@ -2420,7 +2420,7 @@ async function orphanIn(
   return { hostname, installationId, tunnelName };
 }
 
-const ON_SECOND_ACCOUNT = /^c-[0-9a-f]{32}\.mausbot\.si$/;
+const ON_SECOND_ACCOUNT = /^c-[0-9a-f]{32}\.indbot\.si$/;
 
 describe("managed endpoints in several Cloudflare accounts", () => {
   afterEach(() => {
@@ -2720,7 +2720,7 @@ describe("managed endpoints in several Cloudflare accounts", () => {
   it("moves a new endpoint in the same request when its zone refuses the DNS record, giving its tunnel back", async () => {
     const fixture = twoAccounts({ dnsRecordLimit: 200 });
     const owner = await signIn(fixture.worker, "accounts-dns-full@example.com");
-    // At the last scan mausbot.si had the most room; its zone has filled since.
+    // At the last scan indbot.si had the most room; its zone has filled since.
     await setSnapshot(PRIMARY_ACCOUNT, { dns_record_count: 995, tunnel_count: 974 });
     await setSnapshot(SECOND_ACCOUNT_ID, { dns_record_count: 150, tunnel_count: 230 });
     fixture.second.providerErrors.set("create_dns", 81_045);
@@ -2767,7 +2767,7 @@ describe("managed endpoints in several Cloudflare accounts", () => {
   it("gives back the tunnel of a row stranded without a DNS record, then moves it or answers locally", async () => {
     const fixture = twoAccounts({ dnsRecordLimit: 200 });
     const owner = await signIn(fixture.worker, "accounts-stranded@example.com");
-    // What an interrupted request leaves in mausbot.si: a tunnel that never
+    // What an interrupted request leaves in indbot.si: a tunnel that never
     // connected, no DNS record, and a row its app keeps retrying.
     const stranded = async (clientInstanceId: string, opaque: string) => {
       const installation = await createInstallation(fixture.worker, owner.token, clientInstanceId);
@@ -2840,7 +2840,7 @@ describe("managed endpoints in several Cloudflare accounts", () => {
         (installation_id, provider_account, hostname, tunnel_name, status, last_error_code, created_at, updated_at)
        VALUES (?, ?, ?, ?, 'error', 'cf_api_81045', ?, ?)`,
     ).bind(waiting.installation.id, SECOND_ACCOUNT_ID, `c-${opaque}.${SECOND_SUFFIX}`, `omb-c-${opaque}`, now, now).run();
-    // mausbot.si refused it a record eleven minutes ago: that refusal no
+    // indbot.si refused it a record eleven minutes ago: that refusal no
     // longer closes the account, but its zone is still full.
     await setSnapshot(PRIMARY_ACCOUNT, { dns_record_count: 995, tunnel_count: 974 });
     await setSnapshot(SECOND_ACCOUNT_ID, {
@@ -3000,7 +3000,7 @@ describe("managed endpoints in several Cloudflare accounts", () => {
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    // Registered by a release that cannot pair a desktop with mausbot.si: it
+    // Registered by a release that cannot pair a desktop with indbot.si: it
     // stays with the full account.
     const old = await provisionIn(fixture, owner.token, "accounts-version", { appVersion: "0.1.102" });
     expect(old.response.status).toBe(503);
@@ -3120,7 +3120,7 @@ describe("managed endpoints in several Cloudflare accounts", () => {
     const fixture = twoAccounts({ dnsRecordLimit: 200, minAppVersion: "0.1.104" });
     const owner = await signIn(fixture.worker, "accounts-free-room@example.com");
     // The scans of 2026-10-20: the primary had 26 tunnels free and 1,878
-    // dormant endpoints; mausbot.si had 770 tunnels free, 207 dormant
+    // dormant endpoints; indbot.si had 770 tunnels free, 207 dormant
     // endpoints, and every record of its Free zone used.
     const scans = async (primaryTunnels: number) => {
       await setSnapshot(PRIMARY_ACCOUNT, { dns_record_count: 995, dormant_endpoints: 1878, tunnel_count: primaryTunnels });
@@ -3369,7 +3369,7 @@ describe("managed endpoints in several Cloudflare accounts", () => {
     const text = await response.text();
     expect(JSON.parse(text)).toEqual({
       ok: true,
-      service: "openmausbot-control-plane",
+      service: "openindbot-control-plane",
       capacity: {
         status: "ok",
         checkedAt: now - 120_000,
@@ -4314,7 +4314,7 @@ describe("self-hosted servers keep their tunnel", () => {
     ...extra,
   });
 
-  /** `openmausbot serve --tunnel` and `openmausbot login`: registration as any client sends it, `kind` only when given. */
+  /** `openindbot serve --tunnel` and `openindbot login`: registration as any client sends it, `kind` only when given. */
   async function register(worker: TestWorker, accountToken: string, clientInstanceId: string, appVersion: string, kind?: string) {
     const response = await call(worker, "/v1/installations", {
       body: { clientInstanceId, name: "home-server", platform: "linux", appVersion, ...(kind ? { kind } : {}) },

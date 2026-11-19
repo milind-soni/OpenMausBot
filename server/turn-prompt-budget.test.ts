@@ -1,4 +1,4 @@
-// Pins the bytes of OpenMausBot's own prompt text a turn carries: the fixed sections of a bot's system prompt, what a
+// Pins the bytes of OpenIndBot's own prompt text a turn carries: the fixed sections of a bot's system prompt, what a
 // Claude turn appends with --append-system-prompt-file, and what a Codex turn sets as developer instructions. Each may
 // move at most 2% either way (lower a number to lock in a win); a bigger change moves its baseline by hand.
 import { describe, expect, it } from "vitest";
@@ -93,7 +93,7 @@ const PROMPT_BUDGET_BASELINE: Record<string, number> = {
   "codex:volatile-note": 97,
 };
 
-describe("OpenMausBot's prompt text per turn", () => {
+describe("OpenIndBot's prompt text per turn", () => {
   it("stays within its pinned budget", async () => {
     const now = await measured();
     expect(Object.keys(now).sort()).toEqual(Object.keys(PROMPT_BUDGET_BASELINE).sort());

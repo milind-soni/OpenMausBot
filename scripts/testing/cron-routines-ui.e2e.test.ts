@@ -46,7 +46,7 @@ afterAll(() => waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }));
     return field.getBoundingClientRect().height > 0;
   })()`);
 
-  const startupBox = `document.querySelector('input[aria-label="Also run when MausBot starts"]')`;
+  const startupBox = `document.querySelector('input[aria-label="Also run when IndBot starts"]')`;
 
   const title = 'input[placeholder="What should happen?"]';
   const newButton = "[...document.querySelectorAll('main header button')].find(button => button.textContent === 'New')";
@@ -109,7 +109,7 @@ afterAll(() => waitForExit(child, { signal: "SIGINT", graceMs: 30_000 }));
   // The API models a bot-created arbitrary schedule. Editing only its title
   // must not collapse its ranges, weekdays, or non-local timezone to a preset.
   const customSchedule = { type: "cron", expression: "15 9-17/2 * * 1-5", timeZone: "America/New_York" };
-  const response = await fetch(`${fixture.url}/api/routines`, { method: "POST", headers: { "content-type": "application/json", origin: fixture.url }, body: JSON.stringify({ name: "Business-hours report", prompt: "Use only the fixture.", botId: monthly.botId, enabled: false, runOn: "maus", schedule: customSchedule }) });
+  const response = await fetch(`${fixture.url}/api/routines`, { method: "POST", headers: { "content-type": "application/json", origin: fixture.url }, body: JSON.stringify({ name: "Business-hours report", prompt: "Use only the fixture.", botId: monthly.botId, enabled: false, runOn: "ind", schedule: customSchedule }) });
   expect(response.status).toBe(201);
   const custom = (await response.json()).routine;
   await expect.poll(() => evaluate(`document.querySelector('li[data-automation="${custom.id}"]')?.dataset.automationStatus`)).toBe("paused");

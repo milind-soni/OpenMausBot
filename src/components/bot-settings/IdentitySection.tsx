@@ -3,7 +3,7 @@ import { DefaultBotHideRow } from "../DefaultBotControls";
 import { BookOpen } from "lucide-react";
 
 import { useStore, type Bot } from "@/state/store";
-import type { MausMotion, MausState } from "@/lib/mascot";
+import type { IndMotion, IndState } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { BOT_PROFILE_LIMITS } from "../../../shared/bot-profile";
 import { BotProfileAvatarCard } from "../BotProfileAvatarCard";
@@ -28,8 +28,8 @@ export function IdentitySection({
 }: {
   bot: Bot;
   patch: (patch: BotPatch) => void;
-  activeState: MausState;
-  mascotMotion: { kind: Exclude<MausMotion, "none">; nonce: number } | null;
+  activeState: IndState;
+  mascotMotion: { kind: Exclude<IndMotion, "none">; nonce: number } | null;
   namePlaceholder?: string;
   parts?: readonly IdentityPart[];
 }) {

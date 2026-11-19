@@ -3,7 +3,7 @@ export const LIBRARY_CATALOG_MAX_BYTES: number;
 export const LIBRARY_BLOB_MAX_BYTES: number;
 export const LIBRARY_REPORT_MAX_BYTES: number;
 export const LIBRARY_FORMAT_SUPPORTED: number;
-export const LIBRARY_STATE_MESSAGE: "openmausbot:managed-library-state";
+export const LIBRARY_STATE_MESSAGE: "openindbot:managed-library-state";
 
 export interface OrgLibraryRelease { version: string; sha256: string; sizeBytes: number; formatVersion: number; publishedAt: number; notes: string }
 export interface OrgLibraryEntry {
@@ -16,12 +16,12 @@ export interface OrgLibraryEntry {
   scanFindings: number;
 }
 export interface OrgLibraryCatalog {
-  format: "openmaus.org-library"; version: 1; libraryVersion: number;
+  format: "openind.org-library"; version: 1; libraryVersion: number;
   organization: { id: string; name: string };
   truncated?: true;
   packages: OrgLibraryEntry[];
 }
-/** What main relays as { type: "openmausbot:managed-library", requestId, library }; null hides the shelf. */
+/** What main relays as { type: "openindbot:managed-library", requestId, library }; null hides the shelf. */
 export interface OrgLibraryRelay { adminOrigin: string; organizationId: string; organizationName: string; digest: string; catalog: OrgLibraryCatalog }
 export interface OrgLibraryReportEntry {
   packageId: string; release: string; sha256: string; state: "installed" | "failed" | "removed" | "withdrawn"; edited?: boolean;

@@ -17,7 +17,7 @@ import { resolveAntigravityRuntime } from "./antigravity-runtime.ts";
 import { AntigravityDriver } from "./antigravity.ts";
 
 const FAKE_ACP = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-acp-cli.ts");
-const OWN = { name: "openmausbot", version: "0.0.0" };
+const OWN = { name: "openindbot", version: "0.0.0" };
 const scratch: string[] = [];
 const instances: ProviderInstance[] = [];
 

@@ -5,22 +5,22 @@ import { describe, expect, it } from "vitest";
 import {
   BotAvatar,
   InitialsAvatar,
-  MausAvatar,
+  IndAvatar,
   resolveBotAvatarOutcome,
   type BotAvatarProps,
-  type MausAvatarProps,
+  type IndAvatarProps,
 } from "./Avatar";
 import { MASCOT_BODIES } from "../../shared/mascot-bodies";
 
-const render = (props: Partial<MausAvatarProps>) =>
-  renderToStaticMarkup(createElement(MausAvatar, { color: "green", animated: false, ...props }));
+const render = (props: Partial<IndAvatarProps>) =>
+  renderToStaticMarkup(createElement(IndAvatar, { color: "green", animated: false, ...props }));
 
 const renderBot = (bot: Partial<BotAvatarProps["bot"]>) =>
   renderToStaticMarkup(
     createElement(BotAvatar, { bot: { color: "green", ...bot }, animated: false }),
   );
 
-describe("MausAvatar body", () => {
+describe("IndAvatar body", () => {
   it("wears the cursor when no body is given", () => {
     expect(render({})).toContain(MASCOT_BODIES.cursor.fit);
   });
@@ -33,7 +33,7 @@ describe("MausAvatar body", () => {
   it("falls back to the cursor for an unknown body", () => {
     // SAFETY: "hexagram" is deliberately not a MascotBodyId, to exercise the runtime fallback for persisted or streamed
     // data.
-    expect(render({ bodyId: "hexagram" as MausAvatarProps["bodyId"] })).toContain(
+    expect(render({ bodyId: "hexagram" as IndAvatarProps["bodyId"] })).toContain(
       MASCOT_BODIES.cursor.fit,
     );
   });

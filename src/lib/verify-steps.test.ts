@@ -50,7 +50,7 @@ describe("parseControlCommand", () => {
     ["node scripts\\control-omb.ts doctor", "doctor"],
     ["FOO=1 pnpm control:omb wait --bot b", "wait"],
     ["timeout 30 npx tsx ./scripts/control-omb.ts screenshot > out.png 2>&1", "screenshot"],
-    ["sudo -u maus pnpm control:omb doctor", "doctor"],
+    ["sudo -u ind pnpm control:omb doctor", "doctor"],
   ])("accepts %s as a control-CLI invocation of %s", (command, subcommand) => {
     expect(parseControlCommand(command)).toEqual({ subcommand, dryRun: false });
   });
@@ -119,7 +119,7 @@ describe("parseRunCommand", () => {
     ["npx tsx scripts/x.ts", "npx"],
     ["./node_modules/.bin/vitest run", "vitest"],
     ["FOO=1 timeout 30 git push", "git push"],
-    ["sudo -u maus systemctl restart omb", "systemctl"],
+    ["sudo -u ind systemctl restart omb", "systemctl"],
   ])("%s is a step labelled %s", (command, label) => {
     expect(parseRunCommand(command)).toEqual({ label, verified: false, dryRun: false });
   });

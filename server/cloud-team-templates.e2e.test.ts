@@ -25,7 +25,7 @@ const as = (who: Who, method: string, path: string, body?: unknown) => team.as(t
 let reporter: { id: string; threadId: string };
 let templateId = "";
 
-const templates = () => join(team.home, ".openmausbot", "team-files", "templates");
+const templates = () => join(team.home, ".openindbot", "team-files", "templates");
 const toolCalls = (list: unknown[]) => writeFileSync(join(team.home, "calls.json"), JSON.stringify(list));
 async function until(done: () => Promise<boolean>, timeoutMs = 60_000): Promise<void> {
   const end = Date.now() + timeoutMs;
@@ -48,7 +48,7 @@ beforeAll(async () => {
   toolCalls([]);
   for (const [who, person] of [["olive", OLIVE], ["adele", ADELE], ["rui", RUI]] as const) tokens[who] = (await team.pair(person)).token!;
   const seeded = await as("olive", "POST", "/api/teams/import", {
-    format: "openmaus.package", version: 2,
+    format: "openind.package", version: 2,
     package: {
       id: "reporter", release: "1.0.0", name: "Reporter", tagline: "Writes the weekly report.", summary: "Writes reports.", category: "Ops",
       author: { name: "Fixture" }, license: "MIT", outcomes: ["Reports."], setupMinutes: 2, requirements: { apps: [], capabilities: [] },

@@ -6,7 +6,7 @@ export interface SharingState {
   computer: boolean;
   /** Lent to a server of the person's own, which they allowed here: no maintainer flag, and Pause holds it. */
   own?: boolean;
-  /** Lending is paused from the OpenMausBot icon's menu or Settings. */
+  /** Lending is paused from the OpenIndBot icon's menu or Settings. */
   paused?: boolean;
   connected?: boolean;
   /** Why it is not connected: "paused", or "not-own" / "machine-changed" once lending to that server ended. */
@@ -100,7 +100,7 @@ export function createComputerSharing(options: {
   file: string;
   fetch: (url: string, init: RequestInit) => Promise<Response>;
   environments: () => Workspace[];
-  /** This computer's own OpenMausBot installs, by environment id: what an MCP server kept for it on a Cloud names. */
+  /** This computer's own OpenIndBot installs, by environment id: what an MCP server kept for it on a Cloud names. */
   localEnvironments?: () => string[];
   enabled?: () => Promise<boolean>;
   protectedPaths?: string[];
@@ -116,7 +116,7 @@ export function createComputerSharing(options: {
   home?: string;
   activityFile?: string;
   /** The verified Cloud sign-in: { status, accountId, origin }; status "restoring" while a saved sign-in is read. */
-  /** The MausBot Cloud sign-in as `env`'s lending checks it (its own address for another Cloud of the person's own), else My Cloud's. */
+  /** The IndBot Cloud sign-in as `env`'s lending checks it (its own address for another Cloud of the person's own), else My Cloud's. */
   cloud?: (env?: Workspace | null) => { status: string; accountId: string | null; origin: string | null } | null;
   /** Signs this app back in to the person's own Cloud after its session there ended; true when it did. */
   reconnect?: ((origin: string) => Promise<boolean> | boolean) | null;
@@ -130,7 +130,7 @@ export function createComputerSharing(options: {
   WebSocket?: typeof globalThis.WebSocket;
   /** The Chrome door's options, for tests: an object with `open` stands in for the door. */
   chrome?: Parameters<typeof import("./device-chrome.mjs").createChromeDoor>[0];
-  /** The ports this app's own OpenMausBot server is on now: a lent MCP server is never reached there. */
+  /** The ports this app's own OpenIndBot server is on now: a lent MCP server is never reached there. */
   serverPorts?: () => number[];
   /** This computer's own check on each connection, for tests: how it looks names up and connects. */
   egress?: Omit<NonNullable<Parameters<typeof import("./device-egress.mjs").createDeviceEgress>[0]>, "seenAs">;

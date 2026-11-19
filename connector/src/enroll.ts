@@ -15,10 +15,10 @@ export function adminOrigin(raw: string | undefined): string {
   try {
     url = new URL(raw ?? "");
   } catch {
-    throw new Error("The install command did not say which MausBot to connect to. Copy the install command from MausBot again.");
+    throw new Error("The install command did not say which IndBot to connect to. Copy the install command from IndBot again.");
   }
   if (url.username || url.password || (url.protocol !== "https:" && !(url.protocol === "http:" && isLoopbackHost(url.hostname)))) {
-    throw new Error(`${url.origin} is not a MausBot address this connector may use.`);
+    throw new Error(`${url.origin} is not a IndBot address this connector may use.`);
   }
   return url.origin;
 }
@@ -48,16 +48,16 @@ export async function enroll(options: {
       signal: AbortSignal.timeout(options.timeoutMs ?? ENROLL_TIMEOUT_MS),
     });
   } catch (error) {
-    throw new Error(`This server can't reach MausBot at ${options.admin} (${errorText(error)}). Check that it can make outbound HTTPS connections, then run the install command again.`);
+    throw new Error(`This server can't reach IndBot at ${options.admin} (${errorText(error)}). Check that it can make outbound HTTPS connections, then run the install command again.`);
   }
   if (response.status === 400 || response.status === 401 || response.status === 403 || response.status === 404 || response.status === 410) {
-    throw new Error("This code isn't valid anymore: a code works once, for one hour. Make a new one in MausBot and run the install command again.");
+    throw new Error("This code isn't valid anymore: a code works once, for one hour. Make a new one in IndBot and run the install command again.");
   }
-  if (!response.ok) throw new Error(`MausBot answered ${response.status} to the connection request. Try the install command again in a minute.`);
+  if (!response.ok) throw new Error(`IndBot answered ${response.status} to the connection request. Try the install command again in a minute.`);
   let body: unknown;
   try { body = await response.json(); } catch { body = null; }
   const checked = checkEnrollResponse(body);
-  if (!checked.ok) throw new Error(`MausBot's answer could not be used (${checked.message}). Try the install command again.`);
+  if (!checked.ok) throw new Error(`IndBot's answer could not be used (${checked.message}). Try the install command again.`);
   const { boxId, teamId, adminKeys } = checked.value;
   return { version: 2, admin: options.admin, boxId, teamId, publicKey: key.publicKey, privateKey: key.privateKey, adminKeys, enrolledAt: (options.now ?? Date.now)(), ...(customerRun ? { mode: "customer-run" } : {}) };
 }

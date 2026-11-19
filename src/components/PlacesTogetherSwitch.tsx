@@ -3,7 +3,7 @@ import { t } from "@/lib/i18n";
 import { setPlacesTogether, usePlacesTogether } from "@/lib/places-together";
 import { SettingRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
 
-/** Settings → MausBot Cloud: this computer's bots and My Cloud's in one sidebar. Shown only where main offers it;
+/** Settings → IndBot Cloud: this computer's bots and My Cloud's in one sidebar. Shown only where main offers it;
  * My Cloud's page can turn it off, and only this computer's page turns it on. */
 export function PlacesTogetherSwitch() {
   const together = usePlacesTogether();

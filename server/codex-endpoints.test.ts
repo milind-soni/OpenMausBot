@@ -8,7 +8,7 @@ describe("Codex direct API endpoints", () => {
     const original = { driver: "codex", config: { cli: "/fixture/codex" } };
     const { instanceId, instances } = newCodexEndpoint({ instances: { codex: original } } as never, fields);
     expect(instances.codex).toEqual(original);
-    expect(instances[instanceId]).toMatchObject({ driver: "codex", access: "custom", config: { cli: "/fixture/codex", endpoint: { url: fields.baseUrl, models: ["custom-model"] } }, environment: { OPENMAUSBOT_CODEX_API_KEY: "fixture-secret" } });
+    expect(instances[instanceId]).toMatchObject({ driver: "codex", access: "custom", config: { cli: "/fixture/codex", endpoint: { url: fields.baseUrl, models: ["custom-model"] } }, environment: { OPENINDBOT_CODEX_API_KEY: "fixture-secret" } });
     expect(instances[instanceId].environment?.CODEX_HOME).toContain(instanceId);
     const info = withCodexEndpointInfo([{ instanceId }], instances);
     expect(info).toEqual([{ instanceId, url: fields.baseUrl, codexEndpoint: { baseUrl: fields.baseUrl, models: ["custom-model"], tokenSaved: true } }]);
@@ -19,7 +19,7 @@ describe("Codex direct API endpoints", () => {
     const { instanceId, instances } = newCodexEndpoint({ instances: {} } as never, fields);
     expect(() => updateCodexEndpoint({ instances } as never, instanceId, { baseUrl: "https://other.example/v1" })).toThrow(/token again/);
     const updated = updateCodexEndpoint({ instances } as never, instanceId, { model: "another-model" }).instances[instanceId];
-    expect(updated.environment?.OPENMAUSBOT_CODEX_API_KEY).toBe("fixture-secret");
+    expect(updated.environment?.OPENINDBOT_CODEX_API_KEY).toBe("fixture-secret");
     expect(updated.config).toMatchObject({ endpoint: { models: ["another-model"] } });
     expect(() => updateCodexEndpoint({ instances: { codex: { driver: "codex" } } } as never, "codex", { model: "m" })).toThrow();
   });

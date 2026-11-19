@@ -199,7 +199,7 @@ real preview recovered its injected stream failure without replaying actions
 or restoring a human lease. Windows native acceptance remains outstanding.
 Final fixture evidence: `server-1789811974163-38144.log` and
 `server-1789811974163-38144-browser.png` in the launcher's printed
-`openmausbot-verification-evidence` directory.
+`openindbot-verification-evidence` directory.
 
 ## Real Codex chat-to-action acceptance (opt-in)
 

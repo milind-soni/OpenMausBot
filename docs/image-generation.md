@@ -74,7 +74,7 @@ same rule the text backups follow:
 
 A timeout or an HTTP 5xx stays on the base, because the image may already have
 been made and billed. A refused request (HTTP 400, including a moderation
-block) also stays on the base: OpenMausBot does not retry a refused prompt
+block) also stays on the base: OpenIndBot does not retry a refused prompt
 with another provider.
 
 When the backup makes the image, the bot is told why the base did not, such as
@@ -92,9 +92,9 @@ the engine gives up on the call), and nothing is attached.
 ## Custom gateway compatibility
 
 For a local gateway such as OmniRoute, a base URL might be
-`http://127.0.0.1:20128/v1`. OpenMausBot appends `/images/generations`; pasting
+`http://127.0.0.1:20128/v1`. OpenIndBot appends `/images/generations`; pasting
 that complete endpoint is also accepted. `localhost` and `127.0.0.1` refer to
-the machine running the OpenMausBot server, including when you open the app
+the machine running the OpenIndBot server, including when you open the app
 remotely. Public endpoints require HTTPS. HTTP is supported for local/private
 endpoints. URLs must not contain embedded credentials, query parameters, or
 fragments.

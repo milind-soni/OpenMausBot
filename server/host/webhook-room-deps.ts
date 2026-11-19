@@ -36,7 +36,7 @@ export function createWebhookRoomPost(deps: WebhookRoomDeps): Pick<WebhookManage
   };
   const verdict = (botId: string, groupId: string): { ok: true } | { ok: false; status: number; error: string } => {
     const bot = botRoom(botId);
-    if (!bot) return { ok: false as const, status: 404, error: "The assigned MAUS no longer exists" };
+    if (!bot) return { ok: false as const, status: 404, error: "The assigned IND no longer exists" };
     const group = store.group(groupId);
     if (!group) return { ok: false as const, status: 404, error: ROOM_GONE };
     const talks = deps.roomTalks(bot, group);
@@ -68,7 +68,7 @@ export function createWebhookRoomPost(deps: WebhookRoomDeps): Pick<WebhookManage
       appendRoomPost: (_trigger, botId, room, content) => {
         const bot = botRoom(botId);
         const group = store.group(room.id);
-        if (!bot) fail(404, "The assigned MAUS no longer exists");
+        if (!bot) fail(404, "The assigned IND no longer exists");
         if (!group) fail(404, ROOM_GONE);
         const talks = deps.roomTalks(bot, group);
         if (!talks.ok) fail(403, roomPostProblem(bot, group, talks));

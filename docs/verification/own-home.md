@@ -10,8 +10,8 @@ node --test electron/own-home-main.node-test.mjs electron/lending-target.node-te
 ```
 
 `scripts/testing/own-home-fixture.ts` starts this computer's server as the
-desktop app starts it, and servers of the person's own (`openmausbot serve`,
-nothing of MausBot Cloud), each paired as a pairing link pairs it, with main's
+desktop app starts it, and servers of the person's own (`openindbot serve`,
+nothing of IndBot Cloud), each paired as a pairing link pairs it, with main's
 own wiring for the move (`electron/own-home-main.mjs`) between them. Its
 requests carry the pairing's session as the window's would. Temp homes and a
 synthetic Claude CLI; no network.
@@ -44,8 +44,8 @@ signed in or too old; every pass goes over the window's sign-in to that server
 only and never signs it out; lending to that server stops once it has other
 people on it or another server answers at its address; while a server of the
 person's own is chosen no move to My Cloud starts; the frozen screen names the
-server and never asks for a MausBot Cloud sign-in; and connected apps through
-MausBot's service stay on this computer (a final, plain reason) when the server
+server and never asks for a IndBot Cloud sign-in; and connected apps through
+IndBot's service stay on this computer (a final, plain reason) when the server
 has no such service, so the move's check still passes.
 
 ## Bots in two places, noticed

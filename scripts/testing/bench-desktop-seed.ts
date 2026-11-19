@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const dataDir = process.env.OMB_DATA_DIR;
-if (!dataDir || !dataDir.includes("openmausbot-bench-")) throw new Error("bench-desktop-seed runs only on a bench fixture folder");
+if (!dataDir || !dataDir.includes("openindbot-bench-")) throw new Error("bench-desktop-seed runs only on a bench fixture folder");
 const [bots = 150, threads = 300, messages = 2000] = process.argv.slice(2).map(Number);
 
 const { Store } = await import("../../server/store.ts");

@@ -22,8 +22,8 @@ export const SETTINGS_CARDS: Record<SettingsCardId, SettingsCard> = {
     label: "Your other computers",
     where: "Settings → Phone & devices",
     when: "when the person asks how to connect or open this computer from another computer",
-    text: "Your other computers: this is turned on in MausBot on the computer itself, in Settings → Phone & devices.",
-    guide: "Tell the user in two or three plain sentences: if the card shows a switch, turn it on there; otherwise open MausBot on that computer, Settings → Phone & devices (both computers need Tailscale, signed in to the same Tailscale account). Then choose Pair a computer and Copy link, and on the other computer open Connect to a server in MausBot and paste the link.",
+    text: "Your other computers: this is turned on in IndBot on the computer itself, in Settings → Phone & devices.",
+    guide: "Tell the user in two or three plain sentences: if the card shows a switch, turn it on there; otherwise open IndBot on that computer, Settings → Phone & devices (both computers need Tailscale, signed in to the same Tailscale account). Then choose Pair a computer and Copy link, and on the other computer open Connect to a server in IndBot and paste the link.",
   },
   "ai-sign-in": {
     label: "AI sign-in",
@@ -45,9 +45,9 @@ export function cardShownStatus(card: SettingsCard, on: true | null): string {
 
 /** A room draws no settings control: the bot is told so, and where the person finds it. */
 export function cardNotInRoom(card: SettingsCard): string {
-  return `No card shown: a settings control is not drawn in a room. Tell the user in one line to open ${card.path ?? `${card.where} → ${card.label}`} in MausBot on the computer itself, or to ask you in your own chat, where you can show it.`;
+  return `No card shown: a settings control is not drawn in a room. Tell the user in one line to open ${card.path ?? `${card.where} → ${card.label}`} in IndBot on the computer itself, or to ask you in your own chat, where you can show it.`;
 }
 
 export function cardElsewhere(card: SettingsCard): string {
-  return `No card shown: ${card.label} is set in the MausBot desktop app on the computer itself, in ${card.where}. Tell the user that in one line.`;
+  return `No card shown: ${card.label} is set in the IndBot desktop app on the computer itself, in ${card.where}. Tell the user that in one line.`;
 }

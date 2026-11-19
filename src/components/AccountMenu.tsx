@@ -64,7 +64,7 @@ export function useAccounts(): AccountsAccess & { sheet: { email: string | null;
   };
 }
 
-/** The You menu's row for the MausBot Cloud page, on this app's own page: Sign in while nobody is signed in here, so whoever was
+/** The You menu's row for the IndBot Cloud page, on this app's own page: Sign in while nobody is signed in here, so whoever was
  * told to sign in finds the words. Any other page knows nothing of who is signed in. */
 export function cloudRowLabel(view: AccountsView | null): string {
   return t(view && !view.active ? "accounts.signIn" : "settings.section.cloudAccount");

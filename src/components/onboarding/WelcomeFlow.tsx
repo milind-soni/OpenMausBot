@@ -62,7 +62,7 @@ export function WelcomeFlow({
   hosted?: boolean;
 }) {
   const { state, dispatch } = useStore();
-  const maus = myDefaultBot(state.bots, useViewerEmail());
+  const ind = myDefaultBot(state.bots, useViewerEmail());
   // A first run keeps its screen in this browser, so a reload resumes it; a replay starts over. A hosted place's
   // browser may hold another person's draft.
   const keepsDraft = !replay && !embedded && !hosted;
@@ -106,7 +106,7 @@ export function WelcomeFlow({
 
   // The first screen fades away before the Chief step comes up; a timer moves on, since a hidden window runs no
   // animation to its end.
-  const toChief = beats.includes("chief") && chiefStepFits(state.bots, maus);
+  const toChief = beats.includes("chief") && chiefStepFits(state.bots, ind);
   const leaving = useRef(false);
   const next = useCallback(() => {
     if (finishing.current || leaving.current) return;
@@ -125,7 +125,7 @@ export function WelcomeFlow({
     setChiefStepOpen(true);
     return () => setChiefStepOpen(false);
   }, [chief, embedded]);
-  // The scrim fades with the dialog and lets clicks through while MausBot lands.
+  // The scrim fades with the dialog and lets clicks through while IndBot lands.
   const fadeScrim = useCallback(() => {
     if (!root.current) return;
     root.current.style.pointerEvents = "none";

@@ -54,7 +54,7 @@ describe("what bots.json holds, and when", () => {
 
   it("holds everything else before the call returns, with the end-of-turn changes that were waiting", () => {
     const store = new Store(selection);
-    const bot = store.createBot({ name: "Maus" }, { seedMessages: false }), threadId = bot.threadId;
+    const bot = store.createBot({ name: "Ind" }, { seedMessages: false }), threadId = bot.threadId;
     const task = (saved: BotRecord) => saved.tasks!.find((candidate) => candidate.threadId === threadId)!;
     const durable: Array<[string, () => void, (saved: BotRecord) => void]> = [
       ["an engine session", () => store.setResumeCursor(bot.id, "claude", { sessionId: "s-1" }, threadId),
@@ -88,7 +88,7 @@ describe("what bots.json holds, and when", () => {
 
   it("does not hold back the unread mark that wakes a snoozed thread", () => {
     const store = new Store(selection);
-    const bot = store.createBot({ name: "Maus" }, { seedMessages: false });
+    const bot = store.createBot({ name: "Ind" }, { seedMessages: false });
     store.patchTask(bot.id, bot.threadId, { snoozedUntil: 0 });
     store.patchTask(bot.id, bot.threadId, { unread: true });
     expect(waitingSaves()).toBe(0);
@@ -99,7 +99,7 @@ describe("what bots.json holds, and when", () => {
 
   it("writes what is waiting when flushed, as shutdown and a backup do, and at a clean exit but not after a fatal one", () => {
     const store = new Store(selection);
-    const bot = store.createBot({ name: "Maus" }, { seedMessages: false });
+    const bot = store.createBot({ name: "Ind" }, { seedMessages: false });
     turnEnd(store, bot.id, bot.threadId);
     expect(onDisk(bot.id).tasks![0]!.usage).toBeUndefined();
     // 1: an uncaught exception; 70: the crash guard's fatal exit (server/crash-guard.ts).
@@ -114,7 +114,7 @@ describe("what bots.json holds, and when", () => {
 
   it("names the changed thread on each bookkeeping event, so its frame can carry that thread alone", () => {
     const store = new Store(selection);
-    const bot = store.createBot({ name: "Maus" }, { seedMessages: false });
+    const bot = store.createBot({ name: "Ind" }, { seedMessages: false });
     const second = store.createTask(bot.id, "Second thread")!;
     const events: unknown[] = [];
     store.onChange((change) => { if (change.type === "bot") events.push(change); });

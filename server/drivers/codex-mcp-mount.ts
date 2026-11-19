@@ -57,7 +57,7 @@ export function boxAdmittedEnv(custom: { box?: { allowEnv: string[] } }): Set<st
   return new Set(botBox.enabled() ? custom.box?.allowEnv : []);
 }
 
-/** One of OpenMausBot's own stdio proxies as Codex's streamable HTTP server, where that setting is on (own-mcp-http.ts):
+/** One of OpenIndBot's own stdio proxies as Codex's streamable HTTP server, where that setting is on (own-mcp-http.ts):
  * no proxy process. The token stays in Codex's environment under the name the proxy read it from, and argv names it only
  * (`bearer_token_env_var`); the other headers (the agents server's settings, a tool limit) go as `http_headers`. Checked
  * on codex-cli 0.50.0, 0.80.0, 0.117.0, 0.146.0 and 0.169.0. */

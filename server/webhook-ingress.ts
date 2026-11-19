@@ -71,7 +71,7 @@ export function header(req: IncomingMessage, name: string): string | undefined {
 export function bearerSecret(req: IncomingMessage): string {
   const authorization = header(req, "authorization") ?? "";
   const match = authorization.match(/^Bearer\s+(.+)$/i);
-  return match?.[1]?.trim() || header(req, "x-openmaus-secret")?.trim() || "";
+  return match?.[1]?.trim() || header(req, "x-openind-secret")?.trim() || "";
 }
 
 function deliveryId(req: IncomingMessage): string | undefined {
@@ -104,7 +104,7 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
       return json(res, 400, { error: "Invalid request URL" });
     }
     if (req.method === "GET" && url.pathname === "/health") {
-      return json(res, 200, { app: "openmausbot-webhooks", ready: true });
+      return json(res, 200, { app: "openindbot-webhooks", ready: true });
     }
     if (door && await door(req, res, url)) return;
     const match = url.pathname.match(/^\/hooks\/(wh_[A-Za-z0-9_-]+)(?:\/([^/]+))?$/);

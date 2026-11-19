@@ -1,7 +1,7 @@
 // Injected into a bot's page after the CSP meta: theme variables with light and dark defaults, and
-// `window.mausbot`, a minimal MCP Apps View on the same bridge as @modelcontextprotocol/ext-apps `App`:
+// `window.indbot`, a minimal MCP Apps View on the same bridge as @modelcontextprotocol/ext-apps `App`:
 //
-//   window.mausbot = {
+//   window.indbot = {
 //     send(text): Promise<void>,        // ui/message
 //     open(url): Promise<void>,         // ui/open-link
 //     setContext(text): Promise<void>,  // ui/update-model-context
@@ -9,12 +9,12 @@
 //     room: boolean,                    // shown in a room: send and setContext resolve and do nothing
 //   }
 //
-// Outside a room it also reports the person's text selection (mausbot/notifications/selection), so the host can
+// Outside a room it also reports the person's text selection (indbot/notifications/selection), so the host can
 // offer to cite it in the chat's composer. Everywhere it reports whether the page, as rendered, opens with a heading
-// (mausbot/notifications/heading), so the host's card knows whether to put the page's title above it.
+// (indbot/notifications/heading), so the host's card knows whether to put the page's title above it.
 //
 // A page pasted from an SDK build runs its own App beside this one: the helper's request ids are strings
-// ("mausbot:1"), never the SDK's numeric ones, and it answers no host request but teardown, so it never
+// ("indbot:1"), never the SDK's numeric ones, and it answers no host request but teardown, so it never
 // races the SDK's answer.
 import { APP_PROTOCOL_VERSION } from "../app.ts";
 
@@ -30,13 +30,13 @@ export const APP_THEME_STYLE = [
 ].join("");
 
 /** The page's text selection, read by the desktop host beside the bridge: { text, left, bottom }, or { text: "" } once gone. */
-export const APP_SELECTION_METHOD = "mausbot/notifications/selection";
+export const APP_SELECTION_METHOD = "indbot/notifications/selection";
 /** One past the longest quote a chat citation holds, so the host can say a longer selection is too long. */
 export const APP_SELECTION_CHARS = 12_001;
 
 /** Whether the page opens with a heading of its own, as rendered: { heading }. Sent again when that changes; null
  * once, from a page still drawing itself from a script, so the host waits for the answer instead of guessing. */
-export const APP_HEADING_METHOD = "mausbot/notifications/heading";
+export const APP_HEADING_METHOD = "indbot/notifications/heading";
 /** A heading that starts lower than this is not what the page opens with (px). */
 const HEADING_TOP = 96;
 /** How long a page with nothing to read yet may still be drawing itself before it counts as having no heading. */
@@ -91,7 +91,7 @@ const helperSource = (room: boolean) => `(function () {
   var post = function (message) { parent.postMessage(message, "*"); };
   var request = function (method, params) {
     return new Promise(function (resolve, reject) {
-      var id = "mausbot:" + (++seq);
+      var id = "indbot:" + (++seq);
       pending[id] = { resolve: resolve, reject: reject };
       post({ jsonrpc: "2.0", id: id, method: method, params: params });
     });
@@ -225,7 +225,7 @@ const helperSource = (room: boolean) => `(function () {
         var found = opensWithHeading(window, document);
         if (found !== null || last !== undefined) return send(found === true);
         if (waiting !== null) return;
-        var mount = document.getElementById("mausbot-root");
+        var mount = document.getElementById("indbot-root");
         var drawing = Boolean(mount) && !mount.firstChild;
         if (drawing) notify("${APP_HEADING_METHOD}", { heading: null });
         waiting = setTimeout(function () { waiting = null; send(false); }, drawing ? ${HEADING_DRAWING_MS} : ${HEADING_WAIT_MS});
@@ -274,7 +274,7 @@ const helperSource = (room: boolean) => `(function () {
     });
   };
   var ready = request("ui/initialize", {
-    appInfo: { name: "mausbot-page", version: "1.0.0" },
+    appInfo: { name: "indbot-page", version: "1.0.0" },
     appCapabilities: {},
     protocolVersion: "${APP_PROTOCOL_VERSION}"
   }).then(function (result) {
@@ -305,7 +305,7 @@ const helperSource = (room: boolean) => `(function () {
       return request("ui/update-model-context", { content: [{ type: "text", text: String(text) }] });
     }).then(function () {});
   };
-  Object.defineProperty(window, "mausbot", { value: api, enumerable: true });
+  Object.defineProperty(window, "indbot", { value: api, enumerable: true });
 })();`;
 
 export const APP_HELPER_SOURCE = helperSource(false);

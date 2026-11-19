@@ -53,8 +53,8 @@ function admin(roster: Record<string, string | null>, options: { status?: number
 }
 
 describe("a Team Cloud's roster check", () => {
-  it("signs as openmaus-cloud's server/cloud-team-roster.ts does", () => {
-    // The same vector is pinned in openmaus-cloud tests/cloud-team-join.test.ts.
+  it("signs as openind-cloud's server/cloud-team-roster.ts does", () => {
+    // The same vector is pinned in openind-cloud tests/cloud-team-join.test.ts.
     expect(teamRosterSignature(SECRET, "cm-test-home", "1792670400", "nonce-nonce-nonce-1", '{"v":1,"emails":["ada@acme.test"]}')).toBe("WvlpjOna5b6fkOkqkNZgLdv0c913uLp8ufS_2gFEI3Y");
   });
 

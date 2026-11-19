@@ -402,7 +402,7 @@ describe("the runtime's launch environment", () => {
       const absent = join(fake.directory, "absent");
       expect(await antigravityBrowserHelperProblem(profile.environment, absent)).toBe("it could not be started");
       await expect(verifyAntigravityBrowserHelper(profile, absent)).rejects.toThrow(
-        "Google sign-in cannot start: the helper that passes the sign-in link to OpenMausBot failed a check (it could not be started).");
+        "Google sign-in cannot start: the helper that passes the sign-in link to OpenIndBot failed a check (it could not be started).");
       const script = join(fake.directory, process.platform === "win32" ? "helper.cmd" : "helper.txt");
       writeFileSync(script, "not a program\n");
       expect(await antigravityBrowserHelperProblem(profile.environment, script)).toBe("it could not be started");

@@ -83,7 +83,7 @@ beforeAll(async () => {
   benThread = (await team.as(ben, "POST", `/api/bots/${mira.id}/tasks`, { title: "Ben's plan" })).body.task.threadId;
   await turn(ada, mira, adaThread, "I'll build your portfolio.");
   await turn(ben, mira, benThread, "I'll draft your plan.");
-  data = join(team.home, ".openmausbot");
+  data = join(team.home, ".openindbot");
   expect(existsSync(join(data, "task-workspaces", mira.id, adaThread)), "a conversation's turns work in its own folder").toBe(true);
 }, hostTimeout(300_000));
 
@@ -133,7 +133,7 @@ it("shows each person the apps from conversations they can read, and everyone th
 it("answers another member, an Admin and the Owner guessing at a member's private app as if it did not exist", async () => {
   for (const [who, token] of [["Ben", ben], ["an Admin", admin], ["the Owner", owner]] as const) {
     expect(await team.as(token, "POST", "/api/published-apps/delete", { id: `included-${portfolio.key}` }), who).toEqual(GONE);
-    const framing = await team.as(token, "GET", `/api/published-apps/framing?url=${encodeURIComponent(portfolio.url)}&origin=${encodeURIComponent("https://acme.mausbot.cloud")}`);
+    const framing = await team.as(token, "GET", `/api/published-apps/framing?url=${encodeURIComponent(portfolio.url)}&origin=${encodeURIComponent("https://acme.indbot.cloud")}`);
     expect(framing.status, who).toBe(404);
   }
   expect(fake.apps.has(portfolio.key)).toBe(true);

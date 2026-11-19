@@ -1,4 +1,4 @@
-// POST /api/bots/:id/helper-followup (routes/bot-messages.ts): MausBot's follow-up after its first look around, written
+// POST /api/bots/:id/helper-followup (routes/bot-messages.ts): IndBot's follow-up after its first look around, written
 // once under its intro as a real bot message. Its client says what it saw (an AI, the apps); the counts are the server's.
 import { z } from "zod";
 
@@ -16,7 +16,7 @@ export const helperFollowupBody = z.object({
   apps: z.array(appName).max(20).default([]),
 });
 
-/** Only MausBot's own person writes its follow-up: on a Team Cloud the member it belongs to, else the place's owner. */
+/** Only IndBot's own person writes its follow-up: on a Team Cloud the member it belongs to, else the place's owner. */
 export function mayFollowUp(bot: BotRecord, auth: RequestAuth): boolean {
   const person = defaultBotPerson(bot);
   if (!person) return auth.scopes.includes("admin");
@@ -29,17 +29,17 @@ function seenBy(bot: BotRecord, person: string): boolean {
   return typeof visibility === "object" && visibility.people.some((email) => email.trim().toLowerCase() === person);
 }
 
-/** What MausBot found: what its client saw, with the person's other bots and the routines they run counted here. */
+/** What IndBot found: what its client saw, with the person's other bots and the routines they run counted here. */
 export function followupFacts(
-  maus: BotRecord,
+  ind: BotRecord,
   seen: { ai: HelperFollowupFacts["ai"]; apps: readonly string[] },
   bots: readonly BotRecord[],
   routines: readonly { botId: string; enabled: boolean }[],
   connects?: string,
 ): HelperFollowupFacts {
-  const person = defaultBotPerson(maus);
-  const others = bots.filter((bot) => bot.id !== maus.id && !bot.hidden && !bot.defaultBot && !bot.movedTo && seenBy(bot, person));
-  const theirs = new Set([maus.id, ...others.map((bot) => bot.id)]);
+  const person = defaultBotPerson(ind);
+  const others = bots.filter((bot) => bot.id !== ind.id && !bot.hidden && !bot.defaultBot && !bot.movedTo && seenBy(bot, person));
+  const theirs = new Set([ind.id, ...others.map((bot) => bot.id)]);
   return {
     ai: seen.ai,
     apps: [...new Set(seen.apps)],
@@ -49,7 +49,7 @@ export function followupFacts(
   };
 }
 
-/** The follow-up to append to `transcript`, or the one already there: a conversation gets one, under MausBot's intro. */
+/** The follow-up to append to `transcript`, or the one already there: a conversation gets one, under IndBot's intro. */
 export function helperFollowup(transcript: readonly Message[], facts: () => HelperFollowupFacts):
   { existing: Message } | { append: Omit<Message, "id" | "at"> } | null {
   if (!transcript.some((message) => message.helperIntro)) return null;

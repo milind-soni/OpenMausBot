@@ -1,4 +1,4 @@
-OpenMausBot ui/screen-reader, BEFORE (origin/main f5e8f60c). Isolated fixture (control-omb launch, fake engine: FAKE_CLAUDE_MODE=slow with a finish gate, 2 scripted tool calls, no mid-turn text), Vite dev UI on 127.0.0.1:5467, headless Chromium via Playwright. Base origin/main f5e8f60c.
+OpenIndBot ui/screen-reader, BEFORE (origin/main f5e8f60c). Isolated fixture (control-omb launch, fake engine: FAKE_CLAUDE_MODE=slow with a finish gate, 2 scripted tool calls, no mid-turn text), Vite dev UI on 127.0.0.1:5467, headless Chromium via Playwright. Base origin/main f5e8f60c.
 
 Counted: text changes of any live region (nearest aria-live wins, off = silent; else role=log/status/alert), deduplicated per region per mutation batch.
 

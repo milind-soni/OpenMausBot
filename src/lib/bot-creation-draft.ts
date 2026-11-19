@@ -100,7 +100,7 @@ export class BotCreationDraft {
     } : schedule.type === "limit_reset" ? { ...schedule, repeat: schedule.repeat ?? "once", at: schedule.at ?? null } : schedule;
     return {
       id: previous?.id ?? `draft-${randomUuid()}`, createdAt: previous?.createdAt ?? Date.now(),
-      updatedAt: Date.now(), nextRunAt: null, runOn: "maus", ...previous, ...fields,
+      updatedAt: Date.now(), nextRunAt: null, runOn: "ind", ...previous, ...fields,
       enabled: input.enabled ?? previous?.enabled ?? true, target: "bot", botId: this.id,
       timeoutMinutes: input.timeoutMinutes ?? undefined,
       durationMinutes: input.durationMinutes ?? previous?.durationMinutes ?? 30,

@@ -1,4 +1,4 @@
-// Served without auth at /.well-known/openmausbot/environment, so a saved connection can check it still reaches the same server.
+// Served without auth at /.well-known/openindbot/environment, so a saved connection can check it still reaches the same server.
 import { randomUUID } from "node:crypto";
 import {
   closeSync,
@@ -119,7 +119,7 @@ export function serverInstall(env: NodeJS.ProcessEnv = process.env, script = pro
   const prefix = cliPrefix(env, script);
   if (prefix.includes("docker") || docker()) return "docker";
   if (prefix === "pnpm omb" || script.endsWith(".ts")) return "source";
-  return prefix === "npx openmausbot" ? "npx" : "global";
+  return prefix === "npx openindbot" ? "npx" : "global";
 }
 
 /** What a server only its one owner signs in to takes from that owner's own desktop by default: told in the owner's own

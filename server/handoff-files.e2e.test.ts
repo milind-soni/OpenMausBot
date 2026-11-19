@@ -14,7 +14,7 @@ const count = (text: string, part: string): number => Math.max(text.split(part).
 
 async function fixture(test: (f: any) => Promise<void>) {
   const session = await launchVerificationServer({ ...process.env }, undefined, undefined, undefined, undefined, { scripted: true });
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENINDBOT_URL: session.info.url } }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
   try {
     const sender = (await cli("new-bot", "--name", "Clive", "--section", "Leadership")).bot;
@@ -105,7 +105,7 @@ it("refuses a file outside the sender's folders, an unsupported type and too man
 
 it("passes a file from one room to a teammate working in another room, into that teammate's own folder", async () => {
   const session = await launchVerificationServer({ ...process.env }, undefined, undefined, undefined, undefined, { scripted: true });
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENINDBOT_URL: session.info.url } }) as Promise<any>;
   const tool = (name: string, args: Record<string, unknown>) => handleToolCall(name, args, (path, options) => request(path, options, session.info.url)) as Promise<any>;
   try {
     const dataDir = session.info.dataDir as string;

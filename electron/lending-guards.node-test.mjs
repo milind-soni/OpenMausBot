@@ -29,7 +29,7 @@ function scriptedServer(jobs) {
   const fetchImpl = async (url, init) => {
     const route = new URL(url).pathname;
     if (route === "/api/auth/session") return json({ kind: "session", id: env.sessionId });
-    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: env.environmentId, capabilities: { sharedComputers: true } });
+    if (route === "/.well-known/openindbot/environment") return json({ environmentId: env.environmentId, capabilities: { sharedComputers: true } });
     const body = init?.body ? JSON.parse(init.body) : {};
     if (route === "/api/shared-computers/connect") { registration = body; return json({}); }
     if (route.endsWith("/poll")) {
@@ -394,7 +394,7 @@ test("a locked screen is refused in one plain sentence before the driver is reac
 
 test("a missing or quarantined driver says how to restore it, and names no path", async t => {
   const dir = await scratch(t);
-  const gone = path.join(dir, "Program Files", "OpenMausBot", "resources", "cua-driver.exe");
+  const gone = path.join(dir, "Program Files", "OpenIndBot", "resources", "cua-driver.exe");
   const { results } = await lend(t, dir, {
     folders: [], computer: true, cuaConnection: async () => ({ mcpCommand: gone, mcpArgs: ["mcp"], mcpEnv: {} }),
     jobs: [{ action: "computer_call", tool_name: "get_desktop_state", arguments: {} }],
@@ -406,8 +406,8 @@ test("a missing or quarantined driver says how to restore it, and names no path"
 test("computer control that never started gives its reason as a fix the person can make", async t => {
   for (const [reason, expected] of [
     ["cua-driver binary not found", helperMissing()],
-    ["embedded host failed: Packaged background CUA driver is missing; reinstall OpenMausBot", helperMissing()],
-    ["Accessibility and Screen Recording required; grant access in System Settings and restart OpenMausBot", /allow Accessibility and Screen Recording/],
+    ["embedded host failed: Packaged background CUA driver is missing; reinstall OpenIndBot", helperMissing()],
+    ["Accessibility and Screen Recording required; grant access in System Settings and restart OpenIndBot", /allow Accessibility and Screen Recording/],
     ["no running cua-driver daemon", /Computer control is not running on this computer/],
   ]) {
     const dir = await scratch(t);

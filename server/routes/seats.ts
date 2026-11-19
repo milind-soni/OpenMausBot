@@ -1,4 +1,4 @@
-// GET /api/seats: how many people can sign in to this server. A number and nothing about who: the MausBot connector on
+// GET /api/seats: how many people can sign in to this server. A number and nothing about who: the IndBot connector on
 // a connected server reads it from the server's own loopback and reports it, so a plan's seats can be counted.
 import type { SignInAllowList } from "../account-signin.ts";
 import type { PublicSession } from "../sessions.ts";

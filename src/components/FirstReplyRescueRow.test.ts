@@ -19,10 +19,10 @@ const rescue: FirstReplyRescue = { botId: "bot-1", threadId: "thread-1", turnId:
 const AT = 50_000;
 const row = (payload: FirstReplyRescue = rescue): Message => ({
   id: "m-1", at: AT, role: "bot", kind: "activity", turnId: payload.turnId,
-  tool: { name: payload.settled ? "notice: OpenCode answered after a slow start." : "notice: Maus hasn't heard back from OpenCode yet.", ok: true, rescue: payload },
+  tool: { name: payload.settled ? "notice: OpenCode answered after a slow start." : "notice: Ind hasn't heard back from OpenCode yet.", ok: true, rescue: payload },
 } as Message);
 const bot = (busy: boolean, turnStartedAt = AT - 20_000): Bot => ({
-  id: "bot-1", threadId: "thread-1", name: "Maus", title: "", description: "", notifications: true, color: "green", unread: false, busy,
+  id: "bot-1", threadId: "thread-1", name: "Ind", title: "", description: "", notifications: true, color: "green", unread: false, busy,
   messages: [{ id: "ask-1", at: 1, role: "user", kind: "text", text: "Plan my week" }],
   modelSelection: { instanceId: "opencodeGo", model: "free" }, tasks: [{ threadId: "thread-1", title: "Chat", createdAt: 1, busy, ...(busy ? { turnStartedAt } : {}) }],
 } as unknown as Bot);
@@ -68,7 +68,7 @@ afterEach(() => {
 describe("first-reply rescue row", () => {
   it("says who is waiting on which AI, as a quiet notice with two ways out", () => {
     render(row());
-    expect(host.textContent).toContain("Maus hasn't heard back from OpenCode yet.");
+    expect(host.textContent).toContain("Ind hasn't heard back from OpenCode yet.");
     expect(host.querySelector('[role="status"]')).not.toBeNull();
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(button("Switch AI")).toBeDefined();
@@ -82,7 +82,7 @@ describe("first-reply rescue row", () => {
 
   it("tells an ended turn's notice as history", () => {
     render(row({ ...rescue, over: true }));
-    expect(host.textContent).toBe("Maus didn't hear back from OpenCode.");
+    expect(host.textContent).toBe("Ind didn't hear back from OpenCode.");
     expect(host.querySelectorAll("button")).toHaveLength(0);
   });
 
@@ -92,7 +92,7 @@ describe("first-reply rescue row", () => {
     ["the running turn started after it", () => render(row(), { turnStartedAt: AT + 1 })],
   ])("keeps no live buttons once %s", (_label, show) => {
     show();
-    expect(host.textContent).toContain("Maus hasn't heard back from OpenCode yet.");
+    expect(host.textContent).toContain("Ind hasn't heard back from OpenCode yet.");
     expect(host.querySelectorAll("button")).toHaveLength(0);
   });
 

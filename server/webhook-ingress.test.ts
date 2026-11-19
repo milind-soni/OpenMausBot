@@ -39,7 +39,7 @@ beforeAll(async () => {
       return { id: `run-${queued.length}` };
     },
   });
-  const created = manager.create({ name: "Build event", prompt: "Review the build", botId: "maus-1" });
+  const created = manager.create({ name: "Build event", prompt: "Review the build", botId: "ind-1" });
   endpointId = created.webhook.endpointId;
   secret = created.secret;
   ingress = await listenWebhookIngress(manager, { port: 0 });
@@ -67,10 +67,10 @@ describe("webhook-only ingress", () => {
       await new Promise<void>((resolve) => guarded.server.close(() => resolve()));
     }
   });
-  it("exposes health but nothing from the main OpenMausBot API", async () => {
+  it("exposes health but nothing from the main OpenIndBot API", async () => {
     const health = await fetch(`${ingress.baseUrl}/health`);
     expect(health.status).toBe(200);
-    expect(await health.json()).toEqual({ app: "openmausbot-webhooks", ready: true });
+    expect(await health.json()).toEqual({ app: "openindbot-webhooks", ready: true });
     expect((await fetch(`${ingress.baseUrl}/api/bots`)).status).toBe(404);
   });
 
@@ -123,7 +123,7 @@ describe("webhook-only ingress", () => {
         return { posted: true, attachments: 1, threadId: "room-7-thread" };
       },
     });
-    const created = rooms.create({ name: "Room brief", prompt: "", botId: "maus-1", delivery: "post", groupId: "room-7" });
+    const created = rooms.create({ name: "Room brief", prompt: "", botId: "ind-1", delivery: "post", groupId: "room-7" });
     const receiver = await listenWebhookIngress(rooms, { port: 0 });
     const send = (deliveryId: string) => fetch(`${receiver.baseUrl}/hooks/${created.webhook.endpointId}/${created.secret}`, {
       method: "POST",
@@ -172,7 +172,7 @@ describe("webhook-only ingress", () => {
   });
 
   it("captures a verification event without queueing work", async () => {
-    const created = manager.create({ name: "Verify", prompt: "", botId: "maus-1", enabled: false, verificationPending: true });
+    const created = manager.create({ name: "Verify", prompt: "", botId: "ind-1", enabled: false, verificationPending: true });
     const before = queued.length;
     const response = await fetch(webhookCredential(ingress.baseUrl, created.webhook.endpointId, created.secret).url, {
       method: "POST",
@@ -251,7 +251,7 @@ describe("requests with a wrong secret", () => {
       enqueue: () => ({ id: `flood-run-${++runs}` }),
       emit: (frame) => { if (frame.kind === "webhook.attempt") emitted.add(frame.attempt.id); },
     });
-    const created = flooded.create({ name: "CI", prompt: "Review", botId: "maus-1" });
+    const created = flooded.create({ name: "CI", prompt: "Review", botId: "ind-1" });
     const receiver = await listenWebhookIngress(flooded, { port: 0 });
     const url = `${receiver.baseUrl}/hooks/${created.webhook.endpointId}`;
     const deliver = (id: string) => fetch(url, {
@@ -323,7 +323,7 @@ describe("advertised base URL", () => {
         sent.on("error", reject);
         sent.end(method === "POST" ? "{}" : undefined);
       });
-      expect(await viaSocket("/health")).toEqual({ status: 200, body: JSON.stringify({ app: "openmausbot-webhooks", ready: true }) });
+      expect(await viaSocket("/health")).toEqual({ status: 200, body: JSON.stringify({ app: "openindbot-webhooks", ready: true }) });
       expect((await viaSocket("/api/bots")).status).toBe(404);
       const before = queued.length;
       expect((await viaSocket(`/hooks/${endpointId}/${secret}`, "POST")).status).toBe(202);

@@ -178,8 +178,8 @@ describe("Show in folder for a file outside the workspace", () => {
   it("offers the reveal only for an absolute local path, and only in the local desktop app", () => {
     vi.stubGlobal("window", { ogb: { revealInFolder: vi.fn(), remoteClient: { active: false } } });
     try {
-      expect(render("/Users/maus/_draft/ollama-gen.js")).toContain("Show in folder");
-      expect(render("C:\\Users\\Maus\\_draft\\ollama-gen.js")).toContain("Show in folder");
+      expect(render("/Users/ind/_draft/ollama-gen.js")).toContain("Show in folder");
+      expect(render("C:\\Users\\Ind\\_draft\\ollama-gen.js")).toContain("Show in folder");
       for (const filePath of ["_draft/ollama-gen.js", "\\\\server\\share\\ollama-gen.js"]) {
         expect(render(filePath)).not.toContain("Show in folder");
         expect(render(filePath)).toContain(`>${filePath}</code>`);
@@ -192,7 +192,7 @@ describe("Show in folder for a file outside the workspace", () => {
   it("gives a remote client the path, since the file is not on its computer", () => {
     vi.stubGlobal("window", { ogb: { revealInFolder: vi.fn(), remoteClient: { active: true } } });
     try {
-      expect(render("/Users/maus/_draft/ollama-gen.js")).toContain(">/Users/maus/_draft/ollama-gen.js</code>");
+      expect(render("/Users/ind/_draft/ollama-gen.js")).toContain(">/Users/ind/_draft/ollama-gen.js</code>");
     } finally {
       vi.unstubAllGlobals();
     }
@@ -232,7 +232,7 @@ describe("a file over the download limit", () => {
 describe("a folder linked in a message", () => {
   const folderPath = "/work/Reports";
   const listing = { name: "Reports", entries: [{ name: "q3.pdf", bytes: 2048, mime: "application/pdf" }], truncated: false };
-  const authorized = () => new Response(JSON.stringify(listing), { status: 200, headers: { "content-type": "application/json", "x-openmausbot-folder": "1" } });
+  const authorized = () => new Response(JSON.stringify(listing), { status: 200, headers: { "content-type": "application/json", "x-openindbot-folder": "1" } });
   const refused = () => new Response(JSON.stringify({ error: "the linked file is outside this conversation's workspace", code: "outside_workspace" }), { status: 403, headers: { "content-type": "application/json" } });
 
   async function clickLink(answer: () => Response) {

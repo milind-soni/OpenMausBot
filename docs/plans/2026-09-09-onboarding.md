@@ -7,7 +7,7 @@ real interface.
 
 ## Goal
 
-A new install should leave the first session knowing what OpenMausBot is
+A new install should leave the first session knowing what OpenIndBot is
 (agents with hands, connected apps, channels, automations, the terminal)
 and where each of those lives in the app, without reading a manual. Every
 part is skippable, replayable from Settings, and never shown on a paired

@@ -55,7 +55,7 @@ describe("answerQuery", () => {
   it("cuts an answer that is itself too big, so the whole result never comes back", () => {
     const answer = answerQuery(store, { result: handle, query: "@" }, 2_000);
     expect(answer.content[0]!.text.length).toBeLessThan(2_400);
-    expect(answer.content[0]!.text).toContain("TRUNCATED by OpenMausBot");
+    expect(answer.content[0]!.text).toContain("TRUNCATED by OpenIndBot");
     expect(answer.content[0]!.text).toContain(`"${handle}"`);
   });
 

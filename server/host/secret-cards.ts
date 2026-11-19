@@ -93,14 +93,14 @@ export type SecretCards = ReturnType<typeof createSecretCards>;
 const SWEEP_MS = 10 * 60 * 1000;
 
 const credentialUpdateText = (label: string, outcome: "provided" | "dismissed"): string => outcome === "provided"
-  ? `OpenMausBot credential update: the user securely provided ${label}. Continue the task that paused for it. You do not receive the secret and must not ask them to paste it into chat.`
-  : `OpenMausBot credential update: the user declined to provide ${label}. Continue without it if possible, or briefly explain the limitation. Do not ask them to paste it into chat.`;
+  ? `OpenIndBot credential update: the user securely provided ${label}. Continue the task that paused for it. You do not receive the secret and must not ask them to paste it into chat.`
+  : `OpenIndBot credential update: the user declined to provide ${label}. Continue without it if possible, or briefly explain the limitation. Do not ask them to paste it into chat.`;
 
 /** What the bot is told a saved custom secret is, and how to use it without ever seeing or showing the value. */
 export function savedSecretText(label: string, saved: SavedSecret | null): string {
-  if (!saved) return `The person saved ${label}, but it expired or OpenMausBot restarted before you used it. Ask again with request_credential if you still need it.`;
+  if (!saved) return `The person saved ${label}, but it expired or OpenIndBot restarted before you used it. Ask again with request_credential if you still need it.`;
   if ("ref" in saved) {
-    return `The person saved ${label} as ${saved.ref}. Put it in an mcp_server env, header or oauth.clientSecret value, alone or inside text such as "Bearer ${saved.ref}": OpenMausBot swaps in the value. It works once, only for you in this conversation, for an hour, and you never see the value.`;
+    return `The person saved ${label} as ${saved.ref}. Put it in an mcp_server env, header or oauth.clientSecret value, alone or inside text such as "Bearer ${saved.ref}": OpenIndBot swaps in the value. It works once, only for you in this conversation, for an hour, and you never see the value.`;
   }
   return `The person saved ${label} to the file ${saved.file}. Read it only inside a command, such as TOKEN="$(cat '${saved.file}')"; never print, echo, log or copy it anywhere else. It is deleted after 24 hours.`;
 }
@@ -120,19 +120,19 @@ function vmFileHome(botId: string, vm: string): SecretFileHome | null {
 
 /** What the bot hears when the mailbox card settles; it never hears the password. */
 function emailUpdateText(secret: SecretRequestCardData, outcome: "provided" | "dismissed", sendingProblem: string | undefined): string {
-  if (outcome === "dismissed") return "OpenMausBot secret update: the person chose not to connect a mailbox. Say briefly what you cannot do without it, and do not ask for the password in chat.";
+  if (outcome === "dismissed") return "OpenIndBot secret update: the person chose not to connect a mailbox. Say briefly what you cannot do without it, and do not ask for the password in chat.";
   const address = secret.address ?? "they typed";
   return sendingProblem
-    ? `OpenMausBot secret update: the person connected the mailbox ${address} for reading: EMAIL_LIST_MESSAGES, EMAIL_READ_MESSAGE and the other reading tools are ready. Sending from it doesn't work yet: ${sendingProblem} The mailbox card in this chat now shows its outgoing server for the person to fix. Continue the task as far as reading allows; don't try to send another way.`
-    : `OpenMausBot secret update: the person connected the mailbox ${address}. The email tools (EMAIL_LIST_MESSAGES, EMAIL_READ_MESSAGE, EMAIL_SEND_MESSAGE and others) are ready. Continue the task that paused for it.`;
+    ? `OpenIndBot secret update: the person connected the mailbox ${address} for reading: EMAIL_LIST_MESSAGES, EMAIL_READ_MESSAGE and the other reading tools are ready. Sending from it doesn't work yet: ${sendingProblem} The mailbox card in this chat now shows its outgoing server for the person to fix. Continue the task as far as reading allows; don't try to send another way.`
+    : `OpenIndBot secret update: the person connected the mailbox ${address}. The email tools (EMAIL_LIST_MESSAGES, EMAIL_READ_MESSAGE, EMAIL_SEND_MESSAGE and others) are ready. Continue the task that paused for it.`;
 }
 
 /** What the bot hears when the outgoing-server card settles; it never hears a password either. */
 function emailOutgoingUpdateText(address: string, outcome: "provided" | "dismissed", sendingProblem: string | undefined): string {
-  if (outcome === "dismissed") return `OpenMausBot secret update: the person chose not to set up sending for ${address}. Reading still works. Say briefly what you can't do without sending; don't send another way or ask for the password in chat.`;
+  if (outcome === "dismissed") return `OpenIndBot secret update: the person chose not to set up sending for ${address}. Reading still works. Say briefly what you can't do without sending; don't send another way or ask for the password in chat.`;
   return sendingProblem
-    ? `OpenMausBot secret update: the person tried another outgoing server for ${address}, and sending still doesn't work: ${sendingProblem} Tell them in one line and carry on without sending.`
-    : `OpenMausBot secret update: sending from ${address} works now; EMAIL_SEND_MESSAGE is ready. Continue the task that paused for it.`;
+    ? `OpenIndBot secret update: the person tried another outgoing server for ${address}, and sending still doesn't work: ${sendingProblem} Tell them in one line and carry on without sending.`
+    : `OpenIndBot secret update: sending from ${address} works now; EMAIL_SEND_MESSAGE is ready. Continue the task that paused for it.`;
 }
 
 const OUTGOING_FIELDS = ["smtpHost", "smtpPort", "smtpSecurity", "smtpUsername", "smtpPassword"] as const;
@@ -160,10 +160,10 @@ function customRequest(body: Record<string, unknown>): { label: string; reason: 
     : "";
   const label = text(body.label, CUSTOM_SECRET_LABEL_MAX);
   const reason = text(body.reason, CUSTOM_SECRET_REASON_MAX);
-  if (!label) return { error: "request_credential needs credential_id for a key OpenMausBot keeps, or label for any other secret." };
+  if (!label) return { error: "request_credential needs credential_id for a key OpenIndBot keeps, or label for any other secret." };
   if (!reason) return { error: "request_credential needs reason: one short line on what the secret is for and where the person finds it." };
   if (!SECRET_DELIVERIES.includes(body.delivery as SecretDelivery)) {
-    return { error: "request_credential needs delivery: ref for OpenMausBot's own tools such as mcp_server, or file for your own commands." };
+    return { error: "request_credential needs delivery: ref for OpenIndBot's own tools such as mcp_server, or file for your own commands." };
   }
   return { label, reason, placeholder: text(body.placeholder, CUSTOM_SECRET_LABEL_MAX), delivery: body.delivery as SecretDelivery, replace: body.replace === true };
 }
@@ -183,8 +183,8 @@ export function createSecretCards(deps: SecretCardsDeps) {
     if (secret.delivery === "email" && secret.emailOutgoing && secret.address) return emailOutgoingUpdateText(secret.address, outcome, deps.email?.sendingProblem(secret.address));
     if (secret.delivery === "email") return emailUpdateText(secret, outcome, secret.address ? deps.email?.sendingProblem(secret.address) : undefined);
     return outcome === "provided"
-      ? `OpenMausBot secret update: ${savedSecretText(secret.label, vault.savedFor(messageId))} Continue the task that paused for it.`
-      : `OpenMausBot secret update: the person declined to provide ${secret.label}. Continue without it if you can, or say briefly what you cannot do. Do not ask for it in chat.`;
+      ? `OpenIndBot secret update: ${savedSecretText(secret.label, vault.savedFor(messageId))} Continue the task that paused for it.`
+      : `OpenIndBot secret update: the person declined to provide ${secret.label}. Continue without it if you can, or say briefly what you cannot do. Do not ask for it in chat.`;
   }
 
   function sweepBases(): string[] {
@@ -272,7 +272,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
 
   /** "Use a saved one" on a custom card: saved secrets and the bot's linked ones whose names could fit, never the one by
    * this very name the bot may already use (it would have had it with no card, so the bot wants a new value). A secret
-   * given only to OpenMausBot's own tools is never offered for a file. */
+   * given only to OpenIndBot's own tools is never offered for a file. */
   function savedChoices(botId: string, threadId: string, messageId: string): Array<VaultChoice & { use(): Promise<{ id: string; value: string }> }> {
     const message = openCustomCard(botId, threadId, messageId);
     if ("status" in message || message.secret!.delivery === "email") return [];

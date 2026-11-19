@@ -32,7 +32,7 @@ function sides() {
   const session = {
     call: async (method, route, body) => {
       calls.push([method, route, body]);
-      if (route === "/.well-known/openmausbot/environment") return reply(200, { capabilities: { cloudHome: true, move: 1 } });
+      if (route === "/.well-known/openindbot/environment") return reply(200, { capabilities: { cloudHome: true, move: 1 } });
       if (route.startsWith("/api/cloud-send?")) return reply(200, summary([...there.values()]));
       if (method === "POST" && route === "/api/bots") { there.set(itemKey.bot(body.id), { ...scout, parts: { soul: EMPTY, name: "n2" } }); return reply(201, { bot: { id: body.id } }); }
       if (method === "PATCH" && route === "/api/bots/scout") { if (body.soul) there.get(scout.key).parts.soul = "s1"; return reply(200, {}); }

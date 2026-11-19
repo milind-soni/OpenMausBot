@@ -65,7 +65,7 @@ describe("show_widget", () => {
     expect(message).toMatchObject({ role: "bot", kind: "widget" });
     expect(message).not.toHaveProperty("from");
     expect(message.text).toBe(widgetToText(message.widget!.root));
-    expect(message.text!.split("\n")[0]).toBe("**Pull requests** · mausbot-mobile · 3 open");
+    expect(message.text!.split("\n")[0]).toBe("**Pull requests** · indbot-mobile · 3 open");
     expect(message.widget).toEqual({ v: 1, root: expect.objectContaining({ type: "ListView", id: "n1", title: "Pull requests" }) });
     const nodes = all(message.widget!.root);
     expect(nodes.map((node) => node.id)).toEqual(nodes.map((_, index) => `n${index + 1}`));

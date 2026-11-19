@@ -28,7 +28,7 @@ export function optionsCardRow({ message: m, transcript, botId, botName, botColo
   /** The bot that asks: this conversation's, or for an inbox's copy the one that asked where it came from. */
   asker?: Asker;
 }): ReactNode {
-  // MausBot's follow-up is drawn under its intro (HelperIntro), never as a row of its own.
+  // IndBot's follow-up is drawn under its intro (HelperIntro), never as a row of its own.
   if (m.helperFollowup) return null;
   const card = m.helperIntro ? (
     <HelperIntro botId={botId} threadId={threadId} message={m} answered={shouldHideOnboardingCard(m, transcript)}

@@ -20,7 +20,7 @@ function page(script: string): string {
     "<meta name=\"color-scheme\" content=\"light dark\"><title>App</title>",
     "<style>html,body{margin:0;padding:0;background:transparent;overflow:hidden}iframe{display:block;width:100%;border:0;background:transparent}</style>",
     "</head><body>",
-    `<script id="mausbot-app-host">${script}</script>`,
+    `<script id="indbot-app-host">${script}</script>`,
     "</body></html>",
     "",
   ].join("\n");
@@ -31,7 +31,7 @@ export function appHostHash(body: string): string {
 }
 
 export function appHostHashOf(html: string): string | null {
-  return /^<!-- mausbot app-host v1 sha256:([0-9a-f]{64}) -->\n/.exec(html)?.[1] ?? null;
+  return /^<!-- indbot app-host v1 sha256:([0-9a-f]{64}) -->\n/.exec(html)?.[1] ?? null;
 }
 
 export async function buildAppHostHtml(): Promise<string> {
@@ -50,7 +50,7 @@ export async function buildAppHostHtml(): Promise<string> {
   const script = result.outputFiles[0]!.text.trim();
   if (/<\/script/i.test(script) || /<!--/.test(script)) throw new Error("the app host bundle holds text that would end its script element");
   const body = page(script);
-  return `<!-- mausbot app-host v1 sha256:${appHostHash(body)} -->\n${body}`;
+  return `<!-- indbot app-host v1 sha256:${appHostHash(body)} -->\n${body}`;
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

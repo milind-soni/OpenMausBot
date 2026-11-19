@@ -1,4 +1,4 @@
-// `openmausbot serve --tunnel`: every public request arrives over an IPC listener, so request-auth always demands a paired session.
+// `openindbot serve --tunnel`: every public request arrives over an IPC listener, so request-auth always demands a paired session.
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync } from "node:fs";
@@ -133,7 +133,7 @@ export function createTunnelAccount(options: {
   fetchImpl?: typeof fetch;
   machineName?: string;
   recovery?: TunnelRecovery;
-  /** `login --relay`: sign in without reserving a public address; phones reach this machine through MausBot Relay. */
+  /** `login --relay`: sign in without reserving a public address; phones reach this machine through IndBot Relay. */
   relayOnly?: boolean;
   log?: (line: string) => void;
   clock?: {

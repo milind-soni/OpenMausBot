@@ -80,7 +80,7 @@ describe("message-db", () => {
   it("finds the first-reply rescue rows that never settled or ended", () => {
     const rescue = (id: string, state: Record<string, true> = {}) => msg(id, "", {
       role: "bot", kind: "activity",
-      tool: { name: "notice: Maus hasn't heard back from OpenCode yet.", ok: true,
+      tool: { name: "notice: Ind hasn't heard back from OpenCode yet.", ok: true,
         rescue: { botId: "b", threadId: "t1", turnId: id, instanceId: "opencodeGo", ai: "OpenCode", ...state } },
     });
     insertMessage("t1", rescue("open"));
@@ -293,7 +293,7 @@ describe("message-db", () => {
     );
     insertMessage("dm", msg("m-old", relayed));
     insertMessage("dm", msg("m-user", "please get the pricing audit emailed to me"));
-    insertMessage("dm", msg("m-bot", "I saw a [Message from @Scout, another bot in this OpenMausBot workspace] earlier about the pricing audit", { role: "bot" }));
+    insertMessage("dm", msg("m-bot", "I saw a [Message from @Scout, another bot in this OpenIndBot workspace] earlier about the pricing audit", { role: "bot" }));
     closeMessageDb();
     const raw = new DatabaseSync(join(DATA_DIR, "messages.db"));
     raw.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)")

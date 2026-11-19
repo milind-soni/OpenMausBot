@@ -17,9 +17,9 @@ import {
 const frame: NotifyFrame = {
   kind: "done",
   botId: "bot-1",
-  botName: "Maus",
+  botName: "Ind",
   threadId: "thread-1",
-  title: "Maus finished",
+  title: "Ind finished",
   body: "All done",
 };
 
@@ -90,7 +90,7 @@ describe("desktop notifications", () => {
     const { notices } = installNotification("granted");
     showNotification(frame, vi.fn());
     expect(notices).toHaveLength(1);
-    expect(notices[0]).toMatchObject({ title: frame.title, options: { body: frame.body, tag: `openmausbot:${frame.botId}` } });
+    expect(notices[0]).toMatchObject({ title: frame.title, options: { body: frame.body, tag: `openindbot:${frame.botId}` } });
   });
 
   it("stays quiet only when the exact target thread is already visible", () => {
@@ -107,7 +107,7 @@ describe("desktop notifications", () => {
     showNotification({ ...frame, kind: "spend", title: "Monthly spend limit reached" }, vi.fn(), "https://avatar.test/a.png", frame.threadId);
 
     expect(notices).toHaveLength(1);
-    expect(notices[0]!.options).toMatchObject({ tag: "openmausbot:spend", icon: undefined });
+    expect(notices[0]!.options).toMatchObject({ tag: "openindbot:spend", icon: undefined });
   });
 
   it("shows a stored Markdown body as plain text", () => {
@@ -148,10 +148,10 @@ describe("desktop notifications", () => {
       vi.fn(),
     );
 
-    expect(notices[0]?.options?.tag).toBe(`openmausbot:${frame.botId}`);
-    expect(notices[1]?.options?.tag).toBe(`openmausbot:${frame.botId}`);
+    expect(notices[0]?.options?.tag).toBe(`openindbot:${frame.botId}`);
+    expect(notices[1]?.options?.tag).toBe(`openindbot:${frame.botId}`);
     showNotification({ ...frame, botId: "bot-2" }, vi.fn());
-    expect(notices[2]?.options?.tag).toBe(`openmausbot:bot-2`);
+    expect(notices[2]?.options?.tag).toBe(`openindbot:bot-2`);
   });
 
   it("carries the bot's avatar when its profile has one", () => {
@@ -180,7 +180,7 @@ describe("on the desktop app, where main shows the banner so its click outlives 
     showNotification(frame, vi.fn(), "/api/attachments/face.png");
     await flush();
     expect(show).toHaveBeenCalledWith({
-      title: frame.title, body: frame.body, tag: "openmausbot:bot-1", silent: false, picture: "/api/attachments/face.png", botId: "bot-1", threadId: "thread-1",
+      title: frame.title, body: frame.body, tag: "openindbot:bot-1", silent: false, picture: "/api/attachments/face.png", botId: "bot-1", threadId: "thread-1",
     });
     expect(notices).toHaveLength(0);
   });
@@ -241,7 +241,7 @@ describe("notification sounds", () => {
 describe("buildNotificationOptions", () => {
   it("keys coalescing on botId and omits a missing avatar", () => {
     expect(buildNotificationOptions({ id: "bot-9" })).toEqual({
-      tag: "openmausbot:bot-9",
+      tag: "openindbot:bot-9",
       icon: undefined,
     });
   });
@@ -253,7 +253,7 @@ describe("notification titles", () => {
   it.each(["en", "pt-br"] as const)("displays the server's title unchanged with client language %s", (language) => {
     const { notices } = installNotification("granted");
     setLocale(language);
-    for (const title of ["Maus em Launch tem uma pergunta", "Maus in Launch has a question", "Maus in Launch hat eine Frage"]) {
+    for (const title of ["Ind em Launch tem uma pergunta", "Ind in Launch has a question", "Ind in Launch hat eine Frage"]) {
       showNotification({ ...frame, kind: "question", groupId: "g1", title }, vi.fn());
       expect(notices.at(-1)?.title).toBe(title);
     }

@@ -22,7 +22,7 @@ async function fixture(t, { screen = () => false } = {}) {
     async fetch(url, { signal }) {
       const route = new URL(url).pathname;
       if (route === "/api/auth/session") return Response.json({ kind: "session", id: identity.sessionId, cloudHome: true, scopes: ["admin"] });
-      if (route === "/.well-known/openmausbot/environment") return Response.json({ environmentId: identity.environmentId, capabilities: { sharedComputers: true } });
+      if (route === "/.well-known/openindbot/environment") return Response.json({ environmentId: identity.environmentId, capabilities: { sharedComputers: true } });
       if (route.endsWith("/disconnect")) { f.disconnects++; if (f.fail) throw new Error("no answer"); if (f.hold) await f.answer.promise; return Response.json({ ok: true }); }
       if (route.endsWith("/poll")) { f.polls++; await new Promise((_resolve, reject) => { signal.throwIfAborted(); signal.addEventListener("abort", () => reject(signal.reason), { once: true }); }); }
       return Response.json({ ok: true });

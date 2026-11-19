@@ -19,7 +19,7 @@ const HOST = "omb-t-0123456789ab.fly.dev";
 const MACHINE_ID = "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93";
 const secret = randomBytes(32).toString("base64url");
 const home = mkdtempSync(join(tmpdir(), "omb-cloud-sharing-"));
-const dataDir = join(home, ".openmausbot");
+const dataDir = join(home, ".openindbot");
 const dump = join(home, "claude.json");
 let base = "";
 let port = 0;
@@ -76,7 +76,7 @@ async function shutdown() {
 }
 
 async function ownersDevice(): Promise<string> {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: "OpenIndBot app (Cloud)", ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const response = await fetch(`${base}/api/cloud/pairing`, { method: "POST", headers: {
     host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", "content-type": "application/json",

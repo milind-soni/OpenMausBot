@@ -196,13 +196,13 @@ test("a check's log line names the rooms and conversations it found missing by i
 
 test("a check that still finds things missing after three passes says so at once, naming what did not go and why", async () => {
   const w = world({ checks: [false, false, false] });
-  w.failed = [{ key: "skill:b1:tidy", kind: "skill", label: "tidy", error: "OpenMausBot on this computer did not answer. Try again in a moment." },
+  w.failed = [{ key: "skill:b1:tidy", kind: "skill", label: "tidy", error: "OpenIndBot on this computer did not answer. Try again in a moment." },
     { key: "app-event:e1", kind: "app-event", label: "Reply to email", error: "This app automation stays on the computer it came from.", final: true }];
   await w.home.kick();
   assert.equal(w.journal.failure.code, "incomplete");
   assert.ok(w.now() - w.journal.failingSince < FAILING_LINE_MS, "not a day later");
   assert.deepEqual(w.home.view(), { phase: "copy", failing: { error: INCOMPLETE, items: [
-    { label: "tidy", error: "OpenMausBot on this computer did not answer. Try again in a moment." },
+    { label: "tidy", error: "OpenIndBot on this computer did not answer. Try again in a moment." },
     { label: "Reply to email", error: "This app automation stays on the computer it came from." }] } });
 });
 

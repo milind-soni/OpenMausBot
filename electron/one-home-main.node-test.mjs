@@ -174,8 +174,8 @@ test("a first move waits for the person's choice, asked on whichever page is ope
     return { main, ask: (channel, page, ...args) => handlers.get(channel)({ page }, ...args), kept: () => kept, show: (next) => { url = next; } };
   };
   const named = (count) => Array.from({ length: count }, (_, i) => ({ id: `b${i}`, name: `Bot ${i}` }));
-  const asked = launch([...named(3), { id: "maus", name: "Maus", defaultBot: { v: 1 } }]);
-  const alone = launch([...named(1), { id: "maus", name: "Maus", defaultBot: { v: 1 } }]);
+  const asked = launch([...named(3), { id: "ind", name: "Ind", defaultBot: { v: 1 } }]);
+  const alone = launch([...named(1), { id: "ind", name: "Ind", defaultBot: { v: 1 } }]);
   try {
     await asked.main.kick();
     assert.equal(asked.kept(), null, "nothing starts by itself");

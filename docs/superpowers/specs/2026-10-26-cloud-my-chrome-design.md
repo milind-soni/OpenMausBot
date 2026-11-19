@@ -6,7 +6,7 @@ Cloud bot may use the Mac while it is live.
 
 ## Behaviour
 
-- **Mac or PC (desktop app):** Settings → MausBot Cloud → what's lent gets a fourth switch, **Your Chrome**, off by
+- **Mac or PC (desktop app):** Settings → IndBot Cloud → what's lent gets a fourth switch, **Your Chrome**, off by
   default and never part of the default grant. While it is on and lending runs, My Cloud's bots can drive the Chrome
   on this computer over the device link that already carries the internet connection.
 - **My Cloud (personal Cloud home only, never a Team Cloud):** once a computer lends its Chrome, a browser profile's

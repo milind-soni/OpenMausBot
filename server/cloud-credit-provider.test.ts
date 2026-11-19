@@ -35,15 +35,15 @@ describe("what the credit's engine is made of", () => {
     for (const body of [null, "models", { data: "x" }, { models: [] }]) expect(parseCreditModels(body)).toEqual([]);
   });
 
-  it("is OpenMausBot's own chat engine on the relay, with this machine's token as its own key: never Claude Code, Codex or an Anthropic route", () => {
+  it("is OpenIndBot's own chat engine on the relay, with this machine's token as its own key: never Claude Code, Codex or an Anthropic route", () => {
     const configs = cloudCreditInstanceConfig(credential, parseCreditModels(MODELS));
     expect(Object.keys(configs)).toEqual([CLOUD_CREDIT_INSTANCE]);
     const entry = configs[CLOUD_CREDIT_INSTANCE]!;
     expect(entry).toEqual({ driver: "openai-compat", displayName: "Trial credit · Claude",
-      config: { url: RELAY, apiKeyEnv: "OPENMAUSBOT_TRIAL_CREDIT_KEY", provider: "", model: "claude-haiku-4-5", managedModels: ["claude-haiku-4-5", "claude-sonnet-5"] },
-      environment: { OPENMAUSBOT_TRIAL_CREDIT_KEY: TOKEN } });
+      config: { url: RELAY, apiKeyEnv: "OPENINDBOT_TRIAL_CREDIT_KEY", provider: "", model: "claude-haiku-4-5", managedModels: ["claude-haiku-4-5", "claude-sonnet-5"] },
+      environment: { OPENINDBOT_TRIAL_CREDIT_KEY: TOKEN } });
     expect(JSON.stringify(configs)).not.toMatch(/ANTHROPIC|claudeAgent|codex|\/messages/);
-    expect(OpenAICompatDriver.decodeConfig(entry.config)).toEqual({ url: RELAY, apiKeyEnv: "OPENMAUSBOT_TRIAL_CREDIT_KEY",
+    expect(OpenAICompatDriver.decodeConfig(entry.config)).toEqual({ url: RELAY, apiKeyEnv: "OPENINDBOT_TRIAL_CREDIT_KEY",
       model: "claude-haiku-4-5", managedModels: ["claude-haiku-4-5", "claude-sonnet-5"], key: undefined, provider: undefined });
   });
 });

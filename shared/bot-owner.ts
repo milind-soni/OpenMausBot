@@ -6,13 +6,13 @@ export interface OwnedBot {
   chiefOfStaff?: boolean;
   createdBy?: string;
   reportsTo?: string;
-  /** A Team Cloud member's own MausBot is theirs, whoever else it might be said to report to. */
+  /** A Team Cloud member's own IndBot is theirs, whoever else it might be said to report to. */
   defaultBot?: { person?: string };
 }
 
 export const ownerEmail = (email: string): string => email.trim().toLowerCase();
 
-/** Who the bot reports to: a member's own MausBot its member, else `reportsTo`, else whoever created it; null for a bot
+/** Who the bot reports to: a member's own IndBot its member, else `reportsTo`, else whoever created it; null for a bot
  * nobody owns, whose asks go to the Admins. */
 export function botOwner(bot: Pick<OwnedBot, "createdBy" | "reportsTo" | "defaultBot">): string | null {
   const email = bot.defaultBot?.person?.trim() || bot.reportsTo?.trim() || bot.createdBy?.trim();

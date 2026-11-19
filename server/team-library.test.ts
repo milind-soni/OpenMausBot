@@ -13,7 +13,7 @@ import {
 } from "./team-library.ts";
 
 const manifest = {
-  format: "openmaus.team",
+  format: "openind.team",
   version: 2,
   team: {
     name: "Engineering",
@@ -30,7 +30,7 @@ const manifest = {
 };
 
 const catalog = {
-  format: "openmaus.catalog",
+  format: "openind.catalog",
   version: 1,
   teams: [
     {
@@ -38,7 +38,7 @@ const catalog = {
       name: "Engineering Team",
       summary: "Plan and ship software.",
       category: "Engineering",
-      manifest: "teams/engineering/team.mausteam.json",
+      manifest: "teams/engineering/team.indteam.json",
       readme: "teams/engineering/README.md",
       members: 1,
       skills: ["teams/engineering/skills/release/SKILL.md"],
@@ -57,7 +57,7 @@ function response(value: unknown, status = 200): Response {
 describe("team library", () => {
   it("validates catalog paths and adds the trusted repository URL", () => {
     const parsed = parseTeamCatalog(catalog);
-    expect(parsed.repositoryUrl).toBe("https://github.com/milind-soni/openmausbot-teams");
+    expect(parsed.repositoryUrl).toBe("https://github.com/milind-soni/openindbot-teams");
     expect(parsed.teams[0]).toMatchObject({ slug: "engineering", members: 1 });
 
     const unsafe = structuredClone(catalog);
@@ -69,12 +69,12 @@ describe("team library", () => {
     const fetcher = vi.fn(async (url: string | URL | Request) => {
       const target = String(url);
       if (target === TEAM_LIBRARY_CATALOG_URL) return response(catalog);
-      if (target === `${TEAM_LIBRARY_RAW_ROOT}/teams/engineering/team.mausteam.json`) return response(manifest);
+      if (target === `${TEAM_LIBRARY_RAW_ROOT}/teams/engineering/team.indteam.json`) return response(manifest);
       return response({}, 404);
     }) as unknown as typeof fetch;
 
     const loaded = await fetchLibraryTeam("engineering", fetcher);
-    if (loaded.format !== "openmaus.team") throw new Error("expected a legacy team");
+    if (loaded.format !== "openind.team") throw new Error("expected a legacy team");
     expect(loaded.team.name).toBe("Engineering");
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
@@ -83,16 +83,16 @@ describe("team library", () => {
     expect(githubManifestUrls("https://github.com/acme/team")).toEqual([
       "https://raw.githubusercontent.com/acme/team/main/botmrr.md",
       "https://raw.githubusercontent.com/acme/team/main/team.md",
-      "https://raw.githubusercontent.com/acme/team/main/team.mausteam.json",
+      "https://raw.githubusercontent.com/acme/team/main/team.indteam.json",
       "https://raw.githubusercontent.com/acme/team/master/botmrr.md",
       "https://raw.githubusercontent.com/acme/team/master/team.md",
-      "https://raw.githubusercontent.com/acme/team/master/team.mausteam.json",
+      "https://raw.githubusercontent.com/acme/team/master/team.indteam.json",
     ]);
-    expect(githubManifestUrls("https://github.com/acme/team/blob/main/presets/seo.mausteam.json")).toEqual([
-      "https://raw.githubusercontent.com/acme/team/main/presets/seo.mausteam.json",
+    expect(githubManifestUrls("https://github.com/acme/team/blob/main/presets/seo.indteam.json")).toEqual([
+      "https://raw.githubusercontent.com/acme/team/main/presets/seo.indteam.json",
     ]);
-    expect(githubManifestUrls("https://raw.githubusercontent.com/acme/team/main/team.mausteam.json")).toEqual([
-      "https://raw.githubusercontent.com/acme/team/main/team.mausteam.json",
+    expect(githubManifestUrls("https://raw.githubusercontent.com/acme/team/main/team.indteam.json")).toEqual([
+      "https://raw.githubusercontent.com/acme/team/main/team.indteam.json",
     ]);
     expect(() => githubManifestUrls("http://example.com/team.json")).toThrow("public HTTPS GitHub");
     expect(() => githubManifestUrls("https://github.com/acme/team/blob/main/run.sh")).toThrow("Markdown playbook");
@@ -100,13 +100,13 @@ describe("team library", () => {
 
   it("falls back from main to master for a repository link", async () => {
     const fetcher = vi.fn(async (url: string | URL | Request) =>
-      String(url).endsWith("team.mausteam.json") && String(url).includes("/master/")
+      String(url).endsWith("team.indteam.json") && String(url).includes("/master/")
         ? response(manifest)
         : response({}, 404),
     ) as unknown as typeof fetch;
 
     const loaded = await fetchGithubTeam("https://github.com/acme/team", fetcher);
-    if (loaded.format !== "openmaus.team") throw new Error("expected a legacy team");
+    if (loaded.format !== "openind.team") throw new Error("expected a legacy team");
     expect(loaded.team.members[0]?.name).toBe("Ada");
     expect(fetcher).toHaveBeenCalledTimes(6);
   });
@@ -114,8 +114,8 @@ describe("team library", () => {
   it("loads a shared team file (package v2) from GitHub as a file, without its claimed publisher", async () => {
     const shared = JSON.parse(readFileSync(join(import.meta.dirname, "..", "shared", "package-fixtures", "full-team.v2.json"), "utf8"));
     const fetcher = vi.fn(async () => response(shared)) as unknown as typeof fetch;
-    const loaded = await fetchGithubTeam("https://github.com/acme/team/blob/main/sales-desk-1.3.0.openmaus.json", fetcher);
-    if (loaded.format !== "openmaus.package" || loaded.version !== 2) throw new Error("expected a shared team");
+    const loaded = await fetchGithubTeam("https://github.com/acme/team/blob/main/sales-desk-1.3.0.openind.json", fetcher);
+    if (loaded.format !== "openind.package" || loaded.version !== 2) throw new Error("expected a shared team");
     expect(loaded.package.team?.name).toBe("Sales desk");
     expect(loaded.package.publisher).toBeUndefined();
   });
@@ -124,7 +124,7 @@ describe("team library", () => {
 describe("the team library as a Chief of Staff reads it", () => {
   const entry = (slug: string, name: string, summary: string, file: { package?: string }) => ({
     ...catalog.teams[0]!, slug, name, summary, ...file,
-    manifest: `teams/${slug}/team.mausteam.json`, readme: `teams/${slug}/README.md`, members: 2, skills: [],
+    manifest: `teams/${slug}/team.indteam.json`, readme: `teams/${slug}/README.md`, members: 2, skills: [],
   });
   const fixture = (name: string) => readFileSync(join(import.meta.dirname, "..", "shared", "package-fixtures", name), "utf8");
   const long = { ...manifest, team: { ...manifest.team, members: [{ ...manifest.team.members[0]!, description: `Plans the work.\n\n${"Checks every step. ".repeat(30)}` }] } };
@@ -141,10 +141,10 @@ describe("the team library as a Chief of Staff reads it", () => {
   const fetcher = vi.fn(async (url: string | URL | Request) => {
     const target = String(url).slice(TEAM_LIBRARY_RAW_ROOT.length + 1);
     if (String(url) === TEAM_LIBRARY_CATALOG_URL) return response(library);
-    if (target === "teams/engineering/team.mausteam.json") return response(manifest);
+    if (target === "teams/engineering/team.indteam.json") return response(manifest);
     if (target === "packages/signal-desk.md") return new Response(fixture("legacy-botmrr.v1.md"));
-    if (target === "teams/sales-desk/team.mausteam.json") return new Response(fixture("full-team.v2.json"));
-    if (target === "teams/long/team.mausteam.json") return response(long);
+    if (target === "teams/sales-desk/team.indteam.json") return new Response(fixture("full-team.v2.json"));
+    if (target === "teams/long/team.indteam.json") return response(long);
     return response({}, 404);
   }) as unknown as typeof fetch;
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BOT_BODY_IDS, FESTIVAL_IDS, FESTIVALS, botBodyId, botBodySchema, isCarvedBody, isFestival } from "./bot-body.ts";
 import { CARVED_BODY_IDS } from "./carved-bodies.ts";
 import { MASCOT_BODY_IDS } from "./mascot-bodies.ts";
-import { MAUS_COLOR_NAMES } from "./wire.ts";
+import { IND_COLOR_NAMES } from "./wire.ts";
 
 describe("bot bodies", () => {
   it("accepts every gradient body and every festival body", () => {
@@ -36,7 +36,7 @@ describe("bot bodies", () => {
 
   it.each(FESTIVAL_IDS)("gives every bot colour but silver and chrome its own %s costume from that festival", (festival) => {
     const { bodies, costumes } = FESTIVALS[festival];
-    const dressed = MAUS_COLOR_NAMES.filter((color) => color !== "silver" && color !== "chrome");
+    const dressed = IND_COLOR_NAMES.filter((color) => color !== "silver" && color !== "chrome");
     expect(Object.keys(costumes).sort()).toEqual([...dressed].sort());
     expect(new Set(Object.values(costumes)).size).toBe(dressed.length);
     for (const body of Object.values(costumes)) expect(bodies).toContain(body);

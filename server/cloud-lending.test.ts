@@ -165,7 +165,7 @@ describe("the owner's routines", () => {
   let dir = "";
   afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = ""; });
   const routine = { prompt: "Tidy ~/Downloads on my Mac", target: "bot", botId: "b1", attachments: [{ id: "a1", path: "/x" }],
-    schedule: { type: "interval", everyMinutes: 1440, anchorAt: 1_790_000_000_000 }, runOn: "maus" };
+    schedule: { type: "interval", everyMinutes: 1440, anchorAt: 1_790_000_000_000 }, runOn: "ind" };
   it("keeps a routine outside work wrote outside when a bot's change would make it nobody's; a person's save still makes it theirs", () => {
     dir = mkdtempSync(join(tmpdir(), "omb-cloud-lending-"));
     const authors = createCloudRoutineAuthors(join(dir, "lending-routines.json"));

@@ -73,13 +73,13 @@ describe("audio attachments", () => {
   it("streams audio of any size through this message's own link", async () => {
     const url = `${route}?media=${"c".repeat(43)}`;
     const fetcher = vi.fn(async () => new Response(JSON.stringify({ url, mime: "audio/mpeg", bytes: PREVIEW_MAX_BYTES * 8 }), {
-      headers: { "content-type": "application/json", "x-openmausbot-media": "1" },
+      headers: { "content-type": "application/json", "x-openindbot-media": "1" },
     }));
     vi.stubGlobal("fetch", fetcher);
     expect(await loadMessageAudio(clip, message, new AbortController().signal)).toBe(url);
     expect(fetcher.mock.calls).toEqual([asks({ path: clip.path, media: true })]);
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ url, mime: "video/mp4" }), {
-      headers: { "content-type": "application/json", "x-openmausbot-media": "1" },
+      headers: { "content-type": "application/json", "x-openindbot-media": "1" },
     })));
     await expect(loadMessageAudio(clip, message, new AbortController().signal)).rejects.toThrow("cannot be played");
   });
@@ -156,8 +156,8 @@ describe("message gallery", () => {
   });
 
   it("sends a Windows path with its backslash before punctuation intact", () => {
-    expect(collectMessageFiles("[report](C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md)")).toEqual([
-      { path: "C:\\Users\\Maus\\.openmausbot\\workspaces\\bot\\report.md", name: "report.md", linked: true },
+    expect(collectMessageFiles("[report](C:\\Users\\Ind\\.openindbot\\workspaces\\bot\\report.md)")).toEqual([
+      { path: "C:\\Users\\Ind\\.openindbot\\workspaces\\bot\\report.md", name: "report.md", linked: true },
     ]);
   });
 
@@ -212,7 +212,7 @@ describe("message gallery", () => {
 describe("explicit local video preview", () => {
   const route = "/api/threads/thread%2Fone/messages/message%20two/file";
   const linkResponse = (body: unknown) => new Response(JSON.stringify(body), {
-    headers: { "content-type": "application/json", "x-openmausbot-media": "1" },
+    headers: { "content-type": "application/json", "x-openindbot-media": "1" },
   });
 
   it("asks the message route for a streaming link and plays that link without downloading the file", async () => {

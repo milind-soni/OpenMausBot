@@ -87,7 +87,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
   const requests = new AppTriggerRequestService({ store: deps.store, triggers: manager, botName: (botId) => deps.store.bot(botId)?.name ?? "the bot" });
 
   const unavailableText = (reason: "self-hosted" | "unavailable" | "off") => reason === "self-hosted"
-    ? "App events need OpenMausBot's connected apps. This server uses its own Composio key, so a bot cannot watch apps here yet: use a schedule that checks the app, or a webhook."
+    ? "App events need OpenIndBot's connected apps. This server uses its own Composio key, so a bot cannot watch apps here yet: use a schedule that checks the app, or a webhook."
     : "Connected apps are not set up here, so a bot cannot watch apps yet.";
 
   async function catalog(bot: Bot, app?: string, search?: string): Promise<AppEventCatalog> {
@@ -149,7 +149,7 @@ export function createAppTriggerHost(deps: AppTriggerHostDeps) {
         const patch: AppTriggerPatch = {
           ...(typeof body.name === "string" ? { name: body.name } : {}),
           ...(typeof body.prompt === "string" ? { prompt: body.prompt } : {}),
-          ...(body.runOn === "maus" || body.runOn === "cloud" ? { runOn: body.runOn } : {}),
+          ...(body.runOn === "ind" || body.runOn === "cloud" ? { runOn: body.runOn } : {}),
           ...(body.filter === null || (body.filter && typeof body.filter === "object") ? { filter: body.filter as never } : {}),
           ...(body.config && typeof body.config === "object" ? { config: body.config as Record<string, unknown> } : {}),
           ...(typeof body.enabled === "boolean" ? { enabled: body.enabled } : {}),

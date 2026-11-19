@@ -86,14 +86,14 @@ Type the address on the Connect sheet each time.
 | Disconnect Tailscale on the client | Tailscale isn't connected on this computer |
 | Type a name from another tailnet | it isn't on this computer's tailnet |
 | Quit the app on the host, or put the host to sleep | it's on your tailnet but didn't answer |
-| On a Mac client, turn off OpenMausBot in System Settings → Privacy & Security → Local Network | macOS blocked the connection |
+| On a Mac client, turn off OpenIndBot in System Settings → Privacy & Security → Local Network | macOS blocked the connection |
 
 Turn Local Network back on and connect again without restarting the app. The Local Network row is what a packaged build
 needs: `NSLocalNetworkUsageDescription` is only in packaged builds.
 
 ### A headless server
 
-On a Linux box, run `npx openmausbot serve --tailscale` with certificates on and then off, and once more as a user that
+On a Linux box, run `npx openindbot serve --tailscale` with certificates on and then off, and once more as a user that
 is not Tailscale's operator. With certificates on, expect `https://$NAME`. In the other two runs expect the line that
 says it listens on `http://$NAME:8799`, and connect a client with the printed link.
 
@@ -107,5 +107,5 @@ says it listens on `http://$NAME:8799`, and connect a client with the printed li
 4. On a computer without Tailscale installed, turn **Your other computers** on. Expect the switch to stay off and the
    row to say Tailscale isn't installed, with **Get Tailscale**. On a tailnet with device approval, do the same on a
    computer not yet approved: expect the row to say it is waiting for approval.
-5. A MausBot Cloud is not on your tailnet. Lend the host to the Cloud with Tailscale on and confirm it still works over
+5. A IndBot Cloud is not on your tailnet. Lend the host to the Cloud with Tailscale on and confirm it still works over
    the host's own outbound connection.

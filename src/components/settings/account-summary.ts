@@ -29,7 +29,7 @@ function fromPlan(plan: CloudPlanSnapshot | null): AccountSummary {
   return { signedIn: plan.status !== "none" && plan.status !== "signin", email: null, plan: paid ? cloudPlanLabel(plan.tier) : null, paid };
 }
 
-/** Who is signed in to MausBot on this device, as far as this page may know. */
+/** Who is signed in to IndBot on this device, as far as this page may know. */
 export function useAccountSummary(): AccountSummary {
   const account = typeof window === "undefined" || window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
   const planBridge = account ? undefined : typeof window === "undefined" ? undefined : window.ogb?.cloudPlan;

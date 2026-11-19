@@ -1,4 +1,4 @@
-# OpenMausBot Enterprise
+# OpenIndBot Enterprise
 
 Source-available features for hosted and white-labelled deployments. This
 folder has its own [LICENSE](./LICENSE); everything outside it is Apache 2.0.
@@ -71,7 +71,7 @@ node enterprise/scripts/issue-license.mjs issue --customer "Acme" --features whi
 ```
 
 The signing key lives outside the repo (default
-`~/.config/openmausbot-enterprise/signing-key.json`). Rotate by generating a
+`~/.config/openindbot-enterprise/signing-key.json`). Rotate by generating a
 new pair and appending its public key: keys signed by older pairs keep
 working until they expire.
 

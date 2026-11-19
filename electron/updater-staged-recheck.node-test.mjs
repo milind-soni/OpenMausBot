@@ -41,7 +41,7 @@ async function found(h, { manual = false, version = "2.0.0" } = {}) {
   await h.coordinator.check(manual);
 }
 
-async function downloadInto(h, files = ["/tmp/OpenMausBot-2.0.0-amd64.deb"]) {
+async function downloadInto(h, files = ["/tmp/OpenIndBot-2.0.0-amd64.deb"]) {
   h.updater.downloadUpdate = () => {
     h.updater.emit("update-downloaded", { version: "2.0.0" });
     return Promise.resolve(files);
@@ -65,7 +65,7 @@ test("a staged update is replaced quietly when the feed offers a newer one", asy
   h.updater.downloadUpdate = async () => {
     downloads += 1;
     h.updater.emit("update-downloaded", { version: "2.1.0" });
-    return ["/tmp/OpenMausBot-2.1.0-amd64.deb"];
+    return ["/tmp/OpenIndBot-2.1.0-amd64.deb"];
   };
   await h.coordinator.check();
   await settle();
@@ -74,7 +74,7 @@ test("a staged update is replaced quietly when the feed offers a newer one", asy
   assert.equal(h.getState().version, "2.1.0");
   h.coordinator.install();
   await settle();
-  assert.equal(h.getState().command, "install /tmp/OpenMausBot-2.1.0-amd64.deb");
+  assert.equal(h.getState().command, "install /tmp/OpenIndBot-2.1.0-amd64.deb");
 });
 
 test("a handed-off update shows the newer file's command after it is replaced", async () => {
@@ -87,7 +87,7 @@ test("a handed-off update shows the newer file's command after it is replaced", 
   newerFeed(h);
   h.updater.downloadUpdate = async () => {
     h.updater.emit("update-downloaded", { version: "2.1.0" });
-    return ["/tmp/OpenMausBot-2.1.0-amd64.deb"];
+    return ["/tmp/OpenIndBot-2.1.0-amd64.deb"];
   };
   await h.coordinator.check();
   await settle();
@@ -96,7 +96,7 @@ test("a handed-off update shows the newer file's command after it is replaced", 
   h.coordinator.install();
   await settle();
   assert.equal(h.getState().status, "handed-off");
-  assert.equal(h.getState().command, "install /tmp/OpenMausBot-2.1.0-amd64.deb");
+  assert.equal(h.getState().command, "install /tmp/OpenIndBot-2.1.0-amd64.deb");
 });
 
 test("an older or equal feed version never replaces the staged update", async () => {
@@ -148,7 +148,7 @@ test("a failed replacement download drops the staged update, and a later check d
 
     h.updater.downloadUpdate = async () => {
       h.updater.emit("update-downloaded", { version: "2.1.0" });
-      return ["/tmp/OpenMausBot-2.1.0-amd64.deb"];
+      return ["/tmp/OpenIndBot-2.1.0-amd64.deb"];
     };
     // quietly on the next hourly check; after a shown error, from the card's Retry
     await h.coordinator.check(needsPerson);
@@ -221,7 +221,7 @@ test("a declined password prompt keeps the update replaceable", async () => {
   newerFeed(h);
   h.updater.downloadUpdate = async () => {
     h.updater.emit("update-downloaded", { version: "2.1.0" });
-    return ["/tmp/OpenMausBot-2.1.0-amd64.deb"];
+    return ["/tmp/OpenIndBot-2.1.0-amd64.deb"];
   };
   await h.coordinator.check();
   await settle();

@@ -4,7 +4,7 @@ import { routineHealthOf } from "./routine-health.ts";
 import type { RoutineRun } from "./routines.ts";
 
 const run = (routineId: string, status: RoutineRun["status"], finishedAt: number, more: Partial<RoutineRun> = {}): RoutineRun => ({
-  id: `${routineId}-${finishedAt}`, routineId, routineName: "Planted name", prompt: "Planted prompt", target: "bot", botId: "bot-1", runOn: "maus",
+  id: `${routineId}-${finishedAt}`, routineId, routineName: "Planted name", prompt: "Planted prompt", target: "bot", botId: "bot-1", runOn: "ind",
   scheduledFor: finishedAt, status, manual: false, createdAt: finishedAt, finishedAt, ...more,
 });
 const on = (id: string) => ({ id, enabled: true });

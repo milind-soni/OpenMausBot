@@ -1374,7 +1374,7 @@ describe("saving OpenCode provider keys", () => {
     expect(mergeOpenCodeProviderKeys({}, { ANTHROPIC_API_KEY: "sk-ant" })).toEqual({ ok: true, keys: { ANTHROPIC_API_KEY: "sk-ant" } });
   });
 
-  it("refuses names OpenCode does not read or that OpenMaus keeps, with the fix", () => {
+  it("refuses names OpenCode does not read or that OpenInd keeps, with the fix", () => {
     const refused = (name: string) => {
       const result = mergeOpenCodeProviderKeys(saved, { [name]: "a-key" });
       expect(result.ok, name).toBe(false);
@@ -1386,7 +1386,7 @@ describe("saving OpenCode provider keys", () => {
     expect(refused("OPENCODE_API_KEY")).toContain("OpenCode API key box");
     for (const name of ["OPENCODE_SERVER_KEY", "OMB_CLOUD_BOAT_TOKEN", "OMB_LICENSE_KEY", "BOX_TOKEN", "COMPOSIO_API_KEY",
       "OPENAI_COMPAT_API_KEY", "XAI_API_KEY", "MISTRAL_API_KEY", "CURSOR_API_KEY", "FACTORY_API_KEY"]) {
-      expect(refused(name)).toBe(`OpenMaus keeps ${name} for itself, so OpenCode can't be given it here. Put this key in opencode.json instead.`);
+      expect(refused(name)).toBe(`OpenInd keeps ${name} for itself, so OpenCode can't be given it here. Put this key in opencode.json instead.`);
     }
   });
 
@@ -2013,7 +2013,7 @@ describe("workspace credential env strip", () => {
     // What an engine deliberately receives (the hosted model token as its provider key), plus look-alike names.
     const engine = {
       PATH: "/usr/bin", ANTHROPIC_API_KEY: "hosted-token", ANTHROPIC_AUTH_TOKEN: "hosted-token",
-      ANTHROPIC_BASE_URL: "https://admin.example.test/api/gateway/w/anthropic", OPENMAUSBOT_COMPANY_API_KEY: "hosted-token",
+      ANTHROPIC_BASE_URL: "https://admin.example.test/api/gateway/w/anthropic", OPENINDBOT_COMPANY_API_KEY: "hosted-token",
       OMB_MANAGED_CODEX_TOKEN: "hosted-token", CODEX_HOME: "/data/codex", OMB_HOOK_TOKEN_FILE: "/data/hook-tokens/a.token",
       OMB_CLOUDFLARED_PATH: "/usr/local/bin/cloudflared", OMB_CLOUD: "not-prefixed", MY_OMB_CLOUD_NOTE: "user",
     };
@@ -2423,7 +2423,7 @@ describe("DATA_DIR outside the suite's throwaway home", () => {
     const realHome = userInfo().homedir;
     const dataDir = childDataDir({ HOME: realHome, USERPROFILE: realHome, VITEST: "true" });
     try {
-      expect(dataDir).not.toBe(join(realHome, ".openmausbot"));
+      expect(dataDir).not.toBe(join(realHome, ".openindbot"));
       expect(dataDir.startsWith(tmpdir())).toBe(true);
     } finally {
       // Only ever a throwaway folder: a broken guard would hand back the real home here.
@@ -2437,7 +2437,7 @@ describe("DATA_DIR outside the suite's throwaway home", () => {
   it("treats an empty OMB_DATA_DIR as unset", () => {
     const home = mkdtempSync(join(tmpdir(), "omb-config-home-"));
     try {
-      expect(childDataDir({ HOME: home, USERPROFILE: home, OMB_DATA_DIR: "" })).toBe(join(home, ".openmausbot"));
+      expect(childDataDir({ HOME: home, USERPROFILE: home, OMB_DATA_DIR: "" })).toBe(join(home, ".openindbot"));
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -2446,7 +2446,7 @@ describe("DATA_DIR outside the suite's throwaway home", () => {
   it("keeps the home folder outside tests", () => {
     const home = mkdtempSync(join(tmpdir(), "omb-config-home-"));
     try {
-      expect(childDataDir({ HOME: home, USERPROFILE: home })).toBe(join(home, ".openmausbot"));
+      expect(childDataDir({ HOME: home, USERPROFILE: home })).toBe(join(home, ".openindbot"));
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

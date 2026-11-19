@@ -22,7 +22,7 @@ The smoke checks:
   Branding is excluded from the strict runtime model grant and credential store.
 
 - Loading Settings does not enroll or open a browser. **Sign in with your
-  organization** uses the standard OpenMaus Admin; a separate custom Admin
+  organization** uses the standard OpenInd Admin; a separate custom Admin
   address remains available under **Advanced**.
 - The production client opens the browser and connects automatically after
   approval. The optional verification code stays collapsed under **Security
@@ -68,7 +68,7 @@ and preservation of personal controls have focused renderer regressions.
 
 Use **Server → Sign in with your organization…** in the installed desktop app, or
 **Use desktop app → Open desktop app** in Admin. The fixed
-`openmausbot://organization` link opens local settings only; it carries no
+`openindbot://organization` link opens local settings only; it carries no
 credentials and does not approve enrollment. Remote pages do not gain access
 to the organization bridge. Existing hosted server selections are not reset
 on an ordinary update.
@@ -136,7 +136,7 @@ used.
   not restoring the saved policy on start; removing the `bindTurnComputer`
   guard; replacing instances on a renewal; skipping the legacy-id rename;
   forgetting instead of adopting a legacy backup key.
-- Against the Admin itself (in the openmaus-cloud `feat/desktop-lifecycle`
+- Against the Admin itself (in the openind-cloud `feat/desktop-lifecycle`
   worktree, disposable fixtures): this client enrolled, reported its version
   and policy, renewed a week later to now + 30 days with the same device,
   stayed connected past the original 30 days and showed `license-expired`

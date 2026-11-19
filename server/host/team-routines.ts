@@ -65,7 +65,7 @@ export function createTeamRoutines(deps: TeamRoutinesDeps) {
     reportsElsewhere(routine: Routine): boolean {
       return deps.team && Boolean(routine.resultsThreadId) && deps.privateTo(routine.resultsThreadId!) !== home(routine);
     },
-    /** Why this routine body is refused: on a team, another person's own MausBot is no bot of theirs (any chat they read
+    /** Why this routine body is refused: on a team, another person's own IndBot is no bot of theirs (any chat they read
      * may take its results; the visibility gate refuses another person's); off a team, the Cloud's rule for results. */
     bodyRefusal(auth: RequestAuth, body: unknown): { status: number; error: string } | null {
       const botId = field(body, "botId"), results = field(body, "resultsThreadId");

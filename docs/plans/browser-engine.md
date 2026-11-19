@@ -12,7 +12,7 @@ Stagehand, browser-use, browserless, Lightpanda) is summarised at the end.
   sandbox, and Electron 43 exits before ready with it on Windows
   (electron/electron#51761). A browser that is its own Chrome process, driven
   over CDP, does not depend on that.
-- **Servers have no browser today.** `openmausbot serve` and the Docker stack
+- **Servers have no browser today.** `openindbot serve` and the Docker stack
   run without Electron, so `availableBrowserConnection()` is null and the
   toggle is greyed.
 - **One engine, one contract.** A skill written on a Mac runs on a VPS.
@@ -68,7 +68,7 @@ capability. Native session identity and encryption keys stay in the server.
   "desktop" | "headless" | "unavailable"` (+ reason), and the Settings toggle
   and the per-bot switch key off it instead of `window.ogb.browser`.
 - Docker: `npm install -g agent-browser@<pinned>` and `agent-browser install
-  --with-deps` at build time, as root, before `USER maus`.
+  --with-deps` at build time, as root, before `USER ind`.
 - Tests: resolver and download pinning (stub server), the integration spec
   (mutation-check the guards), an e2e turn against a fake `agent-browser`
   binary that speaks MCP.
@@ -151,7 +151,7 @@ system prompt teaches them. No adapter.
 - **Where it applies.** The desktop app, where the bots run on the person's
   computer, and My Cloud (a personal Cloud home, never a Team Cloud) once a
   Mac or PC lends its Chrome. That computer lends Chrome only by its own
-  **Your Chrome** switch in Settings → MausBot Cloud, which is off by default,
+  **Your Chrome** switch in Settings → IndBot Cloud, which is off by default,
   never part of the default grant, and dropped when lending is turned off.
   Chrome travels over the device link that carries the internet connection:
   agent-browser on My Cloud attaches through a loopback door per browser
@@ -170,7 +170,7 @@ system prompt teaches them. No adapter.
   is now where My Chrome is when it cannot be found by itself (another port or
   machine); setting it also makes My Chrome available on a server. It no
   longer attaches every bot. Details of the lent Chrome:
-  [MausBot Cloud](../cloud-pro.md#your-chrome).
+  [IndBot Cloud](../cloud-pro.md#your-chrome).
 - **Why My Chrome and not a headed built-in browser.** Measured Oct 12 with
   agent-browser 0.37.0 and Chrome 154 on macOS, entering an account that
   does not exist at accounts.google.com: the headless built-in browser and a

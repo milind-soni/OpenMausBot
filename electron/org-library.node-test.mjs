@@ -21,7 +21,7 @@ const release = (bytes, extra = {}) => ({ version: "1.3.0", sha256: sha256Hex(by
 const entry = (packageId, extra = {}) => ({ packageId, ref: "acme/sales-desk", name: "Sales desk", tagline: "Qualify leads.", kind: "team",
   publisher: { organizationId: PUBLISHER, name: "Acme Partners", self: false }, mode: "available", offAction: "keep", release: release(teamBytes), withdrawnReleases: [],
   contents: { bots: 3, skills: 2, presets: 0, rooms: 1, routines: 2, connections: 1, botNames: ["Scout", "Closer", "Pixel"] }, scanFindings: 0, ...extra });
-const catalogOf = (packages, extra = {}) => ({ format: "openmaus.org-library", version: 1, libraryVersion: 1, organization: { id: ORG, name: "Beta Clinic" }, packages, ...extra });
+const catalogOf = (packages, extra = {}) => ({ format: "openind.org-library", version: 1, libraryVersion: 1, organization: { id: ORG, name: "Beta Clinic" }, packages, ...extra });
 const standard = (extra = {}) => catalogOf([
   entry(TEAM),
   entry(SKILLS, { ref: "acme/refund-skills", name: "Refund skills", kind: "library", release: release(skillBytes, { version: "2.0.0" }) }),
@@ -119,7 +119,7 @@ test("an entry with a control character, a non-string disguised as one or a bad 
 });
 
 test("a malformed envelope or another organization's catalog is refused whole", () => {
-  for (const value of [null, "{", Buffer.from([0xff, 0xfe]), [], catalogOf([], { format: "openmaus.library" }), catalogOf([], { version: 2 }), catalogOf([], { libraryVersion: -1 }),
+  for (const value of [null, "{", Buffer.from([0xff, 0xfe]), [], catalogOf([], { format: "openind.library" }), catalogOf([], { version: 2 }), catalogOf([], { libraryVersion: -1 }),
     catalogOf([], { organization: { id: ORG, name: "" } }), catalogOf([], { organization: { id: "not-a-uuid", name: "Beta" } }), catalogOf({}),
     catalogOf(Array.from({ length: 101 }, () => entry(TEAM)))]) assert.equal(parseOrgLibraryCatalog(value), null);
   assert.equal(parseOrgLibraryCatalog(standard(), { organizationId: PUBLISHER }), null, "a foreign organization's catalog");
@@ -137,9 +137,9 @@ test("capability, pointer, report entries and the runtime's state message parse 
   assert.deepEqual(entries, [{ packageId: TEAM, release: "1.3.0", sha256: "b".repeat(64), state: "installed" },
     { packageId: NEWER, release: "1.3.0", sha256: "b".repeat(64), state: "failed", edited: false, reason: "import_failed" }], "free text never leaves the desktop");
   assert.equal(parseLibraryReportEntries(Array.from({ length: 150 }, (_, index) => ({ ...good, packageId: `${String(index).padStart(8, "0")}-0000-4000-8000-000000000000` }))).length, 100);
-  assert.equal(parseLibraryStateMessage({ type: "openmausbot:managed-desktop-result" }), undefined, "another channel's message");
-  assert.equal(parseLibraryStateMessage({ type: "openmausbot:managed-library-state", digest: "nope", packages: [] }), null);
-  assert.deepEqual(parseLibraryStateMessage({ data: { type: "openmausbot:managed-library-state", digest: "c".repeat(64), packages: [good] } }).packages.length, 1);
+  assert.equal(parseLibraryStateMessage({ type: "openindbot:managed-desktop-result" }), undefined, "another channel's message");
+  assert.equal(parseLibraryStateMessage({ type: "openindbot:managed-library-state", digest: "nope", packages: [] }), null);
+  assert.deepEqual(parseLibraryStateMessage({ data: { type: "openindbot:managed-library-state", digest: "c".repeat(64), packages: [good] } }).packages.length, 1);
 });
 
 test("only the fixed library routes exist, each with its own cap", () => {
@@ -222,7 +222,7 @@ test("another organization's or a malformed catalog keeps the last good one, and
   const f = await fixture(t);
   await f.sync();
   const good = { record: structuredClone(f.record.value), file: await fs.readFile(path.join(f.dataDir, "catalog.json")) };
-  for (const bad of [catalogOf([entry(TEAM)], { organization: { id: PUBLISHER, name: "Acme Partners" }, libraryVersion: 2 }), { format: "openmaus.org-library", version: 1 }]) {
+  for (const bad of [catalogOf([entry(TEAM)], { organization: { id: PUBLISHER, name: "Acme Partners" }, libraryVersion: 2 }), { format: "openind.org-library", version: 1 }]) {
     const digest = f.setCatalog(bad);
     f.requests.length = 0;
     await f.sync({ version: 2, digest });
@@ -370,7 +370,7 @@ test("a restarted runtime gets the catalog again; one that did not acknowledge i
 test("install reports: 5 s debounce, only the newest snapshot, once per start, and retried on the next check after a failure", async t => {
   const f = await fixture(t);
   await f.sync();
-  const state = packages => ({ type: "openmausbot:managed-library-state", digest: f.digest(), packages });
+  const state = packages => ({ type: "openindbot:managed-library-state", digest: f.digest(), packages });
   const installed = (state = "installed", extra = {}) => ({ packageId: TEAM, release: "1.3.0", sha256: sha256Hex(teamBytes), state, ...extra });
   assert.equal(f.library.receive(state([installed("failed", { reason: "import_failed" })])), true);
   assert.equal(f.library.receive(state([installed()])), true);
@@ -404,7 +404,7 @@ test("the first report of an app start waits for a session sync, then goes once"
   await fs.writeFile(path.join(f.dataDir, "catalog.json"), first.catalogBytes);
   f.record.value = structuredClone(first.record.value);
   await f.library.restore(identity()); await f.library.idle();
-  f.library.receive({ type: "openmausbot:managed-library-state", digest: first.digest(), packages: [] });
+  f.library.receive({ type: "openindbot:managed-library-state", digest: first.digest(), packages: [] });
   await f.advance(5_000);
   assert.deepEqual(f.reports, [], "no report before a successful session sync");
   await f.sync(); await f.advance(5_000);
@@ -414,13 +414,13 @@ test("the first report of an app start waits for a session sync, then goes once"
 test("a snapshot for a catalog this desktop did not relay, or a malformed one, is never reported", async t => {
   const f = await fixture(t);
   await f.sync();
-  assert.equal(f.library.receive({ type: "openmausbot:managed-library-state", digest: "f".repeat(64), packages: [] }), true);
-  assert.equal(f.library.receive({ type: "openmausbot:managed-library-state", digest: f.digest(), packages: "all" }), true);
-  assert.equal(f.library.receive({ type: "openmausbot:managed-desktop-result", requestId: "x", ok: true }), false, "left for the relay");
+  assert.equal(f.library.receive({ type: "openindbot:managed-library-state", digest: "f".repeat(64), packages: [] }), true);
+  assert.equal(f.library.receive({ type: "openindbot:managed-library-state", digest: f.digest(), packages: "all" }), true);
+  assert.equal(f.library.receive({ type: "openindbot:managed-desktop-result", requestId: "x", ok: true }), false, "left for the relay");
   await f.advance(5_000);
   assert.deepEqual(f.reports, []);
   await f.library.clear(); await f.library.idle();
-  f.library.receive({ type: "openmausbot:managed-library-state", digest: f.digest(), packages: [] });
+  f.library.receive({ type: "openindbot:managed-library-state", digest: f.digest(), packages: [] });
   await f.advance(5_000);
   assert.deepEqual(f.reports, [], "never after sign-out");
 });
@@ -445,7 +445,7 @@ function desktop(t, { capability = 1, pointer = true, catalog = standard(), sess
   const f = { clock: Date.now(), order: [], requests: [], messages: [], catalogBytes: bytesOf(catalog), blobs: new Map([[sha256Hex(teamBytes), teamBytes], [sha256Hex(skillBytes), skillBytes]]), record: { value: saved }, revoked: false };
   const relay = createManagedDesktopRelay({ timeoutMs: 15_000 });
   // The fake runtime: acknowledges at once, as server/org-library.ts must, and records the message.
-  const proc = { postMessage: message => { f.messages.push(message); f.order.push(`relay ${message.library ? "catalog" : "null"}`); queueMicrotask(() => relay.receive(proc, { type: "openmausbot:managed-desktop-result", requestId: message.requestId, ok: true })); } };
+  const proc = { postMessage: message => { f.messages.push(message); f.order.push(`relay ${message.library ? "catalog" : "null"}`); queueMicrotask(() => relay.receive(proc, { type: "openindbot:managed-desktop-result", requestId: message.requestId, ok: true })); } };
   f.fetch = async (url, options) => {
     const route = url.slice(origin.length);
     f.requests.push({ route, options }); f.order.push(route);
@@ -461,7 +461,7 @@ function desktop(t, { capability = 1, pointer = true, catalog = standard(), sess
     if (route === "/api/desktop/library") return new Response(f.catalogBytes, { headers: { "content-type": "application/json" } });
     if (route === "/api/desktop/library/report") { f.reports = [...(f.reports ?? []), JSON.parse(options.body)]; return Response.json({ accepted: 1, ignored: 0 }); }
     const sha = /^\/api\/desktop\/library\/blobs\/([a-f0-9]{64})$/.exec(route)?.[1];
-    if (sha && f.blobs.has(sha)) return new Response(f.blobs.get(sha), { headers: { "x-openmaus-sha256": sha } });
+    if (sha && f.blobs.has(sha)) return new Response(f.blobs.get(sha), { headers: { "x-openind-sha256": sha } });
     if (sha) return Response.json({ error: "Not found." }, { status: 404 });
     throw new Error(`Unexpected fixture route ${route}`);
   };
@@ -495,11 +495,11 @@ test("end to end with the managed-desktop client: capability, pointer, catalog, 
     assert.equal(options.headers.authorization, `Bearer omd_${"a".repeat(43)}`, "the device token, never the model token");
     assert.equal(options.redirect, "error"); assert.equal(options.credentials, "omit");
   }
-  const sent = f.messages.filter(message => message.type === "openmausbot:managed-library");
+  const sent = f.messages.filter(message => message.type === "openindbot:managed-library");
   assert.equal(sent.length, 1);
   assert.equal(sent[0].library.digest, sha256Hex(f.catalogBytes));
   assert.equal(sent[0].library.catalog.packages.length, 4);
-  f.library.receive({ type: "openmausbot:managed-library-state", digest: sent[0].library.digest, packages: [{ packageId: TEAM, release: "1.3.0", sha256: sha256Hex(teamBytes), state: "installed" }] });
+  f.library.receive({ type: "openindbot:managed-library-state", digest: sent[0].library.digest, packages: [{ packageId: TEAM, release: "1.3.0", sha256: sha256Hex(teamBytes), state: "installed" }] });
   t.mock.timers.tick(5_000); await f.settle();
   assert.deepEqual(f.reports, [{ libraryVersion: 1, digest: sent[0].library.digest, appVersion: "0.1.90", packages: [{ packageId: TEAM, release: "1.3.0", sha256: sha256Hex(teamBytes), state: "installed" }] }]);
   const report = f.requests.find(request => request.route === "/api/desktop/library/report");
@@ -508,7 +508,7 @@ test("end to end with the managed-desktop client: capability, pointer, catalog, 
   f.revoked = true;
   await f.client.refresh(); await f.settle();
   assert.equal(f.client.state().status, "reauth-required");
-  assert.equal(f.messages.filter(message => message.type === "openmausbot:managed-library").at(-1).library, null);
+  assert.equal(f.messages.filter(message => message.type === "openindbot:managed-library").at(-1).library, null);
   assert.equal(f.libraryRecord.value, null);
   assert.equal(await exists(path.join(f.dataDir, "catalog.json")), false);
 });
@@ -536,7 +536,7 @@ test("a desktop that could not read the config at start learns the capability la
   f.clock += 10 * 60_000; t.mock.timers.tick(60_000); await f.settle();
   assert.equal(f.requests.filter(request => request.route === "/api/public/config").length, 3);
   assert.equal(f.requests.filter(request => request.route === "/api/desktop/library").length, 1);
-  assert.equal(f.messages.filter(message => message.type === "openmausbot:managed-library").length, 1);
+  assert.equal(f.messages.filter(message => message.type === "openindbot:managed-library").length, 1);
 });
 
 test("an Admin without the library capability never sees a library request, even with a pointer on the session", async t => {
@@ -546,14 +546,14 @@ test("an Admin without the library capability never sees a library request, even
   assert.equal(f.client.state().status, "connected");
   assert.deepEqual(f.requests.filter(request => request.route.startsWith("/api/desktop/library")), []);
   assert.equal(f.requests.filter(request => request.route === "/api/public/config").length, 1, "the config renew() reads once per start");
-  assert.deepEqual(f.messages.filter(message => message.type === "openmausbot:managed-library"), []);
+  assert.deepEqual(f.messages.filter(message => message.type === "openindbot:managed-library"), []);
 });
 
 test("sign-out tells the runtime library: null; no account means no library activity", async t => {
   const f = await desktop(t);
   await f.client.start(); await f.settle();
   await f.client.disconnect(); await f.settle();
-  assert.equal(f.messages.filter(message => message.type === "openmausbot:managed-library").at(-1).library, null);
+  assert.equal(f.messages.filter(message => message.type === "openindbot:managed-library").at(-1).library, null);
   const none = await desktop(t);
   none.record.value = null;
   await none.client.start(); await none.settle();

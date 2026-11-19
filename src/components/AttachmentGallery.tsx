@@ -185,7 +185,7 @@ async function readMessageVideo(
 ): Promise<Blob | string> {
   const response = await requestMessageFile(file.path, message, signal, { mediaLink: true });
   progress();
-  if (response.headers.get("x-openmausbot-media") === "1") return messageMediaLink(await response.json().catch(() => null), message, VIDEO_MIMES, t("attach.videoUnavailable"));
+  if (response.headers.get("x-openindbot-media") === "1") return messageMediaLink(await response.json().catch(() => null), message, VIDEO_MIMES, t("attach.videoUnavailable"));
   const mime = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (!mime || !VIDEO_MIMES.includes(mime)) {
     await response.body?.cancel();
@@ -357,7 +357,7 @@ async function readMessageAudio(
     return requestMessageFile(file.path, message, signal);
   });
   progress();
-  if (response.headers.get("x-openmausbot-media") === "1") return messageMediaLink(await response.json().catch(() => null), message, AUDIO_MIMES, t("attach.audioUnavailable"));
+  if (response.headers.get("x-openindbot-media") === "1") return messageMediaLink(await response.json().catch(() => null), message, AUDIO_MIMES, t("attach.audioUnavailable"));
   const mime = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
   if (!mime || !AUDIO_MIMES.includes(mime)) {
     await response.body?.cancel();

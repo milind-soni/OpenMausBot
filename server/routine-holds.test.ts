@@ -30,7 +30,7 @@ function harness(file?: string) {
     startTurn: async (_botId, threadId) => { started.push(threadId); },
   };
   const manager = new RoutineManager(options);
-  const hourly = (name: string, enabled = true) => manager.create({ name, prompt: `Do ${name}`, botId: "maus-1", enabled,
+  const hourly = (name: string, enabled = true) => manager.create({ name, prompt: `Do ${name}`, botId: "ind-1", enabled,
     schedule: { type: "interval", everyMinutes: 60, anchorAt: START + HOUR } });
   const routine = (id: string) => manager.listRoutines().find((candidate) => candidate.id === id)!;
   return { manager, file, started, emitted, hourly, routine, setNow: (at: number) => { now = at; }, now: () => now };
@@ -125,7 +125,7 @@ describe("routines pause while their owner has left, and come back by themselves
 
   it("never turns back on a room's routine whose room was deleted while it waited", () => {
     const h = harness();
-    const goal = h.manager.create({ name: "Weekly plan", prompt: "Plan the week", botId: "maus-1", target: "room-goal", groupId: "room-1",
+    const goal = h.manager.create({ name: "Weekly plan", prompt: "Plan the week", botId: "ind-1", target: "room-goal", groupId: "room-1",
       schedule: { type: "interval", everyMinutes: 60, anchorAt: START + HOUR } });
     h.manager.holdFor(["no_engine"]);
     h.manager.disableForGroup("room-1");
@@ -136,7 +136,7 @@ describe("routines pause while their owner has left, and come back by themselves
 
   it("leaves a one-time run whose time passed while it waited over, never late", () => {
     const h = harness();
-    const once = h.manager.create({ name: "Send the recap", prompt: "Send it", botId: "maus-1", schedule: { type: "once", at: START + HOUR } });
+    const once = h.manager.create({ name: "Send the recap", prompt: "Send it", botId: "ind-1", schedule: { type: "once", at: START + HOUR } });
     h.manager.holdFor(["no_engine"]);
     h.setNow(START + 3 * HOUR);
     h.manager.holdFor([]);

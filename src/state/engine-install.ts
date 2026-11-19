@@ -10,7 +10,7 @@ export interface EngineInstall {
   managed?: { label: string; downloadBytes: number };
   server?: { package?: string; standalone?: { version: string; downloadBytes: number } };
   settings?: "connections";
-  /** The CLI runs the copy OpenMausBot installed, which the person's terminal does not reach: set up in the app, not there. */
+  /** The CLI runs the copy OpenIndBot installed, which the person's terminal does not reach: set up in the app, not there. */
   appCopy?: boolean;
 }
 

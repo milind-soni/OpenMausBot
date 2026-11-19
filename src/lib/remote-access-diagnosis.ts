@@ -41,7 +41,7 @@ type Problem = { reason: string; next: string[] };
 type AccountProblem = NonNullable<CompanionAccountState["problem"]>;
 
 const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(?:-[0-9A-Za-z.]{1,32})?$/;
-const RELAY_NODE = /^(relay[1-9][0-9]?)\.openmausbot\.com$/;
+const RELAY_NODE = /^(relay[1-9][0-9]?)\.openindbot\.com$/;
 const ACCOUNT_PROBLEMS: ReadonlySet<string> = new Set<AccountProblem>(["unconfigured", "unreachable", "sign_in", "busy", "limit", "update", "address", "failed"]);
 const TOKEN_CODES: ReadonlySet<string> = new Set(["unavailable", "sign_in", "busy", "unreachable", "failed"]);
 const RELAY_PROBLEMS: ReadonlySet<string> = new Set(["no_answer", "token_refused", "busy", "unreachable", "replaced"]);

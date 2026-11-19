@@ -14,7 +14,7 @@ import { TRIAL_CREDIT_REFUSED, trialCreditEnds, trialCreditFailure, trialCreditR
 export const CLOUD_CREDIT_INSTANCE = "trial-credit";
 export type CloudCreditStatus = "active" | "used_up" | "ended";
 /** The chat engine reads its key from this, in its own environment only: never the workspace's OpenAI-compatible key. */
-const CREDIT_KEY_ENV = "OPENMAUSBOT_TRIAL_CREDIT_KEY";
+const CREDIT_KEY_ENV = "OPENINDBOT_TRIAL_CREDIT_KEY";
 /** OpenAI-compatible model ids, OpenRouter's provider/model[:variant] among them; an id only ever goes in a request body. */
 const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/;
 const MAX_MODELS = 20;

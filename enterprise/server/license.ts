@@ -1,7 +1,7 @@
 // License keys: signed entitlement claims.
 //
 // A key is `omb1.<claims>.<signature>`: base64url JSON claims, Ed25519-signed
-// by an OpenMausBot signing key. The public keys are baked in below, so one
+// by an OpenIndBot signing key. The public keys are baked in below, so one
 // build serves every customer — the key, not the code, decides the feature
 // set. Verification is offline; nothing phones home.
 import { createPrivateKey, createPublicKey, sign, verify, type JsonWebKeyInput } from "node:crypto";
@@ -41,7 +41,7 @@ export function verifyLicenseKey(
 ): LicenseClaims {
   const parts = key.trim().split(".");
   if (parts.length !== 3 || parts[0] !== PREFIX || !parts[1] || !parts[2]) {
-    throw new Error(`OMB_LICENSE_KEY is not an OpenMausBot license key (expected "${PREFIX}.<claims>.<signature>")`);
+    throw new Error(`OMB_LICENSE_KEY is not an OpenIndBot license key (expected "${PREFIX}.<claims>.<signature>")`);
   }
   const [, claimsPart, signaturePart] = parts;
   const signature = Buffer.from(signaturePart, "base64url");
@@ -51,7 +51,7 @@ export function verifyLicenseKey(
   );
   if (!trusted) {
     throw new Error(
-      "OMB_LICENSE_KEY signature does not match any OpenMausBot signing key: the key was altered, or it was issued for a different build",
+      "OMB_LICENSE_KEY signature does not match any OpenIndBot signing key: the key was altered, or it was issued for a different build",
     );
   }
   let parsed: unknown;

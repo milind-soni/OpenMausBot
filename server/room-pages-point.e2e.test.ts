@@ -15,7 +15,7 @@ afterAll(async () => {
 });
 
 it("sends a pick on a room page to the bot that made it, and to no other member", async () => {
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: fixture.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENINDBOT_URL: fixture.info.url } }) as Promise<any>;
   const api = async (path: string, body?: unknown) => {
     const response = await fetch(`${fixture.info.url}${path}`, {
       method: body === undefined ? "GET" : "POST", headers: { "content-type": "application/json" },

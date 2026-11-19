@@ -11,7 +11,7 @@ import { RoutineManager, type RoutineManagerOptions, type RoutineRun } from "./r
 
 const MINUTE = 60_000, HOUR = 60 * MINUTE;
 const START = Date.parse("2026-11-16T08:00:00Z");
-const NO_START = "Maus's cloud desktop didn't start. Change where this routine runs.";
+const NO_START = "Ind's cloud desktop didn't start. Change where this routine runs.";
 const dirs: string[] = [];
 
 function harness(start = START, file?: string) {
@@ -44,7 +44,7 @@ function harness(start = START, file?: string) {
   return h;
 }
 
-const every = (minutes: number, more: Record<string, unknown> = {}) => ({ name: "Fix new bugs", prompt: "Look for new bug reports and fix them", botId: "maus-1",
+const every = (minutes: number, more: Record<string, unknown> = {}) => ({ name: "Fix new bugs", prompt: "Look for new bug reports and fix them", botId: "ind-1",
   schedule: { type: "interval" as const, everyMinutes: minutes, anchorAt: START }, ...more });
 
 afterEach(() => {
@@ -140,8 +140,8 @@ describe("a routine whose runs fail", () => {
 });
 
 describe("routines an earlier version turned off after three cloud-computer start failures", () => {
-  const saved = (id: string, more: Record<string, unknown> = {}) => ({ id, ...every(60), target: "bot", runOn: "maus", durationMinutes: 30, enabled: false, nextRunAt: null, createdAt: START, updatedAt: START + 3 * HOUR + 50, ...more });
-  const failures = (routineId: string) => [1, 2, 3].map((hour): RoutineRun => ({ id: `${routineId}-${hour}`, routineId, routineName: "Fix new bugs", target: "bot", botId: "maus-1", runOn: "maus",
+  const saved = (id: string, more: Record<string, unknown> = {}) => ({ id, ...every(60), target: "bot", runOn: "ind", durationMinutes: 30, enabled: false, nextRunAt: null, createdAt: START, updatedAt: START + 3 * HOUR + 50, ...more });
+  const failures = (routineId: string) => [1, 2, 3].map((hour): RoutineRun => ({ id: `${routineId}-${hour}`, routineId, routineName: "Fix new bugs", target: "bot", botId: "ind-1", runOn: "ind",
     scheduledFor: START + hour * HOUR, status: "failed", manual: false, error: NO_START, createdAt: START + hour * HOUR, startedAt: START + hour * HOUR, finishedAt: START + hour * HOUR + 50 }));
 
   it("come back on at the next start, and only those: one a person paused, one changed since and one held stay as they are", () => {
@@ -158,7 +158,7 @@ describe("routines an earlier version turned off after three cloud-computer star
     expect(after["renamed-since"]).toMatchObject({ enabled: false, nextRunAt: null, updatedAt: START + 4 * HOUR });
     expect(after.held).toMatchObject({ enabled: false, heldFor: "no_connections", updatedAt: START + 3 * HOUR + 50 });
     expect(after.on).toMatchObject({ enabled: true, nextRunAt: START + 9 * HOUR });
-    expect(h.manager.takeTurnedBackOn().map((routine) => [routine.id, routine.botId, routine.name])).toEqual([["switched-off", "maus-1", "Fix new bugs"]]);
+    expect(h.manager.takeTurnedBackOn().map((routine) => [routine.id, routine.botId, routine.name])).toEqual([["switched-off", "ind-1", "Fix new bugs"]]);
     expect(h.manager.takeTurnedBackOn()).toEqual([]);
   });
 
@@ -317,10 +317,10 @@ describe("deliberate pauses still hold", () => {
 
   it("lets a bot the person paused drop its scheduled runs quietly", async () => {
     const h = harness();
-    h.options.pausedText = () => "Maus is paused, so it takes no new work."; h.options.held = () => true;
+    h.options.pausedText = () => "Ind is paused, so it takes no new work."; h.options.held = () => true;
     h.manager.create(every(60));
     await h.tickAt(START + HOUR);
-    expect(h.runs().map((run) => [run.status, run.error])).toEqual([["cancelled", "Maus is paused, so it takes no new work."]]);
+    expect(h.runs().map((run) => [run.status, run.error])).toEqual([["cancelled", "Ind is paused, so it takes no new work."]]);
     expect([h.started, h.failed]).toEqual([[], []]);
     expect(h.routine().enabled).toBe(true);
   });
@@ -393,7 +393,7 @@ describe("a run queued behind a busy bot", () => {
   it("keeps an event's run and a run started by hand waiting as long as it takes: nothing comes after them", async () => {
     const h = harness(); h.bot("busy");
     const routine = h.manager.create(every(24 * 60));
-    h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-1", runOn: "maus", deliveryId: "d1", receivedAt: START });
+    h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "ind-1", runOn: "ind", deliveryId: "d1", receivedAt: START });
     h.manager.runNow(routine.id);
     await h.tickAt(START + MINUTE);
     await h.passTo(START + 3 * HOUR);
@@ -612,7 +612,7 @@ describe("the default run limit", () => {
     const h = harness();
     const own = h.manager.create(every(24 * 60, { name: "Long build", timeoutMinutes: 1_440 }));
     expect(() => h.manager.update(own.id, { timeoutMinutes: 1_441 })).toThrow("from 5 to 1440 minutes");
-    h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "maus-2", runOn: "maus", deliveryId: "d1", receivedAt: START });
+    h.manager.enqueueWebhook({ webhookId: "hook", webhookName: "New lead", prompt: "Handle it", botId: "ind-2", runOn: "ind", deliveryId: "d1", receivedAt: START });
     await h.tickAt(START + MINUTE);
     h.manager.runNow(own.id);
     await h.tickAt(START + 2 * MINUTE);
@@ -659,7 +659,7 @@ describe("a turn that does not stop", () => {
   it("holds the scheduler ten seconds, then the other routines fire", async () => {
     const { h, warn } = hung();
     h.manager.create(every(240, { name: "Runs too long", timeoutMinutes: 30 }));
-    h.manager.create(every(270, { name: "Must still fire", botId: "maus-2" }));
+    h.manager.create(every(270, { name: "Must still fire", botId: "ind-2" }));
     vi.setSystemTime(START + 4 * HOUR); await h.manager.tick();
     expect(h.started).toEqual(["thread-1"]);
 

@@ -2,19 +2,19 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: superpowers:executing-plans. Each task is test-first (superpowers:test-driven-development). Omkar asked for one pass; this plan names files, interfaces and tests rather than listing full code.
 
-**Goal:** X research becomes an included service of paid OpenMausBot Cloud plans: an Admin relay with per-tier monthly allowances, tokens for Cloud homes and signed-in desktops, and no bring-your-own token.
+**Goal:** X research becomes an included service of paid OpenIndBot Cloud plans: an Admin relay with per-tier monthly allowances, tokens for Cloud homes and signed-in desktops, and no bring-your-own token.
 
 **Spec:** `docs/superpowers/specs/2026-10-09-x-research-pro-relay-design.md`
 
-**Worktrees:** app `/Users/omkar/Desktop/openmaus/OpenGrokBot-x-research` (branch `feat/x-research-pro`, from local main a5406ed2); Admin `/Users/omkar/Desktop/openmaus/openmaus-cloud-x-relay` (branch `feat/x-research-relay`, from origin/main 82f1386). Node 24. Nothing is pushed or deployed.
+**Worktrees:** app `/Users/omkar/Desktop/openind/OpenGrokBot-x-research` (branch `feat/x-research-pro`, from local main a5406ed2); Admin `/Users/omkar/Desktop/openind/openind-cloud-x-relay` (branch `feat/x-research-relay`, from origin/main 82f1386). Node 24. Nothing is pushed or deployed.
 
 ## Global Constraints
 
-- Admin rules (openmaus-cloud AGENTS.md): schema only through `migrate()`, additive and idempotent; no edits to applied migrations or `runtime/`; tests never make paid calls; expected errors are a status and a plain sentence; never log bodies, tokens or emails.
+- Admin rules (openind-cloud AGENTS.md): schema only through `migrate()`, additive and idempotent; no edits to applied migrations or `runtime/`; tests never make paid calls; expected errors are a status and a plain sentence; never log bodies, tokens or emails.
 - Relay endpoint allow-list is exactly the eight ids in the spec.
 - Allowances: personal 1,500, pro 5,000, max 15,000 per account per UTC month; unknown plan `OMB_CLOUD_X_CALLS_PER_MONTH` (default 1,500).
 - Token prefixes: home `omb_x_`, desktop `omb_xd_`. Env: `OMB_CLOUD_TREG_KEY` (Admin), `OMB_CLOUD_X_URL` + secret `OMB_CLOUD_X_TOKEN` (homes).
-- App parent-port message: `{ type: "openmausbot:included-x", access: { url, token } | null }`.
+- App parent-port message: `{ type: "openindbot:included-x", access: { url, token } | null }`.
 - The included token is never written to config.json, never reported to a client, never in an engine's environment.
 
 ## Review Focus
@@ -25,7 +25,7 @@
 4. Treg refusing our key must read as "temporarily unavailable" to the customer, never as their plan or token problem.
 5. Removing the person's token must not break loading an existing config.json that still contains `treg`.
 
-## Admin tasks (openmaus-cloud)
+## Admin tasks (openind-cloud)
 
 ### Task C1: Tier allowance `xCallsPerMonth`
 - Files: `server/cloud-plans.ts`, `tests/cloud-plans.test.ts` (or the existing tier tests).
@@ -54,7 +54,7 @@
 - `cloud-machines.ts` passes `accountAccess` from billing's entitlement; `main.ts` reads `OMB_CLOUD_TREG_KEY` and `OMB_CLOUD_X_CALLS_PER_MONTH` and adds them to the Fly requirement, startup lines and docs.
 - Tests: paid gets a token that the relay accepts; free gets 402; a second request replaces the first token; sign-out revokes; the route through the portal (native device path, no same-origin header needed).
 
-## App tasks (OpenMausBot)
+## App tasks (OpenIndBot)
 
 ### Task A1: Remove the person's treg token
 - Files:

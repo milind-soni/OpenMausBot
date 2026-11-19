@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
-vi.mock("./Avatar", () => ({ MausAvatar: () => createElement("i", { "data-our-mark": "" }) }));
+vi.mock("./Avatar", () => ({ IndAvatar: () => createElement("i", { "data-our-mark": "" }) }));
 
 import { setLocale } from "@/lib/i18n";
 import { GrokMovePopup, type GrokMovePopupAction } from "./GrokMovePopup";

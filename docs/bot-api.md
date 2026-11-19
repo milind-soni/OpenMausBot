@@ -68,7 +68,7 @@ saved memory and the thread itself, whoever writes there next:
 - It runs confined and in Ask, whatever the bot's own level, with none of its
   saved allowances. Nothing answers an approval for the caller.
 - It has no shell, computer, browser, phone, connected apps, MCP servers or data
-  tools, and none of OpenMausBot's own tools, so it can't start a thread, ask a
+  tools, and none of OpenIndBot's own tools, so it can't start a thread, ask a
   teammate, make a routine or webhook, change the bot, write its memory or search
   other conversations.
 - It works in the thread's own empty folder, and its words stay out of the person's

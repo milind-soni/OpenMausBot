@@ -4,7 +4,7 @@ import { Crown, Pencil } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { imeComposing } from "@/lib/send-key";
-import type { MausState } from "@/lib/mascot";
+import type { IndState } from "@/lib/mascot";
 import type { Bot } from "@/state/store";
 import { BOT_PROFILE_LIMITS } from "../../../shared/bot-profile";
 import { BotAvatar } from "../Avatar";
@@ -58,7 +58,7 @@ function useInlineEdit(save: (value: string) => void) {
 
 export function PanelHero({ bot, activeState, patch, editorOpen, onToggleEditor }: {
   bot: Bot;
-  activeState: MausState;
+  activeState: IndState;
   patch: (patch: BotPatch) => void;
   editorOpen: boolean;
   onToggleEditor: () => void;

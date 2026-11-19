@@ -1,4 +1,4 @@
-// OpenMausBot's own listening ports, which no bot's browser may reach, and one egress gate per running browser.
+// OpenIndBot's own listening ports, which no bot's browser may reach, and one egress gate per running browser.
 import { subscribe } from "node:diagnostics_channel";
 import type { Server } from "node:net";
 
@@ -54,7 +54,7 @@ function hearDesktopReports(): void {
   hearingReports = true;
   parentPort.on("message", ({ data }) => {
     const message = data as { type?: unknown; ports?: unknown } | undefined;
-    if (message?.type !== "openmausbot:own-listeners" || !Array.isArray(message.ports) || message.ports.length > 256) return;
+    if (message?.type !== "openindbot:own-listeners" || !Array.isArray(message.ports) || message.ports.length > 256) return;
     reportedPorts = new Set(message.ports.filter(validPort));
   });
 }
@@ -92,7 +92,7 @@ export interface EgressSetup {
   ownership?: ListenerOwnership;
   /** How a gate looks names up: the system's resolver unless a test passes one. */
   resolve?(host: string): Promise<ResolvedAddress[]>;
-  /** MausBot Cloud: the person's own computer while it lends its internet connection, which device is away, or that
+  /** IndBot Cloud: the person's own computer while it lends its internet connection, which device is away, or that
    * none of the person's computers shares it; null where this browser may not use a computer's connection. Only the
    * sites that turn away data centres (home-sites.ts) go through it. */
   device?(session: string): GateUpstream | { away: string } | { unshared: true } | null;
@@ -105,7 +105,7 @@ interface Blocked { target: string; reason: Refusal }
 export const awayNotice = (device: string) => `The person's ${device} is away, so sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection for now and may refuse. They open through the ${device} again once it is back.`;
 
 /** What the bot reads once when those sites load from My Cloud's own connection because no computer shares one. */
-export const UNSHARED_NOTICE = `Sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection and may refuse it with an error page or "too many requests". If one does and the person needs it, tell them these sites open through their own computer's internet connection while OpenMausBot is open on it, signed in to MausBot Cloud.`;
+export const UNSHARED_NOTICE = `Sites that turn away data centres, such as Instagram, YouTube and Google sign-in, load from My Cloud's own connection and may refuse it with an error page or "too many requests". If one does and the person needs it, tell them these sites open through their own computer's internet connection while OpenIndBot is open on it, signed in to IndBot Cloud.`;
 
 /** One gate per running browser session, so a Chrome keeps the port it launched with; released once that browser has
  * ended, and opened again on the same port where it is still free. */
@@ -127,12 +127,12 @@ export class BrowserEgress {
     };
   }
 
-  /** Why a destination is refused by its name alone on this host: Reddit, from MausBot Cloud. */
+  /** Why a destination is refused by its name alone on this host: Reddit, from IndBot Cloud. */
   nameRefusal(name: string): Refusal | null {
     return this.setup && refusesReddit(this.setup.host, name) ? "reddit" : null;
   }
 
-  /** What a browser tool call that would open Reddit from MausBot Cloud is told instead of running, or null. */
+  /** What a browser tool call that would open Reddit from IndBot Cloud is told instead of running, or null. */
   callRefusal(params: unknown): string | null {
     return this.setup && opensReddit(this.setup.host, params) ? REDDIT_REFUSAL : null;
   }
@@ -150,7 +150,7 @@ export class BrowserEgress {
     };
   }
 
-  /** The way out for one of `session`'s connections to a site that turns away data centres: on MausBot Cloud the
+  /** The way out for one of `session`'s connections to a site that turns away data centres: on IndBot Cloud the
    * person's computer while it lends its connection, else this server's own (when that computer is away, or none shares
    * its connection, the bot is told once). Every other site always goes this server's own way. */
   private through(session: string): GateUpstream | null {

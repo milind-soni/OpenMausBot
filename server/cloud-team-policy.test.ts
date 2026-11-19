@@ -32,8 +32,8 @@ function world(fetchImpl: (body: { loaded: { fingerprint: string } | null; probl
 }
 
 describe("the document", () => {
-  it("computes the fingerprint and signature exactly as openmaus-cloud's server/cloud-team-policy.ts does", () => {
-    // The same vectors are pinned in openmaus-cloud tests/cloud-team-policy.test.ts.
+  it("computes the fingerprint and signature exactly as openind-cloud's server/cloud-team-policy.ts does", () => {
+    // The same vectors are pinned in openind-cloud tests/cloud-team-policy.test.ts.
     expect(teamPolicyFingerprint({ schema: 1, limits: { remoteAccess: "off", allowedEngines: ["claudeAgent", "codex"] } })).toBe("8341e89f9d7fc734");
     expect(teamPolicyFingerprint({ limits: { allowedEngines: ["claudeAgent", "codex"], remoteAccess: "off" }, schema: 1 })).toBe("8341e89f9d7fc734");
     expect(teamPolicySignature("s".repeat(43), "cm-test-home", "1792670400", "nonce-nonce-nonce-1", '{"v":1,"loaded":null,"problem":null}')).toBe("ZNkIYIIuPldLp7gQ4cy7s1zQJpBiWkyP8DOyRtRz03w");

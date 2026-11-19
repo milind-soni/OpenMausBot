@@ -23,7 +23,7 @@ function dailyLogs(root: string): Array<{ path: string; text: string }> {
 
 it("carries a bot's recent 1:1 work into a room turn, tells the room, logs the turn, and carries the room back", async () => {
   const fixture = await launchVerificationServer();
-  const env = { OPENMAUSBOT_URL: fixture.info.url };
+  const env = { OPENINDBOT_URL: fixture.info.url };
   const api = async (method: string, path: string, body?: unknown) => {
     const response = await fetch(`${fixture.info.url}${path}`, {
       method, headers: { "content-type": "application/json" },

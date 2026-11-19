@@ -264,7 +264,7 @@ it.each(["explicit mention", "configured lead", "Auto fallback"])("preserves a p
       : { kind: "member", botId: bots[choice === "explicit mention" ? 1 : 0]!.id },
   });
   await api("POST", "/api/paused", { kind: "bot", id: bots[0]!.id, paused: true });
-  replyContent = 'Goal done.\n<openmaus-goal>{"status":"completed","detail":"Fixture goal done."}</openmaus-goal>';
+  replyContent = 'Goal done.\n<openind-goal>{"status":"completed","detail":"Fixture goal done."}</openind-goal>';
   try {
     const before = routingCalls;
     await api("POST", `/api/groups/${room.id}/messages`, {
@@ -288,7 +288,7 @@ it("still excludes a room-held member from goal coordination", async () => {
   const room = await newRoom();
   await api("PATCH", `/api/groups/${room.id}`, { defaultResponder: { kind: "member", botId: bots[0]!.id } });
   await api("POST", `/api/groups/${room.id}/holds`, { botId: bots[0]!.id, held: true });
-  replyContent = 'Goal done.\n<openmaus-goal>{"status":"completed","detail":"Fixture goal done."}</openmaus-goal>';
+  replyContent = 'Goal done.\n<openind-goal>{"status":"completed","detail":"Fixture goal done."}</openind-goal>';
   try {
     await api("POST", `/api/groups/${room.id}/messages`, { text: "@Atlas please finish this goal.", threadId: room.threadId, mode: "goal" });
     await expect.poll(async () => (await messages(room)).find((message) => message.kind === "goal.run")?.goalRun?.status, { timeout: 30_000 }).toBe("completed");

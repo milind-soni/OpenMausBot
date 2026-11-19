@@ -27,7 +27,7 @@ Keep the launcher running. In a second terminal, pass the exact `ui.json` path
 it printed to the asserted recipe:
 
 ```sh
-node --experimental-strip-types scripts/verify-command-allowlist-ui.ts /tmp/openmausbot-verify-data-XXXXXX/ui.json
+node --experimental-strip-types scripts/verify-command-allowlist-ui.ts /tmp/openindbot-verify-data-XXXXXX/ui.json
 ```
 
 The script uses the real app, accessible control names and the fixture's HTTP

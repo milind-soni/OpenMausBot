@@ -88,7 +88,7 @@ describe("serve --tailscale", () => {
     }
   });
 
-  it("checks first: HTTPS certificates on, and no other MausBot server already on this name; a serve that exits says why", async () => {
+  it("checks first: HTTPS certificates on, and no other IndBot server already on this name; a serve that exits says why", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-ts-"));
     try {
       const fake = fakeServe(null);
@@ -98,7 +98,7 @@ describe("serve --tailscale", () => {
       const refused = fakeServe(1, "Access denied: serve config denied");
       expect(await tailscaleServe(status, 8799, { dataDir: dir, settleMs: 500, spawnImpl: refused.spawnImpl })).toEqual({ failure: "needs-operator" });
       expect(existsSync(tailscaleMarker(dir))).toBe(false);
-      expect(explainTailscaleFailure("other-server")).toContain("different MausBot server");
+      expect(explainTailscaleFailure("other-server")).toContain("different IndBot server");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

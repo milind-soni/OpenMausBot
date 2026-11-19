@@ -32,7 +32,7 @@ export function cloudComputerAnswering(
   return lastAnsweredAt === null ? null : { state: "awake", lastAnsweredAt };
 }
 
-/** GET and POST /api/bots/:id/computer/recovery: what MausBot is doing about a bot's cloud computer that stopped answering,
+/** GET and POST /api/bots/:id/computer/recovery: what IndBot is doing about a bot's cloud computer that stopped answering,
  * whether it answers now, and the computer panel's Restart computer and Replace computer. Admin-only like every computer route. */
 export function createCloudComputerRecoveryRoutes(deps: CloudComputerRecoveryRouteDeps): RouteHandler {
   return async ({ req, res, path, method, json, readBody }) => {

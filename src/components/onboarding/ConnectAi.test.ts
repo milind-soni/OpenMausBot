@@ -20,7 +20,7 @@ vi.mock("@/state/store", () => ({
   useStore: () => ({ state: { instances: f.instances, config: f.config }, dispatch: f.dispatch }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn(), emailGateDone: () => false }));
-vi.mock("@/lib/brand", () => ({ brandStatus: () => ({ source: f.brand }), productName: () => "MausBot" }));
+vi.mock("@/lib/brand", () => ({ brandStatus: () => ({ source: f.brand }), productName: () => "IndBot" }));
 vi.mock("@/lib/app-links", async (original) => ({ ...await original<typeof import("@/lib/app-links")>(), openExternalLink: async (url: string) => { f.opened.push(url); } }));
 vi.mock("@/components/EngineSetup", async () => {
   const { createElement: h } = await import("react");
@@ -248,7 +248,7 @@ describe("connecting an AI on the first screen", () => {
 });
 
 describe("the ModelGo option", () => {
-  const URL_EXACT = "https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=app&campaign_id=openmausbot&ad_group_id=app";
+  const URL_EXACT = "https://modelgo.ai/?utm_source=openindbot&utm_medium=sponsorship&utm_content=app&campaign_id=openindbot&ad_group_id=app";
   const option = () => host.querySelector("[data-modelgo-option]");
   const events = () => vi.mocked(track).mock.calls.filter(([name]) => name === "modelgo_offer").map(([, props]) => props);
   const provider = (ready = false) => engine("modelgo", "modelgo", "ModelGo (API)", ready);

@@ -171,7 +171,7 @@ export function createPagePublisher(deps: {
       `Page id ${result.pageId}. This account now has ${usageWords(result.usage)}.`,
       "A card with the link, Copy link and Unpublish is in the chat. Publishing the same file or folder again updates this same link.",
       ...(live ? ["It is live: when a file in its folder changes, it is published again by itself (at most once a minute) and open copies reload."] : []),
-      ...(result.badge ? ["Free pages carry a small “Made with MausBot” badge."] : []),
+      ...(result.badge ? ["Free pages carry a small “Made with IndBot” badge."] : []),
       skippedNote(bundle.skipped),
     ];
     return { status: 200, text: lines.filter(Boolean).join("\n"), card };

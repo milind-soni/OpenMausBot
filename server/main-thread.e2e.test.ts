@@ -85,7 +85,7 @@ it("stamps askedAt where a person writes, never for a routine, a webhook, start_
     await replied(bot.id, routineThread, "Routine report.");
     expect(run.resultsThreadId).toBe(first);
 
-    const hook = await api("POST", "/api/webhooks", { name: "Build", prompt: "Handle the build event.", botId: bot.id, runOn: "maus" }, 201);
+    const hook = await api("POST", "/api/webhooks", { name: "Build", prompt: "Handle the build event.", botId: bot.id, runOn: "ind" }, 201);
     const delivered = await fetch(hook.credential.url, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     expect(delivered.status).toBe(202);
     const webhookThread = await finished((candidate) => candidate.webhookId === hook.webhook.id);

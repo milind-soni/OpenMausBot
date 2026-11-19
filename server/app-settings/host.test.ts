@@ -70,7 +70,7 @@ function fixture(options: { owner?: boolean; guest?: boolean; group?: boolean; w
     credentials: () => cfg,
     window: {
       read: (id) => windowValues.get(id),
-      write: (id, value) => { if (!windowValues.size) return "Open MausBot on this computer first."; windowValues.set(id, value); return null; },
+      write: (id, value) => { if (!windowValues.size) return "Open IndBot on this computer first."; windowValues.set(id, value); return null; },
     },
     engines: () => engines,
     addEngine: async (path, body) => {
@@ -229,7 +229,7 @@ describe("safe tier", () => {
     const closed = fixture({ window: false });
     const refused = await closed.set("appearance.skin", "midnight");
     expect(refused.status).toBe(409);
-    expect(refused.body.error).toContain("Open MausBot on this computer first");
+    expect(refused.body.error).toContain("Open IndBot on this computer first");
     const open = fixture();
     expect((await open.set("appearance.skin", "midnight")).status).toBe(200);
     expect(open.windowValues.get("appearance.skin")).toBe("midnight");
@@ -343,10 +343,10 @@ describe("owner-only tier", () => {
     const fx = fixture();
     fx.windowValues.set("remote.relay", false);
     const on = await fx.set("remote.relay", "true");
-    expect(on.body.text).toMatch(/^Done: Let your paired phones reach this computer from anywhere, through MausBot's relay\./);
+    expect(on.body.text).toMatch(/^Done: Let your paired phones reach this computer from anywhere, through IndBot's relay\./);
     expect(fx.windowValues.get("remote.relay")).toBe(true);
     const off = await fx.set("remote.relay", false);
-    expect(off).toMatchObject({ status: 409, body: { error: "Turning off Reach from anywhere is changed only by the person, in Settings → Phone & devices → How your phone reaches this computer → Anywhere, through MausBot (only in the desktop app, on this computer's own page). Tell them where in one line; do not try another way." } });
+    expect(off).toMatchObject({ status: 409, body: { error: "Turning off Reach from anywhere is changed only by the person, in Settings → Phone & devices → How your phone reaches this computer → Anywhere, through IndBot (only in the desktop app, on this computer's own page). Tell them where in one line; do not try another way." } });
     expect(fx.windowValues.get("remote.relay")).toBe(true);
     expect(await fx.undo()).toEqual({ claimed: true, state: "undone" });
     expect(fx.windowValues.get("remote.relay")).toBe(false);
@@ -423,7 +423,7 @@ describe("every other setting applies at once with Undo, Full access or not", ()
       (fx: ReturnType<typeof fixture>) => expect(fx.saved).toEqual([{ anthropic: { url: "https://proxy.example/v1" } }, { anthropic: { url: "https://api.anthropic.com" } }])],
     ["a library skill", "skills.library", { name: "notes", enabled: true }, "Turn on the library skill notes",
       (fx: ReturnType<typeof fixture>) => expect(fx.routeCalls).toEqual([{ route: "skills", method: "PATCH", path: "/api/skills-library/notes", body: { enabled: true } }, { route: "skills", method: "PATCH", path: "/api/skills-library/notes", body: { enabled: false } }])],
-    ["a window preference", "general.openAtLogin", true, "Open MausBot when you log in", (fx: ReturnType<typeof fixture>) => expect(fx.windowValues.get("general.openAtLogin")).toBe(false)],
+    ["a window preference", "general.openAtLogin", true, "Open IndBot when you log in", (fx: ReturnType<typeof fixture>) => expect(fx.windowValues.get("general.openAtLogin")).toBe(false)],
   ])("%s applies with no card to answer, and Undo puts it back", async (_kind, id, value, subtitle, check) => {
     const fx = fixture();
     fx.windowValues.set("general.openAtLogin", false);
@@ -482,7 +482,7 @@ describe("every other setting applies at once with Undo, Full access or not", ()
 
   it("a window preference is refused while no window is open, and nothing is posted", async () => {
     const fx = fixture({ window: false });
-    expect((await fx.set("general.openAtLogin", true)).body.error).toContain("Open MausBot on this computer first");
+    expect((await fx.set("general.openAtLogin", true)).body.error).toContain("Open IndBot on this computer first");
     expect(fx.cards()).toEqual([]);
     expect(fx.windowValues.size).toBe(0);
   });

@@ -75,7 +75,7 @@ function followedCloud(kept, state) {
 
 /**
  * Who the window opens. `journal`: one-home.json read back; `frozenCloud`: this computer's freeze marker when there is no
- * journal (its Cloud's origin, or true when it names none); `state`: the MausBot Cloud sign-in's state. An ended My Cloud
+ * journal (its Cloud's origin, or true when it names none); `state`: the IndBot Cloud sign-in's state. An ended My Cloud
  * sends home only a computer that moved to that Cloud; a freeze that names another Cloud of the signed-in person's own list
  * is theirs, and opens that Cloud.
  * @returns {{ kind: "computer" } | { kind: "cloud", origin: string } | { kind: "signin", other?: true }}
@@ -389,7 +389,7 @@ export function createHomeWindow(deps) {
     clearRetry();
   }
   const signInNeeded = () => ["reauth-required", "signed-out"].includes(state()?.status);
-  /** This device has no MausBot Cloud sign-in to pair a team with (homeOf's rule for My Cloud). */
+  /** This device has no IndBot Cloud sign-in to pair a team with (homeOf's rule for My Cloud). */
   const signedOut = () => { const current = state(); return !current?.account?.id || ["signed-out", "connecting"].includes(current.status); };
   /** The session's list's word for My Cloud (the account's primary Cloud), else null: an older Admin, or one it doesn't list. */
   const myListed = () => { const current = state(); return current?.status === "connected" && Array.isArray(current.clouds) ? current.clouds.find((cloud) => cloud.primary) ?? null : null; };
@@ -427,7 +427,7 @@ export function createHomeWindow(deps) {
   async function redeem(origin, grant) {
     try {
       const response = await cookieFetch(`${origin}/api/auth/pair`, { method: "POST", credentials: "include", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15_000),
-        headers: { "content-type": "application/json", origin }, body: JSON.stringify({ code: grant.code, cookie: true, label: "OpenMausBot app" }) });
+        headers: { "content-type": "application/json", origin }, body: JSON.stringify({ code: grant.code, cookie: true, label: "OpenIndBot app" }) });
       await response.body?.cancel?.().catch(() => {});
       return response.ok;
     } catch { return false; }
@@ -641,7 +641,7 @@ export function createHomeWindow(deps) {
 
   async function version(origin) {
     try {
-      const response = await cookieFetch(`${origin}/.well-known/openmausbot/environment`, { cache: "no-store", redirect: "error",
+      const response = await cookieFetch(`${origin}/.well-known/openindbot/environment`, { cache: "no-store", redirect: "error",
         signal: AbortSignal.timeout(LOOK_MS), headers: { accept: "application/json", ...BACKGROUND_HEADERS } });
       const body = response.ok ? await response.json() : null;
       return typeof body?.version === "string" ? body.version : null;
@@ -728,7 +728,7 @@ export function createHomeWindow(deps) {
     shown: () => shown,
     /** The person asked again (the screen's timer, back online, or the window focused). */
     retry: () => show(),
-    /** The screen's one button: this device's MausBot Cloud sign-in, again. A sign-in already open in the browser opens
+    /** The screen's one button: this device's IndBot Cloud sign-in, again. A sign-in already open in the browser opens
      * again; one with an account My Cloud isn't (`other`) ends first, so the browser can sign in another; one that is still
      * good only looks again. */
     async signIn() {
@@ -745,7 +745,7 @@ export function createHomeWindow(deps) {
       await client.begin();
     },
     repair,
-    /** The MausBot Cloud sign-in changed: a window that waits on it, a home that changed, or a team shown that the
+    /** The IndBot Cloud sign-in changed: a window that waits on it, a home that changed, or a team shown that the
      * session no longer lists (or lists at another address), shows again. */
     async changed() {
       const before = home;

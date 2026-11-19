@@ -16,7 +16,7 @@ import { lastNonReceipt } from "../src/lib/receipts.ts";
 import { openSse } from "./testing/sse.ts";
 
 const CALLS = 12;
-const NOTE = "[OpenMausBot: this exact call has failed the same way 5 times in a row: “Bash: git status”. Change approach, or stop and report what is blocking.]";
+const NOTE = "[OpenIndBot: this exact call has failed the same way 5 times in a row: “Bash: git status”. Change approach, or stop and report what is blocking.]";
 const STOPPED = "the same call failed the same way 10 times in a row: “Bash: git status” — the turn was stopped";
 /** What the command prints, every time. Never in anything the harness writes. */
 const OUTPUT = "fatal: not a git repository (or any of the parent directories): .git";

@@ -35,20 +35,20 @@ const io = () => {
 
 const base: FleetInput = {
   action: "list", admins: [], members: [], dryRun: false, yes: false, keepData: false,
-  node: "/usr/bin/node", script: "/usr/lib/node_modules/openmausbot/cli.js", root: "/",
+  node: "/usr/bin/node", script: "/usr/lib/node_modules/openindbot/cli.js", root: "/",
 };
-const registryFile = "/etc/openmausbot/fleet.json";
+const registryFile = "/etc/openindbot/fleet.json";
 const withRegistry = (workspaces = {}) => ({ [registryFile]: JSON.stringify({ ...emptyRegistry("agentada.cc"), workspaces }) });
 
-describe("openmausbot fleet", () => {
+describe("openindbot fleet", () => {
   it("updates only managed OpenRouter models and rejects missing, malformed or redirected config", async () => {
     const workspace: FleetWorkspace = { slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "running", createdAt: "" };
-    const path = "/var/lib/openmausbot/acme/.config/opencode/opencode.json";
-    const cfgPath = "/var/lib/openmausbot/acme/.openmausbot/config.json";
+    const path = "/var/lib/openindbot/acme/.config/opencode/opencode.json";
+    const cfgPath = "/var/lib/openindbot/acme/.openindbot/config.json";
     const config = { model: "my-own-default", provider: { unrelated: { models: { keep: {} } }, [MANAGED_OPENROUTER]: {
       npm: "@ai-sdk/openai-compatible", name: "Keep this name", options: { baseURL: "https://admin.example.test/api/gateway/acme/openrouter/v1", apiKey: "scoped-secret" }, models: { "old/model": { name: "Old" } },
     } } };
-    const initialFiles = { ...withRegistry({ acme: workspace }), [path]: JSON.stringify(config), [cfgPath]: '{"defaultModelSelection":{"instanceId":"claude","model":"keep"}}', "/etc/openmausbot/instances/acme.env": "OMB_ADMIN_URL=https://admin.example.test\nOMB_ADMIN_WORKSPACE=acme\n" };
+    const initialFiles = { ...withRegistry({ acme: workspace }), [path]: JSON.stringify(config), [cfgPath]: '{"defaultModelSelection":{"instanceId":"claude","model":"keep"}}', "/etc/openindbot/instances/acme.env": "OMB_ADMIN_URL=https://admin.example.test\nOMB_ADMIN_WORKSPACE=acme\n" };
     const m = machine({ root: true, files: initialFiles });
     const output = io();
     const input: FleetInput = { ...base, action: "providers", slug: "acme", openrouterModels: ["next/model", "next/model"] };
@@ -75,22 +75,22 @@ describe("openmausbot fleet", () => {
     const { io: log, out } = io();
     expect(await runFleetCommand({ ...base, action: "init", domain: "agentada.cc" }, log, deps)).toBe(0);
     expect(out[0]).toBe("not running as root; inspect this plan, then rerun the fleet command as root without --dry-run (with --yes where required):");
-    expect(out.join("\n")).toContain("cat > /etc/systemd/system/openmausbot@.service <<'OMB_EOF'");
-    expect(out.join("\n")).toContain("systemctl enable --now openmausbot-fence.service");
+    expect(out.join("\n")).toContain("cat > /etc/systemd/system/openindbot@.service <<'OMB_EOF'");
+    expect(out.join("\n")).toContain("systemctl enable --now openindbot-fence.service");
     expect(calls).toEqual([]);
 
     const rooted = machine({ root: true, files: withRegistry() });
     const dry = io();
     expect(await runFleetCommand({ ...base, action: "create", slug: "acme", admins: ["ada@example.test"], dryRun: true }, dry.io, rooted.deps)).toBe(0);
     expect(dry.out[0]).toBe("dry run; inspect this plan, then rerun the fleet command as root without --dry-run (with --yes where required):");
-    expect(dry.out.join("\n")).toContain("useradd --system --create-home --home-dir /var/lib/openmausbot/acme");
+    expect(dry.out.join("\n")).toContain("useradd --system --create-home --home-dir /var/lib/openindbot/acme");
     expect(rooted.calls).toEqual([]);
   });
 
   it("refuses an npx cache as the unit's script and asks for the domain", async () => {
     const { deps } = machine({ root: true });
     const bad = io();
-    expect(await runFleetCommand({ ...base, action: "init", domain: "agentada.cc", script: "/root/.npm/_npx/abc/node_modules/openmausbot/cli.js" }, bad.io, deps)).toBe(2);
+    expect(await runFleetCommand({ ...base, action: "init", domain: "agentada.cc", script: "/root/.npm/_npx/abc/node_modules/openindbot/cli.js" }, bad.io, deps)).toBe(2);
     expect(bad.err[0]).toMatch(/npx|permanently/);
     const missing = io();
     expect(await runFleetCommand({ ...base, action: "init" }, missing.io, deps)).toBe(2);
@@ -104,16 +104,16 @@ describe("openmausbot fleet", () => {
     expect(code).toBe(0);
     expect(calls.slice(0, 5)).toEqual([
       `write ${registryFile} 600`,
-      "run useradd --system --create-home --home-dir /var/lib/openmausbot/acme --shell /usr/sbin/nologin --user-group omb-acme",
+      "run useradd --system --create-home --home-dir /var/lib/openindbot/acme --shell /usr/sbin/nologin --user-group omb-acme",
       `write ${registryFile} 600`,
-      "mkdir /var/lib/openmausbot/acme/.openmausbot 700 as omb-acme",
-      "write /var/lib/openmausbot/acme/.openmausbot/config.json 600 as omb-acme",
+      "mkdir /var/lib/openindbot/acme/.openindbot 700 as omb-acme",
+      "write /var/lib/openindbot/acme/.openindbot/config.json 600 as omb-acme",
     ]);
-    expect(JSON.parse(files.get("/var/lib/openmausbot/acme/.openmausbot/config.json")!)).toEqual({
+    expect(JSON.parse(files.get("/var/lib/openindbot/acme/.openindbot/config.json")!)).toEqual({
       signIn: { admins: ["ada@example.test"], members: ["@acme.test"] }, anthropic: { key: "sk-ant-fixture" }, budgets: { monthlyUsd: 40 },
     });
-    expect(files.get("/var/lib/openmausbot/acme/.openmausbot/brand.json")).toBe('{"name":"Acme"}');
-    expect(files.get("/etc/openmausbot/instances/acme.env")).toContain("OMB_LICENSE_KEY=omb1.k");
+    expect(files.get("/var/lib/openindbot/acme/.openindbot/brand.json")).toBe('{"name":"Acme"}');
+    expect(files.get("/etc/openindbot/instances/acme.env")).toContain("OMB_LICENSE_KEY=omb1.k");
     expect(calls).toContain("health http://127.0.0.1:8810/api/health");
     expect(calls.at(-1)).toBe(`write ${registryFile} 600`);
     expect(JSON.parse(files.get(registryFile)!).workspaces.acme).toMatchObject({ port: 8810, host: "acme.agentada.cc" });
@@ -148,7 +148,7 @@ describe("openmausbot fleet", () => {
   });
 
   it("edits a workspace's sign-in list in place, owned by the workspace, and lists what runs", async () => {
-    const dataFile = "/var/lib/openmausbot/acme/.openmausbot/config.json";
+    const dataFile = "/var/lib/openindbot/acme/.openindbot/config.json";
     const ready = machine({ root: true, files: { ...withRegistry({ acme: { slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status: "running", createdAt: "" } }), [dataFile]: '{"signIn":{"admins":["ada@example.test"]}}' } });
     const added = io();
     expect(await runFleetCommand({ ...base, action: "users", slug: "acme", userAction: "add", email: "Bob@Acme.test", chatOnly: true }, added.io, ready.deps)).toBe(0);
@@ -168,19 +168,19 @@ describe("openmausbot fleet", () => {
       beta: { slug: "beta", host: "beta.agentada.cc", port: 8820, webhookPort: 8821, status: "suspended", createdAt: "" },
       old: { slug: "old", host: "old.agentada.cc", port: 8830, webhookPort: 8831, status: "retained", createdAt: "" },
     };
-    const prior = { ...emptyRegistry("agentada.cc"), operator: "maus", nextPort: 8840, workspaces };
+    const prior = { ...emptyRegistry("agentada.cc"), operator: "ind", nextPort: 8840, workspaces };
     const ready = machine({ root: true, files: { [registryFile]: JSON.stringify(prior) } });
     const result = io();
     expect(await runFleetCommand({ ...base, action: "init", domain: "fresh.example.test", yes: true }, result.io, ready.deps)).toBe(0);
     expect(JSON.parse(ready.files.get(registryFile)!)).toEqual({ ...prior, domain: "fresh.example.test" });
-    expect(ready.files.get("/etc/openmausbot/fence.nft")).toBe(fenceRules(Object.values(workspaces)));
-    expect(ready.files.get("/etc/systemd/system/openmausbot-fleet.service")).toContain("--group maus");
-    expect(ready.calls).toContain("run nft -f /etc/openmausbot/fence.nft");
+    expect(ready.files.get("/etc/openindbot/fence.nft")).toBe(fenceRules(Object.values(workspaces)));
+    expect(ready.files.get("/etc/systemd/system/openindbot-fleet.service")).toContain("--group ind");
+    expect(ready.calls).toContain("run nft -f /etc/openindbot/fence.nft");
     expect(await runFleetCommand({ ...base, action: "init", domain: "fresh.example.test", operator: "newadmin", yes: true }, io().io, ready.deps)).toBe(0);
     expect(JSON.parse(ready.files.get(registryFile)!).operator).toBe("newadmin");
   });
 
-  it.each(["/var/lib/openmausbot/acme", "/etc/openmausbot/instances/acme.env", "/etc/caddy/omb.d/acme.caddy", "/etc/systemd/system/openmausbot@acme.service.d"])("refuses residual customer path %s before taking action", async (path) => {
+  it.each(["/var/lib/openindbot/acme", "/etc/openindbot/instances/acme.env", "/etc/caddy/omb.d/acme.caddy", "/etc/systemd/system/openindbot@acme.service.d"])("refuses residual customer path %s before taking action", async (path) => {
     const ready = machine({ root: true, files: { ...withRegistry(), [path]: "retained data" } });
     const result = io();
     expect(await runFleetCommand({ ...base, action: "create", slug: "acme", admins: ["a@example.test"] }, result.io, ready.deps)).toBe(2);
@@ -201,7 +201,7 @@ describe("openmausbot fleet", () => {
   });
 
   it.each(["provisioning", "error", "retained"])("lists a %s reservation accurately and rejects duplicate creation before residual paths", async (status) => {
-    const ready = machine({ root: true, files: { ...withRegistry({ acme: { slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status, createdAt: "" } }), "/etc/openmausbot/instances/acme.env": "retained" } });
+    const ready = machine({ root: true, files: { ...withRegistry({ acme: { slug: "acme", host: "acme.agentada.cc", port: 8810, webhookPort: 8811, status, createdAt: "" } }), "/etc/openindbot/instances/acme.env": "retained" } });
     const listed = io();
     expect(await runFleetCommand(base, listed.io, ready.deps)).toBe(0);
     expect(listed.out[0]).toContain(status);

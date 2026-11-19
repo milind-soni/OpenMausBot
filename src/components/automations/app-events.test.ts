@@ -35,7 +35,7 @@ const catalog = {
   notConnected: [{ app: "slack", name: "Slack" }],
 };
 const acme: AppTrigger = {
-  id: "acme", name: "Acme replies", prompt: "Draft a reply.", botId: "bot-a", runOn: "maus", enabled: true, app: "gmail", appName: "Gmail",
+  id: "acme", name: "Acme replies", prompt: "Draft a reply.", botId: "bot-a", runOn: "ind", enabled: true, app: "gmail", appName: "Gmail",
   event: "GMAIL_NEW_GMAIL_MESSAGE", eventName: "New Gmail message", delivery: "poll", accountId: "ca_1", config: { query: "from:acme.com" },
   filter: { from: "acme.com" }, remote: { triggerId: "ti_1", state: "active" }, received: 1, filtered: 0, createdAt: now, updatedAt: now,
   skipped: { day: new Date().toISOString().slice(0, 10), dailyLimit: 12, queueFull: 0, expired: 0, tooMany: 0 },

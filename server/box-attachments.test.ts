@@ -68,7 +68,7 @@ describe("attachmentsForBox", () => {
       `<attached-file path="${join(root, "elsewhere.md")}" name="e.md" />`,
       `<attached-file path="${uploads}/../secret.md" name="s.md" />`,
       `<attached-file path="${join(uploads, "missing.md")}" name="m.md" />`,
-      `<attached-file path="${join(uploads, ".openmaus-upload-x.partial")}" name="p" />`,
+      `<attached-file path="${join(uploads, ".openind-upload-x.partial")}" name="p" />`,
     ].join("\n");
     expect(run(text)).toBe(text);
   });

@@ -5,7 +5,7 @@
 // rotation, sign-out). Nothing else of the account crosses. Without a hosted sign-in the message says `access: null`.
 import { COMPANION_INSTALLATION_CREDENTIAL_FIELD, companionAccountCleanupPending } from "./companion-account-service.mjs";
 
-export const PHONE_PUSH_ACCESS_MESSAGE = "openmausbot:phone-push-access";
+export const PHONE_PUSH_ACCESS_MESSAGE = "openindbot:phone-push-access";
 const INSTALLATION_CREDENTIAL = /^omb_install_[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}$/;
 
 /** The message for the server, from the credential document and the control plane's origin ("" when hosted access is

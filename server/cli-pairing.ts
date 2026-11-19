@@ -1,4 +1,4 @@
-// What `openmausbot serve` and `openmausbot pair` print for a pairing code. A browser on this computer is no longer the
+// What `openindbot serve` and `openindbot pair` print for a pairing code. A browser on this computer is no longer the
 // owner just by being here, so it signs in once with the link printed for it.
 import qrcode from "qrcode-terminal";
 
@@ -9,7 +9,7 @@ import type { PhoneRelayStatus } from "./phone-relay.ts";
 export function desktopOwnedRefusal(status: number, body: unknown): string | null {
   const error = (body as { error?: unknown } | null)?.error;
   if (status !== 403 || typeof error !== "string" || !error.includes("must come from the desktop app")) return null;
-  return "The OpenMausBot desktop app runs this server, so it only pairs devices from the app itself: open OpenMausBot on this computer and use Settings → Phone & devices.";
+  return "The OpenIndBot desktop app runs this server, so it only pairs devices from the app itself: open OpenIndBot on this computer and use Settings → Phone & devices.";
 }
 
 /** A clock time a code works until: "11:22", or "tomorrow 11:22" / a date when it runs past today. */
@@ -51,7 +51,7 @@ export function pairingBlock(input: {
   lines.push(`Link           ${input.link}`);
   lines.push("");
   lines.push("  Desktop app   ＋ → Connect to a server, paste the link");
-  lines.push(scanInvite ? "  Phone         scan this with the MausBot app" : "  Phone         scan with your camera or the MausBot app");
+  lines.push(scanInvite ? "  Phone         scan this with the IndBot app" : "  Phone         scan with your camera or the IndBot app");
   lines.push("");
   lines.push(qrToString(scanInvite ? input.inviteUrl! : input.link));
   if (!input.chatOnly) lines.push(`For a phone (chat and approvals only)   ${input.prefix} pair --phone`);
@@ -91,17 +91,17 @@ const isStatus = (value: unknown): value is PhoneRelayStatus =>
   typeof value === "object" && value !== null && typeof (value as PhoneRelayStatus).grant === "string" && typeof (value as PhoneRelayStatus).relay === "string";
 
 /** Until the control plane tells a server from a desktop, a machine that takes a relay token gives back its tunnel. */
-export const RELAY_NOT_WITH_TUNNEL = "--relay cannot be used on a machine whose saved choice is a tunnel address: a relay token would make the tunnel go for good. Start with --local, or use the relay on a machine signed in with `openmausbot login --relay`.";
+export const RELAY_NOT_WITH_TUNNEL = "--relay cannot be used on a machine whose saved choice is a tunnel address: a relay token would make the tunnel go for good. Start with --local, or use the relay on a machine signed in with `openindbot login --relay`.";
 
 /** Why phones cannot pair through the relay yet, in words for the person at the terminal; empty when they can. */
 export function relayProblemLines(status: PhoneRelayStatus | null, prefix: string): string[] {
-  if (!status) return [`MausBot Relay is off on this server. Start it with: ${prefix} serve --relay`];
-  if (status.grant === "tunnel") return [`MausBot Relay stays off here: ${status.reason ?? "this machine holds a tunnel address"}. A relay token would make that tunnel go for good; use the relay on a machine signed in with ${prefix} login --relay.`];
-  if (status.grant === "signed-out") return [`MausBot Relay needs this machine signed in to a MausBot account: ${prefix} login --relay (then leave the server running; it connects within a minute).`];
-  if (status.grant === "unavailable") return ["MausBot Relay is not available for this machine right now. The server keeps working here; it asks again every half hour."];
-  if (status.grant === "failed") return ["The MausBot account service did not answer. The server keeps working here and keeps trying."];
-  if (status.grant === "waiting") return ["Still asking the MausBot account service for a relay pass…"];
-  if (status.relay !== "connected") return ["Can't reach MausBot Relay yet. The server keeps working here and keeps trying; phones pair once it connects."];
+  if (!status) return [`IndBot Relay is off on this server. Start it with: ${prefix} serve --relay`];
+  if (status.grant === "tunnel") return [`IndBot Relay stays off here: ${status.reason ?? "this machine holds a tunnel address"}. A relay token would make that tunnel go for good; use the relay on a machine signed in with ${prefix} login --relay.`];
+  if (status.grant === "signed-out") return [`IndBot Relay needs this machine signed in to a IndBot account: ${prefix} login --relay (then leave the server running; it connects within a minute).`];
+  if (status.grant === "unavailable") return ["IndBot Relay is not available for this machine right now. The server keeps working here; it asks again every half hour."];
+  if (status.grant === "failed") return ["The IndBot account service did not answer. The server keeps working here and keeps trying."];
+  if (status.grant === "waiting") return ["Still asking the IndBot account service for a relay pass…"];
+  if (status.relay !== "connected") return ["Can't reach IndBot Relay yet. The server keeps working here and keeps trying; phones pair once it connects."];
   return [];
 }
 
@@ -111,7 +111,7 @@ export function relayPairingBlock(body: Record<string, unknown>, chatOnly: boole
   if (!chatOnly || !isStatus(body.relay) || !invite || typeof body.expiresAt !== "number") return null;
   const lines = [
     `Phone pairing   works once, until ${untilText(body.expiresAt, now)} · chat and approvals`,
-    "  Scan with the MausBot app. It connects through MausBot Relay, end-to-end encrypted: no address, open port or VPN needed.",
+    "  Scan with the IndBot app. It connects through IndBot Relay, end-to-end encrypted: no address, open port or VPN needed.",
     "",
     qrToString(invite),
     ...relayProblemLines(body.relay, prefix),

@@ -1,4 +1,4 @@
-// What the Published apps page lists and deletes: the pages this server published to a MausBot link, the sites bots
+// What the Published apps page lists and deletes: the pages this server published to a IndBot link, the sites bots
 // published to the person's own Netlify account, and the apps on the hosting the Cloud plan includes.
 //
 // Security: everything here answers for one viewer. An app is theirs to see only through a bot they can see and, where

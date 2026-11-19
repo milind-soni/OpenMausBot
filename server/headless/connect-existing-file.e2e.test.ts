@@ -19,7 +19,7 @@ afterAll(async () => {
 async function api(path: string, body?: unknown) {
   const response = await fetch(fixture.info.url + path, {
     method: body === undefined ? "GET" : "POST",
-    headers: { "content-type": "application/json", "x-openmausbot-cli": "1", origin: fixture.info.url },
+    headers: { "content-type": "application/json", "x-openindbot-cli": "1", origin: fixture.info.url },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   expect(response.ok).toBe(true);

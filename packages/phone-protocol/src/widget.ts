@@ -483,7 +483,7 @@ const SPECS: Record<string, NodeSpec> = {
   Button: { props: { label: line(WIDGET_LIMITS.label), iconStart: icon(), iconEnd: icon(), block: on, disabled: on, submit: on, onClickAction: action } },
   Select: { props: { ...FIELD, options, placeholder: PLACEHOLDER, defaultValue: text(200), clearable: on, block: on } },
   DatePicker: { props: { ...FIELD, placeholder: PLACEHOLDER, defaultValue: isoDate, min: isoDate, max: isoDate, clearable: on, block: on } },
-  // MausBot additions: a time of day, and days of the week
+  // IndBot additions: a time of day, and days of the week
   TimePicker: { props: { ...FIELD, placeholder: PLACEHOLDER, defaultValue: timeOfDay, min: timeOfDay, max: timeOfDay, step: integer(1, 60), clearable: on, block: on } },
   DayPicker: { props: { ...FIELD, defaultValue: weekdaysReader } },
   Checkbox: { props: { ...FIELD, defaultChecked: on } },

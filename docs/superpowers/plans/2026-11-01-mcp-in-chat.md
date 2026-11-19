@@ -10,16 +10,16 @@ A new internal route factory (`createInternalMcpRoutes`) behind the bot capabili
 cards. One `mcp_server` tool replaces `add_mcp_server`. Approval cards reuse the generic option card. The sign-in card
 reuses the connector card with `source: "mcp"`, so every existing client can draw it.
 
-**Tech Stack:** TypeScript (Node server, React/Electron desktop), vitest, zod; Swift (iOS) and Kotlin (Android) in mausbot-mobile.
+**Tech Stack:** TypeScript (Node server, React/Electron desktop), vitest, zod; Swift (iOS) and Kotlin (Android) in indbot-mobile.
 
 **Spec:** `docs/superpowers/specs/2026-11-01-mcp-in-chat-design.md`. Read it before any task. Its tables ("The bot
 tool", "What a bot may touch", "Error handling") are the requirements.
 
 ## Global Constraints
 
-- Work only in `/Users/omkar/Desktop/openmaus/OpenGrokBot-mcp-in-chat` (branch `feat/mcp-in-chat`). Never touch the
+- Work only in `/Users/omkar/Desktop/openind/OpenGrokBot-mcp-in-chat` (branch `feat/mcp-in-chat`). Never touch the
   `OpenGrokBot/` checkout.
-- Phone work goes only in a mausbot-mobile worktree, never in OpenMausBot.
+- Phone work goes only in a indbot-mobile worktree, never in OpenIndBot.
 - Never push and never open a PR. Commit locally only.
 - Run tests with `pnpm vitest run <files>`, typecheck with `pnpm typecheck`, lint with `pnpm lint`.
 - Regenerate catalog goldens with `UPDATE_AGENTS_CATALOG_GOLDENS=1 pnpm vitest run server/drivers/agents-catalog-wire.test.ts server/drivers/agents-bridge-wire.test.ts`.
@@ -272,7 +272,7 @@ tool", "What a bot may touch", "Error handling") are the requirements.
   - The MCP card is `kind: "connector"` with
     `connector: { source: "mcp", slug: <server name>, label: <readable name>, description, status: "required", resumeKey }`.
   - `description` follows the spec: "Kiwi added Linear's MCP server (mcp.linear.app). Sign in so Kiwi can use it."
-  - The fallback `text` names the server and says "Open this conversation in OpenMausBot to sign in". It never
+  - The fallback `text` names the server and says "Open this conversation in OpenIndBot to sign in". It never
     includes the URL.
   - `authorize` returns `{ url }` and refuses with 409 plus these exact sentences:
     - Companion phone on a home with no public https origin: "Open this chat on your Mac to sign in to Linear."
@@ -320,9 +320,9 @@ tool", "What a bot may touch", "Error handling") are the requirements.
   - A bot removes a server.
   - Capture screenshots for the report.
 
-### Task 7: Phone polish (mausbot-mobile, own worktree and branch)
+### Task 7: Phone polish (indbot-mobile, own worktree and branch)
 
-**Files (mausbot-mobile `origin/main` worktree, branch `feat/mcp-sign-in-card`):**
+**Files (indbot-mobile `origin/main` worktree, branch `feat/mcp-sign-in-card`):**
 - iOS:
   - Modify `ios/Sources/CompanionCore/ConnectorRequest.swift` (decode `source`)
   - Modify `ios/App/Cards/ConnectorRequestCardView.swift` (MCP title and button, refusal text)

@@ -64,7 +64,7 @@ describe("transcript pages on bot and room frames", () => {
 
   beforeAll(async () => {
     home = mkdtempSync(join(tmpdir(), "omb-thread-page-frames-"));
-    const data = join(home, ".openmausbot");
+    const data = join(home, ".openindbot");
     mkdirSync(data, { recursive: true });
     // one deliberately unknown driver: no engine CLI runs, nothing answers
     writeFileSync(join(data, "config.json"), JSON.stringify({
@@ -166,7 +166,7 @@ describe("transcript pages on bot and room frames", () => {
     let imported: any;
     const frames = await framesDuring(async () => {
       const reply = await api("POST", "/api/teams/import?mode=project", {
-        format: "openmaus.team", version: 2, team: { name: "Imported", members: [
+        format: "openind.team", version: 2, team: { name: "Imported", members: [
           { key: "first", name: "Imported One", appearance: { color: "purple" } },
           { key: "second", name: "Imported Two", appearance: { color: "blue" } },
         ] },

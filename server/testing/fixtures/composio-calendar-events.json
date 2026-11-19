@@ -1,7 +1,7 @@
 {
   "items": [
     {
-      "id": "demo-1", "status": "confirmed", "summary": "Supamaus demo with Jake",
+      "id": "demo-1", "status": "confirmed", "summary": "Supaind demo with Jake",
       "start": { "dateTime": "2026-10-17T17:00:00.000Z" }, "end": { "dateTime": "2026-10-17T17:30:00.000Z" },
       "hangoutLink": "https://meet.google.com/abc-defg-hij",
       "description": "Walk Pin through the bot dashboard.",

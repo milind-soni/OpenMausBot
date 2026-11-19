@@ -20,7 +20,7 @@ type Listing = "bot" | "person";
 const ROW = "flex w-full min-w-0 items-center gap-3 px-3 py-2 text-start";
 const LIST = "flex flex-col divide-y divide-hairline/30 overflow-hidden rounded-xl border border-hairline/40 bg-card";
 
-/** The team's bots a person shares: each person's own MausBot is theirs alone and stays out. */
+/** The team's bots a person shares: each person's own IndBot is theirs alone and stays out. */
 export const sharedBots = (bots: readonly Bot[]): Bot[] =>
   bots.filter((bot) => !bot.hidden && !bot.defaultBot?.person).sort((a, b) => a.name.localeCompare(b.name));
 

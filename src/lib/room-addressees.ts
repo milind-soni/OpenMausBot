@@ -1,10 +1,10 @@
 import { blankCode } from "../../shared/skill-command";
-import type { MausColor } from "./mascot";
+import type { IndColor } from "./mascot";
 import { mentionRanges, type MentionPeer } from "./mentions";
 import { replyAuthor } from "./replies";
 import type { Bot, Message } from "@/state/store";
 
-export type RoomAddressee = { key: string; name: string; color?: MausColor };
+export type RoomAddressee = { key: string; name: string; color?: IndColor };
 
 /** Who a bot's room message speaks to: the author of the message it replies to, then the room bots it @mentions.
  * The sender itself is never listed. A tag a teammate takes (a tie with a bot's name is the teammate's, as the server

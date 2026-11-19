@@ -39,7 +39,7 @@ header{padding:28px 32px;font-size:30px;font-weight:700}main{padding:0 32px}li{m
 const tries = {
   bridge: () => typeof window.ogb,
   parentBridge: () => typeof parent.ogb,
-  mausbot: () => typeof window.mausbot,
+  indbot: () => typeof window.indbot,
   parentDocument: () => parent.document.title,
   parentStorage: () => parent.localStorage.length,
   topAddress: () => top.location.href,
@@ -176,7 +176,7 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
       .toEqual([bakery.url, "allow-scripts allow-same-origin allow-forms allow-popups", "no-referrer"]);
     await until(() => shows("probe referrer: none"), "the framed site to report its probes");
     const probes = [...new Set(JSON.stringify(await ui("snapshot")).match(/probe \w+: [\w ]+/g))].sort();
-    expect(probes).toEqual(["probe bridge: undefined", "probe mausbot: undefined", "probe navigateTop: blocked", "probe ownStorage: works", "probe parentBridge: blocked", "probe parentDocument: blocked",
+    expect(probes).toEqual(["probe bridge: undefined", "probe indbot: undefined", "probe navigateTop: blocked", "probe ownStorage: works", "probe parentBridge: blocked", "probe parentDocument: blocked",
       "probe parentStorage: blocked", "probe referrer: none", "probe topAddress: blocked"]);
     expect(await evaluate("location.href")).toContain("127.0.0.1");
     await shot("preview-desktop");

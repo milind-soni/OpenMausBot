@@ -147,13 +147,13 @@ export async function startRig(relayUrl: (signingPublicKey: Buffer) => Promise<s
   const control = async (method: string, path: string, body?: unknown): Promise<State> => {
     const res = await fetch(`http://127.0.0.1:${controlPort}${path}`, {
       method,
-      headers: { "x-openmausbot-control-token": controlToken, ...(body ? { "content-type": "application/json" } : {}) },
+      headers: { "x-openindbot-control-token": controlToken, ...(body ? { "content-type": "application/json" } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) throw new Error(`${method} ${path}: ${res.status} ${await res.text()}`);
     return (await res.json()) as State;
   };
-  await control("PUT", "/e2e/relay", { hostId: hid, nodes: ["relay1.openmausbot.com"], relayToken: relayToken() });
+  await control("PUT", "/e2e/relay", { hostId: hid, nodes: ["relay1.openindbot.com"], relayToken: relayToken() });
   await waitFor(async () => (await control("GET", "/state")).e2e.relay === "connected", 10_000);
   const transportKey = (state: State) => fromB64u(state.e2e.descriptor!.k)!;
   return {

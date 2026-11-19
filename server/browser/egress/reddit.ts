@@ -1,5 +1,5 @@
 // Reddit blocks automated browsing from data-centre addresses and bans the accounts behind it, and its rules name AI
-// agents, so a browser that runs in the cloud never opens it: a MausBot Cloud home's, and a cloud computer's. The
+// agents, so a browser that runs in the cloud never opens it: a IndBot Cloud home's, and a cloud computer's. The
 // desktop's browser uses the person's own connection and a self-hosted server's its admin's, so neither is limited.
 import type { EgressHost } from "./policy.ts";
 
@@ -25,7 +25,7 @@ export function isRedditAddress(raw: string): boolean {
   }
 }
 
-/** Only a MausBot Cloud home's browsers connect from a data centre. */
+/** Only a IndBot Cloud home's browsers connect from a data centre. */
 const inCloud = (host: EgressHost) => host === "cloud";
 
 /** Whether a browser on `host` refuses to connect to `name`. */

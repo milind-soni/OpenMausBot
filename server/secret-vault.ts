@@ -1,6 +1,6 @@
 // How a bot is handed a secret from a card or the Vault without seeing it.
 // Security: a `ref` value stays in this process's memory, behind a one-use reference bound to the asking bot and
-// conversation that only OpenMausBot's own tools accept. A `file` value goes to an owner-only file in a private folder
+// conversation that only OpenIndBot's own tools accept. A `file` value goes to an owner-only file in a private folder
 // of that bot's own workspace (or the Local VM workspace its turn runs in); nothing that syncs, backs up, moves, links,
 // attaches, publishes or uploads workspace files carries that folder (inSecretFolder). Neither value is ever logged,
 // and while either lives, held-secret redaction masks it in transcripts, events and logs.
@@ -69,12 +69,12 @@ function refText(ref: string, reason: "unknown" | "used" | "expired" | "owner"):
     case "owner":
       return `${ref} was given to another bot or conversation. Ask the person here with request_credential.`;
     default:
-      return `${ref} is not a secretRef OpenMausBot holds: it is mistyped, or OpenMausBot restarted before it was used. Ask again with request_credential.`;
+      return `${ref} is not a secretRef OpenIndBot holds: it is mistyped, or OpenIndBot restarted before it was used. Ask again with request_credential.`;
   }
 }
 
 export const NOT_A_REF_TEXT =
-  "That is a secret file for your own commands, not a secretRef: it is deleted after 24 hours, and OpenMausBot's tools take only a secretRef. Ask again with request_credential and delivery ref.";
+  "That is a secret file for your own commands, not a secretRef: it is deleted after 24 hours, and OpenIndBot's tools take only a secretRef. Ask again with request_credential and delivery ref.";
 
 export class SecretVault {
   private readonly refs = new Map<string, RefEntry>();
@@ -108,7 +108,7 @@ export class SecretVault {
     return ref;
   }
 
-  /** Writes the card's value to `<home>/.openmausbot-secrets/<thread>/<card>` (0600, in 0700 folders); returns its path
+  /** Writes the card's value to `<home>/.openindbot-secrets/<thread>/<card>` (0600, in 0700 folders); returns its path
    * as the bot's commands see it. */
   saveFile(owner: SecretOwner, messageId: string, value: string, home: SecretFileHome): string {
     const saved = this.writeFile(owner, messageId, value, home);
@@ -116,7 +116,7 @@ export class SecretVault {
     return saved.file;
   }
 
-  /** Writes a Vault item's value to `<home>/.openmausbot-secrets/<thread>/vault-<item>`, replacing that conversation's
+  /** Writes a Vault item's value to `<home>/.openindbot-secrets/<thread>/vault-<item>`, replacing that conversation's
    * earlier copy, for another 24 hours. */
   mintFile(owner: SecretOwner, itemId: string, value: string, home: SecretFileHome): string {
     const name = `vault-${itemId}`;

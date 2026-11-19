@@ -146,7 +146,7 @@ describe("parseWidgetInput", () => {
 describe("widgetToText", () => {
   it("reads as a list", () => {
     expect(widgetToText(sample("pullRequests"))).toBe([
-      "**Pull requests** · mausbot-mobile · 3 open",
+      "**Pull requests** · indbot-mobile · 3 open",
       "- iOS: mid-turn steer · #750 · 4 files · passed 2h ago · Ready",
       "- Android: thread pin parity · #739 · 2 files · passed 5h ago · Ready",
       "- iOS: file links, send, attach · #719 · 9 files · 1 test failing · Failing",
@@ -159,7 +159,7 @@ describe("widgetToText", () => {
     expect(widgetToText(sample("routineForm"))).toContain("[ ] Stop if any check is red");
     expect(widgetToText(sample("spendTable"))).toContain("Bot | Runs | Cost\nScout | 38 | $21.40");
     expect(widgetToText(sample("tokenChart"))).toContain("[chart: Opus, Sonnet]");
-    expect(widgetToText(sample("buildStatus")).split("\n").slice(0, 3)).toEqual(["Uploading", "**Build 25 to TestFlight** · OpenMausMobile 1.4.0 (25)", "about 40s left 62%"]);
+    expect(widgetToText(sample("buildStatus")).split("\n").slice(0, 3)).toEqual(["Uploading", "**Build 25 to TestFlight** · OpenIndMobile 1.4.0 (25)", "about 40s left 62%"]);
   });
 
   it("stays under its limit", () => {

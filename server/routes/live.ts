@@ -64,8 +64,8 @@ const DEVICE_ID = /^[\w-]{1,128}$/;
 
 /** The companion sends its own id for the phone that authenticated, never one the phone chose. */
 function companionDevice(req: IncomingMessage): string | undefined {
-  if (req.headers["x-openmausbot-companion"] !== "1") return undefined;
-  const device = req.headers["x-openmausbot-companion-device"];
+  if (req.headers["x-openindbot-companion"] !== "1") return undefined;
+  const device = req.headers["x-openindbot-companion-device"];
   return typeof device === "string" && DEVICE_ID.test(device) ? device : undefined;
 }
 
@@ -118,7 +118,7 @@ export function createLiveRoutes(deps: LiveRouteDeps): RouteHandler {
     }
 
     if (method === "POST" && path === "/api/live/device-revoked") {
-      if (req.headers["x-openmausbot-companion"] !== "1") return json(res, 403, { error: "Only the phone companion can report an unpaired phone." });
+      if (req.headers["x-openindbot-companion"] !== "1") return json(res, 403, { error: "Only the phone companion can report an unpaired phone." });
       const device = companionDevice(req);
       if (!device) return json(res, 400, { error: "The unpaired phone was not named." });
       deps.deviceRevoked?.(device);

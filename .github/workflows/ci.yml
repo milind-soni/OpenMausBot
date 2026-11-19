@@ -699,7 +699,7 @@ jobs:
           sudo chmod 4755 release/linux-unpacked/chrome-sandbox
           test "$(stat -c '%U:%G %a' release/linux-unpacked/chrome-sandbox)" = "root:root 4755"
       - name: Verify the installed browser with Ubuntu sandbox restrictions
-        run: node scripts/smoke-browser-bundle.mjs --resources /opt/OpenMausBot/resources
+        run: node scripts/smoke-browser-bundle.mjs --resources /opt/OpenIndBot/resources
       - name: Launch packaged app and verify lifecycle
         env:
           OMB_KEEP_SMOKE_DIR: "1"
@@ -707,12 +707,12 @@ jobs:
         run: pnpm smoke:linux-package
       - name: Remove the installed upgrade fixture
         if: always()
-        run: sudo dpkg --purge openmausbot || true
+        run: sudo dpkg --purge openindbot || true
       - name: Upload smoke diagnostics on failure
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
-          name: openmausbot-ubuntu-smoke-diagnostics
+          name: openindbot-ubuntu-smoke-diagnostics
           path: |
             /tmp/omb-linux-smoke-*
             /tmp/omb-linux-smoke-runtime-*
@@ -777,17 +777,17 @@ jobs:
         if: ${{ !cancelled() && runner.os == 'macOS' }}
         run: test "$(defaults read "/Applications/Google Chrome.app/Contents/Info.plist" CFBundleShortVersionString)" = "$(cat "$RUNNER_TEMP/chrome-version")"
       - name: S4 inside the server image's runtime, as its own user
-        # maus, with its real home, as the server runs there. The image's
+        # ind, with its real home, as the server runs there. The image's
         # Chrome for Testing has no setuid sandbox helper yet, so this leg
         # runs with the operator opt-out; the host legs keep the sandbox.
         # Vitest writes its bundled config beside it and its cache under
-        # node_modules/.vite, so those two places are opened to maus. It runs
+        # node_modules/.vite, so those two places are opened to ind. It runs
         # even when the host leg failed: they test different Chromes.
         if: ${{ !cancelled() && runner.os == 'Linux' }}
         run: |
           docker build --target runtime -t omb-runtime:s4 .
           mkdir -p node_modules/.vite && chmod a+w . node_modules/.vite
-          docker run --rm --init --shm-size=512m --user maus -e CI=true \
-            -e OMB_CDP_CHROME=/opt/openmausbot-browser/chrome -e OMB_CDP_HOST=container -e OMB_BROWSER_SANDBOX=0 \
+          docker run --rm --init --shm-size=512m --user ind -e CI=true \
+            -e OMB_CDP_CHROME=/opt/openindbot-browser/chrome -e OMB_CDP_HOST=container -e OMB_BROWSER_SANDBOX=0 \
             -v "$PWD:/src" -w /src omb-runtime:s4 \
             node node_modules/vitest/vitest.mjs run server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e --reporter=verbose --silent=false

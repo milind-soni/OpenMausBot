@@ -22,7 +22,7 @@ const details: TemplateDetails = {
   scope: "bot", name: "Quill", tagline: "Writes outreach.", bots: [{ key: "quill", name: "Quill", color: "purple", skills: [] }],
   skills: [], routines: [], apps: [{ label: "Gmail" }], groupChats: [],
 };
-const LINK = "https://github.com/milind-soni/openmausbot-teams/tree/abc123/teams/quill";
+const LINK = "https://github.com/milind-soni/openindbot-teams/tree/abc123/teams/quill";
 
 function mount(element: ReturnType<typeof createElement>) {
   const container = document.createElement("div");
@@ -128,7 +128,7 @@ describe("a department's Share", () => {
 
   it("makes the template at once and publishes it to the community, then shows the link and the pull request", async () => {
     api.mockImplementation(async (path: string) => path === "/api/share/export" ? card
-      : { ...card, status: "published", link: LINK, prUrl: "https://github.com/milind-soni/openmausbot-teams/pull/9" });
+      : { ...card, status: "published", link: LINK, prUrl: "https://github.com/milind-soni/openindbot-teams/pull/9" });
     const view = mount(createElement(ShareDepartmentDialog, { department: "Sales desk", onClose: vi.fn() }));
     try {
       await vi.waitFor(() => expect(document.body.textContent).toContain("2 bots · 1 skill · 1 routine (paused)"));
@@ -165,7 +165,7 @@ describe("a department's Share", () => {
     let connected = false;
     api.mockImplementation(async (path: string) => path === "/api/share/export" ? card
       : path === "/api/share/github" ? (connected ? { connected: true } : { connected: false, reason: "not_connected", error: "Connect GitHub in Apps first." })
-      : { kind: "pull_request", url: "https://github.com/acme/playbooks/pull/3", link: "https://github.com/acme/playbooks/tree/mausbot-sales-desk-abc123/sales-desk", branch: "mausbot-sales-desk-abc123" });
+      : { kind: "pull_request", url: "https://github.com/acme/playbooks/pull/3", link: "https://github.com/acme/playbooks/tree/indbot-sales-desk-abc123/sales-desk", branch: "indbot-sales-desk-abc123" });
     const view = mount(createElement(ShareDepartmentDialog, { department: "Sales desk", onClose: vi.fn() }));
     try {
       await vi.waitFor(() => expect(button("Your GitHub repo…")).toBeTruthy());
@@ -183,7 +183,7 @@ describe("a department's Share", () => {
       typeInto(folder!, "templates");
       await vi.waitFor(() => expect(button("Open pull request")!.disabled).toBe(false));
       button("Open pull request")!.click();
-      await vi.waitFor(() => expect(document.body.textContent).toContain("Pull request opened from the branch mausbot-sales-desk-abc123."));
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Pull request opened from the branch indbot-sales-desk-abc123."));
       expect(api).toHaveBeenCalledWith("/api/share/tpl2/publish-repo", { method: "POST", body: JSON.stringify({ repo: "acme/playbooks", folder: "templates", direct: false }) });
       [...document.querySelectorAll("button")].find((each) => each.textContent?.includes("View pull request") && each.closest("footer"))!.click();
       expect(openLink).toHaveBeenCalledWith("https://github.com/acme/playbooks/pull/3");

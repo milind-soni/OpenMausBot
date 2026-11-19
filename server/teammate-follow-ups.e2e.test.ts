@@ -318,7 +318,7 @@ it("P4 keeps Mira's question from a Clive turn a webhook started: it is not list
   await f.say(f.mira.id, chat, "P4: redo the pricing page.");
   await expect.poll(async () => (await asking(f, chat)) !== undefined, { timeout: 30_000 }).toBe(true);
 
-  const hook = await f.api("POST", "/api/webhooks", { name: "P4", prompt: "P4-HOOK: tell Mira to keep it.", botId: f.clive.id, runOn: "maus" });
+  const hook = await f.api("POST", "/api/webhooks", { name: "P4", prompt: "P4-HOOK: tell Mira to keep it.", botId: f.clive.id, runOn: "ind" });
   expect(hook.status, JSON.stringify(hook.body)).toBe(201);
   const delivered = await fetch(hook.body.credential.url, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   expect(delivered.status).toBe(202);

@@ -60,7 +60,7 @@ describe("a template's chat card", () => {
 
   it("shows Publishing… while it publishes, and Copy link and View on GitHub once published", () => {
     expect(shown({ ...draft, status: "publishing" })).toContain("Publishing…");
-    const published = shown({ ...draft, status: "published", link: "https://github.com/milind-soni/openmausbot-teams/tree/abc/teams/quill" });
+    const published = shown({ ...draft, status: "published", link: "https://github.com/milind-soni/openindbot-teams/tree/abc/teams/quill" });
     expect(published).toContain("Published");
     expect(published).toContain("Copy link");
     expect(published).toContain("View on GitHub");
@@ -78,7 +78,7 @@ describe("a template's chat card", () => {
     const signIn = shown({ ...draft, fallback: "sign_in" });
     expect(signIn).toContain("Save folder…");
     expect(signIn).toContain("Upload on GitHub");
-    expect(signIn).toContain("Sign in to MausBot to publish");
+    expect(signIn).toContain("Sign in to IndBot to publish");
     expect(signIn).not.toMatch(/\bPublish\b/);
     expect(shown({ ...draft, fallback: "unavailable" })).toContain("Publishing isn't available here");
   });

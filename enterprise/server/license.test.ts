@@ -30,7 +30,7 @@ describe("license keys", () => {
     const old = keypair();
     const fresh = keypair();
     const key = issueLicenseKey(claims, old.privateJwk);
-    expect(() => verifyLicenseKey(key, { publicKeys: [fresh.x], now: new Date("2026-12-01") })).toThrow(/does not match any OpenMausBot signing key/);
+    expect(() => verifyLicenseKey(key, { publicKeys: [fresh.x], now: new Date("2026-12-01") })).toThrow(/does not match any OpenIndBot signing key/);
     expect(verifyLicenseKey(key, { publicKeys: [fresh.x, old.x], now: new Date("2026-12-01") }).customer).toBe(claims.customer);
   });
 

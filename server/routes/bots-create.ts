@@ -105,7 +105,7 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "bot must be a JSON object" });
       }
-      if (req.headers["x-openmausbot-companion"] === "1") {
+      if (req.headers["x-openindbot-companion"] === "1") {
         const field = adminOnlyBotSetting(askedSettings(body));
         if (field) {
           return json(res, 403, { error: `forbidden: a paired device may say who a new bot is and how it looks, not "${field}"; set that on the host computer` });

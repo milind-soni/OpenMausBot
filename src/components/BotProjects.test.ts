@@ -12,7 +12,7 @@ vi.mock("@/state/store", async (original) => ({
 }));
 
 const bot: Bot = {
-  id: "maus", threadId: "current", name: "Maus", title: "", description: "", notifications: true,
+  id: "ind", threadId: "current", name: "Ind", title: "", description: "", notifications: true,
   color: "green", unread: false, messages: [], modelSelection: { instanceId: "fake", model: "test" },
   projects: [{ id: "mail", name: "Email", emoji: "📬" }],
   tasks: [{ threadId: "current", title: "Inbox", projectId: "mail", createdAt: 1 }],
@@ -56,9 +56,9 @@ describe("folder controls", () => {
     expect(markup.match(/<button /g)).toHaveLength(1);
   });
   it.each([
-    { projectId: "mail", expected: { type: "newTask", botId: "maus", projectId: "mail" } },
-    { projectId: undefined, expected: { type: "newTask", botId: "maus" } },
-    { projectId: "deleted", expected: { type: "newTask", botId: "maus" } },
+    { projectId: "mail", expected: { type: "newTask", botId: "ind", projectId: "mail" } },
+    { projectId: undefined, expected: { type: "newTask", botId: "ind" } },
+    { projectId: "deleted", expected: { type: "newTask", botId: "ind" } },
   ])("creates one thread in the current valid folder ($projectId), then closes its picker", ({ projectId, expected }) => {
     const onCreated = vi.fn();
     const button = NewThreadButton({

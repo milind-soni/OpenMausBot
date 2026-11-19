@@ -16,7 +16,7 @@ export const NEW_LOOK_KEY = "omb-new-look";
 /** Device settings only Advanced mode could change: each goes back to its default once. The sidebar's are spelled out,
  * since importing its module would put zod in the first page's bundle. */
 export const ADVANCED_ONLY_PREFS = [FONT_KEY, CHAT_WIDTH_KEY, SHOW_THREADS_KEY, RUN_CARD_KEY, WEB_PANELS_KEY,
-  "openmausbot.sidebarToolsLayout", "openmausbot.pinnedCircles", "openmausbot.universalPins"];
+  "openindbot.sidebarToolsLayout", "openindbot.pinnedCircles", "openindbot.universalPins"];
 
 /** "due" once a browser that was on Advanced is put back on it, until the word that Advanced is back is closed ("seen"). */
 export const ADVANCED_BACK_KEY = "omb-advanced-back";

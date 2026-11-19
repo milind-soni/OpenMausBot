@@ -182,7 +182,7 @@ const FRAME_TIMEOUT_MS = 12_000;
 export async function captureFrame(ports: RelayPorts, target: RelayTarget): Promise<{ png: string; format: "jpeg" }> {
   const probe = await ports.probe(target);
   if (!probe?.connected) throw new Error("the browser has no open page to picture");
-  const file = join(tmpdir(), `openmausbot-browser-${randomUUID()}.jpg`);
+  const file = join(tmpdir(), `openindbot-browser-${randomUUID()}.jpg`);
   try {
     closeSync(openSync(file, "wx", 0o600));
     let answer: RelayAnswer;

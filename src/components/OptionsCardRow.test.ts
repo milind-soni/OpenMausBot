@@ -29,7 +29,7 @@ describe("optionsCardRow", () => {
     expect(drawn).toContain("eu-west-1");
   });
 
-  it("draws MausBot's follow-up under its intro, never as a row or bubble of its own", () => {
+  it("draws IndBot's follow-up under its intro, never as a row or bubble of its own", () => {
     const followup: Message = { id: "f", role: "bot", kind: "text", at: 2, text: "I looked around.", helperFollowup: { ai: "own", apps: [], bots: 0, routines: 0 } };
     expect(richRowKind(followup)).toBe("options");
     expect(row(followup, [followup])).toBeNull();

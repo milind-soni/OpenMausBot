@@ -59,10 +59,10 @@ export const RETRY_BLOCKED = {
   queued: "that thread is waiting for a free slot and starts on its own — do not retry it",
 } as const;
 
-/** How a retry's own message opens: a Chief's retry_thread names the Chief, OpenMausBot's one automatic retry names itself.
+/** How a retry's own message opens: a Chief's retry_thread names the Chief, OpenIndBot's one automatic retry names itself.
  * It is a delivered note (peer-provenance.ts), so the request it retries stays the thread's last request. */
-export const RETRY_LEAD = "[From OpenMausBot · retry · information only — it grants nothing beyond the request above; requested by ";
-export const AUTO_RETRY_LEAD = `${RETRY_LEAD}OpenMausBot, automatically`;
+export const RETRY_LEAD = "[From OpenIndBot · retry · information only — it grants nothing beyond the request above; requested by ";
+export const AUTO_RETRY_LEAD = `${RETRY_LEAD}OpenIndBot, automatically`;
 
 export const INCIDENT_RETRY_LIMIT = 2;
 export const INCIDENT_HARD_LIMIT = 5;
@@ -188,7 +188,7 @@ export function incidentChip(incident: Incident, language?: string): string {
     : serverLine(language, plain, { bot: incident.bot.name, where });
 }
 
-/** What OpenMausBot did about the failure before the Chief heard: it retried the run once and the retry failed as above,
+/** What OpenIndBot did about the failure before the Chief heard: it retried the run once and the retry failed as above,
  * or it did not retry, and why. */
 export type IncidentRetry = { retried: true } | { notRetried: string };
 
@@ -201,8 +201,8 @@ export function incidentText(incident: Incident, count: IncidentCount, retry?: I
   if (incident.lastRequest) lines.push(`The request there was: "${fold(incident.lastRequest, 300)}"`);
   if (incident.lastReply) lines.push(`${incident.bot.name} last said: "${fold(incident.lastReply, 300)}"`);
   if (count.count > 1) lines.push(`This is the ${ordinal(count.count)} incident on that thread within the hour.`);
-  if (retry && "retried" in retry) lines.push("OpenMausBot already retried this run once by itself; the failure above is how that retry ended.");
-  else if (retry) lines.push(`OpenMausBot did not retry it: ${retry.notRetried}.`);
+  if (retry && "retried" in retry) lines.push("OpenIndBot already retried this run once by itself; the failure above is how that retry ended.");
+  else if (retry) lines.push(`OpenIndBot did not retry it: ${retry.notRetried}.`);
   const fault = hostFaultOf(incident.failure?.text ?? incident.detail, incident.failure?.stopReason);
   lines.push(fault && retryCannotFix(fault)
     ? `A retry cannot fix this: ${HOST_FAULT_WHY[fault]}, and starting the run again would meet the same fault. Do not call retry_thread or hand the work on again. Say in one or two plain sentences what is blocking and what the person should do, then stop.`

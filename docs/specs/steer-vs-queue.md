@@ -30,7 +30,7 @@ Native mid-turn steering EXISTS; no child kill or restart is needed.
 - Semantics: steering redirects the RUNNING turn. Codex aborts the in-flight
   model stream at a safe boundary (turn-level abort via protocol) and continues
   the same turn/session with the new input folded in. The app-server child and
-  the native thread stay alive; nothing is SIGTERMed or restarted. The OpenMausBot
+  the native thread stay alive; nothing is SIGTERMed or restarted. The OpenIndBot
   codex driver already runs one app-server per turn, so `turn/steer` rides the
   live request instance that owns the running turn.
 

@@ -71,7 +71,7 @@ Grok uses those two helpers to discover and call the selected MCP tools.
 Their results and calls are checked against the same original selectors.
 Pi sends the selected MCP schemas directly to the model.
 
-**OpenMausBot's own tools** sit on the server named `agents`. A few of them do
+**OpenIndBot's own tools** sit on the server named `agents`. A few of them do
 several things, and each of those things has a name of its own, which a
 selector can use. `trigger`, `delete_trigger` and `trigger_info` also cover
 everything they do by their own names; for the other tools, the tool's name

@@ -24,7 +24,7 @@ it("posts one rescue notice into a silent first reply, readable as plain text, a
   const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as any[];
   const stream = await openSse(`${url}/api/events`, { origin: url });
   try {
-    const { bot } = await control(["new-bot", "--name", "Maus"]);
+    const { bot } = await control(["new-bot", "--name", "Ind"]);
     const threadId = bot.activeTaskId;
     const instanceId = bot.modelSelection.instanceId;
     const ai = ((await api("GET", "/api/instances")).instances as any[]).find((instance) => instance.instanceId === instanceId).displayName;
@@ -40,7 +40,7 @@ it("posts one rescue notice into a silent first reply, readable as plain text, a
     expect(notice).toMatchObject({ role: "bot", kind: "activity", turnId: expect.any(String) });
     const asked = (await messages(threadId)).find((message) => message.role === "user" && message.text === "Hello?");
     expect(notice.tool).toEqual({
-      name: `notice: Maus hasn't heard back from ${ai} yet.`,
+      name: `notice: Ind hasn't heard back from ${ai} yet.`,
       ok: true,
       rescue: { botId: bot.id, threadId, turnId: notice.turnId, requestMessageId: asked.id, instanceId, ai },
     });

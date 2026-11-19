@@ -29,13 +29,13 @@ async function made(side: Side, name: string) {
   const bot = (await side("POST", "/api/bots", { name })).body.bot as { id: string };
   expect((await side("PATCH", `/api/bots/${bot.id}`, { soul: `You are ${name}.` })).status).toBe(200);
 }
-/** Main's suggestion as the app wires it, with no MausBot Cloud: its channels, on this computer's page. */
+/** Main's suggestion as the app wires it, with no IndBot Cloud: its channels, on this computer's page. */
 function install(dismissed = "two-places.json") {
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
   const main = installTwoPlacesMain({
     ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => { handlers.set(channel, handler); } },
     guard: (_channel: string, handler: (...args: unknown[]) => unknown) => handler,
-    localRequest: (route: string, init: RequestInit = {}) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { "x-openmausbot-desktop-owner": fx.ownerCapability } }),
+    localRequest: (route: string, init: RequestInit = {}) => fetch(`${fx.desktopBase}${route}`, { ...init, headers: { "x-openindbot-desktop-owner": fx.ownerCapability } }),
     fetch: fx.windowFetch, environments: () => [garage.place, family.place], cloud: () => ({ origin: null, asleep: false }),
     oneHome: { journal: () => null, keep: { state: () => ({ shown: false, on: false, moved: false }), set: async () => {} } },
     ownHome: fx.main, dismissed: file(dismissed), tell: () => {},

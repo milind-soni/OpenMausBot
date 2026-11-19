@@ -1,5 +1,5 @@
 // Slack for Team Clouds on a real Team Cloud (docs/team-slack.md). The Admin's part is played here: a session opened
-// for each member through the signed pairing (label "Slack (MausBot Cloud)"), the three routes called with it, and a
+// for each member through the signed pairing (label "Slack (IndBot Cloud)"), the three routes called with it, and a
 // stand-in Admin that takes the Cloud's signed reports and checks them as the real one does. A channel message becomes
 // a shared conversation its writer asked in; a direct message their private chat; the app's own rules decide who may
 // ask, read and stop. Disposable homes and the synthetic Claude CLI; no Slack and no real Admin are reached.
@@ -22,7 +22,7 @@ const ARI = { email: "ari@acme.test", role: "admin" as const };
 const PRIYA = { email: "priya@acme.test", role: "member" as const };
 const TOM = { email: "tom@acme.test", role: "member" as const };
 const priyaKey = personKey({ id: "", email: PRIYA.email });
-const SLACK_LABEL = "Slack (MausBot Cloud)";
+const SLACK_LABEL = "Slack (IndBot Cloud)";
 const ENGINE = `const { existsSync } = process.getBuiltinModule("node:fs");
 const dir = process.env.FAKE_CLAUDE_FIXTURE_DIR;
 process.env.FAKE_CLAUDE_DUMP = dir + "/dump.json";
@@ -64,7 +64,7 @@ let scout: Bot, reporter: Bot, vault: Bot, payroll: Bot, notes: Bot, priyaOwn: B
 const sockets: Socket[] = [];
 
 const file = (name: string) => join(team.home, name);
-const dataFile = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+const dataFile = (...rest: string[]) => join(team.home, ".openindbot", ...rest);
 const bots = async (token: string) => (await team.as(token, "GET", "/api/bots?messages=0")).body.bots as Bot[];
 const taskOf = async (token: string, botId: string, threadId: string) => (await bots(token)).find((bot) => bot.id === botId)?.tasks?.find((task) => task.threadId === threadId);
 const rows = async (token: string, threadId: string) => ((await team.as(token, "GET", `/api/threads/${threadId}/messages?limit=200`)).body.messages ?? []) as Row[];
@@ -138,7 +138,7 @@ beforeAll(async () => {
   expect((await team.as(ada, "PUT", `/api/bots/${payroll.id}/access`, { everyone: "view", people: {} })).status).toBe(200);
   notes = await create(priya, { name: "Notes" });
   priyaOwn = (await bots(priya)).find((bot) => bot.defaultBot?.person === PRIYA.email)!;
-  expect(priyaOwn, "every member has a MausBot of their own").toBeTruthy();
+  expect(priyaOwn, "every member has a IndBot of their own").toBeTruthy();
 }, hostTimeout(180_000));
 
 afterEach(async () => {
@@ -329,7 +329,7 @@ it("a channel's conversation never reads the member's private notes or About you
   }
 }, hostTimeout(180_000));
 
-it("an approval is reported as waiting, sits in the member's inbox and conversation, and is answered only in MausBot", async () => {
+it("an approval is reported as waiting, sits in the member's inbox and conversation, and is answered only in IndBot", async () => {
   await until(idle);
   writeFileSync(file("hang-mode"), "");
   rmSync(file("release"), { force: true });
@@ -359,7 +359,7 @@ it("an approval is reported as waiting, sits in the member's inbox and conversat
   expect((await rows(priya, thread)).some((row) => row.card?.requestId === requestId)).toBe(true);
   const inbox = async () => ((await team.as(priya, "GET", "/api/inbox")).body.rows ?? []) as { card?: { requestId?: string; answered?: string }; tab?: string }[];
   await until(async () => (await inbox()).some((row) => row.card?.requestId === requestId && row.tab === "needs-you"));
-  // Slack's only other route, Stop, is not an answer; the card stays open until she answers it in MausBot.
+  // Slack's only other route, Stop, is not an answer; the card stays open until she answers it in IndBot.
   expect(statuses(sent.id).filter((status) => status === "waiting")).toHaveLength(1);
   const allowed = await team.as(priya, "POST", `/api/threads/${thread}/respond`, { requestId, behavior: "allow" });
   expect(allowed.status, JSON.stringify(allowed.body)).toBe(200);

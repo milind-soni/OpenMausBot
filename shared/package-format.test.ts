@@ -92,7 +92,7 @@ describe("package fixtures", () => {
   it("refuses a newer file with a pointer to update, and unknown formats plainly", () => {
     expect(refusal(fixture("newer.v4.json"))).toMatchObject({ code: "newer_version", message: NEWER_PACKAGE_MESSAGE });
     expect(refusal({ ...fixture("full-team.v2.json"), version: 0 })).toMatchObject({ code: "unsupported_version" });
-    expect(refusal({ format: "openmaus.team", version: 2 })).toMatchObject({ code: "not_a_package" });
+    expect(refusal({ format: "openind.team", version: 2 })).toMatchObject({ code: "not_a_package" });
     expect(refusal("# not a playbook")).toMatchObject({ code: "not_a_package" });
   });
 });
@@ -267,13 +267,13 @@ describe("canonical form", () => {
     expect(canonicalJson({ b: 1, a: [3, { d: undefined, c: "x" }], e: undefined })).toBe('{"a":[3,{"c":"x"}],"b":1}');
     expect(canonicalJson({ a: [3, { c: "x" }], b: 1 })).toBe(canonicalJson({ b: 1, a: [3, { c: "x" }] }));
     expect(canonicalJson({ "é": 1, Z: 2, a: 3 })).toBe('{"Z":2,"a":3,"é":1}');
-    expect(sha256(canonicalJson({ format: "openmaus.package", version: 2, package: { id: "x", tags: ["b", "a"] } })))
+    expect(sha256(canonicalJson({ format: "openind.package", version: 2, package: { id: "x", tags: ["b", "a"] } })))
       .toBe("8d50ccbf67f4efca8c5de1159b4cf6ab4368f7b1335316a8f8896a75aab8b71e");
   });
 
   it("hashes a reordered copy of a fixture to the same release bytes", () => {
     const input = fixture("full-team.v2.json");
-    const shuffled = { package: Object.fromEntries(Object.entries(input.package).reverse()), version: 2, format: "openmaus.package" };
+    const shuffled = { package: Object.fromEntries(Object.entries(input.package).reverse()), version: 2, format: "openind.package" };
     expect(canonicalJson(parsePackageDocument(shuffled))).toBe(canonicalJson(parsePackageDocument(input)));
   });
 });

@@ -51,7 +51,7 @@ Sign in and pair:
 
 ```sh
 docker compose exec omb codex login --device-auth
-docker compose exec omb openmausbot pair
+docker compose exec omb openindbot pair
 ```
 
 With the defaults, `pair` prints a sign-in link for a browser on the Docker
@@ -60,14 +60,14 @@ there and name the address they use (only on a machine behind your router):
 
 ```sh
 OMB_BIND_ADDRESS=0.0.0.0 OMB_PUBLIC_URL=http://192.168.1.20:8080 docker compose up -d
-docker compose exec omb openmausbot pair    # Link http://192.168.1.20:8080/pair#code=…
+docker compose exec omb openindbot pair    # Link http://192.168.1.20:8080/pair#code=…
 ```
 
-Paste that link into MausBot under **＋ → Connect to a server**; the app
+Paste that link into IndBot under **＋ → Connect to a server**; the app
 accepts plain http on a private network address. The other install methods
 are in [Self-hosting](../../docs/self-hosting.md#golden-paths).
 
-On Windows, `./maus.ps1` forwards arguments to Compose using the repository
+On Windows, `./ind.ps1` forwards arguments to Compose using the repository
 directory. It respects Docker's selected context and `DOCKER_CONTEXT`.
 
 Data and engine credentials persist in the named data volume. For an existing

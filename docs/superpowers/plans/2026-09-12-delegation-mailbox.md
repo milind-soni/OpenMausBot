@@ -34,7 +34,7 @@ Each of these was found while reading the code for this plan:
 
 ## Global Constraints
 
-- Work only in the worktree `~/Desktop/openmaus/OpenGrokBot-mailbox`, on branch `feat/delegation-mailbox`. Never touch `~/Desktop/openmaus/OpenGrokBot`.
+- Work only in the worktree `~/Desktop/openind/OpenGrokBot-mailbox`, on branch `feat/delegation-mailbox`. Never touch `~/Desktop/openind/OpenGrokBot`.
 - Commit locally after each task. **Never push. Never open a PR.** Omkar owns publishing.
 - End every commit message with: `Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>`
 - Server-only change. No edits under `src/`, `ios/`, `android/`.
@@ -267,13 +267,13 @@ with:
 In the `list_bots` tool definition, change the description's opening sentence from:
 
 ```
-"List the other bots (agents) in your OpenMausBot section, with their model and whether they're busy.
+"List the other bots (agents) in your OpenIndBot section, with their model and whether they're busy.
 ```
 
 to:
 
 ```
-"List the other bots (agents) in your OpenMausBot section, with their model and what each is doing right now (available, working, waiting on the user, not responding, or unavailable).
+"List the other bots (agents) in your OpenIndBot section, with their model and what each is doing right now (available, working, waiting on the user, not responding, or unavailable).
 ```
 
 Leave the rest of that description string unchanged.

@@ -59,7 +59,7 @@ afterEach(() => {
 });
 
 describe("the conversation the server is told about", () => {
-  it("is a shared chat or a group chat, never a private chat or a member's own MausBot", () => {
+  it("is a shared chat or a group chat, never a private chat or a member's own IndBot", () => {
     expect(sharedThreadOf(state())).toBe("scout-main");
     expect(sharedThreadOf(state({ bots: [bot({ threadId: "ben-own" })] }))).toBeNull();
     expect(sharedThreadOf(state({ bots: [bot({ defaultBot: { person: BEN.email } })] }))).toBeNull();

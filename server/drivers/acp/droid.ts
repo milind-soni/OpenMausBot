@@ -36,7 +36,7 @@ interface FactorySettings {
   sessionDefaultSettings?: { model?: string };
 }
 
-const INJECT_ID_PREFIX = "custom:openmausbot-";
+const INJECT_ID_PREFIX = "custom:openindbot-";
 
 export function droidInjectId(host: string, model: string): string {
   const safe = `${host}-${model}`.replace(/[^a-zA-Z0-9._+-]+/g, "-").replace(/-+/g, "-");
@@ -99,7 +99,7 @@ export function applyDroidLocalAuthEnv(
   if (env.FACTORY_API_KEY?.trim()) return;
   // A placeholder FACTORY_API_KEY can take precedence over a login file.
   if (authFilePaths(env).some(existsSync)) return;
-  env.FACTORY_API_KEY = "openmausbot-local";
+  env.FACTORY_API_KEY = "openindbot-local";
 }
 
 function readSettings(env: Record<string, string | undefined>): FactorySettings {

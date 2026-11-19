@@ -15,7 +15,7 @@ const {
 const CONNECTION_SCHEMA_VERSION = 1;
 // Schema 2 is deliberately incompatible with early builds that started Cua without the Xorg seat-safety flags.
 const SETTINGS_SCHEMA_VERSION = 2;
-const HOST_BUNDLE_ID = "com.openmausbot.app";
+const HOST_BUNDLE_ID = "com.openindbot.app";
 const CERTIFIED_CONTRACT_VERSION = "0.8.0";
 const CERTIFIED_TOOLS_LIST_SCHEMA_VERSION = "1";
 const CERTIFIED_CAPABILITY_VERSION = "1";
@@ -573,7 +573,7 @@ function createLinuxCuaRuntime({
           stat.uid === currentUid &&
           (stat.mode & 0o077) === 0
         ) {
-          const root = ensurePrivateDirectory(path.join(configured, "openmausbot-cua"));
+          const root = ensurePrivateDirectory(path.join(configured, "openindbot-cua"));
           cleanupStaleRuntimeDirectories(root);
           return root;
         }
@@ -581,7 +581,7 @@ function createLinuxCuaRuntime({
     }
     // Unix sockets have a short path limit: a private uid-scoped dir under the temp root when XDG_RUNTIME_DIR is unusable.
     const currentUid = process.getuid?.() ?? os.userInfo().uid;
-    const root = ensurePrivateDirectory(path.join(os.tmpdir(), `openmausbot-cua-${currentUid}`));
+    const root = ensurePrivateDirectory(path.join(os.tmpdir(), `openindbot-cua-${currentUid}`));
     cleanupStaleRuntimeDirectories(root);
     return root;
   };

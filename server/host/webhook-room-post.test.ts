@@ -11,15 +11,15 @@ import { parseRoomPostPayload, postWebhookToRoom, type RoomPostDeps, type RoomPo
 const limits = { maxTextChars: 200, maxVoiceChars: 1_000, maxImages: 4, maxImageBytes: 64 };
 
 // threadId deliberately differs from id: a receipt that reports the room id as the thread would pass the wrong way round.
-const room: RoomPostRoom = { id: "room-1", threadId: "room-1-thread", dm: false, memberIds: ["maus-1"], name: "Ops" };
+const room: RoomPostRoom = { id: "room-1", threadId: "room-1-thread", dm: false, memberIds: ["ind-1"], name: "Ops" };
 
 const trigger = {
   id: "hook-1",
   endpointId: "wh_test",
   name: "Ops brief",
   prompt: "",
-  botId: "maus-1",
-  runOn: "maus",
+  botId: "ind-1",
+  runOn: "ind",
   delivery: "post",
   groupId: "room-1",
   enabled: true,
@@ -121,7 +121,7 @@ describe("postWebhookToRoom", () => {
     expect(result).toEqual({ posted: true, attachments: 0, threadId: "room-1-thread" });
     expect(h.calls.appended).toHaveLength(1);
     expect(h.calls.appended[0]).toEqual({
-      botId: "maus-1",
+      botId: "ind-1",
       roomId: "room-1",
       content: { text: "Pipeline is green" },
     });
@@ -132,7 +132,7 @@ describe("postWebhookToRoom", () => {
     const h = deps();
     const result = await postWebhookToRoom(h.deps, trigger, { text: "Listen up", voiceNote: "hello there", images: [{ data: png, mime: "image/png" }] });
 
-    expect(h.calls.synthesized).toEqual([{ botId: "maus-1", text: "hello there" }]);
+    expect(h.calls.synthesized).toEqual([{ botId: "ind-1", text: "hello there" }]);
     expect(result).toEqual({ posted: true, attachments: 2, threadId: "room-1-thread" });
     expect(h.calls.appended[0]!.content.attachments).toEqual([
       { kind: "audio", path: "/audio/0.mp3", mime: "audio/mpeg", text: "hello there" },
@@ -230,8 +230,8 @@ describe("createWebhookRoomPost", () => {
     rmSync(ATTACHMENTS_DIR, { recursive: true, force: true });
     mkdirSync(ATTACHMENTS_DIR, { recursive: true });
     __resetAttachmentAccountingForTests();
-    const group = { id: "room-1", threadId: "room-1-thread", name: "Ops", dm: false, memberIds: ["maus-1"], section: "Build" } as unknown as GroupRecord;
-    const bot = { id: "maus-1", name: "Maus", color: "teal", section: "Build", voice: "voice-1" } as unknown as BotRecord;
+    const group = { id: "room-1", threadId: "room-1-thread", name: "Ops", dm: false, memberIds: ["ind-1"], section: "Build" } as unknown as GroupRecord;
+    const bot = { id: "ind-1", name: "Ind", color: "teal", section: "Build", voice: "voice-1" } as unknown as BotRecord;
     const appended: Array<{ threadId: string; message: Record<string, unknown> }> = [];
     const store = {
       bot: (id: string) => (id === bot.id ? bot : undefined),
@@ -262,7 +262,7 @@ describe("createWebhookRoomPost", () => {
       expect(h.appended).toHaveLength(1);
       expect(h.appended[0]).toMatchObject({
         threadId: "room-1-thread",
-        message: { role: "bot", kind: "text", text: "Deploy done", from: { botId: "maus-1", name: "Maus", color: "teal" }, webhookPost: true,
+        message: { role: "bot", kind: "text", text: "Deploy done", from: { botId: "ind-1", name: "Ind", color: "teal" }, webhookPost: true,
           attachments: [{ kind: "audio", mime: "audio/mpeg" }, { kind: "image", mime: "image/png" }] },
       });
       expect(stored()).toHaveLength(2);
@@ -282,7 +282,7 @@ describe("createWebhookRoomPost", () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
       h.group.memberIds = ["someone-else"];
 
-      await expect(delivery).rejects.toMatchObject({ status: 403, message: "@Maus is not a member of the room “Ops”. Add @Maus to the room, or point the webhook at a room it is in." });
+      await expect(delivery).rejects.toMatchObject({ status: 403, message: "@Ind is not a member of the room “Ops”. Add @Ind to the room, or point the webhook at a room it is in." });
       expect(h.appended).toEqual([]);
       expect(stored()).toEqual([]);
     } finally {
@@ -337,11 +337,11 @@ describe("createWebhookRoomPost", () => {
   it("names the room and the way out when the bot is not in it, and when the room is gone", () => {
     const h = host(chatterbox, mp3);
     restore();
-    expect(h.roomMember("maus-1", "room-1")).toEqual({ ok: true });
+    expect(h.roomMember("ind-1", "room-1")).toEqual({ ok: true });
     h.group.memberIds = ["someone-else"];
-    expect(h.roomMember("maus-1", "room-1")).toEqual({ ok: false, status: 403,
-      error: "@Maus is not a member of the room “Ops”. Add @Maus to the room, or point the webhook at a room it is in." });
-    expect(h.roomMember("maus-1", "room-gone")).toEqual({ ok: false, status: 404,
+    expect(h.roomMember("ind-1", "room-1")).toEqual({ ok: false, status: 403,
+      error: "@Ind is not a member of the room “Ops”. Add @Ind to the room, or point the webhook at a room it is in." });
+    expect(h.roomMember("ind-1", "room-gone")).toEqual({ ok: false, status: 404,
       error: "The room this webhook posts to no longer exists. Point the webhook at another room, or delete it." });
   });
 });

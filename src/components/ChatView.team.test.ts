@@ -75,7 +75,7 @@ it("sets a person's name in the same type as a bot's name", () => {
   expect(name.className).toContain("text-ink-secondary");
 });
 
-it("says a member's own MausBot is theirs, not everyone's", () => {
+it("says a member's own IndBot is theirs, not everyone's", () => {
   draw(luna([], { defaultBot: { person: "ada@acme.test" } } as Partial<Bot>));
   expect(container.textContent).not.toContain(t("team.sharedHeader", { team: "Acme" }));
   expect(container.textContent).toContain(t("team.ownHelperHeader"));

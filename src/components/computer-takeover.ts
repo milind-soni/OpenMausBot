@@ -19,7 +19,7 @@ type Request = (action: "take" | "release", controlLeaseId?: string) => Promise<
 
 /** Kept in sessionStorage, which a reload of the page keeps, so a viewer still gives back its own hold when a reload came
  * after its open or cut that open off. */
-const viewerLeaseKey = (botId: string) => `openmausbot.viewer-lease.${botId}`;
+const viewerLeaseKey = (botId: string) => `openindbot.viewer-lease.${botId}`;
 function recordViewerLease(botId: string, lease: string): void {
   try { sessionStorage.setItem(viewerLeaseKey(botId), lease); } catch { /* no storage: no record */ }
 }

@@ -29,9 +29,9 @@ const clientSession = (id: string): RequestAuth => ({
 });
 const companion = (device: string): RequestAuth => ({ kind: "loopback", scopes: ["admin", "client"], companionDevice: device });
 const registration = {
-  installId: "install-0001", name: "Maus's iPhone", platform: "ios", appVersion: "1.5.0", timeZone: "Asia/Kolkata", capabilities: { calendar: "full" },
+  installId: "install-0001", name: "Ind's iPhone", platform: "ios", appVersion: "1.5.0", timeZone: "Asia/Kolkata", capabilities: { calendar: "full" },
 };
-const fromPhone = (device = "d1") => ({ "x-openmausbot-companion": "1", "x-openmausbot-companion-device": device });
+const fromPhone = (device = "d1") => ({ "x-openindbot-companion": "1", "x-openindbot-companion-device": device });
 
 async function setup(options: { auth?: RequestAuth; owner?: () => string | null; live?: () => boolean; afterBody?: () => void } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "phones-routes-"));
@@ -70,7 +70,7 @@ async function setup(options: { auth?: RequestAuth; owner?: () => string | null;
 describe("phone routes", () => {
   it("a loopback request without the companion marker has no phone key", async () => {
     const { call } = await setup();
-    const out = await call("PUT", "/api/phones/self", registration, { "x-openmausbot-companion-device": "d1" });
+    const out = await call("PUT", "/api/phones/self", registration, { "x-openindbot-companion-device": "d1" });
     expect(out.status).toBe(403);
     expect(out.body.error).toBe("Only a paired phone can register its apps, and only for itself.");
   });

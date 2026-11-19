@@ -435,7 +435,7 @@
 				"sethostname"
 			],
 			"action": "SCMP_ACT_ALLOW",
-			"comment": "MausBot bot box (bubblewrap): its own user, mount, pid, net, ipc, uts and cgroup namespaces, the mounts inside them, and its hostname"
+			"comment": "IndBot bot box (bubblewrap): its own user, mount, pid, net, ipc, uts and cgroup namespaces, the mounts inside them, and its hostname"
 		},
 		{
 			"names": [

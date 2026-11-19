@@ -19,10 +19,10 @@ async function boot(simpleOnly = true) {
 }
 
 const ADVANCED_PREFS = {
-  "omb-font": "serif", "omb-chat-width": "full", "omb-show-threads": "1", "openmausbot.sidebarToolsLayout": "toolbar",
-  "openmausbot.pinnedCircles": "1", "openmausbot.universalPins": "1", "omb-show-run-card": "0", "omb-web-panels": "[]",
+  "omb-font": "serif", "omb-chat-width": "full", "omb-show-threads": "1", "openindbot.sidebarToolsLayout": "toolbar",
+  "openindbot.pinnedCircles": "1", "openindbot.universalPins": "1", "omb-show-run-card": "0", "omb-web-panels": "[]",
 };
-const KEPT = { "omb-skin": "lagoon", "openmausbot.sidebarDensity": "avatars", "omb-drafts": "{}" };
+const KEPT = { "omb-skin": "lagoon", "openindbot.sidebarDensity": "avatars", "omb-drafts": "{}" };
 
 beforeEach(() => {
   values.clear();
@@ -159,11 +159,11 @@ describe("Advanced mode back, as shipped", () => {
 
   it("restores nothing it cannot know: the reset settings stay at their defaults, which Advanced reads as threads shown, and a choice made since stays", async () => {
     values.set("omb-new-look", "seen");
-    values.set("openmausbot.universalPins", "true");
+    values.set("openindbot.universalPins", "true");
     const back = await boot(false);
     expect(back.mode.readAdvancedMode()).toBe(true);
-    for (const key of Object.keys(ADVANCED_PREFS).filter((key) => key !== "openmausbot.universalPins")) expect(values.has(key), key).toBe(false);
-    expect(values.get("openmausbot.universalPins")).toBe("true");
+    for (const key of Object.keys(ADVANCED_PREFS).filter((key) => key !== "openindbot.universalPins")) expect(values.has(key), key).toBe(false);
+    expect(values.get("openindbot.universalPins")).toBe("true");
     expect([back.font, back.width]).toEqual(["skin", "standard"]);
   });
 

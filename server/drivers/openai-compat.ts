@@ -16,14 +16,14 @@ import {
 const DRIVER_KIND = "openai-compat";
 const DEFAULT_IDLE_TIMEOUT_MS = 180_000;
 const idleTimeoutMs = () => {
-  const raw = process.env.OPENMAUS_OPENAI_COMPAT_IDLE_TIMEOUT_MS;
+  const raw = process.env.OPENIND_OPENAI_COMPAT_IDLE_TIMEOUT_MS;
   if (!raw) return DEFAULT_IDLE_TIMEOUT_MS;
   const value = Number(raw);
   return Number.isSafeInteger(value) && value >= 1_000 && value <= 2_147_483_647 ? value : DEFAULT_IDLE_TIMEOUT_MS;
 };
 const LIVENESS_EVERY_MS = 30_000;
 const livenessEveryMs = () => {
-  const value = Number(process.env.OPENMAUS_OPENAI_COMPAT_PROBE_MS);
+  const value = Number(process.env.OPENIND_OPENAI_COMPAT_PROBE_MS);
   return Number.isSafeInteger(value) && value >= 100 ? value : LIVENESS_EVERY_MS;
 };
 /** Ollama, LM Studio or llama.cpp on this machine or a home or office network: asking it for its models is free. */

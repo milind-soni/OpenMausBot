@@ -15,7 +15,7 @@ const legacyNameFor = (botId: string) => {
   return `ogb-${prefix}-${hash}`;
 };
 
-describe("OpenMaus-managed Boat inventory", () => {
+describe("OpenInd-managed Boat inventory", () => {
   let api: Server;
   let boats: ProviderBoat[] = [];
   let listStatus = 200;
@@ -286,7 +286,7 @@ describe("OpenMaus-managed Boat inventory", () => {
     const inventory = await boat.listManagedBoats(cfg, [{ botId, name: "Conflict", inUse: false }]);
 
     expect(inventory).toMatchObject({ available: false, instances: [] });
-    expect(inventory.problem).toMatch(/no longer has its OpenMausBot owner name/i);
+    expect(inventory.problem).toMatch(/no longer has its OpenIndBot owner name/i);
     expect(journal.boatCreateRecoverySnapshot()).toContainEqual({ botId, boxId, resolved: true });
     expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
       "GET /api/v1/sandboxes",
@@ -590,7 +590,7 @@ describe("OpenMaus-managed Boat inventory", () => {
     deleteRemovesBoat = false;
 
     await expect(boat.deleteManagedBoat(cfg, owners, boxId, managedName)).rejects.toThrow(
-      `boat.dev accepted the deletion of cloud computer ${boxId}, but says it is blocked without a reason OpenMausBot knows. boat.dev keeps retrying on its own; if ${boxId} is still listed in boat.dev later, delete it there.`,
+      `boat.dev accepted the deletion of cloud computer ${boxId}, but says it is blocked without a reason OpenIndBot knows. boat.dev keeps retrying on its own; if ${boxId} is still listed in boat.dev later, delete it there.`,
     );
     expect(deleteJournal.boatDeletionSnapshot()).toEqual([expect.objectContaining({ boxId, phase: "blocked" })]);
     expect(journal.boatCreateRecoverySnapshot()).toContainEqual({ botId, boxId, resolved: true });

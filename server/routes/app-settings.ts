@@ -41,8 +41,8 @@ export function createWindowPrefs(deps: {
     routes,
     read: (id: WindowPrefId) => values.get(id),
     write(id: WindowPrefId, value: unknown): string | null {
-      if (!deps.windowOpen()) return "Open MausBot on this computer first; this setting lives in the app window.";
-      if (!values.has(id)) return "The open MausBot window can't change this here. It is changed in MausBot's desktop app on this computer.";
+      if (!deps.windowOpen()) return "Open IndBot on this computer first; this setting lives in the app window.";
+      if (!values.has(id)) return "The open IndBot window can't change this here. It is changed in IndBot's desktop app on this computer.";
       values.set(id, value);
       deps.broadcast({ kind: "window-pref", id, value }, { adminOnly: true });
       return null;

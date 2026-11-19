@@ -26,7 +26,7 @@ type Bot = {
 };
 type OAuth = Pick<McpOAuthManager, "authState" | "tokenRefused" | "endsAt">;
 
-/** A bot the team shares, as the Admin's report names them: not hidden, not moved away, not a member's own MausBot. */
+/** A bot the team shares, as the Admin's report names them: not hidden, not moved away, not a member's own IndBot. */
 export const isTeamBot = (bot: Pick<Bot, "hidden" | "movedTo" | "defaultBot">): boolean => !bot.hidden && !bot.movedTo && !bot.defaultBot?.person;
 
 export interface ConnectionHealthHostDeps<B extends Bot = Bot> {

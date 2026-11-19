@@ -31,10 +31,10 @@ async function setup(extra: NodeJS.ProcessEnv) {
   const session = await launchVerificationServer(env);
   try {
     const url = session.info.url;
-    const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: url } }) as Promise<any>;
+    const cli = (...args: string[]) => runControlOmb(args, { env: { OPENINDBOT_URL: url } }) as Promise<any>;
     const bot = (await cli("new-bot", "--name", "Warm summary probe")).bot;
     const thread = bot.activeTaskId as string;
-    // A 1M-window model, as on the trial: OpenMausBot's own fold would wait for 180k, so Claude Code's comes first.
+    // A 1M-window model, as on the trial: OpenIndBot's own fold would wait for 180k, so Claude Code's comes first.
     await cli("set-model", "--bot", bot.id, "--instance", "claude", "--model", "claude-opus-5-5");
     const task = () => readRegistry(session.info.dataDir).bots
       .find((b: any) => b.id === bot.id).tasks.find((t: any) => t.threadId === thread);
@@ -62,7 +62,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const words = (prompt: any) => JSON.stringify(prompt);
 /** Each run's times to the next reply, kept with the fixtures' other evidence. */
 const record = (entry: Record<string, unknown>) => {
-  const dir = join(tmpdir(), "openmausbot-verification-evidence");
+  const dir = join(tmpdir(), "openindbot-verification-evidence");
   mkdirSync(dir, { recursive: true });
   appendFileSync(join(dir, "warm-summary-timings.jsonl"), `${JSON.stringify({ at: new Date().toISOString(), compactMs: COMPACT_MS, ...entry })}\n`);
 };

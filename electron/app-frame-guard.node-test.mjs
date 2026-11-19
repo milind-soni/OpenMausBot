@@ -50,7 +50,7 @@ const appPage = { frameTreeNodeId: 1, origin: "http://127.0.0.1:5199" };
 const newFrame = (url, initiator, parent = appPage) => ({ isMainFrame: false, url, frame: { origin: "null", url: "", parent }, initiator });
 
 test("a new frame may load the address the app page gives it (a published site beside the chat)", () => {
-  assert.equal(appFrameNavigationAllowed(newFrame("https://abc.mausbot.page/", { frameTreeNodeId: 1, origin: "http://127.0.0.1:5199" })), true);
+  assert.equal(appFrameNavigationAllowed(newFrame("https://abc.indbot.page/", { frameTreeNodeId: 1, origin: "http://127.0.0.1:5199" })), true);
 });
 
 test("an app frame still may not go anywhere by itself or through a frame of its own", () => {

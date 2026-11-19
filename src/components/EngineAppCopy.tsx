@@ -1,4 +1,4 @@
-// An engine whose CLI runs the copy OpenMausBot installed: the person's terminal does not reach it, so it is
+// An engine whose CLI runs the copy OpenIndBot installed: the person's terminal does not reach it, so it is
 // finished here, never with a terminal step.
 import { Check, KeyRound, X } from "lucide-react";
 import { useStore, type InstanceInfo } from "@/state/store";

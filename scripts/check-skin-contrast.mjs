@@ -296,7 +296,7 @@ for (const skinId of ["daylight", "pop"]) {
   if (!bubbleFailed) console.log(`✓ ${skinId} bubble — editor, controls and paired fills above 4.5:1`);
 }
 
-// MausBot Cloud's night card paints its own sky in every skin: an indigo dusk in the light scheme, a deep night in the
+// IndBot Cloud's night card paints its own sky in every skin: an indigo dusk in the light scheme, a deep night in the
 // dark one. Its text sits between the sky's first two stops; the close button's glyph also lands on the far stop.
 const night = [...css.matchAll(/:root\s*\{([^}]*)\}/g)].map(([, body]) => declarations(body)).find(tokens => tokens["--cloud-night-from"]);
 if (!night) {

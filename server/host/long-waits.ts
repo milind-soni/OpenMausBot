@@ -1,4 +1,4 @@
-// A question a person has left for a day is said in words the next time they talk to their Chief or MausBot: the badge
+// A question a person has left for a day is said in words the next time they talk to their Chief or IndBot: the badge
 // alone says nothing about how long it has waited, and no card or feature flag is added for it.
 export const LONG_WAIT_MS = 24 * 60 * 60_000;
 

@@ -540,7 +540,7 @@
       "use_tool"
     ]
   },
-  "default+mausbot": {
+  "default+indbot": {
     "bytes": 18082,
     "sha256": "97b8fa6fc920cad0f5b733f01161b8851eea5d267e5589cb265a1b79317da6fa",
     "tools": [
@@ -564,7 +564,7 @@
       "use_tool"
     ]
   },
-  "skills+shared+voice+mausbot": {
+  "skills+shared+voice+indbot": {
     "bytes": 18930,
     "sha256": "5dfaa7c8c79b94eacc21660e42d19649b7800d3d1ae5ece8b5d583f9270e609f",
     "tools": [

@@ -17,7 +17,7 @@ const MAX_ERROR_BYTES = 64 * 1024;
 export function desktopCompanionRendererArguments(localOrigin, remoteAccess) {
   return [
     `--omb-local-origin=${localOrigin}`,
-    ...(remoteAccess ? ["--openmausbot-remote-client"] : []),
+    ...(remoteAccess ? ["--openindbot-remote-client"] : []),
   ];
 }
 
@@ -47,7 +47,7 @@ export const NEXT_MANAGED_COMPANION_HOST_SUFFIX = "";
 
 /** Every zone the control plane makes addresses in, lowercase apex names. Ship a new domain here first. */
 export const MANAGED_COMPANION_HOST_SUFFIXES = Object.freeze(
-  ["openmausbot.com", "mausbot.si", NEXT_MANAGED_COMPANION_HOST_SUFFIX].filter(Boolean),
+  ["openindbot.com", "indbot.si", NEXT_MANAGED_COMPANION_HOST_SUFFIX].filter(Boolean),
 );
 
 /** Only the control plane's `c-<32 hex>` names: any other name in those zones never receives a pairing code. */
@@ -135,7 +135,7 @@ export async function pairDesktopCompanion({
 }) {
   const endpoint = normalizeDesktopCompanionEndpoint(rawEndpoint);
   if (!endpoint) {
-    throw new Error("Enter the OpenMausBot HTTPS companion address or full Tailscale name ending in .ts.net");
+    throw new Error("Enter the OpenIndBot HTTPS companion address or full Tailscale name ending in .ts.net");
   }
   const code = String(rawCode ?? "").trim();
   if (!PAIRING_CODE.test(code)) throw new Error("Enter the six-digit code shown on the other computer");

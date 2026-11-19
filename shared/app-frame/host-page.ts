@@ -1,4 +1,4 @@
-// The phones' app host page, loaded in a web view: iOS from mausbot-app://host/app-host.html, Android from
+// The phones' app host page, loaded in a web view: iOS from indbot-app://host/app-host.html, Android from
 // https://appassets.androidplatform.net/app/app-host.html. It holds the same sandboxed srcdoc iframe the
 // desktop draws, so the `window.parent.postMessage` contract SDK views assume holds everywhere.
 //
@@ -6,7 +6,7 @@
 //
 //   native → page
 //     iOS:     evaluateJavaScript / callAsyncJavaScript in the host world,
-//              calling `appHost.<fn>(...)` (also `mausbotAppHost.<fn>`)
+//              calling `appHost.<fn>(...)` (also `indbotAppHost.<fn>`)
 //     Android: replyProxy.postMessage(JSON.stringify({ v: 1, call, args })),
 //              heard on the injected `appHost` object's `onmessage`
 //     appHost.load({ v: 1, doc, hostContext, limits?, engagedAt?, hostVersion? })
@@ -219,11 +219,11 @@ export function startAppHostPage(win: Window, given?: AppHostTransport): AppHost
       case "reply": return api.reply(message.args[0], message.args[1]);
     }
   });
-  const globals = win as unknown as { appHost?: unknown; mausbotAppHost?: unknown };
+  const globals = win as unknown as { appHost?: unknown; indbotAppHost?: unknown };
   // Android's injected object owns the name `appHost` there; native reaches
   // the page through it, so it is left alone.
   if (!(globals.appHost && typeof (globals.appHost as AndroidInjected).postMessage === "function")) globals.appHost = api;
-  globals.mausbotAppHost = api;
+  globals.indbotAppHost = api;
   send({ v: 1, type: "ready" });
   return api;
 }

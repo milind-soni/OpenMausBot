@@ -22,7 +22,7 @@ import {
   openCodePromptUnreachedModel,
   OpenCodeDriver,
   openCodeProviderKeysAllowed,
-  openMausOwnsWorkingFolder,
+  openIndOwnsWorkingFolder,
   parseOpenCodeModelsOutput,
   preferredOpenCodeModel,
   resetOpenCodeModelCache,
@@ -428,7 +428,7 @@ describe("OpenCode catalog", () => {
     },
   );
 
-  it("points a rejected Zen key at the key OpenMaus saves", () => {
+  it("points a rejected Zen key at the key OpenInd saves", () => {
     expect(describeOpenCodeAccountError("invalid_credentials", "opencode/big-pickle")).toContain("Settings → AI → Providers");
     for (const model of [undefined, "opencode/big-pickle", "opencode-go/minimax-m3"]) {
       expect(describeOpenCodeAccountError("invalid_credentials", model)).not.toContain("opencode auth login");
@@ -1048,7 +1048,7 @@ describe("OpenCode catalog probes", () => {
           FAKE_ACP_SESSION_DELETE: "1", FAKE_ACP_RPC_APPEND_FILE: rpc,
         }, FAKE_CLI);
         const lines = rpcLines(rpc);
-        ledger = join(lines.find((entry) => entry.method === "session/new")!.cwd!, ".openmaus-probe-sessions.json");
+        ledger = join(lines.find((entry) => entry.method === "session/new")!.cwd!, ".openind-probe-sessions.json");
         return lines.filter((entry) => entry.method === "session/delete").map((entry) => entry.sessionId).sort();
       };
       expect(await discover(join(scratch, "first.jsonl"))).toEqual(["fake-acp-session"]);
@@ -1076,7 +1076,7 @@ describe("OpenCode catalog probes", () => {
       }, FAKE_CLI);
       const lines = rpcLines(crashed);
       expect(lines.some((entry) => entry.method === "session/delete")).toBe(false);
-      ledger = join(lines.find((entry) => entry.method === "session/new")!.cwd!, ".openmaus-probe-sessions.json");
+      ledger = join(lines.find((entry) => entry.method === "session/new")!.cwd!, ".openind-probe-sessions.json");
       expect(Object.keys(JSON.parse(readFileSync(ledger, "utf8")))).toEqual(["ses_crashed"]);
 
       writeFileSync(ledger, JSON.stringify({ ses_crashed: Date.now() - 10 * 60_000 }));
@@ -1101,7 +1101,7 @@ describe("OpenCode catalog probes", () => {
       await discoverOpenCodeModels({ ...process.env, HOME: scratch, FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_RPC_APPEND_FILE: rpc }, FAKE_CLI);
       const lines = rpcLines(rpc);
       expect(lines.some((entry) => entry.method === "session/delete")).toBe(false);
-      const ledger = join(lines.find((entry) => entry.method === "session/new")!.cwd!, ".openmaus-probe-sessions.json");
+      const ledger = join(lines.find((entry) => entry.method === "session/new")!.cwd!, ".openind-probe-sessions.json");
       expect(existsSync(ledger) ? JSON.parse(readFileSync(ledger, "utf8")) : {}).toEqual({});
     } finally {
       await removeTempDir(scratch);
@@ -1134,7 +1134,7 @@ describe("OpenCode catalog probes", () => {
   });
 });
 
-describe("OpenCode access to folders OpenMaus owns", () => {
+describe("OpenCode access to folders OpenInd owns", () => {
   it("names the attachments folder and only this bot's shared folder", () => {
     expect(openCodeOwnedDirectories("bot-7")).toEqual([ATTACHMENTS_DIR, workspaceDir("bot-7")]);
     expect(openCodeOwnedDirectories("..")).toEqual([ATTACHMENTS_DIR]);
@@ -1147,7 +1147,7 @@ describe("OpenCode access to folders OpenMaus owns", () => {
     ["the bot's shared folder (a room's)", workspaceDir("bot-7")],
     ["a folder inside the shared one", join(workspaceDir("bot-7"), "memory")],
     ["the attachments folder", ATTACHMENTS_DIR],
-    ["OpenMaus's data folder", dirname(ATTACHMENTS_DIR)],
+    ["OpenInd's data folder", dirname(ATTACHMENTS_DIR)],
     ["a project folder", join(tmpdir(), "project")],
   ])("never allows the working folder or a folder above it: %s", (_label, cwd) => {
     const inside = (path: string, folder: string) => {
@@ -1159,15 +1159,15 @@ describe("OpenCode access to folders OpenMaus owns", () => {
     expect(allowed).not.toContain(join(TASK_WORKSPACES_DIR, "bot-7"));
   });
 
-  it("switches off project config only in OpenMaus's own working folders", () => {
-    expect(openMausOwnsWorkingFolder(join(TASK_WORKSPACES_DIR, "bot-7", "thread-1"))).toBe(true);
-    expect(openMausOwnsWorkingFolder(workspaceDir("bot-7"))).toBe(true);
-    expect(openMausOwnsWorkingFolder(TASK_WORKSPACES_DIR)).toBe(false);
-    expect(openMausOwnsWorkingFolder(join(tmpdir(), "project"))).toBe(false);
-    expect(openMausOwnsWorkingFolder(`${TASK_WORKSPACES_DIR}-elsewhere`)).toBe(false);
+  it("switches off project config only in OpenInd's own working folders", () => {
+    expect(openIndOwnsWorkingFolder(join(TASK_WORKSPACES_DIR, "bot-7", "thread-1"))).toBe(true);
+    expect(openIndOwnsWorkingFolder(workspaceDir("bot-7"))).toBe(true);
+    expect(openIndOwnsWorkingFolder(TASK_WORKSPACES_DIR)).toBe(false);
+    expect(openIndOwnsWorkingFolder(join(tmpdir(), "project"))).toBe(false);
+    expect(openIndOwnsWorkingFolder(`${TASK_WORKSPACES_DIR}-elsewhere`)).toBe(false);
   });
 
-  it("keeps the person's single folder rule ahead of OpenMaus's folders", () => {
+  it("keeps the person's single folder rule ahead of OpenInd's folders", () => {
     const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-folder-rule-"));
     try {
       const configDir = join(scratch, "config", "opencode");
@@ -1576,7 +1576,7 @@ describe("OpenCode ready only through its free models", () => {
 });
 
 describe("OpenCode one-off calls (connection checks, memory upkeep)", () => {
-  it("file their session under OpenMaus's own OpenCode project, never the global one the person's other folders share", async () => {
+  it("file their session under OpenInd's own OpenCode project, never the global one the person's other folders share", async () => {
     const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-oneshot-"));
     const requests = join(scratch, "requests.jsonl");
     const driver = createOpenCodeDriver(async () => catalog("opencode/big-pickle"));

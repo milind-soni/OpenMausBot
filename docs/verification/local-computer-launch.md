@@ -136,7 +136,7 @@ holds the current set.
 The bundled Windows driver (0.28.2) sends a foreground `type_text` as one burst
 of key packets, which Windows 11 Notepad scrambles, and answers a click that
 picks a menu item with `foreground_unavailable` after the click worked. With a
-driver older than 0.35.0, OpenMausBot types such text one character at a time
+driver older than 0.35.0, OpenIndBot types such text one character at a time
 and tells the bot that the click was sent:
 
 ```sh

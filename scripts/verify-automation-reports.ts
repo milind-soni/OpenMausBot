@@ -51,7 +51,7 @@ try {
     reply("Nothing else from Acme.\nNOTHING NEW", "run-5"),
     { ...reply("NOTHING NEW", "later"), repeat: true },
   ] } }));
-  ui = await mountPreview(fixture, { entry: "/scripts/testing/threads-preview.tsx", route: "/__automations.html", title: "Isolated OpenMaus Automations", logLevel: "silent" });
+  ui = await mountPreview(fixture, { entry: "/scripts/testing/threads-preview.tsx", route: "/__automations.html", title: "Isolated OpenInd Automations", logLevel: "silent" });
   say({ ...fixture.info, previewUrl: ui.previewUrl, botId, mainThreadId: main });
 
   await control(["send", "--bot", botId, "--task", main, "--text", "Watch my inbox and tell me when Acme writes."]);

@@ -33,7 +33,7 @@ export function isCodexEndpoint(entry: InstanceConfig | undefined): boolean {
 
 function infoOf(entry: InstanceConfig): CodexEndpointInfo {
   const endpoint = configOf(entry).endpoint!;
-  return { baseUrl: endpoint.url, models: [...endpoint.models], tokenSaved: Boolean(entry.environment?.OPENMAUSBOT_CODEX_API_KEY) };
+  return { baseUrl: endpoint.url, models: [...endpoint.models], tokenSaved: Boolean(entry.environment?.OPENINDBOT_CODEX_API_KEY) };
 }
 
 export function withCodexEndpointInfo(described: unknown, configs: InstanceConfigMap): unknown {
@@ -52,7 +52,7 @@ export function newCodexEndpoint(cfg: AppConfig, body: z.infer<typeof codexEndpo
   instances[instanceId] = {
     driver: "codex", access: "custom", displayName: body.displayName,
     config: { ...(cli ? { cli } : {}), endpoint: { url: endpointBaseUrl(body.baseUrl)!, ...(body.model ? { model: body.model, models: [body.model] } : { models: officialModels(true) }) } },
-    environment: { CODEX_HOME: join(DATA_DIR, "providers", instanceId), OPENMAUSBOT_CODEX_API_KEY: body.token },
+    environment: { CODEX_HOME: join(DATA_DIR, "providers", instanceId), OPENINDBOT_CODEX_API_KEY: body.token },
   };
   return { instanceId, instances };
 }
@@ -66,12 +66,12 @@ export function updateCodexEndpoint(cfg: AppConfig, instanceId: string, body: Fi
   const address = body.baseUrl === undefined ? saved.baseUrl : endpointBaseUrl(body.baseUrl)!;
   // A saved credential belongs only to the address it was entered for.
   if (body.token === undefined && address !== saved.baseUrl) throw Object.assign(new Error("Enter the endpoint's token again for the new address."), { status: 400 });
-  const token = body.token ?? entry.environment?.OPENMAUSBOT_CODEX_API_KEY;
+  const token = body.token ?? entry.environment?.OPENINDBOT_CODEX_API_KEY;
   if (!token) throw Object.assign(new Error("Enter the endpoint's token."), { status: 400 });
   instances[instanceId] = {
     ...entry, ...(body.displayName ? { displayName: body.displayName } : {}),
     config: { ...configOf(entry), endpoint: { ...configOf(entry).endpoint!, url: address, ...(body.model ? { model: body.model, models: [body.model] } : {}) } },
-    environment: { ...entry.environment, OPENMAUSBOT_CODEX_API_KEY: token },
+    environment: { ...entry.environment, OPENINDBOT_CODEX_API_KEY: token },
   };
   return { instances };
 }

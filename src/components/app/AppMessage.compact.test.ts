@@ -39,7 +39,7 @@ const press = (element: HTMLElement) => act(async () => { element.click(); await
 /** happy-dom runs no script in the frame, so the page's word on its heading is played by a message from its window. */
 const pageSays = (heading: boolean | null) => act(async () => {
   const view = card().querySelector("iframe")!.contentWindow;
-  window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", method: "mausbot/notifications/heading", params: { heading } }, source: view as MessageEventSource }));
+  window.dispatchEvent(new MessageEvent("message", { data: { jsonrpc: "2.0", method: "indbot/notifications/heading", params: { heading } }, source: view as MessageEventSource }));
 });
 
 beforeEach(() => {

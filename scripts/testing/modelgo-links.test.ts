@@ -17,7 +17,7 @@ const mentions = (file: string) => lines(file).filter((line) => !isComment(line)
 
 describe("links to ModelGo's site", () => {
   it("is the exact address the sponsor asked for", () => {
-    expect(MODELGO_URL).toBe("https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=app&campaign_id=openmausbot&ad_group_id=app");
+    expect(MODELGO_URL).toBe("https://modelgo.ai/?utm_source=openindbot&utm_medium=sponsorship&utm_content=app&campaign_id=openindbot&ad_group_id=app");
   });
 
   it("is the only ModelGo address anywhere in src/, shared/ and the phone protocol", () => {

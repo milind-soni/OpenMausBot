@@ -1,4 +1,4 @@
-export const PINNED_CIRCLE_DRAG_TYPE = "application/x-openmausbot-pinned-circle";
+export const PINNED_CIRCLE_DRAG_TYPE = "application/x-openindbot-pinned-circle";
 
 export type PinnedCircleDropPlace = "before" | "after";
 export type PinnedCircleDrop = { id: string; place: PinnedCircleDropPlace; axis: "x" | "y" };

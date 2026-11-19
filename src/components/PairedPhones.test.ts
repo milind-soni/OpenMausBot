@@ -22,7 +22,7 @@ describe("paired phones", () => {
   });
 
   it("offers Connect from only once the computer serves the encrypted connection", () => {
-    const e2e = { enabled: true, relay: "connected" as const, node: "relay1.openmausbot.com", descriptor: null };
+    const e2e = { enabled: true, relay: "connected" as const, node: "relay1.openindbot.com", descriptor: null };
     expect(row(phone(), state())).not.toContain("Connect from");
     const markup = row(phone({ routes: "local" }), state({ e2e }));
     expect(markup).toContain("Connect from");
@@ -42,11 +42,11 @@ describe("paired phones", () => {
     const rowFor = (device: PhoneDevice, controller: PhoneSetupController, onPairAgain?: () => void) =>
       createElement(PhoneRow, { device, connected: false, state: state(), c: controller, onRemoved: () => {}, onPairAgain });
     const markup = renderToStaticMarkup(rowFor(phone(), retired, () => {}));
-    expect(markup).toContain("This phone has an older MausBot app. Update the app, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again here.");
+    expect(markup).toContain("This phone has an older IndBot app. Update the app, then open it once on the same Wi-Fi as this computer. If that doesn&#x27;t reconnect it, pair it again here.");
     expect(markup).toMatch(/<button type="button"[^>]*>Pair again<\/button>/);
     expect(renderToStaticMarkup(rowFor(phone(), retired)), "no way to pair from here: no button").not.toContain("Pair again");
-    expect(renderToStaticMarkup(rowFor(phone({ e2eAt: NOW }), retired, () => {})), "a phone on the encrypted connection").not.toContain("older MausBot app");
-    expect(renderToStaticMarkup(rowFor(phone(), c, () => {})), "the link not ended").not.toContain("older MausBot app");
+    expect(renderToStaticMarkup(rowFor(phone({ e2eAt: NOW }), retired, () => {})), "a phone on the encrypted connection").not.toContain("older IndBot app");
+    expect(renderToStaticMarkup(rowFor(phone(), c, () => {})), "the link not ended").not.toContain("older IndBot app");
   });
 
   it("lists connected phones first, then the most recently seen", () => {

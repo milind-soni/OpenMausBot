@@ -18,7 +18,7 @@ function fakeFetch(...responses: Reply[]) {
 
 const OWN = { token: "treg_own_key", api: "https://treg.example.test", included: false };
 const PLAN = { token: "omb_xd_plan", api: "https://cloud.example.test/api/cloud/services/x", included: true };
-const PEOPLE = { id: "apollo.people.search", name: "Find people", method: "GET", platform: "people", cost: { usd: 0.002, type: "per_call" }, input: { type: "object" }, test_request: { q: "maus" } };
+const PEOPLE = { id: "apollo.people.search", name: "Find people", method: "GET", platform: "people", cost: { usd: 0.002, type: "per_call" }, input: { type: "object" }, test_request: { q: "ind" } };
 const COMPANIES = { id: "dataforseo.domains.bulk", name: "Domains", method: "POST", platform: "seo", input: { queryArrayEncoding: "comma" } };
 
 async function failure(promise: Promise<unknown>): Promise<XResearchError> {
@@ -39,16 +39,16 @@ describe("research with the person's own treg key", () => {
     expect(calls[0]!.headers.get("x-treg-token")).toBe("treg_own_key");
     expect(answer).toEqual({ query: "work email of a person", verdict: "strong", results: [{
       id: "apollo.people.search", name: "Find people", platform: "people", method: "GET", cost: { estimatedUsd: 0.002, type: "per_call" },
-      params: { type: "object" }, example: { q: "maus" },
+      params: { type: "object" }, example: { q: "ind" },
     }] });
   });
 
   it("reads the endpoint's method from the catalog, sends params as its query string, a fresh Idempotency-Key and the key, and reports treg's cost", async () => {
     const { fetcher, calls } = fakeFetch({ body: { endpoint: PEOPLE } }, { body: { people: [] }, headers: { "x-treg-cost-micro": "2000", "x-treg-call-id": "call-1" } });
-    const answer = await createResearchClient(OWN, { fetcher }).call({ id: "apollo.people.search", params: { q: "maus", titles: ["CEO", "CTO"] } });
+    const answer = await createResearchClient(OWN, { fetcher }).call({ id: "apollo.people.search", params: { q: "ind", titles: ["CEO", "CTO"] } });
     expect(calls.map((call) => [call.method, call.url])).toEqual([
       ["GET", "https://treg.example.test/catalog/endpoints/apollo.people.search"],
-      ["GET", "https://treg.example.test/call/apollo.people.search?q=maus&titles=CEO&titles=CTO"],
+      ["GET", "https://treg.example.test/call/apollo.people.search?q=ind&titles=CEO&titles=CTO"],
     ]);
     expect(calls[1]!.headers.get("x-treg-token")).toBe("treg_own_key");
     expect(calls[1]!.headers.get("idempotency-key")).toMatch(/^[0-9a-f-]{36}$/);
@@ -59,8 +59,8 @@ describe("research with the person's own treg key", () => {
 
   it("sends a body endpoint's params as JSON and its query as the query string, arrays as the endpoint encodes them", async () => {
     const { fetcher, calls } = fakeFetch({ body: { endpoint: COMPANIES } }, { body: { tasks: [] } });
-    await createResearchClient(OWN, { fetcher }).call({ id: "dataforseo.domains.bulk", params: [{ target: "openmausbot.com" }], query: { fields: ["rank", "traffic"] } });
-    expect(calls[1]).toMatchObject({ method: "POST", url: "https://treg.example.test/call/dataforseo.domains.bulk?fields=rank%2Ctraffic", body: [{ target: "openmausbot.com" }] });
+    await createResearchClient(OWN, { fetcher }).call({ id: "dataforseo.domains.bulk", params: [{ target: "openindbot.com" }], query: { fields: ["rank", "traffic"] } });
+    expect(calls[1]).toMatchObject({ method: "POST", url: "https://treg.example.test/call/dataforseo.domains.bulk?fields=rank%2Ctraffic", body: [{ target: "openindbot.com" }] });
     expect(researchRequest(COMPANIES, { id: COMPANIES.id })).toEqual({ search: "", body: "{}" });
     expect(() => researchRequest(PEOPLE, { id: PEOPLE.id, params: { q: "a" }, query: { q: "b" } })).toThrow(/params or as query, not both/);
   });
@@ -102,7 +102,7 @@ describe("research through the plan's relay", () => {
     const client = createResearchClient(PLAN, { fetcher });
     expect(await client.search({ job: "people", limit: 3 })).toEqual({ query: "people", results: [], budget: { leftUsd: 14 } });
     await client.endpoint("apollo.people.search");
-    const answer = await client.call({ id: "apollo.people.search", params: { q: "maus" }, query: { page: 2 } });
+    const answer = await client.call({ id: "apollo.people.search", params: { q: "ind" }, query: { page: 2 } });
     expect(calls.map((call) => [call.method, call.url])).toEqual([
       ["GET", `${PLAN.api}/research/search?q=people&limit=3`],
       ["GET", `${PLAN.api}/research/endpoints/apollo.people.search`],
@@ -112,7 +112,7 @@ describe("research through the plan's relay", () => {
       expect(call.headers.get("authorization")).toBe("Bearer omb_xd_plan");
       expect(call.headers.get("x-treg-token")).toBeNull();
     }
-    expect(calls[2]!.body).toEqual({ params: { q: "maus" }, query: { page: 2 } });
+    expect(calls[2]!.body).toEqual({ params: { q: "ind" }, query: { page: 2 } });
     expect(calls[2]!.headers.get("idempotency-key")).toMatch(/^[0-9a-f-]{36}$/);
     expect(answer).toEqual({ result: { people: [] }, costUsd: 0.0045, costPending: true });
     expect(costLine(answer)).toBe("about $0.0045, settled when treg finishes");

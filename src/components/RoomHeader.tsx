@@ -63,7 +63,7 @@ export function DefaultResponderSelect({ group, members }: { group: Group; membe
   );
 }
 
-function memberMauses(group: Group, members: Bot[], placeOf: (entry: RoomQueueEntry) => string | undefined) {
+function memberInds(group: Group, members: Bot[], placeOf: (entry: RoomQueueEntry) => string | undefined) {
   const contextWarnings = roomContextWarnings(group, members);
   const speakersElsewhere = new Set(roomSpeakerIds(group).filter((id) => id !== group.busyBotId));
   return members.map((b) => {
@@ -151,7 +151,7 @@ export function RoomHeader({
 }) {
   const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle } = useCaptionChrome();
   const { state, dispatch } = useStore();
-  const faces = memberMauses(group, members, busyPlaceOf(state.groups, state.bots));
+  const faces = memberInds(group, members, busyPlaceOf(state.groups, state.bots));
   const pinned = (
     <PinnedMessagesMenu
       pins={pinnedPreview(group.messages, group.pinnedMessageId, t("room.aBot"), false)}

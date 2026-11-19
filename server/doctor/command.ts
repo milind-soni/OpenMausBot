@@ -1,4 +1,4 @@
-// `openmausbot doctor --data [--fix] [--data-dir DIR] [--json]`: the doctor on this computer's data folder, without the
+// `openindbot doctor --data [--fix] [--data-dir DIR] [--json]`: the doctor on this computer's data folder, without the
 // server. It reports; with --fix it applies the safe repairs, only while no server uses the folder.
 import { join, resolve } from "node:path";
 
@@ -19,7 +19,7 @@ export function dataDoctorOutcome(report: DoctorReport): VerbOutcome {
       `${MARK[result.status]!.padEnd(8)}${result.title}: ${result.summary}`,
       ...(result.fixed ? [`        done: ${result.fixed}`] : []),
       ...(result.status !== "ok" && result.status !== "fixed" && result.instruction ? [`        what to do: ${result.instruction}`] : []),
-      ...(result.status === "problem" && result.fixable && !report.fix.ran ? ["        openmausbot doctor --data --fix repairs it"] : []),
+      ...(result.status === "problem" && result.fixable && !report.fix.ran ? ["        openindbot doctor --data --fix repairs it"] : []),
     ]),
     ...(report.fix.asked && !report.fix.ran && report.fix.why ? [`No fixes ran: ${report.fix.why}`] : []),
     ...(report.backup ? [`What was changed was copied to ${report.backup} first.`] : []),
@@ -29,6 +29,6 @@ export function dataDoctorOutcome(report: DoctorReport): VerbOutcome {
 }
 
 export async function dataDoctor(ctx: VerbContext): Promise<VerbOutcome> {
-  const dataDir = resolve(flag(ctx.flags, "data-dir") ?? (ctx.env.OMB_DATA_DIR || join(dataHome(), ".openmausbot")));
+  const dataDir = resolve(flag(ctx.flags, "data-dir") ?? (ctx.env.OMB_DATA_DIR || join(dataHome(), ".openindbot")));
   return dataDoctorOutcome(runDoctor({ dataDir, version: serverVersion(), mode: "command", fix: ctx.flags.fix === true }));
 }

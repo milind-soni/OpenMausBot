@@ -49,23 +49,23 @@ export function createManagedDesktopRelay({ timeoutMs = 15_000 } = {}) {
   return {
     send(proc, connection) {
       if (!proc) return connection ? Promise.reject(new Error("The local bot runtime is not available.")) : Promise.resolve();
-      return post(proc, { type: "openmausbot:managed-desktop", connection });
+      return post(proc, { type: "openindbot:managed-desktop", connection });
     },
     sendPolicy(proc, policy) {
-      return proc ? post(proc, { type: "openmausbot:managed-desktop-policy", policy }) : Promise.resolve();
+      return proc ? post(proc, { type: "openindbot:managed-desktop-policy", policy }) : Promise.resolve();
     },
     sendIdentity(proc, identity) {
-      return proc ? post(proc, { type: "openmausbot:managed-desktop-identity", identity }) : Promise.resolve();
+      return proc ? post(proc, { type: "openindbot:managed-desktop-identity", identity }) : Promise.resolve();
     },
     receive(proc, raw) {
       const message = raw?.data ?? raw;
-      if (message?.type !== "openmausbot:managed-desktop-result") return false;
+      if (message?.type !== "openindbot:managed-desktop-result") return false;
       if (pending.get(message.requestId)?.proc === proc && typeof message.ok === "boolean") settle(message.requestId, !message.ok);
       return true;
     },
     sendLibrary(proc, library) {
       if (!proc) return library ? Promise.reject(new Error("The local bot runtime is not available.")) : Promise.resolve();
-      return post(proc, { type: "openmausbot:managed-library", library });
+      return post(proc, { type: "openindbot:managed-library", library });
     },
     rejectProcess(proc) { for (const [id, entry] of pending) if (entry.proc === proc) settle(id, true); },
   };
@@ -92,9 +92,9 @@ export const retryDelay = attempt => [15_000, 30_000, 60_000][Math.min(attempt, 
 export const MANAGED_TEXT = Object.freeze({
   clearFailed: "The saved company sign-in could not be cleared. Unlock your system keychain and Disconnect again before reconnecting.",
   disconnected: "Disconnected on this computer.",
-  runtimeRunning: "The local runtime did not confirm stopping Company tasks. Quit and reopen OpenMausBot before using Company models again.",
+  runtimeRunning: "The local runtime did not confirm stopping Company tasks. Quit and reopen OpenIndBot before using Company models again.",
   portalUnreachable: "The portal was unreachable; ask your administrator to revoke this device there too.",
-  confirmStopped: "Quit and reopen OpenMausBot to confirm Company tasks have stopped.",
+  confirmStopped: "Quit and reopen OpenIndBot to confirm Company tasks have stopped.",
   expired: "Your company sign-in expired. Reconnect to continue using company models and backups.",
   accessEnded: "Company access ended or needs a new sign-in. Your personal and local providers are unchanged.",
   retrying: "Can't reach the Admin portal or apply company models. Personal and local providers are still available. We'll retry shortly.",
@@ -102,7 +102,7 @@ export const MANAGED_TEXT = Object.freeze({
   denied: "Sign-in was denied, expired or already used. Start again on this computer.",
   completeFailed: "Could not complete sign-in. Check your Admin address and start again.",
   removed: "This computer's company sign-in couldn't be read, so it was removed. Sign in again.",
-  restoreFailed: "The saved company sign-in can't be read right now. OpenMausBot tries again every minute.",
+  restoreFailed: "The saved company sign-in can't be read right now. OpenIndBot tries again every minute.",
   startFailed: "Could not start company sign-in. Check the Admin portal address and your connection.",
 });
 const said = (...codes) => ({ message: codes.map(code => MANAGED_TEXT[code]).join(" "), messageCodes: codes });

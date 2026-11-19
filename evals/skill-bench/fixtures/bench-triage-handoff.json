@@ -1,7 +1,7 @@
 {
   "id": "bench-triage-handoff",
   "title": "Triage requests dispatch to the duty officer instead of being answered directly",
-  "behavior": "With the skill installed, a triage request carries the openmaus-skill block on the system prompt and the scripted follower dispatches one self-contained brief to the duty officer; without it, the same prompt gets a direct answer with no dispatch and no skill block.",
+  "behavior": "With the skill installed, a triage request carries the openind-skill block on the system prompt and the scripted follower dispatches one self-contained brief to the duty officer; without it, the same prompt gets a direct answer with no dispatch and no skill block.",
   "skill": {
     "id": "bench-triage-handoff",
     "name": "Bench Triage Handoff",
@@ -35,7 +35,7 @@
       "id": "queue-triage",
       "text": "Please triage the support queue and tell me what deserves attention.",
       "assertions": [
-        { "kind": "systemPromptIncludes", "bot": "worker", "turn": 0, "includes": "<openmaus-skill id=\"bench-triage-handoff\"" },
+        { "kind": "systemPromptIncludes", "bot": "worker", "turn": 0, "includes": "<openind-skill id=\"bench-triage-handoff\"" },
         { "kind": "toolNames", "bot": "worker", "equals": ["coordinate_bots"] },
         { "kind": "turnOrder", "bots": ["worker", "duty"] },
         { "kind": "promptIncludes", "bot": "worker", "turn": 0, "includes": "triage" }
@@ -68,7 +68,7 @@
       "id": "incident-triage",
       "text": "Can you triage yesterday's incident reports and rank the follow-ups?",
       "assertions": [
-        { "kind": "systemPromptIncludes", "bot": "worker", "turn": 0, "includes": "<openmaus-skill id=\"bench-triage-handoff\"" },
+        { "kind": "systemPromptIncludes", "bot": "worker", "turn": 0, "includes": "<openind-skill id=\"bench-triage-handoff\"" },
         { "kind": "toolNames", "bot": "worker", "equals": ["coordinate_bots"] },
         { "kind": "turnOrder", "bots": ["worker", "duty"] },
         { "kind": "promptIncludes", "bot": "worker", "turn": 0, "includes": "incident" }
@@ -101,7 +101,7 @@
       "id": "inbox-triage",
       "text": "Triage my inbox from the weekend and flag anything urgent.",
       "assertions": [
-        { "kind": "systemPromptIncludes", "bot": "worker", "turn": 0, "includes": "<openmaus-skill id=\"bench-triage-handoff\"" },
+        { "kind": "systemPromptIncludes", "bot": "worker", "turn": 0, "includes": "<openind-skill id=\"bench-triage-handoff\"" },
         { "kind": "toolNames", "bot": "worker", "equals": ["coordinate_bots"] },
         { "kind": "turnOrder", "bots": ["worker", "duty"] },
         { "kind": "promptIncludes", "bot": "worker", "turn": 0, "includes": "weekend" }

@@ -26,8 +26,8 @@ describe("the managed Caddy", () => {
   });
 
   it("writes the Docker stack's Caddyfile with this server's ports and no admin API", () => {
-    const file = caddyfileFor({ domain: "maus.example.com", appPort: 18799, webhookPort: 18800 });
-    expect(file).toContain("maus.example.com {");
+    const file = caddyfileFor({ domain: "ind.example.com", appPort: 18799, webhookPort: 18800 });
+    expect(file).toContain("ind.example.com {");
     expect(file).toContain("reverse_proxy 127.0.0.1:18799");
     expect(file).toContain("handle /hooks/*");
     expect(file).toContain("reverse_proxy 127.0.0.1:18800");
@@ -47,8 +47,8 @@ describe("the managed Caddy", () => {
   });
 
   it("takes a bare public hostname for --domain", () => {
-    expect(normalizeDomainOption(" HTTPS://Maus.Example.com/ ")).toBe("maus.example.com");
-    expect(normalizeDomainOption("maus.example.com:443")).toEqual({ error: expect.stringContaining("bare hostname") });
+    expect(normalizeDomainOption(" HTTPS://Ind.Example.com/ ")).toBe("ind.example.com");
+    expect(normalizeDomainOption("ind.example.com:443")).toEqual({ error: expect.stringContaining("bare hostname") });
     expect(normalizeDomainOption("localhost")).toEqual({ error: expect.stringContaining("bare hostname") });
     expect(normalizeDomainOption("box.internal")).toEqual({ error: expect.stringContaining("public domain") });
     expect(normalizeDomainOption("nodots")).toEqual({ error: expect.stringContaining("bare hostname") });
@@ -84,7 +84,7 @@ describe("the managed Caddy", () => {
     const fake = join(dir, "fake-caddy");
     writeFileSync(fake, `#!/bin/sh\necho "$@" > "${join(dir, "args.txt")}"\nexec sleep 300\n`, { mode: 0o755 });
     chmodSync(fake, 0o755);
-    const running = await startCaddy({ binary: fake, dataDir: dir, domain: "maus.example.com", appPort: 18799, webhookPort: 18800, settleMs: 300 });
+    const running = await startCaddy({ binary: fake, dataDir: dir, domain: "ind.example.com", appPort: 18799, webhookPort: 18800, settleMs: 300 });
     try {
       // the stand-in writes its arguments from a shell that may start slowly under load
       await expect.poll(() => existsSync(join(dir, "args.txt")), { timeout: 5_000 }).toBe(true);
@@ -98,7 +98,7 @@ describe("the managed Caddy", () => {
 
     const refusing = join(dir, "refusing-caddy");
     writeFileSync(refusing, "#!/bin/sh\necho 'Error: loading initial config: listen tcp :443: bind: permission denied' >&2\nexit 1\n", { mode: 0o755 });
-    await expect(startCaddy({ binary: refusing, dataDir: join(dir, "d2"), domain: "maus.example.com", appPort: 1, webhookPort: 2, settleMs: 2000 })).rejects.toThrow(/ports 80 and 443/);
+    await expect(startCaddy({ binary: refusing, dataDir: join(dir, "d2"), domain: "ind.example.com", appPort: 1, webhookPort: 2, settleMs: 2000 })).rejects.toThrow(/ports 80 and 443/);
     expect(portPermissionRefused("listen tcp :443: bind: permission denied")).toBe(true);
     expect(portPermissionRefused("some other error")).toBe(false);
   });

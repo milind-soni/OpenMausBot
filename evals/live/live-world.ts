@@ -47,7 +47,7 @@ export class LiveWorld extends BaseWorld {
    * never pollute the scenario bot's evidence). */
   async createBot(key: string, name: string): Promise<void> {
     const created = (await runControlOmb(["new-bot", "--name", name], {
-      env: { OPENMAUSBOT_URL: this.session!.url },
+      env: { OPENINDBOT_URL: this.session!.url },
     })) as { bot: { id: string; activeTaskId: string } };
     this.bots.set(key, { id: created.bot.id, threadId: created.bot.activeTaskId });
     const response = await this.api.patch("/api/bots/" + created.bot.id, {

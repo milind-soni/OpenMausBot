@@ -12,7 +12,7 @@ import { agentsMcp } from "./agents-mcp.ts";
 
 const EVERYTHING = {
   OMB_BOT_ID: "bot-alias", OMB_CHIEF_OF_STAFF: "1", OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1",
-  OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_MAUSBOT: "1",
+  OMB_VOICE_NOTES: "1", OMB_X_RESEARCH: "1", OMB_RESEARCH: "1", OMB_TEAM_PEOPLE: "1", OMB_INDBOT: "1",
 };
 const LISTED = new Set(availableTools(catalogProfileFromEnv(EVERYTHING)).map((tool) => tool.name));
 
@@ -26,9 +26,9 @@ const CALLS: Record<string, Json> = {
   session_read: { thread_id: "thread-old", message_id: "message-old" },
   update_widget: { widget_id: "m7", widget: WIDGET_SAMPLES.buildStatus },
   update_html: { app_id: "m9", html: "<p>v2</p>" },
-  x_user_posts: { handle: "@openmausbot", limit: 5 },
-  x_post: { post: "https://x.com/openmausbot/status/123", replies: true },
-  x_profile: { handle: "openmausbot" },
+  x_user_posts: { handle: "@openindbot", limit: 5 },
+  x_post: { post: "https://x.com/openindbot/status/123", replies: true },
+  x_profile: { handle: "openindbot" },
 };
 
 /** What a call sends to the harness, and what the model reads back. */

@@ -4,7 +4,7 @@ import { useStore, type Bot } from "@/state/store";
 import { HELPER_ASK_KEYS } from "../HelperIntro";
 import { Card } from "./rows";
 
-/** MausBot's example asks, in its panel (Simple mode): a tap sends one in the open conversation. */
+/** IndBot's example asks, in its panel (Simple mode): a tap sends one in the open conversation. */
 export function TryAsking({ bot }: { bot: Bot }) {
   const { dispatch } = useStore();
   const advanced = useAdvancedMode();

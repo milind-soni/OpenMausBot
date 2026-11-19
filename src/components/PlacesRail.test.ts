@@ -272,20 +272,20 @@ it("Connect to a server says how another computer's desktop app is opened from h
   await click(host.querySelector("[data-rail-add]"));
   await click(document.querySelector('[data-place-add-choice="server"]'));
   const form = document.querySelector('[data-place-add="own-server"]')!;
-  expect(form.querySelector("[data-connect-other-computer]")?.textContent).toBe("For another computer running the MausBot app: on that computer, open Settings → Phone & devices → Your other computers.");
+  expect(form.querySelector("[data-connect-other-computer]")?.textContent).toBe("For another computer running the IndBot app: on that computer, open Settings → Phone & devices → Your other computers.");
   await type(form.querySelector("[data-own-server-link]"), "192.168.1.30:8799");
   await settle();
   const line = form.querySelector("[data-connect-problem]")?.textContent ?? "";
-  expect(line).toContain("192.168.1.30:8799 is a MausBot desktop app. To open it from here, turn on Tailscale and Your other computers in its Settings → Phone & devices, then use the link shown there.");
+  expect(line).toContain("192.168.1.30:8799 is a IndBot desktop app. To open it from here, turn on Tailscale and Your other computers in its Settings → Phone & devices, then use the link shown there.");
   expect(line).toContain("My Cloud");
-  expect(line).not.toMatch(/can't connect to another|isn't a MausBot server/);
+  expect(line).not.toMatch(/can't connect to another|isn't a IndBot server/);
   expect((form.querySelector("[data-own-server-connect]") as HTMLButtonElement).disabled).toBe(true);
   await type(form.querySelector("[data-own-server-link]"), "123456");
   await settle();
   const code = form.querySelector("[data-connect-problem]")?.textContent ?? "";
   expect(code).toContain("That code is for the phone app. To open that computer from here, turn on Tailscale and Your other computers in its Settings → Phone & devices, then use the link shown there.");
   expect(code).toContain("My Cloud");
-  expect(code).not.toMatch(/can't connect to another|older MausBot/);
+  expect(code).not.toMatch(/can't connect to another|older IndBot/);
 });
 
 it("an address typed key by key stays in its box; a pasted one moves on to the code", async () => {
@@ -295,12 +295,12 @@ it("an address typed key by key stays in its box; a pasted one moves on to the c
   const form = document.querySelector('[data-place-add="own-server"]')!;
   const address = form.querySelector("[data-own-server-link]") as HTMLInputElement;
   const afterTimers = () => act(async () => { await new Promise((done) => setTimeout(done, 0)); });
-  for (const key of "maus.local") {
+  for (const key of "ind.local") {
     const focused = document.activeElement as HTMLInputElement;
     await type(focused, focused.value + key);
     await afterTimers();
   }
-  expect([address.value, (form.querySelector("[data-own-server-code]") as HTMLInputElement).value]).toEqual(["maus.local", ""]);
+  expect([address.value, (form.querySelector("[data-own-server-code]") as HTMLInputElement).value]).toEqual(["ind.local", ""]);
   expect(document.activeElement).toBe(address);
   await type(address, "");
   await act(async () => {
@@ -331,11 +331,11 @@ it("Connect to a server takes an address and a code typed apart: a code pasted a
   await type(form.querySelector("[data-own-server-link]"), "192.168.1.20:8799");
   await settle();
   expect(probe).toHaveBeenLastCalledWith("192.168.1.20:8799", "ABCD-EFGH-JKLM");
-  expect(form.querySelector("[data-connect-found]")?.textContent).toBe("✓ kitchen-box · MausBot 0.1.147 · Private network, not encrypted. Fine on your own network or Tailscale.");
+  expect(form.querySelector("[data-connect-found]")?.textContent).toBe("✓ kitchen-box · IndBot 0.1.147 · Private network, not encrypted. Fine on your own network or Tailscale.");
   expect(form.querySelector("[data-connect-problem]")).toBeNull();
   const button = form.querySelector("[data-own-server-connect]") as HTMLButtonElement;
   expect([button.disabled, button.textContent]).toEqual([false, "Connect to kitchen-box"]);
-  expect(form.textContent).toContain("npx openmausbot pair");
+  expect(form.textContent).toContain("npx openindbot pair");
   workspaces.add.mockResolvedValueOnce({ outcome: "problem", problem: "unreachable", host: "192.168.1.20:8799" });
   await submit(form);
   expect(form.querySelector('[role="alert"]')?.textContent).toBe("Can't reach 192.168.1.20:8799. Check the server is running and reachable from this computer.");
@@ -461,7 +461,7 @@ it("a server of the person's own that signed in: a small server mark, the offlin
   expect(workspaces.open.mock.calls).toHaveLength(1);
   const connect = document.querySelector('[data-place-add="connect-server"]')!;
   expect(connect.textContent).toContain("Connect Render VPS");
-  expect(connect.textContent, "it runs OpenMausBot already: only its pairing link is left").not.toContain("npx");
+  expect(connect.textContent, "it runs OpenIndBot already: only its pairing link is left").not.toContain("npx");
   await type(connect.querySelector("[data-own-server-link]"), "https://render.example.test/#pair=xyz");
   await submit(connect);
   expect(workspaces.add.mock.calls).toEqual([["link", "https://render.example.test/#pair=xyz", ""]]);

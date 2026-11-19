@@ -6,7 +6,7 @@ import { initialState, reducer, type AppState, type Bot, type Group, type Messag
 
 const said = { id: "m1", at: 1, role: "user", kind: "text", text: "Keep this" } as Message;
 const bot = {
-  id: "bot-1", threadId: "first", name: "Maus", messages: [said], activeLeafId: "m1",
+  id: "bot-1", threadId: "first", name: "Ind", messages: [said], activeLeafId: "m1",
   tasks: [{ threadId: "first", title: "First", createdAt: 1 }],
 } as unknown as Bot;
 const room = {

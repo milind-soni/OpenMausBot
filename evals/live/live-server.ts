@@ -78,7 +78,7 @@ export async function spawnLiveServer(
     try {
       const response = await fetch(url + "/api/health", { signal: AbortSignal.timeout(1_000) });
       const body = response.ok ? await response.json() as { app?: string } : null;
-      if (body?.app === "openmausbot") break;
+      if (body?.app === "openindbot") break;
     } catch {
     }
     if (Date.now() >= deadline) {

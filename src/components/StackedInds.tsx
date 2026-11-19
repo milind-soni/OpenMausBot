@@ -14,7 +14,7 @@ export function RoomMark({ density, large = false }: { density: SidebarDensity; 
   );
 }
 
-export function StackedMauses({ members, density, large = false }: { members: Bot[]; density: SidebarDensity; large?: boolean }) {
+export function StackedInds({ members, density, large = false }: { members: Bot[]; density: SidebarDensity; large?: boolean }) {
   const iconOnly = density === "icons";
   const slotSize = slotFor(density, large);
   const singleSize = iconOnly ? 44 : large ? 36 : 32;

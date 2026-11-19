@@ -59,7 +59,7 @@ export function installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, ap
           panel,
           voiceInUse: () => speech.busy() || callPresence.active(),
           release: () => shortcut.releaseModifiers(),
-          openChat: chat => (chat ? openLink(`openmausbot://thread/${encodeURIComponent(chat.threadId)}?bot=${encodeURIComponent(chat.botId)}`) : reveal()),
+          openChat: chat => (chat ? openLink(`openindbot://thread/${encodeURIComponent(chat.threadId)}?bot=${encodeURIComponent(chat.botId)}`) : reveal()),
         });
         shortcut = createTalkShortcut({ globalShortcut, prefs, available: () => appleSpeech && !remote() && !away(), onPress: logged("press", () => session.press()) });
       } catch (error) {

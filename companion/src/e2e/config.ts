@@ -35,7 +35,7 @@ export function parseRelayConfig(value: unknown): RelayConfig | null | "invalid"
   return { hostId: id, nodes: [...nodes], token: relayToken };
 }
 
-/** The desktop app's `openmausbot:companion-e2e` message: `{transportKey, relay}`, the key as b64u of the 32-byte
+/** The desktop app's `openindbot:companion-e2e` message: `{transportKey, relay}`, the key as b64u of the 32-byte
  * private scalar. */
 export function parseE2EMessage(message: Record<string, unknown>): E2EConfig | null {
   let transportKey: KeyPair | null = null;

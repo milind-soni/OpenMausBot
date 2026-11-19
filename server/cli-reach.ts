@@ -1,11 +1,11 @@
-// How other devices reach a server `openmausbot serve` started, and the lines that say so. A route is chosen by a flag
+// How other devices reach a server `openindbot serve` started, and the lines that say so. A route is chosen by a flag
 // (or the saved setup); the link always uses the first one in ROUTE_ORDER.
 import { allowedServerOrigin, isLoopbackHost } from "../electron/server-address.mjs";
 import { reachableAddresses, type ReachableAddresses } from "./lan-address.ts";
 
 export type Route = "public-url" | "domain" | "tunnel" | "tailscale" | "lan";
 
-const DESCRIPTOR = "/.well-known/openmausbot/environment";
+const DESCRIPTOR = "/.well-known/openindbot/environment";
 
 /** `--public-url`: https anywhere, or http on a private network; never plain http on the open internet. */
 export function publicUrlProblem(url: string): string | null {
@@ -62,7 +62,7 @@ const clock = (at: number) => new Date(at).toLocaleTimeString([], { hour: "2-dig
 const NOTE: Record<Route, string> = {
   "public-url": "",
   domain: "",
-  tunnel: "MausBot web address",
+  tunnel: "IndBot web address",
   tailscale: "your tailnet",
   lan: "this network only, not encrypted",
 };
@@ -83,10 +83,10 @@ export function noRouteLines(port: number, prefix: string): string[] {
     "",
     "Pick a way in and run again:",
     `  ${prefix} serve --public-url https://…     you already have HTTPS in front (cloudflared, Caddy)`,
-    `  ${prefix} serve --domain maus.example.com  we get the certificate (ports 80, 443)`,
+    `  ${prefix} serve --domain ind.example.com  we get the certificate (ports 80, 443)`,
     `  ${prefix} serve --tailscale                your tailnet (needs Tailscale)`,
     `  ${prefix} serve --lan                      this network only, not encrypted`,
-    `  ${prefix} serve --tunnel                   a free MausBot web address; sign in first: ${prefix} login`,
+    `  ${prefix} serve --tunnel                   a free IndBot web address; sign in first: ${prefix} login`,
     `Sign in from a browser on this machine with the link from: ${prefix} pair`,
   ];
 }

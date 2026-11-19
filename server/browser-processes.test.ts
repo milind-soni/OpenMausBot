@@ -418,8 +418,8 @@ describe("a browser on Windows", () => {
       return {} as ChildProcess;
     }) as unknown as typeof execFile);
     Object.defineProperty(process, "platform", { value: "win32", configurable: true });
-    const engine = "C:\\OpenMausBot\\resources\\browser-engine\\agent-browser.exe";
-    const launcher = "C:\\Users\\me\\AppData\\Roaming\\openmausbot\\browser\\chrome-launcher.cmd";
+    const engine = "C:\\OpenIndBot\\resources\\browser-engine\\agent-browser.exe";
+    const launcher = "C:\\Users\\me\\AppData\\Roaming\\openindbot\\browser\\chrome-launcher.cmd";
     const killed = () => commands.filter(([file]) => file === "taskkill");
     await releaseBrowserProfile(dir, engine, launcher);
     expect(killed(), "a live daemon's Chrome is never stopped").toEqual([]);

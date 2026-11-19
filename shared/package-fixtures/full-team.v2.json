@@ -1,5 +1,5 @@
 {
-  "format": "openmaus.package",
+  "format": "openind.package",
   "version": 2,
   "package": {
     "id": "sales-desk",
@@ -125,7 +125,7 @@
         "name": "Daily digest",
         "agent": "scout",
         "prompt": "Summarize new leads from yesterday with one line each.",
-        "runOn": "maus",
+        "runOn": "ind",
         "schedule": {
           "type": "daily",
           "time": "09:00",
@@ -149,7 +149,7 @@
         "agent": "lead",
         "room": "desk",
         "prompt": "Review the pipeline together and agree the week's priorities.",
-        "runOn": "maus",
+        "runOn": "ind",
         "schedule": {
           "type": "cron",
           "expression": "0 10 * * 1",

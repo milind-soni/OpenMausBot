@@ -15,7 +15,7 @@ function harness({ origin = CLOUD, pairStatus = 200, on = false, putFails = fals
     wanted: () => the.switch && Boolean(the.origin),
     pref: { read: () => { if (the.unreadable) throw new Error("busy"); return { v: 1, on: the.switch }; } },
     localRequest: async (route, init = {}) => {
-      if (route === "/.well-known/openmausbot/environment") return answer(200, { environmentId: "11111111-1111-4111-8111-111111111111", label: "Sam's Mac" });
+      if (route === "/.well-known/openindbot/environment") return answer(200, { environmentId: "11111111-1111-4111-8111-111111111111", label: "Sam's Mac" });
       const sent = init.body ? JSON.parse(init.body) : undefined;
       localCalls.push({ method: init.method ?? "GET", ...(sent ? { body: sent } : {}) });
       if (init.method === "PUT" && sent.on === true) {

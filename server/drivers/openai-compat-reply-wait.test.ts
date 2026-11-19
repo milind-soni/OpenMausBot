@@ -19,7 +19,7 @@ const create = (config: Record<string, unknown>) => OpenAICompatDriver.create({
 });
 
 it("waits as long as the server's own setting says, over the server-wide default", async () => {
-  vi.stubEnv("OPENMAUS_OPENAI_COMPAT_IDLE_TIMEOUT_MS", "5000");
+  vi.stubEnv("OPENIND_OPENAI_COMPAT_IDLE_TIMEOUT_MS", "5000");
   await create({ replyWaitMinutes: 20 });
   await create({});
   vi.unstubAllEnvs();

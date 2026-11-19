@@ -7,7 +7,7 @@ tagline: Find and explain the signal.
 summary: A complete two-bot signal workflow.
 category: Research
 author:
-  name: OpenMausBot
+  name: OpenIndBot
 license: MIT
 outcomes:
   - Produce a concise signal brief.
@@ -52,7 +52,7 @@ routines:
     name: Morning signals
     agent: scout
     prompt: Prepare the approved morning signal brief.
-    runOn: maus
+    runOn: ind
     schedule:
       type: daily
       time: 09:00
@@ -90,7 +90,7 @@ skills:
 
 Find and explain the signal.
 
-> **Give this file to your Chief of Staff.** It is the complete team blueprint. Any agent system can run it; OpenMausBot can also install it directly.
+> **Give this file to your Chief of Staff.** It is the complete team blueprint. Any agent system can run it; OpenIndBot can also install it directly.
 
 ## Activation
 

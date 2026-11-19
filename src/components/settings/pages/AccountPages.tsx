@@ -43,7 +43,7 @@ export function AccountPage() {
     {bridge && <CloudAccountSettings part="account" advanced={ctx.advanced} linkRequest={state.appSettingsCloudLink} avatar={<YouAvatar size={32} />}
       onSignIn={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })} />}
     {elsewhere && (
-      <SettingsGroup label={t("settings.account.mausbot", { app: productName() })} block="mausbot-account">
+      <SettingsGroup label={t("settings.account.indbot", { app: productName() })} block="indbot-account">
         <SettingsRows icons>
           {/* The same card as on This computer: who is signed in (live, it is the person's own), then the way to sign out
               or switch accounts, which happens on This computer, in Sign out's place. Refresh is This computer's only. */}
@@ -55,7 +55,7 @@ export function AccountPage() {
       </SettingsGroup>
     )}
     {!ctx.desktop && (
-      <SettingsGroup block="mausbot-account">
+      <SettingsGroup block="indbot-account">
         <SettingsRows>
           <SettingRow title={t("settings.account.signedInTo", { place: place.name })} subtitle={profile?.email}>{null}</SettingRow>
           {session?.kind === "session" && (

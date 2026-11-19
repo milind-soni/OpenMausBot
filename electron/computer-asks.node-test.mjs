@@ -34,7 +34,7 @@ function cloudHome() {
   state.fetch = async (url, init) => {
     const route = new URL(url).pathname;
     if (route === "/api/auth/session") return json({ kind: "session", id: state.sessionId, scopes: ["admin", "client"], cloudHome: true });
-    if (route === "/.well-known/openmausbot/environment") {
+    if (route === "/.well-known/openindbot/environment") {
       return json({ environmentId: state.environmentId, capabilities: { sharedComputers: true, lendingDetails: true, deviceLink: true, myChromeLink: true, computerAsks: true } });
     }
     const body = init?.body ? JSON.parse(init.body) : {};

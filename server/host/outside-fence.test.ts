@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { OUTSIDE_REFUSAL, outsideRouteRefused } from "./outside-fence.ts";
 
-describe("what a confined turn reaches of OpenMausBot's own routes", () => {
+describe("what a confined turn reaches of OpenIndBot's own routes", () => {
   it("refuses what runs or starts something with no person deciding", () => {
     for (const path of ["vm-exec", "fill-login", "create-room", "computer/select", "phone/claim", "device/mcp", "pages/publish", "pages/unpublish", "request-credential", "request-sign-in", "threads/abc/close"]) {
       expect(outsideRouteRefused("POST", `/api/internal/${path}`), path).toBe(true);

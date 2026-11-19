@@ -60,7 +60,7 @@ export function withE2EIdentity(credentials, identity) {
 export function companionE2EMessage(identity, relay) {
   const verified = identity ? readE2EIdentity({ [E2E_TRANSPORT_KEY_FIELD]: identity }) : null;
   return {
-    type: "openmausbot:companion-e2e",
+    type: "openindbot:companion-e2e",
     transportKey: verified?.privateKey ?? null,
     relay: verified && relay ? { hostId: relay.hostId, nodes: [...relay.nodes], relayToken: relay.token } : null,
   };

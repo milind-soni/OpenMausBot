@@ -46,7 +46,7 @@ the samples in `shared/widget-samples.ts` to `/api/internal/options-card` as
 file to let the turn finish, then:
 
 ```sh
-H=/tmp/openmausbot-verify-data-XXXXXX/ui.json
+H=/tmp/openindbot-verify-data-XXXXXX/ui.json
 pnpm control:omb ui snapshot --ui $H
 pnpm control:omb ui click --ui $H --name "Create routine"
 pnpm control:omb ui wait-settle --ui $H --timeout 60

@@ -212,12 +212,12 @@ describe("phone setup flow", () => {
     expect(secureAddressRequestLapsed(account("connecting"), waiting)).toBe(false);
     expect(secureAddressRequestLapsed(account("error"), waiting)).toBe(false);
     expect(secureAddressRequestLapsed(
-      { ...account("ready"), endpoint: "https://c-opaque.openmausbot.com" },
+      { ...account("ready"), endpoint: "https://c-opaque.openindbot.com" },
       waiting,
     )).toBe(false);
     expect(secureAddressRequestLapsed(account("ready"), {
       enabled: true,
-      endpoints: [{ kind: "hosted", url: "https://c-opaque.openmausbot.com", priority: 0 }],
+      endpoints: [{ kind: "hosted", url: "https://c-opaque.openindbot.com", priority: 0 }],
     })).toBe(false);
     expect(secureAddressRequestLapsed(account("ready"), { enabled: false })).toBe(false);
     expect(secureAddressRequestLapsed(null, waiting)).toBe(false);
@@ -229,7 +229,7 @@ describe("phone setup flow", () => {
       enabled: true, port: 8810, endpoints: [], lan: "192.168.1.34",
       routes: { relay: { on: true } }, e2e: { enabled: true },
     };
-    const withAddress = { ...account("ready"), endpoint: "https://c-opaque.openmausbot.com" };
+    const withAddress = { ...account("ready"), endpoint: "https://c-opaque.openindbot.com" };
     expect(relayServesPairing(account("ready"), relayOn)).toBe(true);
     // A stored address that has not answered (yet) does not hold the code.
     expect(relayServesPairing(withAddress, relayOn)).toBe(true);

@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Two repos, two branches named `feat/chat-widgets`: server, shared and desktop in `OpenGrokBot-widgets` (milind-soni/OpenMausBot); iOS and Android in `mausbot-mobile-widgets` (SupaMaus/mausbot-mobile). Never put phone code in the first or desktop code in the second. No push, no PR.
+- Two repos, two branches named `feat/chat-widgets`: server, shared and desktop in `OpenGrokBot-widgets` (milind-soni/OpenIndBot); iOS and Android in `indbot-mobile-widgets` (SupaInd/indbot-mobile). Never put phone code in the first or desktop code in the second. No push, no PR.
 - Ratchets (`scripts/testing/file-size-ratchet.test.ts`, `index-route-ratchet.test.ts`): `server/index.ts`, `src/state/store.tsx`, `server/store.ts`, `server/config.ts`, `ChatView.tsx`, `GroupView.tsx`, `scripts/mcp-server.ts`, `server/drivers/agents-call.ts` may not gain a line; `server/index.ts` may not gain a path guard; no new file over 1,000 lines. Move code out to make room and lower the pinned number.
 - Server code runs on type stripping: type-only imports must be `import type`, no enums, no parameter properties.
 - Tests are colocated `*.test.ts` (never `.tsx`); React tests start with `// @vitest-environment happy-dom` and use `createElement`.
@@ -96,7 +96,7 @@ export function resolveWidgetAction(payload: WidgetPayload, ref: string, values:
 
 ### Task 4: iOS
 
-**Files (in `mausbot-mobile-widgets`):**
+**Files (in `indbot-mobile-widgets`):**
 - Create: `ios/Sources/CompanionCore/ChatWidget.swift` (forgiving `JSONValue`, `ChatWidgetPayload`, `ChatWidgetNode` accessors, field and action helpers mirroring Task 1's scope rules), `ios/Tests/CompanionCoreTests/ChatWidgetTests.swift`, `ios/App/Cards/ChatWidgetView.swift`, `ChatWidgetNodes.swift`, `ChatWidgetControls.swift`, `ChatWidgetChart.swift`, `ChatWidgetIcons.swift`
 - Modify: `Models.swift` (`Kind.widget`, `widget` payload), `StateSnapshot.swift` and its guard tests, `ChatPreferences.swift` and `Walkie.swift` kind switches, `Client.swift` (`sendWidgetAction`), `Session.swift`, `TranscriptRows.swift` (`TranscriptActions.sendWidgetAction`), `ChatView.swift` (dispatch), `Localizable.xcstrings`
 - Fixture: `ios/Tests/CompanionCoreTests/Fixtures/widget-messages.json` (written by Task 1's samples; do not hand-edit)
@@ -107,12 +107,12 @@ export function resolveWidgetAction(payload: WidgetPayload, ref: string, values:
 
 ### Task 5: Android
 
-**Files (in `mausbot-mobile-widgets`):**
+**Files (in `indbot-mobile-widgets`):**
 - Create: `android/core/.../core/ChatWidget.kt`, `android/core/src/test/.../ChatWidgetTest.kt`, `android/app/.../ui/ChatWidgetView.kt`, `ChatWidgetNodes.kt`, `ChatWidgetControls.kt`, `ChatWidgetChart.kt`, `ChatWidgetIcons.kt`, app tests beside the existing ones
 - Modify: `Models.kt` (`Kind.WIDGET`, serializer, `widget` field last), `StateSnapshot.kt` and its test, `ChatPreferences.kt`, `ChatPolicy.kt` kind switches, `Client.kt`, `Session.kt` (`sendWidgetAction`), `MessageRow.kt` (dispatch), the three `strings.xml`
 
 - [ ] Core tests first, mirroring Task 4 on the shared fixture.
-- [ ] Implement core, then composables with `Maus.colors`, `Space`, `MausShapes`; charts on a Canvas; https images through a small bounded loader.
+- [ ] Implement core, then composables with `Ind.colors`, `Space`, `IndShapes`; charts on a Canvas; https images through a small bounded loader.
 - [ ] Run `:core:test :app:testDebugUnitTest` and `:app:assembleDebug`. Read the real counts from `build/test-results`. Commit.
 
 ### Task 6: End-to-end verification and review

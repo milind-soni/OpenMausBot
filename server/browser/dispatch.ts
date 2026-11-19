@@ -3,7 +3,7 @@
 // Adapted from pingdotgg/t3code@00cdceb1 apps/server/src/preview/ServerBrowser.ts (runOperation, executeTabOperation,
 // navigate, status) and apps/server/src/mcp/PreviewAutomationBroker.ts, MIT License, Copyright (c) 2026 T3 Tools Inc.
 // (full text in third_party/t3-code/LICENSE); modified: one in-process host instead of a broker, tabs that belong to
-// the profile, the CDP driver instead of Playwright, and OpenMausBot's page-change and page-health lines.
+// the profile, the CDP driver instead of Playwright, and OpenIndBot's page-change and page-health lines.
 import { describePageChange, sanitizeUrl, type PageState } from "../browser-tool-shape.ts";
 import type { CdpBrowser } from "./cdp/browser.ts";
 import type { Download } from "./cdp/downloads.ts";

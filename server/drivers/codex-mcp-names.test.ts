@@ -53,8 +53,8 @@ describe("codexConfigMcpServerNames", () => {
 describe("mountedMcpServerName", () => {
   it("keeps a free name and moves a taken one aside deterministically", () => {
     expect(mountedMcpServerName("notes", new Set())).toBe("notes");
-    expect(mountedMcpServerName("fibery", new Set(["fibery"]))).toBe("fibery_openmausbot");
-    expect(mountedMcpServerName("fibery", new Set(["fibery", "fibery_openmausbot"]))).toBe("fibery_openmausbot2");
+    expect(mountedMcpServerName("fibery", new Set(["fibery"]))).toBe("fibery_openindbot");
+    expect(mountedMcpServerName("fibery", new Set(["fibery", "fibery_openindbot"]))).toBe("fibery_openindbot2");
   });
 });
 
@@ -73,7 +73,7 @@ describe("codexConfigRunsServer", () => {
   ])("reserves the parsed server name in %s", (toml) => {
     const config = configFor(toml);
     expect([...config.names]).toEqual(["notes"]);
-    expect(mountedMcpServerName("notes", config.names)).toBe("notes_openmausbot");
+    expect(mountedMcpServerName("notes", config.names)).toBe("notes_openindbot");
     expect(codexConfigRunsServer(config, "notes", { type: "http", url: "https://notes.example/mcp", headers: {} })).toBe(true);
   });
 

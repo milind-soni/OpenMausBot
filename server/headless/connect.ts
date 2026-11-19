@@ -11,14 +11,14 @@ import type { VerbContext, VerbOutcome } from "./context.ts";
 type Rec = Record<string, any>;
 
 /** The command that makes a pairing code on a server, whichever way that server was installed. */
-const PAIR_ON_SERVER = "npx openmausbot pair (Docker: docker compose exec omb openmausbot pair)";
+const PAIR_ON_SERVER = "npx openindbot pair (Docker: docker compose exec omb openindbot pair)";
 
 const isLoopback = (origin: string) => /^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/i.test(origin);
 
 async function call(origin: string, path: string, init: RequestInit = {}): Promise<{ status: number; body: Rec }> {
   const response = await fetch(`${origin}${path}`, {
     ...init, redirect: "error", signal: AbortSignal.timeout(15_000),
-    headers: { "content-type": "application/json", "x-openmausbot-cli": "1", ...(init.headers as Record<string, string> | undefined) },
+    headers: { "content-type": "application/json", "x-openindbot-cli": "1", ...(init.headers as Record<string, string> | undefined) },
   });
   return { status: response.status, body: await response.json().catch(() => ({})) as Rec };
 }
@@ -40,12 +40,12 @@ export function writeTokenFile(path: string, token: string, force: boolean): voi
 
 const PROBLEM: Record<string, string> = {
   empty: "give the server's address or its pairing link",
-  codeOnly: "that is a pairing code: give the server's address too, like openmausbot connect http://192.168.1.20:8799 --code CODE",
+  codeOnly: "that is a pairing code: give the server's address too, like openindbot connect http://192.168.1.20:8799 --code CODE",
   emailCode: "that is a sign-in code from an email; pairing needs a 12-character code like 7KQ2-M9XD-H4TP",
-  oldCode: "that is a code from an older MausBot; pairing needs a 12-character code like 7KQ2-M9XD-H4TP",
+  oldCode: "that is a code from an older IndBot; pairing needs a 12-character code like 7KQ2-M9XD-H4TP",
   scriptKey: "that is a script key; pass it with --token-file instead of pairing",
   notACode: "that is not a pairing code; pairing needs a 12-character code like 7KQ2-M9XD-H4TP",
-  phoneLink: "that link is for the MausBot phone app; give the server's address or the link the server printed",
+  phoneLink: "that link is for the IndBot phone app; give the server's address or the link the server printed",
   notAnAddress: "that is not a server address; give the link the server printed, or its address like http://192.168.1.20:8799",
 };
 
@@ -69,7 +69,7 @@ export async function connectVerb(ctx: VerbContext): Promise<VerbOutcome> {
   let origin = candidates[0]!;
   let described: { status: number; body: Rec } | null = null;
   for (const candidate of candidates) {
-    described = await call(candidate, "/.well-known/openmausbot/environment").catch(() => null);
+    described = await call(candidate, "/.well-known/openindbot/environment").catch(() => null);
     origin = candidate;
     if (described?.status === 200 && typeof described.body.environmentId === "string") break;
   }
@@ -77,9 +77,9 @@ export async function connectVerb(ctx: VerbContext): Promise<VerbOutcome> {
   let code = secret;
   if (!code && !isLoopback(origin)) throw usageError("a workspace elsewhere needs a pairing code", pairHint);
   if (described?.status !== 200 || typeof described.body.environmentId !== "string") {
-    throw new HeadlessError(`no MausBot server answers at ${origin}`, EXIT.unreachable, "check the address, and that the server is running with a way in (see openmausbot serve --help on the server)");
+    throw new HeadlessError(`no IndBot server answers at ${origin}`, EXIT.unreachable, "check the address, and that the server is running with a way in (see openindbot serve --help on the server)");
   }
-  const label = flag(ctx.flags, "label")?.trim() || "openmausbot CLI";
+  const label = flag(ctx.flags, "label")?.trim() || "openindbot CLI";
   if (!code) {
     const minted = await call(origin, "/api/auth/pairing", { method: "POST", body: JSON.stringify({ label, ...(ctx.flags.client ? { scopes: ["client"] } : {}) }) });
     if (minted.status !== 200 || typeof minted.body.code !== "string") {

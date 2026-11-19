@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { readAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { ANCHOR_EFFECTS, currentStep, stepNumber, TOUR_STEPS, withTourFinished, type TourEffect, type TourStep } from "@/lib/guided-tour";
 import { t } from "@/lib/i18n";
-import type { MausState } from "@/lib/mascot";
+import type { IndState } from "@/lib/mascot";
 import { hintSeenPatch } from "@/lib/onboarding";
 import { sendKeyLabel, useSendKey } from "@/lib/send-key";
 import type { LocaleKey } from "@/locales";
 import { api, useStore } from "@/state/store";
 import { Spotlight } from "./Spotlight";
 
-const MASCOT: Record<TourStep["id"], MausState> = {
+const MASCOT: Record<TourStep["id"], IndState> = {
   "tour.composer": "happy",
   "tour.model": "curious",
   "tour.computer": "working",

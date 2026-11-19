@@ -105,7 +105,7 @@ The first command renders the shelf cards and the preview to markup. It
 checks:
 
 - Add appears only for a checked file, and there is no confirm step;
-- Added, "Update OpenMausBot to add this", the Recommended badge, the
+- Added, "Update OpenIndBot to add this", the Recommended badge, the
   waiting-release sentence and "Withdrawn by …";
 - "Included skills — switched on";
 - a skills-only preview with no team;

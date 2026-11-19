@@ -50,10 +50,10 @@ its logins and secrets serve the team's bots in shared, group and private chats,
 lists it in `vault.providers` as `{ kind: "bitwarden", connected, label: <server host>, lastError? }`, never a value,
 the API key or the master password.
 
-## The tool, and why OpenMausBot stays Apache-2.0
+## The tool, and why OpenIndBot stays Apache-2.0
 
 The tool is Bitwarden's own command line client, built from github.com/bitwarden/clients, whose code is GPL-3.0 except
-the `bitwarden_license/` folder. OpenMausBot uses its **open-source build** (`bw-oss-*`, made with `build:oss` from the
+the `bitwarden_license/` folder. OpenIndBot uses its **open-source build** (`bw-oss-*`, made with `build:oss` from the
 GPL code alone) and never bundles, ships or imports it:
 
 - It is downloaded on first use from Bitwarden's GitHub release
@@ -61,7 +61,7 @@ GPL code alone) and never bundles, ships or imports it:
   pinned size and SHA-256 below, and unpacked to `<data>/tools/bitwarden/2026.10.1/bw` (`bw.exe` on Windows). A download
   that fails the check installs nothing.
 - It runs only as a separate process: arguments and environment in, text out (`server/host/bitwarden-cli.ts`). Two
-  programs talking that way are separate works; OpenMausBot links nothing of Bitwarden's and copies none of its source.
+  programs talking that way are separate works; OpenIndBot links nothing of Bitwarden's and copies none of its source.
 - No `@bitwarden/` package is a dependency: `scripts/testing/no-bitwarden-dependency.test.ts` fails if one enters a
   manifest, a lockfile or an import. (Bitwarden's Secrets Manager SDK, `@bitwarden/sdk-napi`, is under Bitwarden's own
   SDK license, which forbids offering an app built with it to others; `@bitwarden/sdk-internal` is GPL-3.0. Neither is

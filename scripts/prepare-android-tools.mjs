@@ -15,7 +15,7 @@ if (!platform || !archive) throw new Error(`Android Platform Tools are unsupport
 
 const finalDir = join(root, "dist-native", "android-platform-tools", platform);
 const override = process.env.OMB_ANDROID_PLATFORM_TOOLS_SOURCE;
-const temporary = mkdtempSync(join(tmpdir(), "openmaus-android-tools-"));
+const temporary = mkdtempSync(join(tmpdir(), "openind-android-tools-"));
 const staged = join(temporary, platform);
 
 try {

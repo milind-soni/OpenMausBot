@@ -19,7 +19,7 @@ process.env = {
   XDG_CONFIG_HOME: join(home, "config"), XDG_DATA_HOME: join(home, "data"),
   XDG_CACHE_HOME: join(home, "cache"), XDG_STATE_HOME: join(home, "state"),
   OMB_DATA_DIR: join(home, "omb"), OPENCODE_DISABLE_DEFAULT_PLUGINS: "true",
-  OPENCODE_DISABLE_MODELS_FETCH: "true", OPENMAUSBOT_PROBE_LOCAL_INJECT: "0",
+  OPENCODE_DISABLE_MODELS_FETCH: "true", OPENINDBOT_PROBE_LOCAL_INJECT: "0",
   ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
 };
 let calls = 0;

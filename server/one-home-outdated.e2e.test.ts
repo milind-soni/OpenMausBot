@@ -18,7 +18,7 @@ const journal = () => { try { return JSON.parse(readFileSync(fx.journalFile, "ut
 
 it("with My Cloud on an older image, the line says My Cloud is updating, never that the move fails; once it has updated, the move goes", async () => {
   expect((await fx.local("POST", "/api/bots", { name: "Juno" })).status).toBeLessThan(300);
-  fx.intercept = (url) => (url.endsWith("/.well-known/openmausbot/environment")
+  fx.intercept = (url) => (url.endsWith("/.well-known/openindbot/environment")
     ? new Response(JSON.stringify({ capabilities: {} }), { status: 200, headers: { "content-type": "application/json" } }) : null);
   fx.account.state = { ...fx.account.state, machine: { status: "ready", origin: fx.cloudBase, moves: true } };
   await fx.oneHome.kick();

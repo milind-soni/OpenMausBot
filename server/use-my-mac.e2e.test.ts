@@ -79,7 +79,7 @@ async function api(method: string, path: string, options: { body?: unknown; toke
 }
 
 async function adminPairing(): Promise<string> {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: "OpenIndBot app (Cloud)", ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const response = await fetch(`${base}/api/cloud/pairing`, { method: "POST", headers: {
     ...edge, "content-type": "application/json",
@@ -184,7 +184,7 @@ function lend(file: string, power = createCloudPowerGate()) {
 }
 
 async function boot() {
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".openindbot");
   // Off the internet: My Cloud's own fetches go nowhere, and its own way out resolves no name, so it reaches nothing.
   const offlinePrelude = `data:text/javascript,${encodeURIComponent([
     'import dns from "node:dns/promises"; import { syncBuiltinESMExports } from "node:module";',
@@ -215,7 +215,7 @@ async function boot() {
 
 beforeAll(async () => {
   home = realpathSync(mkdtempSync(join(tmpdir(), "omb-use-my-mac-")));
-  const dataDir = join(home, ".openmausbot");
+  const dataDir = join(home, ".openindbot");
   mkdirSync(dataDir, { recursive: true });
   mkdirSync(turnDumps());
   const cli = join(home, "fixture-claude.mjs");
@@ -274,7 +274,7 @@ let gate = 0;
 const posixOnly = it.skipIf(process.platform === "win32");
 
 it("My Cloud offers the device link, and a fresh Mac signed in to it lends itself by itself: the internet connection and Chrome, no terminal, no click", async () => {
-  expect((await api("GET", "/.well-known/openmausbot/environment")).body.capabilities).toMatchObject({ sharedComputers: true, deviceLink: true });
+  expect((await api("GET", "/.well-known/openindbot/environment")).body.capabilities).toMatchObject({ sharedComputers: true, deviceLink: true });
   const file = join(home, "desktop-profile", "computer-sharing.json");
   expect(existsSync(file), "nothing was ever lent from this Mac").toBe(false);
   mac = lend(file);

@@ -526,7 +526,7 @@ function fillCard(entry, account) {
 }
 
 function tellBot(post, id) {
-  window.mausbot?.setContext?.(`The person is looking at the ${RULES[id].name} preview of "${post.title ?? "this post"}".`)?.catch?.(() => {});
+  window.indbot?.setContext?.(`The person is looking at the ${RULES[id].name} preview of "${post.title ?? "this post"}".`)?.catch?.(() => {});
 }
 
 function renderPost(post, account, root, index) {

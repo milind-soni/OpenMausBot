@@ -230,13 +230,13 @@ const SUPPORT: AcpSupport = {
 // and names an MCP server's namespace after its config key: only those two keys get a prefix, so other servers keep theirs.
 const COPILOT_RESERVED_SERVER_NAMES: ReadonlySet<string> = new Set(["browser", "computer"]);
 
-/** The config key Copilot gets for each server, in order: a reserved name becomes `maus_<name>` (numbered if taken). */
+/** The config key Copilot gets for each server, in order: a reserved name becomes `ind_<name>` (numbered if taken). */
 export function copilotServerNames(names: readonly string[]): string[] {
   const taken = new Set(names);
   return names.map((name) => {
     if (!COPILOT_RESERVED_SERVER_NAMES.has(name.toLowerCase())) return name;
-    let key = `maus_${name}`;
-    for (let n = 2; taken.has(key); n++) key = `maus_${name}_${n}`;
+    let key = `ind_${name}`;
+    for (let n = 2; taken.has(key); n++) key = `ind_${name}_${n}`;
     taken.add(key);
     return key;
   });

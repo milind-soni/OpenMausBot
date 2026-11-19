@@ -33,7 +33,7 @@ export async function checkServer(origin, fetchImpl, timeoutMs = RECONNECT.timeo
   if (!allowedServerOrigin(origin)) return { kind: "blocked", reason: "insecure" };
   const get = (path, init = {}) => fetchImpl(`${origin}${path}`, { redirect: "error", cache: "no-store", signal: AbortSignal.timeout(timeoutMs), ...init });
   try {
-    const described = await get("/.well-known/openmausbot/environment", { credentials: "omit" });
+    const described = await get("/.well-known/openindbot/environment", { credentials: "omit" });
     const body = described.ok ? await described.json().catch(() => null) : null;
     if (typeof body?.environmentId !== "string") return { kind: "transient" };
     const session = await get("/api/auth/session", { credentials: "include", headers: { origin } });

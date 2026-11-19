@@ -57,9 +57,9 @@ it("takes cron through the real routine tools, applying the bot's own routine at
     expect(create.subtitle).toContain("Cron: 0 9 1 * *");
     const { resultId: routineId } = applied(create);
     const current = async () => (await api("GET", "/api/routines")).routines.find((routine: any) => routine.id === routineId);
-    expect(await current()).toMatchObject({ schedule, enabled: true, runOn: "maus", overlap: "queue", runOnStartup: true });
+    expect(await current()).toMatchObject({ schedule, enabled: true, runOn: "ind", overlap: "queue", runOnStartup: true });
     expect(create.subtitle).toContain("Queue one scheduled run");
-    expect(create.subtitle).toContain("On startup: Also runs once each time OpenMausBot starts");
+    expect(create.subtitle).toContain("On startup: Also runs once each time OpenIndBot starts");
     expect((await current()).nextRunAt).toBe(nextCronRuns(schedule, create.routineRequest.createdAt, 1)[0]);
 
     const cardCount = (await messages()).filter(message => message.card?.routineRequest).length;
@@ -101,7 +101,7 @@ it("takes cron through the real routine tools, applying the bot's own routine at
       name: "Explicit Boat", instructions: "Run on the Boat-hosted agent.", schedule, run_on: "box",
     }, "Try the separate Boat runner without a Boat account.", true);
     const boatResponse = providerEvidence().at(-1).evidence.find((entry: any) => entry.step?.tool === "create_trigger").response;
-    expect(boatResponse.result.content[0].text).toContain('run_on="maus"');
+    expect(boatResponse.result.content[0].text).toContain('run_on="ind"');
     expect(boatResponse.result.content[0].text).toContain("self-hosted VPS");
     const before = await current();
     for (const invalid of [

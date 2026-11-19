@@ -31,7 +31,7 @@ const streams: SseRecorder[] = [];
 
 async function boot(env: Record<string, string>): Promise<Fixture> {
   const home = mkdtempSync(join(tmpdir(), "omb-phone-push-"));
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".openindbot");
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, "config.json"), JSON.stringify({
     features: { smartSetupChoices: false },
@@ -150,7 +150,7 @@ describe("phone push switched on", () => {
       v: 1,
       token: FCM_B,
       pairing: "pair-tag-bbbb",
-      collapseId: `openmaus.${herald.threadId}.${done.seq}`,
+      collapseId: `openind.${herald.threadId}.${done.seq}`,
       notification: { kind: "done", title: "Herald finished", botId: herald.id, botName: "Herald", threadId: herald.threadId },
     });
     const raw = JSON.stringify(stub.pushes);
@@ -161,7 +161,7 @@ describe("phone push switched on", () => {
     expect((await api(on, "POST", `/api/bots/${sage.id}/messages`, { text: "pick a colour for the banner" })).status).toBe(202);
     const question = await streamA.until((frame) => frame.kind === "notify" && frame.notification?.kind === "question" && frame.notification?.botId === sage.id, 30_000);
     await expect.poll(() => sends().length, { timeout: 15_000 }).toBe(2);
-    expect(sends()[1]!.body).toMatchObject({ token: FCM_B, collapseId: `openmaus.${question.notification.threadId}.${question.seq}`, notification: { kind: "question", title: "Sage has a question" } });
+    expect(sends()[1]!.body).toMatchObject({ token: FCM_B, collapseId: `openind.${question.notification.threadId}.${question.seq}`, notification: { kind: "question", title: "Sage has a question" } });
     await api(on, "POST", `/api/bots/${sage.id}/interrupt`, {}).catch(() => undefined);
 
     expect((await api(on, "POST", "/api/auth/logout", {}, phoneB.token)).status).toBe(200);
@@ -184,7 +184,7 @@ describe("Live Activities by push", () => {
     const pip = await createBot(on, "Pip", "slow", "claude-sonnet-5");
     expect((await api(on, "PUT", "/api/push/device", { platform: "apns", token: "c3".repeat(32) }, phone.token)).status).toBe(200);
     const registered = await api(on, "PUT", "/api/push/activity", {
-      scheme: "openmausbot",
+      scheme: "openindbot",
       headlines: { needsYou: "{name} braucht dich", working: "{name} arbeitet" },
       statuses: { working: "Arbeitet", needsYou: { approval: "Braucht deine Freigabe", question: "Hat eine Frage", signIn: "Braucht deine Anmeldung", other: "Braucht dich" } },
       activities: [{ botId: pip.id, token: ACTIVITY }],
@@ -204,7 +204,7 @@ describe("Live Activities by push", () => {
       token: ACTIVITY,
       event: "update",
       activity: {
-        botId: pip.id, botName: "Pip", kind: "working", headline: "Pip arbeitet", since: expect.any(Number), link: `openmausbot://chat/${pip.threadId}`, color: "#7C5CFF", gradient: ["#B9A9FF", "#7C5CFF"], body: "round",
+        botId: pip.id, botName: "Pip", kind: "working", headline: "Pip arbeitet", since: expect.any(Number), link: `openindbot://chat/${pip.threadId}`, color: "#7C5CFF", gradient: ["#B9A9FF", "#7C5CFF"], body: "round",
         version: 1, ask: "other", status: "Arbeitet", waiting: 0,
       },
     });

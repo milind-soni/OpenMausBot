@@ -1,4 +1,4 @@
-// A real Team Cloud: what a User's own MausBot says about connecting an AI, and that it names the owner once the owner has
+// A real Team Cloud: what a User's own IndBot says about connecting an AI, and that it names the owner once the owner has
 // opened the team.
 import { randomBytes } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";

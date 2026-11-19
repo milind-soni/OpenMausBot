@@ -75,7 +75,7 @@ beforeAll(async () => {
     }
     if (url.startsWith("/sandboxes")) return reply(200, { ok: true, sandboxes: [], pageInfo: { nextCursor: null } });
     if (url.startsWith("/composio/tool_router/session")) {
-      return reply(201, { session_id: "trs_readback", mcp: { type: "http", url: "https://app.composio.dev/tool_router/v3/trs_readback/mcp" }, config: { user_id: "openmausbot_readback" } });
+      return reply(201, { session_id: "trs_readback", mcp: { type: "http", url: "https://app.composio.dev/tool_router/v3/trs_readback/mcp" }, config: { user_id: "openindbot_readback" } });
     }
     if (url === "/gemini/interactions") {
       const input = JSON.parse(raw);

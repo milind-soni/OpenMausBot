@@ -7,11 +7,11 @@ const BOTS = [
   { id: "b1", name: "Ledger" },
   { id: "b2", name: "Scout" },
   { id: "b3", name: "Hidden", hidden: true },
-  { id: "b4", name: "Ada's MausBot", defaultBot: { person: "p_ada" } },
+  { id: "b4", name: "Ada's IndBot", defaultBot: { person: "p_ada" } },
 ];
 
 describe("the team's Vault in the Admin's report", () => {
-  it("names each secret, when it was added and the team bots that may use it, never a member's own MausBot", () => {
+  it("names each secret, when it was added and the team bots that may use it, never a member's own IndBot", () => {
     const report = teamVaultReport({
       secrets: [{ name: "Stripe key", createdAt: Date.UTC(2026, 10, 1), bots: "all" }, { name: "Deploy key", createdAt: Date.UTC(2026, 10, 2), bots: ["b2", "b4", "gone"] }],
       bots: BOTS, onePassword: { connected: false },

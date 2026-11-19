@@ -63,7 +63,7 @@ const fixture = skillBenchSchema.parse({
       id: "p1",
       text: "fake prompt one",
       assertions: [
-        { kind: "systemPromptIncludes", bot: "worker", turn: 0, includes: "<openmaus-skill" },
+        { kind: "systemPromptIncludes", bot: "worker", turn: 0, includes: "<openind-skill" },
         { kind: "promptIncludes", bot: "worker", turn: 0, includes: "fake" },
       ],
       withSkill: { turns: [{ reply: "with" }] },
@@ -73,7 +73,7 @@ const fixture = skillBenchSchema.parse({
       id: "p2",
       text: "fake prompt two",
       assertions: [
-        { kind: "systemPromptIncludes", bot: "worker", turn: 0, includes: "<openmaus-skill" },
+        { kind: "systemPromptIncludes", bot: "worker", turn: 0, includes: "<openind-skill" },
         { kind: "promptIncludes", bot: "worker", turn: 0, includes: "fake" },
       ],
       withSkill: { turns: [{ reply: "with" }] },
@@ -161,7 +161,7 @@ describe("skill bench scorers", () => {
         {
           id: "only-system",
           text: "fake prompt one",
-          assertions: [{ kind: "systemPromptIncludes", bot: "worker", turn: 0, includes: "<openmaus-skill" }],
+          assertions: [{ kind: "systemPromptIncludes", bot: "worker", turn: 0, includes: "<openind-skill" }],
           withSkill: { turns: [{ reply: "with" }] },
           withoutSkill: { turns: [{ reply: "without" }] },
         },

@@ -31,7 +31,7 @@ describe("reading Composio's answers", () => {
   it("reads events, skipping resources and id-less entries, with https join links only", () => {
     const events = eventsFromData(fixture("composio-calendar-events"), { id: "primary", owned: true });
     expect(events.map((event) => [event.id, event.status])).toEqual([["demo-1", "confirmed"], ["weekly-2_20261017", "confirmed"], ["holiday", "confirmed"], ["gone", "cancelled"]]);
-    expect(events[0]).toMatchObject({ title: "Supamaus demo with Jake", joinUrl: "https://meet.google.com/abc-defg-hij", ownedCalendar: true });
+    expect(events[0]).toMatchObject({ title: "Supaind demo with Jake", joinUrl: "https://meet.google.com/abc-defg-hij", ownedCalendar: true });
     expect(events[0]!.attendees.map((one) => one.email)).toEqual(["me@example.test", "jake@pin.example"]);
     expect(events[1]).toMatchObject({ seriesId: "weekly-2", selfDeclined: true, joinUrl: "https://zoom.us/j/1" });
     expect(events[2]).toMatchObject({ allDay: true });

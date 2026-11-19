@@ -39,7 +39,7 @@ the next turn starts small.
   conversation at 80% or more of where Claude Code summarizes by itself
   (`OMB_CLAUDE_AUTOCOMPACT`, 200,000 by default) gets one about 10 seconds
   later, because its next turn would summarize anyway. For other engines,
-  OpenMausBot's own fold runs while idle once the conversation is at 85% of
+  OpenIndBot's own fold runs while idle once the conversation is at 85% of
   the threshold its next turn would fold at.
 - **Claude Code:** `/compact` with instructions to keep the person's latest
   requests and every open question (open question cards are named), on a
@@ -54,7 +54,7 @@ the next turn starts small.
   existing "not seen yet" path, which is saved with the conversation.
 - **Shown in the chat:** the line "summarized this conversation while it was
   idle; the latest messages carry on word for word", in the language of the
-  conversation's person (`server.warmSummary.summarized`). OpenMausBot's fold
+  conversation's person (`server.warmSummary.summarized`). OpenIndBot's fold
   shows its usual summary note instead.
 - **A turn that starts meanwhile wins:** the summary is abandoned and nothing
   changes. The exception is a turn that would summarize at its start anyway,
@@ -108,7 +108,7 @@ It also proves:
   not.
 
 The times are kept in
-`<tmp>/openmausbot-verification-evidence/warm-summary-timings.jsonl`. No live
+`<tmp>/openindbot-verification-evidence/warm-summary-timings.jsonl`. No live
 model runs: whether a real Claude Code honours `--fork-session` for
 `/compact` in print mode is checked only by the fake.
 

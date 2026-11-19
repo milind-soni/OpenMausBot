@@ -1,7 +1,7 @@
 # Kimi model selection
 
 Kimi Code 2.5.3 accepts a global `-m` argument, but its ACP `session/new`
-can still select the CLI's configured default. OpenMausBot selects the
+can still select the CLI's configured default. OpenIndBot selects the
 `model` session config option after creating or restoring a session and
 requires the returned value to match before sending a prompt. A rejected
 or unconfirmed switch fails the turn instead of using another provider.

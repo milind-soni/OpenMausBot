@@ -36,7 +36,7 @@ const runnerLost = (): Job[] => [gate("failure"), vitest("ubuntu-latest", "succe
 const cancelled = (): Job[] => [];
 
 const pkg = (version: string, extra: Record<string, unknown> = {}) =>
-  `${JSON.stringify({ name: "openmausbot", private: true, version, scripts: { test: "vitest run" }, ...extra }, null, 2)}\n`;
+  `${JSON.stringify({ name: "openindbot", private: true, version, scripts: { test: "vitest run" }, ...extra }, null, 2)}\n`;
 
 /** A scripted GitHub. Each poll (one sleep) moves to the next state. */
 function fakeGitHub(polls: Array<{ runs: Run[]; jobs?: Record<number, Job[]> }>, setup: {

@@ -34,7 +34,7 @@ const SITE: PublishedApp = {
   publishedAt: NOW - 2 * 3_600_000, access: "public", manageUrl: "https://app.netlify.com/projects/bright-bakery", canDelete: true,
 };
 const PAGE: PublishedApp = {
-  id: "page-abcdefghijklmnopqrstuvwxyz", source: "page", title: "Sales report", url: "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/", bot: { id: "mira", name: "Mira" }, threadId: "main",
+  id: "page-abcdefghijklmnopqrstuvwxyz", source: "page", title: "Sales report", url: "https://abcdefghijklmnopqrstuvwxyz.indbot.page/", bot: { id: "mira", name: "Mira" }, threadId: "main",
   publishedAt: NOW - 3 * 86_400_000, access: "link", canDelete: true,
 };
 const TEAM_ONLY: PublishedApp = { ...SITE, id: "netlify-mira-s2", title: "Staff rota", url: "https://staff-rota.netlify.app/", access: "netlify-team", canDelete: false, threadId: "room-thread" };
@@ -225,7 +225,7 @@ describe("apps on the hosting the Cloud plan includes", () => {
   it("says plainly where each app is hosted", async () => {
     apps = [INCLUDED, SITE, PAGE];
     await show();
-    expect([INCLUDED, SITE, PAGE].map((app) => card(app.id).querySelector("[data-app-source]")?.textContent)).toEqual(["Included hosting", "Your Netlify", "MausBot page"]);
+    expect([INCLUDED, SITE, PAGE].map((app) => card(app.id).querySelector("[data-app-source]")?.textContent)).toEqual(["Included hosting", "Your Netlify", "IndBot page"]);
     expect(card(INCLUDED.id).getAttribute("data-source")).toBe("included");
     expect(card(INCLUDED.id).querySelector("[data-app-access]")?.textContent).toBe("Public");
   });
@@ -244,7 +244,7 @@ describe("apps on the hosting the Cloud plan includes", () => {
     expect(host.querySelector(`[data-published-app="${INCLUDED.id}"]`)).toBeNull();
   });
 
-  it("shows an app MausBot took down as taken down, with nothing to open, preview or copy", async () => {
+  it("shows an app IndBot took down as taken down, with nothing to open, preview or copy", async () => {
     apps = [TAKEN_DOWN, NOT_LIVE, FOLDERLESS];
     await show();
     expect(card(TAKEN_DOWN.id).querySelector("[data-app-status]")?.textContent).toBe("Taken down");

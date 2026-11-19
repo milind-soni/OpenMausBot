@@ -82,13 +82,13 @@ it("recovers queued/due work and a waiting routine's imported hand-off after res
     disk.routines.find((routine: { id: string }) => routine.id === scheduled.id).nextRunAt = dueAt;
     disk.runs.push({
       id: "interrupted-run", routineId: interrupted.id, routineName: interrupted.name,
-      prompt: interrupted.prompt, target: "bot", botId: interruptedBot.id, runOn: "maus",
+      prompt: interrupted.prompt, target: "bot", botId: interruptedBot.id, runOn: "ind",
       scheduledFor: dueAt, createdAt: dueAt, startedAt: dueAt, manual: true,
       status: "waiting", threadId: interruptedBot.threadId,
     });
     disk.runs.push({
       id: "historical-run", routineId: "historical-routine", routineName: "Previously completed work",
-      prompt: "Already finished", target: "bot", botId: reusedBot.id, runOn: "maus",
+      prompt: "Already finished", target: "bot", botId: reusedBot.id, runOn: "ind",
       scheduledFor: dueAt - 60_000, createdAt: dueAt - 60_000, startedAt: dueAt - 60_000,
       finishedAt: dueAt - 60_000, manual: true, status: "completed", threadId: reusedBot.threadId,
     });

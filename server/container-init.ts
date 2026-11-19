@@ -25,12 +25,12 @@ export function containerInit(options: {
 } = {}): ContainerInit {
   if ((options.platform ?? process.platform) !== "linux" || (options.pid ?? process.pid) !== 1) return { exec: null, line: null };
   const env = options.env ?? process.env;
-  if (env[UNDER_IMAGE_INIT] === "1") return { exec: null, line: `OpenMausBot is still process 1 after starting under ${IMAGE_INIT}: ${NO_INIT}` };
-  if (!(options.runnable ?? canRun)(IMAGE_INIT)) return { exec: null, line: `OpenMausBot is process 1 in this container and has no init it can run (${IMAGE_INIT} is missing or not executable): ${NO_INIT}` };
+  if (env[UNDER_IMAGE_INIT] === "1") return { exec: null, line: `OpenIndBot is still process 1 after starting under ${IMAGE_INIT}: ${NO_INIT}` };
+  if (!(options.runnable ?? canRun)(IMAGE_INIT)) return { exec: null, line: `OpenIndBot is process 1 in this container and has no init it can run (${IMAGE_INIT} is missing or not executable): ${NO_INIT}` };
   const execPath = options.execPath ?? process.execPath, argv = options.argv ?? process.argv;
   return {
     exec: { file: IMAGE_INIT, args: [IMAGE_INIT, "--", execPath, ...(options.execArgv ?? process.execArgv), ...argv.slice(1)], env: { ...env, [UNDER_IMAGE_INIT]: "1" } },
-    line: `OpenMausBot is process 1 in this container: the image's entrypoint was replaced. It starts again under ${IMAGE_INIT}, so the processes bots leave behind are still collected (${DOCS}).`,
+    line: `OpenIndBot is process 1 in this container: the image's entrypoint was replaced. It starts again under ${IMAGE_INIT}, so the processes bots leave behind are still collected (${DOCS}).`,
   };
 }
 
@@ -53,6 +53,6 @@ export function execUnderInit(exec: NonNullable<ContainerInit["exec"]>, execve: 
     if (!execve) throw new Error("this Node cannot replace its own process");
     execve(exec.file, exec.args, exec.env);
   } catch (error) {
-    console.warn(`OpenMausBot could not start under ${exec.file} (${error instanceof Error ? error.message : String(error)}): ${NO_INIT}`);
+    console.warn(`OpenIndBot could not start under ${exec.file} (${error instanceof Error ? error.message : String(error)}): ${NO_INIT}`);
   }
 }

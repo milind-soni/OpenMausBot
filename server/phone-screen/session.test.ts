@@ -13,7 +13,7 @@ import { openPhoneSession, type PhoneSession } from "./session.ts";
 
 const FAKE_ADB = fileURLToPath(new URL("../testing/fake-adb.mjs", import.meta.url));
 const SERIAL = "PHONE1";
-const deviceDir = (scid: string | undefined) => `/data/local/tmp/openmausbot-scrcpy-${scid}`;
+const deviceDir = (scid: string | undefined) => `/data/local/tmp/openindbot-scrcpy-${scid}`;
 const deviceJar = (scid: string | undefined) => `${deviceDir(scid)}/scrcpy-server.jar`;
 const removal = (scid: string | undefined) => ["-s", SERIAL, "shell", "rm", "-rf", deviceDir(scid)];
 

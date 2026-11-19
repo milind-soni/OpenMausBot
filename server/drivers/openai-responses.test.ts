@@ -555,7 +555,7 @@ describe("what Responses can answer", () => {
   });
 
   it("stops when the model goes quiet, and when the person stops it", async () => {
-    vi.stubEnv("OPENMAUS_OPENAI_COMPAT_IDLE_TIMEOUT_MS", "1000");
+    vi.stubEnv("OPENIND_OPENAI_COMPAT_IDLE_TIMEOUT_MS", "1000");
     cleanups.push(() => { vi.unstubAllEnvs(); });
     const f = await fixture(onResponses((response) => events(response, [created, textDelta("Part")], false)));
     const quiet = await f.turn();

@@ -66,7 +66,7 @@ export function startAutoVmClaim(table: AutoVmClaimTable, threadId: string, gene
     () => { slot.claimed = true; },
     (error: unknown) => {
       const failure = error instanceof Error ? error.message : String(error);
-      // A computer MausBot keeps bringing back by itself (`keepsTrying`) is never given up on for the turn.
+      // A computer IndBot keeps bringing back by itself (`keepsTrying`) is never given up on for the turn.
       if (transientClaimFailure(error) && (attempt < MAX_CLAIM_ATTEMPTS || (error as { keepsTrying?: unknown } | null)?.keepsTrying === true)) {
         slot.retryReason = failure;
         if (slot.begin === begin) slot.begin = undefined;

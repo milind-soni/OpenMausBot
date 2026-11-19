@@ -1,4 +1,4 @@
-// Sending one @devs report to the MausBot team's endpoint and reading its answer: 201 {id}; 400 or 413 {error}; 429
+// Sending one @devs report to the IndBot team's endpoint and reading its answer: 201 {id}; 400 or 413 {error}; 429
 // {error, retryAfter} (seconds, also Retry-After). And asking that endpoint's origin what became of the reports this app
 // sent (POST /api/bug-reports/status): the same way on the desktop and on a Cloud, which also signs its question with the
 // bootstrap secret it shares with the Admin, so the Admin can tell whether its plan still runs.
@@ -8,7 +8,7 @@ import { z } from "zod";
 import { DEVS_REPORT_LIMITS, withoutContact, type DevsReportPayload } from "./devs-report.ts";
 
 export const BUG_REPORT_PATH = "/api/bug-reports";
-export const PRODUCTION_CLOUD_ORIGIN = "https://cloud.openmausbot.com";
+export const PRODUCTION_CLOUD_ORIGIN = "https://cloud.openindbot.com";
 export const STAGING_CLOUD_ORIGIN = "https://omb-cloud-staging.fly.dev";
 const SEND_TIMEOUT_MS = 20_000;
 const ANSWER_MAX_BYTES = 16 * 1024;
@@ -94,7 +94,7 @@ export async function sendDevsReport(endpoint: string, payload: DevsReportPayloa
   return { ok: false, retry: true, why: "server" };
 }
 
-/** What the app asks about the reports it sent (openmaus-cloud server/bug-report-contract.ts BugReportStatusRequest). */
+/** What the app asks about the reports it sent (openind-cloud server/bug-report-contract.ts BugReportStatusRequest). */
 export const BUG_REPORT_STATUS_PATH = "/api/bug-reports/status";
 export const BUG_REPORT_STATUS_MAX_IDS = 50;
 export interface ReportStatusQuestion { installId: string; ids: string[] }
@@ -109,7 +109,7 @@ const statusAnswerSchema = z.object({
 /** A Cloud home's credential for its question: its machine and the bootstrap secret it shares with the Admin. */
 export interface ReportStatusHome { machineId: string; bootstrapSecret: string }
 
-/** Must match openmaus-cloud server/bug-reports.ts `bugReportsHomeSignature`: its own signing string, so no other signed
+/** Must match openind-cloud server/bug-reports.ts `bugReportsHomeSignature`: its own signing string, so no other signed
  * request can be replayed here or the other way. */
 export function bugReportsHomeSignature(secret: string, machineId: string, timestamp: string, nonce: string, body: string): string {
   const bodyHash = createHash("sha256").update(body).digest("base64url");

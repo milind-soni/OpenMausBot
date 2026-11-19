@@ -48,7 +48,7 @@ describe("a @devs report's redaction", () => {
   });
 
   it("masks the server's own secret values wherever they appear, whatever their shape", () => {
-    const secrets = environmentSecrets({ OMB_OPENAI_API_KEY: HELD, COMPOSIO_API_KEY: "short", OMB_DATA_DIR: "/Users/ada/OpenMausBot" });
+    const secrets = environmentSecrets({ OMB_OPENAI_API_KEY: HELD, COMPOSIO_API_KEY: "short", OMB_DATA_DIR: "/Users/ada/OpenIndBot" });
     expect(secrets).toEqual([HELD]);
     expect(redactReportText(`upstream said ${HELD}!`, secrets)).toBe(`upstream said «redacted ${HELD.length} chars»!`);
   });

@@ -22,7 +22,7 @@ pnpm exec vitest run server/cloud-team-bot-access.e2e.test.ts server/bot-access.
   Dan changes instructions, apps and sharing but not the approval level, folder, computer, department, Chief, peers or
   visibility; Eve gets 404. A message another app relays (the guarded route's `onBehalfOf`) goes through only for
   someone who can chat. Bob's live stream gets his new level with no sharing in it, then ends when he is removed; the
-  owner always edits, keeps editing after handing the bot on, and each person's own MausBot stays theirs. Bots made
+  owner always edits, keeps editing after handing the bot on, and each person's own IndBot stays theirs. Bots made
   before levels keep exactly what their visibility gave. Asking to chat: someone who can't see the bot gets 404 and its
   owner 409; Bob's ask puts one card in Dan's inbox (the owner's, not an admin's), asking again adds none, Bob can't
   answer it, Not now leaves him at Can view, a new ask and Allow give him Can chat, a conversation of his own and a
@@ -33,7 +33,7 @@ pnpm exec vitest run server/cloud-team-bot-access.e2e.test.ts server/bot-access.
 - `server/host/access-requests.test.ts`: the admins decide when the owner is gone, one admin's Allow settles every
   copy, the owner alone decides while on the team, Not now gives nothing.
 - `src/components/bot-access/AccessOverview.dom.test.ts`: Settings → Bot access lists each team bot (no one's own
-  MausBot) with its owner, a plain summary and a stack of faces (+N past four); a row opens the Share dialog; the search
+  IndBot) with its owner, a plain summary and a stack of faces (+N past four); a row opens the Share dialog; the search
   takes a bot's name or owner; By person lists each User, and opening one gives their bots at the same level menus, with
   Remove only for their own access; the empty states; "Ask Cara to chat" asks and says so, "Ask an admin to chat" when
   nobody on the team owns the bot. `src/components/settings/settings-index.test.ts` and

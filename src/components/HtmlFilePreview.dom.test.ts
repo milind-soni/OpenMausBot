@@ -15,7 +15,7 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi
 
 async function open(answer: () => Promise<Response>) {
   vi.stubGlobal("fetch", vi.fn(answer));
-  await act(async () => root.render(createElement(HtmlFileButton, { path: "C:\\Users\\Maus\\Downloads\\report.html", name: "report.html", message })));
+  await act(async () => root.render(createElement(HtmlFileButton, { path: "C:\\Users\\Ind\\Downloads\\report.html", name: "report.html", message })));
   await act(async () => host.querySelector<HTMLButtonElement>("button")!.click());
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
 }

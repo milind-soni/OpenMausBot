@@ -50,7 +50,7 @@ export interface Announcements {
   person: PersonRecord;
   writer: RecordWriter;
   viewer: WelcomeViewer | null;
-  /** This desktop's MausBot Cloud sign-in, on its own page. */
+  /** This desktop's IndBot Cloud sign-in, on its own page. */
   account: CloudAccountState | null;
   /** The app's Add a Cloud and Cloud sign-in are here: This computer's page. */
   cloudBridge: boolean;

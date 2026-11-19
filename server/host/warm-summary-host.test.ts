@@ -271,7 +271,7 @@ describe("warm summaries for a Claude conversation", () => {
     expect(f.compactCalls).toHaveLength(1);
   });
 
-  it("uses OpenMausBot's own fold for an engine without its own compaction", async () => {
+  it("uses OpenIndBot's own fold for an engine without its own compaction", async () => {
     const f = setup({}, { native: false });
     f.finishTurn();
     await f.advance(WARM_SUMMARY_IDLE_MS);

@@ -69,14 +69,14 @@ describe("doctor-backups", () => {
   });
 });
 
-describe("openmausbot doctor --data", () => {
+describe("openindbot doctor --data", () => {
   it("reports without changing anything, and says --fix repairs it; exit 8 while a problem is left", () => {
     const data = dataFolder();
     const temp = stray(data);
     const outcome = dataDoctorOutcome(runDoctor({ dataDir: data, version: "1.0.0", mode: "command", fix: false, now: () => NOW, pidAlive: () => false }));
     expect(outcome.exitCode).toBe(8);
     expect(existsSync(temp)).toBe(true);
-    expect(outcome.human).toContain("        openmausbot doctor --data --fix repairs it");
+    expect(outcome.human).toContain("        openindbot doctor --data --fix repairs it");
     expect(outcome.result).toMatchObject({ ok: false, counts: { problems: expect.any(Number), fixed: 0 } });
   });
 
@@ -90,6 +90,6 @@ describe("openmausbot doctor --data", () => {
     expect(outcome.human.at(-1)).toMatch(/^All fine now: \d+ fixed\.$/);
     expect(existsSync(temp)).toBe(false);
     // The lease was let go.
-    expect(existsSync(join(data, "openmausbot-server.lease"))).toBe(false);
+    expect(existsSync(join(data, "openindbot-server.lease"))).toBe(false);
   });
 });

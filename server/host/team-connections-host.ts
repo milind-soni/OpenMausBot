@@ -167,7 +167,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       const where = ownPage(person);
       const again = people.appsElsewhere(person);
       return `${name} is connected by each person in ${teamName()}, and ${nameOf(person)} ${again ? `needs to connect theirs again: ${teamName()} changed where its apps connect, and connections don't carry over` : "hasn't connected theirs"}. ${noWorkaround} Reply with this one line and nothing more about it: `
-        + (where ? `"Connect your ${name} ${again ? "again " : ""}here: ${where}"` : `"Connect your own ${name} ${again ? "again " : ""}on your team's page in MausBot Cloud."`);
+        + (where ? `"Connect your ${name} ${again ? "again " : ""}here: ${where}"` : `"Connect your own ${name} ${again ? "again " : ""}on your team's page in IndBot Cloud."`);
     },
     /** No one person's own request is behind this work: say so, and how to get it done. */
     nobody: (name: string) => {
@@ -181,7 +181,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
     ownGone: (person: string) => {
       const where = ownPage(person);
       return `${nameOf(person)}'s own apps aren't connected here any more. ${noWorkaround} Reply with this one line and nothing more about it: `
-        + (where ? `"Connect your apps again here: ${where}"` : `"Connect your apps again on your team's page in MausBot Cloud."`);
+        + (where ? `"Connect your apps again here: ${where}"` : `"Connect your apps again on your team's page in IndBot Cloud."`);
     },
     teamApp: (name: string) => `${name} is ${team?.name ?? "the team"}'s, connected once for everyone: use it through the composio tools, not ${OWN_APPS_SERVER}. Nothing was run.`,
     /** A team app's connection card, asked for through a member's own bridge. An Owner or Admin can connect it for
@@ -382,7 +382,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
         const these = `${list(names)} ${names.length === 1 ? "is" : "are"} each person's own in ${team.name}`;
         return hasOwn(acting)
           ? ` ${these}, used only in a chat that is theirs alone. Others read this chat, so ${who}'s own aren't here: what they bring back would be read here. If the task needs one, don't try it another way (the browser or another tool). ${handOnHow(who)}`
-          : ` ${these}, and ${who} hasn't connected any yet. If the task needs one, don't try it another way (the browser or another tool): reply with one plain line and nothing more about it: "Connect your <name> here: ${ownPage(acting) ?? "your team's page in MausBot Cloud"}".`;
+          : ` ${these}, and ${who} hasn't connected any yet. If the task needs one, don't try it another way (the browser or another tool): reply with one plain line and nothing more about it: "Connect your <name> here: ${ownPage(acting) ?? "your team's page in IndBot Cloud"}".`;
       }
       if (!person) {
         const where = appsPage();
@@ -399,7 +399,7 @@ export function createTeamConnectionsHost(deps: TeamConnectionsHostDeps) {
       return (ownApps.length ? ` ${list(ownApps.map(appLabel))} ${ownApps.length === 1 ? "is" : "are"} ${whose} own: use ${ownApps.length === 1 ? "it" : "them"} through the ${OWN_APPS_SERVER} tools, which act as their own accounts; ${team.name}'s shared apps stay under composio.` : "")
         + (ownServers.length ? ` The MCP ${ownServers.length === 1 ? "server" : "servers"} ${list(ownServers)} act${ownServers.length === 1 ? "s" : ""} as ${whose} own account.` : "")
         + (ownApps.length || ownServers.length ? ` ${only}` : "")
-        + (missing.length ? ` Each person connects these for themselves, and ${who} hasn't connected ${missing.length === 1 ? "it" : "them"} yet, or their sign-in ended: ${list(missing)}. If the task needs one, don't try it another way (the browser or another tool): reply with one plain line and nothing more about it: "Connect your <name> here: ${where ?? "your team's page in MausBot Cloud"}".` : "");
+        + (missing.length ? ` Each person connects these for themselves, and ${who} hasn't connected ${missing.length === 1 ? "it" : "them"} yet, or their sign-in ended: ${list(missing)}. If the task needs one, don't try it another way (the browser or another tool): reply with one plain line and nothing more about it: "Connect your <name> here: ${where ?? "your team's page in IndBot Cloud"}".` : "");
     },
 
     /** Whose own account a tool call uses, for its step ("using Ada's Notion"): a `person` app through their own bridge,

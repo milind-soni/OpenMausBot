@@ -1,4 +1,4 @@
-// The email-code sign-in the phone apps use (openmaus-cloud server/cloud-app-signin.ts), typed into the app: it ends in
+// The email-code sign-in the phone apps use (openind-cloud server/cloud-app-signin.ts), typed into the app: it ends in
 // the same omc_ device token as the browser approval. The attempt and the token stay in main; the page sees outcomes only.
 export const SIGN_IN_START = "/api/cloud/app/sign-in/start";
 export const SIGN_IN_VERIFY = "/api/cloud/app/sign-in/verify";

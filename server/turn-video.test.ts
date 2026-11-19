@@ -18,7 +18,7 @@ function hasFfmpeg(): boolean {
   }
 }
 
-// These exercise the real ffmpeg/ffprobe on PATH (the same local build OpenMausBot would find), not a fake: this
+// These exercise the real ffmpeg/ffprobe on PATH (the same local build OpenIndBot would find), not a fake: this
 // module has nothing to fake ffmpeg's behaviour against. Skipped wherever neither is installed.
 describe.skipIf(!hasFfmpeg())("video frame sampling", () => {
   const temporary: string[] = [];

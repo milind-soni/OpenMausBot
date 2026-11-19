@@ -1,7 +1,7 @@
 import { userErrorThrown } from "./user-errors.ts";
 import { z } from "zod";
 import { profilePatchSchema, fitsOnOneLine } from "./bot-profile.ts";
-import { EFFORT_LEVELS, MAUS_COLOR_NAMES } from "../shared/wire.ts";
+import { EFFORT_LEVELS, IND_COLOR_NAMES } from "../shared/wire.ts";
 import { isModelVariant } from "./contracts.ts";
 import { normalizeCronSchedule } from "../shared/routine-schedule.ts";
 import { parseToolScope, type ToolScope } from "../shared/tool-scope.ts";
@@ -33,7 +33,7 @@ export const botDefaultsProfileSchema = z.preprocess(withoutRetiredFields, profi
   name: z.string({ error: "name must be a string" }).max(100, { error: "name must be at most 100 characters" })
     .refine(fitsOnOneLine, "name must fit on one line").optional(),
   section: z.string({ error: "section must be a string" }).trim().max(60, { error: "section must be at most 60 characters" }).optional(),
-  color: z.enum(MAUS_COLOR_NAMES).optional(),
+  color: z.enum(IND_COLOR_NAMES).optional(),
   mascotExpression: z.string().max(60).nullable().optional(),
   modelSelection: botDefaultModelSchema.optional(),
   computer: z.enum(["cloud", "vm", "local", "browser", "off"]).nullable().optional(),
@@ -83,7 +83,7 @@ const scheduleSchema = z.discriminatedUnion("type", [
 export const botRoutineTemplateSchema = z.object({
   name: z.string().trim().min(1).max(80), prompt: z.string().trim().min(1).max(20_000),
   schedule: scheduleSchema, enabled: z.boolean().optional(),
-  runOn: z.enum(["maus", "cloud"]).optional(),
+  runOn: z.enum(["ind", "cloud"]).optional(),
   durationMinutes: z.number().int().min(5).max(240).optional(),
   timeoutMinutes: z.number().min(1).max(1440).nullable().optional(),
   overlap: z.enum(["skip", "queue"]).optional(),

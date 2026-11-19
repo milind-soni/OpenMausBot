@@ -26,11 +26,11 @@ describe("which of a Starter Cloud's bots stay awake", () => {
     expect(createStarterAwake({ dataDir: dir, starter: () => true, bots: () => list }).paused()).toEqual(["b0", "b1", "b2"]);
   });
 
-  it("pauses nobody within the limit, off Starter, or the MausBot and chief of staff", () => {
+  it("pauses nobody within the limit, off Starter, or the IndBot and chief of staff", () => {
     expect(createStarterAwake({ dataDir: dataDir(), starter: () => true, bots: () => bots(5) }).paused()).toEqual([]);
     const off = createStarterAwake({ dataDir: dataDir(), starter: () => false, bots: () => bots(30) });
     expect([off.limit(), off.paused()]).toEqual([undefined, []]);
-    const list: AwakeBot[] = [...bots(5), { id: "maus", defaultBot: {}, createdAt: 0 }, { id: "chief", chiefOfStaff: true, createdAt: 0 }, { id: "gone", hidden: true, createdAt: 0 }];
+    const list: AwakeBot[] = [...bots(5), { id: "ind", defaultBot: {}, createdAt: 0 }, { id: "chief", chiefOfStaff: true, createdAt: 0 }, { id: "gone", hidden: true, createdAt: 0 }];
     expect(createStarterAwake({ dataDir: dataDir(), starter: () => true, bots: () => list }).paused()).toEqual([]);
   });
 

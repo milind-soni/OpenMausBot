@@ -8,15 +8,15 @@ import { addHeldSecretScrubber, redactSecretsInText } from "./redact.ts";
 
 const now = Date.parse("2026-10-17T10:00:00Z");
 const routine = (id: string, botId: string, prompt = "Summarize the inbox."): Routine => ({
-  id, name: `Routine ${id}`, prompt, target: "bot", botId, runOn: "maus", enabled: true,
+  id, name: `Routine ${id}`, prompt, target: "bot", botId, runOn: "ind", enabled: true,
   schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 30, nextRunAt: now + 3_600_000, createdAt: now, updatedAt: now,
 });
 const webhook = (id: string, botId: string): WebhookTrigger => ({
-  id, endpointId: `wh_${id}`, name: `Hook ${id}`, prompt: "Draft a reply.", botId, runOn: "maus", enabled: true,
+  id, endpointId: `wh_${id}`, name: `Hook ${id}`, prompt: "Draft a reply.", botId, runOn: "ind", enabled: true,
   createdAt: now, updatedAt: now, deliveryCount: 2, lastReceivedAt: now - 60_000,
 });
 const run = (id: string, routineId: string, botId: string, output = "done"): RoutineRun => ({
-  id, routineId, routineName: routineId, target: "bot", botId, runOn: "maus", scheduledFor: now, status: "completed", manual: false, output, createdAt: now,
+  id, routineId, routineName: routineId, target: "bot", botId, runOn: "ind", scheduledFor: now, status: "completed", manual: false, output, createdAt: now,
 });
 
 describe("listTriggers", () => {

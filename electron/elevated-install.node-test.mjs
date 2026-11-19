@@ -44,7 +44,7 @@ function fixture() {
   const dir = mkdtempSync(join(tmpdir(), "omb-elevated-"));
   const cache = join(dir, "cache dir", "o'brien", "pending");
   mkdirSync(cache, { recursive: true });
-  const file = join(cache, "OpenMausBot-2.0.0-amd64.deb");
+  const file = join(cache, "OpenIndBot-2.0.0-amd64.deb");
   writeFileSync(file, "deb bytes");
   return { dir, file, cache, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }

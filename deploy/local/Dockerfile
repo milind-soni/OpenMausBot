@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=ghcr.io/milind-soni/openmausbot:latest
+ARG BASE_IMAGE=ghcr.io/milind-soni/openindbot:latest
 FROM ${BASE_IMAGE}
 USER root
 ARG ENGINES="@anthropic-ai/claude-code @openai/codex"
@@ -16,4 +16,4 @@ RUN if [ -n "$GROK_VERSION" ]; then \
       && HOME=/tmp/grok-install grok --version | grep -qF "grok $GROK_VERSION " \
       && rm -rf /tmp/grok-install; \
     fi
-USER maus
+USER ind

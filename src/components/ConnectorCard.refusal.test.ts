@@ -16,7 +16,7 @@ vi.mock("@/state/store", () => ({
 import { ConnectorCard } from "./ConnectorCard";
 
 const SENTENCE = "Finish this sign-in in Apps → MCP servers.";
-const AUTH_URL = "https://mcp.linear.app/authorize?client_id=maus&state=s3cr3t";
+const AUTH_URL = "https://mcp.linear.app/authorize?client_id=ind&state=s3cr3t";
 
 let host: HTMLDivElement;
 let root: Root;

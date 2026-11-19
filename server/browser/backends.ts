@@ -35,7 +35,7 @@ export interface OpenRequest {
 
 export interface OpenedBrowser {
   readonly browser: CdpBrowser;
-  /** The largest page its windows may show, as no real window is larger than its screen; null where OpenMausBot sizes no window. */
+  /** The largest page its windows may show, as no real window is larger than its screen; null where OpenIndBot sizes no window. */
   readonly pageLimit?: { width: number; height: number } | null;
   readonly pid: number | null;
   /** The Chrome version that answered, e.g. 155.0.8059.80. */
@@ -80,7 +80,7 @@ export interface LocalBackendOptions {
 
 const LOCAL_CAPS: BackendCaps = { persistentProfile: true, window: true, egressGate: true, identityOverride: true, ownsAllTabs: true, downloads: "local", uploads: "path", botPasskeys: true };
 
-/** A Chrome OpenMausBot launches on a profile folder of its own, driven over its DevTools pipe. */
+/** A Chrome OpenIndBot launches on a profile folder of its own, driven over its DevTools pipe. */
 export class LocalBackend implements Backend {
   readonly kind = "local" as const;
   readonly caps = LOCAL_CAPS;
@@ -195,7 +195,7 @@ async function takeFirstNavigation(browser: CdpBrowser): Promise<void> {
 const CONNECTED_CAPS: BackendCaps = { persistentProfile: true, window: false, egressGate: false, identityOverride: false, ownsAllTabs: false, downloads: "none", uploads: "inject", botPasskeys: false };
 
 /**
- * A browser OpenMausBot reaches over a DevTools WebSocket: the person's own Chrome (My Chrome), or a cloud browser the
+ * A browser OpenIndBot reaches over a DevTools WebSocket: the person's own Chrome (My Chrome), or a cloud browser the
  * person brings. Nothing is changed about it: no identity, no gate, no permissions, no downloads.
  */
 export class ConnectedBackend implements Backend {

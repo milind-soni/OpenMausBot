@@ -55,7 +55,7 @@ describe("setting nudges", () => {
     asks();
     expect(turn({ tools: false })).toBe("");
     const note = turn();
-    expect(note).toMatch(/^\n\nOpenMausBot note: your last 2 turns in this conversation failed because your AI could not answer/);
+    expect(note).toMatch(/^\n\nOpenIndBot note: your last 2 turns in this conversation failed because your AI could not answer/);
     expect(note).toContain("app_settings set bots.model");
     expect(note).toContain("Say it this once only");
     replies();

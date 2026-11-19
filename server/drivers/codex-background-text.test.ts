@@ -145,12 +145,12 @@ describe("codexBackgroundProviderArgs", () => {
       'model_providers.mygw.wire_api="responses"',
       "model_providers.mygw.request_max_retries=2",
       'model_providers.mygw.query_params=[ "a", "b", ]',
-      'model_providers.mygw.env_http_headers.X-Team="OPENMAUSBOT_CODEX_MYGW_HEADER_1"',
-      'model_providers.mygw.env_key="OPENMAUSBOT_CODEX_MYGW_TOKEN"',
+      'model_providers.mygw.env_http_headers.X-Team="OPENINDBOT_CODEX_MYGW_HEADER_1"',
+      'model_providers.mygw.env_key="OPENINDBOT_CODEX_MYGW_TOKEN"',
     ]);
     expect(args.join(" ")).not.toMatch(/secret|other\.example|mine-mcp/);
-    expect(env.OPENMAUSBOT_CODEX_MYGW_TOKEN).toBe("sk-gateway-secret");
-    expect(env.OPENMAUSBOT_CODEX_MYGW_HEADER_1).toBe("team-secret");
+    expect(env.OPENINDBOT_CODEX_MYGW_TOKEN).toBe("sk-gateway-secret");
+    expect(env.OPENINDBOT_CODEX_MYGW_HEADER_1).toBe("team-secret");
   });
 
   it("reads inline and dotted provider tables, and a profile file's", () => {
@@ -218,8 +218,8 @@ describe("Codex generateMemoryText (fake CLI)", () => {
         HOME: scratch,
         CODEX_HOME: join(scratch, ".codex"),
         FAKE_CODEX_TEXT_LOG: log,
-        ...(managed ? { OPENMAUSBOT_COMPANY_API_KEY: "synthetic-company-fixture" } : {}),
-        ...(endpoint ? { OPENMAUSBOT_CODEX_API_KEY: "synthetic-endpoint-key" } : {}),
+        ...(managed ? { OPENINDBOT_COMPANY_API_KEY: "synthetic-company-fixture" } : {}),
+        ...(endpoint ? { OPENINDBOT_CODEX_API_KEY: "synthetic-endpoint-key" } : {}),
         ...environment,
       },
       enabled: true,
@@ -291,13 +291,13 @@ describe("Codex generateMemoryText (fake CLI)", () => {
     const codex = await create({}, false, true);
     await codex.generateMemoryText!("hello");
     const [call] = calls();
-    expect(call!.argv).toContain('model_provider="openmaus_endpoint"');
-    expect(call!.argv).toContain('model_providers.openmaus_endpoint.base_url="https://gateway.example/v1"');
+    expect(call!.argv).toContain('model_provider="openind_endpoint"');
+    expect(call!.argv).toContain('model_providers.openind_endpoint.base_url="https://gateway.example/v1"');
     expect(modelsRun()).toEqual(["gateway-model"]);
-    expect(call!.env.OPENMAUSBOT_CODEX_API_KEY).toBe("synthetic-endpoint-key");
+    expect(call!.env.OPENINDBOT_CODEX_API_KEY).toBe("synthetic-endpoint-key");
     expect(JSON.stringify(call!.argv)).not.toContain("synthetic-endpoint-key");
     await codex.dispose();
-    const keyless = await create({ OPENMAUSBOT_CODEX_API_KEY: "" }, false, true);
+    const keyless = await create({ OPENINDBOT_CODEX_API_KEY: "" }, false, true);
     await expect(keyless.generateMemoryText!("hello")).rejects.toThrow(/Direct API key/);
   });
 
@@ -306,10 +306,10 @@ describe("Codex generateMemoryText (fake CLI)", () => {
     await codex.generateMemoryText!("hello");
     const [call] = calls();
     expect(call!.argv[call!.argv.indexOf("--model") + 1]).toBe("gpt-6-luna");
-    expect(call!.argv).toContain('model_provider="openmaus_company"');
-    expect(call!.env.OPENMAUSBOT_COMPANY_API_KEY).toBe("synthetic-company-fixture");
+    expect(call!.argv).toContain('model_provider="openind_company"');
+    expect(call!.env.OPENINDBOT_COMPANY_API_KEY).toBe("synthetic-company-fixture");
     await codex.dispose();
-    const keyless = await create({ OPENMAUSBOT_COMPANY_API_KEY: "" }, true);
+    const keyless = await create({ OPENINDBOT_COMPANY_API_KEY: "" }, true);
     await expect(keyless.generateMemoryText!("hello")).rejects.toThrow(/Company model access is unavailable/);
   });
 

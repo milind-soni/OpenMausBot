@@ -13,7 +13,7 @@ Status: plan (Sep 14, 2026). First phase of the harness-upgrade programme descri
 Touches no bot-to-bot behaviour: delegation, rooms, peer comms and shared memory are untouched
 until Phase 6.
 
-**Standing rule (owner, Sep 14): OpenMausBot is model- and CLI-agnostic, and every item here must
+**Standing rule (owner, Sep 14): OpenIndBot is model- and CLI-agnostic, and every item here must
 hold for every engine.** The engine families on main are: **Claude Code** (stream-json,
 `drivers/claude.ts`), **Codex** (app-server JSON-RPC, `drivers/codex.ts`), **pi** (rpc mode,
 `drivers/pi.ts`), the **ACP family** sharing `drivers/acp/core.ts` (Cursor, Gemini, Droid, Grok
@@ -321,7 +321,7 @@ because it uses the harness-side `generateText` seam, not the engine's own compa
 
 ### 0.8 Benchmark track: the headless driver (`scripts/bench/run.ts`, `POST /api/bench/run`)
 
-`maus bench run --bot <id> --task <file|string> --cwd <dir> --budget "steps=200,tokens=400000,minutes=30" --out <dir>`
+`ind bench run --bot <id> --task <file|string> --cwd <dir> --budget "steps=200,tokens=400000,minutes=30" --out <dir>`
 starts one fresh detached thread on one bot (exactly what routines do: `createTask(activate=false)` +
 `startTurn(... { automationSource: "bench" })`), blocks until settle or budget, and writes
 `trajectory.json` (the thread's messages + digests + usage + prompt shapes) and `result.json`

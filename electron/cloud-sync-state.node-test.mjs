@@ -11,7 +11,7 @@ test("keeps the base, PC places, failures and flags across a reopen, and forgets
   const file = join(dir, "cloud-sync", "state.db");
   let state = openSyncState(file);
   state.setBase("f1", "a.txt", { sha256: "s", size: 3, mtimeMs: 1.5 });
-  state.setPlace("bot-b-t", "/Users/ash/Documents/MausBot/Owl/Plan");
+  state.setPlace("bot-b-t", "/Users/ash/Documents/IndBot/Owl/Plan");
   assert.equal(state.failed("f1", "x.xlsx", "EBUSY"), 1);
   assert.equal(state.failed("f1", "x.xlsx", "EBUSY"), 2);
   assert.deepEqual(state.failures(), []);
@@ -20,7 +20,7 @@ test("keeps the base, PC places, failures and flags across a reopen, and forgets
   state.close();
   state = openSyncState(file);
   assert.deepEqual(state.base("f1"), new Map([["a.txt", { sha256: "s", size: 3, mtimeMs: 1.5 }]]));
-  assert.equal(state.place("bot-b-t"), "/Users/ash/Documents/MausBot/Owl/Plan");
+  assert.equal(state.place("bot-b-t"), "/Users/ash/Documents/IndBot/Owl/Plan");
   assert.deepEqual(state.failures(), [{ folderId: "f1", path: "x.xlsx", error: "EBUSY" }]);
   state.cleared("f1", "x.xlsx");
   assert.deepEqual(state.failures(), []);

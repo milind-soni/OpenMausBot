@@ -1,5 +1,5 @@
-// The one-time "Get MausBot updates?" question: this computer's answer, kept in desktop-prefs.json before anything is
-// sent, and the MausBot Cloud Admin's consent record (account or email-only), kept in step with it.
+// The one-time "Get IndBot updates?" question: this computer's answer, kept in desktop-prefs.json before anything is
+// sent, and the IndBot Cloud Admin's consent record (account or email-only), kept in step with it.
 import { cleanEmail } from "./cloud-signin.mjs";
 
 /** The consent wording shown, by version: the Admin keeps the version with each answer as proof of what was asked. */
@@ -12,7 +12,7 @@ const text = (value, max) => typeof value === "string" && value.length > 0 && va
 const STATE_WAIT_MS = 8_000;
 
 /**
- * The record kept on this computer. `account`: the MausBot Cloud account the answer belongs to (given while signed in,
+ * The record kept on this computer. `account`: the IndBot Cloud account the answer belongs to (given while signed in,
  * or carried over to it). `email`: typed while signed out. `receipt`: the Admin's handle for that email-only answer,
  * the only way this computer can withdraw it. `replacedReceipts`: receipts of email-only opt-ins that a later answer
  * replaced (another email, or an account), each kept until its withdrawal succeeds. `receiptEmails`: the addresses

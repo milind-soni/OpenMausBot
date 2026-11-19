@@ -15,7 +15,7 @@ import { keepFirefoxProfileBeforeRemove, keepInstalledAppsBeforeRemove } from ".
 
 export type LocalVmUpdateNeed = "image" | "recreate";
 
-/** A desktop OpenMausBot made, or a durable folder left by one, that this release cannot run without updating. */
+/** A desktop OpenIndBot made, or a durable folder left by one, that this release cannot run without updating. */
 export function localVmUpdateNeed(status: ContainerComputerStatus, workspaceExists: boolean): LocalVmUpdateNeed | null {
   if (!status.runtime || !status.daemonUp) return null;
   if (status.container === "missing") return workspaceExists && !status.image && status.create_supported ? "image" : null;
@@ -23,7 +23,7 @@ export function localVmUpdateNeed(status: ContainerComputerStatus, workspaceExis
   return status.image ? "recreate" : "image";
 }
 
-/** A VPS desktop OpenMausBot made whose image this release no longer runs. Replacing it deletes its files, so a person does it. */
+/** A VPS desktop OpenIndBot made whose image this release no longer runs. Replacing it deletes its files, so a person does it. */
 export function vpsDesktopOutdated(status: {
   configured?: boolean; daemonUp?: boolean; container?: string; managed?: boolean; imageMatches?: boolean;
 } | null | undefined): boolean {

@@ -177,7 +177,7 @@ export interface AppDocument {
   /** Why serverTools/serverResources are off: drawn as a strip under the frame. */
   blocked?: { reason: AppBlockedReason; text: string };
   /** Shown in a room, to everyone who can see it: view-only. `can` has message, modelContext, serverTools and
-   * serverResources off, and a bot's page reads `mausbot.room === true`. */
+   * serverResources off, and a bot's page reads `indbot.room === true`. */
   room?: true;
 }
 

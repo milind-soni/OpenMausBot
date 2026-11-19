@@ -1,6 +1,6 @@
 // Adapted from pingdotgg/t3code@00cdceb1 apps/web/src/components/preview/AgentBrowserCursor.tsx (AgentCursorMark) and
 // agentBrowserCursorLogic.ts, MIT License, Copyright (c) 2026 T3 Tools Inc. (full text in third_party/t3-code/LICENSE);
-// modified: OpenMausBot's colours.
+// modified: OpenIndBot's colours.
 import { MousePointer2 } from "lucide-react";
 import { useEffect, useState } from "react";
 

@@ -36,11 +36,11 @@ describe("the headless command line", () => {
   it("redacts secrets in everything it prints", async () => {
     const { io, out } = capture();
     const callTool = vi.fn(async () => ({ messages: [{ role: "bot", kind: "text", text: "the key is sk-ant-abcdefghijklmnopqrstuv0123" }] }));
-    await runHeadless(["messages", "--bot", "b1", "--json"], { io, env: { OPENMAUSBOT_URL: "http://127.0.0.1:19999" }, callTool: callTool as any });
+    await runHeadless(["messages", "--bot", "b1", "--json"], { io, env: { OPENINDBOT_URL: "http://127.0.0.1:19999" }, callTool: callTool as any });
     expect(out.join("\n")).not.toContain("sk-ant-abcdefghijklmnopqrstuv0123");
     expect(out.join("\n")).toContain("«redacted");
     const human = capture();
-    await runHeadless(["messages", "--bot", "b1"], { io: human.io, env: { OPENMAUSBOT_URL: "http://127.0.0.1:19999" }, callTool: callTool as any });
+    await runHeadless(["messages", "--bot", "b1"], { io: human.io, env: { OPENINDBOT_URL: "http://127.0.0.1:19999" }, callTool: callTool as any });
     expect(human.out.join("\n")).not.toContain("sk-ant-abcdefghijklmnopqrstuv0123");
   });
 
@@ -51,26 +51,26 @@ describe("the headless command line", () => {
     expect(out[0]).toContain("Give a bot or room one job and wait until it, and every teammate it asked, is done.");
     expect(await runHeadless(["team", "apply", "--help"], { io })).toBe(0);
     expect(out[1]).toContain("a second apply prints \"No changes.\"");
-    expect(USAGE).toContain("openmausbot run BOT \"do this\"         give a bot one job and wait until it and every teammate it asked are done");
+    expect(USAGE).toContain("openindbot run BOT \"do this\"         give a bot one job and wait until it and every teammate it asked are done");
   });
 
   it("is reachable through the published entry, which keeps every other command as it was", () => {
-    const entry = join(import.meta.dirname, "..", "openmausbot.ts");
+    const entry = join(import.meta.dirname, "..", "openindbot.ts");
     const help = spawnSync(process.execPath, ["--experimental-strip-types", entry, "help", "export"], { encoding: "utf8" });
     expect(help.status).toBe(0);
-    expect(help.stdout).toContain("openmausbot export TARGET --out DIR");
-    const refused = spawnSync(process.execPath, ["--experimental-strip-types", entry, "run", "--json"], { encoding: "utf8", env: { ...process.env, OPENMAUSBOT_URL: "" } });
+    expect(help.stdout).toContain("openindbot export TARGET --out DIR");
+    const refused = spawnSync(process.execPath, ["--experimental-strip-types", entry, "run", "--json"], { encoding: "utf8", env: { ...process.env, OPENINDBOT_URL: "" } });
     expect(refused.status).toBe(2);
     expect(JSON.parse(refused.stdout)).toMatchObject({ ok: false, exitCode: 2 });
     const usage = spawnSync(process.execPath, ["--experimental-strip-types", entry, "--help"], { encoding: "utf8" });
-    expect(usage.stdout).toContain("openmausbot serve [--port 8799]");
+    expect(usage.stdout).toContain("openindbot serve [--port 8799]");
     expect(usage.stdout).toContain("Drive a running workspace");
   });
 
   it("serves MCP through the published entry, and Ctrl-C ends it like any command", async () => {
-    const entry = join(import.meta.dirname, "..", "openmausbot.ts");
+    const entry = join(import.meta.dirname, "..", "openindbot.ts");
     const child = spawn(process.execPath, ["--experimental-strip-types", entry, "mcp"], {
-      env: { ...process.env, OPENMAUSBOT_URL: "http://127.0.0.1:19998", OPENMAUSBOT_TOKEN: "" }, stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env, OPENINDBOT_URL: "http://127.0.0.1:19998", OPENINDBOT_TOKEN: "" }, stdio: ["pipe", "pipe", "pipe"],
     });
     let stdout = "";
     child.stdout.on("data", (chunk) => { stdout += chunk; });
@@ -78,7 +78,7 @@ describe("the headless command line", () => {
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize",
       params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "test", version: "1" } } })}\n`);
     await vi.waitFor(() => expect(stdout).toContain('"id":1'), { timeout: 10_000 });
-    expect(JSON.parse(stdout.split("\n")[0]!)).toMatchObject({ id: 1, result: { serverInfo: { name: expect.stringContaining("openmausbot") } } });
+    expect(JSON.parse(stdout.split("\n")[0]!)).toMatchObject({ id: 1, result: { serverInfo: { name: expect.stringContaining("openindbot") } } });
     child.kill("SIGINT");
     const timer = setTimeout(() => child.kill("SIGKILL"), 5_000);
     const { signal } = await exited;

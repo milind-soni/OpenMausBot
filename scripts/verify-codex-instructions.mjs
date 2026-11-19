@@ -111,7 +111,7 @@ try {
         assert(text(5, 'developer').includes('BOT_RULE_B'));
         assert(text(5, 'developer').indexOf('BOT_RULE_B') > text(5, 'developer').indexOf('BOT_RULE_A'));
         assert(!text(7, 'developer').includes('BOT_RULE_A') && text(7, 'developer').includes('BOT_RULE_B'));
-        assert(text(8, 'developer').includes('No OpenMausBot bot-specific instructions remain.'));
+        assert(text(8, 'developer').includes('No OpenIndBot bot-specific instructions remain.'));
         assert(!text(10, 'developer').includes('BOT_RULE_'));
     }
     else {

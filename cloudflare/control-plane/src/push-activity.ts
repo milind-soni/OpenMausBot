@@ -19,7 +19,7 @@ const ID = /^[\w-]{1,120}$/;
 const HEX = /^#[0-9A-Fa-f]{6}$/;
 const BODY = /^[a-z][a-z0-9-]{0,39}$/;
 /** A chat link in any of the app's schemes. */
-const LINK = /^openmausbot(?:-dev|-next)?:\/\/chat\/[A-Za-z0-9%_.-]{1,360}$/;
+const LINK = /^openindbot(?:-dev|-next)?:\/\/chat\/[A-Za-z0-9%_.-]{1,360}$/;
 
 function oneLine(max: number) {
   return z.string().min(1).max(max * 4).refine((value) => {

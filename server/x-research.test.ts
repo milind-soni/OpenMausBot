@@ -6,8 +6,8 @@ const CREATED = 1791418354;
 
 /** A row as anyapi's search answers it (treg's published example). */
 const searchRow = (id: string, extra: Record<string, unknown> = {}) => ({
-  authorName: "Maus",
-  authorUsername: "maus",
+  authorName: "Ind",
+  authorUsername: "ind",
   authorVerified: true,
   bookmarkCount: 0,
   conversationId: id,
@@ -94,44 +94,44 @@ describe("parsePostRef", () => {
   it("reads a bare id, and an x.com or twitter.com link with its handle", () => {
     expect(parsePostRef("2107987482155561188")).toEqual({ id: "2107987482155561188" });
     expect(parsePostRef("https://x.com/pbteja1998/status/2107987482155561188/photo/1")).toEqual({ id: "2107987482155561188", handle: "pbteja1998" });
-    expect(parsePostRef("https://twitter.com/maus/status/42")).toEqual({ id: "42", handle: "maus" });
+    expect(parsePostRef("https://twitter.com/ind/status/42")).toEqual({ id: "42", handle: "ind" });
     expect(parsePostRef("https://mobile.twitter.com/i/web/status/43")).toEqual({ id: "43" });
   });
 
   it("accepts a status link typed without https://", () => {
-    expect(parsePostRef("x.com/maus/status/123")).toEqual({ id: "123", handle: "maus" });
-    expect(parsePostRef("mobile.twitter.com/maus/status/124")).toEqual({ id: "124", handle: "maus" });
+    expect(parsePostRef("x.com/ind/status/123")).toEqual({ id: "123", handle: "ind" });
+    expect(parsePostRef("mobile.twitter.com/ind/status/124")).toEqual({ id: "124", handle: "ind" });
   });
 
   it("refuses anything that is not an X post", () => {
-    expect(parsePostRef("https://example.com/maus/status/42")).toBeNull();
-    expect(parsePostRef("https://x.com/maus")).toBeNull();
+    expect(parsePostRef("https://example.com/ind/status/42")).toBeNull();
+    expect(parsePostRef("https://x.com/ind")).toBeNull();
     expect(parsePostRef("forty two")).toBeNull();
   });
 });
 
 describe("normalizeHandle", () => {
   it("accepts @name, name and an x.com profile link", () => {
-    expect(normalizeHandle("@maus")).toBe("maus");
-    expect(normalizeHandle("  maus ")).toBe("maus");
-    expect(normalizeHandle("https://x.com/maus")).toBe("maus");
-    expect(normalizeHandle("https://twitter.com/maus/status/1")).toBe("maus");
+    expect(normalizeHandle("@ind")).toBe("ind");
+    expect(normalizeHandle("  ind ")).toBe("ind");
+    expect(normalizeHandle("https://x.com/ind")).toBe("ind");
+    expect(normalizeHandle("https://twitter.com/ind/status/1")).toBe("ind");
   });
 
   it("accepts links typed without https://", () => {
-    expect(normalizeHandle("x.com/maus")).toBe("maus");
-    expect(normalizeHandle("www.x.com/maus")).toBe("maus");
-    expect(normalizeHandle("twitter.com/maus/status/1")).toBe("maus");
+    expect(normalizeHandle("x.com/ind")).toBe("ind");
+    expect(normalizeHandle("www.x.com/ind")).toBe("ind");
+    expect(normalizeHandle("twitter.com/ind/status/1")).toBe("ind");
   });
 
   it("refuses X's own pages, which are not accounts", () => {
-    for (const raw of ["https://x.com/home", "https://x.com/i/lists/1", "https://x.com/search?q=maus", "x.com/explore", "https://x.com/settings", "i", "home"]) {
+    for (const raw of ["https://x.com/home", "https://x.com/i/lists/1", "https://x.com/search?q=ind", "x.com/explore", "https://x.com/settings", "i", "home"]) {
       expect(normalizeHandle(raw), raw).toBeNull();
     }
   });
 
   it("refuses non-X links and names X does not allow", () => {
-    expect(normalizeHandle("https://example.com/maus")).toBeNull();
+    expect(normalizeHandle("https://example.com/ind")).toBeNull();
     expect(normalizeHandle("not a handle!")).toBeNull();
     expect(normalizeHandle("a".repeat(16))).toBeNull();
     expect(normalizeHandle("")).toBeNull();
@@ -142,9 +142,9 @@ describe("toPost", () => {
   it("reads anyapi's search row", () => {
     expect(toPost(searchRow("7"))).toEqual({
       id: "7",
-      url: "https://x.com/maus/status/7",
-      author: "@maus",
-      authorName: "Maus",
+      url: "https://x.com/ind/status/7",
+      author: "@ind",
+      authorName: "Ind",
       createdAt: "2026-10-08T00:12:34.000Z",
       text: "post 7",
       likes: 18,
@@ -157,7 +157,7 @@ describe("toPost", () => {
   });
 
   it("reads anyapi's shorter timeline names, taking the author from the caller", () => {
-    expect(toPost(timelineRow("8"), "maus")).toMatchObject({ id: "8", author: "@maus", likes: 2, reposts: 0, replies: 0, quotes: 0, views: 1597 });
+    expect(toPost(timelineRow("8"), "ind")).toMatchObject({ id: "8", author: "@ind", likes: 2, reposts: 0, replies: 0, quotes: 0, views: 1597 });
   });
 
   it("reads anyapi's reply row", () => {
@@ -191,8 +191,8 @@ describe("toPost", () => {
   });
 
   it("links to the author's own post page whenever the author is known, so a bot never needs its browser to find it", () => {
-    expect(toPost({ id: "21", authorUsername: "maus", url: "https://x.com/i/web/status/21", text: "t" })?.url).toBe("https://x.com/maus/status/21");
-    expect(toPost(timelineRow("22"), "maus")?.url).toBe("https://x.com/maus/status/22");
+    expect(toPost({ id: "21", authorUsername: "ind", url: "https://x.com/i/web/status/21", text: "t" })?.url).toBe("https://x.com/ind/status/21");
+    expect(toPost(timelineRow("22"), "ind")?.url).toBe("https://x.com/ind/status/22");
     expect(toPost({ id: "23", url: "https://x.com/i/web/status/23", text: "t" })?.url).toBe("https://x.com/i/web/status/23");
   });
 
@@ -215,11 +215,11 @@ describe("toPost", () => {
 describe("search", () => {
   it("calls anyapi's search with the token, a cost ceiling and Latest, and returns compact posts", async () => {
     const { fetcher, calls } = fakeFetch({ body: anyapi({ items: [searchRow("12"), searchRow("11")], nextCursor: "" }) });
-    const result = await clientWith(fetcher).search({ query: "mausbot", sort: "latest", limit: 20 });
+    const result = await clientWith(fetcher).search({ query: "indbot", sort: "latest", limit: 20 });
     expect(calls).toHaveLength(1);
     expect(calls[0]!.method).toBe("POST");
     expect(calls[0]!.url.href).toBe(`${RELAY}/call/anyapi.x.search.posts`);
-    expect(calls[0]!.body).toEqual({ query: "mausbot", queryType: "Latest", limit: 20 });
+    expect(calls[0]!.body).toEqual({ query: "indbot", queryType: "Latest", limit: 20 });
     expect(calls[0]!.headers.get("authorization")).toBe("Bearer omb_xd_test");
     // Our treg key, the customer tag and the cost ceiling are the relay's to add; nothing of treg's is sent from here.
     expect(calls[0]!.headers.get("x-treg-token")).toBeNull();
@@ -235,7 +235,7 @@ describe("search", () => {
       nextCursor: `after-${start}`,
     });
     const { fetcher, calls } = fakeFetch({ body: page(1000) }, { body: page(980) }, { body: page(960) });
-    const result = await clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 50 });
+    const result = await clientWith(fetcher).search({ query: "ind", sort: "latest", limit: 50 });
     expect(calls.map((call) => (call.body as { cursor?: string }).cursor)).toEqual([undefined, "after-1000", "after-980"]);
     expect(result.posts).toHaveLength(50);
     expect(result.newestId).toBe("1000");
@@ -244,15 +244,15 @@ describe("search", () => {
 
   it("with sinceId, asks X for newer posts and stops at the first one already seen", async () => {
     const { fetcher, calls } = fakeFetch({ body: anyapi({ items: ["103", "102", "101", "100", "99"].map((id) => searchRow(id)), nextCursor: "c2" }) });
-    const result = await clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 20, sinceId: "100" });
-    expect((calls[0]!.body as { query: string }).query).toBe("maus since_id:100");
+    const result = await clientWith(fetcher).search({ query: "ind", sort: "latest", limit: 20, sinceId: "100" });
+    expect((calls[0]!.body as { query: string }).query).toBe("ind since_id:100");
     expect(result.posts.map((post) => post.id)).toEqual(["103", "102", "101"]);
     expect(result.more).toBe(false);
   });
 
   it("with top sort, asks for Top, and sinceId drops old posts but keeps reading past them", async () => {
     const { fetcher, calls } = fakeFetch({ body: anyapi({ items: ["105", "90", "104"].map((id) => searchRow(id)) }) });
-    const result = await clientWith(fetcher).search({ query: "maus", sort: "top", limit: 20, sinceId: "100" });
+    const result = await clientWith(fetcher).search({ query: "ind", sort: "top", limit: 20, sinceId: "100" });
     expect((calls[0]!.body as { queryType: string }).queryType).toBe("Top");
     expect(result.posts.map((post) => post.id)).toEqual(["105", "104"]);
     expect(result.newestId).toBe("105");
@@ -263,9 +263,9 @@ describe("search", () => {
       { status: 503, body: { error: "provider_capacity_unavailable" } },
       { body: { output: { posts: [graphqlRow, searchRow("5")], next_cursor: "n2" }, raw: {}, _treg: { served_by: "tikhub.x.twitter-web-fetch-search-timeline" } } },
     );
-    const result = await clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 20 });
+    const result = await clientWith(fetcher).search({ query: "ind", sort: "latest", limit: 20 });
     expect(calls[1]!.url.href).toBe(`${RELAY}/call/treg.x.search.posts`);
-    expect(calls[1]!.body).toEqual({ q: "maus" });
+    expect(calls[1]!.body).toEqual({ q: "ind" });
     expect(result.posts.map((post) => post.id)).toEqual(["77", "5"]);
     expect(result.more).toBe(true);
   });
@@ -273,7 +273,7 @@ describe("search", () => {
   it("does not fall back on a rejected token or an empty balance", async () => {
     for (const status of [401, 402]) {
       const { fetcher, calls } = fakeFetch({ status, body: { detail: "no" } });
-      await failure(clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 20 }));
+      await failure(clientWith(fetcher).search({ query: "ind", sort: "latest", limit: 20 }));
       expect(calls).toHaveLength(1);
     }
   });
@@ -283,7 +283,7 @@ describe("result size", () => {
   it("keeps a big answer under the agents result cap, newest id and more first", async () => {
     const rows = Array.from({ length: 50 }, (_, i) => searchRow(String(1000 - i), { text: "x".repeat(900) }));
     const { fetcher } = fakeFetch({ body: anyapi({ items: rows, nextCursor: "" }) });
-    const result = await clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 50 });
+    const result = await clientWith(fetcher).search({ query: "ind", sort: "latest", limit: 50 });
     expect(JSON.stringify(result).length).toBeLessThanOrEqual(22_000);
     expect(Object.keys(result).slice(0, 2)).toEqual(["newestId", "more"]);
     expect(result.posts.length).toBeLessThan(50);
@@ -308,22 +308,22 @@ describe("result size", () => {
 describe("userPosts", () => {
   it("reads an account's posts, naming the author, without its replies by default", async () => {
     const { fetcher, calls } = fakeFetch({ body: anyapi({ tweets: [timelineRow("3"), timelineRow("2", { isReply: true })], nextCursor: "" }) });
-    const result = await clientWith(fetcher).userPosts({ handle: "maus", limit: 20, includeReplies: false });
+    const result = await clientWith(fetcher).userPosts({ handle: "ind", limit: 20, includeReplies: false });
     expect(calls[0]!.url.href).toBe(`${RELAY}/call/anyapi.x.user.posts`);
-    expect(calls[0]!.body).toEqual({ handle: "maus", limit: 20 });
-    expect(result.posts.map((post) => [post.id, post.author])).toEqual([["3", "@maus"]]);
+    expect(calls[0]!.body).toEqual({ handle: "ind", limit: 20 });
+    expect(result.posts.map((post) => [post.id, post.author])).toEqual([["3", "@ind"]]);
   });
 
   it("keeps replies when asked", async () => {
     const { fetcher } = fakeFetch({ body: anyapi({ tweets: [timelineRow("3"), timelineRow("2", { isReply: true })] }) });
-    const result = await clientWith(fetcher).userPosts({ handle: "maus", limit: 20, includeReplies: true });
+    const result = await clientWith(fetcher).userPosts({ handle: "ind", limit: 20, includeReplies: true });
     expect(result.posts.map((post) => post.id)).toEqual(["3", "2"]);
   });
 
   it("skips an old pinned post instead of stopping at it", async () => {
     const rows = [timelineRow("50", { isPinned: true }), timelineRow("120"), timelineRow("110"), timelineRow("100"), timelineRow("90")];
     const { fetcher } = fakeFetch({ body: anyapi({ tweets: rows, nextCursor: "more" }) });
-    const result = await clientWith(fetcher).userPosts({ handle: "maus", limit: 20, sinceId: "100", includeReplies: false });
+    const result = await clientWith(fetcher).userPosts({ handle: "ind", limit: 20, sinceId: "100", includeReplies: false });
     expect(result.posts.map((post) => post.id)).toEqual(["120", "110"]);
     expect(result.more).toBe(false);
   });
@@ -331,7 +331,7 @@ describe("userPosts", () => {
   it("keeps reading past one old post a scraper lists out of order, such as a retweet under its original id", async () => {
     const rows = [timelineRow("120"), timelineRow("60"), timelineRow("110"), timelineRow("100"), timelineRow("90")];
     const { fetcher } = fakeFetch({ body: anyapi({ tweets: rows, nextCursor: "more" }) });
-    const result = await clientWith(fetcher).userPosts({ handle: "maus", limit: 20, sinceId: "100", includeReplies: false });
+    const result = await clientWith(fetcher).userPosts({ handle: "ind", limit: 20, sinceId: "100", includeReplies: false });
     expect(result.posts.map((post) => post.id)).toEqual(["120", "110"]);
     expect(result.more).toBe(false);
   });
@@ -341,10 +341,10 @@ describe("userPosts", () => {
       { status: 502, body: { error: "upstream" } },
       { body: { output: { posts: [timelineRow("4")] }, raw: {}, _treg: { served_by: "tikhub.x.user.posts" } } },
     );
-    const result = await clientWith(fetcher).userPosts({ handle: "maus", limit: 20, includeReplies: false });
+    const result = await clientWith(fetcher).userPosts({ handle: "ind", limit: 20, includeReplies: false });
     expect(calls[1]!.url.href).toBe(`${RELAY}/call/treg.x.user.posts`);
-    expect(calls[1]!.body).toEqual({ username: "maus" });
-    expect(result.posts.map((post) => [post.id, post.author])).toEqual([["4", "@maus"]]);
+    expect(calls[1]!.body).toEqual({ username: "ind" });
+    expect(result.posts.map((post) => [post.id, post.author])).toEqual([["4", "@ind"]]);
   });
 });
 
@@ -356,12 +356,12 @@ describe("post", () => {
       { body: { output: { found: true, data: tweet }, provider: "AnyAPI" } },
       { body: { output: { found: true, data: { items: [{ authorHandle: "a", id: "43", text: "r1" }, { authorHandle: "b", id: "44", text: "r2" }], nextCursor: "r2" } } } },
     );
-    const result = await clientWith(fetcher).post({ id: "42", handle: "maus", replies: true });
+    const result = await clientWith(fetcher).post({ id: "42", handle: "ind", replies: true });
     expect(calls[0]!.url.href).toBe(`${RELAY}/call/anyapi.twitter.tweet`);
-    expect(calls[0]!.body).toEqual({ url: "https://x.com/maus/status/42" });
+    expect(calls[0]!.body).toEqual({ url: "https://x.com/ind/status/42" });
     expect(calls[1]!.url.href).toBe(`${RELAY}/call/anyapi.x.post.comments`);
-    expect(calls[1]!.body).toEqual({ url: "https://x.com/maus/status/42", limit: 20 });
-    expect(result.post).toMatchObject({ id: "42", author: "@maus", likes: 9, reposts: 3, replies: 2, quotes: 1, views: 500 });
+    expect(calls[1]!.body).toEqual({ url: "https://x.com/ind/status/42", limit: 20 });
+    expect(result.post).toMatchObject({ id: "42", author: "@ind", likes: 9, reposts: 3, replies: 2, quotes: 1, views: 500 });
     expect(result.replies?.map((post) => post.author)).toEqual(["@a", "@b"]);
     expect(result.moreReplies).toBe(true);
   });
@@ -385,13 +385,13 @@ describe("post", () => {
 describe("profile", () => {
   it("maps treg's normalized profile", async () => {
     const { fetcher, calls } = fakeFetch({ body: { output: {
-      username: "maus", user_id: "1", name: "Maus", followers: 1200, following: 80, posts_count: 340, is_verified: true, description: "Open source Grok Bot",
+      username: "ind", user_id: "1", name: "Ind", followers: 1200, following: 80, posts_count: 340, is_verified: true, description: "Open source Grok Bot",
     }, raw: {}, _treg: { served_by: "anyapi.x.user.profile" } } });
-    expect(await clientWith(fetcher).profile("maus")).toEqual({
-      handle: "@maus", name: "Maus", bio: "Open source Grok Bot", followers: 1200, following: 80, posts: 340, verified: true, url: "https://x.com/maus",
+    expect(await clientWith(fetcher).profile("ind")).toEqual({
+      handle: "@ind", name: "Ind", bio: "Open source Grok Bot", followers: 1200, following: 80, posts: 340, verified: true, url: "https://x.com/ind",
     });
     expect(calls[0]!.url.href).toBe(`${RELAY}/call/treg.x.user.profile`);
-    expect(calls[0]!.body).toEqual({ username: "maus" });
+    expect(calls[0]!.body).toEqual({ username: "ind" });
   });
 
   it("names the missing account when every scraper misses", async () => {
@@ -404,7 +404,7 @@ describe("profile", () => {
 
 describe("errors", () => {
   it("maps HTTP statuses to plain sentences", () => {
-    // What the Admin's relay answers (openmaus-cloud server/cloud-services.ts).
+    // What the Admin's relay answers (openind-cloud server/cloud-services.ts).
     expect(errorFor(401, { error: "invalid_api_key" })).toMatchObject({ code: "bad_key", message: X_MESSAGES.badKey });
     expect(errorFor(402, { error: "subscription_inactive" })).toMatchObject({ code: "no_credit", message: X_MESSAGES.noPlan });
     expect(errorFor(422, { error: "invalid_request" }).code).toBe("bad_input");
@@ -428,14 +428,14 @@ describe("errors", () => {
 
   it("asks for a new Cloud sign-in when the relay refuses the token, and does not fall back", async () => {
     const { fetcher, calls } = fakeFetch({ status: 401, body: { error: "invalid_api_key", message: "This X research token is not valid." } });
-    const error = await failure(clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 20 }));
+    const error = await failure(clientWith(fetcher).search({ query: "ind", sort: "latest", limit: 20 }));
     expect(error).toMatchObject({ code: "bad_key", message: X_MESSAGES.badKey });
     expect(calls).toHaveLength(1);
   });
 
   it("does not fall back while the relay says treg is rate-limiting: a second call would only count against the plan too", async () => {
     const { fetcher, calls } = fakeFetch({ status: 503, body: { error: "overloaded", message: "X research is busy right now. Try again in a moment." } });
-    const error = await failure(clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 20 }));
+    const error = await failure(clientWith(fetcher).search({ query: "ind", sort: "latest", limit: 20 }));
     expect(error).toMatchObject({ code: "rate_limited", message: X_MESSAGES.rateLimited });
     expect(calls).toHaveLength(1);
   });
@@ -447,7 +447,7 @@ describe("errors", () => {
   it("passes on the relay's own sentence when this month's allowance is used up, and says how to keep going", async () => {
     const sentence = "Your Pro plan's 5,000 X research calls for October are used up. They reset on 1 November.";
     const { fetcher, calls } = fakeFetch({ status: 429, body: { error: "quota_exceeded", message: sentence } });
-    const error = await failure(clientWith(fetcher).search({ query: "maus", sort: "latest", limit: 20 }));
+    const error = await failure(clientWith(fetcher).search({ query: "ind", sort: "latest", limit: 20 }));
     expect(error).toMatchObject({ code: "rate_limited", message: `${sentence} Add your own treg key to keep going.` });
     expect(calls).toHaveLength(1);
     expect(errorFor(429, { error: "rate_limited", message: "Slow down." }).message).toBe(X_MESSAGES.rateLimited);
@@ -496,7 +496,7 @@ describe("with the person's own treg key", () => {
 
   it("calls treg directly with X-Treg-Token and no bearer, and sends no cost ceiling of ours", async () => {
     const { fetcher, calls } = fakeFetch({ body: anyapi({ items: [searchRow("101")], nextCursor: "" }) });
-    const page = await createXClient(own, { fetcher }).search({ query: "maus", sort: "latest", limit: 20 });
+    const page = await createXClient(own, { fetcher }).search({ query: "ind", sort: "latest", limit: 20 });
     expect(page.posts.map((post) => post.id)).toEqual(["101"]);
     expect(calls[0]!.url.toString()).toBe("https://treg.example.test/call/anyapi.x.search.posts");
     expect(calls[0]!.headers.get("x-treg-token")).toBe("treg_own_key");
@@ -506,7 +506,7 @@ describe("with the person's own treg key", () => {
 
   it("goes through the relay with a bearer when the credential is the plan's", async () => {
     const { fetcher, calls } = fakeFetch({ body: anyapi({ items: [], nextCursor: "" }) });
-    await createXClient({ token: "omb_xd_plan", api: RELAY, included: true }, { fetcher }).search({ query: "maus", sort: "latest", limit: 20 });
+    await createXClient({ token: "omb_xd_plan", api: RELAY, included: true }, { fetcher }).search({ query: "ind", sort: "latest", limit: 20 });
     expect(calls[0]!.url.toString()).toBe(`${RELAY}/call/anyapi.x.search.posts`);
     expect(calls[0]!.headers.get("authorization")).toBe("Bearer omb_xd_plan");
     expect(calls[0]!.headers.get("x-treg-token")).toBeNull();
@@ -529,7 +529,7 @@ describe("with the person's own treg key", () => {
 
   it("asks to check the key in Settings when treg refuses it, and does not fall back", async () => {
     const { fetcher, calls } = fakeFetch({ status: 401, body: { detail: "invalid token" } });
-    const error = await failure(createXClient(own, { fetcher }).search({ query: "maus", sort: "latest", limit: 20 }));
+    const error = await failure(createXClient(own, { fetcher }).search({ query: "ind", sort: "latest", limit: 20 }));
     expect(error).toMatchObject({ code: "bad_key", message: X_MESSAGES.ownBadKey });
     expect(calls).toHaveLength(1);
   });

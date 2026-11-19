@@ -11,7 +11,7 @@ const { BotThreadList, botRowProps } = await import("./Sidebar");
 // The short thread list keeps the six newest open threads, across folders and loose ones.
 const loose = Array.from({ length: 7 }, (_, index) => ({ threadId: `loose-${index}`, title: `Loose chat ${index}`, createdAt: 100 + index }));
 const bot = (filed: NonNullable<Bot["tasks"]>): Bot => ({
-  id: "maus", threadId: "loose-6", name: "Maus", title: "", description: "", notifications: true,
+  id: "ind", threadId: "loose-6", name: "Ind", title: "", description: "", notifications: true,
   color: "green", unread: false, messages: [], modelSelection: { instanceId: "fake", model: "test" },
   projects: [{ id: "folder", name: "Taxes" }],
   tasks: [...loose, ...filed],

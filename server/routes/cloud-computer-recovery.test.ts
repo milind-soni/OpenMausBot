@@ -74,7 +74,7 @@ describe("the computer panel's recovery routes", () => {
     expect(requiredScope("POST", "/api/bots/bot-1/computer/recovery")).toBe("admin");
   });
 
-  it("report what MausBot is doing about the bot's computer", async () => {
+  it("report what IndBot is doing about the bot's computer", async () => {
     const { base } = await serve();
     const response = await fetch(`${base}/bot-1/computer/recovery`);
     expect(response.headers.get("cache-control")).toContain("no-store");

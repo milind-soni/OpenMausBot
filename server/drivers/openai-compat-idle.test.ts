@@ -6,7 +6,7 @@ import { recordEvents } from "../testing/events.ts";
 afterEach(() => vi.unstubAllEnvs());
 
 it.each(["json", "http-error", "truncated", "interrupt"] as const)("settles a real loopback %s response without hanging or reporting false success", async (mode) => {
-  vi.stubEnv("OPENMAUS_OPENAI_COMPAT_IDLE_TIMEOUT_MS", "1000");
+  vi.stubEnv("OPENIND_OPENAI_COMPAT_IDLE_TIMEOUT_MS", "1000");
   let received!: () => void;
   const requestReceived = new Promise<void>((resolve) => { received = resolve; });
   const upstream = createServer((req, res) => {
@@ -73,8 +73,8 @@ async function localServer(handle: (req: import("node:http").IncomingMessage, re
 }
 
 it("stops waiting soon after a local server stops answering, long before the reply wait", async () => {
-  vi.stubEnv("OPENMAUS_OPENAI_COMPAT_IDLE_TIMEOUT_MS", "60000");
-  vi.stubEnv("OPENMAUS_OPENAI_COMPAT_PROBE_MS", "200");
+  vi.stubEnv("OPENIND_OPENAI_COMPAT_IDLE_TIMEOUT_MS", "60000");
+  vi.stubEnv("OPENIND_OPENAI_COMPAT_PROBE_MS", "200");
   let frozen = false;
   const fixture = await localServer((req, res) => {
     if (req.url === "/v1/models" && !frozen) { res.end(JSON.stringify({ data: [] })); return; }
@@ -93,8 +93,8 @@ it("stops waiting soon after a local server stops answering, long before the rep
 }, 15_000);
 
 it("keeps waiting for a slow first token while the local server still answers", async () => {
-  vi.stubEnv("OPENMAUS_OPENAI_COMPAT_IDLE_TIMEOUT_MS", "60000");
-  vi.stubEnv("OPENMAUS_OPENAI_COMPAT_PROBE_MS", "200");
+  vi.stubEnv("OPENIND_OPENAI_COMPAT_IDLE_TIMEOUT_MS", "60000");
+  vi.stubEnv("OPENIND_OPENAI_COMPAT_PROBE_MS", "200");
   const fixture = await localServer((req, res) => {
     if (req.url === "/v1/models") { res.end(JSON.stringify({ data: [] })); return; }
     setTimeout(() => {

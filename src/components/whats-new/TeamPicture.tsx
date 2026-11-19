@@ -1,12 +1,12 @@
 // The Team slide's picture: a team's shared bots on its one Cloud, in two departments, and around them each person with
 // their own Chief. Drawn with the skin's tokens; the work handed to the shared bots moves only while motion is allowed.
 import { memo, useId, useRef } from "react";
-import { MausAvatar } from "@/components/Avatar";
+import { IndAvatar } from "@/components/Avatar";
 import { t } from "@/lib/i18n";
-import type { MausColor, MausState } from "@/lib/mascot";
+import type { IndColor, IndState } from "@/lib/mascot";
 import { useLiveMotion } from "../cloud-buy/live-motion";
 
-type Person = { name: string; color: MausColor; chief: MausColor; x: number; y: number; right: boolean; path: string };
+type Person = { name: string; color: IndColor; chief: IndColor; x: number; y: number; right: boolean; path: string };
 const CHIP = { width: 126, height: 44 };
 /** Made-up teammates, clear of the popup's close button at the top right; each path runs from the person's card into the
  * shared Cloud. */
@@ -16,7 +16,7 @@ const PEOPLE: readonly Person[] = [
   { name: "Cleo", color: "coral", chief: "yellow", x: 384, y: 50, right: true, path: "M384 72C360 72 350 92 328 106" },
   { name: "Dara", color: "blue", chief: "cyan", x: 384, y: 204, right: true, path: "M384 226C358 226 348 210 326 198" },
 ];
-type Bot = { color: MausColor; state: MausState; x: number; y: number; size: number };
+type Bot = { color: IndColor; state: IndState; x: number; y: number; size: number };
 /** The shared bots by department: each department's main bot, and a helper beside it. */
 const DEPARTMENTS: readonly { label: "whatsNew.team.support" | "whatsNew.team.sales"; x: number; bots: readonly Bot[] }[] = [
   { label: "whatsNew.team.support", x: 224, bots: [{ color: "cyan", state: "idle", x: 236, y: 142, size: 24 }, { color: "blue", state: "working", x: 200, y: 130, size: 46 }] },
@@ -24,7 +24,7 @@ const DEPARTMENTS: readonly { label: "whatsNew.team.support" | "whatsNew.team.sa
 ];
 const CROWN = "M0 5.5 1.2 0 4 3 6 0 8 3 10.8 0 12 5.5Z";
 const ink = (percent: number) => `color-mix(in srgb, var(--color-ink) ${percent}%, transparent)`;
-const tint = (color: MausColor, percent: number) => `color-mix(in srgb, var(--identity-${color}) ${percent}%, var(--color-card))`;
+const tint = (color: IndColor, percent: number) => `color-mix(in srgb, var(--identity-${color}) ${percent}%, var(--color-card))`;
 
 /** The Cloud: its pieces drawn once with a line around them and once filled over it, so only its outline shows. */
 function CloudShape({ fill, line }: { fill: string; line: string }) {
@@ -44,7 +44,7 @@ function PersonCard({ person, moving }: { person: Person; moving: boolean }) {
     <text x={avatar} y={y + 26.5} textAnchor="middle" fontSize="13" fontWeight="600" fill={`var(--identity-${color})`}>{name[0]}</text>
     <text x={label} y={y + 26.5} textAnchor={right ? "end" : "start"} fontSize="13" fontWeight="600" fill="var(--color-ink)">{name}</text>
     <foreignObject x={chiefX} y={y + 12} width="26" height="26" overflow="visible">
-      <MausAvatar color={chief} state="idle" size={26} animated={moving} trackPointer={false} />
+      <IndAvatar color={chief} state="idle" size={26} animated={moving} trackPointer={false} />
     </foreignObject>
     <path transform={`translate(${chiefX + 7} ${y + 3})`} d={CROWN} fill="var(--color-warning)" />
   </g>;
@@ -73,7 +73,7 @@ export const TeamPicture = memo(function TeamPicture({ active }: { active: boole
       <CloudShape fill={`color-mix(in srgb, var(--color-accent) 7%, var(--color-card))`} line={ink(12)} />
       {DEPARTMENTS.map(department => <g key={department.label}>
         {department.bots.map(bot => <foreignObject key={bot.color} x={bot.x} y={bot.y} width={bot.size} height={bot.size} overflow="visible">
-          <MausAvatar color={bot.color} state={bot.state} size={bot.size} animated={moving} trackPointer={false} />
+          <IndAvatar color={bot.color} state={bot.state} size={bot.size} animated={moving} trackPointer={false} />
         </foreignObject>)}
         <text x={department.x} y="198" textAnchor="middle" fontSize="12" fontWeight="600" fill="var(--color-ink-secondary)">{t(department.label)}</text>
       </g>)}

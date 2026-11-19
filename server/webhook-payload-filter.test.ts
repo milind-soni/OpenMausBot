@@ -45,7 +45,7 @@ describe("webhook payload filter", () => {
 
   it("records a call that does not match as ignored and starts no run; a matching call runs", () => {
     const h = harness();
-    const { webhook, secret } = h.manager.create({ name: "Doorbell", prompt: "Answer it", botId: "maus-1", payloadFilter: { " status ": " ring ", "visitor.known": "" } });
+    const { webhook, secret } = h.manager.create({ name: "Doorbell", prompt: "Answer it", botId: "ind-1", payloadFilter: { " status ": " ring ", "visitor.known": "" } });
     expect(webhook.payloadFilter).toEqual({ status: "ring" });
 
     expect(h.manager.receive(webhook.endpointId, secret, { payload: { status: "idle" }, deliveryId: "d-1" })).toMatchObject({ ignored: true });
@@ -58,7 +58,7 @@ describe("webhook payload filter", () => {
 
   it("keeps the filter across a restart and an unrelated edit, removes it with null or {}, and lets Run now through", () => {
     const h = harness();
-    const { webhook, secret } = h.manager.create({ name: "Doorbell", prompt: "Answer it", botId: "maus-1", payloadFilter: { status: "ring" } });
+    const { webhook, secret } = h.manager.create({ name: "Doorbell", prompt: "Answer it", botId: "ind-1", payloadFilter: { status: "ring" } });
     const reloaded = new WebhookManager(h.options);
     expect(reloaded.list()[0]!.payloadFilter).toEqual({ status: "ring" });
     expect(reloaded.update(webhook.id, { name: "Front door" })!.payloadFilter).toEqual({ status: "ring" });
@@ -75,7 +75,7 @@ describe("webhook payload filter", () => {
   it("refuses more than 10 fields", () => {
     const h = harness();
     const payloadFilter = Object.fromEntries(Array.from({ length: 11 }, (_, index) => [`f${index}`, "x"]));
-    expect(() => h.manager.create({ name: "Too many", prompt: "x", botId: "maus-1", payloadFilter })).toThrow();
+    expect(() => h.manager.create({ name: "Too many", prompt: "x", botId: "ind-1", payloadFilter })).toThrow();
   });
 });
 

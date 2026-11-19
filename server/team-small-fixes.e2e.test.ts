@@ -154,7 +154,7 @@ it("a lent computer: a team's bot hears the team's one line, not a personal Clou
   expect(body.say).toBe(TEAM_LINE);
   expect(body.unavailable).toBe(TEAM_LINE);
 
-  const environment = await fetch(`${team.base}/.well-known/openmausbot/environment`, { headers: fx.edge });
+  const environment = await fetch(`${team.base}/.well-known/openindbot/environment`, { headers: fx.edge });
   const environmentId = ((await environment.json()) as { environmentId: string }).environmentId;
   const lent = await team.as(ada, "POST", "/api/shared-computers/connect",
     { id: randomUUID(), name: "Ada's Mac", environmentId, folders: [], terminal: true, computer: true, platform: "darwin" },
@@ -228,7 +228,7 @@ it("a question left for a day is said in the person's own inbox chat, once the c
   const reporter = await create({ name: "Reporter", title: "Reports", section: "Support", reportsTo: MIRA.email });
   expect((await team.as(ada, "PATCH", `/api/bots/${reporter.id}`, { approvalMode: "ask" })).status).toBe(200);
   const bots = async () => (await team.as(mira, "GET", "/api/bots")).body.bots as Array<Bot & { defaultBot?: unknown; tasks?: Array<{ threadId: string; inbox?: true; openAsks?: number }> }>;
-  // A User's own MausBot: no crown and no Chief's powers.
+  // A User's own IndBot: no crown and no Chief's powers.
   const own = (await bots()).find((bot) => bot.defaultBot) as Bot & { chiefOfStaff?: boolean };
   expect(MIRA.role).toBe("member");
   expect(own.chiefOfStaff).toBeFalsy();

@@ -30,7 +30,7 @@ const bot: Bot = {
 };
 const failed: RoutineRun = {
   id: "failed-run", routineId: "broken", routineName: "Broken report", target: "bot", botId: bot.id,
-  runOn: "maus", scheduledFor: 100, createdAt: 100, status: "failed", manual: false, error: "Provider crashed",
+  runOn: "ind", scheduledFor: 100, createdAt: 100, status: "failed", manual: false, error: "Provider crashed",
 };
 const missed: RoutineRun = { ...failed, id: "missed-run", routineId: "stale", routineName: "Stale digest", status: "missed" };
 const completed: RoutineRun = { ...failed, id: "fine-run", routineId: "fine", routineName: "Fine brief", status: "completed" };
@@ -48,7 +48,7 @@ afterAll(() => vi.unstubAllGlobals());
 
 describe("failures on the Automations page", () => {
   const routine = (id: string, name: string) => ({
-    id, name, prompt: `Write the ${name.toLowerCase()}.`, target: "bot" as const, botId: bot.id, runOn: "maus" as const, enabled: true,
+    id, name, prompt: `Write the ${name.toLowerCase()}.`, target: "bot" as const, botId: bot.id, runOn: "ind" as const, enabled: true,
     schedule: { type: "daily" as const, time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 30, nextRunAt: Date.now() + 3_600_000, createdAt: 0, updatedAt: 0,
   });
 

@@ -54,14 +54,14 @@ export async function discoverAgentEndpointModels(entry: InstanceConfig, fetchIm
   const setModels = (models: string[]) => { if (codex) config.endpoint!.models = models; else config.endpointModels = models; };
   if (!isGatewayEndpoint(entry)) return setModels(officialModels(codex));
   const env = entry.environment ?? {};
-  const token = codex ? env.OPENMAUSBOT_CODEX_API_KEY : env.ANTHROPIC_API_KEY;
+  const token = codex ? env.OPENINDBOT_CODEX_API_KEY : env.ANTHROPIC_API_KEY;
   const headers = codex ? { authorization: `Bearer ${token}` } : { authorization: `Bearer ${token}`, "x-api-key": token!, "anthropic-version": "2023-06-01" };
   const modelsUrl = providerModelsUrl(codex ? "openai" : "anthropic", agentEndpointAddress(entry));
   const failure = (detail: string) => Object.assign(new Error(`Could not discover gateway models: ${detail}`), { status: 400 });
   // Same rule as checkProviderKey: the key goes out only over HTTPS, or over plain HTTP to this computer.
   const target = new URL(modelsUrl);
   if (target.protocol !== "https:" && !(target.protocol === "http:" && isLoopback(target.hostname))) {
-    throw failure(`OpenMausBot reads a model list only over HTTPS or from this computer, so your key is not sent in the clear.${TYPE_MODEL}`);
+    throw failure(`OpenIndBot reads a model list only over HTTPS or from this computer, so your key is not sent in the clear.${TYPE_MODEL}`);
   }
   let response: Response;
   try {
@@ -72,9 +72,9 @@ export async function discoverAgentEndpointModels(entry: InstanceConfig, fetchIm
   } catch (error) {
     const timeout = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
     const localHint = isLoopback(new URL(modelsUrl).hostname)
-      ? " localhost refers to OpenMausBot's server or container. If both apps run on this computer, try 127.0.0.1; otherwise use an address reachable from that server."
-      : " Check that the gateway address is reachable from OpenMausBot's server.";
-    throw failure((timeout ? "The request timed out." : "OpenMausBot's server could not reach the gateway.") + localHint);
+      ? " localhost refers to OpenIndBot's server or container. If both apps run on this computer, try 127.0.0.1; otherwise use an address reachable from that server."
+      : " Check that the gateway address is reachable from OpenIndBot's server.";
+    throw failure((timeout ? "The request timed out." : "OpenIndBot's server could not reach the gateway.") + localHint);
   }
   if (!response.ok) await response.body?.cancel().catch(() => {});
   if (response.status === 401 || response.status === 403) {

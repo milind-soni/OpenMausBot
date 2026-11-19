@@ -73,7 +73,7 @@ describe("templates on a throwaway server", () => {
 
   it("a bot shares itself from chat: one card, a folder with no chats, memory or keys, and an equivalent bot when it is added back", async () => {
     const seeded = await api("POST", "/api/teams/import", {
-      format: "openmaus.package", version: 2,
+      format: "openind.package", version: 2,
       package: {
         id: "sales-helper", release: "1.0.0", name: "Sales helper", tagline: "Quotes prices.", summary: "Helps with quotes.", category: "Sales",
         author: { name: "Fixture" }, license: "MIT", outcomes: ["Quotes."], setupMinutes: 2, requirements: { apps: [], capabilities: [] },

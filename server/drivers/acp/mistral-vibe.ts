@@ -11,7 +11,7 @@
 //     account's own Vibe home ($VIBE_HOME, default ~/.vibe).
 //   - A browser sign-in leaves a populated `$VIBE_HOME/whoami_cache.json`; `MISTRAL_API_KEY`
 //     (Settings → Connections → Model providers, plan key) works with no sign-in.
-//   - session/new exposes three config options: `mode` (MausBot's approval modes map there),
+//   - session/new exposes three config options: `mode` (IndBot's approval modes map there),
 //     `model`, and `thinking` (off | high). `thinking` follows the chosen model's own default;
 //     item-specific thought levels prove nothing here, so variants stay off.
 //   - `vibe-acp --version` prints "vibe-acp 3.1.1".

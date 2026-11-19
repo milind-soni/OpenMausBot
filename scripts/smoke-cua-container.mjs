@@ -4,7 +4,7 @@ import { spawn } from "node:child_process";
 
 const runtime = process.env.OMB_CUA_RUNTIME || "docker";
 const container = process.env.OMB_CUA_CONTAINER;
-const socket = process.env.OMB_CUA_SOCKET || "/run/user/1000/openmausbot-cua.sock";
+const socket = process.env.OMB_CUA_SOCKET || "/run/user/1000/openindbot-cua.sock";
 if (!container || !/^[a-zA-Z0-9_.-]+$/.test(container)) {
   throw new Error("set OMB_CUA_CONTAINER to the explicitly created smoke container name");
 }
@@ -26,7 +26,7 @@ const child = spawn(
     "-e",
     "CUA_DRIVER_RS_TELEMETRY_ENABLED=0",
     container,
-    "/usr/local/libexec/openmausbot/cua-driver",
+    "/usr/local/libexec/openindbot/cua-driver",
     "mcp",
     "--socket",
     socket,
@@ -79,7 +79,7 @@ try {
   await rpc("initialize", {
     protocolVersion: "2024-11-05",
     capabilities: {},
-    clientInfo: { name: "openmausbot-container-smoke", version: "1" },
+    clientInfo: { name: "openindbot-container-smoke", version: "1" },
   });
   child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) + "\n");
 

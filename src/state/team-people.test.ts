@@ -6,22 +6,22 @@ const OLIVE = { email: "olive@acme.test", name: "Olive", role: "owner", you: tru
 const bots = [
   { id: "scout", yourAccess: "edit" },
   { id: "payroll", yourAccess: "view" },
-  { id: "olives-mausbot", defaultBot: { person: "Olive@acme.test" }, yourAccess: "edit" },
-  { id: "bobs-mausbot", defaultBot: { person: "bob@acme.test" }, yourAccess: "edit" },
+  { id: "olives-indbot", defaultBot: { person: "Olive@acme.test" }, yourAccess: "edit" },
+  { id: "bobs-indbot", defaultBot: { person: "bob@acme.test" }, yourAccess: "edit" },
   { id: "archived", hidden: true, yourAccess: "edit" },
 ];
 
 describe("schedulableBots", () => {
-  it("on a team lists only the bots the person can chat with, their own MausBot and no teammate's", () => {
-    expect(schedulableBots(bots, { me: OLIVE }).map((bot) => bot.id)).toEqual(["scout", "olives-mausbot"]);
+  it("on a team lists only the bots the person can chat with, their own IndBot and no teammate's", () => {
+    expect(schedulableBots(bots, { me: OLIVE }).map((bot) => bot.id)).toEqual(["scout", "olives-indbot"]);
   });
 
   it("keeps the bot a routine being changed already has", () => {
-    expect(schedulableBots(bots, { me: OLIVE }, "payroll").map((bot) => bot.id)).toEqual(["scout", "payroll", "olives-mausbot"]);
+    expect(schedulableBots(bots, { me: OLIVE }, "payroll").map((bot) => bot.id)).toEqual(["scout", "payroll", "olives-indbot"]);
   });
 
   it("off a team lists every bot shown", () => {
-    expect(schedulableBots(bots, null).map((bot) => bot.id)).toEqual(["scout", "payroll", "olives-mausbot", "bobs-mausbot"]);
+    expect(schedulableBots(bots, null).map((bot) => bot.id)).toEqual(["scout", "payroll", "olives-indbot", "bobs-indbot"]);
   });
 });
 
@@ -31,7 +31,7 @@ describe("mayRename", () => {
     expect(mayRename({ yourAccess: undefined }, null)).toBe(true);
   });
 
-  it("on a team: an admin any bot, a member only one they can edit or their own MausBot", () => {
+  it("on a team: an admin any bot, a member only one they can edit or their own IndBot", () => {
     expect(mayRename({ yourAccess: "chat" }, { admin: true, me: OLIVE })).toBe(true);
     expect(mayRename({ yourAccess: "chat" }, member)).toBe(false);
     expect(mayRename({ yourAccess: "view" }, member)).toBe(false);

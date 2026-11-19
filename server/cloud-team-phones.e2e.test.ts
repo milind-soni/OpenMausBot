@@ -63,7 +63,7 @@ it("lists a member's own phone for her, as its device and her address, and nobod
   expect(fromPhone.rows).toEqual(["Ada's iPhone · ada@acme.test"]);
   expect(fromPhone.current).toBe(phones.ada.id);
   // The app windows that open the team (the Admin's signed pairings) are not phones.
-  expect(mine.rows.join()).not.toContain("OpenMausBot app");
+  expect(mine.rows.join()).not.toContain("OpenIndBot app");
 }, hostTimeout(60_000));
 
 it("lists every member's phone for the team's admins and its owner", async () => {

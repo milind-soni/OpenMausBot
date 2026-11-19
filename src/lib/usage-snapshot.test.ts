@@ -113,9 +113,9 @@ function hostileState(): SnapshotState {
     sections: [HOSTILE, "Ops"],
     routines: [
       { name: HOSTILE, prompt: HOSTILE, enabled: true, runOn: "cloud", target: "bot", schedule: { type: "cron", expression: HOSTILE, timeZone: HOSTILE } },
-      { name: HOSTILE, prompt: HOSTILE, enabled: false, runOn: "maus", target: "room-goal", schedule: { type: "daily", time: "09:00", weekdays: [1] } },
-      { name: HOSTILE, prompt: HOSTILE, enabled: true, runOn: "maus", target: "bot", schedule: { type: "once", at: 1 } },
-      { name: HOSTILE, prompt: HOSTILE, enabled: true, runOn: "maus", target: "bot", schedule: { type: "interval", everyMinutes: 60, anchorAt: 0 } },
+      { name: HOSTILE, prompt: HOSTILE, enabled: false, runOn: "ind", target: "room-goal", schedule: { type: "daily", time: "09:00", weekdays: [1] } },
+      { name: HOSTILE, prompt: HOSTILE, enabled: true, runOn: "ind", target: "bot", schedule: { type: "once", at: 1 } },
+      { name: HOSTILE, prompt: HOSTILE, enabled: true, runOn: "ind", target: "bot", schedule: { type: "interval", everyMinutes: 60, anchorAt: 0 } },
     ] as unknown as SnapshotState["routines"],
     routinesLoadState: "ready",
     webhooks: [{ id: HOSTILE, name: HOSTILE }] as unknown as SnapshotState["webhooks"],
@@ -167,7 +167,7 @@ function hostileSources(overrides: Partial<UsageSources> = {}): UsageSources & {
           status: "connected", account: { id: HOSTILE, email: `${HOSTILE}@example.com` }, deviceId: HOSTILE,
           entitlement: { plan: "pro", tier: "max", status: "active", expiresAt: null, version: 1 },
           trial: { state: "active", tier: "max", endsAt: 1, amount: 9900, chargeAt: 1, holdUntil: null },
-          machine: { status: "ready", origin: `https://${HOSTILE}.mausbot.cloud` },
+          machine: { status: "ready", origin: `https://${HOSTILE}.indbot.cloud` },
         } as never;
       },
     },
@@ -210,7 +210,7 @@ describe("the daily usage snapshot", () => {
     expect(Object.keys(sent!).sort()).toEqual([...DOCUMENTED].sort());
     expectOnlyCountsFlagsAndWords(sent!);
     const wire = JSON.stringify(ph.captured);
-    for (const fragment of [HOSTILE, "HOSTILE", "example.com", "mausbot.cloud", "iPhone", "Owner", "3f0c2b1e", "/Users/"]) expect(wire).not.toContain(fragment);
+    for (const fragment of [HOSTILE, "HOSTILE", "example.com", "indbot.cloud", "iPhone", "Owner", "3f0c2b1e", "/Users/"]) expect(wire).not.toContain(fragment);
   });
 
   it("sends once per UTC day, writing the day before it gathers, and again after midnight", async () => {

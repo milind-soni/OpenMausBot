@@ -9,7 +9,7 @@ const words = (delta: string): RuntimeEvent =>
 
 describe("a reply as it goes out", () => {
   it("carries a finished reply's text as its saved message holds it, and the bus's own copy is untouched", () => {
-    const text = "Done. <openmaus-goal>{\"status\":\"done\"}</openmaus-goal> Key sk-ant-api03-abcdefghijklmnopqrstuvwxyz";
+    const text = "Done. <openind-goal>{\"status\":\"done\"}</openind-goal> Key sk-ant-api03-abcdefghijklmnopqrstuvwxyz";
     const completed = { ...words(""), type: "item.completed", itemType: "assistant_text", text } as RuntimeEvent;
     const sent = publicReplyEvent(completed);
     expect(sent.type === "item.completed" && sent.itemType === "assistant_text" && sent.text).toBe(redactSecretsInText("Done.  Key sk-ant-api03-abcdefghijklmnopqrstuvwxyz"));

@@ -10,7 +10,7 @@ import type { Routine, RoutineRun } from "./routines.ts";
 import { installLibrarySkill, readSkillLibraryIndex } from "./skill-library.ts";
 import { WebhookManager } from "./webhooks.ts";
 
-const HERE = "/Users/amit/.openmausbot";
+const HERE = "/Users/amit/.openindbot";
 const OWNER = { person: "p_owner0000000000000000", name: "Amit" };
 
 /** Routines held in memory as the routine manager holds them, adopting the way it does. */
@@ -22,10 +22,10 @@ function routinesHeld(routines: Routine[] = [], runs: RoutineRun[] = []) {
     adopt(apply: (held: { routines: Routine[]; runs: RoutineRun[] }) => Routine[]) { apply({ routines, runs }); },
   };
 }
-const routine = (fields: Partial<Routine> = {}): Routine => ({ id: "r1", name: "Morning", prompt: `Read ${HERE}/workspaces/b1/notes.md`, target: "bot", botId: "b1", runOn: "maus", enabled: true,
+const routine = (fields: Partial<Routine> = {}): Routine => ({ id: "r1", name: "Morning", prompt: `Read ${HERE}/workspaces/b1/notes.md`, target: "bot", botId: "b1", runOn: "ind", enabled: true,
   schedule: { type: "daily", time: "09:00", weekdays: [1] } as never, durationMinutes: 15, attachments: [{ id: "a1", kind: "file", name: "plan.md", path: `${HERE}/attachments/plan.md`, size: 4 }] as never,
   nextRunAt: 123, createdAt: 1, updatedAt: 2, ...fields });
-const run = (id: string, status: string, fields: Partial<RoutineRun> = {}): RoutineRun => ({ id, routineId: "r1", routineName: "Morning", target: "bot", botId: "b1", runOn: "maus",
+const run = (id: string, status: string, fields: Partial<RoutineRun> = {}): RoutineRun => ({ id, routineId: "r1", routineName: "Morning", target: "bot", botId: "b1", runOn: "ind",
   scheduledFor: 10, status: status as never, manual: false, createdAt: 10, output: `Wrote ${HERE}/workspaces/b1/out.md`, ...fields });
 
 function deps(dataDir: string, over: Partial<MoveKindsDeps> = {}): MoveKindsDeps & { owned: Array<[string, string]>; patched: Array<[string, unknown]>; chief: string[] } {
@@ -54,7 +54,7 @@ describe("what a move compares", () => {
   it("hashes a definition the same on both servers once each names its own data folder, apart from its switch and next time", () => {
     const here = routinesHeld([routine()], [run("run-1", "completed")]);
     const [mine] = moveItems(deps(HERE, { routines: () => here }), new Set(["b1"])).filter((item) => item.kind === "routine");
-    const cloud = "/data/.openmausbot";
+    const cloud = "/data/.openindbot";
     const moved = routine({ prompt: `Read ${cloud}/workspaces/b1/notes.md`, attachments: [{ id: "a1", kind: "file", name: "plan.md", path: `${cloud}/attachments/plan.md`, size: 4 }] as never,
       enabled: false, nextRunAt: null, updatedAt: 99 });
     const [theirs] = moveItems(deps(cloud, { routines: () => routinesHeld([moved], [run("run-1", "completed", { output: `Wrote ${cloud}/workspaces/b1/out.md` })]) }), new Set(["b1"]));
@@ -180,7 +180,7 @@ describe("My Cloud sets a bot's move-only fields", () => {
     expect((await take(d, "bot:nobody", { pinned: true })).status).toBe(409);
   });
 
-  it("this computer answers a bot's record with its own name, which a MausBot that moves is named for when the place it goes keeps its own (email 1a1c22b6)", async () => {
+  it("this computer answers a bot's record with its own name, which a IndBot that moves is named for when the place it goes keeps its own (email 1a1c22b6)", async () => {
     const before = process.env.OMB_ENVIRONMENT_LABEL;
     process.env.OMB_ENVIRONMENT_LABEL = "Amits-MacBook-Pro.local";
     try {

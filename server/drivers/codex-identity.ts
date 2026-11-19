@@ -84,6 +84,6 @@ export async function codexAccountEmail(
         }
       }
     });
-    send({ id: 1, method: "initialize", params: { clientInfo: { name: "openmausbot", version: "1" } } });
+    send({ id: 1, method: "initialize", params: { clientInfo: { name: "openindbot", version: "1" } } });
   });
 }

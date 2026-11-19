@@ -47,7 +47,7 @@ it("loads, queries, shows, pages, renders and exports through the real server", 
     writeFileSync(csv, lines.join("\n") + "\n");
     mkdirSync(join(dataDir, "Downloads"), { recursive: true });
 
-    const minted = await api("POST", "/api/testing/internal-capability", { botId: bot.id, threadId, kind: "data" }, 201, { "x-openmausbot-test-capability": CAPABILITY_KEY });
+    const minted = await api("POST", "/api/testing/internal-capability", { botId: bot.id, threadId, kind: "data" }, 201, { "x-openindbot-test-capability": CAPABILITY_KEY });
     const mcp = async (method: string, params?: unknown, token: string = minted.token) =>
       (await api("POST", "/api/internal/data/mcp", { method, params }, 200, { authorization: `Bearer ${token}` })).result;
     const call = async (name: string, args: Record<string, unknown>, token?: string) => {
@@ -181,7 +181,7 @@ it("loads, queries, shows, pages, renders and exports through the real server", 
       expect(readFileSync(workbook.data.path).subarray(0, 2).toString()).toBe("PK");
       // A second instance proves cached extensions load again, without relying on the exporter's LOAD.
       const { bot: reader } = await runControlOmb(["new-bot", "--name", "Workbook reader", "--url", url]) as { bot: { id: string; activeTaskId: string } };
-      const readerToken = await api("POST", "/api/testing/internal-capability", { botId: reader.id, threadId: reader.activeTaskId, kind: "data" }, 201, { "x-openmausbot-test-capability": CAPABILITY_KEY });
+      const readerToken = await api("POST", "/api/testing/internal-capability", { botId: reader.id, threadId: reader.activeTaskId, kind: "data" }, 201, { "x-openindbot-test-capability": CAPABILITY_KEY });
       const reloaded = await call("data_load", { source: workbook.data.path, name: "workbook_sales" }, readerToken.token);
       expect(reloaded.isError, reloaded.text).toBe(false);
       expect(reloaded.data.tables[0].rowCount).toBe(300);

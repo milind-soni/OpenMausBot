@@ -10,7 +10,7 @@ const bot = (id: string, extra: Partial<BotRecord> = {}): BotRecord => ({
   modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, resumeCursors: {}, createdAt: 1, tasks: [], ...extra,
 } as unknown as BotRecord);
 const list = <T>(values: T[]) => ({ list: () => values });
-const routine = (id: string, botId: string, target = "bot") => ({ id, name: id, prompt: "p", target, botId, runOn: "maus", enabled: true, schedule: { type: "daily", time: "09:00" }, durationMinutes: 5, createdAt: 1 });
+const routine = (id: string, botId: string, target = "bot") => ({ id, name: id, prompt: "p", target, botId, runOn: "ind", enabled: true, schedule: { type: "daily", time: "09:00" }, durationMinutes: 5, createdAt: 1 });
 
 function kinds(): MoveKindsDeps {
   return {

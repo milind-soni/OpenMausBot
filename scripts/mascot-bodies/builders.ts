@@ -235,7 +235,7 @@ function buildStar(w: number, h: number, points: number, inner: number): string 
 
 
 /**
- * The shipped maus artwork, copied verbatim from the avatar's
+ * The shipped ind artwork, copied verbatim from the avatar's
  * `DEFAULT_SILHOUETTE.body`; it is already cubics-only. Drawn pre-transform, so
  * its coordinates run negative (bbox -83.23,-16.56 .. 238.51,368.25).
  */

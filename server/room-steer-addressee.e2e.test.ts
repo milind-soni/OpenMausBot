@@ -9,7 +9,7 @@ import { readHandoffs } from "./testing/handoff-rows.ts";
 
 it("with parallel room jobs off, an unnamed steer while a member works a handed job stays queued for the lead and stops nothing", async () => {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
-  const env = { OPENMAUSBOT_URL: session.info.url };
+  const env = { OPENINDBOT_URL: session.info.url };
   const cli = (...args: string[]) => runControlOmb(args, { env }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, headers: { Origin: session.info.url }, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
   try {

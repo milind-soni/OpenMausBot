@@ -35,7 +35,7 @@ describe("self-hosted server pairing links", () => {
     "https://bots.example.com/other#code=ABCD-EFGH-JKLM",
     "https://bots.example.com/pair#code=ABCD EFGH JKLM",
     "https://bots.example.com\\@other.example/pair#code=ABCD-EFGH-JKLM",
-    "openmausbot://pair?code=123456",
+    "openindbot://pair?code=123456",
   ])("rejects an incomplete, malformed, or insecure link: %s", (link) => {
     expect(isServerPairingLink(link)).toBe(false);
   });
@@ -56,8 +56,8 @@ describe("remote connection Settings", () => {
     expect(html).toContain("Server pairing link");
     // Full access first: only it can make a server you own your bots' home; chat-only says what it can't do.
     expect(html.indexOf('data-pair-access="full"')).toBeLessThan(html.indexOf('data-pair-access="client"'));
-    expect(html).toMatch(/data-pair-access="full"[\s\S]*?Your own server: full access[\s\S]*?>npx openmausbot pair<\/code>/);
-    expect(html).toMatch(/data-pair-access="client"[\s\S]*?chat and approvals only[\s\S]*?>npx openmausbot pair --client<\/code>[\s\S]*?make the server your bots[\s\S]{1,8}home/);
+    expect(html).toMatch(/data-pair-access="full"[\s\S]*?Your own server: full access[\s\S]*?>npx openindbot pair<\/code>/);
+    expect(html).toMatch(/data-pair-access="client"[\s\S]*?chat and approvals only[\s\S]*?>npx openindbot pair --client<\/code>[\s\S]*?make the server your bots[\s\S]{1,8}home/);
     expect(html).toContain("12-character code");
     expect(html).toContain("custom domains and Cloudflare Tunnel");
     expect(html).toContain("Connect to server");
@@ -77,7 +77,7 @@ describe("remote connection Settings", () => {
     expect(html).toContain("Companion address");
     expect(html).toContain("Six-digit companion code");
     expect(html).toContain('placeholder="000000"');
-    expect(html).toContain("managed MausBot HTTPS address");
+    expect(html).toContain("managed IndBot HTTPS address");
     expect(html).toContain("Tailscale name ending in .ts.net");
     expect(html).not.toContain("<select");
     expect(html).not.toContain("Server pairing link");

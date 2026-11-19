@@ -141,7 +141,7 @@ describe("installCredentialStoreIpc", () => {
       dialog: { showMessageBox: vi.fn(async () => ({ response: 0 })) },
       windowFor: () => null,
       t: (key) => key,
-      appName: () => "OpenMausBot",
+      appName: () => "OpenIndBot",
       unreadable: () => true,
       quitting: () => false,
       moveAside: vi.fn(),

@@ -231,7 +231,7 @@ const rowValue = (rendered: Rendered, page: string) => find(rendered, "data-pane
 const skill = (name: string, enabled: boolean, origin?: ManagedSkill["origin"]): ManagedSkill =>
   ({ name, description: `${name} helper`, enabled, source: "github:x/y", warnings: [], ...(origin ? { origin } : {}) });
 const routine = (extra: Partial<Routine> = {}): Routine => ({
-  id: "r1", name: "Morning brief", prompt: "Brief me", target: "bot", botId: "scout", runOn: "maus", enabled: true,
+  id: "r1", name: "Morning brief", prompt: "Brief me", target: "bot", botId: "scout", runOn: "ind", enabled: true,
   schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 15,
   nextRunAt: Date.UTC(2099, 0, 5, 9), createdAt: 1, updatedAt: 1, ...extra,
 });

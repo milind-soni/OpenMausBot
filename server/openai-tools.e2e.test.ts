@@ -32,7 +32,7 @@ type ChatRequest = {
 };
 
 // The chat drivers keep the system message to the stable half of the prompt, so the provider's cached prefix survives a memory write.
-const CONTEXT_NOTE = "Context from OpenMausBot updated since this conversation started; it replaces any earlier copy:";
+const CONTEXT_NOTE = "Context from OpenIndBot updated since this conversation started; it replaces any earlier copy:";
 const MEMORY = "Your memory (MEMORY.md):\n# Memory\n- Fixture prefers concise replies.";
 // Team availability changes whenever a teammate starts or finishes, so it must never reach the cached system message.
 const AVAILABILITY = "Team availability";

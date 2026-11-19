@@ -29,7 +29,7 @@ beforeAll(async () => {
   fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-team-move-${randomBytes(8).toString("hex")}`, team: { ...ACME, engine: ENGINE } });
   team = fx.team!;
   for (const [who, member] of Object.entries({ olive: OWNER, ben: ADMIN, ada: ADA, cleo: CLEO })) tokens[who] = (await team.pair(member)).token!;
-  // Ada's MausBot Cloud sign-in lists Acme, and the Admin pairs her there as herself.
+  // Ada's IndBot Cloud sign-in lists Acme, and the Admin pairs her there as herself.
   fx.account.state.teams = [{ ...ACME, role: "member", machine: { origin: team.base, status: "ready", state: "ready" } }];
   fx.account.pairTeam = async (id) => { if (id !== ACME.id) throw Object.assign(new Error("not in that team"), { gone: true }); return team.grant(ADA); };
   expect((await fx.onCloud("PATCH", "/api/config", { profile: { name: "Ada", aboutMe: ABOUT } })).status).toBe(200);
@@ -50,8 +50,8 @@ async function say(bot: { id: string }, threadId: string, text: string) {
 const onTeam = (who: string) => (method: string, path: string, body?: unknown) => team.as(tokens[who]!, method, path, body);
 const teamBots = async (who: string) => (await onTeam(who)("GET", "/api/bots")).body.bots as Bot[];
 const cloudBots = async () => (await fx.onCloud("GET", "/api/bots")).body.bots as Bot[];
-const cloudHome = (...rest: string[]) => join(fx.root, "cloud", ".openmausbot", ...rest);
-const teamHome = (...rest: string[]) => join(team.home, ".openmausbot", ...rest);
+const cloudHome = (...rest: string[]) => join(fx.root, "cloud", ".openindbot", ...rest);
+const teamHome = (...rest: string[]) => join(team.home, ".openindbot", ...rest);
 
 /** A bot on My Cloud with two chats, a routine that is on, two files and notes about Ada. */
 async function botWithEverything(name: string) {

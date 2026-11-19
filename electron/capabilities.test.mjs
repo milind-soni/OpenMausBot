@@ -45,7 +45,7 @@ describe("desktop capabilities", () => {
   });
 
   it("exposes the recorded macOS failure to the local renderer without claiming readiness or leaking it remotely", () => {
-    const localConnection = { mode: "unavailable", reason: "Screen Recording required; restart OpenMausBot" };
+    const localConnection = { mode: "unavailable", reason: "Screen Recording required; restart OpenIndBot" };
     const local = desktopCapabilities({ platform: "darwin", localConnection });
     expect(local.localComputer).toMatchObject({
       available: false, enabled: false, status: "unavailable", message: localConnection.reason,

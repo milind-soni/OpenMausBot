@@ -42,7 +42,7 @@ export interface EgressGate {
   close(): Promise<void>;
 }
 
-/** A Chrome OpenMausBot starts never touches the person's credential store: on macOS Chrome otherwise opens the login
+/** A Chrome OpenIndBot starts never touches the person's credential store: on macOS Chrome otherwise opens the login
  * keychain (a dialog when it cannot find one), and on Linux it asks the desktop keyring. */
 export function credentialStoreFlags(platform: NodeJS.Platform = process.platform): string[] {
   return platform === "darwin" ? ["--use-mock-keychain"] : platform === "linux" ? ["--password-store=basic"] : [];

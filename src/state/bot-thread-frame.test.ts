@@ -4,7 +4,7 @@ import { unreadBeyondFrame, wholeBotFrame } from "./bot-thread-frame";
 import { initialState, reducer, type Bot, type BotAnnouncement } from "./store";
 
 const bot: Bot = {
-  id: "bot", threadId: "first", name: "Maus", title: "", description: "", notifications: true, color: "green", unread: false,
+  id: "bot", threadId: "first", name: "Ind", title: "", description: "", notifications: true, color: "green", unread: false,
   modelSelection: { instanceId: "claude", model: "m" }, approvalMode: "ask", alwaysAllow: [], messages: [],
   tasks: [
     { threadId: "first", title: "First", createdAt: 1, activity: "idle", busy: false, unread: false, modelSelection: { instanceId: "claude", model: "m" } },

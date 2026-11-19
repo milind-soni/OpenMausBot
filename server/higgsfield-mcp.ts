@@ -229,7 +229,7 @@ export async function generateHiggsfieldImage(request: HiggsfieldImageRequest, o
     if (!spec) throw signInAgain();
     const client = new RemoteMcpClient(spec, { fetch: fetchImpl });
     try {
-      await client.initialize("OpenMausBot", signal);
+      await client.initialize("OpenIndBot", signal);
       return client;
     } catch (error) {
       await client.close().catch(() => {});

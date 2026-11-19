@@ -46,7 +46,7 @@ function server(launchId?: () => string) {
   };
 }
 
-const daily = { name: "Morning brief", prompt: "Brief me", botId: "maus-1", runOnStartup: true, schedule: { type: "daily" as const, time: "23:00", weekdays: [0, 1, 2, 3, 4, 5, 6] } };
+const daily = { name: "Morning brief", prompt: "Brief me", botId: "ind-1", runOnStartup: true, schedule: { type: "daily" as const, time: "23:00", weekdays: [0, 1, 2, 3, 4, 5, 6] } };
 
 describe("a headless server's startup routines", () => {
   it("run at most once in OMB_STARTUP_ROUTINE_GAP_MS while the server crashes and starts again every minute", async () => {
@@ -62,8 +62,8 @@ describe("a headless server's startup routines", () => {
     expect(startups).toHaveLength(2);
     const skipped = last!.listRuns().filter((run) => run.status === "missed");
     expect(skipped.map((run) => [run.routineId, run.triggerSource, run.skipped?.count, run.error])).toEqual([
-      [routine.id, "startup", 29, "Not run at 29 starts because OpenMausBot started again soon after the start that last ran it"],
-      [routine.id, "startup", 29, "Not run at 29 starts because OpenMausBot started again soon after the start that last ran it"],
+      [routine.id, "startup", 29, "Not run at 29 starts because OpenIndBot started again soon after the start that last ran it"],
+      [routine.id, "startup", 29, "Not run at 29 starts because OpenIndBot started again soon after the start that last ran it"],
     ]);
   });
 

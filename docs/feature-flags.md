@@ -10,7 +10,7 @@ packaged releases may differ, including which controls Settings shows.
 
 ## Change a switch
 
-The default file is `~/.openmausbot/config.json` on the machine running the server.
+The default file is `~/.openindbot/config.json` on the machine running the server.
 If the server uses `OMB_DATA_DIR`, edit `config.json` in that directory instead.
 Stop that server (or quit the app if it runs the server), back up the file, merge
 only the keys you want into its existing `features` object, then start it again.
@@ -83,7 +83,7 @@ The desktop asks its person before ordinary server lending. There is an
 exception after **Make &lt;server&gt; my home** moves the bots to a server owned by
 that person alone: the computer then works for its home automatically, without
 another access dialog, even when `sharedComputers` is `false`. Use the
-OpenMausBot menu bar item to **Pause** that lending. Cloud homes also have their
+OpenIndBot menu bar item to **Pause** that lending. Cloud homes also have their
 own lending rules; this flag is not a universal pause control. See
 [Self-hosting](self-hosting.md) for the move, pairing and trust boundaries.
 

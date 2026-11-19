@@ -272,7 +272,7 @@ describe("parseGroupGoalDecision recovers a decision whose close tag is missing,
 
   it("recovers a decision closed by an escaped close tag", () => {
     const parsed = parseGroupGoalDecision(
-      `Done.\n${O}{"status":"completed","detail":"Shipped"}<\\/openmaus-goal>`,
+      `Done.\n${O}{"status":"completed","detail":"Shipped"}<\\/openind-goal>`,
     );
     expect(parsed.decision).toEqual({ status: "completed", detail: "Shipped" });
   });
@@ -286,7 +286,7 @@ describe("parseGroupGoalDecision recovers a decision whose close tag is missing,
 
   it("recovers a decision whose close tag is escaped and also carries trailing prose", () => {
     const parsed = parseGroupGoalDecision(
-      `${O}{"status":"blocked","detail":"No network"} trailing ${""}<\\/openmaus-goal>`,
+      `${O}{"status":"blocked","detail":"No network"} trailing ${""}<\\/openind-goal>`,
     );
     expect(parsed.decision).toEqual({ status: "blocked", detail: "No network" });
   });
@@ -370,7 +370,7 @@ describe("parseGroupGoalDecision still refuses contradictory or quoted decisions
 
   it("keeps the visible text that follows an escaped close tag", () => {
     const parsed = parseGroupGoalDecision(
-      `First\n${O}{"status":"completed","detail":"ok"}<\\/openmaus-goal>\nSecond`,
+      `First\n${O}{"status":"completed","detail":"ok"}<\\/openind-goal>\nSecond`,
     );
     expect(parsed.decision).toEqual({ status: "completed", detail: "ok" });
     expect(parsed.visibleText).toContain("Second");

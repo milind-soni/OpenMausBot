@@ -8,7 +8,7 @@ type Fetcher = typeof fetch;
 const RAW = "https://raw.githubusercontent.com";
 const MANIFEST_MAX_BYTES = 1_000_000;
 const FOLDER_MANIFESTS = ["bot.md", "team.md"] as const;
-const REPOSITORY_FILES = ["bot.md", "team.md", "botmrr.md", "team.mausteam.json"] as const;
+const REPOSITORY_FILES = ["bot.md", "team.md", "botmrr.md", "team.indteam.json"] as const;
 
 export class GithubTemplateError extends Error {
   readonly status: number;
@@ -38,9 +38,9 @@ export function githubTemplateSource(input: string): GithubTemplateSource {
   try {
     parts = url.pathname.split("/").filter(Boolean).map((part) => decodeURIComponent(part));
   } catch {
-    throw new GithubTemplateError("That GitHub link isn't one MausBot can read.");
+    throw new GithubTemplateError("That GitHub link isn't one IndBot can read.");
   }
-  if (!parts.every(safeSegment)) throw new GithubTemplateError("That GitHub link isn't one MausBot can read.");
+  if (!parts.every(safeSegment)) throw new GithubTemplateError("That GitHub link isn't one IndBot can read.");
   const fileSource = (owner: string, repo: string, ref: string, path: string[]): GithubTemplateSource => {
     const name = path.at(-1)!;
     const folder = path.slice(0, -1);
@@ -114,7 +114,7 @@ export async function fetchGithubTemplate(input: string, fetcher: Fetcher = fetc
   if (source.kind === "file") {
     const body = await fetchBody(source.url, MANIFEST_MAX_BYTES, fetcher, false);
     if (body === null) throw new GithubTemplateError("Nothing was found at that GitHub link.", 404);
-    const key = source.name.endsWith(".json") ? "team.mausteam.json" : "botmrr.md";
+    const key = source.name.endsWith(".json") ? "team.indteam.json" : "botmrr.md";
     return readShareFolder({ [key]: body });
   }
   for (const folder of source.folders) {

@@ -83,7 +83,7 @@ describe("1Password logins", () => {
       { id: "v2", title: "Finance", items: 1, bots: "all" },
       { id: "v1", title: "Shared with OMB", items: 2, bots: "all" },
     ] });
-    expect(calls).toEqual(["createClient OpenMausBot", "vaults.list", "items.list v2", "items.getAll v2 f1", "items.list v1", "items.getAll v1 i1,i2,i4,i5,i6,i7,i8,i11,i3,i10"]);
+    expect(calls).toEqual(["createClient OpenIndBot", "vaults.list", "items.list v2", "items.getAll v2 f1", "items.list v1", "items.getAll v1 i1,i2,i4,i5,i6,i7,i8,i11,i3,i10"]);
     const rows = source.list();
     expect(rows.map((row) => [row.site, row.hosts, row.username, row.hasTotp, row.source, row.bots])).toEqual([
       ["example.com", ["accounts.example.com"], "alice@example.com", true, "1password", "all"],

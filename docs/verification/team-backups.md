@@ -4,7 +4,7 @@
 
 This is the legacy partial team-copy format. The sidebar no longer offers it;
 use **Settings → Import & export** for a [full workspace backup](workspace-backups.md).
-Existing `.mausbackup.json` files remain importable through
+Existing `.indbackup.json` files remain importable through
 Teams → Import → choose the file → review → **Import backup**.
 Import always adds independent copies; existing bots, Chiefs, rooms and chats
 are never archived, overwritten or merged. Repeated imports number copies.
@@ -26,7 +26,7 @@ remaining members; orphaned direct messages become ordinary rooms. Routines
 whose bot/room/coordinator was deleted are omitted. These cases produce
 explicit notes in the backup, download confirmation and import preview.
 
-Existing `.mausteam.json` and BotMRR Markdown templates remain importable;
+Existing `.indteam.json` and BotMRR Markdown templates remain importable;
 they contain setup only, not conversation history. Every template import adds
 a new section named after the team, with its new bots and any imported rooms
 inside. Existing sections are left alone; importing again numbers the new

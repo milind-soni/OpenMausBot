@@ -45,7 +45,7 @@ holds it awake while a way in is on, and that includes **Your other computers**.
 
 | It says | Do this |
 |---|---|
-| "…is a MausBot desktop app. To open it from here, turn on Tailscale and Your other computers…" | The address reached the host's phone link or an app that is not shared. Share the host as above and use its link. |
+| "…is a IndBot desktop app. To open it from here, turn on Tailscale and Your other computers…" | The address reached the host's phone link or an app that is not shared. Share the host as above and use its link. |
 | "That code is for the phone app…" | A six-digit code was typed. Use **Pair a computer** on the host. |
 | "Tailscale isn't connected on this computer." | Open Tailscale on the client and sign in. |
 | "…isn't on this computer's tailnet." | The two computers are signed in to different Tailscale accounts. |
@@ -67,7 +67,7 @@ holds it awake while a way in is on, and that includes **Your other computers**.
 ## Without Tailscale
 
 Share the computer with **My Cloud** from its own app, and open My Cloud from the other computer. A server of
-your own (`openmausbot serve`) is the other choice: see [self-hosting](self-hosting.md).
+your own (`openindbot serve`) is the other choice: see [self-hosting](self-hosting.md).
 
 ## The earlier desktop companion connection
 

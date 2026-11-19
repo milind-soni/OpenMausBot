@@ -6,7 +6,7 @@ import { EMPTY_ONBOARDING } from "@/lib/onboarding";
 
 const store = vi.hoisted(() => ({ state: {} as any, dispatch: vi.fn() }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: store.state, dispatch: store.dispatch }), api: vi.fn(async (_path: string, init?: RequestInit) => ({ onboarding: JSON.parse(String(init?.body)).onboarding })) }));
-vi.mock("@/components/Avatar", () => ({ MausAvatar: () => null }));
+vi.mock("@/components/Avatar", () => ({ IndAvatar: () => null }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/components/onboarding/view-transition", () => ({ withViewTransition: (update: () => void) => { update(); return null; } }));
 vi.mock("@/lib/cloud-intent", async original => {

@@ -201,7 +201,7 @@ async function main(): Promise<void> {
     preview = await mountPreview(fixture, {
       entry: "/scripts/testing/threads-preview.tsx",
       route: "/__threads.html",
-      title: "Isolated OpenMaus Chat",
+      title: "Isolated OpenInd Chat",
       logLevel: "warn",
     });
     const session = { home: fixture.info.dataDir, session: `omb-voice-${new URL(fixture.info.url).port}`, chrome };

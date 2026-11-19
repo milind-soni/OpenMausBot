@@ -78,7 +78,7 @@ export interface InternalMcpDeps {
   usedBy(name: string): string[];
   /** Shows the person a card for a change below Full access; the bot ends its turn and their answer resumes it. */
   requestApproval(proposal: { action: McpCardAction; name: string; subtitle: string; targetHash: string; fields?: McpUpdateFields }): { text: string };
-  /** Shows the person a Sign in card for a server reached by URL; the bot ends its turn and OpenMausBot resumes it when
+  /** Shows the person a Sign in card for a server reached by URL; the bot ends its turn and OpenIndBot resumes it when
    * they finish or set the card aside. */
   requestSignIn(name: string, server: StoredRemoteMcpServer): { posted: true } | { status: number; error: string };
   /** Whose lent computers this turn may use; null: nobody's. */
@@ -351,7 +351,7 @@ function signIn(deps: Deps, name: string, server: StoredMcpServer, owner: Return
   const card = deps.requestSignIn(name, server);
   if ("error" in card) return card;
   say(deps, { action: "sign_in", name }, ["server.mcp.askedSignIn", { name }]);
-  return { status: 202, text: `A Sign in card for ${name} is now visible to the person. End this turn and wait; OpenMausBot resumes you when they finish.` };
+  return { status: 202, text: `A Sign in card for ${name} is now visible to the person. End this turn and wait; OpenIndBot resumes you when they finish.` };
 }
 
 async function signOut(deps: Deps, name: string, server: StoredMcpServer): Promise<Outcome> {

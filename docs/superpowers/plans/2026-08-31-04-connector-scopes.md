@@ -1,7 +1,7 @@
 # Connector Scopes (Connections Center, part 2) Implementation Plan
 
 > **Superseded.** The per-bot grants this plan sketched shipped as exact tool
-> names rather than verb classes, tracked in umbrella issue [#1734](https://github.com/milind-soni/OpenMausBot/issues/1734)
+> names rather than verb classes, tracked in umbrella issue [#1734](https://github.com/milind-soni/OpenIndBot/issues/1734)
 > (data model #1756, harness verdict #1761, web grant editors #1814, mobile
 > surfacing + docs #1739). Everything below is kept for history; the P4
 > constraints it named still hold and were carried forward: imports land with

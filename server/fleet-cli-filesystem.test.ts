@@ -35,7 +35,7 @@ describe.skipIf(process.platform === "win32" || process.getuid?.() === 0)("fleet
     fixture.account = "";
     fixture.calls = [];
     mkdirSync(fixture.home, { mode: 0o700 });
-    data = join(fixture.home, ".openmausbot");
+    data = join(fixture.home, ".openindbot");
     file = join(data, "config.json");
   });
   afterEach(async () => { await removeTempDir(root); });
@@ -117,7 +117,7 @@ describe.skipIf(process.platform === "win32" || process.getuid?.() === 0)("fleet
   });
 
   it("updates managed models through the real tenant helper and refuses a symlink without touching its target", async () => {
-    fixture.home = join(root, "var/lib/openmausbot/acme");
+    fixture.home = join(root, "var/lib/openindbot/acme");
     mkdirSync(fixture.home, { recursive: true, mode: 0o700 });
     const directory = join(fixture.home, ".config", "opencode");
     mkdirSync(directory, { recursive: true, mode: 0o700 });
@@ -208,7 +208,7 @@ describe.skipIf(process.platform === "win32" || process.getuid?.() === 0)("fleet
 
   it("returns empty totals for missing nested data, missing usage directory and missing month", () => {
     const empty = { turns: 0, costUsd: null, billableUsd: null };
-    expect(deps.usage(join(fixture.home, "absent", "nested", ".openmausbot"), "omb-acme", now)).toEqual(empty);
+    expect(deps.usage(join(fixture.home, "absent", "nested", ".openindbot"), "omb-acme", now)).toEqual(empty);
     expect(deps.usage(data, "omb-acme", now)).toEqual(empty);
     mkdirSync(data);
     expect(deps.usage(data, "omb-acme", now)).toEqual(empty);

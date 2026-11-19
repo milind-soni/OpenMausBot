@@ -45,7 +45,7 @@ describe("an engine set up to use a proxy", () => {
 });
 
 describe("Claude's --mcp-config", () => {
-  it("gets OpenMausBot's own proxies by URL with their capability, settings, tool limit and alwaysLoad; nothing else changes", () => {
+  it("gets OpenIndBot's own proxies by URL with their capability, settings, tool limit and alwaysLoad; nothing else changes", () => {
     const servers: Record<string, unknown> = { agents: { ...agents, alwaysLoad: true }, browser, ogb, phone, mine: { command: "npx", args: ["my-server"] } };
     expect(claudeOwnMcpOverHttp(servers, true)).toBe(true);
     expect(servers.agents).toEqual({ type: "http", url: `${HARNESS}/api/internal/mcp-http/agents`, alwaysLoad: true,

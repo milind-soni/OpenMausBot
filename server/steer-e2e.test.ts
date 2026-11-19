@@ -39,7 +39,7 @@ posixOnly("mid-turn steering e2e", () => {
     return { status: res.status, body: await res.json() };
   };
   const getBot = async (id: string) => (await api("GET", "/api/bots")).body.bots.find((b: any) => b.id === id);
-  const askedAt = (botId: string, threadId: string) => (readRegistry(join(home, ".openmausbot")).bots as any[])
+  const askedAt = (botId: string, threadId: string) => (readRegistry(join(home, ".openindbot")).bots as any[])
     .find((bot) => bot.id === botId).tasks.find((task: any) => task.threadId === threadId).askedAt;
   const PAIRED = { name: "Safari on Mac", id: expect.stringMatching(/^p_[\w-]{22}$/) };
   const asPairedPerson = async () => {
@@ -75,7 +75,7 @@ posixOnly("mid-turn steering e2e", () => {
     chmodSync(FAKE_ACP, 0o755);
     chmodSync(FAKE_CODEX, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-steer-"));
-    mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    mkdirSync(join(home, ".openindbot"), { recursive: true });
     steerGate = join(home, "delayed-steer.gate");
     steerFinishGate = join(home, "finish-steered-turn.gate");
     lateSteerFinishGate = join(home, "finish-late-steered-turn.gate");
@@ -85,7 +85,7 @@ posixOnly("mid-turn steering e2e", () => {
     hermesGate = join(home, "finish-hermes-turn.gate");
     writeFileSync(codexSteerGate, "refuse live steers until the queue test clears this gate");
     writeFileSync(
-      join(home, ".openmausbot", "config.json"),
+      join(home, ".openindbot", "config.json"),
       JSON.stringify({
         instances: {
           claude: { driver: "claudeAgent", environment: { FAKE_CLAUDE_MODE: "slow" }, config: { cli: FAKE_CLAUDE, permissionMode: "bypassPermissions" } },
@@ -114,7 +114,7 @@ posixOnly("mid-turn steering e2e", () => {
           acp: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "hang" }, config: { cli: FAKE_ACP, fullAuto: true } },
           hermes: {
             driver: "hermesAgent",
-            environment: { FAKE_ACP_MODE: "hermes-steer", FAKE_ACP_GATE_FILE: hermesGate, OPENMAUSBOT_PROBE_LOCAL_INJECT: "0" },
+            environment: { FAKE_ACP_MODE: "hermes-steer", FAKE_ACP_GATE_FILE: hermesGate, OPENINDBOT_PROBE_LOCAL_INJECT: "0" },
             config: { cli: FAKE_ACP, fullAuto: true },
           },
           // codex parks its turn on an unanswered question; turn/steer folds new input into that live turn without ending it.
@@ -366,7 +366,7 @@ posixOnly("mid-turn steering e2e", () => {
       "bot:hello from fake claude",
       "bot:reply to: and also this",
     ]);
-    const events = readFileSync(join(home, ".openmausbot", "events", `${created.threadId}.ndjson`), "utf8")
+    const events = readFileSync(join(home, ".openindbot", "events", `${created.threadId}.ndjson`), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
     const completed = events.filter((e) => e.type === "turn.completed");
     expect(completed).toHaveLength(1);
@@ -397,7 +397,7 @@ posixOnly("mid-turn steering e2e", () => {
         "the image queue tool chip",
       );
 
-      const attachments = join(home, ".openmausbot", "attachments");
+      const attachments = join(home, ".openindbot", "attachments");
       mkdirSync(attachments, { recursive: true });
       const firstImagePath = join(attachments, "123e4567-e89b-42d3-a456-426614174000.png");
       const secondImagePath = join(attachments, "123e4567-e89b-42d3-a456-426614174001.png");
@@ -439,7 +439,7 @@ posixOnly("mid-turn steering e2e", () => {
       );
 
       const nativeRows = readFileSync(
-        join(home, ".openmausbot", "native", `${waiting}.ndjson`),
+        join(home, ".openindbot", "native", `${waiting}.ndjson`),
         "utf8",
       )
         .trim()
@@ -474,7 +474,7 @@ posixOnly("mid-turn steering e2e", () => {
     await waitFor(async () => (await getBot(created.id)).busy === true, "the turn to start");
     await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.kind === "activity"), "the tool chip");
 
-    const attachments = join(home, ".openmausbot", "attachments");
+    const attachments = join(home, ".openindbot", "attachments");
     mkdirSync(attachments, { recursive: true });
     const imagePath = join(attachments, "123e4567-e89b-42d3-a456-426614174006.png");
     writeFileSync(imagePath, "steered png");
@@ -496,7 +496,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(replies).toHaveLength(1);
     expect(withoutTurnClock(replies[0].text)).toBe("reply to: first + steered: [image] and look at this");
 
-    const nativeRows = readFileSync(join(home, ".openmausbot", "native", `${created.threadId}.ndjson`), "utf8")
+    const nativeRows = readFileSync(join(home, ".openindbot", "native", `${created.threadId}.ndjson`), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
     const steerRow = nativeRows.filter((row) =>
       row.dir === "out" && row.source === "claude.sdk.message" && Array.isArray(row.msg?.message?.content),
@@ -527,7 +527,7 @@ posixOnly("mid-turn steering e2e", () => {
 
     // Loopback API sends never merge (each is its own identity), so the burst comes from one paired person; the gated opener cannot settle early.
     const person = await asPairedPerson();
-    const attachments = join(home, ".openmausbot", "attachments");
+    const attachments = join(home, ".openindbot", "attachments");
     mkdirSync(attachments, { recursive: true });
     const imagePath = join(attachments, "123e4567-e89b-42d3-a456-426614174004.png");
     writeFileSync(imagePath, "room png");
@@ -551,7 +551,7 @@ posixOnly("mid-turn steering e2e", () => {
     ).toHaveLength(2);
 
     const nativeRows = readFileSync(
-      join(home, ".openmausbot", "native", `${room.threadId}.ndjson`),
+      join(home, ".openindbot", "native", `${room.threadId}.ndjson`),
       "utf8",
     )
       .trim()
@@ -670,7 +670,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect((await api("POST", `/api/bots/${created.id}/messages`, { text: "first" })).status).toBe(202);
     const nativeRows = () => {
       try {
-        return readFileSync(join(home, ".openmausbot", "native", `${created.threadId}.ndjson`), "utf8")
+        return readFileSync(join(home, ".openindbot", "native", `${created.threadId}.ndjson`), "utf8")
           .trim().split("\n").map((line) => JSON.parse(line));
       } catch {
         return [];
@@ -720,7 +720,7 @@ posixOnly("mid-turn steering e2e", () => {
     const steered = (await getBot(created.id)).messages.find((m: any) => m.text === "and also this");
     expect(steered.steered).toBe(true);
 
-    const nativeRows = readFileSync(join(home, ".openmausbot", "native", `${created.threadId}.ndjson`), "utf8")
+    const nativeRows = readFileSync(join(home, ".openindbot", "native", `${created.threadId}.ndjson`), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
     const steerRow = nativeRows.find((row) => row.dir === "out" && row.msg?.method === "turn/steer")?.msg;
     expect(steerRow?.params).toMatchObject({
@@ -831,7 +831,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(folded?.steered).toBe(true);
     expect(folded?.sender).toEqual(PAIRED);
 
-    const nativeRows = readFileSync(join(home, ".openmausbot", "native", `${room.threadId}.ndjson`), "utf8")
+    const nativeRows = readFileSync(join(home, ".openindbot", "native", `${room.threadId}.ndjson`), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
     const steerRow = nativeRows.find((row) => row.dir === "out" && row.msg?.method === "turn/steer")?.msg;
     expect(steerRow?.params).toMatchObject({ input: [{ type: "text", text: "steer these room words" }] });
@@ -915,7 +915,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(steered.body.steered).toBe(true);
     expect(steered.body.queueIds).toEqual([replying.body.queueId, plain.body.queueId]);
 
-    const nativeRows = readFileSync(join(home, ".openmausbot", "native", `${room.threadId}.ndjson`), "utf8")
+    const nativeRows = readFileSync(join(home, ".openindbot", "native", `${room.threadId}.ndjson`), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
     const foldRow = nativeRows.find((row) => row.dir === "out" && row.msg?.method === "turn/steer")?.msg;
     const foldedText = foldRow?.params.input.map((block: any) => block.text).join("\n") ?? "";
@@ -945,7 +945,7 @@ posixOnly("mid-turn steering e2e", () => {
     await waitFor(async () => (await getGroup())?.busyBotId === created.id, "the room turn to start");
     await waitFor(async () => (await getGroup())?.messages.some((m: any) => m.card), "the room question card");
 
-    const attachments = join(home, ".openmausbot", "attachments");
+    const attachments = join(home, ".openindbot", "attachments");
     mkdirSync(attachments, { recursive: true });
     const imagePath = join(attachments, "123e4567-e89b-42d3-a456-426614174005.png");
     writeFileSync(imagePath, "clip png");
@@ -972,7 +972,7 @@ posixOnly("mid-turn steering e2e", () => {
     await api("POST", `/api/groups/${room.id}/interrupt`, {});
     await waitFor(async () => (await getGroup())?.working === false, "the drained attachment turn to settle");
 
-    const nativeRows = readFileSync(join(home, ".openmausbot", "native", `${room.threadId}.ndjson`), "utf8")
+    const nativeRows = readFileSync(join(home, ".openindbot", "native", `${room.threadId}.ndjson`), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
     expect(nativeRows.filter((row) => row.dir === "out" && row.msg?.method === "turn/steer")).toHaveLength(0);
   }, 40_000);
@@ -994,7 +994,7 @@ posixOnly("mid-turn steering e2e", () => {
       await waitFor(async () => (await getGroup())?.busyBotId === created.id, "the room turn to start");
       await waitFor(async () => (await getGroup())?.messages.some((m: any) => m.kind === "activity"), "the room tool chip");
 
-      const attachments = join(home, ".openmausbot", "attachments");
+      const attachments = join(home, ".openindbot", "attachments");
       mkdirSync(attachments, { recursive: true });
       const imagePath = join(attachments, "123e4567-e89b-42d3-a456-426614174007.png");
       writeFileSync(imagePath, "room steer png");
@@ -1021,7 +1021,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(replies).toHaveLength(1);
     expect(replies[0].text).toContain("+ steered: [image] what about this one");
 
-    const nativeRows = readFileSync(join(home, ".openmausbot", "native", `${room.threadId}.ndjson`), "utf8")
+    const nativeRows = readFileSync(join(home, ".openindbot", "native", `${room.threadId}.ndjson`), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
     const steerRow = nativeRows.filter((row) =>
       row.dir === "out" && row.source === "claude.sdk.message" && Array.isArray(row.msg?.message?.content),
@@ -1044,7 +1044,7 @@ posixOnly("mid-turn steering e2e", () => {
     await waitFor(async () => (await getBot(created.id)).busy === true, "the codex turn to start");
     await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.card), "the codex question card");
 
-    const attachments = join(home, ".openmausbot", "attachments");
+    const attachments = join(home, ".openindbot", "attachments");
     mkdirSync(attachments, { recursive: true });
     const imagePath = join(attachments, "123e4567-e89b-42d3-a456-426614174008.png");
     writeFileSync(imagePath, "codex png");
@@ -1061,7 +1061,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(still.body.steered).toBeUndefined();
     expect((await getBot(created.id)).busy).toBe(true);
     expect((await getBot(created.id)).messages.some((m: any) => m.text === imageText)).toBe(false);
-    const nativeRows = readFileSync(join(home, ".openmausbot", "native", `${created.threadId}.ndjson`), "utf8")
+    const nativeRows = readFileSync(join(home, ".openindbot", "native", `${created.threadId}.ndjson`), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
     expect(nativeRows.filter((row) => row.dir === "out" && row.msg?.method === "turn/steer")).toHaveLength(0);
 

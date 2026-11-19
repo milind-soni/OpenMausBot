@@ -7,7 +7,7 @@ import test from "node:test";
 import { installDesktopNotifications } from "./desktop-notifications.mjs";
 
 const CLOUD = "https://studio.example.com", COMPUTER = "http://127.0.0.1:8799";
-const NOTE = { title: "Scout resumed", body: "Results in", tag: "openmausbot:scout", botId: "scout", threadId: "work-thread" };
+const NOTE = { title: "Scout resumed", body: "Results in", tag: "openindbot:scout", botId: "scout", threadId: "work-thread" };
 
 function world({ shown = CLOUD, supported = true, mayNotify = true, picture = async () => null } = {}) {
   const banners = [], log = [];
@@ -99,7 +99,7 @@ test("a place that took too long does not jump to an old banner's thread when op
 test("a later click replaces the one still waiting for its place", async () => {
   const w = world();
   await w.show();
-  await w.show({ ...NOTE, tag: "openmausbot:atlas", botId: "atlas", threadId: "atlas-thread" });
+  await w.show({ ...NOTE, tag: "openindbot:atlas", botId: "atlas", threadId: "atlas-thread" });
   w.at.shown = COMPUTER;
   w.banners[0].emit("click");
   w.banners[1].emit("click");

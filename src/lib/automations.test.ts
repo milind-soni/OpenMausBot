@@ -12,16 +12,16 @@ import type { WebhookAttempt } from "@/lib/webhooks";
 const NOW = new Date(2026, 9, 17, 12, 0).getTime(); // Saturday Oct 17 2026, noon local
 const at = (days: number, hours: number, minutes = 0) => { const day = new Date(NOW); day.setDate(day.getDate() + days); day.setHours(hours, minutes, 0, 0); return day.getTime(); };
 const routine = (overrides: Partial<Routine> = {}): Routine => ({
-  id: "brief", name: "Morning summary", prompt: "Send me a summary of my inbox: who wrote and what they need.", target: "bot", botId: "scout", runOn: "maus", enabled: true,
+  id: "brief", name: "Morning summary", prompt: "Send me a summary of my inbox: who wrote and what they need.", target: "bot", botId: "scout", runOn: "ind", enabled: true,
   schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 30, nextRunAt: at(2, 9), createdAt: 0, updatedAt: 0, ...overrides,
 });
 const webhook = (overrides: Partial<WebhookTrigger> = {}): WebhookTrigger => ({
-  id: "hook", endpointId: "wh_x", name: "Sales form leads", prompt: "Draft a short follow-up email for the lead.", botId: "scout", runOn: "maus", enabled: true,
+  id: "hook", endpointId: "wh_x", name: "Sales form leads", prompt: "Draft a short follow-up email for the lead.", botId: "scout", runOn: "ind", enabled: true,
   createdAt: 0, updatedAt: 0, deliveryCount: 0, ...overrides,
 });
 let sequence = 0;
 const run = (status: RoutineRun["status"], startedAt: number, extra: Partial<RoutineRun> = {}): RoutineRun => ({
-  id: `run-${++sequence}`, routineId: "brief", routineName: "Morning summary", target: "bot", botId: "scout", runOn: "maus", scheduledFor: startedAt, startedAt,
+  id: `run-${++sequence}`, routineId: "brief", routineName: "Morning summary", target: "bot", botId: "scout", runOn: "ind", scheduledFor: startedAt, startedAt,
   createdAt: startedAt, status, manual: false, ...extra,
 });
 const automation = (runs: RoutineRun[], overrides: Partial<Routine> = {}): Automation => automationsFrom({ routines: [routine(overrides)], webhooks: [], runs })[0]!;

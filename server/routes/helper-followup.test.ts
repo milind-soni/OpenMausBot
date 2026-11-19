@@ -1,5 +1,5 @@
-// POST /api/bots/:id/helper-followup: MausBot's follow-up after its first look around, written once under its intro as
-// a real bot message, by MausBot's own person only.
+// POST /api/bots/:id/helper-followup: IndBot's follow-up after its first look around, written once under its intro as
+// a real bot message, by IndBot's own person only.
 import { readFileSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -30,8 +30,8 @@ afterEach(async () => {
 
 async function fixture(person?: string, teamAiOwnerName?: () => string) {
   const store = new Store(() => sonnet);
-  const maus = createDefaultBot(store, person ? { person } : {});
-  const routines = [{ botId: maus.id, enabled: true }, { botId: maus.id, enabled: false }, { botId: "elsewhere", enabled: true }];
+  const ind = createDefaultBot(store, person ? { person } : {});
+  const routines = [{ botId: ind.id, enabled: true }, { botId: ind.id, enabled: false }, { botId: "elsewhere", enabled: true }];
   const deps = { store, routines: () => ({ listRoutines: () => routines }), ...(teamAiOwnerName ? { teamAiOwnerName } : {}) } as unknown as BotMessageRouteDeps;
   const routes = [createBotMessageRoutes(deps)];
   let auth = OWNER;
@@ -47,17 +47,17 @@ async function fixture(person?: string, teamAiOwnerName?: () => string) {
   servers.push(server);
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const post = async (body: unknown, as: RequestAuth = OWNER, botId = maus.id) => {
+  const post = async (body: unknown, as: RequestAuth = OWNER, botId = ind.id) => {
     auth = as;
     const res = await fetch(`${base}/api/bots/${botId}/helper-followup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     return { status: res.status, body: await res.json() as { message?: { id: string; text: string; helperFollowup?: unknown } } };
   };
-  return { store, maus, post };
+  return { store, ind, post };
 }
 
-describe("MausBot's follow-up", () => {
+describe("IndBot's follow-up", () => {
   it("is written once under the intro, as a bot message the model reads, with the server's own counts", async () => {
-    const { store, maus, post } = await fixture();
+    const { store, ind, post } = await fixture();
     store.createBot({ name: "Scout" });
     store.createBot({ name: "Gone" });
     store.patchBot(store.bots.find((bot) => bot.name === "Gone")!.id, { hidden: true });
@@ -65,7 +65,7 @@ describe("MausBot's follow-up", () => {
     expect(first.status).toBe(201);
     expect(first.body.message?.helperFollowup).toEqual({ ai: "own", apps: ["Gmail", "GitHub"], bots: 1, routines: 1 });
     expect(first.body.message?.text).toBe(englishFollowup({ ai: "own", apps: ["Gmail", "GitHub"], bots: 1, routines: 1 }));
-    const thread = store.messagesFor(maus.threadId);
+    const thread = store.messagesFor(ind.threadId);
     expect(thread.map((message) => [message.role, message.kind, Boolean(message.helperIntro), Boolean(message.helperFollowup)]))
       .toEqual([["bot", "options", true, false], ["bot", "text", false, true]]);
     expect(isContextMessage(thread[1]!), "the model sees it").toBe(true);
@@ -73,14 +73,14 @@ describe("MausBot's follow-up", () => {
     const again = await post({ ai: "none", apps: [] });
     expect(again.status, "idempotent: the one already there").toBe(200);
     expect(again.body.message?.id).toBe(first.body.message?.id);
-    expect(store.messagesFor(maus.threadId)).toHaveLength(2);
+    expect(store.messagesFor(ind.threadId)).toHaveLength(2);
   });
 
-  it("is MausBot's own person's only: never a bot's shell, nor another member on a Team Cloud", async () => {
+  it("is IndBot's own person's only: never a bot's shell, nor another member on a Team Cloud", async () => {
     const place = await fixture();
     expect((await place.post({ ai: "own" }, BOT_SHELL)).status).toBe(403);
     expect((await place.post({ ai: "own" }, session("someone@example.com"))).status).toBe(403);
-    expect(place.store.messagesFor(place.maus.threadId)).toHaveLength(1);
+    expect(place.store.messagesFor(place.ind.threadId)).toHaveLength(1);
 
     const team = await fixture("ada@example.com");
     expect((await team.post({ ai: "own" }, session("bob@example.com", true))).status, "not even an admin").toBe(403);
@@ -109,11 +109,11 @@ describe("MausBot's follow-up", () => {
   });
 
   it("refuses another bot, a conversation without the intro, and a body it cannot read", async () => {
-    const { store, maus, post } = await fixture();
+    const { store, ind, post } = await fixture();
     const scout = store.createBot({ name: "Scout" });
     expect((await post({ ai: "own" }, OWNER, scout.id)).status).toBe(404);
     expect((await post({ ai: "own", threadId: scout.threadId })).status, "another bot's conversation").toBe(404);
-    const task = store.createTask(maus.id, "Later");
+    const task = store.createTask(ind.id, "Later");
     expect((await post({ ai: "own", threadId: task!.threadId })).status).toBe(409);
     expect((await post({ ai: "maybe" })).status).toBe(400);
     expect((await post({ ai: "own", apps: ["x".repeat(61)] })).status).toBe(400);

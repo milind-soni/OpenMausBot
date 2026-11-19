@@ -17,7 +17,7 @@ it("sends a thread's change alone to a stream that asked for it, the whole bot t
     return result;
   };
   const snapshot = async (botId: string) => ((await api("GET", "/api/bots?messages=0")).bots as any[]).find((bot) => bot.id === botId);
-  const { bot } = await control(["new-bot", "--name", "Maus"]);
+  const { bot } = await control(["new-bot", "--name", "Ind"]);
   for (const title of ["Second", "Third"]) await api("POST", `/api/bots/${bot.id}/tasks`, { title });
   const known = await snapshot(bot.id);
   expect(known.tasks).toHaveLength(3);
@@ -38,7 +38,7 @@ it("sends a thread's change alone to a stream that asked for it, the whole bot t
     for (const frame of partial) {
       expect(frame.tasksPartial).toBe(true);
       expect(frame.bot.tasks.map((task: any) => task.threadId)).toEqual([threadId]);
-      expect(frame.bot).toMatchObject({ id: bot.id, name: "Maus" });
+      expect(frame.bot).toMatchObject({ id: bot.id, name: "Ind" });
     }
 
     await vi.waitFor(() => expect(botFrames(whole).length).toBe(partial.length), { timeout: 10_000 });
@@ -62,7 +62,7 @@ it("sends a thread's change alone to a stream that asked for it, the whole bot t
     const cursor = (whole.frames.find((frame) => frame.kind === "hello").cursor as string).split(":")[0];
     const lastSeq = Math.max(...whole.frames.map((frame) => frame.seq ?? 0));
     whole.close();
-    await vi.waitFor(async () => expect((await api("GET", "/api/health")).app).toBe("openmausbot"));
+    await vi.waitFor(async () => expect((await api("GET", "/api/health")).app).toBe("openindbot"));
     await turn("And another line.");
     whole = await openSse(`${url}/api/events?since=${cursor}:${lastSeq}`, { origin: url });
     expect((await whole.until((frame) => frame.kind === "hello")).resumed).toBe(false);

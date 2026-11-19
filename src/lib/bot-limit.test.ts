@@ -11,7 +11,7 @@ describe("how many more bots this plan makes", () => {
     expect(botRoom({ config: null, bots: made(50) })).toBeNull();
   });
 
-  it("counts as the server does: not the MausBot, an archived bot, or one that moved away", () => {
+  it("counts as the server does: not the IndBot, an archived bot, or one that moved away", () => {
     expect(botRoom(state(5, [{ defaultBot: {} }, { hidden: true }, { movedTo: { state: "moved" } }, {}]))).toBe(4);
   });
 
@@ -70,7 +70,7 @@ describe("the popup's other plan limits", () => {
   });
 
   it("counts for the awake limit the bots the bot limit counts, the chief of staff aside", () => {
-    const bots = [{ id: "a" }, { id: "maus", defaultBot: {} }, { id: "chief", chiefOfStaff: true }, { id: "old", hidden: true }, { id: "b" }];
+    const bots = [{ id: "a" }, { id: "ind", defaultBot: {} }, { id: "chief", chiefOfStaff: true }, { id: "old", hidden: true }, { id: "b" }];
     expect(awakeCandidates(bots).map((bot) => bot.id)).toEqual(["a", "b"]);
   });
 });

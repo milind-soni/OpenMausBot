@@ -5,15 +5,15 @@ import fs from "node:fs";
 import path from "node:path";
 
 export const HIDDEN_ARG = "--omb-hidden";
-const MARK = "X-OpenMausBot-Lending=true";
+const MARK = "X-OpenIndBot-Lending=true";
 /** Windows keeps one Run entry per name, so the person's own entry has a name apart from lending's (the app's). */
-const CHOSEN_NAME = "OpenMausBot at login";
+const CHOSEN_NAME = "OpenIndBot at login";
 
 /** Desktop Entry Exec quoting: the path in double quotes, with ", `, $ and \ escaped. */
 const quoted = (value) => `"${value.replace(/["`$\\]/g, (match) => `\\${match}`)}"`;
 
 export function autostartEntry(exec, { lending = true } = {}) {
-  return ["[Desktop Entry]", "Type=Application", "Name=OpenMausBot", `Exec=${quoted(exec)}${lending ? ` ${HIDDEN_ARG}` : ""}`, "NoDisplay=true",
+  return ["[Desktop Entry]", "Type=Application", "Name=OpenIndBot", `Exec=${quoted(exec)}${lending ? ` ${HIDDEN_ARG}` : ""}`, "NoDisplay=true",
     "X-GNOME-Autostart-enabled=true", ...(lending ? [MARK] : []), ""].join("\n");
 }
 
@@ -27,7 +27,7 @@ export function autostartEntry(exec, { lending = true } = {}) {
  * adds the person's kind of item, and `homeRelease()` takes away only that one, or gives it to lending.
  */
 export function createOpenAtLogin({ app, file, platform = process.platform, env = process.env, home, argv = process.argv, execPath = process.execPath }) {
-  const autostart = path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "autostart", "openmausbot.desktop");
+  const autostart = path.join(env.XDG_CONFIG_HOME || path.join(home, ".config"), "autostart", "openindbot.desktop");
   const saved = () => { try { return JSON.parse(fs.readFileSync(file, "utf8")) ?? {}; } catch { return {}; } };
   const store = (fields) => { try { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, JSON.stringify({ ...saved(), ...fields })); } catch {} };
   const added = () => saved().added === true;

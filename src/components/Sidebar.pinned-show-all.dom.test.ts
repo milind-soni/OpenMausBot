@@ -21,7 +21,7 @@ const filed = [
   { threadId: "filed-plain", title: "Filed plain", createdAt: 1_001, projectId: "folder" },
 ];
 const bot: Bot = {
-  id: "maus", threadId: "loose-8", name: "Maus", title: "", description: "", notifications: true,
+  id: "ind", threadId: "loose-8", name: "Ind", title: "", description: "", notifications: true,
   color: "green", unread: false, messages: [], modelSelection: { instanceId: "fake", model: "test" },
   projects: [{ id: "folder", name: "Taxes" }],
   tasks: [...loose, ...filed],
@@ -65,7 +65,7 @@ describe("a bot's Show all threads", () => {
     await unmount();
 
     forgetSidebarShowAllForTests(); // read it back from storage, as a reload would
-    expect(saved()).toEqual(["maus"]);
+    expect(saved()).toEqual(["ind"]);
     await mount();
     expect(host.textContent).toContain("Loose chat 0");
     expect(button("Show all 11 threads")).toBeUndefined();
@@ -106,7 +106,7 @@ describe("a collapsed bot's pinned thread", () => {
     const html = renderToStaticMarkup(createElement(SidebarBotActivity, {
       bot, rowThreadId: bot.threadId, density: "comfortable", pendingQueued: {}, dispatch: vi.fn(),
     }));
-    expect(html).toContain('aria-label="Maus: Filed pinned · Pinned"');
+    expect(html).toContain('aria-label="Ind: Filed pinned · Pinned"');
     expect(html).not.toContain("Unread");
   });
 });

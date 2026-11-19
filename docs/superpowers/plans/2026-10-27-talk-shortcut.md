@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** On macOS, hold ⌃⌥Space in any app, speak, let go of ⌃⌥, and the words go to MausBot's "Quick asks" chat on this Mac's server while a small box that never takes focus shows the live words and then the reply.
+**Goal:** On macOS, hold ⌃⌥Space in any app, speak, let go of ⌃⌥, and the words go to IndBot's "Quick asks" chat on this Mac's server while a small box that never takes focus shows the live words and then the reply.
 
-**Architecture:** `globalShortcut` sees the press; the existing speech helper sees the release (`--finish-on-release`, polling `CGEventSource.flagsState`). Small injected-dependency modules in Electron main do the rest: `talk-keys` (presets), `talk-shortcut` (registration and call presence), `talk-server` (find MausBot, keep the Quick asks chat, send, follow `/api/events`), `talk-panel` (the non-activating box), `talk-session` (the ask state machine). `speech.mjs` gains sinks so main can own a speech session without a window.
+**Architecture:** `globalShortcut` sees the press; the existing speech helper sees the release (`--finish-on-release`, polling `CGEventSource.flagsState`). Small injected-dependency modules in Electron main do the rest: `talk-keys` (presets), `talk-shortcut` (registration and call presence), `talk-server` (find IndBot, keep the Quick asks chat, send, follow `/api/events`), `talk-panel` (the non-activating box), `talk-session` (the ask state machine). `speech.mjs` gains sinks so main can own a speech session without a window.
 
 **Tech Stack:** Electron ^43.5.0 main (ESM `.mjs`, preload `.cjs`), Swift helper (`swiftc`), Node `node:test` for `electron/*.node-test.mjs`, vitest (+ happy-dom) for `electron/*.test.mjs`, `server/`, `src/`; React settings row.
 
@@ -16,9 +16,9 @@
 - Keys, exactly: `ctrl-opt-space` → `Control+Alt+Space`, release `control,option`, label `⌃⌥Space` (default); `ctrl-shift-space` → `Control+Shift+Space`, `control,shift`, `⌃⇧Space`; `opt-shift-space` → `Alt+Shift+Space`, `option,shift`, `⌥⇧Space`.
 - `desktop-prefs.json` gains `talkShortcut` (absent = on), `talkKey`, `quickAsks` (per server). Only fields that were set are written.
 - Asks always go to this computer's own server, never the Cloud or team page the window shows. The chat is titled exactly `Quick asks`, created on first use with `select: false`, reused, recreated when gone.
-- The box never takes focus and never raises the MausBot window: `type:"panel"`, `focusable:false`, `showInactive()`, never `show()`/`focus()`.
+- The box never takes focus and never raises the IndBot window: `type:"panel"`, `focusable:false`, `showInactive()`, never `show()`/`focus()`.
 - Timings: reply box hides 12 s after it settles unless the pointer is over it; no answer in 120 s → "Still working · Open chat"; reply text is plain, at most 400 characters.
-- Copy fixed by the spec: `Talk to MausBot from any app`, `Hold {key}, speak, let go`, `{key} is used by another app`, `Voice is in use in MausBot`, `Open MausBot to talk`, `Still working · Open chat`. Settings strings go in `src/locales/en.json` only (other languages fall back; `pnpm i18n:check` must pass). The box's own copy is English in v1: main has no locale catalogs.
+- Copy fixed by the spec: `Talk to IndBot from any app`, `Hold {key}, speak, let go`, `{key} is used by another app`, `Voice is in use in IndBot`, `Open IndBot to talk`, `Still working · Open chat`. Settings strings go in `src/locales/en.json` only (other languages fall back; `pnpm i18n:check` must pass). The box's own copy is English in v1: main has no locale catalogs.
 - New bridge keys (`talkShortcut`, `callActive`) stay out of `REMOTE_SAFE`; their IPC is `localOnly` (`call:active`: `localOrHome`, see Task 8).
 - No new dependencies. Modules under `node --test` never import `electron`: inject it.
 - AGENTS.md: comments only for what code cannot say (OS/Electron facts, public contracts, security invariants). No narration.
@@ -27,8 +27,8 @@
 ## Review Focus
 
 - A tap let go before any word is heard (the recognizer then reports `recognition-error` with nothing heard): the box closes silently, never an error. Pinned in Task 7.
-- A second ask while MausBot is still answering the first in the same chat: each box shows its own answer; the first turn's deltas and `turn.completed` never end the second box. Pinned in Task 5.
-- The Quick asks chat was deleted, or two presses race on first use: exactly one new chat, and the chat open in the MausBot window never switches. Pinned in Tasks 1 and 5.
+- A second ask while IndBot is still answering the first in the same chat: each box shows its own answer; the first turn's deltas and `turn.completed` never end the second box. Pinned in Task 5.
+- The Quick asks chat was deleted, or two presses race on first use: exactly one new chat, and the chat open in the IndBot window never switches. Pinned in Tasks 1 and 5.
 - The page reloads or its renderer crashes during a call: afterwards the shortcut works again instead of saying "Voice is in use" forever. Pinned in Tasks 4 and 9.
 - A reply with markup or Markdown (`<img src=x onerror=…>`, `**bold**`, links): shown as plain text, never parsed as HTML. Pinned in Task 6.
 
@@ -44,7 +44,7 @@
 | `electron/talk-keys.mjs` (new) | the three presets |
 | `electron/desktop-prefs.mjs`, `.d.mts` (modify) | talk prefs, Quick asks chat per server, injectable store |
 | `electron/talk-shortcut.mjs`, `.d.mts` (new) | register/unregister with prefs; call presence |
-| `electron/talk-server.mjs`, `.d.mts` (new) | find MausBot, Quick asks chat, SSE reading, reply tracking, ask |
+| `electron/talk-server.mjs`, `.d.mts` (new) | find IndBot, Quick asks chat, SSE reading, reply tracking, ask |
 | `electron/talk-panel.mjs`, `electron/talk-panel-preload.cjs` (new) | the box window, its `data:` page, `isTalkPanel` |
 | `electron/talk-session.mjs` (new) | the ask state machine |
 | `electron/main.mjs`, `electron/preload.cjs`, `src/types/ogb.d.ts` (modify) | wiring, `appWindows()`, IPC, bridge |
@@ -56,7 +56,7 @@
 
 ### Task 1: Create a chat without selecting it
 
-`POST /api/bots/:id/tasks` always passes `activate = true` (`server/routes/tasks.ts:194` → `server/store.ts:2205`), so creating Quick asks would switch the chat the MausBot window shows.
+`POST /api/bots/:id/tasks` always passes `activate = true` (`server/routes/tasks.ts:194` → `server/store.ts:2205`), so creating Quick asks would switch the chat the IndBot window shows.
 
 **Files:**
 - Modify: `server/routes/tasks.ts:162-198`
@@ -287,9 +287,9 @@ test("the talk shortcut is on with ⌃⌥Space until changed, and the choice sur
 test("each server keeps its own Quick asks chat; nothing malformed is read back", () => {
   let saved = null;
   const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
-  prefs.setQuickAsksChat("/Users/a/.openmausbot", { botId: "bot-1", threadId: "t-1" });
-  assert.deepEqual(createDesktopPrefs({ read: () => saved, write: () => {} }).quickAsksChat("/Users/a/.openmausbot"), { botId: "bot-1", threadId: "t-1" });
-  assert.equal(prefs.quickAsksChat("/Users/a/.openmausbot-aprs"), null);
+  prefs.setQuickAsksChat("/Users/a/.openindbot", { botId: "bot-1", threadId: "t-1" });
+  assert.deepEqual(createDesktopPrefs({ read: () => saved, write: () => {} }).quickAsksChat("/Users/a/.openindbot"), { botId: "bot-1", threadId: "t-1" });
+  assert.equal(prefs.quickAsksChat("/Users/a/.openindbot-aprs"), null);
   const broken = createDesktopPrefs({ read: () => ({ quickAsks: { a: { botId: "../x", threadId: "t" }, b: "t-1", c: { botId: "b", threadId: "t", extra: 1 } } }), write: () => {} });
   assert.equal(broken.quickAsksChat("a"), null);
   assert.equal(broken.quickAsksChat("b"), null);
@@ -378,28 +378,28 @@ git commit -m "feat(talk): the talk shortcut setting, its keys and registration"
 **Interfaces:**
 - Consumes: `select: false` (Task 1); prefs `quickAsksChat`/`setQuickAsksChat` (Task 4).
 - Produces:
-  - `QUICK_ASKS_TITLE = "Quick asks"`; `class TalkServerError extends Error` with `code: "server-down" | "no-mausbot" | "refused" | "lost"`.
-  - `findMausBot(bots)` → the bot with `defaultBot` and an empty `defaultBot.person`, else the first `chiefOfStaff` bot that is not `hidden`, else `null`.
+  - `QUICK_ASKS_TITLE = "Quick asks"`; `class TalkServerError extends Error` with `code: "server-down" | "no-indbot" | "refused" | "lost"`.
+  - `findIndBot(bots)` → the bot with `defaultBot` and an empty `defaultBot.person`, else the first `chiefOfStaff` bot that is not `hidden`, else `null`.
   - `readFrames(body: ReadableStream<Uint8Array>, onFrame: (frame: object) => void): Promise<void>` — SSE: frames end at a blank line, `data:` lines joined, `:` comments and unparsable JSON skipped.
   - `createReplyTracker({ threadId, sendId })` → `(frame) => TalkUpdate | null`, `TalkUpdate = { kind: "thinking" } | { kind: "reply", text } | { kind: "needs-you" } | { kind: "done", ok, text }`.
   - `createTalkServer({ request: (route, init?) => Promise<Response>, prefs, serverKey: () => string })` → `{ prepare(): Promise<TalkChat>, ask({ chat, text, sendId, signal, onUpdate }): Promise<"done" | "needs-you" | "failed"> }`, `TalkChat = { botId, threadId }`.
 
 Tracker rules (the algorithm the tests do not fully determine): frames for other threads, and every frame before `{ kind: "message", message: { role: "user", sendId } }` with this ask's `sendId`, return null; that frame returns `thinking`. After it: `runtime` `content.delta` (`streamKind: "assistant_text"`) appends to a buffer that restarts when `itemId` changes → `reply` with the buffer; `runtime` `item.completed` (`itemType: "assistant_text"`) and a `message` with `role: "bot", kind: "text"` replace the shown text → `reply`; a `message` with `role: "bot", kind: "options"` whose `card` is not `answered`, `dismissed` or `expired`, or a `runtime` `request.opened` → `needs-you`; `runtime` `turn.completed` → `done` with its `ok` and the last shown text.
 
-`prepare()`: `GET /api/bots?messages=0` (a rejected request or non-2xx → `server-down`; no MausBot → `no-mausbot`); reuse `prefs.quickAsksChat(serverKey())` when its `botId` is MausBot's and MausBot's `tasks` still list its `threadId`; else `POST /api/bots/:id/tasks` with exactly `{ title: QUICK_ASKS_TITLE, select: false }`, save and return it. One prepare in flight at a time: a second call while one runs gets the same promise.
+`prepare()`: `GET /api/bots?messages=0` (a rejected request or non-2xx → `server-down`; no IndBot → `no-indbot`); reuse `prefs.quickAsksChat(serverKey())` when its `botId` is IndBot's and IndBot's `tasks` still list its `threadId`; else `POST /api/bots/:id/tasks` with exactly `{ title: QUICK_ASKS_TITLE, select: false }`, save and return it. One prepare in flight at a time: a second call while one runs gets the same promise.
 
 `ask()`: `GET /api/events?screens=off` first; wait for its `{ kind: "hello" }` frame; then `POST /api/bots/:botId/messages` with exactly `{ text, threadId, sendId }` (non-2xx → `refused`). Resolve on `done` (`"failed"` when `ok` is false and the text is empty) or `needs-you`; the stream ending first → `lost`; `signal` aborting → reject with `signal.reason` and cancel the stream. `content-type: application/json` on both POSTs.
 
 - [ ] **Step 1: Write the failing unit tests** (frame builders: `userMessage(threadId, sendId)`, `delta(threadId, itemId, text)`, `botText(threadId, text)`, `card(threadId, cardFields)` (a `role: "bot", kind: "options"` message), `opened(threadId)`, `completed(threadId, ok)`. `fakeServer({ bots, saved = null, sendStatus = 202 })` returns `{ talk, calls, saves, events }`: `talk = createTalkServer({ request, serverKey: () => "server-a", prefs: { quickAsksChat: () => saved, setQuickAsksChat: (server, chat) => saves.push([server, chat]) } })`; `request` answers `GET /api/bots?messages=0` with `{ bots }`, `POST …/tasks` with 201 `{ task: { threadId: "t-new", title: "Quick asks" } }`, `GET /api/events?screens=off` with a `ReadableStream` the test drives through `events.push(frame)` / `events.end()`, `POST …/messages` with `sendStatus`; `calls` records `[method, route, parsedBody]`. `flush = () => new Promise(r => setImmediate(r))`)
 
 ```js
-test("findMausBot picks this computer's MausBot, else the Chief of Staff", () => {
+test("findIndBot picks this computer's IndBot, else the Chief of Staff", () => {
   const mine = { id: "m", defaultBot: {} }, member = { id: "p", defaultBot: { person: "a@b.test" } }, chief = { id: "c", chiefOfStaff: true };
-  assert.equal(findMausBot([member, chief, mine]).id, "m");
-  assert.equal(findMausBot([member, chief]).id, "c");
-  assert.equal(findMausBot([{ id: "x" }, { ...chief, hidden: true }]), null);
+  assert.equal(findIndBot([member, chief, mine]).id, "m");
+  assert.equal(findIndBot([member, chief]).id, "c");
+  assert.equal(findIndBot([{ id: "x" }, { ...chief, hidden: true }]), null);
 });
-test("prepare reuses the saved Quick asks chat while MausBot still has it");   // saved {botId:"m",threadId:"t1"}, tasks [{threadId:"t1"}] → returns saved; no POST in calls
+test("prepare reuses the saved Quick asks chat while IndBot still has it");   // saved {botId:"m",threadId:"t1"}, tasks [{threadId:"t1"}] → returns saved; no POST in calls
 test("prepare makes a Quick asks chat without selecting it when the saved one is gone, and keeps it", async () => {
   const server = fakeServer({ bots: [{ id: "m", defaultBot: {}, tasks: [] }], saved: { botId: "m", threadId: "t-gone" } });
   assert.deepEqual(await server.talk.prepare(), { botId: "m", threadId: "t-new" });
@@ -407,7 +407,7 @@ test("prepare makes a Quick asks chat without selecting it when the saved one is
   assert.deepEqual(server.saves, [["server-a", { botId: "m", threadId: "t-new" }]]);
 });
 test("two prepares at once make one chat");                                   // Promise.all([prepare(), prepare()]) → one POST
-test("prepare says why it cannot ask");                                       // request rejects → code "server-down"; 503 → "server-down"; bots [] → "no-mausbot"
+test("prepare says why it cannot ask");                                       // request rejects → code "server-down"; 503 → "server-down"; bots [] → "no-indbot"
 test("the reply tracker follows only this ask", () => {
   const track = createReplyTracker({ threadId: "t1", sendId: "s1" });
   for (const early of [delta("t1", "i0", "old answer"), completed("t1", true), userMessage("t1", "s0"), userMessage("t2", "s1")]) assert.equal(track(early), null);
@@ -419,7 +419,7 @@ test("the reply tracker follows only this ask", () => {
   assert.equal(track(delta("t2", "i9", "elsewhere")), null);
   assert.deepEqual(track(completed("t1", true)), { kind: "done", ok: true, text: "You have two meetings." });
 });
-test("a waiting card or an opened request means MausBot needs the person", () => {
+test("a waiting card or an opened request means IndBot needs the person", () => {
   const track = createReplyTracker({ threadId: "t1", sendId: "s1" });
   track(userMessage("t1", "s1"));
   assert.equal(track(card("t1", { answered: "Allow" })), null);
@@ -448,10 +448,10 @@ test("readFrames joins frames split across chunks and skips heartbeats and junk"
 });
 ```
 
-- [ ] **Step 2: Write the failing fixture test** (`server/talk-server.e2e.test.ts`; launch with `OMB_TEST_DESKTOP_OWNER_TOKEN: owner` and send `x-openmausbot-desktop-owner` on every request, as `server/chat-pages.e2e.test.ts:54-56` does, so it runs the packaged desktop's path)
+- [ ] **Step 2: Write the failing fixture test** (`server/talk-server.e2e.test.ts`; launch with `OMB_TEST_DESKTOP_OWNER_TOKEN: owner` and send `x-openindbot-desktop-owner` on every request, as `server/chat-pages.e2e.test.ts:54-56` does, so it runs the packaged desktop's path)
 
 ```ts
-it("asks MausBot in its own Quick asks chat, as the desktop app does, and follows the reply to the end", async () => {
+it("asks IndBot in its own Quick asks chat, as the desktop app does, and follows the reply to the end", async () => {
   let saved: TalkChat | null = null;
   const talk = createTalkServer({ request, serverKey: () => "fixture", prefs: { quickAsksChat: () => saved, setQuickAsksChat: (_s, chat) => { saved = chat; } } });
   const before = (await (await request("/api/bots?messages=0")).json()).bots.find((b: any) => b.defaultBot);
@@ -484,7 +484,7 @@ Expected: PASS. If the fixture shows a wire shape the unit fakes assumed wrongly
 
 ```bash
 git add electron/talk-server.mjs electron/talk-server.d.mts electron/talk-server.node-test.mjs server/talk-server.e2e.test.ts
-git commit -m "feat(talk): find MausBot, keep the Quick asks chat and follow the reply"
+git commit -m "feat(talk): find IndBot, keep the Quick asks chat and follow the reply"
 ```
 
 ---
@@ -498,7 +498,7 @@ git commit -m "feat(talk): find MausBot, keep the Quick asks chat and follow the
 **Interfaces:**
 - Produces:
   - `TALK_PANEL = { width: 400, margin: 24, minHeight: 56, maxHeight: 240, fadeMs: 180 }` (frozen).
-  - `TALK_LABELS` (frozen): `listening: "Listening…"`, `sending: "Sending to MausBot…"`, `thinking: "MausBot is thinking…"`, `reply: "MausBot"`, `"needs-you": "MausBot needs you · Open chat"`, `"still-working": "Still working · Open chat"`, `error: ""`.
+  - `TALK_LABELS` (frozen): `listening: "Listening…"`, `sending: "Sending to IndBot…"`, `thinking: "IndBot is thinking…"`, `reply: "IndBot"`, `"needs-you": "IndBot needs you · Open chat"`, `"still-working": "Still working · Open chat"`, `error: ""`.
   - `TalkView = { state: "listening" | "sending" | "thinking" | "reply" | "needs-you" | "still-working" | "error", text: string }`.
   - `talkPanelBounds(workArea, height)` → `{ x, y, width, height }`: centred, `margin` above the work area's bottom, height clamped to `[minHeight, maxHeight]`.
   - `replyPreview(text, limit = 400): string` — drop Markdown heading marks, list markers, `**`/`__`/`*`/`_` emphasis, backticks and fences; `[label](url)` → `label`; collapse whitespace; over `limit`, cut at the last space before it and add `…`.
@@ -590,7 +590,7 @@ git commit -m "feat(talk): the floating box that never takes focus"
 - Consumes: `speech` `{ start(sink, { finishOnRelease }), stop(sink) }` (Task 3 via main); `server` `{ prepare, ask }` and `TalkServerError` codes (Task 5); `panel` `{ render(view), close(), hovered() }` and `TalkView` (Task 6).
 - Produces:
   - `TALK_TIMING = { replyHideMs: 12_000, noticeHideMs: 4_000, stillWorkingMs: 120_000, hoverRecheckMs: 500 }` (frozen).
-  - `TALK_TEXT` (frozen): `busy: "Voice is in use in MausBot"`, `serverDown: "Open MausBot to talk"`, `permission: "Talking needs Microphone + Speech Recognition access — System Settings → Privacy & Security."`, `dictationOff: "Turn on Dictation in System Settings → Keyboard, then try again."`, `unavailable: "Talking couldn't start. Try again."`, `failed: "MausBot couldn't take that · Open chat"`.
+  - `TALK_TEXT` (frozen): `busy: "Voice is in use in IndBot"`, `serverDown: "Open IndBot to talk"`, `permission: "Talking needs Microphone + Speech Recognition access — System Settings → Privacy & Security."`, `dictationOff: "Turn on Dictation in System Settings → Keyboard, then try again."`, `unavailable: "Talking couldn't start. Try again."`, `failed: "IndBot couldn't take that · Open chat"`.
   - `createTalkSession({ speech, server, panel, voiceInUse: () => boolean, release: () => string[], openChat: (chat: TalkChat | null) => void, newSendId = randomUUID })` → `{ press(), open(), dismiss(), close() }`.
 
 | Phase | `press()` | `open()` | `dismiss()` / `close()` |
@@ -600,7 +600,7 @@ git commit -m "feat(talk): the floating box that never takes focus"
 | sending, thinking | ignored | abort ask, `openChat(chat)`, close box | abort ask, close box |
 | reply, needs-you, still-working, error | abort ask, close box, start a new ask as from idle | abort ask, `openChat(chat ?? null)`, close box | abort ask, close box |
 
-Each press makes a new sink and `AbortController`; callbacks from an older one are ignored. Sink: `transcript(line)` → render `listening` with `line.text`; `replaced()` → close box; `end(info)`: reason `speech-not-authorized`, `mic-failed` or `recognizer-unavailable` → error `permission`; `dictation-disabled` → `dictationOff`; `helper-build-failed`, `helper-start-failed` or `unsupported-platform` → `unavailable` (these three hide in `noticeHideMs`); otherwise nothing heard → close box silently; otherwise render `sending` with the words and ask. `prepare()` failing (`server-down`, `no-mausbot`) while listening stops speech and shows `serverDown`; at send time it shows the same. The ask: `thinking` → render `thinking` with the words; `reply` → render `reply`; `done` → render `reply`, hide in `replyHideMs`; `needs-you` → render `needs-you` with the last reply text, hide in `replyHideMs`; `"failed"` or `refused` → error `failed`, hide in `replyHideMs`; `lost`, or `stillWorkingMs` after sending with no outcome → abort, render `still-working` with the last reply text, hide in `replyHideMs`. Hiding: when the timer fires and `panel.hovered()`, check again every `hoverRecheckMs`.
+Each press makes a new sink and `AbortController`; callbacks from an older one are ignored. Sink: `transcript(line)` → render `listening` with `line.text`; `replaced()` → close box; `end(info)`: reason `speech-not-authorized`, `mic-failed` or `recognizer-unavailable` → error `permission`; `dictation-disabled` → `dictationOff`; `helper-build-failed`, `helper-start-failed` or `unsupported-platform` → `unavailable` (these three hide in `noticeHideMs`); otherwise nothing heard → close box silently; otherwise render `sending` with the words and ask. `prepare()` failing (`server-down`, `no-indbot`) while listening stops speech and shows `serverDown`; at send time it shows the same. The ask: `thinking` → render `thinking` with the words; `reply` → render `reply`; `done` → render `reply`, hide in `replyHideMs`; `needs-you` → render `needs-you` with the last reply text, hide in `replyHideMs`; `"failed"` or `refused` → error `failed`, hide in `replyHideMs`; `lost`, or `stillWorkingMs` after sending with no outcome → abort, render `still-working` with the last reply text, hide in `replyHideMs`. Hiding: when the timer fires and `panel.hovered()`, check again every `hoverRecheckMs`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -638,7 +638,7 @@ test("a press while a reply shows closes it and starts a new ask");           //
 test("voice in use refuses without listening", () => {
   const h = harness({ busy: true }); h.session.press();
   assert.deepEqual(h.starts, []);
-  assert.deepEqual(h.views, [{ state: "error", text: "Voice is in use in MausBot" }]);
+  assert.deepEqual(h.views, [{ state: "error", text: "Voice is in use in IndBot" }]);
   mock.timers.tick(4_000); assert.equal(h.closed, 1);
 });
 test("an empty transcript closes silently, even when the recognizer reports an error", async () => {
@@ -650,11 +650,11 @@ test("an empty transcript closes silently, even when the recognizer reports an e
 });
 test("words heard before a recognizer error are still sent");                 // say "remind me", release {code:1, reason:"recognition-error"} → asks[0].text "remind me"
 test("permission and setup problems say what to fix");                        // speech-not-authorized → TALK_TEXT.permission; dictation-disabled → dictationOff; helper-start-failed → unavailable; each hides after 4 s
-test("the server not running says Open MausBot to talk and stops listening", async () => {
+test("the server not running says Open IndBot to talk and stops listening", async () => {
   const h = harness({ prepare: async () => { throw new TalkServerError("server-down"); } });
   h.session.press(); await flush();
   assert.deepEqual(h.stops, [true]);
-  assert.deepEqual(h.views.at(-1), { state: "error", text: "Open MausBot to talk" });
+  assert.deepEqual(h.views.at(-1), { state: "error", text: "Open IndBot to talk" });
   mock.timers.tick(4_000); assert.equal(h.closed, 1);
 });
 test("needs-you shows and hides like a reply");                               // ask: onUpdate reply "Checking", needs-you, resolve "needs-you" → views.at(-1) { state: "needs-you", text: "Checking" }; tick(12_000) closed 1
@@ -669,7 +669,7 @@ test("no answer in 120 s shows Still working · Open chat", async () => {
 });
 test("a lost stream shows Still working; a refused send shows the failure");  // ask rejects TalkServerError("lost") → still-working; TalkServerError("refused") → { state: "error", text: TALK_TEXT.failed }
 test("replaced while listening closes the box and nothing is sent");         // sink.replaced() → closed 1; then release(h) after say → asks.length 0
-test("clicking the box opens the chat; before the chat is known it only brings MausBot forward"); // open() while listening → opened [null], stops [true], closed 1; after a reply → opened [CHAT]
+test("clicking the box opens the chat; before the chat is known it only brings IndBot forward"); // open() while listening → opened [null], stops [true], closed 1; after a reply → opened [CHAT]
 test("dismissing while listening cancels capture");                           // dismiss() → stops [true], closed 1
 ```
 
@@ -708,7 +708,7 @@ Wiring in `main.mjs`:
 - `function appWindows() { return BrowserWindow.getAllWindows().filter((win) => !isTalkPanel(win)); }` (a hoisted declaration near the top) replaces every `BrowserWindow.getAllWindows()` call.
 - `speech:stop` and `speech:finish` call `stopSpeech(BrowserWindow.fromWebContents(event.sender))` / `finishSpeech(…)`, so a page never stops the talk box's session.
 - Next to the speech IPC: `const callPresence = createCallPresence();`, `let talkShortcut = null, talkSession = null;`, the three handlers (`talk-shortcut:set` passes only boolean `enabled` and string `key` through).
-- In `whenReady`, at 3066: `const desktopPrefs = createDesktopPrefs(jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")));` passed as `prefs` to `registerDesktopPrefs`; then the panel (`createTalkPanel({ BrowserWindow, screen, iconPath: APP_ICON, onOpen: () => talkSession.open(), onDismiss: () => talkSession.dismiss() })`), `talkShortcut = createTalkShortcut({ globalShortcut, prefs: desktopPrefs, available: () => nativeActions.appleSpeech && !desktopRemoteAccess, onPress: () => talkSession.press() })` and `talkSession = createTalkSession({ speech: { start: startSpeech, stop: stopSpeech }, server: createTalkServer({ request: talkRequest, prefs: desktopPrefs, serverKey: () => (app.isPackaged ? runningDataDir : DEV_URL) ?? "local" }), panel, voiceInUse: () => speechBusy() || callPresence.active(), release: () => talkShortcut.releaseModifiers(), openChat: chat => (chat ? queueChatLink(`openmausbot://thread/${chat.threadId}?bot=${chat.botId}`) : revealForLink()) })`.
+- In `whenReady`, at 3066: `const desktopPrefs = createDesktopPrefs(jsonFile(path.join(app.getPath("userData"), "desktop-prefs.json")));` passed as `prefs` to `registerDesktopPrefs`; then the panel (`createTalkPanel({ BrowserWindow, screen, iconPath: APP_ICON, onOpen: () => talkSession.open(), onDismiss: () => talkSession.dismiss() })`), `talkShortcut = createTalkShortcut({ globalShortcut, prefs: desktopPrefs, available: () => nativeActions.appleSpeech && !desktopRemoteAccess, onPress: () => talkSession.press() })` and `talkSession = createTalkSession({ speech: { start: startSpeech, stop: stopSpeech }, server: createTalkServer({ request: talkRequest, prefs: desktopPrefs, serverKey: () => (app.isPackaged ? runningDataDir : DEV_URL) ?? "local" }), panel, voiceInUse: () => speechBusy() || callPresence.active(), release: () => talkShortcut.releaseModifiers(), openChat: chat => (chat ? queueChatLink(`openindbot://thread/${chat.threadId}?bot=${chat.botId}`) : revealForLink()) })`.
 - `talkRequest(route, init)`: packaged → `localServerRequest(route, init)` (owner header; rejects while the server is down); dev → `fetch(new URL(route, DEV_URL), init)`, through Vite's `/api` proxy to `pnpm dev:server`, because dev never starts the server itself (`serverReady = !app.isPackaged`, line 313).
 - `before-quit`, first lines: `talkSession?.close(); talkShortcut?.close();`.
 
@@ -769,12 +769,12 @@ git commit -m "feat(talk): wire the talk shortcut into the desktop app"
 **Files:**
 - Create: `src/lib/call-presence.ts`, `src/components/TalkShortcutRow.tsx`
 - Modify: `src/components/LiveCallHost.tsx` (call the hook), `src/components/SettingsModal.tsx` (General keywords line 85; render `<TalkShortcutRow />` right after `<DefaultBotSidebarRow />` at ~671), `src/locales/en.json` (beside `settings.analytics.*`, ~1228)
-- Test: `src/lib/call-presence.test.ts`, `src/components/TalkShortcutRow.test.ts` (happy-dom, `createRoot` + `act`, with `settle`/`show`/`click` helpers as `src/components/UpdatesConsent.test.ts:14-27`; `toggle()` is `button[aria-label="Talk to MausBot from any app"]`; `bridge = { state: vi.fn(async () => current), set: vi.fn(async change => (current = { ...current, ...change })) }` on `window.ogb.talkShortcut`)
+- Test: `src/lib/call-presence.test.ts`, `src/components/TalkShortcutRow.test.ts` (happy-dom, `createRoot` + `act`, with `settle`/`show`/`click` helpers as `src/components/UpdatesConsent.test.ts:14-27`; `toggle()` is `button[aria-label="Talk to IndBot from any app"]`; `bridge = { state: vi.fn(async () => current), set: vi.fn(async change => (current = { ...current, ...change })) }` on `window.ogb.talkShortcut`)
 
 **Interfaces:**
 - Consumes: `window.ogb.talkShortcut`, `window.ogb.callActive` (Task 8); `useOnCall`, `startCall`, `endCall` (`src/lib/call.ts`); `useLiveMedia`, `isLiveCallRunning`, `LiveMediaPhase` (`src/lib/live-call-media.ts`).
 - Produces: `callInProgress(onCall: string | null, phase: LiveMediaPhase): boolean`; `useReportCallPresence(): void` (reports on mount and on every change, so a reloaded page clears a stale `true`); `TalkShortcutRow()`.
-- Strings: `settings.talk.title` "Talk to MausBot from any app", `settings.talk.subtitle` "Hold {key}, speak, let go. MausBot answers in a small box at the bottom of the screen; click it to open the chat.", `settings.talk.aria` "Talk to MausBot from any app", `settings.talk.keyAria` "Talk shortcut", `settings.talk.taken` "{key} is used by another app. Pick another shortcut.". Keywords: `"talk"`, `"voice"`, `"shortcut"`, `"hotkey"`, `"hold to talk"`, `"push to talk"`, `"quick asks"`.
+- Strings: `settings.talk.title` "Talk to IndBot from any app", `settings.talk.subtitle` "Hold {key}, speak, let go. IndBot answers in a small box at the bottom of the screen; click it to open the chat.", `settings.talk.aria` "Talk to IndBot from any app", `settings.talk.keyAria` "Talk shortcut", `settings.talk.taken` "{key} is used by another app. Pick another shortcut.". Keywords: `"talk"`, `"voice"`, `"shortcut"`, `"hotkey"`, `"hold to talk"`, `"push to talk"`, `"quick asks"`.
 - Row: hidden without the bridge or when `!state.available`; `SettingRow` with the `Switch`; when on, a `Select size="sm"` of `state.keys` (labels) in the row's `message`, and under it `role="alert"` `settings.talk.taken` when `state.taken`; each change shows the state `set()` returns.
 
 - [ ] **Step 1: Write the failing tests**
@@ -799,7 +799,7 @@ it("tells main when a call starts and ends, and says none on mount", async () =>
 it("is not shown without the bridge or where Apple speech is unavailable");   // no ogb → host empty; available:false → host empty
 it("shows the switch on with the key in its subtitle, and turns it off", async () => {
   await show();
-  expect(host.textContent).toContain("Talk to MausBot from any app");
+  expect(host.textContent).toContain("Talk to IndBot from any app");
   expect(host.textContent).toContain("Hold ⌃⌥Space, speak, let go");
   await click(toggle());
   expect(bridge.set).toHaveBeenCalledWith({ enabled: false });
@@ -842,17 +842,17 @@ git commit -m "feat(talk): Settings row, and calls tell main they hold the micro
 
 `talk-shortcut.md` sections (in this repo's recipe style, see `docs/verification/local-environments.md`):
 1. **Floor: automated checks** — `node --test electron/talk-*.node-test.mjs electron/desktop-prefs.node-test.mjs electron/preload.node-test.mjs electron/speech-helper-release.node-test.mjs`; `pnpm exec vitest run electron/speech.test.mjs server/task-select.test.ts server/talk-server.e2e.test.ts src/lib/call-presence.test.ts src/components/TalkShortcutRow.test.ts --maxWorkers=1`; `pnpm typecheck && pnpm lint && pnpm i18n:check`. What they prove and what they do not (the real hotkey, the microphone, focus, Spaces).
-2. **Setup** — a packaged build of the branch installed beside, never over, the installed OpenMausBot (maintainers: the OMB2 side-by-side build), launched with `OMB_DATA_DIR=$HOME/.openmausbot-test` unless the check needs real bots; only one running app may hold the key. Composer dictation used once first so Microphone and Speech Recognition are granted.
+2. **Setup** — a packaged build of the branch installed beside, never over, the installed OpenIndBot (maintainers: the OMB2 side-by-side build), launched with `OMB_DATA_DIR=$HOME/.openindbot-test` unless the check needs real bots; only one running app may hold the key. Composer dictation used once first so Microphone and Speech Recognition are granted.
 3. **By hand**, each with its expected result:
    - Settings → General shows the row, on, "Hold ⌃⌥Space, speak, let go".
-   - In Safari's address bar: hold ⌃⌥, tap Space, say "what can you do", let go of ⌃⌥. Live words, then the reply, bottom-centre of that display. `osascript -e 'tell application "System Events" to name of first application process whose frontmost is true'` prints `Safari` before and after; the caret still blinks in Safari; the MausBot window stays behind.
+   - In Safari's address bar: hold ⌃⌥, tap Space, say "what can you do", let go of ⌃⌥. Live words, then the reply, bottom-centre of that display. `osascript -e 'tell application "System Events" to name of first application process whose frontmost is true'` prints `Safari` before and after; the caret still blinks in Safari; the IndBot window stays behind.
    - The box hides 12 s after the reply; with the pointer on it, it stays until the pointer leaves.
-   - Clicking it brings MausBot forward on the "Quick asks" chat; the chat open before the ask had not changed until then.
+   - Clicking it brings IndBot forward on the "Quick asks" chat; the chat open before the ask had not changed until then.
    - In a full-screen app and on another Space, the box shows there.
    - Tap and let go without speaking: the box closes, no error.
-   - During a voice call, and while composer dictation is on: "Voice is in use in MausBot"; the call or dictation carries on.
+   - During a voice call, and while composer dictation is on: "Voice is in use in IndBot"; the call or dictation carries on.
    - Delete the Quick asks chat, ask again: a new Quick asks chat.
-   - Switch to ⌃⇧Space: ⌃⌥Space does nothing in MausBot any more; ⌃⇧Space works and ends on letting go of ⌃ or ⇧.
+   - Switch to ⌃⇧Space: ⌃⌥Space does nothing in IndBot any more; ⌃⇧Space works and ends on letting go of ⌃ or ⇧.
    - Turn it off: the key does nothing.
    - With System Settings → Keyboard → Keyboard Shortcuts → Input Sources → "Select next source in Input menu" on (⌃⌥Space): note whether Settings shows "⌃⌥Space is used by another app" or the press never arrives; either way ⌃⇧Space must work.
    - Dev loop: `pnpm dev:server`, `pnpm dev`, `pnpm dev:desktop`: an ask reaches the dev server through Vite's `/api` proxy.
@@ -875,7 +875,7 @@ git commit -m "docs(verification): talk shortcut recipe"
 
 ## Self-review
 
-- **Spec coverage.** Key via `globalShortcut` + helper release (Tasks 2, 4); repeat presses ignored, press during a reply starts anew (7); registration failure shown in Settings (4, 9); speech sinks, `speechBusy`, `replaced()` (3); `call:active` and refusal during calls or dictation (4, 7, 8, 9); the box, its window flags, `data:` page with strict CSP, `open()`/`dismiss()` only, states, 12 s hide unless hovered, click opens the chat, panel skipped by every window list (6, 7, 8); local server, MausBot lookup, owner header, send with `sendId`, SSE follow, needs-you, 120 s, empty transcript, server down (5, 7, 8); prefs, Settings row, hidden without Apple speech, not in `REMOTE_SAFE` (4, 8, 9); Quick asks chat created, reused, recreated, per server (1, 4, 5); testing section (all tasks, 10). Dev reaching the dev server (8, 10).
-- **Deviations from the spec, on purpose.** The ask posts `threadId` (the spec's `{text, sendId}` would land in MausBot's selected chat, `server/routes/bot-messages.ts:202`, against the Quick asks decision). Speech sink tests live in vitest `electron/speech.test.mjs`, not a node-test, because `speech.mjs` imports Electron's `app`. `call:active` is `localOrHome`, not `localOnly`, so a Live call on My Cloud's page also blocks the shortcut. The box's copy is English in v1.
+- **Spec coverage.** Key via `globalShortcut` + helper release (Tasks 2, 4); repeat presses ignored, press during a reply starts anew (7); registration failure shown in Settings (4, 9); speech sinks, `speechBusy`, `replaced()` (3); `call:active` and refusal during calls or dictation (4, 7, 8, 9); the box, its window flags, `data:` page with strict CSP, `open()`/`dismiss()` only, states, 12 s hide unless hovered, click opens the chat, panel skipped by every window list (6, 7, 8); local server, IndBot lookup, owner header, send with `sendId`, SSE follow, needs-you, 120 s, empty transcript, server down (5, 7, 8); prefs, Settings row, hidden without Apple speech, not in `REMOTE_SAFE` (4, 8, 9); Quick asks chat created, reused, recreated, per server (1, 4, 5); testing section (all tasks, 10). Dev reaching the dev server (8, 10).
+- **Deviations from the spec, on purpose.** The ask posts `threadId` (the spec's `{text, sendId}` would land in IndBot's selected chat, `server/routes/bot-messages.ts:202`, against the Quick asks decision). Speech sink tests live in vitest `electron/speech.test.mjs`, not a node-test, because `speech.mjs` imports Electron's `app`. `call:active` is `localOrHome`, not `localOnly`, so a Live call on My Cloud's page also blocks the shortcut. The box's copy is English in v1.
 - **Types.** `TalkView`, `TalkChat`, `TalkUpdate`, `TalkShortcutState`, `TalkKeyId` and every factory name are spelled the same in each task's Interfaces and tests.
 - **Left open to the implementer.** Exact page markup and CSS within the tokens given; the Swift parsing style.

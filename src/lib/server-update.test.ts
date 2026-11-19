@@ -22,8 +22,8 @@ describe("self-hosted update row", () => {
       label: "Version 0.1.93 available (release notes)",
       subtitle: "Update with: git pull && ./update.sh",
     });
-    const npm = check({ install: "npm", available: true, latest: "0.1.93", command: "npm install -g openmausbot@latest", restart: true });
-    expect(serverUpdateRow("available", npm).subtitle).toBe("Update with: npm install -g openmausbot@latest, then restart the app");
+    const npm = check({ install: "npm", available: true, latest: "0.1.93", command: "npm install -g openindbot@latest", restart: true });
+    expect(serverUpdateRow("available", npm).subtitle).toBe("Update with: npm install -g openindbot@latest, then restart the app");
     // an install it cannot recognise still learns there is a new version
     expect(serverUpdateRow("available", check({ install: "unknown", available: true, latest: "0.1.93" }))).toEqual({
       label: "Version 0.1.93 available (release notes)",
@@ -55,7 +55,7 @@ describe("self-hosted update row", () => {
 
   it("explains servers that are updated elsewhere", () => {
     expect(serverUpdateRow("up-to-date", check({ install: "desktop" })).label).toBe(
-      "Updates come from the MausBot app on the computer these bots run on",
+      "Updates come from the IndBot app on the computer these bots run on",
     );
     expect(serverUpdateRow("up-to-date", check({ install: "managed" })).label).toBe("Kept up to date for you");
   });
@@ -66,12 +66,12 @@ describe("self-hosted update row", () => {
 });
 
 describe("the update row for another server the app shows", () => {
-  const npm = check({ current: "0.1.116", install: "npm", available: true, latest: "0.1.127", command: "npm install -g openmausbot@latest", restart: true });
+  const npm = check({ current: "0.1.116", install: "npm", available: true, latest: "0.1.127", command: "npm install -g openindbot@latest", restart: true });
 
   it("says whose update it is, and that whoever runs that server installs it", () => {
     expect(serverUpdateRow("available", npm, "0.1.116", "Office Mac")).toEqual({
       label: "Office Mac can update to 0.1.127",
-      subtitle: "Whoever runs that server updates it with: npm install -g openmausbot@latest, then restarts it",
+      subtitle: "Whoever runs that server updates it with: npm install -g openindbot@latest, then restarts it",
     });
     const docker = check({ available: true, latest: "0.1.127", command: "git pull && ./update.sh", restart: false });
     expect(serverUpdateRow("available", docker, "0.1.116", "Office Mac").subtitle).toBe(
@@ -85,7 +85,7 @@ describe("the update row for another server the app shows", () => {
 
   it("keeps the rows of servers updated for their owner, and the row of this computer", () => {
     expect(serverUpdateRow("up-to-date", check({ install: "desktop" }), "0.1.116", "Office Mac").label).toBe(
-      "Updates come from the MausBot app on the computer these bots run on",
+      "Updates come from the IndBot app on the computer these bots run on",
     );
     expect(serverUpdateRow("up-to-date", check({ install: "managed" }), "0.1.116", "Office Mac").label).toBe("Kept up to date for you");
     expect(serverUpdateRow("available", npm, "0.1.116", null).label).toBe("Version 0.1.127 available (release notes)");
@@ -96,7 +96,7 @@ describe("the update row for another server the app shows", () => {
     try {
       expect(serverUpdateRow("available", npm, "0.1.116", "Office Mac")).toEqual({
         label: "Office Mac kann auf 0.1.127 aktualisiert werden",
-        subtitle: "Wer diesen Server betreibt, aktualisiert ihn mit: npm install -g openmausbot@latest und startet ihn danach neu",
+        subtitle: "Wer diesen Server betreibt, aktualisiert ihn mit: npm install -g openindbot@latest und startet ihn danach neu",
       });
     } finally {
       setLocale("en");
@@ -108,8 +108,8 @@ describe("the Update server row", () => {
   const behind = check({ current: "0.1.150", available: true, latest: "0.1.151", command: "git pull && ./update.sh" });
   const button = (patch: Partial<ServerUpdateStatus> = {}): ServerUpdateStatus => ({
     mode: "button", current: "0.1.150", latest: "0.1.151", available: true, activeTurns: 0,
-    command: "cd /opt/openmausbot && sudo ./update.sh", rollback: "cd /opt/openmausbot && sudo ./update.sh --rollback",
-    logs: "cd /opt/openmausbot && sudo docker compose logs --tail 50 omb", setup: "cd /opt/openmausbot && sudo ./update-runner.sh --install", ...patch,
+    command: "cd /opt/openindbot && sudo ./update.sh", rollback: "cd /opt/openindbot && sudo ./update.sh --rollback",
+    logs: "cd /opt/openindbot && sudo docker compose logs --tail 50 omb", setup: "cd /opt/openindbot && sudo ./update-runner.sh --install", ...patch,
   });
   const view = (input: Partial<Parameters<typeof serverUpdateView>[0]>) => serverUpdateView({ check: behind, status: button(), bundle: "0.1.150", app: null, ...input });
 
@@ -121,15 +121,15 @@ describe("the Update server row", () => {
     const command = { label: "Version 0.1.151 is available for this server", subtitle: "Update with: git pull && ./update.sh", action: null, busy: false };
     expect(view({ status: button({ mode: "command", command: "git pull && ./update.sh", rollback: undefined }) })).toEqual(command);
     expect(view({ status: null })).toEqual(command);
-    const npm = check({ install: "npm", available: true, latest: "0.1.151", command: "npm install -g openmausbot@0.1.151", restart: true });
-    expect(view({ check: npm, status: button({ mode: "command", command: npm.command }) }).subtitle).toBe("Update with: npm install -g openmausbot@0.1.151, then restart the app");
+    const npm = check({ install: "npm", available: true, latest: "0.1.151", command: "npm install -g openindbot@0.1.151", restart: true });
+    expect(view({ check: npm, status: button({ mode: "command", command: npm.command }) }).subtitle).toBe("Update with: npm install -g openindbot@0.1.151, then restart the app");
     expect(view({ status: button({ mode: "held" }) })).toMatchObject({ subtitle: "Updates are on hold on this server.", action: null });
   });
 
   it("says a build of main is not one the app updates, with the command that moves it to stable", () => {
-    expect(view({ status: button({ mode: "command", why: "unreleased", command: "cd /opt/openmausbot && sudo ./update.sh" }) })).toEqual({
+    expect(view({ status: button({ mode: "command", why: "unreleased", command: "cd /opt/openindbot && sudo ./update.sh" }) })).toEqual({
       label: "Version 0.1.151 is available for this server", action: null, busy: false,
-      subtitle: "This server runs a build of main, which the app doesn't update. It moves to the stable version once that is newer than the build; on the server run: cd /opt/openmausbot && sudo ./update.sh",
+      subtitle: "This server runs a build of main, which the app doesn't update. It moves to the stable version once that is newer than the build; on the server run: cd /opt/openindbot && sudo ./update.sh",
     });
     expect(JSON.stringify(view({ status: button({ mode: "command", why: "unreleased", command: "x" }) }))).not.toContain("--allow-older");
   });
@@ -152,7 +152,7 @@ describe("the Update server row", () => {
     expect(SERVER_UPDATE_DEADLINE_MS).toBe(15 * 60_000);
     expect(view({ status: running, waitedMs: SERVER_UPDATE_DEADLINE_MS })).toEqual({
       label: "The server isn't back yet", subtitle: "It has been updating for more than 15 minutes.", action: null, busy: true, noteTone: "danger",
-      note: "On the server, run: cd /opt/openmausbot && sudo docker compose logs --tail 50 omb To go back to the version before: cd /opt/openmausbot && sudo ./update.sh --rollback",
+      note: "On the server, run: cd /opt/openindbot && sudo docker compose logs --tail 50 omb To go back to the version before: cd /opt/openindbot && sudo ./update.sh --rollback",
     });
     expect(view({ pressed: true, status: null, waitedMs: SERVER_UPDATE_DEADLINE_MS }).label).toBe("The server isn't back yet");
   });
@@ -173,25 +173,25 @@ describe("the Update server row", () => {
       note: "The update didn't work, so the server went back to v0.1.150. Your data is as it was. The reason is in .update/update.log on the server.",
     });
     expect(view({ status: button({ run: { outcome: "rollback-failed", from: "0.1.150", at: 1 } }) }).note).toBe(
-      "The update failed, and the server couldn't go back by itself. On the server, run: cd /opt/openmausbot && sudo ./update.sh --rollback",
+      "The update failed, and the server couldn't go back by itself. On the server, run: cd /opt/openindbot && sudo ./update.sh --rollback",
     );
     expect(view({ status: button({ run: { outcome: "not-changed", reason: "too-soon", from: "0.1.150", at: 1 } }) }).note).toBe(
       "The server wasn't changed. Updates were asked for too often. Try again in a few minutes.",
     );
     expect(view({ status: button({ run: { outcome: "not-changed", reason: "not-retried", target: "0.1.151", from: "0.1.150", at: 1 } }) }).note).toBe(
-      "The server wasn't changed. The update to v0.1.151 didn't work on this server before, so the app won't try it again. To try it by hand, on the server run: cd /opt/openmausbot && sudo ./update.sh",
+      "The server wasn't changed. The update to v0.1.151 didn't work on this server before, so the app won't try it again. To try it by hand, on the server run: cd /opt/openindbot && sudo ./update.sh",
     );
     expect(view({ status: button({ setup: "cd /srv/deploy && sudo ./update-runner.sh --install", run: { outcome: "not-changed", reason: "stale", from: "0.1.150", at: 1 } }) }).note).toBe(
       "The server wasn't changed. The server's update.sh is newer than the copy the button uses. On the server, run: cd /srv/deploy && sudo ./update-runner.sh --install",
     );
     expect(view({ status: button({ run: { outcome: "not-changed", reason: "unsafe", detail: "/opt root:staff 775", from: "0.1.150", at: 1 } }) }).note).toBe(
-      "The server wasn't changed. The button runs nothing, because someone other than root could change what it runs: /opt (root:staff, 775). Fix that, then on the server run: cd /opt/openmausbot && sudo ./update-runner.sh --install",
+      "The server wasn't changed. The button runs nothing, because someone other than root could change what it runs: /opt (root:staff, 775). Fix that, then on the server run: cd /opt/openindbot && sudo ./update-runner.sh --install",
     );
     expect(view({ status: button({ run: { outcome: "not-changed", reason: "no-room", from: "0.1.150", at: 1 } }) }).note).toBe(
-      "The server wasn't changed. The server needs free disk space for a copy of its data first. To see the copies earlier updates kept, on the server run: docker volume ls --filter label=com.mausbot.role=update-backup. To remove one: docker volume rm <name>",
+      "The server wasn't changed. The server needs free disk space for a copy of its data first. To see the copies earlier updates kept, on the server run: docker volume ls --filter label=com.indbot.role=update-backup. To remove one: docker volume rm <name>",
     );
     expect(view({ status: button({ run: { outcome: "not-started", from: "0.1.150", at: 1 } }) }).note).toBe(
-      "The server didn't start the update. On the server, run: systemctl status openmausbot-update.path",
+      "The server didn't start the update. On the server, run: systemctl status openindbot-update.path",
     );
   });
 

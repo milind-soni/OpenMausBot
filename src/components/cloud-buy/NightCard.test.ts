@@ -3,21 +3,21 @@ import { readFileSync } from "node:fs";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { MAUS_COLOR_NAMES } from "@/lib/mascot";
+import { IND_COLOR_NAMES } from "@/lib/mascot";
 
 type Seen = { color: string; state: string; animated: boolean; trackPointer?: boolean; size: number };
 vi.mock("@/components/Avatar", () => ({
-  MausAvatar: ({ color, state, animated, trackPointer, size: _size, ...choreography }: Seen) => createElement("i", {
-    "data-maus": color, "data-state": state, "data-animated": String(animated), "data-pointer": String(trackPointer),
+  IndAvatar: ({ color, state, animated, trackPointer, size: _size, ...choreography }: Seen) => createElement("i", {
+    "data-ind": color, "data-state": state, "data-animated": String(animated), "data-pointer": String(trackPointer),
     "data-extra": Object.keys(choreography).join(",") }),
 }));
 const { NightCard } = await import("./NightCard");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement, root: Root;
-const render = async (small = false) => { await act(async () => { root.render(createElement(NightCard, { small, children: createElement("h2", null, "MausBot Cloud") })); }); };
+const render = async (small = false) => { await act(async () => { root.render(createElement(NightCard, { small, children: createElement("h2", null, "IndBot Cloud") })); }); };
 const card = () => host.querySelector<HTMLElement>("[data-night-card]")!;
-const mascots = () => [...host.querySelectorAll<HTMLElement>("[data-maus]")];
+const mascots = () => [...host.querySelectorAll<HTMLElement>("[data-ind]")];
 const animated = () => mascots().map(node => node.dataset.animated);
 const motion = () => ["twinkle", "z", "shoot"].map(name => host.querySelectorAll(`.cloud-night-${name}`).length);
 
@@ -32,16 +32,16 @@ afterEach(async () => {
 it("the scene is hidden from screen readers: the card's own text is what is read", async () => {
   await render();
   expect(card().querySelector("svg")!.getAttribute("aria-hidden")).toBe("true");
-  expect(card().textContent).toBe("MausBot Cloud");
+  expect(card().textContent).toBe("IndBot Cloud");
   expect(card().querySelector("h2")!.closest("svg"), "the text sits outside the scene").toBeNull();
 });
 
 it("three of the app's own mascots ride the cloud in three colours, each in a calm state, never following the pointer", async () => {
   await render();
-  const colors = mascots().map(node => node.dataset.maus!);
+  const colors = mascots().map(node => node.dataset.ind!);
   expect(colors).toHaveLength(3);
   expect(new Set(colors).size).toBe(3);
-  for (const color of colors) expect(MAUS_COLOR_NAMES).toContain(color);
+  for (const color of colors) expect(IND_COLOR_NAMES).toContain(color);
   expect(mascots().map(node => node.dataset.state)).toEqual(["working", "idle", "thinking"]);
   expect(mascots().map(node => node.dataset.extra), "no faces, gazes or motions laid on top").toEqual(["", "", ""]);
   expect(mascots().map(node => node.dataset.pointer)).toEqual(["false", "false", "false"]);

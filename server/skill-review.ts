@@ -161,7 +161,7 @@ export function shownSkills(skills: readonly ReviewSkill[], transcript: string):
 // The review prompt. Adapted from Hermes Agent's _SKILL_REVIEW_PROMPT and its
 // shared _LESSON_LAYER_BLOCK and _DO_NOT_CAPTURE_BLOCK
 // (agent/background_review.py, https://github.com/NousResearch/hermes-agent),
-// MIT License, Copyright (c) 2025 Nous Research. Changed for OpenMausBot: the
+// MIT License, Copyright (c) 2025 Nous Research. Changed for OpenIndBot: the
 // reviewer has no tools and answers with whole SKILL.md files (the harness
 // stages them through skill_manage's path), only learned skills can be
 // updated, there are no support files, and the body follows this repo's

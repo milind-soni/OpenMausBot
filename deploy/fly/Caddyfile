@@ -1,6 +1,6 @@
 # Edge for one OMB Cloud home machine (docs/cloud-pro.md). Fly's proxy
 # terminates TLS for <app>.fly.dev and reaches this machine on :8080 (on an own
-# server, the connector does, or a proxy of the owner's). The OpenMausBot
+# server, the connector does, or a proxy of the owner's). The OpenIndBot
 # server listens only on 127.0.0.1, and every request forwarded to it carries
 # X-Forwarded-*, so it is never the loopback owner (server/request-auth.ts): a
 # remote client needs a paired session.

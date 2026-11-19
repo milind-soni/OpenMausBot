@@ -71,7 +71,7 @@ FAKE_CLAUDE_REPLY_STATE=/tmp/reactions-reply-state \
 Then, with the printed handle:
 
 ```sh
-H=/tmp/openmausbot-verify-data-XXXXXX/ui.json
+H=/tmp/openindbot-verify-data-XXXXXX/ui.json
 pnpm control:omb ui type --ui $H --name "Message Pepper" --text "Draft an email to Sam about Friday."
 pnpm control:omb ui press --ui $H --keys Enter
 pnpm control:omb ui wait-settle --ui $H --timeout 60

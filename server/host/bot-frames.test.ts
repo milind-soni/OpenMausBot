@@ -12,7 +12,7 @@ function rig(wholeListeners: boolean) {
     broadcast: (payload, options) => { state.seq += 1; sent.push({ payload, ...(options ? { frames: options.frames } : {}) }); },
     wire: (bot, onlyThreadId) => {
       wired.push(onlyThreadId);
-      return { id: bot.id, name: "Maus", tasks: (bot.tasks ?? []).filter((task) => onlyThreadId === undefined || task.threadId === onlyThreadId) };
+      return { id: bot.id, name: "Ind", tasks: (bot.tasks ?? []).filter((task) => onlyThreadId === undefined || task.threadId === onlyThreadId) };
     },
     wholeListeners: () => state.wholeListeners,
     lastSeq: () => state.seq,
@@ -26,7 +26,7 @@ describe("bot frames", () => {
   it("sends one thread's change as the bot with that thread alone, and builds no whole bot when nobody takes one", () => {
     const { frames, sent, wired } = rig(false);
     frames.send(bot, "t2");
-    expect(sent).toEqual([{ frames: "thread", payload: { kind: "bot", tasksPartial: true, bot: { id: "b1", name: "Maus", tasks: [{ threadId: "t2", title: "Two" }] } } }]);
+    expect(sent).toEqual([{ frames: "thread", payload: { kind: "bot", tasksPartial: true, bot: { id: "b1", name: "Ind", tasks: [{ threadId: "t2", title: "Two" }] } } }]);
     expect(wired).toEqual(["t2"]);
   });
 
@@ -35,7 +35,7 @@ describe("bot frames", () => {
     frames.send(bot, "t2", { messages: [] });
     expect(sent.map((frame) => frame.frames)).toEqual(["thread", "whole"]);
     expect(sent[0]!.payload).toMatchObject({ tasksPartial: true, bot: { messages: [] } });
-    expect(sent[1]!.payload).toEqual({ kind: "bot", bot: { id: "b1", name: "Maus", tasks: bot.tasks, messages: [] } });
+    expect(sent[1]!.payload).toEqual({ kind: "bot", bot: { id: "b1", name: "Ind", tasks: bot.tasks, messages: [] } });
   });
 
   it("sends the whole bot to every stream when the change names no thread, or one the bot does not have", () => {

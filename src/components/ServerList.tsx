@@ -25,10 +25,10 @@ const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-dig
 export function updateCommand(install: ServerInstall | null, version: string): string {
   if (install === "docker") return "git pull && ./update.sh";
   // The rootless Podman service's own update.sh, in the folder its installer uses unless told another.
-  if (install === "podman-service") return "~/.local/share/openmausbot/update.sh";
-  if (install === "global") return `npm install -g openmausbot@${version}`;
+  if (install === "podman-service") return "~/.local/share/openindbot/update.sh";
+  if (install === "global") return `npm install -g openindbot@${version}`;
   if (install === "source") return "git pull && pnpm install";
-  return `npx openmausbot@${version} serve`;
+  return `npx openindbot@${version} serve`;
 }
 
 function UpdateNote({ name, status, appVersion, onHide }: { name: string; status: ServerStatus; appVersion: string; onHide: () => void }) {

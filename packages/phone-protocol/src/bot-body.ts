@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { DEFAULT_MASCOT_BODY, MASCOT_BODY_IDS } from "./mascot-bodies.ts";
 import { CARVED_BODY_IDS, DIWALI_BODY_IDS, HALLOWEEN_BODY_IDS, type CarvedBodyId } from "./carved-bodies.ts";
-import type { MausColor } from "./wire.ts";
+import type { IndColor } from "./wire.ts";
 
 export const BOT_BODY_IDS = [...MASCOT_BODY_IDS, ...CARVED_BODY_IDS] as const;
 
@@ -21,7 +21,7 @@ export function isCarvedBody(value: unknown): value is CarvedBodyId {
   return (CARVED_BODY_IDS as readonly unknown[]).includes(value);
 }
 
-export type CostumeColor = Exclude<MausColor, "silver" | "chrome">;
+export type CostumeColor = Exclude<IndColor, "silver" | "chrome">;
 
 /** A festival skin's own bodies, and the costume each bot colour wears while "Dress my bots up" is on with it. */
 const festival = <Id extends CarvedBodyId>(bodies: readonly Id[], costumes: Record<CostumeColor, NoInfer<Id>>) => ({ bodies, costumes });

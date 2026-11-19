@@ -102,8 +102,8 @@ describe("GitHub template links", () => {
 
   it("reads a gallery team from its template folder when the catalog names one", async () => {
     const folder = writeShareFolder(team, "department");
-    const catalog = { format: "openmaus.catalog", version: 1, teams: [{ slug: "sales-desk", name: "Sales desk", summary: "Sales.", category: "Sales",
-      manifest: "teams/sales-desk/team.mausteam.json", readme: "teams/sales-desk/README.md", members: 3, skills: [], requires: { apps: [] },
+    const catalog = { format: "openind.catalog", version: 1, teams: [{ slug: "sales-desk", name: "Sales desk", summary: "Sales.", category: "Sales",
+      manifest: "teams/sales-desk/team.indteam.json", readme: "teams/sales-desk/README.md", members: 3, skills: [], requires: { apps: [] },
       folder: "teams/sales-desk", kind: "department", main: "teams/sales-desk/team.md" }] };
     const fetcher = (async (url: string) => {
       if (url === `${TEAM_LIBRARY_RAW_ROOT}/catalog.json`) return Response.json(catalog);

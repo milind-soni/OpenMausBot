@@ -68,7 +68,7 @@ describe("relay tokens", () => {
 describe("descriptors", () => {
   it("round-trip, with and without the relay", () => {
     const T = generateKeyPair();
-    const withRelay = descriptorFor(T.publicKey, { hostId: Buffer.alloc(16, 1), nodes: ["relay1.openmausbot.com"] });
+    const withRelay = descriptorFor(T.publicKey, { hostId: Buffer.alloc(16, 1), nodes: ["relay1.openindbot.com"] });
     const parsed = parseDescriptor(encodeDescriptor(withRelay));
     expect(parsed.outcome === "ok" && parsed.descriptor).toEqual(withRelay);
     const direct = descriptorFor(T.publicKey);

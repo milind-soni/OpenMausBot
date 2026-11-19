@@ -1,13 +1,13 @@
 // What the records an admin reads may say on a Team Cloud (docs/team-cloud.md "Team admin"): usage, the decision log
 // and admin activity. Admins read how much each person used, by person and team bot, and when a bot decided something;
-// never on what, in which conversation, or anything of a person's own MausBot. Off a team every row is read as it is.
+// never on what, in which conversation, or anything of a person's own IndBot. Off a team every row is read as it is.
 import type { AdminActionRow } from "../admin-activity.ts";
 import { routineVisible, type RoutineRef, type VisibleSet } from "../bot-visibility.ts";
 import type { DecisionRow } from "../decision-log.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { PRIVATE_ROUTINE, type UsageRow } from "../usage-ledger.ts";
 
-/** A person's own MausBot, to anyone else. */
+/** A person's own IndBot, to anyone else. */
 export const PRIVATE_BOT = { botId: "private", botName: "Private bot" } as const;
 
 export interface PrivateRecordsDeps {
@@ -21,7 +21,7 @@ export function createPrivateRecords(deps: PrivateRecordsDeps) {
   const hidesBot = (visible: VisibleSet, botId: string | undefined, hiddenThread: boolean): boolean =>
     botId !== undefined && (deps.botExists(botId) ? !visible.bot(botId) : hiddenThread);
   return {
-    /** Security invariant: a row from someone else's private conversation, private routine or own MausBot keeps its
+    /** Security invariant: a row from someone else's private conversation, private routine or own IndBot keeps its
      * amounts, time, model and person, and loses everything that says what it was: the conversation's id, the routine's
      * name and id, the bot when it is theirs alone. */
     usageRow(auth: RequestAuth) {

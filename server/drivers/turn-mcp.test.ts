@@ -24,7 +24,7 @@ const turn = (extra: Partial<SendTurnInput> = {}): SendTurnInput => ({
   ...extra,
 } as SendTurnInput);
 
-describe("OpenMausBot's own MCP servers for an engine that reaches servers by URL", () => {
+describe("OpenIndBot's own MCP servers for an engine that reaches servers by URL", () => {
   it("turns each own proxy into this server's endpoint with the same capability, and leaves the person's servers as they are", () => {
     const servers = acpMcpServers(turn(), { http: true });
     expect(servers.map((server) => [server.name, "url" in server ? server.url : server.command])).toEqual([

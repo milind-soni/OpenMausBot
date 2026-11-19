@@ -10,7 +10,7 @@ import {
   type VpsComputerInventoryInstance,
 } from "./LocalComputerSection";
 
-/** Settings' list of OpenMaus-managed VPS computers, across every server in play. */
+/** Settings' list of OpenInd-managed VPS computers, across every server in play. */
 export function VpsComputersCard({
   instances,
   configured,

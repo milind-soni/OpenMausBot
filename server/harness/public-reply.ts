@@ -7,7 +7,7 @@ import { visibleCoordinatorText } from "../group-goal-run.ts";
 
 /** A finished reply as its saved message holds it. */
 export function savedReplyText(text: string): string {
-  return redactSecretsInText(text.includes("openmaus-goal>") ? visibleCoordinatorText(text) : text);
+  return redactSecretsInText(text.includes("openind-goal>") ? visibleCoordinatorText(text) : text);
 }
 
 export function publicReplyEvent(event: RuntimeEvent, speakerId?: string): RuntimeEvent {

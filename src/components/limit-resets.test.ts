@@ -45,7 +45,7 @@ const HOUR = 3_600_000;
 const claude = (used: number, blocked = false): EngineLimit => ({ engine: "claude", name: "Claude", driver: "claude", window: "5-hour", usedPercent: used, resetsAt: RESET, blocked });
 const bot = { id: "scout", name: "Scout", hidden: false, threadId: "t-main", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, tasks: [] } as unknown as Bot;
 const routine = (id: string, nextRunAt: number, extra: Partial<Routine> = {}): Routine => ({
-  id, name: id, prompt: "Finish the report.", target: "bot", botId: "scout", runOn: "maus", enabled: true,
+  id, name: id, prompt: "Finish the report.", target: "bot", botId: "scout", runOn: "ind", enabled: true,
   schedule: { type: "daily", time: "11:00", weekdays: [0, 1, 2, 3, 4, 5, 6] }, durationMinutes: 30, nextRunAt, createdAt: 0, updatedAt: 0, ...extra,
 });
 
@@ -338,9 +338,9 @@ describe("the calendar", () => {
     const onCreate = vi.fn();
     const container = grid(onDropOnReset, onCreate);
     const shown = container.querySelector('[data-limit-marker="claude"]')!;
-    drop(shown, "application/x-openmaus-bot", "scout");
+    drop(shown, "application/x-openind-bot", "scout");
     expect(onDropOnReset).toHaveBeenLastCalledWith({ botId: "scout" }, marker);
-    drop(shown, "application/x-openmaus-calendar-event", JSON.stringify({ kind: "routine", id: "brief", at: NOW + HOUR }));
+    drop(shown, "application/x-openind-calendar-event", JSON.stringify({ kind: "routine", id: "brief", at: NOW + HOUR }));
     expect(onDropOnReset).toHaveBeenLastCalledWith({ event: { kind: "routine", id: "brief", at: NOW + HOUR } }, marker);
     expect(onCreate).not.toHaveBeenCalled();
   });

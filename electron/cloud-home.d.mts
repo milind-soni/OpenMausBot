@@ -99,7 +99,7 @@ export interface CloudPlanAllowances {
   /** A team plan's most people, its owner included. */
   seats?: number;
 }
-/** One plan OpenMausBot Cloud sells: its monthly price before tax in US cents,
+/** One plan OpenIndBot Cloud sells: its monthly price before tax in US cents,
  * and its free trial's days when it comes with one. */
 export interface CloudOfferPlan { tier: string; label?: string; amount: number; allowances?: CloudPlanAllowances; trialDays?: number }
 /** What someone may buy now: the session's `offer` (signed in), or the public

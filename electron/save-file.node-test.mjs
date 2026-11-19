@@ -26,7 +26,7 @@ let botHome;
 
 before(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), "omb-save-file-"));
-  botHome = path.join(home, ".openmausbot");
+  botHome = path.join(home, ".openindbot");
   fs.mkdirSync(path.join(botHome, "workspaces", "bot"), { recursive: true });
   fs.writeFileSync(path.join(botHome, "workspaces", "bot", "report.docx"), "docx");
   fs.writeFileSync(path.join(home, "secret.txt"), "private");
@@ -51,9 +51,9 @@ describe("save-file path validation", () => {
     const realBotHome = path.join(realHome, "bot-data");
     fs.mkdirSync(realBotHome, { recursive: true });
     fs.writeFileSync(path.join(realBotHome, "report.docx"), "docx");
-    fs.symlinkSync(realBotHome, path.join(linkedHome, ".openmausbot"));
+    fs.symlinkSync(realBotHome, path.join(linkedHome, ".openindbot"));
 
-    const viaLink = path.join(linkedHome, ".openmausbot", "report.docx");
+    const viaLink = path.join(linkedHome, ".openindbot", "report.docx");
     assert.equal(await resolveSavablePath(viaLink, { home: linkedHome }), await fs.promises.realpath(viaLink));
 
     fs.rmSync(realHome, { recursive: true, force: true });
@@ -261,9 +261,9 @@ describe("Show in folder for a file outside the workspace", () => {
   it("accepts a Windows drive path like the one in the report", async () => {
     const { shown, reveal } = shell();
     const fsp = { stat: async () => ({ isFile: () => true, isDirectory: () => false }) };
-    const rawPath = "C:\\Users\\Maus\\_draft\\..\\_draft\\ollama-gen.js";
+    const rawPath = "C:\\Users\\Ind\\_draft\\..\\_draft\\ollama-gen.js";
     assert.equal(await revealInFolder(rawPath, { reveal, fsp, pathApi: path.win32 }), "shown");
-    assert.deepEqual(shown, ["C:\\Users\\Maus\\_draft\\ollama-gen.js"]);
+    assert.deepEqual(shown, ["C:\\Users\\Ind\\_draft\\ollama-gen.js"]);
   });
 });
 
@@ -326,8 +326,8 @@ describe("openFolder for a folder a chat links to", () => {
         return { isFile: () => false, isDirectory: () => true };
       },
     };
-    assert.equal(await openFolder("C:\\Users\\Maus\\Reports\\..\\Reports", { open, fsp, pathApi: path.win32 }), "opened");
-    assert.deepEqual(opened, ["C:\\Users\\Maus\\Reports"]);
+    assert.equal(await openFolder("C:\\Users\\Ind\\Reports\\..\\Reports", { open, fsp, pathApi: path.win32 }), "opened");
+    assert.deepEqual(opened, ["C:\\Users\\Ind\\Reports"]);
   });
 
   it("gives up on a check that never answers (dead mount) and opens nothing when it answers late", async () => {
@@ -367,7 +367,7 @@ describe("openFolder for a folder a chat links to", () => {
       realpath: async () => "\\\\server\\share\\Reports",
       stat: () => assert.fail("a network share must not be looked up"),
     };
-    assert.equal(await openFolder("C:\\Users\\Maus\\Reports", { open, fsp, pathApi: path.win32 }), "not-folder");
+    assert.equal(await openFolder("C:\\Users\\Ind\\Reports", { open, fsp, pathApi: path.win32 }), "not-folder");
     assert.deepEqual(opened, []);
   });
 
@@ -380,7 +380,7 @@ describe("openFolder for a folder a chat links to", () => {
         return { isFile: () => false, isDirectory: () => true };
       },
     };
-    assert.equal(await openFolder("/Users/maus/Locked", { open, fsp }), "not-folder");
+    assert.equal(await openFolder("/Users/ind/Locked", { open, fsp }), "not-folder");
     assert.deepEqual(opened, []);
   });
 
@@ -392,7 +392,7 @@ describe("openFolder for a folder a chat links to", () => {
         return { isFile: () => false, isDirectory: () => true };
       },
     };
-    assert.equal(await openFolder("/home/maus/Reports", { open: () => new Promise(() => {}), fsp, openMs: 20 }), "opened");
+    assert.equal(await openFolder("/home/ind/Reports", { open: () => new Promise(() => {}), fsp, openMs: 20 }), "opened");
   });
 });
 
@@ -400,7 +400,7 @@ describe("openLogsFolder", () => {
   it("opens exactly main's own logs folder, making it first, and says where it is when the system cannot open it", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "omb-logs-folder-"));
     try {
-      const folder = path.join(root, "OpenMausBot", "logs");
+      const folder = path.join(root, "OpenIndBot", "logs");
       const opened = [];
       assert.deepEqual(await openLogsFolder(folder, { open: async (target) => { opened.push(target); return ""; } }), { folder, opened: true });
       assert.deepEqual(opened, [folder]);

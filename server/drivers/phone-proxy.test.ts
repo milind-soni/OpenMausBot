@@ -589,7 +589,7 @@ describe("phone batch runs", () => {
 
   it.each([
     { refusal: "Another thread is using the phone. This call was not performed. Pause phone work until that thread finishes, then read the screen again before acting.", said: "Another thread is using the phone. Pause phone work until that thread finishes, then read the screen again before acting" },
-    { refusal: "OpenMausBot could not be reached to reserve the phone. This call was not performed; try again.", said: "OpenMausBot could not be reached to reserve the phone" },
+    { refusal: "OpenIndBot could not be reached to reserve the phone. This call was not performed; try again.", said: "OpenIndBot could not be reached to reserve the phone" },
     { refusal: "A person has taken control of the phone, so this call was NOT performed. Do not act until they hand it back. To wait, call read_screen: each phone call waits up to 45 seconds and returns as soon as they hand the phone back. Meanwhile you may work on anything that does not need the phone.", said: "A person has taken control of the phone. Do not act until they hand it back. To wait, call read_screen: each phone call waits up to 45 seconds and returns as soon as they hand the phone back. Meanwhile you may work on anything that does not need the phone" },
     { refusal: "The person has handed the phone back. This call was NOT performed: the screen may have changed. Call read_screen, then continue the task.", said: "The person has handed the phone back. Call read_screen, then continue the task" },
     { refusal: "The phone is free now, but this call had to wait for it, so it was NOT performed. Call again: the next call goes through at once. If you meant to tap or type from an earlier read_screen, call read_screen again first: the screen may have changed while you waited.", said: "The phone is free now, but this call had to wait for it. Call again: the next call goes through at once. If you meant to tap or type from an earlier read_screen, call read_screen again first: the screen may have changed while you waited" },
@@ -876,7 +876,7 @@ describe("phone MCP claim while a person may hold the phone", () => {
   it.each([
     [{ reason: "person" }, PERSON_TEXT],
     [{ reason: "handed-back" }, HANDED_BACK_TEXT],
-    [{}, "OpenMausBot could not reserve the phone for this call. This call was not performed; try again, or start a new turn if it keeps failing."],
+    [{}, "OpenIndBot could not reserve the phone for this call. This call was not performed; try again, or start a new turn if it keeps failing."],
   ])("tells the bot what a 423 %j means", async (body, message) => {
     await expect(createPhoneClaim(harnessEnv, refusal(body))()).resolves.toEqual({ ok: false, message });
   });
@@ -905,7 +905,7 @@ describe("phone MCP calls claim before each command sent to the phone", () => {
   const onPhone = (...command: string[]) => ["-s", "USB123", ...command];
   const DUMP = onPhone("shell", "uiautomator", "dump", "/dev/tty");
   const APPS = onPhone("shell", "cmd", "package", "query-activities", "--brief", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER");
-  const SAVED_DUMP = "/data/local/tmp/openmaus-window.xml";
+  const SAVED_DUMP = "/data/local/tmp/openind-window.xml";
   const SAVE_READ_AND_REMOVE = onPhone("shell", `rm -f ${SAVED_DUMP}; uiautomator dump ${SAVED_DUMP} >/dev/null && cat ${SAVED_DUMP}; status=$?; rm -f ${SAVED_DUMP}; exit $status`);
   const namingTheSavedDumpWithoutRemovingIt = (commands: string[][]) =>
     commands.filter((command) => command.join(" ").includes(SAVED_DUMP) && !command.join(" ").includes(`rm -f ${SAVED_DUMP}`));

@@ -67,7 +67,7 @@ export interface ChromeLauncherOptions {
   sidecars?: IdentitySidecars;
   readyWaitMs?: number;
   log?: (line: string) => void;
-  /** False for OpenMausBot's own driver, which needs the binary and its identity but no launcher for agent-browser. */
+  /** False for OpenIndBot's own driver, which needs the binary and its identity but no launcher for agent-browser. */
   wrapper?: boolean;
   /** Chrome's sandbox while its identity is read; by default off only where agent-browser turns it off. */
   sandbox?: boolean;
@@ -307,7 +307,7 @@ export class ChromeLauncher implements BrowserLaunch {
     return (await loadOrCalibrateIdentity(this.options.dataDir, options, calibrate)).identity;
   }
 
-  /** The Chrome and its identity for OpenMausBot's own driver: found or downloaded once, and read once per version. */
+  /** The Chrome and its identity for OpenIndBot's own driver: found or downloaded once, and read once per version. */
   async binary(): Promise<{ path: string; identity: ChromeIdentity; product: string; source: FoundChrome["source"] }> {
     const plan = this.plan();
     if (plan.kind === "legacy") throw new Error(`no Chrome to run here (${plan.reason})`);

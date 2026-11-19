@@ -75,11 +75,11 @@ describe("menu paths in our own text", () => {
   it("tell a stale path from a real one", () => {
     expect(inventedPaths('"Add it in Settings → API keys."')).toEqual(["Settings → API keys.\""]);
     expect(inventedPaths('"Sign in again in Settings → AI to keep using it."')).toEqual([]);
-    expect(inventedPaths('"open Settings → Phone & devices → Your other computers in MausBot"')).toEqual([]);
+    expect(inventedPaths('"open Settings → Phone & devices → Your other computers in IndBot"')).toEqual([]);
     expect(inventedPaths('"open Settings → AI → API keys"')).toEqual(["Settings → AI → API keys\""]);
     expect(inventedPaths('"in System Settings → Privacy & Security"')).toEqual([]);
     expect(inventedPaths("// Settings → Computers, a comment only")).toEqual([]);
-    expect(inventedPaths('"turn it on in Settings > MausBot Cloud (Advanced mode)"')).toEqual(["Settings → MausBot Cloud (Advanced mode)\""]);
+    expect(inventedPaths('"turn it on in Settings > IndBot Cloud (Advanced mode)"')).toEqual(["Settings → IndBot Cloud (Advanced mode)\""]);
     expect(inventedPaths('"Settings › Desktops & browser › Built-in browser"')).toEqual([]);
     expect(inventedPaths('"open Settings → {section} and choose {open}"')).toEqual([]);
     expect(inventedPaths('  "call.live.needsKey": "Add it in Settings → API keys.",')).toEqual(["Settings → API keys.\","]);

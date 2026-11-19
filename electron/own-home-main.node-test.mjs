@@ -24,7 +24,7 @@ function servers(answers) {
     if (server?.down) throw new TypeError("fetch failed");
     if (!server) return new Response("", { status: 502 });
     if (pathname === "/api/auth/session") return Response.json(server.signedIn === false ? { error: "unauthorized" } : { kind: "session", scopes: ["admin"], ...(server.own ? { own: true } : {}) }, { status: server.signedIn === false ? 401 : 200 });
-    if (pathname === "/.well-known/openmausbot/environment") return Response.json({ environmentId: server.environmentId ?? ID, capabilities: server.move === false ? {} : { move: 1 } });
+    if (pathname === "/.well-known/openindbot/environment") return Response.json({ environmentId: server.environmentId ?? ID, capabilities: server.move === false ? {} : { move: 1 } });
     return new Response("", { status: 404 });
   };
   return { fetch, asked };
@@ -87,7 +87,7 @@ test("starting asks the server once more, and keeps this computer's bots here wh
   const cases = [
     [{ own: false }, "Garage server has other people on it, so your bots stay here."],
     [{ signedIn: false }, "This app isn't signed in to Garage server."],
-    [{ own: true, move: false }, "Update OpenMausBot on Garage server first"],
+    [{ own: true, move: false }, "Update OpenIndBot on Garage server first"],
   ];
   for (const [answer, words] of cases) {
     const { own } = install({ answers: { [garage.origin]: answer } });
@@ -187,7 +187,7 @@ test("after an own-home move is done, an app update does not send the old worksp
     if (path === "/api/cloud-send/memory") return Response.json(query.startsWith("bot=") ? { v: 1, files: [], journal: [] } : { v: 1, about: { learned: [], removed: [] }, teams: [] });
     if (path.endsWith("/skills")) return Response.json({ skills: [] });
     if (path.endsWith("/memory")) return Response.json({ topics: [] });
-    if (path === "/api/cloud-send/chats") return Response.json({ v: 1, dataDir: "/desk/.openmausbot", conversations: [], attachments: [] });
+    if (path === "/api/cloud-send/chats") return Response.json({ v: 1, dataDir: "/desk/.openindbot", conversations: [], attachments: [] });
     return Response.json({ v: 1 });
   };
   const fetch = async (url, init) => {
@@ -195,7 +195,7 @@ test("after an own-home move is done, an app update does not send the old worksp
     const method = init?.method ?? "GET";
     asked.push(`${method} ${pathname}${search}`);
     if (pathname === "/api/auth/session") return Response.json({ kind: "session", scopes: ["admin"], own: true });
-    if (pathname === "/.well-known/openmausbot/environment") return Response.json({ environmentId: ID, capabilities: { move: 1 } });
+    if (pathname === "/.well-known/openindbot/environment") return Response.json({ environmentId: ID, capabilities: { move: 1 } });
     if (pathname === "/api/cloud-connections") return Response.json({ computer: { environmentId: "env-srv", label: "Garage" }, connections: [], engines: [], commands: [] });
     if (pathname === "/api/cloud-send/files" && method === "POST") return Response.json({ stored: true }, { status: 201 });
     if (pathname === "/api/cloud-send/files") return Response.json({ v: 1, files: serverFiles, space: { freeBytes: 1e12, volumeBytes: 1e12 } });

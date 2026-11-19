@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
 import { setDressUp, useDressUp } from "@/lib/festival-dress";
 import { FESTIVALS, isFestival, type CostumeColor, type FestivalId } from "../../shared/bot-body";
-import { MausAvatar } from "./Avatar";
+import { IndAvatar } from "./Avatar";
 import { useContext } from "react";
 import { SettingsLook, Switch } from "./SettingsPrimitives";
 import { useSkinChoice } from "./ThemeRow";
@@ -67,7 +67,7 @@ export function DressUpRow({ festival }: { festival: FestivalId }) {
     <div data-dress-up className="mt-4 flex items-center gap-4 rounded-xl border border-accent-border/40 bg-accent/[0.06] p-3">
       <div className="flex shrink-0 -space-x-1.5" aria-hidden="true">
         {DRESS_UP_PREVIEW[festival].map((color) => (
-          <MausAvatar key={color} color={color} bodyId={FESTIVALS[festival].costumes[color]} size={30} animated={false} trackPointer={false} />
+          <IndAvatar key={color} color={color} bodyId={FESTIVALS[festival].costumes[color]} size={30} animated={false} trackPointer={false} />
         ))}
       </div>
       <div className="min-w-0 flex-1">

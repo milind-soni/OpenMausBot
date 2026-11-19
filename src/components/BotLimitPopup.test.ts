@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const fixture = vi.hoisted(() => ({ state: { config: { cloudHome: true, botLimit: 5 } as Record<string, unknown>, bots: [] as unknown[] } }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: fixture.state, dispatch: vi.fn() }) }));
-vi.mock("./Avatar", () => ({ MausAvatar: () => createElement("i", { "data-mark": "" }), BotAvatar: () => createElement("i", { "data-avatar": "" }) }));
+vi.mock("./Avatar", () => ({ IndAvatar: () => createElement("i", { "data-mark": "" }), BotAvatar: () => createElement("i", { "data-avatar": "" }) }));
 const posted = vi.hoisted(() => [] as Array<{ path: string; body: unknown }>);
 vi.mock("@/state/api", () => ({ api: vi.fn(async (path: string, init?: { body?: string }) => { posted.push({ path, body: init?.body ? JSON.parse(init.body) : undefined }); return {}; }) }));
 vi.mock("@/lib/app-links", async (original) => ({ ...await original<typeof import("@/lib/app-links")>(), openExternalLink: vi.fn(async () => {}) }));
@@ -114,7 +114,7 @@ describe("the bot limit popup", () => {
     expect(dialog()!.querySelector("p")?.textContent).toBe("To create more, upgrade this Cloud on its Plan page. Every bot you have stays as it is.");
     expect(buttons()).toEqual(["Open the Plan page", "Not now", "Close"]);
     await press("Open the Plan page");
-    expect(openExternalLink).toHaveBeenCalledExactlyOnceWith("https://cloud.openmausbot.com/cloud");
+    expect(openExternalLink).toHaveBeenCalledExactlyOnceWith("https://cloud.openindbot.com/cloud");
   });
 
   it("on a person's other Cloud, which only reads its plan, opens its Plan page and closes", async () => {

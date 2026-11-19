@@ -1,7 +1,7 @@
 # Bot memory
 
 By default, bots keep notes between tasks. The notes are plain markdown files in a
-folder on the computer running OpenMausBot — nothing is stored anywhere else,
+folder on the computer running OpenIndBot — nothing is stored anywhere else,
 and you can open, edit, or delete any of it in any editor. **Bot Settings →
 Memory** shows the same files with a gauge of how much of them actually loads,
 an editor that never overwrites something the bot wrote while you were typing,
@@ -17,7 +17,7 @@ instructions to forbid that when memory must stay in another source of truth.
 ## Where it lives
 
 ```
-~/.openmausbot/workspaces/<botId>/
+~/.openindbot/workspaces/<botId>/
 ├── MEMORY.md            the notes that load into every conversation
 └── memory/
     ├── <topic>.md       longer notes the bot reads on demand
@@ -30,7 +30,7 @@ The folder is the bot's private workspace: the directory its file tools work in
 when it has no project folder set. It is created the first time the bot runs a
 turn. **Open in Obsidian** and **Show in Finder** (Explorer, or your file
 manager) in the Memory panel open this folder; because it is on the server's
-disk, those buttons only work from the computer running OpenMausBot — a
+disk, those buttons only work from the computer running OpenIndBot — a
 paired phone or a remote browser is shown the path instead.
 
 Files are written with owner-only permissions (`0600`), atomically (a crash
@@ -377,7 +377,7 @@ agreed shows up in each member's next 1:1 brief.
 
 Every change to a memory file that the app can see is recorded — yours from
 the panel, the bot's during a task, an import, an undo — in
-`~/.openmausbot/memory-journal/<botId>.ndjson`. It lives *outside* the
+`~/.openindbot/memory-journal/<botId>.ndjson`. It lives *outside* the
 workspace on purpose: the bot's file tools point at the workspace, and a
 record the bot could edit would not be a record.
 

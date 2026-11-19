@@ -160,7 +160,7 @@ describe("holdIncludedServices", () => {
 describe("X research credential", () => {
   const RELAY_X = "https://cloud.example.test/api/cloud/services/x";
   const desktopToken = `omb_xd_${"a".repeat(43)}`;
-  afterEach(() => { applyIncludedXMessage({ type: "openmausbot:included-x", access: null }); });
+  afterEach(() => { applyIncludedXMessage({ type: "openindbot:included-x", access: null }); });
 
   it("is a Cloud home's included token, sent only to the relay, and there is no own-key path", () => {
     expect(xCredential({ OMB_CLOUD_X_URL: `${RELAY_X}/`, OMB_CLOUD_X_TOKEN: "omb_x_included" })).toEqual({ token: "omb_x_included", api: RELAY_X, included: true });
@@ -169,39 +169,39 @@ describe("X research credential", () => {
   });
 
   it("takes a signed-in desktop's token from its main process, and drops it when told", () => {
-    expect(applyIncludedXMessage({ type: "openmausbot:included-x", access: { url: RELAY_X, token: desktopToken } })).toBe(true);
+    expect(applyIncludedXMessage({ type: "openindbot:included-x", access: { url: RELAY_X, token: desktopToken } })).toBe(true);
     expect(xCredential({})).toEqual({ token: desktopToken, api: RELAY_X, included: true });
-    expect(applyIncludedXMessage({ type: "openmausbot:included-x", access: null })).toBe(true);
+    expect(applyIncludedXMessage({ type: "openindbot:included-x", access: null })).toBe(true);
     expect(xCredential({})).toBeNull();
   });
 
   it("ignores other messages and refuses a malformed one without changing what it holds", () => {
-    applyIncludedXMessage({ type: "openmausbot:included-x", access: { url: RELAY_X, token: desktopToken } });
-    expect(applyIncludedXMessage({ type: "openmausbot:managed-composio", access: null })).toBe(false);
+    applyIncludedXMessage({ type: "openindbot:included-x", access: { url: RELAY_X, token: desktopToken } });
+    expect(applyIncludedXMessage({ type: "openindbot:managed-composio", access: null })).toBe(false);
     for (const access of [{ url: "http://cloud.example.test/api/cloud/services/x", token: desktopToken }, { url: RELAY_X, token: "" }, { url: "not a url", token: desktopToken },
       { url: RELAY_X, token: "x".repeat(300) }, "nope"]) {
-      expect(() => applyIncludedXMessage({ type: "openmausbot:included-x", access }), JSON.stringify(access)).toThrow();
+      expect(() => applyIncludedXMessage({ type: "openindbot:included-x", access }), JSON.stringify(access)).toThrow();
     }
     expect(xCredential({})?.token).toBe(desktopToken);
   });
 
   it("lets a loopback relay through for development and tests only over http", () => {
-    applyIncludedXMessage({ type: "openmausbot:included-x", access: { url: "http://127.0.0.1:4300/api/cloud/services/x", token: desktopToken } });
+    applyIncludedXMessage({ type: "openindbot:included-x", access: { url: "http://127.0.0.1:4300/api/cloud/services/x", token: desktopToken } });
     expect(xCredential({})?.api).toBe("http://127.0.0.1:4300/api/cloud/services/x");
   });
 });
 
 describe("X research status for the app's Settings", () => {
   const RELAY_X = "https://cloud.example.test/api/cloud/services/x";
-  afterEach(() => { applyIncludedXMessage({ type: "openmausbot:included-x", access: null }); });
+  afterEach(() => { applyIncludedXMessage({ type: "openindbot:included-x", access: null }); });
 
   it("is included with a credential, not offered once the Admin said no, and plain not-included otherwise", () => {
     expect(xResearchStatus({})).toEqual({ included: false });
-    applyIncludedXMessage({ type: "openmausbot:included-x", access: null, offered: false });
+    applyIncludedXMessage({ type: "openindbot:included-x", access: null, offered: false });
     expect(xResearchStatus({})).toEqual({ included: false, unavailable: true });
-    applyIncludedXMessage({ type: "openmausbot:included-x", access: { url: RELAY_X, token: `omb_xd_${"b".repeat(43)}` } });
+    applyIncludedXMessage({ type: "openindbot:included-x", access: { url: RELAY_X, token: `omb_xd_${"b".repeat(43)}` } });
     expect(xResearchStatus({})).toEqual({ included: true });
-    applyIncludedXMessage({ type: "openmausbot:included-x", access: null });
+    applyIncludedXMessage({ type: "openindbot:included-x", access: null });
     expect(xResearchStatus({})).toEqual({ included: false });
     expect(xResearchStatus({ OMB_CLOUD_X_URL: RELAY_X, OMB_CLOUD_X_TOKEN: "omb_x_home" })).toEqual({ included: true });
   });

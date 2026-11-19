@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { RUN_COMPUTER_LINES } from "../shared/cloud-computer-recovery.ts";
 import { NO_START_FIRST_SPACING_MS, NO_START_SPACING_MS, SWITCHED_OFF_WITHIN_MS, afterSpacing, failedToStartComputer, noStartAlert, noStartSpacing, switchedOffByNoStarts, turnBackOn } from "./routine-no-start.ts";
 
-const NO_START = "Maus's cloud desktop didn't start. Change where this routine runs.";
+const NO_START = "Ind's cloud desktop didn't start. Change where this routine runs.";
 const failed = (id: string, at: number, error = NO_START, routineId = "r") => ({ id, routineId, status: "failed", error, createdAt: at, finishedAt: at + 50 });
 const completed = (id: string, at: number, routineId = "r") => ({ id, routineId, status: "completed", createdAt: at, finishedAt: at + 50 });
 

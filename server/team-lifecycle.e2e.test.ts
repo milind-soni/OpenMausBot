@@ -59,7 +59,7 @@ it("retains empty teams, moves existing bots, and keeps legacy imports additive 
     await api("/api/sidebar-sections?section=Launch", "PATCH", { name: "Untouched empty" }, 409);
 
     const imported = await api("/api/teams/import?mode=add", "POST", {
-      format: "openmaus.team", version: 2, team: { name: "Launch", members: [
+      format: "openind.team", version: 2, team: { name: "Launch", members: [
         { key: "writer", name: "Fixture writer", appearance: { color: "purple" } },
       ] },
     }, 201);

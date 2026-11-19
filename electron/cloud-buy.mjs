@@ -10,7 +10,7 @@ import { dotIcons } from "./color-dot.mjs";
 export const CLOUD_COLORS = environments.ENTRY_COLORS;
 export const DEFAULT_CLOUD_COLOR = "blue";
 export const CLOUD_NAME_MAX = 28;
-/** Each colour in the default skin (src/lib/mascot.ts MAUS_COLORS), for the native menu's dot; the page uses the skin's own. */
+/** Each colour in the default skin (src/lib/mascot.ts IND_COLORS), for the native menu's dot; the page uses the skin's own. */
 export const CLOUD_COLOR_HEX = Object.freeze({ blue: "#377FE6", teal: "#01A492", purple: "#8057C8", orange: "#E78531", red: "#D94B52", yellow: "#D8A729" });
 // oxlint-disable-next-line no-control-regex
 const CONTROL = /[\x00-\x1f\x7f]/;
@@ -69,7 +69,7 @@ export function createCloudLook({ store, accountId, homeEntry, saveEntry }) {
   };
 }
 
-/** openmausbot://cloud, the same with or without a checkout waiting: the sheet while a purchase made here is under way
+/** openindbot://cloud, the same with or without a checkout waiting: the sheet while a purchase made here is under way
  * (a checkout opened in the last day, a payment being linked, setup), else Settings, which signs in or opens the Cloud. */
 export function cloudLinkOpensSheet(state) {
   return Boolean((state?.checkout && !state.checkout.done) || (state?.adding && !state.adding.done) || state?.purchase || state?.machine?.status === "provisioning");
@@ -111,7 +111,7 @@ export function installCloudBuy({ ipcMain, guard, client, offersReady, clipboard
   handle("signInVerify", (_event, code) => client().emailVerify(plain(code)));
   handle("signInCancel", () => { client().emailCancel(); });
   handle("reopenCheckout", async (_event, plan, source) => {
-    if (!(await offersReady())) throw new Error("MausBot Cloud isn't offered in this app.");
+    if (!(await offersReady())) throw new Error("IndBot Cloud isn't offered in this app.");
     const account = client();
     if (account.checkoutLink()) return account.reopenCheckout();
     if (typeof plan !== "string" || !CHECKOUT_SOURCES.includes(source)) throw new Error("Choose a plan to continue.");

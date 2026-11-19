@@ -3,7 +3,7 @@ import { accessSync, constants } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-const mcpNpmCache = join(tmpdir(), `openmausbot-mcp-npm-${randomBytes(12).toString("hex")}`);
+const mcpNpmCache = join(tmpdir(), `openindbot-mcp-npm-${randomBytes(12).toString("hex")}`);
 
 /** npm's cache for this environment: `npm_config_cache` when set, else npm's own default under the home folder. */
 function inheritedNpmCache(env: NodeJS.ProcessEnv): string | undefined {

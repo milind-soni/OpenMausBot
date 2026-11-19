@@ -1,5 +1,5 @@
 // Bitwarden's own command line tool, `bw` (GPL-3.0, github.com/bitwarden/clients), is never bundled, imported or shipped
-// with OpenMausBot: it is downloaded on first use from Bitwarden's GitHub release, checked against the size and SHA-256
+// with OpenIndBot: it is downloaded on first use from Bitwarden's GitHub release, checked against the size and SHA-256
 // pinned here, kept in the data folder, and only ever run as a separate process. The "oss" build is the one made from
 // the GPL code alone. Security: every secret reaches it in its environment, never its arguments, which any local user
 // can list.

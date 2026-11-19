@@ -29,7 +29,7 @@ export interface ChiefNoticeDeps {
   threadSettling?(threadId: string): boolean;
   /** The thread waits for a free slot and starts on its own. */
   threadQueued?(botId: string, threadId: string): boolean;
-  /** Runs OpenMausBot's automatic retry after the failed turn's own handling is done; the host's next tick by default. */
+  /** Runs OpenIndBot's automatic retry after the failed turn's own handling is done; the host's next tick by default. */
   schedule?(run: () => void): void;
   /** Starts this thread's request again where it stopped: a continuation of the request the harness recorded, never a line
    * of the person's. Absent: a run stopped for memory with no Chief to retry it is only reported. */
@@ -65,14 +65,14 @@ export interface ChiefNoticeDeps {
 export const MEMORY_RETRY_MS = 30_000;
 /** The chats a Chief's line for the problems it was not started for names; its count covers the rest. */
 export const FOLDED_LISTED = 5;
-export const MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run was stopped to free memory on this Cloud. "
+export const MEMORY_RETRY_TEXT = "[OpenIndBot started this again by itself, once: the last run was stopped to free memory on this Cloud. "
   + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 
-export const SERVER_MEMORY_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run was stopped to free memory on this server. "
+export const SERVER_MEMORY_RETRY_TEXT = "[OpenIndBot started this again by itself, once: the last run was stopped to free memory on this server. "
   + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 
 /** A run the server had no room to start is the server's shortage: it starts again by itself, and no AI is asked about it. */
-export const ROOM_RETRY_TEXT = "[OpenMausBot started this again by itself, once: the last run could not start because this server had no room for another program. "
+export const ROOM_RETRY_TEXT = "[OpenIndBot started this again by itself, once: the last run could not start because this server had no room for another program. "
   + "Continue the request above from where it stopped and finish it. If the same problem comes back, say exactly what is blocking and stop.]";
 
 export function createChiefNotices(deps: ChiefNoticeDeps) {
@@ -119,7 +119,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     return null;
   }
 
-  /** The one way a teammate's stopped thread runs again: a Chief's retry_thread and OpenMausBot's automatic retry both
+  /** The one way a teammate's stopped thread runs again: a Chief's retry_thread and OpenIndBot's automatic retry both
    * start it here, after the same refusal checks. Throws the refusal, or why the start failed. */
   async function retryThread(input: { chief: BotRecord; bot: BotRecord; threadId: string; unattended: boolean; note?: string; automatic?: true }): Promise<void> {
     const refused = retryRefusal(input.bot.id, input.threadId);
@@ -226,7 +226,7 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     return "chief";
   }
 
-  /** A failed teammate run gets one retry from OpenMausBot before its Chief hears; the Chief then hears how that retry ended.
+  /** A failed teammate run gets one retry from OpenIndBot before its Chief hears; the Chief then hears how that retry ended.
    * Never retried: a stall the turn watchdog stopped (kind "stalled"), a stop, a refusal or a cap (retriesTeammateThread,
    * from the failure's words and `facts`), a run that answered a retry, and a thread whose asks are not the Chief's person's. */
   /** `notified`: the person already heard of it another way (a usage limit's own notice), so only the Chief is told. */

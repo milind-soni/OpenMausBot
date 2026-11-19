@@ -266,9 +266,9 @@ describe("pairing codes", () => {
 
   it("takes the code or the credential out of a pasted link", () => {
     const a = registry.openPairing();
-    expect(registry.exchange({ code: `https://maus.example.com/pair#code=${formatPairingCode(a.code)}`, label: "", source: "s" }).ok).toBe(true);
+    expect(registry.exchange({ code: `https://ind.example.com/pair#code=${formatPairingCode(a.code)}`, label: "", source: "s" }).ok).toBe(true);
     const b = registry.openPairing();
-    expect(registry.exchange({ code: `openmausbot://pair?address=https%3A%2F%2Fmaus.example.com&token=${b.credential}`, label: "", source: "s" }).ok).toBe(true);
+    expect(registry.exchange({ code: `openindbot://pair?address=https%3A%2F%2Find.example.com&token=${b.credential}`, label: "", source: "s" }).ok).toBe(true);
   });
 
   it("answers a lost-response retry with the same session for a minute, keyed on the client's attempt id", () => {

@@ -232,7 +232,7 @@ describe("Move to after reset", () => {
 });
 
 describe("a usage limit with a backup engine", () => {
-  const run = (): RoutineRun => ({ id: "run-1", routineId: "r", routineName: "Brief", target: "bot", botId: "scout", runOn: "maus", scheduledFor: START,
+  const run = (): RoutineRun => ({ id: "run-1", routineId: "r", routineName: "Brief", target: "bot", botId: "scout", runOn: "ind", scheduledFor: START,
     status: "running", manual: false, createdAt: START, threadId: "t" });
 
   it("starts the run again at once, for the backup to take, instead of waiting for the reset", () => {

@@ -17,7 +17,7 @@ import { redactSecretsInText } from "./redact.ts";
 import type { Message, StoreChange } from "./store.ts";
 import { userError, type UserError } from "./user-errors.ts";
 import type { PublishedPageCard as PublishedPage } from "../shared/published-page.ts";
-import type { MausColor } from "../shared/wire.ts";
+import type { IndColor } from "../shared/wire.ts";
 
 const NO_SUCH_PAGE = "No page with that id in this conversation.";
 const NOT_A_PAGE = "That app came from an MCP server, not from show_html; it cannot be replaced. Show a new page instead.";
@@ -102,7 +102,7 @@ const pageFallback = (title: string, page: PageText, given?: string) =>
 export function createAppCard(args: {
   store: AgentCardStore;
   docs: AppDocs;
-  bot: { id: string; name: string; color: MausColor };
+  bot: { id: string; name: string; color: IndColor };
   threadId: string;
   input: Record<string, unknown>;
   authored?(messageId: string): void;
@@ -126,7 +126,7 @@ export function createAppCard(args: {
 }
 
 function placePage(
-  args: { store: AgentCardStore; docs: AppDocs; bot: { id: string; name: string; color: MausColor }; threadId: string; authored?(messageId: string): void },
+  args: { store: AgentCardStore; docs: AppDocs; bot: { id: string; name: string; color: IndColor }; threadId: string; authored?(messageId: string): void },
   value: { appId?: string; height?: number; fallbackText?: string; frameless?: boolean; live?: boolean },
   made: MadePage,
 ): AgentCardResult {
@@ -279,7 +279,7 @@ export function publishablePage(args: { store: Pick<AgentCardStore, "messagesFor
  * same file or folder gains the new version and the link, or a new card holds both. null when a card can't hold it (a
  * page with nothing to preview); the caller then posts the plain link. */
 export function showPublishedPage(args: {
-  store: AgentCardStore; docs: AppDocs; threadId: string; card: PublishedPage; bundle: PageBundle; bot: { id: string; name: string; color: MausColor };
+  store: AgentCardStore; docs: AppDocs; threadId: string; card: PublishedPage; bundle: PageBundle; bot: { id: string; name: string; color: IndColor };
 }): string | null {
   const { store, docs, threadId, card, bundle } = args;
   if (card.state !== "live") return null;
@@ -454,13 +454,13 @@ export function rowRate(limit: number, windowMs: number): { take(key: string, no
 export interface ChatApps {
   readonly docs: AppDocs;
   createAppCard(args: {
-    bot: { id: string; name: string; color: MausColor }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void; folders?: BotFolders;
+    bot: { id: string; name: string; color: IndColor }; threadId: string; input: Record<string, unknown>; authored?(messageId: string): void; folders?: BotFolders;
   }): AgentCardResult | Promise<AgentCardResult>;
   /** `origin`: the web origin the client reaches this app at, which a folder page's files load from. `viewer`: who asked,
    * whose own token those files load with. */
   appDocument(threadId: string, messageId: string, rev?: number, origin?: string, viewer?: PageFilesViewer): AppDocument | null;
   publishablePage(threadId: string, messageId: string, rev?: number): PublishablePage;
-  showPublishedPage(args: { threadId: string; card: PublishedPage; bundle: PageBundle; bot: { id: string; name: string; color: MausColor } }): string | null;
+  showPublishedPage(args: { threadId: string; card: PublishedPage; bundle: PageBundle; bot: { id: string; name: string; color: IndColor } }): string | null;
   /** The folder pages' files route, ahead of the sign-in gate: true when the request was its own. */
   serveFile(req: IncomingMessage, res: ServerResponse, path: string, method: string): boolean;
   setAppContext(args: { threadId: string; messageId: string; content?: unknown; structuredContent?: unknown }): AppRouteResult;

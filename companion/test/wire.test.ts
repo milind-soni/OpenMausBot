@@ -46,8 +46,8 @@ describe("scrub", () => {
       vpsAliases: ["production-vps", "alpha-vps"],
       problem: null,
       instances: [
-        { name: "openmausbot-vps-one", state: "running", vpsAlias: "production-vps", ownerBotId: "b1", ownerName: "Rio", orphaned: false, inUse: false },
-        { name: "openmausbot-vps-two", state: "exited", vpsAlias: "alpha-vps", ownerBotId: null, ownerName: null, orphaned: true, inUse: false },
+        { name: "openindbot-vps-one", state: "running", vpsAlias: "production-vps", ownerBotId: "b1", ownerName: "Rio", orphaned: false, inUse: false },
+        { name: "openindbot-vps-two", state: "exited", vpsAlias: "alpha-vps", ownerBotId: null, ownerName: null, orphaned: true, inUse: false },
       ],
       bot: { id: "b1", name: "Rio", vpsAlias: "alpha-vps" },
     };
@@ -62,8 +62,8 @@ describe("scrub", () => {
       available: true,
       problem: null,
       instances: [
-        { name: "openmausbot-vps-one", state: "running", ownerBotId: "b1", ownerName: "Rio", orphaned: false, inUse: false },
-        { name: "openmausbot-vps-two", state: "exited", ownerBotId: null, ownerName: null, orphaned: true, inUse: false },
+        { name: "openindbot-vps-one", state: "running", ownerBotId: "b1", ownerName: "Rio", orphaned: false, inUse: false },
+        { name: "openindbot-vps-two", state: "exited", ownerBotId: null, ownerName: null, orphaned: true, inUse: false },
       ],
       bot: { id: "b1", name: "Rio" },
     });
@@ -79,11 +79,11 @@ describe("scrub", () => {
   it("leaves the alias's text alone wherever it is not a withheld key", () => {
     // "vps" is a natural SSH alias; the bot's backend, a container name and a message say "vps" too.
     const payload = {
-      bot: { id: "b1", cloudBackend: "vps", vpsAlias: "vps", computers: [{ name: "openmausbot-vps-one" }] },
+      bot: { id: "b1", cloudBackend: "vps", vpsAlias: "vps", computers: [{ name: "openindbot-vps-one" }] },
       messages: [{ text: "Is the vps up?" }],
     };
     expect(scrub(payload)).toEqual({
-      bot: { id: "b1", cloudBackend: "vps", computers: [{ name: "openmausbot-vps-one" }] },
+      bot: { id: "b1", cloudBackend: "vps", computers: [{ name: "openindbot-vps-one" }] },
       messages: [{ text: "Is the vps up?" }],
     });
   });
@@ -107,7 +107,7 @@ describe("isJson", () => {
 
   it("matches structured JSON suffixes too", () => {
     expect(isJson("application/problem+json")).toBe(true);
-    expect(isJson("application/vnd.openmausbot.bot+json; charset=utf-8")).toBe(true);
+    expect(isJson("application/vnd.openindbot.bot+json; charset=utf-8")).toBe(true);
     expect(isJson("APPLICATION/PROBLEM+JSON")).toBe(true);
     expect(isJson("text/notjson")).toBe(false);
   });

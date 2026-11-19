@@ -104,8 +104,8 @@ describe("My Cloud holding a bot while it moves into a team", () => {
 describe("a bot moving from this computer to My Cloud", () => {
   const MY_CLOUD = { id: MY_CLOUD_TEAM, name: "My Cloud" };
   function here() {
-    const bots = new Map<string, Record<string, unknown>>([["scout", { id: "scout", name: "Scout" }], ["pip", { id: "pip", name: "Pip" }], ["maus", { id: "maus", name: "Maus", defaultBot: { v: 1 } }]]);
-    const groups = [{ id: "both", memberIds: ["scout", "pip"], dm: false }, { id: "alone", memberIds: ["scout", "maus"], dm: false }];
+    const bots = new Map<string, Record<string, unknown>>([["scout", { id: "scout", name: "Scout" }], ["pip", { id: "pip", name: "Pip" }], ["ind", { id: "ind", name: "Ind", defaultBot: { v: 1 } }]]);
+    const groups = [{ id: "both", memberIds: ["scout", "pip"], dm: false }, { id: "alone", memberIds: ["scout", "ind"], dm: false }];
     const routines = [{ id: "brief", botId: "scout", enabled: true }];
     const removed: string[] = [];
     const moves = createBotMoves({
@@ -125,7 +125,7 @@ describe("a bot moving from this computer to My Cloud", () => {
     expect(routines[0]!.enabled).toBe(false);
     expect(bots.get("scout")).toMatchObject({ hidden: true, movedTo: { state: "moved" } });
     expect(groups.find((group) => group.id === "both")!.memberIds, "the room goes on here without it").toEqual(["pip"]);
-    expect(groups.find((group) => group.id === "alone")!.memberIds, "only the helper every place has is left").toEqual(["scout", "maus"]);
+    expect(groups.find((group) => group.id === "alone")!.memberIds, "only the helper every place has is left").toEqual(["scout", "ind"]);
   });
 
   it("is here again as it went if My Cloud ends, its automations left off", async () => {

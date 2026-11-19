@@ -32,7 +32,7 @@ const bot = (fields: Partial<Bot>): Bot => ({
 });
 const payroll = bot({ id: "payroll", name: "Payroll", reportsTo: CARA.email, access: { everyone: "none", people: { [BOB.email]: "view" } } });
 const helpdesk = bot({ id: "helpdesk", name: "Helpdesk", access: { everyone: "chat", people: {} } });
-const bobsOwn = bot({ id: "bobs", name: "MausBot", defaultBot: { person: BOB.email } });
+const bobsOwn = bot({ id: "bobs", name: "IndBot", defaultBot: { person: BOB.email } });
 
 let host: HTMLDivElement;
 let root: Root;
@@ -78,7 +78,7 @@ afterEach(() => {
   setTeamPeople(null);
 });
 
-it("lists each team bot once with its owner and a plain summary, leaving out each person's own MausBot", async () => {
+it("lists each team bot once with its owner and a plain summary, leaving out each person's own IndBot", async () => {
   await overview();
   expect(botRows().map((row) => row.dataset.accessRow)).toEqual(["helpdesk", "payroll"]);
   expect(document.querySelector('[data-access-row="payroll"]')!.textContent).toContain("Owner: Cara");

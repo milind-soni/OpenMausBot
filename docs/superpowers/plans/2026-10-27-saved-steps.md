@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- Work only in `/Users/omkar/Desktop/openmaus/OpenGrokBot-learn-watch-talk` on `feat/learned-replay`. Never push. Every commit message ends with a blank line and `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
+- Work only in `/Users/omkar/Desktop/openind/OpenGrokBot-learn-watch-talk` on `feat/learned-replay`. Never push. Every commit message ends with a blank line and `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 - Comments follow `AGENTS.md`: only what code cannot say (vendor facts with version, wire doc comments in `shared/`, security invariants, known open risks). No narration.
 - The server runs on type stripping: type-only imports are `import type` (or inline `type`).
 - `server/index.ts` is at 16170 lines against a file-size ratchet of 16173 (`scripts/testing/file-size-ratchet.test.ts`). This plan adds exactly three lines there and removes one. `server/config.ts` (1365/1365), `src/components/ChatView.tsx` (1348/1348) and `src/state/store.tsx` (3456/3456) may not grow at all: their edits extend existing lines.
@@ -29,7 +29,7 @@
 - Never address a replayed step by `x`/`y`. A recipe never holds `element_token`, `element_index`, `pid`, `window_id` or `session`; targets are resolved fresh.
 - Wire field: `WireMessage.savedSteps?: { recipeId: string; learned?: true; replayed?: true }`. Setting: `config.json` `features.savedSteps`, on unless `false`.
 - Copy (English, `src/locales/en.json`): chips "Saved these steps · next time no AI" / "Repeated saved steps · no AI" with a "Forget" button; setting title "Repeat computer tasks without AI".
-- Phones are untouched (no `mausbot-mobile` work); the forget route is not added to `CLIENT_ALLOW`.
+- Phones are untouched (no `indbot-mobile` work); the forget route is not added to `CLIENT_ALLOW`.
 - Test commands: `pnpm exec vitest run <file>`; `pnpm typecheck`; `pnpm lint`; `pnpm i18n:check`.
 - Line numbers are those of commit `8a82b4a79`. A line an earlier task inserts shifts every later one, so find each edit by the code quoted beside it.
 
@@ -957,7 +957,7 @@ Expected: FAIL, file missing.
   FAKE_CLAUDE_REPLIES='["Typed hello world into TextEdit. Nothing else changed.","Typed hello world into TextEdit again.","Typed it once more.","Typed it with the switch off."]' \
     node --experimental-strip-types scripts/control-omb.ts launch
   ```
-  In a second terminal, with the printed `DATA` and `PORT`: write `$DATA/Library/Application Support/OpenMausBot/cua-connection.json` under `umask 077` as `{"mode":"embedded","status":"ready","socketPath":"$DATA/cua.sock","mcpCommand":"$PWD/server/testing/fake-cua-driver.ts","mcpArgs":["mcp"],"mcpEnv":{"FAKE_CUA_STATE":"$SCRATCH/cua-state.json","FAKE_CUA_LOG":"$SCRATCH/cua-calls.jsonl","FAKE_CUA_FAIL":"$SCRATCH/fail"}}`; `pnpm control:omb new-bot --name Typist --url http://127.0.0.1:$PORT` (BOT_ID; a new bot runs at Full access); `pnpm control:omb messages --bot BOT_ID --url …` gives `taskId` as THREAD_ID.
+  In a second terminal, with the printed `DATA` and `PORT`: write `$DATA/Library/Application Support/OpenIndBot/cua-connection.json` under `umask 077` as `{"mode":"embedded","status":"ready","socketPath":"$DATA/cua.sock","mcpCommand":"$PWD/server/testing/fake-cua-driver.ts","mcpArgs":["mcp"],"mcpEnv":{"FAKE_CUA_STATE":"$SCRATCH/cua-state.json","FAKE_CUA_LOG":"$SCRATCH/cua-calls.jsonl","FAKE_CUA_FAIL":"$SCRATCH/fail"}}`; `pnpm control:omb new-bot --name Typist --url http://127.0.0.1:$PORT` (BOT_ID; a new bot runs at Full access); `pnpm control:omb messages --bot BOT_ID --url …` gives `taskId` as THREAD_ID.
 - Rounds, each `send` followed by `wait` (`settled`), then `curl -s "http://127.0.0.1:$PORT/api/threads/$THREAD_ID/messages?limit=40"`:
   1. Learn: `send --text "Open TextEdit and type hello world"` → last bot text has `savedSteps.learned: true` (keep its `recipeId`); `prompts.jsonl` has 1 line; `$DATA/bots/BOT_ID/saved-steps.json` holds one recipe and `stat -f %Lp` prints `600`.
   2. Replay: `send --text "Please open TextEdit and type hello world."` → `prompts.jsonl` still 1 line; `cua-calls.jsonl` gains `list_apps`, `list_windows`, `get_window_state`, `click {"element_token":"s2-e2"}`, then the same three lookups and `type_text {"text":"hello world", …"element_token":"s3-e2"}`; the reply is "Typed hello world into TextEdit." with `savedSteps.replayed: true`.

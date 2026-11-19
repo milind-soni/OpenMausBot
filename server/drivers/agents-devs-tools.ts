@@ -1,4 +1,4 @@
-// The agents catalog's report_bug tool: a person's message that tags @devs is a bug report for the MausBot team, and
+// The agents catalog's report_bug tool: a person's message that tags @devs is a bug report for the IndBot team, and
 // the bot answering it writes the summary that goes with it.
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
@@ -19,7 +19,7 @@ export const DEVS_TOOL_DEFINITIONS = [
   {
     name: "report_bug",
     description:
-      "Send the person's bug report to the MausBot team (OpenMausBot's developers) with the app's diagnostics. Only for a message that tags @devs, once. No passwords, keys, tokens or file contents.",
+      "Send the person's bug report to the IndBot team (OpenIndBot's developers) with the app's diagnostics. Only for a message that tags @devs, once. No passwords, keys, tokens or file contents.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

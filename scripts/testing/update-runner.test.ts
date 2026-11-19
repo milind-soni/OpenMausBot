@@ -13,7 +13,7 @@ import { hostTimeout } from "../../server/testing/host-timeout.ts";
 const DEPLOY = join(import.meta.dirname, "..", "..", "deploy");
 const RUNNER = join(DEPLOY, "update-runner.sh");
 const FAKE = join(import.meta.dirname, "fake-compose-docker.mjs");
-const REPO = "ghcr.io/milind-soni/openmausbot";
+const REPO = "ghcr.io/milind-soni/openindbot";
 const posix = process.platform !== "win32";
 
 const id = (letter: string) => `sha256:${letter.repeat(64)}`;
@@ -42,10 +42,10 @@ function install(options: { stable?: Image; running?: Image; updater?: "real" | 
   const fake = join(root, "fake");
   const bin = join(root, "bin");
   const data = join(fake, "volumes", "deploy_data");
-  for (const dir of [bin, deploy, join(data, ".openmausbot"), join(state, "request"), join(state, "status")]) mkdirSync(dir, { recursive: true });
-  writeFileSync(join(data, ".openmausbot", "bots.json"), '[{"name":"Mira"}]');
+  for (const dir of [bin, deploy, join(data, ".openindbot"), join(state, "request"), join(state, "status")]) mkdirSync(dir, { recursive: true });
+  writeFileSync(join(data, ".openindbot", "bots.json"), '[{"name":"Mira"}]');
   writeFileSync(join(deploy, "docker-compose.yml"), "services: {}\n");
-  writeFileSync(join(deploy, ".env"), "DOMAIN=maus.example.test\n");
+  writeFileSync(join(deploy, ".env"), "DOMAIN=ind.example.test\n");
   const argv = join(root, "update-sh-argv");
   // A stand-in that says what a plain run would take, and notes every real run's arguments.
   const recorder = `[ "\${3:-}" = --print-target ] && { echo "${NEW.refs[0]} 0.1.151"; exit 0; }\nprintf '%s\\n' "$#:$*:\${OMB_UPDATE_BY_RUNNER:-}" >> "${argv}"\n`;
@@ -73,12 +73,12 @@ exec /usr/bin/stat "$@"
   if (options.earlierCopy) {
     mkdirSync(join(fake, "volumes", EARLIER_COPY), { recursive: true });
     writeFileSync(join(fake, "volumes", EARLIER_COPY, "the-last-good-data.txt"), "good");
-    labels[EARLIER_COPY] = ["com.mausbot.role=update-backup", "com.mausbot.project=deploy", "com.mausbot.data=deploy_data", `com.mausbot.image=${running.id}`];
+    labels[EARLIER_COPY] = ["com.indbot.role=update-backup", "com.indbot.project=deploy", "com.indbot.data=deploy_data", `com.indbot.image=${running.id}`];
   }
   if (options.runnerCopy) {
     mkdirSync(join(fake, "volumes", RUNNER_COPY), { recursive: true });
     writeFileSync(join(fake, "volumes", RUNNER_COPY, "the-last-good-data.txt"), "good");
-    labels[RUNNER_COPY] = ["com.mausbot.role=update-backup", "com.mausbot.project=deploy", "com.mausbot.data=deploy_data", `com.mausbot.image=${running.id}`, "com.mausbot.by=runner"];
+    labels[RUNNER_COPY] = ["com.indbot.role=update-backup", "com.indbot.project=deploy", "com.indbot.data=deploy_data", `com.indbot.image=${running.id}`, "com.indbot.by=runner"];
   }
   writeFileSync(join(fake, "state.json"), JSON.stringify({
     serial: 1, composeReadsPin: true, defaultImage: `${REPO}:latest`, dataVolume: "deploy_data", images, volumeLabels: labels,
@@ -256,7 +256,7 @@ describe.skipIf(!posix)("deploy/update-runner.sh", { timeout: hostTimeout(60_000
     expect(box.last()?.result).toBe("updated");
     const made = box.copies().filter((name) => name !== EARLIER_COPY && name !== RUNNER_COPY);
     expect(made).toHaveLength(1);
-    expect(box.fakeState().volumeLabels[made[0]!]).toContain("com.mausbot.by=runner");
+    expect(box.fakeState().volumeLabels[made[0]!]).toContain("com.indbot.by=runner");
     expect(readFileSync(join(box.fake, "volumes", made[0]!, "the-last-good-data.txt"), "utf8")).toBe("DAMAGED");
     // The good copy made before it survives this update, and the person's own copy any number of them.
     for (const kept of [RUNNER_COPY, EARLIER_COPY]) expect(readFileSync(join(box.fake, "volumes", kept, "the-last-good-data.txt"), "utf8"), kept).toBe("good");
@@ -317,7 +317,7 @@ describe.skipIf(!posix)("deploy/update-runner.sh", { timeout: hostTimeout(60_000
 
   it("lets a person's own run use links in the install's folder, as before", () => {
     const box = install();
-    writeFileSync(join(box.root, "env-real"), "DOMAIN=maus.example.test\n");
+    writeFileSync(join(box.root, "env-real"), "DOMAIN=ind.example.test\n");
     rmSync(join(box.deploy, ".env"));
     symlinkSync(join(box.root, "env-real"), join(box.deploy, ".env"));
     const done = box.personRun();
@@ -522,13 +522,13 @@ describe.skipIf(!posix)("deploy/update-runner.sh", { timeout: hostTimeout(60_000
     expect(mode(join(box.state, "update.sh"))).toBe(0o755);
     expect(readFileSync(join(box.state, "update.sh"), "utf8")).toBe(readFileSync(join(DEPLOY, "update.sh"), "utf8"));
     expect(readFileSync(victim, "utf8")).toBe("untouched");
-    expect(readFileSync(join(systemd, "openmausbot-update.path"), "utf8")).toContain(`PathExists=${box.state}/request/request\nPathChanged=${box.policy}\nPathChanged=${box.deploy}/.env\n`);
-    const service = readFileSync(join(systemd, "openmausbot-update.service"), "utf8");
-    expect(service).toContain(`ExecStart=${sbin}/openmausbot-update-runner`);
+    expect(readFileSync(join(systemd, "openindbot-update.path"), "utf8")).toContain(`PathExists=${box.state}/request/request\nPathChanged=${box.policy}\nPathChanged=${box.deploy}/.env\n`);
+    const service = readFileSync(join(systemd, "openindbot-update.service"), "utf8");
+    expect(service).toContain(`ExecStart=${sbin}/openindbot-update-runner`);
     // Root's settings at the install, and only plain values: one that is not is left out, `%` included (systemd expands it).
     expect(service).toContain(`Environment=HOME=/root OMB_INSTALL_DIR=${box.deploy} OMB_STABLE_URL=file:///srv/stable.json\n`);
-    expect(readFileSync(join(sbin, "openmausbot-update-runner"), "utf8")).toBe(readFileSync(RUNNER, "utf8"));
-    expect(tools.log()).toContain("systemctl enable --now openmausbot-update.path");
+    expect(readFileSync(join(sbin, "openindbot-update-runner"), "utf8")).toBe(readFileSync(RUNNER, "utf8"));
+    expect(tools.log()).toContain("systemctl enable --now openindbot-update.path");
     expect(box.runnerInfo()).toEqual({ layout: "compose", dir: box.deploy, held: false, release: true });
     // One install per server: another folder is refused while this one has the button.
     const other = join(box.root, "other");
@@ -548,10 +548,10 @@ describe.skipIf(!posix)("deploy/update-runner.sh", { timeout: hostTimeout(60_000
     expect(elsewhere.status).toBe(1);
     expect(elsewhere.stderr).toContain(`updates ${box.deploy}, not ${other}, so nothing was removed`);
     expect(existsSync(join(box.state, "update.sh"))).toBe(true);
-    expect(existsSync(join(systemd, "openmausbot-update.path"))).toBe(true);
+    expect(existsSync(join(systemd, "openindbot-update.path"))).toBe(true);
     const removed = spawnSync("sh", [RUNNER, "--remove", "--dir", box.deploy], { encoding: "utf8", env, timeout: 30_000 });
     expect(removed.status, removed.stdout + removed.stderr).toBe(0);
-    for (const gone of [join(systemd, "openmausbot-update.path"), join(systemd, "openmausbot-update.service"), join(sbin, "openmausbot-update-runner"),
+    for (const gone of [join(systemd, "openindbot-update.path"), join(systemd, "openindbot-update.service"), join(sbin, "openindbot-update-runner"),
       join(box.deploy, "docker-compose.override.yml"), box.state]) expect(existsSync(gone), gone).toBe(false);
     expect(existsSync(join(box.deploy, "update.sh"))).toBe(true);
   });

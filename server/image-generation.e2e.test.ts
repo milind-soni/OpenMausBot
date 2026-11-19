@@ -41,7 +41,7 @@ interface ImageFixture {
 async function withImageFixture(test: (f: ImageFixture) => Promise<void>) {
   // A fake image URL exported in the shell would configure Custom in every fixture.
   const session = await launchVerificationServer({ ...process.env, OMB_FAKE_IMAGE_API_URL: undefined }, undefined, undefined, undefined, undefined, { scripted: true });
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } });
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENINDBOT_URL: session.info.url } });
   const api = (path: string, body?: unknown, method = "POST") =>
     request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url);
   let images: FakeImageApi | undefined;
@@ -148,7 +148,7 @@ it("makes no image for a goal's coordinator, whose files never reach the room's 
   f.savePlan({
     [lead.id]: {
       steps: [{ tool: "generate_image", arguments: { prompt: "a private sketch" }, expectError: true }],
-      reply: "Done.\n<openmaus-goal>{\"status\":\"completed\",\"detail\":\"Sketch made.\"}</openmaus-goal>",
+      reply: "Done.\n<openind-goal>{\"status\":\"completed\",\"detail\":\"Sketch made.\"}</openind-goal>",
     },
   });
   const room = await newRoom(f, "Goal room", lead, helper);

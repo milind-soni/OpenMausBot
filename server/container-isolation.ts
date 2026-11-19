@@ -3,7 +3,7 @@ import type { Runtime } from "./container-computer.ts";
 import { MAX_DESKTOP_CPUS, MIN_DESKTOP_CPUS, MIN_DESKTOP_MEMORY_GB } from "./container-limits.ts";
 
 /** The run flags a desktop was made with. A desktop made under other flags is updated like one on an older image. */
-export const DESKTOP_FLAGS_LABEL = "com.openmausbot.desktop-flags";
+export const DESKTOP_FLAGS_LABEL = "com.openindbot.desktop-flags";
 export const DESKTOP_FLAGS_VERSION = "2";
 
 const GIB = 1024 * 1024 * 1024;
@@ -41,7 +41,7 @@ const GUEST_IDS_SCRIPT = [
 ].join("\n");
 
 export function guestIdsCommand(ids: HostUser): string[] {
-  return ["sh", "-c", GUEST_IDS_SCRIPT, "openmausbot-desktop", String(ids.uid), String(ids.gid)];
+  return ["sh", "-c", GUEST_IDS_SCRIPT, "openindbot-desktop", String(ids.uid), String(ids.gid)];
 }
 
 /** Docker Engine on Linux, and Podman run by root (whose keep-id is the host's own id map), run the desktop's root as the

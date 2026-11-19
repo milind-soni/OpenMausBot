@@ -38,7 +38,7 @@ function selfHosted({ scopes = ["admin", "client"], own = true, extra = {}, mcp 
     const route = new URL(url).pathname;
     const owner = state.own && state.scopes.includes("admin");
     if (route === "/api/auth/session") return json({ kind: "session", id: state.sessionId, scopes: state.scopes, ...(owner ? { own: true, lending: { sharedComputers: true, lendingDetails: true, fileEdits: true, ...(mcp ? { lentMcp: true } : {}), ...(mcp && caller ? { mcpCaller: true } : {}) } } : {}), ...state.extra });
-    if (route === "/.well-known/openmausbot/environment") return json({ environmentId: state.environmentId, capabilities: { remoteSessions: true } });
+    if (route === "/.well-known/openindbot/environment") return json({ environmentId: state.environmentId, capabilities: { remoteSessions: true } });
     const body = init?.body ? JSON.parse(init.body) : {};
     if (route === "/api/shared-computers/connect") { state.connects.push(body); return json({ ok: true }); }
     if (route.endsWith("/poll")) {

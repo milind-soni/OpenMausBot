@@ -7,7 +7,7 @@ import { MASCOT_FACE_COLORS, type MascotFaceColor } from "../../shared/bot-avata
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { MAUS_COLOR_NAMES, type MausColor } from "@/lib/mascot";
+import { IND_COLOR_NAMES, type IndColor } from "@/lib/mascot";
 import { matchingRows, openOtherPlaceBot, placedKey, usePlacesTogether, type BotHome, type PlaceBotRow, type PlacesTogetherState } from "@/lib/places-together";
 import { useSidebarDensity } from "@/lib/sidebar-preferences";
 import { BotAvatar } from "./Avatar";
@@ -38,7 +38,7 @@ export function OwnBotHomeMark() {
 }
 
 function avatarOf(row: PlaceBotRow) {
-  const color = (MAUS_COLOR_NAMES as readonly string[]).includes(row.color ?? "") ? row.color as MausColor : "green";
+  const color = (IND_COLOR_NAMES as readonly string[]).includes(row.color ?? "") ? row.color as IndColor : "green";
   const body = (BOT_BODY_IDS as readonly string[]).includes(row.mascotBody ?? "") ? row.mascotBody as BotBodyId : null;
   const face = (MASCOT_FACE_COLORS as readonly string[]).includes(row.mascotFaceColor ?? "") ? row.mascotFaceColor as MascotFaceColor : null;
   return { name: row.name, color, mascotBody: body, mascotFaceColor: face };

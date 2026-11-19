@@ -54,7 +54,7 @@ export interface MeetingEngine {
 }
 
 const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
-const ROOT = "$HOME/.mausbot-meet";
+const ROOT = "$HOME/.indbot-meet";
 const CHUNK = 48_000;
 
 export class MeetingEngineError extends Error {}

@@ -28,7 +28,7 @@ function dial(address: string, port: number, path: string, headers: Record<strin
 async function untilShared(port: number, host: string) {
   let descriptor = { status: 0, headers: {}, body: "" } as Awaited<ReturnType<typeof dial>>;
   for (let attempt = 0; attempt < 50 && descriptor.status !== 200; attempt++) {
-    descriptor = await dial(standIn!, port, "/.well-known/openmausbot/environment", { host }).catch(() => descriptor);
+    descriptor = await dial(standIn!, port, "/.well-known/openindbot/environment", { host }).catch(() => descriptor);
     if (descriptor.status !== 200) await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return descriptor;
@@ -85,7 +85,7 @@ describe.skipIf(!standIn)("a server shared on the tailnet", () => {
   it("is shared when the desktop app asks, and the owner's desktop capability means nothing from the tailnet", async () => {
     const owner = "o".repeat(43);
     const realFetch = globalThis.fetch;
-    globalThis.fetch = (input, init = {}) => realFetch(input, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openmausbot-desktop-owner": owner } });
+    globalThis.fetch = (input, init = {}) => realFetch(input, { ...init, headers: { ...Object.fromEntries(new Headers(init.headers)), "x-openindbot-desktop-owner": owner } });
     const fixture = await launchVerificationServer({ OMB_TEST_DESKTOP_OWNER_TOKEN: owner, OMB_TEST_TAILNET_STAND_IN: standIn!, OMB_TEST_DESKTOP_TAILNET_SHARE: JSON.stringify({ name: NAME, addresses: [standIn] }) });
     const port = Number(new URL(fixture.info.url).port);
     const host = `${NAME}:${port}`;
@@ -93,7 +93,7 @@ describe.skipIf(!standIn)("a server shared on the tailnet", () => {
       expect((await untilShared(port, host)).status).toBe(200);
       const offer = await (await fetch(`${fixture.info.url}/api/auth/pairing`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).json() as { code: string; url: string | null };
       expect(offer.url).toBe(`http://${host}/pair#code=${offer.code}`);
-      expect((await dial(standIn!, port, "/api/bots", { host, "x-openmausbot-desktop-owner": owner })).status).toBe(403);
+      expect((await dial(standIn!, port, "/api/bots", { host, "x-openindbot-desktop-owner": owner })).status).toBe(403);
       const paired = JSON.parse((await dial(standIn!, port, "/api/auth/pair", { host, "content-type": "application/json" }, "POST", JSON.stringify({ code: offer.code, label: "Laptop" }))).body) as { token: string };
       expect((await dial(standIn!, port, "/api/bots", { host, authorization: `Bearer ${paired.token}` })).status).toBe(200);
     } finally {

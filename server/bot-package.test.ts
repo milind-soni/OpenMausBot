@@ -4,7 +4,7 @@ import { parseBotPackage, renderBotPackageMarkdown } from "./bot-package.ts";
 import { memberFromAgent } from "./package-import.ts";
 
 const validPackage: any = {
-  format: "openmaus.package",
+  format: "openind.package",
   version: 1,
   package: {
     id: "research-desk",
@@ -13,7 +13,7 @@ const validPackage: any = {
     tagline: "Turn a question into a sourced brief.",
     summary: "A small research team.",
     category: "Research",
-    author: { name: "OpenMausBot" },
+    author: { name: "OpenIndBot" },
     license: "MIT",
     outcomes: ["Produce a sourced brief."],
     setupMinutes: 3,
@@ -158,7 +158,7 @@ describe("bot packages", () => {
       name: "Morning brief",
       agent: "lead",
       prompt: "Summarize the overnight queue.",
-      runOn: "maus",
+      runOn: "ind",
       schedule: { type: "daily", time: "09:00", weekdays: [1] },
       durationMinutes: 5,
       enabledAfterInstall: false,
@@ -184,7 +184,7 @@ describe("bot packages", () => {
       ...validPackage,
       package: { ...validPackage.package, routines: [{
         key: "monthly", name: "Monthly report", agent: "lead", prompt: "Prepare the report.",
-        runOn: "maus", schedule, durationMinutes: 30, enabledAfterInstall: false,
+        runOn: "ind", schedule, durationMinutes: 30, enabledAfterInstall: false,
       }] },
     };
     const parsed = parseBotPackage(document);
@@ -208,7 +208,7 @@ describe("bot packages", () => {
           name: "Frequent check",
           agent: "lead",
           prompt: "Check the queue.",
-          runOn: "maus",
+          runOn: "ind",
           schedule: {
             type: "interval",
             everyMinutes: 15,

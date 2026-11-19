@@ -209,7 +209,7 @@ async function sweepRun(dir: string, tag: string, self: SweepSelf & { boot: stri
   let left = await theirs();
   if (left === null) return;
   if (left.length) {
-    log(`Stopping ${left.length} process${left.length === 1 ? "" : "es"} an earlier OpenMausBot server of this data folder started and left running.`);
+    log(`Stopping ${left.length} process${left.length === 1 ? "" : "es"} an earlier OpenIndBot server of this data folder started and left running.`);
     signal(left, "SIGTERM");
     for (const until = Date.now() + 1_500; Date.now() < until && left.length; ) {
       await new Promise((resolve) => setTimeout(resolve, 100));

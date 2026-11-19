@@ -20,7 +20,7 @@ const PHONE_SESSION = { id: "phone-session", label: "Omkar's iPhone" } as Sessio
 const DESK_SESSION = { id: "desk-session", label: "Laptop" } as SessionRecord;
 const session = (record: SessionRecord): RequestAuth => ({ kind: "session", session: record, via: "bearer", scopes: ["admin", "client"] });
 const loopback: RequestAuth = { kind: "loopback", scopes: ["admin", "client"] };
-const chief = { id: "chief", name: "MausBot", color: "teal", chiefOfStaff: true } as BotRecord;
+const chief = { id: "chief", name: "IndBot", color: "teal", chiefOfStaff: true } as BotRecord;
 
 const dirs: string[] = [];
 afterEach(async () => { for (const dir of dirs.splice(0)) await removeTempDir(dir); });

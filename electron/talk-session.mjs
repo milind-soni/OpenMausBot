@@ -4,15 +4,15 @@ import { TalkServerError } from "./talk-server.mjs";
 export const TALK_TIMING = Object.freeze({ replyHideMs: 12_000, noticeHideMs: 4_000, stillWorkingMs: 120_000, hoverRecheckMs: 500, maxListenMs: 60_000 });
 
 export const TALK_TEXT = Object.freeze({
-  busy: "Voice is in use in MausBot",
-  serverDown: "Open MausBot to talk",
-  starting: "MausBot is still starting. Try again in a moment.",
-  noMausbot: "Set up MausBot first, then try again.",
-  moved: "MausBot lives on My Cloud now — talk to it there",
+  busy: "Voice is in use in IndBot",
+  serverDown: "Open IndBot to talk",
+  starting: "IndBot is still starting. Try again in a moment.",
+  noIndbot: "Set up IndBot first, then try again.",
+  moved: "IndBot lives on My Cloud now — talk to it there",
   permission: "Talking needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
   dictationOff: "Turn on Dictation in System Settings → Keyboard, then try again.",
   unavailable: "Talking couldn't start. Try again.",
-  failed: "MausBot couldn't take that · Open chat",
+  failed: "IndBot couldn't take that · Open chat",
 });
 
 const SPEECH_PROBLEMS = new Map([
@@ -28,11 +28,11 @@ const SPEECH_PROBLEMS = new Map([
 const SERVER_NOTICES = new Map([
   ["server-down", TALK_TEXT.serverDown],
   ["starting", TALK_TEXT.starting],
-  ["no-mausbot", TALK_TEXT.noMausbot],
+  ["no-indbot", TALK_TEXT.noIndbot],
   ["moved", TALK_TEXT.moved],
 ]);
 
-const SERVER_NOTICE_KEYS = new Map([["server-down", "native.talk.openMausBot"], ["starting", "native.talk.starting"], ["no-mausbot", "native.talk.setUpFirst"], ["moved", "native.talk.movedToCloud"]]);
+const SERVER_NOTICE_KEYS = new Map([["server-down", "native.talk.openIndBot"], ["starting", "native.talk.starting"], ["no-indbot", "native.talk.setUpFirst"], ["moved", "native.talk.movedToCloud"]]);
 const SPEECH_KEYS = new Map([["speech-not-authorized", "native.talk.permissions"], ["mic-failed", "native.talk.unavailable"], ["recognizer-unavailable", "native.talk.unavailable"], ["dictation-disabled", "native.talk.dictationOff"], ["helper-build-failed", "native.talk.unavailable"], ["helper-start-failed", "native.talk.unavailable"], ["unsupported-platform", "native.talk.unavailable"]]);
 
 const UNDER_WAY = new Set(["listening", "sending", "thinking"]);

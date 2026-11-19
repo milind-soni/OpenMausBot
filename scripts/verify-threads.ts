@@ -50,7 +50,7 @@ try {
   ].join("\n"), { mode: 0o700 });
   await api("PATCH", "/api/instances/claude", { cli: wrapper });
   ui = await mountPreview(fixture, {
-    entry: "/scripts/testing/threads-preview.tsx", route: "/__threads.html", title: "Isolated OpenMaus Threads",
+    entry: "/scripts/testing/threads-preview.tsx", route: "/__threads.html", title: "Isolated OpenInd Threads",
   });
   console.log(JSON.stringify({ ...fixture.info, previewUrl: ui.previewUrl, finishGate }));
   await parkUntilSignal();

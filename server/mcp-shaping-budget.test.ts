@@ -15,7 +15,7 @@ describe("held-result metadata obeys the query budget", () => {
     const answer = answerQuery(store, { result: handle, query: "@" }, budget);
     expect(answer.isError).toBeUndefined();
     expect(answer.content[0]!.text.length).toBeLessThanOrEqual(budget);
-    expect(answer.content[0]!.text).toContain("TRUNCATED by OpenMausBot");
+    expect(answer.content[0]!.text).toContain("TRUNCATED by OpenIndBot");
     expect(answer.content[0]!.text).toContain(`"${handle}"`);
     expect(answer.content[0]!.text).toContain("Narrow the query");
     expect(store.get(handle)!.value).toBe(value);

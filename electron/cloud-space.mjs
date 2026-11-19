@@ -2,7 +2,7 @@
 // steps of its own), or never fits on this plan. The one-time move measures before it sends files and attachments.
 const SPACE_MARGIN = 256 * 1024 ** 2;
 const GB = 1024 ** 3;
-/** Must match openmaus-cloud's VOLUME_EXTEND step. */
+/** Must match openind-cloud's VOLUME_EXTEND step. */
 const DISK_STEP_GB = 10;
 const count = (value) => Number.isSafeInteger(value) && value >= 0;
 

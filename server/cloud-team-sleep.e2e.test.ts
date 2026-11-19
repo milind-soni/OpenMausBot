@@ -46,7 +46,7 @@ const askToSleep = (idleMinutes?: number) => admin("POST", "/api/cloud/power/sle
 
 /** The Admin's signed pairing with a member claim, redeemed into that member's bearer. */
 async function pair(person: { email: string; role: "owner" | "member" }) {
-  const body = JSON.stringify({ label: "OpenMausBot app (Team Cloud)", ttlSeconds: 300, team: TEAM, member: person });
+  const body = JSON.stringify({ label: "OpenIndBot app (Team Cloud)", ttlSeconds: 300, team: TEAM, member: person });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const minted = await fetch(`${base}/api/cloud/pairing`, { method: "POST", body, headers: { ...EDGE, "content-type": "application/json",
     "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce, "x-omb-cloud-signature": `v1=${cloudPairingSignature(secret, timestamp, nonce, body)}` } });

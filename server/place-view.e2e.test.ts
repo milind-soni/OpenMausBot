@@ -12,7 +12,7 @@ import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
-/** The Admin relay's refusal envelope (boatError in openmaus-cloud). */
+/** The Admin relay's refusal envelope (boatError in openind-cloud). */
 const refusal = (status: number, code: string, message: string) =>
   ({ status, body: { ok: false, type: "sandbox.error", status, code, message, error: { code, message, status } } });
 const HOURS = refusal(429, "limit_reached", "Your Pro plan's 50 cloud computer hours for October are used up. They reset on 1 November.");
@@ -221,7 +221,7 @@ describe("a cloud computer that can't start, against the real server", () => {
     createAnswer = refusal(402, "subscription_inactive", "Cloud computers are included with an active Cloud subscription.");
     await send(bot.id, bot.threadId, "Open the desktop.");
     const row = await failedRow(bot.threadId);
-    expect(row.tool.name).toBe("error: Your MausBot Cloud plan has ended, so cloud desktops are off. See your plan on the Plan page.");
+    expect(row.tool.name).toBe("error: Your IndBot Cloud plan has ended, so cloud desktops are off. See your plan on the Plan page.");
     expect(row.tool.place).toEqual({ state: "cc-ended", params: { bot: "Ended Bot" }, source: "works-on" });
   }, 90_000);
 

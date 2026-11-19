@@ -90,7 +90,7 @@ describe("the pin", () => {
 
   it("stages both mac arches and x64 elsewhere", () => {
     expect(targetsFor("darwin", {})).toEqual([{ platform: "darwin", arch: "arm64" }, { platform: "darwin", arch: "x64" }]);
-    expect(targetsFor("darwin", { OPENMAUSBOT_CUA_ARCHES: "arm64", OPENMAUSBOT_CUA_ARCHES_PARTIAL: "1" })).toEqual([{ platform: "darwin", arch: "arm64" }]);
+    expect(targetsFor("darwin", { OPENINDBOT_CUA_ARCHES: "arm64", OPENINDBOT_CUA_ARCHES_PARTIAL: "1" })).toEqual([{ platform: "darwin", arch: "arm64" }]);
     expect(targetsFor("linux", {})).toEqual([{ platform: "linux", arch: "x64" }]);
     // The Docker build stages the image's CPU, which need not be the build host's (linux/arm64 under buildx).
     expect(targetsFor("linux", { OMB_DUCKDB_ARCH: "arm64" })).toEqual([{ platform: "linux", arch: "arm64" }]);
@@ -181,7 +181,7 @@ describe("staging from an install", () => {
       return directory;
     };
     const staged = await stageDuckdb({ root, targets: [{ platform: "win32", arch: "x64" }], pack, sign: false, log: null });
-    const cache = path.join(root, "node_modules", ".cache", "openmausbot", "duckdb");
+    const cache = path.join(root, "node_modules", ".cache", "openindbot", "duckdb");
     // Both native packages the host lacks are fetched, each at its own pin.
     expect(packed).toEqual([
       { name: "node-bindings-win32-x64", version: PIN, cache, scope: "@duckdb" },

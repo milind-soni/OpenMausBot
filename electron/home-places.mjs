@@ -87,7 +87,7 @@ export function createHomePlaces({ store, environments: read, persist, makeId, h
       if (key === "team") places.left(entry?.name ?? place?.name);
       if (current()[key] === place?.id) places.remember(null);
     },
-    /** The MausBot Cloud sign-in changed: a connected session's teams and other Clouds are the saved places of theirs
+    /** The IndBot Cloud sign-in changed: a connected session's teams and other Clouds are the saved places of theirs
      * (one it no longer lists is gone; a team with its name for the line), in the colours the Admin keeps for them;
      * anything else changes nothing. An Admin that lists no Clouds leaves the Cloud places as they were. */
     sync(state) {

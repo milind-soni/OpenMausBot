@@ -6,7 +6,7 @@ import type { RoutineRun } from "./routines.ts";
 
 const MINUTE = 60_000;
 const run = (id: string, status: RoutineRun["status"], more: Partial<RoutineRun> = {}): RoutineRun => ({
-  id, routineId: "r", routineName: "Check", target: "bot", botId: "bot-1", runOn: "maus", scheduledFor: 0, status, manual: false, createdAt: 0, ...more,
+  id, routineId: "r", routineName: "Check", target: "bot", botId: "bot-1", runOn: "ind", scheduledFor: 0, status, manual: false, createdAt: 0, ...more,
 });
 
 describe("the run an occurrence is skipped behind", () => {

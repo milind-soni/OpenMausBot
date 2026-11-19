@@ -76,10 +76,10 @@ describe("reading what a Bot wrote", () => {
     expect(refused({ format: GROK_EXPORT_FORMAT, version: 2, bots: [{ name: "x" }] }).code).toBe("newerVersion");
   });
 
-  it("reads a bare Bot file, and the earlier openmaus.grok/1 export", () => {
+  it("reads a bare Bot file, and the earlier openind.grok/1 export", () => {
     expect(parseGrokExport(JSON.stringify({ name: "Bare", instructions: "x" }))[0]!.name).toBe("Bare");
     const old = {
-      format: "openmaus.grok/1", source: "Grok Bot", name: "Old", description: "Does things.", instructions: "Be old.",
+      format: "openind.grok/1", source: "Grok Bot", name: "Old", description: "Does things.", instructions: "Be old.",
       skills: [{ name: "s", description: "d", body: "the body" }],
       routines: [{ name: "r", schedule: "0 9 * * 1-5", cron: "", timeZone: "Asia/Tokyo", prompt: "Go." }],
       plugins: ["Slack"], memories: ["a"],
@@ -148,7 +148,7 @@ describe("what an export may never bring", () => {
     expect(() => parsePackageDocument(document, { trust: "file" })).not.toThrow();
   });
   it("writes back a document that reads as the same Bots, with nothing the parser does not read", () => {
-    const bots = parseGrokExport(JSON.stringify({ ...EXPORT, stray: "x", bots: [{ ...BOT, extra: { anything: 1 } }, { name: "Maus", memories: ["likes cheese"] }] }));
+    const bots = parseGrokExport(JSON.stringify({ ...EXPORT, stray: "x", bots: [{ ...BOT, extra: { anything: 1 } }, { name: "Ind", memories: ["likes cheese"] }] }));
     const written = JSON.stringify(grokExportDocument(bots));
     expect(parseGrokExport(written)).toEqual(bots);
     expect(written).not.toMatch(/stray|anything|real-secret-value|sk-abcdefghij/);

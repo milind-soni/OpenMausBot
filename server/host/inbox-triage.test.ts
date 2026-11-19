@@ -144,7 +144,7 @@ describe("the brief on a non-Claude engine, sorted by the helper models", () => 
       ...(helpers ? { inbox: createInboxTriage({ decider: helpers.decider, extractor: helpers.extractor, config: () => HELPERS_ON }) } : {}),
     });
     const routine: Routine = {
-      id: "watch", name: "Keep an eye on my day", prompt: "Check my day.", target: "bot", botId: chief.id, runOn: "maus", enabled: true,
+      id: "watch", name: "Keep an eye on my day", prompt: "Check my day.", target: "bot", botId: chief.id, runOn: "ind", enabled: true,
       schedule: { type: "interval", everyMinutes: 15, anchorAt: 0 }, durationMinutes: 30, nextRunAt: null, createdAt: now - 60 * MINUTE, updatedAt: 0,
       checks: ["calendar", "mail", "runs"], access: "read-and-draft", deliver: "brief",
     };

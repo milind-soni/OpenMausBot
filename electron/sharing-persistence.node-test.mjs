@@ -24,7 +24,7 @@ function fixture(t) {
     async fetch(url, { signal }) {
       const route = new URL(url).pathname;
       if (route === "/api/auth/session") return Response.json({ kind: "session", id: grant.sessionId, cloudHome: true, scopes: ["admin"] });
-      if (route === "/.well-known/openmausbot/environment") return Response.json({ environmentId: grant.environmentId, capabilities: { sharedComputers: true } });
+      if (route === "/.well-known/openindbot/environment") return Response.json({ environmentId: grant.environmentId, capabilities: { sharedComputers: true } });
       if (route === "/api/shared-computers/connect") connects.push(url);
       if (route.endsWith("/poll")) await new Promise((resolve, reject) => {
         polls.push(signal);

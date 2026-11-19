@@ -15,7 +15,7 @@ const state = { status: "connected", teams: [
   { id: "team-waiting", name: "Waiting", machine: { origin: OTHER, status: "provisioning" } },
 ] };
 const BOTS = [
-  { id: "maus-bot-1", name: "MausBot", defaultBot: {} },
+  { id: "ind-bot-1", name: "IndBot", defaultBot: {} },
   { id: "atlas-bot-1", name: "Atlas" },
   { id: "chief-bot-1", name: "Luna", chiefOfStaff: true },
   { id: "old-bot-01", name: "Hidden", hidden: true },
@@ -51,7 +51,7 @@ test("lists My Cloud's bots to that team's own page, each with why it can't go, 
   try {
     const list = handlers.get("cloud-send:team-bring");
     assert.deepEqual(await list(OWN), { team: { id: "team-acme", name: "Acme", ready: true }, bots: [
-      { id: "maus-bot-1", name: "MausBot", stays: "default" }, { id: "atlas-bot-1", name: "Atlas" }, { id: "chief-bot-1", name: "Luna", stays: "chief" },
+      { id: "ind-bot-1", name: "IndBot", stays: "default" }, { id: "atlas-bot-1", name: "Atlas" }, { id: "chief-bot-1", name: "Luna", stays: "chief" },
     ] });
     assert.deepEqual(await list({ origin: "https://stranger.example.test" }), { bots: [] }, "a page that isn't one of the person's teams");
     assert.deepEqual(await list({}), { bots: [] }, "a sender that isn't the window's own page");
@@ -82,7 +82,7 @@ test("moves nothing until the person agrees in main's own confirm, which says th
     assert.equal(journal.value, null);
     assert.equal(asked[0].message, "Move Atlas to Acme?");
     assert.match(asked[0].detail, /no way back/);
-    assert.match(asked[0].detail, /what Atlas remembers, your connections, and MausBot/);
+    assert.match(asked[0].detail, /what Atlas remembers, your connections, and IndBot/);
     assert.deepEqual(asked[0].buttons, ["Move to Acme", "Cancel"]);
   } finally { done(); }
 });
@@ -102,7 +102,7 @@ test("refuses what can't go, a bot My Cloud doesn't have, a team not ready and a
   const { handlers, asked, journal, done } = fixture({ agrees: true });
   try {
     const move = handlers.get("cloud-send:team-bring-move");
-    await assert.rejects(move(OWN, "maus-bot-1"), /Choose one of your bots/);
+    await assert.rejects(move(OWN, "ind-bot-1"), /Choose one of your bots/);
     await assert.rejects(move(OWN, "chief-bot-1"), /Choose one of your bots/);
     await assert.rejects(move(OWN, "elsewhere-1"), /Choose one of your bots/);
     await assert.rejects(move({ origin: OTHER }, "atlas-bot-1"), /Open the team/);
@@ -143,13 +143,13 @@ test("the native confirm and IPC refusals follow the app's current language", as
         "Só você e os administradores de Acme podem usar Atlas até você compartilhar.",
         "Vão com Atlas: instruções, habilidades, arquivos, rotinas e suas conversas com Atlas",
         "Suas conversas continuam privadas lá: só você pode vê-las.",
-        "Ficam no My Cloud: o que Atlas lembra, suas conexões e o MausBot",
+        "Ficam no My Cloud: o que Atlas lembra, suas conexões e o IndBot",
         "Não é possível desfazer: você não pode mover o bot de volta para o My Cloud.",
       ].join("\n\n"),
       buttons: ["Mover para Acme", "Cancelar"],
     });
     await assert.rejects(move({}, "atlas-bot-1"), { message: "Abra a equipe para a qual você quer mover o bot." });
-    await assert.rejects(move(OWN, "maus-bot-1"), { message: "Escolha um dos seus bots para mover." });
+    await assert.rejects(move(OWN, "ind-bot-1"), { message: "Escolha um dos seus bots para mover." });
   } finally { done(); }
 });
 

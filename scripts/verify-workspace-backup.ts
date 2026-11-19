@@ -49,7 +49,7 @@ async function restartFixture(fixture: VerificationServer): Promise<ChildProcess
       try {
         const response = await fetch(`${fixture.info.url}/api/health`, { signal: AbortSignal.timeout(1_000) });
         const health = await response.json() as { app?: string; pid?: number };
-        if (response.ok && health.app === "openmausbot" && health.pid === child.pid) return child;
+        if (response.ok && health.app === "openindbot" && health.pid === child.pid) return child;
       } catch { /* Only this owned child can satisfy the PID handshake. */ }
       if (Date.now() >= deadline) throw new Error(`Restored fixture did not start; see ${fixture.info.logPath}`);
       await new Promise((done) => setTimeout(done, 100));

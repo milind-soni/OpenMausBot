@@ -1,5 +1,5 @@
-// Server: --url, --port, OPENMAUSBOT_URL or OMB_PORT, else the desktop ports. A credential never travels while a server
-// is being looked for; it comes from OPENMAUSBOT_TOKEN or --token-file only (a command line leaks).
+// Server: --url, --port, OPENINDBOT_URL or OMB_PORT, else the desktop ports. A credential never travels while a server
+// is being looked for; it comes from OPENINDBOT_TOKEN or --token-file only (a command line leaks).
 import { readFileSync } from "node:fs";
 
 import { EXIT, flag, HeadlessError, usageError, type Flags } from "./args.ts";
@@ -27,7 +27,7 @@ export async function loadMcp(): Promise<McpModule> {
     return await mcpModule;
   } catch (error) {
     mcpModule = undefined;
-    throw usageError(`OPENMAUSBOT_URL is not usable: ${error instanceof Error ? error.message : String(error)}`);
+    throw usageError(`OPENINDBOT_URL is not usable: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -53,7 +53,7 @@ export function readToken(flags: Flags, env: NodeJS.ProcessEnv): string | undefi
     if (!token) throw usageError(`--token-file ${file} is empty`);
     return token;
   }
-  return env.OPENMAUSBOT_TOKEN?.trim() || undefined;
+  return env.OPENINDBOT_TOKEN?.trim() || undefined;
 }
 
 export function namedServer(flags: Flags, env: NodeJS.ProcessEnv): { url: string } | { port: string } | undefined {
@@ -61,7 +61,7 @@ export function namedServer(flags: Flags, env: NodeJS.ProcessEnv): { url: string
   if (url) return { url };
   const port = flag(flags, "port")?.trim();
   if (port) return { port };
-  if (env.OPENMAUSBOT_URL?.trim()) return { url: env.OPENMAUSBOT_URL.trim() };
+  if (env.OPENINDBOT_URL?.trim()) return { url: env.OPENINDBOT_URL.trim() };
   return env.OMB_PORT?.trim() ? { port: env.OMB_PORT.trim() } : undefined;
 }
 
@@ -82,17 +82,17 @@ export async function openClient(flags: Flags, deps: ClientDeps, mutating: boole
     baseUrl = `http://127.0.0.1:${port}`;
   } else {
     if (mutating && deps.requireExplicitForMutations) {
-      throw usageError("mutating commands require an explicit OpenMausBot instance", "start `control-omb launch`, then pass its URL with --url");
+      throw usageError("mutating commands require an explicit OpenIndBot instance", "start `control-omb launch`, then pass its URL with --url");
     }
     if (token) {
       throw usageError("a token needs a named server, so it is never sent while looking for one",
-        "pass --url (or --port), or set OPENMAUSBOT_URL or OMB_PORT");
+        "pass --url (or --port), or set OPENINDBOT_URL or OMB_PORT");
     }
     try {
       baseUrl = await mcp.probeBaseUrls(DISCOVERY_PORTS.map((port) => `http://127.0.0.1:${port}`));
     } catch {
-      throw new HeadlessError(`no OpenMausBot server answered on 127.0.0.1 ports ${DISCOVERY_PORTS.join(", ")}`, EXIT.unreachable,
-        "start one with `openmausbot serve`, or name one with --url or OPENMAUSBOT_URL");
+      throw new HeadlessError(`no OpenIndBot server answered on 127.0.0.1 ports ${DISCOVERY_PORTS.join(", ")}`, EXIT.unreachable,
+        "start one with `openindbot serve`, or name one with --url or OPENINDBOT_URL");
     }
   }
   const request = deps.request ?? mcp.request;
@@ -119,7 +119,7 @@ export async function openClient(flags: Flags, deps: ClientDeps, mutating: boole
 }
 
 export function serverWords(message: string): string {
-  const body = /^OpenMausBot API error \(\d+\): ([\s\S]*)$/.exec(message)?.[1];
+  const body = /^OpenIndBot API error \(\d+\): ([\s\S]*)$/.exec(message)?.[1];
   if (body === undefined) return message;
   try {
     const said = (JSON.parse(body) as { error?: unknown }).error;
@@ -137,21 +137,21 @@ export async function explain(error: unknown, baseUrl?: string): Promise<Headles
   const status = typeof (error as { status?: unknown })?.status === "number" ? (error as { status: number }).status : undefined;
   if (status === 401) {
     return new HeadlessError("this server needs a credential and did not accept the one given", EXIT.unreachable,
-      "get one with `openmausbot connect URL --out FILE`, then pass --token-file FILE or set OPENMAUSBOT_TOKEN");
+      "get one with `openindbot connect URL --out FILE`, then pass --token-file FILE or set OPENINDBOT_TOKEN");
   }
   if (status === 403) {
     return new HeadlessError(`not allowed: ${message}`, EXIT.unreachable,
-      "this needs a paired session with the right scope: `openmausbot connect` mints one on this computer");
+      "this needs a paired session with the right scope: `openindbot connect` mints one on this computer");
   }
   if (status === 404 && /^no such (bot|channel|conversation|task|message)\b/i.test(message)) {
-    return usageError(message, "openmausbot bots and openmausbot channels list the ids");
+    return usageError(message, "openindbot bots and openindbot channels list the ids");
   }
-  if (/cannot report a conversation's job/.test(message)) return new HeadlessError(message, EXIT.unreachable, "update OpenMausBot on the server");
+  if (/cannot report a conversation's job/.test(message)) return new HeadlessError(message, EXIT.unreachable, "update OpenIndBot on the server");
   const cause = (error as { cause?: { code?: unknown } })?.cause?.code;
   if ((error instanceof TypeError && /fetch failed/i.test(message)) || cause === "ECONNREFUSED" || cause === "ENOTFOUND"
     || (error instanceof Error && (error.name === "TimeoutError" || /timed out|aborted due to timeout/i.test(message)))) {
-    return new HeadlessError(`cannot reach OpenMausBot${baseUrl ? ` at ${baseUrl}` : ""}`, EXIT.unreachable,
-      "check the server is running and the address is right (openmausbot doctor)");
+    return new HeadlessError(`cannot reach OpenIndBot${baseUrl ? ` at ${baseUrl}` : ""}`, EXIT.unreachable,
+      "check the server is running and the address is right (openindbot doctor)");
   }
   if (error instanceof Error && error.name === "AbortError") return new HeadlessError("stopped", EXIT.interrupted);
   return new HeadlessError(message, EXIT.failed);
@@ -164,7 +164,7 @@ export async function readJob(client: HeadlessClient, threadId: string, query: R
     const status = (error as { status?: number }).status;
     const message = error instanceof Error ? error.message : String(error);
     if (status === 404 && !/no such conversation/.test(message)) {
-      throw new HeadlessError("this OpenMausBot server cannot report a conversation's job", EXIT.unreachable, "update OpenMausBot on the server");
+      throw new HeadlessError("this OpenIndBot server cannot report a conversation's job", EXIT.unreachable, "update OpenIndBot on the server");
     }
     throw error;
   }

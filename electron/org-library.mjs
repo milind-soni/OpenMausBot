@@ -20,7 +20,7 @@ const APP_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/;
 const BLOB_NAME = /^([a-f0-9]{64})\.json$/, OWNED_BLOB_FILE = /^[a-f0-9]{64}\.json(?:\.[0-9a-f-]{36}\.tmp)?$/;
 const STATES = new Set(["installed", "failed", "removed", "withdrawn"]);
 const REASONS = new Set(["blob_unavailable", "invalid_package", "import_failed", "newer_app_required", "connection_refused_by_policy", "removed_locally", "withdrawn_by_publisher"]);
-export const LIBRARY_STATE_MESSAGE = "openmausbot:managed-library-state";
+export const LIBRARY_STATE_MESSAGE = "openindbot:managed-library-state";
 
 // oxlint-disable-next-line no-control-regex
 const safeText = (value, max) => typeof value === "string" && value.length > 0 && value.length <= max && !/[\x00-\x1f\x7f]/.test(value);
@@ -74,7 +74,7 @@ export function parseOrgLibraryCatalog(input, { organizationId } = {}) {
   if (typeof input === "string" || input instanceof Uint8Array) {
     try { value = JSON.parse(typeof input === "string" ? input : new TextDecoder("utf-8", { fatal: true }).decode(input)); } catch { return null; }
   }
-  if (!record(value) || value.format !== "openmaus.org-library" || value.version !== 1 || !count(value.libraryVersion) || !record(value.organization) ||
+  if (!record(value) || value.format !== "openind.org-library" || value.version !== 1 || !count(value.libraryVersion) || !record(value.organization) ||
       !matches(UUID, value.organization.id) || !safeText(value.organization.name, 100) || !Array.isArray(value.packages) || value.packages.length > CATALOG_MAX_ENTRIES) return null;
   if (organizationId !== undefined && value.organization.id !== organizationId) return null;
   const seen = new Set(), packages = [];
@@ -82,7 +82,7 @@ export function parseOrgLibraryCatalog(input, { organizationId } = {}) {
     const entry = parseEntry(item);
     if (entry && !seen.has(entry.packageId)) { seen.add(entry.packageId); packages.push(entry); }
   }
-  return { format: "openmaus.org-library", version: 1, libraryVersion: value.libraryVersion, organization: { id: value.organization.id, name: value.organization.name },
+  return { format: "openind.org-library", version: 1, libraryVersion: value.libraryVersion, organization: { id: value.organization.id, name: value.organization.name },
     ...(value.truncated === true ? { truncated: true } : {}), packages };
 }
 export function parseLibraryReportEntries(value) {

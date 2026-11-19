@@ -1,9 +1,9 @@
 import { useEffect, type CSSProperties } from "react";
 import { Bot, FolderOpen, Lock, X } from "lucide-react";
-import { MausAvatar } from "@/components/Avatar";
+import { IndAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { MausColor } from "@/lib/mascot";
+import type { IndColor } from "@/lib/mascot";
 import { reducedMotion } from "@/lib/onboarding";
 import type { TeamsAction, TeamsStep } from "@/lib/teams-whats-new";
 import type { LocaleKey } from "@/locales";
@@ -20,7 +20,7 @@ const POINTS: readonly { icon: typeof Bot; text: LocaleKey }[] = [
   { icon: Lock, text: "teamsNew.private" },
 ];
 /** Made-up teammates who join the one shared bot, two on each side; each comes in from further out. */
-const FACES: readonly { name: string; color: MausColor; x: number; y: number }[] = [
+const FACES: readonly { name: string; color: IndColor; x: number; y: number }[] = [
   { name: "Ada", color: "purple", x: -92, y: -26 },
   { name: "Ben", color: "teal", x: -76, y: 30 },
   { name: "Cleo", color: "coral", x: 92, y: -26 },
@@ -36,7 +36,7 @@ function TeamsPicture() {
   return <div aria-hidden="true" data-teams-picture="" className="relative h-[132px] shrink-0 overflow-hidden bg-ink/[0.035] [@media(max-height:560px)]:hidden">
     <div className="absolute left-1/2 top-1/2 size-0">
       <span className="absolute -left-[60px] -top-[60px] size-[120px] rounded-full bg-[radial-gradient(circle,color-mix(in_srgb,var(--color-accent)_16%,transparent),transparent_70%)]" />
-      <span className="absolute -left-7 -top-7"><MausAvatar color="chrome" size={56} state="idle" animated={animated} trackPointer={false} /></span>
+      <span className="absolute -left-7 -top-7"><IndAvatar color="chrome" size={56} state="idle" animated={animated} trackPointer={false} /></span>
       {FACES.map((face, index) => <span key={face.name} data-teams-face={face.name}
         className="teams-face-in absolute flex size-9 items-center justify-center rounded-full text-[14px] font-semibold ring-2 ring-app"
         style={{ left: face.x - 18, top: face.y - 18, color: `var(--identity-${face.color})`, background: `color-mix(in srgb, var(--identity-${face.color}) 22%, var(--color-card))`,
@@ -46,7 +46,7 @@ function TeamsPicture() {
 }
 
 /**
- * "MausBot is better with your team": once per person after this release (AppNotices), and again from Announcements.
+ * "IndBot is better with your team": once per person after this release (AppNotices), and again from Announcements.
  * Focus starts at its main button and stays inside; Escape, ×, a click outside and every button end it.
  */
 export function TeamsPopup({ action, onStep, onStart, onDone }: {

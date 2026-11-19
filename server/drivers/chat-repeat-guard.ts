@@ -40,7 +40,7 @@ export class ChatRepeatGuard {
     if (++this.refusals >= REFUSALS_BEFORE_STOP) {
       this.stuck = `The model kept repeating a call to ${name} that had already failed ${seen.streak} times the same way, so the turn was stopped. Try again with a clearer request, or choose a stronger model.`;
     }
-    return `[OpenMausBot: this exact call was not run. It already failed ${seen.streak} times the same way. Use different inputs, try another approach, or say what is blocking.]`;
+    return `[OpenIndBot: this exact call was not run. It already failed ${seen.streak} times the same way. Use different inputs, try another approach, or say what is blocking.]`;
   }
 
   /** A result the model has seen before, with a note to add to it. A screenshot is never the same answer: its text says
@@ -56,12 +56,12 @@ export class ChatRepeatGuard {
     const streak = before && before.ok === result.ok && before.answer === answer ? before.streak + 1 : 1;
     this.seen.set(key, { ok: result.ok, answer, streak });
     if (!result.ok) {
-      return streak === REFUSE_AFTER_FAILURES ? `[OpenMausBot: this exact call has now failed ${streak} times the same way, so it will not run again this turn. Change approach, or say what is blocking.]` : undefined;
+      return streak === REFUSE_AFTER_FAILURES ? `[OpenIndBot: this exact call has now failed ${streak} times the same way, so it will not run again this turn. Change approach, or say what is blocking.]` : undefined;
     }
     if (streak >= SAME_ANSWER_STOP_AT) {
       this.stuck = `The model made the same call to ${name} ${streak} times and got the same answer each time, so the turn was stopped. Try again with a clearer request, or choose a stronger model.`;
     }
-    return streak >= SAME_ANSWER_NOTE_AT ? `[OpenMausBot: this call has returned this same result ${streak} times. If that was expected, carry on. Otherwise use the result, try something else, or give your answer.]` : undefined;
+    return streak >= SAME_ANSWER_NOTE_AT ? `[OpenIndBot: this call has returned this same result ${streak} times. If that was expected, carry on. Otherwise use the result, try something else, or give your answer.]` : undefined;
   }
 
   /** Set once the turn should end: the words to end it with. */

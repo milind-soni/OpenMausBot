@@ -80,7 +80,7 @@ describe("the box's environment allow-list", () => {
       OPENAI_API_KEY: "sk-1", CODEX_HOME: "/data/.codex", OMB_HOOK_URL: "http://127.0.0.1:8799/api/internal/hook", OMB_COMMS_TOKEN: "cap",
       HTTPS_PROXY: "http://127.0.0.1:3128", NO_PROXY: "127.0.0.1", NPM_CONFIG_LOGLEVEL: "error", ELECTRON_RUN_AS_NODE: "1",
       OMB_CLOUD_BOOTSTRAP_SECRET: "s", OMB_CLOUD_MACHINE_ID: "m", OMB_CLOUD_ADMIN_URL: "https://a", OMB_LICENSE_KEY: "k",
-      OMB_DATA_DIR: "/data/.openmausbot", OMB_PORT: "8799", OMB_LOOPBACK_TRUST: "owner", AWS_SECRET_ACCESS_KEY: "aws", SSH_AUTH_SOCK: "/x",
+      OMB_DATA_DIR: "/data/.openindbot", OMB_PORT: "8799", OMB_LOOPBACK_TRUST: "owner", AWS_SECRET_ACCESS_KEY: "aws", SSH_AUTH_SOCK: "/x",
       SOME_RANDOM_NAME: "x", EMPTY: undefined,
     });
     expect(Object.keys(kept).sort()).toEqual([
@@ -101,14 +101,14 @@ describe("the box's environment allow-list", () => {
   });
 
   // The CLI's session token and server address (server/headless/client.ts, scripts/mcp-server.ts): an operator may put
-  // them in the server's environment, and nothing that runs in a box reads them. The engines' own OPENMAUSBOT_ keys
-  // (OPENMAUSBOT_CODEX_API_KEY, OPENMAUSBOT_CHATGPT_TOKEN) still pass, and a spawn's allowEnv never lifts these two.
-  it("keeps the CLI's session token and server address on the server, and the engines' OPENMAUSBOT_ keys in the box", () => {
+  // them in the server's environment, and nothing that runs in a box reads them. The engines' own OPENINDBOT_ keys
+  // (OPENINDBOT_CODEX_API_KEY, OPENINDBOT_CHATGPT_TOKEN) still pass, and a spawn's allowEnv never lifts these two.
+  it("keeps the CLI's session token and server address on the server, and the engines' OPENINDBOT_ keys in the box", () => {
     const kept = boxEnvironment(
-      { OPENMAUSBOT_TOKEN: "omb_sess_x", OPENMAUSBOT_URL: "http://127.0.0.1:8799", OPENMAUSBOT_CODEX_API_KEY: "k", OPENMAUSBOT_CHATGPT_TOKEN: "t" },
-      new Set(), new Set(["OPENMAUSBOT_TOKEN", "OPENMAUSBOT_URL"]),
+      { OPENINDBOT_TOKEN: "omb_sess_x", OPENINDBOT_URL: "http://127.0.0.1:8799", OPENINDBOT_CODEX_API_KEY: "k", OPENINDBOT_CHATGPT_TOKEN: "t" },
+      new Set(), new Set(["OPENINDBOT_TOKEN", "OPENINDBOT_URL"]),
     );
-    expect(Object.keys(kept).sort()).toEqual(["OPENMAUSBOT_CHATGPT_TOKEN", "OPENMAUSBOT_CODEX_API_KEY"]);
+    expect(Object.keys(kept).sort()).toEqual(["OPENINDBOT_CHATGPT_TOKEN", "OPENINDBOT_CODEX_API_KEY"]);
   });
 
   it("keeps what Antigravity's runtime is started with: its harness, its file storage switch and the browser hook", () => {

@@ -2,7 +2,7 @@
 
 Date: 2026-11-01 · Status: awaiting review · Scope: server, desktop (macOS, Windows), iPhone, Android
 
-Repos: server and desktop in milind-soni/OpenMausBot; phone apps in SupaMaus/mausbot-mobile (separate PR).
+Repos: server and desktop in milind-soni/OpenIndBot; phone apps in SupaInd/indbot-mobile (separate PR).
 
 Mockup (approved): [assets/2026-11-01-mcp-in-chat/mockup.html](assets/2026-11-01-mcp-in-chat/mockup.html), four tabs with working buttons.
 
@@ -65,8 +65,8 @@ These would make it a failure even if it works:
    - A "Sign in to Linear" card. The card moves from waiting to "Signed in · Kiwi carried on".
    - A "Turn on Linear?" card that shows the address, or the command and "Runs on this computer".
    - Changes, keys and clean-up happen in the chat.
-3. **Phones are in this project.** The phone apps get their changes in a mausbot-mobile PR that pairs with the
-   OpenMausBot PR.
+3. **Phones are in this project.** The phone apps get their changes in a indbot-mobile PR that pairs with the
+   OpenIndBot PR.
 
 Note for the builder. This is a deliberate exception to `server/direct-apply.ts`, which applies bot-requested
 changes (skills, profile, model, team setup) at every level with Undo. MCP is different because turning a server on
@@ -267,7 +267,7 @@ Data shape:
 - Add `source?: "composio" | "mcp"` to `ConnectorCardData`, defaulting to composio.
 - For `mcp`, `slug` is the MCP server name and `label` is a readable name ("Linear").
 - `description` is "Kiwi added Linear's MCP server (mcp.linear.app). Sign in so Kiwi can use it."
-- The fallback `text` names the server and "Open this conversation in OpenMausBot to sign in". It never includes the
+- The fallback `text` names the server and "Open this conversation in OpenIndBot to sign in". It never includes the
   authorization URL.
 
 Routes. The connector-card routes in `server/index.ts` branch on `source`:
@@ -287,7 +287,7 @@ on their phone's browser and never reopens the app. Polling stays as the fallbac
 
 Where the browser runs:
 
-- **Desktop on the computer running OpenMausBot.** The flow is the loopback listener, as on the settings page.
+- **Desktop on the computer running OpenIndBot.** The flow is the loopback listener, as on the settings page.
 - **A session on a Cloud or remote host (phone or desktop window).** `remote` is true. The callback uses the public
   https origin through dynamic registration, which works from a phone browser.
 - **A phone paired to a local Mac** (companion request, `auth.kind === "loopback"` with `companionDevice`). There is
@@ -305,10 +305,10 @@ the shared `mcpOAuth`. The status poll is a mutating GET that resumes a turn, so
 
 Servers that need an API key use `request_credential` (delivery `ref`) and pass the `secretRef` to `add` or `update`.
 That card already exists on desktop and iPhone. **Android has no secret card today.** Kind `"secret"` decodes to
-UNKNOWN there, so an Android user sees only "Securely provide the … from OpenMausBot on your phone or computer." See
+UNKNOWN there, so an Android user sees only "Securely provide the … from OpenIndBot on your phone or computer." See
 open question 1.
 
-### Phones (mausbot-mobile PR)
+### Phones (indbot-mobile PR)
 
 Function needs no phone change, because of the connector card and generic option card reuse. The phone PR is polish:
 
@@ -368,11 +368,11 @@ Each step ends in a check:
 3. Approval cards for Ask, Edits and Auto.
 4. Sign in card: connector `source: "mcp"`, card-scoped owner, `onSettled`, phone and paste-back refusals.
 5. Desktop wording and settings panel refresh.
-6. mausbot-mobile PR: wording, refusal text, fixtures and tests.
+6. indbot-mobile PR: wording, refusal text, fixtures and tests.
 
 ## Left to the builder
 
-- File layout of the service and routes, and how many OpenMausBot PRs the steps become.
+- File layout of the service and routes, and how many OpenIndBot PRs the steps become.
 - Exact model-facing wording of results and the system-prompt sentence, within the rules above.
 - How the activity line labels are produced.
 - The Team Cloud admin helper's shape.
@@ -380,7 +380,7 @@ Each step ends in a check:
 ## Settled after the builder check
 
 1. **The Android secret card is a follow-up project.** It isn't part of this one. On Android, a key request shows the
-   existing fallback line ("Securely provide the … from OpenMausBot on your phone or computer"). The `mcp_server`
+   existing fallback line ("Securely provide the … from OpenIndBot on your phone or computer"). The `mcp_server`
    result for a key-needing server tells the bot to say the key can be entered on the computer or an iPhone. (My
    call, announced to Omkar 2026-11-01.)
 2. Team role, guests, env destination changes, keys inside addresses and no self-widening are settled inline above.

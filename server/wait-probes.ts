@@ -208,7 +208,7 @@ function requestOnce(url: URL, address: { address: string; family: number }, sig
         agent: false,
         signal,
         lookup: pinned,
-        headers: { "user-agent": "OpenMausBot-wait", accept: "text/html,text/plain;q=0.9,*/*;q=0.1" },
+        headers: { "user-agent": "OpenIndBot-wait", accept: "text/html,text/plain;q=0.9,*/*;q=0.1" },
       },
       (response: IncomingMessage) => {
         const status = response.statusCode ?? 0;

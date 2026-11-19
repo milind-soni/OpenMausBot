@@ -13,7 +13,7 @@ describe("firstUnreadMessageId", () => {
 
   it("does not take a line another bot delivered for the person's", () => {
     const peer = line("p3", "user", { peerAsk: { botId: "chief", name: "Chief" } });
-    const legacyPeer = line("p4", "user", { text: "[Message from @Chief, another bot in this OpenMausBot workspace] hi" });
+    const legacyPeer = line("p4", "user", { text: "[Message from @Chief, another bot in this OpenIndBot workspace] hi" });
     expect(firstUnreadMessageId([line("u1", "user"), line("b2", "bot"), peer, legacyPeer, line("b5", "bot")])).toBe("b2");
   });
 

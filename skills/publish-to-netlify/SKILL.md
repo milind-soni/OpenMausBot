@@ -122,7 +122,7 @@ Give the call an 8-minute `timeout`: a new site's first deploy can take Netlify 
 
 - The first run creates a site on the person's account and writes `.netlify-site.json` in the project folder (the
   site's id, name, addresses, title, your name and when it was published; never the token). Keep that file and
-  don't edit it by hand: with it, every later run updates the same link, and MausBot lists what you published from
+  don't edit it by hand: with it, every later run updates the same link, and IndBot lists what you published from
   it. If it is gone, a new run makes a second site with a new link.
 - `--name my-site` asks for that address (`my-site.netlify.app`) on the first run; names are shared by all of
   Netlify, so it may be taken. Without it Netlify picks a name.
@@ -131,7 +131,7 @@ Give the call an 8-minute `timeout`: a new site's first deploy can take Netlify 
 - Sites are public by default: once a deploy is ready, the site is opened to anyone with the link, even where their
   Netlify team keeps new sites private (a draft never changes it). Pass `--keep-private` only when the person asks for
   a private site: it is remembered for later runs, and `--make-public` alone undoes it when they ask.
-- It never uploads dotfiles and dot folders (`.env`, `.git`, `.openmausbot-secrets`, the site record),
+- It never uploads dotfiles and dot folders (`.env`, `.git`, `.openindbot-secrets`, the site record),
   `node_modules`, env files, keys or certificates, or links to files elsewhere, and it stops if any file contains the
   token. The answer lists what it left out under `skipped`.
 - Only files Netlify does not already hold are uploaded (`uploaded`; `alreadyOnNetlify` counts the rest). Netlify allows 3 deploys a minute and 100 a day through its API: batch your

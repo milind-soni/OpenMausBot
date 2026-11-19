@@ -128,13 +128,13 @@ describe("environment identity", () => {
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: false }).capabilities.selfUpdate).toBe("operator");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true }).capabilities, "the desktop updates its own server").not.toHaveProperty("install");
     const none = () => false;
-    expect(serverInstall({}, "/home/me/.npm/_npx/1a2b/node_modules/openmausbot/dist-server/index.js", none)).toBe("npx");
-    expect(serverInstall({ OMB_CLI_PREFIX: "docker compose exec omb openmausbot" }, "/app/dist-server/index.js", none)).toBe("docker");
+    expect(serverInstall({}, "/home/me/.npm/_npx/1a2b/node_modules/openindbot/dist-server/index.js", none)).toBe("npx");
+    expect(serverInstall({ OMB_CLI_PREFIX: "docker compose exec omb openindbot" }, "/app/dist-server/index.js", none)).toBe("docker");
     expect(serverInstall({}, "/app/dist-server/index.js", () => true)).toBe("docker");
     expect(serverInstall({}, "/repo/server/index.ts", none)).toBe("source");
-    expect(serverInstall({}, "/usr/lib/node_modules/openmausbot/dist-server/index.js", none)).toBe("global");
+    expect(serverInstall({}, "/usr/lib/node_modules/openindbot/dist-server/index.js", none)).toBe("global");
     // The rootless Podman service: its unit marks it, whatever its CLI prefix says.
-    expect(serverInstall({ OMB_PODMAN_SERVICE: "~/.local/share/openmausbot", OMB_CLI_PREFIX: "podman exec -it openmausbot openmausbot" }, "/app/dist-server/index.js", none)).toBe("podman-service");
+    expect(serverInstall({ OMB_PODMAN_SERVICE: "~/.local/share/openindbot", OMB_CLI_PREFIX: "podman exec -it openindbot openindbot" }, "/app/dist-server/index.js", none)).toBe("podman-service");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: false }).capabilities)
       .not.toHaveProperty("sharedComputers");
     expect(environmentDescriptor({ environmentId: "abc", desktopManaged: true, sharedComputers: true }).capabilities)

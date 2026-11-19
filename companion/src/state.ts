@@ -1,4 +1,4 @@
-// The sidecar's own state directory, never the harness's ~/.openmausbot.
+// The sidecar's own state directory, never the harness's ~/.openindbot.
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -14,7 +14,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 /** OMB_COMPANION_DIR isolates a test rig from a real paired fleet. */
-export const DATA_DIR = process.env.OMB_COMPANION_DIR ?? join(homedir(), ".openmausbot-companion");
+export const DATA_DIR = process.env.OMB_COMPANION_DIR ?? join(homedir(), ".openindbot-companion");
 
 /** The paired fleet's hashes are an offline target, and the 0755/0644 defaults
  * would publish which phones someone owns to every account on the machine. */

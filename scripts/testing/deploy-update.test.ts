@@ -6,13 +6,13 @@ import { afterEach, describe, expect, it } from "vitest";
 
 const SCRIPT = join(import.meta.dirname, "..", "..", "deploy", "update.sh");
 const FAKE = join(import.meta.dirname, "fake-compose-docker.mjs");
-const REPO = "ghcr.io/milind-soni/openmausbot";
+const REPO = "ghcr.io/milind-soni/openindbot";
 const posix = process.platform !== "win32";
 
 const id = (letter: string) => `sha256:${letter.repeat(64)}`;
 const OLD = { id: id("a"), refs: [`${REPO}:latest`, `${REPO}@${id("1")}`], version: "0.1.150", local: true, engine: true };
 const NEW = { id: id("b"), refs: [`${REPO}@${id("2")}`, `${REPO}:v0.1.151`], version: "0.1.151", local: false, engine: true };
-const ENV = "DOMAIN=maus.example.test\nOMB_SIGNIN_EMAILS=owner@example.test\n";
+const ENV = "DOMAIN=ind.example.test\nOMB_SIGNIN_EMAILS=owner@example.test\n";
 /** .env after a rollback: as it was, with the version that ran before pinned by its digest, so a tag that moved since
  * (the installer's `stable`) cannot bring the undone version back on a later run of the installer. */
 const ROLLED_BACK = `${ENV}OMB_IMAGE=${OLD.refs[1]}\n`;
@@ -48,8 +48,8 @@ function install(target: Record<string, unknown> = {}, extra: Record<string, unk
   const data = join(fake, "volumes", "deploy_data");
   mkdirSync(join(root, "bin"));
   mkdirSync(deploy);
-  mkdirSync(join(data, ".openmausbot"), { recursive: true });
-  writeFileSync(join(data, ".openmausbot", "bots.json"), '[{"name":"Mira"}]');
+  mkdirSync(join(data, ".openindbot"), { recursive: true });
+  writeFileSync(join(data, ".openindbot", "bots.json"), '[{"name":"Mira"}]');
   writeFileSync(join(data, "started-by.txt"), "0.1.150\n");
   copyFileSync(SCRIPT, join(deploy, "update.sh"));
   writeFileSync(join(deploy, "docker-compose.yml"), "services: {}\n");
@@ -131,7 +131,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(order.every((at) => at >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
     expect(calls.find((call) => call.includes("--entrypoint cp"))).toBe(
-      `run --rm --network none --user 0:0 --label com.mausbot.role=update-helper -v deploy_data:/from:ro -v ${box.copies()[0]}:/to --entrypoint cp ${OLD.id} -a /from/. /to/`,
+      `run --rm --network none --user 0:0 --label com.indbot.role=update-helper -v deploy_data:/from:ro -v ${box.copies()[0]}:/to --entrypoint cp ${OLD.id} -a /from/. /to/`,
     );
     // The server was stopped, and seen to be stopped, before the copy.
     expect(calls.slice(calls.indexOf("compose stop"), calls.findIndex((call) => call.includes("--entrypoint cp"))).some((call) => call.includes("{{.State.Running}}"))).toBe(true);
@@ -166,10 +166,10 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
   });
 
   it("says why in the server's own last words when the new version stops as it starts", () => {
-    const box = install({ behaviour: "crashes", lastWords: "This data was written by a newer MausBot." });
+    const box = install({ behaviour: "crashes", lastWords: "This data was written by a newer IndBot." });
     const failed = box.run();
     expect(failed.status).toBe(1);
-    expect(failed.stdout).toContain("The update to 0.1.151 did not work: it kept stopping as it started (This data was written by a newer MausBot.).");
+    expect(failed.stdout).toContain("The update to 0.1.151 did not work: it kept stopping as it started (This data was written by a newer IndBot.).");
     expect(failed.said.at(-1)).toBe("Your server runs 0.1.150 again, with its data as it was before the update.");
     expect(tree(box.data)["started-by.txt"]).toBe("0.1.150\n0.1.150\n");
   });
@@ -191,7 +191,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     ]);
     // It kept stopping as it started, so it ran in its own container with the server stopped.
     expect(box.state().doctorRuns).toEqual(["run"]);
-    expect(box.calls()).toContain("compose run --rm --no-deps -T omb openmausbot doctor --data --fix --json");
+    expect(box.calls()).toContain("compose run --rm --no-deps -T omb openindbot doctor --data --fix --json");
     expect(box.state().containers.omb).toMatchObject({ image: NEW.id, status: "running" });
     expect(box.env()).toBe(`${ENV}OMB_IMAGE=${NEW.refs[0]}\n`);
   });
@@ -386,7 +386,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     const box = install();
     const before = tree(box.data);
     expect(box.run().status).toBe(0);
-    writeFileSync(join(box.data, ".openmausbot", "bots.json"), "[]");
+    writeFileSync(join(box.data, ".openindbot", "bots.json"), "[]");
     const declined = box.run(["--rollback"], { input: "no\n" });
     expect(declined.status).toBe(4);
     expect(box.state().containers.omb.image).toBe(NEW.id);
@@ -418,7 +418,7 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
     expect(moving.env()).toBe(`${ENV}OMB_IMAGE=${OLD.refs[1]}\n`);
   });
 
-  // A hardened server answers `openmausbot doctor` without a session with a refusal, so before the server's own count
+  // A hardened server answers `openindbot doctor` without a session with a refusal, so before the server's own count
   // the check that a bot can still start never ran there.
   it("checks a hardened version's engines with the server's own count, where doctor is refused", () => {
     const hardened = { counts: true, doctor: false };
@@ -435,8 +435,8 @@ describe.skipIf(!posix)("deploy/update.sh", () => {
 
   it("moves an install the installer made with Caddy in the server's network to the current files, and back on rollback", () => {
     const box = install();
-    const oldCompose = `# Written by MausBot's installer (deploy/install.sh), and written again each time it runs.
-name: openmausbot
+    const oldCompose = `# Written by IndBot's installer (deploy/install.sh), and written again each time it runs.
+name: openindbot
 services:
   omb:
     image: \${OMB_IMAGE:?run the installer again}
@@ -456,8 +456,8 @@ services:
     expect((statSync(join(box.deploy, ".update")).mode & 0o777).toString(8)).toBe("700");
     const compose = readFileSync(join(box.deploy, "compose.yaml"), "utf8");
     expect(compose).not.toContain("network_mode");
-    expect(compose).toContain("- edge:/run/openmausbot");
-    expect(readFileSync(join(box.deploy, "Caddyfile"), "utf8")).toContain("reverse_proxy unix//run/openmausbot/http.sock");
+    expect(compose).toContain("- edge:/run/openindbot");
+    expect(readFileSync(join(box.deploy, "Caddyfile"), "utf8")).toContain("reverse_proxy unix//run/openindbot/http.sock");
     expect(box.run(["--rollback", "--yes"]).status).toBe(0);
     expect(readFileSync(join(box.deploy, "compose.yaml"), "utf8")).toBe(oldCompose);
     expect(readFileSync(join(box.deploy, "Caddyfile"), "utf8")).toBe(oldCaddyfile);

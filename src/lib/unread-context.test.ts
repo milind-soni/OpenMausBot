@@ -36,7 +36,7 @@ describe("unreadContextMessage", () => {
 
   it("skips another bot's line and non-text rows", () => {
     const peer = line("p4", "user", { peerAsk: { botId: "chief", name: "Chief" } });
-    const legacyPeer = line("p5", "user", { text: "[Message from @Chief, another bot in this OpenMausBot workspace] hi" });
+    const legacyPeer = line("p5", "user", { text: "[Message from @Chief, another bot in this OpenIndBot workspace] hi" });
     const rows = [line("u1", "user"), line("b2", "bot"), peer, legacyPeer, line("a6", "user", { kind: "activity" }), line("b7", "bot")];
     expect(unreadContextMessage(rows, "b7")?.id).toBe("u1");
     expect(unreadContextMessage([line("b2", "bot"), line("u3", "user")], "b2")).toBeNull();

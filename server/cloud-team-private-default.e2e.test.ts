@@ -126,7 +126,7 @@ describe("a team bot is its maker's until they share it", () => {
   });
 
   it("a package and a backup: the bots are the importer's, unless the admin says who sees them", async () => {
-    const manifest = { format: "openmaus.team", version: 2, team: { name: "Desk", members: [{ key: "helper", name: "Desk helper", appearance: { color: "blue" } }] } };
+    const manifest = { format: "openind.team", version: 2, team: { name: "Desk", members: [{ key: "helper", name: "Desk helper", appearance: { color: "blue" } }] } };
     const imported = await as("ada", "POST", "/api/teams/import?mode=add", manifest);
     expect(imported.status, JSON.stringify(imported.body)).toBe(201);
     const helper = imported.body.bots[0] as Bot;
@@ -240,7 +240,7 @@ describe("a team bot is its maker's until they share it", () => {
       ["POST", "/api/webhooks", { botId: own.id, name: "Hook" }],
       ["PUT", `/api/bots/${own.id}/memory/file`, { path: "MEMORY.md", text: "x" }],
       ["GET", "/api/bot-defaults", undefined],
-      ["POST", "/api/teams/import?mode=add", { format: "openmaus.team", version: 2, team: { name: "Mine", members: [{ key: "a", name: "A" }] } }],
+      ["POST", "/api/teams/import?mode=add", { format: "openind.team", version: 2, team: { name: "Mine", members: [{ key: "a", name: "A" }] } }],
     ] as const) {
       expect((await as("rui", method, path, body)).status, `${method} ${path}`).toBe(403);
     }
@@ -267,8 +267,8 @@ describe("a team bot is its maker's until they share it", () => {
     const adas = await made("ada", { name: "Ada's, shared with Rui" });
     expect((await as("ada", "PUT", `/api/bots/${adas.id}/access`, { everyone: "none", people: { [RUI.email]: "edit" } })).status).toBe(200);
     expect((await as("rui", "DELETE", `/api/bots/${adas.id}`)).status, "a bot he can edit but does not look after").toBe(403);
-    const mausbot = (await bots("rui")).find((bot) => (bot as Bot & { defaultBot?: { person?: string } }).defaultBot?.person === RUI.email);
-    if (mausbot) expect((await as("rui", "DELETE", `/api/bots/${mausbot.id}`)).status, "his own MausBot stays").toBe(409);
+    const indbot = (await bots("rui")).find((bot) => (bot as Bot & { defaultBot?: { person?: string } }).defaultBot?.person === RUI.email);
+    if (indbot) expect((await as("rui", "DELETE", `/api/bots/${indbot.id}`)).status, "his own IndBot stays").toBe(409);
 
     expect((await as("rui", "PUT", `/api/bots/${own.id}/access`, PRIVATE)).status).toBe(200);
     const gone = await as("rui", "DELETE", `/api/bots/${own.id}`);

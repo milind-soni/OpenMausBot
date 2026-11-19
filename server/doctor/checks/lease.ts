@@ -8,7 +8,7 @@ export function leaseCheck(describe: (dataDir: string) => DataDirLeaseHolder = d
   return {
     id: "lease",
     title: "Data folder lease",
-    looksAt: "openmausbot-server.lease",
+    looksAt: "openindbot-server.lease",
     check(ctx) {
       if (ctx.mode === "start") return { status: "ok", summary: "This server holds it." };
       const holder = describe(ctx.dataDir);
@@ -23,10 +23,10 @@ export function leaseCheck(describe: (dataDir: string) => DataDirLeaseHolder = d
         case "other-machine":
           return { status: "problem", detail: holder,
             summary: `The lease names a process on another machine or container (${holder.host}, process ${holder.pid}).`,
-            instruction: `If no OpenMausBot runs there on this folder, stop this server and delete ${holder.path}; it starts again without it.` };
+            instruction: `If no OpenIndBot runs there on this folder, stop this server and delete ${holder.path}; it starts again without it.` };
         default:
           return { status: "problem", detail: holder, summary: "The lease record cannot be read.",
-            instruction: `If no OpenMausBot is running on this folder, delete ${holder.path} and start the server again.` };
+            instruction: `If no OpenIndBot is running on this folder, delete ${holder.path} and start the server again.` };
       }
     },
   };

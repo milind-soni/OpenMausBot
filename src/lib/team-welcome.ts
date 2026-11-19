@@ -73,7 +73,7 @@ export const WELCOME_PEOPLE = 6, WELCOME_BOTS = 4;
 /**
  * What the welcome shows: who invited them (from the people list, else their address), everyone else in the team (a few,
  * and how many more), and the bots shared with them, each with one line; the first one they can chat with is the one
- * action. Their own MausBot is theirs, not shared, and a bot they can only view can't be the first chat.
+ * action. Their own IndBot is theirs, not shared, and a bot they can only view can't be the first chat.
  */
 export function teamWelcomeView(input: { invitedBy: string | null; people: readonly TeamPerson[]; bots: readonly WelcomeBot[] }) {
   const inviter = input.invitedBy ? input.people.find((person) => person.email === input.invitedBy) ?? { email: input.invitedBy, name: "", role: "member" } : null;

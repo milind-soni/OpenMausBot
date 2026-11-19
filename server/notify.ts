@@ -26,7 +26,7 @@ export function buildSpendNotification(
   return { kind: "spend", botId: bot.id, botName: bot.name, threadId, title: text.title, body: summarize(text.body, 200) };
 }
 
-/** Something OpenMausBot did on its own about `bot` that the person hears once, in one plain line. */
+/** Something OpenIndBot did on its own about `bot` that the person hears once, in one plain line. */
 export function buildNoticeNotification(bot: Pick<NotifyBot, "id" | "name">, threadId: string, text: string): Notification {
   return { kind: "notice", botId: bot.id, botName: bot.name, threadId, title: bot.name, body: summarize(text, 240) };
 }

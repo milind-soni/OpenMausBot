@@ -51,7 +51,7 @@ const rpc = async (token: string, method: string, params: unknown = {}) => {
 };
 const mint = async (botId: string, threadId: string) => {
   const response = await fetch(url + "/api/testing/internal-capability", {
-    method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": key },
+    method: "POST", headers: { "content-type": "application/json", "x-openindbot-test-capability": key },
     body: JSON.stringify({ botId, threadId, kind: "device" }),
   });
   expect(response.status).toBe(201);

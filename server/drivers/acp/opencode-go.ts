@@ -483,12 +483,12 @@ function withinFolder(path: string, folder: string): boolean {
 }
 
 /** A bot's shared or private folder: bots wrote everything there, so none of it may become OpenCode configuration. */
-export function openMausOwnsWorkingFolder(cwd: string): boolean {
+export function openIndOwnsWorkingFolder(cwd: string): boolean {
   return [join(DATA_DIR, "workspaces"), join(DATA_DIR, "task-workspaces")].some((root) =>
     withinFolder(cwd, root) && resolvePath(cwd) !== resolvePath(root));
 }
 
-/** OpenMaus folders an OpenCode bot may use without an approval card: attachments and its own shared folder.
+/** OpenInd folders an OpenCode bot may use without an approval card: attachments and its own shared folder.
  * Never one at or above the working folder: OpenCode reads opencode.json, .opencode/ and AGENTS.md from
  * every folder above it, so a planted file would configure later conversations. Known risk: the folder
  * rule covers writes too, so a bot can change or delete files in the attachments folder. */
@@ -713,7 +713,7 @@ const support = (
     },
     spawnFingerprint: (env, config) => openCodeSpawnFingerprint(env, config.cli),
     applyTurnEnv: (env, { fullAuto, botId, cwd }) => {
-      if (openMausOwnsWorkingFolder(cwd)) env.OPENCODE_DISABLE_PROJECT_CONFIG = "1";
+      if (openIndOwnsWorkingFolder(cwd)) env.OPENCODE_DISABLE_PROJECT_CONFIG = "1";
       if (!fullAuto) {
         allowOwnedDirectories(env, botId, cwd);
         return;

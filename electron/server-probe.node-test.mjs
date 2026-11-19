@@ -28,11 +28,11 @@ test("a private address over http is found after https fails, and names the serv
 test("failures are sorted into what the person can fix", async () => {
   assert.deepEqual(await probeServer({ address: "http://192.168.1.50:8799", fetch: fakeFetch({}).fetch }), { outcome: "problem", problem: "unreachable", host: "192.168.1.50:8799", reason: "refused" });
   const dns = Object.assign(new Error("net::ERR_NAME_NOT_RESOLVED"));
-  assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": dns }).fetch })).problem, "dns");
+  assert.equal((await probeServer({ address: "ind.example.com", fetch: fakeFetch({ "https://ind.example.com": dns }).fetch })).problem, "dns");
   const cert = new Error("net::ERR_CERT_AUTHORITY_INVALID");
-  assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": cert }).fetch })).problem, "certificate");
+  assert.equal((await probeServer({ address: "ind.example.com", fetch: fakeFetch({ "https://ind.example.com": cert }).fetch })).problem, "certificate");
   const other = () => new Response("<html>", { status: 200 });
-  assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": other }).fetch })).problem, "notMausBot");
+  assert.equal((await probeServer({ address: "ind.example.com", fetch: fakeFetch({ "https://ind.example.com": other }).fetch })).problem, "notIndBot");
   assert.deepEqual(await probeServer({ address: "http://203.0.113.9", fetch: fakeFetch({}).fetch }), { outcome: "problem", problem: "publicHttp", host: "203.0.113.9" });
   assert.deepEqual(await probeServer({ address: "ABCD-EFGH-JKLM", fetch: fakeFetch({}).fetch }), { outcome: "problem", problem: "codeOnly", code: "ABCD-EFGH-JKLM" });
 });
@@ -48,7 +48,7 @@ test("on a Mac, a local address that never answers names the Local Network permi
   // Refused means the network let the request through: nothing listens on that port.
   assert.equal((await probeServer({ address: "http://192.168.1.50:8799", fetch: fakeFetch({}).fetch, platform: "darwin" })).problem, "unreachable");
   // An https address is not a local-network one.
-  assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": blocked() }).fetch, platform: "darwin" })).problem, "unreachable");
+  assert.equal((await probeServer({ address: "ind.example.com", fetch: fakeFetch({ "https://ind.example.com": blocked() }).fetch, platform: "darwin" })).problem, "unreachable");
 });
 
 test("a tailnet address that doesn't answer says whose Tailscale to fix", async () => {
@@ -104,17 +104,17 @@ test("connecting opens only the server it found; a pasted link asks first and th
   await assert.rejects(make(true).connectAsking("http://203.0.113.9"), /native\.connect\.publicHttp 203\.0\.113\.9/);
 });
 
-test("another computer's desktop app (its Remote access answers 401) is named as a desktop app, not as no MausBot at all", async () => {
+test("another computer's desktop app (its Remote access answers 401) is named as a desktop app, not as no IndBot at all", async () => {
   const desktop = () => new Response(JSON.stringify({ error: "pair this device from Remote access settings on the host computer" }), { status: 401, headers: { "content-type": "application/json" } });
   assert.deepEqual(await probeServer({ address: "192.168.1.30:8799", fetch: fakeFetch({ "http://192.168.1.30:8799": desktop }).fetch, platform: "linux" }), { outcome: "problem", problem: "desktopApp", host: "192.168.1.30:8799" });
   assert.deepEqual(await probeServer({ address: "192.168.1.30:8799", fetch: fakeFetch({ "https://192.168.1.30:8799": desktop }).fetch, platform: "linux" }), { outcome: "problem", problem: "desktopApp", host: "192.168.1.30:8799" });
-  // Any other refusal still reads as no MausBot server.
+  // Any other refusal still reads as no IndBot server.
   const otherRefusal = () => new Response(JSON.stringify({ error: "unauthorized" }), { status: 401 });
-  assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": otherRefusal }).fetch })).problem, "notMausBot");
+  assert.equal((await probeServer({ address: "ind.example.com", fetch: fakeFetch({ "https://ind.example.com": otherRefusal }).fetch })).problem, "notIndBot");
   const oddError = () => new Response(JSON.stringify({ error: { toString: null } }), { status: 401 });
-  assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": oddError }).fetch })).problem, "notMausBot");
+  assert.equal((await probeServer({ address: "ind.example.com", fetch: fakeFetch({ "https://ind.example.com": oddError }).fetch })).problem, "notIndBot");
   const huge = () => new Response(JSON.stringify({ error: `pair this device from Remote access settings ${"x".repeat(5_000)}` }), { status: 401 });
-  assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": huge }).fetch })).problem, "notMausBot");
+  assert.equal((await probeServer({ address: "ind.example.com", fetch: fakeFetch({ "https://ind.example.com": huge }).fetch })).problem, "notIndBot");
 });
 
 test("a 401 body with no or a wrong Content-Length is read only up to the refusal limit", async () => {
@@ -125,7 +125,7 @@ test("a 401 body with no or a wrong Content-Length is read only up to the refusa
       pull(controller) { pulled += 1; controller.enqueue(new Uint8Array(1_024).fill(120)); },
       cancel() { cancelled = true; },
     }), { status: 401, headers });
-    assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": endless }).fetch })).problem, "notMausBot");
+    assert.equal((await probeServer({ address: "ind.example.com", fetch: fakeFetch({ "https://ind.example.com": endless }).fetch })).problem, "notIndBot");
     assert.equal(cancelled, true);
     assert.ok(pulled <= 8, `pulled ${pulled} chunks`);
   }
@@ -138,7 +138,7 @@ test("a 401 whose Content-Length is over the refusal limit is cancelled unread",
     pull(controller) { pulled += 1; controller.enqueue(new Uint8Array(1_024).fill(120)); },
     cancel() { cancelled = true; },
   }, { highWaterMark: 0 }), { status: 401, headers: { "content-length": "1000000" } });
-  assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": big }).fetch })).problem, "notMausBot");
+  assert.equal((await probeServer({ address: "ind.example.com", fetch: fakeFetch({ "https://ind.example.com": big }).fetch })).problem, "notIndBot");
   assert.equal(cancelled, true);
   assert.equal(pulled, 0);
 });
@@ -149,6 +149,6 @@ test("a 401 body whose cancellation never settles does not hold up the probe", a
       pull(controller) { controller.enqueue(new Uint8Array(1_024).fill(120)); },
       cancel() { return new Promise(() => {}); },
     }, { highWaterMark: 0 }), { status: 401, headers });
-    assert.equal((await probeServer({ address: "maus.example.com", fetch: fakeFetch({ "https://maus.example.com": stuck }).fetch })).problem, "notMausBot");
+    assert.equal((await probeServer({ address: "ind.example.com", fetch: fakeFetch({ "https://ind.example.com": stuck }).fetch })).problem, "notIndBot");
   }
 });

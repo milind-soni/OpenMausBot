@@ -1,4 +1,4 @@
-// MausBot joining the sidebar from its welcome: the rows already there glide down to make room (measured before and
+// IndBot joining the sidebar from its welcome: the rows already there glide down to make room (measured before and
 // after, then played back as transforms), the avatar travels from the welcome into the new top slot, and the row shows
 // as it lands. Only transform and opacity move, nothing is left behind that catches a click, and with reduced motion
 // the row just fades in.

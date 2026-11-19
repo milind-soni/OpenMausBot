@@ -5,13 +5,13 @@ back, one command is enough: `install.sh` here
 ([Podman (rootless, as a service)](../../docs/self-hosting.md#podman-rootless-as-a-service)).
 The recipe below builds from a checkout and adds Caddy and per-bot desktops.
 
-Run the OpenMausBot server, Caddy, and per-bot Linux desktops with one Podman
+Run the OpenIndBot server, Caddy, and per-bot Linux desktops with one Podman
 engine. Docker Engine, Docker Desktop, and Docker Compose are not required;
 `podman-compose` provides the Compose commands. The existing
 [`deploy/docker-compose.yml`](../docker-compose.yml) remains an independent option.
 
 ```text
-Browser -> loopback Caddy :8080 -> OpenMausBot :8799
+Browser -> loopback Caddy :8080 -> OpenIndBot :8799
                                     |
                              rootless Podman socket
                                     |
@@ -30,18 +30,18 @@ PowerShell. Podman Desktop is optional. Clone the repository on a Windows drive
 that WSL can access through `/mnt/c`, `/mnt/d`, etc. From the repository root:
 
 ```powershell
-.\deploy\podman\maus.ps1 setup
+.\deploy\podman\ind.ps1 setup
 # Edit deploy/podman/.env. Set ENGINES to the npm CLI packages you want to use.
-.\deploy\podman\maus.ps1 up -d --build
-.\deploy\podman\maus.ps1 ps
+.\deploy\podman\ind.ps1 up -d --build
+.\deploy\podman\ind.ps1 ps
 ```
 
-Setup creates/starts a WSL2 machine named `openmausbot` (4 CPUs, 10 GiB RAM,
+Setup creates/starts a WSL2 machine named `openindbot` (4 CPUs, 10 GiB RAM,
 60 GiB requested disk), installs `podman-compose` inside it if missing, enables
 the user socket, and generates `.env`. WSL resource limits still apply.
 It preserves an existing `.env`. Use `OMB_PODMAN_MACHINE` to select a different
 machine. The wrapper refuses a stopped machine for normal Compose commands;
-after a reboot, use `podman machine start openmausbot` before `up -d`.
+after a reboot, use `podman machine start openindbot` before `up -d`.
 
 Compose runs **inside** the machine, so the socket and bind paths have the same
 meaning for the server and the engine. `OMB_PODMAN_ENV_FILE` selects an alternate
@@ -72,9 +72,9 @@ Podman restart service configured according to the host's administration policy.
 ## Engines and desktops
 
 Open <http://localhost:8080>. Sign the selected engines in inside the container,
-for example `maus.ps1 exec omb claude`. Their logins persist under `OMB_DATA_ROOT`.
+for example `ind.ps1 exec omb claude`. Their logins persist under `OMB_DATA_ROOT`.
 For the Linux commands, substitute the `podman compose --env-file .env -f
-compose.yaml` prefix for `maus.ps1`.
+compose.yaml` prefix for `ind.ps1`.
 
 In **App Settings -> Local VM**, prepare the managed image, select **Per bot**,
 and set the maximum number of desktops. Give each bot **Local VM** as its computer,
@@ -83,7 +83,7 @@ Each desktop gets 4 GiB / 2 CPUs unless `localVm.memoryGb` and `localVm.cpus` sa
 and build as well as all concurrent desktops. See the
 [Local VM guide](../../apps/docs/content/docs/computers/local-vm.mdx).
 
-The server's `maus` user (1001) and each desktop's `cua` user (1000) map to the same
+The server's `ind` user (1001) and each desktop's `cua` user (1000) map to the same
 rootless host user through separate `keep-id` namespaces. The server mounts the
 data root at the **same absolute path** on both sides so desktop workspace paths
 resolve on the engine host. Do not replace that mount with an unrelated named
@@ -97,7 +97,7 @@ existing data.
 Caddy listens on loopback only. To use Tailscale Serve, route the tailnet HTTPS
 endpoint to `http://127.0.0.1:8080`, set `OMB_PUBLIC_URL` to that HTTPS URL and
 `OMB_HTTPS_HOST` to its hostname, then recreate the services with `up -d`.
-Mint a pairing code with `maus.ps1 exec omb openmausbot pair`.
+Mint a pairing code with `ind.ps1 exec omb openindbot pair`.
 The proxy forwards the client address and scheme so the server's pairing checks
 remain in force. Do not publish the server, webhook listener, or Podman socket
 directly. For public-domain HTTPS, use the existing Docker deployment or design

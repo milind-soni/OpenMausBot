@@ -43,7 +43,7 @@ describe("ElevenLabs Live endpoint", () => {
 describe("an ElevenLabs agent for Live calls", () => {
   it("is set up with the delegate client tool and a prompt each conversation may override", async () => {
     const fetchImpl = fakeElevenLabs();
-    expect(await setUpElevenLabsAgent(" eleven-secret ", elevenLabsLiveEndpoint(null, {}), "OpenMausBot", fetchImpl)).toBe("agent_1");
+    expect(await setUpElevenLabsAgent(" eleven-secret ", elevenLabsLiveEndpoint(null, {}), "OpenIndBot", fetchImpl)).toBe("agent_1");
     const [[toolUrl, toolInit], [agentUrl, agentInit]] = fetchImpl.mock.calls;
     expect(String(toolUrl)).toBe("https://api.elevenlabs.io/v1/convai/tools");
     expect(toolInit!.headers).toMatchObject({ "xi-api-key": "eleven-secret" });
@@ -51,7 +51,7 @@ describe("an ElevenLabs agent for Live calls", () => {
     expect(String(agentUrl)).toBe("https://api.elevenlabs.io/v1/convai/agents/create");
     const agent = JSON.parse(String(agentInit!.body));
     expect(agent).toMatchObject({
-      name: "OpenMausBot Live calls",
+      name: "OpenIndBot Live calls",
       conversation_config: { agent: { prompt: { tool_ids: ["tool_1"] } }, asr: { user_input_audio_format: "pcm_16000" }, tts: { agent_output_audio_format: "pcm_16000" } },
       platform_settings: { overrides: { conversation_config_override: { agent: { prompt: { prompt: true } } } }, auth: { enable_auth: true } },
     });

@@ -42,7 +42,7 @@ function workspace(seed: { configured?: Record<string, boolean>; available?: str
     const out: string[] = [];
     const err: string[] = [];
     const io: HeadlessIo = { out: (text) => out.push(text), err: (text) => err.push(text), readStdin: async () => "" };
-    const code = await runHeadless(argv, { io, env: { OPENMAUSBOT_URL: "http://127.0.0.1:19997", ...env }, request: request as any, callTool: callTool as any });
+    const code = await runHeadless(argv, { io, env: { OPENINDBOT_URL: "http://127.0.0.1:19997", ...env }, request: request as any, callTool: callTool as any });
     return { code, out: out.join("\n"), err: err.join("\n") };
   };
   return { config, writes, run };
@@ -59,7 +59,7 @@ describe("engine set", () => {
 
     w.writes.length = 0;
     const again = await w.run(["engine", "set", "claude", "--key-env", "ANTHROPIC_API_KEY"]);
-    expect(again.out).toBe("claude was already set up; nothing changed (pass --rotate to replace its key). Bots use it as claude/MODEL (openmausbot models).");
+    expect(again.out).toBe("claude was already set up; nothing changed (pass --rotate to replace its key). Bots use it as claude/MODEL (openindbot models).");
     expect(w.writes).toEqual([]);
     expect((await w.run(["engine", "set", "claude", "--key-env", "ANTHROPIC_API_KEY", "--rotate", "--json"])).code).toBe(0);
     expect(w.writes).toEqual([{ path: "/api/config", body: { anthropic: { key: KEY, everyClaudeBot: true } } }]);
@@ -73,7 +73,7 @@ describe("engine set", () => {
   });
 
   it("waits for an install that takes longer than an ordinary request may, as a fresh sandbox's npm install does", async () => {
-    // The server answers the install only once npm is done, which outlasts OPENMAUSBOT_MCP_TIMEOUT_MS (1 s here).
+    // The server answers the install only once npm is done, which outlasts OPENINDBOT_MCP_TIMEOUT_MS (1 s here).
     const asked: string[] = [];
     let state = "unavailable";
     const server = createServer((req, res) => {
@@ -90,14 +90,14 @@ describe("engine set", () => {
       res.end();
     });
     await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
-    const previous = process.env.OPENMAUSBOT_MCP_TIMEOUT_MS;
-    process.env.OPENMAUSBOT_MCP_TIMEOUT_MS = "1000";
+    const previous = process.env.OPENINDBOT_MCP_TIMEOUT_MS;
+    process.env.OPENINDBOT_MCP_TIMEOUT_MS = "1000";
     try {
       const out: string[] = [];
       const err: string[] = [];
       const io: HeadlessIo = { out: (text) => out.push(text), err: (text) => err.push(text), readStdin: async () => "" };
       const code = await runHeadless(["engine", "set", "claude", "--key-env", "ANTHROPIC_API_KEY", "--install", "--json"],
-        { io, env: { OPENMAUSBOT_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, ANTHROPIC_API_KEY: KEY } });
+        { io, env: { OPENINDBOT_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, ANTHROPIC_API_KEY: KEY } });
       expect(code, out.join("\n")).toBe(0);
       const result = JSON.parse(out.join("\n"));
       expect(result).toMatchObject({ ok: true, installed: "now", state: "available", changed: [] });
@@ -105,8 +105,8 @@ describe("engine set", () => {
       expect(err.map((line) => JSON.parse(line))).toEqual([{ event: "installing", engine: "claude" }]);
       expect(asked).toContain("POST /api/instances/claude/install");
     } finally {
-      if (previous === undefined) delete process.env.OPENMAUSBOT_MCP_TIMEOUT_MS;
-      else process.env.OPENMAUSBOT_MCP_TIMEOUT_MS = previous;
+      if (previous === undefined) delete process.env.OPENINDBOT_MCP_TIMEOUT_MS;
+      else process.env.OPENINDBOT_MCP_TIMEOUT_MS = previous;
       server.closeAllConnections();
       await new Promise((done) => server.close(done));
     }

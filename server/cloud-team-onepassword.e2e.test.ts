@@ -17,7 +17,7 @@ const STRIPE = `sk_test_fake-1p-${randomBytes(12).toString("hex")}`;
 const BANK_PASSWORD = `fake-bank-${randomBytes(12).toString("hex")}`;
 const TEAM_VALUE = `fake-team-deploy-${randomBytes(12).toString("hex")}`;
 const ADA_VALUE = `fake-ada-own-${randomBytes(12).toString("hex")}`;
-const VAULT = "Shared with OpenMausBot";
+const VAULT = "Shared with OpenIndBot";
 const ITEMS = [
   { id: "i1", title: "Stripe secret key", category: "ApiCredentials", fields: [{ id: "credential", title: "credential", fieldType: "Concealed", value: STRIPE }] },
   { id: "i2", title: "Bank", category: "Login", fields: [{ id: "username", title: "username", fieldType: "Text", value: "treasurer" },

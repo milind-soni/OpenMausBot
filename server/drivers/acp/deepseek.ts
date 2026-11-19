@@ -172,7 +172,7 @@ export function parseDeepSeekCatalog(sessionResult: unknown): ModelCatalog {
   };
 }
 
-export const DEEPSEEK_MODELS_TIMEOUT_ENV = "OPENMAUS_DEEPSEEK_MODELS_TIMEOUT_MS";
+export const DEEPSEEK_MODELS_TIMEOUT_ENV = "OPENIND_DEEPSEEK_MODELS_TIMEOUT_MS";
 /** A warm `dsh --profile acp` answers session/new in ~2 s; the first boot
  * after an install also creates the profile, so leave real headroom. */
 export const DEEPSEEK_MODELS_DEFAULT_TIMEOUT_MS = 60_000;
@@ -298,7 +298,7 @@ export function fetchDeepSeekCatalog(
     initId = send("initialize", {
       protocolVersion: 1,
       clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
-      clientInfo: { name: "openmausbot", version: "catalog" },
+      clientInfo: { name: "openindbot", version: "catalog" },
     });
   });
 }

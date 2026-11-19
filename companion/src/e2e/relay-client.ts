@@ -1,4 +1,4 @@
-// The computer's side of MausBot Relay: one outbound control socket, and one data socket per phone session. The relay
+// The computer's side of IndBot Relay: one outbound control socket, and one data socket per phone session. The relay
 // splices sealed bytes and can't open them; everything here is outside the encryption. Wire spec: README section 9.
 import { getDefaultAutoSelectFamilyAttemptTimeout, setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 

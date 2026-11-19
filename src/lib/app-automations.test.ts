@@ -10,13 +10,13 @@ import { automationFor, automationSentence, automationsFrom, automationStatus, c
 const NOW = Date.UTC(2026, 9, 18, 12, 0);
 const today = new Date(NOW).toISOString().slice(0, 10);
 const trigger = (overrides: Partial<AppTrigger> = {}): AppTrigger => ({
-  id: "acme", name: "Acme replies", prompt: "Draft a reply with the order status.", botId: "scout", runOn: "maus", enabled: true,
+  id: "acme", name: "Acme replies", prompt: "Draft a reply with the order status.", botId: "scout", runOn: "ind", enabled: true,
   app: "gmail", appName: "Gmail", event: "GMAIL_NEW_GMAIL_MESSAGE", eventName: "New Gmail message", delivery: "poll", accountId: "ca_1",
   config: { query: "from:acme.com" }, filter: { from: "Acme" }, remote: { triggerId: "ti_1", state: "active" }, received: 0, filtered: 0,
   createdAt: 0, updatedAt: 0, ...overrides,
 });
 const run = (status: RoutineRun["status"], at: number): RoutineRun => ({
-  id: `run-${at}`, routineId: "acme", routineName: "Acme replies", target: "bot", botId: "scout", runOn: "maus", scheduledFor: at, startedAt: at, createdAt: at,
+  id: `run-${at}`, routineId: "acme", routineName: "Acme replies", target: "bot", botId: "scout", runOn: "ind", scheduledFor: at, startedAt: at, createdAt: at,
   status, manual: false, triggerSource: "webhook", eventSource: "app", output: "Drafted a reply to Ada.",
 });
 const automation = (overrides: Partial<AppTrigger> = {}, runs: RoutineRun[] = []) => automationsFrom({ routines: [], webhooks: [], appTriggers: [trigger(overrides)], runs })[0]!;
@@ -37,7 +37,7 @@ describe("an app-event automation in plain words", () => {
     expect(automationSentence(automation({ prompt: "Add the lead from the webhook payload" }), "Scout")).toBe("When you get an email from Acme, Scout adds the lead");
     expect(automationSentence(automation({ prompt: "Log the order in the payload" }), "Scout")).toBe("When you get an email from Acme, Scout logs the order");
     expect(automationSentence(automation({ prompt: "Summarize the event for me" }), "Scout")).toBe("When you get an email from Acme, Scout summarizes the event for you");
-    const [hook] = automationsFrom({ routines: [], webhooks: [{ id: "h", endpointId: "wh_1", name: "Sales form", prompt: "Draft a follow-up from the webhook data.", botId: "scout", runOn: "maus", enabled: true, createdAt: 0, updatedAt: 0, deliveryCount: 0 }], runs: [] });
+    const [hook] = automationsFrom({ routines: [], webhooks: [{ id: "h", endpointId: "wh_1", name: "Sales form", prompt: "Draft a follow-up from the webhook data.", botId: "scout", runOn: "ind", enabled: true, createdAt: 0, updatedAt: 0, deliveryCount: 0 }], runs: [] });
     expect(automationSentence(hook!, "Scout")).toBe("When your sales form sends something, Scout drafts a follow-up");
   });
 

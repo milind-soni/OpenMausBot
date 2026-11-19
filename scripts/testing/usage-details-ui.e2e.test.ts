@@ -86,7 +86,7 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
     }
     await agentBrowser(browser.binary, sessionEnv(browser), ["set", "viewport", "1100", "900"]);
     await expect.poll(() => evaluate("innerWidth")).toBe(1100);
-    const density = await evaluate("localStorage.getItem('openmausbot.sidebarDensity')");
+    const density = await evaluate("localStorage.getItem('openindbot.sidebarDensity')");
     const activate = async (selector: string) => {
       await expect.poll(() => evaluate(`(() => {
         const button = document.querySelector(${JSON.stringify(selector)});
@@ -103,7 +103,7 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
     };
     await openUsage();
     await expect.poll(() => evaluate("document.querySelector('[data-sidebar]').getBoundingClientRect().width")).toBe(80);
-    expect(await evaluate("localStorage.getItem('openmausbot.sidebarDensity')")).toBe(density);
+    expect(await evaluate("localStorage.getItem('openindbot.sidebarDensity')")).toBe(density);
     await expect.poll(() => evaluate("Boolean(document.querySelector('[role=dialog]'))"), { timeout: 10_000 }).toBe(true);
     await ui("screenshot", "--out", `${handle.logPath}.settings-1100.png`);
     await ui("press", "--keys", "Escape");

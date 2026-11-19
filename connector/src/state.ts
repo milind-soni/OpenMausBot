@@ -22,7 +22,7 @@ export interface AgentRecord {
   mode?: ServerMode;
 }
 
-/** The server's admin paused remote management (`mausbot-connector pause`): every job and request from MausBot is refused. */
+/** The server's admin paused remote management (`indbot-connector pause`): every job and request from IndBot is refused. */
 export interface PauseRecord {
   paused: boolean;
   at: number;
@@ -78,7 +78,7 @@ export interface SelfUpdateRecord {
   /** The id of the container that started the update; the new one removes it once it has connected. */
   previousContainer: string;
   candidateContainer: string;
-  /** The new connector's MAUSBOT_INSTANCE: how each side knows which one it is. */
+  /** The new connector's INDBOT_INSTANCE: how each side knows which one it is. */
   candidateInstance: string;
   deadline: number;
 }
@@ -194,7 +194,7 @@ export class StateStore {
     this.write(FILES.status, { ...this.status(), ...patch });
   }
 
-  /** Read from the disk each time: `mausbot-connector pause` is another process. */
+  /** Read from the disk each time: `indbot-connector pause` is another process. */
   paused(): boolean {
     return this.read<PauseRecord>(FILES.pause)?.paused === true;
   }

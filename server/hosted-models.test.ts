@@ -61,7 +61,7 @@ it("locks native and OpenRouter instances to assigned catalogs and fixed gateway
   const configs = policy.configs();
   expect(Object.keys(configs)).toEqual(["claude", "codex", "opencode"]);
   expect(configs.claude.environment).toMatchObject({ ANTHROPIC_BASE_URL: "https://admin.example.test/api/gateway/fixture/anthropic", ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-fixture" });
-  expect(configs.codex.environment).toEqual({ OPENMAUSBOT_COMPANY_API_KEY: token, CODEX_HOME: join(root, "providers/hosted/codex") });
+  expect(configs.codex.environment).toEqual({ OPENINDBOT_COMPANY_API_KEY: token, CODEX_HOME: join(root, "providers/hosted/codex") });
   expect(configs.codex.config).toMatchObject({ managed: { models: ["gpt-fixture"], url: "https://admin.example.test/api/gateway/fixture/openai/v1" } });
   const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
   const registry = new ProviderRegistry([ClaudeDriver, CodexDriver, OpenAICompatDriver], { npmAvailable: () => false }); registries.push(registry);

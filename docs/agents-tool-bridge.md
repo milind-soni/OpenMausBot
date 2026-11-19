@@ -1,6 +1,6 @@
 # Agents tool bridge
 
-Every turn of every bot is sent OpenMausBot's own tool catalog: 27 to 39 tools,
+Every turn of every bot is sent OpenIndBot's own tool catalog: 27 to 39 tools,
 43 to 57 KB of JSON, though most turns call two or three of them. With the
 bridge on, a turn is listed a short set of tools it needs in most turns, plus
 two more:
@@ -40,7 +40,7 @@ worst case. Run the eval again before changing this.
 
 ## Turning it on
 
-In `~/.openmausbot/config.json`:
+In `~/.openindbot/config.json`:
 
 ```json
 { "features": { "agentsToolBridge": true } }
@@ -57,14 +57,14 @@ the saved setting when it is exactly `1` or `0`.
 where the bot has them `send_voice_note` and Watcher's `create_options_card`.
 
 Two of these can never be reached through `use_tool`: `post_to_room` and
-`send_voice_note`. OpenMausBot recognizes a send by the name of the tool that
+`send_voice_note`. OpenIndBot recognizes a send by the name of the tool that
 made it (so that a turn cut off after posting is not run again), and any tool
 it would recognize that way is always listed and answers "call it directly".
 
 ## Which bots and engines get it
 
 The switch is necessary, not sufficient. A call made through `use_tool`
-reaches OpenMausBot and the engine under the name `use_tool`, so a turn is
+reaches OpenIndBot and the engine under the name `use_tool`, so a turn is
 bridged only where nothing decides by a tool's own name. The decision is one
 function, `agentsToolBridgeRefusal` in `server/agents-bridge-switch.ts`, and
 its default is no bridge.
@@ -77,17 +77,17 @@ they are started unbridged (`server/mcp-gate-config.ts`,
 `server/drivers/chat-mcp-tools.ts`), and the gate judges a `use_tool` call by
 the tool it names as well (`server/mcp-gate.ts`).
 
-**Engines.** Only engines on which OpenMausBot pre-approves all of its own
+**Engines.** Only engines on which OpenIndBot pre-approves all of its own
 tools, so that no approval is ever asked for, remembered or refused by one
 tool's name, and on which everything the engine itself reads about a tool's
-name can be read by OpenMausBot too:
+name can be read by OpenIndBot too:
 
 | Engine | Bridged | Why |
 |---|---|---|
 | Claude Code | Yes, with the exceptions below | The agents server is pre-allowed as a whole (`--allowedTools mcp__agents`, `server/drivers/claude.ts:1673`), and the settings the CLI reads for the turn are checked. |
 | API models: OpenAI-compatible, Cerebras, Greenference, ModelGo, Grok API, Groq, Meta, MiniMax, Mistral | Yes | The chat runtime never asks for the agents server (`server/drivers/chat-mcp-tools.ts:371`) and reads no configuration of the person's about a tool. |
-| Codex, including the ChatGPT plan | No | Codex reads a layered configuration of its own: `config.toml` under `CODEX_HOME` or `~/.codex`, a Company engine's own home under OpenMausBot's data, a trusted project's `.codex/config.toml`, `/etc/codex/config.toml` and `/etc/codex/managed_config.toml`; and it has `PreToolUse` and `PermissionRequest` hooks of its own. Any of these can take a rule about a tool by name, and this version does not examine them. |
-| Pi | No | pi is launched with `-e` for OpenMausBot's extension and nothing that keeps the person's own extensions out (`server/drivers/pi.ts`, `PI_ARGS`), in the person's home. Pi loads the extensions it finds there, and an extension's `tool_call` handler can block a call by the name it sees, as OpenMausBot's own does (`server/drivers/pi-mcp-extension.ts`). This version does not examine them. |
+| Codex, including the ChatGPT plan | No | Codex reads a layered configuration of its own: `config.toml` under `CODEX_HOME` or `~/.codex`, a Company engine's own home under OpenIndBot's data, a trusted project's `.codex/config.toml`, `/etc/codex/config.toml` and `/etc/codex/managed_config.toml`; and it has `PreToolUse` and `PermissionRequest` hooks of its own. Any of these can take a rule about a tool by name, and this version does not examine them. |
+| Pi | No | pi is launched with `-e` for OpenIndBot's extension and nothing that keeps the person's own extensions out (`server/drivers/pi.ts`, `PI_ARGS`), in the person's home. Pi loads the extensions it finds there, and an extension's `tool_call` handler can block a call by the name it sees, as OpenIndBot's own does (`server/drivers/pi-mcp-extension.ts`). This version does not examine them. |
 | ACP agents: Grok, Kimi, Droid, Cursor, Antigravity, OpenCode, Qwen, Hermes, Cline, Gemini, custom | No | They keep their own permissions. "Allow for this session" hands the agent its own remembered approval ([approval levels](approval-levels.md)); given once for a harmless `use_tool` call it would cover every hidden tool. A reviewer would also lose the read-only marks the hidden reads carry, and Grok has native tools named `use_tool` and `search_tool`. |
 | Muse Code, and any engine not named above | No | Not shown to qualify. |
 
@@ -115,14 +115,14 @@ Claude Code is not bridged when any of these holds:
   `PermissionRequest` hook: a `hooks` key, in any case, holding one of those
   keys, in any case, with any value other than `null`. Any such hook counts,
   whatever it matches: an empty or wildcard matcher sees every call, and a
-  hook's own script can test the tool's name. OpenMausBot's own hooks are none
+  hook's own script can test the tool's name. OpenIndBot's own hooks are none
   of these and are in none of these files: it registers `PostToolUse`,
   `PostToolUseFailure`, `PreCompact` and `SessionStart` through a private
   settings file written for each launch.
 - A settings file's `permissions.deny` or `permissions.ask` list (keys in any
   case) holds a rule with a wildcard in a tool's name, even one about another
   server (`mcp__github__*`, `*exec*`). Claude Code matches a deny or ask
-  rule's whole tool name as a glob, so such a rule can reach an OpenMausBot
+  rule's whole tool name as a glob, so such a rule can reach an OpenIndBot
   tool by pattern when it is called directly and miss the same call made as
   `use_tool`. Allow rules do not glob and are not given this test.
 - The machine's managed policy, or a drop-in beside it, holds
@@ -134,7 +134,7 @@ Claude Code is not bridged when any of these holds:
   without being opened), it is larger than 1 MB (refused without being read),
   it is not JSON, or its top level or its `hooks` is not an object.
 - The Claude CLI is older than 1.0.122, the first with `--setting-sources`:
-  it reads the person's own settings as well. The same goes while OpenMausBot
+  it reads the person's own settings as well. The same goes while OpenIndBot
   has not yet read the CLI's version, which it does whenever it describes its
   engines (when the app loads, and on the Engines page).
 
@@ -161,7 +161,7 @@ The machine's managed policy always applies:
 file in a `managed-settings.d` folder beside it.
 
 **Not read.** Claude Code can still take a rule about a tool by name from
-places OpenMausBot does not read:
+places OpenIndBot does not read:
 
 - policy an organisation delivers through the operating system: macOS managed
   preferences, the Windows registry;
@@ -169,13 +169,13 @@ places OpenMausBot does not read:
 - a project subagent file under `.claude/agents/`, whose frontmatter takes
   `tools`, `disallowedTools` and `hooks` of its own;
 - the frontmatter of a skill file (`disallowed-tools` or `disallowedTools`,
-  and `hooks`), including the skills OpenMausBot itself links into a bot's
+  and `hooks`), including the skills OpenIndBot itself links into a bot's
   workspace under `.claude/skills`, and of a slash-command file, which takes
   the same keys;
 - hooks that come from a plugin a settings file enables, which live in the
   plugin, not in the file.
 
-An organisation or a project that uses any of these to restrict OpenMausBot's
+An organisation or a project that uses any of these to restrict OpenIndBot's
 own tools should leave the bridge off: a rule there would see `use_tool`, not
 the tool it ran.
 
@@ -191,12 +191,12 @@ any other turn a tool called `use_tool` is left as it is: it belongs to some
 other server. On a bridged turn the engines that are covered report a tool
 with its server (`mcp__agents__use_tool` on Claude Code, `agents_use_tool` on
 the chat runtime); were one to report a bare `use_tool`, another MCP server's
-own tool of that name that happened to name one of OpenMausBot's tools would
+own tool of that name that happened to name one of OpenIndBot's tools would
 be shown under the name it was given.
 
 The bot's Activity log is read back from the event log, which knows only what
 each call carried. It names a bridged call by its tool wherever the logged
-name says the call was OpenMausBot's (`mcp__agents__use_tool`,
+name says the call was OpenIndBot's (`mcp__agents__use_tool`,
 `agents_use_tool`); a bare `use_tool`, which could be any server's, is left
 as "Use tool".
 

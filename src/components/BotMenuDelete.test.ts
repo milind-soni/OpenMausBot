@@ -5,7 +5,7 @@ import { allThreadRows, deleteAllThreads, deleteAllThreadsCopy } from "./BotMenu
 vi.mock("@/state/store", async (original) => ({ ...await original<typeof import("@/state/store")>(), api: vi.fn() }));
 
 const bot: Bot = {
-  id: "maus", threadId: "open", name: "Maus", title: "", description: "", notifications: true,
+  id: "ind", threadId: "open", name: "Ind", title: "", description: "", notifications: true,
   color: "green", unread: false, messages: [], modelSelection: { instanceId: "fake", model: "test" },
   tasks: [
     { threadId: "open", title: "Open chat", createdAt: 3 },
@@ -33,12 +33,12 @@ describe("delete all threads", () => {
 
   it("sends every thread, running ones too, and says plainly which were kept", async () => {
     const post = vi.mocked(api);
-    post.mockResolvedValueOnce({ deleted: ["pinned"], refused: [{ threadId: "open", reason: "busy" }], bot: { id: "maus" } });
+    post.mockResolvedValueOnce({ deleted: ["pinned"], refused: [{ threadId: "open", reason: "busy" }], bot: { id: "ind" } });
     const dispatch = vi.fn();
 
     await deleteAllThreads({ ...bot, busy: true, activity: "working" }, dispatch);
 
-    expect(post).toHaveBeenCalledWith("/api/bots/maus/tasks/delete", { method: "POST", body: JSON.stringify({ threadIds: ["open", "pinned"] }) });
+    expect(post).toHaveBeenCalledWith("/api/bots/ind/tasks/delete", { method: "POST", body: JSON.stringify({ threadIds: ["open", "pinned"] }) });
     expect(dispatch).toHaveBeenLastCalledWith({ type: "notice", notice: { kind: "note", botName: null, text: "Deleted: 1. Kept because they are running: 1." } });
   });
 });

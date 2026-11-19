@@ -49,26 +49,26 @@ describe("X research internal routes", () => {
   it("refuses without a Cloud plan's credential, and refuses a bot that is not switched on, before any spend", async () => {
     const client = fakeClient();
     const noToken = createXResearchInternalRoutes({ credential: () => null, botEnabled: () => true, client: () => client });
-    expect(await callInternal(noToken, { body: { query: "maus" } })).toMatchObject({ status: 403, body: { error: X_MESSAGES.noKey } });
+    expect(await callInternal(noToken, { body: { query: "ind" } })).toMatchObject({ status: 403, body: { error: X_MESSAGES.noKey } });
     const { handler } = enabled(client);
-    expect(await callInternal(handler, { botId: "bot-2", body: { query: "maus" } })).toMatchObject({ status: 403, body: { error: X_MESSAGES.botOff } });
+    expect(await callInternal(handler, { botId: "bot-2", body: { query: "ind" } })).toMatchObject({ status: 403, body: { error: X_MESSAGES.botOff } });
     expect(client.search).not.toHaveBeenCalled();
   });
 
   it("reads the credential on every call, so a plan that lapsed (the desktop cleared it) stops the next one", async () => {
     let credential: ServiceCredential | null = included;
     const { handler } = enabled(fakeClient(), () => credential);
-    expect((await callInternal(handler, { body: { query: "maus" } })).status).toBe(200);
+    expect((await callInternal(handler, { body: { query: "ind" } })).status).toBe(200);
     credential = null;
-    expect((await callInternal(handler, { body: { query: "maus" } })).status).toBe(403);
+    expect((await callInternal(handler, { body: { query: "ind" } })).status).toBe(403);
   });
 
   it("validates input with a reason a retry can use", async () => {
     const { handler } = enabled();
     for (const [path, body] of [
       ["/api/internal/x/search", {}],
-      ["/api/internal/x/search", { query: "maus", sinceId: "abc" }],
-      ["/api/internal/x/search", { query: "maus", limit: 51 }],
+      ["/api/internal/x/search", { query: "ind", sinceId: "abc" }],
+      ["/api/internal/x/search", { query: "ind", limit: 51 }],
       ["/api/internal/x/user-posts", { handle: "not a handle!" }],
       ["/api/internal/x/post", { post: "https://example.com/1" }],
       ["/api/internal/x/profile", { handle: "" }],
@@ -81,20 +81,20 @@ describe("X research internal routes", () => {
 
   it("hands the client normalized input with defaults filled in", async () => {
     const { client, handler } = enabled();
-    await callInternal(handler, { body: { query: "maus" } });
-    expect(client.search).toHaveBeenCalledWith({ query: "maus", sort: "latest", limit: 20 });
-    await callInternal(handler, { path: "/api/internal/x/user-posts", body: { handle: "@maus", sinceId: "99", limit: 5 } });
-    expect(client.userPosts).toHaveBeenCalledWith({ handle: "maus", limit: 5, includeReplies: false, sinceId: "99" });
-    await callInternal(handler, { path: "/api/internal/x/post", body: { post: "https://x.com/maus/status/42", replies: true } });
-    expect(client.post).toHaveBeenCalledWith({ id: "42", handle: "maus", replies: true });
-    await callInternal(handler, { path: "/api/internal/x/profile", body: { handle: "https://x.com/maus" } });
-    expect(client.profile).toHaveBeenCalledWith("maus");
+    await callInternal(handler, { body: { query: "ind" } });
+    expect(client.search).toHaveBeenCalledWith({ query: "ind", sort: "latest", limit: 20 });
+    await callInternal(handler, { path: "/api/internal/x/user-posts", body: { handle: "@ind", sinceId: "99", limit: 5 } });
+    expect(client.userPosts).toHaveBeenCalledWith({ handle: "ind", limit: 5, includeReplies: false, sinceId: "99" });
+    await callInternal(handler, { path: "/api/internal/x/post", body: { post: "https://x.com/ind/status/42", replies: true } });
+    expect(client.post).toHaveBeenCalledWith({ id: "42", handle: "ind", replies: true });
+    await callInternal(handler, { path: "/api/internal/x/profile", body: { handle: "https://x.com/ind" } });
+    expect(client.profile).toHaveBeenCalledWith("ind");
   });
 
   it("returns the client's result as the body", async () => {
     const posts = { posts: [{ id: "5", url: "https://x.com/a/status/5", author: "@a", text: "t" }], newestId: "5", more: false };
     const { handler } = enabled(fakeClient({ search: vi.fn(async () => posts) }));
-    expect(await callInternal(handler, { body: { query: "maus" } })).toMatchObject({ status: 200, body: posts });
+    expect(await callInternal(handler, { body: { query: "ind" } })).toMatchObject({ status: 200, body: posts });
   });
 
   it("turns provider failures into 404 or 502 with the plain sentence, never 401", async () => {
@@ -102,25 +102,25 @@ describe("X research internal routes", () => {
     expect(await callInternal(gone.handler, { path: "/api/internal/x/post", body: { post: "42" } }))
       .toMatchObject({ status: 404, body: { error: X_MESSAGES.postNotFound, code: "not_found" } });
     const badToken = enabled(fakeClient({ search: vi.fn(async () => { throw new XResearchError("bad_key", X_MESSAGES.badKey); }) }));
-    expect(await callInternal(badToken.handler, { body: { query: "maus" } }))
+    expect(await callInternal(badToken.handler, { body: { query: "ind" } }))
       .toMatchObject({ status: 502, body: { error: X_MESSAGES.badKey, code: "bad_key" } });
   });
 
   it("tells a Cloud home's bot the relay refused the Cloud's token, never to sign in again", async () => {
     const client = fakeClient({ search: vi.fn(async () => { throw new XResearchError("bad_key", X_MESSAGES.badKey); }) });
     const home = createXResearchInternalRoutes({ credential: () => included, botEnabled: () => true, client: () => client, cloudHome: true });
-    const answer = await callInternal(home, { body: { query: "maus" } });
+    const answer = await callInternal(home, { body: { query: "ind" } });
     expect(answer).toMatchObject({ status: 502, body: { error: X_MESSAGES.homeBadKey, code: "bad_key" } });
     expect(answer.body.error).not.toMatch(/sign in again/i);
     const other = createXResearchInternalRoutes({ credential: () => included, botEnabled: () => true, client: () => fakeClient({ search: vi.fn(async () => { throw new XResearchError("rate_limited", X_MESSAGES.rateLimited); }) }), cloudHome: true });
-    expect(await callInternal(other, { body: { query: "maus" } })).toMatchObject({ status: 502, body: { error: X_MESSAGES.rateLimited } });
+    expect(await callInternal(other, { body: { query: "ind" } })).toMatchObject({ status: 502, body: { error: X_MESSAGES.rateLimited } });
   });
 
   it("keeps the Cloud home sentence for the plan's token only: a refused own treg key says to check the key", async () => {
     const ownKey: ServiceCredential = { token: "treg_own", api: "https://treg.to", included: false };
     const client = fakeClient({ search: vi.fn(async () => { throw new XResearchError("bad_key", X_MESSAGES.ownBadKey); }) });
     const home = createXResearchInternalRoutes({ credential: () => ownKey, botEnabled: () => true, client: () => client, cloudHome: true });
-    expect(await callInternal(home, { body: { query: "maus" } })).toMatchObject({ status: 502, body: { error: X_MESSAGES.ownBadKey } });
+    expect(await callInternal(home, { body: { query: "ind" } })).toMatchObject({ status: 502, body: { error: X_MESSAGES.ownBadKey } });
   });
 });
 
@@ -141,9 +141,9 @@ describe("research internal routes", () => {
     expect(research.search).toHaveBeenCalledWith({ job: "work emails", limit: 5 });
     await callInternal(handler, { path: "/api/internal/research/endpoint", body: { id: "apollo.people.search" } });
     expect(research.endpoint).toHaveBeenCalledWith("apollo.people.search");
-    expect(await callInternal(handler, { path: "/api/internal/research/call", body: { id: "apollo.people.search", params: { q: "maus" } } }))
+    expect(await callInternal(handler, { path: "/api/internal/research/call", body: { id: "apollo.people.search", params: { q: "ind" } } }))
       .toMatchObject({ status: 200, body: { result: { people: [] }, cost: "$0.0020", callId: "c1" } });
-    expect(research.call).toHaveBeenCalledWith({ id: "apollo.people.search", params: { q: "maus" } });
+    expect(research.call).toHaveBeenCalledWith({ id: "apollo.people.search", params: { q: "ind" } });
   });
 
   it("refuses without a credential or with the bot switched off, before any spend, and refuses ids that are paths or URLs", async () => {

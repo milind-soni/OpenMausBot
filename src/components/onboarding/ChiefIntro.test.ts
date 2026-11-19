@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-// The first run's second screen: MausBot as the Chief of Staff (Create) or a bot the person already has (Choose).
+// The first run's second screen: IndBot as the Chief of Staff (Create) or a bot the person already has (Choose).
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,19 +9,19 @@ import type { Bot } from "@/state/store";
 
 const f = vi.hoisted(() => ({ state: {} as { bots: Bot[]; instances: unknown[] }, dispatch: vi.fn(), landed: vi.fn(), onDone: vi.fn(), onLeave: vi.fn(), reduced: true }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }) }));
-vi.mock("@/components/Avatar", () => ({ BotAvatar: () => null, MausAvatar: () => null }));
+vi.mock("@/components/Avatar", () => ({ BotAvatar: () => null, IndAvatar: () => null }));
 vi.mock("@/components/mascot-clock", () => ({ usePrefersReducedMotion: () => f.reduced }));
 vi.mock("@/lib/default-bot", async (original) => ({ ...(await original<typeof import("@/lib/default-bot")>()), useViewerEmail: () => null }));
-vi.mock("@/lib/mausbot-landing", () => ({ FLIGHT_MS: 700, landInSidebar: (input: { botId: string; commit: () => void }) => { f.landed(input.botId); input.commit(); } }));
+vi.mock("@/lib/indbot-landing", () => ({ FLIGHT_MS: 700, landInSidebar: (input: { botId: string; commit: () => void }) => { f.landed(input.botId); input.commit(); } }));
 const { CHIEF_FADE_MS, CHIEF_GUARD_MS, ChiefIntro } = await import("./ChiefIntro");
-const { FLIGHT_MS } = await import("@/lib/mausbot-landing");
+const { FLIGHT_MS } = await import("@/lib/indbot-landing");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const bot = (id: string, name: string, extra: Partial<Bot> = {}): Bot => ({
   id, threadId: `${id}-t`, name, title: "", description: "", notifications: true, color: "blue", unread: false,
   modelSelection: { instanceId: "claude", model: "m" }, messages: [], ...extra,
 });
-const maus = (extra: Partial<Bot> = {}) => bot("maus", "MausBot", { defaultBot: {}, chiefOfStaff: true, color: "chrome", ...extra });
+const ind = (extra: Partial<Bot> = {}) => bot("ind", "IndBot", { defaultBot: {}, chiefOfStaff: true, color: "chrome", ...extra });
 const CLAUDE = { instanceId: "claude", capabilities: { agentsMcp: true } };
 const CHAT_ONLY = { instanceId: "chat-only", capabilities: { agentsMcp: false } };
 
@@ -56,7 +56,7 @@ beforeEach(() => {
   f.onDone.mockReset();
   f.onLeave.mockReset();
   f.reduced = true;
-  f.state = { bots: [maus()], instances: [CLAUDE, CHAT_ONLY] };
+  f.state = { bots: [ind()], instances: [CLAUDE, CHAT_ONLY] };
   stageIntro(null);
   host = document.createElement("div");
   document.body.append(host);
@@ -69,45 +69,45 @@ afterEach(async () => {
 });
 
 describe("Create", () => {
-  it("fades the dialog and scrim, flies MausBot to its tile, and opens the chat when the flight ends, on its own clock", async () => {
+  it("fades the dialog and scrim, flies IndBot to its tile, and opens the chat when the flight ends, on its own clock", async () => {
     f.reduced = false;
     await show();
     await press("Create Chief of Staff");
     expect(f.onLeave).toHaveBeenCalledOnce();
-    expect(f.landed).toHaveBeenCalledWith("maus");
+    expect(f.landed).toHaveBeenCalledWith("ind");
     await tick(FLIGHT_MS - 1);
     expect(f.onDone, "the chat waits for the landing").not.toHaveBeenCalled();
     await tick(1);
-    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("maus");
+    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("ind");
   });
 
   it("crossfades with reduced motion", async () => {
     await show();
     await press("Create Chief of Staff");
     await tick(CHIEF_FADE_MS);
-    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("maus");
+    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("ind");
   });
 
-  it("on a new install is the only action: MausBot, already its Chief, lands in the sidebar and its chat opens", async () => {
+  it("on a new install is the only action: IndBot, already its Chief, lands in the sidebar and its chat opens", async () => {
     await show();
     expect(text()).toContain("Introducing your Chief of Staff");
     expect(text()).toContain("Your main point of contact. It checks in on its own and coordinates work with your other bots.");
     expect(button("Choose an existing bot"), "nothing to choose on a new install").toBeUndefined();
     expect(document.activeElement).toBe(button("Create Chief of Staff"));
-    expect(welcoming, "kept out of the sidebar until it lands").toBe("maus");
+    expect(welcoming, "kept out of the sidebar until it lands").toBe("ind");
     await choose("Create Chief of Staff");
-    expect(patches()).toEqual([{ type: "updateBot", botId: "maus", patch: { welcomed: true } }]);
-    expect(f.landed).toHaveBeenCalledWith("maus");
+    expect(patches()).toEqual([{ type: "updateBot", botId: "ind", patch: { welcomed: true } }]);
+    expect(f.landed).toHaveBeenCalledWith("ind");
     expect(welcoming).toBeNull();
-    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("maus");
-    expect(introStaged("maus")).toBe(true);
+    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("ind");
+    expect(introStaged("ind")).toBe(true);
   });
 
-  it("makes MausBot the Chief where the place has none, and brings it back to the sidebar", async () => {
-    f.state = { ...f.state, bots: [maus({ chiefOfStaff: false, sidebarHidden: true })] };
+  it("makes IndBot the Chief where the place has none, and brings it back to the sidebar", async () => {
+    f.state = { ...f.state, bots: [ind({ chiefOfStaff: false, sidebarHidden: true })] };
     await show();
     await choose("Create Chief of Staff");
-    expect(patches()).toEqual([{ type: "updateBot", botId: "maus", patch: { welcomed: true, sidebarHidden: false, chiefOfStaff: true } }]);
+    expect(patches()).toEqual([{ type: "updateBot", botId: "ind", patch: { welcomed: true, sidebarHidden: false, chiefOfStaff: true } }]);
   });
 
   it("ignores clicks, Enter and Space for its first 300 ms, so a double click on Next presses nothing", async () => {
@@ -126,13 +126,13 @@ describe("Create", () => {
     expect(f.onDone).not.toHaveBeenCalled();
     await tick(1);
     await choose("Create Chief of Staff");
-    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("maus");
+    expect(f.onDone).toHaveBeenCalledExactlyOnceWith("ind");
   });
 });
 
 describe("Choose an existing bot", () => {
   it("sits beside Create where the person has bots, with Create still the one focused", async () => {
-    f.state = { ...f.state, bots: [maus(), bot("research", "Research")] };
+    f.state = { ...f.state, bots: [ind(), bot("research", "Research")] };
     await show();
     const actions = [...host.querySelectorAll<HTMLButtonElement>("button")].map((node) => node.textContent);
     expect(actions).toEqual(["Choose an existing bot", "Create Chief of Staff"]);
@@ -140,7 +140,7 @@ describe("Choose an existing bot", () => {
   });
 
   it("lists the person's own bots to pick one, any whose AI cannot lead held back, and Confirm makes it the Chief", async () => {
-    f.state = { ...f.state, bots: [maus(), bot("research", "Research"), bot("writer", "Writer", { modelSelection: { instanceId: "chat-only", model: "m" } }),
+    f.state = { ...f.state, bots: [ind(), bot("research", "Research"), bot("writer", "Writer", { modelSelection: { instanceId: "chat-only", model: "m" } }),
       bot("sales", "Sales", { section: "Sales" }), bot("gone", "Gone", { hidden: true })] };
     await show();
     await press("Choose an existing bot");
@@ -157,16 +157,16 @@ describe("Choose an existing bot", () => {
     expect(f.dispatch, "nothing changes before Confirm").not.toHaveBeenCalled();
     await choose("Confirm");
     expect(patches()).toEqual([
-      { type: "updateBot", botId: "maus", patch: { welcomed: true } },
+      { type: "updateBot", botId: "ind", patch: { welcomed: true } },
       { type: "updateBot", botId: "research", patch: { chiefOfStaff: true } },
     ]);
     expect(f.onLeave).toHaveBeenCalledOnce();
     expect(f.onDone).toHaveBeenCalledExactlyOnceWith("research");
-    expect(introStaged("maus"), "MausBot's first messages are not where the person lands").toBe(false);
+    expect(introStaged("ind"), "IndBot's first messages are not where the person lands").toBe(false);
   });
 
   it("picks with the arrow keys, and goes back to the introduction with Back or Escape", async () => {
-    f.state = { ...f.state, bots: [maus(), bot("research", "Research"), bot("inbox", "Inbox")] };
+    f.state = { ...f.state, bots: [ind(), bot("research", "Research"), bot("inbox", "Inbox")] };
     await show();
     await press("Choose an existing bot");
     const dialog = host.querySelector<HTMLElement>("[role=dialog]")!;
@@ -190,6 +190,6 @@ describe("the introduction", () => {
     expect(f.dispatch).not.toHaveBeenCalled();
     expect(f.onDone).not.toHaveBeenCalled();
     expect(text()).toContain("Introducing your Chief of Staff");
-    expect(welcoming).toBe("maus");
+    expect(welcoming).toBe("ind");
   });
 });

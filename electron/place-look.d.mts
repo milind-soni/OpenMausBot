@@ -6,7 +6,7 @@ export interface PlaceLook {
   swatch: import("./cloud-list.mjs").CloudSwatch | null;
   /** Where a change goes: the Admin (every app of theirs follows), this app, or nowhere from here. */
   change: "admin" | "local" | null;
-  /** Why it can't be changed here: only its Super admin and Admins may, or the MausBot Cloud sign-in is away. */
+  /** Why it can't be changed here: only its Super admin and Admins may, or the IndBot Cloud sign-in is away. */
   reason?: "member" | "signed-out";
 }
 export type PlaceColorOutcome = "saved" | "refused" | "unsupported" | "failed";

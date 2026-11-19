@@ -1,7 +1,7 @@
 # Published apps
 
 The Published apps page (Tools → Published apps) lists what bots put online: the pages this server published to a
-MausBot link, and the sites bots published to the person's own Netlify account, found from the `.netlify-site.json`
+IndBot link, and the sites bots published to the person's own Netlify account, found from the `.netlify-site.json`
 records in the bots' own folders (`skills/publish-to-netlify/site-record.md`). A card's Preview, and a published link
 in a bot's message, open the app in a sandboxed frame beside the conversation. Delete takes an app down for good.
 

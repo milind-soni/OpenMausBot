@@ -24,12 +24,12 @@ const state: CompanionState = {
   devices: [{ id: "device-secret-id", name: "Ana's iPhone", createdAt: 1, lastSeenAt: 1, cloudDesktopAccess: false }],
   pairing: { code: "482913", token: "omb_pair_secret", expiresAt: 1 },
   lan: "192.168.1.34",
-  endpoints: [{ url: "http://192.168.1.34:8810", kind: "lan", priority: 0 }, { url: "https://c-opaque.openmausbot.com", kind: "hosted", priority: 1 }],
+  endpoints: [{ url: "http://192.168.1.34:8810", kind: "lan", priority: 0 }, { url: "https://c-opaque.openindbot.com", kind: "hosted", priority: 1 }],
   routes: { wifi: { on: true, since: 1 }, relay: { on: true, since: 1 }, tailscale: { on: false, since: null }, https: { on: false, since: null } },
   e2e: { enabled: true, relay: "connecting", node: null, relayProblem: "no_answer", descriptor: null },
   relayToken: { state: "ready", code: null },
 };
-const account: CompanionAccountState = { available: true, status: "ready", email: "ada@example.com", endpoint: "https://c-opaque.openmausbot.com" };
+const account: CompanionAccountState = { available: true, status: "ready", email: "ada@example.com", endpoint: "https://c-opaque.openindbot.com" };
 
 let host: HTMLDivElement;
 let root: Root;
@@ -50,7 +50,7 @@ const button = (label: string) => [...host.querySelectorAll("button")].find((nod
 describe("the connection check", () => {
   it("in Settings, shows the headline closed, and the steps and Copy diagnostics open", async () => {
     flushSync(() => root.render(createElement(RemoteAccessCheckRow, { account, state })));
-    expect(host.querySelector("[data-remote-access-headline]")?.textContent).toBe("MausBot Relay didn't answer.");
+    expect(host.querySelector("[data-remote-access-headline]")?.textContent).toBe("IndBot Relay didn't answer.");
     expect(host.querySelector("[data-remote-access-check]")).toBeNull();
     flushSync(() => button("Connection check")!.click());
     const steps = [...host.querySelectorAll("[data-step]")].map((node) => `${node.getAttribute("data-step")}=${node.getAttribute("data-result")}`);
@@ -68,7 +68,7 @@ describe("the connection check", () => {
     flushSync(() => root.render(createElement(PairingFailureCheck, { account: { available: false, status: "signed-out" }, state, setupTimedOut: false })));
     expect(host.querySelector("[data-remote-access-headline]")).toBeNull();
     expect(host.querySelector('[data-step="account"]')?.getAttribute("data-result")).toBe("failed");
-    expect(host.textContent).toContain("This computer can't reach MausBot right now.");
+    expect(host.textContent).toContain("This computer can't reach IndBot right now.");
     expect(button("Copy diagnostics")).not.toBeNull();
   });
 });

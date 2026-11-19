@@ -64,7 +64,7 @@ async function run(programmatic = false) {
   const argv = ["run", "--bot", "lead", "--task", "t1", "Write the report", "--export", out, "--json"];
   const stdout: string[] = [];
   const io: HeadlessIo = { out: (text) => stdout.push(text), err: () => undefined, readStdin: async () => "" };
-  const options = { env: { OPENMAUSBOT_URL: origin }, io };
+  const options = { env: { OPENINDBOT_URL: origin }, io };
   if (programmatic) return { result: await runHeadlessCommand(argv, options), out };
   const code = await runHeadless(argv, options);
   return { code, result: JSON.parse(stdout.join("\n")), out };

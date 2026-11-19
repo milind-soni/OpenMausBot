@@ -18,7 +18,7 @@ the standing instructions, then checks:
 
 - `POST /api/teams/export` with `kind: "library"`: a dry run counts one
   preset and one skill and writes no `published-library.json`; saving writes
-  `support-agent-1.0.0.openmaus.json` with the preset (name, look, picture,
+  `support-agent-1.0.0.openind.json` with the preset (name, look, picture,
   standing instructions, skill, starter notes), reports the redacted
   instructions, contains no password, approval, connected-app, model or
   routine field, and the next save suggests `1.0.1`;

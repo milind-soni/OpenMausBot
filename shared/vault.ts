@@ -1,6 +1,6 @@
 /**
  * The Vault: saved logins (shared/logins.ts) and saved secrets, kept
- * encrypted on the computer OpenMausBot runs on. A bot uses a saved secret
+ * encrypted on the computer OpenIndBot runs on. A bot uses a saved secret
  * through a one-use reference or a private file and never sees it. Clients
  * see a saved secret as a list row, never its value.
  */
@@ -16,7 +16,7 @@ export interface VaultSecret {
   /** A bot's secure card, or Settings. */
   source: "card" | "settings";
   bots: LoginBots;
-  /** Given on a card for OpenMausBot's own tools only, so it is never written to a file a bot's commands read. */
+  /** Given on a card for OpenIndBot's own tools only, so it is never written to a file a bot's commands read. */
   refOnly?: true;
   createdAt: number;
   updatedAt: number;

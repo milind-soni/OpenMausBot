@@ -36,7 +36,7 @@ export interface TeamRouteDeps {
   packageImportDeps(selection: ModelSelection): PackageImportDeps;
   /** On a Team Cloud: false for someone else's private chat, which a team backup never carries. */
   threadShown?(auth: RequestAuth): (threadId: string) => boolean;
-  /** On a Team Cloud: false for someone else's own MausBot, which no export carries. */
+  /** On a Team Cloud: false for someone else's own IndBot, which no export carries. */
   botShown?(auth: RequestAuth): (botId: string) => boolean;
   /** On a Team Cloud: false for a routine that lives in someone else's private chat, which no export carries. */
   routineShown?(auth: RequestAuth): (routine: Routine) => boolean;
@@ -58,7 +58,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
       if (body?.format !== "backup") return json(res, 400, { error: "Only backups are exported here. Share a bot or a department as a template instead." });
       const botShown = deps.botShown?.(auth), exportable = botShown ? store.bots.filter((bot) => botShown(bot.id)) : store.bots;
       const profileName = deps.authorName(auth);
-      const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : profileName ? `${profileName}'s Team` : "My OpenMaus Team";
+      const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : profileName ? `${profileName}'s Team` : "My OpenInd Team";
       if (exportable.length === 0) return json(res, 400, { error: "Create a bot before exporting your team" });
       try {
         return json(res, 200, createTeamBackup(store, routinesFor(auth), name, deps.threadShown?.(auth)));
@@ -176,7 +176,7 @@ export function createTeamRoutes(deps: TeamRouteDeps): RouteHandler {
         importVisibility = parsed.visibility;
       }
       const body = await readBody(req, MAX_TEAM_BACKUP_BYTES);
-      if (body?.format === "openmaus.backup") {
+      if (body?.format === "openind.backup") {
         if (importMode !== "add") return json(res, 400, { error: "Import backups alongside your existing bots; project mode is only for templates" });
         try {
           const imported = importTeamBackup(store, routines!, body, await defaultSelection(), { visibility: importVisibility, ...teamCreator(auth) });

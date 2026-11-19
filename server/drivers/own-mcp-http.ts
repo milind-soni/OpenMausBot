@@ -1,4 +1,4 @@
-// OpenMausBot's own MCP servers (agents, browser, computer, data, email, device) reached by URL instead of a stdio proxy
+// OpenIndBot's own MCP servers (agents, browser, computer, data, email, device) reached by URL instead of a stdio proxy
 // process each: every engine process otherwise starts one Node helper per server, about 7 threads each, all counted
 // against a container's pids limit. The URL form is the endpoint those proxies forward to (routes/own-mcp-http.ts), with
 // the same capability token, so identity and permissions are the stdio form's. The permission prompt server (ogb, over the
@@ -9,7 +9,7 @@ import { ownMcpOverHttp } from "./turn-mcp.ts";
 /** "1" turns the URL form on; off unless set, on every kind of server. */
 export const OWN_MCP_HTTP_ENV = "OMB_OWN_MCP_HTTP";
 
-/** Whether engines get OpenMausBot's own servers by URL: only with OMB_OWN_MCP_HTTP=1, and never while the bot box is on
+/** Whether engines get OpenIndBot's own servers by URL: only with OMB_OWN_MCP_HTTP=1, and never while the bot box is on
  * (a boxed engine reaches this server only through the box's relays, which carry the stdio proxies' requests, not an
  * engine's own). */
 export function ownMcpHttpEnabled(env: NodeJS.ProcessEnv = process.env, boxed: boolean = botBox.enabled()): boolean {
@@ -33,7 +33,7 @@ export function loopbackUnproxied(env: Record<string, string | undefined>, http:
 
 type StdioMount = { command?: unknown; args?: unknown; env?: unknown; alwaysLoad?: unknown };
 
-/** One --mcp-config entry as Claude Code's HTTP form when it is one of OpenMausBot's own stdio proxies (Claude Code 1.0.60,
+/** One --mcp-config entry as Claude Code's HTTP form when it is one of OpenIndBot's own stdio proxies (Claude Code 1.0.60,
  * 2.0.0, 2.1.257 and 2.1.325 checked: `type: "http"` with headers connects and lists tools), else null. `alwaysLoad` stays. */
 export function claudeOwnHttpMount(server: unknown): Record<string, unknown> | null {
   const mount = server as StdioMount | null;
@@ -42,7 +42,7 @@ export function claudeOwnHttpMount(server: unknown): Record<string, unknown> | n
   return http ? { type: "http", url: http.url, headers: http.headers, ...(mount.alwaysLoad === true ? { alwaysLoad: true } : {}) } : null;
 }
 
-/** Turns every one of OpenMausBot's own proxies in a Claude --mcp-config into its HTTP form, when the setting is on;
+/** Turns every one of OpenIndBot's own proxies in a Claude --mcp-config into its HTTP form, when the setting is on;
  * true when any was. */
 export function claudeOwnMcpOverHttp(servers: Record<string, unknown>, enabled: boolean = ownMcpHttpEnabled()): boolean {
   if (!enabled) return false;
@@ -64,7 +64,7 @@ export function noteAcpMcpHttp(instanceId: string, init: unknown): void {
   else acpHttpAgents.delete(instanceId);
 }
 
-/** An ACP engine gets OpenMausBot's own servers by URL once its agent has said it can take them (its first session starts
+/** An ACP engine gets OpenIndBot's own servers by URL once its agent has said it can take them (its first session starts
  * with the stdio form), unless its servers come from the launcher's own configuration. */
 export function acpOwnMcpOverHttp(instanceId: string, fromLaunch: boolean, enabled: boolean = ownMcpHttpEnabled()): boolean {
   return enabled && !fromLaunch && acpHttpAgents.has(instanceId);

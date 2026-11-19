@@ -19,9 +19,9 @@ const inboxRows = async (token: string) => ((await team.as(token, "GET", "/api/i
 
 it("tells a User who connects the AI, sends nothing, and really tells the owner once they can be told", async () => {
   const dana = (await team.pair(USER)).token!;
-  const maus = await ownBot(dana, USER.email);
-  expect(maus.modelSelection?.instanceId, "this team has no AI").toBeFalsy();
-  const send = () => team.as(dana, "POST", `/api/bots/${maus.id}/messages`, { text: WORDS, threadId: maus.threadId });
+  const ind = await ownBot(dana, USER.email);
+  expect(ind.modelSelection?.instanceId, "this team has no AI").toBeFalsy();
+  const send = () => team.as(dana, "POST", `/api/bots/${ind.id}/messages`, { text: WORDS, threadId: ind.threadId });
 
   const early = await send();
   expect(early).toMatchObject({ status: 409, body: { code: "no_ai", error: "The team's owner needs to connect an AI before bots can answer. I'll tell them when they first open the team." } });
@@ -38,7 +38,7 @@ it("tells a User who connects the AI, sends nothing, and really tells the owner 
 
   expect(JSON.stringify(lines), "the person's words stay theirs").not.toContain(WORDS);
   const after = await team.as(dana, "GET", "/api/bots?messages=50");
-  const said = (after.body.bots as Array<{ id: string; messages?: Array<{ text?: string }> }>).find((bot) => bot.id === maus.id)!.messages;
+  const said = (after.body.bots as Array<{ id: string; messages?: Array<{ text?: string }> }>).find((bot) => bot.id === ind.id)!.messages;
   expect(Array.isArray(said), JSON.stringify(after.status)).toBe(true);
   expect(said!.some((line) => line.text === WORDS), "nothing was sent: the app keeps it in the box").toBe(false);
 }, hostTimeout(120_000));

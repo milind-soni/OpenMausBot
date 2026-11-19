@@ -1,7 +1,7 @@
 # Edge for a Cloud home on a server reached through a Cloudflare tunnel
 # (docs/cloud-pro.md, "On your own server"): the same routes as Caddyfile on
 # :8080, for the connector, and on 127.0.0.1:8812, where the control plane
-# points the tunnel. cloudflared runs in this home, as maus (the launcher
+# points the tunnel. cloudflared runs in this home, as ind (the launcher
 # starts it: server/cloud-home-start.ts), and connects only from loopback, so
 # that listener alone believes Cf-Connecting-IP, which Cloudflare's edge sets;
 # :8080 trusts only the proxies the owner names. The address feeds the pairing

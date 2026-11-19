@@ -812,7 +812,7 @@ describe("Antigravity OAuth validation", () => {
   });
 
   it("reads the sign-in link from either announcement Google makes", () => {
-    expect(authorizationUrlFromLine(`__OPENMAUS_ANTIGRAVITY_AUTH_URL__${JSON.stringify(authorizationUrl)}`))
+    expect(authorizationUrlFromLine(`__OPENIND_ANTIGRAVITY_AUTH_URL__${JSON.stringify(authorizationUrl)}`))
       .toBe(authorizationUrl);
     expect(authorizationUrlFromLine(`${ANTIGRAVITY_AUTH_PREFIX}${authorizationUrl}`)).toBe(authorizationUrl);
   });
@@ -820,7 +820,7 @@ describe("Antigravity OAuth validation", () => {
   it("ignores ordinary server logs, including ones quoting a link", () => {
     expect(authorizationUrlFromLine("I0905 11:02:06.473720 8283299200 main.py:80] Starting AGY ACP Server...")).toBeNull();
     expect(authorizationUrlFromLine(`I0905 credential_manager.py:553] ${ANTIGRAVITY_AUTH_PREFIX}${authorizationUrl}`)).toBeNull();
-    expect(authorizationUrlFromLine("__OPENMAUS_ANTIGRAVITY_AUTH_URL__not-json")).toBeNull();
+    expect(authorizationUrlFromLine("__OPENIND_ANTIGRAVITY_AUTH_URL__not-json")).toBeNull();
     expect(authorizationUrlFromLine("")).toBeNull();
   });
 

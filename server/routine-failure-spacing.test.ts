@@ -14,7 +14,7 @@ const MINUTE = 60_000, HOUR = 60 * MINUTE;
 const START = Date.parse("2026-11-16T08:00:00Z");
 const DEAD_TOOL = "MCP server could not start; check its command and installation";
 const OVERLOADED = "Claude is overloaded right now (HTTP 529). Wait a minute, then run it again.";
-const NO_START = "Maus's cloud desktop didn't start. Change where this routine runs.";
+const NO_START = "Ind's cloud desktop didn't start. Change where this routine runs.";
 const SPAWN_REFUSED = "spawn /usr/local/bin/claude EAGAIN";
 const dirs: string[] = [];
 
@@ -94,7 +94,7 @@ function harness(start?: RoutineManagerOptions["startTurn"], schedule: Parameter
     onRunFailed: (_run, alert) => alerts.push(alert),
   };
   const manager = new RoutineManager(options);
-  manager.create({ name: "Sync the CRM", prompt: "Read new leads from the CRM and file them", botId: "maus-1", schedule });
+  manager.create({ name: "Sync the CRM", prompt: "Read new leads from the CRM and file them", botId: "ind-1", schedule });
   const working = () => manager.listRuns().filter((run) => run.status === "running");
   return {
     manager, started, alerts,

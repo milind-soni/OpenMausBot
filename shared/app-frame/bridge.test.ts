@@ -93,7 +93,7 @@ describe("handshake", () => {
     const answer = await h.request("ui/initialize", { appInfo: { name: "x", version: "1" }, appCapabilities: {}, protocolVersion: "2025-06-18" });
     expect(answer?.result).toEqual({
       protocolVersion: "2026-01-26",
-      hostInfo: { name: "mausbot", version: "0.1.108" },
+      hostInfo: { name: "indbot", version: "0.1.108" },
       hostCapabilities: {
         openLinks: {}, logging: {}, updateModelContext: { text: {}, structuredContent: {} }, message: { text: {} },
         serverTools: {}, serverResources: {},

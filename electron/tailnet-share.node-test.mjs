@@ -32,7 +32,7 @@ function world({ status = { state: "ready", name: NAME, addresses: ["100.101.102
     postMessage(message) {
       w.posted.push(message.share);
       const origin = message.share === null ? null : message.share.served ?? `http://${message.share.name}:8799`;
-      setImmediate(() => w.share.receive({ type: "openmausbot:tailnet-share-state", origin, listening: [], error: null }));
+      setImmediate(() => w.share.receive({ type: "openindbot:tailnet-share-state", origin, listening: [], error: null }));
     },
   };
   return w;
@@ -105,10 +105,10 @@ test("an organization's policy keeps it off, whatever is saved", async () => {
 
 test("Tailscale not answering keeps the saved name and says why nothing is there yet; no name at all shares nothing", async () => {
   const quiet = world({ status: { state: "not-running" } });
-  quiet.proc.postMessage = (message) => { quiet.posted.push(message.share); setImmediate(() => quiet.share.receive({ type: "openmausbot:tailnet-share-state", origin: null, listening: [], error: "none" })); };
+  quiet.proc.postMessage = (message) => { quiet.posted.push(message.share); setImmediate(() => quiet.share.receive({ type: "openindbot:tailnet-share-state", origin: null, listening: [], error: "none" })); };
   assert.deepEqual(await quiet.share.attach(quiet.proc, 8799, route()), { on: true, origin: null, https: false, problem: "not-running" });
   assert.deepEqual(quiet.posted, [{ name: NAME }]);
-  quiet.share.receive({ type: "openmausbot:tailnet-share-state", origin: `http://${NAME}:8799`, listening: ["100.101.102.103"], error: null });
+  quiet.share.receive({ type: "openindbot:tailnet-share-state", origin: `http://${NAME}:8799`, listening: ["100.101.102.103"], error: null });
   assert.deepEqual(quiet.share.state(), { on: true, origin: `http://${NAME}:8799`, https: false, problem: null }, "Tailscale came up by itself");
   const nameless = world({ status: { state: "signed-out" } });
   assert.deepEqual(await nameless.share.attach(nameless.proc, 8799, route({ name: null })), { on: true, origin: null, https: false, problem: "signed-out" });

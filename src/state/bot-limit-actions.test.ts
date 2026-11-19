@@ -91,8 +91,8 @@ describe("a create button with no room, on an older server that caps Starter's b
     expect(seen.error).toBeNull();
   });
 
-  it("leaves the MausBot out of the count, as the server does", async () => {
-    await mount([botNamed("maus", { defaultBot: {} } as never), ...five().slice(1)], STARTER);
+  it("leaves the IndBot out of the count, as the server does", async () => {
+    await mount([botNamed("ind", { defaultBot: {} } as never), ...five().slice(1)], STARTER);
     created = () => json({ bot: botNamed("new") }, 201);
     await send({ type: "newBot" });
     await vi.waitFor(() => expect(creates).toBe(1));

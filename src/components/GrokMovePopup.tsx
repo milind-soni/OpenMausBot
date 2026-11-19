@@ -3,7 +3,7 @@ import { X } from "lucide-react";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { MausAvatar } from "./Avatar";
+import { IndAvatar } from "./Avatar";
 import { GrokBotMark } from "./GrokBotMark";
 import { NotNowButton, PRIMARY_BUTTON } from "./NoticeCard";
 
@@ -49,7 +49,7 @@ export function GrokMovePopup({ onDone }: { onDone: (action: GrokMovePopupAction
         className="ui-modal animate-pop-in relative flex w-[min(380px,calc(100vw-32px))] flex-col items-center border-0 px-6 pb-3 pt-8 text-center text-ink motion-reduce:animate-none">
         <div aria-hidden="true" className="flex items-center gap-5">
           <GrokBotMark size={44} />
-          <MausAvatar color="chrome" size={52} state="idle" animated={false} />
+          <IndAvatar color="chrome" size={52} state="idle" animated={false} />
         </div>
         <h2 id={TITLE} className="mt-5 text-[19px] font-semibold leading-6 tracking-[-0.012em]">{t("settings.import.grokTitle")}</h2>
         <p id={BODY} className="mt-1.5 text-[14px] leading-5 text-ink-secondary [text-wrap:pretty]">{t("grokMove.popup.body")}</p>

@@ -11,7 +11,7 @@ it("bounds a real roster, retrieves its tail, isolates owners and expires stoppe
   const proxies: ChildProcess[] = [];
   const evidence: unknown[] = [];
   const cli = async (...args: string[]) => {
-    const result = await runControlOmb(args, { env: { OPENMAUSBOT_URL: fixture.info.url } }) as any;
+    const result = await runControlOmb(args, { env: { OPENINDBOT_URL: fixture.info.url } }) as any;
     evidence.push({ args: args.map(arg => arg.length > 200 ? `${arg.slice(0, 200)}…` : arg), result });
     return result;
   };

@@ -20,16 +20,16 @@ describe("foreignPaths", () => {
   it("names the host that runs a cloud routine as Linux whatever this computer is", () => {
     const routine = { prompt: "Total E:\\ledger.xlsx", runOn: "cloud" as const };
     expect(routineHostWarning(routine, "win32")).toContain("cannot exist on the Linux computer that runs it");
-    expect(routineHostWarning({ ...routine, runOn: "maus" }, "win32")).toBeUndefined();
+    expect(routineHostWarning({ ...routine, runOn: "ind" }, "win32")).toBeUndefined();
   });
 });
 
 describe("composeExecutionPrompt", () => {
   it("heads scheduled and manual runs with what to do now, and leaves webhook runs to their own boundary", () => {
-    expect(composeExecutionPrompt({ id: "routine-id", name: "Daily [brief]\n", trigger: "schedule", runOn: "maus" }, "Write it", undefined))
+    expect(composeExecutionPrompt({ id: "routine-id", name: "Daily [brief]\n", trigger: "schedule", runOn: "ind" }, "Write it", undefined))
       .toBe('[Scheduled routine "Daily brief" — do this now:]\nTrigger id: routine-id\nWrite it');
-    expect(composeExecutionPrompt({ id: "routine-id", name: "Daily", trigger: "startup", runOn: "maus" }, "Write it", undefined))
+    expect(composeExecutionPrompt({ id: "routine-id", name: "Daily", trigger: "startup", runOn: "ind" }, "Write it", undefined))
       .toBe('[Routine "Daily" — do this now:]\nTrigger id: routine-id\nWrite it');
-    expect(composeExecutionPrompt({ id: "hook-id", name: "Hook", trigger: "webhook", runOn: "maus" }, "Payload block", undefined)).toBe("Payload block");
+    expect(composeExecutionPrompt({ id: "hook-id", name: "Hook", trigger: "webhook", runOn: "ind" }, "Payload block", undefined)).toBe("Payload block");
   });
 });

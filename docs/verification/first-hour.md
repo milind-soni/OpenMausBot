@@ -19,9 +19,9 @@ its plan includes it. The fake CLI answers by a marker in its prompt
 
 Expected:
 
-- The Chief's chat is the first thing: one message, "Hi Sam! I'm MausBot, your
+- The Chief's chat is the first thing: one message, "Hi Sam! I'm IndBot, your
   Chief of Staff. … What do you want off your plate?", the Cloud's welcome steps
-  recorded as done (`cloud-welcome-done`) and MausBot's own welcome card off.
+  recorded as done (`cloud-welcome-done`) and IndBot's own welcome card off.
 - After the first answer, the Chief says why ("So I can see what needs you
   today, connect Gmail and Google Calendar…") and two connection cards follow.
   Its system prompt says it is the person's first day and never to ask for

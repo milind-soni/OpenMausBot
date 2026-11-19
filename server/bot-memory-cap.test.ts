@@ -45,7 +45,7 @@ describe("the cap's setting", () => {
   it("reports the ladder's rungs this host offers, and watches with the watchdog", () => {
     const log: CapSetting = { mode: "log", bytes: GB };
     expect(capLadder(log, { platform: "darwin" })).toEqual({ rung: "none", offered: [] });
-    const files: Record<string, string> = { "/proc/self/cgroup": "0::/system.slice/openmausbot.service\n", "/sys/fs/cgroup/system.slice/openmausbot.service/cgroup.controllers": "cpu io memory pids\n" };
+    const files: Record<string, string> = { "/proc/self/cgroup": "0::/system.slice/openindbot.service\n", "/sys/fs/cgroup/system.slice/openindbot.service/cgroup.controllers": "cpu io memory pids\n" };
     const read = (path: string) => files[path] ?? null;
     expect(capLadder(log, { platform: "linux", read, writable: () => true, exists: () => true })).toEqual({ rung: "watchdog", offered: ["systemd-scope", "cgroup", "watchdog"] });
     expect(capLadder(log, { platform: "linux", read: (path) => (path === "/proc/self/cgroup" ? "0::/\n" : path === "/sys/fs/cgroup/cgroup.controllers" ? "memory pids\n" : null), writable: () => false, exists: () => false }))

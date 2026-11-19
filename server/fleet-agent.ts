@@ -142,7 +142,7 @@ export function createFleetAgent(options: FleetAgentOptions): Server {
         const workspaces: (FleetWorkspaceView | Pick<FleetWorkspaceView, "slug" | "live">)[] = [];
         for (const workspace of Object.values(registry.workspaces).sort((a, b) => a.slug.localeCompare(b.slug))) {
           const live = workspace.status === "running" || workspace.status === "suspended"
-            ? (await deps.run(["systemctl", "is-active", `openmausbot@${workspace.slug}.service`])).output.trim() || "unknown"
+            ? (await deps.run(["systemctl", "is-active", `openindbot@${workspace.slug}.service`])).output.trim() || "unknown"
             : workspace.status;
           workspaces.push(statusOnly ? { slug: workspace.slug, live } : { ...workspace, live, usage: workspaceUsage(layout, workspace.slug, now(), deps) });
         }

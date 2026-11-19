@@ -7,7 +7,7 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 
 it("gives each member three turns in order and tells it the last one is final", async () => {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
-  const env = { OPENMAUSBOT_URL: session.info.url };
+  const env = { OPENINDBOT_URL: session.info.url };
   const cli = (...args: string[]) => runControlOmb(args, { env }) as Promise<any>;
   const api = async (method: string, path: string, body?: unknown) => {
     const response = await fetch(`${session.info.url}${path}`, {

@@ -114,7 +114,7 @@ it("offers an organization library's presets in New bot until the publisher with
     writeFileSync(join(blobs, `${digest}.json`), bytes, { mode: 0o600 });
     const packageId = "44444444-4444-4444-8444-444444444444";
     const catalog = (withdrawn: boolean) => JSON.stringify({
-      format: "openmaus.org-library", version: 1, libraryVersion: withdrawn ? 2 : 1, organization: { id: "11111111-1111-4111-8111-111111111111", name: "Customer Co" },
+      format: "openind.org-library", version: 1, libraryVersion: withdrawn ? 2 : 1, organization: { id: "11111111-1111-4111-8111-111111111111", name: "Customer Co" },
       packages: [{
         packageId, ref: "acme/sales-skills", name: "Sales skills", tagline: document.package.tagline, kind: "library",
         publisher: { organizationId: "33333333-3333-4333-8333-333333333333", name: "Acme Partners", self: false }, mode: "available", offAction: "keep",
@@ -126,7 +126,7 @@ it("offers an organization library's presets in New bot until the publisher with
     });
     const relay = (body: string) => call("POST", "/api/testing/org-library", {
       library: { adminOrigin: "https://admin.example.com", organizationId: "11111111-1111-4111-8111-111111111111", organizationName: "Customer Co", digest: sha(body), catalog: body },
-    }, { "x-openmausbot-test-org-library": key });
+    }, { "x-openindbot-test-org-library": key });
     expect((await relay(catalog(false))).status).toBe(200);
     const added = await call("POST", "/api/org-library/add", { packageId });
     expect(added.status).toBe(201);

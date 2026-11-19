@@ -15,7 +15,7 @@ import { BotListItem, botRowProps } from "./Sidebar";
 import { SidebarBotTile, SidebarTileGrid } from "./SidebarTiles";
 
 const bot = (extra: Partial<Bot> = {}): Bot => ({
-  id: "mausbot", threadId: "t", name: "MausBot", title: "", description: "", notifications: true, color: "chrome",
+  id: "indbot", threadId: "t", name: "IndBot", title: "", description: "", notifications: true, color: "chrome",
   unread: false, modelSelection: { instanceId: "fake", model: "m" }, messages: [], ...extra,
 });
 const dispatch = vi.fn();
@@ -46,7 +46,7 @@ describe("the sidebar tiles", () => {
     const html = renderToStaticMarkup(createElement(SidebarBotTile, { ...props(bot({ chiefOfStaff: primary })), primary }));
     expect(html).toMatch(new RegExp(`data-sidebar-tile="${primary ? "primary" : "pinned"}"[^>]*class="[^"]*\\bh-\\[92px\\] w-\\[78px\\][^"]*\\brounded-\\[8px\\]`));
     expect(html).toContain('width="56px" height="56px"');
-    expect(html).toMatch(/truncate text-center text-\[13px\] font-medium leading-4 text-ink"[^>]*>MausBot</);
+    expect(html).toMatch(/truncate text-center text-\[13px\] font-medium leading-4 text-ink"[^>]*>IndBot</);
     expect(html).not.toContain("data-provider-mark");
   });
 
@@ -54,7 +54,7 @@ describe("the sidebar tiles", () => {
     const tileHtml = (extra: Partial<Bot>, primary: boolean) => renderToStaticMarkup(createElement(SidebarBotTile, { ...props(bot(extra)), primary }));
     const main = tileHtml({ chiefOfStaff: true }, true);
     expect(main).toContain('data-testid="chief-badge"');
-    expect(main).toContain('title="MausBot · Chief of Staff"');
+    expect(main).toContain('title="IndBot · Chief of Staff"');
     expect(tileHtml({ chiefOfStaff: true }, false)).not.toContain('data-testid="chief-badge"');
     expect(tileHtml({}, true)).not.toContain('data-testid="chief-badge"');
   });
@@ -67,14 +67,14 @@ describe("the sidebar tiles", () => {
     expect(renderToStaticMarkup(createElement(SidebarBotTile, props(bot({ activity: "waiting-on-you" }))))).toContain('data-testid="waiting-dot"');
     const unread = renderToStaticMarkup(createElement(SidebarBotTile, props(bot({ unread: true }))));
     expect(unread).toContain('data-testid="unread-dot"');
-    expect(unread).toContain('aria-label="MausBot · Unread"');
+    expect(unread).toContain('aria-label="IndBot · Unread"');
   });
 
   it("shows a failed last turn as a red dot on the tile and on a Simple row, never the orange waiting one", () => {
     const failed = bot({ messages: [{ id: "e1", role: "bot", kind: "activity", at: 2, tool: { name: "error: The site did not answer.", ok: false } }] as Bot["messages"] });
     const html = renderToStaticMarkup(createElement(SidebarBotTile, props(failed)));
     expect(html).toMatch(/data-testid="failed-dot"[^>]*class="[^"]*\bbg-danger\b/);
-    expect(html).toContain('aria-label="MausBot · Ran into a problem"');
+    expect(html).toContain('aria-label="IndBot · Ran into a problem"');
     expect(html).not.toContain('data-testid="waiting-dot"');
     const row = renderToStaticMarkup(createElement(BotListItem, props(failed)));
     expect(row).toMatch(/data-testid="failed-dot"[^>]*class="[^"]*\bbg-danger\b/);
@@ -91,9 +91,9 @@ describe("the sidebar tiles", () => {
       key: name, shiftKey: false, preventDefault: vi.fn(), currentTarget: { getBoundingClientRect: () => ({ left: 10, top: 20, width: 94, height: 92 }) },
     } as unknown as KeyboardEvent);
     key("Enter");
-    expect(dispatch).toHaveBeenCalledWith({ type: "select", id: "mausbot" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "select", id: "indbot" });
     key("ContextMenu");
-    expect(onMenu).toHaveBeenCalledWith({ botId: "mausbot", x: 57, y: 66 });
+    expect(onMenu).toHaveBeenCalledWith({ botId: "indbot", x: 57, y: 66 });
   });
 });
 
@@ -104,7 +104,7 @@ describe("a tile with a dot", () => {
     function Capture() { tree = tile({ ...props(withWork), primary: true }); return tree; }
     renderToStaticMarkup(createElement(Capture));
     (find(tree, "data-sidebar-tile")!.props.onKeyDown as (event: KeyboardEvent) => void)({ key: "Enter", preventDefault: vi.fn() } as unknown as KeyboardEvent);
-    expect(dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "mausbot", threadId: "work" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "indbot", threadId: "work" });
   });
 });
 
@@ -124,7 +124,7 @@ describe("the tile grid", () => {
   it.each([0, 1, 2, 3, 5])("puts the main bot first, then %i pinned bots, as same-size tiles in one centred, wrapping grid", (count) => {
     const html = grid(main, pins(count));
     const drag = count > 1 ? ":drag" : "";
-    expect(tiles(html)).toEqual(["primary:mausbot", ...pins(count).map((pin) => `pinned:${pin.id}${drag}`)]);
+    expect(tiles(html)).toEqual(["primary:indbot", ...pins(count).map((pin) => `pinned:${pin.id}${drag}`)]);
     expect(html).toMatch(/^<div data-sidebar-tiles="" class="flex max-h-\[40vh\] flex-wrap justify-center gap-1 overflow-y-auto /);
     expect(html.match(/\bh-\[92px\] w-\[78px\]/g)).toHaveLength(count + 1);
     expect(html.match(/width="56px" height="56px"/g)).toHaveLength(count + 1);
@@ -132,8 +132,8 @@ describe("the tile grid", () => {
   });
 
   it("follows the saved pinned order after the main bot, which never moves", () => {
-    setPinnedCircleOrder(["pin2", "pin0", "mausbot"]);
-    expect(tiles(grid(main, pins(3)))).toEqual(["primary:mausbot", "pinned:pin2:drag", "pinned:pin0:drag", "pinned:pin1:drag"]);
+    setPinnedCircleOrder(["pin2", "pin0", "indbot"]);
+    expect(tiles(grid(main, pins(3)))).toEqual(["primary:indbot", "pinned:pin2:drag", "pinned:pin0:drag", "pinned:pin1:drag"]);
   });
 
   it("shows the pinned tiles alone when there is no main bot, and nothing when there is neither", () => {

@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { mixSrgb } from "./color-contrast";
-import type { MausColor } from "./mascot";
+import type { IndColor } from "./mascot";
 import { userBubbleTone } from "./user-bubble-tone";
 
 /** Hover and press step the fill away from its ink, so the label only gains contrast. */
@@ -12,7 +12,7 @@ export const BOT_BUTTON = "bot-button";
 export type BotButtonTone = { fill: string; ink: string; hover: string; pressed: string };
 
 /** A bot's own primary button: the flat fill and ink of its Simple bubble. */
-export function botButtonTone(color: MausColor): BotButtonTone {
+export function botButtonTone(color: IndColor): BotButtonTone {
   const { background, ink } = userBubbleTone(color);
   const away = ink === "#ffffff" ? "#000000" : "#ffffff";
   return {
@@ -23,7 +23,7 @@ export function botButtonTone(color: MausColor): BotButtonTone {
   };
 }
 
-export function botButtonStyle(color: MausColor): CSSProperties {
+export function botButtonStyle(color: IndColor): CSSProperties {
   const tone = botButtonTone(color);
   return {
     "--bot-button": tone.fill,
@@ -37,7 +37,7 @@ export type BotButton = { className: string; style?: CSSProperties };
 
 /** A primary action that belongs to one bot. `shape` sizes it either way; `plain` is its look when no single bot owns
  * it, as in a room or for a teammate's line. */
-export function botButton(color: MausColor | undefined, shape: string, plain: string): BotButton {
+export function botButton(color: IndColor | undefined, shape: string, plain: string): BotButton {
   const classes = (look: string) => [shape, look].filter(Boolean).join(" ");
   return color ? { className: classes(BOT_BUTTON), style: botButtonStyle(color) } : { className: classes(plain) };
 }

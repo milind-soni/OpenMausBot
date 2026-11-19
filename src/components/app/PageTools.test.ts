@@ -31,7 +31,7 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const fetchMock = vi.fn<(path: string, init?: RequestInit) => Promise<Response>>();
 const openExternal = vi.fn(async () => true);
 const store = { state: {}, dispatch: vi.fn(), flushBotPatches: vi.fn(async () => null) } as unknown as ReturnType<typeof useStore>;
-const LINK = "https://page000000000000000000001.mausbot.page/";
+const LINK = "https://page000000000000000000001.indbot.page/";
 const LIVE: PublishedPageCard = { state: "live", title: "Pricing", pageId: "page000000000000000000001", url: LINK, usage: { pages: 1, limit: 5 } };
 
 let host: HTMLDivElement;
@@ -129,7 +129,7 @@ describe("a bot's page in the chat", () => {
     await fromFrame(PICK, inlineFrame().contentWindow);
     expect(chips()).toEqual([]);
     await click("Point", card());
-    expect(posted).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "mausbot/point", params: { on: true } }, "*");
+    expect(posted).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "indbot/point", params: { on: true } }, "*");
     expect(card().textContent).toContain("Click the part of the page you want changed.");
     await fromFrame(PICK, window);
     expect(chips()).toEqual([]);
@@ -146,7 +146,7 @@ describe("a bot's page in the chat", () => {
     expect(posted).toHaveBeenCalledWith(marksMessage(["main > section:nth-of-type(2) > button", "footer > a"]), "*");
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(button("Point", card()).getAttribute("aria-pressed")).toBe("false");
-    expect(posted).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "mausbot/point", params: { on: false } }, "*");
+    expect(posted).toHaveBeenCalledWith({ jsonrpc: "2.0", method: "indbot/point", params: { on: false } }, "*");
   });
 
   it("sends Point and the numbered outlines again to the frame a reload puts in place", async () => {
@@ -160,7 +160,7 @@ describe("a bot's page in the chat", () => {
     await act(async () => { inlineFrame().dispatchEvent(new Event("load")); });
     // The new page starts with Point off, so it is told Point is still on before it gets the outlines.
     expect(posted.mock.calls.map(([message]) => message)).toEqual([
-      { jsonrpc: "2.0", method: "mausbot/point", params: { on: true } },
+      { jsonrpc: "2.0", method: "indbot/point", params: { on: true } },
       marksMessage(["main > section:nth-of-type(2) > button"]),
     ]);
   });

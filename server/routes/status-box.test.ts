@@ -1,4 +1,4 @@
-// The MausBot connector on a server its owner runs reads whether the bot box is on from the server's own health answer.
+// The IndBot connector on a server its owner runs reads whether the bot box is on from the server's own health answer.
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, expect, it } from "vitest";

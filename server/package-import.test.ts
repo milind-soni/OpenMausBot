@@ -111,13 +111,13 @@ describe("importing a whole team", () => {
     expect(app.events.filter((kind) => kind === "bot")).toHaveLength(3);
   });
 
-  it("brings a new install's chrome MausBot back in chrome from its own export", async () => {
+  it("brings a new install's chrome IndBot back in chrome from its own export", async () => {
     const app = await installation();
     app.store.seedIfEmpty();
     const { createBotPackageExport } = await import("./package-export.ts");
     const exported = createBotPackageExport({ name: "Mine", groups: [], routines: [], bots: app.store.bots });
     const document: PackageDocument = app.parsePackageDocument(JSON.parse(JSON.stringify(exported)));
-    expect(document.package.agents.map((agent) => [agent.name, agent.appearance?.color])).toEqual([["MausBot", "chrome"]]);
+    expect(document.package.agents.map((agent) => [agent.name, agent.appearance?.color])).toEqual([["IndBot", "chrome"]]);
     const result = app.importer.importPackageDocument(document, { trust: "file", mode: "add" }, app.deps);
     if (result.alreadyAdded) throw new Error("unexpected");
     expect(result.bots.map((bot) => app.store.bot(bot.id)?.color)).toEqual(["chrome"]);
@@ -246,7 +246,7 @@ describe("importing past five bots, and the workspace's ceiling", () => {
   it("adds a template's manifest past five bots", async () => {
     const app = await withBots(19, 100);
     const { parseTeamManifest } = await import("./team-manifest.ts");
-    const manifest = parseTeamManifest({ format: "openmaus.team", version: 2, team: { name: "Desk", members: [{ key: "helper", name: "Helper", appearance: { color: "blue" } }] } });
+    const manifest = parseTeamManifest({ format: "openind.team", version: 2, team: { name: "Desk", members: [{ key: "helper", name: "Helper", appearance: { color: "blue" } }] } });
     app.importer.importTeamManifest(manifest, { mode: "add", cwd: null }, app.deps);
     expect(app.store.bots).toHaveLength(20);
   });

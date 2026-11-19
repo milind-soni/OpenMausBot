@@ -1,4 +1,4 @@
-// Webhook triggers a bot makes or changes from chat. Every change applies at once (OpenMausBot adds no confirmation
+// Webhook triggers a bot makes or changes from chat. Every change applies at once (OpenIndBot adds no confirmation
 // card of its own); the conversation gets a receipt card with Undo, which never carries the address.
 import { z } from "zod";
 
@@ -45,7 +45,7 @@ const INSTRUCTIONS_MAX = 20_000;
 const definitionSchema = z.object({
   name: z.string().trim().min(1, "A webhook trigger needs a name").max(NAME_MAX),
   instructions: z.string().trim().max(INSTRUCTIONS_MAX).default(""),
-  runOn: z.enum(["maus", "cloud"]).default("maus"),
+  runOn: z.enum(["ind", "cloud"]).default("ind"),
   eventTypes: z.array(z.string().trim().min(1).max(200)).max(20).optional(),
   payloadFilter: z.record(z.string().trim().min(1).max(200), z.string().trim().max(200)).optional(),
   sameConversation: z.boolean().optional(),

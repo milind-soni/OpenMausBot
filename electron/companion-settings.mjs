@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 /** `companion-settings.json` in the app's user data: each way into this computer and whether the person turned it on.
- * `wifi` is Same Wi-Fi (the device port on the LAN, and Bonjour), `relay` is Anywhere, through MausBot, `tailscale`
+ * `wifi` is Same Wi-Fi (the device port on the LAN, and Bonjour), `relay` is Anywhere, through IndBot, `tailscale`
  * the tailnet address (with `computers` when the person's other computers may open this one's server over it, and
  * `forShare` when turning that share on is what turned this route on, so turning the share off turns it off again), `https`
  * the HTTPS address (the managed tunnel). `notices` lists routes kept on by the update that the person has not seen yet. */
@@ -84,7 +84,7 @@ export const phoneLinkShouldSleep = (state) =>
   state?.enabled === true && !state.error && state.devicesUnreadable !== true && Array.isArray(state.devices) && state.devices.length === 0 && !state.pairing;
 
 export const companionDevicesFile = (env = process.env, home = os.homedir()) =>
-  path.join(env.OMB_COMPANION_DIR ?? path.join(home, ".openmausbot-companion"), "devices.json");
+  path.join(env.OMB_COMPANION_DIR ?? path.join(home, ".openindbot-companion"), "devices.json");
 
 /** Paired devices in the companion's own store; null when the file exists but cannot be read. */
 export function readPairedDevices(file = companionDevicesFile()) {

@@ -2,7 +2,7 @@
 
 ## Summary
 
-OpenMausBot currently stops every room member turn after five minutes, even when the engine is still producing output. The duration and the error message are hard-coded in `server/index.ts`. This behavior is separate from the activity-based turn stall watchdog controlled by `OMB_TURN_STALL_MS`.
+OpenIndBot currently stops every room member turn after five minutes, even when the engine is still producing output. The duration and the error message are hard-coded in `server/index.ts`. This behavior is separate from the activity-based turn stall watchdog controlled by `OMB_TURN_STALL_MS`.
 
 Add one global, persisted room turn timeout setting. Keep five minutes as the default, expose the setting in the existing General settings UI, and use the configured value for room turns started after the setting is saved.
 

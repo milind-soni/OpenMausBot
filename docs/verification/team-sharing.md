@@ -2,8 +2,8 @@
 
 A template is a folder (`bot.md` or `team.md`, `skills/<name>/SKILL.md`, `avatars/<key>.<ext>`) that holds no chats,
 memory, keys or connection addresses. A bot makes one of itself when asked in chat (the header Share sends the ask); a
-department's "…" → Share makes one at once. Publish sends it to the community repository through the MausBot Admin;
-without a MausBot sign-in the card offers Save folder… and GitHub's upload page instead. Import (+ → Import…) adds one
+department's "…" → Share makes one at once. Publish sends it to the community repository through the IndBot Admin;
+without a IndBot sign-in the card offers Save folder… and GitHub's upload page instead. Import (+ → Import…) adds one
 from a GitHub link or a folder.
 
 ## Automated checks
@@ -35,6 +35,6 @@ node --experimental-strip-types scripts/control-omb.ts launch
 1. Create a bot, give it a skill and a routine, then send it: "Create a public template of yourself that I can share with somebody else".
 2. Expected with a Claude engine: the bot calls `share` with action export, and one card appears with Draft, the counts and
    "Chats, memory and keys are never shared". Details lists Instructions, Skills, Routines, Apps.
-3. On a server not signed in to MausBot the card shows "Sign in to MausBot to publish" (desktop) or "Publishing isn't
+3. On a server not signed in to IndBot the card shows "Sign in to IndBot to publish" (desktop) or "Publishing isn't
    available here" (self-hosted), with Save folder… and Upload on GitHub.
 4. `POST /api/share/import` with `{ "path": "<saved folder>" }` adds a new bot; its routine is off and nothing private came along.

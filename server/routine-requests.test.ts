@@ -118,7 +118,7 @@ describe("RoutineRequestService", () => {
   it("refuses instruction replacement after redaction without saving a card or changing other fields", async () => {
     const { routines, service, store } = harness();
     const prompt = "Review the queue.\n".repeat(180) + "Use sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789.";
-    const saved = routines.create({ name: "Private instructions", prompt, botId: "bot-a", target: "bot", runOn: "maus", enabled: false,
+    const saved = routines.create({ name: "Private instructions", prompt, botId: "bot-a", target: "bot", runOn: "ind", enabled: false,
       durationMinutes: 30, schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } });
     const submit = (changes: unknown) => service.submit({ botId: "bot-a", threadId: "thread-a", proposal: { action: "update", routineId: saved.id, changes } });
     const before = structuredClone(routines.listRoutines());
@@ -459,7 +459,7 @@ describe("RoutineRequestService", () => {
     expect(plain.detail).not.toContain("On startup:");
 
     const proposed = await service.propose({ botId: "bot-a", threadId: "thread-a", proposal: createProposal({ runOnStartup: true }) });
-    expect(proposed.detail).toContain("On startup: Also runs once each time OpenMausBot starts");
+    expect(proposed.detail).toContain("On startup: Also runs once each time OpenIndBot starts");
     expect(store.messagesFor("thread-a")[0]!.card!.routineRequest?.operation).toMatchObject({ action: "create", routine: { runOnStartup: true } });
     expect(service.resolve({ botId: "bot-a", threadId: "thread-a", requestId: proposed.requestId, behavior: "allow" }).state).toBe("applied");
     const routine = routines.listRoutines().find((candidate) => candidate.name === "Morning brief")!;
@@ -1007,7 +1007,7 @@ describe("RoutineRequestService", () => {
     await service.propose({
       botId: "bot-a",
       threadId: "thread-a",
-      proposal: { action: "update", routineId: routine.id, changes: { runOn: "maus" } },
+      proposal: { action: "update", routineId: routine.id, changes: { runOn: "ind" } },
     });
     await service.propose({
       botId: "bot-a",
@@ -1122,7 +1122,7 @@ describe("RoutineRequestService", () => {
       botId: "bot-a",
       name: "Morning brief",
       prompt: "Summarize the overnight support queue.",
-      runOn: "maus",
+      runOn: "ind",
       enabled: true,
       schedule: { type: "daily", time: "09:00", weekdays: [1, 3] },
       durationMinutes: 5,

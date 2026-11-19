@@ -54,7 +54,7 @@ function setup(options: { hosted?: boolean; needsYou?: NeedsYouItem[]; language?
   const watchRun = (key: string, reply: string): RoutineRun => {
     const runThread = store.createTask(chief.id, "Keep an eye on my day", false)!.threadId;
     store.appendMessage(runThread, { role: "bot", kind: "text", text: reply, turnId: "turn-1" });
-    return { id: `run-${key}`, routineId: "watch", routineName: "Keep an eye on my day", target: "bot", botId: chief.id, runOn: "maus", scheduledFor: now, status: "completed",
+    return { id: `run-${key}`, routineId: "watch", routineName: "Keep an eye on my day", target: "bot", botId: chief.id, runOn: "ind", scheduledFor: now, status: "completed",
       manual: false, threadId: runThread, checkKey: key, deliver: "brief", access: "read-and-draft", createdAt: now };
   };
   return {
@@ -69,7 +69,7 @@ describe("the brief", () => {
     const s = setup({ needsYou: [{ kind: "signed-out", id: "sign-in", at: 0, instanceId: "claude", botIds: [] }] });
     s.advance(21_643);
     const run = (name: string, finishedAt: number): RoutineRun => ({
-      id: name, routineId: name, routineName: name, target: "bot", botId: s.chief.id, runOn: "maus",
+      id: name, routineId: name, routineName: name, target: "bot", botId: s.chief.id, runOn: "ind",
       scheduledFor: finishedAt, status, manual: false, createdAt: finishedAt, finishedAt,
     });
     s.runs.push(run("Before midnight", Date.parse("2026-10-22T03:59:59.999Z")), run("After midnight", Date.parse("2026-10-22T04:00:00.001Z")));
@@ -200,12 +200,12 @@ describe("the brief", () => {
 
   it("a routine run that published a page offers Open page, which opens the page itself, beside Open for its chat", async () => {
     const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
-    const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
+    const PAGE = "https://abcdefghijklmnopqrstuvwxyz.indbot.page/";
     const run = (id: string, name: string, card?: "live" | "unpublished"): RoutineRun => {
       const threadId = s.store.createTask(s.chief.id, name, false)!.threadId, startedAt = Date.now();
       if (card) s.store.appendMessage(threadId, { role: "bot", kind: "text", text: `Published “Sales”: ${PAGE}`, publishedPage: { state: card, title: "Sales", pageId: "abcdefghijklmnopqrstuvwxyz", url: PAGE } });
       s.store.appendMessage(threadId, { role: "bot", kind: "text", text: "Updated the dashboard." });
-      return { id, routineId: id, routineName: name, target: "bot", botId: s.chief.id, runOn: "maus", scheduledFor: s.now(), status: "completed", manual: false,
+      return { id, routineId: id, routineName: name, target: "bot", botId: s.chief.id, runOn: "ind", scheduledFor: s.now(), status: "completed", manual: false,
         threadId, createdAt: startedAt, startedAt, finishedAt: Date.now(), output: "Updated the dashboard." };
     };
     s.runs.push(run("dash", "Refresh the sales dashboard", "live"), run("gone", "Old dashboard", "unpublished"), run("plain", "Tidy my inbox"));
@@ -217,7 +217,7 @@ describe("the brief", () => {
 
   it("takes a routine's real run for its latest, not a row that only counts occurrences skipped behind it", async () => {
     const s = setup({ needsYou: [{ kind: "signed-out", id: "x", at: 0, instanceId: "claude", botIds: [] }] });
-    const base = { routineId: "tidy", routineName: "Tidy my inbox", target: "bot" as const, botId: s.chief.id, runOn: "maus" as const, manual: false };
+    const base = { routineId: "tidy", routineName: "Tidy my inbox", target: "bot" as const, botId: s.chief.id, runOn: "ind" as const, manual: false };
     const done: RoutineRun = { ...base, id: "done", scheduledFor: s.now(), status: "completed", createdAt: s.now(), finishedAt: s.now() + 1_000, output: "Filed twelve emails." };
     const counted: RoutineRun = { ...base, id: "counted", scheduledFor: s.now() + 500, status: "missed", createdAt: s.now() + 500, finishedAt: s.now() + 2_000, seenAt: s.now() + 500,
       error: "Skipped because the previous run of this routine is still running", skipped: { count: 1, firstAt: s.now() + 500, lastAt: s.now() + 500, behind: "done" } };

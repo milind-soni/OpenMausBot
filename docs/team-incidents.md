@@ -8,7 +8,7 @@ by opening the desktop and reading every thread, then retried by hand.
 
 Now the team's coordinator hears first. When a run breaks on a bot whose
 section has a **Chief of Staff** (or that a Chief was put in charge of),
-OpenMausBot:
+OpenIndBot:
 
 1. opens — once — a **Problems to look at** thread (older ones are still called Team incidents) on the Chief and leaves a chip
    there naming what broke, linked to the broken thread;

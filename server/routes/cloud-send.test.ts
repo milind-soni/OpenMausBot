@@ -49,7 +49,7 @@ describe("what a move asks of a server", () => {
   });
 
   it("what only a move carries, only when a move asks", async () => {
-    const routine = { id: "r1", name: "Morning", prompt: "Report.", target: "bot", botId: "bot-00000001", runOn: "maus", enabled: true, schedule: { type: "daily", time: "09:00", weekdays: [1] },
+    const routine = { id: "r1", name: "Morning", prompt: "Report.", target: "bot", botId: "bot-00000001", runOn: "ind", enabled: true, schedule: { type: "daily", time: "09:00", weekdays: [1] },
       durationMinutes: 15, nextRunAt: null, createdAt: 1, updatedAt: 1 };
     const route = createCloudSendRoutes({ appVersion: "0.1.120", bots: () => [{ id: "bot-00000001", threadId: "thread-0001", name: "Yuki", soul: "Be brief.", pinned: true } as never],
       messagesTail: () => ({ messages: [], hasMore: false }), skills: () => [], logins: { listSecrets: () => [], secret: () => null, changes: () => [], get: () => null, onePasswordConnectedAt: () => null, onePasswordGrants: () => ({}), onePasswordItemGrants: () => ({}), onePasswordToken: () => null },

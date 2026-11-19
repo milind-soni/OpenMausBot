@@ -56,7 +56,7 @@ vi.mock("./cua-restart.mjs", async (original) => {
 let cua;
 beforeEach(async () => {
   Object.assign(fixture, { home: mkdtempSync(join(tmpdir(), "omb-cua-watch-")), alive: true, dead: new Set(), hosts: [], failStarts: 0, granted: true });
-  vi.stubEnv("OPENMAUSBOT_CUA_EMBEDDED", "1");
+  vi.stubEnv("OPENINDBOT_CUA_EMBEDDED", "1");
   vi.stubEnv("CUA_DRIVER_PATH", "/fixture/cua-driver");
   vi.resetModules();
   cua = await import("./cua.mjs");

@@ -112,7 +112,7 @@ posixOnly("who may answer a card on a shared workspace", () => {
   beforeAll(async () => {
     chmodSync(FAKE_CLI, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-card-answerers-"));
-    const data = join(home, ".openmausbot");
+    const data = join(home, ".openindbot");
     mkdirSync(data, { recursive: true });
     writeFileSync(join(data, "config.json"), JSON.stringify({
       signIn: { admins: [BOSS], members: [ADA, BOB] },
@@ -183,7 +183,7 @@ posixOnly("who may answer a card on a shared workspace", () => {
     // a fresh thread (the threads route: coordinate_bots with thread "new",
     // an assignment on the job runtime, opened for the same person).
     const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
-      method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
+      method: "POST", headers: { "content-type": "application/json", "x-openindbot-test-capability": CAPABILITY_KEY },
       body: JSON.stringify({ botId: opener.id, threadId: opener.threadId }),
     });
     expect(minted.status).toBe(201);
@@ -263,7 +263,7 @@ posixOnly("who may answer a card on a shared workspace", () => {
     expect(task.status).toBe(201);
     const threadId = task.body.task.threadId as string;
     const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
-      method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
+      method: "POST", headers: { "content-type": "application/json", "x-openindbot-test-capability": CAPABILITY_KEY },
       body: JSON.stringify({ botId: bot.id, threadId }),
     });
     const { token } = await minted.json() as { token: string };
@@ -304,7 +304,7 @@ posixOnly("who may answer a card on a shared workspace", () => {
 
     // A Slack-shaped request: the worker opens the thread and sends through
     // the guarded route, so no person can be named. Any member may approve it
-    // in OpenMausBot, as before; nothing waits on an admin.
+    // in OpenIndBot, as before; nothing waits on an admin.
     const task = await api("POST", `/api/bots/${bot.id}/tasks`, { title: "Slack · C1 · 1.0" });
     expect(task.status, JSON.stringify(task.body)).toBe(201);
     const threadId = task.body.task.threadId as string;

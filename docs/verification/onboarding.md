@@ -1,12 +1,12 @@
 # Welcome flow and guided tour
 
-The first run is two screens, then the chat (Oct 27 2026): "Meet OpenMausBot"
+The first run is two screens, then the chat (Oct 27 2026): "Meet OpenIndBot"
 (a composer typing one sentence and Next; with no AI working, the same pill
 signs one in, with "Other ways to connect · Set up later" under it), then
 "Introducing your Chief of Staff" over an empty app (Create Chief of Staff, and
 Choose an existing bot where the person has bots). The Chief step shows only
-for a MausBot not yet introduced where no other bot is the Chief. It lands in
-the Chief's chat, where MausBot's three lines, its follow-up (written once by
+for a IndBot not yet introduced where no other bot is the Chief. It lands in
+the Chief's chat, where IndBot's three lines, its follow-up (written once by
 the server, `POST /api/bots/:id/helper-followup`) and chips offer only what is
 still missing. The app tour starts only from Settings → Replay app tour.
 
@@ -19,7 +19,7 @@ node --experimental-strip-types scripts/control-omb.ts ui launch
 In a second terminal, pass its exact printed handle:
 
 ```sh
-node --experimental-strip-types scripts/verify-onboarding-ui.ts /tmp/openmausbot-verify-data-XXXXXX/ui.json
+node --experimental-strip-types scripts/verify-onboarding-ui.ts /tmp/openindbot-verify-data-XXXXXX/ui.json
 ```
 
 Use a fresh fixture. The recipe clears only its browser storage, then enables
@@ -31,7 +31,7 @@ Assertions cover the two screens: no field, step count, Back or Skip on the
 first; a reload on the second coming back to it; Create landing in the Chief's
 chat with its first messages and one saved follow-up even when the completion
 save fails, and the next browser without this one's mark seeing the welcome
-again, without the Chief step MausBot already had, and saving it (with
+again, without the Chief step IndBot already had, and saving it (with
 `met-chief-v1`); no app tour after the welcome or a reload; automatic
 starter-model selection and a successful first composer message without opening
 the model picker; every app tour step from Settings, persistence after reload,
@@ -52,7 +52,7 @@ pnpm exec vitest run src/components/onboarding/WelcomeFlow.test.ts src/component
 
 They cover when the Chief step shows, its 300 ms input guard, the Cloud Pro
 popup settled by a first run that could offer the Cloud, the chips' order and
-cap, the follow-up written once and only by MausBot's own person, the default
+cap, the follow-up written once and only by IndBot's own person, the default
 profile name's guards, and the Advanced intro and spotlights kept as they were.
 
 ## Providers connected after first launch
@@ -81,7 +81,7 @@ What each first-run surface depends on, and how it was checked:
 |---|---|---|
 | Desktop app, own server (full bridge, `remoteClient` present) | The two-screen first run, decided without a new request | `src/components/onboarding/WelcomeGate.test.ts`, `src/components/onboarding/WelcomeFlow.test.ts` |
 | Hosted workspace opened inside the desktop app (reduced bridge, no `remoteClient`) | Treated like a browser: the server is asked | `src/components/onboarding/WelcomeGate.test.ts` |
-| Packaged desktop with the organization bridge | An optional "Using OpenMausBot at work?" row under Other ways in Connect an AI; a signed-in Company engine counts as ready | `src/components/onboarding/beats/OrganisationRow.test.ts`, `src/components/onboarding/ConnectAi.test.ts` (fake bridge) |
+| Packaged desktop with the organization bridge | An optional "Using OpenIndBot at work?" row under Other ways in Connect an AI; a signed-in Company engine counts as ready | `src/components/onboarding/beats/OrganisationRow.test.ts`, `src/components/onboarding/ConnectAi.test.ts` (fake bridge) |
 | Browser, admin of a hosted workspace | The first screen only, with the shared-workspace line, then the chat | `src/components/onboarding/WelcomeGate.test.ts`, `src/components/onboarding/WelcomeFlow.test.ts`, `src/lib/onboarding.test.ts` |
 | Browser, hosted member (no admin scope) | No welcome flow; one dismissible note kept in browser storage; no first-conversation spotlights | `src/components/onboarding/WelcomeGate.test.ts`, `src/components/onboarding/FirstConversationTour.test.ts` |
 | Browser, client-scope session on a server that is not hosted | Nothing new: the flow does not open itself (it could not be saved); Settings replay and spotlights as before | `src/components/onboarding/WelcomeGate.test.ts`, `src/lib/onboarding.test.ts` |
@@ -140,7 +140,7 @@ desktop's preload bridge are not exercised here; they are covered by
 ## Bring what you already use (Oct 16 2026)
 
 Skills and MCP servers another AI tool keeps on this computer, brought in with
-one button: in Settings → Import & export, and offered by MausBot's first messages as a
+one button: in Settings → Import & export, and offered by IndBot's first messages as a
 "Bring in your skills" chip when its look around finds some within two seconds.
 Desktop app only.
 
@@ -156,7 +156,7 @@ sentinel reaches no answer, saved server or copied skill. The route test
 refuses a paired device, a service loopback and a hosted or Cloud server; the
 end-to-end test runs the real server from `launchVerificationServer` against a
 planted home, as the desktop app runs it (`OMB_TEST_DESKTOP_OWNER_TOKEN`), checks
-that a headless server (`openmausbot serve`) refuses the step, and checks that the starter bot and a bot made afterwards both
+that a headless server (`openindbot serve`) refuses the step, and checks that the starter bot and a bot made afterwards both
 get the skills in their turn's index, task folder links and `/name`, that a
 Claude turn with "Also use my Claude Code skills" on sees a Claude Code skill
 once, and that a bot can switch one off for itself. The rows, working, failed
@@ -168,7 +168,7 @@ window itself.
 ## Two screens, then the chat (Oct 27 2026)
 
 ```sh
-pnpm exec vitest run src/lib/onboarding.test.ts src/lib/welcome-draft.test.ts src/lib/default-bot.test.ts src/lib/corner-popup.test.ts src/components/onboarding src/components/HelperIntro.test.ts src/components/AppNotices.test.ts src/components/MausBotWelcome.gate.test.ts
+pnpm exec vitest run src/lib/onboarding.test.ts src/lib/welcome-draft.test.ts src/lib/default-bot.test.ts src/lib/corner-popup.test.ts src/components/onboarding src/components/HelperIntro.test.ts src/components/AppNotices.test.ts src/components/IndBotWelcome.gate.test.ts
 ```
 
 - `src/components/onboarding/WelcomeFlow.test.ts` renders the flow in
@@ -177,20 +177,20 @@ pnpm exec vitest run src/lib/onboarding.test.ts src/lib/welcome-draft.test.ts sr
   holding Connect an AI, Next held until one connects and Later moving on;
   Escape and Enter; a reload on the second screen; a hosted admin's one screen;
   a replay saving nothing about a first chat.
-- `src/components/onboarding/ChiefIntro.test.ts` covers Create (MausBot made the
+- `src/components/onboarding/ChiefIntro.test.ts` covers Create (IndBot made the
   Chief only where there is none, an existing Chief never replaced), Choose with
   its radio list and Confirm (a bot whose AI cannot lead held back), Escape
   leaving only the list, and the choice finishing in a window that runs no
   animation frames.
 - `src/components/onboarding/ConnectAi.test.ts` covers the recommended sign-in,
   Other ways and the failed check.
-- `src/components/HelperIntro.test.ts` covers MausBot's first messages: the
+- `src/components/HelperIntro.test.ts` covers IndBot's first messages: the
   three bubbles, the look around, chips for only what is missing, and the
   staged arrival.
 - `src/lib/corner-popup.test.ts` and `src/components/AppNotices.test.ts` keep
   every corner notice out of the first conversation until a reply;
   `src/components/onboarding/FirstConversationTour.test.ts` keeps its
-  spotlights off; `src/components/MausBotWelcome.gate.test.ts` keeps MausBot's
+  spotlights off; `src/components/IndBotWelcome.gate.test.ts` keeps IndBot's
   first-launch card for older installs only.
 - `src/components/onboarding/GuidedTour.test.ts` and
   `src/components/onboarding/WelcomeGate.test.ts` check the app tour never

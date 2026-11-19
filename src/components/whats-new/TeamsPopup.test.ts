@@ -8,7 +8,7 @@ import { setLocale } from "@/lib/i18n";
 import type { TeamsAction } from "@/lib/teams-whats-new";
 
 const avatars = vi.hoisted(() => [] as Array<{ animated?: boolean }>);
-vi.mock("@/components/Avatar", () => ({ MausAvatar: (props: { animated?: boolean }) => { avatars.push(props); return null; } }));
+vi.mock("@/components/Avatar", () => ({ IndAvatar: (props: { animated?: boolean }) => { avatars.push(props); return null; } }));
 const opened = vi.hoisted(() => [] as string[]);
 vi.mock("@/lib/app-links", async (original) => ({ ...(await original<typeof import("@/lib/app-links")>()), openExternalLink: async (url: string) => { opened.push(url); } }));
 const { TeamsPopup, TEAMS_POPUP } = await import("./TeamsPopup");
@@ -37,7 +37,7 @@ describe("the Teams popup", () => {
   it("each audience has its own buttons: invite for a team's admins, Got it for its members, Start a team and Not now for everyone else", async () => {
     let popup = await show({ kind: "start", inApp: true, url: "https://cloud.example/pro/buy" });
     expect(popup.getAttribute("role")).toBe("dialog");
-    expect(popup.textContent).toContain("MausBot is better with your team");
+    expect(popup.textContent).toContain("IndBot is better with your team");
     expect(popup.textContent).toContain("$40 a month for 2 people, $20 for each extra person.");
     expect(buttons(popup)).toEqual(["Start a team", "See Team plans", "Not now", "Close"]);
     expect(document.activeElement?.textContent, "focus starts at its main button").toBe("Start a team");
@@ -59,7 +59,7 @@ describe("the Teams popup", () => {
       const popup = await show(action);
       const link = [...popup.querySelectorAll("button")].find(button => button.textContent === "See Team plans");
       await act(async () => { link!.click(); });
-      expect(opened.at(-1), action.kind).toBe("https://www.openmausbot.com/pricing#teams");
+      expect(opened.at(-1), action.kind).toBe("https://www.openindbot.com/pricing#teams");
       expect(onStep, action.kind).toHaveBeenLastCalledWith("see_team_plans");
       await act(async () => root?.unmount()); root = null;
     }

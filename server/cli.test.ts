@@ -19,7 +19,7 @@ const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const setup = vi.hoisted(() => ({ runSetup: vi.fn(), isSetupComplete: vi.fn(), readCliStartup: vi.fn(), saveCliStartup: vi.fn() }));
 vi.mock("./cli-setup.ts", () => setup);
 
-describe("openmausbot command line", () => {
+describe("openindbot command line", () => {
   it("parses commands and flags, and explains mistakes", () => {
     const serve = parseArgs(["serve", "--port", "9001", "--data-dir", "/tmp/x", "--label", "cab mini", "--tailscale", "--no-pair"], {});
     // --data-dir is resolved against the platform: C:\tmp\x on Windows.
@@ -35,8 +35,8 @@ describe("openmausbot command line", () => {
     });
     expect(parseArgs(["fleet", "users", "acme", "add", "bob@acme.test", "--chat-only"], {})).toMatchObject({ command: "fleet", fleetAction: "users", slug: "acme", fleetUserAction: "add", email: "bob@acme.test", chatOnly: true });
     expect(parseArgs(["fleet", "delete", "acme", "--yes", "--keep-data"], {})).toMatchObject({ fleetAction: "delete", slug: "acme", yes: true, keepData: true });
-    expect(parseArgs(["fleet", "init", "--domain", "AgentAda.cc", "--operator", "maus"], {})).toMatchObject({ fleetAction: "init", domain: "agentada.cc", operator: "maus" });
-    expect(parseArgs(["fleet", "agent", "--socket", "/run/x.sock", "--group", "maus"], {})).toMatchObject({ fleetAction: "agent", socket: "/run/x.sock", group: "maus" });
+    expect(parseArgs(["fleet", "init", "--domain", "AgentAda.cc", "--operator", "ind"], {})).toMatchObject({ fleetAction: "init", domain: "agentada.cc", operator: "ind" });
+    expect(parseArgs(["fleet", "agent", "--socket", "/run/x.sock", "--group", "ind"], {})).toMatchObject({ fleetAction: "agent", socket: "/run/x.sock", group: "ind" });
     expect(parseArgs(["fleet"], {})).toMatchObject({ error: expect.stringContaining("fleet needs one of") });
     expect(parseArgs(["fleet", "create"], {})).toMatchObject({ error: "fleet create needs a workspace name" });
     expect(parseArgs(["fleet", "users", "acme"], {})).toMatchObject({ error: expect.stringContaining("add|remove") });
@@ -64,14 +64,14 @@ describe("openmausbot command line", () => {
     expect(parseArgs(["access", "list"], {})).toMatchObject({ command: "access", accessAction: "list" });
     expect(parseArgs(["access"], {})).toEqual({ error: "access needs one of: list, add EMAIL [--chat-only], remove EMAIL" });
     expect(parseArgs(["access", "add"], {})).toEqual({ error: "add needs a value" });
-    expect(parseArgs(["service", "install", "--domain", "maus.example.com", "--port", "8799"], {})).toMatchObject({ command: "service", serviceAction: "install", domain: "maus.example.com", port: 8799 });
+    expect(parseArgs(["service", "install", "--domain", "ind.example.com", "--port", "8799"], {})).toMatchObject({ command: "service", serviceAction: "install", domain: "ind.example.com", port: 8799 });
     expect(parseArgs(["service", "uninstall"], {})).toMatchObject({ command: "service", serviceAction: "uninstall" });
     expect(parseArgs(["service", "install", "--sentinel"], {})).toMatchObject({ command: "service", serviceAction: "install", sentinel: true });
     expect(parseArgs(["serve", "--sentinel"], {})).toEqual({ error: expect.stringContaining("--sentinel") });
     expect(parseArgs(["service"], {})).toEqual({ error: expect.stringContaining("service needs one of") });
-    expect(parseArgs(["serve", "--domain", "Maus.Example.com"], {})).toMatchObject({ command: "serve", domain: "maus.example.com" });
+    expect(parseArgs(["serve", "--domain", "Ind.Example.com"], {})).toMatchObject({ command: "serve", domain: "ind.example.com" });
     expect(parseArgs(["serve", "--domain", "localhost"], {})).toEqual({ error: expect.stringContaining("bare hostname") });
-    expect(parseArgs(["serve", "--domain", "maus.example.com", "--tunnel"], {})).toEqual({ error: expect.stringContaining("--domain already gives") });
+    expect(parseArgs(["serve", "--domain", "ind.example.com", "--tunnel"], {})).toEqual({ error: expect.stringContaining("--domain already gives") });
   });
 
   it("takes the phone kind non-interactively; --phone alone is a chat-only code for any phone", () => {
@@ -86,9 +86,9 @@ describe("openmausbot command line", () => {
   });
 
   it("--public-url takes https, or http on a private network only", () => {
-    expect(parseArgs(["serve", "--public-url", "https://maus.example.com"], {})).toMatchObject({ publicUrl: "https://maus.example.com" });
+    expect(parseArgs(["serve", "--public-url", "https://ind.example.com"], {})).toMatchObject({ publicUrl: "https://ind.example.com" });
     expect(parseArgs(["serve", "--public-url", "http://192.168.1.20:8799"], {})).toMatchObject({ publicUrl: "http://192.168.1.20:8799" });
-    expect(parseArgs(["serve", "--public-url", "http://maus.example.com"], {})).toEqual({ error: expect.stringContaining("plain http isn't encrypted") });
+    expect(parseArgs(["serve", "--public-url", "http://ind.example.com"], {})).toEqual({ error: expect.stringContaining("plain http isn't encrypted") });
     expect(parseArgs(["serve", "--lan"], {})).toMatchObject({ lan: true });
     expect(parseArgs(["serve", "--lan", "--local"], {})).toEqual({ error: expect.stringContaining("--local") });
   });
@@ -96,7 +96,7 @@ describe("openmausbot command line", () => {
   describe("the pairing block", () => {
     const now = Date.parse("2026-11-07T10:00:00");
     const link = "https://mini.example/pair#code=ABCD-EFGH-JKLM";
-    const base = { code: "ABCD-EFGH-JKLM", expiresAt: now + 10 * 60_000, chatOnly: false, link, prefix: "npx openmausbot", now };
+    const base = { code: "ABCD-EFGH-JKLM", expiresAt: now + 10 * 60_000, chatOnly: false, link, prefix: "npx openindbot", now };
 
     it("shows one code, its link to paste into the desktop app, a QR, and the phone command the way the CLI was started", () => {
       const out = pairingBlock(base);
@@ -104,7 +104,7 @@ describe("openmausbot command line", () => {
       expect(out).toContain(`Link           ${link}`);
       expect(out).toContain("＋ → Connect to a server, paste the link");
       expect(out).toContain(qrToString(link));
-      expect(out).toContain("For a phone (chat and approvals only)   npx openmausbot pair --phone");
+      expect(out).toContain("For a phone (chat and approvals only)   npx openindbot pair --phone");
       expect(out).not.toMatch(/omb_pair_|phone app:|this computer:/);
       expect(pairingBlock({ ...base, chatOnly: true })).toContain("· chat and approvals");
     });
@@ -114,13 +114,13 @@ describe("openmausbot command line", () => {
       const out = pairingBlock({ ...base, link: null, localLink: local });
       expect(out).toContain("reachable from this machine only");
       expect(out).toContain(`Browser on this machine     ${local}`);
-      expect(out).toContain("pick a way in first: npx openmausbot serve --help");
+      expect(out).toContain("pick a way in first: npx openindbot serve --help");
       expect(out).not.toMatch(/[▀▄█]/);
       expect(pairingBlock({ ...base, link: null, localLink: "http://localhost:8080/pair#code=X", localPlace: "docker" })).toContain("Browser on the Docker host   http://localhost:8080/pair#code=X");
     });
 
     it("gives an Android phone the app-scheme QR, because its scanner rejects https", () => {
-      const invite = `openmausbot://pair?address=https%3A%2F%2Fmini.example&token=omb_pair_${"a".repeat(43)}&name=mini`;
+      const invite = `openindbot://pair?address=https%3A%2F%2Fmini.example&token=omb_pair_${"a".repeat(43)}&name=mini`;
       const out = pairingBlock({ ...base, chatOnly: true, inviteUrl: invite, phone: "android" });
       expect(out).toContain(qrToString(invite));
       expect(out).not.toContain(qrToString(link));
@@ -138,7 +138,7 @@ describe("openmausbot command line", () => {
       const guided = browserSignInLines(local, "ABCD-EFGH-JKLM", Date.now() + 60_000);
       expect(guided).toContain(local);
       expect(guided).toContain("ABCD-EFGH-JKLM");
-      expect(guided).toContain("openmausbot pair");
+      expect(guided).toContain("openindbot pair");
     });
   });
 
@@ -166,7 +166,7 @@ describe("openmausbot command line", () => {
   it("serve: starts the server, prints the pairing link, and stops on SIGTERM", async () => {
     const home = mkdtempSync(join(tmpdir(), "omb-cli-serve-"));
     const port = workerPort(21000, 9000);
-    const child = spawn(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openmausbot.ts"), "serve", "--port", String(port), "--data-dir", join(home, "data"), "--label", "cli test", "--public-url", "https://mini.example"], {
+    const child = spawn(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openindbot.ts"), "serve", "--port", String(port), "--data-dir", join(home, "data"), "--label", "cli test", "--public-url", "https://mini.example"], {
       cwd: join(SERVER_DIR, ".."),
       env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, OMB_WEBHOOK_PORT: String(port + 1), OMB_BROWSER_CONNECTION: join(home, "browser-connection.json") },
       stdio: ["ignore", "pipe", "pipe"],
@@ -180,14 +180,14 @@ describe("openmausbot command line", () => {
       expect(out).toContain('server "cli test"');
       expect(out).toMatch(/Reach {4}✗ https:\/\/mini\.example doesn't reach this server/);
       expect(out, "not a terminal: no code goes into a log").not.toMatch(/Pairing code {3}[A-Z2-9]{4}-/);
-      expect(out).toContain("Get a pairing code: openmausbot pair");
+      expect(out).toContain("Get a pairing code: openindbot pair");
       expect(out).not.toContain("Ctrl+C");
-      const paired = spawnSync(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openmausbot.ts"), "pair", "--port", String(port)], { cwd: join(SERVER_DIR, ".."), env: { PATH: process.env.PATH ?? "", HOME: home }, encoding: "utf8" });
+      const paired = spawnSync(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openindbot.ts"), "pair", "--port", String(port)], { cwd: join(SERVER_DIR, ".."), env: { PATH: process.env.PATH ?? "", HOME: home }, encoding: "utf8" });
       expect(paired.stdout).toMatch(/Pairing code {3}[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4} {3}works once, until .+ · everything/);
       expect(paired.stdout).toContain("Link           https://mini.example/pair#code=");
       expect(paired.stdout).toMatch(/[▀▄█]/);
       expect(paired.stdout).toContain("The code works once the address answers.");
-      const descriptor: any = await (await fetch(`http://127.0.0.1:${port}/.well-known/openmausbot/environment`)).json();
+      const descriptor: any = await (await fetch(`http://127.0.0.1:${port}/.well-known/openindbot/environment`)).json();
       expect(descriptor.label).toBe("cli test");
       const pairing: any = await (await fetch(`http://127.0.0.1:${port}/api/auth/pairing`)).json();
       expect(pairing.pairings.length).toBeGreaterThanOrEqual(1);
@@ -211,7 +211,7 @@ describe("serve --lan", () => {
     const lan = reachableAddresses().lan[0];
     const home = mkdtempSync(join(tmpdir(), "omb-cli-lan-"));
     const port = workerPort(21000, 9000);
-    const child = spawn(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openmausbot.ts"), "serve", "--lan", "--port", String(port), "--data-dir", join(home, "data")], {
+    const child = spawn(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openindbot.ts"), "serve", "--lan", "--port", String(port), "--data-dir", join(home, "data")], {
       cwd: join(SERVER_DIR, ".."),
       env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, OMB_WEBHOOK_PORT: String(port + 1), OMB_BROWSER_CONNECTION: join(home, "browser-connection.json") },
       stdio: ["ignore", "pipe", "pipe"],
@@ -281,7 +281,7 @@ describe("terminal onboarding commands", () => {
     expect(setup.runSetup).toHaveBeenCalledWith({ dataDir: options.dataDir, port: options.port });
     expect(setup.isSetupComplete).not.toHaveBeenCalled();
     expect(serve).not.toHaveBeenCalled();
-    expect(output.log).toHaveBeenCalledWith(expect.stringContaining("Start with: openmausbot"));
+    expect(output.log).toHaveBeenCalledWith(expect.stringContaining("Start with: openindbot"));
     expect(phoneSetup).toHaveBeenCalledOnce();
     expect(setup.saveCliStartup).toHaveBeenCalledWith(options.dataDir, { access: "local" });
   });
@@ -429,16 +429,16 @@ describe("phone endpoint identity", () => {
     const fetcher = vi.fn().mockResolvedValueOnce(Response.json({ environmentId: "fixture" }))
       .mockResolvedValueOnce(Response.json({ environmentId: "fixture" }));
     vi.stubGlobal("fetch", fetcher);
-    expect(await verifyPhoneEndpoint(18451, "https://maus.example.com")).toBe(true);
+    expect(await verifyPhoneEndpoint(18451, "https://ind.example.com")).toBe(true);
     expect(fetcher.mock.calls[1]![1]).toMatchObject({ redirect: "error" });
     expect(fetcher.mock.calls[1]![1]).not.toHaveProperty("headers");
   });
   it("refuses another server or unreachable origin", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(Response.json({ environmentId: "ours" }))
       .mockResolvedValueOnce(Response.json({ environmentId: "other" })));
-    expect(await verifyPhoneEndpoint(18451, "https://maus.example.com")).toBe(false);
+    expect(await verifyPhoneEndpoint(18451, "https://ind.example.com")).toBe(false);
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
-    expect(await verifyPhoneEndpoint(18451, "https://maus.example.com")).toBe(false);
+    expect(await verifyPhoneEndpoint(18451, "https://ind.example.com")).toBe(false);
     expect(await verifyPhoneEndpoint(18451, "https://localhost")).toBe(false);
   });
 });
@@ -447,7 +447,7 @@ const exited = (child: ChildProcess) => (child.exitCode !== null ? Promise.resol
 
 describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
   const cli = (args: string[], env: NodeJS.ProcessEnv) =>
-    spawn(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openmausbot.ts"), ...args], {
+    spawn(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openindbot.ts"), ...args], {
       cwd: join(SERVER_DIR, ".."),
       env: { PATH: process.env.PATH ?? "", ...env },
       stdio: ["ignore", "pipe", "pipe"],
@@ -461,7 +461,7 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
     child.stderr?.on("data", (chunk) => (err += String(chunk)));
     try {
       expect(await exited(child)).toBe(1);
-      expect(err).toContain("run openmausbot login first");
+      expect(err).toContain("run openindbot login first");
       let dead = false;
       try {
         await fetch(`http://127.0.0.1:${port}/api/health`);
@@ -519,7 +519,7 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
       const gatewayDeadline = Date.now() + 20_000;
       while (Date.now() < gatewayDeadline && status !== 200) {
         try {
-          status = (await fetch(`${gateway}/.well-known/openmausbot/environment`)).status;
+          status = (await fetch(`${gateway}/.well-known/openindbot/environment`)).status;
         } catch {
           status = 0;
         }
@@ -566,7 +566,7 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
       while (!out.includes("Get a pairing code:") && Date.now() < deadline && child.exitCode === null) await new Promise((r) => setTimeout(r, 200));
       expect(out).toContain('server "tunnel test"');
       expect(out).toMatch(new RegExp(`^Reach .*${stub.endpointUrl.replace(/[.]/g, "\\.")}`, "m"));
-      const pairOut = spawnSync(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openmausbot.ts"), "pair", "--port", String(port), "--data-dir", dataDir], { cwd: join(SERVER_DIR, ".."), env: { PATH: process.env.PATH ?? "", HOME: home }, encoding: "utf8" }).stdout;
+      const pairOut = spawnSync(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openindbot.ts"), "pair", "--port", String(port), "--data-dir", dataDir], { cwd: join(SERVER_DIR, ".."), env: { PATH: process.env.PATH ?? "", HOME: home }, encoding: "utf8" }).stdout;
       expect(pairOut).toContain(`Link           ${stub.endpointUrl}/pair#code=`);
       expect(stub.calls).toContain("POST /v1/installations/self/endpoint");
 
@@ -574,7 +574,7 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
       const gatewayDeadline = Date.now() + 20_000;
       while (Date.now() < gatewayDeadline) {
         try {
-          descriptor = await fetch(`${gateway}/.well-known/openmausbot/environment`);
+          descriptor = await fetch(`${gateway}/.well-known/openindbot/environment`);
           if (descriptor.status === 200) break;
         } catch {
           descriptor = null;
@@ -586,7 +586,7 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
       const stranger = await fetch(`${gateway}/api/bots`);
       expect(stranger.status).toBe(403);
       expect(((await stranger.json()) as { error: string }).error).toMatch(/through a proxy/);
-      expect(await (await fetch(`${gateway}/api/health`)).json()).toEqual({ app: "openmausbot" });
+      expect(await (await fetch(`${gateway}/api/health`)).json()).toEqual({ app: "openindbot" });
       expect(typeof ((await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()) as { pid: unknown }).pid).toBe("number");
       const match = /Pairing code {3}([A-Z2-9-]+)/.exec(pairOut);
       expect(match).toBeTruthy();
@@ -617,7 +617,7 @@ describe.skipIf(process.platform === "win32")("serve --tunnel", () => {
   }, 120_000);
 });
 
-describe("openmausbot access", () => {
+describe("openindbot access", () => {
   it("edits the sign-in allow-list in config.json without a running server", async () => {
     const home = mkdtempSync(join(tmpdir(), "omb-cli-access-"));
     const dataDir = join(home, "data");
@@ -662,7 +662,7 @@ describe.skipIf(process.platform === "win32")("serve --domain", () => {
     const fake = join(home, "fake-caddy");
     writeFileSync(fake, `#!/bin/sh\necho "$@" > "${join(home, "caddy-args.txt")}"\necho $$ > "${join(home, "caddy.pid")}"\nexec sleep 300\n`, { mode: 0o755 });
     const port = workerPort(21000, 9000);
-    const child = spawn(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openmausbot.ts"), "serve", "--domain", "omb.example.test", "--port", String(port), "--data-dir", dataDir], {
+    const child = spawn(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openindbot.ts"), "serve", "--domain", "omb.example.test", "--port", String(port), "--data-dir", dataDir], {
       cwd: join(SERVER_DIR, ".."),
       env: { PATH: process.env.PATH ?? "", HOME: home, USERPROFILE: home, OMB_WEBHOOK_PORT: String(port + 1), OMB_BROWSER_CONNECTION: join(home, "browser-connection.json"), OMB_CADDY_PATH: fake },
       stdio: ["ignore", "pipe", "pipe"],
@@ -675,7 +675,7 @@ describe.skipIf(process.platform === "win32")("serve --domain", () => {
       while (!out.includes("Get a pairing code:") && Date.now() < deadline && child.exitCode === null) await new Promise((r) => setTimeout(r, 200));
       expect(out).toContain("https: Caddy serves https://omb.example.test");
       expect(out).toMatch(/^Reach {4}… https:\/\/omb\.example\.test doesn't answer yet/m);
-      const pairOut = spawnSync(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openmausbot.ts"), "pair", "--port", String(port), "--data-dir", dataDir], { cwd: join(SERVER_DIR, ".."), env: { PATH: process.env.PATH ?? "", HOME: home }, encoding: "utf8" }).stdout;
+      const pairOut = spawnSync(process.execPath, ["--experimental-strip-types", join(SERVER_DIR, "openindbot.ts"), "pair", "--port", String(port), "--data-dir", dataDir], { cwd: join(SERVER_DIR, ".."), env: { PATH: process.env.PATH ?? "", HOME: home }, encoding: "utf8" }).stdout;
       expect(pairOut).toContain("Link           https://omb.example.test/pair#code=");
       const args = readFileSync(join(home, "caddy-args.txt"), "utf8").trim();
       expect(args).toMatch(/^run --config .*Caddyfile --adapter caddyfile$/);

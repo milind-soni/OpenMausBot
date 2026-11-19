@@ -31,7 +31,7 @@ vi.mock("./ModelPicker", () => ({ ModelPicker: (_props: ComponentProps<typeof Mo
 vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: (_props: ComponentProps<typeof ApprovalModeSelector>) => createElement("span") }));
 vi.mock("@/components/Avatar", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/components/Avatar")>(),
-  MausAvatar: () => null,
+  IndAvatar: () => null,
 }));
 // The tour's text, without measuring an anchor on screen.
 vi.mock("./onboarding/Spotlight", () => ({ Spotlight: ({ children }: { children: ReactNode }) => createElement("div", null, children) }));

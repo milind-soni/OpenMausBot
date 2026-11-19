@@ -22,7 +22,7 @@ const TEAM = { id: "team-7f3a", name: "Acme" };
 
 class Fixture {
   home = mkdtempSync(join(tmpdir(), "omb-parallel-"));
-  dataDir = join(this.home, ".openmausbot");
+  dataDir = join(this.home, ".openindbot");
   gates = join(this.home, "gates");
   base = "";
   log = "";
@@ -123,7 +123,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-ac
     if (this.cloud()) this.token = await this.pair();
   }
   async pair() {
-    const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300, ...(this.role === "team" ? { team: TEAM, member: { email: "owner@acme.test", role: "admin" } } : {}) });
+    const body = JSON.stringify({ label: "OpenIndBot app (Cloud)", ttlSeconds: 300, ...(this.role === "team" ? { team: TEAM, member: { email: "owner@acme.test", role: "admin" } } : {}) });
     const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
     const response = await fetch(`${this.base}/api/cloud/pairing`, { method: "POST", headers: {
       host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", "content-type": "application/json",
@@ -420,7 +420,7 @@ describe("a Starter Cloud", () => {
     await whenStarted(main!);
     f.finish(main!);
     await expect.poll(() => busyThreads(f, botId), { timeout: 20_000, interval: 100 }).toEqual([]);
-    const created = await f.api("POST", "/api/routines", { name: "Slot holder", prompt: "Write the digest.", target: "bot", botId, runOn: "maus", enabled: true, schedule: { type: "daily", time: "23:00" } });
+    const created = await f.api("POST", "/api/routines", { name: "Slot holder", prompt: "Write the digest.", target: "bot", botId, runOn: "ind", enabled: true, schedule: { type: "daily", time: "23:00" } });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const run = (await f.api("POST", `/api/routines/${created.body.routine.id}/run`)).body.run;
     await expect.poll(async () => (await f.api("GET", "/api/routines")).body.runs.find((candidate: any) => candidate.id === run.id)?.status, { timeout: 20_000, interval: 100 }).toBe("running");
@@ -513,7 +513,7 @@ describe("a Starter Cloud", () => {
     await whenStarted(threads[1]!);
     const refused = await f.api("POST", `/api/bots/${botId}/messages/guarded`, { threadId: threads[0], sendId: randomUUID(), text: "From a script", expectedActiveLeafId: null, expectedApprovalMode: "ask" });
     expect(refused.status, JSON.stringify(refused.body)).toBe(409);
-    const created = await f.api("POST", "/api/routines", { name: "Digest", prompt: "Write the digest.", target: "bot", botId, runOn: "maus", enabled: true, schedule: { type: "daily", time: "23:00" } });
+    const created = await f.api("POST", "/api/routines", { name: "Digest", prompt: "Write the digest.", target: "bot", botId, runOn: "ind", enabled: true, schedule: { type: "daily", time: "23:00" } });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const run = (await f.api("POST", `/api/routines/${created.body.routine.id}/run`)).body.run;
     const state = async () => (await f.api("GET", "/api/routines")).body.runs.find((candidate: any) => candidate.id === run.id);

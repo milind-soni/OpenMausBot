@@ -110,7 +110,7 @@ it.each(["ask", "full", "auto"])("a bot at %s stops at the approval: nothing ans
   expect(launch.argv[launch.argv.indexOf("--permission-mode") + 1]).toBe("default");
   expect(JSON.stringify(launch.prompt)).toContain("[UNTRUSTED BOT API MESSAGE]");
   expect(JSON.stringify(launch.systemPrompt)).toContain("through this bot's API");
-  // Whatever the bot's own level: confined, and no tool of OpenMausBot's, so it can start, schedule or change nothing.
+  // Whatever the bot's own level: confined, and no tool of OpenIndBot's, so it can start, schedule or change nothing.
   expect(launch.argv).toContain("--restricted");
   expect(launch.argv[launch.argv.indexOf("--tools") + 1]).toBe("Read,Grep,Glob,Edit,Write,WebSearch");
   expect(Object.keys(launch.mcpConfig.mcpServers)).toEqual(["ogb"]);

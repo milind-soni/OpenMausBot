@@ -9,7 +9,7 @@ export const SERVER_LOOK_MS = 3_000;
 /** Whether anything answers at `origin` (any HTTP status but a 5xx from a proxy in front of a stopped app). */
 export async function serverAnswers(origin, fetchImpl, timeoutMs = SERVER_LOOK_MS) {
   try {
-    const response = await fetchImpl(`${origin}/.well-known/openmausbot/environment`, {
+    const response = await fetchImpl(`${origin}/.well-known/openindbot/environment`, {
       cache: "no-store", redirect: "manual", credentials: "omit", signal: AbortSignal.timeout(timeoutMs), headers: { accept: "application/json" },
     });
     return response.status < 500;

@@ -329,7 +329,7 @@ describe("on a Team Cloud", () => {
   });
 
   it("gives an admin's team app to the team's bots without asking, never to a person's own helper", async () => {
-    fixture.state.bots = [bot("scout", { connectorScopes: { apps: {} } }), bot("maus", { connectorScopes: { apps: {} }, defaultBot: { person: "ada@acme.test" } } as Partial<Bot>)];
+    fixture.state.bots = [bot("scout", { connectorScopes: { apps: {} } }), bot("ind", { connectorScopes: { apps: {} }, defaultBot: { person: "ada@acme.test" } } as Partial<Bot>)];
     await open();
     await connectApollo();
     expect(prompt()).toBeNull();
@@ -338,11 +338,11 @@ describe("on a Team Cloud", () => {
   });
 
   it("leaves each person's own helper out of the choice", async () => {
-    fixture.state.bots = [bot("scout"), bot("maus", { defaultBot: { person: "ada@acme.test" } } as Partial<Bot>)];
+    fixture.state.bots = [bot("scout"), bot("ind", { defaultBot: { person: "ada@acme.test" } } as Partial<Bot>)];
     fixture.services = { apollo: { connected: true, accounts: [{ id: "ca_old", status: "ACTIVE" }] } };
     await open();
     await click(button(tile(), "Which bots can use Apollo?"));
-    expect(switchOf("Maus")).toBeNull();
+    expect(switchOf("Ind")).toBeNull();
     expect(switchOf("Scout")).not.toBeNull();
   });
 });

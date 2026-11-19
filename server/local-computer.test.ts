@@ -77,7 +77,7 @@ function linuxDescriptor(userData: string, { session = "x11" }: { session?: "x11
       args: ["mcp", "--embedded", "--socket", socket],
       env: {
         CUA_DRIVER_EMBEDDED: "1",
-        CUA_DRIVER_HOST_BUNDLE_ID: "com.openmausbot.app",
+        CUA_DRIVER_HOST_BUNDLE_ID: "com.openindbot.app",
         CUA_DRIVER_RS_UPDATE_CHECK: "false",
         CUA_DRIVER_RS_TELEMETRY_ENABLED: "false",
         ...(session === "wayland" ? { CUA_DRIVER_RS_ENABLE_WAYLAND: "1" } : {}),
@@ -138,7 +138,7 @@ afterEach(() => {
 
 describe("local computer descriptor", () => {
   it("reports an unavailable reason without making that record mountable", () => {
-    const reason = "embedded host failed: Screen Recording required; grant access in System Settings and restart OpenMausBot";
+    const reason = "embedded host failed: Screen Recording required; grant access in System Settings and restart OpenIndBot";
     const record = { mode: "unavailable", reason };
     expect(decodeCuaConnection(record, { platform: "darwin" })).toBeNull();
     expect(cuaUnavailableReason(record, "darwin")).toBe(reason);

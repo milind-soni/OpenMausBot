@@ -19,7 +19,7 @@ const MARK_USED_MS = 10 * 60_000;
 export const vaultPointer = (item: string): string => `vault:${item}`;
 export const isVaultItemId = (value: unknown): value is string => typeof value === "string" && ITEM_ID.test(value);
 
-/** Text anywhere in `value` holding a `vault:<id>`: only a secretRef redeemed by OpenMausBot may put one in a server. */
+/** Text anywhere in `value` holding a `vault:<id>`: only a secretRef redeemed by OpenIndBot may put one in a server. */
 export function holdsVaultPointer(value: unknown): boolean {
   if (typeof value === "string") return value.search(POINTER) !== -1;
   if (Array.isArray(value)) return value.some(holdsVaultPointer);

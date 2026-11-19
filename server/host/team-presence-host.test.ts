@@ -30,7 +30,7 @@ function manualClock() {
 const session = (email: string, extra: Partial<SessionRecord> = {}): SessionRecord => ({ id: `s-${email}`, tokenHash: "x".repeat(64), label: "", scopes: ["client"], createdAt: 0, lastSeenAt: 0, expiresAt: Infinity,
   email, membershipAuthority: "team", teamRole: "member", ...extra });
 
-/** A team with a bot's shared chat, Ada's private chat with it, Ada's own MausBot, a group chat with it and one Ben may
+/** A team with a bot's shared chat, Ada's private chat with it, Ada's own IndBot, a group chat with it and one Ben may
  * not read. */
 function setup(team = true) {
   const dir = mkdtempSync(join(tmpdir(), "omb-presence-"));
@@ -39,9 +39,9 @@ function setup(team = true) {
   people?.seen(ADA, "member");
   people?.seen(BEN, "admin");
   const audiences: Record<string, Audience> = { shared: "team", "ada-private": "member:p_ada", "ada-own": "team", room: "room:g1", "room-own": "room:g2", hidden: "team" };
-  const bots: Record<string, { defaultBot?: { person?: string } }> = { scout: {}, mausbot: { defaultBot: { person: ADA } } };
-  const threadBots: Record<string, string> = { shared: "scout", "ada-private": "scout", "ada-own": "mausbot", hidden: "scout" };
-  const groups: Record<string, { memberIds: string[] }> = { room: { memberIds: ["scout"] }, "room-own": { memberIds: ["scout", "mausbot"] } };
+  const bots: Record<string, { defaultBot?: { person?: string } }> = { scout: {}, indbot: { defaultBot: { person: ADA } } };
+  const threadBots: Record<string, string> = { shared: "scout", "ada-private": "scout", "ada-own": "indbot", hidden: "scout" };
+  const groups: Record<string, { memberIds: string[] }> = { room: { memberIds: ["scout"] }, "room-own": { memberIds: ["scout", "indbot"] } };
   const sent: Array<{ to: string; frame: Record<string, unknown> }> = [];
   /** An open event stream whose writes land in `sent`. */
   const stream = (name: string, person?: SessionRecord): PresenceStream & { name: string } => ({ name, person, backpressured: false, close: () => {},

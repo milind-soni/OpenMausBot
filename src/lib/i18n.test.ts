@@ -37,7 +37,7 @@ describe("t", () => {
   });
 
   it("fills {app} with the product's name, a white-label brand's own name, or the name a caller passes", () => {
-    expect(t("routines.runsOn.localHint")).toBe("Starts while MausBot is open here.");
+    expect(t("routines.runsOn.localHint")).toBe("Starts while IndBot is open here.");
     expect(t("routines.runsOn.localHint", { app: "Acme" })).toBe("Starts while Acme is open here.");
     applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "/brand.json" });
     try {
@@ -130,9 +130,9 @@ describe("t", () => {
     // A raw template, so the test doesn't depend on which catalog keys use params.
     const template = "Hello {name}, {missing}!";
     const rendered = template.replace(/\{(\w+)\}/g, (match, name: string) =>
-      name in { name: "Maus" } ? String({ name: "Maus" }[name as "name"]) : match,
+      name in { name: "Ind" } ? String({ name: "Ind" }[name as "name"]) : match,
     );
-    expect(rendered).toBe("Hello Maus, {missing}!");
+    expect(rendered).toBe("Hello Ind, {missing}!");
   });
 });
 

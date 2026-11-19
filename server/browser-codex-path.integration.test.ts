@@ -37,7 +37,7 @@ describe.skipIf(process.platform === "win32")("Codex browser turns with a minima
   beforeAll(async () => {
     home = mkdtempSync(join(tmpdir(), "omb-browser-codex-path-"));
     bin = join(home, ".local", "bin");
-    const data = join(home, ".openmausbot");
+    const data = join(home, ".openindbot");
     mkdirSync(bin, { recursive: true });
     mkdirSync(data);
     // The extensionless executable must exercise /usr/bin/env node, rather
@@ -79,7 +79,7 @@ describe.skipIf(process.platform === "win32")("Codex browser turns with a minima
       child.once("exit", () => { clearTimeout(timer); reject(new Error(`Fixture exited: ${stderr}`)); });
       child.stdout!.on("data", (chunk) => {
         output += chunk;
-        if (output.includes(`openmausbot server on ${base}`)) { clearTimeout(timer); resolve(); }
+        if (output.includes(`openindbot server on ${base}`)) { clearTimeout(timer); resolve(); }
       });
     });
     events = await openSse(`${base}/api/events`);

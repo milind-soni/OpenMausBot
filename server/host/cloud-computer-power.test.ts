@@ -49,7 +49,7 @@ describe("cloud computer power", () => {
   let refuseClaim: boolean;
   let logs: string[];
   let broadcasts: Record<string, unknown>[];
-  let routines: { botId: string; runOn: "maus" | "cloud"; enabled: boolean; nextRunAt: number | null }[];
+  let routines: { botId: string; runOn: "ind" | "cloud"; enabled: boolean; nextRunAt: number | null }[];
   /** Which cloud computer each bot's routine turns use; a bot left out uses none. */
   let computers: Map<string, string>;
   let power: ReturnType<typeof createCloudComputerPower>;
@@ -435,7 +435,7 @@ describe("cloud computer power", () => {
   describe("a routine due soon", () => {
     const due = (botId: string, inMs: number, computer = botId) => {
       computers.set(botId, computer);
-      const routine = { botId, runOn: "maus" as const, enabled: true, nextRunAt: Date.now() + inMs };
+      const routine = { botId, runOn: "ind" as const, enabled: true, nextRunAt: Date.now() + inMs };
       routines.push(routine);
       return routine;
     };

@@ -63,7 +63,7 @@ try {
   await startServer();
   await api("PATCH", "/api/config", { language: "en" });
   const { bot } = await runControlOmb(["new-bot", "--name", "Data review", "--url", url]) as { bot: { id: string; activeTaskId: string } };
-  const minted = await api("POST", "/api/testing/internal-capability", { botId: bot.id, threadId: bot.activeTaskId, kind: "data" }, { "x-openmausbot-test-capability": capabilityKey });
+  const minted = await api("POST", "/api/testing/internal-capability", { botId: bot.id, threadId: bot.activeTaskId, kind: "data" }, { "x-openindbot-test-capability": capabilityKey });
   const mcp = async (method: string, params?: unknown) =>
     (await api("POST", "/api/internal/data/mcp", { method, params }, { authorization: `Bearer ${minted.token}` })).result;
   const call = async (name: string, args: Record<string, unknown>) => {

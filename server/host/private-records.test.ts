@@ -11,7 +11,7 @@ const RUI = "rui@acme.test", ANA = "ana@acme.test";
 const RUI_KEY = "p_ruiruiruiruiruiruirui1", ANA_KEY = "p_anaanaanaanaanaanaana1";
 const bots = [
   { id: "quotes", threadId: "main", tasks: [{ threadId: "main" }, { threadId: "rui-chat" }, { threadId: "rui-run" }, { threadId: "ana-run" }] },
-  { id: "ruis-maus", threadId: "rui-maus-chat", defaultBot: { person: RUI }, tasks: [{ threadId: "rui-maus-chat" }] },
+  { id: "ruis-ind", threadId: "rui-ind-chat", defaultBot: { person: RUI }, tasks: [{ threadId: "rui-ind-chat" }] },
 ];
 const audienceOf = (threadId: string) =>
   threadId.startsWith("rui-") || threadId === "gone-chat" ? `member:${RUI_KEY}` as const : threadId.startsWith("ana-") ? `member:${ANA_KEY}` as const : threadId === "main" ? "team" as const : undefined;
@@ -43,18 +43,18 @@ const row = (fields: Partial<UsageRow>): UsageRow => ({ at: "2026-11-10T10:00:00
 const rows = [
   row({ threadId: "rui-chat", turnId: "turn-1", parent: { threadId: "rui-chat", turnId: "turn-0" } as UsageRow["parent"] }),
   row({ threadId: "rui-run", trigger: { kind: "routine", routineId: "r-rui", label: "Salary check", runId: "run-1", email: RUI } }),
-  row({ threadId: "rui-maus-chat", botId: "ruis-maus", botName: "Confidant", section: "Rui's corner" }),
-  row({ threadId: "gone-chat", botId: "left-maus", botName: "Old confidant" }),
+  row({ threadId: "rui-ind-chat", botId: "ruis-ind", botName: "Confidant", section: "Rui's corner" }),
+  row({ threadId: "gone-chat", botId: "left-ind", botName: "Old confidant" }),
   row({ threadId: "ana-run", trigger: { kind: "routine", routineId: "r-ana", label: "Ana's digest", email: ANA } }),
   row({ threadId: "main", trigger: { kind: "routine", routineId: "r-team", label: "Standup" } }),
-  row({ threadId: "rui-chat", trigger: { kind: "bot", botId: "ruis-maus", email: RUI } }),
+  row({ threadId: "rui-chat", trigger: { kind: "bot", botId: "ruis-ind", email: RUI } }),
 ];
 
 describe("what an admin reads of other people's records on a Team Cloud", () => {
   it("usage keeps every amount and person and says nothing of what was private", () => {
     const seen = rows.map(records().usageRow(admin(ANA)));
     const told = JSON.stringify(seen) + usageCsv(seen) + JSON.stringify(summarizeUsage(seen, "routine")) + JSON.stringify(summarizeUsage(seen, "bot"));
-    for (const secret of ["rui-chat", "rui-run", "rui-maus-chat", "gone-chat", "Salary check", "r-rui", "run-1", "ruis-maus", "Confidant", "left-maus", "Old confidant", "Rui's corner", "turn-1", "turn-0"]) {
+    for (const secret of ["rui-chat", "rui-run", "rui-ind-chat", "gone-chat", "Salary check", "r-rui", "run-1", "ruis-ind", "Confidant", "left-ind", "Old confidant", "Rui's corner", "turn-1", "turn-0"]) {
       expect(told, secret).not.toContain(secret);
     }
     expect(seen.map((one) => [one.input, one.output, one.costUsd, one.at, one.model])).toEqual(rows.map((one) => [one.input, one.output, one.costUsd, one.at, one.model]));
@@ -74,23 +74,23 @@ describe("what an admin reads of other people's records on a Team Cloud", () => 
     expect(rows.map(records(false).usageRow(admin(ANA)))).toEqual(rows);
   });
 
-  it("a decision in someone's private chat keeps when, tool and outcome, and names their own MausBot to nobody", () => {
+  it("a decision in someone's private chat keeps when, tool and outcome, and names their own IndBot to nobody", () => {
     const decision = (fields: Partial<DecisionRow>): DecisionRow => ({ at: "2026-11-10T10:00:00.000Z", threadId: "rui-chat", botId: "quotes", botName: "Quotes", tool: "Bash",
       summary: "rm -rf salary.xlsx", summaryCode: "notice.ran", summaryParams: { file: "salary.xlsx" }, rule: "rm .*", requestId: "req-1", decision: "allowed", source: "user", ...fields } as DecisionRow);
     const read = records().decisionRow(admin(ANA));
     expect(read(decision({}))).toEqual({ at: "2026-11-10T10:00:00.000Z", threadId: "", botId: "quotes", botName: "Quotes", tool: "Bash", decision: "allowed", source: "user" });
-    expect(read(decision({ threadId: "rui-maus-chat", botId: "ruis-maus", botName: "Confidant" }))).toMatchObject({ threadId: "", botId: "private", botName: "Private bot" });
-    expect(read(decision({ threadId: "gone-chat", botId: "left-maus", botName: "Old confidant" }))).toMatchObject({ botId: "private", botName: "Private bot" });
+    expect(read(decision({ threadId: "rui-ind-chat", botId: "ruis-ind", botName: "Confidant" }))).toMatchObject({ threadId: "", botId: "private", botName: "Private bot" });
+    expect(read(decision({ threadId: "gone-chat", botId: "left-ind", botName: "Old confidant" }))).toMatchObject({ botId: "private", botName: "Private bot" });
     const shared = decision({ threadId: "main" });
     expect(read(shared)).toBe(shared);
-    const mine = decision({ threadId: "rui-maus-chat", botId: "ruis-maus", botName: "Confidant" });
+    const mine = decision({ threadId: "rui-ind-chat", botId: "ruis-ind", botName: "Confidant" });
     expect(records().decisionRow(admin(RUI))(mine)).toBe(mine);
   });
 
-  it("an admin action on a person's own MausBot is listed to that person only", () => {
+  it("an admin action on a person's own IndBot is listed to that person only", () => {
     const action = (id: string): AdminActionRow => ({ at: "2026-11-10T10:00:00.000Z", category: "bot", action: "bot.update", target: { kind: "bot", id, name: "Confidant" }, actor: { kind: "session" } as AdminActionRow["actor"] });
-    expect([action("ruis-maus"), action("quotes"), action("deleted-team-bot")].map(records().adminActionShown(admin(ANA)))).toEqual([false, true, true]);
-    expect(records().adminActionShown(admin(RUI))(action("ruis-maus"))).toBe(true);
-    expect(records(false).adminActionShown(admin(ANA))(action("ruis-maus"))).toBe(true);
+    expect([action("ruis-ind"), action("quotes"), action("deleted-team-bot")].map(records().adminActionShown(admin(ANA)))).toEqual([false, true, true]);
+    expect(records().adminActionShown(admin(RUI))(action("ruis-ind"))).toBe(true);
+    expect(records(false).adminActionShown(admin(ANA))(action("ruis-ind"))).toBe(true);
   });
 });

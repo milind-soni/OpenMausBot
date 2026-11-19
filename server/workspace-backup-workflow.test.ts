@@ -38,7 +38,7 @@ it("starts the server with the original workspace after an interrupted restore p
     }, { timeout: 20_000 }).toBe(true);
     const response = await fetch(`${fixture.info.url}/api/health`);
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ app: "openmausbot", pid: restarted.pid });
+    expect(await response.json()).toMatchObject({ app: "openindbot", pid: restarted.pid });
     expect(readFileSync(join(target, "note.txt"), "utf8")).toBe("original workspace");
     expect(existsSync(join(target, ".backups", "pending-restore.json"))).toBe(false);
   } finally {

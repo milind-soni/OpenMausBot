@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BOT_BODY_IDS } from "../../shared/bot-body";
 import { en, locales } from "@/locales";
 import { setLocale } from "./i18n";
-import { MAUS_COLOR_NAMES, PICKABLE_STATES } from "./mascot";
+import { IND_COLOR_NAMES, PICKABLE_STATES } from "./mascot";
 import { bodyName, colorName, expressionName, silhouetteName } from "./mascot-names";
 
 afterEach(() => {
@@ -13,7 +13,7 @@ afterEach(() => {
 describe("mascot names", () => {
   const keys = [
     ...BOT_BODY_IDS.map((id) => `mascot.body.${id}`),
-    ...MAUS_COLOR_NAMES.map((color) => `mascot.color.${color}`),
+    ...IND_COLOR_NAMES.map((color) => `mascot.color.${color}`),
     ...PICKABLE_STATES.map((state) => `mascot.expression.${state}`),
   ];
 

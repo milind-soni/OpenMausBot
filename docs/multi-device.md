@@ -1,4 +1,4 @@
-# Using OpenMausBot on more than one device
+# Using OpenIndBot on more than one device
 
 This page is for a person with two or more computers, or a computer and a phone, who wants the same bots everywhere.
 It says what each device keeps, what does and does not travel between them, the ways to use one set of bots from every
@@ -6,11 +6,11 @@ device, and what to check when a device looks empty.
 
 ## What each device keeps
 
-The desktop app runs a full OpenMausBot on the computer it is installed on. Until you choose another home (below), that
+The desktop app runs a full OpenIndBot on the computer it is installed on. Until you choose another home (below), that
 computer is the bots' **home**: their conversations, memory, skills, routines, connected apps and keys are stored
 there, and its routines run there.
 
-Signing in to the same account on a second computer (**Settings → MausBot Cloud**) does not copy one computer's home
+Signing in to the same account on a second computer (**Settings → IndBot Cloud**) does not copy one computer's home
 to the other by itself. Unless both computers open the same home (below), each has its own: a new computer can show an
 empty Inbox, and a bot created on one computer does not appear in the other's list. Engine sign-ins (Claude, Codex and
 the rest) are separate too, because they belong to the machine the bots run on.
@@ -23,11 +23,11 @@ Pick one home, then open it from your other devices. There are three ways:
 
 | Home | Good for | How |
 | --- | --- | --- |
-| **My Cloud** (Starter, Pro or Max plan) | Bots that keep running when your computers are off | Sign in at **Settings → MausBot Cloud**. Once My Cloud is ready, the desktop app moves this computer's bots there by itself, once, and opens My Cloud from then on. On your other computers, sign in to the same account and choose **Open My Cloud**. See [cloud-pro.md](cloud-pro.md). |
+| **My Cloud** (Starter, Pro or Max plan) | Bots that keep running when your computers are off | Sign in at **Settings → IndBot Cloud**. Once My Cloud is ready, the desktop app moves this computer's bots there by itself, once, and opens My Cloud from then on. On your other computers, sign in to the same account and choose **Open My Cloud**. See [cloud-pro.md](cloud-pro.md). |
 | **Your own server** | A VPS or always-on machine you run yourself | Pair each device with it, then right-click the server's circle at the window's left edge and choose **Make <server> my home** to move this computer's bots there. See [self-hosting.md](self-hosting.md). |
 | **One of your computers** | Two desktops on the same Tailscale network, no Cloud | On the computer with the bots, turn on **Settings → Phone & devices → Your other computers** and pair; on the other, choose **＋ → Connect to a server**. The bots stay on the first computer, which must be on. See [desktop-companion.md](desktop-companion.md). |
 
-A phone is paired separately. For My Cloud, use **Settings → MausBot Cloud → Use My Cloud on your phone**; for this
+A phone is paired separately. For My Cloud, use **Settings → IndBot Cloud → Use My Cloud on your phone**; for this
 computer, **Settings → Phone & devices → Pair a phone** (a six-digit code). The phone opens the home it paired
 with. See [ios-companion.md](ios-companion.md).
 

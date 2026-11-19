@@ -25,7 +25,7 @@ function world(dataDir?: string) {
   const bots = [
     { id: "ops", name: "Ops", threadId: "ops-main", createdAt: 1 },
     { id: "chief-2", name: "Second", threadId: "chief-2-main", createdAt: 3, chiefOfStaff: true },
-    { id: "chief", name: "MausBot", threadId: "chief-main", createdAt: 2, chiefOfStaff: true, defaultBot: {} },
+    { id: "chief", name: "IndBot", threadId: "chief-main", createdAt: 2, chiefOfStaff: true, defaultBot: {} },
   ];
   const host = createRoutineHoldsHost({
     dataDir: dir, now: () => now,

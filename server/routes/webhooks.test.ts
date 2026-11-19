@@ -73,7 +73,7 @@ describe("a webhook's address for the person", () => {
     expect(hidden.webhooks.authorize(theirs.webhook.endpointId, theirs.secret)).toBe(true);
     // Into a bot this viewer cannot see: answered as for a bot that does not exist, and nothing is made.
     expect(await hidden.call("POST", "/api/webhooks", { name: "Into theirs", prompt: "", botId: "bot-hidden" })).toEqual(await hidden.call("POST", "/api/webhooks", { name: "Into theirs", prompt: "", botId: "gone-1" }));
-    expect(await hidden.call("POST", "/api/webhooks", { name: "Into theirs", prompt: "", botId: "bot-hidden" })).toEqual({ status: 400, body: { error: "That MAUS no longer exists" } });
+    expect(await hidden.call("POST", "/api/webhooks", { name: "Into theirs", prompt: "", botId: "bot-hidden" })).toEqual({ status: 400, body: { error: "That IND no longer exists" } });
     expect(hidden.webhooks.list().map((hook) => hook.botId)).toEqual(["bot-hidden"]);
     expect((await hidden.call("POST", "/api/webhooks", { name: "Mine", prompt: "", botId: "bot-a" })).status).toBe(201);
 

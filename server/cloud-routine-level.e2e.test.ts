@@ -48,7 +48,7 @@ async function api(method: string, path: string, options: { body?: unknown; toke
 }
 
 async function adminPairing(): Promise<string> {
-  const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+  const body = JSON.stringify({ label: "OpenIndBot app (Cloud)", ttlSeconds: 300 });
   const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
   const response = await fetch(`${base}/api/cloud/pairing`, { method: "POST", headers: {
     host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", "content-type": "application/json",
@@ -60,7 +60,7 @@ async function adminPairing(): Promise<string> {
 
 beforeAll(async () => {
   home = mkdtempSync(join(tmpdir(), "omb-cloud-routine-level-"));
-  dataDir = join(home, ".openmausbot");
+  dataDir = join(home, ".openindbot");
   mkdirSync(dataDir, { recursive: true });
   // Claude's turns hold until the test writes the release file; each engine dumps its latest start.
   const claude = join(home, "claude-cli.mjs");

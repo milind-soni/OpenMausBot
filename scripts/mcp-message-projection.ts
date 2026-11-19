@@ -1,4 +1,4 @@
-// A conversation message as the OpenMausBot MCP server shows it to an agent: its text plus the state of any card on it.
+// A conversation message as the OpenIndBot MCP server shows it to an agent: its text plus the state of any card on it.
 export function isRecord(value: unknown): value is Record<string, any> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

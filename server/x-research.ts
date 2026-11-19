@@ -1,5 +1,5 @@
 // X research: the x_* agents tools' only way out, through treg (treg.to). With the person's own treg key it calls treg
-// directly, billed to their treg balance; otherwise it calls the MausBot Cloud Admin's relay, which calls treg on our
+// directly, billed to their treg balance; otherwise it calls the IndBot Cloud Admin's relay, which calls treg on our
 // account for paying Cloud plans within each plan's monthly calls. It hands back compact posts and profiles, never a
 // scraper's raw JSON, and turns every failure into an XResearchError carrying a sentence a bot can pass on.
 //
@@ -18,7 +18,7 @@ const MAX_PAGES = 3;
 const TEXT_LIMIT = 1_500;
 const QUOTE_LIMIT = 300;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
-/** Longer than the relay's own 30 s with treg (openmaus-cloud X_TIMEOUT_MS): the relay's answer, counted or given
+/** Longer than the relay's own 30 s with treg (openind-cloud X_TIMEOUT_MS): the relay's answer, counted or given
  * back, arrives before this side gives up and falls back to a second, also counted, call. */
 export const X_CLIENT_TIMEOUT_MS = 35_000;
 /** Characters an answer may take: under the agents server's 24,000-character
@@ -29,7 +29,7 @@ const RESULT_BUDGET = 22_000;
 
 /** treg catalog ids: the cheapest scraper for each job, then treg's routed
  * endpoint for the same job (identity fields only, one page). The relay serves
- * exactly these (openmaus-cloud X_ENDPOINTS). */
+ * exactly these (openind-cloud X_ENDPOINTS). */
 export const TREG_X_ENDPOINTS = {
   search: "anyapi.x.search.posts",
   searchRouted: "treg.x.search.posts",
@@ -47,13 +47,13 @@ export const TREG_TOP_UP_URL = "https://treg.to";
 
 /** Every sentence a bot or the Settings page can be shown about X research. */
 export const X_MESSAGES = {
-  noKey: "Research isn't set up on this server. Add a treg key in Settings → AI → Other services, or use a paid MausBot Cloud plan.",
+  noKey: "Research isn't set up on this server. Add a treg key in Settings → AI → Other services, or use a paid IndBot Cloud plan.",
   botOff: "Research is off for this bot. Turn it on in this bot's settings under Access.",
-  badKey: "Sign in to MausBot Cloud again in Settings to use X research.",
+  badKey: "Sign in to IndBot Cloud again in Settings to use X research.",
   ownBadKey: "treg rejected your key. Check it in Settings → AI → Other services.",
   /** A Cloud home's relay token is the Admin's to replace; the person has no sign-in to redo there. */
-  homeBadKey: "X research isn't connected on this Cloud right now. It comes with your plan, so there is nothing to sign in to: try again later, and tell MausBot support if it keeps happening.",
-  noPlan: "X research comes with MausBot Cloud plans, and this account's plan isn't active.",
+  homeBadKey: "X research isn't connected on this Cloud right now. It comes with your plan, so there is nothing to sign in to: try again later, and tell IndBot support if it keeps happening.",
+  noPlan: "X research comes with IndBot Cloud plans, and this account's plan isn't active.",
   rateLimited: "X research is busy right now. Try again in a moment.",
   badRequest: "That X research request was refused. Check the query, handle or post link.",
   unavailable: "X research is temporarily unavailable. Try again shortly.",
@@ -169,7 +169,7 @@ function idOf(...values: unknown[]): string | undefined {
   return undefined;
 }
 
-/** "@maus", "maus" or an x.com profile link (https:// optional) → "maus";
+/** "@ind", "ind" or an x.com profile link (https:// optional) → "ind";
  * anything else, X's own pages included, → null. */
 export function normalizeHandle(raw: string): string | null {
   let value = raw.trim();
@@ -290,7 +290,7 @@ function newestOf(posts: XPost[]): string | undefined {
 
 /** An HTTP refusal from treg as one of the sentences in X_MESSAGES. */
 export function errorFor(status: number, body: unknown): XResearchError {
-  // The relay's own refusals (openmaus-cloud server/cloud-services.ts); a 5xx
+  // The relay's own refusals (openind-cloud server/cloud-services.ts); a 5xx
   // there is a scraper or our treg account, never the person's to fix.
   if (status === 401 || status === 403) return new XResearchError("bad_key", X_MESSAGES.badKey);
   if (status === 402) return new XResearchError("no_credit", X_MESSAGES.noPlan);

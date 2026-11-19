@@ -2,25 +2,25 @@ import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   EYE_SCALE,
-  MausAvatar,
+  IndAvatar,
   MOUTH_WEIGHT,
-  type MausAvatarHandle,
+  type IndAvatarHandle,
 } from "@/components/Avatar";
 import {
-  MAUS_COLOR_NAMES,
-  MAUS_COLORS,
-  MAUS_MOTIONS,
+  IND_COLOR_NAMES,
+  IND_COLORS,
+  IND_MOTIONS,
   PICKABLE_STATES,
   STATE_GROUPS,
-  type MausColor,
-  type MausMotion,
-  type MausState,
+  type IndColor,
+  type IndMotion,
+  type IndState,
 } from "@/lib/mascot";
 import { EXPRESSION_COUNT } from "@/components/CursorAvatar";
 import "./styles.css";
 import "./mascot-preview.css";
 
-interface ScenarioLabels extends Partial<Record<MausState, string>> {}
+interface ScenarioLabels extends Partial<Record<IndState, string>> {}
 
 const SCENARIOS: ScenarioLabels = {
   idle: "General / admin",
@@ -48,9 +48,9 @@ const MOTION_SCENARIOS = {
   blink: "New reply",
   surprise: "Unread update",
   failure: "Action failed",
-} satisfies Record<Exclude<MausMotion, "none">, string>;
+} satisfies Record<Exclude<IndMotion, "none">, string>;
 
-const MOTION_COLORS: MausColor[] = [
+const MOTION_COLORS: IndColor[] = [
   "green", "blue", "purple", "red", "cyan", "orange",
   "teal", "green", "pink", "yellow", "coral", "red",
 ];
@@ -96,16 +96,16 @@ function Tuner({
 }: {
   tuning: Tuning;
   setTuning: (t: Tuning) => void;
-  state: MausState;
-  setState: (s: MausState) => void;
+  state: IndState;
+  setState: (s: IndState) => void;
   expression: number | undefined;
   setExpression: (e: number | undefined) => void;
-  color: MausColor;
-  setColor: (c: MausColor) => void;
+  color: IndColor;
+  setColor: (c: IndColor) => void;
   forward: boolean;
   setForward: (v: boolean) => void;
 }) {
-  const handle = useRef<MausAvatarHandle>(null);
+  const handle = useRef<IndAvatarHandle>(null);
   const changed = (Object.keys(DEFAULTS) as (keyof Tuning)[]).filter(
     (k) => tuning[k] !== DEFAULTS[k],
   );
@@ -113,13 +113,13 @@ function Tuner({
   return (
     <section className="tuner">
       <div className="tuner-stage">
-        <MausAvatar
+        <IndAvatar
           ref={handle}
           color={color}
           state={state}
           expression={expression}
           size={300}
-          label={`${state} maus`}
+          label={`${state} ind`}
           eyeScale={tuning.eyeScale}
           mouthStroke={tuning.mouthStroke}
           spring={tuning.spring}
@@ -177,14 +177,14 @@ function Tuner({
 
           <h3>Colour</h3>
           <div className="chips">
-            {MAUS_COLOR_NAMES.map((c) => (
+            {IND_COLOR_NAMES.map((c) => (
               <button
                 key={c}
                 type="button"
                 className={c === color ? "on" : ""}
                 onClick={() => setColor(c)}
               >
-                <span className="swatch" style={{ background: MAUS_COLORS[c] }} />
+                <span className="swatch" style={{ background: IND_COLORS[c] }} />
                 {c}
               </button>
             ))}
@@ -243,17 +243,17 @@ function MotionCard({
   replayAll,
   color,
 }: {
-  motion: Exclude<MausMotion, "none">;
+  motion: Exclude<IndMotion, "none">;
   index: number;
   replayAll: number;
-  color: MausColor;
+  color: IndColor;
 }) {
   const [replayOne, setReplayOne] = useState(0);
 
   return (
     <article className="motion-card">
       <div className="motion-stage">
-        <MausAvatar
+        <IndAvatar
           color={color ?? MOTION_COLORS[index]}
           state="idle"
           size={172}
@@ -279,9 +279,9 @@ function MotionCard({
 function Preview() {
   const [replayAll, setReplayAll] = useState(0);
   const [tuning, setTuning] = useState<Tuning>(DEFAULTS);
-  const [state, setState] = useState<MausState>("idle");
+  const [state, setState] = useState<IndState>("idle");
   const [expression, setExpression] = useState<number | undefined>(undefined);
-  const [color, setColor] = useState<MausColor>("green");
+  const [color, setColor] = useState<IndColor>("green");
   const [forward, setForward] = useState(true);
 
   useEffect(() => {
@@ -294,7 +294,7 @@ function Preview() {
       <header className="preview-header">
         <div>
           <p className="eyebrow">Morphing face engine · 25 expressions · 39 states</p>
-          <h1>Maus motion library</h1>
+          <h1>Ind motion library</h1>
           <p className="intro">
             The app&rsquo;s lit body with the face engine behind it. Expressions morph on a
             spring, blink on each state&rsquo;s own rhythm, and the eyes wrap around an implied
@@ -321,7 +321,7 @@ function Preview() {
       />
 
       <section className="motion-grid" aria-label="Mascot motion library">
-        {MAUS_MOTIONS.map((motion, index) => (
+        {IND_MOTIONS.map((motion, index) => (
           <MotionCard
             key={motion}
             motion={motion}
@@ -338,7 +338,7 @@ function Preview() {
             <p className="eyebrow">Identity system · 100 combinations</p>
             <h2 id="expression-heading">Colors and states</h2>
           </div>
-          <p>Move your pointer over any Maus to test the responsive eyes.</p>
+          <p>Move your pointer over any Ind to test the responsive eyes.</p>
         </div>
 
         <div className="matrix-wrap">
@@ -351,16 +351,16 @@ function Preview() {
               </div>
             ))}
 
-            {MAUS_COLOR_NAMES.map((c) => (
+            {IND_COLOR_NAMES.map((c) => (
               <div className="matrix-row" key={c}>
                 <div className="row-label">
-                  <span className="swatch" style={{ background: MAUS_COLORS[c] }} />
+                  <span className="swatch" style={{ background: IND_COLORS[c] }} />
                   <strong>{c}</strong>
-                  <code>{MAUS_COLORS[c]}</code>
+                  <code>{IND_COLORS[c]}</code>
                 </div>
                 {PICKABLE_STATES.map((s) => (
                   <div className="mascot-cell" key={`${c}-${s}`}>
-                    <MausAvatar color={c} state={s} size={86} label={`${c} ${s} maus`} />
+                    <IndAvatar color={c} state={s} size={86} label={`${c} ${s} ind`} />
                   </div>
                 ))}
               </div>

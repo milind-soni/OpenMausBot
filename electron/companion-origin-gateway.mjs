@@ -21,7 +21,7 @@ export function validCompanionOriginTarget(target, platform = process.platform) 
   if (!Number.isSafeInteger(target?.pid) || target.pid <= 0) return false;
   if (Object.prototype.toString.call(target?.socketPath) !== "[object String]") return false;
   if (platform === "win32") {
-    return /^\\\\\.\\pipe\\openmausbot-companion-origin-[1-9][0-9]*-[0-9a-f-]{36}$/i.test(
+    return /^\\\\\.\\pipe\\openindbot-companion-origin-[1-9][0-9]*-[0-9a-f-]{36}$/i.test(
       target.socketPath,
     );
   }
@@ -43,7 +43,7 @@ export function createCompanionOriginEndpoint({
   if (platform === "win32") {
     return Object.freeze({
       pid: processId,
-      socketPath: `\\\\.\\pipe\\openmausbot-companion-origin-${processId}-${identifier()}`,
+      socketPath: `\\\\.\\pipe\\openindbot-companion-origin-${processId}-${identifier()}`,
       directory: null,
     });
   }
@@ -149,7 +149,7 @@ export function companionOriginHealth(
         response.on("end", () => {
           if (response.statusCode !== 200) return finish(false);
           try {
-            finish(JSON.parse(Buffer.concat(chunks).toString("utf8"))?.app === "openmausbot");
+            finish(JSON.parse(Buffer.concat(chunks).toString("utf8"))?.app === "openindbot");
           } catch {
             finish(false);
           }

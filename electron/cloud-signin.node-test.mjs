@@ -7,7 +7,7 @@ import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_TRIES, signInIdentity,
 const accessToken = `omc_${"E".repeat(43)}`, ATTEMPT = "a".repeat(43), CODE = "48201937";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check) { for (let i = 0; i < 200; i++) { if (check()) return; await sleep(5); } assert.fail("Fixture did not reach the expected state"); }
-/** A fixture Admin with the phone apps' email-code routes (openmaus-cloud server/cloud-app-signin.ts) and the desktop session. */
+/** A fixture Admin with the phone apps' email-code routes (openind-cloud server/cloud-app-signin.ts) and the desktop session. */
 async function fixture(t, options = {}) {
   const f = { now: 1_800_000_000_000, requests: [], saved: null, states: [], browsers: [], code: CODE, wrong: 0,
     start: null, verify: null, entitlement: { plan: "free", status: "inactive", expiresAt: null, version: 0 } };

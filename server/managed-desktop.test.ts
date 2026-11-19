@@ -59,10 +59,10 @@ it("keeps routing and secrets per instance and uses separate device-scoped Claud
   expect(claude.environment).toMatchObject({ ANTHROPIC_BASE_URL: `${value.portalOrigin}/api/desktop/gateway/anthropic`, ANTHROPIC_API_KEY: value.token });
   expect((claude.config as { configDir: string }).configDir).toContain(join("/fixture/company-runtime", "company."));
   expect(claude.config).toMatchObject({ managed: true });
-  expect(codex.environment).toMatchObject({ OPENMAUSBOT_COMPANY_API_KEY: value.token });
+  expect(codex.environment).toMatchObject({ OPENINDBOT_COMPANY_API_KEY: value.token });
   expect(codex.environment?.CODEX_HOME).toContain(join("/fixture/company-runtime", "company."));
   expect(codex.config).toEqual({ managed: { url: `${value.portalOrigin}/api/desktop/gateway/openai/v1`, models: ["gpt-fixture"] } });
-  expect(router.config).toMatchObject({ url: `${value.portalOrigin}/api/desktop/gateway/openrouter/v1`, provider: "", apiKeyEnv: "OPENMAUSBOT_COMPANY_API_KEY" });
+  expect(router.config).toMatchObject({ url: `${value.portalOrigin}/api/desktop/gateway/openrouter/v1`, provider: "", apiKeyEnv: "OPENINDBOT_COMPANY_API_KEY" });
   expect(router.environment).not.toHaveProperty("ANTHROPIC_API_KEY");
   expect(codex.environment).not.toHaveProperty("OPENAI_API_KEY");
 });
@@ -237,18 +237,18 @@ it("runs native Codex with Company Responses routing, isolated home and no OAuth
   let native: ProviderInstance | undefined;
   try {
     native = await CodexDriver.create({ instanceId: "fixture-company-codex", displayName: "Company", enabled: true, config,
-      environment: { CODEX_HOME: isolatedHome, OPENMAUSBOT_COMPANY_API_KEY: value.token, OPENAI_API_KEY: "personal-must-not-leak", FAKE_CODEX_DUMP: dump, FAKE_CODEX_MODE: "logged-out" } });
+      environment: { CODEX_HOME: isolatedHome, OPENINDBOT_COMPANY_API_KEY: value.token, OPENAI_API_KEY: "personal-must-not-leak", FAKE_CODEX_DUMP: dump, FAKE_CODEX_MODE: "logged-out" } });
     expect(await native.snapshot()).toMatchObject({ state: "available", authenticated: true, billing: "metered" });
     const events = recordEvents(native.adapter);
     await native.adapter.sendTurn({ threadId: "company-codex-fixture", text: "Fixture request", model: "gpt-fixture" });
     await events.until(event => event.type === "turn.completed"); events.stop();
     const spawned = JSON.parse(readFileSync(dump, "utf8"));
     expect(spawned.env.CODEX_HOME).toBe(isolatedHome);
-    expect(spawned.env.OPENMAUSBOT_COMPANY_API_KEY).toBe(value.token);
+    expect(spawned.env.OPENINDBOT_COMPANY_API_KEY).toBe(value.token);
     expect(spawned.env.OPENAI_API_KEY).toBeUndefined();
     expect(spawned.argv).toEqual(expect.arrayContaining(managedCodexArgs(config.managed!)));
     expect(JSON.stringify(spawned.argv)).not.toContain(value.token);
-    expect(spawned.calls.find((call: { method: string }) => call.method === "thread/start").params).toMatchObject({ model: "gpt-fixture", modelProvider: "openmaus_company" });
+    expect(spawned.calls.find((call: { method: string }) => call.method === "thread/start").params).toMatchObject({ model: "gpt-fixture", modelProvider: "openind_company" });
     await expect(native.adapter.sendTurn({ threadId: "blocked", text: "No fallback", model: "gpt-personal" })).rejects.toThrow("personal billing");
   } finally { await native?.dispose(); }
 });

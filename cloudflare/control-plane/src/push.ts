@@ -62,8 +62,8 @@ const KIND = /^[a-z][a-z-]{0,39}$/;
 const PAIRING = /^[A-Za-z0-9_-]{8,64}$/;
 const NEEDS_YOU = new Set(["approval", "question", "sign-in", "mention"]);
 /** The phone app's notification categories (action buttons) and Android channels, by the ids the store apps created. */
-const CATEGORY: Record<string, string> = { approval: "OPENMAUS_APPROVAL", question: "OPENMAUS_QUESTION" };
-const CATEGORY_UPDATE = "OPENMAUS_UPDATE";
+const CATEGORY: Record<string, string> = { approval: "OPENIND_APPROVAL", question: "OPENIND_QUESTION" };
+const CATEGORY_UPDATE = "OPENIND_UPDATE";
 const CHANNEL_BLOCKING = "approval_question";
 const CHANNEL_ROUTINES = "routine_failed";
 const CHANNEL_MESSAGES = "bot_messages";

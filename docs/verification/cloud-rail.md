@@ -16,7 +16,7 @@ The rail's sheets cover the window while open. Its circles are small and named
 on hover; the place on screen wears a ring. Beside the rail the sidebar's
 switcher and the profile menu's Switch to… step aside. The person can hide the
 rail; the page then has the whole window, and those two come back.
-Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
+Nothing here needs a real IndBot Cloud account, a payment or the Electron app.
 
 ## Contract
 
@@ -98,7 +98,7 @@ Once a person's bots moved to My Cloud, this computer's own copy is frozen and
 is never a place again. The rail then shows This Mac (This PC on Windows and
 Linux) first, beside My Cloud: a separate place on this computer, with its own
 bots. A click starts it fresh in a folder of its own beside the data folder
-(`~/.openmausbot-profiles/default`, a profile by its stable id; more profiles
+(`~/.openindbot-profiles/default`, a profile by its stable id; more profiles
 would be more folders there), on the same address, one server at a time, as a
 local environment switch does. Nothing moves either way, the frozen copy keeps
 its marker and its bots, and the move's code never reaches the profile. A line
@@ -135,8 +135,8 @@ never drops. Each picture is the rail beside the page, as the window shows them.
 ＋ offers New workspace on this computer first, to everyone with the rail (and
 in the Server menu where there is no rail yet). It asks a name (Work, then
 Personal, then Workspace 2 and on) and a colour, then opens it fresh: another
-profile under `~/.openmausbot-profiles/<id>`, listed with its name, colour and
-creation time in `~/.openmausbot-profiles/profiles.json` (This Mac, `default`,
+profile under `~/.openindbot-profiles/<id>`, listed with its name, colour and
+creation time in `~/.openindbot-profiles/profiles.json` (This Mac, `default`,
 is its first entry, kept as it was). One runs at a time: opening another waits
 for the work under way in the one that runs (as the move waits for it, at most
 a minute, the circle saying so), then stops it as a quit does and starts the

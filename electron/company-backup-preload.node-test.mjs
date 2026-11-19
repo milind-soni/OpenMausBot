@@ -12,7 +12,7 @@ function fixture({ remote = false, company = true, remoteClient = false, storage
   const location = { origin: remote ? "https://remote.invalid" : origin };
   let bridge;
   const context = vm.createContext({
-    process: { platform: "fixture", argv: [`--omb-local-origin=${origin}`, ...(company ? ["--omb-company-desktop=1"] : []), ...(remoteClient ? ["--openmausbot-remote-client"] : [])] },
+    process: { platform: "fixture", argv: [`--omb-local-origin=${origin}`, ...(company ? ["--omb-company-desktop=1"] : []), ...(remoteClient ? ["--openindbot-remote-client"] : [])] },
     location, TextEncoder,
     localStorage: storage ?? { getItem: key => values.get(key) ?? null },
     require: name => {
@@ -42,9 +42,9 @@ test("tools layout persists in the backup client keys", () => {
   const f = fixture();
   const preloadKeys = JSON.parse(vm.runInContext("JSON.stringify(COMPANY_BACKUP_CLIENT_KEYS)", f.context));
   for (const keys of [preloadKeys, WORKSPACE_BACKUP_CLIENT_KEYS]) {
-    const density = keys.indexOf("openmausbot.sidebarDensity");
+    const density = keys.indexOf("openindbot.sidebarDensity");
     assert.ok(density >= 0, "density key is allowlisted");
-    assert.equal(keys[density + 1], "openmausbot.sidebarToolsLayout");
+    assert.equal(keys[density + 1], "openindbot.sidebarToolsLayout");
   }
 });
 

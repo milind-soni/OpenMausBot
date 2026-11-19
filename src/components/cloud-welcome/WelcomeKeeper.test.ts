@@ -66,7 +66,7 @@ beforeEach(() => {
     removeItem: (key: string) => { stored.delete(key); },
   });
   fixture.state = {
-    connected: true, selectedId: "b1", activeView: "chat", routines: [], groups: [], bots: [{ id: "b1", threadId: "t1", name: "Maus" }],
+    connected: true, selectedId: "b1", activeView: "chat", routines: [], groups: [], bots: [{ id: "b1", threadId: "t1", name: "Ind" }],
     instances: [{ instanceId: "claude" }], config: { cloudHome: true, onboarding: { ...EMPTY_ONBOARDING }, profile: { name: "", email: "", aboutMe: "" } },
   };
   server = structuredClone(fixture.state.config);

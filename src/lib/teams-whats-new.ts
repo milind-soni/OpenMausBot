@@ -21,7 +21,7 @@ export type TeamsAction =
 export function teamsAction({ team, viewer, account, canAddCloud }: {
   team: { id: string; cloudPage?: string } | null | undefined;
   viewer: Pick<WelcomeViewer, "canSave" | "teamRole"> | null;
-  /** This desktop's MausBot Cloud sign-in, on its own page; null elsewhere. */
+  /** This desktop's IndBot Cloud sign-in, on its own page; null elsewhere. */
   account: CloudAccountState | null;
   /** The app's Add a Cloud can open here. */
   canAddCloud: boolean;

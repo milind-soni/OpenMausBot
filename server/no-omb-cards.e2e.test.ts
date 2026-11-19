@@ -1,5 +1,5 @@
 // Real server, fake engine: a bot at Full access and one at Approve for me (auto) change a profile, a working folder,
-// a teammate's profile, a skill, the team and team memory with no card of OpenMausBot's own. Each change leaves one
+// a teammate's profile, a skill, the team and team memory with no card of OpenIndBot's own. Each change leaves one
 // applied notice in the conversation, and its Undo puts the change back.
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync } from "node:fs";
@@ -22,7 +22,7 @@ const api = async (method: string, path: string, body?: unknown, token?: string)
 };
 const mint = async (botId: string, threadId: string) => {
   const response = await fetch(fixture.info.url + "/api/testing/internal-capability", {
-    method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": key },
+    method: "POST", headers: { "content-type": "application/json", "x-openindbot-test-capability": key },
     body: JSON.stringify({ botId, threadId, kind: "agents", skillAuthoring: true }),
   });
   expect(response.status).toBe(201);

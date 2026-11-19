@@ -15,14 +15,14 @@ import { ownTurnText } from "./testing/room-handoff-agent.ts";
 import { withAnswer } from "./testing/your-computer.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const RERUN_NOTE = "OpenMausBot restarted while your previous turn here was running";
+const RERUN_NOTE = "OpenIndBot restarted while your previous turn here was running";
 const RERUN_CHIP = "Resuming after a restart";
-const SECRET_PROVIDED = "OpenMausBot credential update: the user securely provided";
+const SECRET_PROVIDED = "OpenIndBot credential update: the user securely provided";
 const SEAT_FREE = "the computer this conversation waited for is free again";
-const INTERRUPTED_OUTWARD = "Interrupted by an OpenMausBot restart after it already";
+const INTERRUPTED_OUTWARD = "Interrupted by an OpenIndBot restart after it already";
 const SETTLED = "Your downstream room requests have settled.";
 const GOAL_RUN_ENDED = "The goal run this step belonged to ended with the restart.";
-const INTERRUPTED_LINE = "turn interrupted — OpenMausBot restarted";
+const INTERRUPTED_LINE = "turn interrupted — OpenIndBot restarted";
 
 const jsonl = (path: string): any[] => existsSync(path)
   ? readFileSync(path, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
@@ -620,7 +620,7 @@ it("R8 does not wake a bot that already spoke for an @everyone from another bot"
   expect(f.turns().map((record: any) => record.planKey)).toEqual(["C0", "M1"]);
 }), hostTimeout(90_000));
 
-const goalDone = (detail: string) => `<openmaus-goal>${JSON.stringify({ status: "completed", detail })}</openmaus-goal>`;
+const goalDone = (detail: string) => `<openind-goal>${JSON.stringify({ status: "completed", detail })}</openind-goal>`;
 const sendGoal = (f: any, bot: { id: string; threadId: string }, text: string) =>
   f.api("POST", `/api/bots/${bot.id}/messages`, { text, mode: "goal", threadId: bot.threadId });
 

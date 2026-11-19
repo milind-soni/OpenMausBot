@@ -1,7 +1,7 @@
-// MausBot's Codex turns run in Codex homes of its own. A ChatGPT-plan instance signs in there, so its login never mixes
+// IndBot's Codex turns run in Codex homes of its own. A ChatGPT-plan instance signs in there, so its login never mixes
 // with the person's; a turn on the person's own Codex sign-in links their login in. Everything else the person set up for
 // Codex (config.toml, skills, plugins, MCP sign-ins) is linked in from their own home, so a turn works like their own
-// Codex, but MausBot's chats stay in its own home: the Codex and ChatGPT apps list every session in the person's home as
+// Codex, but IndBot's chats stay in its own home: the Codex and ChatGPT apps list every session in the person's home as
 // their history. Company Codex homes never come here: they stay fully separate.
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, unlinkSync } from "node:fs";
@@ -73,16 +73,16 @@ function linkEntry(target: string, link: string, name: string): boolean {
   return true;
 }
 
-/** Whose login a MausBot home uses: its own (a ChatGPT plan's) or the person's, linked in. */
+/** Whose login a IndBot home uses: its own (a ChatGPT plan's) or the person's, linked in. */
 export type CodexHomeLogin = "own" | "person";
 
-/** Makes MausBot's Codex home and links the person's own Codex home into it. Linking never fails the turn: an entry
+/** Makes IndBot's Codex home and links the person's own Codex home into it. Linking never fails the turn: an entry
  * that cannot be linked (a file link Windows refuses without Developer Mode) stays as the home had it. True when the
  * home has the login it should: its own, or the person's (none when they have none). */
-export function linkSharedCodexHome(sharedHome: string | null, mausHome: string, login: CodexHomeLogin = "own"): boolean {
-  mkdirSync(mausHome, { recursive: true, mode: 0o700 });
-  if (!isAbsolute(mausHome)) return false;
-  const own = resolve(mausHome);
+export function linkSharedCodexHome(sharedHome: string | null, indHome: string, login: CodexHomeLogin = "own"): boolean {
+  mkdirSync(indHome, { recursive: true, mode: 0o700 });
+  if (!isAbsolute(indHome)) return false;
+  const own = resolve(indHome);
   const apart = (name: string) => CHATS.has(name) || DATABASE.test(name) || (login === "own" && PRIVATE.has(name));
   // A link from before chats were kept apart goes, even when sharing fails below, so no new chat is written through it;
   // the person's own files behind it stay as they are.
@@ -98,7 +98,7 @@ export function linkSharedCodexHome(sharedHome: string | null, mausHome: string,
     for (const name of SHARED_FOLDERS) mkdirSync(join(shared, name), { recursive: true, mode: 0o700 });
     names = readdirSync(shared);
   } catch (error) {
-    note(shared, `could not share your Codex home with MausBot's: ${(error as Error).message}`);
+    note(shared, `could not share your Codex home with IndBot's: ${(error as Error).message}`);
     return false;
   }
   const kept: string[] = [];
@@ -107,10 +107,10 @@ export function linkSharedCodexHome(sharedHome: string | null, mausHome: string,
     try {
       if (!linkEntry(join(shared, name), join(own, name), name)) kept.push(name);
     } catch (error) {
-      note(join(own, name), `could not link ${JSON.stringify(name)} of your Codex home into MausBot's: ${(error as Error).message}`);
+      note(join(own, name), `could not link ${JSON.stringify(name)} of your Codex home into IndBot's: ${(error as Error).message}`);
     }
   }
-  if (kept.length) note(own, `MausBot's Codex home keeps its own ${kept.join(", ")} from earlier turns; the rest of your Codex home is shared`);
+  if (kept.length) note(own, `IndBot's Codex home keeps its own ${kept.join(", ")} from earlier turns; the rest of your Codex home is shared`);
   return login === "own" || personLogin(shared, own);
 }
 
@@ -135,10 +135,10 @@ function keyringLogin(home: string, managedConfigs: readonly string[]): boolean 
   return /^\s*cli_auth_credentials_store\s*=\s*["'](?:keyring|auto)["']/m.test(topLevel);
 }
 
-/** A turn on the person's own Codex sign-in runs in MausBot's Codex home for this instance, so its chats stay out of their
- * Codex and ChatGPT apps. It keeps their home when that is MausBot's already (a Team Cloud's engine homes, anything in
+/** A turn on the person's own Codex sign-in runs in IndBot's Codex home for this instance, so its chats stay out of their
+ * Codex and ChatGPT apps. It keeps their home when that is IndBot's already (a Team Cloud's engine homes, anything in
  * the data folder), when their home has no login file or their login may be in the keyring, or when their login cannot
- * be linked or MausBot's home cannot be made: the turn still runs. */
+ * be linked or IndBot's home cannot be made: the turn still runs. */
 export function keepChatsOutOfCodexHistory(env: Record<string, string | undefined>, instanceId: string, dataDir = DATA_DIR,
   teamCloud = engineHomes.active(), managedConfigs: readonly string[] = MANAGED_CODEX_CONFIGS): void {
   const person = codexHome(env);
@@ -147,7 +147,7 @@ export function keepChatsOutOfCodexHistory(env: Record<string, string | undefine
   try {
     if (!linkSharedCodexHome(person, home, "person")) return;
   } catch (error) {
-    note(home, `could not make MausBot's Codex home, so this turn uses yours: ${(error as Error).message}`);
+    note(home, `could not make IndBot's Codex home, so this turn uses yours: ${(error as Error).message}`);
     return;
   }
   env.CODEX_HOME = home;

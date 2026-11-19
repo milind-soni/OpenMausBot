@@ -32,7 +32,7 @@ export function folderToFollow(bot: { id: string; cwd?: string }, threadId: stri
   return isOwnThreadFolder(threadCwd, bot.id, threadId) ? bot.cwd : undefined;
 }
 
-/** A conversation's folder a teammate may be sent to: one that still exists, outside OpenMausBot's own data (a bot's private workspace).
+/** A conversation's folder a teammate may be sent to: one that still exists, outside OpenIndBot's own data (a bot's private workspace).
  * The path as given and where it really leads are both checked against the data root as it really resolves too, and a
  * link is shared as the folder it resolved to at check time, so retargeting it afterwards cannot move a shared task. */
 export function sharedProjectFolder(cwd: string | null | undefined, dataDir: string): string | undefined {

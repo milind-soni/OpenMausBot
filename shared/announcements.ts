@@ -12,9 +12,9 @@ import { z } from "zod";
 
 export const ANNOUNCEMENTS_FILE = "announcements/announcements.json";
 export const ANNOUNCEMENTS_SCHEMA_FILE = "announcements/announcements.schema.json";
-export const ANNOUNCEMENTS_URL = `https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/${ANNOUNCEMENTS_FILE}`;
+export const ANNOUNCEMENTS_URL = `https://raw.githubusercontent.com/milind-soni/OpenIndBot/main/${ANNOUNCEMENTS_FILE}`;
 /** Pictures: files in the repository's announcements/ folder on main, as raw.githubusercontent.com serves them. */
-export const ANNOUNCEMENT_IMAGE_PREFIX = "https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/announcements/";
+export const ANNOUNCEMENT_IMAGE_PREFIX = "https://raw.githubusercontent.com/milind-soni/OpenIndBot/main/announcements/";
 
 /** An install reads at most this many cards, in file order; CI refuses a longer list. */
 export const MAX_CARDS = 20;
@@ -36,11 +36,11 @@ export type AnnouncementMark = (typeof ANNOUNCEMENT_MARKS)[number];
 
 export const ANNOUNCEMENT_PLATFORMS = ["mac", "windows", "linux", "ios", "android"] as const;
 export type AnnouncementPlatform = (typeof ANNOUNCEMENT_PLATFORMS)[number];
-/** `desktop`: the desktop app's own page. `cloud`: a MausBot Cloud's page, in a browser or in the desktop's window.
+/** `desktop`: the desktop app's own page. `cloud`: a IndBot Cloud's page, in a browser or in the desktop's window.
  * `server`: any other server's page, a self-hosted one or the app in a browser. */
 export const ANNOUNCEMENT_SURFACES = ["desktop", "cloud", "server"] as const;
 export type AnnouncementSurface = (typeof ANNOUNCEMENT_SURFACES)[number];
-/** `none`: no MausBot Cloud plan of one's own (signed out, or a free account). `cloud`: a Cloud of one's own, or its
+/** `none`: no IndBot Cloud plan of one's own (signed out, or a free account). `cloud`: a Cloud of one's own, or its
  * page. `team`: a Team Cloud's page. */
 export const ANNOUNCEMENT_PLANS = ["none", "cloud", "team"] as const;
 export type AnnouncementPlan = (typeof ANNOUNCEMENT_PLANS)[number];

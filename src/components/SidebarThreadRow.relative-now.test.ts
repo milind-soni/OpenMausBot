@@ -103,7 +103,7 @@ describe("relative clock tick", () => {
   it("runs the shared clock from the production thread list: one timer for every row", () => {
     const now = Date.now();
     const bot: Bot = {
-      id: "maus", threadId: "current", name: "Maus", title: "", description: "", notifications: true,
+      id: "ind", threadId: "current", name: "Ind", title: "", description: "", notifications: true,
       color: "green", unread: false, busy: false, messages: [], modelSelection: { instanceId: "fake", model: "fake" },
       tasks: [
         { threadId: "current", title: "Current chat", createdAt: now - 10_000, busy: false, activity: "idle" },

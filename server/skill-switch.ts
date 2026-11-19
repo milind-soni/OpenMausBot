@@ -49,7 +49,7 @@ export function skillSwitchTarget(
   if (action === "enable" && skill.enabled) return { error: `skill "${name}" is already on` };
   if (action === "disable" && !skill.enabled) return { error: `skill "${name}" is already off` };
   if (skill.text === null) {
-    return { error: `skill "${name}" changed outside OpenMausBot and can't be shown for review; the person can fix it in the bot's Skills settings` };
+    return { error: `skill "${name}" changed outside OpenIndBot and can't be shown for review; the person can fix it in the bot's Skills settings` };
   }
   const preview = redactSecretsInText(skill.text);
   return {

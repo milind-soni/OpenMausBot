@@ -5,7 +5,7 @@ import { z } from "zod";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode.ts";
 import { BOT_PROFILE_LIMITS } from "../../shared/bot-profile.ts";
 import { TOOL_GROUP_LABELS, TOOL_GROUPS, type ToolGroup } from "../../shared/tool-groups.ts";
-import { EFFORT_LEVELS, MAUS_COLOR_NAMES } from "../../shared/wire.ts";
+import { EFFORT_LEVELS, IND_COLOR_NAMES } from "../../shared/wire.ts";
 import type { BotRecord } from "../store.ts";
 import { withoutKeys, type RegistryDeps, type SettingEntry, type WritableSpec } from "./registry.ts";
 
@@ -93,7 +93,7 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
     }),
     perBot({
       id: "bots.color", label: "Bot colour", help: "A bot's colour in the sidebar and its chat.", where: "bot-settings", synonyms: ["color", "colour", "tint", "bot color"],
-      value: forBot({ color: z.enum(MAUS_COLOR_NAMES) }), allowed: `{"botId","color"} with color one of ${MAUS_COLOR_NAMES.join(", ")}`, read: everyBot((one) => one.color),
+      value: forBot({ color: z.enum(IND_COLOR_NAMES) }), allowed: `{"botId","color"} with color one of ${IND_COLOR_NAMES.join(", ")}`, read: everyBot((one) => one.color),
       effect: (one, { color }) => ({ change: `Make ${one.name} ${color}` }), was: (one, { botId }) => ({ botId, color: one.color }), patch: (_one, { color }) => ({ color }),
     }),
     perBot({
@@ -119,11 +119,11 @@ export function botEntries(deps: Pick<RegistryDeps, "bots" | "engines" | "patchB
       patch: (one, { archived }) => ({ hidden: archived, ...(archived && one.chiefOfStaff ? { chiefOfStaff: false } : {}) }),
     }),
     writable({
-      id: "sidebar.showHelper", label: "Show MausBot in the sidebar", help: "Whether this place's own bot, MausBot, has a row in the sidebar; it keeps working either way.", where: "show-helper",
-      synonyms: ["helper", "starter", "default bot", "mausbot", "show helper"], value: z.boolean(), allowed: "true or false",
+      id: "sidebar.showHelper", label: "Show IndBot in the sidebar", help: "Whether this place's own bot, IndBot, has a row in the sidebar; it keeps working either way.", where: "show-helper",
+      synonyms: ["helper", "starter", "default bot", "indbot", "show helper"], value: z.boolean(), allowed: "true or false",
       current: () => { const helper = deps.bots().find((one) => one.defaultBot); return helper ? !helper.sidebarHidden : undefined; },
-      describe: (show: boolean) => (deps.bots().some((one) => one.defaultBot) ? { change: show ? "Show MausBot in the sidebar" : "Take MausBot out of the sidebar; it keeps working" } : { refusal: "This place has no MausBot of its own." }),
-      write: (show: boolean) => { const helper = deps.bots().find((one) => one.defaultBot); return helper ? deps.patchBot(helper.id, { sidebarHidden: !show }) : Promise.resolve("This place has no MausBot of its own."); },
+      describe: (show: boolean) => (deps.bots().some((one) => one.defaultBot) ? { change: show ? "Show IndBot in the sidebar" : "Take IndBot out of the sidebar; it keeps working" } : { refusal: "This place has no IndBot of its own." }),
+      write: (show: boolean) => { const helper = deps.bots().find((one) => one.defaultBot); return helper ? deps.patchBot(helper.id, { sidebarHidden: !show }) : Promise.resolve("This place has no IndBot of its own."); },
     }),
     perBot({
       id: "bots.tools", label: "Bot tool groups", where: "bot-settings",

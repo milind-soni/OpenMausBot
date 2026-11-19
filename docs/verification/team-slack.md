@@ -4,7 +4,7 @@ Read [the verification entry point](README.md) first. What this is and what each
 [Slack for Team Clouds: the Team Cloud's side](../team-slack.md).
 
 Nothing here reaches Slack or the real Admin. The Admin's part is played by the test: it pairs each member with the
-Admin's signed claim (label "Slack (MausBot Cloud)"), calls the three routes with that session, and runs a stand-in
+Admin's signed claim (label "Slack (IndBot Cloud)"), calls the three routes with that session, and runs a stand-in
 Admin that takes the Cloud's signed reports and judges each as the real one does (machine, clock, nonce, the signature in
 Slack's own context with the bootstrap secret, and whether the message is this team's).
 
@@ -40,15 +40,15 @@ before it acts, one only its owner uses, one everyone can only view, and one a U
 - **A final report the Admin did not take** (a 503) is sent again until it does, once.
 - **Which bot**: `GET /api/slack/team/bots` lists the bots the member can chat with, each `shared` or not and none with
   a picture, never one they can't chat with; the Owner's list has the bot only its owner uses and not the User's own
-  MausBot. `{ default: true }` is the member's own MausBot; `{ name }` ignores case.
-- **Private and unreachable bots**: a bot only its owner uses, a User's own bot and their MausBot answer `403
+  IndBot. `{ default: true }` is the member's own IndBot; `{ name }` ignores case.
+- **Private and unreachable bots**: a bot only its owner uses, a User's own bot and their IndBot answer `403
   bot_private` for a channel. A bot the member can't see, one they can only view and a name nobody has all answer
   exactly what an id no bot has answers, for both audiences, and no conversation is made.
 - **The audience holds**: with a marker in the member's About you and another in their private notes for the bot, a
   direct message's turn is given both, and a channel's turn (a new conversation and a continued one) is given neither,
   nor the path of their private layer.
 - **An approval** asked through the bot's permission socket is reported `waiting` with `approval`, once; the card is in
-  the conversation and in the member's inbox under Needs you (`GET /api/inbox`); answered in MausBot, the reports go on
+  the conversation and in the member's inbox under Needs you (`GET /api/inbox`); answered in IndBot, the reports go on
   `running` then `completed`.
 - **Stop** (`POST /api/slack/team/messages/<id>/stop`): another User gets 403 in the app's words and the run goes on;
   an id never taken is 404; its writer's Stop ends it, the report is `stopped`, and the conversation says who stopped.
@@ -68,8 +68,8 @@ of that audience is given.
 ## On a My Cloud
 
 `server/cloud-personal-slack.e2e.test.ts` launches a My Cloud (`scripts/testing/cloud-send-fixture.ts`, no team) with
-its MausBot and one more bot, the synthetic Claude CLI, and the same stand-in Admin. The Admin's session is the owner's:
-the signed pairing with the label "Slack (MausBot Cloud)" and no member's claim. It proves:
+its IndBot and one more bot, the synthetic Claude CLI, and the same stand-in Admin. The Admin's session is the owner's:
+the signed pairing with the label "Slack (IndBot Cloud)" and no member's claim. It proves:
 
 - **The list** (`GET /api/slack/team/bots`) is every bot, each `shared: true`; a request with no session is refused.
 - **A channel message** (`audience: "team"`) is the owner's own line in a new conversation: `202`, the reports
@@ -77,7 +77,7 @@ the signed pairing with the label "Slack (MausBot Cloud)" and no member's claim.
   relayed, the engine's prompt with nothing relayed or information only, and the bot still opening to its own chat.
 - **The same id again** answers as the first did, while the run works, after it ended, and from another session of the
   owner's: one line, one reply, one conversation, one `completed`.
-- **A direct message** (`audience: "member"`, `{ default: true }`) is a conversation with the Cloud's MausBot titled
+- **A direct message** (`audience: "member"`, `{ default: true }`) is a conversation with the Cloud's IndBot titled
   "Slack DM: …"; `{ name }` ignores case; a direct message's conversation becomes the chat its bot opens to as any
   conversation the owner writes in does, and a channel's never does. A thread continues by `conversationId` with either
   audience; an id that names nothing answers `409 no_such_conversation`, a bot that does not exist `404 no_such_bot`.
@@ -97,5 +97,5 @@ Team Cloud's test drives.
 
 That Slack delivers the events, that the Admin matches a Slack user to a member and opens their session, that its
 retries carry the same id, that its words for each answer and report read well in a thread, and that a Cloud asleep is
-woken for a message. The Admin's own tests in openmaus-cloud run it against a fake Cloud that follows the same
+woken for a message. The Admin's own tests in openind-cloud run it against a fake Cloud that follows the same
 contract; no run has joined the real two.

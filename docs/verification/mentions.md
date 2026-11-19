@@ -25,7 +25,7 @@ stops the fixture servers and removes their temporary data directory.
 | Direct chat scope | Enter `@everyone @Atlas @Juniper` in Atlas's direct chat | Only Juniper is highlighted |
 | Responsive draft | Resize from desktop to 390px with the multiple-mention draft | Input grows to three lines; mirror and textarea both measure 80px |
 | Skins | Switch Dark → Light → Dark | Names remain legible in the composer and sent bubbles |
-| Bot identity colors | Compare Juniper (red) and Atlas (blue) with their avatars | Each mention uses its bot's MAUS_COLORS value; everyone remains neutral |
+| Bot identity colors | Compare Juniper (red) and Atlas (blue) with their avatars | Each mention uses its bot's IND_COLORS value; everyone remains neutral |
 | Markdown | Run ChatMarkdown tests | Prose/lists/tables highlight known names; code, links and HTML safety are preserved |
 
 ## Recorded run
@@ -67,7 +67,7 @@ node --experimental-strip-types scripts/control-omb.ts messages --channel 18b5bf
 ```
 
 Printed log:
-`%TEMP%/openmausbot-verification-evidence/server-1788957885515-22688.log`.
+`%TEMP%/openindbot-verification-evidence/server-1788957885515-22688.log`.
 As always, fresh runs must use their own printed URL and returned channel ID.
 The 65 focused tests (including direction forwarding, existing bidi controls,
 mention rendering and cloudflared retries), typecheck, production renderer
@@ -139,7 +139,7 @@ node --experimental-strip-types scripts/control-omb.ts messages --channel ec952c
 ```
 
 The printed server log was
-`%TEMP%/openmausbot-verification-evidence/server-1788790736762-24868.log`.
+`%TEMP%/openindbot-verification-evidence/server-1788790736762-24868.log`.
 Fresh runs must use their own printed URL and channel ID.
 
 ### Review fixes and mentions authored by bots
@@ -175,7 +175,7 @@ node --experimental-strip-types scripts/control-omb.ts messages --channel 2ee9e1
 ```
 
 Recorded on 2026-09-07; printed log:
-`%TEMP%/openmausbot-verification-evidence/server-1788791336713-2520.log`.
+`%TEMP%/openindbot-verification-evidence/server-1788791336713-2520.log`.
 The channel settled. Evidence: [wait](evidence/mentions/bot-reply-wait.json),
 [transcript](evidence/mentions/bot-reply-messages.json),
 [DOM palettes](evidence/mentions/bot-reply-dom.json),

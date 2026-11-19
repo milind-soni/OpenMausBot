@@ -1,4 +1,4 @@
-// dweb's HTTP API (the local OpenMaus network daemon) as MCP tools over stdio JSON-RPC 2.0: dweb_status,
+// dweb's HTTP API (the local OpenInd network daemon) as MCP tools over stdio JSON-RPC 2.0: dweb_status,
 // dweb_repo_status, dweb_opencode_models, dweb_opencode_run (waits up to 5 min). Env:
 //   DWEB_URL  base URL of the local dweb daemon (http://127.0.0.1:49737)
 import readline from "node:readline";
@@ -25,7 +25,7 @@ const TOOLS = [
   {
     name: "dweb_repo_status",
     description:
-      "Report the state of the OpenMausBot repository the dweb daemon is tracking: repo name, checked-out branch, last commit, file count, and checkout path.",
+      "Report the state of the OpenIndBot repository the dweb daemon is tracking: repo name, checked-out branch, last commit, file count, and checkout path.",
     inputSchema: { type: "object", properties: {} },
   },
   {

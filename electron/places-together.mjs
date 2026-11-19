@@ -1,4 +1,4 @@
-// "This computer and My Cloud together" (Settings → MausBot Cloud, an early feature that starts off): the sidebar of this
+// "This computer and My Cloud together" (Settings → IndBot Cloud, an early feature that starts off): the sidebar of this
 // computer's page and of My Cloud's page lists the other one's bots too. A page can only talk to its own place, so main
 // reads the other place's bots as the signed-in person, keeps the list, and opens that place at a bot when its row is
 // clicked. With the switch off nothing here reads, keeps or sends anything.

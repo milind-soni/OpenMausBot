@@ -7,7 +7,7 @@ import { test } from "node:test";
 
 import { contextMenuTemplate, createMediaDownloads, fileLink, mediaCopyName, mediaLink, savedName } from "./context-menu.mjs";
 
-const CLOUD = "https://bright-otter.mausbot.cloud";
+const CLOUD = "https://bright-otter.indbot.cloud";
 const VIDEO = `${CLOUD}/api/threads/t1/messages/m1/file?media=${"a".repeat(43)}`;
 const editFlags = { canUndo: false, canRedo: false, canCut: false, canCopy: false, canPaste: false, canSelectAll: true };
 const base = { mediaType: "none", srcURL: "", hasImageContents: false, linkURL: "", isEditable: false, misspelledWord: "", dictionarySuggestions: [], selectionText: "", x: 12, y: 34, editFlags, pageURL: `${CLOUD}/` };
@@ -69,7 +69,7 @@ test("a link keeps Copy Link and the text menu, and gains Save Link As only when
   assert.deepEqual(labels(menu({ linkURL: "https://example.com/about" })).slice(0, 2), ["Copy Link", "---"]);
   assert.equal(fileLink("https://example.com/index.html"), false);
   assert.equal(fileLink(`${CLOUD}/api/threads/t1/messages/m1/file`), true);
-  assert.equal(fileLink("openmausbot://bot/abc.def"), false);
+  assert.equal(fileLink("openindbot://bot/abc.def"), false);
   assert.equal(fileLink("mailto:someone@example.com"), false);
 });
 

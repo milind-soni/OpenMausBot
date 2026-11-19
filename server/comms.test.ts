@@ -120,7 +120,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
           name: candidate.name, busy: candidate.busy,
           tail: (candidate.messages ?? []).slice(-6).map((m: any) => ({ role: m.role, kind: m.kind, text: m.text?.slice(0, 300), tool: m.tool?.name, from: m.from?.name })),
         }));
-        const rows = readHandoffs(join(home, ".openmausbot")).map(({ id, parentId, botId, status, outcome, mode, result }) => ({ id, parentId, botId, status, outcome, mode, result: result.slice(0, 200) }));
+        const rows = readHandoffs(join(home, ".openindbot")).map(({ id, parentId, botId, status, outcome, mode, result }) => ({ id, parentId, botId, status, outcome, mode, result: result.slice(0, 200) }));
         throw new Error(`${what}.\nbots: ${JSON.stringify(tails)}\nrows: ${JSON.stringify(rows)}\nstderr: ${stderr.slice(-1500)}`);
       }
       await new Promise((r) => setTimeout(r, 250));
@@ -136,7 +136,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
   };
   const bot = async (botId: string): Promise<any> => (await api("GET", "/api/bots")).body.bots.find((candidate: any) => candidate.id === botId);
   const threadMessages = async (threadId: string): Promise<any[]> => (await api("GET", `/api/threads/${threadId}/messages?limit=200`)).body.messages ?? [];
-  const rows = () => readHandoffs(join(home, ".openmausbot"));
+  const rows = () => readHandoffs(join(home, ".openindbot"));
   const assignments = (helperId: string, askerId: string) => rows().filter((node) => node.botId === helperId && node.parentId
     && rows().find((parent) => parent.id === node.parentId)?.botId === askerId);
   const helperPrompt = (): string => {
@@ -208,7 +208,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     }
     const antigravityProfile = join(
       home,
-      ".openmausbot",
+      ".openindbot",
       "providers",
       "antigravity",
       createHash("sha256").update("geminiAsker").digest("hex"),
@@ -238,9 +238,9 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
     });
     await new Promise<void>((resolve) => compat.listen(0, "127.0.0.1", resolve));
     compatUrl = `http://127.0.0.1:${(compat.address() as AddressInfo).port}/v1`;
-    mkdirSync(join(home, ".openmausbot"), { recursive: true });
+    mkdirSync(join(home, ".openindbot"), { recursive: true });
     writeFileSync(
-      join(home, ".openmausbot", "config.json"),
+      join(home, ".openindbot", "config.json"),
       JSON.stringify({
         threads: { maxConcurrentPerBot: 3 },
         openaiCompat: { key: "comms-compat-key", url: compatUrl },
@@ -816,7 +816,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
         expect(taskId).toBeTruthy();
         const minted = await request("/api/testing/internal-capability", {
           method: "POST",
-          headers: { "content-type": "application/json", "x-openmausbot-test-capability": TEST_CAPABILITY_KEY },
+          headers: { "content-type": "application/json", "x-openindbot-test-capability": TEST_CAPABILITY_KEY },
           body: JSON.stringify({ botId: chief.id, threadId: sourceThreadId, kind: "agents" }),
         });
         expect(minted.status).toBe(201);
@@ -853,7 +853,7 @@ describe("routine comms e2e on the job runtime (fake ACP fleet)", () => {
   );
 
   it(
-    "keeps OpenMausBot tools authorized for Hermes after Stop issues a new bearer",
+    "keeps OpenIndBot tools authorized for Hermes after Stop issues a new bearer",
     async () => {
       // Stop issues a new bearer; a pooled Hermes keeps its first agents server, so the next turn must run on a fresh process.
       for (const existing of (await api("GET", "/api/bots")).body.bots) {

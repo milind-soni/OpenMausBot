@@ -4,7 +4,7 @@
  * `button`: this server can be updated from the app (a Docker Compose install with deploy/update-runner.sh on its host).
  * `command`: it cannot, or the server follows every release (OMB_UPDATE_CHANNEL=newest), which update.sh does not take;
  *   `command` is what to run on the server instead.
- * `held`: the host's own policy holds updates (`"updates": "hold"` in /etc/mausbot/policy.json).
+ * `held`: the host's own policy holds updates (`"updates": "hold"` in /etc/indbot/policy.json).
  * `none`: updated for its owner (this computer's app, or a Cloud we run): no button and no command.
  */
 export type ServerUpdateMode = "button" | "command" | "held" | "none";

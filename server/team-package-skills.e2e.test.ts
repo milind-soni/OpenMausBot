@@ -15,7 +15,7 @@ it("a bot template carries its skills, which arrive disabled; originals stay; a 
   const sharedText = instructions("source-check", "SHARED_SKILL_FIXTURE_MARKER");
   const privateText = instructions("private-notes", "PRIVATE_SKILL_FIXTURE_MARKER");
   const document = {
-    format: "openmaus.package", version: 1,
+    format: "openind.package", version: 1,
     package: {
       id: "skill-transfer", release: "1.0.0", name: "Skill transfer probe",
       tagline: "Isolated skill transfer.", summary: "Review imported skills before enabling.",

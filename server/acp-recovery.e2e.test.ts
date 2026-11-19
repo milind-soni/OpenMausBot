@@ -77,7 +77,7 @@ it.each([false, true])("recovers the same conversation after an ACP internal err
 
     writeFileSync(failureFile, JSON.stringify({ code: -32603, message: "Internal error", data: { details: "OpenCode service failure" } }));
     await send(failedText);
-    // OpenMausBot retries the failed run once by itself, on a replacement process that loads the same session; the fake
+    // OpenIndBot retries the failed run once by itself, on a replacement process that loads the same session; the fake
     // still refuses, so that retry fails too.
     const failures = async () => (await messages()).filter((message) => message.tool?.ok === false && /OpenCode service failure/.test(message.tool.name));
     await expect.poll(async () => (await failures()).length, { timeout: 20_000 }).toBe(2);

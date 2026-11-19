@@ -2,7 +2,7 @@ import type { MoveFailureCode, MoveFailurePhase } from "./move-failure.mjs";
 
 export type MovePhase = "none" | "copy" | "wait" | "freeze" | "final" | "check" | "switch" | "done" | "keeping" | "home-again" | "back";
 /**
- * What holds the move now. Before any move starts (phase `none`, or `back` from an earlier one): `signed_out` (no MausBot
+ * What holds the move now. Before any move starts (phase `none`, or `back` from an earlier one): `signed_out` (no IndBot
  * Cloud sign-in), `not_verified` (signed in, but the Admin's word on it isn't current: unreachable, expired or ended),
  * `team_only` (no Cloud of its own, only a team's), `no_cloud` (no Cloud of its own), `cloud_ended` (its Cloud ended and is
  * held until it is deleted), `moves_off` (the Admin doesn't let this account move: OMB_CLOUD_MOVES), `cloud_not_ready`

@@ -22,7 +22,7 @@ function setup(options: { start?: string; connected?: { gmail?: boolean; googlec
   dirs.push(dir);
   let now = Date.parse(options.start ?? "2026-10-27T15:00:00Z");
   const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
-  const chief = store.createBot({ name: "MausBot" }, { seedMessages: false });
+  const chief = store.createBot({ name: "IndBot" }, { seedMessages: false });
   store.setChiefOfStaff(chief.id);
   const thread = () => store.bot(chief.id)!.threadId;
   store.appendMessage(thread(), greetingMessage(chief, {}, undefined));
@@ -96,12 +96,12 @@ describe("a new Cloud's first hour", () => {
     const s = setup();
     const fh = s.make();
     fh.begin();
-    expect(s.texts()[0]).toBe("Hi! I'm MausBot, your Chief of Staff. I live on the Cloud, so I keep working while your computer is off. What do you want off your plate?");
+    expect(s.texts()[0]).toBe("Hi! I'm IndBot, your Chief of Staff. I live on the Cloud, so I keep working while your computer is off. What do you want off your plate?");
     s.world.person = { email: "sam.lee@example.test" };
     s.world.language = "de";
     fh.arrived();
     fh.stop();
-    expect(s.texts()[0]).toBe("Hallo Sam! Ich bin MausBot, dein Chief of Staff. Ich lebe in deiner Cloud und arbeite weiter, auch wenn dein Computer aus ist. Was soll ich dir abnehmen?");
+    expect(s.texts()[0]).toBe("Hallo Sam! Ich bin IndBot, dein Chief of Staff. Ich lebe in deiner Cloud und arbeite weiter, auch wenn dein Computer aus ist. Was soll ich dir abnehmen?");
     s.write("Mein Postfach");
     s.world.language = "fr";
     fh.arrived();
@@ -282,9 +282,9 @@ describe("a new Cloud's first hour", () => {
     other.begin();
     t.ledger.add("drafted", 1);
     t.world.runs.push(
-      { id: "r1", routineId: "news", routineName: "News", target: "bot", botId: t.chief.id, runOn: "maus", scheduledFor: 0, status: "completed", manual: false, createdAt: 0, finishedAt: t.now() + HOUR, report: { state: "posted", threadId: "x", messageId: "y" } },
-      { id: "r2", routineId: "watch", routineName: "Keep an eye on my day", target: "bot", botId: t.chief.id, runOn: "maus", scheduledFor: 0, status: "completed", manual: false, createdAt: 0, finishedAt: t.now() + HOUR, deliver: "brief", report: { state: "posted", threadId: "x", messageId: "y" } },
-      { id: "r3", routineId: "news", routineName: "News", target: "bot", botId: t.chief.id, runOn: "maus", scheduledFor: 0, status: "completed", manual: false, createdAt: 0, finishedAt: t.now() + HOUR, report: { state: "quiet" } },
+      { id: "r1", routineId: "news", routineName: "News", target: "bot", botId: t.chief.id, runOn: "ind", scheduledFor: 0, status: "completed", manual: false, createdAt: 0, finishedAt: t.now() + HOUR, report: { state: "posted", threadId: "x", messageId: "y" } },
+      { id: "r2", routineId: "watch", routineName: "Keep an eye on my day", target: "bot", botId: t.chief.id, runOn: "ind", scheduledFor: 0, status: "completed", manual: false, createdAt: 0, finishedAt: t.now() + HOUR, deliver: "brief", report: { state: "posted", threadId: "x", messageId: "y" } },
+      { id: "r3", routineId: "news", routineName: "News", target: "bot", botId: t.chief.id, runOn: "ind", scheduledFor: 0, status: "completed", manual: false, createdAt: 0, finishedAt: t.now() + HOUR, report: { state: "quiet" } },
     );
     t.set("2026-10-28T09:00:00Z");
     other.tick();

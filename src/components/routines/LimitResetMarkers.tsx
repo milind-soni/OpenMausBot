@@ -5,8 +5,8 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { resetTime, type ResetMarker } from "@/lib/limit-resets";
 
-export const BOT_DRAG_TYPE = "application/x-openmaus-bot";
-export const EVENT_DRAG_TYPE = "application/x-openmaus-calendar-event";
+export const BOT_DRAG_TYPE = "application/x-openind-bot";
+export const EVENT_DRAG_TYPE = "application/x-openind-calendar-event";
 
 /** What was dropped on a reset marker: a bot from the sidebar, or an automation already on the calendar. */
 export type ResetDrop = { botId: string } | { event: { kind: "routine" | "call"; id: string; at: number } };

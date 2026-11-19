@@ -103,7 +103,7 @@
       },
       "secretFindings": [],
       "downgrade": {
-        "error": "Packages without bots cannot be opened by older versions of OpenMausBot."
+        "error": "Packages without bots cannot be opened by older versions of OpenIndBot."
       }
     },
     "legacy-team.v1.json": {
@@ -224,7 +224,7 @@
     "newer.v4.json": {
       "error": {
         "code": "newer_version",
-        "message": "This file was made by a newer OpenMausBot. Update the app, then import it again."
+        "message": "This file was made by a newer OpenIndBot. Update the app, then import it again."
       }
     }
   }

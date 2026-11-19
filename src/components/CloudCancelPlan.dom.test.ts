@@ -57,7 +57,7 @@ describe("the cancel sheet", () => {
     expect(chips()).toEqual([["Missing a feature", "false"], ["Too expensive", "false"], ["Hard to set up", "false"], ["Didn't work as I expected", "false"],
       ["Not using it right now", "false"], ["Something else", "false"]]);
     expect(document.activeElement?.textContent).toBe("Missing a feature");
-    expect([...sheet()!.querySelectorAll("label")].map(label => label.textContent)).toEqual(["What did you expect MausBot to do? (optional)", "What could we have done better? (optional)"]);
+    expect([...sheet()!.querySelectorAll("label")].map(label => label.textContent)).toEqual(["What did you expect IndBot to do? (optional)", "What could we have done better? (optional)"]);
     const call = sheet()!.querySelector<HTMLAnchorElement>(`a[href="${CLOUD_CALL_URL}"]`)!;
     expect([call.textContent, call.getAttribute("target"), call.parentElement!.textContent]).toEqual(["Book 30 minutes with Milind", "_blank", "Rather talk it through? Book 30 minutes with Milind"]);
     // One tap picks a reason; the same tap again lets it go.

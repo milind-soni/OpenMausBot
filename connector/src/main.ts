@@ -1,4 +1,4 @@
-// mausbot-connector: `run` (the service), `enroll` (the code on stdin), `status`, `probe`, `job` (one job from root on this
+// indbot-connector: `run` (the service), `enroll` (the code on stdin), `status`, `probe`, `job` (one job from root on this
 // server), `audit` (the audit log, checked), `pause` and `resume` (remote management, by the server's admin), `version`.
 import { existsSync, readFileSync, statfsSync } from "node:fs";
 import { join } from "node:path";
@@ -47,12 +47,12 @@ const reader: HostReader = {
 };
 
 const auditLog = () => new AuditLog(join(PATHS.audit, AUDIT_FILE));
-const identity = (): ConnectorIdentity => ({ version: CONNECTOR_VERSION, protocol: PROTOCOL_VERSION, image: process.env.MAUSBOT_CONNECTOR_IMAGE || null });
+const identity = (): ConnectorIdentity => ({ version: CONNECTOR_VERSION, protocol: PROTOCOL_VERSION, image: process.env.INDBOT_CONNECTOR_IMAGE || null });
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The stricter of what the server was enrolled as and what install.sh started this container as. */
 function serverMode(record: AgentRecord | null): ServerMode {
-  return record?.mode === "customer-run" || process.env.MAUSBOT_MODE === "customer-run" ? "customer-run" : "operated";
+  return record?.mode === "customer-run" || process.env.INDBOT_MODE === "customer-run" ? "customer-run" : "operated";
 }
 
 /** The bot box's profiles belong to a home the connector makes; a home its owner installed is not given them. */
@@ -74,7 +74,7 @@ function hostReporter(docker: SocketDocker, admin: () => string | null, mode: Se
     return info.value;
   };
   const probe = async (fresh: boolean) => {
-    const image = process.env.MAUSBOT_CONNECTOR_IMAGE;
+    const image = process.env.INDBOT_CONNECTOR_IMAGE;
     if (!image || mode === "customer-run") return null;
     if (fresh || !box || Date.now() - box.at > 6 * 60 * 60_000) {
       let value: BoxProbeResult | null;
@@ -113,8 +113,8 @@ function hostReporter(docker: SocketDocker, admin: () => string | null, mode: Se
 async function run(): Promise<void> {
   const state = new StateStore(PATHS.state);
   const docker = new SocketDocker(PATHS.docker);
-  const instance = process.env.MAUSBOT_INSTANCE || "unknown";
-  log(`MausBot connector ${CONNECTOR_VERSION} starting`);
+  const instance = process.env.INDBOT_INSTANCE || "unknown";
+  log(`IndBot connector ${CONNECTOR_VERSION} starting`);
   const audit = auditLog();
   const note = (event: Parameters<AuditLog["append"]>[0]) => {
     try { audit.append(event); } catch (error) { log(`could not write the audit log ${audit.file}: ${errorText(error)}`); }
@@ -128,7 +128,7 @@ async function run(): Promise<void> {
     await sleep(10 * 60_000);
   }
   let record: AgentRecord | null = state.agent();
-  if (!record) log("waiting for this server to be connected: run the install command with the code MausBot shows");
+  if (!record) log("waiting for this server to be connected: run the install command with the code IndBot shows");
   const enrolledNow = !record;
   while (!record) {
     await sleep(2_000);
@@ -138,9 +138,9 @@ async function run(): Promise<void> {
   let current: AgentRecord = record;
   const mode = serverMode(record);
   if (enrolledNow) note({ event: "connector", what: "enrolled", version: CONNECTOR_VERSION, image: identity().image, boxId: record.boxId, mode });
-  if (mode === "customer-run") log("this server is run by its owner: MausBot may only do what connector/src/customer-run.ts lists");
+  if (mode === "customer-run") log("this server is run by its owner: IndBot may only do what connector/src/customer-run.ts lists");
   const kept = savedConfig(state.adminConfig(), current);
-  if (kept) log(`going by MausBot's schedule and policy kept on this server (version ${kept.version}) until MausBot answers`);
+  if (kept) log(`going by IndBot's schedule and policy kept on this server (version ${kept.version}) until IndBot answers`);
   const host = hostReporter(docker, () => current.admin, mode);
   const adopted = mode === "customer-run" ? new AdoptedHome({
     docker, state, log, diskFree: () => reader.disk().free, updateDir: PATHS.update,
@@ -149,7 +149,7 @@ async function run(): Promise<void> {
   const home = adopted ?? new Home({
     docker, state, log, readHealth, seccomp, transfer: httpTransfer,
     diskFree: () => reader.disk().free,
-    updateWindowMs: envSeconds("MAUSBOT_UPDATE_WAIT_S", 600, 60, 3600) * 1000,
+    updateWindowMs: envSeconds("INDBOT_UPDATE_WAIT_S", 600, 60, 3600) * 1000,
     onStep: ({ id, type, step, detail }) => note({ event: "step", id, type, step, ...(detail ? { detail } : {}) }),
   });
   // On a customer-run server only its owner replaces the connector, and never with an older one: one from before this
@@ -180,10 +180,10 @@ async function run(): Promise<void> {
     saveAdminKeys: (keys) => {
       current = { ...current, adminKeys: keys };
       state.saveAgent(current);
-      log(`MausBot's signing keys are now ${Object.keys(keys).join(", ")}`);
+      log(`IndBot's signing keys are now ${Object.keys(keys).join(", ")}`);
     },
     config: { saved: () => state.adminConfig(), save: (config) => state.saveAdminConfig(config) },
-    onConfig: (config) => log(`MausBot's schedule and policy (version ${config.version}) are kept on this server`),
+    onConfig: (config) => log(`IndBot's schedule and policy (version ${config.version}) are kept on this server`),
     stream: (stream, accept) => (adopted
       ? serveCustomerRunRequest(stream, accept, {
         paused: () => state.paused(), record: note,
@@ -264,7 +264,7 @@ async function readStdin(): Promise<string> {
 }
 
 async function enrollCommand(): Promise<void> {
-  const admin = adminOrigin(process.env.MAUSBOT_ADMIN_URL);
+  const admin = adminOrigin(process.env.INDBOT_ADMIN_URL);
   const code = (await readStdin()).trim();
   const state = new StateStore(PATHS.state);
   const docker = new SocketDocker(PATHS.docker);
@@ -275,7 +275,7 @@ async function enrollCommand(): Promise<void> {
   state.saveAgent(record);
   // Connected again only once the service has connected with this token.
   state.saveStatus({ connected: false, unauthorized: false, lastError: null });
-  console.log(`This server is connected to MausBot (server ${record.boxId}).`);
+  console.log(`This server is connected to IndBot (server ${record.boxId}).`);
 }
 
 function statusCommand(): void {
@@ -293,7 +293,7 @@ function statusCommand(): void {
 
 /**
  * One line per check for install.sh: `ok <id>`, `warn <id> <fix>` or `fail <id> <fix>`. With --json, one object
- * `{ok, checks}` for `openmausbot doctor --host`, which asks the connector on a server that runs one. Exits 1 when any
+ * `{ok, checks}` for `openindbot doctor --host`, which asks the connector on a server that runs one. Exits 1 when any
  * check fails.
  */
 async function probeCommand(): Promise<void> {
@@ -304,7 +304,7 @@ async function probeCommand(): Promise<void> {
     process.exitCode = 1;
     return;
   }
-  const image = process.env.MAUSBOT_CONNECTOR_IMAGE;
+  const image = process.env.INDBOT_CONNECTOR_IMAGE;
   let box: BoxProbeResult | null = null;
   try { box = image ? await probeBox(docker, image, seccomp()) : null; } catch (error) { box = { ok: false, fix: errorText(error) }; }
   const checks = hostChecks(await docker.info(), reader, { clockSkewS: null, box });
@@ -315,7 +315,7 @@ async function probeCommand(): Promise<void> {
 }
 
 const JOB_USAGE = [
-  "usage: mausbot-connector job <type> [args as JSON], for example:",
+  "usage: indbot-connector job <type> [args as JSON], for example:",
   "  job status                                   the server's state, and its backups with their ids",
   "  job backup",
   "  job restore '{\"backupId\":\"<id>\"}'           put a backup back (root only on a server its owner runs); the id is one of job status's backups[].id",
@@ -350,19 +350,19 @@ function auditCommand(): void {
   for (const line of audit.tail(Number.isInteger(count) && count > 0 ? count : 50)) console.log(line);
 }
 
-/** `pause` and `resume`: the server's admin stops and allows MausBot's jobs and requests. The running connector reads it before each one. */
+/** `pause` and `resume`: the server's admin stops and allows IndBot's jobs and requests. The running connector reads it before each one. */
 function pauseCommand(paused: boolean): void {
   const state = new StateStore(PATHS.state);
   if (serverMode(state.agent()) !== "customer-run") {
-    throw new Error("MausBot runs this server, so there is no remote management to pause here. To cut the connection: docker stop mausbot-connector");
+    throw new Error("IndBot runs this server, so there is no remote management to pause here. To cut the connection: docker stop indbot-connector");
   }
   if (state.paused() !== paused) {
     state.savePause(paused);
     auditLog().append({ event: "management", what: paused ? "paused" : "resumed", by: "local" });
   }
   console.log(paused
-    ? "Remote management is paused: this server refuses every job and request from MausBot, and logs each one. It still reports its health. To allow them again: mausbot-connector resume"
-    : "Remote management is on again: MausBot may run the jobs this server allows.");
+    ? "Remote management is paused: this server refuses every job and request from IndBot, and logs each one. It still reports its health. To allow them again: indbot-connector resume"
+    : "Remote management is on again: IndBot may run the jobs this server allows.");
 }
 
 const commands: Record<string, () => Promise<void> | void> = {
@@ -379,7 +379,7 @@ const commands: Record<string, () => Promise<void> | void> = {
 
 const command = commands[process.argv[2] ?? "run"];
 if (!command) {
-  console.error(`usage: mausbot-connector run | enroll | status | probe [--json] | job <type> [args] | audit [--tail N | --verify] | pause | resume | version\n${JOB_USAGE}`);
+  console.error(`usage: indbot-connector run | enroll | status | probe [--json] | job <type> [args] | audit [--tail N | --verify] | pause | resume | version\n${JOB_USAGE}`);
   process.exitCode = 2;
 } else {
   Promise.resolve().then(command).catch((error) => {

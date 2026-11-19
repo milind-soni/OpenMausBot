@@ -24,7 +24,7 @@ const PRIVATE = "Kumquat salary plan for March";
 const SHARED = "Team lunch is on Friday";
 const DESKTOP = ["1280", "800"] as const, PHONE = ["390", "844"] as const;
 
-/** A new member is offered their own MausBot in a dialog over the app; this run leaves it for later. */
+/** A new member is offered their own IndBot in a dialog over the app; this run leaves it for later. */
 const DISMISS = `(() => { [...document.querySelectorAll('[role="dialog"] button, dialog button')].find((button) => button.textContent.trim() === "Not now")?.click(); return true; })()`;
 
 type Task = { threadId: string; private?: true; sharedChat?: true; unread?: boolean };
@@ -125,7 +125,7 @@ async function openAs(who: keyof typeof tokens, size: readonly [string, string])
     const onboarding = { completedAt: new Date().toISOString(), version: WELCOME_VERSION, hintsSeen: [...TOUR_STEPS.map((step) => step.id), ...SPOTLIGHTS, "cloud-welcome-done", "cloud-setup-hidden"] };
     expect((await team.as(tokens.olive, "PATCH", "/api/config", { onboarding, language: "en" })).status).toBe(200);
     for (const who of ["ada", "ben"] as const) expect((await team.as(tokens[who], "PUT", "/api/me/welcome", { welcomed: true })).status).toBe(200);
-    // Each person said yes to "Add MausBot", as its card saves it: their own helper sits at the top of their sidebar.
+    // Each person said yes to "Add IndBot", as its card saves it: their own helper sits at the top of their sidebar.
     for (const who of ["olive", "ada", "ben"] as const) {
       const own = ((await team.as(tokens[who], "GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; defaultBot?: { person?: string } }>).find((bot) => bot.defaultBot?.person === `${who}@acme.test`)!;
       const added = await team.as(tokens[who], "PATCH", `/api/bots/${own.id}`, { welcomed: true, sidebarHidden: false, pinned: true });
@@ -154,7 +154,7 @@ async function openAs(who: keyof typeof tokens, size: readonly [string, string])
 
     const bots = (await team.as(tokens.ada, "GET", "/api/bots?messages=0")).body.bots as Array<Bot & { defaultBot?: { person?: string } }>;
     mine = bots.find((bot) => bot.defaultBot?.person === "ada@acme.test")!.id;
-    expect(await ada.listed(), "Just me lists her own MausBot and the bots she can chat with").toEqual(expect.arrayContaining([scout, mine]));
+    expect(await ada.listed(), "Just me lists her own IndBot and the bots she can chat with").toEqual(expect.arrayContaining([scout, mine]));
     const own = (await scoutAs("ada")).tasks.filter((task) => task.private === true);
     expect(own.length, "one private conversation, made by the click").toBe(1);
     adaOwn = own[0]!.threadId;

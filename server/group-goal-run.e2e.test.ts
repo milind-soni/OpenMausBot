@@ -27,16 +27,16 @@ let stderr = "";
 
 const completeReplies = [
   [
-    "Scout should verify the draft.\n<openmaus-goal>{\"status\":\"continue\",",
-    "\"next\":\"Scout\",\"instruction\":\"Verify the draft and report evidence\",\"detail\":\"Draft prepared\"}</openmaus-goal>",
+    "Scout should verify the draft.\n<openind-goal>{\"status\":\"continue\",",
+    "\"next\":\"Scout\",\"instruction\":\"Verify the draft and report evidence\",\"detail\":\"Draft prepared\"}</openind-goal>",
   ],
   "The draft is accurate and the cited evidence checks out.",
-  "The verified draft is ready to ship.\n<openmaus-goal>{\"status\":\"completed\",\"detail\":\"Draft produced and independently verified.\"}</openmaus-goal>",
+  "The verified draft is ready to ship.\n<openind-goal>{\"status\":\"completed\",\"detail\":\"Draft produced and independently verified.\"}</openind-goal>",
 ];
 
 const loopReplies = Array.from({ length: 13 }, (_, index) =>
   index % 2 === 0
-    ? `More work is needed.\n<openmaus-goal>{"status":"continue","next":"Looper","instruction":"Try approach ${index / 2 + 1}","detail":"Still working"}</openmaus-goal>`
+    ? `More work is needed.\n<openind-goal>{"status":"continue","next":"Looper","instruction":"Try approach ${index / 2 + 1}","detail":"Still working"}</openind-goal>`
     : `Approach ${Math.ceil(index / 2)} did not finish the task.`,
 );
 
@@ -58,7 +58,7 @@ beforeAll(async () => {
   queueFinishGate = join(home, "queue-finish");
   stopScopedLeadFinishGate = join(home, "stop-scoped-lead-finish");
   writeFileSync(stopScopedLeadFinishGate, "allow initial goal delegation");
-  const data = join(home, ".openmausbot");
+  const data = join(home, ".openindbot");
   const staticDir = join(home, "static");
   mkdirSync(data, { recursive: true });
   mkdirSync(join(staticDir, "assets"), { recursive: true });
@@ -111,7 +111,7 @@ beforeAll(async () => {
           FAKE_CLAUDE_SLOW_FINISH_GATE: busyGoalFinishGate,
           FAKE_CLAUDE_REPLIES: JSON.stringify([
             "The unrelated direct task is complete.",
-            "The queued team goal is complete.\n<openmaus-goal>{\"status\":\"completed\",\"detail\":\"Waited for the lead, then completed normally.\"}</openmaus-goal>",
+            "The queued team goal is complete.\n<openind-goal>{\"status\":\"completed\",\"detail\":\"Waited for the lead, then completed normally.\"}</openind-goal>",
           ]),
           FAKE_CLAUDE_REPLY_STATE: join(home, "busy-goal-replies.txt"),
         },
@@ -123,8 +123,8 @@ beforeAll(async () => {
         environment: {
           FAKE_CLAUDE_MODE: "happy",
           FAKE_CLAUDE_REPLIES: JSON.stringify([
-            "I am delegating the research.\n<openmaus-goal>{\"status\":\"continue\",\"next\":\"Busy specialist\",\"instruction\":\"Research the answer and report evidence\",\"detail\":\"Waiting for specialist research.\"}</openmaus-goal>",
-            "The specialist's evidence resolves the goal.\n<openmaus-goal>{\"status\":\"completed\",\"detail\":\"Specialist research incorporated after their direct task finished.\"}</openmaus-goal>",
+            "I am delegating the research.\n<openind-goal>{\"status\":\"continue\",\"next\":\"Busy specialist\",\"instruction\":\"Research the answer and report evidence\",\"detail\":\"Waiting for specialist research.\"}</openind-goal>",
+            "The specialist's evidence resolves the goal.\n<openind-goal>{\"status\":\"completed\",\"detail\":\"Specialist research incorporated after their direct task finished.\"}</openind-goal>",
           ]),
           FAKE_CLAUDE_REPLY_STATE: join(home, "busy-worker-lead-replies.txt"),
         },
@@ -151,9 +151,9 @@ beforeAll(async () => {
           FAKE_CLAUDE_MODE: "slow",
           FAKE_CLAUDE_SLOW_FINISH_GATE: stopScopedLeadFinishGate,
           FAKE_CLAUDE_REPLIES: JSON.stringify([
-            "I am delegating this scheduled goal.\n<openmaus-goal>{\"status\":\"continue\",\"next\":\"Delayed worker\",\"instruction\":\"Finish the scheduled analysis\",\"detail\":\"Waiting for the delayed worker.\"}</openmaus-goal>",
+            "I am delegating this scheduled goal.\n<openind-goal>{\"status\":\"continue\",\"next\":\"Delayed worker\",\"instruction\":\"Finish the scheduled analysis\",\"detail\":\"Waiting for the delayed worker.\"}</openind-goal>",
             "This is unrelated direct work and should be stopped.",
-            "The scheduled analysis is now complete.\n<openmaus-goal>{\"status\":\"completed\",\"detail\":\"Scheduled goal survived the coordinator's direct Stop.\"}</openmaus-goal>",
+            "The scheduled analysis is now complete.\n<openind-goal>{\"status\":\"completed\",\"detail\":\"Scheduled goal survived the coordinator's direct Stop.\"}</openind-goal>",
           ]),
           FAKE_CLAUDE_REPLY_STATE: join(home, "stop-scoped-lead-replies.txt"),
         },
@@ -188,7 +188,7 @@ beforeAll(async () => {
           FAKE_CLAUDE_MODE: "slow",
           FAKE_CLAUDE_SLOW_FINISH_GATE: routineGoalFinishGate,
           FAKE_CLAUDE_REPLIES: JSON.stringify([
-            "The scheduled review is complete.\n<openmaus-goal>{\"status\":\"completed\",\"detail\":\"Scheduled team review completed.\"}</openmaus-goal>",
+            "The scheduled review is complete.\n<openind-goal>{\"status\":\"completed\",\"detail\":\"Scheduled team review completed.\"}</openind-goal>",
           ]),
           FAKE_CLAUDE_REPLY_STATE: join(home, "routine-goal-replies.txt"),
         },
@@ -274,7 +274,7 @@ describe("goal-driven channel runs", () => {
     expect(current.working).toBe(false);
     expect(current.messages.filter((message: { kind: string; role?: string }) => message.kind === "text" && message.role === "bot")
       .map((message: { from?: { name?: string } }) => message.from?.name)).toEqual(["Lead", "Scout", "Lead"]);
-    expect(JSON.stringify(current.messages)).not.toContain("<openmaus-goal>");
+    expect(JSON.stringify(current.messages)).not.toContain("<openind-goal>");
   });
 
   it("waits for a busy coordinator without spending a goal turn, then completes on the same card", async () => {
@@ -571,7 +571,7 @@ describe("goal-driven channel runs", () => {
         target: "room-goal",
         groupId: room.id,
         botId: lead.id,
-        runOn: "maus",
+        runOn: "ind",
         schedule: { type: "once", at: Date.now() + 60_000 },
         durationMinutes: 30,
       });
@@ -664,7 +664,7 @@ describe("goal-driven channel runs", () => {
         target: "room-goal",
         groupId: room.id,
         botId: lead.id,
-        runOn: "maus",
+        runOn: "ind",
         schedule: { type: "once", at: Date.now() + 60_000 },
         durationMinutes: 30,
       });
@@ -765,7 +765,7 @@ describe("goal-driven channel runs", () => {
         target: "room-goal",
         groupId: room.id,
         botId: lead.id,
-        runOn: "maus",
+        runOn: "ind",
         schedule: { type: "once", at: Date.now() + 60_000 },
         durationMinutes: 30,
       });
@@ -896,7 +896,7 @@ describe("goal-driven channel runs", () => {
         target: "room-goal",
         groupId: room.id,
         botId: lead.id,
-        runOn: "maus",
+        runOn: "ind",
         schedule: { type: "once", at: Date.now() + 60_000 },
         durationMinutes: 30,
       });

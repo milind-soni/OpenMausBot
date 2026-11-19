@@ -20,7 +20,7 @@ export interface HistoryFacts {
   branded: boolean;
   /** An organization runs this desktop; null while that is read. */
   organization: boolean | null;
-  /** This desktop's own page, which sells MausBot Cloud (its Cloud sign-in). */
+  /** This desktop's own page, which sells IndBot Cloud (its Cloud sign-in). */
   cloudSale: boolean;
   /** This page shows the Cloud's own cards: This computer's page with its sign-in, or a Cloud's page in the desktop. */
   cloudCards: boolean;

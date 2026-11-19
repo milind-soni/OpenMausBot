@@ -63,7 +63,7 @@ export function duckdbDirectory(env: NodeJS.ProcessEnv = process.env): string | 
 
 /** createRequire resolves upwards from the anchor, so one inside <dir>/node_modules finds the staged @duckdb and @resvg first. */
 export function nativeRequire(directory: string | null = duckdbDirectory()): NodeJS.Require {
-  return createRequire(directory ? join(directory, "node_modules", "openmausbot-duckdb-anchor.js") : import.meta.url);
+  return createRequire(directory ? join(directory, "node_modules", "openindbot-duckdb-anchor.js") : import.meta.url);
 }
 
 function loadBinding(directory: string | null): Binding {
@@ -735,7 +735,7 @@ class Engine implements DataEngine {
       const detail = (error instanceof Error ? error.message : String(error)).split("\n")[0].trim();
       const where = directory ? `from ${directory}` : "from the server's node_modules";
       const action = directory
-        ? "Reinstall OpenMausBot, or point OMB_DUCKDB_DIR at a folder holding node_modules/@duckdb."
+        ? "Reinstall OpenIndBot, or point OMB_DUCKDB_DIR at a folder holding node_modules/@duckdb."
         : "Run pnpm install, or set OMB_DUCKDB_DIR to a folder holding node_modules/@duckdb.";
       this.loaded = { reason: `DuckDB did not load ${where}: ${detail}. ${action}` };
     }

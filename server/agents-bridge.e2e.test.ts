@@ -9,7 +9,7 @@
 // MCP servers) and then holds the turn open, so the turn's capability is
 // still good while this test starts the dumped agents server itself and
 // talks to it the way the engine would. Nothing here touches a person's
-// OpenMausBot: the server, its data and its home are the fixture's.
+// OpenIndBot: the server, its data and its home are the fixture's.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { expect, it } from "vitest";

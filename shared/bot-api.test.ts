@@ -4,7 +4,7 @@ import { BOT_API_KEY_PLACEHOLDER, botApiCurl, botApiEndpoint } from "./bot-api.t
 
 describe("the Bot API's address and command", () => {
   it("sits under the webhook receiver's /hooks path, whatever base the app advertises", () => {
-    expect(botApiEndpoint("https://scout.mausbot.cloud", "b1")).toBe("https://scout.mausbot.cloud/hooks/api/bots/b1/messages");
+    expect(botApiEndpoint("https://scout.indbot.cloud", "b1")).toBe("https://scout.indbot.cloud/hooks/api/bots/b1/messages");
     expect(botApiEndpoint("http://127.0.0.1:8800/", "b 1")).toBe("http://127.0.0.1:8800/hooks/api/bots/b%201/messages");
   });
 

@@ -14,7 +14,7 @@ const at = new Date(2026, 9, 29, 11, 31).getTime();
 const commitCheck: CalendarEventItem = {
   kind: "routine", id: "next-streak", at, durationMinutes: 30, run: null,
   routine: {
-    id: "streak", name: "Daily GitHub commit-streak check", prompt: "Check today's commits.", target: "bot", botId: hazel.id, runOn: "maus", enabled: true,
+    id: "streak", name: "Daily GitHub commit-streak check", prompt: "Check today's commits.", target: "bot", botId: hazel.id, runOn: "ind", enabled: true,
     schedule: { type: "interval", everyMinutes: 360 }, durationMinutes: 30, nextRunAt: at, createdAt: 0, updatedAt: 0,
   },
 } as CalendarEventItem;

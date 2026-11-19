@@ -5,8 +5,8 @@ import { listConfigBackups, restoreConfigBackup } from "./config-backup.ts";
 import { parseStoredConfig } from "./config.ts";
 import { parseJson } from "./schema.ts";
 
-export const CONFIG_USAGE = `openmausbot config backups [--data-dir DIR] [--json]
-openmausbot config restore NAME [--data-dir DIR] [--dry-run] [--json]
+export const CONFIG_USAGE = `openindbot config backups [--data-dir DIR] [--json]
+openindbot config restore NAME [--data-dir DIR] [--dry-run] [--json]
 
 Shows and puts back the dated copies of the settings file. Every save keeps a
 copy of the file as it was, named config.json.bak.YYYYMMDD-HHMMSS, beside it,
@@ -18,7 +18,7 @@ restore   put a copy back, by name or "latest"; the file it replaces is kept,
           so the restore can be undone. Stop the server first if it is
           running, so nothing it holds in memory is written over the copy.
 
---data-dir DIR  the OpenMausBot data folder (default ~/.openmausbot)
+--data-dir DIR  the OpenIndBot data folder (default ~/.openindbot)
 --dry-run        say what a restore would do, and change nothing
 --json           print the result as JSON`;
 
@@ -52,7 +52,7 @@ export function parseConfigArgs(argv: string[], env: NodeJS.ProcessEnv = process
   const help = argv.includes("--help") || argv.includes("-h");
   const dryRun = argv.includes("--dry-run");
   const fail = (error: string): ConfigCliError => ({ error, json });
-  let dataDir = env.OMB_DATA_DIR || join(homedir(), ".openmausbot");
+  let dataDir = env.OMB_DATA_DIR || join(homedir(), ".openindbot");
   let name: string | undefined;
   const words = argv.filter((arg) => arg !== "--json" && arg !== "--help" && arg !== "-h" && arg !== "--dry-run");
   const command = words[0];
@@ -69,10 +69,10 @@ export function parseConfigArgs(argv: string[], env: NodeJS.ProcessEnv = process
       dataDir = resolve(value);
       index += 1;
     } else if (command === "restore" && name === undefined && !arg.startsWith("-")) name = arg;
-    else return fail(`unknown argument "${arg}"; see openmausbot config --help`);
+    else return fail(`unknown argument "${arg}"; see openindbot config --help`);
   }
   // The help comes before the name is asked for: "config restore --help" is a question, not a request.
-  if (command === "restore" && name === undefined && !help) return fail("restore needs the name of a copy, or \"latest\"; run openmausbot config backups to see them");
+  if (command === "restore" && name === undefined && !help) return fail("restore needs the name of a copy, or \"latest\"; run openindbot config backups to see them");
   return { command, dataDir, name, json, help, dryRun };
 }
 

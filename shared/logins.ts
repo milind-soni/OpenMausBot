@@ -194,5 +194,5 @@ export function loginLabel(login: LoginPlace & { username: string }): string {
 
 /** The resume line after the person saved a login from a sign-in card. */
 export function savedLoginResumePrompt(site: string): string {
-  return `OpenMausBot sign-in update: the person saved a login for ${site}. Open its login page in your browser and call fill_login there: it fills the form and submits it. Then check you are signed in. You never see the password. Never ask for a password or a one-time code in chat.`;
+  return `OpenIndBot sign-in update: the person saved a login for ${site}. Open its login page in your browser and call fill_login there: it fills the form and submits it. Then check you are signed in. You never see the password. Never ask for a password or a one-time code in chat.`;
 }

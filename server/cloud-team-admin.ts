@@ -25,14 +25,14 @@ export interface ConnectionStatus {
   /** The admin who added it, by address and the name they go by on the team (null when they set none). */
   addedBy?: { email: string; name: string | null };
   addedAt?: string;
-  /** The team bots that use it (each member's own MausBot is left out). */
+  /** The team bots that use it (each member's own IndBot is left out). */
   bots?: string[];
 }
 
 export type PersonConnectionState = "connected" | "needs-sign-in" | "not-connected";
 
 /** The team's Vault, by name only: the secrets an Admin saved or a shared chat's card kept (never a member's own), and the
- * password managers linked to it. `usedBy`: the team bots that may use it (each member's own MausBot is left out).
+ * password managers linked to it. `usedBy`: the team bots that may use it (each member's own IndBot is left out).
  * `label`: 1Password's vaults the token reads, or Bitwarden's server; "" while not connected. `lastError`: a fixed class, never the manager's words. */
 export interface TeamVaultSummary {
   secrets: { name: string; addedAt: string; usedBy?: string[] }[];

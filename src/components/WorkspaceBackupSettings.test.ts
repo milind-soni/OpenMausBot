@@ -33,7 +33,7 @@ function render(recovery: boolean | "restart" | "cloud" = false) {
 const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
 const submit = (form: Node) => form.props.onSubmit!({ preventDefault: vi.fn() });
 const change = (input: Node, value: string) => input.props.onChange!({ target: { value } });
-const summary: WorkspaceBackupSummary = { format: "openmaus.workspace-backup", version: 1, id: "archive-id", createdAt: "2026-09-11T00:00:00Z", appVersion: "0.1.71", files: 9, directories: 3, bytes: 1234, bots: 2, groups: 1, threads: 4, messages: 8, warnings: ["Fixture warning"], exclusions: ["Saved account credentials and connections", "External CLI sign-ins"] };
+const summary: WorkspaceBackupSummary = { format: "openind.workspace-backup", version: 1, id: "archive-id", createdAt: "2026-09-11T00:00:00Z", appVersion: "0.1.71", files: 9, directories: 3, bytes: 1234, bots: 2, groups: 1, threads: 4, messages: 8, warnings: ["Fixture warning"], exclusions: ["Saved account credentials and connections", "External CLI sign-ins"] };
 let storage: Map<string, string>;
 beforeEach(() => {
   fixture.values = []; fixture.index = 0; fixture.effects = []; fixture.api.mockReset();
@@ -125,7 +125,7 @@ describe("Settings full backups", () => {
     replace().props.onClick!(); await flush();
     expect(JSON.parse(fixture.api.mock.calls[3][1].body)).toEqual({ id: "stage-id", confirmation: "REPLACE" });
     expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
-    expect(render().html).toContain("Fully quit MausBot");
+    expect(render().html).toContain("Fully quit IndBot");
   });
 
   it("does not offer a replacement after failed password validation", async () => {
@@ -165,7 +165,7 @@ describe("Settings full backups", () => {
     fixture.api.mockResolvedValueOnce({ busy: true, pendingRestore: true });
     expect(render(true).html).not.toContain("Continue without restoring drafts");
     fixture.effects[0](); await flush();
-    expect(render(true).html).toContain("Fully quit MausBot");
+    expect(render(true).html).toContain("Fully quit IndBot");
     expect(render(true).html).not.toContain("Continue without restoring drafts");
     expect(fixture.api).toHaveBeenCalledOnce(); expect(storage.get("omb-drafts")).toBe("old");
     fixture.values = [];
@@ -259,7 +259,7 @@ describe("Settings full backups", () => {
     storage.set("omb-pending-workspace-restore", "stage-id");
     render("restart").nodes.find(node => node.type === "button")!.props.onClick!(); await flush();
     const view = render("restart");
-    expect(view.html).toContain("Could not restart MausBot");
+    expect(view.html).toContain("Could not restart IndBot");
     expect(view.nodes.find(node => node.type === "button")!.props.disabled).toBe(false);
     expect(storage.get("omb-pending-workspace-restore")).toBe("stage-id");
     expect(window.location.reload).not.toHaveBeenCalled();

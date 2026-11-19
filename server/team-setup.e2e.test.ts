@@ -30,7 +30,7 @@ it("Clive sets up multi-provider teams at Ask with no card, keeps existing threa
     expect(codex).toBeDefined();
     const selection = (instance: any) => ({ instanceId: instance.instanceId, model: instance.models.default });
     const chief = (await api("POST", "/api/bots", { name: "Clive", title: "Chief of Staff", section: "Operations", modelSelection: selection(claude) }, 201)).bot;
-    // At Ask: team setup applies at once, since OpenMausBot adds no card of its own.
+    // At Ask: team setup applies at once, since OpenIndBot adds no card of its own.
     await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, approvalMode: "ask", connectorTools: { slack: { tools: ["SLACK_SEND_MESSAGE"] } } });
     const state = async () => (await api("GET", "/api/bots")).bots;
     // The fixture pins its starter's name, but identity is the honest comparison: a name once collided with a random starter.

@@ -21,7 +21,7 @@ function config(features: string[], fleet: boolean): ConfigStatus {
 
 const fleet: FleetView = {
   domain: "agentada.cc",
-  operator: "maus",
+  operator: "ind",
   workspaces: [
     { slug: "acme", host: "acme.agentada.cc", port: 8810, status: "running", createdAt: "", live: "active", usage: { month: "2026-09", turns: 12, costUsd: 3.5, billableUsd: 7 } },
     { slug: "globex", host: "globex.agentada.cc", port: 8820, status: "suspended", createdAt: "", live: "inactive", usage: { month: "2026-09", turns: 0, costUsd: null, billableUsd: null } },

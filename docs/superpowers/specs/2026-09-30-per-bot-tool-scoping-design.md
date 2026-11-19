@@ -1,6 +1,6 @@
 # Per-bot tool selection for local models
 
-Design for [#2047](https://github.com/milind-soni/OpenMausBot/issues/2047).
+Design for [#2047](https://github.com/milind-soni/OpenIndBot/issues/2047).
 
 ## Purpose and acceptance
 

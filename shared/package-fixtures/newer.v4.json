@@ -1,5 +1,5 @@
 {
-  "format": "openmaus.package",
+  "format": "openind.package",
   "version": 4,
   "package": {
     "id": "from-the-future",

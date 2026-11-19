@@ -15,6 +15,6 @@ it("answers every step of an older desktop's Copy this computer with the one thi
     expect(routes(res, path), path).toBe(true);
     expect(sent, path).toEqual({ status: 410, body: { error: COPY_REFUSAL } });
   }
-  expect(COPY_REFUSAL).toBe("Update OpenMausBot to bring your bots here by itself.");
+  expect(COPY_REFUSAL).toBe("Update OpenIndBot to bring your bots here by itself.");
   for (const path of ["/api/cloud-moves", "/api/cloud-send/chats", "/api/workspace-backup/upload"]) expect(routes(answer().res, path), path).toBe(false);
 });

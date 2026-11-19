@@ -19,7 +19,7 @@ function isPageUrl(value: string): boolean {
   let url: URL;
   try { url = new URL(value); } catch { return false; }
   const host = url.hostname.toLowerCase();
-  return url.protocol === "https:" && !url.username && !url.password && !url.port && host.endsWith(".mausbot.page") && PAGE_ID.test(host.slice(0, -".mausbot.page".length));
+  return url.protocol === "https:" && !url.username && !url.password && !url.port && host.endsWith(".indbot.page") && PAGE_ID.test(host.slice(0, -".indbot.page".length));
 }
 
 const deleteBody = z.object({ id: z.string().min(1).max(300) }).strict();

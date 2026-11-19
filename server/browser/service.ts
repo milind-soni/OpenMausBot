@@ -4,7 +4,7 @@
 // The tab lifecycle, popups, downloads and the per-server limits follow pingdotgg/t3code@00cdceb1
 // apps/server/src/preview/ServerBrowser.ts (dropTab, adoptPopup, saveDownload, closeIdleAgentTabs), MIT License,
 // Copyright (c) 2026 T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified: a Chrome per profile behind the
-// CDP driver instead of Playwright contexts, and OpenMausBot's idle close, caps and person/bot control rules.
+// CDP driver instead of Playwright contexts, and OpenIndBot's idle close, caps and person/bot control rules.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

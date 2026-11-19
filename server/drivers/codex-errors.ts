@@ -6,7 +6,7 @@ import type { ServerText } from "../../shared/server-text.ts";
 import { noticeFailure } from "../chat-notices.ts";
 import { plainRecord } from "./codex-app-approval.ts";
 
-/** How a Codex turn reaches OpenAI: OpenMausBot's ChatGPT plan, Codex's own sign-in, or any other provider. */
+/** How a Codex turn reaches OpenAI: OpenIndBot's ChatGPT plan, Codex's own sign-in, or any other provider. */
 export type CodexRoute = "plan" | "own" | "other";
 
 // codex-cli 0.160.1 holding no login sends no Authorization header and gets this 401.
@@ -16,11 +16,11 @@ export function codexNotSignedIn(): string {
   return `Codex isn't signed in on this computer.${cloudHomeConfigured() ? " Sign-ins don't copy over when you move to My Cloud." : ""} Sign in to Codex in Settings → AI → Providers, on Codex.`;
 }
 
-/** Codex's own words name ChatGPT's plans ("Upgrade to Pro"), which read as MausBot's. codex-cli 0.160.1 ends them
+/** Codex's own words name ChatGPT's plans ("Upgrade to Pro"), which read as IndBot's. codex-cli 0.160.1 ends them
  * with "Try again at 5:23 PM." or "…or try again at Oct 17th, 2026 5:23 PM.", in its local time. */
 export function codexLimitMessage(said: string, timeZone = hostTimeZone()): string {
   const resets = /\btry again at ([^.]+)/i.exec(said)?.[1]?.trim();
-  return `${CODEX_USAGE_LIMIT_REACHED} This is OpenAI's limit, not your MausBot plan. ${resets
+  return `${CODEX_USAGE_LIMIT_REACHED} This is OpenAI's limit, not your IndBot plan. ${resets
     ? `It resets at ${resets} (${timeZone}). Until then, manage your Codex usage in ChatGPT or switch this bot to another AI.`
     : "Manage your Codex usage in ChatGPT, or switch this bot to another AI until it resets."}`;
 }
@@ -67,7 +67,7 @@ export function codexLimitFacts(raw: string, route: CodexRoute, codexErrorInfo?:
 // "The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."
 const PLAN_MODEL_REFUSED = /model is not supported when using Codex with a ChatGPT account/i;
 
-// A ChatGPT plan takes only text, image and file input (2026-11-17 report on OpenMausBot 0.1.169): it refuses a request
+// A ChatGPT plan takes only text, image and file input (2026-11-17 report on OpenIndBot 0.1.169): it refuses a request
 // that carries audio with this code, and Codex keeps that audio in the saved session it resends every turn.
 export function codexPlanUnsupportedInput(raw: string, route: CodexRoute): boolean {
   return route === "plan" && raw.includes("subscription_sharing_unsupported_capability");

@@ -19,7 +19,7 @@ RUN test "$(uname -m)" = x86_64 \
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl git \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --uid 1001 --create-home --home-dir /data --shell /bin/bash maus
+    && useradd --uid 1001 --create-home --home-dir /data --shell /bin/bash ind
 # Only the remote client runs here. The engine and desktop containers are siblings.
 RUN curl -fsSL https://github.com/podman-container-tools/podman/releases/download/v5.8.3/podman-remote-static-linux_amd64.tar.gz -o /tmp/podman.tgz \
     && echo '8431e989a1383e4dc2582a178538b3a686160e15db9f5f2de2501a61dbf91c62  /tmp/podman.tgz' | sha256sum -c - \
@@ -27,19 +27,19 @@ RUN curl -fsSL https://github.com/podman-container-tools/podman/releases/downloa
     && install -m 0755 /tmp/bin/podman-remote-static-linux_amd64 /usr/local/bin/podman \
     && rm /tmp/podman.tgz /tmp/bin/podman-remote-static-linux_amd64
 WORKDIR /app
-COPY --from=build --chown=maus:maus /src/dist-native/duckdb/linux-x64 ./duckdb
-COPY --from=build --chown=maus:maus /src/dist-server ./dist-server
-COPY --from=build --chown=maus:maus /src/dist ./dist
-COPY --from=build --chown=maus:maus /src/skills ./skills
+COPY --from=build --chown=ind:ind /src/dist-native/duckdb/linux-x64 ./duckdb
+COPY --from=build --chown=ind:ind /src/dist-server ./dist-server
+COPY --from=build --chown=ind:ind /src/dist ./dist
+COPY --from=build --chown=ind:ind /src/skills ./skills
 ARG ENGINES=""
 RUN if [ -n "$ENGINES" ]; then npm install -g $ENGINES; fi
 ENV HOME=/data \
     OMB_DUCKDB_DIR=/app/duckdb \
-    OMB_DATA_DIR=/data/.openmausbot \
+    OMB_DATA_DIR=/data/.openindbot \
     OMB_STATIC_DIR=/app/dist \
     OMB_PORT=8799 \
     OMB_WEBHOOK_PORT=8800 \
     NODE_ENV=production
-USER maus
+USER ind
 # Starts dist-server/index.js again when it asks to (server/restart.ts).
 CMD ["node", "dist-server/server-launcher.js"]

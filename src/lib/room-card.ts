@@ -63,7 +63,7 @@ export function roomCardView(input: { room: CloudRoom | null | undefined; usage:
     tip: offer ? null : t(kind === "disk" ? "roomCard.tip.disk" : "roomCard.tip.memory") };
 }
 
-const HIDDEN_KEY = "openmausbot.roomCard.hidden.v1";
+const HIDDEN_KEY = "openindbot.roomCard.hidden.v1";
 export function readRoomCardHidden(): string | null {
   try { return globalThis.localStorage?.getItem(HIDDEN_KEY) ?? null; } catch { return null; }
 }

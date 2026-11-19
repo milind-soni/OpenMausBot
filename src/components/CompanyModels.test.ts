@@ -63,7 +63,7 @@ beforeEach(() => {
   fixture.flushBotPatches = vi.fn(async (botId: string) => ({ id: botId,
     modelSelection: fixture.kept.has(botId) ? { instanceId: "company.fixture.anthropic", model: "company-claude" } : { instanceId: "claude", model: "saved-model" } }));
   fixture.instances = [personalClaude, personalCodex, workingGrok, companyClaude, companyCodex];
-  fixture.bots = [bot("b1", "Scout", "claude"), bot("b2", "Writer", "grok"), bot("b3", "Maus", "removed-instance")];
+  fixture.bots = [bot("b1", "Scout", "claude"), bot("b2", "Writer", "grok"), bot("b3", "Ind", "removed-instance")];
   vi.stubGlobal("window", { ogb: { platform: "darwin" } });
   setLocale("en");
 });
@@ -83,7 +83,7 @@ describe("Company models in the connected Organisation panel", () => {
 
   it("counts only bots that cannot run, names them, and changes nothing until clicked", async () => {
     const view = render();
-    expect(view.html).toContain("Can’t run now: Scout, Maus");
+    expect(view.html).toContain("Can’t run now: Scout, Ind");
     expect(view.html).not.toContain("Writer");
     const action = view.nodes.find((node) => node.type === "button" && node.props.children === "Use Company · Fixture Company · Claude for 2 bots that can’t run");
     expect(action).toBeDefined();
@@ -94,7 +94,7 @@ describe("Company models in the connected Organisation panel", () => {
       [{ type: "setModel", botId: "b1", selection: { instanceId: "company.fixture.anthropic", model: "company-claude" } }],
       [{ type: "setModel", botId: "b3", selection: { instanceId: "company.fixture.anthropic", model: "company-claude" } }],
     ]);
-    expect(render().html).toContain("Now using Company · Fixture Company · Claude: Scout, Maus");
+    expect(render().html).toContain("Now using Company · Fixture Company · Claude: Scout, Ind");
   });
 
   it("names only bots the server kept on the Company model", async () => {
@@ -103,7 +103,7 @@ describe("Company models in the connected Organisation panel", () => {
     use().props.onClick!(); await flush();
     expect(fixture.flushBotPatches.mock.calls).toEqual([["b1"], ["b3"]]);
     const html = render().html;
-    expect(html).toContain("Now using Company · Fixture Company · Claude: Maus");
+    expect(html).toContain("Now using Company · Fixture Company · Claude: Ind");
     expect(html).not.toContain("Now using Company · Fixture Company · Claude: Scout");
     fixture.values = []; fixture.kept = new Set(); fixture.flushBotPatches.mockClear();
     use().props.onClick!(); await flush();

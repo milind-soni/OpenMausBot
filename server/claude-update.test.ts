@@ -51,7 +51,7 @@ describe("updateClaudeCli", () => {
     };
 
     await expect(updateClaudeCli("claude", {}, execute, noAppCopy)).rejects.toThrow(
-      "Claude finished updating, but OpenMausBot could not verify",
+      "Claude finished updating, but OpenIndBot could not verify",
     );
   });
 

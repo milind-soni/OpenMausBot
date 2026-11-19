@@ -33,7 +33,7 @@ interface PhoneSecretIdentity {
 }
 
 type SendPrivateMessage = (message: {
-  type: "openmausbot:phone-secret-save";
+  type: "openindbot:phone-secret-save";
   requestId: string;
   target: string;
   value: string;
@@ -96,7 +96,7 @@ export function phoneSecretAAD(context: Pick<
   "keyId" | "deviceId" | "botId" | "threadId" | "messageId" | "target" | "requestKey"
 >): Uint8Array {
   const fields = [
-    "openmausbot-phone-credential-v1",
+    "openindbot-phone-credential-v1",
     context.keyId,
     context.deviceId,
     context.botId,
@@ -136,11 +136,11 @@ export function assertPhoneSecretRequestMatches(
 ): void {
   // Phone entry hands a key to the desktop's settings; the 1Password token goes to Logins, which a phone cannot reach.
   if (expected.target === "onePasswordToken") {
-    throw new PhoneSecretError("Paste the 1Password token in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
+    throw new PhoneSecretError("Paste the 1Password token in OpenIndBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
   }
   // An AI provider key lives in the server's settings, which only the computer's own app writes.
   if (isCredentialTargetId(expected.target) && isProviderCredentialTarget(expected.target)) {
-    throw new PhoneSecretError("Paste this key in OpenMausBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
+    throw new PhoneSecretError("Paste this key in OpenIndBot on your computer, or in My Cloud: a phone cannot save it yet.", 409);
   }
   if (
     context.deviceId !== authenticatedDeviceId ||
@@ -300,7 +300,7 @@ function decodeSaveResult(raw: unknown): { requestId: string; ok: boolean; error
   const message = (raw as { data?: unknown } | null)?.data ?? raw;
   if (!message || typeof message !== "object" || Array.isArray(message)) return null;
   const value = message as Record<string, unknown>;
-  if (value.type !== "openmausbot:phone-secret-save-result") return null;
+  if (value.type !== "openindbot:phone-secret-save-result") return null;
   if (typeof value.requestId !== "string" || !ROUTE_ID.test(value.requestId) || typeof value.ok !== "boolean") {
     return null;
   }
@@ -345,7 +345,7 @@ export class PhoneSecretBridge {
     const message = (raw as { data?: unknown } | null)?.data ?? raw;
     if (!message || typeof message !== "object" || Array.isArray(message)) return false;
     const record = message as Record<string, unknown>;
-    if (record.type === "openmausbot:phone-secret-key") {
+    if (record.type === "openindbot:phone-secret-key") {
       const identity = importIdentity(record);
       this.identity = identity;
       this.imported = false;
@@ -389,14 +389,14 @@ export class PhoneSecretBridge {
     if (!this.identity) {
       throw new PhoneSecretError(
         this.desktopManaged
-          ? "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again."
+          ? "Secure phone entry is not ready on this computer. Reopen OpenIndBot and try again."
           : "This server cannot take secrets from a phone. Enter it on the web or on your computer instead.",
         503,
       );
     }
     const identity = await this.identity.catch(() => {
       throw new PhoneSecretError(
-        "Secure phone entry is not ready on this computer. Reopen OpenMausBot and try again.",
+        "Secure phone entry is not ready on this computer. Reopen OpenIndBot and try again.",
         503,
       );
     });
@@ -451,7 +451,7 @@ export class PhoneSecretBridge {
       timer.unref?.();
       this.pending.set(requestId, { resolve, reject, timer });
       if (this.send({
-        type: "openmausbot:phone-secret-save",
+        type: "openindbot:phone-secret-save",
         requestId,
         target: context.target,
         value,

@@ -186,7 +186,7 @@ describe("/api/move/freeze", () => {
     expect(await ask(garage, "GET", "/api/bots", {}, "loopback", "phone-1")).toEqual({ status: 410, body: { error: "This computer's bots moved to Garage server. Open Garage server from your phone instead.", code: "home_moved", place: "Garage server" } });
   });
 
-  it("is only for OpenMausBot on this computer, never a paired device", async () => {
+  it("is only for OpenIndBot on this computer, never a paired device", async () => {
     const freeze = createMoveFreeze({ dataDir: dataDir() });
     const route = createMoveFreezeRoutes({ freeze, busy: () => null, restart() {} });
     expect(await ask(route, "POST", undefined, {}, "session")).toMatchObject({ status: 403 });

@@ -32,7 +32,7 @@ const bot = {
 } as Bot;
 const routine: Routine = {
   id: "weekly", name: "Weekly digest", prompt: "Summarise the week", target: "bot", botId: bot.id,
-  runOn: "maus", enabled: false, schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 30,
+  runOn: "ind", enabled: false, schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 30,
   nextRunAt: null, createdAt: 1, updatedAt: 1,
 };
 
@@ -106,7 +106,7 @@ describe("calendar event details drawer", () => {
 
   it("shows a goal run that had no group as the bot's own, even after the routine was given a room", () => {
     const roomGoal: Routine = { ...routine, target: "room-goal", groupId: "room" };
-    const run: RoutineRun = { id: "run", routineId: roomGoal.id, routineName: roomGoal.name, target: "room-goal", botId: bot.id, runOn: "maus", scheduledFor: 1, status: "running", manual: false, createdAt: 1 };
+    const run: RoutineRun = { id: "run", routineId: roomGoal.id, routineName: roomGoal.name, target: "room-goal", botId: bot.id, runOn: "ind", scheduledFor: 1, status: "running", manual: false, createdAt: 1 };
     const html = renderToStaticMarkup(createElement(() => EventDetails({
       item: { kind: "routine", id: roomGoal.id, at: 1, durationMinutes: 30, routine: roomGoal, run },
       bots: [bot], onClose: vi.fn(), onEdit: vi.fn(), onCallChanged: vi.fn(), onOpenRoom: vi.fn(),

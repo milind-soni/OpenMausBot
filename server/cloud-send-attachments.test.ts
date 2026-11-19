@@ -36,7 +36,7 @@ describe("the attachment store a move fills", () => {
     }
     await expect(saveNamedAttachment("broken.png", breaking())).rejects.toThrow("connection reset");
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toMatch(/^\.openmaus-upload-[0-9a-f-]+-[0-9a-f-]+\.partial$/iu);
+    expect(seen[0]).toMatch(/^\.openind-upload-[0-9a-f-]+-[0-9a-f-]+\.partial$/iu);
     expect(partials()).toEqual([]);
     expect(existsSync(join(ATTACHMENTS_DIR, "broken.png"))).toBe(false);
   });

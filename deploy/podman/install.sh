@@ -1,15 +1,15 @@
 #!/bin/sh
-# MausBot's server as your own user's service, with rootless Podman: no root, no Docker. One line, run as yourself:
+# IndBot's server as your own user's service, with rootless Podman: no root, no Docker. One line, run as yourself:
 #
-#   curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/podman/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenIndBot/main/deploy/podman/install.sh | sh
 #   ... | sh -s -- --lan                 also answer other devices on this network (private addresses only)
 #   ... | sh -s -- --uninstall           stops and removes the service; keeps your data
 #
-# It writes a Quadlet unit (~/.config/containers/systemd/openmausbot.container) that runs the published server image,
+# It writes a Quadlet unit (~/.config/containers/systemd/openindbot.container) that runs the published server image,
 # pinned by its digest, as your user: systemd restarts it when it fails, and starts it at boot once your user may run
 # services without being logged in (it prints the one `loginctl enable-linger` line for that; it never runs sudo).
-# Your data stays in ~/.local/share/openmausbot/data. Running it again repairs the install and never touches your data.
-# Updates, with a copy of the data first and a way back: ~/.local/share/openmausbot/update.sh
+# Your data stays in ~/.local/share/openindbot/data. Running it again repairs the install and never touches your data.
+# Updates, with a copy of the data first and a way back: ~/.local/share/openindbot/update.sh
 #
 # WARNING: the server shares this machine's network, with less isolation than the Docker install (docs/self-hosting.md,
 # Podman). A port a bot or tool opens on 0.0.0.0 is open on every address of the machine; bots reach every service on
@@ -20,16 +20,16 @@
 set -eu
 
 settings() {
-  IMAGE_REPO=ghcr.io/milind-soni/openmausbot
-  STABLE_URL=https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json
-  RELEASES_URL=https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest
-  REPOSITORY_FILES=https://raw.githubusercontent.com/milind-soni/OpenMausBot
-  PINNED='^ghcr\.io/milind-soni/openmausbot@sha256:[0-9a-f]{64}$'
+  IMAGE_REPO=ghcr.io/milind-soni/openindbot
+  STABLE_URL=https://raw.githubusercontent.com/milind-soni/OpenIndBot/channels/stable.json
+  RELEASES_URL=https://api.github.com/repos/milind-soni/OpenIndBot/releases/latest
+  REPOSITORY_FILES=https://raw.githubusercontent.com/milind-soni/OpenIndBot
+  PINNED='^ghcr\.io/milind-soni/openindbot@sha256:[0-9a-f]{64}$'
   # One copy of this repository's files to use instead (https://… or file:///…), as deploy/install.sh takes it.
   SOURCE_ASKED="${OMB_INSTALL_SOURCE:-}"
-  INSTALL_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/openmausbot"
+  INSTALL_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/openindbot"
   UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/containers/systemd"
-  NAME=openmausbot
+  NAME=openindbot
   HEALTH_WAIT_S="${OMB_INSTALL_HEALTH_WAIT_S:-240}"
   MODE=install
   DIR_GIVEN=no
@@ -54,7 +54,7 @@ usage() {
   say "  --local            answer this machine only again (the default)"
   say "  --port N           the server's port on this machine (default 8799; webhooks use the next one)"
   say "  --public-url URL   the HTTPS address a proxy or tunnel in front of it serves, for pairing links"
-  say "  --dir PATH         where the data and settings live (default ~/.local/share/openmausbot)"
+  say "  --dir PATH         where the data and settings live (default ~/.local/share/openindbot)"
   say "  --uninstall        stop and remove the service; keeps the data"
 }
 
@@ -91,9 +91,9 @@ parse() {
   esac
   case "$PUBLIC_URL" in
     "" | https://*) ;;
-    *) fail "--public-url takes the https:// address people open, like https://maus.example.com." ;;
+    *) fail "--public-url takes the https:// address people open, like https://ind.example.com." ;;
   esac
-  case "$PUBLIC_URL" in *[!A-Za-z0-9:/._-]*) fail "--public-url takes a plain address, like https://maus.example.com." ;; esac
+  case "$PUBLIC_URL" in *[!A-Za-z0-9:/._-]*) fail "--public-url takes a plain address, like https://ind.example.com." ;; esac
   UNIT="$UNIT_DIR/$NAME.container"
 }
 
@@ -112,12 +112,12 @@ choose_dir() {
   INSTALL_DIR=$(printf '%s' "$INSTALL_DIR" | sed 's|//*$||')
   case "$INSTALL_DIR" in
     /?*) ;;
-    *) fail "--dir takes an absolute path of a folder, like /srv/openmausbot." ;;
+    *) fail "--dir takes an absolute path of a folder, like /srv/openindbot." ;;
   esac
   existing=$(installed_dir || true)
   if [ -n "$existing" ] && [ "$existing" != "$INSTALL_DIR" ]; then
     if [ "$DIR_GIVEN" = yes ]; then
-      fail "This user's MausBot service already uses $existing, and --dir names $INSTALL_DIR. Nothing was changed. Run this again with --dir $existing, or without --dir. To move it: --uninstall first, move the folder, then install with --dir and the new place."
+      fail "This user's IndBot service already uses $existing, and --dir names $INSTALL_DIR. Nothing was changed. Run this again with --dir $existing, or without --dir. To move it: --uninstall first, move the folder, then install with --dir and the new place."
     fi
     INSTALL_DIR=$existing
     note "The service already uses $INSTALL_DIR, so this run does too (--dir names it)."
@@ -245,7 +245,7 @@ choose_image() {
       *@sha256:*) ;;
       *)
         # update.sh's rollback can name the image that ran before by a name of this machine's own
-        # (openmausbot-before-update:local), which no registry has: never pulled, pinned by the digest it came with.
+        # (openindbot-before-update:local), which no registry has: never pulled, pinned by the digest it came with.
         if podman image exists "$IMAGE" 2>/dev/null; then
           digest=$(podman image inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$IMAGE" 2>/dev/null | grep -E "^${IMAGE_REPO}@sha256:[0-9a-f]{64}$" | head -n 1 || true)
           if [ -z "$digest" ]; then
@@ -260,8 +260,8 @@ choose_image() {
   else
     stable_image
   fi
-  say "Downloading MausBot (the first time is about a gigabyte)..."
-  podman pull -q "$IMAGE" >/dev/null || fail "MausBot could not be downloaded ($IMAGE; Podman's message is above). Check this machine's outbound HTTPS, then run this again."
+  say "Downloading IndBot (the first time is about a gigabyte)..."
+  podman pull -q "$IMAGE" >/dev/null || fail "IndBot could not be downloaded ($IMAGE; Podman's message is above). Check this machine's outbound HTTPS, then run this again."
   # A tag moves; the digest does not, so a restart never brings a different version than update.sh chose.
   case "$IMAGE" in
     *@sha256:*) ;;
@@ -275,7 +275,7 @@ choose_image() {
           ;;
         esac
       done
-      [ -n "$digest" ] || fail "MausBot $IMAGE was downloaded, but Podman did not say its digest, so it cannot be pinned (a tag moves, a digest does not). Nothing was changed. Run this again, or name the image by its digest: OMB_INSTALL_IMAGE=$repo@sha256:..."
+      [ -n "$digest" ] || fail "IndBot $IMAGE was downloaded, but Podman did not say its digest, so it cannot be pinned (a tag moves, a digest does not). Nothing was changed. Run this again, or name the image by its digest: OMB_INSTALL_IMAGE=$repo@sha256:..."
       IMAGE=$digest
       ;;
   esac
@@ -295,7 +295,7 @@ stable_image() {
       ;;
     404)
       release=$(curl -fsS --max-time 20 "$RELEASES_URL" 2>/dev/null | sed -n 's/.*"tag_name": *"\(v[0-9][0-9.]*\)".*/\1/p' | head -n 1)
-      [ -n "$release" ] || fail "The newest MausBot release could not be read from api.github.com. Check this machine's outbound HTTPS, then run this again."
+      [ -n "$release" ] || fail "The newest IndBot release could not be read from api.github.com. Check this machine's outbound HTTPS, then run this again."
       IMAGE="$IMAGE_REPO:$release"
       ok "version: $release, the newest release (no version is stable yet)"
       ;;
@@ -303,13 +303,13 @@ stable_image() {
   esac
 }
 
-# The image's own user and group (its `maus`): the container runs as them, mapped to this user by keep-id, so the data
+# The image's own user and group (its `ind`): the container runs as them, mapped to this user by keep-id, so the data
 # folder stays this user's own on the host. Never a recursive chown (`:U`).
 image_user() {
   RUN_UID=$(podman run --rm --network none --entrypoint id "$IMAGE" -u 2>/dev/null || true)
   RUN_GID=$(podman run --rm --network none --entrypoint id "$IMAGE" -g 2>/dev/null || true)
   case "$RUN_UID:$RUN_GID" in
-    *[!0-9:]* | : | :* | *:) fail "The MausBot image did not say which user it runs as. Run this again; if it still fails, send us this line." ;;
+    *[!0-9:]* | : | :* | *:) fail "The IndBot image did not say which user it runs as. Run this again; if it still fails, send us this line." ;;
   esac
 }
 
@@ -324,11 +324,11 @@ write_settings() {
   if [ ! -f "$INSTALL_DIR/server.env" ]; then
     write_file "$INSTALL_DIR/server.env" 600 <<'ENV'
 # The server's settings (docs/self-hosting.md). The Podman installer sets OMB_PORT, OMB_WEBHOOK_PORT, OMB_LAN and
-# OMB_PUBLIC_URL when asked, and keeps every other line. Apply a change with: systemctl --user restart openmausbot
+# OMB_PUBLIC_URL when asked, and keeps every other line. Apply a change with: systemctl --user restart openindbot
 OMB_PORT=8799
 OMB_WEBHOOK_PORT=8800
-OMB_SERVER_NAME=mausbot-podman
-OMB_CLI_PREFIX=podman exec -it openmausbot openmausbot
+OMB_SERVER_NAME=indbot-podman
+OMB_CLI_PREFIX=podman exec -it openindbot openindbot
 ENV
   fi
   if [ -n "$PORT" ]; then
@@ -364,11 +364,11 @@ unit_text() {
   label=""
   if selinux_on; then label=":Z"; fi
   cat <<UNIT
-# Written by MausBot's Podman installer (deploy/podman/install.sh), and written again each time it runs. The server's
+# Written by IndBot's Podman installer (deploy/podman/install.sh), and written again each time it runs. The server's
 # settings are in $INSTALL_DIR/server.env; update.sh changes Image= below.
 [Unit]
-Description=MausBot server (rootless Podman)
-Documentation=https://github.com/milind-soni/OpenMausBot/blob/main/docs/self-hosting.md#podman-rootless-as-a-service
+Description=IndBot server (rootless Podman)
+Documentation=https://github.com/milind-soni/OpenIndBot/blob/main/docs/self-hosting.md#podman-rootless-as-a-service
 
 [Container]
 ContainerName=$NAME
@@ -391,7 +391,7 @@ Environment=OMB_PODMAN_SERVICE=$(shown_dir)
 ShmSize=512m
 # curl's own limit: Podman 4.9 does not end a check that hangs on a server that accepts and never answers. The port is
 # read in the container when the check runs (server.env's OMB_PORT); systemd turns the doubled dollar into one.
-HealthCmd=curl -sf --max-time 4 http://127.0.0.1:\$\${OMB_PORT:-8799}/api/health | grep -q openmausbot
+HealthCmd=curl -sf --max-time 4 http://127.0.0.1:\$\${OMB_PORT:-8799}/api/health | grep -q openindbot
 HealthInterval=30s
 HealthTimeout=5s
 HealthRetries=3
@@ -448,7 +448,7 @@ place_update() {
   note "update.sh could not be downloaded; run this again later to place it."
 }
 
-answers() { curl -sf --max-time 5 "http://127.0.0.1:$SERVER_PORT/api/health" 2>/dev/null | grep -q openmausbot; }
+answers() { curl -sf --max-time 5 "http://127.0.0.1:$SERVER_PORT/api/health" 2>/dev/null | grep -q openindbot; }
 
 wait_healthy() {
   waited=0
@@ -465,22 +465,22 @@ port_taken() { ss -ltnH "( sport = :$1 )" 2>/dev/null | grep -q .; }
 start_service() {
   update_busy
   if ! systemctl --user is-active --quiet "$NAME" && port_taken "$SERVER_PORT"; then
-    fail "Something else on this machine already listens on port $SERVER_PORT (another MausBot server?). Stop it, or run this again with --port and a free port, like --port 8811."
+    fail "Something else on this machine already listens on port $SERVER_PORT (another IndBot server?). Stop it, or run this again with --port and a free port, like --port 8811."
   fi
   if [ "$CHANGED" = yes ] || ! systemctl --user is-active --quiet "$NAME"; then
-    say "Starting MausBot..."
+    say "Starting IndBot..."
     systemctl --user restart "$NAME" ||
-      fail "MausBot could not be started. Its log: journalctl --user -u $NAME -n 50"
+      fail "IndBot could not be started. Its log: journalctl --user -u $NAME -n 50"
   fi
-  wait_healthy || fail "MausBot started but did not answer within $HEALTH_WAIT_S seconds. Its log: journalctl --user -u $NAME -n 50"
+  wait_healthy || fail "IndBot started but did not answer within $HEALTH_WAIT_S seconds. Its log: journalctl --user -u $NAME -n 50"
 }
 
 finish() {
   say ""
-  say "MausBot is running as your user's service ($NAME), on http://127.0.0.1:$SERVER_PORT."
+  say "IndBot is running as your user's service ($NAME), on http://127.0.0.1:$SERVER_PORT."
   if [ "$(env_value "$INSTALL_DIR/server.env" OMB_LAN)" = 1 ]; then say "Its port $SERVER_PORT also answers other devices on this network, from private addresses only, over plain http; each device pairs."; fi
   say ""
-  say "  Pair a device   podman exec -it $NAME openmausbot pair"
+  say "  Pair a device   podman exec -it $NAME openindbot pair"
   say "  Log             journalctl --user -u $NAME -f"
   say "  Update          $INSTALL_DIR/update.sh"
   say "  Data            $DATA_DIR"
@@ -492,7 +492,7 @@ finish() {
   say "  - Every account and program on this machine counts as the owner on port $SERVER_PORT, and can attach to Chrome's"
   say "    debugging port."
   say "Use it on a machine only you sign in to, behind a host firewall:"
-  say "https://github.com/milind-soni/OpenMausBot/blob/main/docs/self-hosting.md#podman-rootless-as-a-service"
+  say "https://github.com/milind-soni/OpenIndBot/blob/main/docs/self-hosting.md#podman-rootless-as-a-service"
   say ""
   if linger_on; then
     say "It starts at boot, without anyone logged in."
@@ -525,11 +525,11 @@ run_uninstall() {
   rm -f "$UNIT"
   systemctl --user daemon-reload 2>/dev/null || true
   rm -f "$INSTALL_DIR/podman.unit"
-  say "MausBot's service is stopped and removed. Your data stays in $DATA_DIR."
+  say "IndBot's service is stopped and removed. Your data stays in $DATA_DIR."
   say "To remove the data too (some files belong to the container's other ids, so through Podman):"
   say "  podman unshare rm -rf $INSTALL_DIR"
-  say "The copies of the data update.sh kept: podman volume ls --filter label=com.mausbot.role=update-backup"
-  say "The downloaded images: podman image ls ghcr.io/milind-soni/openmausbot"
+  say "The copies of the data update.sh kept: podman volume ls --filter label=com.indbot.role=update-backup"
+  say "The downloaded images: podman image ls ghcr.io/milind-soni/openindbot"
 }
 
 main() {

@@ -25,7 +25,7 @@ same. A new card is one id in `SETTINGS_CARD_IDS`, one entry in `server/app-sett
 
 ## Goal
 
-A bot can find, explain and change MausBot's own settings from chat: add an AI provider, reorder bots, group them into sidebar sections, switch the theme, change thread limits, and answer "where do I change X?" for every setting. Settings stop being a page the user has to learn.
+A bot can find, explain and change IndBot's own settings from chat: add an AI provider, reorder bots, group them into sidebar sections, switch the theme, change thread limits, and answer "where do I change X?" for every setting. Settings stop being a page the user has to learn.
 
 ## Risks this design closes
 
@@ -91,7 +91,7 @@ value?: unknown    // set, validated by the entry's zod schema
 
 ## Window-only preferences
 
-Skin, Simple mode, font, chat width, send key and notification sounds live in the renderer's localStorage. The server pushes a change as an SSE event; the renderer applies it with the existing setters (`src/lib/skins.ts`, `src/lib/interface-mode.ts`, and so on) and reports its current values back so `read` can show them. If no window is connected, `set` on these refuses with "Open MausBot on this computer first".
+Skin, Simple mode, font, chat width, send key and notification sounds live in the renderer's localStorage. The server pushes a change as an SSE event; the renderer applies it with the existing setters (`src/lib/skins.ts`, `src/lib/interface-mode.ts`, and so on) and reports its current values back so `read` can show them. If no window is connected, `set` on these refuses with "Open IndBot on this computer first".
 
 ## Wiring
 
@@ -124,7 +124,7 @@ Deviations from the design above, each chosen as the safer or simpler option:
 - **`where` strings live in the registry.** `src/components/settings/settings-index.ts` imports lucide icons and the
   renderer's locale types, so it is not imported server-side.
 - **Window preferences change only while an owner's app window holds its live stream open** (`/api/events?window=1`).
-  With none open, `set` refuses with "Open MausBot on this computer first". The window reports its values with
+  With none open, `set` refuses with "Open IndBot on this computer first". The window reports its values with
   `PUT /api/window-prefs` so `read` can show them.
 - **The write budget counts accepted sets** (a safe or confirm write, or a secret card request). A set refused by
   validation, the tier or the turn does not spend it.
@@ -159,7 +159,7 @@ now holds 104 settings: 15 safe, 62 confirm (8 before), 19 secret, 8 owner-only 
 `features.sharedComputers` switch) are now `confirm`. The card is what keeps them safe: its Change counts only with
 `ownerReview` (the desktop app or a paired Full-access device), so a bot's own shell on loopback gets 403, and the confirm
 path never reads `fullAccess()`, so Full access never skips it. Every card names the bot and the effect in plain words
-(`Let Kiwi act without asking (Full access)`, `Let your paired phones reach this computer from anywhere, through MausBot's
+(`Let Kiwi act without asking (Full access)`, `Let your paired phones reach this computer from anywhere, through IndBot's
 relay`, `... A lent folder can be used to reach a shell`). `describe` refuses before any card an unknown bot, Custom
 approval (desktop app only), and Approve for me on this computer's own desktop (the route takes that only with the
 warning the bot's Settings dialog shows). The approval change is sent with `applyToAllThreads`, as the bot panel does.
@@ -179,11 +179,11 @@ warning the bot's Settings dialog shows). The approval change is sent with `appl
   only on Change. `src/lib/window-prefs.ts` applies each with the row's own setter, and reaches desktop-only ones through
   the preload bridge (`openAtLogin`, `talkShortcut`, `windowFrame`, `rail`, `workspaces.color`, `updatesConsent`,
   `companion`). Reads may be async; a preference whose bridge is absent is left out of the report, and the server refuses
-  a preference the window never reported ("The open MausBot window can't change this here").
+  a preference the window never reported ("The open IndBot window can't change this here").
 - Keys: `withoutKeys` (the engines refusal, now shared) wraps every object value that could carry one; decider and
   image sections drop their key fields, and `read` strips any key, token, secret or password field.
 - Anything that sends data off the computer says so on its card: decision provider, image provider, product update
-  emails (your address goes to MausBot), usage analytics (PostHog).
+  emails (your address goes to IndBot), usage analytics (PostHog).
 
 **Inventory** (every row of `src/components/settings/settings-index.ts`):
 
@@ -191,7 +191,7 @@ warning the bot's Settings dialog shows). The approval change is sent with `appl
 |---|---|---|---|
 | pair, paired | `phone.pairing` | owner-only | pairing takes a code; removal and per-device grants stay in Settings |
 | wifi | `remote.wifi` | confirm | window → `companion.setRoute("wifi")` |
-| relay | `remote.relay` | confirm | window → `companion.setRoute("relay")` (needs a MausBot sign-in) |
+| relay | `remote.relay` | confirm | window → `companion.setRoute("relay")` (needs a IndBot sign-in) |
 | keep-awake | `remote.keepAwake` | confirm | window → `companion.keepAwake` |
 | wake-automations | — | skipped | opens Automations, not a value |
 | tailscale | `remote.tailscale`, `remote.httpsAddress` | confirm | window → `companion.setTailscale` / `setRoute("https", false)`; turning HTTPS on needs the pairing flow |

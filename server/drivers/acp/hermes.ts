@@ -14,19 +14,19 @@ import { createAcpDriver, type AcpSupport } from "./core.ts";
 
 const EMPTY: ModelCatalog = { default: "", options: [] };
 
-export const HERMES_OPENMAUS_SCREENSHOT_COMPAT = "HERMES_OPENMAUS_SCREENSHOT_COMPAT";
-export const HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL = "HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL";
+export const HERMES_OPENIND_SCREENSHOT_COMPAT = "HERMES_OPENIND_SCREENSHOT_COMPAT";
+export const HERMES_OPENIND_SCREENSHOT_COMPAT_MODEL = "HERMES_OPENIND_SCREENSHOT_COMPAT_MODEL";
 
 export function bindHermesScreenshotCompat(
   env: Record<string, string | undefined>,
   modelId: string | null | undefined,
 ): void {
-  delete env[HERMES_OPENMAUS_SCREENSHOT_COMPAT];
-  delete env[HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL];
+  delete env[HERMES_OPENIND_SCREENSHOT_COMPAT];
+  delete env[HERMES_OPENIND_SCREENSHOT_COMPAT_MODEL];
   const inject = decodeInjectId(modelId);
   if (!inject) return;
-  env[HERMES_OPENMAUS_SCREENSHOT_COMPAT] = "1";
-  env[HERMES_OPENMAUS_SCREENSHOT_COMPAT_MODEL] = inject.model;
+  env[HERMES_OPENIND_SCREENSHOT_COMPAT] = "1";
+  env[HERMES_OPENIND_SCREENSHOT_COMPAT_MODEL] = inject.model;
 }
 
 function quoteYaml(value: string): string {

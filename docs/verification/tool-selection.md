@@ -1,7 +1,7 @@
 # Per-bot tool selection
 
 All checks below use disposable homes, workspaces and MCP servers. They do
-not read the user's OpenMausBot data or connect a real mail account.
+not read the user's OpenIndBot data or connect a real mail account.
 
 ## Repeatable automated checks
 
@@ -175,7 +175,7 @@ all 13 spawned proxy paths. Optional browser fixtures absent from the managed
 checkout are not counted as tested. The actual tool-selection renderer workflow
 and the screenshots above were verified separately in the primary checkout.
 
-[Final composed fork CI](https://github.com/BitL8-ByteShort/OpenMausBot/actions/runs/36804814592)
+[Final composed fork CI](https://github.com/BitL8-ByteShort/OpenIndBot/actions/runs/36804814592)
 on `738c5a8a586b6922b28a32947a06c05ba12abe62` passed all 26 selected checks,
 including all 12 Vitest shards across macOS, Ubuntu and Windows, builds,
 renderer, Electron and source-free packaging checks. Deployment was deliberately
@@ -185,9 +185,9 @@ files. The new ACP selection, Pi extension and capacity cleanup suites passed
 on Windows without a cleanup warning. The existing ACP suite's temporary-home
 cleanup warning also occurs in the unchanged-production baseline.
 
-[Feature draft #2101](https://github.com/milind-soni/OpenMausBot/pull/2101)
+[Feature draft #2101](https://github.com/milind-soni/OpenIndBot/pull/2101)
 keeps those prerequisites out of its diff. Maintainer preflight repair #2088 and
-[Windows cleanup draft #2100](https://github.com/milind-soni/OpenMausBot/pull/2100)
+[Windows cleanup draft #2100](https://github.com/milind-soni/OpenIndBot/pull/2100)
 must land before the clean feature branch can have green upstream CI. The
 cleanup candidate's exact-head full fork CI also passed all 26 checks; its one
 unchanged network-fixture failure and focused rerun are disclosed in that PR.

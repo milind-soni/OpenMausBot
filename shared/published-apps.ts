@@ -1,7 +1,7 @@
 /** One thing a bot put online, as the Published apps page shows it (GET /api/published-apps). */
 export interface PublishedApp {
   id: string;
-  /** `page`: a page published from this server to a MausBot link. `netlify`: a site on the person's own Netlify account.
+  /** `page`: a page published from this server to a IndBot link. `netlify`: a site on the person's own Netlify account.
    * `included`: an app on the hosting the Cloud plan includes. */
   source: "page" | "netlify" | "included";
   title: string;
@@ -18,7 +18,7 @@ export interface PublishedApp {
   access: "link" | "public" | "netlify-team" | "unknown";
   /** The site's page in the person's Netlify account. */
   manageUrl?: string;
-  /** An included app that can't be opened: `taken_down` by MausBot, or `not_live` because no publish of it has
+  /** An included app that can't be opened: `taken_down` by IndBot, or `not_live` because no publish of it has
    * finished yet. Absent for an app that is online. */
   status?: "taken_down" | "not_live";
   canDelete: boolean;

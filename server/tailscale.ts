@@ -51,7 +51,7 @@ export function explainTailscaleFailure(reason: TailscaleFailure): string {
     case "https-not-enabled":
       return "HTTPS certificates are off for this tailnet: enable them at https://login.tailscale.com/admin/dns (HTTPS Certificates), then try again";
     case "other-server":
-      return "this machine's tailnet name already fronts a different MausBot server: stop that one, or pass --port for this one";
+      return "this machine's tailnet name already fronts a different IndBot server: stop that one, or pass --port for this one";
     default:
       return "Tailscale reported an error; run `tailscale status` and `tailscale serve status` to see it";
   }
@@ -112,7 +112,7 @@ export async function tailscaleStatus(): Promise<{ status: TailscaleStatus } | {
 const LISTEN_INSTEAD: Partial<Record<TailscaleFailure, [why: string, fix: string]>> = {
   "https-not-enabled": ["HTTPS certificates are off for this tailnet", "turn on HTTPS Certificates at https://login.tailscale.com/admin/dns and start again"],
   "needs-operator": ["Tailscale won't let this user run tailscale serve", "run `sudo tailscale set --operator=$USER` once and start again"],
-  "other-server": ["the tailnet name's HTTPS address already fronts a different MausBot server", "stop that server and start again"],
+  "other-server": ["the tailnet name's HTTPS address already fronts a different IndBot server", "stop that server and start again"],
 };
 
 /**
@@ -140,7 +140,7 @@ export const tailscaleMarker = (dataDir: string) => join(dataDir, "tailscale-ser
 /**
  * `tailscale serve` in the foreground: the share ends with this process. Before serving, the tailnet must have HTTPS
  * certificates (`CertDomains`), or serve waits on an enablement link forever; and the name must not already front a
- * different MausBot server. Resolves once serve has run for `settleMs` without exiting.
+ * different IndBot server. Resolves once serve has run for `settleMs` without exiting.
  */
 export async function tailscaleServe(
   status: TailscaleStatus,

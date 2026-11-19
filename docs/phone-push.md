@@ -1,6 +1,6 @@
 # Phone push: alerts when the phone app is closed
 
-Today the MausBot phone app only gets a notification while it is connected to its
+Today the IndBot phone app only gets a notification while it is connected to its
 computer or Cloud. The app builds every notification itself from the live event
 stream (`notify` frames). So an alert arrives while the app is open, for about
 25 seconds after it goes to the background on iPhone, or all the time on Android
@@ -71,7 +71,7 @@ carry it (`400 invalid_request`, not silently dropped).
 | thread id | `th_…` | which conversation to open |
 | room id, room name | `grp_…`, `Launch` | only in a room |
 | pairing | the phone's random tag for this computer | so a tap opens the right one of several saved computers |
-| collapse id | `openmaus.<thread>.<seq>` | see "No duplicates" |
+| collapse id | `openind.<thread>.<seq>` | see "No duplicates" |
 
 What the lock screen reads, by kind:
 
@@ -105,7 +105,7 @@ of the two exists. They can meet at the edges: the app comes back and replays
 the frames it missed, or the stream closes just as an alert is sent.
 
 - The push carries the identifier the app would give its own notification for
-  the same frame: `openmaus.<threadId>.<seq>`. On iPhone this is the APNs
+  the same frame: `openind.<threadId>.<seq>`. On iPhone this is the APNs
   collapse id, which becomes the notification's identifier; on Android it is
   the notification's tag. A local notification with the same identifier
   replaces the push instead of adding a second one.
@@ -116,7 +116,7 @@ the frames it missed, or the stream closes just as an alert is sent.
   shown: the stream's own notification wins.
 - If the identifier would be longer than 64 bytes (APNs' limit), the push
   falls back to one identifier per kind and conversation. That only happens
-  for thread ids over 40 characters; MausBot's are shorter.
+  for thread ids over 40 characters; IndBot's are shorter.
 
 ## Privacy and threat model
 
@@ -128,7 +128,7 @@ message text, files or credentials. It logs only the request id, the platform
 and the provider's status and reason, never the token or the payload.
 
 **What Apple and Google learn.** The same names, ids and title, the device
-token, and when MausBot pushed to the phone. Not the content of any
+token, and when IndBot pushed to the phone. Not the content of any
 conversation.
 
 **Where tokens are kept.** On the computer or Cloud, in
@@ -172,7 +172,7 @@ would only send that person the same names and ids it can already read.
 ## Cloud homes
 
 A desktop has an installation credential once its owner turns on "Use your
-phone anywhere", and `openmausbot serve` has one after `openmausbot login` or
+phone anywhere", and `openindbot serve` has one after `openindbot login` or
 from `OMB_INSTALLATION_CREDENTIAL`. A Cloud home has none, so today it cannot
 send.
 
@@ -232,7 +232,7 @@ and its phones keep today's behaviour.
 
 The owner asked for push "like the reference app does it, with a relay". This
 section says what the reference app actually does, how each part maps onto
-MausBot, and which design we keep.
+IndBot, and which design we keep.
 
 ### How the reference app does it
 
@@ -264,9 +264,9 @@ MausBot, and which design we keep.
   without a foreground service and shows one ongoing "agent activity"
   notification plus alerts.
 
-### How that maps onto MausBot
+### How that maps onto IndBot
 
-| The reference app | MausBot |
+| The reference app | IndBot |
 | --- | --- |
 | The user's server watches its events and decides | The computer or Cloud (`server/phone-push.ts`) does the same |
 | Hosted relay: holds the APNs and Firebase keys, stores tokens, sends | The control plane's push routes (`cloudflare/control-plane/src/push.ts`) |
@@ -275,14 +275,14 @@ MausBot, and which design we keep.
 | Live Activity tokens registered, updates and ends by push | The same (`/api/push/activity`, control plane `push/activity`) |
 | Android ongoing notification from FCM data, no foreground service | The same (the phone app's `bot-activity` module) |
 
-MausBot also has something called a relay: MausBot Relay (`relay1`, `relay2`,
+IndBot also has something called a relay: IndBot Relay (`relay1`, `relay2`,
 `relay/` in this repository). It is a different thing. It splices the phone's
 end-to-end encrypted connection to the computer and cannot read a byte of it,
 so it never sees an event, a bot name or a token. The reference app's relay is
 a hosted service that receives plain state from the user's server and talks to
-Apple and Google. In MausBot that service is the control plane.
+Apple and Google. In IndBot that service is the control plane.
 
-### Should push go through MausBot Relay as well, or instead?
+### Should push go through IndBot Relay as well, or instead?
 
 What it would buy:
 
@@ -307,20 +307,20 @@ What it would cost or break:
   control plane can serve them all.
 - **It weakens what the relay promises.** Today a relay compromise exposes
   only ciphertext and connection metadata. With push it would also expose
-  device tokens and the keys that can alert every MausBot phone.
+  device tokens and the keys that can alert every IndBot phone.
 - **Credentials would sit outside Cloudflare's secret store,** on hosts we
   patch ourselves.
 
 **Recommendation: keep the control plane as the sender. It already is our
 equivalent of the reference app's relay:** a single hosted service that holds
 the Apple and Google keys, receives content-free state from the user's own
-machine, and sends. MausBot Relay stays a blind splice. What we take from the
+machine, and sends. IndBot Relay stays a blind splice. What we take from the
 reference app is everything around the sender: the phone's registration
 robustness, Live Activities updated and ended by push from tokens the phone
 registers, and an ongoing "working" notification on Android driven by FCM data
-messages. MausBot keeps one difference on purpose: the phone registers with
+messages. IndBot keeps one difference on purpose: the phone registers with
 each computer, not with a hosted account, because a phone can be paired
-without any MausBot account at all.
+without any IndBot account at all.
 
 ## Switching it on
 
@@ -330,13 +330,13 @@ What the owner provides and does, in order. Nothing here has been done.
 
 1. In the Apple Developer account, create an APNs auth key (`.p8`) with the
    Apple Push Notifications service enabled. Note its Key ID and the Team ID.
-2. Enable the Push Notifications capability on the App ID `com.openmausbot.app`
+2. Enable the Push Notifications capability on the App ID `com.openindbot.app`
    (and `.next` / `.dev` if those builds should get pushes), then regenerate
    the provisioning profiles.
 
 **Google**
 
-3. Create a Firebase project, add the Android app `com.openmausbot.companion`
+3. Create a Firebase project, add the Android app `com.openindbot.companion`
    (and the `.next` / `.dev` packages if wanted), and download
    `google-services.json`.
 4. In Project settings → Service accounts, generate a private key (the
@@ -351,7 +351,7 @@ What the owner provides and does, in order. Nothing here has been done.
    use the same APNs key (topic `<bundle id>.push-type.liveactivity`) and the
    same Firebase project.
 6. Set the secrets: `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY` (the
-   `.p8`), `APNS_BUNDLE_ID` (`com.openmausbot.app`), optionally
+   `.p8`), `APNS_BUNDLE_ID` (`com.openindbot.app`), optionally
    `APNS_ENVIRONMENTS=production,sandbox` to accept development builds, and
    `FCM_SERVICE_ACCOUNT` (the whole service-account JSON).
 7. Deploy the Worker. Until a platform's secrets are set its routes answer
@@ -360,12 +360,12 @@ What the owner provides and does, in order. Nothing here has been done.
 **Phone app** (`app/app.config.ts` in the phone repository)
 
 8. Put `google-services.json` where the build can read it (an EAS file secret
-   named by `MAUSBOT_GOOGLE_SERVICES_FILE`, or `app/google-services.json`).
-9. Build with `MAUSBOT_REMOTE_PUSH=1` (or set `REMOTE_PUSH = true`). This adds
+   named by `INDBOT_GOOGLE_SERVICES_FILE`, or `app/google-services.json`).
+9. Build with `INDBOT_REMOTE_PUSH=1` (or set `REMOTE_PUSH = true`). This adds
    the `aps-environment` entitlement (`production` for preview and production
    builds, `development` for development builds), Firebase on Android, and
    turns on token registration in the app. Update the store privacy answers
-   (the app now sends a device token to MausBot's servers and to Apple or
+   (the app now sends a device token to IndBot's servers and to Apple or
    Google).
 
 **Desktop and server**

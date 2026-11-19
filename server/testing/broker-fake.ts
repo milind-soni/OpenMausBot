@@ -1,5 +1,5 @@
 // The connected-apps service (cloudflare/composio-broker) with its own fake D1 and fake Composio, served over loopback
-// HTTP so a real OpenMausBot server can register with it, create triggers and long-poll events. Nothing leaves the
+// HTTP so a real OpenIndBot server can register with it, create triggers and long-poll events. Nothing leaves the
 // machine: Composio calls from the Worker are answered by the broker's test harness.
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";

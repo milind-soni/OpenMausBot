@@ -17,7 +17,7 @@ const TOKEN = "t0ken-of-the-registry";
 const CODE = "ABCD-1234-EFGH";
 const BOX_PASSED = '{"box":"bwrap","total":31,"passed":31,"failed":[],"results":[{"id":"config-hidden","ok":true},{"id":"messages-db-hidden","ok":true}]}';
 const BOX_FAILED = '{"box":"bwrap","total":31,"passed":30,"failed":["config-hidden"],"results":[{"id":"config-hidden","ok":false}]}';
-const FILES = "https://raw.githubusercontent.com/milind-soni/OpenMausBot";
+const FILES = "https://raw.githubusercontent.com/milind-soni/OpenIndBot";
 const SOURCE = `${FILES}/v0.1.151`;
 const REAL_TOOLS = ["sed", "awk", "grep", "cat", "head", "tail", "tr", "sort", "cut", "mkdir", "mktemp", "chmod", "chown", "mv", "rm", "dirname", "sh", "stat", "install", "find"];
 
@@ -25,7 +25,7 @@ const REAL_TOOLS = ["sed", "awk", "grep", "cat", "head", "tail", "tr", "sort", "
 const HEALTHY = {
   FAKE_UID: "0", FAKE_ARCH: "x86_64", FAKE_CPUS: "4", FAKE_FREE_GB: "80", FAKE_DOCKER: "27.3.1", FAKE_SECURITY: '["name=apparmor","name=seccomp,profile=builtin"]',
   FAKE_COMPOSE: "0", FAKE_PUBLIC_IP: "203.0.113.7", FAKE_LOCAL_IP: "10.0.0.5", FAKE_DNS: "203.0.113.7", FAKE_NOW: "1794268800", FAKE_THEIRS: "1794268790",
-  FAKE_STABLE: "404", FAKE_RELEASE: "v0.1.151", FAKE_RELEASE_STATUS: "200", FAKE_HEALTH: "healthy", FAKE_HTTPS: "openmausbot",
+  FAKE_STABLE: "404", FAKE_RELEASE: "v0.1.151", FAKE_RELEASE_STATUS: "200", FAKE_HEALTH: "healthy", FAKE_HTTPS: "openindbot",
   FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data","OMB_IMAGE=server"]', FAKE_BOX_CHECK: BOX_PASSED, FAKE_SOURCE: "published",
 };
 
@@ -83,7 +83,7 @@ case "$*" in
     esac
     for last; do :; done
     case "$*" in
-      *deploy/box/prepare-host.sh*) printf '#!/bin/sh\\necho "prepare-host profiles=$MAUSBOT_PROFILES_DIR" >> "$FAKE_LOG"\\nexit "\${FAKE_PREPARE:-0}"\\n' > "$last" ;;
+      *deploy/box/prepare-host.sh*) printf '#!/bin/sh\\necho "prepare-host profiles=$INDBOT_PROFILES_DIR" >> "$FAKE_LOG"\\nexit "\${FAKE_PREPARE:-0}"\\n' > "$last" ;;
       *deploy/update-runner.sh*) printf '#!/bin/sh\\necho "update-runner $*" >> "$FAKE_LOG"\\nexit "\${FAKE_RUNNER:-0}"\\n' > "$last" ;;
       *) printf 'the repository file\\n' > "$last" ;;
     esac ;;
@@ -98,8 +98,8 @@ case "$*" in
   "info --format {{json .SecurityOptions}}") echo "$FAKE_SECURITY" ;;
   "info --format {{.DockerRootDir}}") echo /nonexistent/docker ;;
   "compose version") exit "$FAKE_COMPOSE" ;;
-  "ps -q --filter label=com.docker.compose.project=openmausbot --filter publish="*) printf '%s' "\${FAKE_OURS:-}" ;;
-  "ps -aq --filter name=mausbot-connector") printf '%s' "\${FAKE_CONNECTOR:-}" ;;
+  "ps -q --filter label=com.docker.compose.project=openindbot --filter publish="*) printf '%s' "\${FAKE_OURS:-}" ;;
+  "ps -aq --filter name=indbot-connector") printf '%s' "\${FAKE_CONNECTOR:-}" ;;
   "run --rm --network none --entrypoint id "*" -u") /usr/bin/id -u ;;
   "run --rm --network none --entrypoint id "*" -g") /usr/bin/id -g ;;
   compose*" ps -q omb") echo c1 ;;
@@ -126,7 +126,7 @@ function run(args: string[], server: Server = {}, kept?: { dir: string }) {
   if (!kept) dirs.push(dir);
   const bin = join(dir, "bin");
   const sysroot = join(dir, "sysroot");
-  const install = join(dir, "opt", "openmausbot");
+  const install = join(dir, "opt", "openindbot");
   const log = join(dir, "calls.log");
   rmSync(bin, { recursive: true, force: true });
   rmSync(log, { force: true });
@@ -152,7 +152,7 @@ function run(args: string[], server: Server = {}, kept?: { dir: string }) {
   const command = server.umask ? ["-c", `umask ${server.umask}; exec /bin/sh "$0" "$@"`, SCRIPT, ...args] : [SCRIPT, ...args];
   const result = spawnSync("/bin/sh", command, {
     encoding: "utf8",
-    env: { PATH: bin, FAKE_LOG: log, OMB_INSTALL_SYSROOT: sysroot, OMB_INSTALL_DIR: install, MAUSBOT_ADMIN_URL: "https://admin.example.test", ...HEALTHY, ...server.env },
+    env: { PATH: bin, FAKE_LOG: log, OMB_INSTALL_SYSROOT: sysroot, OMB_INSTALL_DIR: install, INDBOT_ADMIN_URL: "https://admin.example.test", ...HEALTHY, ...server.env },
     timeout: 60_000,
   });
   const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n").filter(Boolean) : [];
@@ -186,20 +186,20 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     for (let cut = 1; cut < lines.length - 1; cut += 7) {
       const partial = join(dir, "partial.sh");
       writeFileSync(partial, lines.slice(0, cut).join("\n"));
-      spawnSync("/bin/sh", [partial, "--domain", "maus.example.com"], { env: { PATH: bin, OMB_INSTALL_DIR: join(dir, "opt") }, timeout: 20_000 });
+      spawnSync("/bin/sh", [partial, "--domain", "ind.example.com"], { env: { PATH: bin, OMB_INSTALL_DIR: join(dir, "opt") }, timeout: 20_000 });
       expect(existsSync(marker), `cut after line ${cut}`).toBe(false);
       expect(existsSync(join(dir, "opt")), `cut after line ${cut}`).toBe(false);
     }
   });
 
   it("--check passes a ready server, names every check, and changes nothing", () => {
-    const result = run(["--check", "--domain", "Maus.Example.com"], { env: { FAKE_UID: "1000" } });
-    expect(result.all).toContain("This server is ready for MausBot. Nothing was changed.");
+    const result = run(["--check", "--domain", "Ind.Example.com"], { env: { FAKE_UID: "1000" } });
+    expect(result.all).toContain("This server is ready for IndBot. Nothing was changed.");
     expect(result.status).toBe(0);
     expect(result.fixes).toEqual([]);
     for (const line of [
       "operating system: Ubuntu 24.04.1 LTS", "processor: x86-64", "processor cores: 4", "memory: 7.7 GB", "Docker: 27.3.1, with Compose", "free disk: 80 GB",
-      "ports 80 and 443: free", "user namespaces: on", "bots' sandbox: AppArmor is on, so this server can be prepared for it", "DNS: maus.example.com points at this server (203.0.113.7)",
+      "ports 80 and 443: free", "user namespaces: on", "bots' sandbox: AppArmor is on, so this server can be prepared for it", "DNS: ind.example.com points at this server (203.0.113.7)",
       "outbound: the image registries and Let's Encrypt are reachable", "clock: right", "version: v0.1.151, the newest release",
     ]) expect(result.stdout).toContain(`  ok    ${line}`);
     expect(result.docker.filter((call) => !READS.test(call))).toEqual([]);
@@ -208,24 +208,24 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   });
 
   it.each<[string, Server, RegExp]>([
-    ["Debian", { osRelease: 'PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\nVERSION_ID="12"\nID=debian\n' }, /^This server runs Debian GNU\/Linux 12 \(bookworm\)\. MausBot's installer runs on Ubuntu 22\.04 or 24\.04/],
+    ["Debian", { osRelease: 'PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\nVERSION_ID="12"\nID=debian\n' }, /^This server runs Debian GNU\/Linux 12 \(bookworm\)\. IndBot's installer runs on Ubuntu 22\.04 or 24\.04/],
     ["an old Ubuntu", { osRelease: 'PRETTY_NAME="Ubuntu 20.04.6 LTS"\nVERSION_ID="20.04"\nID=ubuntu\n' }, /^This server runs Ubuntu 20\.04\.6 LTS\./],
     ["no os-release", { osRelease: null }, /operating system can't be identified/],
     ["an ARM processor", { env: { FAKE_ARCH: "aarch64" } }, /^This server's processor is aarch64\..*pick an x86-64 server\.$/],
-    ["one core", { env: { FAKE_CPUS: "1" } }, /^This server has 1 processor core\. MausBot needs at least 2/],
-    ["2 GB of memory", { memoryKb: 2_000_000 }, /^This server has 1\.9 GB of memory\. MausBot needs at least 4 GB/],
-    ["a full disk", { env: { FAKE_FREE_GB: "5" } }, /^This server has only 5 GB free at .*MausBot needs at least 20 GB/],
+    ["one core", { env: { FAKE_CPUS: "1" } }, /^This server has 1 processor core\. IndBot needs at least 2/],
+    ["2 GB of memory", { memoryKb: 2_000_000 }, /^This server has 1\.9 GB of memory\. IndBot needs at least 4 GB/],
+    ["a full disk", { env: { FAKE_FREE_GB: "5" } }, /^This server has only 5 GB free at .*IndBot needs at least 20 GB/],
     ["no curl", { without: ["curl"] }, /^curl isn't installed\. Run: sudo apt-get install -y curl/],
     ["no Docker", { without: ["docker"] }, /^Docker isn't installed\. Run this again with --install-docker/],
     ["Docker stopped", { env: { FAKE_DOCKER: "" } }, /^Docker is installed but not running\. Start it with: sudo systemctl enable --now docker/],
-    ["an old Docker", { env: { FAKE_DOCKER: "20.10.24" } }, /^Docker 20\.10\.24 is too old; MausBot needs Docker 24 or newer/],
+    ["an old Docker", { env: { FAKE_DOCKER: "20.10.24" } }, /^Docker 20\.10\.24 is too old; IndBot needs Docker 24 or newer/],
     ["rootless Docker", { env: { FAKE_SECURITY: '["name=seccomp","name=rootless"]' } }, /^Docker runs in rootless mode here/],
     ["Docker without Compose", { env: { FAKE_COMPOSE: "1" } }, /^Docker is here without its Compose plugin\. Run: sudo apt-get install -y docker-compose-plugin/],
     ["port 80 taken", { env: { FAKE_SS_80: 'LISTEN 0 511 0.0.0.0:80 0.0.0.0:* users:(("nginx",pid=812,fd=6))' } }, /^Port 80 is already in use by nginx\. Stop what uses it \(for example: sudo systemctl disable --now nginx\)/],
     ["port 80 taken by another container", { env: { FAKE_SS_80: 'LISTEN 0 4096 0.0.0.0:80 0.0.0.0:* users:(("docker-proxy",pid=9,fd=4))' } }, /^Port 80 is already in use by another Docker container\. Find it with: sudo docker ps/],
     ["port 443 taken by an unnamed program", { env: { FAKE_SS_443: "LISTEN 0 511 0.0.0.0:443 0.0.0.0:*" } }, /^Port 443 is already in use\. Stop what uses it, then run this again\.$/],
-    ["a domain with no record", { env: { FAKE_DNS: "" } }, /^maus\.example\.com does not resolve yet\. Add an A record for it pointing at 203\.0\.113\.7/],
-    ["a domain that points elsewhere", { env: { FAKE_DNS: "198.51.100.9" } }, /^maus\.example\.com points at 198\.51\.100\.9, not at this server \(203\.0\.113\.7\)\. Change its A record to 203\.0\.113\.7/],
+    ["a domain with no record", { env: { FAKE_DNS: "" } }, /^ind\.example\.com does not resolve yet\. Add an A record for it pointing at 203\.0\.113\.7/],
+    ["a domain that points elsewhere", { env: { FAKE_DNS: "198.51.100.9" } }, /^ind\.example\.com points at 198\.51\.100\.9, not at this server \(203\.0\.113\.7\)\. Change its A record to 203\.0\.113\.7/],
     ["Let's Encrypt blocked", { env: { FAKE_BLOCKED: "acme-v02.api.letsencrypt.org" } }, /^This server can't reach acme-v02\.api\.letsencrypt\.org over HTTPS \(port 443\)\. Allow outbound HTTPS/],
     ["user namespaces off", { userns: { max: "0" } }, /^This server switches off user namespaces, which the bots' sandbox needs\. Run: printf/],
     ["unprivileged user namespaces off", { userns: { clone: "0" } }, /^This server switches off user namespaces/],
@@ -233,11 +233,11 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     ["AppArmor without its tools", { without: ["apparmor_parser"] }, /^This server is missing AppArmor or its tools/],
     ["this repository's files blocked", { env: { FAKE_BLOCKED: "raw.githubusercontent.com" } }, /^This server can't reach raw\.githubusercontent\.com over HTTPS/],
     ["a clock an hour off", { env: { FAKE_THEIRS: "1794265200" } }, /^This server's clock is 60 minutes off, so HTTPS certificates will be refused\. Run: sudo timedatectl set-ntp true/],
-    ["a release without an image", { env: { FAKE_RELEASE_STATUS: "404" } }, /^MausBot v0\.1\.151 has no server image yet/],
-    ["a registry that is throttling", { env: { FAKE_RELEASE_STATUS: "429" } }, /^The image registry ghcr\.io did not say whether it has MausBot v0\.1\.151 \(it answered 429\)\. Run this again in a few minutes\.$/],
-    ["the latest tag asked for", { env: { OMB_INSTALL_IMAGE: "ghcr.io/milind-soni/openmausbot:latest" } }, /^OMB_INSTALL_IMAGE names the latest tag/],
+    ["a release without an image", { env: { FAKE_RELEASE_STATUS: "404" } }, /^IndBot v0\.1\.151 has no server image yet/],
+    ["a registry that is throttling", { env: { FAKE_RELEASE_STATUS: "429" } }, /^The image registry ghcr\.io did not say whether it has IndBot v0\.1\.151 \(it answered 429\)\. Run this again in a few minutes\.$/],
+    ["the latest tag asked for", { env: { OMB_INSTALL_IMAGE: "ghcr.io/milind-soni/openindbot:latest" } }, /^OMB_INSTALL_IMAGE names the latest tag/],
   ])("--check on %s prints the one thing to fix", (_name, server, sentence) => {
-    const result = run(["--check", "--domain", "maus.example.com"], server);
+    const result = run(["--check", "--domain", "ind.example.com"], server);
     expect(result.fixes).toHaveLength(1);
     expect(result.fixes[0]).toMatch(sentence);
     expect(result.status).toBe(1);
@@ -247,7 +247,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   });
 
   it("names every blocked address in one line, and both ghcr.io failures when the registry is cut off", () => {
-    const result = run(["--check", "--domain", "maus.example.com"], { env: { FAKE_BLOCKED: "ghcr.io registry-1.docker.io" } });
+    const result = run(["--check", "--domain", "ind.example.com"], { env: { FAKE_BLOCKED: "ghcr.io registry-1.docker.io" } });
     expect(result.fixes).toEqual([
       "This server can't reach ghcr.io registry-1.docker.io over HTTPS (port 443). Allow outbound HTTPS to them in your firewall, then run this again.",
       "The image registry ghcr.io did not say which versions exist (it answered 000). Check this server's outbound HTTPS, then run this again.",
@@ -256,23 +256,23 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
 
   it("accepts ports its own install holds, a domain that names a local address, and a skipped DNS check", () => {
     const listening = 'LISTEN 0 4096 0.0.0.0:80 0.0.0.0:* users:(("docker-proxy",pid=9,fd=4))';
-    const own = run(["--check", "--domain", "maus.example.com"], { env: { FAKE_SS_80: listening, FAKE_SS_443: listening, FAKE_OURS: "c1" } });
+    const own = run(["--check", "--domain", "ind.example.com"], { env: { FAKE_SS_80: listening, FAKE_SS_443: listening, FAKE_OURS: "c1" } });
     expect(own.fixes).toEqual([]);
     expect(own.stdout).toContain("  ok    ports 80 and 443: held by this install");
-    const local = run(["--check", "--domain", "maus.example.com"], { env: { FAKE_DNS: "10.0.0.5" } });
-    expect(local.stdout).toContain("DNS: maus.example.com points at this server (10.0.0.5)");
-    const skipped = run(["--check", "--domain", "maus.example.com"], { env: { FAKE_DNS: "198.51.100.9", OMB_INSTALL_SKIP_DNS: "1" } });
+    const local = run(["--check", "--domain", "ind.example.com"], { env: { FAKE_DNS: "10.0.0.5" } });
+    expect(local.stdout).toContain("DNS: ind.example.com points at this server (10.0.0.5)");
+    const skipped = run(["--check", "--domain", "ind.example.com"], { env: { FAKE_DNS: "198.51.100.9", OMB_INSTALL_SKIP_DNS: "1" } });
     expect(skipped.fixes).toEqual([]);
-    expect(skipped.stdout).toContain("note  The DNS record of maus.example.com was not checked, as asked.");
+    expect(skipped.stdout).toContain("note  The DNS record of ind.example.com was not checked, as asked.");
   });
 
   it("refuses a domain, an email or a code that is not one, before anything else", () => {
     for (const [args, sentence] of [
-      [["--domain", "https://maus.example.com"], "is not a domain name"],
+      [["--domain", "https://ind.example.com"], "is not a domain name"],
       [["--domain", "localhost"], "is not a full domain name"],
-      [["--domain", "maus.example.com", "--email", "a b@example.com"], "email address doesn't look right"],
-      [["--domain", "maus.example.com", "code;rm"], "That code doesn't look right"],
-      [["--domain", "maus.example.com", "--dir", "relative"], "--dir needs a full path"],
+      [["--domain", "ind.example.com", "--email", "a b@example.com"], "email address doesn't look right"],
+      [["--domain", "ind.example.com", "code;rm"], "That code doesn't look right"],
+      [["--domain", "ind.example.com", "--dir", "relative"], "--dir needs a full path"],
       [["--frobnicate"], "Unknown option --frobnicate"],
     ] as const) {
       const result = run([...args]);
@@ -283,10 +283,10 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   });
 
   it("installs only as root, and only once every check passes", () => {
-    const user = run(["--domain", "maus.example.com"], { env: { FAKE_UID: "1000" } });
-    expect(user.stderr).toContain("Please run this as root: put sudo before sh, like this: curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenMausBot/main/deploy/install.sh | sudo sh -s -- --domain maus.example.com");
+    const user = run(["--domain", "ind.example.com"], { env: { FAKE_UID: "1000" } });
+    expect(user.stderr).toContain("Please run this as root: put sudo before sh, like this: curl -fsSL https://raw.githubusercontent.com/milind-soni/OpenIndBot/main/deploy/install.sh | sudo sh -s -- --domain ind.example.com");
     expect(user.calls).toEqual([]);
-    const small = run(["--domain", "maus.example.com"], { env: { FAKE_CPUS: "1" } });
+    const small = run(["--domain", "ind.example.com"], { env: { FAKE_CPUS: "1" } });
     expect(small.status).toBe(1);
     expect(small.stderr).toContain("This server is not ready: fix the 1 line(s) marked FIX above, then run this again. Nothing was changed.");
     expect(small.docker.filter((call) => !READS.test(call))).toEqual([]);
@@ -294,41 +294,41 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   });
 
   it("never installs Docker unasked", () => {
-    const result = run(["--domain", "maus.example.com"], { without: ["docker"] });
+    const result = run(["--domain", "ind.example.com"], { without: ["docker"] });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("Docker isn't installed. Install it with: curl -fsSL https://get.docker.com | sudo sh  and then run this again, or run this again with --install-docker.");
     expect(result.calls.some((call) => call.includes("get.docker.com -o"))).toBe(false);
     expect(existsSync(result.install)).toBe(false);
-    const asked = run(["--domain", "maus.example.com", "--install-docker"], { without: ["docker"] });
+    const asked = run(["--domain", "ind.example.com", "--install-docker"], { without: ["docker"] });
     expect(asked.calls.some((call) => call.includes("https://get.docker.com -o"))).toBe(true);
     expect(asked.stderr).toContain("Docker's install script could not be downloaded.");
   });
 
   it("installs under one folder, pinned to the newest release, and says how the first admin signs in", () => {
-    const result = run(["--domain", "maus.example.com", "--email", "owner@example.com"]);
-    expect(result.all).toContain("MausBot is running at https://maus.example.com");
+    const result = run(["--domain", "ind.example.com", "--email", "owner@example.com"]);
+    expect(result.all).toContain("IndBot is running at https://ind.example.com");
     expect(result.status).toBe(0);
-    expect(readFileSync(join(result.install, ".env"), "utf8")).toContain("DOMAIN=maus.example.com\nOMB_IMAGE=ghcr.io/milind-soni/openmausbot:v0.1.151\nOMB_SIGNIN_EMAILS=owner@example.com\n");
+    expect(readFileSync(join(result.install, ".env"), "utf8")).toContain("DOMAIN=ind.example.com\nOMB_IMAGE=ghcr.io/milind-soni/openindbot:v0.1.151\nOMB_SIGNIN_EMAILS=owner@example.com\n");
     expect(statSync(join(result.install, ".env")).mode & 0o777).toBe(0o600);
     expect(statSync(join(result.install, "data")).mode & 0o777).toBe(0o700);
     for (const file of ["compose.yaml", "Caddyfile", "caddy/data", "caddy/config"]) expect(existsSync(join(result.install, file)), file).toBe(true);
     const changes = result.docker.filter((call) => !READS.test(call) && !call.includes(" ps -q omb") && !call.startsWith("docker inspect"));
     expect(changes).toEqual([
       "docker compose pull -q",
-      'docker image inspect -f {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/milind-soni/openmausbot:v0.1.151',
-      "docker image inspect -f {{json .Config.Env}} ghcr.io/milind-soni/openmausbot:v0.1.151",
-      'docker image inspect -f {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/milind-soni/openmausbot:v0.1.151',
-      "docker run --rm --network none --entrypoint id ghcr.io/milind-soni/openmausbot:v0.1.151 -u",
-      "docker run --rm --network none --entrypoint id ghcr.io/milind-soni/openmausbot:v0.1.151 -g",
-      'docker image inspect -f {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/milind-soni/openmausbot:v0.1.151',
+      'docker image inspect -f {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/milind-soni/openindbot:v0.1.151',
+      "docker image inspect -f {{json .Config.Env}} ghcr.io/milind-soni/openindbot:v0.1.151",
+      'docker image inspect -f {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/milind-soni/openindbot:v0.1.151',
+      "docker run --rm --network none --entrypoint id ghcr.io/milind-soni/openindbot:v0.1.151 -u",
+      "docker run --rm --network none --entrypoint id ghcr.io/milind-soni/openindbot:v0.1.151 -g",
+      'docker image inspect -f {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/milind-soni/openindbot:v0.1.151',
       "docker compose up -d --remove-orphans",
       "docker compose exec -T omb node dist-server/bot-box/box-check.js --public=none",
     ]);
-    expect(result.stdout).toContain(`  cd ${result.install} && sudo docker compose exec omb openmausbot pair --label "First admin"`);
+    expect(result.stdout).toContain(`  cd ${result.install} && sudo docker compose exec omb openindbot pair --label "First admin"`);
     // Not a terminal, as here: the admin's sign-in link is not made, so no log holds it, and the output says why.
     expect(result.stdout).toContain("(The link is not made here because this output is not a terminal");
-    expect(result.docker.some((call) => call.includes("openmausbot pair"))).toBe(false);
-    expect(result.stdout).toContain("Or open https://maus.example.com/pair and sign in with an emailed code as: owner@example.com");
+    expect(result.docker.some((call) => call.includes("openindbot pair"))).toBe(false);
+    expect(result.stdout).toContain("Or open https://ind.example.com/pair and sign in with an emailed code as: owner@example.com");
     expect(result.stdout).toContain(`Your data: ${result.install}/data`);
   });
 
@@ -343,32 +343,32 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
       FAKE_MANIFEST: JSON.stringify({ config: { mediaType: "application/vnd.oci.image.config.v1+json", digest: digest("d"), size: 1 }, layers: [] }),
       FAKE_CONFIG: JSON.stringify({ config: { Env: ["PATH=/usr/bin", "HOME=/data", ...(config ? [config] : [])] } }),
     } });
-    const without = run(["--check", "--domain", "maus.example.com"], registry(""));
+    const without = run(["--check", "--domain", "ind.example.com"], registry(""));
     expect(without.stdout).toContain("  ok    version: v0.1.151, the newest release\n  note  This version has no bots' sandbox");
     expect(without.calls.filter((call) => call.includes("-fsSL")).map((call) => call.replace(/^.* (\S+)$/, "$1"))).toEqual([
-      "https://ghcr.io/v2/milind-soni/openmausbot/manifests/v0.1.151",
-      `https://ghcr.io/v2/milind-soni/openmausbot/manifests/${digest("b")}`,
-      `https://ghcr.io/v2/milind-soni/openmausbot/blobs/${digest("d")}`,
+      "https://ghcr.io/v2/milind-soni/openindbot/manifests/v0.1.151",
+      `https://ghcr.io/v2/milind-soni/openindbot/manifests/${digest("b")}`,
+      `https://ghcr.io/v2/milind-soni/openindbot/blobs/${digest("d")}`,
     ]);
-    expect(run(["--check", "--domain", "maus.example.com"], registry("OMB_IMAGE=server")).stdout).not.toContain("no bots' sandbox");
+    expect(run(["--check", "--domain", "ind.example.com"], registry("OMB_IMAGE=server")).stdout).not.toContain("no bots' sandbox");
     // Asked for no sandbox, or a registry that does not say: nothing to add.
-    expect(run(["--check", "--domain", "maus.example.com", "--no-sandbox"], registry("")).stdout).not.toContain("no bots' sandbox");
-    expect(run(["--check", "--domain", "maus.example.com"]).stdout).not.toContain("no bots' sandbox");
+    expect(run(["--check", "--domain", "ind.example.com", "--no-sandbox"], registry("")).stdout).not.toContain("no bots' sandbox");
+    expect(run(["--check", "--domain", "ind.example.com"]).stdout).not.toContain("no bots' sandbox");
   });
 
   it("uses the stable channel once it is published, and never the latest tag", () => {
-    const result = run(["--domain", "maus.example.com"], { env: { FAKE_STABLE: "200" } });
+    const result = run(["--domain", "ind.example.com"], { env: { FAKE_STABLE: "200" } });
     expect(result.stdout).toContain("  ok    version: the stable channel");
-    expect(readFileSync(join(result.install, ".env"), "utf8")).toContain("OMB_IMAGE=ghcr.io/milind-soni/openmausbot:stable\n");
-    expect(script).not.toMatch(/openmausbot:latest/);
+    expect(readFileSync(join(result.install, ".env"), "utf8")).toContain("OMB_IMAGE=ghcr.io/milind-soni/openindbot:stable\n");
+    expect(script).not.toMatch(/openindbot:latest/);
     expect(result.calls.some((call) => call.includes("releases/latest"))).toBe(false);
   });
 
   it("keeps the registry's token and the one-time code out of its output, and the token off every command line", () => {
     const connector = mkdtempSync(join(tmpdir(), "omb-server-install-connector-"));
     dirs.push(connector);
-    writeFileSync(join(connector, "install.sh"), `# stands in for mausbot-connector's installer\necho "$MAUSBOT_ADMIN_URL $MAUSBOT_INSTALL_DIR $# $2" > "${connector}/ran"\nprintf '%s' "$1" > "${connector}/code"\n`);
-    const result = run(["--domain", "maus.example.com", CODE], { env: { MAUSBOT_CONNECTOR_INSTALLER: join(connector, "install.sh") } });
+    writeFileSync(join(connector, "install.sh"), `# stands in for indbot-connector's installer\necho "$INDBOT_ADMIN_URL $INDBOT_INSTALL_DIR $# $2" > "${connector}/ran"\nprintf '%s' "$1" > "${connector}/code"\n`);
+    const result = run(["--domain", "ind.example.com", CODE], { env: { INDBOT_CONNECTOR_INSTALLER: join(connector, "install.sh") } });
     expect(result.status).toBe(0);
     expect(result.all).not.toContain(TOKEN);
     expect(result.all).not.toContain(CODE);
@@ -380,22 +380,22 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(readFileSync(join(connector, "code"), "utf8")).toBe(CODE);
   });
 
-  it("with a code, checks that MausBot is reachable and hands the code to the connector's own installer, unchanged", () => {
-    const blocked = run(["--check", "--domain", "maus.example.com", CODE], { env: { FAKE_BLOCKED: "admin.example.test" } });
+  it("with a code, checks that IndBot is reachable and hands the code to the connector's own installer, unchanged", () => {
+    const blocked = run(["--check", "--domain", "ind.example.com", CODE], { env: { FAKE_BLOCKED: "admin.example.test" } });
     expect(blocked.fixes).toEqual(["This server can't reach admin.example.test over HTTPS (port 443). Allow outbound HTTPS to them in your firewall, then run this again."]);
     const connectorScript = readFileSync(join(ROOT, "connector", "install.sh"), "utf8");
-    expect(connectorScript).toContain("CONNECTOR=mausbot-connector");
-    expect(connectorScript).toContain("--install-docker) MAUSBOT_INSTALL_DOCKER=1 ;;");
-    expect(connectorScript).toContain('ADMIN_URL="${MAUSBOT_ADMIN_URL:-@MAUSBOT_ADMIN_URL@}"');
+    expect(connectorScript).toContain("CONNECTOR=indbot-connector");
+    expect(connectorScript).toContain("--install-docker) INDBOT_INSTALL_DOCKER=1 ;;");
+    expect(connectorScript).toContain('ADMIN_URL="${INDBOT_ADMIN_URL:-@INDBOT_ADMIN_URL@}"');
     expect(script).toContain('curl -fsSL --max-time 60 "$ADMIN_URL/install.sh"');
-    const missing = run(["--domain", "maus.example.com", CODE]);
+    const missing = run(["--domain", "ind.example.com", CODE]);
     expect(missing.status).toBe(1);
-    expect(missing.stderr).toContain("MausBot is installed and running here, but the connector's installer could not be downloaded from https://admin.example.test. Nothing needs reinstalling");
+    expect(missing.stderr).toContain("IndBot is installed and running here, but the connector's installer could not be downloaded from https://admin.example.test. Nothing needs reinstalling");
     expect(existsSync(join(missing.install, "data"))).toBe(true);
   });
 
   it("run again, it repairs its own files and keeps the person's settings and data", () => {
-    const first = run(["--domain", "maus.example.com"]);
+    const first = run(["--domain", "ind.example.com"]);
     expect(first.status).toBe(0);
     const env = join(first.install, ".env");
     writeFileSync(env, `${readFileSync(env, "utf8")}OMB_SIGNIN_SMTP_URL=smtps://mail.example.com\n`);
@@ -404,12 +404,12 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     const before = statSync(join(first.install, "data"));
     const listening = 'LISTEN 0 4096 0.0.0.0:80 0.0.0.0:* users:(("docker-proxy",pid=9,fd=4))';
     const second = run([], { env: { FAKE_SS_80: listening, FAKE_SS_443: listening, FAKE_OURS: "c1", FAKE_RELEASE: "v0.1.152" } }, { dir: first.dir });
-    expect(second.all).toContain("MausBot is running at https://maus.example.com");
+    expect(second.all).toContain("IndBot is running at https://ind.example.com");
     expect(second.status).toBe(0);
     expect(readFileSync(env, "utf8").split("\n").filter((line) => /^[A-Z_]+=/.test(line))).toEqual([
-      "OMB_SIGNIN_SMTP_URL=smtps://mail.example.com", "DOMAIN=maus.example.com", "OMB_IMAGE=ghcr.io/milind-soni/openmausbot:v0.1.152", "COMPOSE_FILE=compose.yaml:compose.box.yaml",
+      "OMB_SIGNIN_SMTP_URL=smtps://mail.example.com", "DOMAIN=ind.example.com", "OMB_IMAGE=ghcr.io/milind-soni/openindbot:v0.1.152", "COMPOSE_FILE=compose.yaml:compose.box.yaml",
     ]);
-    expect(readFileSync(join(first.install, "compose.yaml"), "utf8")).toContain("name: openmausbot");
+    expect(readFileSync(join(first.install, "compose.yaml"), "utf8")).toContain("name: openindbot");
     expect(readFileSync(join(first.install, "data", "messages.db"), "utf8")).toBe("chats");
     const after = statSync(join(first.install, "data"));
     expect([after.mode, after.uid, after.gid]).toEqual([before.mode, before.uid, before.gid]);
@@ -417,18 +417,18 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   });
 
   it("says so when the server does not come up, or HTTPS does not answer", () => {
-    const sick = run(["--domain", "maus.example.com"], { env: { FAKE_HEALTH: "starting", OMB_INSTALL_HEALTH_WAIT_S: "10" } });
+    const sick = run(["--domain", "ind.example.com"], { env: { FAKE_HEALTH: "starting", OMB_INSTALL_HEALTH_WAIT_S: "10" } });
     expect(sick.status).toBe(1);
-    expect(sick.stderr).toContain("MausBot started but did not report healthy within 10 seconds.");
-    const noCertificate = run(["--domain", "maus.example.com"], { env: { FAKE_HTTPS: "", OMB_INSTALL_HTTPS_WAIT_S: "10" } });
+    expect(sick.stderr).toContain("IndBot started but did not report healthy within 10 seconds.");
+    const noCertificate = run(["--domain", "ind.example.com"], { env: { FAKE_HTTPS: "", OMB_INSTALL_HTTPS_WAIT_S: "10" } });
     expect(noCertificate.status).toBe(1);
-    expect(noCertificate.stderr).toContain("MausBot is running, but https://maus.example.com did not answer within 10 seconds, usually because the certificate could not be issued.");
-    expect(noCertificate.all).not.toContain("MausBot is running at");
+    expect(noCertificate.stderr).toContain("IndBot is running, but https://ind.example.com did not answer within 10 seconds, usually because the certificate could not be issued.");
+    expect(noCertificate.all).not.toContain("IndBot is running at");
   });
 
   it("gives what it makes fixed modes whatever the umask it is started with, and closes a folder others could change", () => {
     const mode = (path: string) => statSync(path).mode & 0o777;
-    const first = run(["--domain", "maus.example.com"], { umask: "000" });
+    const first = run(["--domain", "ind.example.com"], { umask: "000" });
     expect(first.status, first.all).toBe(0);
     const expected: Record<string, number> = {
       "": 0o755, "compose.yaml": 0o644, Caddyfile: 0o644, ".env": 0o600, data: 0o700, "update.sh": 0o755,
@@ -460,18 +460,18 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
 
   it("--uninstall stops the server and keeps the data, saying where it is", () => {
     const nothing = run(["--uninstall"]);
-    expect(nothing.stderr).toContain("MausBot isn't installed in");
-    const installed = run(["--domain", "maus.example.com"]);
+    expect(nothing.stderr).toContain("IndBot isn't installed in");
+    const installed = run(["--domain", "ind.example.com"]);
     writeFileSync(join(installed.install, "data", "messages.db"), "chats");
     const result = run(["--uninstall"], { env: { FAKE_CONNECTOR: "c9" } }, { dir: installed.dir });
     expect(result.status).toBe(0);
     expect(result.docker).toEqual([
       "docker compose down --remove-orphans",
-      "docker ps -aq --filter name=mausbot-connector",
+      "docker ps -aq --filter name=indbot-connector",
     ]);
     expect(result.stdout).toContain(`Your data is kept in ${result.install}/data, your settings in ${result.install}/.env and the HTTPS certificates in ${result.install}/caddy.`);
     expect(result.stdout).toContain("This command never deletes your data.");
-    expect(result.stdout).toContain("This server is still connected to MausBot.");
+    expect(result.stdout).toContain("This server is still connected to IndBot.");
     expect(readFileSync(join(result.install, "data", "messages.db"), "utf8")).toBe("chats");
     for (const file of [".env", "compose.yaml", "Caddyfile"]) expect(existsSync(join(result.install, file)), file).toBe(true);
     expect(script).not.toMatch(/down[^\n]*(-v\b|--volumes)/);
@@ -479,7 +479,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   });
 
   it("prepares the server for the bots' sandbox with the repository's own files, starts with its settings, and checks that it holds", () => {
-    const result = run(["--domain", "maus.example.com"]);
+    const result = run(["--domain", "ind.example.com"]);
     expect(result.status).toBe(0);
     for (const path of ["deploy/box/prepare-host.sh", "deploy/box/compose.box.yaml", "connector/profiles/seccomp-omb-home.json", "connector/profiles/omb-home-narrow.apparmor"]) {
       expect(result.calls.some((call) => call.startsWith("curl ") && call.includes(`${SOURCE}/${path} -o `)), path).toBe(true);
@@ -493,20 +493,20 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   });
 
   it("says so, and does not finish, when the sandbox does not hold or the server cannot be prepared", () => {
-    const failed = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: BOX_FAILED } });
+    const failed = run(["--domain", "ind.example.com"], { env: { FAKE_BOX_CHECK: BOX_FAILED } });
     expect(failed.status).toBe(1);
-    expect(failed.stderr).toContain("MausBot is running, but its sandbox self-check did not show that a bot cannot read the server's settings (config-hidden)");
-    expect(failed.all).not.toContain("MausBot is running at");
-    const silent = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: '{"box":"bwrap","failed":[],"results":[]}' } });
+    expect(failed.stderr).toContain("IndBot is running, but its sandbox self-check did not show that a bot cannot read the server's settings (config-hidden)");
+    expect(failed.all).not.toContain("IndBot is running at");
+    const silent = run(["--domain", "ind.example.com"], { env: { FAKE_BOX_CHECK: '{"box":"bwrap","failed":[],"results":[]}' } });
     expect(silent.status).toBe(1);
-    expect(silent.stderr).toContain("MausBot is running, but its bots' sandbox gave no answer to its self-check");
-    const off = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: '{"box":"off","reason":"userns-refused"}' } });
+    expect(silent.stderr).toContain("IndBot is running, but its bots' sandbox gave no answer to its self-check");
+    const off = run(["--domain", "ind.example.com"], { env: { FAKE_BOX_CHECK: '{"box":"off","reason":"userns-refused"}' } });
     expect(off.stderr).toContain("gave no answer to its self-check");
-    const refused = run(["--domain", "maus.example.com"], { env: { FAKE_PREPARE: "1" } });
+    const refused = run(["--domain", "ind.example.com"], { env: { FAKE_PREPARE: "1" } });
     expect(refused.status).toBe(1);
     expect(refused.stderr).toContain("This server could not be prepared for the bots' sandbox (the reason is above).");
     expect(refused.docker).not.toContain("docker compose up -d --remove-orphans");
-    const unpublished = run(["--domain", "maus.example.com"], { env: { FAKE_SOURCE: "missing" } });
+    const unpublished = run(["--domain", "ind.example.com"], { env: { FAKE_SOURCE: "missing" } });
     expect(unpublished.status).toBe(1);
     expect(unpublished.stderr).toContain(`The files that prepare this server for the bots' sandbox could not be downloaded from ${FILES}.`);
     expect(unpublished.docker).not.toContain("docker compose up -d --remove-orphans");
@@ -519,11 +519,11 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   const hidden = { id: "config-hidden", ok: true, detail: "ENOENT" };
 
   it.each(["keyring-denied", "hostname-private", "cpu-list-readable", "fly-api-hidden", "egress-public-allowed"])("goes on with a warning when only %s fails, showing what the check said", (id) => {
-    const result = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: box([hidden, { id, ok: false, detail: "exit null" }]) } });
+    const result = run(["--domain", "ind.example.com"], { env: { FAKE_BOX_CHECK: box([hidden, { id, ok: false, detail: "exit null" }]) } });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain(`  note  The sandbox's self-check did not pass ${id} (exit null).`);
     expect(result.stdout).toContain("The bots' sandbox is on:");
-    expect(result.all).toContain("MausBot is running at https://maus.example.com");
+    expect(result.all).toContain("IndBot is running at https://ind.example.com");
   });
 
   it.each([
@@ -533,18 +533,18 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     "broker-other-grant-refused", "own-cwd-rw", "bot-folder-rw", "engine-runs", "harness-internal-allowed", "broker-call-works", "base-url-is-broker",
     "a-check-added-next-year",
   ])("stops when %s fails", (id) => {
-    const result = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: box([{ id, ok: false, detail: "sees 4 entries" }, hidden, { id: "keyring-denied", ok: false, detail: "exit null" }]) } });
+    const result = run(["--domain", "ind.example.com"], { env: { FAKE_BOX_CHECK: box([{ id, ok: false, detail: "sees 4 entries" }, hidden, { id: "keyring-denied", ok: false, detail: "exit null" }]) } });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain(`MausBot is running, but its bots' sandbox failed its self-check: ${id} (sees 4 entries). Bots are not safely separated from the server.`);
+    expect(result.stderr).toContain(`IndBot is running, but its bots' sandbox failed its self-check: ${id} (sees 4 entries). Bots are not safely separated from the server.`);
     expect(result.stdout).toContain("  note  The sandbox's self-check did not pass keyring-denied (exit null).");
-    expect(result.all).not.toContain("MausBot is running at");
+    expect(result.all).not.toContain("IndBot is running at");
   });
 
   it("stops when config.json is readable, and takes a check's own severity over its list", () => {
-    const readable = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: box([{ id: "config-hidden", ok: false, detail: "read 212 bytes" }]) } });
+    const readable = run(["--domain", "ind.example.com"], { env: { FAKE_BOX_CHECK: box([{ id: "config-hidden", ok: false, detail: "read 212 bytes" }]) } });
     expect(readable.status).toBe(1);
     expect(readable.stderr).toContain("did not show that a bot cannot read the server's settings (config-hidden)");
-    const marked = run(["--domain", "maus.example.com"], { env: { FAKE_BOX_CHECK: box([hidden, { id: "keyring-denied", ok: false, detail: "EACCES", severity: "must" }, { id: "new-soft-check", ok: false, detail: "slow", severity: "warn" }]) } });
+    const marked = run(["--domain", "ind.example.com"], { env: { FAKE_BOX_CHECK: box([hidden, { id: "keyring-denied", ok: false, detail: "EACCES", severity: "must" }, { id: "new-soft-check", ok: false, detail: "slow", severity: "warn" }]) } });
     expect(marked.status).toBe(1);
     expect(marked.stderr).toContain("failed its self-check: keyring-denied (EACCES). Bots are not safely separated");
     expect(marked.stdout).toContain("  note  The sandbox's self-check did not pass new-soft-check (slow).");
@@ -552,29 +552,29 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
   });
 
   it("takes the sandbox's files and update.sh from the installed version's tag, from main only when the tag has none, and says which", () => {
-    const tagged = run(["--domain", "maus.example.com"]);
-    expect(tagged.stdout).toContain("  note  The sandbox's files are MausBot v0.1.151's own.");
-    expect(tagged.stdout).toContain("  note  update.sh is MausBot v0.1.151's own.");
+    const tagged = run(["--domain", "ind.example.com"]);
+    expect(tagged.stdout).toContain("  note  The sandbox's files are IndBot v0.1.151's own.");
+    expect(tagged.stdout).toContain("  note  update.sh is IndBot v0.1.151's own.");
     expect(tagged.calls.some((call) => call.includes(`${FILES}/main/`))).toBe(false);
-    const fallback = run(["--domain", "maus.example.com"], { env: { FAKE_SOURCE: "main-only" } });
+    const fallback = run(["--domain", "ind.example.com"], { env: { FAKE_SOURCE: "main-only" } });
     expect(fallback.status).toBe(0);
     expect(fallback.stdout).toContain("  note  The sandbox's files are the newest in the repository (v0.1.151 has none).");
     expect(fallback.stdout).toContain("  note  update.sh is the newest in the repository (v0.1.151 has none).");
     const order = fallback.calls.filter((call) => call.includes("deploy/box/prepare-host.sh")).map((call) => (call.includes("/v0.1.151/") ? "tag" : "main"));
     expect(order).toEqual(["tag", "main"]);
     expect(fallback.calls.filter((call) => call.includes("/v0.1.151/") && call.includes("compose.box.yaml"))).toEqual([]);
-    const stable = run(["--domain", "maus.example.com"], { env: { FAKE_STABLE: "200", FAKE_IMAGE_VERSION: "0.1.160" } });
-    expect(stable.stdout).toContain("  note  The sandbox's files are MausBot v0.1.160's own.");
-    const unlabelled = run(["--domain", "maus.example.com"], { env: { FAKE_IMAGE_VERSION: "" } });
+    const stable = run(["--domain", "ind.example.com"], { env: { FAKE_STABLE: "200", FAKE_IMAGE_VERSION: "0.1.160" } });
+    expect(stable.stdout).toContain("  note  The sandbox's files are IndBot v0.1.160's own.");
+    const unlabelled = run(["--domain", "ind.example.com"], { env: { FAKE_IMAGE_VERSION: "" } });
     expect(unlabelled.stdout).toContain("  note  The sandbox's files are the newest in the repository.");
-    const copy = run(["--domain", "maus.example.com"], { env: { OMB_INSTALL_SOURCE: "https://mirror.example.test/omb" } });
+    const copy = run(["--domain", "ind.example.com"], { env: { OMB_INSTALL_SOURCE: "https://mirror.example.test/omb" } });
     expect(copy.status).toBe(1);
     expect(copy.calls.some((call) => call.includes("https://mirror.example.test/omb/deploy/box/prepare-host.sh -o "))).toBe(true);
     expect(copy.calls.some((call) => call.includes(FILES) && call.includes(" -o "))).toBe(false);
   });
 
   it("leaves the sandbox out for a version that has none and when asked, and takes its settings back out", () => {
-    const first = run(["--domain", "maus.example.com"]);
+    const first = run(["--domain", "ind.example.com"]);
     expect(readFileSync(join(first.install, ".env"), "utf8")).toContain("COMPOSE_FILE=");
     const asked = run(["--no-sandbox"], { apparmor: null }, { dir: first.dir });
     expect(asked.status).toBe(0);
@@ -582,36 +582,36 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(readFileSync(join(first.install, ".env"), "utf8")).not.toContain("COMPOSE_FILE=");
     expect(asked.calls.some((call) => call.startsWith("prepare-host"))).toBe(false);
     expect(asked.docker.some((call) => call.includes("box-check"))).toBe(false);
-    const old = run(["--domain", "maus.example.com"], { env: { FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data"]' } });
+    const old = run(["--domain", "ind.example.com"], { env: { FAKE_IMAGE_ENV: '["PATH=/usr/bin","HOME=/data"]' } });
     expect(old.status).toBe(0);
-    expect(old.stdout).toContain("note  This MausBot version has no bots' sandbox yet. Run this command again after updating to a version that has it.");
+    expect(old.stdout).toContain("note  This IndBot version has no bots' sandbox yet. Run this command again after updating to a version that has it.");
     expect(readFileSync(join(old.install, ".env"), "utf8")).not.toContain("COMPOSE_FILE=");
     expect(old.calls.some((call) => call.includes("deploy/box/"))).toBe(false);
   });
 
   it("places update.sh as the repository has it, names it as the way to update, and keeps the version it pinned", () => {
-    const first = run(["--domain", "maus.example.com"], { env: { FAKE_STABLE: "200" } });
+    const first = run(["--domain", "ind.example.com"], { env: { FAKE_STABLE: "200" } });
     expect(first.calls.some((call) => call.includes(`${SOURCE}/deploy/update.sh -o `))).toBe(true);
     expect(readFileSync(join(first.install, "update.sh"), "utf8")).toBe("the repository file\n");
     expect(statSync(join(first.install, "update.sh")).mode & 0o777).toBe(0o755);
     expect(first.stdout).toContain(`To update later, with a backup first and a way back:  sudo ${first.install}/update.sh`);
     const env = join(first.install, ".env");
-    const pin = `ghcr.io/milind-soni/openmausbot@sha256:${"a".repeat(64)}`;
-    writeFileSync(env, readFileSync(env, "utf8").replace("OMB_IMAGE=ghcr.io/milind-soni/openmausbot:stable", `OMB_IMAGE=${pin}`));
+    const pin = `ghcr.io/milind-soni/openindbot@sha256:${"a".repeat(64)}`;
+    writeFileSync(env, readFileSync(env, "utf8").replace("OMB_IMAGE=ghcr.io/milind-soni/openindbot:stable", `OMB_IMAGE=${pin}`));
     const again = run([], { env: { FAKE_STABLE: "200" } }, { dir: first.dir });
     expect(again.status).toBe(0);
     expect(again.stdout).toContain("  ok    version: the one update.sh pinned here; it stays until update.sh changes it");
     expect(readFileSync(env, "utf8")).toContain(`OMB_IMAGE=${pin}\n`);
     expect(readFileSync(env, "utf8")).not.toContain(":stable");
     expect(again.calls.some((call) => call.includes("ghcr.io/token"))).toBe(false);
-    const unpublished = run(["--domain", "maus.example.com", "--no-sandbox"], { env: { FAKE_SOURCE: "missing" } });
+    const unpublished = run(["--domain", "ind.example.com", "--no-sandbox"], { env: { FAKE_SOURCE: "missing" } });
     expect(unpublished.status).toBe(0);
     expect(existsSync(join(unpublished.install, "update.sh"))).toBe(false);
     expect(unpublished.stdout).toContain("To update later, run this command again.");
   });
 
   it("adds the Update server button with update-runner.sh, before the server starts, and says when it could not", () => {
-    const first = run(["--domain", "maus.example.com"]);
+    const first = run(["--domain", "ind.example.com"]);
     expect(first.calls.some((call) => call.includes(`${SOURCE}/deploy/update-runner.sh -o `))).toBe(true);
     const ids = `${process.getuid?.()}:${process.getgid?.()}`;
     const button = first.calls.findIndex((call) => call === `update-runner --install --dir ${first.install} --user ${ids} --no-restart`);
@@ -619,8 +619,8 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(button).toBeLessThan(first.calls.indexOf("docker compose up -d --remove-orphans"));
     expect(first.stdout).toContain("  note  The app can update this server: Settings, Updates, Update server.");
     const compose = readFileSync(join(first.install, "compose.yaml"), "utf8");
-    expect(compose).toContain("      - /var/lib/openmausbot-update/request:/run/omb-update/request\n      - /var/lib/openmausbot-update/status:/run/omb-update/status:ro\n");
-    const refused = run(["--domain", "maus.example.com"], { env: { FAKE_RUNNER: "1" } });
+    expect(compose).toContain("      - /var/lib/openindbot-update/request:/run/omb-update/request\n      - /var/lib/openindbot-update/status:/run/omb-update/status:ro\n");
+    const refused = run(["--domain", "ind.example.com"], { env: { FAKE_RUNNER: "1" } });
     expect(refused.status).toBe(0);
     expect(refused.stdout).toContain(`Update it with: sudo ${refused.install}/update.sh`);
     const removed = run(["--uninstall"], {}, { dir: first.dir });
@@ -637,7 +637,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
 
   it("writes the Caddyfile and the server's settings the manual Compose setup uses", () => {
     const caddyfile = readFileSync(join(ROOT, "deploy", "Caddyfile"), "utf8");
-    const result = run(["--domain", "maus.example.com"]);
+    const result = run(["--domain", "ind.example.com"]);
     expect(readFileSync(join(result.install, "Caddyfile"), "utf8")).toBe(caddyfile.slice(caddyfile.indexOf("{$DOMAIN} {")));
     const manual = readFileSync(join(ROOT, "deploy", "docker-compose.yml"), "utf8");
     const written = readFileSync(join(result.install, "compose.yaml"), "utf8");
@@ -645,8 +645,8 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(settings(written)).toEqual(settings(manual));
     // The sign-in lists and mail server are passed only when .env sets them: an empty one would still be set.
     for (const name of ["OMB_SIGNIN_EMAILS", "OMB_SIGNIN_MEMBER_EMAILS", "OMB_SIGNIN_SMTP_URL", "OMB_SIGNIN_SMTP_FROM", "OMB_PHONE_RELAY"]) expect(settings(written)).toContain(`${name}:`);
-    for (const line of ['test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot"]', "init: true", "shm_size: 512m", '- "80:80"', '- "443:443"',
-      "- edge:/run/openmausbot", "type: tmpfs"]) {
+    for (const line of ['test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8799/api/health | grep -q openindbot"]', "init: true", "shm_size: 512m", '- "80:80"', '- "443:443"',
+      "- edge:/run/openindbot", "type: tmpfs"]) {
       expect(written).toContain(line);
       expect(manual).toContain(line);
     }

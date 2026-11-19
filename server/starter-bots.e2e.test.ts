@@ -15,11 +15,11 @@ const HOST = "omb-t-0123456789ab.fly.dev";
 const FORWARDED = { host: HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https" };
 const CLAUDE = { instanceId: "claude", model: "claude-sonnet-5" };
 const PACKAGE = JSON.parse(readFileSync(join(SERVER_DIR, "..", "shared", "package-fixtures", "full-team.v2.json"), "utf8"));
-const manifest = (name: string) => ({ format: "openmaus.team", version: 2, team: { name, members: [{ key: "helper", name: `${name} helper`, appearance: { color: "blue" } }] } });
+const manifest = (name: string) => ({ format: "openind.team", version: 2, team: { name, members: [{ key: "helper", name: `${name} helper`, appearance: { color: "blue" } }] } });
 
 class Cloud {
   home = mkdtempSync(join(tmpdir(), "omb-starter-bots-"));
-  dataDir = join(this.home, ".openmausbot");
+  dataDir = join(this.home, ".openindbot");
   gate = join(this.home, "finish");
   dump = join(this.home, "claude.json");
   secret = randomBytes(32).toString("base64url");
@@ -79,7 +79,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     if (!this.token) await this.pair();
   }
   async pair() {
-    const body = JSON.stringify({ label: "OpenMausBot app (Cloud)", ttlSeconds: 300 });
+    const body = JSON.stringify({ label: "OpenIndBot app (Cloud)", ttlSeconds: 300 });
     const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
     const response = await fetch(`${this.base}/api/cloud/pairing`, { method: "POST", headers: { ...FORWARDED, "content-type": "application/json",
       "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce, "x-omb-cloud-signature": `v1=${cloudPairingSignature(this.secret, timestamp, nonce, body)}` }, body });
@@ -105,7 +105,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   /** The capability of a real turn of this Cloud's Chief, for what the bot's own tools call. */
   async chiefTurn() {
     const chief = (await this.bots()).find((bot) => bot.chiefOfStaff);
-    expect(chief, "a new Cloud's MausBot is its Chief").toBeTruthy();
+    expect(chief, "a new Cloud's IndBot is its Chief").toBeTruthy();
     const sent = await this.api("POST", `/api/bots/${chief.id}/messages`, { text: "Add a specialist." });
     expect(sent.status, JSON.stringify(sent.body)).toBe(202);
     await expect.poll(() => existsSync(this.dump), { timeout: 20_000 }).toBe(true);

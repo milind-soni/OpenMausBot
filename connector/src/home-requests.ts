@@ -21,7 +21,7 @@ export interface RequestHead {
 export function parseHead(head: string): { ok: true; head: RequestHead } | { ok: false; why: string } {
   const lines = head.split("\r\n");
   const match = /^([A-Z]{3,7}) (\/[^\s]*) HTTP\/1\.1$/.exec(lines[0] ?? "");
-  if (!match || !METHODS.has(match[1]!)) return { ok: false, why: "not an HTTP/1.1 request MausBot may send" };
+  if (!match || !METHODS.has(match[1]!)) return { ok: false, why: "not an HTTP/1.1 request IndBot may send" };
   let length = 0;
   for (const line of lines.slice(1)) {
     const colon = line.indexOf(":");

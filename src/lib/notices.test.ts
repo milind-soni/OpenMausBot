@@ -200,7 +200,7 @@ it("ModelGo's card follows update consent and the account's notices, and goes be
   expect(MODELGO_OFFER_NOTICE).toBe("modelgo-offer-2026-11");
 });
 
-it("Update MausBot on your phone goes right after the Grok Bot popup, ahead of every promotion, and holds the sponsor's card", () => {
+it("Update IndBot on your phone goes right after the Grok Bot popup, ahead of every promotion, and holds the sponsor's card", () => {
   const all = (phone: boolean | null, grok: boolean | null = false) => facts(true, true, true, true, true, true, true, true, true, true, grok, true, phone);
   expect(nextNotice(all(true), none)).toBe(PHONE_UPDATE_NOTICE);
   expect(nextNotice(all(true, true), none), "the Grok Bot popup still goes first").toBe(GROK_MOVE_NOTICE);
@@ -212,7 +212,7 @@ it("Update MausBot on your phone goes right after the Grok Bot popup, ahead of e
   expect(nextNotice(sponsor, none, PHONE_UPDATE_NOTICE, true), "closed in its own launch: the card follows").toBe(MODELGO_OFFER_NOTICE);
 });
 
-it("an Update MausBot on your phone dismissal is kept per phone, in short hints, all in one patch", () => {
+it("an Update IndBot on your phone dismissal is kept per phone, in short hints, all in one patch", () => {
   expect(phoneUpdateHint("0f8c2a41-1111-4222-8333-444455556666")).toBe("phone-app-update:0f8c2a41");
   expect(phoneUpdateHint("0f8c2a41-1111-4222-8333-444455556666").length).toBeLessThanOrEqual(60);
   const ids = [phoneUpdateHint("aaaaaaaa-1"), phoneUpdateHint("bbbbbbbb-2")];

@@ -13,7 +13,7 @@ import {
   readApnsConfig,
 } from "../src/push";
 
-const BASE_URL = "https://auth.openmausbot.test";
+const BASE_URL = "https://auth.openindbot.test";
 const TOKEN_A = "a1".repeat(32);
 const TOKEN_B = "b2".repeat(32);
 
@@ -64,7 +64,7 @@ async function pushEnv(privateKeyPem: string, extra: Record<string, string> = {}
     ...env,
     APNS_KEY_ID: "KEY1234567",
     APNS_TEAM_ID: "TEAM123456",
-    APNS_BUNDLE_ID: "com.example.mausbot",
+    APNS_BUNDLE_ID: "com.example.indbot",
     APNS_PRIVATE_KEY: privateKeyPem,
     APNS_ENVIRONMENTS: "production,sandbox",
     ...extra,
@@ -171,7 +171,7 @@ describe("phone push relay", () => {
     const [sent] = apns.calls;
     expect(sent!.url).toBe(`https://api.sandbox.push.apple.com/3/device/${TOKEN_A}`);
     expect(sent!.headers).toMatchObject({
-      "apns-topic": "com.example.mausbot",
+      "apns-topic": "com.example.indbot",
       "apns-push-type": "alert",
       "apns-priority": "10",
     });
@@ -181,7 +181,7 @@ describe("phone push relay", () => {
         alert: { title: "Scout in Launch needs approval" },
         sound: "default",
         "thread-id": "th_1",
-        category: "OPENMAUS_APPROVAL",
+        category: "OPENIND_APPROVAL",
         "interruption-level": "time-sensitive",
       },
       omb: { v: 1, kind: "approval", botId: "bot_1", botName: "Scout", threadId: "th_1", roomId: "grp_1", roomName: "Launch", pairing: "pair-tag-1" },

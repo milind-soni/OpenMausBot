@@ -1,9 +1,9 @@
 // Point mode: the person picks a part of a bot's page in the preview and it reaches the composer as a chip.
 //
-//   host → frame  { jsonrpc: "2.0", method: "mausbot/point", params: { on: boolean } }
-//   frame → host  { jsonrpc: "2.0", method: "mausbot/pointed", params: { tag, role, text, selector, html } }
-//                 { jsonrpc: "2.0", method: "mausbot/point-ended", params: {} }   Escape in the page
-//   host → frame  { jsonrpc: "2.0", method: "mausbot/marks", params: { selectors: string[] } }   numbered outlines on the
+//   host → frame  { jsonrpc: "2.0", method: "indbot/point", params: { on: boolean } }
+//   frame → host  { jsonrpc: "2.0", method: "indbot/pointed", params: { tag, role, text, selector, html } }
+//                 { jsonrpc: "2.0", method: "indbot/point-ended", params: {} }   Escape in the page
+//   host → frame  { jsonrpc: "2.0", method: "indbot/marks", params: { selectors: string[] } }   numbered outlines on the
 //                 parts waiting in the composer, so the person sees what they already picked
 //
 // Point stays on after a pick, so the person can mark several parts in one pass; Escape or Point again ends it.
@@ -12,10 +12,10 @@
 // everything a pick carries is the page's word: the host keeps only the frame's own window, clips every field, and
 // the server hands it to the model only inside a records block.
 
-export const POINT_METHOD = "mausbot/point";
-export const POINTED_METHOD = "mausbot/pointed";
-export const POINT_ENDED_METHOD = "mausbot/point-ended";
-export const MARKS_METHOD = "mausbot/marks";
+export const POINT_METHOD = "indbot/point";
+export const POINTED_METHOD = "indbot/pointed";
+export const POINT_ENDED_METHOD = "indbot/point-ended";
+export const MARKS_METHOD = "indbot/marks";
 
 export const POINT_LIMITS = {
   text: 200,
@@ -181,7 +181,7 @@ export const APP_POINT_SOURCE = `(function () {
   var place = function (element) {
     if (!box) {
       box = document.createElement("div");
-      box.setAttribute("data-mausbot-point", "");
+      box.setAttribute("data-indbot-point", "");
       box.setAttribute("aria-hidden", "true");
       box.style.cssText = "position:fixed;z-index:2147483647;pointer-events:none;box-sizing:border-box;border:2px solid #3b82f6;" +
         "background:rgba(59,130,246,0.12);border-radius:4px;transition:all 60ms ease-out;display:none";
@@ -202,7 +202,7 @@ export const APP_POINT_SOURCE = `(function () {
     box.style.display = "block";
   };
   var pickable = function (node) {
-    return node && node.nodeType === 1 && node !== root && node !== document.body && !(node.closest && node.closest("[data-mausbot-point]")) ? node : null;
+    return node && node.nodeType === 1 && node !== root && node !== document.body && !(node.closest && node.closest("[data-indbot-point]")) ? node : null;
   };
   var drawMarks = function () {
     marks.forEach(function (mark) {
@@ -225,7 +225,7 @@ export const APP_POINT_SOURCE = `(function () {
       try { element = typeof selector === "string" ? document.querySelector(selector) : null; } catch (error) { element = null; }
       if (!element) return;
       var mark = document.createElement("div");
-      mark.setAttribute("data-mausbot-point", "mark");
+      mark.setAttribute("data-indbot-point", "mark");
       mark.setAttribute("aria-hidden", "true");
       mark.style.cssText = "position:fixed;z-index:2147483646;pointer-events:none;box-sizing:border-box;border:2px dashed #f59e0b;" +
         "background:rgba(245,158,11,0.10);border-radius:4px";

@@ -1,4 +1,4 @@
-// How many paired phones have an older MausBot app that lost its way in when the control plane ended this computer's
+// How many paired phones have an older IndBot app that lost its way in when the control plane ended this computer's
 // secure link ("retired"); 0 when it was not ended. Told to the local server when it changes and when a server starts.
 import { deviceCounts } from "./companion-e2e.mjs";
 
@@ -19,7 +19,7 @@ export function createPhoneLinkFact({ retired, server, log }) {
     const olderPhoneApps = count();
     if (sent?.proc === proc && sent.olderPhoneApps === olderPhoneApps) return;
     try {
-      proc.postMessage({ type: "openmausbot:phone-link", olderPhoneApps });
+      proc.postMessage({ type: "openindbot:phone-link", olderPhoneApps });
       sent = { proc, olderPhoneApps };
     } catch (error) {
       log(`phone link fact sync failed: ${error?.message ?? error}`);

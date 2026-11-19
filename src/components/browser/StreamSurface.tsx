@@ -1,5 +1,5 @@
 // Adapted from pingdotgg/t3code@00cdceb1 apps/web/src/browser/ServerBrowserSurface.tsx, MIT License, Copyright (c)
-// 2026 T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified: OpenMausBot's UI, the panel picks the
+// 2026 T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified: OpenIndBot's UI, the panel picks the
 // transport (the v2 stream, or the v1 view as a fallback), page input goes through the panel's control rules so the
 // first press takes the browser, Shift+Escape returns to the address bar, a larger frame cap is sent in place rather
 // than by reconnecting, so the person keeps the browser they hold, and the page's dropdown lists, cursor shape and HTTP

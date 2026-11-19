@@ -151,7 +151,7 @@ export function differenceSignature(plan) {
 const FAILURE_REASONS = 3;
 
 /** What a send did not get across, grouped by reason (bots by name, logins only counted, never a site), and why a send
- * stopped as a whole; the strip on My Cloud and Settings → MausBot Cloud both say it. */
+ * stopped as a whole; the strip on My Cloud and Settings → IndBot Cloud both say it. */
 export function failedSummary(outcome) {
   const reasons = new Map();
   for (const entry of outcome.result.failed) {

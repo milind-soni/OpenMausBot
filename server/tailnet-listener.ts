@@ -48,7 +48,7 @@ export function readTailnetShare(input: unknown, standIn = process.env.OMB_TEST_
   return addresses.every((address) => isIP(address) !== 0 && (inTailscaleRange(address) || address === standIn)) ? { name, addresses: [...new Set(addresses)] } : null;
 }
 
-/** `OMB_TAILNET_NAME`, set by `openmausbot serve --tailscale`, follows Tailscale's interface. With `OMB_TAILNET_SERVED`
+/** `OMB_TAILNET_NAME`, set by `openindbot serve --tailscale`, follows Tailscale's interface. With `OMB_TAILNET_SERVED`
  * (the HTTPS origin `tailscale serve` gives it) nothing is bound; `OMB_TAILNET_ADDRESSES` (a comma list) pins the addresses. */
 export function tailnetShareFromEnv(env: NodeJS.ProcessEnv): TailnetShareConfig | null {
   if (!env.OMB_TAILNET_NAME) return null;
@@ -100,7 +100,7 @@ export function createTailnetShare(options: TailnetShareOptions) {
     const answer = JSON.stringify(share.state());
     if (!tellParent || answer === toldParent) return;
     toldParent = answer;
-    tellParent({ type: "openmausbot:tailnet-share-state", ...share.state() });
+    tellParent({ type: "openindbot:tailnet-share-state", ...share.state() });
   }
 
   const guarded: Handle = async (req, res) => {
@@ -203,12 +203,12 @@ export function createTailnetShare(options: TailnetShareOptions) {
     },
     /** The desktop app's private message; anything else is not ours. Replies with the state once it is applied. */
     receive(message: unknown, reply: (answer: object) => void): boolean {
-      if (!message || typeof message !== "object" || (message as { type?: unknown }).type !== "openmausbot:tailnet-share") return false;
+      if (!message || typeof message !== "object" || (message as { type?: unknown }).type !== "openindbot:tailnet-share") return false;
       tellParent = reply;
       const config = readTailnetShare((message as { share?: unknown }).share);
       void share.apply(config).then(() => {
         toldParent = JSON.stringify(share.state());
-        reply({ type: "openmausbot:tailnet-share-state", ...share.state() });
+        reply({ type: "openindbot:tailnet-share-state", ...share.state() });
       });
       return true;
     },

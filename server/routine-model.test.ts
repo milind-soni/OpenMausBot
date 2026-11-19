@@ -34,7 +34,7 @@ const daily = { type: "daily" as const, time: "09:00", weekdays: [1] };
 describe("a routine's own model", () => {
   it("keeps the model it was given across an edit and a restart, and drops it on null", () => {
     const { options, routines } = manager();
-    const routine = routines.create({ name: "Inbox sweep", prompt: "Sweep the inbox", botId: "maus-1", schedule: daily, modelSelection: { ...HAIKU, effort: "low" } });
+    const routine = routines.create({ name: "Inbox sweep", prompt: "Sweep the inbox", botId: "ind-1", schedule: daily, modelSelection: { ...HAIKU, effort: "low" } });
     expect(routine.modelSelection).toEqual({ ...HAIKU, effort: "low" });
     expect(routines.update(routine.id, { prompt: "Sweep the inbox twice" })?.modelSelection).toEqual({ ...HAIKU, effort: "low" });
     expect(new RoutineManager(options).listRoutines()[0]!.modelSelection).toEqual({ ...HAIKU, effort: "low" });
@@ -45,15 +45,15 @@ describe("a routine's own model", () => {
   it("refuses a model on a limit-reset routine, which stays on the model of the conversation it continues", () => {
     const { routines } = manager();
     const schedule = { type: "limit_reset" as const, engine: "claude", repeat: "once" as const };
-    expect(() => routines.create({ name: "Continue", prompt: "Carry on", botId: "maus-1", schedule, modelSelection: HAIKU })).toThrow("continues its conversation");
-    const routine = routines.create({ name: "Continue", prompt: "Carry on", botId: "maus-1", schedule });
+    expect(() => routines.create({ name: "Continue", prompt: "Carry on", botId: "ind-1", schedule, modelSelection: HAIKU })).toThrow("continues its conversation");
+    const routine = routines.create({ name: "Continue", prompt: "Carry on", botId: "ind-1", schedule });
     expect(() => routines.update(routine.id, { modelSelection: HAIKU })).toThrow("continues its conversation");
   });
 
   it("refuses a model with no engine or model id, with both an effort and a variant, or on a room goal", () => {
     const { routines } = manager();
     const create = (modelSelection: unknown, target: "bot" | "room-goal" = "bot") =>
-      () => routines.create({ name: "Inbox sweep", prompt: "Sweep the inbox", botId: "maus-1", target, schedule: daily, modelSelection } as never);
+      () => routines.create({ name: "Inbox sweep", prompt: "Sweep the inbox", botId: "ind-1", target, schedule: daily, modelSelection } as never);
     expect(create({ model: "claude-haiku-4-5" })).toThrow(/Choose a model/);
     expect(create({ instanceId: "claude", model: " " })).toThrow(/Choose a model/);
     expect(create({ ...HAIKU, effort: "low", variant: "fast" })).toThrow(/Choose a model/);

@@ -1,8 +1,8 @@
 # Pages and apps in a room
 
 A bot in a room can show a page (`show_html`), a widget (`show_widget`), an MCP server's app or a published page's
-card there, and everyone who can see the room sees it, view-only. Inside a room's frame, `mausbot.room` is `true`,
-and `mausbot.send` and `mausbot.setContext` resolve without doing anything; the host refuses `ui/message`,
+card there, and everyone who can see the room sees it, view-only. Inside a room's frame, `indbot.room` is `true`,
+and `indbot.send` and `indbot.setContext` resolve without doing anything; the host refuses `ui/message`,
 `ui/update-model-context` and an MCP app's calls to its server; and the server refuses an app's message, its context,
 its server calls and a widget press for a room's thread.
 

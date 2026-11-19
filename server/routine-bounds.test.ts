@@ -10,7 +10,7 @@ import type { RoutineManagerOptions, RoutineRun } from "./routines.ts";
 
 const MINUTE = 60_000, HOUR = 60 * MINUTE;
 const run = (more: Partial<RoutineRun> = {}): RoutineRun => ({
-  id: "run", routineId: "r", routineName: "Check", target: "bot", botId: "bot-1", runOn: "maus", scheduledFor: 0, status: "running", manual: false, createdAt: 0, startedAt: 0, ...more,
+  id: "run", routineId: "r", routineName: "Check", target: "bot", botId: "bot-1", runOn: "ind", scheduledFor: 0, status: "running", manual: false, createdAt: 0, startedAt: 0, ...more,
 });
 /** Scheduler passes a minute apart from `from` to `to`, as while a run works. */
 const passes = (row: RoutineRun, clock: RunClock, from: number, to: number) => {

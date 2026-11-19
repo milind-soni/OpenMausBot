@@ -6,7 +6,7 @@ import { buildSystemPrompt } from "./system-prompt.ts";
 
 const routine = (id: string, patch: Partial<Routine> = {}): Routine => ({
   id, botId: "bot", target: "bot", name: `Monitor ${id}`, prompt: "Check the payment. Pause after delivery.",
-  enabled: true, runOn: "maus", durationMinutes: 10, createdAt: 1, updatedAt: 1,
+  enabled: true, runOn: "ind", durationMinutes: 10, createdAt: 1, updatedAt: 1,
   schedule: { type: "interval", everyMinutes: 60, anchorAt: 0 }, nextRunAt: 3_600_000, ...patch,
 });
 const context = (routines: Routine[], extra: Partial<Parameters<typeof activeRoutinesContext>[0]> = {}) =>

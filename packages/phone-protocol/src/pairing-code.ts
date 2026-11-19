@@ -84,7 +84,7 @@ function fromLink(raw: string): string | null {
   return url.searchParams.get("token") ?? url.searchParams.get("code") ?? hash.get("code");
 }
 
-/** Reads a typed code, an `omb_pair_` credential, or a link that carries either (`openmausbot://pair?…`,
+/** Reads a typed code, an `omb_pair_` credential, or a link that carries either (`openindbot://pair?…`,
  * `…/pair#code=…`, `?code=…`). */
 export function readPairingInput(raw: string): PairingInput {
   let value = raw.trim();

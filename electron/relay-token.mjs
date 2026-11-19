@@ -1,4 +1,4 @@
-/** Keeps this computer's MausBot Relay token fresh while the relay is needed: fetched at once, again after the control
+/** Keeps this computer's IndBot Relay token fresh while the relay is needed: fetched at once, again after the control
  * plane's `refreshAfter` (an hour), and sooner when the relay refuses it. A token that is still valid survives a
  * failed refresh; the relay keeps spliced sessions through an expired control socket anyway. */
 const MINUTE_MS = 60_000;
@@ -9,7 +9,7 @@ const UNAVAILABLE_RETRY_MS = 30 * MINUTE_MS;
 const SIGN_IN_FALLBACK_MS = 60 * MINUTE_MS;
 const BACKOFF_MS = [MINUTE_MS, 2 * MINUTE_MS, 4 * MINUTE_MS, 8 * MINUTE_MS, 16 * MINUTE_MS, 32 * MINUTE_MS, 60 * MINUTE_MS];
 const MIN_REFRESH_MS = MINUTE_MS;
-const RELAY_HOST = /^relay[1-9][0-9]?\.openmausbot\.com$/;
+const RELAY_HOST = /^relay[1-9][0-9]?\.openindbot\.com$/;
 const HOST_ID = /^[A-Za-z0-9_-]{22}$/;
 const TOKEN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
 

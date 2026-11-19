@@ -28,7 +28,7 @@ interface ManagedDesktopOptions {
 }
 const signature = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const expiredMessage = "Company access has ended. Reconnect your organization or explicitly choose a personal model; personal billing will not be used automatically.";
-export const LICENSE_EXPIRED_MESSAGE = "Your organization's OpenMaus Admin license has expired. Contact your admin.";
+export const LICENSE_EXPIRED_MESSAGE = "Your organization's OpenInd Admin license has expired. Contact your admin.";
 
 /** Only for messages from Electron's private utility-parent port: never renderer HTTP, never merged into saved AppConfig. */
 export function parseManagedDesktopConnection(raw: unknown, now = Date.now()): ManagedDesktopConnection | null {
@@ -68,11 +68,11 @@ export function companyInstanceConfigs(connection: ManagedDesktopConnection, run
     };
     if (provider.id === "openai") entries[id] = {
       driver: "codex", displayName, config: { managed: { url: `${base}/v1`, models: provider.models } },
-      environment: { OPENMAUSBOT_COMPANY_API_KEY: connection.token, CODEX_HOME: join(runtimeDirectory, id, "codex") },
+      environment: { OPENINDBOT_COMPANY_API_KEY: connection.token, CODEX_HOME: join(runtimeDirectory, id, "codex") },
     };
     if (provider.id === "openrouter") entries[id] = {
-      driver: "openai-compat", displayName, config: { url: `${base}/v1`, apiKeyEnv: "OPENMAUSBOT_COMPANY_API_KEY", model: provider.models[0], provider: "" },
-      environment: { OPENMAUSBOT_COMPANY_API_KEY: connection.token },
+      driver: "openai-compat", displayName, config: { url: `${base}/v1`, apiKeyEnv: "OPENINDBOT_COMPANY_API_KEY", model: provider.models[0], provider: "" },
+      environment: { OPENINDBOT_COMPANY_API_KEY: connection.token },
     };
   }
   return entries;

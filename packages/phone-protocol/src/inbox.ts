@@ -1,7 +1,7 @@
 import type { ConnectorCardData } from "./connector-card.ts";
 import type { OptionCardData, SecretRequestCardData, SignInRequestCardData } from "./wire.ts";
 
-/** On a Team Cloud, a line in a person's inbox: their own conversation with their own Chief of Staff (their own MausBot
+/** On a Team Cloud, a line in a person's inbox: their own conversation with their own Chief of Staff (their own IndBot
  * when they crowned none), where everything addressed to them arrives. It says who it is from and where it came from,
  * so clients can label it and open that conversation. Replying to the line answers it: the answer goes back where it
  * came from. */

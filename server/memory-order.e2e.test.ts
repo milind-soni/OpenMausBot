@@ -14,7 +14,7 @@ async function fixture(test: (f: any) => Promise<void>) {
   const { dataDir } = session.info;
   const free = (bytes: number) => writeFileSync(join(dataDir, "host-memory.json"), JSON.stringify({ totalBytes: 2 * GB, availableBytes: bytes, swapFreeBytes: 0, oomKills: 0, fullStall10: 0 }));
   free(900 * MB);
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENINDBOT_URL: session.info.url } }) as Promise<any>;
   const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
   const planPath = join(dataDir, "room-plan.json");
   /** The bots whose turns have ended, in the order they did. With room for one at a time that is the order they ran in. */

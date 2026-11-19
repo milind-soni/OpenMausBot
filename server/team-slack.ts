@@ -1,4 +1,4 @@
-// Slack for Clouds, the Cloud's side (docs/team-slack.md). One MausBot Slack app is installed per company or person;
+// Slack for Clouds, the Cloud's side (docs/team-slack.md). One IndBot Slack app is installed per company or person;
 // Slack's events arrive at the Admin, which hands each message to the Cloud with a session it opened for the member who
 // wrote it (on a personal Cloud, for its owner), so here the message is that person's own request. This module holds
 // the contract's wire shapes, the record of the messages taken (the idempotency key and what the Admin has been told)
@@ -12,7 +12,7 @@ import { z } from "zod";
 
 import { writeFileAtomic } from "./atomic.ts";
 
-/** On the Admin; must match openmaus-cloud's TEAM_SLACK_REPORT_PATH. */
+/** On the Admin; must match openind-cloud's TEAM_SLACK_REPORT_PATH. */
 export const TEAM_SLACK_REPORT_PATH = "/api/cloud/machines/slack";
 export const TEAM_SLACK_FILE = "team-slack-messages.json";
 /** The Admin's own limit on a final answer. */
@@ -21,7 +21,7 @@ export const TEAM_SLACK_RUNNING_EVERY_MS = 10 * 60_000;
 const MAX_MESSAGES = 2_000, KEEP_FINISHED_MS = 7 * 24 * 3_600_000, KEEP_ANY_MS = 30 * 24 * 3_600_000;
 const FETCH_TIMEOUT_MS = 15_000, ANSWER_MAX_BYTES = 16 * 1024;
 
-/** Must match openmaus-cloud's teamSlackSignature: a context of its own, so no other signed request reads as a report. */
+/** Must match openind-cloud's teamSlackSignature: a context of its own, so no other signed request reads as a report. */
 export function teamSlackSignature(secret: string, machineId: string, timestamp: string, nonce: string, body: string): string {
   const bodyHash = createHash("sha256").update(body).digest("base64url");
   return createHmac("sha256", secret).update(`omb-team-slack-v1\n${machineId}\n${timestamp}\n${nonce}\n${bodyHash}`).digest("base64url");

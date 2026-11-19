@@ -72,7 +72,7 @@ The public `GET /api/health/hosted` capability probe returns `200` only when
 complete hosted configuration, explicit portal membership, the loaded access
 hook, and a currently valid `admin` entitlement are all present; otherwise it
 returns a generic `503`. Its successful response
-includes `{ok:true,service:"openmausbot",membershipAuthority:"portal",workspace:"<slug>"}`
+includes `{ok:true,service:"openindbot",membershipAuthority:"portal",workspace:"<slug>"}`
 plus the contract metadata above and the `X-OMB-Hosted-Contract-Version: 1`
 response header, emitted by the running runtime for an authenticated deployment
 probe to relay. A wrapper must not manufacture this version for an older runtime.

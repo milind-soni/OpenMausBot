@@ -26,7 +26,7 @@ export async function startFakeHarness(): Promise<FakeHarness> {
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? "/", "http://harness");
     const path = url.pathname;
-    if (path === "/api/health") return void res.writeHead(200, { "content-type": "application/json" }).end('{"app":"openmausbot"}');
+    if (path === "/api/health") return void res.writeHead(200, { "content-type": "application/json" }).end('{"app":"openindbot"}');
     if (path === "/api/config") return void res.writeHead(200, { "content-type": "application/json" }).end('{"computerName":"Test Mac"}');
     if (path === "/api/events") {
       const since = Number(req.headers["last-event-id"] ?? url.searchParams.get("since") ?? 0) || 0;

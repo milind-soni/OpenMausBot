@@ -7,10 +7,10 @@ import { latestRoutineRun, routineNextLabel } from "@/lib/routine-display";
 import { setLocale } from "@/lib/i18n";
 
 const routine: Routine = {
-  id: "brief", name: "Morning brief", prompt: "Report progress", target: "bot", botId: "scout", runOn: "maus", enabled: true,
+  id: "brief", name: "Morning brief", prompt: "Report progress", target: "bot", botId: "scout", runOn: "ind", enabled: true,
   schedule: { type: "interval", everyMinutes: 60, anchorAt: 1 }, durationMinutes: 30, nextRunAt: 3_600_000, createdAt: 1, updatedAt: 1,
 };
-const run: RoutineRun = { id: "run", routineId: routine.id, routineName: routine.name, target: "bot", botId: routine.botId, runOn: "maus", scheduledFor: 100, createdAt: 100, status: "completed", manual: false, output: "Brief prepared." };
+const run: RoutineRun = { id: "run", routineId: routine.id, routineName: routine.name, target: "bot", botId: routine.botId, runOn: "ind", scheduledFor: 100, createdAt: 100, status: "completed", manual: false, output: "Brief prepared." };
 
 function list(props: Partial<Parameters<typeof RoutineList>[0]> = {}) {
   return renderToStaticMarkup(createElement(RoutineList, { routines: [routine], runs: [run], onOpen: vi.fn(), onLogs: vi.fn(), ...props }));
@@ -67,10 +67,10 @@ describe("routine list", () => {
     setLocale("en");
   });
   it("says a coded run result in the app language, and the run's own words otherwise", () => {
-    const waiting = { ...run, output: undefined, attention: "Starting again shortly after OpenMausBot restarted while it ran", attentionCode: "routines.server.retryAfterRestart" } as RoutineRun;
-    expect(list({ runs: [waiting] })).toContain("Starting again shortly after OpenMausBot restarted while it ran");
+    const waiting = { ...run, output: undefined, attention: "Starting again shortly after OpenIndBot restarted while it ran", attentionCode: "routines.server.retryAfterRestart" } as RoutineRun;
+    expect(list({ runs: [waiting] })).toContain("Starting again shortly after OpenIndBot restarted while it ran");
     setLocale("pt-br");
-    expect(list({ runs: [waiting] })).toContain("Vai começar novamente em instantes: o OpenMausBot reiniciou durante a execução");
+    expect(list({ runs: [waiting] })).toContain("Vai começar novamente em instantes: o OpenIndBot reiniciou durante a execução");
     expect(list()).toContain("Brief prepared.");
     setLocale("en");
   });

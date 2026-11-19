@@ -1,5 +1,5 @@
 // X research's relay access on the desktop: while this computer's
-// MausBot Cloud sign-in is on an active paid plan, fetch that sign-in's
+// IndBot Cloud sign-in is on an active paid plan, fetch that sign-in's
 // own relay token from the Admin once and hand it to the local server over
 // the private parent port (server/included-services.ts). Kept in memory only.
 //
@@ -84,7 +84,7 @@ export function createDesktopIncludedX({ account, server, log }) {
     send: (access, note) => {
       const proc = server();
       if (!proc) return;
-      try { proc.postMessage({ type: "openmausbot:included-x", access, ...(note?.offered === false ? { offered: false } : {}) }); }
+      try { proc.postMessage({ type: "openindbot:included-x", access, ...(note?.offered === false ? { offered: false } : {}) }); }
       catch (error) { log(`X research access sync failed: ${error?.message ?? error}`); }
     },
   });

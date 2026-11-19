@@ -9,7 +9,7 @@ export const RELAY_PROTOCOL = "omb-relay.v1";
 const DRAIN_POLL_MS = 5;
 
 export interface DialOptions {
-  /** `ws://host:port/v1/e2e` for Wi-Fi and Tailscale, `wss://relayN.openmausbot.com/v1/phone` for the relay. */
+  /** `ws://host:port/v1/e2e` for Wi-Fi and Tailscale, `wss://relayN.openindbot.com/v1/phone` for the relay. */
   url: string;
   transportByte: TransportByte;
   remoteStatic: Uint8Array;

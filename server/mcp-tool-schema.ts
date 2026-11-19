@@ -72,7 +72,7 @@ function resolvesInside(root: JsonObject, ref: string): boolean {
   return true;
 }
 
-/** A tool's parameters as a Chat Completions provider is handed them when OpenMausBot could not compile its schema: a
+/** A tool's parameters as a Chat Completions provider is handed them when OpenIndBot could not compile its schema: a
  * reference the schema does not hold itself is left out, since no provider fetches one and a strict one refuses the whole
  * request over it. The server still checks the call. The same object when nothing dangles. */
 export function withoutDanglingReferences(schema: JsonObject): JsonObject {
@@ -98,7 +98,7 @@ function toolName(tool: JsonObject): string {
 
 /** The note a shortened tool carries, so the model fills in what its schema no longer spells out. */
 export function shortenedToolNote(provider: string): string {
-  return `(OpenMausBot shortened this tool's parameters to fit ${provider}'s size limit for one tool: give any field it no longer lists `
+  return `(OpenIndBot shortened this tool's parameters to fit ${provider}'s size limit for one tool: give any field it no longer lists `
     + "as this description says. The tool still checks every call against its full schema.)";
 }
 

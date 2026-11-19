@@ -20,7 +20,7 @@ vi.mock("../DesktopCapabilities", async (importOriginal) => ({
   useCaptionChrome: () => ({ dragProps: {}, padClass: "" }),
   useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: "/Users/ada" } }, ready: true }),
 }));
-vi.mock("../Avatar", () => ({ BotAvatar: () => null, MausAvatar: () => null }));
+vi.mock("../Avatar", () => ({ BotAvatar: () => null, IndAvatar: () => null }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const bot = (id: string, name: string): Bot => ({
@@ -109,7 +109,7 @@ describe("the Room panel's card", () => {
 
   it("names each way a room can answer, and the folder by its last part", () => {
     render(room({ defaultResponder: { kind: "auto", fallbackBotId: "lead" }, cwd: "/Users/ada/code/recruiting/" }));
-    expect(rowValue('[data-panel-page="responder"]')).toBe("MausBot decides");
+    expect(rowValue('[data-panel-page="responder"]')).toBe("IndBot decides");
     expect(rowValue('[data-panel-page="folder"]')).toBe("recruiting");
     render(room({ defaultResponder: { kind: "everyone" } }));
     expect(rowValue('[data-panel-page="responder"]')).toBe("Everyone");
@@ -120,7 +120,7 @@ describe("the Room panel's card", () => {
 });
 
 describe("Who responds", () => {
-  it("lists each member, then MausBot choosing, everyone and mentions only, and writes what the header picker writes", async () => {
+  it("lists each member, then IndBot choosing, everyone and mentions only, and writes what the header picker writes", async () => {
     render(room());
     click($('[data-panel-page="responder"]'));
     await settle();
@@ -131,7 +131,7 @@ describe("Who responds", () => {
       ["member:bench", "Vendor Bench", "false"],
       ["member:paper", "Paperwork", "false"],
       ["member:match", "Matcher", "false"],
-      ["auto", "Let MausBot choose", "false"],
+      ["auto", "Let IndBot choose", "false"],
       ["everyone", "Everyone", "false"],
       ["mentions", "Only who I @mention", "false"],
     ]);
@@ -153,7 +153,7 @@ describe("Who responds", () => {
     render(room({ defaultResponder: { kind: "auto", fallbackBotId: "paper" } }));
     click($('[data-panel-page="responder"]'));
     await settle();
-    expect($('[data-panel-choice="auto"]')?.textContent).toBe("Let MausBot chooseThe decision model is off, so plain messages go to Paperwork; @mentions override this");
+    expect($('[data-panel-choice="auto"]')?.textContent).toBe("Let IndBot chooseThe decision model is off, so plain messages go to Paperwork; @mentions override this");
     expect($('[data-panel-choice="auto"]')?.getAttribute("aria-checked")).toBe("true");
   });
 

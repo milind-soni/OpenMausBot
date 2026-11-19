@@ -31,7 +31,7 @@ export interface TemplateCard {
   prUrl?: string;
   /** The last publish's one-line error. */
   error?: string;
-  /** Publishing can't happen from here: no MausBot account is signed in, or the community service isn't offered. The card
+  /** Publishing can't happen from here: no IndBot account is signed in, or the community service isn't offered. The card
    * offers Save folder… and the community repository's upload page instead of Publish. */
   fallback?: "sign_in" | "unavailable";
 }
@@ -85,7 +85,7 @@ export interface TemplateRepoPublish {
 }
 
 /** The community repository a published template lands in, and the page anyone can upload a folder through. */
-export const COMMUNITY_REPOSITORY_URL = "https://github.com/milind-soni/openmausbot-teams";
+export const COMMUNITY_REPOSITORY_URL = "https://github.com/milind-soni/openindbot-teams";
 export const COMMUNITY_UPLOAD_URL = `${COMMUNITY_REPOSITORY_URL}/upload/main/teams`;
 
 /** The chat message the bot's Share button sends, and the one Update sends. */

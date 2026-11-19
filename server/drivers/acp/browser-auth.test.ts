@@ -163,14 +163,14 @@ describe.skipIf(process.platform === "win32")("AcpBrowserAuth", () => {
     const home = tempHome();
     homes.push(home);
     const auth = new AcpBrowserAuth(
-      spec({ serverHint: "this sign-in happens on the computer running OpenMausBot" }),
+      spec({ serverHint: "this sign-in happens on the computer running OpenIndBot" }),
       { cli: join(home, "missing-cli"), environment: () => ({ ...process.env, HOME: home }) },
     );
     // A missing cli reports ENOENT asynchronously, after start has already resolved as waiting.
     const started = await auth.start();
     await expect.poll(async () => (await auth.get(started.flowId!)).phase, soon).toBe("failed");
     const status = await auth.get(started.flowId!);
-    expect(status.message).toContain("computer running OpenMausBot");
+    expect(status.message).toContain("computer running OpenIndBot");
     await auth.dispose();
   });
 

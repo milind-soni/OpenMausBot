@@ -106,10 +106,10 @@ describe("the page helper's heading report", () => {
   });
 
   it("says a jsx page is still drawing, then what it drew, however long its libraries take", async () => {
-    const { page, reports } = boot("<div id=\"mausbot-root\"></div>");
+    const { page, reports } = boot("<div id=\"indbot-root\"></div>");
     await new Promise((resolve) => setTimeout(resolve, 900));
     expect(reports).toEqual([null]);
-    page.document.getElementById("mausbot-root")!.innerHTML = "<main><h1>Drawn by React</h1><p>body</p></main>";
+    page.document.getElementById("indbot-root")!.innerHTML = "<main><h1>Drawn by React</h1><p>body</p></main>";
     await expect.poll(() => reports).toEqual([null, true]);
   });
 

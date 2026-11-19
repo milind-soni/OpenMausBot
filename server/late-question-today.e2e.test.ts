@@ -18,7 +18,7 @@ it("keeps a question nobody answered on Today after its turn ends, and a late an
     });
     return { status: response.status, body: await response.json() };
   };
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: fixture.info.url } }) as Promise<any>;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENINDBOT_URL: fixture.info.url } }) as Promise<any>;
   let socket: Socket | undefined;
   console.log(`late-question Today fixture: ${fixture.info.logPath}`);
   try {

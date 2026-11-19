@@ -12,7 +12,7 @@ export function deviceCounts(state) {
   return { e2e: Math.min(e2e, 100), legacy: Math.min(devices.length - e2e, 100) };
 }
 
-/** The relay is needed while the companion runs, the person has Anywhere, through MausBot on, and a phone could use it:
+/** The relay is needed while the companion runs, the person has Anywhere, through IndBot on, and a phone could use it:
  * one not restricted to Wi-Fi and Tailscale, or a pairing window. Null when that can't be told. */
 export function relayNeed(state) {
   if (!state || typeof state !== "object") return null;
@@ -115,7 +115,7 @@ export function createCompanionE2E({
     tokenRejected: () => void tokens.refreshNow(),
     /** The computer woke: the sidecar redials now, and the token may have lapsed while asleep. */
     resumed() {
-      post({ type: "openmausbot:companion-e2e-redial" });
+      post({ type: "openindbot:companion-e2e-redial" });
       void tokens.refreshNow();
     },
   };

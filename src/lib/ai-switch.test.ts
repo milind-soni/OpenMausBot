@@ -16,7 +16,7 @@ const { forgetStops, noteRuntimeTurn } = await import("./stop-turn");
 
 const asked: Message = { id: "ask-1", at: 1, role: "user", kind: "text", text: "Plan my week" };
 const bot = (busy: boolean, messages: Message[] = [asked]): Bot => ({
-  id: "bot-1", threadId: "thread-1", name: "Maus", title: "", description: "", notifications: true, color: "green", unread: false, busy,
+  id: "bot-1", threadId: "thread-1", name: "Ind", title: "", description: "", notifications: true, color: "green", unread: false, busy,
   modelSelection: { instanceId: "opencodeGo", model: "free" }, messages,
   tasks: [{ threadId: "thread-1", title: "Chat", createdAt: 1, busy }],
 } as unknown as Bot);

@@ -47,8 +47,8 @@ export function diskLine(disk: CloudComputerDisk | null): string | null {
   return parts.length ? parts.join(" ") : null;
 }
 
-/** What MausBot is doing about a cloud computer that stopped answering, and the person's Restart computer and Replace computer. */
-/** `always`: the buttons show even while nothing is wrong (Advanced); otherwise only once MausBot is dealing with the computer. */
+/** What IndBot is doing about a cloud computer that stopped answering, and the person's Restart computer and Replace computer. */
+/** `always`: the buttons show even while nothing is wrong (Advanced); otherwise only once IndBot is dealing with the computer. */
 export function CloudComputerRecoveryRow({ botId, name, always }: { botId: string; name: string; always?: boolean }) {
   const [recovery, setRecovery] = useState<CloudComputerRecovery | null>(null);
   const [answering, setAnswering] = useState<CloudComputerAnswering | null>(null);
@@ -85,7 +85,7 @@ export function CloudComputerRecoveryRow({ botId, name, always }: { botId: strin
   };
 
   const busy = pending !== null || Boolean(recovery && recoveryUnderWay(recovery.state));
-  // While MausBot is dealing with the computer its own line says more than this one.
+  // While IndBot is dealing with the computer its own line says more than this one.
   const state = recovery && recoveryUnderWay(recovery.state) ? null : [answeringLine(answering, !always), diskLine(disk)].filter(Boolean).join(" ") || null;
   if (!always && !recovery && !result && !state) return null;
   return (

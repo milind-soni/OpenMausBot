@@ -94,7 +94,7 @@ export function createDesktopViewer(deps: {
     catch (error) {
       const status = error && typeof error === "object" && "status" in error ? error.status : 502;
       return json(res, typeof status === "number" && status >= 400 && status < 600 ? status : 502,
-        { error: "The desktop is not available. Open it again from OpenMausBot." });
+        { error: "The desktop is not available. Open it again from OpenIndBot." });
     }
     // Inspection may outlive a closed tab or the handshake deadline.
     if (res.destroyed || upgrade?.socket.destroyed) return;

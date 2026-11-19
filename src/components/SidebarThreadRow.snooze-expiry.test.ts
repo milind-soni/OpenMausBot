@@ -101,7 +101,7 @@ describe("snooze expiry wake-up", () => {
   it("schedules the wake-up from the production thread list so a snoozed row reappears at its deadline", () => {
     const now = Date.now();
     const bot: Bot = {
-      id: "maus", threadId: "current", name: "Maus", title: "", description: "", notifications: true,
+      id: "ind", threadId: "current", name: "Ind", title: "", description: "", notifications: true,
       color: "green", unread: false, busy: true, messages: [], modelSelection: { instanceId: "fake", model: "fake" },
       tasks: [
         { threadId: "current", title: "Current chat", createdAt: 1, busy: true, activity: "working" },

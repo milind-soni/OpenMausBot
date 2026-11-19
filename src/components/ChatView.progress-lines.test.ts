@@ -33,16 +33,16 @@ const messages: Message[] = [
   said("answer", "Fathom, Fireflies and Granola are the three to look at.", 29_000, true),
 ].map((message, index, all): Message => ({ ...message, parentId: all[index - 1]?.id }));
 const bot: Bot = {
-  id: "maus", threadId: "maus-thread", name: "MausBot", title: "", description: "", color: "green",
+  id: "ind", threadId: "ind-thread", name: "IndBot", title: "", description: "", color: "green",
   notifications: true, unread: false, busy: false, messages, activeLeafId: "answer", modelSelection: { instanceId: "test", model: "m" },
-  tasks: [{ threadId: "maus-thread", title: "Thread", createdAt: 1, busy: false, activity: "idle", modelSelection: { instanceId: "test", model: "m" }, approvalMode: "ask" }],
+  tasks: [{ threadId: "ind-thread", title: "Thread", createdAt: 1, busy: false, activity: "idle", modelSelection: { instanceId: "test", model: "m" }, approvalMode: "ask" }],
 };
 
 function mount(showToolCalls: boolean) {
   const state: AppState = {
     ...initialState,
     connected: true,
-    selectedId: "maus",
+    selectedId: "ind",
     bots: [bot],
     instances: [{ instanceId: "test", driverKind: "claude", displayName: "Claude", snapshot: { state: "available" } } as InstanceInfo],
     config: { features: { showToolCalls } } as unknown as AppState["config"],

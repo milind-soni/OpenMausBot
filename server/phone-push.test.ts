@@ -22,7 +22,7 @@ import {
 } from "./phone-push.ts";
 
 const CREDENTIAL = `omb_install_${"a".repeat(22)}.${"b".repeat(43)}`;
-const ACCESS = { controlPlane: "https://accounts.openmausbot.test", credential: CREDENTIAL };
+const ACCESS = { controlPlane: "https://accounts.openindbot.test", credential: CREDENTIAL };
 const APNS = "ab".repeat(32);
 const APNS_2 = "cd".repeat(32);
 const FCM = `fcmInstance_1:APA91b${"x".repeat(140)}`;
@@ -203,7 +203,7 @@ describe("offering a notify frame", () => {
     expect(relay.sends()).toEqual([{
       path: "/v1/installations/self/push/send",
       authorization: `Bearer ${CREDENTIAL}`,
-      body: { v: 1, token: APNS, pairing: "pair-tag-0001", collapseId: "openmaus.th_1.42", notification: { kind: "approval", title: "Scout needs approval", botId: "bot_1", botName: "Scout", threadId: "th_1" } },
+      body: { v: 1, token: APNS, pairing: "pair-tag-0001", collapseId: "openind.th_1.42", notification: { kind: "approval", title: "Scout needs approval", botId: "bot_1", botName: "Scout", threadId: "th_1" } },
     }]);
     const raw = JSON.stringify(relay.calls);
     for (const secret of ["PRIVATE", "payroll", "sk-live", "API_KEY"]) expect(raw).not.toContain(secret);
@@ -245,7 +245,7 @@ describe("offering a notify frame", () => {
     clock += PUSH_COALESCE_MS;
     push.offer({ notification: notification(), seq: 4 }, everyone);
     await push.flush();
-    expect(relay.sends().map((call) => call.body.collapseId)).toEqual(["openmaus.th_1.1", "openmaus.th_1.3", "openmaus.th_1.4"]);
+    expect(relay.sends().map((call) => call.body.collapseId)).toEqual(["openind.th_1.1", "openind.th_1.3", "openind.th_1.4"]);
   });
 
   it("stops a looping bot buzzing a pocket", async () => {
@@ -268,7 +268,7 @@ describe("the outbox", () => {
     push.offer({ notification: notification(), seq: 2 }, everyone);
     await push.flush();
     for (const wait of PUSH_RETRY_MS) await advance(push, wait);
-    expect(relay.sends().map((call) => call.body.collapseId)).toEqual(["openmaus.th_1.1", "openmaus.th_1.2", "openmaus.th_1.2", "openmaus.th_1.2"]);
+    expect(relay.sends().map((call) => call.body.collapseId)).toEqual(["openind.th_1.1", "openind.th_1.2", "openind.th_1.2", "openind.th_1.2"]);
     expect(push.pending()).toBe(0);
   });
 
@@ -325,7 +325,7 @@ describe("the outbox", () => {
     await advance(push, 119_000);
     expect(relay.sends()).toHaveLength(2);
     await advance(push, 1_000);
-    expect(relay.sends().at(-1)!.body.collapseId).toBe("openmaus.th_4.4");
+    expect(relay.sends().at(-1)!.body.collapseId).toBe("openind.th_4.4");
   });
 
   it("never throws into the server", async () => {
@@ -337,7 +337,7 @@ describe("the outbox", () => {
 
 describe("the push's identifier and title", () => {
   it("is the stream notification's own identifier when it fits APNs' 64 bytes", () => {
-    expect(phonePushCollapseId("th_1", 9)).toBe("openmaus.th_1.9");
+    expect(phonePushCollapseId("th_1", 9)).toBe("openind.th_1.9");
     expect(phonePushCollapseId("t".repeat(60), 9)).toBeUndefined();
     expect(phonePushCollapseId("th_1", -1)).toBeUndefined();
   });
@@ -353,21 +353,21 @@ describe("where the relay credential comes from", () => {
 
   it("prefers the desktop app's message, including its 'none'", () => {
     writeFileSync(tunnelFile(), JSON.stringify({ companionInstallationCredential: CREDENTIAL }));
-    const source = new PhonePushAccessSource({ env: { OMB_PUSH_CREDENTIAL: CREDENTIAL }, tunnelFile: tunnelFile(), defaultControlPlane: "https://accounts.openmausbot.com" });
+    const source = new PhonePushAccessSource({ env: { OMB_PUSH_CREDENTIAL: CREDENTIAL }, tunnelFile: tunnelFile(), defaultControlPlane: "https://accounts.openindbot.com" });
     expect(source.receive({ type: "something-else" })).toBe(false);
-    expect(source.receive({ type: PHONE_PUSH_DESKTOP_MESSAGE, access: { controlPlane: "https://accounts.openmausbot.com/", credential: CREDENTIAL } })).toBe(true);
-    expect(source.current()).toEqual({ controlPlane: "https://accounts.openmausbot.com", credential: CREDENTIAL });
+    expect(source.receive({ type: PHONE_PUSH_DESKTOP_MESSAGE, access: { controlPlane: "https://accounts.openindbot.com/", credential: CREDENTIAL } })).toBe(true);
+    expect(source.current()).toEqual({ controlPlane: "https://accounts.openindbot.com", credential: CREDENTIAL });
     source.receive({ type: PHONE_PUSH_DESKTOP_MESSAGE, access: null });
     expect(source.current()).toBeNull();
     source.receive({ type: PHONE_PUSH_DESKTOP_MESSAGE, access: { controlPlane: "http://evil.example", credential: CREDENTIAL } });
     expect(source.current()).toBeNull();
   });
 
-  it("then OMB_PUSH_CREDENTIAL, a fleet's credential, then `openmausbot login`'s file", () => {
-    const at = (env: NodeJS.ProcessEnv) => new PhonePushAccessSource({ env, tunnelFile: tunnelFile(), defaultControlPlane: "https://accounts.openmausbot.com" }).current();
+  it("then OMB_PUSH_CREDENTIAL, a fleet's credential, then `openindbot login`'s file", () => {
+    const at = (env: NodeJS.ProcessEnv) => new PhonePushAccessSource({ env, tunnelFile: tunnelFile(), defaultControlPlane: "https://accounts.openindbot.com" }).current();
     expect(at({})).toBeNull();
     writeFileSync(tunnelFile(), JSON.stringify({ companionInstallationCredential: CREDENTIAL }));
-    expect(at({})).toEqual({ controlPlane: "https://accounts.openmausbot.com", credential: CREDENTIAL });
+    expect(at({})).toEqual({ controlPlane: "https://accounts.openindbot.com", credential: CREDENTIAL });
     expect(at({ OMB_PUSH_CREDENTIAL: "not-a-credential" })).toBeNull();
     expect(at({ OMB_INSTALLATION_CREDENTIAL: CREDENTIAL, OMB_CONTROL_PLANE_URL: "http://127.0.0.1:8787" })).toEqual({ controlPlane: "http://127.0.0.1:8787", credential: CREDENTIAL });
   });

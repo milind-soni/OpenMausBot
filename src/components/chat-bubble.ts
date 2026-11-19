@@ -57,7 +57,7 @@ export function isBotTextRow(message: Message, botId: string): boolean {
   return bubbleGroup(message, botId) === "bot";
 }
 
-/** A transcript row that draws nothing: a reaction, MausBot's follow-up (drawn under its intro), or a tool step or work
+/** A transcript row that draws nothing: a reaction, IndBot's follow-up (drawn under its intro), or a tool step or work
  * summary while tool calls are hidden. */
 export function quietRow(message: Message, showToolCalls: boolean): boolean {
   if (message.reaction || message.helperFollowup) return true;

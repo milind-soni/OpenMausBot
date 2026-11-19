@@ -15,7 +15,7 @@ describe("a chat video the player cannot decode", () => {
     document.body.append(host);
     root = createRoot(host);
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ url, mime: "video/quicktime", bytes: 300 * 1024 * 1024 }), {
-      headers: { "content-type": "application/json", "x-openmausbot-media": "1" },
+      headers: { "content-type": "application/json", "x-openindbot-media": "1" },
     })));
   });
   afterEach(() => {

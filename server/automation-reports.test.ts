@@ -117,7 +117,7 @@ function fixture(options: { threadLanguage?: (threadId: string) => string | unde
     store.patchTask(bot.id, threadId, { routineRunId: id });
     if (said !== null) store.appendMessage(threadId, { role: "bot", kind: "text", text: said, turnId: `turn-${id}`, turnTerminal: true });
     const run: RoutineRun = {
-      id, routineId: `routine-${name}`, routineName: name, target: "bot", botId: bot.id, runOn: "maus", scheduledFor: Date.now(),
+      id, routineId: `routine-${name}`, routineName: name, target: "bot", botId: bot.id, runOn: "ind", scheduledFor: Date.now(),
       status: "completed", manual: false, triggerSource: "schedule", threadId, resultsThreadId: main, createdAt: Date.now(), ...extra,
     };
     runs.set(id, run);

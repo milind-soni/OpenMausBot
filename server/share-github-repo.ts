@@ -108,7 +108,7 @@ export function githubSession(connection: Extract<GithubConnection, { ok: true }
   const open = async (signal: AbortSignal) => {
     const init = await connection.relay({
       jsonrpc: "2.0", id: "omb-share-init", method: "initialize",
-      params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "openmausbot-templates", version: "1" } },
+      params: { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "openindbot-templates", version: "1" } },
     }, undefined, signal);
     if (init.status !== 200) throw new GithubTemplateError(`GitHub couldn't be reached through Apps (HTTP ${init.status}). Try again in a few minutes.`, 502);
     await connection.relay({ jsonrpc: "2.0", method: "notifications/initialized" }, init.transportSessionId, signal).catch(() => undefined);
@@ -228,7 +228,7 @@ export async function publishToRepo(connection: Extract<GithubConnection, { ok: 
   }
   const madeTree = text(await session.call(GITHUB_TOOLS.tree, { owner, repo, base_tree: baseTree, tree }), "sha");
   if (!madeTree) throw new GithubTemplateError("GitHub's answer for the folder had no id.", 502);
-  const message = `Add the ${input.name} template from MausBot`;
+  const message = `Add the ${input.name} template from IndBot`;
   const commit = text(await session.call(GITHUB_TOOLS.commit, { owner, repo, message, tree: madeTree, parents: [headSha] }), "sha");
   if (!commit) throw new GithubTemplateError("GitHub's answer for the commit had no id.", 502);
   const link = (branch: string) => `https://github.com/${owner}/${repo}/tree/${encodeURIComponent(branch)}/${dir}`;
@@ -237,12 +237,12 @@ export async function publishToRepo(connection: Extract<GithubConnection, { ok: 
     if (moved === session.missing) throw new GithubTemplateError(`${base} couldn't be updated. Try a pull request instead.`, 409);
     return { kind: "commit", url: link(base), link: link(base), branch: base };
   }
-  const branch = `mausbot-${input.slug}-${randomBytes(3).toString("hex")}`;
+  const branch = `indbot-${input.slug}-${randomBytes(3).toString("hex")}`;
   const made = await session.call(GITHUB_TOOLS.createRef, { owner, repo, ref: `refs/heads/${branch}`, sha: commit });
   if (made === session.missing) throw new GithubTemplateError("The new branch couldn't be made.", 502);
   const pull = await session.call(GITHUB_TOOLS.pullRequest, {
     owner, repo, title: message, head: branch, base,
-    body: "A template made in MausBot: its instructions, skills and their scripts, and pictures. No chats, memory, keys or connections.",
+    body: "A template made in IndBot: its instructions, skills and their scripts, and pictures. No chats, memory, keys or connections.",
   });
   const url = inRepository(field(pull, "html_url"), owner, repo);
   if (!url) throw new GithubTemplateError("GitHub's answer for the pull request had no link.", 502);

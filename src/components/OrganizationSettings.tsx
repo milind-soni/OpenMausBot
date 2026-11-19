@@ -6,7 +6,7 @@ import { Card, LearnMore, SETTINGS_INPUT, SettingRow, SettingsField, SettingsFol
 import { CompanyModels } from "./CompanyModels";
 
 const providerNames: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter" };
-const DEFAULT_PORTAL_ORIGIN = "https://admin.openmausbot.com";
+const DEFAULT_PORTAL_ORIGIN = "https://admin.openindbot.com";
 const STATUS_TEXT: Record<ManagedMessageCode, LocaleKey> = {
   clearFailed: "organization.status.clearFailed",
   disconnected: "organization.status.disconnected",

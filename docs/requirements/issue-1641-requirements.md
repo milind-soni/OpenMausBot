@@ -3,7 +3,7 @@
 ## 目的
 
 #1637 を `main`（`6d72b3ac`）へマージした push CI
-https://github.com/milind-soni/OpenMausBot/actions/runs/35702797939
+https://github.com/milind-soni/OpenIndBot/actions/runs/35702797939
 が落ちている。直前の `main`（`e8729497`）は緑だった。落ちている検査を、製品のピン留めと更新順を戻さずに通す。
 
 ## 失敗

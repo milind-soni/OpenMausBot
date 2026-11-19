@@ -283,7 +283,7 @@ const CHROME_FLAGS = [
 ];
 
 export async function launchChrome(executable: string): Promise<Chrome> {
-  const profile = mkdtempSync(join(tmpdir(), "openmausbot-bench-chrome-"));
+  const profile = mkdtempSync(join(tmpdir(), "openindbot-bench-chrome-"));
   const child: ChildProcess = spawn(executable, [...CHROME_FLAGS, `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank"], { stdio: "ignore" });
   const portFile = join(profile, "DevToolsActivePort");
   const deadline = Date.now() + 30_000;

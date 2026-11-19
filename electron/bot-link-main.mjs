@@ -58,7 +58,7 @@ export function createBotLinkMain({ wanted, pref, localRequest, fetch: fetchImpl
   let computer = null;
   const thisComputer = async () => {
     if (computer) return computer;
-    const described = await body(await localRequest("/.well-known/openmausbot/environment", { signal: AbortSignal.timeout(10_000) }));
+    const described = await body(await localRequest("/.well-known/openindbot/environment", { signal: AbortSignal.timeout(10_000) }));
     if (!described?.environmentId) return null;
     return (computer = { id: described.environmentId, name: String(described.label ?? "").trim().slice(0, 120) || "This computer" });
   };

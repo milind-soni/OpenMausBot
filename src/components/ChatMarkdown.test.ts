@@ -566,23 +566,23 @@ describe("#Title thread links in markdown", () => {
   });
 
   it("renders a sent canonical link as a chip that opens the thread", () => {
-    const markup = render("done in [QA PR 245](openmausbot://thread/qa-245?bot=scout) today");
+    const markup = render("done in [QA PR 245](openindbot://thread/qa-245?bot=scout) today");
     expect(markup).toContain('<button type="button" data-thread-link="qa-245"');
     expect(markup).toContain(">QA PR 245</button>");
-    expect(markup).not.toContain('href="openmausbot://');
+    expect(markup).not.toContain('href="openindbot://');
   });
 
   it("keeps a dead thread link as plain text, never an external anchor", () => {
-    const markup = render("see [Gone](openmausbot://thread/dead?bot=scout)");
+    const markup = render("see [Gone](openindbot://thread/dead?bot=scout)");
     expect(markup).toContain(">Gone<");
     expect(markup).not.toContain("data-thread-link");
-    expect(markup).not.toContain('href="openmausbot://');
+    expect(markup).not.toContain('href="openindbot://');
     expect(markup).not.toContain('target="_blank"');
   });
 });
 
 describe("a Use my Mac link in an older bot message", () => {
-  const text = "To let me use your apps, press [Use my Mac](openmausbot://use-my-computer).";
+  const text = "To let me use your apps, press [Use my Mac](openindbot://use-my-computer).";
 
   it("is plain text everywhere, even in this app with an older Cloud's bridge: this computer is lent by itself", () => {
     const offer = vi.fn(async () => {});
@@ -591,12 +591,12 @@ describe("a Use my Mac link in an older bot message", () => {
       const markup = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
       expect(markup).toContain(">Use my Mac<");
       expect(markup).not.toContain("<button");
-      expect(markup).not.toContain('href="openmausbot://');
+      expect(markup).not.toContain('href="openindbot://');
       expect(offer).not.toHaveBeenCalled();
     } finally {
       delete window.ogb;
     }
-    expect(chatUrlTransform("openmausbot://use-my-computer")).toBe("openmausbot://use-my-computer");
+    expect(chatUrlTransform("openindbot://use-my-computer")).toBe("openindbot://use-my-computer");
   });
 });
 
@@ -651,7 +651,7 @@ describe("application and rejected Markdown links", () => {
 });
 
 describe("a bot's link to a page it published", () => {
-  const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
+  const PAGE = "https://abcdefghijklmnopqrstuvwxyz.indbot.page/";
   const text = `Here is your dashboard: [Sales dashboard](${PAGE})`;
   async function clickPage(store?: Parameters<typeof BotEditorStore>[0]["value"]) {
     const host = document.createElement("div");
@@ -703,7 +703,7 @@ describe("Markdown image metadata", () => {
     expect(markdownImageName("https://example.test/random.png", "Final render")).toBe("Final render");
     expect(markdownImageName("https://example.test/output/Launch%20art.webp")).toBe("Launch art.webp");
     expect(markdownImageName("")).toBe("Image");
-    expect(markdownImageName("C:\\Users\\Maus\\chart.png")).toBe("chart.png");
+    expect(markdownImageName("C:\\Users\\Ind\\chart.png")).toBe("chart.png");
   });
 
   it("only offers an external action for HTTP sources", () => {
@@ -727,7 +727,7 @@ describe("message-scoped file targets", () => {
     expect(localFilePath("file://server/share/report.pdf")).toBe("//server/share/report.pdf");
     expect(localFilePath("//cdn.example.test/report.pdf")).toBeNull();
     expect(localFilePath("/C:/posix/report.pdf")).toBe("/C:/posix/report.pdf");
-    expect(localFilePath("file:///C:/Users/Maus/report.pdf")).toBe("C:/Users/Maus/report.pdf");
+    expect(localFilePath("file:///C:/Users/Ind/report.pdf")).toBe("C:/Users/Ind/report.pdf");
     expect(localFilePath("https://example.test/report.pdf")).toBeNull();
     expect(localFilePath("#section")).toBeNull();
     expect(localFilePath("javascript:alert(1)")).toBeNull();
@@ -735,9 +735,9 @@ describe("message-scoped file targets", () => {
 
   it("preserves supported local file spellings without widening unsafe protocols", () => {
     expect(chatUrlTransform("file:///Users/milind/report.md")).toBe("file:///Users/milind/report.md");
-    expect(chatUrlTransform("C:/Users/Maus/report.md")).toBe("C:/Users/Maus/report.md");
+    expect(chatUrlTransform("C:/Users/Ind/report.md")).toBe("C:/Users/Ind/report.md");
     expect(chatUrlTransform("\\\\server\\share\\report.md")).toBe("\\\\server\\share\\report.md");
-    expect(chatUrlTransform("C:%5CUsers%5CMaus%5Crelease%20notes.md")).toBe("C:\\Users\\Maus\\release%20notes.md");
+    expect(chatUrlTransform("C:%5CUsers%5CInd%5Crelease%20notes.md")).toBe("C:\\Users\\Ind\\release%20notes.md");
     expect(chatUrlTransform("javascript:alert(1)")).toBe("");
     expect(chatUrlTransform("https://example.test/report.md")).toBe("https://example.test/report.md");
   });
@@ -766,12 +766,12 @@ describe("ChatMarkdown attachments", () => {
 
   it("keeps host paths private while routing them through the scoped file handler", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
-      text: "[macOS](file:///Users/milind/report.md) [Windows](C:/Users/Maus/report.md)",
+      text: "[macOS](file:///Users/milind/report.md) [Windows](C:/Users/Ind/report.md)",
       message: { threadId: "thread-1", messageId: "message-1" },
     }));
     expect(html).toContain('title="Preview: report.md"');
     expect(html).not.toContain("/Users/milind/report.md");
-    expect(html).not.toContain("C:/Users/Maus/report.md");
+    expect(html).not.toContain("C:/Users/Ind/report.md");
   });
 
   it("says an image with no source is unavailable in the person's language", () => {
@@ -808,14 +808,14 @@ describe("ChatMarkdown attachments", () => {
     const preview = vi.spyOn(AttachmentPreview, "MarkdownImagePreview");
     try {
       const html = renderToStaticMarkup(createElement(ChatMarkdown, {
-        text: "[Report](C:\\Users\\Maus\\.openmausbot\\report.md)\n\n![Chart](C:\\Users\\Maus\\.openmausbot\\chart.png)",
+        text: "[Report](C:\\Users\\Ind\\.openindbot\\report.md)\n\n![Chart](C:\\Users\\Ind\\.openindbot\\chart.png)",
         message: { threadId: "thread-1", messageId: "message-1" },
       }));
       expect(html).toContain('title="Preview: report.md"');
       expect(html).not.toContain('href=""');
       expect(html).not.toContain("Image unavailable");
-      expect(save.mock.calls[0]?.[0]).toBe("C:\\Users\\Maus\\.openmausbot\\report.md");
-      expect(preview.mock.calls[0]?.[0].filePath).toBe("C:\\Users\\Maus\\.openmausbot\\chart.png");
+      expect(save.mock.calls[0]?.[0]).toBe("C:\\Users\\Ind\\.openindbot\\report.md");
+      expect(preview.mock.calls[0]?.[0].filePath).toBe("C:\\Users\\Ind\\.openindbot\\chart.png");
     } finally {
       save.mockRestore();
       preview.mockRestore();
@@ -823,8 +823,8 @@ describe("ChatMarkdown attachments", () => {
   });
 
   it("names a linked page by its real file name, not its percent-encoded spelling", () => {
-    const filePath = String.raw`C:\Users\Maus\Downloads\2026 AI视频分析报告.html`;
-    for (const text of [`[报告](<${filePath}>)`, "已保存到 `" + filePath + "`", "[报告](file:///C:/Users/Maus/Downloads/2026%20AI%E8%A7%86%E9%A2%91%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.html)"]) {
+    const filePath = String.raw`C:\Users\Ind\Downloads\2026 AI视频分析报告.html`;
+    for (const text of [`[报告](<${filePath}>)`, "已保存到 `" + filePath + "`", "[报告](file:///C:/Users/Ind/Downloads/2026%20AI%E8%A7%86%E9%A2%91%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.html)"]) {
       const html = renderToStaticMarkup(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } }));
       expect(html).toContain('title="Preview page: 2026 AI视频分析报告.html"');
       expect(html).toContain('aria-label="Save a copy of 2026 AI视频分析报告.html"');
@@ -834,7 +834,7 @@ describe("ChatMarkdown attachments", () => {
 
   it("decodes a linked name once: a literal %25 in a file:// link stays as written", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
-      text: "[Report](file:///Users/maus/100%2541%20report.html)", message: { threadId: "thread-1", messageId: "message-1" },
+      text: "[Report](file:///Users/ind/100%2541%20report.html)", message: { threadId: "thread-1", messageId: "message-1" },
     }));
     expect(html).toContain('title="Preview page: 100%41 report.html"');
   });
@@ -850,7 +850,7 @@ describe("ChatMarkdown attachments", () => {
 
   it("preserves dollar signs in Windows file destinations", () => {
     const save = vi.spyOn(AttachmentPreview, "useLocalFileSave");
-    const filePath = "C:\\Users\\Maus\\R$5\\receipt.pdf";
+    const filePath = "C:\\Users\\Ind\\R$5\\receipt.pdf";
     try {
       renderToStaticMarkup(createElement(ChatMarkdown, {
         text: `[Receipt](${filePath})`, message: { threadId: "thread-1", messageId: "message-1" },
@@ -863,9 +863,9 @@ describe("ChatMarkdown attachments", () => {
 
   it("links a path written as plain text, and the server authorizes the very path the link asks for", () => {
     const cases: Array<[string, string]> = [
-      ["I saved the report to /Users/maus/reports/q3.md, have a look.", "/Users/maus/reports/q3.md"],
-      ["It's in `/Users/maus/My Reports/q3 final.md`.", "/Users/maus/My Reports/q3 final.md"],
-      [String.raw`Written to C:\Users\Maus\.openmausbot\report.md.`, String.raw`C:\Users\Maus\.openmausbot\report.md`],
+      ["I saved the report to /Users/ind/reports/q3.md, have a look.", "/Users/ind/reports/q3.md"],
+      ["It's in `/Users/ind/My Reports/q3 final.md`.", "/Users/ind/My Reports/q3 final.md"],
+      [String.raw`Written to C:\Users\Ind\.openindbot\report.md.`, String.raw`C:\Users\Ind\.openindbot\report.md`],
       [String.raw`It's on \\fileserver\team\plans\roadmap.docx now.`, String.raw`\\fileserver\team\plans\roadmap.docx`],
       [String.raw`Saved /tmp/out/my\_notes.md`, "/tmp/out/my_notes.md"],
     ];
@@ -885,7 +885,7 @@ describe("ChatMarkdown attachments", () => {
 
   it("does not authorize a path the message never rendered as a link", () => {
     expect(messageReferencesFile("Use and/or here, or /etc alone.", "/etc")).toBe(false);
-    expect(messageReferencesFile("```\ncat /Users/maus/notes.md\n```", "/Users/maus/notes.md")).toBe(false);
+    expect(messageReferencesFile("```\ncat /Users/ind/notes.md\n```", "/Users/ind/notes.md")).toBe(false);
     expect(messageReferencesFile(String.raw`On \\fileserver\team\a.md`, String.raw`\fileserver\team\a.md`.slice(1))).toBe(false);
   });
 
@@ -927,7 +927,7 @@ describe("ChatMarkdown attachments", () => {
   });
 
   describe("a file link outside the conversation's workspace", () => {
-    const filePath = "C:\\Users\\Maus\\_draft\\ollama-gen.js";
+    const filePath = "C:\\Users\\Ind\\_draft\\ollama-gen.js";
     const render = (outsideWorkspace: boolean, href = filePath) => {
       const save = vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
         state: "failed",
@@ -966,7 +966,7 @@ describe("ChatMarkdown attachments", () => {
       try {
         const html = render(true);
         expect(html).not.toContain("Show in folder");
-        expect(html).toMatch(/<code[^>]*select-all[^>]*>C:\\Users\\Maus\\_draft\\ollama-gen\.js<\/code>/);
+        expect(html).toMatch(/<code[^>]*select-all[^>]*>C:\\Users\\Ind\\_draft\\ollama-gen\.js<\/code>/);
       } finally {
         vi.unstubAllGlobals();
       }
@@ -974,7 +974,7 @@ describe("ChatMarkdown attachments", () => {
 
     it("does not offer a retry for a refusal that happens on every try", () => {
       expect(render(true)).not.toContain("lucide-rotate-ccw");
-      expect(render(true, "file:///Users/maus/Desktop/designs/Posts/2026-10-08_News")).not.toContain("lucide-rotate-ccw");
+      expect(render(true, "file:///Users/ind/Desktop/designs/Posts/2026-10-08_News")).not.toContain("lucide-rotate-ccw");
       expect(render(false)).toContain("lucide-rotate-ccw");
     });
 
@@ -1401,7 +1401,7 @@ describe("bidi: message content carries its own direction", () => {
     expect(labelled).toContain('dir="auto"');
 
     const path = renderToStaticMarkup(createElement(ChatMarkdown, {
-      text: `${ARABIC} [report](/Users/maus/out/report.md) ${ARABIC}`,
+      text: `${ARABIC} [report](/Users/ind/out/report.md) ${ARABIC}`,
       message: { threadId: "thread-1", messageId: "message-1" },
     }));
     expect(path).toContain('<span dir="ltr"');

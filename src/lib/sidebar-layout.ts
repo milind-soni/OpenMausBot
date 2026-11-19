@@ -112,7 +112,7 @@ export function partitionSidebarBots<T extends SidebarBot>(
   options?: { universalPins?: boolean; viewerEmail?: string | null; welcoming?: string | null; searching?: boolean },
 ) {
   const universalPins = options?.universalPins === true;
-  // A search also finds the viewer's own MausBot when it is hidden from the sidebar, so it can always be reached.
+  // A search also finds the viewer's own IndBot when it is hidden from the sidebar, so it can always be reached.
   const listed = (bot: T) => !hiddenFromSidebar(bot, options?.viewerEmail) || (options?.searching === true && Boolean(bot.defaultBot) && !someoneElsesDefaultBot(bot, options.viewerEmail));
   const visible = bots.filter((bot) => !bot.hidden && listed(bot) && bot.id !== options?.welcoming);
   // The pin flag is the server's, the same on every client. Only the main Chief keeps its own top slot when pins are
@@ -124,7 +124,7 @@ export function partitionSidebarBots<T extends SidebarBot>(
   const sectionedBots = visible.filter(
     (bot) => !bot.chiefOfStaff && Boolean(bot.section) && !pinnedIds.has(bot.id),
   );
-  // A search can list two unsectioned Chiefs (the viewer's hidden MausBot and a shared Chief); the second is a bot row.
+  // A search can list two unsectioned Chiefs (the viewer's hidden IndBot and a shared Chief); the second is a bot row.
   const unsectionedBots = visible.filter(
     (bot) => (!bot.chiefOfStaff || (options?.searching === true && bot !== unsectionedChief)) && !bot.section && !pinnedIds.has(bot.id),
   );

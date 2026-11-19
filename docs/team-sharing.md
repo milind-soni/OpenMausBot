@@ -1,6 +1,6 @@
 # Sharing a bot or a department
 
-A bot or a whole department can be shared as a **template**: a small folder anyone can add to their own MausBot.
+A bot or a whole department can be shared as a **template**: a small folder anyone can add to their own IndBot.
 
 - **A bot.** Ask it in chat ("publish yourself to GitHub", "export yourself"), or use **Share → Share as template**.
   The app sends the bot "Create a public template of yourself that I can share with somebody else"; the bot makes the
@@ -22,7 +22,7 @@ A bot or a whole department can be shared as a **template**: a small folder anyo
 ```
 
 `bot.md` and `team.md` are BotMRR Markdown v2: YAML frontmatter with the template's fields, and a readable body any AI
-agent can follow when the file is pasted in. Older files (BotMRR v1 Markdown, `team.mausteam.json`, package JSON) still
+agent can follow when the file is pasted in. Older files (BotMRR v1 Markdown, `team.indteam.json`, package JSON) still
 import.
 
 Never in a template: chats, memory, keys, passwords, tokens, connection addresses, models, approval levels, folders,
@@ -41,9 +41,9 @@ their interpreter (`python3 scripts/report.py`). Older apps ignore the extra fil
 
 ## Publishing
 
-**Publish** sends the folder to the MausBot Admin, which opens a pull request on the community repository
-(`milind-soni/openmausbot-teams`); nobody needs a GitHub account. The card then has **Copy link**, a GitHub folder link
-that **Import…** accepts, and **View on GitHub**. Publishing needs a MausBot sign-in; without one, the card offers
+**Publish** sends the folder to the IndBot Admin, which opens a pull request on the community repository
+(`milind-soni/openindbot-teams`); nobody needs a GitHub account. The card then has **Copy link**, a GitHub folder link
+that **Import…** accepts, and **View on GitHub**. Publishing needs a IndBot sign-in; without one, the card offers
 **Save folder…** and **Upload on GitHub**, the repository's own upload page. The community repository takes each skill's
 SKILL.md alone for now, so a published template leaves its scripts out; the other targets keep them.
 
@@ -51,7 +51,7 @@ SKILL.md alone for now, so a published template leaves its scripts out; the othe
 
 **Your GitHub repo…** (in the card's **…**, and beside **Publish to community** in a department's Share) publishes to a
 repository the GitHub connection in Apps can write to: `owner/repo`, an optional folder, and the template goes in
-`<folder>/<slug>/` as one commit on a new branch `mausbot-<slug>-<6 hex>` with a pull request, or straight on the default
+`<folder>/<slug>/` as one commit on a new branch `indbot-<slug>-<6 hex>` with a pull request, or straight on the default
 branch with **Commit directly to the default branch**. Files already in that folder under other names stay. Without a
 GitHub connection it says **Connect GitHub in Apps first** with **Open Apps**. On a Team Cloud it uses the team's GitHub,
 or the person's own when the team has each person connect GitHub; the team's Rules apply as to any app call.

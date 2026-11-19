@@ -72,7 +72,7 @@ function ThemeEditor({ id, act, onClose, onDelete }: { id: string; act: Act; onC
             onClick={() => void act(() => api(`/api/themes/${id}/duplicate`, { method: "POST", body: JSON.stringify({ name: t("settings.customThemes.copyName", { name: file.name }).slice(0, 60) }) }))}>
             {t("settings.customThemes.duplicate")}
           </button>
-          <button type="button" className="ui-button ui-button-sm" onClick={() => void act(async () => download(`${id}.mausbot-theme.json`, await api(`/api/themes/${id}/export`)))}>
+          <button type="button" className="ui-button ui-button-sm" onClick={() => void act(async () => download(`${id}.indbot-theme.json`, await api(`/api/themes/${id}/export`)))}>
             {t("settings.customThemes.export")}
           </button>
           <button type="button" className="ui-button ui-button-sm" data-danger="" onClick={onDelete}>{t("common.delete")}</button>

@@ -41,7 +41,7 @@ let state: CompanionState = {
   tailnetName: "ada-mac.tail1234.ts.net",
   discovery: { advertising: true, name: "Ada's MacBook" },
   ...(e2eOn
-    ? { e2e: { enabled: true, relay: relayOn ? "connected" : "off", node: relayOn ? "relay1.openmausbot.com" : null, descriptor: relayOn ? { v: 1, k: K, h: "lz81isB3BuNV6rHgYgG3Wg", r: ["relay1.openmausbot.com", "relay2.openmausbot.com"] } : { v: 1, k: K } } }
+    ? { e2e: { enabled: true, relay: relayOn ? "connected" : "off", node: relayOn ? "relay1.openindbot.com" : null, descriptor: relayOn ? { v: 1, k: K, h: "lz81isB3BuNV6rHgYgG3Wg", r: ["relay1.openindbot.com", "relay2.openindbot.com"] } : { v: 1, k: K } } }
     : {}),
 };
 const answer = async (next?: Partial<CompanionState>) => {

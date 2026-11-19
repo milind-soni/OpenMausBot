@@ -8,7 +8,7 @@ import { backupFolder, context, dataFolder, deadPid, NOW } from "../../testing/d
 import { runDoctor } from "../run.ts";
 import { leaseCheck } from "./lease.ts";
 
-const LEASE = "openmausbot-server.lease";
+const LEASE = "openindbot-server.lease";
 const lease = (data: string, pid: number) => {
   const record = `${JSON.stringify({ version: 1, pid, host: hostname(), token: randomUUID(), createdAt: Date.now() })}\n`;
   writeFileSync(join(data, LEASE), record, { mode: 0o600 });

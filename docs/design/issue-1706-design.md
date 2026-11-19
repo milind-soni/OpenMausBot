@@ -296,7 +296,7 @@ swift test
 
 Then generate the project and run the UI test on a fresh simulator, the
 way `docs/verification/ios-threads.md` describes. Also build
-`OpenMausCompanion` for the simulator.
+`OpenIndCompanion` for the simulator.
 
 `docs/verification/README.md` and the fake-engine control tool cover server
 flows. This change does not touch them, so that harness is not the check.

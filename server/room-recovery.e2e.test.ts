@@ -20,7 +20,7 @@ it("boots, starts an interrupted routine once more, and reports it back to its s
     // Reproduce the persisted state of an interrupted process, not a second live writer.
     writeFileSync(join(dataDir, "routines.json"), JSON.stringify({ version: 1, routines: [], runs: [{
       id: "interrupted-room-run", routineId: "interrupted-routine", routineName: "Room report",
-      botId: bot.id, target: "bot", runOn: "maus", sourceThreadId: channel.activeTaskId,
+      botId: bot.id, target: "bot", runOn: "ind", sourceThreadId: channel.activeTaskId,
       status: "running", prompt: "Report once", createdAt: Date.now(), scheduledFor: Date.now(),
     }] }));
     const env: NodeJS.ProcessEnv = {};
@@ -74,7 +74,7 @@ it("keeps a routine waiting through a restart, reruns its cut teammate once, and
     await waitForExit(fixture.child, { signal: "SIGTERM" });
     const at = Date.now() - 60_000;
     writeFileSync(join(dataDir, "routines.json"), JSON.stringify({ version: 1, routines: [], runs: [{
-      id: "cut-run", routineId: "cut-routine", routineName: "Weekly export", botId: chief.id, target: "bot", runOn: "maus",
+      id: "cut-run", routineId: "cut-routine", routineName: "Weekly export", botId: chief.id, target: "bot", runOn: "ind",
       threadId: chief.activeTaskId, status: "running", prompt: "Have Engineering build the export", createdAt: at, scheduledFor: at, startedAt: at,
     }] }));
     const node = { result: "", executions: 0, kind: "work", restarts: 0, rootId: "cut-root" };

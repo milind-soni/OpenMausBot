@@ -82,7 +82,7 @@ const refusal = (status: number, code: string, error: string): TeamSlackAnswer =
 const NO_SUCH_BOT = refusal(404, "no_such_bot", "No such bot.");
 const NO_SUCH_CONVERSATION = refusal(409, "no_such_conversation", "No such conversation.");
 
-/** Usable where everyone the team shares the bot with reads along: never a member's own MausBot, never a bot only its owner uses. */
+/** Usable where everyone the team shares the bot with reads along: never a member's own IndBot, never a bot only its owner uses. */
 export const teamSlackShared = (bot: BotRecord): boolean => !defaultBotPerson(bot) && sharedBeyondOwner(bot);
 
 const openCard = (message: Message): boolean => Boolean(message.card?.requestId && !message.card.answered && !message.card.dismissed && !message.card.expired);

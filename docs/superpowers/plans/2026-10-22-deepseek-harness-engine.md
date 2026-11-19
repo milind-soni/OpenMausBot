@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add DeepSeek Harness (`dsh`) as a selectable MausBot engine: an ACP driver, a default-fleet instance, a DeepSeek API-key row in Settings, an Engines-page card with mark and npm install.
+**Goal:** Add DeepSeek Harness (`dsh`) as a selectable IndBot engine: an ACP driver, a default-fleet instance, a DeepSeek API-key row in Settings, an Engines-page card with mark and npm install.
 
 **Architecture:** One new ACP support file `server/drivers/acp/deepseek.ts` built on `createAcpDriver` from `server/drivers/acp/core.ts`, using the core's existing `selectModel` + `modelVariants` path (model and reasoning effort are ACP config options on dsh, exactly like OpenCode). Picker ids are `<provider>/<model>`; `resolveTurnModel` turns them into dsh's wire value `["<provider>","<model>"]`. The key follows the Groq pattern end to end (zod section, env override, sync, merge list, injected env, status flag, Settings row).
 
@@ -17,7 +17,7 @@
 - Static catalog, in this order: `deepseek-official/deepseek-v4-flash` "DeepSeek-V4-Flash" (default), `deepseek-official/deepseek-flash` "DeepSeek-V4.1-Flash", `deepseek-official/deepseek-v4-pro` "DeepSeek-V4-Pro".
 - Config section `deepseek: { key }`; env override `OMB_DEEPSEEK_API_KEY` (config layer) and `DEEPSEEK_API_KEY` (what the child reads). `DEEPSEEK_API_KEY` joins `PROVIDER_CREDENTIAL_ENV`.
 - Install line on every platform: `npm install -g @deepseek-ai/dsh`, `needsNode: true`, docs `https://github.com/deepseek-ai/deepseek-harness`.
-- No catalog probe at startup (`resolveModelsOnCreate: false`). Probe timeout env `OPENMAUS_DEEPSEEK_MODELS_TIMEOUT_MS`, default 60 000 ms.
+- No catalog probe at startup (`resolveModelsOnCreate: false`). Probe timeout env `OPENIND_DEEPSEEK_MODELS_TIMEOUT_MS`, default 60 000 ms.
 - Nothing is pushed and no PR is opened (Omkar owns publishing). Commits stay local on `feat/deepseek-harness-engine`.
 - Run tests with `pnpm vitest run <file>` from the worktree root.
 
@@ -189,7 +189,7 @@ git commit -m "feat(engines): DeepSeek Harness ACP support (ids, key detection, 
 - Consumes: `resolveCli(cli, args, env)` from `../../procs.ts` (returns `{ command, args }`), `spawn` from `node:child_process`, the JSON-RPC pattern of `fetchHermesAcpModels` in `./hermes.ts`.
 - Produces:
   - `export function parseDeepSeekCatalog(sessionResult: unknown): ModelCatalog` — reads `configOptions[id=model]`; each leaf `{value, name}` becomes `{ id: deepseekPickerId(value), label: name ?? id, provider: <group name or provider id> }` (skip leaves whose value is not a pair); `default` is `deepseekPickerId(currentValue)` when offered, else the first option; throws `Error("dsh advertised no models")` when empty.
-  - `export async function fetchDeepSeekCatalog(cli: string, env: Record<string, string | undefined>, cwd: string): Promise<ModelCatalog>` — spawns `cli --profile acp` with `stdio: ["pipe","pipe","ignore"]`, sends `initialize` (`protocolVersion: 1`, fs caps false), then `session/new {cwd, mcpServers: []}`, parses the result, sends `session/close {sessionId}`, ends stdin, kills (SIGKILL after 1 s). Rejects on spawn error, child close before the answer, non-JSON only output, or timeout `OPENMAUS_DEEPSEEK_MODELS_TIMEOUT_MS` (default 60 000, same validation as `hermesAcpModelsTimeoutMs`). Export `DEEPSEEK_MODELS_TIMEOUT_ENV` and `DEEPSEEK_MODELS_DEFAULT_TIMEOUT_MS`.
+  - `export async function fetchDeepSeekCatalog(cli: string, env: Record<string, string | undefined>, cwd: string): Promise<ModelCatalog>` — spawns `cli --profile acp` with `stdio: ["pipe","pipe","ignore"]`, sends `initialize` (`protocolVersion: 1`, fs caps false), then `session/new {cwd, mcpServers: []}`, parses the result, sends `session/close {sessionId}`, ends stdin, kills (SIGKILL after 1 s). Rejects on spawn error, child close before the answer, non-JSON only output, or timeout `OPENIND_DEEPSEEK_MODELS_TIMEOUT_MS` (default 60 000, same validation as `hermesAcpModelsTimeoutMs`). Export `DEEPSEEK_MODELS_TIMEOUT_ENV` and `DEEPSEEK_MODELS_DEFAULT_TIMEOUT_MS`.
   - `deepseekSupport.resolveModels = (env, config) => fetchDeepSeekCatalog(config.cli || "dsh", env, tmpdir())`, `resolveModelsOnCreate: false`.
 
 - [ ] **Step 1: Write the failing tests**

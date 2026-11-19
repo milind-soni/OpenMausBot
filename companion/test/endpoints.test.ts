@@ -10,18 +10,18 @@ import { lanAddresses } from "../src/listener.ts";
 
 describe("hostedCompanionUrl", () => {
   it("normalizes one explicit HTTPS origin", () => {
-    expect(hostedCompanionUrl("  https://Maus.Example/  ")).toBe("https://maus.example");
+    expect(hostedCompanionUrl("  https://Ind.Example/  ")).toBe("https://ind.example");
     expect(hostedCompanionUrl(undefined)).toBeNull();
     expect(hostedCompanionUrl("  ")).toBeNull();
   });
 
   it("refuses insecure or ambiguous hosted routes", () => {
     for (const value of [
-      "http://maus.example",
-      "https://user:secret@maus.example",
-      "https://maus.example/companion",
-      "https://maus.example?device=one",
-      "https://maus.example#pair",
+      "http://ind.example",
+      "https://user:secret@ind.example",
+      "https://ind.example/companion",
+      "https://ind.example?device=one",
+      "https://ind.example#pair",
       "not a URL",
     ]) {
       expect(() => hostedCompanionUrl(value)).toThrow(/OMB_COMPANION_HOSTED_URL/);
@@ -37,14 +37,14 @@ describe("companionEndpointCandidates", () => {
         ["100.121.5.6", "192.168.1.42", "10.0.0.7"],
         "macbook.tail1234.ts.net",
         "https://device-123.companion.example",
-        "openmausbot-abcd1234.local",
+        "openindbot-abcd1234.local",
       ),
     ).toEqual([
       { url: "https://device-123.companion.example", kind: "hosted", priority: 0 },
       { url: "http://macbook.tail1234.ts.net:8810", kind: "tailnet", priority: 100 },
       { url: "http://192.168.1.42:8810", kind: "lan", priority: 201 },
       { url: "http://10.0.0.7:8810", kind: "lan", priority: 202 },
-      { url: "http://openmausbot-abcd1234.local:8810", kind: "bonjour", priority: 300 },
+      { url: "http://openindbot-abcd1234.local:8810", kind: "bonjour", priority: 300 },
     ]);
   });
 
@@ -63,10 +63,10 @@ describe("companionEndpointCandidates", () => {
 
   it("keeps direct routes when no hosted route exists", () => {
     expect(
-      companionEndpointCandidates(8810, ["192.168.1.42"], null, null, "openmausbot-abcd1234.local"),
+      companionEndpointCandidates(8810, ["192.168.1.42"], null, null, "openindbot-abcd1234.local"),
     ).toEqual([
       { url: "http://192.168.1.42:8810", kind: "lan", priority: 200 },
-      { url: "http://openmausbot-abcd1234.local:8810", kind: "bonjour", priority: 300 },
+      { url: "http://openindbot-abcd1234.local:8810", kind: "bonjour", priority: 300 },
     ]);
   });
 
@@ -77,12 +77,12 @@ describe("companionEndpointCandidates", () => {
       addresses,
       null,
       "https://device-123.companion.example",
-      "openmausbot-abcd1234.local",
+      "openindbot-abcd1234.local",
     );
     expect(endpoints).toHaveLength(MAX_COMPANION_ENDPOINTS);
     expect(endpoints[0]).toMatchObject({ kind: "hosted", priority: 0 });
     expect(endpoints.at(-1)).toEqual({
-      url: "http://openmausbot-abcd1234.local:8810",
+      url: "http://openindbot-abcd1234.local:8810",
       kind: "bonjour",
       priority: 300,
     });

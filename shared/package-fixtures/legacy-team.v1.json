@@ -1,5 +1,5 @@
 {
-  "format": "openmaus.package",
+  "format": "openind.package",
   "version": 1,
   "package": {
     "id": "signal-desk",
@@ -9,7 +9,7 @@
     "summary": "A complete two-bot signal workflow.",
     "category": "Research",
     "author": {
-      "name": "OpenMausBot"
+      "name": "OpenIndBot"
     },
     "license": "MIT",
     "outcomes": [
@@ -76,7 +76,7 @@
         "name": "Morning signals",
         "agent": "scout",
         "prompt": "Prepare the approved morning signal brief.",
-        "runOn": "maus",
+        "runOn": "ind",
         "schedule": {
           "type": "daily",
           "time": "09:00",

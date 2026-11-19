@@ -15,7 +15,7 @@ vi.mock("@/lib/interface-mode", async (original) => ({
 }));
 
 const bot: Bot = {
-  id: "maus", threadId: "idle", name: "Maus", title: "", description: "", notifications: true,
+  id: "ind", threadId: "idle", name: "Ind", title: "", description: "", notifications: true,
   color: "green", unread: true, busy: true, activity: "working", messages: [],
   modelSelection: { instanceId: "fake", model: "test" },
   tasks: [
@@ -33,7 +33,7 @@ const threadList = (candidate: Bot, query = "") => createElement(BotThreadList, 
 describe("sidebar bot threads", () => {
   it("shows named threads flush with the bot row, with separate presence and no trailing New thread row", () => {
     const markup = renderToStaticMarkup(threadList(bot));
-    expect(markup).toContain('aria-label="Maus threads"');
+    expect(markup).toContain('aria-label="Ind threads"');
     expect(markup).toContain('data-sidebar-thread-row="idle" aria-current="page"');
     expect(markup).toContain(`Long research · ${formatUpdatedAt(2)} · Working`);
     expect(markup).toContain(`Needs approval · ${formatUpdatedAt(3)} · Waiting · Unread`);

@@ -69,7 +69,7 @@ export function routinesKeptAtSharing(input: OwnersRoutinesInput & { outsideThre
 export function approvalShape(shape: { prompt?: string; botId?: string; runOn?: string; schedule?: unknown; target?: string; groupId?: string | null; attachments?: { id: string; path: string }[] }): string {
   const schedule = shape.schedule && typeof shape.schedule === "object" ? { ...(shape.schedule as Record<string, unknown>) } : null;
   if (schedule) delete schedule.anchorAt;
-  return JSON.stringify([shape.prompt ?? "", shape.botId ?? "", shape.runOn ?? "maus", schedule, shape.target ?? "bot", shape.groupId ?? null,
+  return JSON.stringify([shape.prompt ?? "", shape.botId ?? "", shape.runOn ?? "ind", schedule, shape.target ?? "bot", shape.groupId ?? null,
     (shape.attachments ?? []).map((attachment) => [attachment.id, attachment.path])]);
 }
 

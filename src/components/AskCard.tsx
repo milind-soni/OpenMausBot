@@ -3,7 +3,7 @@ import { ArrowUp, Check, Clock3, LoaderCircle, Square, X } from "lucide-react";
 import { botButton, type BotButton } from "@/lib/bot-button";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import type { MausColor } from "@/lib/mascot";
+import type { IndColor } from "@/lib/mascot";
 import { imeComposing } from "@/lib/send-key";
 import type { Bot } from "@/state/store";
 import { BotAvatar } from "./Avatar";
@@ -173,7 +173,7 @@ export function AskChoices({ choices, label, onPick, sending = null, picked = []
 export function AskReply({ label, placeholder, color, onSend, sending = false, value, onChange, maxLength, multiline = false }: {
   label: string;
   placeholder: string;
-  color: MausColor | undefined;
+  color: IndColor | undefined;
   onSend(text: string): void;
   sending?: boolean;
   value: string;
@@ -285,7 +285,7 @@ const ASK_PRIMARY_LOOK = `${ASK_LOOK} ui-button-primary bg-accent text-accent-in
 export const ASK_PRIMARY_BUTTON = `${ASK_SHAPE} ${ASK_PRIMARY_LOOK}`;
 
 /** The answer a card waits for, in the asking bot's own button; the plain primary when no single bot asked. */
-export function askPrimary(color: MausColor | undefined, shape = ASK_BUTTON_SHAPE): BotButton {
+export function askPrimary(color: IndColor | undefined, shape = ASK_BUTTON_SHAPE): BotButton {
   return botButton(color, shape, ASK_PRIMARY_LOOK);
 }
 

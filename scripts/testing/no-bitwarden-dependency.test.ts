@@ -1,4 +1,4 @@
-// OpenMausBot stays Apache-2.0: Bitwarden's tool (GPL-3.0) and SDKs (GPL-3.0, or Bitwarden's own SDK license) are never a
+// OpenIndBot stays Apache-2.0: Bitwarden's tool (GPL-3.0) and SDKs (GPL-3.0, or Bitwarden's own SDK license) are never a
 // dependency, never bundled and never imported. The Vault downloads Bitwarden's `bw` at run time and runs it as a separate
 // process (server/host/bitwarden-cli.ts). This fails the moment any `@bitwarden/` package enters a manifest, a lockfile
 // or the code.

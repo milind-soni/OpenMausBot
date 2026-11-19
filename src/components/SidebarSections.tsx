@@ -24,7 +24,7 @@ import {
   type SidebarDensity,
 } from "@/lib/sidebar-preferences";
 
-const SECTION_DRAG_TYPE = "application/x-openmausbot-sidebar-section";
+const SECTION_DRAG_TYPE = "application/x-openindbot-sidebar-section";
 
 /** The sidebar's sections on this device: which are collapsed, their saved order, and dragging or Alt+Up/Down a
  * heading to reorder them. Simple and Advanced each keep their own order, so a move in one leaves the other as it was. */

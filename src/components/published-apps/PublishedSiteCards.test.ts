@@ -28,7 +28,7 @@ const { AppPreviewPanel } = await import("./AppPreviewPanel");
 const { PublishedSiteCards } = await import("./PublishedSiteCards");
 
 const SITE = "https://bright-bakery.netlify.app/";
-const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
+const PAGE = "https://abcdefghijklmnopqrstuvwxyz.indbot.page/";
 const app = (id: string, url: string, title: string, fields: Partial<PublishedApp> = {}): PublishedApp =>
   ({ id, source: "netlify", title, url, bot: { id: "mira", name: "Mira" }, publishedAt: 1, access: "public", canDelete: true, ...fields });
 const OWN = [

@@ -17,7 +17,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 
 describe("teamSlackSignature", () => {
   it("signs as the Admin checks: the Slack context, the machine, the time, the nonce and the body's hash", () => {
-    // The value openmaus-cloud's teamSlackSignature gives for the same input.
+    // The value openind-cloud's teamSlackSignature gives for the same input.
     expect(teamSlackSignature("s3cret-s3cret", "machine-1", "1731662000", "nonce-nonce-nonce", '{"v":1}')).toBe("Ajtt5Il9oDl9T2EOM8ebLe5iTiDiES4oheQp2ZwcUTk");
   });
 });

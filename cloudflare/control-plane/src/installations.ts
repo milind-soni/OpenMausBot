@@ -47,7 +47,7 @@ function printableString(maxLength: number) {
 const printableName = printableString(80);
 export const printableVersion = printableString(64);
 
-/** The desktop app, or a self-hosted server (`openmausbot serve`, a fleet container). Optional on every request
+/** The desktop app, or a self-hosted server (`openindbot serve`, a fleet container). Optional on every request
  * that carries it: accepted here before any client sends it, since the request schemas are strict. */
 export const installationKindSchema = z.enum(["desktop", "server"]);
 export type InstallationKind = z.infer<typeof installationKindSchema>;

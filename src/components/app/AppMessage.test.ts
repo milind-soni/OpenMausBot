@@ -186,7 +186,7 @@ describe("a bot's page", () => {
     expect(button("About this app")!.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("sends mausbot.send as the person's message from this app, only while they use it", async () => {
+  it("sends indbot.send as the person's message from this app, only while they use it", async () => {
     await mount(row(htmlPayload()));
     await handshake();
     const ask = { jsonrpc: "2.0", id: "m1", method: "ui/message", params: { role: "user", content: [{ type: "text", text: "I have had 3 cups." }] } };

@@ -25,7 +25,7 @@ export function colorDotPng(hex, size, diameter = size * 0.72) {
   return `data:image/png;base64,${png.toString("base64")}`;
 }
 
-/** Each mascot colour in the default skin (src/lib/mascot.ts MAUS_COLORS), for a bot's dot in a native menu. */
+/** Each mascot colour in the default skin (src/lib/mascot.ts IND_COLORS), for a bot's dot in a native menu. */
 export const BOT_COLOR_HEX = Object.freeze({ green: "#009957", blue: "#377FE6", red: "#D94B52", orange: "#E78531", purple: "#8057C8", cyan: "#0EA5C6",
   pink: "#D84F8B", yellow: "#D8A729", teal: "#01A492", coral: "#E5634E", silver: "#A8ADB4", chrome: "#B3BAC4" });
 

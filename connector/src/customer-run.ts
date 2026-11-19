@@ -1,4 +1,4 @@
-// A customer-run server: everything MausBot's control plane (the Admin) may run on it, ask of it and learn from it.
+// A customer-run server: everything IndBot's control plane (the Admin) may run on it, ask of it and learn from it.
 // This one file is the whole list, for a security reviewer to read. The connector enforces it on the server itself,
 // whatever the Admin sends: a job, a request or a reported field that is not written here does not exist in this mode.
 //
@@ -9,13 +9,13 @@ import {
   type Job, type JobError, type JobErrorCode, type JobReply, type JobType,
 } from "./protocol.ts";
 
-// 1. JOBS. The only kinds the Admin may run. Not here, so refused: `export-disk` (uploads the data to MausBot) and
+// 1. JOBS. The only kinds the Admin may run. Not here, so refused: `export-disk` (uploads the data to IndBot) and
 // `import-disk` (replaces the data with an archive from elsewhere).
 
 export const CUSTOMER_RUN_JOBS = ["start", "stop", "restart", "update", "status", "host-health", "backup"] as const satisfies readonly JobType[];
 
 /**
- * Kinds only root on the server may run (`mausbot-connector job <kind>`), never the Admin:
+ * Kinds only root on the server may run (`indbot-connector job <kind>`), never the Admin:
  * - `self-update` replaces the connector, and with it every rule in this file. An older connector does not know this
  *   mode at all, so the Admin asking for one would undo the mode. The owner replaces the connector, or nobody does.
  * - `restore` puts older data back over what is there.
@@ -26,12 +26,12 @@ export const CUSTOMER_RUN_LOCAL_JOBS = ["self-update", "restore"] as const satis
  * What each job may carry.
  * - `start`, `stop`, `restart`: nothing. They start and stop the server its owner installed, with the owner's settings;
  *   a `start` that names an image or settings is refused.
- * - `update`: the image to move to, MausBot's own server image pinned by digest, and never an older version than the
+ * - `update`: the image to move to, IndBot's own server image pinned by digest, and never an older version than the
  *   one running (below). The server's own updater does it.
  * - `backup`: nothing. Copies the data to a Docker volume on this server; it never removes a copy the owner made.
  * - `status`, `host-health`: nothing. They read.
  */
-export const CUSTOMER_HOME_IMAGE = /^ghcr\.io\/milind-soni\/openmausbot@sha256:[0-9a-f]{64}$/;
+export const CUSTOMER_HOME_IMAGE = /^ghcr\.io\/milind-soni\/openindbot@sha256:[0-9a-f]{64}$/;
 
 /** Who sent a job: the Admin over the connection, or root on this server. */
 export type JobSource = "admin" | "local";
@@ -42,7 +42,7 @@ const allowed = (type: unknown, by: JobSource): boolean =>
 /** Why this server refuses a job of `type` sent by `by`, or null when the kind is on that sender's list. */
 export function customerRunRefusal(type: string, by: JobSource): string | null {
   if (allowed(type, by)) return null;
-  if (allowed(type, "local")) return `This server is run by its owner, and only they may run ${type} here: sudo docker exec mausbot-connector mausbot-connector job ${type}`;
+  if (allowed(type, "local")) return `This server is run by its owner, and only they may run ${type} here: sudo docker exec indbot-connector indbot-connector job ${type}`;
   return `This server is run by its owner, and ${JSON.stringify(type.slice(0, 32))} is not a job that may run on it.`;
 }
 
@@ -93,11 +93,11 @@ export function checkCustomerRunJob(message: unknown, by: JobSource): CheckedJob
   if (type === "start") {
     return keys.length === 0
       ? { ok: true, job: { id: shape.job.id, type, args: {} } as unknown as Job }
-      : { ok: false, id: shape.job.id, code: "refused_by_mode", message: "This server is run by its owner: MausBot may start it, but not choose its image or its settings." };
+      : { ok: false, id: shape.job.id, code: "refused_by_mode", message: "This server is run by its owner: IndBot may start it, but not choose its image or its settings." };
   }
   const image = (args as Record<string, unknown>).image;
   if (keys.length !== 1 || typeof image !== "string" || !CUSTOMER_HOME_IMAGE.test(image)) {
-    return { ok: false, id: shape.job.id, code: "invalid_args", message: "image must be ghcr.io/milind-soni/openmausbot@sha256:<digest>" };
+    return { ok: false, id: shape.job.id, code: "invalid_args", message: "image must be ghcr.io/milind-soni/openindbot@sha256:<digest>" };
   }
   return { ok: true, job: { id: shape.job.id, type, args: { image } } };
 }
@@ -144,10 +144,10 @@ export function answerCustomerRunRequest(request: CustomerRunRequest, facts: Ser
 }
 
 // 3. WHAT THE CONNECTOR READS FROM THE HOME. Three GETs on the home's own loopback, with no body, and from them four
-// fields: that it answers as MausBot and whether its bot box is on or off, its version, and its seat count. Every other field of those answers (the
+// fields: that it answers as IndBot and whether its bot box is on or off, its version, and its seat count. Every other field of those answers (the
 // server's name among them) is dropped here and never kept.
 
-export const HOME_READS = ["/api/health", "/.well-known/openmausbot/environment", "/api/seats"] as const;
+export const HOME_READS = ["/api/health", "/.well-known/openindbot/environment", "/api/seats"] as const;
 const RECORD_END = "\u001e";
 /** Run inside the home's container: curl comes with the image, and the home listens on its own loopback only. */
 export const HOME_READS_COMMAND = [
@@ -175,14 +175,14 @@ const parsed = (text: string | undefined): Record<string, unknown> => {
 export function parseHomeReads(output: string): HomeFacts {
   const [health, environment, seats] = output.split(RECORD_END);
   const said = parsed(health);
-  return { answers: said.app === "openmausbot", version: versionOrNull(parsed(environment).version), seats: seatsOrNull(parsed(seats).seats), box: boxOnOff(said.box) };
+  return { answers: said.app === "openindbot", version: versionOrNull(parsed(environment).version), seats: seatsOrNull(parsed(seats).seats), box: boxOnOff(said.box) };
 }
 
 // 4. WHAT LEAVES THE SERVER. The heartbeat (every 30 seconds) and each job's reply, rebuilt here field by field. A
 // field that is not copied below is not sent. No name, no address, no file name, no log line.
 
 const VERSION = /^v?\d{1,5}\.\d{1,5}\.\d{1,5}(?:-[0-9A-Za-z.]{1,32})?$/;
-const IMAGE = /^ghcr\.io\/milind-soni\/(?:openmausbot|mausbot-connector)(?:@sha256:[0-9a-f]{64}|:[0-9A-Za-z][0-9A-Za-z._-]{0,63})$/;
+const IMAGE = /^ghcr\.io\/milind-soni\/(?:openindbot|indbot-connector)(?:@sha256:[0-9a-f]{64}|:[0-9A-Za-z][0-9A-Za-z._-]{0,63})$/;
 /** An operating system, kernel or Docker version as the machine names itself: letters, digits and version punctuation. */
 const MACHINE = /^[0-9A-Za-z][0-9A-Za-z ._:+~()/#-]{0,79}$/;
 const COPY_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -252,16 +252,16 @@ const FAILURES: Record<JobErrorCode, string> = {
   interrupted: "The job was interrupted and finished safely.",
   audit_unavailable: "The audit log on the server cannot be written, so nothing was done.",
   refused_by_policy: "The server's policy file does not allow this job.",
-  refused_by_mode: "This server is run by its owner, and this is not a job MausBot may run on it.",
+  refused_by_mode: "This server is run by its owner, and this is not a job IndBot may run on it.",
   paused: "The server's admin has paused remote management.",
   image_refused: "The image was refused. Nothing was changed.",
-  no_home: "MausBot is not installed on this server.",
+  no_home: "IndBot is not installed on this server.",
   docker: "Docker on the server could not do this.",
   pull_failed: "The image could not be downloaded. Nothing was changed.",
   unhealthy: "The server did not become healthy.",
   update_rolled_back: "The new version did not become healthy. The previous version and its data are back.",
   rollback_failed: "The update failed and the previous version did not come back healthy either.",
-  update_unavailable: "The server's own updater is not installed, so MausBot cannot update it.",
+  update_unavailable: "The server's own updater is not installed, so IndBot cannot update it.",
   update_not_started: "The server's own updater did not start the update. Nothing was changed.",
   older_version: "The image is older than the version the server runs, or names no version. Nothing was changed.",
   not_found: "There is no such backup on this server.",
@@ -270,12 +270,12 @@ const FAILURES: Record<JobErrorCode, string> = {
   box_unavailable: "The bot box's security profiles are not installed on this server.",
   transfer_failed: "A transfer failed.",
   self_update_failed: "The connector could not replace itself and was not changed.",
-  unsigned_job: "The job was not signed by MausBot.",
+  unsigned_job: "The job was not signed by IndBot.",
   wrong_box: "The job was signed for another server.",
   expired_job: "The job's signature was too old.",
-  pending_box: "The team's Owner has not accepted this server in MausBot yet.",
+  pending_box: "The team's Owner has not accepted this server in IndBot yet.",
 };
-const AUDIT_HINT = " The server's admin can read the reason with: mausbot-connector audit";
+const AUDIT_HINT = " The server's admin can read the reason with: indbot-connector audit";
 
 function reducedError(error: JobError): JobError {
   const code: JobErrorCode = Object.hasOwn(FAILURES, error.code) ? error.code : "docker";

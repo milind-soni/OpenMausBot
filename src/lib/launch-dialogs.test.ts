@@ -10,9 +10,9 @@ afterEach(() => vi.unstubAllGlobals());
 
 it("keeps the first ask that opened in this launch, and only that one", () => {
   expect(launchDialogShown()).toBeNull();
-  markLaunchDialog("mausbot");
+  markLaunchDialog("indbot");
   markLaunchDialog("notices");
-  expect(launchDialogShown()).toBe("mausbot");
+  expect(launchDialogShown()).toBe("indbot");
   session.clear();
   expect(launchDialogShown(), "a new launch").toBeNull();
 });
@@ -21,6 +21,6 @@ it("remembers the launch's ask in memory when browser storage is blocked", () =>
   vi.stubGlobal("sessionStorage", { getItem: () => { throw new Error("blocked"); }, setItem: () => { throw new Error("blocked"); } });
   expect(() => markLaunchDialog("notices")).not.toThrow();
   expect(launchDialogShown()).toBe("notices");
-  markLaunchDialog("mausbot");
+  markLaunchDialog("indbot");
   expect(launchDialogShown(), "the first claim still holds").toBe("notices");
 });

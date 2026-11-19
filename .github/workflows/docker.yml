@@ -36,13 +36,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build image
-        run: docker build -t openmausbot:ci .
+        run: docker build -t openindbot:ci .
       - name: Boot the container and prove the server + UI answer
         run: |
           set -euo pipefail
-          docker run -d --name omb openmausbot:ci
+          docker run -d --name omb openindbot:ci
           for i in $(seq 1 40); do
-            if docker exec omb curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot; then break; fi
+            if docker exec omb curl -sf http://127.0.0.1:8799/api/health | grep -q openindbot; then break; fi
             sleep 2
             if [ "$i" = "40" ]; then docker logs omb; echo "server never became healthy"; exit 1; fi
           done
@@ -57,9 +57,9 @@ jobs:
         # and a licensed self-hoster would silently run the open-source edition.
         run: |
           set -euo pipefail
-          docker run -d --name omb-ent -e OMB_LICENSE_KEY=omb1.not.real openmausbot:ci
+          docker run -d --name omb-ent -e OMB_LICENSE_KEY=omb1.not.real openindbot:ci
           for i in $(seq 1 40); do
-            if docker exec omb-ent curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot; then break; fi
+            if docker exec omb-ent curl -sf http://127.0.0.1:8799/api/health | grep -q openindbot; then break; fi
             sleep 2
             if [ "$i" = "40" ]; then docker logs omb-ent; echo "server never became healthy"; exit 1; fi
           done
@@ -73,7 +73,7 @@ jobs:
       - name: Prove the non-root user can browse with the baked-in Chrome
         run: |
           set -euo pipefail
-          test "$(docker exec omb id -un)" = maus
+          test "$(docker exec omb id -un)" = ind
           timeout 45 docker exec omb agent-browser --session ci-browser open 'data:text/html,<title>OMB browser smoke</title><h1>Browser ready</h1>'
           timeout 15 docker exec omb agent-browser --session ci-browser get title | grep -Fx 'OMB browser smoke'
           # Chrome for Testing's page is 1280x577 until sized; the harness sizes
@@ -96,7 +96,7 @@ jobs:
         run: |
           set -euo pipefail
           probe() { docker run --rm --network bridge curlimages/curl:8.14.1 -s --max-time 3 "http://$1:$2/" >/dev/null; }
-          docker run -d --name leaky --entrypoint node openmausbot:ci -e "require('http').createServer((q,s)=>s.end('leak')).listen(8799,'0.0.0.0')"
+          docker run -d --name leaky --entrypoint node openindbot:ci -e "require('http').createServer((q,s)=>s.end('leak')).listen(8799,'0.0.0.0')"
           sleep 2
           leaky_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' leaky)
           test -n "$leaky_ip"
@@ -117,19 +117,19 @@ jobs:
         run: |
           set -euo pipefail
           docker rm -f omb >/dev/null
-          docker tag openmausbot:ci ghcr.io/milind-soni/openmausbot:latest
+          docker tag openindbot:ci ghcr.io/milind-soni/openindbot:latest
           printf 'DOMAIN=localhost\nENGINES=\n' > deploy/.env
           docker compose -f deploy/docker-compose.yml up -d --no-build
           for i in $(seq 1 45); do
-            curl -sk -o /dev/null --max-time 2 https://localhost/.well-known/openmausbot/environment && break
+            curl -sk -o /dev/null --max-time 2 https://localhost/.well-known/openindbot/environment && break
             sleep 2
             if [ "$i" = "45" ]; then docker compose -f deploy/docker-compose.yml logs; echo "caddy never answered"; exit 1; fi
           done
           code() { curl -sk -o /dev/null -w '%{http_code}' --max-time 5 "$@"; }
           body() { curl -sk --max-time 10 "$@"; }
           H=https://localhost
-          grep -q '"environmentId"' <<<"$(body $H/.well-known/openmausbot/environment)"   # descriptor is public
-          grep -q '^{"app":"openmausbot"}$' <<<"$(body $H/api/health)"             # the probe is public, and says only the app name
+          grep -q '"environmentId"' <<<"$(body $H/.well-known/openindbot/environment)"   # descriptor is public
+          grep -q '^{"app":"openindbot"}$' <<<"$(body $H/api/health)"             # the probe is public, and says only the app name
           test "$(code $H/api/bots)" = 403                                        # nothing else before pairing
           grep -q 'pair this device' <<<"$(body $H/api/bots)"
           grep -qi '<html' <<<"$(body $H/pair)"                                    # the UI shell is served so /pair can load
@@ -144,7 +144,7 @@ jobs:
           grep -qi 'Secure' <<<"$paired"                                          # over TLS the cookie is Secure
           grep -qi 'HttpOnly' <<<"$paired"
           test "$(code -b "$jar" $H/api/health)" = 200                              # paired: the API answers
-          grep -q openmausbot <<<"$(body -b "$jar" $H/api/health)"
+          grep -q openindbot <<<"$(body -b "$jar" $H/api/health)"
           test "$(code -b "$jar" -H 'Origin: https://evil.example' -X POST -d '{}' $H/api/bots)" = 403   # cookie is same-origin only
           test "$(code -b "$jar" -H 'Origin: https://localhost' $H/api/auth/session)" = 200
           grep -q '"via":"cookie"' <<<"$(body -b "$jar" $H/api/auth/session)"
@@ -162,7 +162,7 @@ jobs:
           C="docker compose -f deploy/docker-compose.yml"
           back() { # $1: what happened; HTTPS through Caddy answers again within two minutes, and is still remote
             for i in $(seq 1 60); do
-              if grep -q '^{"app":"openmausbot"}$' <<<"$(body $H/api/health || true)" && [ "$(code $H/api/bots)" = 403 ]; then echo "HTTPS back after: $1"; return 0; fi
+              if grep -q '^{"app":"openindbot"}$' <<<"$(body $H/api/health || true)" && [ "$(code $H/api/bots)" = 403 ]; then echo "HTTPS back after: $1"; return 0; fi
               sleep 2
             done
             $C ps; $C logs --tail 30; echo "HTTPS did not come back after: $1"; return 1
@@ -178,11 +178,11 @@ jobs:
           docker compose -f deploy/docker-compose.yml down -v
       - name: Cloud Pro home image (--target cloud-home) boots, stays private and pairs on a signed request
         # The Fly home machine, built from the same runtime as the image above, with the environment
-        # openmaus-cloud's provisioner writes (docs/cloud-pro.md): Caddy on
+        # openind-cloud's provisioner writes (docs/cloud-pro.md): Caddy on
         # :8080 is the only listener, a forwarded request is never the
         # loopback owner, a bad boot contract never serves, the launcher stays
         # root (and runs only root's code) while the server and the edge run as
-        # maus with no secret in their environment, and only an HMAC-signed,
+        # ind with no secret in their environment, and only an HMAC-signed,
         # fresh, unreplayed request opens a
         # single-use pairing window, also after a restart. Cloud Pro includes
         # no AI: the machine boots without any model gateway, serves no
@@ -209,7 +209,7 @@ jobs:
           E=http://127.0.0.1:18080
           healthy() {
             for i in $(seq 1 45); do
-              curl -sf --max-time 2 "$E/api/health" | grep -q openmausbot && return 0
+              curl -sf --max-time 2 "$E/api/health" | grep -q openindbot && return 0
               sleep 2
             done
             docker logs home; echo "the cloud home never became healthy"; return 1
@@ -219,38 +219,38 @@ jobs:
           grep -qF "bots run on the engines the person signs in to here" <<<"$logs"
           if grep -qF "ignoring OMB_HOSTED" <<<"$logs"; then echo "a model gateway reached the boot contract"; exit 1; fi
           if grep -qF "$secret" <<<"$logs"; then echo "the bootstrap secret reached the log"; exit 1; fi
-          # The launcher stays root; the server and the edge run as maus. Chosen
+          # The launcher stays root; the server and the edge run as ind. Chosen
           # by command line (a node process's comm is not always "node"), from
           # outside the container so no probe matches itself.
-          maus=$(docker exec home id -u maus)
+          ind=$(docker exec home id -u ind)
           procs=$(docker top home -eo pid,uid,args)   # docker top needs the pid column
           echo "$procs"
           uids() { awk -v pat="$1" 'NR > 1 && index($0, pat) { print $2 }' <<<"$procs" | sort -u | tr '\n' ' '; }
           test "$(uids dist-server/cloud-home-start.js)" = "0 "
-          test "$(uids dist-server/index.js)" = "$maus "
-          test "$(uids 'caddy run')" = "$maus "
-          # No secret in the server's starting environment, read as any maus process (an
+          test "$(uids dist-server/index.js)" = "$ind "
+          test "$(uids 'caddy run')" = "$ind "
+          # No secret in the server's starting environment, read as any ind process (an
           # engine's shell) can read it: root in the container lacks CAP_SYS_PTRACE for that.
           spid=$(docker exec home sh -c 'for p in /proc/[0-9]*; do case "$(tr "\0" " " < "$p/cmdline" 2>/dev/null)" in *"dist-server/in""dex.js"*) echo "${p#/proc/}";; esac; done')
           test -n "$spid"
-          docker exec -u maus home grep -qaF OMB_CLOUD_ROLE=home "/proc/$spid/environ"         # the probe reads it
+          docker exec -u ind home grep -qaF OMB_CLOUD_ROLE=home "/proc/$spid/environ"         # the probe reads it
           # Out of memory, the kernel takes the engines first and the server and the edge (the health check) last.
           test "$(docker exec home cat "/proc/$spid/oom_score_adj")" = -800
           epid=$(docker exec home sh -c 'for p in /proc/[0-9]*; do case "$(tr "\0" " " < "$p/cmdline" 2>/dev/null)" in *"caddy r""un"*) echo "${p#/proc/}";; esac; done')
           test "$(docker exec home cat "/proc/$epid/oom_score_adj")" = -900
           for value in "$secret" "box_omb_$relay"; do
-            if docker exec -u maus home grep -qaF -- "$value" "/proc/$spid/environ"; then echo "a secret is in the server's environment"; exit 1; fi
+            if docker exec -u ind home grep -qaF -- "$value" "/proc/$spid/environ"; then echo "a secret is in the server's environment"; exit 1; fi
           done
-          # The root launcher runs only code maus cannot change; maus owns only the volume.
-          docker exec -u maus home sh -c 'for f in /app /app/dist-server /app/dist-server/index.js /app/dist-server/cloud-home-start.js /app/cloud/Caddyfile /app/cloud/Caddyfile.tls /app/cloud/Caddyfile.tunnel /app/cloud/edge-routes.caddy /usr/local/bin/caddy /usr/local/bin/cloudflared; do if test -w "$f"; then echo "maus can write $f"; exit 1; fi; done; test -w /data'
+          # The root launcher runs only code ind cannot change; ind owns only the volume.
+          docker exec -u ind home sh -c 'for f in /app /app/dist-server /app/dist-server/index.js /app/dist-server/cloud-home-start.js /app/cloud/Caddyfile /app/cloud/Caddyfile.tls /app/cloud/Caddyfile.tunnel /app/cloud/edge-routes.caddy /usr/local/bin/caddy /usr/local/bin/cloudflared; do if test -w "$f"; then echo "ind can write $f"; exit 1; fi; done; test -w /data'
           test "$(docker exec home stat -c %U /app/dist-server/index.js)" = root
           # The shell tools bots use on a Cloud, as the user their engines run as.
-          docker exec -u maus home sh -c 'python3 -c "import json, sqlite3, zipfile, csv" && pdftotext -v 2>&1 | grep -q pdftotext && unzip -v | grep -q UnZip'
+          docker exec -u ind home sh -c 'python3 -c "import json, sqlite3, zipfile, csv" && pdftotext -v 2>&1 | grep -q pdftotext && unzip -v | grep -q UnZip'
           code() { curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$@"; }
           H=(-H "Host: $host")
           test "$(code "${H[@]}" $E/api/bots)" = 403                       # through the edge: never the owner
           test "$(code -H 'Host: localhost' $E/api/bots)" = 403            # another name is refused at the edge
-          # The Admin's request (openmaus-cloud cloudPairingSignature).
+          # The Admin's request (openind-cloud cloudPairingSignature).
           pair() { # body key timestamp nonce -> prints the HTTP status, keeps the reply in $reply
             local body=$1 key=$2 ts=$3 nonce=$4 bh sig
             bh=$(printf %s "$body" | openssl dgst -sha256 -binary | b64url)
@@ -258,7 +258,7 @@ jobs:
             curl -s -o /tmp/pair-reply -w '%{http_code}' --max-time 5 "${H[@]}" -X POST -H 'content-type: application/json' \
               -H "x-omb-cloud-timestamp: $ts" -H "x-omb-cloud-nonce: $nonce" -H "x-omb-cloud-signature: v1=$sig" --data-binary "$body" $E/api/cloud/pairing
           }
-          body='{"label":"OpenMausBot app (Cloud)","ttlSeconds":300}'
+          body='{"label":"OpenIndBot app (Cloud)","ttlSeconds":300}'
           test "$(pair "$body" "$(rand43)" "$(date +%s)" "$(rand43)")" = 401                 # wrong key
           test "$(pair "$body" "$secret" "$(( $(date +%s) - 400 ))" "$(rand43)")" = 401      # stale
           nonce=$(rand43); now=$(date +%s)
@@ -308,7 +308,7 @@ jobs:
           }
           healthy() { # name port
             for i in $(seq 1 45); do
-              curl -sf --max-time 2 "http://127.0.0.1:$2/api/health" | grep -q openmausbot && return 0
+              curl -sf --max-time 2 "http://127.0.0.1:$2/api/health" | grep -q openindbot && return 0
               if [ "$(docker inspect -f '{{.State.Running}}' "$1")" != true ]; then docker logs "$1" 2>&1 | tail -20; echo "$1 exited"; return 1; fi
               sleep 2
             done
@@ -373,7 +373,7 @@ jobs:
           grep -qF "caddy run --config /app/cloud/Caddyfile.tls --adapter caddyfile" <<<"$(docker top tls -eo pid,uid,args)"
           served() { # name: the certificate the edge serves on 443, once it answers there
             for i in $(seq 1 30); do
-              if docker exec "$1" curl -sfk --max-time 2 --resolve home.own-server.internal:443:127.0.0.1 https://home.own-server.internal/api/health | grep -q openmausbot; then
+              if docker exec "$1" curl -sfk --max-time 2 --resolve home.own-server.internal:443:127.0.0.1 https://home.own-server.internal/api/health | grep -q openindbot; then
                 docker exec "$1" sh -c 'echo | openssl s_client -connect 127.0.0.1:443 -servername home.own-server.internal 2>/dev/null | openssl x509 -noout -fingerprint -sha256'
                 return 0
               fi
@@ -389,7 +389,7 @@ jobs:
           docker rm -f tls >/dev/null
           docker volume rm omb-tls-ci >/dev/null
 
-          # No inbound port: the home runs its tunnel's connector itself, as omb-tunnel, whose environment (the token) maus
+          # No inbound port: the home runs its tunnel's connector itself, as omb-tunnel, whose environment (the token) ind
           # cannot read. Only the tunnel's loopback listener, :8812, believes Cf-Connecting-IP. The token here is well
           # formed but names no tunnel, so Cloudflare refuses it and cloudflared keeps trying.
           token=$(printf '{"a":"0123456789abcdef0123456789abcdef","t":"11111111-2222-3333-4444-555555555555","s":"%s"}' "$(openssl rand -base64 32)" | base64 -w0)
@@ -400,10 +400,10 @@ jobs:
           for i in $(seq 1 15); do cpid=$(docker exec tunnel sh -c 'for p in /proc/[0-9]*; do case "$(tr "\0" " " < "$p/cmdline" 2>/dev/null)" in *"cloudflared tun""nel"*) echo "${p#/proc/}";; esac; done'); [ -n "$cpid" ] && break; sleep 1; done
           test -n "$cpid"
           test "$(docker exec tunnel stat -c %u "/proc/$cpid")" = "$(docker exec tunnel id -u omb-tunnel)"
-          if docker exec -u maus tunnel cat "/proc/$cpid/environ" >/dev/null 2>&1; then echo "maus can read the tunnel's token"; exit 1; fi
+          if docker exec -u ind tunnel cat "/proc/$cpid/environ" >/dev/null 2>&1; then echo "ind can read the tunnel's token"; exit 1; fi
           if docker exec tunnel sh -c "tr '\\0' ' ' < /proc/$cpid/cmdline" | grep -qF "$token"; then echo "the token is in cloudflared's command line"; exit 1; fi
           for p in $(docker exec tunnel sh -c 'for p in /proc/[0-9]*; do case "$(tr "\0" " " < "$p/cmdline" 2>/dev/null)" in *"dist-server/in""dex.js"*|*"caddy r""un"*) echo "${p#/proc/}";; esac; done'); do
-            if docker exec -u maus tunnel grep -qaF "$token" "/proc/$p/environ"; then echo "the token is in a maus process's environment"; exit 1; fi
+            if docker exec -u ind tunnel grep -qaF "$token" "/proc/$p/environ"; then echo "the token is in a ind process's environment"; exit 1; fi
           done
           if docker logs tunnel 2>&1 | grep -qF "$token"; then echo "the token reached the log"; exit 1; fi
           from_tunnel() { # port [curl options...]: as cloudflared reaches the edge, from the home's loopback
@@ -434,7 +434,7 @@ jobs:
 
           # A SIGKILL leaves the server's lease behind; the same container starts again, and so does a new one.
           docker kill -s KILL own >/dev/null
-          docker run --rm -v omb-own-ci:/data:ro --entrypoint test omb-cloud-home:ci -s /data/.openmausbot/openmausbot-server.lease
+          docker run --rm -v omb-own-ci:/data:ro --entrypoint test omb-cloud-home:ci -s /data/.openindbot/openindbot-server.lease
           docker start own >/dev/null
           healthy own 18081
           docker kill -s KILL own >/dev/null
@@ -444,7 +444,7 @@ jobs:
           grep -q 7d1e2f3a-4b5c-4d6e-8f70-8192a3b4c5d6 <<<"$(docker run --rm -v omb-own-ci:/data:ro --entrypoint cat omb-cloud-home:ci /data/.omb-cloud-home.json)"
           # A second home on the volume the live one holds refuses to start, and the live one carries on.
           if timeout 90 docker run --name own3 -v omb-own-ci:/data "${contract[@]}" omb-cloud-home:ci; then echo "a second home started on a held volume"; exit 1; fi
-          grep -qF "Another MausBot home is already running on this volume. No data was changed." <<<"$(docker logs own3 2>&1)"
+          grep -qF "Another IndBot home is already running on this volume. No data was changed." <<<"$(docker logs own3 2>&1)"
           docker rm -f own3 >/dev/null
           healthy own2 18081
           docker rm -f own2 >/dev/null
@@ -452,13 +452,13 @@ jobs:
       - name: Prove each image ships its files once, no build cache, and a Caddy without capabilities
         # A pull downloads every layer, so a file written twice or a cache left
         # in a layer costs every machine that pulls the image. The Cloud home's
-        # Caddy must not carry the privileged-port capability (it runs as maus
+        # Caddy must not carry the privileged-port capability (it runs as ind
         # on :8080), which Docker's default capabilities would hide at runtime.
         # Its Grok is one root-owned binary, with nothing from the installer's
         # throwaway home left in the image.
         run: |
           set -euo pipefail
-          docker save openmausbot:ci -o "$RUNNER_TEMP/server.tar"
+          docker save openindbot:ci -o "$RUNNER_TEMP/server.tar"
           docker save omb-cloud-home:ci -o "$RUNNER_TEMP/home.tar"
           python3 - "$RUNNER_TEMP/server.tar" "$RUNNER_TEMP/home.tar" <<'PY'
           import json, re, sys, tarfile
@@ -501,20 +501,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build image
-        run: docker build -t openmausbot:arm64 .
+        run: docker build -t openindbot:arm64 .
       - name: Boot the container; prove the server, UI, DuckDB and browser work on arm64
         run: |
           set -euo pipefail
-          test "$(docker image inspect -f '{{.Architecture}}' openmausbot:arm64)" = arm64
-          docker run -d --init --shm-size=512m --name omb openmausbot:arm64
+          test "$(docker image inspect -f '{{.Architecture}}' openindbot:arm64)" = arm64
+          docker run -d --init --shm-size=512m --name omb openindbot:arm64
           for i in $(seq 1 40); do
-            if docker exec omb curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot; then break; fi
+            if docker exec omb curl -sf http://127.0.0.1:8799/api/health | grep -q openindbot; then break; fi
             sleep 2
             if [ "$i" = "40" ]; then docker logs omb; echo "server never became healthy"; exit 1; fi
           done
           docker exec omb curl -sf http://127.0.0.1:8799/ | grep -qi "<html" || { docker logs omb; echo "UI not served"; exit 1; }
           docker exec -w /app/duckdb omb node --input-type=module -e "const { DuckDBInstance } = await import('@duckdb/node-api'); const c = await (await DuckDBInstance.create()).connect(); const r = await c.runAndReadAll('select 42 as x'); if (Number(r.getRows()[0][0]) !== 42) process.exit(1)"
-          test "$(docker exec omb id -un)" = maus
+          test "$(docker exec omb id -un)" = ind
           timeout 90 docker exec omb agent-browser --session ci-browser open 'data:text/html,<title>OMB browser smoke</title><h1>Browser ready</h1>'
           timeout 15 docker exec omb agent-browser --session ci-browser get title | grep -Fx 'OMB browser smoke'
           timeout 15 docker exec omb agent-browser --session ci-browser close
@@ -585,7 +585,7 @@ jobs:
       # The Cloud Pro home machine (the Dockerfile's cloud-home target), on the
       # same runtime layers as the server image just pushed, with Claude Code,
       # Codex and Grok baked in. The Admin pins it by digest
-      # (OMB_CLOUD_HOME_IMAGE=ghcr.io/milind-soni/openmausbot-cloud-home@sha256:...).
+      # (OMB_CLOUD_HOME_IMAGE=ghcr.io/milind-soni/openindbot-cloud-home@sha256:...).
       - id: repo
         # Image references must be lowercase; the repository name is not.
         run: echo "name=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"

@@ -12,14 +12,14 @@ const skill = (name: string) => `---\nname: ${name}\ndescription: ${name} steps.
 
 function oneBot(): PackageDocument {
   return parsePackageDocument({
-    format: "openmaus.package", version: 2,
+    format: "openind.package", version: 2,
     package: {
       id: "helper", release: "1.0.0", name: "Helper", tagline: "Answers questions.", summary: "A helpful bot.", category: "Community",
-      author: { name: "MausBot user" }, license: "Unspecified", outcomes: ["Answers."], setupMinutes: 2,
+      author: { name: "IndBot user" }, license: "Unspecified", outcomes: ["Answers."], setupMinutes: 2,
       requirements: { apps: [{ slug: "gmail", label: "Gmail", reason: "Reads mail.", optional: true }], capabilities: [] },
       team: { name: "Helper" },
       agents: [{ key: "helper", name: "Helper", soul: "Be brief.\n---\nNever guess.", appearance: { color: "blue" }, skills: ["triage"], tools: { off: ["images", "warp-drive"] } }],
-      routines: [{ key: "daily", name: "Daily", agent: "helper", prompt: "Check.", runOn: "maus", schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 30, enabledAfterInstall: false }],
+      routines: [{ key: "daily", name: "Daily", agent: "helper", prompt: "Check.", runOn: "ind", schedule: { type: "daily", time: "09:00", weekdays: [1, 2, 3, 4, 5] }, durationMinutes: 30, enabledAfterInstall: false }],
       skills: { version: 1, entries: [{ name: "triage", description: "triage steps.", instructions: skill("triage") }] },
     },
   });
@@ -57,9 +57,9 @@ describe("template folders", () => {
   it("reads the older shapes: BotMRR v1 in team.md or botmrr.md, a team file and a package JSON", () => {
     const legacy = fixture("legacy-botmrr.v1.md");
     for (const name of ["team.md", "botmrr.md"]) expect(readShareFolder({ [name]: legacy }).kind).toBe("package");
-    const manifest = readShareFolder({ "team.mausteam.json": fixture("manifest.json") });
+    const manifest = readShareFolder({ "team.indteam.json": fixture("manifest.json") });
     expect(manifest.kind).toBe("manifest");
-    const json = readShareFolder({ "sales-desk-1.3.0.openmaus.json": fixture("full-team.v2.json") });
+    const json = readShareFolder({ "sales-desk-1.3.0.openind.json": fixture("full-team.v2.json") });
     expect(json.kind === "package" && json.document.package.id).toBe("sales-desk");
   });
 
@@ -94,7 +94,7 @@ describe("template folders", () => {
     const files = writeShareFolder(oneBot(), "bot");
     expect(() => readShareFolder({ ...files, "team.md": files["bot.md"]! })).toThrow(/not both/);
     expect(() => readShareFolder({ "README.md": "# hi" })).toThrow(/no bot.md or team.md/);
-    expect(() => readShareFolder({ "bot.md": String(files["bot.md"]).replace("botmrr: 2", "botmrr: 3") })).toThrow(/newer MausBot/);
+    expect(() => readShareFolder({ "bot.md": String(files["bot.md"]).replace("botmrr: 2", "botmrr: 3") })).toThrow(/newer IndBot/);
   });
 
   it("names only skills and pictures for a remote reader to fetch", () => {

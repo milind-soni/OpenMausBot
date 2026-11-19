@@ -103,7 +103,7 @@ async function send(ctx, action, again = true) {
 }
 
 /**
- * A bot's work: My Cloud's files to this computer, in `local` (Documents/MausBot/<bot>/<conversation>). Never deletes here,
+ * A bot's work: My Cloud's files to this computer, in `local` (Documents/IndBot/<bot>/<conversation>). Never deletes here,
  * never writes a config an agent or tool would obey, and marks each file as downloaded (`markDownloaded`).
  */
 export async function fetchOutputs({ client, state, folder, local, platform = process.platform, now = Date.now, trashItem, markDownloaded = async () => {}, freeBytes = defaultFree, report }) {

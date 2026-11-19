@@ -2,12 +2,12 @@ import { Fragment } from "react";
 
 import { BotAvatar } from "./Avatar";
 import { cn } from "@/lib/cn";
-import { MAUS_COLOR_NAMES, normalizeState, type MausColor } from "@/lib/mascot";
+import { IND_COLOR_NAMES, normalizeState, type IndColor } from "@/lib/mascot";
 import type { RoomAddressee } from "@/lib/room-addressees";
 import type { Bot } from "@/state/store";
 
-function isPaletteColor(color: string | undefined): color is MausColor {
-  return (MAUS_COLOR_NAMES as readonly string[]).includes(color ?? "");
+function isPaletteColor(color: string | undefined): color is IndColor {
+  return (IND_COLOR_NAMES as readonly string[]).includes(color ?? "");
 }
 
 function Name({ name, color }: { name: string; color?: string }) {

@@ -89,7 +89,7 @@ describe("the SDK's App against the bridge", () => {
   it("connects: the handshake completes and the View reads our capabilities and context", async () => {
     // `initialized` is a notification the View sends after connect() resolves.
     await expect.poll(() => bridge.initialized).toBe(true);
-    expect(app.getHostVersion()).toEqual({ name: "mausbot", version: "0.1.108" });
+    expect(app.getHostVersion()).toEqual({ name: "indbot", version: "0.1.108" });
     expect(app.getHostCapabilities()).toMatchObject({ serverTools: {}, serverResources: {}, message: { text: {} }, openLinks: {}, sandbox: { permissions: {} } });
     expect(app.getHostContext()).toMatchObject({ theme: "dark", displayMode: "inline", toolInfo: { tool: { name: "debug-tool" } } });
   });

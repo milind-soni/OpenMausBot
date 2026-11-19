@@ -144,7 +144,7 @@ export async function exportJob(client: HeadlessClient, options: ExportOptions, 
   const maxBytes = options.maxBytes ?? 500_000_000;
   const job = await readJob(client, options.threadId, { since: String(options.since ?? 0), full: "1" });
   const nodes: Rec[] = (job.nodes ?? []).filter((node: Rec) => !options.root || node.rootId === options.root);
-  if (options.root && !nodes.length) throw usageError(`no job with root ${options.root} in this conversation`, "openmausbot export TARGET without --root writes all of it");
+  if (options.root && !nodes.length) throw usageError(`no job with root ${options.root} in this conversation`, "openindbot export TARGET without --root writes all of it");
   for (const dir of ["transcripts", "files", "screens"]) mkdirSync(join(out, dir), { recursive: true });
 
   const threads = new Map<string, string>([[options.threadId, "conversation"]]);
@@ -188,7 +188,7 @@ export async function exportJob(client: HeadlessClient, options: ExportOptions, 
     if (files.length >= maxFiles) return void skipped.push({ ...about, reason: `more than --max-files ${maxFiles}` });
     const response = await fileRoute(threadId, messageId, { path: link, listFolder: true });
     if (!response?.ok) return void skipped.push({ ...about, reason: await refusal(response) });
-    if (response.headers.get("x-openmausbot-folder") !== "1") {
+    if (response.headers.get("x-openindbot-folder") !== "1") {
       return keep(response, join(out, "files", folder), fileName(response.headers.get("content-disposition"), link), about, files);
     }
     const listing = await response.json() as Rec;

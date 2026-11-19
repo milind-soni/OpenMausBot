@@ -24,7 +24,7 @@ vi.mock("@/lib/interface-mode", async (original) => ({ ...await original<typeof 
 const { BotThreadList, botRowProps } = await import("./Sidebar");
 
 const bot: Bot = {
-  id: "maus", threadId: "loose", name: "Maus", title: "", description: "", notifications: true,
+  id: "ind", threadId: "loose", name: "Ind", title: "", description: "", notifications: true,
   color: "green", unread: false, messages: [], modelSelection: { instanceId: "fake", model: "test" },
   projects: [{ id: "folder", name: "Taxes" }],
   tasks: [

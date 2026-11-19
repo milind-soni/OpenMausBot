@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 const SCRIPT = join(import.meta.dirname, "..", "..", "deploy", "podman", "install.sh");
-const REPO = "ghcr.io/milind-soni/openmausbot";
+const REPO = "ghcr.io/milind-soni/openindbot";
 const DIGEST = `${REPO}@sha256:${"2".repeat(64)}`;
 const STABLE = `${REPO}@sha256:${"5".repeat(64)}`;
 const posix = process.platform !== "win32";
@@ -24,7 +24,7 @@ afterEach(() => {
 /** Each stand-in logs its call to $FAKE/<name>.log and answers from FAKE_ settings and files in $FAKE. */
 const STUBS: Record<string, string> = {
   uname: "echo Linux",
-  id: 'case "$1" in -u) echo 1000 ;; -un) echo maus-tester ;; *) echo 1000 ;; esac',
+  id: 'case "$1" in -u) echo 1000 ;; -un) echo ind-tester ;; *) echo 1000 ;; esac',
   sleep: ":",
   ss: ":",
   loginctl: 'echo "${FAKE_LINGER:-yes}"',
@@ -40,9 +40,9 @@ const STUBS: Record<string, string> = {
   *) echo "podman stand-in: $*" >&2; exit 64 ;;
 esac`,
   // Podman's generator: what it was given, and the service it makes of it.
-  quadlet: `cp "$QUADLET_UNIT_DIRS/openmausbot.container" "$FAKE/dryrun.container"; echo "$QUADLET_UNIT_DIRS" >"$FAKE/dryrun.dir"
-[ -z "\${FAKE_QUADLET_FAILS:-}" ] || { echo "quadlet-generator[1]: converting \\"openmausbot.container\\": unsupported key 'HealthOnFailure'"; exit 0; }
-echo "---openmausbot.service---"`,
+  quadlet: `cp "$QUADLET_UNIT_DIRS/openindbot.container" "$FAKE/dryrun.container"; echo "$QUADLET_UNIT_DIRS" >"$FAKE/dryrun.dir"
+[ -z "\${FAKE_QUADLET_FAILS:-}" ] || { echo "quadlet-generator[1]: converting \\"openindbot.container\\": unsupported key 'HealthOnFailure'"; exit 0; }
+echo "---openindbot.service---"`,
   systemctl: `[ "$1" = --user ] || exit 64
 case "$2" in
   show-environment | daemon-reload) ;;
@@ -58,7 +58,7 @@ case "$*" in
   *channels/stable.json*) [ "\${FAKE_STABLE_CODE:-404}" = 000 ] && { printf 000; exit 7; }; printf '%s' "\${FAKE_STABLE_BODY:-}" >"$out"; printf '%s' "\${FAKE_STABLE_CODE:-404}" ;;
   *releases/latest*) printf '{"tag_name": "v0.1.151"}' ;;
   */deploy/update.sh*) echo "# the updater; it reads podman.unit" >"$out" ;;
-  */api/health*) [ -f "$FAKE/active" ] && echo '{"app":"openmausbot"}' ;;
+  */api/health*) [ -f "$FAKE/active" ] && echo '{"app":"openindbot"}' ;;
   *) exit 22 ;;
 esac`,
 };
@@ -78,8 +78,8 @@ function machine(options: { home?: string } = {}) {
     writeFileSync(join(bin, name), `#!/bin/sh\necho "$*" >>"$FAKE/${name}.log"\n${body}\n`);
     chmodSync(join(bin, name), 0o755);
   }
-  const dir = join(home, ".local", "share", "openmausbot");
-  const unitPath = join(home, ".config", "containers", "systemd", "openmausbot.container");
+  const dir = join(home, ".local", "share", "openindbot");
+  const unitPath = join(home, ".config", "containers", "systemd", "openindbot.container");
   const run = (args: string[] = [], env: Record<string, string> = {}) => {
     const result = spawnSync(SHELL, [SCRIPT, ...args], {
       encoding: "utf8", timeout: 30_000,
@@ -113,17 +113,17 @@ describe.skipIf(!posix)("deploy/podman/install.sh", () => {
     const unit = box.unit()!;
     expect(unit).toContain(`Image=${DIGEST}\n`);
     // systemd turns $$ into $, so the container's shell reads OMB_PORT from server.env at each check.
-    expect(unit).toContain("HealthCmd=curl -sf --max-time 4 http://127.0.0.1:$${OMB_PORT:-8799}/api/health | grep -q openmausbot\n");
+    expect(unit).toContain("HealthCmd=curl -sf --max-time 4 http://127.0.0.1:$${OMB_PORT:-8799}/api/health | grep -q openindbot\n");
     expect(unit).not.toContain("8811");
     expect(box.read(join(box.dir, "server.env"))).toContain("OMB_PORT=8811\n");
     expect(unit).toContain(`EnvironmentFile=${box.dir}/server.env\n`);
-    expect(unit).toContain("Environment=OMB_PODMAN_SERVICE=~/.local/share/openmausbot\n");
+    expect(unit).toContain("Environment=OMB_PODMAN_SERVICE=~/.local/share/openindbot\n");
     expect(unit).toContain("WARNING: this isolates less than the Docker install.");
     // The generator read a copy in a folder of its own, never the live unit's folder.
     expect(box.read(join(box.fake, "dryrun.container"))).toBe(unit);
     expect(box.read(join(box.fake, "dryrun.dir"))!.trim()).not.toBe(join(box.home, ".config", "containers", "systemd"));
     expect(box.read(join(box.dir, ".env"))).toBe(`OMB_IMAGE=${DIGEST}\n`);
-    expect(done.stdout).toContain("MausBot is running as your user's service (openmausbot), on http://127.0.0.1:8811.");
+    expect(done.stdout).toContain("IndBot is running as your user's service (openindbot), on http://127.0.0.1:8811.");
     expect(done.stdout).toContain("Warning: it shares this machine's network, which isolates less than the Docker install.");
     expect(done.stdout).toContain("Bots run unboxed, beside the data folder that holds the engines' logins.");
     expect(done.stdout).toContain("Bots reach every service on this machine's loopback: databases, other programs' admin ports.");
@@ -148,7 +148,7 @@ describe.skipIf(!posix)("deploy/podman/install.sh", () => {
     expect(stable.unit()).toContain(`Image=${STABLE}\n`);
 
     for (const [env, words] of [
-      [{ FAKE_STABLE_CODE: "500" }, "The stable channel could not be read (https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json answered 500)."],
+      [{ FAKE_STABLE_CODE: "500" }, "The stable channel could not be read (https://raw.githubusercontent.com/milind-soni/OpenIndBot/channels/stable.json answered 500)."],
       [{ FAKE_STABLE_CODE: "000" }, "answered 000"],
       [{ FAKE_STABLE_CODE: "200", FAKE_STABLE_BODY: `{"image": "${REPO}:stable"}` }, "names no image this installer accepts"],
     ] as const) {
@@ -167,7 +167,7 @@ describe.skipIf(!posix)("deploy/podman/install.sh", () => {
     const box = machine();
     const unpinned = box.run([], { FAKE_DIGESTS: "" });
     expect(unpinned.status).toBe(1);
-    expect(unpinned.stderr).toContain(`MausBot ${REPO}:v0.1.151 was downloaded, but Podman did not say its digest, so it cannot be pinned`);
+    expect(unpinned.stderr).toContain(`IndBot ${REPO}:v0.1.151 was downloaded, but Podman did not say its digest, so it cannot be pinned`);
     expect(box.unit()).toBeNull();
     expect(existsSync(join(box.dir, ".env"))).toBe(false);
 
@@ -249,7 +249,7 @@ describe.skipIf(!posix)("deploy/podman/install.sh", () => {
 
     const other = box.run(["--dir", join(box.root, "srv", "other")]);
     expect(other.status).toBe(1);
-    expect(other.stderr).toContain(`This user's MausBot service already uses ${elsewhere}, and --dir names ${join(box.root, "srv", "other")}. Nothing was changed.`);
+    expect(other.stderr).toContain(`This user's IndBot service already uses ${elsewhere}, and --dir names ${join(box.root, "srv", "other")}. Nothing was changed.`);
     expect(existsSync(join(box.root, "srv", "other"))).toBe(false);
     expect(box.unit()).toBe(unit);
 
@@ -268,14 +268,14 @@ describe.skipIf(!posix)("deploy/podman/install.sh", () => {
   it("refuses a Docker install's folder", () => {
     for (const file of ["compose.yaml", "docker-compose.yml"]) {
       const box = machine();
-      const docker = join(box.root, "opt", "openmausbot");
+      const docker = join(box.root, "opt", "openindbot");
       mkdirSync(docker, { recursive: true });
       writeFileSync(join(docker, file), "services: {}\n");
-      writeFileSync(join(docker, ".env"), "DOMAIN=maus.example.com\n");
+      writeFileSync(join(docker, ".env"), "DOMAIN=ind.example.com\n");
       const refused = box.run(["--dir", docker]);
       expect(refused.status).toBe(1);
       expect(refused.stderr).toContain(`${docker} holds a Docker install (compose.yaml or docker-compose.yml). Nothing was changed.`);
-      expect(readFileSync(join(docker, ".env"), "utf8")).toBe("DOMAIN=maus.example.com\n");
+      expect(readFileSync(join(docker, ".env"), "utf8")).toBe("DOMAIN=ind.example.com\n");
       expect(box.unit()).toBeNull();
     }
   });
@@ -295,12 +295,12 @@ describe.skipIf(!posix)("deploy/podman/install.sh", () => {
   });
 
   it("installs in a home with @ in its name (realmd and SSSD homes), and names the folder when its characters cannot go in a unit", () => {
-    const box = machine({ home: "home/maus@corp.example" });
+    const box = machine({ home: "home/ind@corp.example" });
     const done = box.run();
     expect(done.status, done.out).toBe(0);
     expect(box.unit()).toContain(`Volume=${box.dir}/data:/data\n`);
 
-    const spaced = machine({ home: "home/maus tester" });
+    const spaced = machine({ home: "home/ind tester" });
     const refused = spaced.run();
     expect(refused.status).toBe(1);
     expect(refused.stderr).toContain(`The folder ${spaced.dir} has characters this installer does not write into a service's unit. Name another with --dir PATH`);
@@ -309,7 +309,7 @@ describe.skipIf(!posix)("deploy/podman/install.sh", () => {
   it("keeps the image a rollback named by this machine's own name, pinned by the digest it came with, and never pulls that name", () => {
     const box = machine();
     expect(box.run().status).toBe(0);
-    const keep = "openmausbot-before-update:local";
+    const keep = "openindbot-before-update:local";
     writeFileSync(join(box.dir, ".env"), `OMB_IMAGE=${keep}\n`);
     writeFileSync(join(box.fake, "local"), `${keep}\n`);
     box.reset();

@@ -6,7 +6,7 @@ import type { NewWait, WaitRecord } from "../waits.ts";
 import { createWaitRoutes, findWaitPeer, handedAssignment, hostWaitRefusal, isNetworkPath, parseWaitRequest, waitSourceRefusal, WAIT_MESSAGES } from "./waits.ts";
 import { PASS } from "./table.ts";
 
-const HOME = "/home/maus";
+const HOME = "/home/ind";
 const FILE_WAIT = { label: "the report", kind: "file_exists", path: "/r.txt" };
 
 const waits = {
@@ -124,7 +124,7 @@ describe("the waits route", () => {
       expect(await call("POST", "/api/internal/waits", { ...FILE_WAIT, path }), path).toMatchObject({ status: 400, payload: { error } });
     }
     expect(waits.create).not.toHaveBeenCalled();
-    for (const path of ["/srv/share/x", "~/a//b", "C:\\Users\\maus\\r.txt", "/a/%2F/b"]) expect(isNetworkPath(path), path).toBe(false);
+    for (const path of ["/srv/share/x", "~/a//b", "C:\\Users\\ind\\r.txt", "/a/%2F/b"]) expect(isNetworkPath(path), path).toBe(false);
   });
   it("treats null as absent and a body that is not an object as an error", async () => {
     expect(parseWaitRequest({ ...FILE_WAIT, text: null, hours: null }, HOME)).toMatchObject({ ok: true, request: { hours: 24 } });

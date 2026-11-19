@@ -242,7 +242,7 @@
   --color-success-ink: #072114;
   --color-scrollbar: #3d3d3d;
   /* second speed line of the mascot — contrasts against the app ground */
-  --color-maus-line: #f5f5f5;
+  --color-ind-line: #f5f5f5;
   --shadow-float: 0 0 #0000;
 }
 
@@ -286,7 +286,7 @@
   --color-success-ink: #072114;
   --color-warning: #ff9800;
   --color-scrollbar: #3d3d3d;
-  --color-maus-line: #f5f5f5;
+  --color-ind-line: #f5f5f5;
 
   --color-edge: #f5f5f50f;
 
@@ -364,7 +364,7 @@
   --color-success-ink: #ffffff;
   --color-warning: #7a5f31;       /* darkened → 4.98:1 */
   --color-scrollbar: #c9c0ae;
-  --color-maus-line: #6b6559;
+  --color-ind-line: #6b6559;
 
   /* System faces rather than Geist: paper reads as the platform's own. */
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
@@ -440,7 +440,7 @@
   --color-success-ink: #1c150c;
   --color-warning: #dfa441;
   --color-scrollbar: #3d3529;
-  --color-maus-line: #b0a696;
+  --color-ind-line: #b0a696;
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
@@ -522,7 +522,7 @@
   --color-success-ink: #ffffff;
   --color-warning: #7a5a2a;
   --color-scrollbar: #a6b8b6;
-  --color-maus-line: #4d5c5b;
+  --color-ind-line: #4d5c5b;
 
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
@@ -584,7 +584,7 @@
   --color-success-ink: #101a14;
   --color-warning: #d3a150;
   --color-scrollbar: #464b54;
-  --color-maus-line: #b3b8c2;
+  --color-ind-line: #b3b8c2;
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
@@ -646,7 +646,7 @@
   --color-success-ink: #ffffff;
   --color-warning: #765b2b;
   --color-scrollbar: #aeb6c0;
-  --color-maus-line: #59616c;
+  --color-ind-line: #59616c;
 
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
@@ -707,7 +707,7 @@
   --color-success-ink: #101812;
   --color-warning: #d0a35d;
   --color-scrollbar: #4a414f;
-  --color-maus-line: #b9afbd;
+  --color-ind-line: #b9afbd;
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
@@ -783,7 +783,7 @@
   --color-success-ink: #ffffff;
   --color-warning: #9c5b00;
   --color-scrollbar: #c4c4c4;
-  --color-maus-line: #5f5f5f;
+  --color-ind-line: #5f5f5f;
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
@@ -811,7 +811,7 @@
 }
 
 /* ── Meadow ───────────────────────────────────────────────────────────────
-   The MausBot brand look: a white page, a sidebar washed in the faintest
+   The IndBot brand look: a white page, a sidebar washed in the faintest
    green, mint for the selected row and a calm green accent. The brand
    green #1f8a52 carries white at only 4.3:1, so the filled accent is one
    step deeper; the brand green stays as the accent border.
@@ -850,7 +850,7 @@
   --color-success-ink: #ffffff;
   --color-warning: #8a5a00;
   --color-scrollbar: #c3cdc6;
-  --color-maus-line: #5a675f;
+  --color-ind-line: #5a675f;
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
@@ -914,7 +914,7 @@
   --color-success-ink: #ffffff;
   --color-warning: #8a5a00;
   --color-scrollbar: #d0bfa6;
-  --color-maus-line: #6b625b;
+  --color-ind-line: #6b625b;
 
   --font-sans: "Plus Jakarta Sans", ui-rounded, "SF Pro Rounded", "Geist Variable",
     -apple-system, system-ui, "Segoe UI", sans-serif;
@@ -971,7 +971,7 @@
   --color-success-ink: #0d1a10;
   --color-warning: #f2b45a;
   --color-scrollbar: #3b3048;
-  --color-maus-line: #c2b3cc;
+  --color-ind-line: #c2b3cc;
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
@@ -1028,7 +1028,7 @@
   --color-success-ink: #0d1a10;
   --color-warning: #f2b45a;
   --color-scrollbar: #392f5a;
-  --color-maus-line: #cdbfdc;
+  --color-ind-line: #cdbfdc;
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
@@ -1086,7 +1086,7 @@
   --color-success-ink: #052e16;
   --color-warning: #f5a524;
   --color-scrollbar: #343834;
-  --color-maus-line: #f2f5f2;
+  --color-ind-line: #f2f5f2;
 
   --color-edge: #f2f5f20f;
 
@@ -2454,245 +2454,245 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   transition: none !important;
 }
 
-/* SupaMaus vector motion. The fast horizontal compression is the edge-on
+/* SupaInd vector motion. The fast horizontal compression is the edge-on
    moment of a turn; face parallax, surface lighting, and orbiting vector marks
    sell the 3D rotation without duplicate silhouettes, raster frames, or WebGL. */
-.maus-character,
-.maus-orbit,
-.maus-face,
-.maus-solid,
-.maus-eyes,
-.maus-fx {
+.ind-character,
+.ind-orbit,
+.ind-face,
+.ind-solid,
+.ind-eyes,
+.ind-fx {
   transform-box: view-box;
   transform-origin: 100px 100px;
 }
 
-.maus-orbit,
-.maus-fx {
+.ind-orbit,
+.ind-fx {
   opacity: 0;
 }
 
-.maus-character {
+.ind-character {
   transform-style: preserve-3d;
 }
 
-.maus-bevel,
-.maus-rim-light {
+.ind-bevel,
+.ind-rim-light {
   pointer-events: none;
 }
 
-.maus-specular {
+.ind-specular {
   opacity: 0.3;
 }
 
-.maus-eyes {
-  transform: translate(var(--maus-eye-x), var(--maus-eye-y));
+.ind-eyes {
+  transform: translate(var(--ind-eye-x), var(--ind-eye-y));
   transition: transform 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.maus-fx {
+.ind-fx {
   pointer-events: none;
 }
 
-.maus-ribbon,
-.maus-burst-ray {
+.ind-ribbon,
+.ind-burst-ray {
   fill: none;
   stroke-linecap: round;
 }
 
-.maus-ribbon {
+.ind-ribbon {
   stroke-width: 4;
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
 }
 
-.maus-ribbon--two { stroke-width: 2.4; }
-.maus-ribbon--three { stroke-width: 3; }
+.ind-ribbon--two { stroke-width: 2.4; }
+.ind-ribbon--three { stroke-width: 3; }
 
-.maus-burst-dot,
-.maus-burst-ray,
-.maus-ellipsis-dot {
+.ind-burst-dot,
+.ind-burst-ray,
+.ind-ellipsis-dot {
   transform-box: fill-box;
   transform-origin: center;
 }
 
-.maus-burst-ray {
+.ind-burst-ray {
   stroke-width: 3;
 }
 
-.maus-speed-line {
+.ind-speed-line {
   fill: none;
-  stroke: var(--maus-color);
+  stroke: var(--ind-color);
   stroke-linecap: round;
   stroke-width: 3.5px;
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
 }
 
-.maus-speed-line--two {
-  /* the mascot's own --maus-color is set per motion; this line reads against
+.ind-speed-line--two {
+  /* the mascot's own --ind-color is set per motion; this line reads against
      the app ground instead, so it follows the skin */
-  stroke: var(--color-maus-line);
+  stroke: var(--color-ind-line);
   stroke-width: 2.5px;
 }
 
-.maus-motion--arrive .maus-character {
-  animation: maus-arrive 940ms cubic-bezier(0.2, 0.82, 0.22, 1) both;
+.ind-motion--arrive .ind-character {
+  animation: ind-arrive 940ms cubic-bezier(0.2, 0.82, 0.22, 1) both;
 }
 
-.maus-motion--switch .maus-character {
-  animation: maus-switch 760ms cubic-bezier(0.2, 0.74, 0.16, 1) both;
+.ind-motion--switch .ind-character {
+  animation: ind-switch 760ms cubic-bezier(0.2, 0.74, 0.16, 1) both;
 }
 
-.maus-motion--customize .maus-character {
-  animation: maus-customize 720ms cubic-bezier(0.18, 0.78, 0.2, 1) both;
+.ind-motion--customize .ind-character {
+  animation: ind-customize 720ms cubic-bezier(0.18, 0.78, 0.2, 1) both;
 }
 
-.maus-motion--switch .maus-face,
-.maus-motion--customize .maus-face {
-  animation: maus-face-parallax 760ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+.ind-motion--switch .ind-face,
+.ind-motion--customize .ind-face {
+  animation: ind-face-parallax 760ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-.maus-motion--arrive .maus-face {
-  animation-name: maus-face-arrive;
+.ind-motion--arrive .ind-face {
+  animation-name: ind-face-arrive;
   animation-duration: 940ms;
 }
 
-.maus-motion--arrive .maus-specular,
-.maus-motion--switch .maus-specular,
-.maus-motion--customize .maus-specular,
-.maus-motion--success .maus-specular,
-.maus-motion--celebrate .maus-specular {
-  animation: maus-specular-sweep 760ms ease-out both;
+.ind-motion--arrive .ind-specular,
+.ind-motion--switch .ind-specular,
+.ind-motion--customize .ind-specular,
+.ind-motion--success .ind-specular,
+.ind-motion--celebrate .ind-specular {
+  animation: ind-specular-sweep 760ms ease-out both;
 }
 
-.maus-motion--arrive .maus-specular { animation-duration: 940ms; }
+.ind-motion--arrive .ind-specular { animation-duration: 940ms; }
 
-.maus-motion--arrive .maus-orbit,
-.maus-motion--switch .maus-orbit,
-.maus-motion--customize .maus-orbit {
-  animation: maus-orbit-turn 760ms cubic-bezier(0.24, 0.76, 0.3, 1) both;
+.ind-motion--arrive .ind-orbit,
+.ind-motion--switch .ind-orbit,
+.ind-motion--customize .ind-orbit {
+  animation: ind-orbit-turn 760ms cubic-bezier(0.24, 0.76, 0.3, 1) both;
 }
 
-.maus-motion--arrive .maus-orbit {
+.ind-motion--arrive .ind-orbit {
   animation-duration: 940ms;
 }
 
-.maus-motion--arrive .maus-speed-line,
-.maus-motion--switch .maus-speed-line,
-.maus-motion--customize .maus-speed-line {
-  animation: maus-line-draw 760ms ease-out both;
+.ind-motion--arrive .ind-speed-line,
+.ind-motion--switch .ind-speed-line,
+.ind-motion--customize .ind-speed-line {
+  animation: ind-line-draw 760ms ease-out both;
 }
 
-.maus-motion--arrive .maus-speed-line {
+.ind-motion--arrive .ind-speed-line {
   animation-duration: 940ms;
 }
 
-.maus-motion--arrive .maus-orbit-dot,
-.maus-motion--switch .maus-orbit-dot,
-.maus-motion--customize .maus-orbit-dot {
+.ind-motion--arrive .ind-orbit-dot,
+.ind-motion--switch .ind-orbit-dot,
+.ind-motion--customize .ind-orbit-dot {
   transform-box: fill-box;
   transform-origin: center;
-  animation: maus-dot-pop 760ms ease-out both;
+  animation: ind-dot-pop 760ms ease-out both;
 }
 
-.maus-motion--arrive .maus-orbit-dot {
+.ind-motion--arrive .ind-orbit-dot {
   animation-duration: 940ms;
 }
 
-.maus-orbit-dot--two { animation-delay: 45ms !important; }
-.maus-orbit-dot--three { animation-delay: 85ms !important; }
+.ind-orbit-dot--two { animation-delay: 45ms !important; }
+.ind-orbit-dot--three { animation-delay: 85ms !important; }
 
-.maus-motion--alert .maus-character {
-  animation: maus-alert-body 1050ms cubic-bezier(0.18, 0.78, 0.18, 1) both;
+.ind-motion--alert .ind-character {
+  animation: ind-alert-body 1050ms cubic-bezier(0.18, 0.78, 0.18, 1) both;
 }
 
-.maus-motion--alert .maus-fx--alert {
-  animation: maus-alert-symbol 1050ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+.ind-motion--alert .ind-fx--alert {
+  animation: ind-alert-symbol 1050ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-.maus-motion--thinking .maus-character {
-  animation: maus-thinking-body 1300ms cubic-bezier(0.2, 0.76, 0.18, 1) both;
+.ind-motion--thinking .ind-character {
+  animation: ind-thinking-body 1300ms cubic-bezier(0.2, 0.76, 0.18, 1) both;
 }
 
-.maus-motion--thinking .maus-fx--ellipsis {
-  animation: maus-ellipsis-stage 1300ms ease-in-out both;
+.ind-motion--thinking .ind-fx--ellipsis {
+  animation: ind-ellipsis-stage 1300ms ease-in-out both;
 }
 
-.maus-motion--thinking .maus-ellipsis-dot {
-  animation: maus-ellipsis-dot 1300ms ease-in-out both;
+.ind-motion--thinking .ind-ellipsis-dot {
+  animation: ind-ellipsis-dot 1300ms ease-in-out both;
 }
 
-.maus-motion--thinking .maus-ellipsis-dot--two { animation-delay: 70ms; }
-.maus-motion--thinking .maus-ellipsis-dot--three { animation-delay: 140ms; }
+.ind-motion--thinking .ind-ellipsis-dot--two { animation-delay: 70ms; }
+.ind-motion--thinking .ind-ellipsis-dot--three { animation-delay: 140ms; }
 
-.maus-motion--working .maus-character {
-  animation: maus-working-body 1150ms ease-in-out infinite;
+.ind-motion--working .ind-character {
+  animation: ind-working-body 1150ms ease-in-out infinite;
 }
 
-.maus-motion--working .maus-orbit {
-  animation: maus-working-orbit 1150ms linear infinite;
+.ind-motion--working .ind-orbit {
+  animation: ind-working-orbit 1150ms linear infinite;
 }
 
-.maus-motion--working .maus-orbit-dot {
-  animation: maus-working-dot 1150ms ease-in-out infinite;
+.ind-motion--working .ind-orbit-dot {
+  animation: ind-working-dot 1150ms ease-in-out infinite;
 }
 
-.maus-motion--launch .maus-character {
-  animation: maus-launch-body 1180ms cubic-bezier(0.2, 0.8, 0.18, 1) both;
+.ind-motion--launch .ind-character {
+  animation: ind-launch-body 1180ms cubic-bezier(0.2, 0.8, 0.18, 1) both;
 }
 
-.maus-motion--launch .maus-fx--ribbons {
-  animation: maus-ribbon-stage 1180ms ease-out both;
+.ind-motion--launch .ind-fx--ribbons {
+  animation: ind-ribbon-stage 1180ms ease-out both;
 }
 
-.maus-motion--launch .maus-ribbon {
-  animation: maus-ribbon-draw 1180ms ease-out both;
+.ind-motion--launch .ind-ribbon {
+  animation: ind-ribbon-draw 1180ms ease-out both;
 }
 
-.maus-motion--success .maus-character {
-  animation: maus-success-body 900ms cubic-bezier(0.18, 0.8, 0.2, 1) both;
+.ind-motion--success .ind-character {
+  animation: ind-success-body 900ms cubic-bezier(0.18, 0.8, 0.2, 1) both;
 }
 
-.maus-motion--celebrate .maus-character {
-  animation: maus-celebrate-body 1250ms cubic-bezier(0.2, 0.82, 0.18, 1) both;
+.ind-motion--celebrate .ind-character {
+  animation: ind-celebrate-body 1250ms cubic-bezier(0.2, 0.82, 0.18, 1) both;
 }
 
-.maus-motion--celebrate .maus-fx--burst {
-  animation: maus-burst-stage 1250ms ease-out both;
+.ind-motion--celebrate .ind-fx--burst {
+  animation: ind-burst-stage 1250ms ease-out both;
 }
 
-.maus-motion--celebrate .maus-burst-dot,
-.maus-motion--celebrate .maus-burst-ray {
-  animation: maus-burst-piece 1250ms ease-out both;
+.ind-motion--celebrate .ind-burst-dot,
+.ind-motion--celebrate .ind-burst-ray {
+  animation: ind-burst-piece 1250ms ease-out both;
 }
 
-.maus-motion--celebrate .maus-burst-dot--one { --maus-burst-x: -34px; --maus-burst-y: -27px; }
-.maus-motion--celebrate .maus-burst-dot--two { --maus-burst-x: 38px; --maus-burst-y: -19px; }
-.maus-motion--celebrate .maus-burst-dot--three { --maus-burst-x: 33px; --maus-burst-y: 31px; }
-.maus-motion--celebrate .maus-burst-dot--four { --maus-burst-x: -39px; --maus-burst-y: 22px; }
+.ind-motion--celebrate .ind-burst-dot--one { --ind-burst-x: -34px; --ind-burst-y: -27px; }
+.ind-motion--celebrate .ind-burst-dot--two { --ind-burst-x: 38px; --ind-burst-y: -19px; }
+.ind-motion--celebrate .ind-burst-dot--three { --ind-burst-x: 33px; --ind-burst-y: 31px; }
+.ind-motion--celebrate .ind-burst-dot--four { --ind-burst-x: -39px; --ind-burst-y: 22px; }
 
-.maus-motion--blink .maus-eyes {
-  animation: maus-blink-eyes 720ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+.ind-motion--blink .ind-eyes {
+  animation: ind-blink-eyes 720ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-.maus-motion--surprise .maus-character {
-  animation: maus-surprise-body 820ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
+.ind-motion--surprise .ind-character {
+  animation: ind-surprise-body 820ms cubic-bezier(0.2, 0.82, 0.2, 1) both;
 }
 
-.maus-motion--surprise .maus-eyes {
-  animation: maus-surprise-eyes 820ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+.ind-motion--surprise .ind-eyes {
+  animation: ind-surprise-eyes 820ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-.maus-motion--failure .maus-character {
-  animation: maus-failure-body 980ms cubic-bezier(0.22, 0.76, 0.2, 1) both;
+.ind-motion--failure .ind-character {
+  animation: ind-failure-body 980ms cubic-bezier(0.22, 0.76, 0.2, 1) both;
 }
 
-.maus-motion--failure .maus-fx--alert {
-  animation: maus-failure-mark 980ms ease-out both;
+.ind-motion--failure .ind-fx--alert {
+  animation: ind-failure-mark 980ms ease-out both;
 }
 
-@keyframes maus-arrive {
+@keyframes ind-arrive {
   0% {
     opacity: 0;
     transform: perspective(180px) translate3d(34px, 5px, 0) rotateY(78deg) rotateZ(42deg) scale(0.28, 0.68);
@@ -2716,7 +2716,7 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   }
 }
 
-@keyframes maus-switch {
+@keyframes ind-switch {
   0% { transform: perspective(180px) translate3d(0, 0, 0) rotateY(0) rotateZ(0) scale(1); }
   13% { transform: perspective(180px) translate3d(-3px, 1px, 4px) rotateY(-12deg) rotateZ(-5deg) scale(1.08, 0.91); }
   35% { transform: perspective(180px) translate3d(8px, -2px, 10px) rotateY(76deg) rotateZ(13deg) scale(0.42, 1.06); }
@@ -2726,7 +2726,7 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   100% { transform: perspective(180px) translate3d(0, 0, 0) rotateY(0) rotateZ(0) scale(1); }
 }
 
-@keyframes maus-customize {
+@keyframes ind-customize {
   0% { transform: perspective(180px) translate3d(0, 0, 0) rotateY(0) rotateZ(0) scale(1); }
   18% { transform: perspective(180px) translate3d(-4px, 1px, 5px) rotateY(-16deg) rotateZ(-7deg) scale(1.12, 0.88); }
   38% { transform: perspective(180px) translate3d(7px, -3px, 11px) rotateY(74deg) rotateZ(12deg) scale(0.44, 1.08); }
@@ -2735,7 +2735,7 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   100% { transform: perspective(180px) translate3d(0, 0, 0) rotateY(0) rotateZ(0) scale(1); }
 }
 
-@keyframes maus-face-parallax {
+@keyframes ind-face-parallax {
   0%, 12% { opacity: 1; transform: translateX(0); }
   31% { opacity: 0.35; transform: translateX(-11px) scaleX(0.45); }
   41% { opacity: 0; transform: translateX(-16px) scaleX(0.1); }
@@ -2744,13 +2744,13 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   100% { opacity: 1; transform: translateX(0) scaleX(1); }
 }
 
-@keyframes maus-face-arrive {
+@keyframes ind-face-arrive {
   0%, 19% { opacity: 0; transform: translateX(12px) scaleX(0.2); }
   38% { opacity: 0.72; transform: translateX(5px) scaleX(0.7); }
   58%, 100% { opacity: 1; transform: translateX(0) scaleX(1); }
 }
 
-@keyframes maus-specular-sweep {
+@keyframes ind-specular-sweep {
   0%, 100% { opacity: 0.3; translate: 0 0; }
   18% { opacity: 0.54; translate: -5px -2px; }
   38% { opacity: 0.92; translate: 34px 12px; }
@@ -2758,28 +2758,28 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   78% { opacity: 0.38; translate: 4px 0; }
 }
 
-@keyframes maus-orbit-turn {
+@keyframes ind-orbit-turn {
   0%, 8% { opacity: 0; transform: rotate(-46deg) scale(0.62); }
   25% { opacity: 0.9; }
   66% { opacity: 0.72; transform: rotate(34deg) scale(1.04); }
   100% { opacity: 0; transform: rotate(74deg) scale(1.18); }
 }
 
-@keyframes maus-line-draw {
+@keyframes ind-line-draw {
   0%, 12% { stroke-dashoffset: 1; opacity: 0; }
   36% { stroke-dashoffset: 0.38; opacity: 0.9; }
   68% { stroke-dashoffset: 0; opacity: 0.48; }
   100% { stroke-dashoffset: -1; opacity: 0; }
 }
 
-@keyframes maus-dot-pop {
+@keyframes ind-dot-pop {
   0%, 10% { opacity: 0; transform: scale(0.15); }
   35% { opacity: 1; transform: scale(1.15); }
   65% { opacity: 0.75; transform: scale(0.82); }
   100% { opacity: 0; transform: scale(0.1); }
 }
 
-@keyframes maus-alert-body {
+@keyframes ind-alert-body {
   0%, 100% { opacity: 1; transform: perspective(180px) scale(1) rotateZ(0); }
   16% { transform: perspective(180px) scale(1.12, 0.86) rotateZ(-6deg); }
   34%, 57% { opacity: 0.08; transform: perspective(180px) scale(0.09, 0.82) rotateZ(2deg); }
@@ -2787,13 +2787,13 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   86% { transform: perspective(180px) scale(0.96, 1.04) rotateZ(-2deg); }
 }
 
-@keyframes maus-alert-symbol {
+@keyframes ind-alert-symbol {
   0%, 22%, 66%, 100% { opacity: 0; transform: translateY(8px) scale(0.3); }
   37% { opacity: 1; transform: translateY(-3px) scale(1.08); }
   51% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
-@keyframes maus-thinking-body {
+@keyframes ind-thinking-body {
   0%, 100% { opacity: 1; transform: scale(1) rotateZ(0); }
   16% { transform: scale(1.08, 0.9) rotateZ(-5deg); }
   31%, 65% { opacity: 0.2; transform: translateY(2px) scale(0.13); }
@@ -2801,34 +2801,34 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   90% { transform: scale(0.97, 1.03) rotateZ(-1deg); }
 }
 
-@keyframes maus-ellipsis-stage {
+@keyframes ind-ellipsis-stage {
   0%, 19%, 73%, 100% { opacity: 0; }
   32%, 63% { opacity: 1; }
 }
 
-@keyframes maus-ellipsis-dot {
+@keyframes ind-ellipsis-dot {
   0%, 18%, 74%, 100% { opacity: 0; transform: translateY(8px) scale(0.25); }
   35% { opacity: 1; transform: translateY(-3px) scale(1.12); }
   48%, 62% { opacity: 0.78; transform: translateY(0) scale(0.88); }
 }
 
-@keyframes maus-working-body {
+@keyframes ind-working-body {
   0%, 100% { transform: perspective(180px) translateY(0) rotateY(-8deg) rotateZ(-2deg) scale(0.98); }
   50% { transform: perspective(180px) translateY(-3px) rotateY(12deg) rotateZ(3deg) scale(1.03); }
 }
 
-@keyframes maus-working-orbit {
+@keyframes ind-working-orbit {
   0% { opacity: 0.18; transform: rotate(0deg) scale(0.78); }
   45% { opacity: 0.9; }
   100% { opacity: 0.18; transform: rotate(360deg) scale(1.08); }
 }
 
-@keyframes maus-working-dot {
+@keyframes ind-working-dot {
   0%, 100% { opacity: 0.32; transform: scale(0.65); }
   50% { opacity: 1; transform: scale(1.1); }
 }
 
-@keyframes maus-launch-body {
+@keyframes ind-launch-body {
   0%, 100% { opacity: 1; transform: translate(0, 0) rotateZ(0) scale(1); }
   16% { transform: translate(-5px, 2px) rotateZ(-9deg) scale(1.13, 0.86); }
   31% { opacity: 0.72; transform: translate(-7px, 5px) rotateZ(-16deg) scale(0.16); }
@@ -2837,18 +2837,18 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   84% { transform: translate(1px, 1px) rotateZ(2deg) scale(0.97, 1.03); }
 }
 
-@keyframes maus-ribbon-stage {
+@keyframes ind-ribbon-stage {
   0%, 16%, 72%, 100% { opacity: 0; transform: rotate(-15deg) scale(0.65); }
   32%, 58% { opacity: 0.92; transform: rotate(3deg) scale(1); }
 }
 
-@keyframes maus-ribbon-draw {
+@keyframes ind-ribbon-draw {
   0%, 14% { opacity: 0; stroke-dashoffset: 1; }
   45% { opacity: 1; stroke-dashoffset: 0; }
   70%, 100% { opacity: 0; stroke-dashoffset: -1; }
 }
 
-@keyframes maus-success-body {
+@keyframes ind-success-body {
   0%, 100% { transform: translateY(0) rotateZ(0) scale(1); }
   20% { transform: translateY(4px) rotateZ(-5deg) scale(1.12, 0.82); }
   46% { transform: translateY(-8px) rotateZ(5deg) scale(0.91, 1.13); }
@@ -2856,7 +2856,7 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   84% { transform: translateY(-1px) scale(0.98, 1.02); }
 }
 
-@keyframes maus-celebrate-body {
+@keyframes ind-celebrate-body {
   0%, 100% { transform: perspective(180px) translateY(0) rotateY(0) rotateZ(0) scale(1); }
   17% { transform: perspective(180px) translateY(5px) rotateY(-13deg) rotateZ(-8deg) scale(1.14, 0.84); }
   42% { transform: perspective(180px) translateY(-10px) rotateY(22deg) rotateZ(13deg) scale(0.88, 1.15); }
@@ -2864,37 +2864,37 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   84% { transform: perspective(180px) translateY(-2px) rotateY(3deg) rotateZ(2deg) scale(0.98, 1.02); }
 }
 
-@keyframes maus-burst-stage {
+@keyframes ind-burst-stage {
   0%, 16%, 82%, 100% { opacity: 0; transform: scale(0.4) rotate(-16deg); }
   34% { opacity: 1; transform: scale(1.12) rotate(4deg); }
   64% { opacity: 0.68; transform: scale(1.28) rotate(12deg); }
 }
 
-@keyframes maus-burst-piece {
+@keyframes ind-burst-piece {
   0%, 18% { opacity: 0; transform: translate(0, 0) scale(0.25); }
-  42% { opacity: 1; transform: translate(var(--maus-burst-x, 0), var(--maus-burst-y, 0)) scale(1.12); }
-  72%, 100% { opacity: 0; transform: translate(var(--maus-burst-x, 0), var(--maus-burst-y, 0)) scale(0.4); }
+  42% { opacity: 1; transform: translate(var(--ind-burst-x, 0), var(--ind-burst-y, 0)) scale(1.12); }
+  72%, 100% { opacity: 0; transform: translate(var(--ind-burst-x, 0), var(--ind-burst-y, 0)) scale(0.4); }
 }
 
-@keyframes maus-blink-eyes {
-  0%, 20%, 48%, 72%, 100% { transform: translate(var(--maus-eye-x), var(--maus-eye-y)) scaleY(1); }
-  34%, 60% { transform: translate(var(--maus-eye-x), var(--maus-eye-y)) scaleY(0.08); }
+@keyframes ind-blink-eyes {
+  0%, 20%, 48%, 72%, 100% { transform: translate(var(--ind-eye-x), var(--ind-eye-y)) scaleY(1); }
+  34%, 60% { transform: translate(var(--ind-eye-x), var(--ind-eye-y)) scaleY(0.08); }
 }
 
-@keyframes maus-surprise-body {
+@keyframes ind-surprise-body {
   0%, 100% { transform: translateY(0) scale(1); }
   24% { transform: translateY(3px) scale(1.12, 0.86); }
   48% { transform: translateY(-5px) scale(0.92, 1.16); }
   72% { transform: translateY(1px) scale(1.05, 0.96); }
 }
 
-@keyframes maus-surprise-eyes {
-  0%, 100% { transform: translate(var(--maus-eye-x), var(--maus-eye-y)) scale(1); }
-  32%, 60% { transform: translate(var(--maus-eye-x), calc(var(--maus-eye-y) - 4px)) scale(1.24, 1.62); }
-  78% { transform: translate(var(--maus-eye-x), var(--maus-eye-y)) scale(0.94, 0.88); }
+@keyframes ind-surprise-eyes {
+  0%, 100% { transform: translate(var(--ind-eye-x), var(--ind-eye-y)) scale(1); }
+  32%, 60% { transform: translate(var(--ind-eye-x), calc(var(--ind-eye-y) - 4px)) scale(1.24, 1.62); }
+  78% { transform: translate(var(--ind-eye-x), var(--ind-eye-y)) scale(0.94, 0.88); }
 }
 
-@keyframes maus-failure-body {
+@keyframes ind-failure-body {
   0%, 100% { opacity: 1; transform: translate(0, 0) rotateZ(0) scale(1); }
   18% { transform: translate(-4px, 2px) rotateZ(-8deg) scale(1.08, 0.88); }
   38% { opacity: 0.82; transform: translate(5px, 3px) rotateZ(19deg) scale(0.42, 1.08); }
@@ -2903,22 +2903,22 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   86% { transform: translate(-1px, 0) rotateZ(-2deg) scale(0.98, 1.02); }
 }
 
-@keyframes maus-failure-mark {
+@keyframes ind-failure-mark {
   0%, 26%, 72%, 100% { opacity: 0; transform: translate(18px, -15px) scale(0.2); }
   43%, 58% { opacity: 1; transform: translate(18px, -15px) scale(0.42); }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .maus-motion *,
-  .maus-motion {
+  .ind-motion *,
+  .ind-motion {
     animation: none !important;
   }
 
-  .maus-orbit {
+  .ind-orbit {
     display: none;
   }
 
-  .maus-eyes { transform: none; }
+  .ind-eyes { transform: none; }
 
   /* Stop spatial motion instead of accelerating infinite animations. Loading
      icons keep a slow opacity pulse, so progress remains visible without
@@ -3550,7 +3550,7 @@ button:disabled.bg-danger {
   color: var(--bubble-selection-ink, #ffffff);
 }
 
-/* MausBot Cloud's night: a deep night sky in the dark skins and an indigo dusk in the light ones. light-dark() picks by
+/* IndBot Cloud's night: a deep night sky in the dark skins and an indigo dusk in the light ones. light-dark() picks by
    the color-scheme of the element that paints it. One star twinkles, the z's drift and now and then a star shoots, each
    slowly; the z's need transform-box to grow around their own centre. */
 :root {

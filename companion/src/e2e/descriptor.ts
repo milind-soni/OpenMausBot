@@ -6,7 +6,7 @@ import { isPublicKey, PUBLIC_KEY_BYTES } from "./noise.ts";
 export const DESCRIPTOR_VERSION = 1;
 export const MAX_DESCRIPTOR_CHARS = 1024;
 export const MAX_RELAY_NODES = 4;
-export const RELAY_HOST = /^relay[1-9][0-9]?\.openmausbot\.com$/;
+export const RELAY_HOST = /^relay[1-9][0-9]?\.openindbot\.com$/;
 
 export type DescriptorRoutes = "any" | "local";
 
@@ -42,7 +42,7 @@ export function descriptorFor(
   return routes === "local" ? { ...base, routes: "local" } : base;
 }
 
-/** `update` means a newer version: the phone says "Update the MausBot app" and never falls back to plain pairing.
+/** `update` means a newer version: the phone says "Update the IndBot app" and never falls back to plain pairing.
  * `reject` refuses the whole invite. */
 export type DescriptorParse =
   | { outcome: "ok"; descriptor: E2EDescriptor; transportKey: Buffer; hostId: Buffer | null }

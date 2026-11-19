@@ -1,6 +1,6 @@
 # Behavior evals
 
-Offline behavior evals for the OpenMausBot harness (upstream issue #1503, tiers 1-3). The unit and e2e suite tests code paths; these scenarios test what the harness *does*: which tools a turn's model was allowed to call, where work was dispatched, what the handoff tree looks like, how routines defer, and when the computer claim fires.
+Offline behavior evals for the OpenIndBot harness (upstream issue #1503, tiers 1-3). The unit and e2e suite tests code paths; these scenarios test what the harness *does*: which tools a turn's model was allowed to call, where work was dispatched, what the handoff tree looks like, how routines defer, and when the computer claim fires.
 
 The principle: evaluate the harness, never the models. A scripted engine replays deterministic turns (tool calls, text, refusals) from a plan file; no external API is called; a run is hermetic and repeatable.
 
@@ -94,7 +94,7 @@ The `live-reply-*` scenarios grade how a bot talks (answer first, one question a
 
 ## Skill bench (alpha)
 
-The skill bench measures one fixture skill against its own prompts through the same scripted machinery as tier 1. Each prompt runs twice — with the skill installed as a user skill under the booted server's data dir and without it — so the contrast covers the real seams: trigger-term selection, the `<openmaus-skill>` block riding the system prompt, and the scripted follower's behavior against a no-skill baseline. It evaluates the harness, never a model.
+The skill bench measures one fixture skill against its own prompts through the same scripted machinery as tier 1. Each prompt runs twice — with the skill installed as a user skill under the booted server's data dir and without it — so the contrast covers the real seams: trigger-term selection, the `<openind-skill>` block riding the system prompt, and the scripted follower's behavior against a no-skill baseline. It evaluates the harness, never a model.
 
     node --experimental-strip-types evals/runners/run-skill-bench.ts [--fixture bench-triage-handoff] [--replicates 2]
 
