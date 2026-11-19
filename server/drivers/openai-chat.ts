@@ -30,7 +30,7 @@ import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS }
 import { plainFailure } from "./engine-errors.ts";
 import { noticeFailure } from "../chat-notices.ts";
 import { toolFailureMessage } from "./tool-failure.ts";
-import { refusesRequestSize, RequestTooLargeError, shareThatFits, sizeChange, smallerResend } from "./chat-size-limit.ts";
+import { refusesRequestSize, RequestTooLargeError, resendsAllowed, shareThatFits, sizeChange, smallerResend } from "./chat-size-limit.ts";
 import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
 import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
@@ -633,7 +633,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           for (const message of joined ?? []) emit({ ...base(turn.threadId, turnId), type: "runtime.notice", message: safeText(message) });
           native("out", options.nativeLog.outgoing(turn, messages, model, tools.definitions));
           let attempt = 0;
-          let resized = false;
+          let resends = 0;
           let completion: Completion;
           for (;;) {
             let streamed = false;
@@ -697,13 +697,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               }
               // A provider refuses an oversized request before running anything, so one smaller copy may go again.
               if (error instanceof RequestTooLargeError && !abort.signal.aborted) {
-                const resend = resized ? null : smallerResend(messages, request, error.bytes, error.fits);
+                const resend = resends < resendsAllowed(error) ? smallerResend(messages, request, error.bytes, error.fits) : null;
                 native("out", { refused: "request_too_large", bytes: error.bytes, ...(resend ? { before: resend.before, after: resend.after } : {}) });
                 console.warn(`${options.driverKind}: ${model} refused a ${error.bytes}-byte request as too large; ${resend ? `resending smaller (${sizeChange(resend.before, resend.after)})` : "not resending"}`);
                 if (!resend) throw new ChatProtocolError(requestTooLargeMessage(options.models().options.find((option) => option.id === model)?.label ?? model));
                 messages.splice(0, messages.length, ...resend.messages);
-                resized = true;
-                emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt: 1, delayMs: 0, reason: "request_too_large" });
+                resends += 1;
+                emit({ ...base(turn.threadId, turnId), type: "turn.retrying", attempt: resends, delayMs: 0, reason: "request_too_large" });
                 continue;
               }
               // A refused tool call ran nothing, so the request goes again, but not once answer text streamed.

@@ -44,10 +44,19 @@ export class RequestTooLargeError extends Error {
   }
 }
 
+/** A provider that counts each refused request may be asked again with fresh counts, since bytes and its tokens differ
+ * in proportion (an image, a dense prompt); a refusal that gives no count gets one smaller copy. */
+export const resendsAllowed = (refusal: RequestTooLargeError): number => refusal.fits === undefined ? 1 : 3;
+
 export const IMAGE_OMITTED = "[image omitted to fit the provider's size limit]";
 export const TOOL_OUTPUT_SHORTENED = "\n[tool output shortened to fit the provider's size limit]";
 const omittedHistory = (count: number) =>
   `[${count} earlier message${count === 1 ? "" : "s"} omitted to fit the provider's size limit; full history remains in the app.]`;
+const OMITTED_HISTORY = /^\[(\d+) earlier messages? omitted to fit the provider's size limit; full history remains in the app\.\]$/;
+const omittedBefore = (message: OpenAIChatMessage): number | undefined => {
+  const count = message.role === "assistant" && typeof message.content === "string" ? OMITTED_HISTORY.exec(message.content)?.[1] : undefined;
+  return count === undefined ? undefined : Number(count);
+};
 const LONG_TOOL_OUTPUT_BYTES = 4_000;
 const SHORT_TOOL_OUTPUT_BYTES = 1_000;
 
@@ -109,12 +118,15 @@ export function smallerResend(
     ...shrinkable.filter((index) => imagesIn(messages[index]!)).map((index) => () => replace(index, withoutImages(out[index]!))),
     ...shrinkable.filter((index) => index > requestAt && messages[index]!.role === "tool" && sizes[index]! > LONG_TOOL_OUTPUT_BYTES)
       .map((index) => () => replace(index, shortenedToolOutput(out[index]!))),
-    ...shrinkable.filter((index) => index < requestAt).map((index) => () => replace(index, null)),
+    ...shrinkable.filter((index) => index < requestAt && omittedBefore(messages[index]!) === undefined).map((index) => () => replace(index, null)),
   ];
   let taken = 0;
   for (; taken < steps.length && total > target; taken++) steps[taken]!();
   if (!taken) return null;
-  const dropped = out.slice(0, requestAt).filter((message) => message === null).length;
+  const earlier = messages.slice(0, requestAt);
+  const notes = earlier.flatMap((message, index) => omittedBefore(message) === undefined ? [] : [index]);
+  if (notes.length && earlier.some((_, index) => out[index] === null)) for (const index of notes) replace(index, null);
+  const dropped = earlier.reduce((count, message, index) => out[index] === null ? count + (omittedBefore(message) ?? 1) : count, 0);
   const firstDropped = out.indexOf(null);
   const kept = out.flatMap((message, index) => [
     ...(dropped && index === firstDropped ? [{ role: "assistant" as const, content: omittedHistory(dropped) }] : []),

@@ -140,6 +140,24 @@ describe("smallerResend", () => {
     expect(counted.after.messages).toBeGreaterThan(halved.after.messages);
   });
 
+  it("counts what an earlier omission note stood for when a second copy drops more", () => {
+    const { request, messages, refused } = turn(history(10, 4_000));
+    const first = smallerResend(messages, request, refused, 0.8)!;
+    const second = smallerResend(first.messages, request, first.after.bytes, 0.6)!;
+    const notes = second.messages.filter((message) => typeof message.content === "string" && message.content.includes("omitted to fit"));
+    const earlier = second.messages.indexOf(request) - 2;
+    expect(notes).toEqual([{ role: "assistant", content: `[${10 - earlier} earlier messages omitted to fit the provider's size limit; full history remains in the app.]` }]);
+    expect(second.messages[1]).toBe(notes[0]);
+    expect(10 - earlier).toBeGreaterThan(10 - (first.messages.indexOf(request) - 2));
+  });
+
+  it("offers nothing to resend when only an omission note stands before the request", () => {
+    const { request, messages, refused } = turn(history(4, 4_000));
+    const first = smallerResend(messages, request, refused, 0.01)!;
+    expect(first.messages).toHaveLength(3);
+    expect(smallerResend(first.messages, request, first.after.bytes, 0.01)).toBeNull();
+  });
+
   it("offers nothing to resend when only the system prompt and the request are left", () => {
     const { request, messages, refused } = turn([]);
     expect(smallerResend(messages, request, refused)).toBeNull();
@@ -153,7 +171,7 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
     vi.restoreAllMocks();
   });
 
-  async function provider(refuse: (bytes: number) => { status: number; body: string } | null) {
+  async function provider(refuse: (bytes: number, messages: Array<{ role: string; content: unknown }>) => { status: number; body: string } | null) {
     const requests: Array<{ bytes: number; messages: Array<{ role: string; content: unknown }> }> = [];
     const server = createServer(async (req, res) => {
       if (req.url === "/v1/models") {
@@ -166,8 +184,9 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
       if (req.method !== "POST") { res.writeHead(404); res.end(); return; }
       for await (const chunk of req) chunks.push(chunk as Buffer);
       const raw = Buffer.concat(chunks);
-      requests.push({ bytes: raw.length, messages: JSON.parse(raw.toString("utf8")).messages });
-      const refusal = refuse(raw.length);
+      const { messages } = JSON.parse(raw.toString("utf8")) as { messages: Array<{ role: string; content: unknown }> };
+      requests.push({ bytes: raw.length, messages });
+      const refusal = refuse(raw.length, messages);
       if (refusal) {
         res.writeHead(refusal.status, { "content-type": "text/html" });
         res.end(refusal.body);
@@ -240,15 +259,18 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
   });
 
   const tokens = (bytes: number) => Math.ceil(bytes / 4);
-  const llamaCpp = (window: (firstTokens: number) => number) => {
+  const llamaCpp = (window: (firstTokens: number) => number, count: (bytes: number, messages: Array<{ role: string; content: unknown }>) => number = tokens) => {
     let n_ctx: number | undefined;
-    return (bytes: number) => {
-      n_ctx ??= window(tokens(bytes));
-      return tokens(bytes) > n_ctx ? { status: 400, body: JSON.stringify({ error: { code: 400,
-        message: `request (${tokens(bytes)} tokens) exceeds the available context size (${n_ctx} tokens), try increasing it`,
-        type: "exceed_context_size_error", n_prompt_tokens: tokens(bytes), n_ctx } }) } : null;
+    return (bytes: number, messages: Array<{ role: string; content: unknown }>) => {
+      const n_prompt_tokens = count(bytes, messages);
+      n_ctx ??= window(n_prompt_tokens);
+      return n_prompt_tokens > n_ctx ? { status: 400, body: JSON.stringify({ error: { code: 400,
+        message: `request (${n_prompt_tokens} tokens) exceeds the available context size (${n_ctx} tokens), try increasing it`,
+        type: "exceed_context_size_error", n_prompt_tokens, n_ctx } }) } : null;
     };
   };
+  const denseSystem = (bytes: number, messages: Array<{ role: string; content: unknown }>) =>
+    tokens(bytes) + 2 * tokens(Buffer.byteLength(JSON.stringify(messages.filter((message) => message.role === "system"))));
 
   it("resends a request llama.cpp counts a few tokens over its window with most of the history kept", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -275,12 +297,30 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
     expect(f.errors()).toEqual([]);
   });
 
+  it("asks llama.cpp again with its fresh count when a dense system prompt keeps the first smaller copy over", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    let window = 0;
+    const f = await provider(llamaCpp((first) => window = Math.floor(first * 0.6), denseSystem));
+    const done = await f.run({ system: `Fixture system prompt. ${"s".repeat(16_000)}`, transcript: transcript(20, 3_000) });
+    expect(done).toMatchObject({ ok: true });
+    expect(f.requests.length).toBeGreaterThan(2);
+    const sent = f.requests.at(-1)!;
+    expect(denseSystem(sent.bytes, sent.messages)).toBeLessThanOrEqual(window);
+    expect(f.retries().map((retry) => (retry as { attempt: number }).attempt)).toEqual(f.requests.slice(1).map((_, index) => index + 1));
+    const notes = sent.messages.filter((message) => typeof message.content === "string" && message.content.includes("omitted to fit"));
+    expect(notes).toHaveLength(1);
+    const kept = sent.messages.length - 3;
+    expect(notes[0]!.content).toMatch(new RegExp(`^\\[${20 - kept} earlier messages omitted`));
+    expect(f.errors()).toEqual([]);
+  });
+
   it("fails with one plain message when not even the newest message fits llama.cpp's window", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const f = await provider(llamaCpp(() => 100));
     const done = await f.run({ system: "Fixture system prompt.", transcript: transcript(20, 3_000) });
     expect(done).toMatchObject({ ok: false });
     expect(f.requests).toHaveLength(2);
+    expect(f.retries()).toHaveLength(1);
     expect(f.errors()).toEqual([requestTooLargeMessage("Fixture Flash")]);
   });
 
