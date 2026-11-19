@@ -60,7 +60,6 @@ dmg:
   title: Gerer Build Studio ${version}
   # Studio-blue installer window; source in build/dmg/background.html.
   background: build/background.png
-  backgroundColor: "#0a101c"
   icon: build/icon.icns
   iconSize: 112
   iconTextSize: 13
