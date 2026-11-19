@@ -18,6 +18,8 @@ export interface AppDefinition {
   /** Plain words Buddies match a request against ("make a montage" → montage). */
   capabilities: string[];
   category: "video" | "design" | "productivity" | "developer";
+  /** The app's own icon, bundled under public/apps/ (never hotlinked). */
+  icon: string;
   transport: "local-mcp-http";
   defaultEndpoint: string;
   auth: { kind: "bearer"; label: string; help: string };
@@ -35,6 +37,7 @@ export const APP_CATALOG: readonly AppDefinition[] = [
     blurb: "Instagram's video editor. Buddies can build and edit video projects in it for you, like montages from your clips.",
     capabilities: ["video editing", "montage", "clips", "reels", "short-form video", "captions"],
     category: "video",
+    icon: "/apps/edits.png",
     transport: "local-mcp-http",
     defaultEndpoint: "http://127.0.0.1:19501/mcp",
     auth: {

@@ -77,6 +77,7 @@ export async function describeApps(force = false) {
         maker: app.maker,
         blurb: app.blurb,
         category: app.category,
+        icon: app.icon,
         capabilities: app.capabilities,
         setupSteps: app.setupSteps,
         auth: app.auth,

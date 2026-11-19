@@ -27,7 +27,12 @@ export function AppStatusPill({ state }: { state: AppState }) {
 
 const CATEGORY_ICON: Record<string, typeof Clapperboard> = { video: Clapperboard };
 
-export function AppIcon({ app, size = 42 }: { app: Pick<AppInfo, "category">; size?: number }) {
+export function AppIcon({ app, size = 42 }: { app: Pick<AppInfo, "category" | "icon">; size?: number }) {
+  const [failed, setFailed] = useState(false);
+  if (app.icon && !failed) {
+    // the app's real icon (a full tile, so no extra frame)
+    return <img src={app.icon} alt="" aria-hidden width={size} height={size} onError={() => setFailed(true)} className="shrink-0 rounded-[22%] object-contain" />;
+  }
   const Icon = CATEGORY_ICON[app.category] ?? Sparkles;
   return (
     <div style={{ width: size, height: size }} className="flex shrink-0 items-center justify-center rounded-xl border border-accent/25 bg-accent/12 text-accent" aria-hidden>

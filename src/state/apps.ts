@@ -11,6 +11,8 @@ export interface AppInfo {
   maker: string;
   blurb: string;
   category: string;
+  /** Path to the app's bundled icon. */
+  icon?: string;
   capabilities: string[];
   setupSteps: string[];
   auth: { kind: "bearer"; label: string; help: string };
