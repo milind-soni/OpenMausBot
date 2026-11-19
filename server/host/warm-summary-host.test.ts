@@ -4,9 +4,9 @@ import type { IdleCompactResult } from "../contracts.ts";
 import type { HandedState } from "../delta-context.ts";
 import type { Message } from "../store.ts";
 import { createJobSlots } from "../job-slots.ts";
-import { WARM_SUMMARY_GIVE_UP_MS, WARM_SUMMARY_IDLE_MS, WARM_SUMMARY_RETRY_MS, WARM_SUMMARY_SOON_MS } from "../warm-summary.ts";
+import { WARM_SUMMARY_GIVE_UP_MS, WARM_SUMMARY_IDLE_MS, WARM_SUMMARY_NOW_MS, WARM_SUMMARY_RETRY_MS, WARM_SUMMARY_SOON_MS } from "../warm-summary.ts";
 import { addServerLinePacks } from "../server-lines.ts";
-import { createWarmSummaryHost, keptAfterSummary, PRESENCE_HOLD_MS, summaryInstructions, type WarmSummaryHostDeps } from "./warm-summary-host.ts";
+import { COMPACTION_STARTED_LINE, createWarmSummaryHost, keptAfterSummary, PRESENCE_HOLD_MS, summaryInstructions, type WarmSummaryHostDeps } from "./warm-summary-host.ts";
 
 let at = 0;
 const line = (role: "user" | "bot", text: string, extra: Partial<Message> = {}): Message =>
@@ -232,8 +232,55 @@ describe("warm summaries for a Claude conversation", () => {
     expect(small.compactCalls).toEqual([]);
     const near = setup({}, { tokens: 165_000 });
     near.finishTurn();
-    await near.advance(WARM_SUMMARY_SOON_MS);
+    await near.advance(WARM_SUMMARY_NOW_MS);
     expect(near.compactCalls).toHaveLength(1);
+  });
+
+  it("writes the summary ahead from 70% of the engine's own point, after the pause of a quick reply, and minutes later below that", async () => {
+    const below = setup({}, { tokens: 139_000 });
+    below.finishTurn();
+    await below.advance(WARM_SUMMARY_IDLE_MS - 1);
+    expect(below.compactCalls).toEqual([]);
+    await below.advance(1);
+    expect(below.compactCalls).toHaveLength(1);
+    const ahead = setup({}, { tokens: 141_465 });
+    ahead.finishTurn();
+    await ahead.advance(WARM_SUMMARY_SOON_MS - 1);
+    expect(ahead.compactCalls).toEqual([]);
+    await ahead.advance(1);
+    expect(ahead.compactCalls).toHaveLength(1);
+  });
+
+  it("shows the engine's own compaction line to a person whose turn waits for the summary, then the summary's line", async () => {
+    let finish = (_result: IdleCompactResult): void => undefined;
+    const compact = vi.fn(() => new Promise<IdleCompactResult>((resolve) => { finish = resolve; }));
+    const s = setup({ instance: () => ({ adapter: { cacheKeepWarm: { compact, hold: () => true } } }) }, { tokens: 165_000 });
+    s.finishTurn();
+    await s.advance(WARM_SUMMARY_NOW_MS);
+    expect(compact).toHaveBeenCalledTimes(1);
+    expect(s.appended).toEqual([]);
+    const waiting = s.host.beforeTurn("t1");
+    await s.advance(0);
+    expect(s.appended.map((m) => m.tool?.name)).toEqual([COMPACTION_STARTED_LINE]);
+    finish({ ok: true, session: "fork-session", sessionBefore: "live-session", input: 4, cacheRead: 160_000, cacheWrite: 40, output: 2_400, costUsd: 0.2, model: "claude-opus-5-5" });
+    expect(await waiting).toBe("waited");
+    expect(s.appended.map((m) => m.kind)).toEqual(["activity", "activity"]);
+    expect(s.appended[1]!.tool?.name).toMatch(/summarized this conversation while it was idle/);
+    expect(s.task.resumeCursors.claude).toBe("fork-session");
+  });
+
+  it("lets a waiting turn go on, on its own session, when the summary fails", async () => {
+    let finish = (_result: IdleCompactResult): void => undefined;
+    const compact = vi.fn(() => new Promise<IdleCompactResult>((resolve) => { finish = resolve; }));
+    const s = setup({ instance: () => ({ adapter: { cacheKeepWarm: { compact, hold: () => true } } }) }, { tokens: 165_000 });
+    s.finishTurn();
+    await s.advance(WARM_SUMMARY_NOW_MS);
+    const waiting = s.host.beforeTurn("t1");
+    await s.advance(0);
+    finish({ ok: false, reason: "the summary failed: API error" });
+    expect(await waiting).toBe("waited");
+    expect(s.task.resumeCursors.claude).toBe("live-session");
+    expect(s.appended.map((m) => m.tool?.name)).toEqual([COMPACTION_STARTED_LINE]);
   });
 
   it("never summarizes a room, or with automatic compaction off", async () => {
