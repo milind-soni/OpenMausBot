@@ -77,7 +77,18 @@ export function clinePlanLimit(error: unknown, now = Date.now()): AcpReportedFai
   return new AcpReportedFailure({ ...failure, ...(resetsAt === undefined ? {} : { limitResetsAt: resetsAt }) }, true);
 }
 
-type ConfigOption = { id?: string; currentValue?: unknown };
+/** Cline 3.0.74: "No access to ClinePass subscription models yet. Subscribe to ClinePass, ...: https://app.cline.bot/..." */
+const NO_PASS = /\bNo access to ClinePass subscription models\b/i;
+
+export function clineReportedFailure(error: unknown): AcpReportedFailure | undefined {
+  const text = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  if (!NO_PASS.test(text)) return clinePlanLimit(error);
+  return new AcpReportedFailure({
+    message: "ClinePass models need a ClinePass subscription. Subscribe at https://app.cline.bot/dashboard/subscription?personal=true, or pick a free Cline model.",
+  }, false);
+}
+
+type ConfigOption ={ id?: string; currentValue?: unknown };
 
 export const CLINE_SUPPORT: AcpSupport = {
   driverKind: "clineAgent",
@@ -94,7 +105,9 @@ export const CLINE_SUPPORT: AcpSupport = {
     signInCommand: "cline auth",
   },
   // Never inherit Cline's terminal auto-approval default or a saved grant: the ACP broker answers permissions.
-  spawnArgs: () => ["--acp", "--auto-approve", "false"],
+  // Cline 3.0.74 has no ACP effort option; without --thinking it reuses the level last chosen in its TUI.
+  effortLevels: ["none", "low", "medium", "high", "xhigh"],
+  spawnArgs: (_config, turn) => ["--acp", "--auto-approve", "false", ...(turn.effort ? ["--thinking", turn.effort] : [])],
   restartOnMcpChange: true,
   credentialEnv: ["CLINE_API_KEY"],
   transformEnv(env, config) {
@@ -148,7 +161,7 @@ export const CLINE_SUPPORT: AcpSupport = {
       await request("session/set_model", { sessionId, modelId: model });
     }
   },
-  reportedFailure: (error) => clinePlanLimit(error),
+  reportedFailure: clineReportedFailure,
 };
 
 export const ClineAgentDriver = {

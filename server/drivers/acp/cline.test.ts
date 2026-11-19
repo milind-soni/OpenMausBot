@@ -9,7 +9,7 @@ import type { ProviderInstance } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { BUILT_IN_DRIVERS } from "../builtIn.ts";
-import { CLINE_SUPPORT, ClineAgentDriver, clinePlanLimit } from "./cline.ts";
+import { CLINE_SUPPORT, ClineAgentDriver, clinePlanLimit, clineReportedFailure } from "./cline.ts";
 import { clineTierModels } from "./cline-models.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 import { assertToolScopeSupported } from "../../../shared/tool-scope-support.ts";
@@ -174,6 +174,19 @@ describe("Cline ACP driver", () => {
     expect(clinePlanLimit(new Error("You have reached your daily Clinepass limit."), now)?.facts.limitResetsAt).toBeUndefined();
     expect(clinePlanLimit(new Error("You hit your rate limit"), now)).toBeUndefined();
     expect(clinePlanLimit(new Error("reached your context window limit"), now)).toBeUndefined();
+  });
+
+  it("says plainly that ClinePass models need a subscription", () => {
+    const words = "No access to ClinePass subscription models yet. Subscribe to ClinePass, the low cost open weights model coding plan: https://app.cline.bot/dashboard/subscription?personal=true";
+    const failure = clineReportedFailure(new Error(`Internal error: ${words}: ${words} (session/prompt)`));
+    expect(failure).toMatchObject({ acpUsageLimit: false, message: expect.stringMatching(/^ClinePass models need a ClinePass subscription\..*pick a free Cline model\.$/) });
+    expect(clineReportedFailure(new Error("Invalid params"))).toBeUndefined();
+  });
+
+  it("passes effort as --thinking, and omits it when unset", () => {
+    const config = { cli: "cline", fullAuto: false };
+    expect(CLINE_SUPPORT.spawnArgs(config, { threadId: "t", text: "hi", effort: "high" })).toEqual(["--acp", "--auto-approve", "false", "--thinking", "high"]);
+    expect(CLINE_SUPPORT.spawnArgs(config, { threadId: "t", text: "hi" })).not.toContain("--thinking");
   });
 
   it("fails the turn rather than silently using a fallback model", async () => {
