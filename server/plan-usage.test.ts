@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +19,7 @@ import {
   type PlanResponse,
 } from "./plan-usage.ts";
 import { claudeKeychainQueries } from "./drivers/claude-keychain.ts";
+import { readOpenCodeDbLogins } from "./opencode-credentials.ts";
 
 const SECRET = "plan-usage-fixture-secret";
 const NOW = 1_800_000_000_000;
@@ -614,6 +617,47 @@ describe("plan usage fetcher", () => {
       credentials: fileCredentialReader({ now: () => NOW, env: { HOME: tmpdir() }, readText: () => JSON.stringify({ "opencode-go": { access: login } }) }),
     });
     expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(`Bearer ${login}`);
+  });
+
+  /** OpenCode v2 keeps its login in opencode.db, not auth.json: with no file entry, the database's active login is used. */
+  it("falls back to OpenCode v2's database login when auth.json has no OpenCode entry, and skips an expired one", async () => {
+    const login = "opencode-db-fixture-login";
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ usage: { monthly: { status: "ok", percent: 13, resetsAt: null } } }));
+    const paths: string[] = [];
+    const credentials = (expires: number) => fileCredentialReader({
+      now: () => NOW, env: { XDG_DATA_HOME: "/xdg" }, readText: () => JSON.stringify({ openrouter: { type: "api", key: "other-provider-key" } }),
+      readOpenCodeDb: (path) => { paths.push(path); return JSON.stringify({ opencode: { type: "oauth", access: login, expires } }); },
+    });
+    const report = await fetchPlanUsage([account("opencode")], { fetch: fetchImpl, now: () => NOW, credentials: credentials(NOW + 600_000) });
+    expect(paths[0]).toBe(join("/xdg", "opencode", "opencode.db"));
+    expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(`Bearer ${login}`);
+    expect(report.providers[0]).toMatchObject({ ok: true, plan: "Go", extra: [{ label: "Monthly", usedPercent: 13 }] });
+
+    const expired = await fetchPlanUsage([account("opencode")], { fetch: fetchImpl, now: () => NOW, credentials: credentials(NOW - 1) });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(expired.providers[0]).toMatchObject({ ok: false });
+  });
+
+  /** Only the active OpenCode logins leave the database; other providers' keys and inactive rows stay put. */
+  it("reads only active OpenCode logins from the CLI's database", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-opencode-db-"));
+    try {
+      const file = join(dir, "opencode.db");
+      const db = new DatabaseSync(file);
+      db.exec("CREATE TABLE credential (id text PRIMARY KEY, integration_id text, label text NOT NULL, value text NOT NULL, connector_id text, method_id text, active integer, time_created integer NOT NULL, time_updated integer NOT NULL)");
+      const insert = db.prepare("INSERT INTO credential VALUES (?, ?, 'x', ?, null, null, ?, 0, 0)");
+      insert.run("a", "opencode", JSON.stringify({ access: "active-login" }), 1);
+      insert.run("b", "opencode-go", JSON.stringify({ access: "inactive-login" }), null);
+      insert.run("c", "openrouter", JSON.stringify({ key: "other-provider-key" }), 1);
+      db.close();
+      const text = readOpenCodeDbLogins(file) ?? "";
+      expect(JSON.parse(text)).toEqual({ opencode: { access: "active-login" } });
+      expect(text).not.toContain("inactive-login");
+      expect(text).not.toContain("other-provider-key");
+      expect(readOpenCodeDbLogins(join(dir, "missing.db"))).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   /** A 200 that carries no meter is an unreadable answer, not an empty allowance. */

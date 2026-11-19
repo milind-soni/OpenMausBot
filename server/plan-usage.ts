@@ -1,7 +1,6 @@
 // Access tokens stay in the request header only, never in the JSON result.
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
@@ -9,6 +8,7 @@ import { readMacKeychainLogin } from "./drivers/claude-keychain.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
 import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
+import { openCodeAuthText, openCodeDbText, readOpenCodeDbLogins } from "./opencode-credentials.ts";
 
 export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity";
 
@@ -110,6 +110,8 @@ export interface CredentialSource {
   env?: NodeJS.ProcessEnv;
   now?: () => number;
   readClaudeKeychain?: (service: string) => string | null | Promise<string | null>;
+  /** OpenCode v2's active logins from its own database, as `auth.json`-shaped JSON keyed by integration. */
+  readOpenCodeDb?: (path: string) => string | null;
 }
 
 const PROVIDER_TIMEOUT_MS = 8_000;
@@ -265,7 +267,7 @@ export function fileCredentialReader(source: CredentialSource): CredentialReader
       const at = now();
       if (account.driver === "claude") return readClaudeCredential(account, merged, source, at);
       if (account.driver === "codex") return readCodexCredential(merged, source.readText, at);
-      if (account.driver === "opencode") return readOpenCodeCredential(merged, source.readText, at);
+      if (account.driver === "opencode") return readOpenCodeCredential(merged, source.readText, at, source.readOpenCodeDb);
       return readGrokCredential(merged, source.readText, at);
     },
   };
@@ -284,6 +286,7 @@ export function defaultCredentialReader(env: NodeJS.ProcessEnv = process.env): C
       }
     },
     ...(process.platform === "darwin" && !sealedFixture() ? { readClaudeKeychain: readDarwinClaudeKeychain } : {}),
+    ...(sealedFixture() ? {} : { readOpenCodeDb: readOpenCodeDbLogins }),
   });
 }
 
@@ -839,15 +842,13 @@ function readGrokCredential(
   return sawExpired ? expiredCredential() : missingCredential();
 }
 
-/** The key saved in Settings, or the login `opencode auth login` keeps. `auth.json` is where OpenCode v1 wrote one; v2 keeps credentials in its own database, so this path covers installs migrated from v1 (the saved key covers v2). */
-function readOpenCodeCredential(env: NodeJS.ProcessEnv, readText: (path: string) => string | null, now: number): PlanCredential {
+/** The key saved in Settings, or the login `opencode auth login` keeps: `auth.json` where OpenCode v1 wrote it, else the `credential` table of v2's `opencode.db`. */
+function readOpenCodeCredential(env: NodeJS.ProcessEnv, readText: (path: string) => string | null, now: number, readDb?: (path: string) => string | null): PlanCredential {
   const key = secretString(env.OPENCODE_API_KEY);
   if (key) return { token: key, accountId: null, expired: false };
-  const raw = env.OPENCODE_AUTH_CONTENT?.trim() || openCodeAuthText(env, readText);
-  const stored = asRecord(parseJson(raw));
-  // A Go login lives under "opencode-go", a Zen one under "opencode"; the CLI lists Go first too.
-  const entry = [stored?.["opencode-go"], stored?.opencode].map((value) => asRecord(value))
-    .find((record) => secretString(record?.access) ?? secretString(record?.key));
+  // auth.json can hold other providers' keys with no OpenCode one, so the database is asked whenever it gave no login.
+  const entry = openCodeLogin(env.OPENCODE_AUTH_CONTENT?.trim() || openCodeAuthText(env, readText))
+    ?? (readDb ? openCodeLogin(openCodeDbText(env, readDb)) : null);
   const token = secretString(entry?.access) ?? secretString(entry?.key);
   if (!token) return missingCredential();
   const expiry = timeMs(entry?.expires ?? entry?.expires_at ?? entry?.expiresAt);
@@ -855,17 +856,13 @@ function readOpenCodeCredential(env: NodeJS.ProcessEnv, readText: (path: string)
   return { token, accountId: null, expired: false };
 }
 
-/** The CLI is xdg-flavoured on every platform, so the xdg data folder comes first. */
-function openCodeAuthText(env: NodeJS.ProcessEnv, readText: (path: string) => string | null): string | null {
-  const home = env.HOME || env.USERPROFILE || homedir();
-  const roots = [
-    env.XDG_DATA_HOME || join(home, ".local", "share"),
-    process.platform === "darwin" ? join(home, "Library", "Application Support") : "",
-    process.platform === "win32" ? env.LOCALAPPDATA || join(home, "AppData", "Local") : "",
-  ].filter(Boolean);
-  for (const root of roots) { const text = readText(join(root, "opencode", "auth.json")); if (text) return text; }
-  return null;
+/** A Go login lives under "opencode-go", a Zen one under "opencode"; the CLI lists Go first too. */
+function openCodeLogin(raw: string | null): Record<string, unknown> | null {
+  const stored = asRecord(parseJson(raw));
+  return [stored?.["opencode-go"], stored?.opencode].map((value) => asRecord(value))
+    .find((record) => secretString(record?.access) ?? secretString(record?.key)) ?? null;
 }
+
 function errorRow(account: PlanAccount, error: string): PlanProviderRow {
   return {
     id: account.id,

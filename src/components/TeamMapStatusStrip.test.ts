@@ -65,6 +65,32 @@ describe("team map status strip", () => {
     expect(html).toContain('aria-label="Claude, Weekly"');
   });
 
+  it("shows OpenCode Go's monthly allowance when it is further along than the week, and lists every window on hover", () => {
+    fixture.report = { fetchedAt: "now", providers: [{
+      id: "opencode", name: "OpenCode", driver: "opencode", plan: "Go", ok: true, error: null,
+      fiveHour: { available: true, remainingPercent: 100, usedPercent: 0, resetsAt: null },
+      weekly: { available: true, remainingPercent: 100, usedPercent: 0, resetsAt: null },
+      extra: [{ label: "Monthly", remainingPercent: 87, usedPercent: 13, resetsAt: null }],
+    }] };
+    const html = render([]);
+    expect(html).toContain(">13%<");
+    expect(html).toContain(">Monthly<");
+    expect(html).toContain('title="OpenCode · 5-hour: 0% used · Weekly: 0% used · Monthly: 13% used"');
+  });
+
+  it("keeps the weekly window when the monthly allowance is behind it, and never treats a spend budget as a window", () => {
+    fixture.report = { fetchedAt: "now", providers: [{
+      id: "opencode", name: "OpenCode", driver: "opencode", plan: "Go", ok: true, error: null,
+      fiveHour: { available: false, remainingPercent: null, usedPercent: null, resetsAt: null },
+      weekly: { available: true, remainingPercent: 60, usedPercent: 40, resetsAt: null },
+      extra: [{ label: "Monthly", remainingPercent: 90, usedPercent: 10, resetsAt: null }, { label: "Monthly spend", remainingPercent: 5, usedPercent: 95, resetsAt: null }],
+    }] };
+    const html = render([]);
+    expect(html).toContain(">40%<");
+    expect(html).toContain(">Weekly<");
+    expect(html).not.toContain("95%");
+  });
+
   it("omits a provider's bar when it has reported no usable window", () => {
     fixture.report = { fetchedAt: "now", providers: [{
       id: "claude", name: "Claude", driver: "claude", plan: null, ok: false, error: "Sign in again.",

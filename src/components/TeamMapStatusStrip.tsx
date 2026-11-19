@@ -1,7 +1,7 @@
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { Select } from "./Select";
-import { providerLabel, usePlanUsage, usageTone, type PlanProvider } from "./PlanUsage";
+import { providerLabel, usePlanUsage, usageTone, windowLabel, type PlanProvider } from "./PlanUsage";
 import { teamMapSessionCounts, type TeamMapSession, type TeamMapSessionState } from "@/lib/team-map";
 
 /** Sentinel `<Select>` value for "no department filter", distinct from the unsectioned team's own key (`""`). */
@@ -25,23 +25,32 @@ function countLabel(state: TeamMapSessionState, count: number): string {
   }
 }
 
-/** The weekly window when the plan has one, else the 5-hour one, named so a bare percentage never stands alone. */
-function primaryUsage(provider: PlanProvider): { used: number; window: string } | null {
-  if (provider.weekly.available && provider.weekly.usedPercent != null) return { used: provider.weekly.usedPercent, window: t("planUsage.weekly") };
-  if (provider.fiveHour.available && provider.fiveHour.usedPercent != null) return { used: provider.fiveHour.usedPercent, window: t("planUsage.fiveHour") };
-  return null;
+type UsageWindow = { kind: "fiveHour" | "weekly" | "monthly"; used: number; window: string };
+
+/** Every quota window the plan reports, shortest first: 5-hour, weekly, then a monthly allowance such as OpenCode Go's (never a spend budget). */
+function usageWindows(provider: PlanProvider): UsageWindow[] {
+  const windows: UsageWindow[] = [];
+  if (provider.fiveHour.available && provider.fiveHour.usedPercent != null) windows.push({ kind: "fiveHour", used: provider.fiveHour.usedPercent, window: t("planUsage.fiveHour") });
+  if (provider.weekly.available && provider.weekly.usedPercent != null) windows.push({ kind: "weekly", used: provider.weekly.usedPercent, window: t("planUsage.weekly") });
+  for (const extra of provider.extra) if (extra.label === "Monthly" && !extra.spend) windows.push({ kind: "monthly", used: extra.usedPercent, window: windowLabel(extra.label) });
+  return windows;
+}
+
+/** The weekly window when the plan has one, else the 5-hour one, unless a monthly allowance is further along, so the strip shows the limit that bites first. */
+function primaryUsage(provider: PlanProvider): UsageWindow | null {
+  const windows = usageWindows(provider);
+  const base = windows.find((entry) => entry.kind === "weekly") ?? windows.find((entry) => entry.kind === "fiveHour") ?? null;
+  const monthly = windows.find((entry) => entry.kind === "monthly") ?? null;
+  return monthly && (!base || monthly.used > base.used) ? monthly : base;
 }
 
 function percent(value: number): number {
   return Math.round(Math.min(100, Math.max(0, value)));
 }
 
-/** Hover text with every window the plan reports, e.g. "Claude · 5-hour: 17% used · Weekly: 17% used". */
+/** Hover text with every window the plan reports, e.g. "OpenCode · 5-hour: 0% used · Weekly: 0% used · Monthly: 13% used". */
 function usageTitle(provider: PlanProvider): string {
-  const parts = [providerLabel(provider)];
-  if (provider.fiveHour.available && provider.fiveHour.usedPercent != null) parts.push(`${t("planUsage.fiveHour")}: ${t("planUsage.used", { used: percent(provider.fiveHour.usedPercent) })}`);
-  if (provider.weekly.available && provider.weekly.usedPercent != null) parts.push(`${t("planUsage.weekly")}: ${t("planUsage.used", { used: percent(provider.weekly.usedPercent) })}`);
-  return parts.join(" · ");
+  return [providerLabel(provider), ...usageWindows(provider).map(({ used, window }) => `${window}: ${t("planUsage.used", { used: percent(used) })}`)].join(" · ");
 }
 
 /** The Live layer's top strip: session-state counts, a compact per-provider usage readout, a department filter and the Live toggle. */
