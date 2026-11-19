@@ -7,6 +7,7 @@ import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
+import { codexHasCredits } from "./codex-credits.ts";
 import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 
@@ -47,22 +48,15 @@ export interface PlanWindows {
   weekly: PlanWindow;
   extra: PlanExtra[];
   models: PlanModelUsage[];
-  /** Codex only: the ChatGPT account has credits to spend past a full window, or has no limit. */
-  codexCredits?: true;
+  codexCredits?: true; // Codex only: the ChatGPT account has credits to spend past a full window, or has no limit
 }
 
-export interface PlanProviderRow {
+export interface PlanProviderRow extends PlanWindows {
   id: string;
   name: string;
   driver: string;
-  plan: string | null;
   ok: boolean;
   error: string | null;
-  fiveHour: PlanWindow;
-  weekly: PlanWindow;
-  extra: PlanExtra[];
-  models: PlanModelUsage[];
-  codexCredits?: true;
 }
 
 export interface PlanUsageReport {
@@ -207,22 +201,6 @@ export function parseCodexUsage(body: unknown): PlanWindows {
   if (root) collectCodexNamedLimits(root, models, extra);
   sortModelWindows(models);
   return { ...assigned, extra, models, plan: planLabel(root?.plan_type ?? root?.plan), ...(codexHasCredits(root?.credits) ? { codexCredits: true as const } : {}) };
-}
-
-/** The ChatGPT usage endpoint's `credits` object: `has_credits`, `unlimited` and `balance`. Anything else reads as
- * no credits. */
-function codexHasCredits(value: unknown): boolean {
-  const credits = asRecord(value);
-  if (!credits) return false;
-  if (credits.unlimited === true) return true;
-  if (credits.has_credits !== true) return false;
-  const balance = typeof credits.balance === "string" ? Number(credits.balance) : credits.balance;
-  return typeof balance === "number" && Number.isFinite(balance) && balance > 0;
-}
-
-/** A local signal that Codex's ChatGPT credits are on and not used up, so a full window does not stop a send here. */
-export function codexHasCreditRoom(row: Pick<PlanProviderRow, "driver" | "codexCredits">): boolean {
-  return row.driver === "codex" && row.codexCredits === true;
 }
 
 export function parseGrokUsage(credits: unknown, billing?: unknown, settings?: unknown): PlanWindows {
@@ -932,8 +910,7 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
     fiveHour: windows.fiveHour,
     weekly: windows.weekly,
     extra: windows.extra,
-    models: windows.models,
-    ...(windows.codexCredits ? { codexCredits: true as const } : {}),
+    models: windows.models, ...(windows.codexCredits ? { codexCredits: true as const } : {}),
   };
 }
 
