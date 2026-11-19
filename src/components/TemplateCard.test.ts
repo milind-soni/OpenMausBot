@@ -9,10 +9,12 @@ import type { Message } from "@/state/store";
 
 const dispatch = vi.fn();
 const api = vi.fn(async (_path: string, _init?: RequestInit): Promise<unknown> => ({ ok: true }));
+const place: { state: { config?: { team?: { id: string; name: string } } }; admin: boolean | null } = { state: {}, admin: null };
 vi.mock("@/state/store", async () => {
   const { createContext } = await import("react");
-  return { StoreContext: createContext(null), useStore: () => ({ state: {}, dispatch }), api: (path: string, init?: RequestInit) => api(path, init) };
+  return { StoreContext: createContext(null), useStore: () => ({ state: place.state, dispatch }), api: (path: string, init?: RequestInit) => api(path, init) };
 });
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => place.admin }));
 const openExternalLink = vi.fn(async (_url: string) => {});
 vi.mock("@/lib/app-links", () => ({ openExternalLink: (url: string) => openExternalLink(url) }));
 const { TemplateChatCard, TemplateDetailsBody } = await import("./TemplateCard");
@@ -35,7 +37,7 @@ function render(card: TemplateCard) {
 }
 const button = (container: HTMLElement, label: string) => [...container.querySelectorAll("button")].find((each) => each.textContent?.trim() === label);
 
-afterEach(() => { vi.clearAllMocks(); delete (window as { ogb?: unknown }).ogb; });
+afterEach(() => { vi.clearAllMocks(); delete (window as { ogb?: unknown }).ogb; place.state = {}; place.admin = null; document.body.innerHTML = ""; });
 
 describe("a template's chat card", () => {
   it("shows a draft with its counts, Publish and Details, and says nothing private travels", () => {
@@ -122,6 +124,40 @@ describe("a template's chat card", () => {
   });
 });
 
+describe("a template's chat card on a Team Cloud", () => {
+  const menuItems = async (container: HTMLElement) => {
+    container.querySelector<HTMLElement>("[aria-label='More']")!.click();
+    await vi.waitFor(() => expect(document.querySelectorAll("[role=menuitem]").length).toBeGreaterThan(0));
+    return [...document.querySelectorAll<HTMLElement>("[role=menuitem]")];
+  };
+
+  it("offers Add to the team's templates and Your GitHub repo… to its owner or an admin", async () => {
+    place.state = { config: { team: { id: "t1", name: "Acme" } } };
+    place.admin = true;
+    api.mockResolvedValueOnce({ template: { slug: "quill", name: "Quill", scope: "bot", tagline: "", addedAt: 1 }, replaced: false });
+    const { container, unmount } = render(draft);
+    try {
+      const items = await menuItems(container);
+      expect(items.map((item) => item.textContent?.trim())).toEqual(expect.arrayContaining(["Add to Acme's templates", "Your GitHub repo…"]));
+      items.find((item) => item.textContent?.trim() === "Add to Acme's templates")!.click();
+      await vi.waitFor(() => expect(container.textContent).toContain("Added to Acme's templates"));
+      expect(api).toHaveBeenCalledWith("/api/share/tpl1/library", { method: "POST", body: "{}" });
+    } finally { unmount(); }
+  });
+
+  it("leaves the team's templates and its repositories out for a member", async () => {
+    place.state = { config: { team: { id: "t1", name: "Acme" } } };
+    place.admin = false;
+    const { container, unmount } = render(draft);
+    try {
+      const items = (await menuItems(container)).map((item) => item.textContent?.trim());
+      expect(items).toContain("Delete");
+      expect(items).not.toContain("Your GitHub repo…");
+      expect(items).not.toContain("Add to Acme's templates");
+    } finally { unmount(); }
+  });
+});
+
 describe("a template's details", () => {
   const details: TemplateDetails = {
     scope: "department", name: "Sales desk", tagline: "Leads in, replies out.", summary: "A small sales team.",
@@ -143,6 +179,14 @@ describe("a template's details", () => {
     expect(markup).not.toContain("type=\"checkbox\"");
     expect(markup).not.toContain("role=\"tab\"");
     expect(markup.match(/aria-expanded="false"/g)).toHaveLength(6);
+  });
+
+  it("shows a picture the folder carries, and the mascot for a bot without one", () => {
+    const picture = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    const markup = renderToStaticMarkup(createElement(TemplateDetailsBody, { details: { ...details, bots: [{ ...details.bots[0]!, picture }, details.bots[1]!] } }));
+    expect(markup.match(/data-template-picture/g)).toHaveLength(1);
+    expect(markup).toContain(`src="${picture}"`);
+    expect(renderToStaticMarkup(createElement(TemplateDetailsBody, { details: { ...details, bots: [{ ...details.bots[0]!, picture: "https://example.com/x.png" }] } }))).not.toContain("example.com");
   });
 
   it("leaves out the rows a template has nothing for", () => {

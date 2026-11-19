@@ -109,12 +109,12 @@ afterEach(() => {
 });
 
 describe("Simple-mode sidebar layout", () => {
-  it("lists the bots with no heading, then gives group chats and a person's own departments a quiet heading with a count", () => {
+  it("lists the bots with no heading, then gives group chats and a person's own departments a quiet heading with no count", () => {
     const { tree } = render();
     expect(sectionOrder(tree)).toEqual([BOTS_SECTION_ID, CHANNELS_SECTION_ID, userSectionId("Work")]);
     expect(listedBots(tree)).toEqual(["atlas", "bea", "dodo"]);
     const lines = headers(tree);
-    expect(lines.map((header) => [header.props.name, header.props.line, header.props.count])).toEqual([["Group chats", true, 1], ["Work", true, 1]]);
+    expect(lines.map((header) => [header.props.name, header.props.line, "count" in header.props])).toEqual([["Group chats", true, false], ["Work", true, false]]);
     expect(lines[0]!.props.onMenu).toBeUndefined();
     expect(lines[1]!.props.onDelete).toBeUndefined();
     expect(lines[1]!.props.onMenu).toBeTypeOf("function");
@@ -331,7 +331,7 @@ describe("Simple-mode sidebar layout", () => {
     expect(render().tree.some((node) => node.type === SimpleRailFooter)).toBe(false);
   });
 
-  it("New Bot makes a bot at once in both modes, Chief of Staff or not; both keep Add department and Templates", () => {
+  it("New bot makes a bot at once in both modes, Chief of Staff or not; both keep Add department and Templates", () => {
     fixture.state = { ...fixture.state, bots: [bot("atlas", { chiefOfStaff: true }), bot("bea")] };
     const openMenu = () => {
       const plus = () => render().tree.find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
@@ -347,7 +347,7 @@ describe("Simple-mode sidebar layout", () => {
     const item = openMenu();
     expect(item("Add department")).toBeDefined();
     expect(item("Templates")).toBeDefined();
-    (item("New Bot")!.props.onClick as () => void)();
+    (item("New bot")!.props.onClick as () => void)();
     expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "newBot" }]);
   });
 

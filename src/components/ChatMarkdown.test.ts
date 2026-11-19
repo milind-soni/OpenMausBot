@@ -822,6 +822,32 @@ describe("ChatMarkdown attachments", () => {
     }
   });
 
+  it("names a linked page by its real file name, not its percent-encoded spelling", () => {
+    const filePath = String.raw`C:\Users\Maus\Downloads\2026 AI视频分析报告.html`;
+    for (const text of [`[报告](<${filePath}>)`, "已保存到 `" + filePath + "`", "[报告](file:///C:/Users/Maus/Downloads/2026%20AI%E8%A7%86%E9%A2%91%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.html)"]) {
+      const html = renderToStaticMarkup(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } }));
+      expect(html).toContain('title="Preview page: 2026 AI视频分析报告.html"');
+      expect(html).toContain('aria-label="Save a copy of 2026 AI视频分析报告.html"');
+      expect(html).not.toContain("%E8");
+    }
+  });
+
+  it("decodes a linked name once: a literal %25 in a file:// link stays as written", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "[Report](file:///Users/maus/100%2541%20report.html)", message: { threadId: "thread-1", messageId: "message-1" },
+    }));
+    expect(html).toContain('title="Preview page: 100%41 report.html"');
+  });
+
+  it("names a delivered copy by its literal file name, without decoding it", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "[Report](/old/100%41.html)", message: { threadId: "thread-1", messageId: "message-1" },
+      delivered: { "100%41.html": "/store/delivered-100.html" },
+    }));
+    expect(html).toContain('title="Preview page: 100%41.html"');
+    expect(html).not.toContain("100A.html");
+  });
+
   it("preserves dollar signs in Windows file destinations", () => {
     const save = vi.spyOn(AttachmentPreview, "useLocalFileSave");
     const filePath = "C:\\Users\\Maus\\R$5\\receipt.pdf";
@@ -954,6 +980,57 @@ describe("ChatMarkdown attachments", () => {
 
     it("shows the path in a browser, which has no desktop bridge", () => {
       expect(render(true)).toContain(`>${filePath}</code>`);
+    });
+
+    describe("a backticked folder path with a space", () => {
+      const folder = "D:\\Claude Works\\v3\\";
+      const text = `The videos are in \`${folder}\``;
+      const outsideSave = () => vi.spyOn(AttachmentPreview, "useLocalFileSave").mockReturnValue({
+        state: "failed", reason: "", savedTo: "", outsideWorkspace: true, retryable: false, folder: null,
+        save: vi.fn(async () => undefined),
+      });
+
+      it("shows the real path in a browser, not the link's %20 spelling", () => {
+        const save = outsideSave();
+        try {
+          const html = renderToStaticMarkup(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } }));
+          expect(html).toContain(`>${folder}</code>`);
+          expect(html).not.toContain("%20");
+        } finally {
+          save.mockRestore();
+        }
+      });
+
+      it("keeps a # or an escape in a file:// link's already-decoded path", () => {
+        const save = outsideSave();
+        try {
+          const html = renderToStaticMarkup(createElement(ChatMarkdown, { text: "[report](file:///tmp/Reports%23Final/100%2520x/)", message: { threadId: "thread-1", messageId: "message-1" } }));
+          expect(html).toContain(">/tmp/Reports#Final/100%20x/</code>");
+        } finally {
+          save.mockRestore();
+        }
+      });
+
+      it("asks the desktop app to show the real folder", async () => {
+        const save = outsideSave();
+        const ogb = (window as { ogb?: unknown }).ogb;
+        const reveal = vi.fn(async () => "shown" as const);
+        (window as { ogb?: unknown }).ogb = { revealInFolder: reveal, remoteClient: { active: false } };
+        const host = document.createElement("div");
+        document.body.append(host);
+        const root = createRoot(host);
+        try {
+          await act(async () => root.render(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } })));
+          const show = [...host.querySelectorAll("button")].find((button) => button.textContent === "Show in folder")!;
+          await act(async () => show.click());
+          expect(reveal).toHaveBeenCalledWith(folder);
+        } finally {
+          await act(async () => root.unmount());
+          host.remove();
+          (window as { ogb?: unknown }).ogb = ogb;
+          save.mockRestore();
+        }
+      });
     });
 
     it("leaves other failures alone", () => {

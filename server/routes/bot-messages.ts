@@ -36,7 +36,7 @@ import { extractSteerImages } from "../turn-images.ts";
 import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { noteTypedSend } from "../typed-sends.ts";
-import { startFresh } from "../fresh-start.ts";
+import { engineSessionOutdated, startFresh } from "../fresh-start.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
 import { pinnedClientThreadGuard } from "./pinned-client-thread.ts";
 import { refusalBody, refusalText, userError } from "../user-errors.ts";
@@ -163,6 +163,8 @@ const guardedSendSchema = z.object({
     name: z.string().trim().min(1).max(120).optional(),
   }).strict().refine((who) => Boolean(who.email || who.name)).optional(),
 }).strict().refine((send) => (send.text === undefined) !== (send.reaction === undefined));
+
+const CONTEXT_BREAKDOWN_WAIT_MS = 5_000;
 
 export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler {
   const {
@@ -492,6 +494,21 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (threadBusy(bot.id, bot.threadId)) return json(res, 409, userError("serverError.chat.busyFresh"));
       if (phoneSecretSubmissions.hasThread(bot.threadId)) return json(res, 409, userError("serverError.chat.savingCredential"));
       return json(res, 200, { ok: true, message: startFresh(store, bot.id, bot.threadId), threadId: bot.threadId });
+    }
+
+    m = path.match(/^\/api\/bots\/([\w-]+)\/context$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      requirePinnedClientThread(m[1], body?.threadId);
+      const bot = requestedTaskBot(m[1], body?.threadId);
+      const notYours = cloudThreadRefusal(auth, bot.threadId);
+      if (notYours) return json(res, 403, { error: notYours });
+      // The engine process answers for the conversation it last read, which the next turn may be about to replace:
+      // already when asked, or by a Start fresh, rewind or summary that lands while it counts.
+      const stale = () => engineSessionOutdated(store, bot.id, bot.threadId);
+      const breakdown = stale() ? null : await registry.get(bot.modelSelection.instanceId)?.adapter
+        .contextBreakdown?.(bot.threadId, { signal: AbortSignal.timeout(CONTEXT_BREAKDOWN_WAIT_MS) }) ?? null;
+      return json(res, 200, { threadId: bot.threadId, breakdown: stale() ? null : breakdown });
     }
 
     m = path.match(/^\/api\/bots\/([\w-]+)\/messages\/([\w-]+)\/edit$/);

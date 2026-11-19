@@ -14,10 +14,12 @@ describe("checking a just-connected engine with one tiny real message", () => {
 
   it("names the exact fix: sign in again, the provider's own refusal in plain words, or what it said", async () => {
     expect(await checkEngine(engine(async () => { throw new Error("Not logged in · Please run /login"); })))
-      .toEqual({ ok: false, error: "Claude isn't signed in on this computer anymore. Sign in again, then check again." });
+      .toEqual({ ok: false, reason: "signed_out", error: "Claude isn't signed in on this computer anymore. Sign in again, then check again." });
     expect((await checkEngine(engine(async () => { throw new Error("API Error: 402 {\"error\":{\"message\":\"Your credit balance is too low\"}}"); }))))
-      .toMatchObject({ ok: false, error: expect.stringContaining("Your Claude account is out of credits") });
-    expect(await checkEngine(engine(async () => ""))).toEqual({ ok: false, error: "Claude answered with nothing. Check again in a minute." });
+      .toMatchObject({ ok: false, reason: "credits", error: expect.stringContaining("Your Claude account is out of credits") });
+    expect(await checkEngine(engine(async () => ""))).toEqual({ ok: false, reason: "empty", error: "Claude answered with nothing. Check again in a minute." });
+    expect(await checkEngine(engine(async () => { throw new Error("spawn claude ENOENT at /Users/ada/bin"); }))).toMatchObject({ ok: false, reason: "other" });
+    expect(await checkEngine(engine(async () => { throw new Error("API Error: 429 rate limited"); }))).toMatchObject({ ok: false, reason: "rate_limit" });
     expect(engineCheckError("ChatGPT", "spawn codex ENOENT with key sk-proj-abcdefghijklmnopqrstuvwxyz0123456789")).not.toContain("sk-proj-abcdefghijklmnop");
   });
 
@@ -52,7 +54,7 @@ describe("checking a just-connected engine with one tiny real message", () => {
       const hanging = { instanceId: "hanging", displayName: "Grok", driverKind: "grokAgent", generateText };
       const pending = checkEngine(hanging, { timeoutMs: 5_000 });
       await vi.advanceTimersByTimeAsync(5_000);
-      expect(await pending).toEqual({ ok: false, error: "Grok didn't answer within 5 seconds.", errorKey: "serverError.engineCheck.timeout", errorParams: { name: "Grok", seconds: "5" } });
+      expect(await pending).toEqual({ ok: false, reason: "timeout", error: "Grok didn't answer within 5 seconds.", errorKey: "serverError.engineCheck.timeout", errorParams: { name: "Grok", seconds: "5" } });
       expect(signal?.aborted).toBe(true);
       expect(vi.getTimerCount()).toBe(0);
       // The engine is free for the next check.

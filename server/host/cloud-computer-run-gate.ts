@@ -18,7 +18,9 @@ const MAX_ROUTINES = 500;
 const ENDED = new Set<CloudComputerRecoveryState>(["needs-person", "unreachable", "capped"]);
 const SLEEPING = new Set(["archived", "archiving"]);
 
-interface RunLike { routineId: string; botId: string; target: string; runOn?: string }
+/** `wakeRetries`: how often the run was queued again because its computer did not wake (routine-wake-retry.ts); it counts
+ * only while the run has not started since (`startedAt`, `retried`). */
+interface RunLike { routineId: string; botId: string; target: string; runOn?: string; wakeRetries?: number; startedAt?: number; retried?: string }
 interface Machine { id: string; state: string }
 
 export interface RunComputerGateDeps {
@@ -44,6 +46,17 @@ export interface RunComputerGateDeps {
   now?(): number;
 }
 
+/** The provider answered the wake with a refusal a later try would meet too (a plan or start limit, a rejected key), not a
+ * timeout, a network failure, a rate limit or a fault on its side. */
+const refusedWake = (error: unknown): boolean => {
+  const status = (error as { boatStatus?: unknown } | null)?.boatStatus;
+  return typeof status === "number" && status >= 400 && status < 500 && status !== 408 && status !== 429;
+};
+
+/** The provider did not answer the lookup at all: a time-out, or no answer from it (findBoat marks that `transient`). */
+const unanswered = (error: unknown): boolean =>
+  (error as { transient?: unknown } | null)?.transient === true || (error instanceof Error && error.name === "TimeoutError");
+
 const VERDICT_LINE: Record<RecoveryVerdict, string> = {
   "restart-failed": RUN_COMPUTER_LINES.afterRestart, "person-busy": RUN_COMPUTER_LINES.personBusy,
   "restart-limited": RUN_COMPUTER_LINES.restartLimited, shared: RUN_COMPUTER_LINES.shared,
@@ -59,14 +72,21 @@ export function createRunComputerGate(deps: RunComputerGateDeps) {
   const startedFull = new Set<string>();
   const fullThreads = new Set<string>();
 
-  async function ready(owner: string, routineId: string, signal?: AbortSignal): Promise<string | null> {
+  async function ready(owner: string, routineId: string, retrying: boolean, signal?: AbortSignal): Promise<string | null> {
     const began = now();
-    let machine = await deps.find(owner).catch(() => null);
+    // A lookup that fails lets the run start, and its turn reports the trouble; but a run tried again because its computer
+    // did not wake already found it asleep, and a lookup the provider does not answer now is the same outage. A lookup
+    // it answered with a refusal (a rejected key) is the turn's to report.
+    const found = await deps.find(owner).then((machine) => machine, (error: unknown) => retrying && unanswered(error) ? RUN_COMPUTER_LINES.noWake : null);
+    if (typeof found === "string") return found;
+    let machine = found;
     if (!machine || signal?.aborted) return null;
     let woke = false;
     if (SLEEPING.has(machine.state)) {
-      machine = await deps.wake(owner, WAKE_BUDGET_MS).catch(() => null);
-      if (!machine) return RUN_COMPUTER_LINES.noWake;
+      const woken = await deps.wake(owner, WAKE_BUDGET_MS).then((up) => up ?? RUN_COMPUTER_LINES.noWake,
+        (error: unknown) => refusedWake(error) ? RUN_COMPUTER_LINES.wakeRefused : RUN_COMPUTER_LINES.noWake);
+      if (typeof woken === "string") return woken;
+      machine = woken;
       woke = true;
     }
     const deadline = now() + RUN_COMPUTER_WAIT_MS;
@@ -99,7 +119,7 @@ export function createRunComputerGate(deps: RunComputerGateDeps) {
       const owner = deps.computerOf(run);
       if (!owner) return null;
       startedFull.delete(run.routineId);
-      return ready(owner, run.routineId, signal).then((reason) => {
+      return ready(owner, run.routineId, (run.wakeRetries ?? 0) > 0 && run.startedAt == null && run.retried === undefined, signal).then((reason) => {
         if (reason) deps.log(`routine ${run.routineId}: its cloud computer (${owner}) was not ready: ${reason}`);
         return reason;
       }, (error) => {

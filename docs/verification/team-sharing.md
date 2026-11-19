@@ -9,8 +9,8 @@ from a GitHub link or a folder.
 ## Automated checks
 
 ```sh
-pnpm exec vitest run shared/share-folder.test.ts server/share.test.ts server/share-github.test.ts src/components/TemplateCard.test.ts src/components/ImportDialog.test.ts src/lib/template-share.test.ts
-pnpm exec vitest run server/share.e2e.test.ts --silent=false
+pnpm exec vitest run shared/share-folder.test.ts shared/skill-files.test.ts server/share.test.ts server/share-github.test.ts server/share-skill-files.test.ts server/share-team-templates.test.ts src/components/TemplateCard.test.ts src/components/ImportDialog.test.ts src/lib/template-share.test.ts
+pnpm exec vitest run server/share.e2e.test.ts server/cloud-team-templates.e2e.test.ts --silent=false
 OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/team-share-ui.e2e.test.ts scripts/testing/team-template-ui.e2e.test.ts --maxWorkers=1
 ```
 
@@ -18,6 +18,13 @@ OMB_UI_E2E=1 pnpm exec vitest run scripts/testing/team-share-ui.e2e.test.ts scri
 share itself; the test checks the card in the chat, saves the folder, finds no key, memory, chat line or connection
 address in it, adds it back as an equivalent bot with its routine paused and skill off, refuses a chat import whose path
 the person didn't write, and round-trips a department with its group chat, brief and Chief.
+
+`server/cloud-team-templates.e2e.test.ts` launches a Team Cloud with an owner, an admin and a member: a bot with a skill
+and its script is shared into `team-files/templates/<slug>/`, added again (the old one kept as `<slug>.previous/`),
+listed, imported as a new bot whose skill brings the script, and removed, each refused to the member, over HTTP and
+through the share tool in a chat. `server/share-team-templates.test.ts` covers a private GitHub link and publishing to
+a person's own repository against a fake GitHub behind a fake connected-apps relay (`server/testing/fake-composio-github.ts`):
+no network is reached.
 
 ## By hand in a fixture
 

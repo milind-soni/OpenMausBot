@@ -16,6 +16,7 @@ import { CloudKeepHere } from "../../CloudKeepHere";
 import { CustomDomainSettings } from "../../CustomDomainSettings";
 import { preloadConnectedApps } from "@/lib/connected-apps";
 import { DecisionModelSettings } from "../../DecisionModelSettings";
+import { DisplayNameSetting } from "../../DisplayNameSetting";
 import { DefaultBotSidebarRow } from "../../DefaultBotControls";
 import { EnginesSettings } from "../../EnginesSettings";
 import { ImageGenerationSettings } from "../../ImageGenerationSettings";
@@ -158,7 +159,7 @@ export function BotsPage() {
       footnote={ctx.here || !ctx.desktop ? t("settings.bots.aboutYouHome", { app: productName() }) : undefined}>
       <div className="flex flex-col gap-2">
         <Card><ProfileFields /></Card>
-        <SettingsRows><AwayEmailsSetting row /></SettingsRows>
+        <SettingsRows><DisplayNameSetting /><AwayEmailsSetting row /></SettingsRows>
       </div>
     </SettingsGroup>
     <SettingsGroup label={t("settings.bots.newBots")} block="new-bots">

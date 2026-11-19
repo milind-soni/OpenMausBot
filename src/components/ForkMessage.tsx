@@ -2,7 +2,8 @@ import { GitFork } from "lucide-react";
 import type { Dispatch } from "react";
 import { ACTION_ICON, type MessageMenuItem } from "./MessageActions";
 import { t } from "@/lib/i18n";
-import { useStore, type Action } from "@/state/store";
+import type { Action, AppState } from "@/state/store";
+import { sameItems, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 type Owner = { kind: "bot" | "group"; ownerId: string; threadId: string; messageId: string };
 
@@ -16,12 +17,18 @@ export function forkMessageItem(owner: Owner, dispatch: Dispatch<Action>, disabl
   };
 }
 
-export function ForkLinks(owner: Owner & { phone: boolean }) {
-  const { state, dispatch } = useStore();
+const NO_FORKS: never[] = [];
+
+function forksOf(state: AppState, owner: Owner) {
   const tasks = owner.kind === "bot"
     ? state.bots?.find((bot) => bot.id === owner.ownerId)?.tasks
     : state.groups?.find((group) => group.id === owner.ownerId)?.tasks;
-  const forks = tasks?.filter((task) => task.origin?.threadId === owner.threadId && task.origin.messageId === owner.messageId) ?? [];
+  return tasks?.filter((task) => task.origin?.threadId === owner.threadId && task.origin.messageId === owner.messageId) ?? NO_FORKS;
+}
+
+export function ForkLinks(owner: Owner & { phone: boolean }) {
+  const dispatch = useStoreDispatch();
+  const forks = useStoreSelector((state) => forksOf(state, owner), sameItems);
   if (owner.phone || !forks.length) return null;
   return (
     <div className="mt-1 flex flex-wrap gap-1" data-testid="fork-links">

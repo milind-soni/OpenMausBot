@@ -1,12 +1,13 @@
 import { useCallback, useId, useState } from "react";
 
-import { botCallVoice, GEMINI_LIVE_VOICE_OPTIONS, geminiLiveVoice, LIVE_VOICE_OPTIONS } from "../../shared/live-call";
+import { GEMINI_LIVE_VOICE_OPTIONS, geminiLiveVoice, LIVE_VOICE_OPTIONS } from "../../shared/live-call";
 import { t } from "@/lib/i18n";
 import { liveDisclosure, liveKeyCopy, liveKeyFormKey } from "@/lib/call-mode";
 import { api, useStore, type Bot, type ConfigStatus } from "@/state/store";
 import type { LiveSettings } from "../../shared/wire";
 import { LiveKeySetup } from "./LiveKeySetup";
 import { LiveProviderSettings } from "./LiveProviderSettings";
+import { BotLiveVoiceSelect } from "./BotLiveVoiceSelect";
 import { KeysLink } from "./keys/KeysLink";
 import { Select } from "./Select";
 
@@ -37,8 +38,6 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
   const voiceOptions = gemini ? GEMINI_LIVE_VOICE_OPTIONS : LIVE_VOICE_OPTIONS;
   const voice = gemini ? geminiLiveVoice(live.geminiVoice) : live.voice || "marin";
   const known = voiceOptions.some((option) => option.id === voice);
-  // A bot's own voice of the other provider's kind stays saved and shows as the default here.
-  const botVoice = bot ? botCallVoice(bot.liveVoice, "", gemini) : "";
 
   const save = async (patch: Partial<Pick<LiveSettings, "voice" | "geminiVoice" | "readTypedReplies" | "idleMinutes">>) => {
     setSaving(true);
@@ -85,17 +84,7 @@ export function LiveCallSettings({ bot, onClose }: { bot?: Pick<Bot, "id" | "nam
       {/* Fish Audio and ElevenLabs calls speak in their agent's own voice. */}
       {!fish && !elevenlabs && <>
       {bot && (
-        <label className="flex items-center justify-between gap-2">
-          <span className="text-ink-secondary">{t("call.live.botVoice", { name: bot.name })}</span>
-          <Select
-            size="sm"
-            value={botVoice}
-            onChange={(event) => dispatch({ type: "updateBot", botId: bot.id, patch: { liveVoice: event.target.value } })}
-          >
-            <option value="">{t("call.live.botVoiceDefault")}</option>
-            {voiceOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
-          </Select>
-        </label>
+        <BotLiveVoiceSelect bot={bot} gemini={gemini} onChange={(liveVoice) => dispatch({ type: "updateBot", botId: bot.id, patch: { liveVoice } })} />
       )}
       <label className="flex items-center justify-between gap-2">
         <span className="text-ink-secondary">{t(bot ? "call.live.defaultVoice" : "call.live.voice")}</span>

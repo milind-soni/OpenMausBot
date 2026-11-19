@@ -64,7 +64,7 @@ The examples below assume a global install; prefix them with `npx` otherwise.
 | `openmausbot pair` | Create another phone invitation while the configured workspace and HTTPS connection are running. |
 | `openmausbot devices` | List paired devices; `openmausbot devices revoke ID` signs one out. |
 | `openmausbot serve` | Start without onboarding prompts or automatic browser opening; specify remote-access flags explicitly for a service. |
-| `openmausbot login` | Sign in to an OpenMausBot account for `--tunnel`; this does not sign in to an AI provider or start the tunnel. |
+| `openmausbot account login` | Sign in to an OpenMausBot account for `--tunnel`; this does not sign in to an AI provider or start the tunnel. |
 
 `start` accepts the same server options as `serve`, including `--port`, `--data-dir`, `--tailscale`, `--tunnel`, and `--public-url`. Keep using your custom data directory and port when starting or pairing:
 

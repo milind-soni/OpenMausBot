@@ -24,6 +24,39 @@ export function object(value: unknown): Record<string, unknown> | undefined {
     ? value as Record<string, unknown> : undefined;
 }
 
+/** A call's arguments as its tool gets them. An empty argument string is a tool with no arguments. `redact` masks
+ * secrets in rejected arguments before they are cut down to quote, so a secret split by the cut can't slip past it. */
+export function toolArguments(text: string, redact: (text: string) => string = (same) => same): Record<string, unknown> {
+  let args: unknown;
+  try { args = JSON.parse(text.trim() || "{}"); }
+  catch { throw new ChatProtocolError(`tool arguments are not complete JSON; you sent ${text.length} characters: ${shownArguments(redact(text))}`); }
+  const found = object(args);
+  if (!found) throw new ChatProtocolError(`tool arguments must be a JSON object; you sent ${text.length} characters: ${shownArguments(redact(text))}`);
+  return found;
+}
+
+/** Rejected arguments as the failed call's result quotes them back, so the model sees where they broke off. */
+function shownArguments(text: string): string {
+  return text.length <= 1_000 ? text : `${text.slice(0, 500)} … ${text.slice(-500)}`;
+}
+
+/** The calls as the next request replays them. A strict server refuses the whole request over arguments that don't
+ * parse ("function.arguments must be valid JSON"), so blank ones (a tool with no arguments) and ones `toolArguments`
+ * refuses (they never ran; the call's result says so) go back as `{}`, and ones that ran only once trimmed (a stray
+ * byte-order mark, which isn't JSON whitespace) go back trimmed. */
+export function replayableToolCalls(calls: ChatToolCall[]): ChatToolCall[] {
+  return calls.map((call) => {
+    const replayed = replayArguments(call.function.arguments);
+    return replayed === call.function.arguments ? call : { ...call, function: { ...call.function, arguments: replayed } };
+  });
+}
+
+function replayArguments(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return "{}";
+  try { toolArguments(trimmed); return trimmed; } catch { return "{}"; }
+}
+
 /** Opaque provider reasoning blocks must keep their original order/signatures.
  * OpenRouter streams the sequence as arrays of blocks, not tool-call deltas. */
 export class ChatReasoningDetails {

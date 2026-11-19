@@ -250,6 +250,7 @@ export class EngineMemory {
   private readonly turns: TurnsSetting;
   private readonly processes: ProcessBudget | null;
   private serverTurns: { at: number; most: number | undefined } | null = null;
+  private idleSweep: (() => void) | null = null;
 
   constructor(options: EngineMemoryOptions) {
     this.enabled = options.enabled;
@@ -572,6 +573,7 @@ export class EngineMemory {
   /** Every couple of seconds while engines run: notes short memory against the running turns, and stops an engine before
    * the machine runs out: an idle one first, else the newest of two or more busy ones. */
   tick(): void {
+    try { this.idleSweep?.(); } catch (error) { this.log(`idle sweep failed: ${error instanceof Error ? error.message : String(error)}`); }
     const memory = this.read();
     if (!memory) return;
     if ((memory.fullStall10 ?? 0) >= STALL_PERCENT) this.ledger.note(this.now(), "stalled");
@@ -600,6 +602,33 @@ export class EngineMemory {
     if (!memory) return 1;
     return Math.min(1, Math.max(0.1, (this.free(memory) - this.floor(memory)) / (memory.totalBytes / 2)));
   }
+
+  /** How much of an idle engine's keep-alive the server's room allows (idle-policy.ts): the lower of memory's headroom and,
+   * on a server under a pids limit, its processes'; 1 where the gate is off. The same signals admission reads. */
+  roomFactor(): number {
+    if (!this.enabled) return 1;
+    return Math.min(this.headroom(), this.processes?.headroom() ?? 1);
+  }
+
+  /** Whether admission would hold a new engine back now: memory below the floor, or no room for one more engine's
+   * processes. Then even an engine kept warm on purpose (a prompt-cache keep-warm hold) is closed once idle. */
+  shortOfRoom(): boolean {
+    if (!this.enabled) return false;
+    if (this.processes?.short(ENGINE_TASKS, 0)) return true;
+    const memory = this.read();
+    return memory !== null && this.free(memory) < this.floor(memory);
+  }
+
+  /** Stops the engine idle longest, if any: what a browser that has no room to open asks before it is refused. */
+  async reclaimIdle(): Promise<boolean> {
+    const idle = this.enabled ? this.idle() : null;
+    if (!idle) return false;
+    await this.stop(idle, "idle");
+    return true;
+  }
+
+  /** Runs on every tick (every couple of seconds while engines run): the idle policy closes what it kept too long. */
+  useIdleSweep(sweep: () => void): void { this.idleSweep = sweep; }
 
   /** Memory the server, Chrome and the page cache keep: below it a machine without swap starts to thrash. */
   private floor(memory: HostMemory): number { return Math.max(320 * MB, memory.totalBytes * 0.1); }

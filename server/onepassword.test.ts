@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import type { LoginBots } from "../shared/logins.ts";
 import { fillLogin, type FillCandidate } from "./login-fill.ts";
-import { loginExtraFields, loginFields, ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED, OnePasswordLogins, onePasswordProblem, onePasswordUnavailable, OnePasswordUnavailableError, sdkOnePasswordClient, secretFields } from "./onepassword.ts";
+import { loginExtraFields, loginFields, ONE_PASSWORD_MALFORMED, ONE_PASSWORD_REFUSED, OnePasswordLogins, onePasswordProblem, onePasswordUnavailable, OnePasswordUnavailableError, parseOnePasswordReference, sdkOnePasswordClient, secretFields } from "./onepassword.ts";
 import { FakeLoginPage, LOGIN_FORM } from "./testing/fake-login-page.ts";
 import { fakeOnePasswordSdk } from "./testing/fake-onepassword.ts";
 import { parseTotpKey, totpCode } from "./totp.ts";
@@ -349,5 +349,51 @@ describe("1Password secrets", () => {
     await expect(readLinkedSecret(deploy)).rejects.toThrow("Could not reach 1Password.");
     failure = null;
     await expect(readLinkedSecret({ ...deploy, field: "nothing" })).rejects.toThrow("Deploy is no longer in 1Password, or has no value there.");
+  });
+
+  it("reads a secret by its op:// reference, by vault and item title or id, through the same bots as its name", async () => {
+    const { source } = setup({ itemGrants: { "v1:i8": ["quill"] } });
+    await source.refresh();
+    const read = async (reference: string, bot = "pepper") => {
+      const use = findLinkedSecret([source], reference, bot);
+      return use ? readLinkedSecret(use) : null;
+    };
+    expect(await read("op://Shared with OMB/Stripe secret key")).toBe(STRIPE);
+    expect(await read("op://shared with omb/stripe secret key/credential")).toBe(STRIPE);
+    expect(await read("op://v1/i6")).toBe(STRIPE);
+    expect(await read("op://Shared with OMB/Plain token/token")).toBe(PLAIN_TOKEN);
+    expect(await read("op://Shared with OMB/Partner API/Client ID")).toBe(CLIENT_ID);
+    expect(await read("op://Shared with OMB/Partner API/Section/Client Secret")).toBe(CLIENT_SECRET);
+    expect(await read("op://Shared with OMB/Acme OAuth/client_secret", "quill")).toBe(ACME_SECRET);
+    expect(await read("op://Shared with OMB/Acme OAuth/client_secret"), "an item kept to other bots").toBeNull();
+    expect(await read("op://Shared with OMB/Stripe secret key/nothing")).toBeNull();
+    expect(await read("op://Finance/Stripe secret key")).toBeNull();
+  });
+
+  it("never reads a Login's username, password or one-time code by reference", async () => {
+    const { source } = setup();
+    await source.refresh();
+    for (const reference of ["op://Shared with OMB/Partner API/password", "op://Shared with OMB/Partner API/username", "op://Shared with OMB/Example/password",
+      "op://Shared with OMB/Example/one-time password", "op://Shared with OMB/Example/password?attribute=otp", "op://Finance/Bank/password"]) {
+      expect(findLinkedSecret([source], reference, "pepper"), reference).toBeNull();
+    }
+  });
+
+  it("refuses a reference that two items fit, rather than picking one", async () => {
+    const { sdk } = fakeOnePasswordSdk({ token: TOKEN, vaults: { v1: { title: "Team", items: [
+      { id: "a", title: "Deploy key", category: "Password", urls: [], password: "fake-deploy-a" },
+      { id: "b", title: "Deploy key", category: "Password", urls: [], password: "fake-deploy-b" },
+    ] } } });
+    const source = new OnePasswordLogins({ token: () => TOKEN, connect: (value) => sdkOnePasswordClient(sdk, value, "9.9.9") });
+    await source.refresh();
+    expect(findLinkedSecret([source], "op://Team/Deploy key", "pepper")).toBeNull();
+    expect(await readLinkedSecret(findLinkedSecret([source], "op://Team/b", "pepper")!)).toBe("fake-deploy-b");
+  });
+
+  it("parses op:// references with or without a section, and nothing else", () => {
+    expect(parseOnePasswordReference("op://Team/Stripe")).toEqual({ vault: "Team", item: "Stripe" });
+    expect(parseOnePasswordReference(" op://Team/Stripe/credential ")).toEqual({ vault: "Team", item: "Stripe", field: "credential" });
+    expect(parseOnePasswordReference("op://Team/Stripe/API/credential")).toEqual({ vault: "Team", item: "Stripe", field: "credential" });
+    for (const other of ["Stripe", "op://Team", "op://Team/Stripe/a/b/c", "op://Team/Stripe/password?attribute=otp", "https://Team/Stripe"]) expect(parseOnePasswordReference(other), other).toBeNull();
   });
 });

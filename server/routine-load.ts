@@ -12,6 +12,7 @@ import { isRoutineHoldCause } from "./routine-holds.ts";
 import { MAX_DATE_MS } from "./routine-intervals.ts";
 import { loadSchedule } from "./routine-schedules.ts";
 import { loadSkips } from "./routine-skips.ts";
+import { loadWakeRetries } from "./routine-wake-retry.ts";
 import type { Routine, RoutineGoalStatus, RoutinePackageStamp, RoutineRequestCommit, RoutineRequestReceipt, RoutineRun, RoutineTarget } from "./routines.ts";
 
 const persistedSourceThreadId = z.string().trim().min(1).optional().catch(undefined);
@@ -137,8 +138,10 @@ export function loadRun(run: RoutineRun): RoutineRun {
     busyMs: instant(run.busyMs),
     workedMs: instant(run.workedMs),
     skipped: loadSkips(run.skipped),
+    wakeRetries: loadWakeRetries(run.wakeRetries),
+    wakeRetryUntil: instant(run.wakeRetryUntil),
   };
-  return withoutUndefined(loaded, ["timeoutMinutes", "access", "deliver", "checkKey", "busyMs", "workedMs", "skipped"]);
+  return withoutUndefined(loaded, ["timeoutMinutes", "access", "deliver", "checkKey", "busyMs", "workedMs", "skipped", "wakeRetries", "wakeRetryUntil"]);
 }
 
 const REQUEST_ACTIONS = new Set<RoutineRequestOperation["action"]>(["create", "update", "pause", "resume", "run_now", "delete"]);

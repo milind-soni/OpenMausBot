@@ -96,6 +96,7 @@ export function parseOpenCodeLogLine(line: string, sessionId: string): LogSignal
 
 export class LogTail {
   private offset: number | null = null;
+  private identity: string | null = null;
   private partial = "";
   private readonly path: string;
   private readonly maxBytes: number;
@@ -113,7 +114,11 @@ export class LogTail {
       return [];
     }
     try {
-      const size = fstatSync(fd).size;
+      const stat = fstatSync(fd);
+      const size = stat.size;
+      const identity = `${stat.dev}:${stat.ino}`;
+      if (this.identity !== null && this.identity !== identity) { this.offset = 0; this.partial = ""; }
+      this.identity = identity;
       if (this.offset === null) {
         this.offset = size;
         return [];

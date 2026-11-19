@@ -107,8 +107,12 @@ const TRIGGER_FIELDS_SCHEMA = {
   run_on_startup: { type: "boolean", description: "Repeating schedules: also run when OpenMausBot starts." },
 } as const;
 
+/** What the engine keeps of a brief: it clips a longer one instead of refusing the call. */
+const MESSAGE_MAX = 12_000;
+
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
-const APPLIES_OUTCOME = " It applies at once, with an Undo where possible: read the result before saying it did. It never raises another bot's execution permissions.";
+const APPLIES_AT_ONCE = " It applies at once, with an Undo where possible: read the result before saying it did.";
+const APPLIES_OUTCOME = APPLIES_AT_ONCE + " It never raises another bot's execution permissions.";
 
 
 const TOOL_DEFINITIONS = [
@@ -170,8 +174,8 @@ const TOOL_DEFINITIONS = [
     description: "The one way to hand work on: ask existing OpenMausBot teammates a question or assign them concrete work. Give 1-4 bot_ids from list_bots; they see only what you send, so include constraints and done_when, and pass files they need in files. In a room it goes to this room; elsewhere to your standing work thread with each teammate. Results return here and resume you, so end your turn after sending; on return, verify the outcome and send fixes with rework true. Never target whoever assigned you this work or anyone above it: end your turn and your reply reaches them. Never thank a finished teammate or repeat a refused call unchanged.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       group_id: { type: "string", description: "Another room, from list_room_targets." },
-      bot_ids: { type: "array", items: { type: "string", description: "A teammate's id as list_bots prints it, or its unique name." }, minItems: 1, maxItems: 4, uniqueItems: true },
-      message: { type: "string", minLength: 1, maxLength: 4000, description: "The question or task; separate calls for different responsibilities." },
+      bot_ids: { type: "array", items: { type: "string", description: "A teammate's name, preferred, or its id from list_bots; an id's first 8 characters or more work too." }, minItems: 1, maxItems: 4, uniqueItems: true },
+      message: { type: "string", minLength: 1, maxLength: MESSAGE_MAX, description: "The question or task; separate calls for different responsibilities." },
       reason: { type: "string", maxLength: 200, description: "Optional one line for the person on why (shown as a chip)." },
       rework: { type: "boolean", description: "True only to resend finished or failed work: a fix, a re-check or a retry." },
       thread: { type: "string", description: "standing (default), new (its own history and run), or a threadId from your receipts or list_threads." },
@@ -231,7 +235,9 @@ const TOOL_DEFINITIONS = [
     name: "list_threads",
     description:
       "See your own threads and the threads you opened on teammates, newest first: each with its bot, title, state (running, waiting on the person, queued, idle, or closed), whether the person has unread there, and the delegation id if it was a handoff. Use it to check how the threads you started are going before reporting to the person; write a thread's title as #Title when you mention it. A Chief of Staff also sees threads teammates opened on each other. This is a read: it starts nothing and changes nothing.",
-    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      page: { type: "integer", minimum: 1, description: "100 per page; default 1." },
+    } },
   },
   {
     name: "close_thread",
@@ -373,7 +379,7 @@ const TOOL_DEFINITIONS = [
   },
   {
     name: "propose_team_setup",
-    description: "Chief of Staff only: create specialists and change bots' profiles, models, Chiefs and teams as the person asked, all in ONE plan, with exact ids from list_team_setup. One operation per bot, at most 40 (8 new). A new team goes in newTeams with a specialist in this plan; teams you are not authorized for cannot be included. Models change defaults for new threads; execution permissions never change." + APPLIES_OUTCOME,
+    description: "Chief of Staff only: create specialists and change bots' profiles, models, Chiefs and teams as the person asked, all in ONE plan, with exact ids from list_team_setup. One operation per bot, at most 40 (8 new). A new team goes in newTeams with a specialist in this plan; teams you are not authorized for cannot be included. Models change defaults for new threads; mcpServers sets an existing bot's MCP servers; no other execution permission changes." + APPLIES_AT_ONCE,
     inputSchema: {
       type: "object", additionalProperties: false,
       properties: {
@@ -395,6 +401,7 @@ const TOOL_DEFINITIONS = [
               modelSelection: { type: "object", additionalProperties: false, properties: {
                 instanceId: { type: "string" }, model: { type: "string" }, effort: { type: "string" }, variant: { type: "string" },
               }, required: ["instanceId", "model"] },
+              mcpServers: { type: "array", maxItems: 20, items: { type: "string" }, description: "update: the bot's full MCP server list by name." },
             } },
           }, required: ["action", "fields"],
         } },
@@ -719,13 +726,13 @@ const TOOL_DEFINITIONS = [
   {
     name: "skill_manage",
     description:
-      "Create or update a reusable skill (SKILL.md), or turn one of your own skills on or off, or delete it. Never change a skill unless the person explicitly asked for that named skill." + APPLIES_OUTCOME,
+      "Create or update a reusable skill (SKILL.md), import one from GitHub or skills.sh (action import with source; same review as create, brings SKILL.md and references/*.md), or turn one of your own skills on or off, or delete it. Never change a skill unless the person explicitly asked for that named skill." + APPLIES_OUTCOME,
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
-        action: { type: "string", enum: ["create", "update", "enable", "disable", "delete"] },
-        skill_name: { type: "string", description: "Every action but create: the exact name from skills_list." },
+        action: { type: "string", enum: ["create", "update", "import", "enable", "disable", "delete"] },
+        skill_name: { type: "string", description: "Every action but create and import: the exact name from skills_list." },
         skill_md: { type: "string", description: "create or update: the full SKILL.md with its YAML frontmatter." },
         references: {
           type: "array",
@@ -743,7 +750,7 @@ const TOOL_DEFINITIONS = [
         },
         gist: { type: "string", description: "Optional one-line summary of the change." },
         base_revision: { type: "string", description: "To update a skill shared with your team: its revision from skills_list." },
-        source: { type: "string", description: "create or update: the URL, folder or 'conversation' it came from." },
+        source: { type: "string", description: "create or update: the URL, folder or 'conversation' it came from. import: owner/repo, a GitHub link to the skill's folder or SKILL.md, or a skills.sh link." },
       },
       required: ["action"],
     },
@@ -810,6 +817,11 @@ const CLOUD_HOME_SURFACE = {
   type: "string", enum: ["auto", "cloud", "browser"],
   description: "auto = suitable configured computer, cloud = the bot's cloud computer, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",
 };
+/** A server with no container runtime cannot give a bot a Local VM, so that surface is left out of the list. */
+const NO_LOCAL_VM_SURFACE = {
+  type: "string", enum: ["auto", "cloud", "local", "browser"],
+  description: "auto = suitable configured computer, cloud = the bot's cloud computer or self-hosted VPS, local = user's own desktop, browser = built-in browser. Omit to list. This server cannot give a bot a Local VM, so vm is not a place here.",
+};
 
 export function availableTools(profile: CatalogProfile) {
   const tools = withoutToolsOff(catalogTools(profile), profile.toolsOff ?? []);
@@ -817,7 +829,13 @@ export function availableTools(profile: CatalogProfile) {
     ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name)).map(tool => tool.name === "select_computer"
       ? { ...tool, inputSchema: { ...tool.inputSchema, properties: { surface: CLOUD_HOME_SURFACE } } }
       : tool)
-    : tools;
+    // A model shown a tool it cannot use spends turns finding out: with no container runtime there is
+    // no Local VM to run a command in, and no Local VM to pick as a place either.
+    : profile.localVm === false
+      ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name)).map(tool => tool.name === "select_computer"
+        ? { ...tool, inputSchema: { ...tool.inputSchema, properties: { surface: NO_LOCAL_VM_SURFACE } } }
+        : tool)
+      : tools;
   return placed.map((tool) => ({ ...tool, inputSchema: advertisedSchema(tool.inputSchema, tool.description) }));
 }
 

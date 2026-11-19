@@ -6,6 +6,7 @@ import { Check, Copy, Laptop, Plus, X } from "lucide-react";
 import { serverTransport } from "../../electron/server-address.mjs";
 import type { ServerInstall, ServerStatus } from "../../electron/server-status.mjs";
 import { useCopyFeedback } from "@/lib/copy-text";
+import { byHand } from "@/lib/saved-servers";
 import { t } from "@/lib/i18n";
 import { OwnServerLink, RailSheet } from "./PlaceAddSheet";
 import { SettingsLinkRow, SettingsRows, Switch } from "./SettingsPrimitives";
@@ -18,12 +19,13 @@ type Sheet = { address: string; locked: boolean; title: string } | null;
 export type OwnServerSharing = { id: string; enabled: boolean; connected: boolean; paused: boolean };
 
 const TRANSPORT = { https: "servers.transport.https", tailscale: "servers.transport.tailscale", "private-http": "servers.transport.privateHttp", loopback: "servers.transport.loopback" } as const;
-const byHand = (entry: Entry) => entry.kind !== "local" && Boolean(entry.origin) && !entry.home && !entry.cloud && !("team" in entry && entry.team);
 const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /** The update command that fits how the server was installed, pinned to this app's version. */
 export function updateCommand(install: ServerInstall | null, version: string): string {
   if (install === "docker") return "git pull && ./update.sh";
+  // The rootless Podman service's own update.sh, in the folder its installer uses unless told another.
+  if (install === "podman-service") return "~/.local/share/openmausbot/update.sh";
   if (install === "global") return `npm install -g openmausbot@${version}`;
   if (install === "source") return "git pull && pnpm install";
   return `npx openmausbot@${version} serve`;

@@ -106,3 +106,30 @@ describe("BotProfileAvatarCard body picker", () => {
     }
   });
 });
+
+function colorButton(markup: string, color: string): string {
+  const tag = markup.match(new RegExp(`<button[^>]*aria-label="Use ${color} mascot color"[^>]*>`))?.[0];
+  expect(tag, `${color} color button`).toBeDefined();
+  return tag ?? "";
+}
+
+describe("BotProfileAvatarCard color picker", () => {
+  it("keeps the color picker for a custom photo in every flat crop", () => {
+    for (const crop of ["circle", "rounded", "square"] as const) {
+      const markup = renderCard(makeBot({ avatarUrl: "/api/attachments/cat.webp", avatarCrop: crop, color: "blue" }));
+
+      expect(markup).toContain(">Color<");
+      expect(colorButton(markup, "blue")).toContain('aria-pressed="true"');
+      expect(colorButton(markup, "green")).toContain('aria-pressed="false"');
+      expect(markup).not.toContain(">Expression<");
+    }
+  });
+
+  it("shows the color picker for the mascot too", () => {
+    const markup = renderCard(makeBot());
+
+    expect(markup).toContain(">Expression<");
+    expect(markup).toContain(">Color<");
+    expect(markup).toContain('aria-label="Use green mascot color"');
+  });
+});

@@ -1,5 +1,5 @@
 // Security: model output never reaches the DOM as raw HTML (no rehype-raw); Shiki's output is generator-escaped.
-import { createContext, Fragment, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { createContext, Fragment, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type Options as MarkdownOptions } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -11,7 +11,8 @@ import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { remarkMentions, sameMentionPerson, type MentionPeer, type MentionPerson } from "@/lib/mentions";
 import { createMarkdownRenderCache } from "@/lib/markdown-render-cache";
-import { closedFence, openFence, splitMarkdownBlocks } from "@/lib/markdown-stream-blocks";
+import { closedFence, mayHoldMath, openFence, splitMarkdownBlocks, splitStreamPieces, type StreamPieces } from "@/lib/markdown-stream-blocks";
+import { drawStreamPieces, type ItemScope, type ParsePiece } from "@/lib/markdown-stream-pieces";
 import { StreamingReplyContext } from "@/state/live-reply";
 
 import { parseFenceInfo } from "../lib/code-block";
@@ -67,6 +68,12 @@ export const localFilePath = (href?: string): string | null => {
   if (absolute) return absolute;
   if (href.startsWith("#") || /^[a-z][a-z\d+.-]*:/i.test(href)) return null;
   return href;
+};
+
+// A plain-path link as the server reads it: cut at ? or #, then percent-decoded once.
+export const decodedLinkPath = (href: string): string => {
+  try { return decodeURIComponent(href.split(/[?#]/, 1)[0]!); }
+  catch { return href; }
 };
 
 export function chatUrlTransform(value: string, key = "href"): string {
@@ -333,9 +340,9 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
 // Security: no href at all, since an <a href="file://…"> reaches setWindowOpenHandler on a middle or modifier click,
 // which calls shell.openExternal without main's containment check.
 // source: the original a delivered copy came from, offered on right-click (Show in Finder) like in the gallery.
-function LocalFileLink({ filePath, name, source, children, message }: { filePath: string; name?: string; source?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
+function LocalFileLink({ filePath, shownPath, shownName, name, source, children, message }: { filePath: string; shownPath: string; shownName: string; name?: string; source?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, name, message);
-  const preview = useHtmlPreview(filePath, name ?? fileName(filePath), message);
+  const preview = useHtmlPreview(filePath, shownName, message);
   const revealMenu = useRevealOriginalMenu();
   if (!message) {
     return <span title={t("chat.file.legacy")} className="break-words text-ink-secondary">{children}</span>;
@@ -352,8 +359,8 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
     <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]" {...revealMenu.targetProps(source)}>
       {revealMenu.menu}
       {preview.opens
-        ? <SaveIconButton name={name ?? fileName(filePath)} save={save} retryable={save.retryable} />
-        : <FilePreviewButton path={filePath} name={name ?? fileName(filePath)} message={message} />}
+        ? <SaveIconButton name={shownName} save={save} retryable={save.retryable} />
+        : <FilePreviewButton path={filePath} name={shownName} message={message} />}
       <button
         type="button"
         onClick={preview.opens ? preview.show : () => void save.save()}
@@ -385,7 +392,7 @@ function LocalFileLink({ filePath, name, source, children, message }: { filePath
       )}
       {save.state === "failed" && save.outsideWorkspace && (
         <span className="inline-flex flex-wrap items-center gap-x-1.5 text-[12px]">
-          <OutsideWorkspaceFile filePath={filePath} />
+          <OutsideWorkspaceFile filePath={shownPath} />
         </span>
       )}
       {save.folder && <MessageFolderFiles folderPath={filePath} listing={save.folder} message={message} />}
@@ -473,6 +480,7 @@ function escapeLiteralDollars(text: string): string {
 }
 
 export function normalizeMathDelimiters(text: string, imageOffsets?: Map<number, number>): string {
+  if (!imageOffsets && !mayHoldMath(text)) return text;
   const protectedCode: Array<{ value: string; sourceOffset: number }> = [];
   const protect = (value: string, sourceOffset: number): string => {
     const token = `\u0000OMB_CODE_${protectedCode.length}\u0000`;
@@ -524,20 +532,22 @@ export function normalizeMathDelimiters(text: string, imageOffsets?: Map<number,
 const normalizedCache = new Map<string, Pick<MessageScope, "imageOffsets"> & { source: string }>();
 const NORMALIZED_CACHE_MAX = TRANSCRIPT_WINDOW_SIZE * 2;
 
-function normalizeMarkdown(text: string) {
+/** Tables are repaired only in a message without images; `repair` carries that choice to a block of the message. */
+function normalizeMarkdown(text: string, repair = !text.includes(MARKDOWN_IMAGE)) {
   const imageOffsets = text.includes(MARKDOWN_IMAGE) ? new Map<number, number>() : undefined;
-  return { source: normalizeMathDelimiters(imageOffsets ? text : repairMarkdownTables(text), imageOffsets), imageOffsets };
+  return { source: normalizeMathDelimiters(repair ? repairMarkdownTables(text) : text, imageOffsets), imageOffsets };
 }
 
-function normalizeMessageMarkdown(text: string) {
-  const cached = normalizedCache.get(text);
+function normalizeMessageMarkdown(text: string, repair = !text.includes(MARKDOWN_IMAGE)) {
+  const key = repair ? text : `\u0000${text}`;
+  const cached = normalizedCache.get(key);
   if (cached) return cached;
-  const normalized = normalizeMarkdown(text);
+  const normalized = normalizeMarkdown(text, repair);
   if (normalizedCache.size >= NORMALIZED_CACHE_MAX) {
     const first = normalizedCache.keys().next().value;
     if (first !== undefined) normalizedCache.delete(first);
   }
-  normalizedCache.set(text, normalized);
+  normalizedCache.set(key, normalized);
   return normalized;
 }
 
@@ -653,7 +663,11 @@ function MarkdownLink({ href, children, ...rest }: { href?: string; children?: R
   if (localPath) {
     const copy = delivered && Object.hasOwn(delivered, fileName(localPath)) ? delivered[fileName(localPath)] : undefined;
     const source = copy && originals && Object.hasOwn(originals, copy) ? originals[copy] : undefined;
-    return <LocalFileLink filePath={copy ?? localPath} name={copy ? fileName(localPath) : undefined} source={source} message={message}>{children}</LocalFileLink>;
+    // localFilePath already decodes a file:// URL; a plain path link is still encoded and gets the server's single decode.
+    // A delivered copy keeps its literal name.
+    const shownPath = copy ?? (/^file:\/\//i.test(href) ? localPath : decodedLinkPath(localPath));
+    const shownName = copy ? fileName(localPath) : fileName(shownPath);
+    return <LocalFileLink filePath={copy ?? localPath} shownPath={shownPath} shownName={shownName} name={copy ? fileName(localPath) : undefined} source={source} message={message}>{children}</LocalFileLink>;
   }
   if (!/^https?:\/\//i.test(href)) {
     return (
@@ -794,6 +808,16 @@ interface MarkdownPart {
   finished: boolean;
   /** A code fence still being written, drawn without parsing. */
   fence?: { lang: string; wrap: boolean; code: string };
+  /** A list or table still being written, of which only the last piece is parsed again. */
+  pieces?: StreamPieces;
+  /** Whether the message repairs tables. */
+  repair?: boolean;
+}
+
+function remarkLooseList() {
+  return (tree: { children: { type: string; spread?: boolean }[] }) => {
+    if (tree.children[0]?.type === "list") tree.children[0].spread = true;
+  };
 }
 
 /** A finished message is one part. A streaming one is its blocks: the finished ones are parsed once and kept, and only
@@ -801,10 +825,13 @@ interface MarkdownPart {
 function markdownParts(text: string, streaming: boolean): MarkdownPart[] {
   if (!streaming) return [{ text, ...normalizeMessageMarkdown(text), finished: true }];
   const blocks = splitMarkdownBlocks(text) ?? [text];
+  const repair = !text.includes(MARKDOWN_IMAGE);
   return blocks.map((block, index): MarkdownPart => {
-    if (index < blocks.length - 1) return { text: block, ...normalizeMessageMarkdown(block), finished: true };
+    if (index < blocks.length - 1) return { text: block, ...normalizeMessageMarkdown(block, repair), finished: true, repair };
     const fence = openFence(block);
-    if (!fence) return { text: block, ...normalizeMarkdown(block), finished: false };
+    const pieces = fence ? null : splitStreamPieces(block);
+    if (pieces) return { text: block, source: block, finished: false, pieces, repair };
+    if (!fence) return { text: block, ...normalizeMarkdown(block, repair), finished: false };
     const [info = "", ...meta] = fence.info.split(/\s+/);
     return { text: block, source: block, finished: false, fence: { ...parseFenceInfo(info, meta.join(" ")), code: fence.code } };
   });
@@ -820,7 +847,8 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   const { threads, currentBotId } = MAY_LINK_THREAD.test(text) ? use(ThreadRefsContext) : NO_THREAD_REFS;
   const streaming = use(StreamingReplyContext);
   const parts = useMemo(() => markdownParts(text, streaming), [text, streaming]);
-  const needsMath = parts.some((part) => !part.fence && normalizedSourceHasMath(part.source));
+  // One answer for the whole text, as a finished message gets: a block alone may hold half of a pair.
+  const needsMath = useMemo(() => normalizedSourceHasMath(parts.length === 1 ? parts[0]!.source : parts.map((part) => part.source).join("")), [parts]);
   const [katexReady, setKatexReady] = useState(() => katexPlugin !== null);
   useEffect(() => {
     if (!needsMath) return;
@@ -839,7 +867,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   }, [needsMath]);
   const mathPlugin = needsMath && katexReady ? katexPlugin : null;
   const linksThreads = threads.length > 0;
-  const draw = ({ text: partText, source, finished }: MarkdownPart) => {
+  const parse = (source: string, cacheKey: string | null, loose = false, joined?: () => ReactElement | null) => {
     const mentions = source.includes("@");
     const variant = `${mathPlugin ? "math" : ""}\u0003${mentions ? `${peerSignature(mentionPeers)}\u0001${everyone ? 1 : 0}\u0001${mentionPerson?.profileName ?? ""}` : ""}\u0003${linksThreads ? `${threadListId(threads)}\u0001${currentBotId ?? ""}` : ""}`;
     // Markdown is a plain function of its options (no hooks), so its elements can be kept and drawn again.
@@ -847,10 +875,26 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
       const remarkPlugins = [...BASE_REMARK_PLUGINS];
       if (mentions) remarkPlugins.push([remarkMentions, { peers: mentionPeers, everyone, person: mentionPerson }]);
       if (linksThreads) remarkPlugins.push(remarkThreadRefs(threads, currentBotId));
-      return Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
+      if (loose) remarkPlugins.push(remarkLooseList);
+      return joined?.() ?? Markdown({ children: source, remarkPlugins, rehypePlugins: rehypePluginsFor(mathPlugin), urlTransform: chatUrlTransform, components: MARKDOWN_COMPONENTS });
     };
     // Streamed text grows each render; keeping its drawing would only fill the cache with prefixes.
-    return finished ? markdownCache.render(partText, variant, render) : <StreamSourceContext value={source}>{render()}</StreamSourceContext>;
+    return cacheKey === null ? render() : markdownCache.render(cacheKey, variant, render);
+  };
+  const piece: ParsePiece = (source, cacheKey, loose) => parse(source, cacheKey, loose);
+  const itemScope: ItemScope = (nodes, index, open) => <StreamSourceContext key={index} value={open}>{nodes}</StreamSourceContext>;
+  const draw = ({ text: partText, source, finished, pieces, repair }: MarkdownPart): ReactNode => {
+    if (finished) {
+      return parse(source, partText, false, () => {
+        const split = splitStreamPieces(partText);
+        const joined = split && drawStreamPieces(split, false, piece, itemScope);
+        return joined ? <>{joined}</> : null;
+      });
+    }
+    const joined = pieces && drawStreamPieces(pieces, true, piece, itemScope);
+    if (joined) return joined;
+    const whole = pieces ? normalizeMarkdown(partText, repair).source : source;
+    return <StreamSourceContext value={whole}>{parse(whole, null)}</StreamSourceContext>;
   };
   // A message still streaming has no saved files to fetch yet.
   const scope = { message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals };

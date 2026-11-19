@@ -175,6 +175,14 @@ export function registerUpdaterIpc({ pageAllowed: allowed, serverPage = () => nu
   }));
 }
 
+/** How an update reaches this computer with nobody at it: installed at a quiet moment ("by-itself"), on the person's
+ * Restart ("restart"), through their package manager ("package"), or not at all from this app ("none"). */
+export function unattendedUpdates() {
+  if (!updaterCoordinator) return "none";
+  if (quiet) return "by-itself";
+  return state.installMode === "handoff" ? "package" : "restart";
+}
+
 // macOS keeps the process (and updater) alive after its window closes, so each new window is retargeted here.
 export function attachUpdaterWindow(mainWindow) {
   win = mainWindow;

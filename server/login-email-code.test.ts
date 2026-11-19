@@ -102,6 +102,24 @@ describe("a code is entered only while its requesting turn remains active", () =
 });
 
 describe("an emailed code inside fill_login", () => {
+  it("fills a code from a Chinese email without exposing the mail or code", async () => {
+    const boxes: CodeMailbox[] = [{
+      list: async () => [{ id: "m", at: NOW + 1_000, from: "no-reply@acme.test", subject: "登录验证码" }],
+      body: async () => `<p>您的验证码是 <b>${CODE}</b>，5 分钟内有效</p>`,
+    }];
+    const { page: current, run } = setup("https://acme.test/verify", CODE_PAGE, async (ask) => {
+      const found = await waitForEmailCode(boxes, { site: ask.site, askedAt: NOW, isUsed: () => false, now: ask.now, sleep: ask.sleep });
+      return found.kind === "code" ? { ...found, typed: () => {} } : found;
+    });
+    current.answer = () => ({ navigate: HOME });
+    const outcome = await run();
+    expect(current.typed).toEqual([CODE]);
+    expect(outcome).toMatchObject({ ok: true, filled: ["code"] });
+    expect(JSON.stringify(outcome)).not.toContain(CODE);
+    expect(JSON.stringify(outcome)).not.toContain("验证码");
+    expect(JSON.stringify(current.engineCalls)).not.toContain(CODE);
+  });
+
   it("fills the code as real input and tells the bot only that it did", async () => {
     const { page: current, remembered, asks, typedCount, run } = setup("https://acme.test/verify", CODE_PAGE, code);
     current.answer = () => ({ navigate: HOME });

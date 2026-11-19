@@ -1,7 +1,7 @@
 export declare const RECONNECT: Readonly<{ baseMs: number; capMs: number; healthyMs: number; cantReachAfterMs: number; timeoutMs: number; refocusMs: number }>;
 
 /** How a server saved by hand was installed, as its descriptor says, so the update command fits it. */
-export type ServerInstall = "npx" | "global" | "docker" | "source";
+export type ServerInstall = "npx" | "global" | "docker" | "source" | "podman-service";
 /** checking: the first look; connected; reconnecting / cantReach: a passing problem (cantReach after two minutes);
  * signedOut: it needs a new pairing code; insecure: a public http address, never contacted. */
 export type ServerState = "checking" | "connected" | "reconnecting" | "cantReach" | "signedOut" | "insecure";

@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 
 import { CONTROL_ACT_WITHIN_MS, CONTROL_UNCONFIRMED, CONTROL_WAITED, controlRefusal, createControlClient, type ControlState } from "./control-client.ts";
@@ -20,6 +20,7 @@ export function runLivenessProbe(probe: BridgeLiveness, timeoutMs = PROBE_TIMEOU
   return new Promise((resolve) => {
     const child = spawn(probe.command, probe.args, {
       shell: false,
+      windowsHide: true,
       env: env ?? { ...process.env, PATH: augmentedPath() },
       stdio: ["ignore", "ignore", "ignore"],
     });
@@ -111,6 +112,8 @@ export interface BridgeOptions {
   label: string;
   /** docker's ssh connection helper takes no ConnectTimeout/ServerAlive options, so a dropped VPS wedges silently without this. */
   liveness?: BridgeLiveness;
+  /** The child is a console program (docker, podman, ssh): start it hidden, or Windows opens a terminal window for it. */
+  consoleChild?: boolean;
   /** `describe`: what a tools/call would open, passed to the gate so the person can be asked in plain words. */
   gate?: { url: string; token: string; describe?: (frame: unknown) => Record<string, string> };
   journal?: { url: string; token: string };
@@ -326,21 +329,24 @@ export function createChildCalls(write: (line: string) => void, closedText = "Co
 const RESPAWN_WAITS_MS = [0, 500, 1_500, 3_000];
 const RESPAWN_INITIALIZE_MS = 5_000;
 
+export function spawnBridgeChild(
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  windowsHide: boolean,
+): ChildProcessWithoutNullStreams {
+  const proc = spawn(command, args, { shell: false, windowsHide, env, stdio: ["pipe", "pipe", "pipe"] });
+  // docker may exit before it drains stdin; pipe() leaves this error unhandled.
+  proc.stdin.on("error", () => {});
+  proc.stderr.pipe(process.stderr, { end: false });
+  return proc;
+}
+
 export function runMcpBridge(options: BridgeOptions): void {
   const env = options.env ?? { ...process.env, PATH: augmentedPath() };
   const { command, args } = resolveCliSpawn(options.command, options.args, env);
   const respawn = options.respawn;
-  const spawnChild = () => {
-    const proc = spawn(command, args, {
-      shell: false,
-      env,
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    // docker may exit before it drains stdin; pipe() leaves this error unhandled.
-    proc.stdin.on("error", () => {});
-    proc.stderr.pipe(process.stderr, { end: false });
-    return proc;
-  };
+  const spawnChild = () => spawnBridgeChild(command, args, env, options.consoleChild === true);
   let child = spawnChild();
 
   const client = options.gate

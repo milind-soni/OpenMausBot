@@ -28,7 +28,7 @@ import {
 import type { InstanceConfigMap, ModelSelection } from "../contracts.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { parseConfigPatchForPerson } from "../decider/config-errors.ts";
-import { TEAM_PERSONAL_HINTS } from "../../shared/cloud-hints.ts";
+import { teamPersonalHint } from "../../shared/cloud-hints.ts";
 import { DECIDER_KEY_ERROR, deciderIncludedHere, deciderPatchKey, deciderSavePatch, deciderBorrowedKey, type Decider } from "../decider/index.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
@@ -41,6 +41,7 @@ import type { SharedComputers } from "../shared-computers.ts";
 import { parseSkillMd } from "../skills.ts";
 import type { Store } from "../store.ts";
 import * as tts from "../tts/index.ts";
+import { DEFAULT_DEEPSEEK_VOICE } from "../../shared/deepseek-voice.ts";
 import * as vps from "../vps-computer.ts";
 import { refusalBody, userError, userErrorFields } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
@@ -147,11 +148,11 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         }
       }
       if (patch.onboarding?.hintsSeen && ownHints) {
-        const mine = patch.onboarding.hintsSeen.filter((hint) => TEAM_PERSONAL_HINTS.has(hint));
+        const mine = patch.onboarding.hintsSeen.filter(teamPersonalHint);
         if (mine.length && ownHints(auth, mine)) {
           // The team's record keeps what it had of these; only this person's changes.
-          const kept = (cfg.onboarding?.hintsSeen ?? []).filter((hint) => TEAM_PERSONAL_HINTS.has(hint));
-          patch.onboarding = { ...patch.onboarding, hintsSeen: [...new Set([...patch.onboarding.hintsSeen.filter((hint) => !TEAM_PERSONAL_HINTS.has(hint)), ...kept])] };
+          const kept = (cfg.onboarding?.hintsSeen ?? []).filter(teamPersonalHint);
+          patch.onboarding = { ...patch.onboarding, hintsSeen: [...new Set([...patch.onboarding.hintsSeen.filter((hint) => !teamPersonalHint(hint)), ...kept])] };
         }
       }
       if (CLOUD_HOME && (patch.signIn?.admins?.length || patch.signIn?.members?.length)) {
@@ -194,7 +195,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         && patch.tts.provider !== tts.voiceProvider(cfg);
       if (changingVoiceProvider && patch.tts?.voice === undefined) {
         // Voice ids are provider-owned: never carry one from one catalog into another.
-        patch.tts = { ...patch.tts, voice: "" };
+        patch.tts = { ...patch.tts, voice: patch.tts?.provider === "deepseek" ? DEFAULT_DEEPSEEK_VOICE : "" };
       }
       if (changingVoiceProvider && patch.tts?.model === undefined) patch.tts = { ...patch.tts, model: "" };
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });

@@ -217,6 +217,22 @@ describe("coverageForDriver", () => {
   });
 });
 
+describe("digestCompletedLate", () => {
+  it("marks a preview digest full once every tool row of its turn has its full result, and leaves it otherwise", async () => {
+    const { digestCompletedLate } = await import("./digest.ts");
+    const preview = activity("Bash", true, "ls");
+    const full = { ...preview, tool: { ...preview.tool!, fullResult: true } };
+    const digest = buildTurnDigest({ ...base, activities: [preview], memory: [] });
+    const row: Message = { id: "d1", role: "bot", kind: "digest", at: 2, turnId: "turn-1", text: renderDigest(digest), digest };
+    expect(renderDigest(digest)).toContain("from tool previews");
+    expect(digestCompletedLate([preview, row], "turn-1")).toBeNull();
+    const completed = digestCompletedLate([full, row], "turn-1");
+    expect(completed).toMatchObject({ id: "d1", digest: { hookCoverage: "full" } });
+    expect(completed!.text).not.toContain("from tool previews");
+    expect(digestCompletedLate([full, { ...row, digest: completed!.digest }], "turn-1")).toBeNull();
+  });
+});
+
 describe("toolEvidence", () => {
   it("is full only when every tool row of the turn carries a delivered result", async () => {
     const { toolEvidence } = await import("./digest.ts");

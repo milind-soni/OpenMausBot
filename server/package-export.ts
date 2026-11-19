@@ -1,4 +1,6 @@
+import type { SkillFile } from "../shared/skill-files.ts";
 import { parseBotPackage, type BotPackageDefinition, type BotPackagePlaybook, type BotPackageSkill, type ParsedBotPackage } from "./bot-package.ts";
+import { productName } from "./brand.ts";
 import type { DefaultsPreset, PublishedLibrary } from "./presets.ts";
 import type { PublishedTeam } from "./published-teams.ts";
 import { nextPatchRelease } from "./published-teams.ts";
@@ -70,11 +72,14 @@ export interface ExportablePackageSkill extends Omit<BotPackageSkill, "name" | "
   name: string;
   description: string;
   enabled?: boolean;
+  /** The text files beside SKILL.md that travel with it. */
+  files?: SkillFile[];
 }
 
 function sameSkill(a: ExportablePackageSkill, b: ExportablePackageSkill): boolean {
   return a.instructions === b.instructions && a.description === b.description &&
-    a.source === b.source && a.license === b.license && a.compatibility === b.compatibility;
+    a.source === b.source && a.license === b.license && a.compatibility === b.compatibility &&
+    JSON.stringify(a.files ?? []) === JSON.stringify(b.files ?? []);
 }
 
 function assignPlaybooks(bots: readonly BotRecord[], idToKey: ReadonlyMap<string, string>) {
@@ -231,10 +236,10 @@ export function createBotPackageExport(input: {
     id,
     release: "1.0.0",
     name: input.name,
-    tagline: `A portable OpenMausBot setup with ${bots.length} ${bots.length === 1 ? "bot" : "bots"}.`,
-    summary: "Exported from OpenMausBot. Review the roles, rooms, playbooks, connector requirements, and paused routines before sharing or publishing.",
+    tagline: `A portable ${productName()} setup with ${bots.length} ${bots.length === 1 ? "bot" : "bots"}.`,
+    summary: `Exported from ${productName()}. Review the roles, rooms, playbooks, connector requirements, and paused routines before sharing or publishing.`,
     category: "Community",
-    author: { name: input.authorName?.trim() || "OpenMausBot user" },
+    author: { name: input.authorName?.trim() || `${productName()} user` },
     license: "Unspecified",
     outcomes: ["Recreate this bot setup without copying private runtime state."],
     setupMinutes: Math.min(240, Math.max(2, bots.length + requirements.size * 2)),
@@ -663,12 +668,12 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
     id: packageId,
     release,
     name: displayName,
-    tagline: input.tagline?.trim() || `A portable OpenMausBot team with ${bots.length} ${bots.length === 1 ? "bot" : "bots"}.`,
+    tagline: input.tagline?.trim() || `A portable ${productName()} team with ${bots.length} ${bots.length === 1 ? "bot" : "bots"}.`,
     summary: input.summary?.trim() ||
-      "Shared from OpenMausBot. Bots, skills, group chats and routines arrive as new copies; routines start paused and chat history never travels.",
+      `Shared from ${productName()}. Bots, skills, group chats and routines arrive as new copies; routines start paused and chat history never travels.`,
     ...(notes ? { notes } : {}),
     category: "Community",
-    author: { name: input.authorName?.trim() || "OpenMausBot user" },
+    author: { name: input.authorName?.trim() || `${productName()} user` },
     license: "Unspecified",
     outcomes: ["Recreate this team without copying chat history or private settings."],
     setupMinutes: Math.min(240, Math.max(2, bots.length + requirements.size * 2 + connections.length * 2)),
@@ -782,12 +787,12 @@ export function createLibraryPackageExport(input: LibraryExportInput): LibraryEx
     id: packageId,
     release,
     name: displayName,
-    tagline: input.tagline?.trim() || "A preset bot for OpenMausBot's New bot dialog.",
+    tagline: input.tagline?.trim() || `A preset bot for ${productName()}'s New bot dialog.`,
     summary: input.summary?.trim() ||
-      "Shared from OpenMausBot. Adds a preset bot to New bot. Its skills arrive switched off; model choices, computers, approval levels and connected apps never travel.",
+      `Shared from ${productName()}. Adds a preset bot to New bot. Its skills arrive switched off; model choices, computers, approval levels and connected apps never travel.`,
     ...(notes ? { notes } : {}),
     category: "Community",
-    author: { name: input.authorName?.trim() || "OpenMausBot user" },
+    author: { name: input.authorName?.trim() || `${productName()} user` },
     license: "Unspecified",
     outcomes: ["Start new bots from a shared preset."],
     setupMinutes: 2,

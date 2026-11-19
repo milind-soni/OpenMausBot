@@ -1,7 +1,7 @@
 import { join, sep } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { createUpdateChecker, installKind, isNewerVersion, LATEST_RELEASE_URL, STABLE_CHANNEL_URL, updateChannel } from "./update-check.ts";
+import { createUpdateChecker, installKind, isNewerVersion, LATEST_RELEASE_URL, STABLE_CHANNEL_URL, updateChannel, updateCommand } from "./update-check.ts";
 
 const release = (tag: string) =>
   ({ ok: true, status: 200, json: async () => ({ tag_name: tag, html_url: `https://github.com/milind-soni/OpenMausBot/releases/tag/${tag}` }) }) as Response;
@@ -27,6 +27,23 @@ describe("server update check", () => {
     })).toBe("npm");
     expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: (path) => path === join(root, "..", ".git") })).toBe("git");
     expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: none })).toBe("unknown");
+  });
+
+  it("knows the rootless Podman service by its unit's mark, and gives its own update.sh, not the Compose recipe", () => {
+    const root = ["", "app", "dist-server"].join(sep);
+    const env = { OMB_PODMAN_SERVICE: "~/.local/share/openmausbot" };
+    expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: (path) => path === "/run/.containerenv", env })).toBe("podman-service");
+    expect(installKind({ desktopManaged: false, managed: false, serverRoot: root, exists: (path) => path === "/run/.containerenv", env: {} })).toBe("podman");
+    expect(installKind({ desktopManaged: false, managed: true, serverRoot: root, exists: () => false, env })).toBe("managed");
+    expect(updateCommand("podman-service", undefined, env)).toEqual({ command: "~/.local/share/openmausbot/update.sh", restart: false });
+    expect(updateCommand("podman-service", { version: "0.1.170", stable: false }, env)?.command).toBe("~/.local/share/openmausbot/update.sh --version 0.1.170");
+    expect(updateCommand("podman-service", { version: "0.1.170", stable: true }, { OMB_PODMAN_SERVICE: "/srv/omb@corp/" })?.command).toBe("/srv/omb@corp/update.sh");
+    // Anything but a plain path stands for nothing: the installer's own folder.
+    for (const bad of ["1", "~/x; rm -rf /", "/srv/../etc", "relative/dir", "$(id)"]) {
+      expect(updateCommand("podman-service", undefined, { OMB_PODMAN_SERVICE: bad })?.command, bad).toBe("~/.local/share/openmausbot/update.sh");
+    }
+    expect(updateCommand("docker", { version: "0.1.170", stable: false })?.command).toBe("git pull && ./update.sh --version 0.1.170");
+    expect(updateCommand("docker", { version: "0.1.170", stable: true })?.command).toBe("git pull && ./update.sh");
   });
 
   it("compares release versions numerically and never reports a malformed one", () => {

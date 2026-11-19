@@ -53,7 +53,7 @@ export function ComposerSendButton({ compact, waits, label, title, look, disable
     return {
       key: choice,
       label: t(`composer.followUp.${choice}`),
-      subtitle: t(`composer.followUp.${choice}Hint`, { name: menu.name }),
+      subtitle: choice === "steer" ? t("settings.followUp.steer") : t(`composer.followUp.${choice}Hint`, { name: menu.name }),
       icon: <Icon size={16} aria-hidden="true" />,
       active: index === 0,
       value: index === 0 ? menu.sendKey : choice === alternate ? menu.alternateKey : undefined,

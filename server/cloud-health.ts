@@ -12,6 +12,7 @@ import type { FirstHourReport } from "./host/first-hour.ts";
 import type { ValueReport } from "./host/value-ledger.ts";
 import type { ProviderSnapshot, RuntimeEvent } from "./contracts.ts";
 import { createCloudSpeed, type CloudSpeed } from "./cloud-speed.ts";
+import { doctorSummary } from "./doctor/start.ts";
 import { classifyError } from "./drivers/retry.ts";
 import type { PerfHealth } from "./perf/perf-report.ts";
 import type { RoutineHealth } from "./routine-health.ts";
@@ -265,6 +266,14 @@ export function boxSummary(report: BoxReport | undefined): { box: BoxReport["box
   return { box: report.box, reason: report.reason, checks: report.checks ? `${report.checks.passed}/${report.checks.total}` : null, failed, boxed: report.boxed, refused: report.refused, broker, hardening: report.hardening };
 }
 
+/** The doctor's last run, as fixed codes and counts. */
+function doctorHealth() {
+  const summary = doctorSummary();
+  if (!summary) return null;
+  const ids = (list: string[]) => list.filter((id) => CODE.test(id)).slice(0, 20);
+  return { at: Date.parse(summary.at) || null, version: match(VERSION, summary.version), checked: summary.checked, fixed: ids(summary.fixed), problems: ids(summary.problems), thisStart: summary.thisStart };
+}
+
 /** What the scheduler says of itself, or `fallback` when asking it throws: the rest of the report is still answered. The log names no cause, which could quote a routine. */
 function guarded<T>(read: () => T, fallback: T): T {
   try { return read(); } catch { console.error("cloud health: the scheduler's part of the report could not be read"); return fallback; }
@@ -315,6 +324,8 @@ export function createCloudHealth(deps: CloudHealthDeps) {
         browser: { available: browser.available, installing: browser.installing, interrupted: browser.interrupted },
         box: boxSummary(deps.box?.()),
         firstHour: first?.firstHour ?? null, value: first?.value ?? null, room: deps.room?.() ?? null, speed: speed.report(), perf: perf(),
+        // The data checks of this version's first start: check ids and counts (server/doctor/start.ts).
+        doctor: doctorHealth(),
         system: { ...memory, rssBytes: process.memoryUsage.rss(), load1: loadavg()[0] ?? 0, cpus: availableParallelism(), disk: diskBytes(deps.dataDir), eventLogWritable: writable(deps.eventsDir) },
       };
       let budget = CLOUD_HEALTH_MAX_BYTES - JSON.stringify({ ...base, cursor: ledger.cursor(read.seq), truncated: true, incidents: [] }).length;

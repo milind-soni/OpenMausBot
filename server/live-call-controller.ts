@@ -4,12 +4,13 @@ import { spokenConsent } from "../shared/call-consent.ts";
 import {
   LIVE_COPY, liveCardKind, liveStepLabel, spokenApprovalPrompt, spokenConnectorPrompt, spokenQuestionPrompt, spokenReviewPrompt, spokenSecretPrompt, spokenSignInPrompt,
 } from "../shared/live-approval.ts";
-import { botCallVoice, clampAppend, commentaryChunks, geminiLiveVoice, LiveTranscript } from "../shared/live-call.ts";
+import { botCallVoice, clampAppend, commentaryChunks, geminiLiveVoice, LiveTranscript, SpokenLines } from "../shared/live-call.ts";
 import { signInWaits } from "../shared/sign-in-request.ts";
 import type { LiveCallRecord, LiveCallState, LiveClient, LiveElevenLabsTransport, LiveEndReason, LiveFishTransport, LiveGeminiTransport, LiveProvider } from "../shared/wire.ts";
 import { FISH_AGENT_VOICE } from "./live-fish.ts";
 import { LIVE_NEEDS_KEY, liveAuthHeaders, liveCallSummaryLine, liveProviderName, LiveSessionError, liveVoice, spokenHangUp, type LiveEndpoint } from "./live-call.ts";
 import { LIVE_CUSTOM_REFUSAL } from "./live-access.ts";
+import { scrubHeldSecrets } from "./redact.ts";
 import type { RequestAuth } from "./request-auth.ts";
 import type { Message, StoreChange } from "./store.ts";
 
@@ -128,6 +129,7 @@ interface Call {
   socket: LiveSocket | null;
   attached: boolean;
   transcript: LiveTranscript;
+  spoken: SpokenLines;
   heardThroughMs: number;
   lastDecision: { throughMs: number; copy: string } | null;
   eventCounter: number;
@@ -295,6 +297,7 @@ export class LiveCallController {
       socket: null,
       attached: false,
       transcript: new LiveTranscript(),
+      spoken: new SpokenLines(scrubHeldSecrets),
       heardThroughMs: 0,
       lastDecision: null,
       eventCounter: 0,
@@ -435,6 +438,7 @@ export class LiveCallController {
   private writeRecord(call: Call, reason: LiveEndReason): void {
     if (!call.attached || !this.deps.recordCall) return;
     const endedAt = this.now();
+    const spoken = call.spoken.list();
     const record: LiveCallRecord = {
       callId: call.state.callId,
       botId: call.state.botId,
@@ -443,6 +447,7 @@ export class LiveCallController {
       endedAt,
       seconds: Math.max(0, Math.round(call.stats.seconds ?? (endedAt - call.state.startedAt) / 1000)),
       endReason: reason,
+      ...(spoken.length ? { spoken } : {}),
     };
     try {
       this.deps.recordCall({ threadId: call.state.threadId, botName: call.botName, record });
@@ -494,6 +499,7 @@ export class LiveCallController {
         return;
       case "session.output_transcript.delta":
         call.transcript.addOutput(Number(event.start_ms), Number(event.end_ms));
+        call.spoken.add(String(event.delta ?? ""), this.now(), Number(event.start_ms), Number(event.end_ms));
         this.touch(call);
         return;
       case "session.delegation.created": {

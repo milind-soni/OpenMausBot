@@ -25,6 +25,13 @@ You'll get a response as soon as possible, normally within a few days.
   guarded routes, so a bot's shell can post into an existing Full-access thread, or open one while
   shared Full access is on, and get Full-access work done without a card. A worker-only relay token
   is the planned fix.
+- `openmausbot login` asks through `POST /api/auth/cli-login`, which needs no session and grants
+  nothing: only Allow in the owner's or an admin's window (an admin route behind the same gate)
+  mints a session, and the terminal collects it once with a secret only it holds. A way to get a
+  session from that route without a person pressing Allow is a vulnerability. Any program here,
+  a bot's shell included, can ask, so the matching code on the card is the person's check. The
+  saved session is in the macOS Keychain or a 0600 file, which a bot with Full access, running as
+  the person, can read like any of their files.
 - API keys live in `~/.openmausbot/config.json` and are write-only through the API (`configured`
   booleans out, never values). The packaged desktop app keeps AI provider and service keys in an
   OS-encrypted store (`credentials.bin`) instead; OpenCode provider keys, per-engine `environment`

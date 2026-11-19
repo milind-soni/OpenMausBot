@@ -13,18 +13,33 @@ export interface RoomJobsDeps {
   // Read lazily: index.ts builds the coordinator after this module.
   coordinator: Pick<Coordinator, "active">;
   cfg: AppConfig;
-  operations: (groupId: string) => Iterable<{ threadId: string; cancelled: boolean; line?: RoomRoundLine }>;
+  operations: (groupId: string) => Iterable<{ threadId: string; cancelled: boolean; botIds: ReadonlySet<string>; line?: RoomRoundLine }>;
   speakerOf: (threadId: string) => string | undefined;
   laneRoomThread: (n: Pick<HandoffView, "botId" | "threadId" | "groupId">) => string | undefined;
 }
 
 export function parallelRoomJobsEnabled(cfg: AppConfig): boolean {
-  return cfg.features?.parallelRoomJobs === true;
+  return cfg.features?.parallelRoomJobs !== false;
 }
 
 const live = (n: HandoffView) => n.parentId !== undefined && (n.status === "queued" || n.status === "running");
 
 export function createRoomJobs({ store, coordinator, cfg, operations, speakerOf, laneRoomThread }: RoomJobsDeps) {
+  /** Where a member runs now outside this room, if anywhere: a turn in another room, else a busy thread of its own.
+   *  The host holds a room hand-off while the member runs (bot.busy), so a turn in another room that has not reached it yet is not busy. */
+  function busyElsewhere(botId: string, roomId: string): RoomQueueEntry["busyIn"] {
+    if (!store.bot(botId)?.busy) return undefined;
+    for (const other of store.groups) {
+      if (other.id === roomId) continue;
+      const turn = [...operations(other.id)].find(operation => !operation.cancelled && operation.botIds.has(botId)
+        && (operation.line?.current === botId || speakerOf(operation.threadId) === botId));
+      if (turn) return { groupId: other.id, threadId: turn.threadId };
+      if (other.busyBotId === botId || speakerOf(other.threadId) === botId) return { groupId: other.id, threadId: other.threadId };
+    }
+    const task = store.tasks(botId).find(candidate => candidate.busy);
+    return task ? { threadId: task.threadId } : undefined;
+  }
+
   function roomLineOf(record: GroupRecord): RoomQueueEntry[] {
     const items: RoomLineItem[] = [];
     for (const operation of operations(record.id)) {
@@ -40,7 +55,10 @@ export function createRoomJobs({ store, coordinator, cfg, operations, speakerOf,
       const speaker = speakerOf(threadId);
       if (speaker) speakers.set(threadId, speaker);
     }
-    return roomQueue(items, speakers);
+    return roomQueue(items, speakers).map(entry => {
+      const busyIn = entry.state === "queued" ? busyElsewhere(entry.botId, record.id) : undefined;
+      return busyIn ? { ...entry, busyIn } : entry;
+    });
   }
 
   function advanceRound(operation: { line?: RoomRoundLine }, current: string | undefined, spoken: ReadonlySet<string>): boolean {
@@ -52,6 +70,13 @@ export function createRoomJobs({ store, coordinator, cfg, operations, speakerOf,
   function useLanes(room: GroupRecord, roomThreadId: string, jobs: number, mode: string): boolean {
     if (mode === "notify" || !parallelRoomJobsEnabled(cfg)) return false;
     return jobs > 1 || coordinator.active().some(n => live(n) && (n.groupId === room.id ? n.threadId === roomThreadId : laneRoomThread(n) === roomThreadId));
+  }
+
+  // A job running beside its room still follows the room's shared instructions.
+  function laneBulletin(n: Pick<HandoffView, "botId" | "threadId" | "groupId">): string {
+    const room = store.groupByThread(laneRoomThread(n) ?? "");
+    const bulletin = room?.bulletin.trim();
+    return room && bulletin ? `Room bulletin of "${room.name}" (shared instructions for everyone):\n${bulletin}` : "";
   }
 
   function openLane(room: GroupRecord, roomThreadId: string, botId: string, sender: { id: string; name: string }, brief: string) {
@@ -81,5 +106,5 @@ export function createRoomJobs({ store, coordinator, cfg, operations, speakerOf,
     return [parallel, sequential].filter(Boolean).join(" ");
   }
 
-  return { roomLineOf, advanceRound, useLanes, openLane, describeRoomJobs };
+  return { roomLineOf, advanceRound, useLanes, laneBulletin, openLane, describeRoomJobs };
 }

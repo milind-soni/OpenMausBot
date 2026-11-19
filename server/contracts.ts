@@ -8,6 +8,7 @@ import type {
 } from "../shared/runtime-events.ts";
 import type { LocalModelFacts, OllamaProblem } from "../shared/local-model.ts";
 import type { ProviderIcon } from "../shared/provider-icon.ts";
+import type { ContextBreakdown } from "../shared/context-breakdown.ts";
 
 export type { CloudBackend, EffortLevel, ModelSelection } from "../shared/wire.ts";
 export type {
@@ -333,6 +334,9 @@ export interface ProviderAdapter {
     hold(threadId: ThreadId, until: number | null): boolean;
     compact?(threadId: ThreadId, options: { instructions: string; session?: string; signal?: AbortSignal }): Promise<IdleCompactResult>;
   };
+  /** The engine's own count, by category, of what fills this thread's context window. null when the thread has no live
+   * engine process to ask or the engine gave no answer; never an estimate. */
+  contextBreakdown?(threadId: ThreadId, options?: { signal?: AbortSignal }): Promise<ContextBreakdown | null>;
 }
 
 /** Tokens are the ping's own; `costUsd` is notional on a subscription. `busy`: a turn was running and nothing was sent;

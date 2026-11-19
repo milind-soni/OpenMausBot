@@ -3,7 +3,7 @@
 // Before such a desktop is removed, its Firefox profile is copied into the workspace, where the new image points ~/.mozilla.
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { lstat, mkdir, readdir, rename, rm, rmdir } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readlink, rename, rm, rmdir, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -34,6 +34,53 @@ async function isEmptyDirectory(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function readChunk(file: FileHandle, buffer: Buffer): Promise<number> {
+  let filled = 0;
+  while (filled < buffer.length) {
+    const { bytesRead } = await file.read(buffer, filled, buffer.length - filled, null);
+    if (!bytesRead) break;
+    filled += bytesRead;
+  }
+  return filled;
+}
+
+async function sameFileBytes(a: string, b: string, deadline: number): Promise<boolean> {
+  const left = await open(a, "r");
+  try {
+    const right = await open(b, "r");
+    try {
+      const leftBuffer = Buffer.allocUnsafe(64 * 1024), rightBuffer = Buffer.allocUnsafe(64 * 1024);
+      for (;;) {
+        if (Date.now() > deadline) throw new Error("installed-app comparison timed out");
+        const [leftRead, rightRead] = await Promise.all([readChunk(left, leftBuffer), readChunk(right, rightBuffer)]);
+        if (leftRead !== rightRead || !leftBuffer.subarray(0, leftRead).equals(rightBuffer.subarray(0, rightRead))) return false;
+        if (!leftRead) return true;
+      }
+    } finally { await right.close(); }
+  } finally { await left.close(); }
+}
+
+async function sameAppTree(a: string, b: string): Promise<boolean> {
+  const pending: [string, string][] = [[a, b]];
+  const deadline = Date.now() + 5 * 60_000;
+  while (pending.length) {
+    if (Date.now() > deadline) throw new Error("installed-app comparison timed out");
+    const [left, right] = pending.pop()!;
+    const [ls, rs] = await Promise.all([lstat(left), lstat(right)]);
+    if (ls.isSymbolicLink() && rs.isSymbolicLink()) {
+      if (await readlink(left) !== await readlink(right)) return false;
+    } else if (ls.isDirectory() && rs.isDirectory()) {
+      const [leftNames, rightNames] = await Promise.all([readdir(left), readdir(right)]);
+      const names = new Set(rightNames);
+      if (leftNames.length !== rightNames.length || leftNames.some((name) => !names.has(name))) return false;
+      for (const name of leftNames) pending.push([join(left, name), join(right, name)]);
+    } else if (ls.isFile() && rs.isFile()) {
+      if (ls.size !== rs.size || !await sameFileBytes(left, right, deadline)) return false;
+    } else return false;
+  }
+  return true;
 }
 
 /** Works on a stopped container. "kept": the workspace already has a Firefox profile, which is never overwritten.
@@ -100,7 +147,7 @@ export async function rescueInstalledApps(runtime: string, target: LocalVmTarget
     if (!copied.isDirectory()) return "none";
     if (existing && !(existing.isDirectory() && await isEmptyDirectory(durable))) {
       try {
-        await run("/usr/bin/diff", ["-qr", staging, durable], { timeout: 5 * 60_000, maxBuffer: 1024 * 1024 });
+        if (!await sameAppTree(staging, durable)) throw new Error("different app trees");
       } catch {
         throw new Error("could not preserve installed desktop apps because the durable app area differs from the old desktop");
       }

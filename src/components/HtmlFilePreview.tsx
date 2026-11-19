@@ -117,7 +117,7 @@ export function OpenInBrowserButton({ source, name, onError }: { source: string;
 function HtmlFileContent({ path, name, message }: { path: string; name: string; message: MessageAttachmentContext }) {
   const [attempt, setAttempt] = useState(0);
   const [source, setSource] = useState<string | null>(null);
-  const [error, setError] = useState<"size" | "load" | null>(null);
+  const [error, setError] = useState<"size" | "load" | { reason: string } | null>(null);
   const [showSource, setShowSource] = useState(false);
   const [openFailed, setOpenFailed] = useState("");
   const save = useLocalFileSave(path, name, message);
@@ -126,17 +126,22 @@ function HtmlFileContent({ path, name, message }: { path: string; name: string; 
     setError(null);
     setSource(null);
     void (async () => {
+      let answered = false;
       try {
         const response = await requestMessageFile(path, message, controller.signal);
+        answered = true;
         const text = await readTableResponse(response, controller.signal, HTML_PREVIEW_MAX_BYTES);
         if (!controller.signal.aborted) setSource(text);
       } catch (reason) {
-        if (!controller.signal.aborted) setError(reason instanceof Error && reason.message === "size" ? "size" : "load");
+        if (controller.signal.aborted) return;
+        // A refusal from the server says why; only a request that got no answer (TypeError) is the connection.
+        if (!answered && reason instanceof Error && !(reason instanceof TypeError)) setError({ reason: reason.message });
+        else setError(reason instanceof Error && reason.message === "size" ? "size" : "load");
       }
     })();
     return () => controller.abort();
   }, [path, message.threadId, message.messageId, attempt]);
-  if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{t(error === "size" ? "html.tooLarge" : "html.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>;
+  if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{typeof error === "object" ? t("html.refused", { reason: error.reason }) : t(error === "size" ? "html.tooLarge" : "html.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>;
   if (source === null) return <div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("html.loading")}</div>;
   return <div className="flex flex-col gap-2">
     <div className="flex items-center justify-end gap-1">

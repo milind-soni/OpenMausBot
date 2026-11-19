@@ -37,6 +37,7 @@ export function redactBotAuthored<T extends Omit<WireMessage, "id" | "at"> & { a
     };
   }
   if (out.call?.title) out.call = { ...out.call, title: redactSecretsInText(out.call.title) };
+  if (out.call?.spoken) out.call = { ...out.call, spoken: out.call.spoken.map((line) => ({ ...line, text: redactSecretsInText(line.text) })) };
   if (out.card) {
     const card = { ...out.card } as OptionCardData & { summary?: string };
     card.title = redactSecretsInText(card.title);

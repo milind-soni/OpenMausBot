@@ -105,6 +105,24 @@ it("offers Grok as a third choice when this Cloud computer has the Grok CLI, and
   expect(render().html).toContain('data-engine-setup="grok"');
 });
 
+it("offers OpenCode next to Claude and ChatGPT before it is installed, and opens its install on this server", () => {
+  const openCode = engine("opencodeGo", "opencodeGo", "device-code", { displayName: "OpenCode", authentication: undefined,
+    snapshot: { state: "unavailable" }, install: { docsUrl: "https://opencode.ai/docs/", server: { standalone: { version: "1", downloadBytes: 1 } } } });
+  store.instances = [claude, codex, openCode];
+  const { html } = render();
+  for (const label of ["OpenCode", "Free models, no account needed."]) expect(html).toContain(label);
+  expect(html.indexOf('data-cloud-choice="opencode"')).toBeGreaterThan(html.indexOf('data-cloud-choice="codex"'));
+  expect(html).toContain("grid-cols-3");
+  choose("opencode");
+  expect(render().html).toContain('data-engine-setup="opencodeGo"');
+  // With Grok as well, four tiles in two rows, Grok last.
+  store.instances = [claude, codex, openCode, engine("grok", "grokAgent", "device-code")];
+  f.values = [];
+  const four = render().html;
+  expect(four).toContain("grid-cols-2");
+  expect(four.indexOf('data-cloud-choice="grok"')).toBeGreaterThan(four.indexOf('data-cloud-choice="opencode"'));
+});
+
 it("leaves Grok out where this Cloud computer has no Grok CLI (an older image)", () => {
   store.instances = [claude, codex, engine("grok", "grokAgent", "device-code", { snapshot: { state: "unavailable", reason: "`grok` CLI not found" } })];
   const { html } = render();

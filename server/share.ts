@@ -19,6 +19,9 @@ import type { TemplateAvatar, TemplateCard, TemplateDetails, TemplateScope } fro
 import { manifestDetails, packageDetails } from "../shared/share-details.ts";
 import {
   isShareFolderPath,
+  isSkillFilePath,
+  namedFolderFiles,
+  MANIFEST_NAMES,
   readShareFolder,
   SHARE_FOLDER_MAX_BYTES,
   SHARE_FOLDER_MAX_FILES,
@@ -26,7 +29,9 @@ import {
   type ShareFolder,
   type ShareFolderFiles,
 } from "../shared/share-folder.ts";
+import { admitSkillFiles, skillFileRefusalWords } from "../shared/skill-files.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { productName } from "./brand.ts";
 import { createTeamPackageExport, TeamExportError, type ExportablePackageSkill, type TeamExportSkip } from "./package-export.ts";
 import type { Routine } from "./routines.ts";
 import { COMMUNITY_MAX_BYTES, COMMUNITY_MAX_FILES, type CommunityPublisher } from "./share-publish.ts";
@@ -50,6 +55,9 @@ export interface ShareHostDeps {
   collectTeamSkills(bots: readonly BotRecord[], selection: "all"):
     | { ok: true; skillsByBot: Map<string, ExportablePackageSkill[]>; skipped: TeamExportSkip[] }
     | { ok: false; error: string };
+  /** The files beside one of the bot's skills, before what may travel is picked from them; null when they changed since
+   * they came in. */
+  skillFiles?(bot: BotRecord, name: string): Array<{ path: string; content: string | Uint8Array }> | null;
   /** The bot's picture as a data: URL, when it shows one instead of its mascot. */
   picture(bot: BotRecord): string | undefined;
   /** The bot's own folder, where a template it makes is written for it to read and edit. */
@@ -83,6 +91,11 @@ const SKIP_WORDS: Record<string, string> = {
   lead_not_in_group_chat: "a group chat goal whose lead isn't in the chat", skill_changed: "a skill that changed while it was being shared",
   skill_conflict: "a skill two bots have in different versions", bot_skill_limit: "skills past a bot's limit", team_skill_limit: "skills past the department's limit",
 };
+/** The line a template gets when its bot or department has no words of its own; a card leaves it out. */
+const plainTagline = (scope: TemplateScope) => `A ${scope === "bot" ? "bot" : "department"} shared from ${productName()}.`;
+const plainSummary = (scope: TemplateScope) => scope === "bot"
+  ? `Shared from ${productName()}. The bot arrives as a new copy with its skills and routines; routines start paused and chat history never travels.`
+  : `Shared from ${productName()}. Its bots, skills, group chats and routines arrive as new copies; routines start paused and chat history never travels.`;
 const skipWords = (skip: TeamExportSkip) => `${SKIP_WORDS[skip.reason] ?? "an item that can't be shared"} (${skip.part})`;
 
 const slugOf = (name: string) => name.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 48) || "template";
@@ -152,6 +165,14 @@ export function readFolderFromDisk(chosen: string): ShareFolderFiles {
         if (isShareFolderPath(`avatars/${name}`)) take(join(prefix, "avatars", name));
       }
     }
+    const manifest = [MANIFEST_NAMES.bot, MANIFEST_NAMES.department].map((name) => files[prefix ? `${prefix}/${name}` : name]).find((value) => typeof value === "string");
+    let named: string[] = [];
+    try {
+      named = typeof manifest === "string" ? namedFolderFiles(manifest) : [];
+    } catch {
+      // The folder reader refuses a manifest it can't read, in its own words.
+    }
+    for (const path of named) if (isSkillFilePath(path)) take(join(prefix, ...path.split("/")));
   };
   collect("");
   if (!Object.keys(files).some((path) => !path.includes("/"))) {
@@ -161,7 +182,7 @@ export function readFolderFromDisk(chosen: string): ShareFolderFiles {
   return files;
 }
 
-function writeFolder(dir: string, files: Record<string, string | Uint8Array>): void {
+export function writeFolder(dir: string, files: Record<string, string | Uint8Array>): void {
   mkdirSync(dir, { recursive: true });
   for (const [path, value] of Object.entries(files)) {
     const target = join(dir, ...path.split("/"));
@@ -214,6 +235,14 @@ function templateDocument(document: PackageDocument, bots: readonly BotRecord[],
   return { document: parsePackageDocument(redactedDocument, { trust: "file" }), redacted: redacted.length };
 }
 
+/** The community repository's check takes SKILL.md alone in a skill's folder, so a template goes there without its
+ * skills' other files; a download, a team library and a person's own repository keep them. */
+export function withoutSkillFiles(document: PackageDocument): PackageDocument {
+  const skills = document.package.skills;
+  if (!skills?.entries.some((skill) => skill.files?.length)) return document;
+  return { ...document, package: { ...document.package, skills: { ...skills, entries: skills.entries.map(({ files: _files, ...skill }) => skill) } } };
+}
+
 export function cardText(card: TemplateCard): string {
   if (card.status === "gone") return `Deleted the template of ${card.name}.`;
   if (card.status === "published" && card.link) return `Published the template of ${card.name}: ${card.link}`;
@@ -247,7 +276,7 @@ export function createShareHost(deps: ShareHostDeps) {
       id: record.id,
       scope: record.scope,
       name: pkg?.name ?? record.slug,
-      tagline: pkg?.tagline ?? "",
+      tagline: pkg && pkg.tagline !== plainTagline(record.scope) ? pkg.tagline : "",
       avatars: record.avatars,
       counts: {
         bots: pkg?.agents.length ?? record.avatars.length,
@@ -289,6 +318,19 @@ export function createShareHost(deps: ShareHostDeps) {
     if (!bots.length) throw new ShareError("This department has no bots to share.");
     const skills = deps.collectTeamSkills(bots, "all");
     if (!skills.ok) throw new ShareError(skills.error);
+    const fileSkips = new Set<string>();
+    for (const bot of bots) {
+      for (const skill of skills.skillsByBot.get(bot.id) ?? []) {
+        const stored = deps.skillFiles ? deps.skillFiles(bot, skill.name) : [];
+        if (stored === null) {
+          fileSkips.add(`the files beside skill ${skill.name}, which changed since they came in`);
+          continue;
+        }
+        const admitted = admitSkillFiles(stored);
+        if (admitted.files.length) skill.files = admitted.files;
+        for (const refused of admitted.refused) fileSkips.add(`${skill.name}/${refused.path}, which ${skillFileRefusalWords(refused.reason)}`);
+      }
+    }
     const avatars: Record<string, string> = {};
     for (const bot of bots) {
       const picture = deps.picture(bot);
@@ -301,9 +343,9 @@ export function createShareHost(deps: ShareHostDeps) {
       exported = createTeamPackageExport({
         team: target.scope === "bot" ? "" : target.section,
         name: lead ? lead.name : target.scope === "department" ? target.section : undefined,
-        tagline: lead ? firstLine(lead.title || lead.description, 160) || undefined : firstLine(brief, 160) || undefined,
-        summary: lead ? (lead.description?.trim().slice(0, 2_000) || undefined) : brief?.slice(0, 2_000) || undefined,
-        authorName: "MausBot user",
+        tagline: (lead && firstLine(lead.title || lead.description, 160)) || plainTagline(target.scope),
+        summary: lead?.description?.trim().slice(0, 2_000) || plainSummary(target.scope),
+        authorName: `${productName()} user`,
         bots,
         groups: target.scope === "bot" ? [] : deps.groups(),
         routines: target.scope === "bot" ? routines.filter((routine) => routine.botId === target.bot.id && routine.target !== "room-goal") : routines,
@@ -331,7 +373,7 @@ export function createShareHost(deps: ShareHostDeps) {
         ...(agent.appearance.mascotBody ? { mascotBody: agent.appearance.mascotBody } : {}),
       };
     });
-    return { document, redacted: redacted + exported.redacted.length, skipped: exported.skipped.map(skipWords), avatars: avatarsShown };
+    return { document, redacted: redacted + exported.redacted.length, skipped: [...exported.skipped.map(skipWords), ...fileSkips], avatars: avatarsShown };
   }
 
   return {
@@ -410,7 +452,7 @@ export function createShareHost(deps: ShareHostDeps) {
         if (error instanceof ShareError) return update(record, { status: "failed", error: error.message });
         throw error;
       }
-      const files = writeShareFolder(document, record.scope);
+      const files = writeShareFolder(withoutSkillFiles(document), record.scope);
       const bytes = Object.values(files).reduce((sum, value) => sum + (typeof value === "string" ? Buffer.byteLength(value) : value.byteLength), 0);
       if (Object.keys(files).length > COMMUNITY_MAX_FILES) return update(record, { status: "failed", error: `A template can have at most ${COMMUNITY_MAX_FILES} files.` }, document);
       if (bytes > COMMUNITY_MAX_BYTES) return update(record, { status: "failed", error: "This template is bigger than 4 MB. Leave out large pictures or skills, then publish again." }, document);
