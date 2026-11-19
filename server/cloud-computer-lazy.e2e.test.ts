@@ -292,6 +292,29 @@ describe("a cloud computer starts only when the bot uses it", () => {
     await apiOk("DELETE", `/api/bots/${bot.id}`);
   }, 30_000);
 
+  it("a second turn on Cloud computer runs in the engine the first one started, and its tools answer only while a turn runs", async () => {
+    const bot = await cloudBot("Returner");
+    const first = await startTurn(bot.id, "hi");
+    await finish(bot.id);
+    expect((await computerCall(first, "tools/list")).status).toBe(401);
+    const second = await startTurn(bot.id, "again");
+    expect(second.pid).toBe(first.pid);
+    expect((await computerCall(first, "tools/list")).body.result.tools.map((tool: { name: string }) => tool.name)).toContain("screenshot");
+    await finish(bot.id);
+    expect((await computerCall(first, "tools/list")).status).toBe(401);
+    // A stop ends the engine and the credential with it: the next turn starts its own, with a new one.
+    const third = await startTurn(bot.id, "once more");
+    expect(third.pid).toBe(first.pid);
+    await apiOk("POST", `/api/bots/${bot.id}/interrupt`, { threadId: bot.threadId });
+    await idle(bot.id);
+    const fourth = await startTurn(bot.id, "after the stop");
+    expect(fourth.pid).not.toBe(first.pid);
+    expect(fourth.mcpConfig.mcpServers.computer.env.OMB_MCP_TOKEN_COMPUTER).not.toBe(first.mcpConfig.mcpServers.computer.env.OMB_MCP_TOKEN_COMPUTER);
+    expect((await computerCall(first, "tools/list")).status).toBe(401);
+    await finish(bot.id);
+    await apiOk("DELETE", `/api/bots/${bot.id}`);
+  }, 60_000);
+
   it("a room message to a member on Cloud computer makes no relay call either", async () => {
     const bot = await cloudBot("Room member");
     const { group } = await apiOk("POST", "/api/groups", { name: "Lazy room", memberIds: [bot.id] });
