@@ -39,6 +39,11 @@ pnpm package:mac   # DMG + ZIP; requires Swift/Xcode tools
 pnpm package:linux # Ubuntu x64 .deb + AppImage; no Swift required
 ```
 
+Set `OMB_RAILWAY_ORIGIN=https://your-service.up.railway.app` in `.env`
+or in your shell, then run `pnpm dev:railway`. Open `http://127.0.0.1:5200`
+(or set `OMB_UI_PORT` to choose another local port) and pair with the Railway server.
+React runs locally with hot reload, and actions in the UI affect the remote data.
+
 To reproduce a failing CI test job, follow [Vitest shards](docs/ci.md#vitest-shards).
 Use the job's checkout revision, OS, file filters, shard fraction, and
 `OMB_VITEST_E2E` value; the same shard number alone does not select the same files.

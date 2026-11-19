@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
+import type { ClientRequest, IncomingMessage } from "node:http";
 import { fileURLToPath } from "node:url";
-import type { Connect, Plugin } from "vite";
+import { loadEnv, type Connect, type Plugin, type ProxyOptions, type ServerOptions } from "vite";
 import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -44,7 +45,59 @@ const include = [
   "scripts/**/*.test.ts",
 ];
 
-export default defineConfig({
+function backendProxy(mode: string, port: number, env: Record<string, string>): ProxyOptions {
+  if (mode !== "railway") {
+    return { target: `http://127.0.0.1:${process.env.OMB_PORT || process.env.OGB_PORT || 8799}` };
+  }
+  const target = URL.parse(env.OMB_RAILWAY_ORIGIN ?? "");
+  if (!target || target.protocol !== "https:" || target.href !== `${target.origin}/`) {
+    throw new Error("Set OMB_RAILWAY_ORIGIN to an HTTPS origin in .env or in your shell.");
+  }
+  return {
+    target: target.origin,
+    changeOrigin: true,
+    configure(server) {
+      // Keep the production same-origin check effective for requests from any other page.
+      const forwardLocalOrigin = (outgoing: ClientRequest, request: IncomingMessage) => {
+        const host = `127.0.0.1:${port}`;
+        if (request.headers.host === host && request.headers.origin === `http://${host}`) {
+          outgoing.setHeader("origin", target.origin);
+        }
+      };
+      server.on("proxyReq", forwardLocalOrigin);
+      server.on("proxyReqWs", forwardLocalOrigin);
+    },
+  };
+}
+
+function devServer(mode: string): ServerOptions {
+  const env = loadEnv(mode, root, "OMB_");
+  const port = Number(env.OMB_UI_PORT) || (mode === "railway" ? 5200 : 5199);
+  const proxy = backendProxy(mode, port, env);
+  return {
+    // IPv4 explicitly — a bare ::1 bind makes localhost a coin-flip for
+    // clients that resolve IPv4 first
+    host: "127.0.0.1",
+    port,
+    strictPort: mode === "railway",
+    // packager output lands inside the repo — its HTML files must never
+    // trigger dev full-page reloads
+    watch: {
+      ignored: ["**/release/**", "**/build/**", "**/dist/**", "**/electron/resources/**"],
+    },
+    // the harness server owns every provider process; the app only ever
+    // talks to /api — clients hold no transports
+    proxy: {
+      "/api": {
+        ...proxy,
+        ws: true,
+      },
+      "/.well-known/openmausbot/environment": proxy,
+    },
+  };
+}
+
+export default defineConfig(({ mode }) => ({
   plugins: [react(), tailwindcss(), railPage()],
   build: {
     rollupOptions: { input: { index: page("./index.html"), rail: page("./rail.html") } },
@@ -76,26 +129,5 @@ export default defineConfig({
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
-  server: {
-    // IPv4 explicitly — a bare ::1 bind makes localhost a coin-flip for
-    // clients that resolve IPv4 first
-    host: "127.0.0.1",
-    port: Number(process.env.OMB_UI_PORT) || 5199,
-    // packager output lands inside the repo — its HTML files must never
-    // trigger dev full-page reloads
-    watch: {
-      ignored: ["**/release/**", "**/build/**", "**/dist/**", "**/electron/resources/**"],
-    },
-    // the harness server owns every provider process; the app only ever
-    // talks to /api — clients hold no transports
-    proxy: {
-      "/api": {
-        ws: true,
-        target: `http://127.0.0.1:${process.env.OMB_PORT || process.env.OGB_PORT || 8799}`,
-      },
-      "/.well-known/openmausbot/environment": {
-        target: `http://127.0.0.1:${process.env.OMB_PORT || process.env.OGB_PORT || 8799}`,
-      },
-    },
-  },
-});
+  server: devServer(mode),
+}));
