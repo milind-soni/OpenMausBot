@@ -3,7 +3,9 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { AlertTriangle, ChevronLeft, ChevronRight, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, LayoutTemplate, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
+import { PanoramicWorkspace } from "./PanoramicWorkspace";
+import { collectLocalBotAsks } from "@/lib/autofabric-bridge";
 import { WorkingDots } from "@/components/WorkingIndicator";
 import { ChatBusyContext, CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "@/components/MessageActions";
 import { ReactAction, ReactionChips } from "@/components/Reactions";
@@ -977,6 +979,22 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   const resultsThreadId = routineExecution?.resultsThreadId ?? routineExecution?.sourceThreadId;
   const canOpenResults = useStoreSelector((s) => Boolean(resultsThreadId) && [...s.bots, ...s.groups].some((owner) => owner.threadId === resultsThreadId || owner.tasks?.some((task) => task.threadId === resultsThreadId)));
 
+  const [panoramicOpen, setPanoramicOpen] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "d" || e.key === "D")) {
+        e.preventDefault();
+        setPanoramicOpen((prev) => !prev);
+      } else if (e.key === "Escape" && panoramicOpen) {
+        setPanoramicOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [panoramicOpen]);
+
+  const localAsksCount = useMemo(() => collectLocalBotAsks(bots).length, [bots]);
+
   return (
     <ThreadLinkContext value={threadLink}>
     <main data-look="chat" className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
@@ -1086,6 +1104,27 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
           )}
           <ThreadContextWarning bot={bot} messages={messages} />
           {phone && <UsageAlert engine={bot.modelSelection?.instanceId} />}
+          {/* Panoramic Workspace Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setPanoramicOpen((open) => !open)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium transition",
+              panoramicOpen
+                ? "border-accent/50 bg-accent/15 text-accent"
+                : cn("border-hairline/40 bg-raised/60 text-ink-secondary hover:bg-raised hover:text-ink", ELEVATED_FLOAT, ELEVATED_HOVER),
+            )}
+            title="切换多项目与多 Agent 全景统御工作台 (Ctrl+1 / ⌘+1)"
+            aria-label="切换全景统御工作台"
+          >
+            <LayoutTemplate size={14} className={panoramicOpen ? "text-accent" : "text-ink-secondary"} />
+            <span className="@max-xl/chathead:hidden">{panoramicOpen ? "返回对话" : "工厂总控"}</span>
+            {!panoramicOpen && localAsksCount > 0 && (
+              <span className="rounded-full bg-warning/15 px-1.5 py-0.2 text-[10px] font-semibold tabular-nums text-warning">
+                {localAsksCount}
+              </span>
+            )}
+          </button>
           {/* The model and the bot's computer stay in view in both modes; Simple mode moves only ⋯ into the bot panel. */}
           {!phone && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} />}
           <LiveCallChip currentBotId={bot.id} onOpen={(botId, threadId) => openThread(dispatch, { botId, threadId }, store.state(), showThreads)} />{!phoneMenu && <WatchScreenButton botId={bot.id} messages={messages} liveTools={liveTools} place={place} />}
@@ -1125,6 +1164,12 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
       <UnreadContextOverlay messages={chatMessages} windowedMessages={windowedMessages} unreadMessageId={unreadDivider.messageId} scrollRef={scrollRef} visitKey={`${bot.id}:${bot.threadId}:${openedAt}`} onJump={(messageId) => dispatch({ type: "focusMessage", threadId: bot.threadId, messageId })} />
 
       </GlassBar>
+
+      {panoramicOpen && (
+        <div className="absolute inset-x-0 bottom-0 top-[52px] z-[26] flex flex-col bg-app">
+          <PanoramicWorkspace onOpenChat={() => setPanoramicOpen(false)} />
+        </div>
+      )}
 
       <div
         ref={scrollRef}
