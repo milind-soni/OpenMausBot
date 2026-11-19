@@ -4,7 +4,7 @@
 
 Gérer Build Studio is a desktop workspace for working with AI Buddies. Give each Buddy a role, bring specialists together in rooms, and keep chats, project files, tasks, and scheduled work in one place.
 
-![Gérer Build Studio alpha welcome screen with animated Buddies](docs/screenshots/alpha-welcome.png)
+![Gérer Build Studio alpha welcome screen with animated Buddies](docs/screenshots/alpha-welcome-0.1.17.png)
 
 ## Install the internal alpha
 
@@ -20,15 +20,15 @@ Application updates are paused during the alpha. To install a newer build, quit 
 4. Review and edit your suggested Buddies. Each one comes with detailed instructions covering its role, how it works, and the rules it follows. You can change their names, roles, instructions, and models, and add or remove Buddies before approving the workspace.
 5. Start the guided tour or go straight to your new workspace. To reopen it, select **Restart Studio tour** in **Settings → System**.
 
-![The guided tour highlighting the Task Board in the sidebar](docs/screenshots/alpha-tour.png)
+![The guided tour highlighting the Task Board in the sidebar](docs/screenshots/alpha-tour-0.1.17.png)
 
 Studio remembers where you were. When you reopen it, it returns to the chat, room, or screen you last had open.
 
 | Personal details | AI engines |
 | --- | --- |
-| ![Personal details step with display name and optional email](docs/screenshots/alpha-personal-details.png) | ![AI engines step showing install, sign-in, and plan status for each engine](docs/screenshots/alpha-ai-engines.png) |
+| ![Personal details step with display name and optional email](docs/screenshots/alpha-personal-details-0.1.17.png) | ![AI engines step showing install, sign-in, and plan status for each engine](docs/screenshots/alpha-ai-engines-0.1.17.png) |
 | **Purpose** | **Your team** |
-| ![Purpose step with Development, Design, Research, Finance, and Custom options](docs/screenshots/alpha-purpose.png) | ![Team review showing the suggested Buddies, roles, and models](docs/screenshots/alpha-team-review.png) |
+| ![Purpose step with Development, Design, Research, Finance, and Custom options](docs/screenshots/alpha-purpose-0.1.17.png) | ![Team review showing suggested Buddies, roles, and unassigned models](docs/screenshots/alpha-team-review-0.1.17.png) |
 
 You can explore Studio without an engine. Assign a model and connect its engine before asking a Buddy to run a task.
 
@@ -45,7 +45,7 @@ You can explore Studio without an engine. Assign a model and connect its engine 
 | Apps and permissions | Connect Edits or Affinity, check which models can use them, and review approval requests from Buddies. |
 | Settings | Edit your profile, review models and permissions, and restart the tour. |
 
-![A Studio room where a project lead, developer, designer, and reviewer coordinate a website launch](docs/screenshots/alpha-room.png)
+![A website launch room showing the project lead, developer, and reviewer in the Activity panel](docs/screenshots/alpha-room-0.1.17.png)
 
 ### Buddies, rooms, and tasks
 
@@ -63,7 +63,7 @@ Use **Quick Preview** beside a chat or open **Preview** under **Tools** for the 
 
 Open **Tools → Apps** in the left sidebar. The Apps page shows the available integrations, their live connection status, and a message explaining what to do next. **Works with** lists the models in your workspace that support app tools. Assign one of those models to the Buddy doing the work. Use **Check app status again** after opening an app or changing its automation settings.
 
-![The Apps page showing Edits needs setup, Affinity is ready, and which models support app tools](docs/screenshots/alpha-apps.png)
+![The Apps page showing Edits needs setup, Affinity is ready, and which models support app tools](docs/screenshots/alpha-apps-0.1.17.png)
 
 | App | What a Buddy can do | How to connect |
 | --- | --- | --- |

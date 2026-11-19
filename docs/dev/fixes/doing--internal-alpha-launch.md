@@ -41,19 +41,21 @@ Execution checklist for [the detailed implementation plan](../plans/implementati
 - [?] Perform scoped folder cleanup and update affected imports/build paths — `package.json:1`, `electron-builder.yml:1`.
 - [?] Rewrite README and guides with real candidate screenshots and exact developer commands — `README.md:1`, `docs/dev/RELEASING.md:1`.
 - [~] Complete automated checks and independent responsive/Electron regression review — `package.json:1`.
-- [~] Build and install-test target artifacts; record signing state and checksums — `electron-builder.yml:1`.
+- [?] Build and install-test the Apple silicon DMG and ZIP and verify their checksums — `electron-builder.yml:1`.
+- [~] Prepare distribution signing and notarization for a Gatekeeper-accepted build.
 - [~] Review final staged contents, commit, push agreed source branch, and hand over evidence. Public release publication is separate.
 
 ## Verification notes
 
 - Baseline on Node 24.19.0: 548 of 550 tests passed. Two schedule retry tests depended on elapsed timestamps in the simulated Codex account response. The fixture now generates a current window; all 556 tests in 71 files passed after the fix.
-- The package version is 0.1.16. The installer target is macOS arm64. Windows packaging remains available for a separate Windows verification pass.
+- The internal candidate is 0.1.17 for macOS arm64. Windows packaging remains available for a separate Windows verification pass.
 - Schedules (2026-11-19): each schedule shows an Active, Paused or Off pill, a readable time zone such as `London (GMT)` and a relative next run. Execution code is unchanged. `src/lib/scheduleLabels.test.ts` covers the labels. Suite: 559 tests in 73 files pass, build passes.
-- README now uses Z's wireframe-matched screenshots for all five onboarding steps (resized to 1600 px).
-- Studio Preview verified the redesigned welcome and team review at 1440 × 900. The README includes both images. The earlier pass verified profile and engine setup at 390 × 844 and an edited proposal surviving reload before approval.
+- The README uses eight Studio Preview captures of the packaged 0.1.17 app at 1440 × 900. The welcome image shows four distinct Buddy colors, and the other images cover onboarding, the tour, a room, and Apps. An earlier pass verified profile and engine setup at 390 × 844 and an edited proposal surviving reload before approval.
 
 - SoSo verified Quick Preview and single-view Preview Studio in a second Electron instance with a disposable Chromium profile and Studio data folder. Both accepted a typed local URL after confirmation, kept the same native guest and Back/Forward history, reloaded the displayed page, and stopped a hanging request. Stop now restores the last committed address. Submitting the canceled address again starts a fresh request. Both cases are covered by `node scripts/testing/preview-testing-regression.mjs` after `pnpm build`.
 - In the isolated onboarding run, an injected HTTP 503 on the first profile save left both fields intact. Continue retried the save and advanced to AI engines. Approving the same proposal twice left the roster identical. An existing workspace with a custom pinned Buddy and no saved profile bypassed onboarding, rejected team approval, and retained its on-disk roster.
 - SoSo's post-fix checks on Node 24.19.0 passed: production build, typecheck, 559 tests in 73 files, and the Electron Preview regression suite.
 
 - SoSo verified the updated welcome palette and the Custom proposal loading, error, Retry, and built-in fallback states in Studio Preview with an isolated harness and fake provider. Server tests cover engine selection, invalid output, and missing engines.
+
+- Typecheck, both production builds, and all 574 tests in 75 files passed. The DMG and ZIP checksums verified, their app resources matched, and the mounted DMG contained the freshly built UI and server plus the updated Finder background. The installed app passed first-run onboarding, opened Schedules and Apps, and restored Apps on relaunch in a disposable profile. Gatekeeper rejected the Apple Development-signed candidate.
