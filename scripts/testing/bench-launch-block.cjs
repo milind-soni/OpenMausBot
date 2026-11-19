@@ -23,4 +23,25 @@ if (!globalThis[LOADED]) {
     process.nextTick(() => this.destroy(new Error(`bench-launch: no connection to ${host} from a measured launch`)));
     return this;
   };
+  // The server child's own V8 profile, from its first line to its "listening" line (scripts/bench-launch.mjs --server-prof).
+  const profDir = process.env.OMB_BENCH_SERVER_PROF;
+  if (profDir && process.type === "utility") {
+    const { Session } = require("node:inspector");
+    const session = new Session();
+    session.connect();
+    session.post("Profiler.enable");
+    session.post("Profiler.setSamplingInterval", { interval: 250 });
+    session.post("Profiler.start");
+    const write = process.stdout.write;
+    let done = false;
+    process.stdout.write = function (chunk, ...rest) {
+      if (!done && String(chunk).includes("openmausbot server on ")) {
+        done = true;
+        session.post("Profiler.stop", (error, result) => {
+          if (!error) try { fs.mkdirSync(profDir, { recursive: true }); fs.writeFileSync(`${profDir}/server-${process.pid}.cpuprofile`, JSON.stringify(result.profile)); } catch {}
+        });
+      }
+      return write.call(this, chunk, ...rest);
+    };
+  }
 }
