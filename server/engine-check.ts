@@ -1,11 +1,13 @@
 // A tiny real message through an engine the person just connected, so setup can say it works or what to fix.
 import type { ProviderInstance } from "./contracts.ts";
-import { engineFailureMessage } from "./drivers/engine-errors.ts";
+import { engineFailureKind, engineFailureMessage } from "./drivers/engine-errors.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { userError } from "./user-errors.ts";
 import type { ServerErrorBody } from "../shared/server-text.ts";
+import type { AiTestReason } from "../shared/ai-ranking.ts";
 
-export type EngineCheck = { ok: true } | ({ ok: false } & ServerErrorBody) | { ok: null };
+/** `reason`: the failure's kind, for the welcome's usage analytics; `error` stays the words people read. */
+export type EngineCheck = { ok: true } | ({ ok: false; reason?: AiTestReason } & ServerErrorBody) | { ok: null };
 
 const PROMPT = "This is a connection check. Reply with the single word OK.";
 const TIMEOUT_MS = 90_000;
@@ -18,6 +20,11 @@ export function engineCheckError(name: string, message: string): string {
   if (plain) return plain;
   const said = redactSecretsInText(message.replace(/\s+/g, " ").trim()).slice(0, 300);
   return said ? `${name} couldn't answer: ${said}` : `${name} didn't answer. Check again in a minute.`;
+}
+
+export function engineCheckReason(message: string): AiTestReason {
+  if (SIGNED_OUT.test(message)) return "signed_out";
+  return engineFailureKind(message) ?? "other";
 }
 
 const running = new Map<string, Promise<EngineCheck>>();
@@ -38,13 +45,16 @@ export function checkEngine(instance: CheckableEngine, options: { timeoutMs?: nu
     const stop = new AbortController();
     const timer = setTimeout(() => {
       stop.abort();
-      resolve({ ok: false, ...userError("serverError.engineCheck.timeout", { name, seconds: String(Math.round(timeoutMs / 1000)) }) });
+      resolve({ ok: false, reason: "timeout", ...userError("serverError.engineCheck.timeout", { name, seconds: String(Math.round(timeoutMs / 1000)) }) });
     }, timeoutMs);
     timer.unref?.();
     // Wrapped so a call that throws synchronously fails the check too.
     new Promise<string>((answer) => answer(call.call(instance, PROMPT, { timeoutMs, signal: stop.signal })))
-      .then((answer): EngineCheck => answer.trim() ? { ok: true } : { ok: false, error: `${name} answered with nothing. Check again in a minute.` },
-        (error): EngineCheck => ({ ok: false, error: engineCheckError(name, error instanceof Error ? error.message : String(error)) }))
+      .then((answer): EngineCheck => answer.trim() ? { ok: true } : { ok: false, reason: "empty", error: `${name} answered with nothing. Check again in a minute.` },
+        (error): EngineCheck => {
+          const message = error instanceof Error ? error.message : String(error);
+          return { ok: false, reason: engineCheckReason(message), error: engineCheckError(name, message) };
+        })
       .then((result) => {
         clearTimeout(timer);
         resolve(result);

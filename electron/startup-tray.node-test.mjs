@@ -216,3 +216,28 @@ test("the loading screen says what the app waits on, before its page has loaded 
   splash.status("Opening My Cloud…");
   assert.equal(ran.length, 2, "nothing after it is gone");
 });
+
+test("the startup screen says how the workspace came up, once", async t => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const ways = [];
+  const painted = fixture({ onReveal: via => ways.push(via) });
+  await painted.splash.ready;
+  painted.win.webContents.executeJavaScript = () => Promise.resolve();
+  painted.splash.attach(painted.win);
+  painted.win.webContents.emit("did-finish-load"); await flush();
+  painted.win.webContents.emit("render-process-gone");
+  const crashed = fixture({ onReveal: via => ways.push(via) });
+  await crashed.splash.ready; crashed.splash.attach(crashed.win);
+  crashed.win.webContents.emit("render-process-gone");
+  const slow = fixture({ onReveal: via => ways.push(via) });
+  await slow.splash.ready; slow.splash.attach(slow.win);
+  t.mock.timers.tick(10_000);
+  assert.deepEqual(ways, ["painted", "crashed", "timeout"]);
+  const hidden = fixture({ onReveal: via => ways.push(via) });
+  await hidden.splash.ready;
+  hidden.splash.window.emit("close", { preventDefault() {} });
+  hidden.win.webContents.executeJavaScript = () => Promise.resolve();
+  hidden.splash.attach(hidden.win);
+  hidden.win.webContents.emit("did-finish-load"); await flush();
+  assert.equal(ways.at(-1), "hidden");
+});

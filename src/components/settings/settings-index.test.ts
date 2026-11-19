@@ -34,14 +34,12 @@ describe("the pages", () => {
     expect(ids(ctx).filter((id) => PLACE_PAGES.includes(id))).toEqual(expected);
   });
 
-  // Owner decisions (Nov 11, Nov 12): Simple shows nine entries, Import & export among them; Advanced adds You and your
-  // bots, Desktops & browser, Spending, Data and General in their places.
   it.each(["local only", "This computer, with My Cloud", "My Cloud's page in the desktop window", "My Cloud in a browser (owner)"] as const)(
-    "shows Simple's nine entries for %s", (who) => {
-      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "phone", "ai", "vault", "transfer", "account", "plan", "app", "appearance"]);
+    "shows Simple's ten entries for %s", (who) => {
+      expect(ids({ ...PEOPLE[who], advanced: false })).toEqual(["overview", "phone", "ai", "vault", "usage", "transfer", "account", "plan", "app", "appearance"]);
     });
 
-  it("is shorter in Simple: the five Advanced pages come back in Advanced, in place", () => {
+  it("is shorter in Simple: the four Advanced pages come back in Advanced, in place", () => {
     const simple = ids(fullContext({ advanced: false }));
     for (const page of ADVANCED_PAGES) expect(simple).not.toContain(page);
     expect(ids(fullContext()).filter((id) => simple.includes(id))).toEqual(simple);
@@ -68,11 +66,13 @@ describe("the pages", () => {
 
   it("finds every Advanced-only row from Simple, marked Advanced; Simple's own homes win for moved rows", () => {
     const simple = fullContext({ advanced: false });
-    for (const query of ["parallel threads", "effort", "spending", "send", "storage"]) {
+    for (const query of ["parallel threads", "effort", "send", "storage"]) {
       const hit = find(query, simple)[0];
       expect(hit, query).toBeDefined();
       expect(hit!.advanced, query).toBe(true);
     }
+    expect(find("spending", simple)[0]).toMatchObject({ entry: { page: "usage" } });
+    expect(find("spending", simple)[0]?.advanced).toBeUndefined();
     expect(find("language", simple)[0]?.entry.page).toBe("app");
     expect(find("backups", simple)[0]).toMatchObject({ entry: { page: "transfer" }, advanced: undefined });
   });
