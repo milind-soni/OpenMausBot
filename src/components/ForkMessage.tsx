@@ -1,5 +1,5 @@
 import { GitFork } from "lucide-react";
-import type { Dispatch } from "react";
+import { useMemo, type Dispatch } from "react";
 import { ACTION_ICON, type MessageMenuItem } from "./MessageActions";
 import { t } from "@/lib/i18n";
 import type { Action, AppState } from "@/state/store";
@@ -19,11 +19,18 @@ export function forkMessageItem(owner: Owner, dispatch: Dispatch<Action>, disabl
 
 const NO_FORKS: never[] = [];
 
-function forksOf(state: AppState, owner: Owner) {
+/** A null message: forks from any message of the thread. */
+function forksOf(state: AppState, owner: Omit<Owner, "messageId"> & { messageId: string | null }) {
   const tasks = owner.kind === "bot"
     ? state.bots?.find((bot) => bot.id === owner.ownerId)?.tasks
     : state.groups?.find((group) => group.id === owner.ownerId)?.tasks;
-  return tasks?.filter((task) => task.origin?.threadId === owner.threadId && task.origin.messageId === owner.messageId) ?? NO_FORKS;
+  return tasks?.filter((task) => task.origin?.threadId === owner.threadId && (owner.messageId === null || task.origin.messageId === owner.messageId)) ?? NO_FORKS;
+}
+
+/** The messages of a thread that conversations were forked from: one read for the whole transcript. */
+export function useForkedMessages(kind: Owner["kind"], ownerId: string, threadId: string): ReadonlySet<string> {
+  const ids = useStoreSelector((state) => forksOf(state, { kind, ownerId, threadId, messageId: null }).map((task) => task.origin!.messageId), sameItems);
+  return useMemo(() => new Set(ids), [ids]);
 }
 
 export function ForkLinks(owner: Owner & { phone: boolean }) {

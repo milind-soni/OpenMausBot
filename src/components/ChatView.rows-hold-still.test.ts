@@ -111,9 +111,24 @@ afterAll(() => {
 describe("a long chat on screen", () => {
   it("draws every kind of row these checks watch", () => {
     expect(document.querySelectorAll("[data-mid]").length).toBeGreaterThan(30);
-    for (const component of ["Bubble", "DigestChip", "TurnNarrationRun", "PublishedSiteCards", "DaySeparator", "ForkLinks"]) {
+    for (const component of ["Bubble", "DigestChip", "TurnNarrationRun", "PublishedSiteCards", "DaySeparator"]) {
       expect(mounted.get(component) ?? 0, component).toBeGreaterThan(0);
     }
+  });
+
+  it("draws no row again while another bot works", async () => {
+    const mark = renderMark();
+    await send({ kind: "bot", bot: { ...announced("a", "Ada"), busy: true, activity: "working" } });
+    await runtime("a-thread", { type: "turn.started" });
+    for (let word = 0; word < 5; word++) await say("a-thread", `other${word} `);
+    await send({ kind: "message", threadId: "a-thread", message: { id: "a1", at: start, role: "bot", kind: "text", text: "Done." } });
+    await send({ kind: "bot", bot: { ...announced("a", "Ada"), busy: false, activity: "idle", tasks: [
+      ...announced("a", "Ada").tasks!, { threadId: "a-fork", title: "Fork", createdAt: 2, approvalMode: "ask", origin: { threadId: "a-thread", messageId: "a1" } },
+    ] } });
+    flushSync(() => dispatch({ type: "connected", value: false }));
+    flushSync(() => dispatch({ type: "connected", value: true }));
+    await settle();
+    expect(countBy(renderedSince(mark).filter((entry) => entry.row !== null), (entry) => entry.component)).toEqual(new Map());
   });
 
   it("draws no saved row again while a reply streams in", async () => {
@@ -140,20 +155,5 @@ describe("a long chat on screen", () => {
     const rows = new Set(renderedSince(mark).flatMap((entry) => entry.row === null ? [] : [entry.row]));
     expect(rows).toEqual(new Set(["live:live-item", "b-saved"]));
     expect(renderedSince(mark).filter((entry) => entry.component === "TurnNarrationRun"), "a folded turn above").toEqual([]);
-  });
-
-  it("draws no row again while another bot works", async () => {
-    const mark = renderMark();
-    await send({ kind: "bot", bot: { ...announced("a", "Ada"), busy: true, activity: "working" } });
-    await runtime("a-thread", { type: "turn.started" });
-    for (let word = 0; word < 5; word++) await say("a-thread", `other${word} `);
-    await send({ kind: "message", threadId: "a-thread", message: { id: "a1", at: start, role: "bot", kind: "text", text: "Done." } });
-    await send({ kind: "bot", bot: { ...announced("a", "Ada"), busy: false, activity: "idle", tasks: [
-      ...announced("a", "Ada").tasks!, { threadId: "a-fork", title: "Fork", createdAt: 2, approvalMode: "ask", origin: { threadId: "a-thread", messageId: "a1" } },
-    ] } });
-    flushSync(() => dispatch({ type: "connected", value: false }));
-    flushSync(() => dispatch({ type: "connected", value: true }));
-    await settle();
-    expect(countBy(renderedSince(mark).filter((entry) => entry.row !== null), (entry) => entry.component)).toEqual(new Map());
   });
 });
