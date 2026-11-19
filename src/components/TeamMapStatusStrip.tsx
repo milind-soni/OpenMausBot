@@ -72,6 +72,7 @@ export function TeamMapStatusStrip({
   return (
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-hairline/40 bg-panel px-6 py-2.5">
       <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <div role="status" className="flex min-w-0 flex-wrap items-center gap-3">
         {COUNTED_STATES.filter((state) => counts[state] > 0).map((state) => (
           <span key={state} className="flex items-center gap-1.5 text-[12px] text-ink-secondary">
             <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", COUNT_DOT[state])} />
@@ -79,6 +80,7 @@ export function TeamMapStatusStrip({
           </span>
         ))}
         {doneLast24h > 0 && <span className="text-[12px] text-ink-secondary">{t("canvas.strip.doneCount", { count: doneLast24h })}</span>}
+        </div>
         {usageProviders.length > 0 && (
           <div className="flex min-w-0 flex-wrap items-center gap-3 border-l border-hairline/40 pl-3">
             {usageProviders.map(({ provider, windows }) => (

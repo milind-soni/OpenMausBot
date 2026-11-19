@@ -711,7 +711,7 @@ export class Runtime {
       const parent = this.store.get(n.parentId);
       if (!parent || parent.assignee.botId === n.assignee.botId) continue;
       const state: LiveEdge["state"] = n.status === "resume" ? "waiting" : n.status as LiveEdge["state"];
-      edges.push({ sourceBotId: parent.assignee.botId, targetBotId: n.assignee.botId, state, threadId: n.assignee.destination.threadId,
+      edges.push({ sourceBotId: parent.assignee.botId, targetBotId: n.assignee.botId, state, threadId: n.assignee.destination.threadId, createdAt: n.createdAt,
         ...(n.assignee.destination.groupId ? { groupId: n.assignee.destination.groupId } : {}) });
     }
     return edges;

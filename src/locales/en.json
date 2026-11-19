@@ -4247,6 +4247,7 @@
   "planUsage.subtitle": "Remaining allowance on each signed-in provider. 5-hour and weekly windows, when that plan has them.",
   "planUsage.fiveHour": "5-hour",
   "planUsage.weekly": "Weekly",
+  "planUsage.monthly": "Monthly",
   "planUsage.left": "{remaining}% left",
   "planUsage.used": "{used}% used",
   "planUsage.monthlySpend": "Monthly spend",

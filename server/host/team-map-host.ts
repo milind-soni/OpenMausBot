@@ -53,8 +53,9 @@ export function createTeamMapHost(deps: TeamMapHostDeps) {
         && (!edge.groupId || visible.group(edge.groupId))
         && !visible.hides(edge.threadId));
       const links = (state: "queued" | "running") =>
-        handoffs.flatMap(({ state: edgeState, ...link }) => edgeState === state ? [link] : []);
+        handoffs.flatMap(({ state: edgeState, createdAt: _createdAt, ...link }) => edgeState === state ? [link] : []);
       const queued = links("queued");
+      const queuedSince = handoffs.filter((edge) => edge.state === "queued");
       const doneLast24h = readUsageCached(deps.dataDir, { from: new Date(now - DAY_MS), to: new Date(now) })
         .filter((row) => mapped.has(row.botId) && row.turnId !== undefined && !visible.hides(row.threadId)).length;
       return {
@@ -63,7 +64,7 @@ export function createTeamMapHost(deps: TeamMapHostDeps) {
         running: links("running"),
         ...teamMapSessions({
           bots: sessionBots,
-          queued,
+          queued: queuedSince,
           roomBusy,
           lastOutputAt: deps.lastRowAt,
           groupIdOf: (threadId) => store.groupByThread(threadId)?.id,

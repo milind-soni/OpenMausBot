@@ -100,7 +100,7 @@ function currentActivity(bot: Bot | undefined, instances: ReturnType<typeof useS
   return bot.tasks?.find((task) => task.busy && task.threadId !== bot.threadId && task.title.trim())?.title;
 }
 
-export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [], computers = NO_COMPUTERS, computerFrames = {}, onOpenComputer, taggedBotIds = [], sent, bottomInset = 0, sessionsByBot, edges = NO_EDGES }: {
+export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [], computers = NO_COMPUTERS, computerFrames = {}, onOpenComputer, taggedBotIds = [], sent, bottomInset = 0, sessionsByBot, edges = NO_EDGES, allSectionKeys }: {
   sections: TeamMapSection<Bot>[];
   canManage: boolean;
   onMove: (bot: Bot, destination: string) => Promise<boolean | void>;
@@ -128,12 +128,15 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
   sessionsByBot?: Map<string, TeamMapSession[]>;
   /** Running/queued delegations; a lead→teammate edge among them animates that team's hierarchy arrow. */
   edges?: TeamMapEdge[];
+  /** Every department's key while a filter shows only some, so saving a layout keeps the hidden ones' positions. */
+  allSectionKeys?: readonly string[];
 }) {
   const { state } = useStore();
   const anySessions = (sessionsByBot?.size ?? 0) > 0;
   const [sessionsNow, setSessionsNow] = useState(() => Date.now());
   useEffect(() => {
     if (!anySessions) return;
+    setSessionsNow(Date.now());
     const timer = window.setInterval(() => setSessionsNow(Date.now()), 30_000);
     return () => window.clearInterval(timer);
   }, [anySessions]);
@@ -190,8 +193,8 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
     setPositions(next);
     if (!storageKey.current) return;
     try {
-      localStorage.setItem(storageKey.current, JSON.stringify(Object.fromEntries(sections
-        .filter((section) => Object.hasOwn(next, section.key)).map((section) => [section.key, next[section.key]]))));
+      localStorage.setItem(storageKey.current, JSON.stringify(Object.fromEntries((allSectionKeys ?? sections.map((section) => section.key))
+        .filter((key) => Object.hasOwn(next, key)).map((key) => [key, next[key]]))));
     } catch {}
   };
   const personalOrder = (key: string) => Object.hasOwn(botOrders, key) ? botOrders[key] : [];
@@ -238,7 +241,13 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
     return () => observer.disconnect();
   }, [fit]);
   const teamSizes = JSON.stringify(tiles.map(({ key, width, height }) => [key, width, height]));
-  useEffect(() => { fit(); }, [fit, teamSizes, layoutLoaded]);
+  // Refit when the teams themselves change shape, not when a live session stack grows or shrinks, so a poll never
+  // replaces the view someone has panned or zoomed. Fit (and 0) still refits on demand.
+  const teamShapes = useMemo(() => JSON.stringify(sections.map((section, index) => {
+    const size = geometries[index] ?? teamSize(section);
+    return [section.key, size.width, size.height];
+  })), [sections, geometries]);
+  useEffect(() => { fit(); }, [fit, teamShapes, layoutLoaded]);
   useEffect(() => {
     const open = viewport.current?.querySelector<HTMLDetailsElement>("details[open]");
     const bounds = viewport.current?.getBoundingClientRect();

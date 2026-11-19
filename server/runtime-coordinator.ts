@@ -529,7 +529,7 @@ export class RuntimeCoordinator implements Coordinator {
     this.ready();
     return this.runtime.liveEdges().map(edge => ({
       sourceBotId: edge.sourceBotId, targetBotId: edge.targetBotId, state: edge.state === "queued" ? "queued" : "running",
-      threadId: edge.threadId, ...(edge.groupId !== undefined ? { groupId: edge.groupId } : {}),
+      threadId: edge.threadId, createdAt: edge.createdAt, ...(edge.groupId !== undefined ? { groupId: edge.groupId } : {}),
     }));
   }
 

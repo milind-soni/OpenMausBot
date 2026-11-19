@@ -97,7 +97,7 @@ describe("Runtime: one tree, one lane", () => {
     expect(root.executions).toBe(1);
     const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
     expect(child).toMatchObject({ status: "queued", depth: 1, rootId: root.id, parentId: root.id, level: "auto", levelSource: "chief" });
-    expect(w.runtime.liveEdges()).toEqual([{ sourceBotId: "chief", targetBotId: "builder", state: "queued", threadId: "builder-work" }]);
+    expect(w.runtime.liveEdges()).toEqual([{ sourceBotId: "chief", targetBotId: "builder", state: "queued", threadId: "builder-work", createdAt: expect.any(Number) }]);
     w.runtime.tick();
     expect(w.runner.runs).toHaveLength(1);
     expect(w.runner.runs[0]!.input).toMatchObject({ resumed: false, restartNote: "", level: "auto", mode: "work" });

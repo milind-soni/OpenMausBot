@@ -11,7 +11,8 @@ export const TEAM_PADDING = 20;
 export const HEADER_HEIGHT = 64;
 export const COMPUTER_DRAG_TYPE = "application/x-omb-computer";
 
-export const SESSION_ROW_HEIGHT = 44;
+/** Matches the card's fixed `h-[52px]` in TeamMapSessions: two text lines (18px + 16.5px), padding and border. */
+export const SESSION_ROW_HEIGHT = 52;
 export const SESSION_ROW_GAP = 6;
 export const SESSION_STACK_GAP = 10;
 export const SESSION_MAX_VISIBLE = 4;

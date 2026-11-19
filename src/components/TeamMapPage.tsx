@@ -298,11 +298,14 @@ export function TeamMapPage() {
   const edges = useMemo(() => buildTeamMapEdges(bots, snapshot), [bots, snapshot]);
   const hasLiveData = snapshot.sessions !== undefined;
   const sessionsByBot = useMemo(() => groupSessionsByBot(snapshot.sessions ?? []), [snapshot.sessions]);
-  const [sectionFilter, setSectionFilter] = useState(ALL_SECTIONS_FILTER);
+  const [chosenFilter, setSectionFilter] = useState(ALL_SECTIONS_FILTER);
+  // A department that was deleted or emptied falls back to all, so the map never stays blank with no way back.
+  const sectionFilter = sections.some((section) => section.key === chosenFilter) ? chosenFilter : ALL_SECTIONS_FILTER;
   const visibleSections = useMemo(
     () => sectionFilter === ALL_SECTIONS_FILTER ? sections : sections.filter((section) => section.key === sectionFilter),
     [sections, sectionFilter],
   );
+  const allSectionKeys = useMemo(() => sections.map((section) => section.key), [sections]);
   const [live, setLive] = useState(true);
   const anyComputer = bots.some((bot) => bot.computer === "cloud" && bot.cloudBackend !== "vps") || computers.some((computer) => computer.section !== null);
   const { show: showComputers, loaded: computersChoiceLoaded, choose: setShowComputers } = useShowComputers(anyComputer);
@@ -319,11 +322,17 @@ export function TeamMapPage() {
   const composerTeams = useMemo(() => sections.map((section) => ({ key: section.key, name: section.name, count: section.chiefs.length + section.members.length })), [sections]);
 
   // `background`: the 3-second poll, which never wakes a Cloud home that went to sleep.
+  // Only the newest request writes: an older reply that lands late never overwrites a newer snapshot.
+  const latestRefresh = useRef(0);
   const refresh = useCallback(async (background = false) => {
+    const request = ++latestRefresh.current;
     try {
-      setSnapshot(await api("/api/team-map", background ? { background } : undefined));
+      const next = await api("/api/team-map", background ? { background } : undefined);
+      if (request !== latestRefresh.current) return;
+      setSnapshot(next);
       setRefreshError(null);
     } catch (requestError) {
+      if (request !== latestRefresh.current) return;
       setRefreshError(requestError instanceof Error ? requestError.message : String(requestError));
     }
   }, []);
@@ -403,7 +412,7 @@ export function TeamMapPage() {
         live={live} onToggleLive={() => setLive((value) => !value)} />}
       <div className="relative flex min-h-0 flex-1">
       <div className="relative flex min-h-0 min-w-0 flex-1">
-      <TeamCanvas sections={visibleSections} sessionsByBot={sessionsByBot} edges={edges} canManage={!remoteClient && admin !== false} onMove={requestMove} taggedBotIds={taggedBotIds} sent={sent} bottomInset={bots.length ? 96 : 0}
+      <TeamCanvas sections={visibleSections} allSectionKeys={allSectionKeys} sessionsByBot={sessionsByBot} edges={edges} canManage={!remoteClient && admin !== false} onMove={requestMove} taggedBotIds={taggedBotIds} sent={sent} bottomInset={bots.length ? 96 : 0}
         connectedBotIds={state.settingsOpen ? edges.flatMap((edge) => edge.sourceBotId === state.selectedId ? [edge.targetBotId] : edge.targetBotId === state.selectedId ? [edge.sourceBotId] : []) : []}
         onComputer={(bot) => openBotSettings(dispatch, "access", { botId: bot.id })}
         computers={showComputers && computersChoiceLoaded && !remoteClient ? mapComputers.computers : undefined} computerFrames={mapComputers.frames}

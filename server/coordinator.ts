@@ -139,6 +139,8 @@ export interface LiveHandoffEdge {
   state: "queued" | "running";
   threadId: string;
   groupId?: string;
+  /** When the hand-off was admitted. */
+  createdAt: number;
 }
 
 /** Every method may throw; the runtime logs a throw and reads it as "not now". */

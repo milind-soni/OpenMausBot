@@ -3,11 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TeamMapSession } from "@/lib/team-map";
 
-const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), showThreads: true }));
+const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), showThreads: true, groups: [] as unknown[] }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: original.initialState, dispatch: fixture.dispatch }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, groups: fixture.groups }, dispatch: fixture.dispatch }) };
 });
 const { TeamMapSessions } = await import("./TeamMapSessions");
 
@@ -28,6 +28,7 @@ function clickFirst(sessions: TeamMapSession[]) {
 beforeEach(() => {
   fixture.dispatch.mockClear();
   fixture.showThreads = true;
+  fixture.groups = [];
 });
 
 describe("team map session cards", () => {
@@ -67,8 +68,18 @@ describe("team map session cards", () => {
     expect(html.indexOf("Stuck")).toBeLessThan(html.indexOf("Working"));
   });
 
-  it("opens the room when the session belongs to one", () => {
-    expect(clickFirst([session({ groupId: "room-1" })])).toEqual([{ type: "select", id: "room-1" }]);
+  it("opens the room when the session is on the room's own thread", () => {
+    fixture.groups = [{ id: "room-1", threadId: "room-main", tasks: [] }];
+    const actions = clickFirst([session({ groupId: "room-1", threadId: "room-main" })]);
+    expect(actions).toContainEqual({ type: "select", id: "room-1" });
+    expect(actions.some((action) => (action as { type: string }).type === "switchGroupTask")).toBe(false);
+  });
+
+  it("opens the room's side task itself when the session is on one", () => {
+    fixture.groups = [{ id: "room-1", threadId: "room-main", tasks: [{ threadId: "room-side" }] }];
+    const actions = clickFirst([session({ groupId: "room-1", threadId: "room-side" })]);
+    expect(actions).toContainEqual({ type: "select", id: "room-1" });
+    expect(actions).toContainEqual({ type: "switchGroupTask", groupId: "room-1", threadId: "room-side" });
   });
 
   it("opens the bot's own thread when the session has no room", () => {

@@ -32,12 +32,9 @@ export function TeamMapSessions({ sessions, now }: { sessions: TeamMapSession[];
         return (
           <button
             key={`${session.botId}:${session.threadId}`}
-            onClick={() => {
-              if (session.groupId) dispatch({ type: "select", id: session.groupId });
-              else openThread(dispatch, { botId: session.botId, threadId: session.threadId }, state, showThreads);
-            }}
+            onClick={() => { openThread(dispatch, { botId: session.botId, threadId: session.threadId }, state, showThreads); }}
             aria-label={t("canvas.session.openAria", { title: session.title })}
-            className="flex w-full min-w-0 flex-col gap-0.5 rounded-lg border border-hairline/40 bg-card px-2.5 py-1.5 text-left transition animate-pop-in hover:bg-raised/50"
+            className="flex h-[52px] w-full min-w-0 flex-col justify-center gap-0.5 overflow-hidden rounded-lg border border-hairline/40 bg-card px-2.5 py-1.5 text-left transition animate-pop-in hover:bg-raised/50"
           >
             <span className="truncate text-[12px] font-medium text-ink">{session.title}</span>
             <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-ink-secondary">

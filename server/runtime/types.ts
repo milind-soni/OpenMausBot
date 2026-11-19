@@ -391,6 +391,8 @@ export interface LiveEdge {
   state: "queued" | "running" | "needs_input" | "waiting";
   threadId: string;
   groupId?: string;
+  /** When the hand-off was admitted. */
+  createdAt: number;
 }
 
 export interface StatusView {

@@ -202,9 +202,9 @@ function rowsInRange(rows: readonly UsageRow[], from: number, to: number): Usage
 }
 
 export function readUsage(dataDir: string, range: { from: Date; to: Date }): UsageRow[] {
-  const rows: UsageRow[] = [];
-  for (const key of monthsBetween(range.from, range.to)) rows.push(...readMonthFile(dataDir, key));
-  return rowsInRange(rows, range.from.getTime(), range.to.getTime());
+  const from = range.from.getTime();
+  const to = range.to.getTime();
+  return monthsBetween(range.from, range.to).flatMap((key) => rowsInRange(readMonthFile(dataDir, key), from, to));
 }
 
 /**
@@ -216,15 +216,17 @@ export function readUsage(dataDir: string, range: { from: Date; to: Date }): Usa
 export function readUsageCached(dataDir: string, range: { from: Date; to: Date }): UsageRow[] {
   const now = Date.now();
   for (const [key, entry] of monthCache) if (now - entry.at >= MONTH_CACHE_TTL_MS) monthCache.delete(key);
-  const rows: UsageRow[] = [];
+  const from = range.from.getTime();
+  const to = range.to.getTime();
+  const rows: UsageRow[][] = [];
   for (const key of monthsBetween(range.from, range.to)) {
     const cacheKey = monthCacheKey(dataDir, key);
     const cached = monthCache.get(cacheKey);
     const monthRows = cached?.rows ?? readMonthFile(dataDir, key);
     if (!cached) monthCache.set(cacheKey, { at: now, rows: monthRows });
-    rows.push(...monthRows);
+    rows.push(rowsInRange(monthRows, from, to));
   }
-  return rowsInRange(rows, range.from.getTime(), range.to.getTime());
+  return rows.flat();
 }
 
 export function parseUsageRange(from: string | null | undefined, to: string | null | undefined, now = new Date()): { from: Date; to: Date } | null {

@@ -23,6 +23,8 @@ export interface TeamMapQueuedHandoff {
   targetBotId: string;
   threadId: string;
   groupId?: string;
+  /** When the hand-off was queued; a queued card's age counts from here, not from the thread's creation. */
+  createdAt?: number;
 }
 
 /** A bot running its turn straight in a room's own thread (not a lane of its own), so there is no `TaskRecord` for
@@ -49,6 +51,13 @@ export interface TeamMapSessionsDeps {
   now?: number;
 }
 
+/** Silence counts from the later of the last line and the turn's own start, so a turn with no line yet still goes stuck
+ * and a new turn is not stuck at once because of an old line. */
+function isStale(now: number, stuckAfterMs: number, lastOutputAt: number | undefined, startedAt: number | undefined): boolean {
+  const since = Math.max(lastOutputAt ?? -Infinity, startedAt ?? -Infinity);
+  return Number.isFinite(since) && now - since > stuckAfterMs;
+}
+
 function stateFor(activity: BotActivity | undefined, stale: boolean): TeamMapSessionState | null {
   if (activity === "waiting-on-you") return "waiting";
   if (activity === "no-signal") return "stuck";
@@ -66,7 +75,7 @@ export function teamMapSessions(deps: TeamMapSessionsDeps): TeamMapSessionsSnaps
       const groupId = deps.groupIdOf(task.threadId);
       if (groupId !== undefined && !deps.visibleGroup(groupId)) continue;
       const lastOutputAt = deps.lastOutputAt(task.threadId);
-      const state = stateFor(task.activity, lastOutputAt !== undefined && now - lastOutputAt > stuckAfterMs);
+      const state = stateFor(task.activity, isStale(now, stuckAfterMs, lastOutputAt, task.turnStartedAt));
       if (!state) continue;
       const selection = task.modelSelection ?? bot.modelSelection;
       const usd = task.usage?.costUsd;
@@ -85,7 +94,7 @@ export function teamMapSessions(deps: TeamMapSessionsDeps): TeamMapSessionsSnaps
     const bot = deps.bots.find((candidate) => candidate.id === busy.botId);
     if (!bot) continue;
     const lastOutputAt = deps.lastOutputAt(busy.threadId);
-    const state = stateFor("working", lastOutputAt !== undefined && now - lastOutputAt > stuckAfterMs);
+    const state = stateFor("working", isStale(now, stuckAfterMs, lastOutputAt, busy.startedAt));
     if (!state) continue;
     sessions.push({
       botId: busy.botId, threadId: busy.threadId, title: busy.title, state, startedAt: busy.startedAt ?? now, groupId: busy.groupId,
@@ -95,11 +104,11 @@ export function teamMapSessions(deps: TeamMapSessionsDeps): TeamMapSessionsSnaps
     });
   }
   for (const edge of deps.queued) {
-    if (sessions.some((session) => session.threadId === edge.threadId)) continue;
+    if (sessions.some((session) => session.botId === edge.targetBotId && session.threadId === edge.threadId)) continue;
     const task = deps.bots.find((bot) => bot.id === edge.targetBotId)?.tasks.find((candidate) => candidate.threadId === edge.threadId);
     sessions.push({
       botId: edge.targetBotId, threadId: edge.threadId, title: task?.title ?? edge.threadId, state: "queued",
-      startedAt: deps.createdAt(edge.threadId) ?? now,
+      startedAt: edge.createdAt ?? deps.createdAt(edge.threadId) ?? now,
       ...(edge.groupId !== undefined ? { groupId: edge.groupId } : {}),
     });
   }

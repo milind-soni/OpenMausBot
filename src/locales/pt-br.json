@@ -4042,6 +4042,7 @@
   "planUsage.subtitle": "Saldo restante em cada provedor em que você fez login. Períodos de 5 horas e semanais, quando disponíveis no plano.",
   "planUsage.fiveHour": "5 horas",
   "planUsage.weekly": "Semanal",
+  "planUsage.monthly": "Mensal",
   "planUsage.left": "Restante: {remaining}%",
   "planUsage.used": "Uso: {used}%",
   "planUsage.monthlySpend": "Gasto mensal",

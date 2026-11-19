@@ -91,6 +91,38 @@ describe("teamMapSessions", () => {
     expect(snapshot.sessions[0]?.state).toBe("running");
   });
 
+  it("dates a queued card from when the hand-off was queued, not from when its thread was made", () => {
+    const bots: TeamMapBotInput[] = [{ id: "bot-2", modelSelection: SELECTION, tasks: [{ threadId: "t2", title: "Old thread", busy: false }] }];
+    const snapshot = teamMapSessions(deps({
+      bots, queued: [{ targetBotId: "bot-2", threadId: "t2", createdAt: NOW - 5_000 }],
+      createdAt: () => NOW - 86_400_000,
+    }));
+    expect(snapshot.sessions[0]?.startedAt).toBe(NOW - 5_000);
+  });
+
+  it("keeps a queued hand-off to one bot on a room thread another bot is running", () => {
+    const bots: TeamMapBotInput[] = [
+      { id: "chief", modelSelection: SELECTION, tasks: [] },
+      { id: "dev", modelSelection: SELECTION, tasks: [] },
+    ];
+    const snapshot = teamMapSessions(deps({
+      bots, roomBusy: [{ botId: "chief", threadId: "room-thread", title: "Room", groupId: "room-1", startedAt: NOW - 1_000 }],
+      queued: [{ targetBotId: "dev", threadId: "room-thread", groupId: "room-1" }],
+    }));
+    expect(snapshot.sessions.map((session) => [session.botId, session.state])).toEqual([["chief", "running"], ["dev", "queued"]]);
+  });
+
+  it("counts silence from the turn's start when the conversation has no line yet, and ignores lines from before the turn", () => {
+    const old = NOW - DEFAULT_STUCK_AFTER_MS - 60_000;
+    const bots: TeamMapBotInput[] = [{ id: "bot-1", modelSelection: SELECTION, tasks: [
+      { threadId: "silent", title: "No line yet", busy: true, activity: "working", turnStartedAt: old },
+      { threadId: "new-turn", title: "Just started", busy: true, activity: "working", turnStartedAt: NOW - 1_000 },
+    ] }];
+    const lastOutputAt = (threadId: string) => (threadId === "new-turn" ? old : undefined);
+    const snapshot = teamMapSessions(deps({ bots, lastOutputAt }));
+    expect(snapshot.sessions.map((session) => [session.threadId, session.state])).toEqual([["silent", "stuck"], ["new-turn", "running"]]);
+  });
+
   it("shows a card for a bot running straight in a room's own thread, with no task of its own", () => {
     const bots: TeamMapBotInput[] = [{ id: "bot-1", modelSelection: SELECTION, tasks: [] }];
     const snapshot = teamMapSessions(deps({
