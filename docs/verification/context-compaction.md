@@ -68,10 +68,16 @@ the idle gap after the turn before, while the prompt cache is still warm, so
 the next turn starts small.
 
 - **When:** a direct conversation (not a room or a routine's run) whose turn
-  ended with 100k tokens or more of context gets one about 3 minutes later. A
-  conversation at 80% or more of where Claude Code summarizes by itself
-  (`OMB_CLAUDE_AUTOCOMPACT`, 200,000 by default) gets one about 10 seconds
-  later, because its next turn would summarize anyway. For an engine
+  ended with 100k tokens or more of context gets one about 3 minutes later.
+  Claude Code summarizes by itself about 33,000 tokens below
+  `OMB_CLAUDE_AUTOCOMPACT` (200,000 by default, so near 167k). A conversation
+  at 70% or more of that setting (140k) gets its summary about 10 seconds
+  after the turn, since one more turn of tool work can reach that point; a
+  message sent meanwhile is not held up and the summary is dropped. At 80% or
+  more (160k) it starts one second after the turn, because the next turn
+  would summarize anyway; a message sent meanwhile shows "context compaction
+  started (auto)" and its turn starts when the summary is written (at most 3
+  minutes, then the turn goes on without it). For an engine
   OpenMausBot folds for, the fold runs while idle once the conversation is at
   85% of the threshold its next turn would fold at.
 - **Claude Code:** `/compact` with instructions to keep the person's latest
