@@ -521,14 +521,16 @@ test("sign-out durably forgets personal Cloud and revokes only its credential; o
 test("failed durable sign-out blocks reconnect until cleanup succeeds", async t => {
   const f = await fixture(t); await f.connect(); f.failWrite = true;
   assert.equal((await f.client.signOut()).message, "signout-storage-failed");
-  await assert.rejects(f.client.begin(), /Sign out/); assert.equal(f.client.state().entitlement, undefined);
+  const asked = f.requests.length, blocked = await f.client.begin();
+  assert.equal(blocked.status, "unavailable"); assert.equal(blocked.reset, true, "clearing it is offered");
+  assert.equal(f.requests.length, asked, "no sign-in starts"); assert.equal(f.client.state().entitlement, undefined);
   f.failWrite = false; await f.client.signOut(); assert.equal(f.saved, null);
 });
 
 test("startup restoration cannot race a new sign-in, and failed token persistence revokes the issued credential", async t => {
   let resolveRead;
   const f = await fixture(t, { store: { read: () => new Promise(resolve => { resolveRead = resolve; }), write: async () => {} } });
-  const restoring = f.client.start(); await assert.rejects(f.client.begin(), /Sign out/);
+  const restoring = f.client.start(); assert.equal((await f.client.begin()).message, "restoring");
   resolveRead(null); await restoring; assert.deepEqual(f.requests, []);
   const broken = await fixture(t); broken.failWrite = true; await broken.client.begin(); broken.approved = true; broken.tick();
   await until(() => broken.revoked); await until(() => broken.client.state().message === "signout-storage-failed");
@@ -604,10 +606,15 @@ test("a locked keychain never removes the saved Cloud sign-in: it is read again,
   lock.locked = true;
   assert.deepEqual(await f.client.start(), { status: "unavailable", message: "restore-failed" });
   assert.equal(f.delay, 15_000);
-  await assert.rejects(f.client.begin(), /Sign out/);
+  assert.deepEqual(await f.client.begin(), { status: "unavailable", message: "restore-failed" });
+  assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "saved" }, "no clearing offered yet");
+  assert.deepEqual(await f.client.resetSaved(), { status: "unavailable", message: "restore-failed" }, "nothing is cleared before it is offered");
   for (const delay of [30_000, 60_000, 60_000]) { f.tick(); await until(() => f.timer); assert.equal(f.delay, delay); }
   assert.ok((await stat(file)).isFile(), "a locked sign-in is never removed");
-  assert.equal(f.states.filter(state => state.message === "restore-failed").length, 1, "said once, not on every try");
+  assert.deepEqual(f.states.filter(state => state.message === "restore-failed").map(state => state.reset ?? false), [false, true],
+    "said once, then once more when clearing it is offered (the third read), not on every try");
+  assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "saved", reset: true });
+  assert.equal(f.requests.length, 0);
   lock.locked = false; f.tick();
   await until(() => f.client.state().status === "connected");
   assert.equal(f.client.state().account.email, "person@example.test");

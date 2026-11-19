@@ -6,7 +6,8 @@ export type HomeView = { name?: string } & (
   | { screen: "opening" | "waking" | "moving" }
   /** The Admin is setting it up (or a brand-new one's name isn't found yet, at `checking`): the step it reports. */
   | { screen: "setup"; step?: import("./cloud-home.mjs").CloudSetupStep; slow?: true }
-  | { screen: "offline"; reason?: string; cause?: "host" | "no_answer" }
+  /** `network`: this computer couldn't connect to My Cloud's address (`host`) while the Admin knows of nothing wrong. */
+  | { screen: "offline"; reason?: string; cause?: "host" | "no_answer" | "network"; host?: string }
   | { screen: "signin"; other?: true }
   /** `member`: a team's User, who can't subscribe or pay for it and is sent to its owner. */
   | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed"; member?: true }

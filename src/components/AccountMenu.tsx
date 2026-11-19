@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Check, LogOut, Plus, UserRound, X } from "lucide-react";
 import type { AccountsView, AccountSwitchResult, RailOpenResult } from "../../electron/cloud-account.mjs";
 import { cn } from "@/lib/cn";
-import type { CloudSignInPhase } from "@/lib/cloud-plan";
+import { blockedProblem, type CloudSignInPhase } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import { usePlaces } from "@/lib/places";
 import { CLOSE, Heading, PRIMARY, QUIET, SCREEN, SHEET } from "./cloud-buy/parts";
@@ -104,7 +104,7 @@ function AddAccount({ start, onDone, onBack }: { start: string; onDone: (note: s
     setBusy(true);
     void bridge.addStart(email).then((result) => {
       if (result.outcome === "sent") { setPhase({ step: "code", intent: false, email: result.email, resendAt: result.resendAt, problem: null, triesLeft: null, ...(result.signupOpen === false ? { signupOpen: false } : {}) }); setCode(""); }
-      else setPhase({ step: "email", intent: false, problem: result.outcome });
+      else setPhase({ step: "email", intent: false, problem: result.outcome === "blocked" ? blockedProblem(result) : result.outcome });
     }, () => setPhase({ step: "email", intent: false, problem: "failed" })).finally(() => setBusy(false));
   };
   const verify = (digits: string) => {
@@ -115,7 +115,7 @@ function AddAccount({ start, onDone, onBack }: { start: string; onDone: (note: s
       if (result.outcome === "switched") onDone(null);
       else if (result.outcome === "added") onDone(t("accounts.added", { email: result.email ?? email }));
       else if (result.outcome === "already") onDone(t("accounts.already", { email: result.email ?? email }));
-      else { setCode(""); setPhase({ ...at, problem: result.outcome, triesLeft: result.outcome === "wrong-code" ? result.triesLeft : null }); }
+      else { setCode(""); setPhase({ ...at, problem: result.outcome === "blocked" ? blockedProblem(result) : result.outcome, triesLeft: result.outcome === "wrong-code" ? result.triesLeft : null }); }
     }, () => setPhase({ ...at, problem: "failed", triesLeft: null })).finally(() => setBusy(false));
   };
   // The browser's way ends in main, which says how once the list changes: the account in use now, kept for after a move, or the

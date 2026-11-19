@@ -63,3 +63,10 @@ it("a Cloud that isn't running says what it is in plain words with its one actio
     for (const words of Object.values(homeScreenText({ screen, name: "Client B", deleteAt: day }, now))) expect(String(words)).not.toMatch(/—|\bVM\b|engine|ctx|server/i);
   }
 });
+
+it("My Cloud this computer couldn't connect to names its address and what may be in the way, with Try again", () => {
+  expect(homeScreenText({ screen: "offline", cause: "network", host: "omb-t-1.fly.dev" })).toMatchObject({
+    title: "Can't reach My Cloud right now.", action: "retry",
+    reason: "This computer couldn't connect to omb-t-1.fly.dev. If My Cloud opens on another device or network, check whether a VPN, firewall or DNS filter here blocks that address.",
+  });
+});
