@@ -26,14 +26,9 @@ export function appFaces(connected: readonly string[], cards: ReadonlyMap<string
   return [...own, ...POPULAR_APPS.filter((app) => !own.some((card) => card.slug === app.slug))].slice(0, APP_FACES);
 }
 
-interface SidebarApps {
-  faces: AppFace[];
-  connected: boolean;
-}
-
-function useSidebarApps(): SidebarApps {
+function useSidebarAppFaces(): AppFace[] {
   const { state } = useStore();
-  const [apps, setApps] = useState<SidebarApps>(() => ({ faces: appFaces([], new Map()), connected: false }));
+  const [faces, setFaces] = useState(() => appFaces([], new Map()));
   useEffect(() => {
     if (state.pluginsOpen) return;
     let alive = true;
@@ -41,12 +36,12 @@ function useSidebarApps(): SidebarApps {
       .then(async (inventory) => {
         const connected = Object.entries(inventory.services).filter(([, status]) => status.connected).map(([slug]) => slug).sort();
         const cards = connected.length > 0 ? await loadAppCards() : new Map<string, AppFace>();
-        if (alive) setApps({ faces: appFaces(connected, cards), connected: connected.length > 0 });
+        if (alive) setFaces(appFaces(connected, cards));
       })
       .catch(() => {});
     return () => { alive = false; };
   }, [state.pluginsOpen]);
-  return apps;
+  return faces;
 }
 
 function AppFaceIcon({ face, className }: { face: AppFace; className?: string }) {
@@ -68,8 +63,8 @@ const FAN = ["motion-safe:group-hover/apps:-translate-x-[3px] motion-safe:group-
 /** `circle` is the collapsed rail's round button. */
 export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
   const { state, dispatch } = useStore();
-  const { faces, connected } = useSidebarApps();
-  const label = connected ? t("sidebar.nav.apps") : t("sidebar.connectApps");
+  const faces = useSidebarAppFaces();
+  const label = t("sidebar.nav.apps");
   return (
     <button
       type="button"

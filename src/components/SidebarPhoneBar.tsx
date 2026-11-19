@@ -7,7 +7,7 @@ import { useStore } from "@/state/store";
 
 import { CloudRoomCard } from "./CloudRoomCard";
 import { CloudUsageCard } from "./CloudUsageMeter";
-import { useAutomationsNeedYou } from "./SidebarFooterNav";
+import { useAutomationsNeedYou } from "./use-automations-need-you";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { openCommandPalette } from "./CommandPalette";
 import { SidebarProfileMenu } from "./SidebarProfileMenu";

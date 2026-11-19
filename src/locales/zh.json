@@ -2240,11 +2240,11 @@
   "sidebar.archived.restoredOne": "已恢复 1 个机器人",
   "sidebar.archived.restoredMany": "已恢复 {count} 个机器人",
   "sidebar.resize": "调整侧栏大小",
-  "sidebar.toolsLayout.title": "工具布局",
-  "sidebar.toolsLayout.subtitle": "把「例行任务」「触发条件」和「团队地图」显示为多行，或合并为一行图标。侧栏以头像列显示时，始终显示为图标。",
-  "sidebar.toolsLayout.rows": "多行",
-  "sidebar.toolsLayout.toolbar": "工具栏",
-  "sidebar.toolsLayout.chooseAria": "选择工具布局",
+
+
+
+
+
   "sidebar.new": "新建",
   "sidebar.newOrShare": "新建或分享",
   "sidebar.servers": "服务器",
@@ -2274,7 +2274,7 @@
   "sidebar.nav.teamMap": "团队地图",
   "sidebar.nav.automations": "自动化",
   "sidebar.nav.connectedApps": "已连接应用",
-  "sidebar.connectApps": "连接应用",
+
   "sidebar.tools": "工具",
   "sidebar.section.expand": "展开 {name}",
   "sidebar.section.collapse": "收起 {name}",

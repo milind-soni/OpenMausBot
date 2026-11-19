@@ -2164,11 +2164,11 @@
   "sidebar.archived.restoredOne": "已還原 1 個機器人",
   "sidebar.archived.restoredMany": "已還原 {count} 個機器人",
   "sidebar.resize": "調整側邊欄大小",
-  "sidebar.toolsLayout.title": "工具版面",
-  "sidebar.toolsLayout.subtitle": "將例行工作、觸發器和團隊地圖顯示為多列，或一列圖示。側邊欄顯示為頭像欄時，一律顯示圖示。",
-  "sidebar.toolsLayout.rows": "多列",
-  "sidebar.toolsLayout.toolbar": "工具列",
-  "sidebar.toolsLayout.chooseAria": "選擇工具版面",
+
+
+
+
+
   "sidebar.new": "新增",
   "sidebar.newOrShare": "新增或分享",
   "sidebar.servers": "伺服器",
@@ -2198,7 +2198,7 @@
   "sidebar.nav.teamMap": "團隊地圖",
   "sidebar.nav.automations": "自動化",
   "sidebar.nav.connectedApps": "已連線的應用程式",
-  "sidebar.connectApps": "連線應用程式",
+
   "sidebar.tools": "工具",
   "sidebar.section.expand": "展開 {name}",
   "sidebar.section.collapse": "收合 {name}",

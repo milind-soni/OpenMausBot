@@ -217,6 +217,11 @@ export function BotContextMenu({
     t(everyBotPaused ? "pause.resumeAll" : "pause.pauseAll"),
     () => { void setEveryBotPaused(!everyBotPaused).catch((error: unknown) => dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) })); });
 
+  const viewThreads = item(<MessagesSquare size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.viewThreads"), () => {
+    openForSettings();
+    openBotSettings(dispatch, "history", { botId: bot.id, anchor: "conversations" });
+  });
+
   if (simpleMenu) {
     const showFlyout = (key: Flyout, focus: boolean) => {
       more.openNow(key);
@@ -286,10 +291,6 @@ export function BotContextMenu({
     ];
     // Simple view hides the thread list: start one, see them all (the panel's Conversations), and choose the one it opens.
     const newThread = bot.yourAccess === "view" ? null : item(<SquarePen size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }));
-    const viewThreads = item(<MessagesSquare size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.viewThreads"), () => {
-      openForSettings();
-      openBotSettings(dispatch, "history", { botId: bot.id, anchor: "conversations" });
-    });
     const openTask = state.selectedId === bot.id ? bot.tasks?.find((task) => task.threadId === bot.threadId) : undefined;
     const setMain = remoteClient || admin !== true || !openTask || openTask.routineRunId || openTask.private || isArchived(openTask) ? null : item(
       <Star size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.setMainThread"),
@@ -395,6 +396,7 @@ export function BotContextMenu({
         {admin && item(<FolderOpen size={16} className="shrink-0 text-ink-secondary" />, t("task.folder.new"), () => onNewTaskFolder(bot.id))}
         {item(<FolderPlus size={16} className="text-ink-secondary" />, t("folder.new"), () => onNewFolder(bot.id))}
       </>}
+      {viewThreads}
       {!member && item(<Trash2 size={16} />, t("task.deleteAll"), () => clearThreads.ask(bot.id), { danger: true })}
       {divider("threads")}
       {team && mayChangeOwner(bot, team) && item(<Users size={16} className="text-ink-secondary" />, ownerMenuLabel(bot, team), () => pickOwnerOf(bot, team, shown))}

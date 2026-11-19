@@ -1346,11 +1346,11 @@
   "sidebar.archived.restoredOne": "1 bot geri yüklendi",
   "sidebar.archived.restoredMany": "{count} bot geri yüklendi",
   "sidebar.resize": "Kenar çubuğunu yeniden boyutlandır",
-  "sidebar.toolsLayout.title": "Araç düzeni",
-  "sidebar.toolsLayout.subtitle": "Rutinler, Tetikleyiciler ve Ekip haritasını satırlar halinde ya da tek sıra simge olarak gösterin. Avatar sütununa daraltılan kenar çubuğu her zaman simgeleri gösterir.",
-  "sidebar.toolsLayout.rows": "Satırlar",
-  "sidebar.toolsLayout.toolbar": "Araç çubuğu",
-  "sidebar.toolsLayout.chooseAria": "Araç düzenini seçin",
+
+
+
+
+
   "sidebar.new": "Yeni",
   "sidebar.newOrShare": "Yeni veya paylaş",
   "sidebar.servers": "Sunucular",

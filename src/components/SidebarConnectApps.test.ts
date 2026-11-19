@@ -10,7 +10,7 @@ import { APP_FACES, POPULAR_APPS, SidebarConnectApps, appFaces } from "./Sidebar
 
 const card = (slug: string) => ({ slug, label: slug, logo: `https://logos.example/${slug}.png`, domain: null });
 
-describe("the Connect apps faces", () => {
+describe("the Apps faces", () => {
   it("shows popular apps until something is connected", () => {
     expect(appFaces([], new Map()).map((face) => face.slug)).toEqual(POPULAR_APPS.map((app) => app.slug));
   });
@@ -36,7 +36,7 @@ describe("the Connect apps faces", () => {
 
   it("is a round 36px puzzle button on the collapsed rail, named for screen readers", () => {
     const html = renderToStaticMarkup(createElement(SidebarConnectApps, { circle: true }));
-    expect(html).toMatch(/data-tour="nav-apps"[^>]*aria-label="Connect apps" title="Connect apps" class="[^"]*\bsize-9\b[^"]*\brounded-full\b/);
+    expect(html).toMatch(/data-tour="nav-apps"[^>]*aria-label="Apps" title="Apps" class="[^"]*\bsize-9\b[^"]*\brounded-full\b/);
     expect(html).toContain("lucide-puzzle");
     expect(html).not.toContain("data-app-face");
   });

@@ -3,17 +3,12 @@ import { z } from "zod";
 
 /** The sidebar as it is, or "icons": the column of avatars the person dragged its edge down to. */
 export type SidebarDensity = "comfortable" | "icons";
-export type SidebarToolsLayout = "rows" | "toolbar";
 
-export const SIDEBAR_TOOLS_LAYOUTS: readonly SidebarToolsLayout[] = ["rows", "toolbar"];
 
 export const SIDEBAR_DENSITY_KEY = "openmausbot.sidebarDensity";
-export const SIDEBAR_TOOLS_LAYOUT_KEY = "openmausbot.sidebarToolsLayout";
-export const SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth";
 export const SIMPLE_SIDEBAR_WIDTH_KEY = "openmausbot.sidebarWidth.simple";
 export const SIDEBAR_ATTENTION_PINNED_KEY = "openmausbot.sidebarAttentionPinned.v1";
 export const SIDEBAR_COLLAPSED_SECTIONS_KEY = "openmausbot.sidebarCollapsedSections.v1";
-export const SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.v1";
 export const SIMPLE_SIDEBAR_SECTION_ORDER_KEY = "openmausbot.sidebarSectionOrder.simple.v1";
 export const PINNED_CIRCLES_KEY = "openmausbot.pinnedCircles";
 export const UNIVERSAL_PINS_KEY = "openmausbot.universalPins";
@@ -43,36 +38,6 @@ export function saveSidebarDensity(
   try {
     const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
     target?.setItem(SIDEBAR_DENSITY_KEY, density === "icons" ? AVATARS : density);
-  } catch {
-  }
-}
-
-export function parseSidebarToolsLayout(value: string | null): SidebarToolsLayout {
-  switch (value) {
-    case "rows":
-    case "toolbar":
-      return value;
-    default:
-      return "rows";
-  }
-}
-
-export function loadSidebarToolsLayout(storage?: Pick<Storage, "getItem"> | null): SidebarToolsLayout {
-  try {
-    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
-    return parseSidebarToolsLayout(target?.getItem(SIDEBAR_TOOLS_LAYOUT_KEY) ?? null);
-  } catch {
-    return "rows";
-  }
-}
-
-export function saveSidebarToolsLayout(
-  layout: SidebarToolsLayout,
-  storage?: Pick<Storage, "setItem"> | null,
-): void {
-  try {
-    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
-    target?.setItem(SIDEBAR_TOOLS_LAYOUT_KEY, layout);
   } catch {
   }
 }
@@ -122,51 +87,6 @@ export function useSidebarDensity(): SidebarDensity {
   return useSyncExternalStore(subscribeDensity, currentSidebarDensity, () => "comfortable");
 }
 
-let toolsLayoutSessionChoice: SidebarToolsLayout | undefined;
-const toolsLayoutListeners = new Set<() => void>();
-
-function currentSidebarToolsLayout(): SidebarToolsLayout {
-  return toolsLayoutSessionChoice ?? loadSidebarToolsLayout();
-}
-
-function notifyToolsLayout() {
-  for (const listener of toolsLayoutListeners) listener();
-}
-
-function onToolsLayoutStorage(event: StorageEvent) {
-  if (event.key !== SIDEBAR_TOOLS_LAYOUT_KEY && event.key !== null) return;
-  try {
-    if (event.storageArea && event.storageArea !== globalThis.localStorage) return;
-  } catch {
-    return;
-  }
-  toolsLayoutSessionChoice = undefined;
-  notifyToolsLayout();
-}
-
-export function subscribeSidebarToolsLayout(listener: () => void): () => void {
-  toolsLayoutListeners.add(listener);
-  if (toolsLayoutListeners.size === 1 && typeof window !== "undefined") {
-    window.addEventListener("storage", onToolsLayoutStorage);
-  }
-  return () => {
-    toolsLayoutListeners.delete(listener);
-    if (toolsLayoutListeners.size === 0 && typeof window !== "undefined") {
-      window.removeEventListener("storage", onToolsLayoutStorage);
-    }
-  };
-}
-
-export function setSidebarToolsLayout(layout: SidebarToolsLayout): void {
-  toolsLayoutSessionChoice = layout;
-  saveSidebarToolsLayout(layout);
-  notifyToolsLayout();
-}
-
-export function useSidebarToolsLayout(): SidebarToolsLayout {
-  return useSyncExternalStore(subscribeSidebarToolsLayout, currentSidebarToolsLayout, () => "rows");
-}
-
 /** The narrowest the open sidebar gets. */
 export const SIDEBAR_MIN_WIDTH = 240;
 
@@ -174,10 +94,10 @@ export function clampSidebarWidth(width: number, viewportWidth: number, max = 48
   return Math.max(SIDEBAR_MIN_WIDTH, Math.min(max, viewportWidth - 320, Math.round(width)));
 }
 
-export function loadSidebarWidth(storage?: Pick<Storage, "getItem"> | null, key = SIDEBAR_WIDTH_KEY): number | null {
+export function loadSidebarWidth(storage?: Pick<Storage, "getItem"> | null): number | null {
   try {
     const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
-    const raw = target?.getItem(key);
+    const raw = target?.getItem(SIMPLE_SIDEBAR_WIDTH_KEY);
     if (raw === null || raw === undefined || !/^\d+$/.test(raw)) return null;
     const width = Number(raw);
     return width >= SIDEBAR_MIN_WIDTH && width <= 480 ? width : null;
@@ -186,10 +106,10 @@ export function loadSidebarWidth(storage?: Pick<Storage, "getItem"> | null, key 
   }
 }
 
-export function saveSidebarWidth(width: number, storage?: Pick<Storage, "setItem"> | null, key = SIDEBAR_WIDTH_KEY): void {
+export function saveSidebarWidth(width: number, storage?: Pick<Storage, "setItem"> | null): void {
   try {
     const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
-    target?.setItem(key, String(width));
+    target?.setItem(SIMPLE_SIDEBAR_WIDTH_KEY, String(width));
   } catch {
   }
 }
@@ -436,19 +356,13 @@ export function toggleCollapsedSection(ids: string[], id: string): string[] {
   return ids.includes(id) ? ids.filter((candidate) => candidate !== id) : [...ids, id];
 }
 
-export function loadSectionOrder(storage?: Pick<Storage, "getItem"> | null): string[] {
-  return loadStringList(SIDEBAR_SECTION_ORDER_KEY, storage);
-}
-
-export function saveSectionOrder(
-  ids: string[],
-  storage?: Pick<Storage, "setItem"> | null,
-): void {
-  saveStringList(SIDEBAR_SECTION_ORDER_KEY, ids, storage);
-}
-
 export function loadSimpleSectionOrder(storage?: Pick<Storage, "getItem"> | null): string[] {
-  return loadStringList(SIMPLE_SIDEBAR_SECTION_ORDER_KEY, storage);
+  try {
+    const target = storage === undefined ? (globalThis.localStorage ?? null) : storage;
+    return parseStringList(target?.getItem(SIMPLE_SIDEBAR_SECTION_ORDER_KEY) ?? target?.getItem("openmausbot.sidebarSectionOrder.v1") ?? null);
+  } catch {
+    return [];
+  }
 }
 
 export function saveSimpleSectionOrder(

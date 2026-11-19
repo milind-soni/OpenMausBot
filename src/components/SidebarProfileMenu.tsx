@@ -43,7 +43,7 @@ import { useCloudPlanSnapshot } from "./CloudTrialNotice";
 import type { WorkspacePlace } from "./DesktopWorkspaceSwitcher";
 import { railShown, usePlaces } from "@/lib/places";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { useAutomationsNeedYou } from "./SidebarFooterNav";
+import { useAutomationsNeedYou } from "./use-automations-need-you";
 import { useCloudFilesReady } from "@/lib/cloud-files";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { api, useStore, type Action, type AppSettingsSection } from "@/state/store";

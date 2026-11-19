@@ -1751,11 +1751,11 @@
   "sidebar.archived.restoredOne": "1 bot ripristinato",
   "sidebar.archived.restoredMany": "{count} bot ripristinati",
   "sidebar.resize": "Ridimensiona la barra laterale",
-  "sidebar.toolsLayout.title": "Disposizione strumenti",
-  "sidebar.toolsLayout.subtitle": "Mostra Routine, Trigger e Mappa del team come righe o come un'unica riga di icone. Come colonna di avatar, la barra laterale mostra sempre le icone.",
-  "sidebar.toolsLayout.rows": "Righe",
-  "sidebar.toolsLayout.toolbar": "Barra strumenti",
-  "sidebar.toolsLayout.chooseAria": "Scegli la disposizione degli strumenti",
+
+
+
+
+
   "sidebar.new": "Nuovo",
   "sidebar.newOrShare": "Nuovo o condividi",
   "sidebar.servers": "Server",

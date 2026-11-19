@@ -17,7 +17,6 @@ import { initialState, StoreContext, type AppState, type Bot } from "@/state/sto
 import { closeInbox, currentInboxPanel, openInbox, readInboxLine, refreshInbox, setInboxView } from "@/state/inbox";
 import { setTeamPeople } from "@/state/team-people";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
-import { SidebarActiveThreads } from "../SidebarActiveThreads";
 import { NeedsYouButton } from "../TeamOwner";
 import { SidebarInboxButton } from "../SidebarInboxButton";
 import { setAttentionPinned } from "./attention-pinned";
@@ -123,12 +122,10 @@ describe("the Inbox button", () => {
 describe("an older server, with no inbox off a team", () => {
   beforeEach(() => { server.refusal = { status: 404 }; });
 
-  it("falls back to the tray and Needs you it showed before, and is not asked again", async () => {
+  it("keeps Needs you available on an older team", async () => {
     await refreshInbox();
-    await mount(createElement("div", null, row(), createElement(SidebarActiveThreads, { entries: [], icons: false, phone: false, dispatch: vi.fn() })));
+    await mount(row());
     expect(inboxButton(), "no row where there is no inbox").toBeNull();
-    await click('[aria-label="Active Threads"]');
-    expect(document.body.textContent).toContain("No active threads");
     setTeamPeople({ people: [], me: null, admin: true, needsYou: [{ kind: "question", id: "q", at: AT, botId: "eli", threadId: "t", text: "Which?" }] });
     await mount(createElement(NeedsYouButton));
     expect(document.querySelector("[data-needs-you]"), "Needs you stays on an older team's Cloud").not.toBeNull();

@@ -2004,11 +2004,11 @@
   "sidebar.archived.restoredOne": "ボット 1 件を戻しました",
   "sidebar.archived.restoredMany": "ボット {count} 件を戻しました",
   "sidebar.resize": "サイドバーのサイズを変更",
-  "sidebar.toolsLayout.title": "ツールのレイアウト",
-  "sidebar.toolsLayout.subtitle": "ルーティン、トリガー、チームマップを、行として表示するか、アイコンを1行に並べて表示するかを選びます。アバターの列にしたサイドバーでは常にアイコンで表示されます。",
-  "sidebar.toolsLayout.rows": "行",
-  "sidebar.toolsLayout.toolbar": "ツールバー",
-  "sidebar.toolsLayout.chooseAria": "ツールのレイアウトを選択",
+
+
+
+
+
   "sidebar.new": "新規",
   "sidebar.newOrShare": "新規または共有",
   "sidebar.servers": "サーバー",
@@ -2038,7 +2038,7 @@
   "sidebar.nav.teamMap": "チームマップ",
   "sidebar.nav.automations": "自動化",
   "sidebar.nav.connectedApps": "連携アプリ",
-  "sidebar.connectApps": "アプリを接続",
+
   "sidebar.tools": "ツール",
   "sidebar.section.expand": "{name} を開く",
   "sidebar.section.collapse": "{name} を畳む",

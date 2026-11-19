@@ -74,16 +74,16 @@ function plusMenu(admin: boolean | null, team = false) {
 
 describe("the sidebar's + menu", () => {
   it("offers a new bot, a department, templates and Import… to someone who can make one, and while that isn't known yet", () => {
-    for (const admin of [true, null]) expect(plusMenu(admin)).toEqual(["New bot", "New group chat", "Add department", "Templates", "Import…"]);
+    for (const admin of [true, null]) expect(plusMenu(admin)).toEqual(["New chat", "New bot", "New group chat", "Add department", "Templates", "Import…"]);
   });
 
   it("offers a team's User a new bot of their own, and departments, templates and Import… only to its admins", () => {
-    expect(plusMenu(false, true)).toEqual(["New bot", "New group chat"]);
-    expect(plusMenu(true, true)).toEqual(["New bot", "New group chat", "Add department", "Templates", "Import…"]);
+    expect(plusMenu(false, true)).toEqual(["New chat", "New bot", "New group chat"]);
+    expect(plusMenu(true, true)).toEqual(["New chat", "New bot", "New group chat", "Add department", "Templates", "Import…"]);
   });
 
   it("offers neither to someone without the admin scope anywhere else, who keeps New group chat", () => {
-    expect(plusMenu(false)).toEqual(["New group chat"]);
+    expect(plusMenu(false)).toEqual(["New chat", "New group chat"]);
   });
 });
 
@@ -109,7 +109,7 @@ describe("the sidebar's + menu with a long bot name (simple mode)", () => {
   });
 
   it("truncates the bot's name in New conversation with … and keeps the full name on hover", () => {
-    const item = withLongBot().filter((node) => node.props.role === "menuitem")[0];
+    const item = withLongBot().find((node) => node.props.role === "menuitem" && words(node.props.children).includes(longName))!;
     const label = nodes(item.props.children).find((node) => node.type === "span" && node.props.title === longName);
     expect(label?.props.className).toContain("truncate");
     expect(label?.props.className).toContain("min-w-0");

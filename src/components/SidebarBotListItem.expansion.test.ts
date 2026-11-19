@@ -61,21 +61,15 @@ function expectSoleRow(markup: string) {
 beforeEach(() => { fixture.slots = []; fixture.state.revealThread = null; forgetThreadDisclosuresForTests(); });
 
 describe("bot row expansion follows the visible thread tree", () => {
-
-
-
-  it("restores the owner row when an expanded list loses its second thread", () => {
-    const multiple = { ...bot, tasks: [...bot.tasks!, { threadId: "older", title: "Earlier", createdAt: 0 }] };
+  it("reveals a conversation in a multi-thread bot's sidebar list", () => {
+    const candidate = { ...bot, tasks: [...bot.tasks!, { threadId: "older", title: "Older conversation", createdAt: 0 }] };
+    expect(render(candidate)).not.toContain('data-sidebar-thread-row=');
     fixture.state.revealThread = { threadId: "older", nonce: 1 };
-    render(multiple);
+    render(candidate);
     fixture.effects.forEach(effect => effect());
-    fixture.state.revealThread = null;
-    const expanded = render(multiple);
-    expect(expanded).toContain('data-sidebar-thread-row="older"');
-    expect(ownerTag(expanded)).not.toContain('aria-current="page"');
-    const sole = render();
-    expectSoleRow(sole);
-    expect(sole).toContain("The latest reply");
+    const markup = render(candidate);
+    expect(markup).toContain('aria-expanded="true" aria-label="Collapse Atlas threads"');
+    expect(markup).toContain('data-sidebar-thread-row="older"');
   });
 
   it.each([

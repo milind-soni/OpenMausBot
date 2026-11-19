@@ -2398,11 +2398,11 @@
   "sidebar.archived.restoredOne": "1 bot restored",
   "sidebar.archived.restoredMany": "{count} bots restored",
   "sidebar.resize": "Resize sidebar",
-  "sidebar.toolsLayout.title": "Tools layout",
-  "sidebar.toolsLayout.subtitle": "Show Routines, Triggers, and Team map as rows or as one row of icons. As a column of avatars, the sidebar always shows icons.",
-  "sidebar.toolsLayout.rows": "Rows",
-  "sidebar.toolsLayout.toolbar": "Toolbar",
-  "sidebar.toolsLayout.chooseAria": "Choose tools layout",
+
+
+
+
+
   "sidebar.new": "New",
   "sidebar.newOrShare": "New or share",
   "sidebar.servers": "Servers",
@@ -2432,7 +2432,7 @@
   "sidebar.nav.teamMap": "Team map",
   "sidebar.nav.automations": "Automations",
   "sidebar.nav.connectedApps": "Connected apps",
-  "sidebar.connectApps": "Connect apps",
+
   "sidebar.tools": "Tools",
   "sidebar.section.expand": "Expand {name}",
   "sidebar.section.collapse": "Collapse {name}",

@@ -2,7 +2,6 @@ import { SidebarInboxButton } from "./SidebarInboxButton";
 import { useRef } from "react";
 
 import { cn } from "@/lib/cn";
-import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { useStore } from "@/state/store";
 
 import { AccountMoveStatus, useAccountMoveLine } from "./AccountMove";
@@ -10,8 +9,6 @@ import { CloudRoomCard } from "./CloudRoomCard";
 import { CloudUsageCard } from "./CloudUsageMeter";
 import { endCloudHowTo, useWorkspacePlace, type WorkspacePlace } from "./DesktopWorkspaceSwitcher";
 import { SidebarConnectApps } from "./SidebarConnectApps";
-import { SidebarBottomButtons, SidebarFooterNav } from "./SidebarFooterNav";
-import { phoneSettingsAction, SidebarPhoneButton } from "./SidebarPhoneButton";
 import { SidebarProfileMenu, useSimpleAccount, type ArchivedBots } from "./SidebarProfileMenu";
 import { UpdateIndicator } from "./UpdateIndicator";
 
@@ -26,7 +23,7 @@ export function SidebarPlaceStatus({ place, className }: { place: WorkspacePlace
   return null;
 }
 
-function SimpleSidebarFooter({ owner, archived }: { owner: string | null; archived?: ArchivedBots }) {
+export function SidebarFooter({ owner = null, archived }: { owner?: string | null; archived?: ArchivedBots }) {
   const { state } = useStore();
   const place = useSimplePlace();
   const account = useSimpleAccount(place, owner, archived);
@@ -46,45 +43,6 @@ function SimpleSidebarFooter({ owner, archived }: { owner: string | null; archiv
         <SidebarConnectApps />
         <UpdateIndicator className="size-9" />
       </div>
-    </div>
-  );
-}
-
-export function SidebarFooter({ density, simple = false, owner = null, archived, toolsCollapsed, onToggleTools }: {
-  density: SidebarDensity;
-  simple?: boolean;
-  owner?: string | null;
-  archived?: ArchivedBots;
-  toolsCollapsed: boolean;
-  onToggleTools?: () => void;
-}) {
-  const { dispatch } = useStore();
-  if (simple) return <SimpleSidebarFooter owner={owner} archived={archived} />;
-  return (
-    <div className={cn("pb-3 pt-2", density === "icons" ? "flex flex-col items-center gap-1 px-2" : "px-3")}>
-      <SidebarFooterNav density={density} collapsed={toolsCollapsed} onToggleCollapsed={onToggleTools} />
-      {density === "icons" ? (
-        <>
-          <SidebarPhoneButton density={density} onOpen={() => dispatch(phoneSettingsAction())} />
-          <div className="flex flex-col items-center justify-center gap-1">
-            <UpdateIndicator />
-            <SidebarProfileMenu iconOnly />
-            <SidebarInboxButton className="size-[46px]" />
-          </div>
-        </>
-      ) : (
-        <>
-          <CloudRoomCard />
-          <CloudUsageCard />
-          <div className="flex items-center gap-1 not-first:mt-3">
-            <div className="min-w-0 flex-1">
-              <SidebarProfileMenu />
-            </div>
-            <SidebarInboxButton />
-            <SidebarBottomButtons />
-          </div>
-        </>
-      )}
     </div>
   );
 }

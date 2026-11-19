@@ -68,14 +68,14 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe("bot-first sidebar", () => {
-  it.each([false, true])("uses the selected mode for bot and room tool previews (advanced: %s)", (advanced) => {
+  it.each([false, true])("uses the same bot and room tool previews (advanced: %s)", (advanced) => {
     fixture.advanced = advanced;
     fixture.showThreads = false;
     const messages: Bot["messages"] = [{ id: "step", role: "bot", kind: "activity", at: 1, tool: { name: "mcp__omb__computer_batch", ok: true } }];
     const candidate = { ...bot, messages, tasks: [], projects: [] };
     const group: Group = { id: "room", threadId: "room-thread", name: "Team", memberIds: [bot.id], messages, defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
-    const expected = advanced ? "mcp__omb__computer_batch" : "Use the screen";
-    const other = advanced ? "Use the screen" : "mcp__omb__computer_batch";
+    const expected = "Use the screen";
+    const other = "mcp__omb__computer_batch";
     for (const markup of [
       renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate))),
       renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() })),
@@ -86,10 +86,10 @@ describe("bot-first sidebar", () => {
   });
 
   it.each([
-    { advanced: true, enabled: true, density: "comfortable", size: 32, spacing: ["gap-2", "py-2", "pl-6"] },
-    { advanced: true, enabled: true, density: "icons", size: 44, spacing: ["justify-center", "px-1", "py-1.5"] },
-    { advanced: true, enabled: false, density: "comfortable", size: 44, spacing: ["gap-3", "py-2", "pl-2.5", "pr-9"] },
-    { advanced: false, enabled: false, density: "comfortable", size: 42, spacing: ["gap-2", "rounded-[8px]", "pl-2", "pr-2", "md:h-[54px]"] },
+    { advanced: true, enabled: true, density: "comfortable", size: 42, spacing: ["gap-2", "rounded-[8px]", "ps-6", "pe-2", "md:h-[54px]"] },
+    { advanced: true, enabled: true, density: "icons", size: 36, spacing: ["h-[54px]", "justify-center"] },
+    { advanced: true, enabled: false, density: "comfortable", size: 42, spacing: ["gap-2", "rounded-[8px]", "ps-2", "pe-2", "md:h-[54px]"] },
+    { advanced: false, enabled: false, density: "comfortable", size: 42, spacing: ["gap-2", "rounded-[8px]", "ps-2", "pe-2", "md:h-[54px]"] },
     { advanced: false, enabled: false, density: "icons", size: 36, spacing: ["h-[54px]", "justify-center"] },
   ] as const)("sizes bot portraits and row spacing in $density density with threads $enabled (advanced $advanced)", ({ advanced, enabled, density, size, spacing }) => {
     fixture.advanced = advanced;
@@ -128,24 +128,15 @@ describe("bot-first sidebar", () => {
     });
   }
 
-  it.each([false, true])("uses 14px medium names in Simple comfortable rows and keeps 15px semibold otherwise (advanced %s)", (advanced) => {
+  it.each([false, true])("uses 14px medium names in Simple comfortable rows in both modes (advanced %s)", (advanced) => {
     fixture.advanced = advanced;
     fixture.showThreads = false;
     const markup = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...bot, tasks: [], projects: [] })));
     const name = markup.match(/<span class="flex min-w-0 grow items-center gap-1\.5 truncate text-ink ([^"]*)"/)?.[1];
-    expect(name).toBe(advanced ? "text-[15px] font-semibold leading-5" : "text-[14px] font-medium leading-5");
+    expect(name).toBe("text-[14px] font-medium leading-5");
     expect(markup).toContain("truncate text-[13px] leading-[18px]");
   });
 
-  it("puts the bot's role in its name line in Advanced mode", () => {
-    fixture.advanced = true;
-    const markup = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...bot, title: "Research" })));
-    const nameLine = markup.match(/<span class="flex min-w-0 grow items-center gap-1\.5 truncate text-ink [^"]*">([\s\S]*?)<\/span><\/span><\/span>/)?.[1] ?? "";
-    expect(nameLine.indexOf(">Atlas<")).toBeGreaterThan(-1);
-    expect(nameLine.indexOf('data-testid="bot-role"')).toBeGreaterThan(nameLine.indexOf(">Atlas<"));
-    expect(nameLine).toContain("Research");
-    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable")))).not.toContain('data-testid="bot-role"');
-  });
 
   it("ends a Simple row's preview line with its engine's faded mark, puts the unread dot at the name line's top right where ⋯ shows, and never moves the name", () => {
     fixture.showThreads = false;
@@ -164,7 +155,7 @@ describe("bot-first sidebar", () => {
     expect(line.slice(0, line.indexOf("data-provider-mark"))).not.toContain("title=");
     expect(String(findElement(tree, "data-sidebar-bot-row", bot.id)!.props.className)).not.toContain("group-hover:pr-9");
     expect(markup).not.toContain("group-hover:pe-7");
-    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*end-\[3px\] top-1\.5 size-6 translate-y-0\b/);
+    expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*end-\[3px\] top-1\.5 flex size-6\b/);
   });
 
   it("fades the collapsed rail's engine badge in both modes", () => {
@@ -238,16 +229,16 @@ describe("bot-first sidebar", () => {
     expect(advanced).not.toContain("focus-visible:ring-accent/60");
   });
 
-  it("hides even the selected Simple row's actions until hover or focus, where Advanced keeps them shown", () => {
+  it("hides the selected row’s actions until hover or focus in both modes", () => {
     fixture.showThreads = false;
     fixture.state = { ...fixture.state, selectedId: bot.id, activeView: "chat" };
     const candidate = { ...bot, tasks: [], projects: [] };
     const simple = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
     expect(simple).toContain("[--row:var(--color-raised)]");
-    expect(simple).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bpointer-events-none opacity-0 group-hover:pointer-events-auto/);
+    expect(simple).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bpointer-events-none.* opacity-0.*group-hover:pointer-events-auto/);
     expect(simple).toContain('class="flex items-baseline justify-between gap-2 pe-7 group-hover:pe-[3.25rem] group-focus-within:pe-[3.25rem] touch:pe-[3.25rem] max-md:touch:pe-7"');
     fixture.advanced = true;
-    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bpointer-events-auto opacity-100/);
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*\bpointer-events-none.* opacity-0/);
   });
 
   it.each(densities)("marks a room as one place instead of its members' faces, where a two-bot channel keeps both faces (%s)", (density) => {
@@ -304,8 +295,8 @@ describe("bot-first sidebar", () => {
   it.each([
     { advanced: false, density: "comfortable", slot: "size-9", spacing: ["gap-2", "rounded-[8px]", "pl-2", "pr-2", "md:h-[54px]"], name: "font-medium", preview: "text-[13px]" },
     { advanced: false, density: "icons", slot: "size-9", spacing: ["h-[54px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
-    { advanced: true, density: "icons", slot: "size-12", spacing: ["justify-center", "px-1", "py-1.5"], name: "font-semibold", preview: "text-[11px]" },
-    { advanced: true, density: "comfortable", slot: "size-8", spacing: ["gap-2", "py-1.5", "pl-6", "pr-9"], name: "font-semibold", preview: "text-[11px]" },
+    { advanced: true, density: "icons", slot: "size-9", spacing: ["h-[54px]", "justify-center"], name: "font-semibold", preview: "text-[11px]" },
+    { advanced: true, density: "comfortable", slot: "size-9", spacing: ["gap-2", "rounded-[8px]", "pl-2", "pr-2", "md:h-[54px]"], name: "font-medium", preview: "text-[13px]" },
   ] as const)("sizes group chat rows in $density density (advanced $advanced)", ({ advanced, density, slot, spacing, name, preview }) => {
     fixture.advanced = advanced;
     const group: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
@@ -328,7 +319,7 @@ describe("bot-first sidebar", () => {
     };
     const markup = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", queuedBot)));
     const queuedDot = markup.match(/<span[^>]*data-testid="queued-dot"[^>]*>/)?.[0] ?? "";
-    expect(queuedDot).toContain("size-2.5");
+    expect(queuedDot).toContain("size-2");
     expect(queuedDot).toContain("bg-ink-secondary");
     expect(queuedDot).not.toContain("size-4");
     expect(queuedDot).not.toContain("size-5");
@@ -376,29 +367,13 @@ describe("bot-first sidebar", () => {
   });
 
   it.each(densities)("keeps selection separate from expansion in %s density", (density) => {
+    fixture.advanced = true;
     fixture.state.selectedId = bot.id;
     const markup = renderToStaticMarkup(createElement(BotListItem, rowProps(density)));
     expect(markup).not.toContain("data-sidebar-thread-row");
-    if (density !== "icons") expect(markup).toContain('aria-label="Expand Atlas threads" aria-expanded="false"');
+    expect(markup.includes('aria-expanded="false" aria-label="Expand Atlas threads"')).toBe(density !== "icons");
   });
 
-  it.each(densities)("with Advanced threads off, hides thread browsing and creation but keeps attention accessible in %s density", (density) => {
-    fixture.advanced = true;
-    fixture.showThreads = false;
-    const markup = renderToStaticMarkup(createElement(BotListItem, rowProps(density)));
-    expect(markup).not.toContain("data-sidebar-thread-row");
-    expect(markup).not.toContain("data-sidebar-folder-row");
-    expect(markup).not.toContain("Idle history");
-    expect(markup).not.toContain("Quiet folder");
-    expect(markup).not.toContain("New thread");
-    expect(markup).not.toContain("New folder");
-    expect(markup).not.toContain("Expand Atlas threads");
-    expect(markup).toContain('data-testid="waiting-dot"');
-    for (const id of ["approval", "working", "queued", "unread"]) expect(markup).toContain(`data-sidebar-activity-row="${id}"`);
-    expect(markup).toContain('aria-label="Atlas: Review permission · Waiting for you…"');
-    expect(markup).toContain('aria-label="Atlas: Next job · Queued"');
-    expect(markup).toContain('aria-label="Atlas: Finished reply · Unread"');
-  });
 
   it("removes child controls and portals from a retained hidden folder list", () => {
     const markup = renderToStaticMarkup(createElement(BotThreadList, { ...rowProps("comfortable"), selected: true, hidden: true }));
@@ -547,14 +522,6 @@ describe("bot-first sidebar", () => {
   });
 
   it.each(densities)("lists the bot with no thread tree in Simple mode, only a row for each thread that waits on the person, keeping its dots, in %s density", (density) => {
-    // Its threads were left expanded in Advanced mode.
-    fixture.advanced = true;
-    let tree: ReactNode;
-    function Capture() { tree = botRow(rowProps(density)); return tree; }
-    renderToStaticMarkup(createElement(Capture));
-    findElement(tree, "aria-label", "Expand Atlas threads")?.props.onClick!({} as MouseEvent);
-    if (density !== "icons") expect(renderToStaticMarkup(createElement(BotListItem, rowProps(density)))).toContain('aria-label="Atlas threads"');
-    fixture.advanced = false;
     fixture.showThreads = false;
     const markup = renderToStaticMarkup(createElement(BotListItem, rowProps(density, bot)));
     expect(markup).toContain(`data-sidebar-bot-row="${bot.id}"`);
@@ -636,7 +603,7 @@ describe("activity-only escape hatch", () => {
     expect(markup).toContain('data-sidebar-activity-row="unread"');
   });
 
-  it("offers a running routine's thread under its bot in both modes, also beside an open thread tree, and drops it once the run ends", () => {
+  it("offers a running routine's thread under its bot in both modes, and drops it once the run ends", () => {
     const runner: Bot = { ...bot, unread: false, threadId: "main", tasks: [
       { threadId: "main", title: "Main chat", createdAt: 1 },
       { threadId: "run", title: "Morning report", createdAt: 2, routineRunId: "run-1", busy: true, activity: "working" },
