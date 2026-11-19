@@ -532,7 +532,11 @@ function posixTarget(word: string, host: Host): FloorVerdict | null {
 
 /** posixTarget for a cmd or PowerShell path. `percent`: a cmd command, where `%NAME%` expands anywhere. */
 function windowsTarget(word: string, percent: boolean, host: Host): FloorVerdict | null {
-  const expanded = percent ? word.replace(/%([^%\s]+)%/g, (_match, name: string) => WINDOWS_VARIABLES[name.toLowerCase()] ?? DYNAMIC) : word;
+  // Windows spells the home directory %HOMEDRIVE%%HOMEPATH% as well as %USERPROFILE%.
+  const expanded = percent
+    ? word.replace(/%homedrive%%homepath%/gi, "%USERPROFILE%")
+      .replace(/%([^%\s]+)%/g, (_match, name: string) => WINDOWS_VARIABLES[name.toLowerCase()] ?? DYNAMIC)
+    : word;
   if (expanded.includes(DYNAMIC)) return null;
   const fromHome = expanded.startsWith(HOME);
   const path = (fromHome ? expanded.slice(1) : expanded).replace(/\//g, "\\");
