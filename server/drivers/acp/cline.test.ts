@@ -210,7 +210,19 @@ describe("Cline ACP driver", () => {
     expect(pass.limit).toBe("model");
     expect(pass.limitModels).toContain("cline-pass/glm-5.3");
     expect(pass.limitModels!.some((model) => model.startsWith("cline-free/"))).toBe(false);
-    expect(CLINE_SUPPORT.limitFacts!("You have reached your weekly Clinepass limit.", "cline-default")).toEqual({ limit: "engine" });
+    expect(CLINE_SUPPORT.limitFacts!("This Cline account has reached its usage limit.", undefined)).toEqual({ limit: "engine" });
+  });
+
+  it("holds Cline default with the ClinePass models when the saved ClinePass provider runs out", () => {
+    const failure = clinePlanLimit(new Error("You have reached your weekly Clinepass limit. The limit resets in 8h 30m, please try again later."))!;
+    expect(failure.message).toMatch(/^Your ClinePass allowance has run out, which resets .*pick a free Cline model or another AI/);
+    // CLINE_MODEL unset: resolveTurnModel gives no model for Cline default.
+    const facts = CLINE_SUPPORT.limitFacts!(failure.message, undefined);
+    expect(facts.limit).toBe("model");
+    expect(facts.limitModels).toContain("cline-default");
+    expect(facts.limitModels).toContain("cline-pass/glm-5.3");
+    expect(facts.limitModels!.some((model) => model.startsWith("cline-free/"))).toBe(false);
+    expect(CLINE_SUPPORT.limitFacts!(clinePlanLimit(new Error("You have reached your weekly Codex limit."))!.message, undefined)).toEqual({ limit: "engine" });
   });
 
   it("says plainly that ClinePass models need a subscription", () => {

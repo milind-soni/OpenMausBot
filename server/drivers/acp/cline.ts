@@ -76,8 +76,15 @@ export function clinePlanLimit(error: unknown, now = Date.now()): AcpReportedFai
   // Cline rounds the wait down to the minute.
   const resetsAt = RESET_IN.test(text) ? now + delayMs + 60_000 : undefined;
   const failure = engineFailure("Cline", "", { kind: "usage_limit", status: null, resetsAt })!;
-  return new AcpReportedFailure({ ...failure, ...(resetsAt === undefined ? {} : { limitResetsAt: resetsAt }) }, true);
+  const facts = { ...failure, ...(resetsAt === undefined ? {} : { limitResetsAt: resetsAt }) };
+  if (!/\bclinepass\b/i.test(text)) return new AcpReportedFailure(facts, true);
+  // limitFacts reads this message to hold only the ClinePass models, so the generic localized text cannot stand in.
+  const message = failure.message.replace("This Cline account has reached its usage limit", PASS_LIMIT)
+    .replace("switch this bot to another AI", "pick a free Cline model or another AI");
+  return new AcpReportedFailure({ ...facts, message, text: undefined }, true);
 }
+
+const PASS_LIMIT = "Your ClinePass allowance has run out";
 
 /** Cline 3.0.74: "No access to ClinePass subscription models yet. Subscribe to ClinePass, ...: https://app.cline.bot/..." */
 const NO_PASS = /\bNo access to ClinePass subscription models\b/i;
@@ -172,8 +179,9 @@ export const CLINE_SUPPORT: AcpSupport = {
   },
   reportedFailure: clineReportedFailure,
   // The ClinePass allowance holds only the ClinePass models; free models keep running.
-  limitFacts: (_text, model) => clineTierProvider(model) === "cline-pass"
-    ? { limit: "model", limitModels: [...new Set([model!, ...clinePassModels()])] }
+  // Cline default runs the saved provider's model, so a ClinePass limit on it holds the default too.
+  limitFacts: (text, model) => clineTierProvider(model) === "cline-pass" || text.startsWith(PASS_LIMIT)
+    ? { limit: "model", limitModels: [...new Set([clineTierProvider(model) ? model! : DEFAULT_OPTION.id, ...clinePassModels()])] }
     : { limit: "engine" },
 };
 
