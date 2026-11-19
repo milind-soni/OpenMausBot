@@ -123,7 +123,7 @@ import { useUnreadDivider } from "@/hooks/use-unread-divider";
 import { NewMessagesDivider } from "./NewMessagesDivider";
 import { unreadMessageIds } from "@/lib/unread-divider"; import { UnreadContextOverlay } from "./UnreadContextOverlay";
 import { appendComposerDraft, appendDraftAttachments, useReplyDraft } from "@/lib/drafts";
-import { botLineText, localDay, transcriptLookups, type TranscriptLookups } from "@/lib/transcript-derivations"; import { DaySeparator } from "./DaySeparator";
+import { canEditTypedMessage, botLineText, localDay, transcriptLookups, type TranscriptLookups } from "@/lib/transcript-derivations"; import { DaySeparator } from "./DaySeparator";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { EmptyChat } from "./ChatEmptyState";
 import { PinnedMessagesMenu, pinnedPreview } from "./PinnedMessagesMenu";
@@ -795,7 +795,7 @@ const MessagesList = memo(function MessagesList({
 
 const CHATHEAD_PILL = `flex min-w-0 items-center gap-2 rounded-full py-0.5 pl-1.5 text-ink ${ELEVATED_FLOAT}`;
 
-export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = false }: { bot: Bot; inForkPanel?: boolean }) {
+export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = false, onOpenV2 }: { bot: Bot; inForkPanel?: boolean; onOpenV2?: () => void }) {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const state = useStoreSelector((s) => ({ computerStart: s.computerStarts[profile.id], mascotMotion: s.mascotMotion?.botId === profile.id ? s.mascotMotion : null, instances: s.instances, config: s.config, focusMessage: s.focusMessage, forkPanelOpen: s.forkPanel !== null, settingsOpen: s.settingsOpen, computerOpen: s.computerOpen, error: s.error, notice: s.notice }), sameFields), dispatch = useStoreDispatch(), store = useStoreRef();
   const showThreads = useShowThreads();
@@ -905,13 +905,6 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
     const said = messages.filter((m) => m.role === "user" && m.kind === "text" && !peerLine(m));
     return [said.at(-1), said.findLast((m) => !m.reaction)];
   }, [messages]);
-  const lastTypedMessageHasAttachments = useMemo(() => {
-    if (!lastTypedMessage?.text) return false;
-    const cited = splitTranscriptCitations(lastTypedMessage.text);
-    const attached = splitTranscriptAttachments(cited.display);
-    return cited.citations.length > 0 || attached.images.length > 0 || attached.files.length > 0;
-  }, [lastTypedMessage]);
-
   const lastMessage = lastNonReceipt(messages);
   const live = useTurnLive(bot.threadId), now = useTurnNow(bot, messages, lastMessage, live, advanced);
   const toolInFlight = (lastMessage?.kind === "activity" && lastMessage.tool?.ok === undefined) || Boolean(live.status && live.status.activity !== "thinking" && live.status.activity !== "reply");
@@ -1084,6 +1077,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
               <span className="@max-4xl/chathead:hidden">{t("chat.stop")}</span>
             </button>
           )}
+          {onOpenV2 && <button type="button" aria-pressed={false} style={headerNoDragStyle} onClick={onOpenV2} className="rounded-full border border-hairline px-2 py-1 text-xs">Chat V2</button>}
           <ThreadContextWarning bot={bot} messages={messages} />
           {phone && <UsageAlert engine={bot.modelSelection?.instanceId} />}
           {/* The model and the bot's computer stay in view in both modes; Simple mode moves only ⋯ into the bot panel. */}
@@ -1254,7 +1248,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
         onClearReply={clearReply}
         onConsumeReply={consumeReply}
         onRestoreReply={restoreReply}
-        onEditLast={lastTypedMessage && !lastTypedMessageHasAttachments && !bot.busy && !lastTypedMessage.id.startsWith("optimistic-")
+        onEditLast={lastTypedMessage && !bot.busy && canEditTypedMessage(lastTypedMessage)
           ? () => setEditingId(lastTypedMessage.id)
           : undefined}
       />

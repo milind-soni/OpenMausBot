@@ -19,6 +19,7 @@ import { cloudAccountBridge, openCloudOnWeb } from "@/lib/cloud-add-web";
 import { parseComputerHelp } from "@/lib/computer-control";
 import { viewerClosedRelease } from "@/components/computer-takeover";
 import { Sidebar } from "@/components/Sidebar";
+import { ChatV2 } from "@/components/chat-v2/ChatV2";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { ForkPanel } from "@/components/ForkPanel";
@@ -91,6 +92,7 @@ import { AppPreviewPanel } from "@/components/published-apps/AppPreviewPanel";
 import { refreshPublishedApps } from "@/lib/own-published-apps";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
+  const [chatV2, setChatV2] = useState(false);
   const { state, dispatch } = useStore();
   useTeamChats(state.config);
   const needsYou = needsYouVersion(state.bots, state.groups, state.notifications);
@@ -419,7 +421,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       ) : group ? (
         <GroupView key={group.id} group={group} />
       ) : bot ? (
-        <ChatView bot={bot} />
+        chatV2 ? <ChatV2 key={bot.threadId} profile={bot} onClose={() => setChatV2(false)} /> : <ChatView bot={bot} onOpenV2={() => setChatV2(true)} />
       ) : noEngines ? (
         <NoEngines />
       ) : (

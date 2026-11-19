@@ -264,18 +264,18 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   }, [olderPending]);
 
   const triggerAutoEarlier = useCallback(() => {
-    if (expandingRef.current) return;
     if (hiddenCount > 0) {
-      expandingRef.current = true;
+      // A queued observer callback can still carry the previous window after a prepend.
+      if (windowRef.current.key !== transcriptKey || windowRef.current.start !== transcriptWindow.start) return;
       holdRowForPrepend();
       const start = expandWindowStart(startIndex);
       setTranscriptWindow((w) => ({ ...w, start }));
-    } else if (hasMore && !olderPending) {
+    } else if (hasMore && !olderPending && !expandingRef.current) {
       expandingRef.current = true;
       holdRowForPrepend();
       dispatch({ type: "loadOlderMessages", threadId });
     }
-  }, [hiddenCount, startIndex, hasMore, olderPending, threadId, dispatch, transcriptKey]);
+  }, [hiddenCount, startIndex, hasMore, olderPending, threadId, dispatch, transcriptKey, transcriptWindow.start]);
 
   useEffect(() => {
     const sentinel = topSentinelRef.current;

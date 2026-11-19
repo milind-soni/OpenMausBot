@@ -1,4 +1,8 @@
 {
+  "chat.v2.sent": "已傳送給 {names}",
+  "chat.v2.received": "收到來自 {names} 的訊息",
+  "chat.v2.bots": "{count} 個 Bot",
+  "chat.v2.records": "{count} 筆協作紀錄",
   "connectedWorkspaces.localTitle": "這台電腦上的環境",
   "connectedWorkspaces.missing": "遺失",
   "connectedWorkspaces.current": "目前",

@@ -1,8 +1,17 @@
 import type { Message } from "@/state/store";
 import { activeLocale, t } from "@/lib/i18n";
 import { lastNonReceipt } from "@/lib/receipts";
+import { splitTranscriptCitations } from "@/lib/citations";
+import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { noticeText } from "@/lib/activity-text";
 import type { ServerTextParams } from "../../shared/server-text";
+
+export function canEditTypedMessage(message: Message): boolean {
+  if (message.attachments?.length || message.id.startsWith("optimistic-")) return false;
+  const cited = splitTranscriptCitations(message.text ?? "");
+  const attached = splitTranscriptAttachments(cited.display);
+  return !cited.citations.length && !attached.images.length && !attached.files.length;
+}
 
 export interface TranscriptLookups {
   editVersions(message: Message): readonly Message[] | undefined;
