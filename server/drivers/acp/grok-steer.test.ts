@@ -1,5 +1,5 @@
 // Steering a running Grok turn with a second session/prompt, against the scripted ACP peer.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ import { ensureDirs } from "../../config.ts";
 import type { AnyProviderDriver, ProviderInstance } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
-import { ensureGrokSteer, GrokAgentDriver } from "./grok.ts";
+import { ensureGrokSteer, GROK_STEER, GrokAgentDriver } from "./grok.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
 
@@ -156,5 +156,45 @@ describe("ensureGrokSteer", () => {
   it("leaves a signed-out home alone", () => {
     ensureGrokSteer(env());
     expect(existsSync(home())).toBe(false);
+  });
+
+  it("keeps a choice written with a quoted key or a single-quoted value", () => {
+    signedIn();
+    for (const text of ['[ui]\n"follow_up_behavior" = "queue"\n', "[ui]\nfollow_up_behavior = 'steer'\n"]) {
+      writeFileSync(config(), text);
+      ensureGrokSteer(env());
+      expect(readFileSync(config(), "utf8")).toBe(text);
+    }
+  });
+
+  it("adds the key under a [ui] header that has a comment, or that ends the file without a newline", () => {
+    signedIn();
+    writeFileSync(config(), '[ui] # display settings\nscreen_mode = "minimal"\n');
+    ensureGrokSteer(env());
+    expect(readFileSync(config(), "utf8")).toBe('[ui] # display settings\nfollow_up_behavior = "steer"\nscreen_mode = "minimal"\n');
+
+    writeFileSync(config(), "[ui]");
+    ensureGrokSteer(env());
+    expect(readFileSync(config(), "utf8")).toBe('[ui]\nfollow_up_behavior = "steer"\n');
+  });
+
+  it("writes nothing when ui is defined another way, or the file cannot be read with confidence", () => {
+    signedIn();
+    for (const text of ['ui.screen_mode = "minimal"\n', 'ui = { screen_mode = "minimal" }\n', 'note = """\n[ui]\n"""\n']) {
+      writeFileSync(config(), text);
+      ensureGrokSteer(env());
+      expect(readFileSync(config(), "utf8"), text).toBe(text);
+    }
+  });
+
+  it("reads a single-quoted steer, and leaves no temporary file behind", () => {
+    signedIn();
+    writeFileSync(config(), "[ui]\nfollow_up_behavior = 'steer'\n");
+    expect(GROK_STEER.enabled!(env())).toBe(true);
+    writeFileSync(config(), '[other]\nfollow_up_behavior = "steer"\n');
+    expect(GROK_STEER.enabled!(env())).toBe(false);
+    ensureGrokSteer(env());
+    expect(readFileSync(config(), "utf8")).toBe('[other]\nfollow_up_behavior = "steer"\n\n[ui]\nfollow_up_behavior = "steer"\n');
+    expect(readdirSync(home()).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 });

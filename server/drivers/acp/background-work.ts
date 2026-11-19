@@ -7,8 +7,9 @@ export interface AcpBackgroundWork {
   wakes(update: Record<string, any> | undefined): boolean;
   /** The session a turn resumes: its stored cursor, or with none whatever ending the work left behind for this live session. */
   resumeCursor(cursor: unknown, live: string | null, session?: object): string | null;
-  /** Ends the session's background work and any turn it woke, keeping its history. Never throws. */
-  end(session: { sessionId: string | null; cwd: string; initResult: any }, request: Request): Promise<void>;
+  /** Ends the session's background work and any turn it woke, keeping its history. Never throws. Resolves false when the work
+   * could not be ended and may still wake turns; the driver then closes the session's process. */
+  end(session: { sessionId: string | null; cwd: string; initResult: any }, request: Request): Promise<boolean | void>;
 }
 
 /** The session/update kinds a turn streams; titles, usage, compaction and command lists are not one. */
@@ -27,13 +28,17 @@ export function closeEndsBackgroundWork(): AcpBackgroundWork {
     end: async (session, request) => {
       const sessionId = session.sessionId;
       if (!sessionId || !session.initResult?.agentCapabilities?.sessionCapabilities?.close) return;
-      try {
-        await request("session/close", { sessionId }, CLOSE_WAIT_MS);
-        closed.set(session, sessionId);
-        session.sessionId = null;
-      } catch {
-        // The session keeps its background work, as before.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await request("session/close", { sessionId }, CLOSE_WAIT_MS);
+          closed.set(session, sessionId);
+          session.sessionId = null;
+          return true;
+        } catch {
+          // Tried again once; the caller hears of a second failure.
+        }
       }
+      return false;
     },
   };
 }

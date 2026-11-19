@@ -989,7 +989,7 @@ function handle(msg: any) {
       break;
     }
     case "session/close":
-      endWokenStep(msg.params?.sessionId);
+      if (process.env.FAKE_ACP_SESSION_CLOSE !== "error") endWokenStep(msg.params?.sessionId);
       if (process.env.FAKE_ACP_CLOSE_ENDS_JOBS === "1") {
         const job = backgroundJobs.get(String(msg.params?.sessionId))?.job;
         if (job) clearTimeout(job);

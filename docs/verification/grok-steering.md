@@ -20,16 +20,48 @@ OpenMausBot adds the line itself, for a signed-in Grok, when a turn starts. A
 
 ## Fixture check
 
-Use an isolated home with a copy of the sign-in, never `~/.grok`:
+`control-omb.ts launch` starts the fake engine only and does not pass `GROK_HOME`, so
+the real CLI needs a server started by hand. Use a temporary data directory and a copy
+of the sign-in, never `~/.grok`:
 
-```sh
-GROK_HOME=<temp dir holding a copy of auth.json> node --experimental-strip-types scripts/control-omb.ts launch
-```
+1. Make a data directory `$D` with `$D/grokhome/` holding a copy of `~/.grok/auth.json`
+   and an empty `$D/tmp/`.
+2. Write `$D/config.json` (the server reads `config.json` from `OMB_DATA_DIR`):
 
-The launcher's fixture has only the fake engine, so for the real CLI start the
-server by hand with an instance `{ driver: "grokAgent", config: { cli: <grok> },
-environment: { GROK_HOME } }` in the fixture's `config.json`, and give Grok's
-shell tool a working shell. File tools need none.
+   ```json
+   {
+     "features": { "smartSetupChoices": false },
+     "instances": {
+       "grok": {
+         "driver": "grokAgent",
+         "displayName": "Grok (real)",
+         "config": { "cli": "<absolute path of the grok executable>", "fullAuto": true },
+         "environment": { "GROK_HOME": "<$D>/grokhome" }
+       }
+     }
+   }
+   ```
+
+3. Start the server with the same isolated environment the launcher builds, on a port of
+   your choice, and serve the built UI (`pnpm build` first). Run from the repository root:
+
+   ```js
+   // start-grok-fixture.mts, run with: node --experimental-strip-types start-grok-fixture.mts
+   import { spawn } from "node:child_process";
+   import { verificationServerArgs, verificationServerEnvironment } from "./scripts/control-omb.ts";
+
+   const dataDir = process.env.D, port = 19975;
+   const env = verificationServerEnvironment(process.env, dataDir, port);
+   env.OMB_STATIC_DIR = `${process.cwd()}/dist`;
+   spawn(process.execPath, verificationServerArgs(env), { env, stdio: "inherit" });
+   ```
+
+4. Open `http://127.0.0.1:19975` and create the first bot; it uses the Grok instance.
+
+Grok's shell tool needs a shell the isolated environment can find, so use its file tools
+for the check below.
+
+Then:
 
 1. Ask the bot for 8 files, `step1.txt` to `step8.txt`, one write per file.
 2. After a few exist, send "do not create any more files, reply MANGO".
@@ -38,7 +70,11 @@ shell tool a working shell. File tools need none.
 
 Automated: `server/drivers/acp/grok-steer.test.ts` against the scripted peer
 (`FAKE_ACP_MODE=grok-steer`), including `ensureGrokSteer` on a config with no
-`[ui]`, one with `[ui]`, none at all, a `"queue"` choice and a signed-out home.
+`[ui]`, one with `[ui]`, none at all, a `"queue"` choice and a signed-out home, plus the
+spellings a TOML file allows: a quoted key, a single-quoted value, a `[ui]` header with a
+comment or at the end of the file, and `ui` defined by dotted keys or an inline table
+(never written to). The reader is `grok-follow-up.ts`; a file it cannot read with
+confidence is left untouched, and steering then stays off.
 
 ## Background subagents and commands
 
@@ -55,6 +91,16 @@ fork and no new session id.
 
 Costs: a background subagent's result is discarded, as with OpenCode; the next
 turn pays a `session/load`.
+
+When it cannot end the work:
+
+- **No `sessionCapabilities.close`.** An agent that does not advertise it gets no
+  `session/close`, and the driver leaves its background work as it was: it can still wake a
+  turn nobody prompted, and that turn runs unseen.
+- **The close fails or times out.** The driver tries it once more. If that fails too, it ends
+  the session's process (the same step it takes for a session that ignores `session/cancel`),
+  which also stops the work; the thread's next turn loads its history in a new process. If
+  even that fails, the work can keep running.
 
 Recorded on the real CLI (2026-11-19): a subagent launched in the background
 finished after the turn and Grok then ran a turn that confirmed its file; with

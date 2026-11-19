@@ -37,8 +37,22 @@ describe("close-ends background work", () => {
     expect(noClose.sessionId).toBe("s1");
 
     const failing = { sessionId: "s2" as string | null, cwd: "/w", initResult: capable };
-    await work.end(failing, async () => { throw new Error("busy"); });
+    expect(await work.end(failing, async () => { throw new Error("busy"); })).toBe(false);
     expect(failing.sessionId).toBe("s2");
     expect(work.resumeCursor(undefined, null, failing)).toBeNull();
+  });
+
+  it("retries a failed close once, and reports when the work could not be ended", async () => {
+    const work = closeEndsBackgroundWork();
+    let attempts = 0;
+    const flaky = { sessionId: "s3" as string | null, cwd: "/w", initResult: capable };
+    expect(await work.end(flaky, async () => { if (++attempts === 1) throw new Error("busy"); return {}; })).toBe(true);
+    expect(attempts).toBe(2);
+    expect(flaky.sessionId).toBeNull();
+
+    let tries = 0;
+    const stuck = { sessionId: "s4" as string | null, cwd: "/w", initResult: capable };
+    expect(await work.end(stuck, async () => { tries++; throw new Error("busy"); })).toBe(false);
+    expect(tries).toBe(2);
   });
 });

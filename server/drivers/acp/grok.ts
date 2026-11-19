@@ -1,6 +1,6 @@
 // Grok Build: the official `grok` CLI over ACP stdio (`grok … agent stdio`) on the grok.com
 // subscription login (~/.grok/auth.json), not the xAI API key. Verified against grok 1.0.0.
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse as parseYaml } from "yaml";
@@ -11,6 +11,7 @@ import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
 import { closeEndsBackgroundWork } from "./background-work.ts";
+import { readGrokFollowUp } from "./grok-follow-up.ts";
 import type { AcpPromptSteer } from "./steer.ts";
 import { bundledEngineCatalog } from "../../model-manifest/bundled.ts";
 import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
@@ -347,7 +348,7 @@ export const GROK_STEER: AcpPromptSteer = {
   kind: "prompt",
   enabled: (env) => {
     try {
-      return /^\s*follow_up_behavior\s*=\s*"steer"/m.test(readFileSync(join(grokHome(env), "config.toml"), "utf8"));
+      return readGrokFollowUp(readFileSync(join(grokHome(env), "config.toml"), "utf8")).value === "steer";
     } catch {
       return false;
     }
@@ -369,15 +370,17 @@ export function ensureGrokSteer(env: Record<string, string | undefined> = proces
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
   }
-  if (/^\s*follow_up_behavior\s*=/m.test(text)) return;
+  const found = readGrokFollowUp(text);
+  if (found.present || found.unclear || (found.insertAt === undefined && found.uiElsewhere)) return;
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
   const line = `follow_up_behavior = "steer"${eol}`;
-  const header = /^\[ui\][ \t]*\r?\n/m.exec(text);
-  const next = header
-    ? text.slice(0, header.index + header[0].length) + line + text.slice(header.index + header[0].length)
+  const next = found.insertAt !== undefined
+    ? text.slice(0, found.insertAt) + (text.slice(0, found.insertAt).endsWith("\n") ? "" : eol) + line + text.slice(found.insertAt)
     : `${text}${text && !text.endsWith("\n") ? eol : ""}${text ? eol : ""}[ui]${eol}${line}`;
   try {
-    writeFileSync(path, next);
+    const staged = `${path}.omb-${process.pid}.tmp`;
+    writeFileSync(staged, next);
+    renameSync(staged, path);
   } catch {
     // Grok then keeps queueing mid-turn messages, its default.
   }
