@@ -127,3 +127,22 @@ export function PeerExchangeView({ lines, peerName, peerBot, botName, self, onCl
     </div>
   );
 }
+
+export function PeerLabel({ peer, bots }: { peer: PeerLine; bots: readonly Bot[] }) {
+  const author = authorOf(bots, peer);
+  const how = t(PEER_HOW[peer.delivery]);
+  return (
+    <div className="mb-1 flex items-center gap-1.5 pl-0.5" data-testid="peer-label">
+      <BotAvatar
+        bot={author ?? { name: peer.name, color: "blue" }}
+        state={normalizeState(author?.mascotExpression) ?? "happy"}
+        size={20}
+        motion="none"
+        motionKey={0}
+        animated={false}
+      />
+      <span className={cn("text-[13px] font-semibold", author ? "bot-identity" : "text-ink-secondary")} data-bot-color={author?.color}>{peer.name}</span>
+      <span className="text-[12px] text-ink-tertiary">· {how}</span>
+    </div>
+  );
+}
