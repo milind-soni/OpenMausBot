@@ -347,12 +347,14 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
   }, [fileSourceKey]);
   const reloadDocument = useCallback(() => setReloadNonce((n) => n + 1), []);
 
+  const initialConfirmation = source ? null : pendingConfirmUrl;
+
   // Manage loading states & Markdown fetching
   useEffect(() => {
     clearTimers();
     setSlowWarning(false);
 
-    if (pendingConfirmUrl) {
+    if (initialConfirmation) {
       updateStatus("confirm");
       return;
     }
@@ -417,7 +419,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     return () => {
       clearTimers();
     };
-  }, [clearTimers, live, pendingConfirmUrl, reloadNonce, source, updateStatus]);
+  }, [clearTimers, initialConfirmation, live, reloadNonce, source, updateStatus]);
 
   useEffect(() => {
     const el = webviewRef.current as any;
@@ -512,8 +514,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
   const scaledW = Math.round(width * scale);
   const scaledH = Math.round(height * scale);
 
-  if (status === "confirm" && pendingConfirmUrl) {
-    return (
+  const confirmation = pendingConfirmUrl && (
       <div className="mx-auto my-auto flex max-w-[380px] flex-col items-center rounded-2xl border border-hairline/70 bg-panel p-6 text-center shadow-lg">
         <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-warning/15 text-warning">
           <ShieldAlert className="h-5 w-5" />
@@ -541,11 +542,10 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
           </button>
         </div>
       </div>
-    );
-  }
+  );
 
   if (!source || status === "empty") {
-    return (
+    return confirmation || (
       <div className="mx-auto my-auto flex max-w-[380px] flex-col items-center rounded-2xl border border-hairline/70 bg-panel p-6 text-center shadow-sm">
         <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-raised text-ink-secondary">
           <Globe className="h-5 w-5" />
@@ -605,6 +605,12 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
             : "relative overflow-hidden rounded-xl ring-1 ring-hairline bg-panel shadow-lg"
         }
       >
+        {confirmation && (
+          <div className="absolute inset-0 z-30 flex overflow-auto bg-app/80 p-3">
+            {confirmation}
+          </div>
+        )}
+
         {/* Top 2px loading bar */}
         {status === "loading" && live && (
           <div className="absolute inset-x-0 top-0 z-20 h-0.5 overflow-hidden bg-accent/20">
@@ -784,7 +790,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
               webviewRef.current = el;
             }}
             src={frameUrl}
-            style={{ width: "100%", height: "100%", border: "0", backgroundColor: "#ffffff" }}
+            style={{ width: "100%", height: "100%", border: "0", backgroundColor: "#ffffff", visibility: pendingConfirmUrl ? "hidden" : undefined }}
             // @ts-expect-error Electron webview attributes
             allowpopups="false"
             webpreferences="contextIsolation=yes, sandbox=yes"
@@ -795,6 +801,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
             ref={iframeRef}
             src={frameUrl}
             title={`${frameTitle} (${width} × ${height})`}
+            inert={Boolean(pendingConfirmUrl)}
             // HTML keeps an opaque origin. PDFs alone need the native PDF viewer,
             // which Chromium disables inside a sandbox (also exempt in server CSP).
             sandbox={source.kind === "file"
