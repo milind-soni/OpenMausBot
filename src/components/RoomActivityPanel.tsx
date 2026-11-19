@@ -160,6 +160,13 @@ export function RoomActivityPanel({
     return () => window.clearInterval(timer);
   }, [liveTimerNeeded]);
 
+  // A docked column: tell resizable panels to refit when it opens or closes.
+  useEffect(() => {
+    const refit = () => window.dispatchEvent(new CustomEvent("gbs-panel-resize", { detail: { id: "activity" } }));
+    refit();
+    return () => void requestAnimationFrame(refit);
+  }, []);
+
   const queued = group.queuedBotIds ?? [];
   const ordered = useMemo(() => [...members].sort((a, b) => {
     if (a.id === group.busyBotId) return -1;
@@ -172,7 +179,7 @@ export function RoomActivityPanel({
   const activeCount = Number(Boolean(group.busyBotId)) + queued.length;
 
   return (
-    <aside className={cn("flex h-full w-[320px] shrink-0 flex-col border-l border-hairline/40 bg-panel", className)} aria-label="Room activity">
+    <aside data-panel="activity" className={cn("flex h-full w-[320px] shrink-0 flex-col border-l border-hairline/40 bg-panel", className)} aria-label="Room activity">
       <div className="shrink-0 border-b border-hairline/40 px-4 py-3">
         <div className="flex items-center justify-between">
         <div>
