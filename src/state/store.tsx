@@ -2374,16 +2374,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
                 rawDispatch({ type: "forkPanelMessage", threadId: body.threadId, message: body.message });
               }
-              if (
-                body?.queued &&
-                typeof body.threadId === "string" &&
-                typeof body.queueId === "string"
-              ) {
-                rawDispatch({
-                  type: "optimisticMessageRemoved",
-                  threadId: body.threadId,
-                  sendId,
-                });
+              if (body?.queued && typeof body.threadId === "string" && typeof body.queueId === "string") {
+                rawDispatch({ type: "optimisticMessageRemoved", threadId: body.threadId, sendId });
                 rawDispatch({
                   type: "pendingQueued",
                   threadId: body.threadId,
@@ -2391,6 +2383,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   text: action.text,
                   reason: body.reason === "capacity" || body.reason === "group-turn" ? body.reason : undefined,
                 });
+                if (body.blockedBy === "images") wrapped({ type: "notice", notice: { kind: "steer-images", botName: null } });
               }
             })
             .catch((error) => {

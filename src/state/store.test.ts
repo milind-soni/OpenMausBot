@@ -3029,6 +3029,27 @@ describe("restoring the open conversation", () => {
       expect(seen.notice).toMatchObject({ kind: "note", text: expect.stringContaining("Nothing was stopped") });
     });
 
+    it("a Steer send that stays queued because of pictures says why", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(
+        path.replace(/\?since=[^&]*$/, "").startsWith("/api/bots/bot-1/messages")
+          ? { ok: true, queued: true, threadId: "bot-1-thread", queueId: "q-image-send", blockedBy: "images" }
+          : {},
+      ))));
+      flushSync(() => dispatch({
+        type: "send",
+        botId: "bot-1",
+        text: "see this",
+        threadId: "bot-1-thread",
+        followUp: "steer",
+        sendId: "send-image",
+      }));
+      await settle();
+      expect(seen.notice).toEqual({ kind: "steer-images", botName: null });
+    });
+
     it("the provider restores the conversation remembered on this device", async () => {
       const { stored, stream } = await boot({ [LAST_CONVERSATION_KEY]: "room-1" });
       stream.send(hello());

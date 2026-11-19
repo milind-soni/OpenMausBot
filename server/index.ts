@@ -7307,7 +7307,7 @@ async function acceptDirectSend(
         });
         if (personsOwn && !chose) personFirst.wait(threadId, {});
         if (chose === "restart") await restartForPerson(botId, threadId, trigger);
-        return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+        return { ok: true as const, queued: true as const, queueId: queued.id, threadId, ...(busyAdmission.action === "queue" && busyAdmission.blockedBy ? { blockedBy: busyAdmission.blockedBy } : {}) };
       }
       return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions);
     },
