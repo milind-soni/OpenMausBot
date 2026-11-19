@@ -1,6 +1,4 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,9 +16,6 @@ import {
   type PlanFetch,
   type PlanResponse,
 } from "./plan-usage.ts";
-import { claudeKeychainQueries } from "./drivers/claude-keychain.ts";
-import { readOpenCodeDbLogins } from "./opencode-credentials.ts";
-import { parseDeepSeekBalance } from "./deepseek-balance.ts";
 
 const SECRET = "plan-usage-fixture-secret";
 const NOW = 1_800_000_000_000;
@@ -39,7 +34,7 @@ function jsonResponse(body: unknown, status = 200): PlanResponse {
 
 /** A plan account for one driver, named as the panel names it. */
 function account(driver: PlanAccount["driver"], extras: Partial<PlanAccount> = {}): PlanAccount {
-  const name = driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : driver === "opencode" ? "OpenCode" : driver === "deepseek" ? "DeepSeek" : "Grok";
+  const name = driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : driver === "opencode" ? "OpenCode" : "Grok";
   return {
     id: driver,
     name,
@@ -271,19 +266,6 @@ describe("an OpenCode Go allowance", () => {
     expect(parseOpenCodeUsage({}).plan).toBeNull();
     expect(parseOpenCodeUsage({ usage: {} }).fiveHour.available).toBe(false);
     expect(parseOpenCodeUsage({ usage: { rolling: { status: "ok", percent: "5" } } }).fiveHour.available).toBe(false);
-  });
-});
-
-describe("the Claude keychain lookup", () => {
-  it("asks for the login saved under the user's own account before any other item of that service", () => {
-    expect(claudeKeychainQueries("Claude Code-credentials", "thi")).toEqual([
-      ["find-generic-password", "-s", "Claude Code-credentials", "-a", "thi", "-w"],
-      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
-    ]);
-  });
-
-  it("falls back to the service alone when the user name is unknown", () => {
-    expect(claudeKeychainQueries("Claude Code-credentials", null)).toEqual([["find-generic-password", "-s", "Claude Code-credentials", "-w"]]);
   });
 });
 
@@ -539,23 +521,6 @@ describe("plan usage fetcher", () => {
     ]);
   });
 
-  it("skips the usage reading for a Claude instance that runs only on an API key", async () => {
-    const accounts = planAccountsFromInstances({
-      claude: { driver: "claudeAgent" },
-      claudeApi: { driver: "claudeAgent", displayName: "Claude (API key)", access: "api", config: { requireApiKey: true } },
-    });
-    expect(accounts.find((entry) => entry.id === "claudeApi")?.noUsage).toBe(true);
-    expect(accounts.find((entry) => entry.id === "claude")?.noUsage).toBeUndefined();
-    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ five_hour: { utilization: 17 }, seven_day: { utilization: 17 } }));
-    const report = await fetchPlanUsage(accounts.filter((entry) => entry.id === "claudeApi"), {
-      fetch: fetchImpl,
-      now: () => NOW,
-      credentials: { read: async () => ({ token: SECRET, accountId: null, expired: false }) },
-    });
-    expect(report.providers).toEqual([]);
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
 /** An OpenCode instance becomes an account under the driver the panel knows. */
   it("lists an OpenCode instance under the key its environment carries", () => {
     expect(planAccountsFromInstances({
@@ -618,47 +583,6 @@ describe("plan usage fetcher", () => {
       credentials: fileCredentialReader({ now: () => NOW, env: { HOME: tmpdir() }, readText: () => JSON.stringify({ "opencode-go": { access: login } }) }),
     });
     expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(`Bearer ${login}`);
-  });
-
-  /** OpenCode v2 keeps its login in opencode.db, not auth.json: with no file entry, the database's active login is used. */
-  it("falls back to OpenCode v2's database login when auth.json has no OpenCode entry, and skips an expired one", async () => {
-    const login = "opencode-db-fixture-login";
-    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ usage: { monthly: { status: "ok", percent: 13, resetsAt: null } } }));
-    const paths: string[] = [];
-    const credentials = (expires: number) => fileCredentialReader({
-      now: () => NOW, env: { XDG_DATA_HOME: "/xdg" }, readText: () => JSON.stringify({ openrouter: { type: "api", key: "other-provider-key" } }),
-      readOpenCodeDb: (path) => { paths.push(path); return JSON.stringify({ opencode: { type: "oauth", access: login, expires } }); },
-    });
-    const report = await fetchPlanUsage([account("opencode")], { fetch: fetchImpl, now: () => NOW, credentials: credentials(NOW + 600_000) });
-    expect(paths[0]).toBe(join("/xdg", "opencode", "opencode.db"));
-    expect(fetchImpl.mock.calls[0]?.[1].headers.Authorization).toBe(`Bearer ${login}`);
-    expect(report.providers[0]).toMatchObject({ ok: true, plan: "Go", extra: [{ label: "Monthly", usedPercent: 13 }] });
-
-    const expired = await fetchPlanUsage([account("opencode")], { fetch: fetchImpl, now: () => NOW, credentials: credentials(NOW - 1) });
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(expired.providers[0]).toMatchObject({ ok: false });
-  });
-
-  /** Only the active OpenCode logins leave the database; other providers' keys and inactive rows stay put. */
-  it("reads only active OpenCode logins from the CLI's database", () => {
-    const dir = mkdtempSync(join(tmpdir(), "omb-opencode-db-"));
-    try {
-      const file = join(dir, "opencode.db");
-      const db = new DatabaseSync(file);
-      db.exec("CREATE TABLE credential (id text PRIMARY KEY, integration_id text, label text NOT NULL, value text NOT NULL, connector_id text, method_id text, active integer, time_created integer NOT NULL, time_updated integer NOT NULL)");
-      const insert = db.prepare("INSERT INTO credential VALUES (?, ?, 'x', ?, null, null, ?, 0, 0)");
-      insert.run("a", "opencode", JSON.stringify({ access: "active-login" }), 1);
-      insert.run("b", "opencode-go", JSON.stringify({ access: "inactive-login" }), null);
-      insert.run("c", "openrouter", JSON.stringify({ key: "other-provider-key" }), 1);
-      db.close();
-      const text = readOpenCodeDbLogins(file) ?? "";
-      expect(JSON.parse(text)).toEqual({ opencode: { access: "active-login" } });
-      expect(text).not.toContain("inactive-login");
-      expect(text).not.toContain("other-provider-key");
-      expect(readOpenCodeDbLogins(join(dir, "missing.db"))).toBeNull();
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
   });
 
   /** A 200 that carries no meter is an unreadable answer, not an empty allowance. */
@@ -746,71 +670,5 @@ describe("plan usage fetcher", () => {
     expect((await load({})).providers.map((row) => row.id)).toEqual(["claude"]);
     expect((await load({ usageMeter: false })).providers).toEqual([]);
     expect((await load({})).providers.map((row) => row.id)).toEqual(["claude"]);
-  });
-
-  it("reports nothing for a Codex login made with an API key, which has no plan quota", async () => {
-    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({}));
-    const report = await fetchPlanUsage([account("codex")], {
-      fetch: fetchImpl,
-      now: () => NOW,
-      credentials: fileCredentialReader({ now: () => NOW, env: { CODEX_HOME: "/codex" }, readText: () => JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: SECRET }) }),
-    });
-    expect(report.providers).toEqual([]);
-    expect(fetchImpl).not.toHaveBeenCalled();
-  });
-
-  it("still asks a Codex user with no login at all to sign in again", async () => {
-    const report = await fetchPlanUsage([account("codex")], {
-      fetch: async () => jsonResponse({}),
-      now: () => NOW,
-      credentials: fileCredentialReader({ now: () => NOW, env: { CODEX_HOME: "/codex" }, readText: () => null }),
-    });
-    expect(report.providers[0]).toMatchObject({ ok: false });
-  });
-});
-
-describe("a DeepSeek balance", () => {
-  it("prefers the USD balance and ignores malformed entries", () => {
-    expect(parseDeepSeekBalance({ is_available: true, balance_infos: [
-      { currency: "CNY", total_balance: "110.00" },
-      { currency: "usd", total_balance: "51.30" },
-    ] })).toEqual({ amount: 51.3, currency: "USD" });
-    expect(parseDeepSeekBalance({ balance_infos: [{ currency: "CNY", total_balance: "7.5" }, { currency: "", total_balance: "1" }] })).toEqual({ amount: 7.5, currency: "CNY" });
-    expect(parseDeepSeekBalance({ balance_infos: [{ currency: "USD", total_balance: "n/a" }] })).toBeNull();
-    expect(parseDeepSeekBalance({})).toBeNull();
-  });
-
-  it("lists a DeepSeek instance and reads its balance with the dsh key", async () => {
-    expect(planAccountsFromInstances({ deepseek: { driver: "deepseekAgent" } })).toEqual([{ id: "deepseek", name: "DeepSeek", driver: "deepseek", environment: {} }]);
-    const home = mkdtempSync(join(tmpdir(), "dsh-"));
-    try {
-      writeFileSync(join(home, ".env"), `DEEPSEEK_API_KEY="${SECRET}"\n`);
-      const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ is_available: true, balance_infos: [{ currency: "USD", total_balance: "51.30" }] }));
-      const report = await fetchPlanUsage([account("deepseek")], {
-        fetch: fetchImpl,
-        now: () => NOW,
-        credentials: fileCredentialReader({ now: () => NOW, env: { DSH_HOME: home }, readText: () => null }),
-      });
-      expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://api.deepseek.com/user/balance");
-      expect(JSON.stringify(fetchImpl.mock.calls[0]?.[1])).toContain(`Bearer ${SECRET}`);
-      expect(report.providers[0]).toMatchObject({ id: "deepseek", ok: true, error: null, balance: { amount: 51.3, currency: "USD" } });
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
-  });
-
-  it("shows no DeepSeek row without a key, and names a refused one", async () => {
-    const home = mkdtempSync(join(tmpdir(), "dsh-"));
-    try {
-      const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ error: "unauthorized" }, 401));
-      const credentials = fileCredentialReader({ now: () => NOW, env: { DSH_HOME: home }, readText: () => null });
-      const none = await fetchPlanUsage([account("deepseek")], { fetch: fetchImpl, now: () => NOW, credentials });
-      expect(none.providers).toEqual([]);
-      expect(fetchImpl).not.toHaveBeenCalled();
-      const refused = await fetchPlanUsage([account("deepseek", { environment: { DEEPSEEK_API_KEY: SECRET } })], { fetch: fetchImpl, now: () => NOW, credentials });
-      expect(refused.providers[0]).toMatchObject({ ok: false, error: "DeepSeek refused the saved key" });
-    } finally {
-      rmSync(home, { recursive: true, force: true });
-    }
   });
 });

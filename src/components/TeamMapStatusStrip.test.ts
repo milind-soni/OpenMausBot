@@ -107,19 +107,6 @@ describe("team map status strip", () => {
     expect(html).not.toContain('role="meter"');
   });
 
-  it("shows a prepaid balance as money left, with no meter", () => {
-    fixture.report = { fetchedAt: "now", providers: [{
-      id: "deepseek", name: "DeepSeek", driver: "deepseek", plan: null, ok: true, error: null,
-      fiveHour: { available: false, remainingPercent: null, usedPercent: null, resetsAt: null },
-      weekly: { available: false, remainingPercent: null, usedPercent: null, resetsAt: null }, extra: [],
-      balance: { amount: 51.3, currency: "USD" },
-    }] };
-    const html = render([]);
-    expect(html).toContain("DeepSeek");
-    expect(html).toContain("$51.30 left");
-    expect(html).not.toContain('role="meter"');
-  });
-
   it("hides the department filter when there is only one department", () => {
     const html = render([], { sectionOptions: [{ key: "", name: "General" }] });
     expect(html).not.toContain("<select");

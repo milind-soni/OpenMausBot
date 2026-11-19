@@ -2,7 +2,6 @@ import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { Select } from "./Select";
 import { providerLabel, usePlanUsage, usageTone, windowLabel, type PlanProvider } from "./PlanUsage";
-import { formatPlanBalance } from "@/lib/plan-spend";
 import { teamMapSessionCounts, type TeamMapSession, type TeamMapSessionState } from "@/lib/team-map";
 
 /** Sentinel `<Select>` value for "no department filter", distinct from the unsectioned team's own key (`""`). */
@@ -70,7 +69,6 @@ export function TeamMapStatusStrip({
     const windows = provider.ok ? usageWindows(provider) : [];
     return windows.length === 0 ? [] : [{ provider, windows: windows.map((entry) => ({ ...entry, used: percent(entry.used) })) }];
   });
-  const balanceProviders = (report?.providers ?? []).flatMap((provider) => provider.ok && provider.balance ? [{ provider, text: formatPlanBalance(provider.balance) }] : []);
   return (
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-hairline/40 bg-panel px-6 py-2.5">
       <div className="flex min-w-0 flex-wrap items-center gap-3">
@@ -81,7 +79,7 @@ export function TeamMapStatusStrip({
           </span>
         ))}
         {doneLast24h > 0 && <span className="text-[12px] text-ink-secondary">{t("canvas.strip.doneCount", { count: doneLast24h })}</span>}
-        {usageProviders.length + balanceProviders.length > 0 && (
+        {usageProviders.length > 0 && (
           <div className="flex min-w-0 flex-wrap items-center gap-3 border-l border-hairline/40 pl-3">
             {usageProviders.map(({ provider, windows }) => (
               <span key={provider.id} title={usageTitle(provider)} className="flex items-center gap-1.5 text-[11px] text-ink-secondary">
@@ -95,12 +93,6 @@ export function TeamMapStatusStrip({
                     <span className="text-ink-secondary/70">{window}</span>
                   </span>
                 ))}
-              </span>
-            ))}
-            {balanceProviders.map(({ provider, text }) => (
-              <span key={provider.id} title={`${providerLabel(provider)} · ${text}`} className="flex items-center gap-1.5 text-[11px] text-ink-secondary">
-                <span className="max-w-[88px] truncate">{providerLabel(provider)}</span>
-                <span className="tabular-nums">{text}</span>
               </span>
             ))}
           </div>

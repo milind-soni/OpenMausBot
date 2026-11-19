@@ -1,18 +1,16 @@
 // Access tokens stay in the request header only, never in the JSON result.
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
-import { readMacKeychainLogin } from "./drivers/claude-keychain.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
 import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
-import { openCodeAuthText, openCodeDbText, readOpenCodeDbLogins } from "./opencode-credentials.ts";
-import { DEEPSEEK_BALANCE_URL, parseDeepSeekBalance, type PlanBalance } from "./deepseek-balance.ts";
-import { readDeepSeekKey } from "./drivers/acp/deepseek.ts";
 
-export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity" | "deepseek";
+export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity";
 
 export interface PlanWindow {
   available: boolean;
@@ -62,8 +60,6 @@ export interface PlanProviderRow {
   weekly: PlanWindow;
   extra: PlanExtra[];
   models: PlanModelUsage[];
-  /** A prepaid API balance, for a provider that has money left instead of quota windows. */
-  balance?: PlanBalance;
 }
 
 export interface PlanUsageReport {
@@ -85,8 +81,6 @@ export interface PlanCredential {
   token: string | null;
   accountId: string | null;
   expired: boolean;
-  /** Signed in with a pay-per-use API key, which has no plan quota to report. */
-  apiKeyOnly?: boolean;
 }
 
 export interface CredentialReader {
@@ -116,13 +110,13 @@ export interface CredentialSource {
   env?: NodeJS.ProcessEnv;
   now?: () => number;
   readClaudeKeychain?: (service: string) => string | null | Promise<string | null>;
-  /** OpenCode v2's active logins from its own database, as `auth.json`-shaped JSON keyed by integration. */
-  readOpenCodeDb?: (path: string) => string | null;
 }
 
 const PROVIDER_TIMEOUT_MS = 8_000;
 const PLAN_USAGE_CACHE_MS = 45_000;
 const CREDENTIAL_READ_MAX_BYTES = 1_000_000;
+const KEYCHAIN_TIMEOUT_MS = 5_000;
+const KEYCHAIN_MAX_BUFFER = 1_000_000;
 const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 const CLAUDE_MODEL_FAMILIES = ["opus", "sonnet", "haiku"];
 const MONTHLY_SPEND = "Monthly spend";
@@ -143,7 +137,7 @@ const WEEK_MAX_SECONDS = 9 * 86400;
 const MONTH_MIN_SECONDS = 27 * 86400;
 const MONTH_MAX_SECONDS = 32 * 86400;
 
-const DRIVER_OF: Record<string, PlanDriver> = { claudeAgent: "claude", codex: "codex", grokAgent: "grok", opencodeGo: "opencode", antigravityAgent: "antigravity", deepseekAgent: "deepseek" };
+const DRIVER_OF: Record<string, PlanDriver> = { claudeAgent: "claude", codex: "codex", grokAgent: "grok", opencodeGo: "opencode", antigravityAgent: "antigravity" };
 
 const PRODUCT_NAME: Record<PlanDriver, string> = {
   claude: "Claude",
@@ -151,7 +145,6 @@ const PRODUCT_NAME: Record<PlanDriver, string> = {
   grok: "Grok",
   opencode: "OpenCode",
   antigravity: "Antigravity",
-  deepseek: "DeepSeek",
 };
 
 export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAccount[] {
@@ -168,8 +161,7 @@ export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAcc
       environment: { ...entry.environment },
       ...(configDir ? { configDir } : {}),
       // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit.
-      // A Claude instance that only runs on an API key has no plan quota; reading the CLI login would repeat the subscription's.
-      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && (config?.usageMeter === false || config?.requireApiKey === true)) ? { noUsage: true as const } : {}),
+      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && config?.usageMeter === false) ? { noUsage: true as const } : {}),
     });
   }
   return accounts;
@@ -274,8 +266,7 @@ export function fileCredentialReader(source: CredentialSource): CredentialReader
       const at = now();
       if (account.driver === "claude") return readClaudeCredential(account, merged, source, at);
       if (account.driver === "codex") return readCodexCredential(merged, source.readText, at);
-      if (account.driver === "opencode") return readOpenCodeCredential(merged, source.readText, at, source.readOpenCodeDb);
-      if (account.driver === "deepseek") { const key = readDeepSeekKey(merged); return key ? { token: key, accountId: null, expired: false } : missingCredential(); }
+      if (account.driver === "opencode") return readOpenCodeCredential(merged, source.readText, at);
       return readGrokCredential(merged, source.readText, at);
     },
   };
@@ -294,7 +285,6 @@ export function defaultCredentialReader(env: NodeJS.ProcessEnv = process.env): C
       }
     },
     ...(process.platform === "darwin" && !sealedFixture() ? { readClaudeKeychain: readDarwinClaudeKeychain } : {}),
-    ...(sealedFixture() ? {} : { readOpenCodeDb: readOpenCodeDbLogins }),
   });
 }
 
@@ -757,7 +747,27 @@ function claudeKeychainServices(account: PlanAccount, env: NodeJS.ProcessEnv, re
 }
 
 function readDarwinClaudeKeychain(service: string): Promise<string | null> {
-  return readMacKeychainLogin(service, (raw) => claudeCredentialFromText(decodeKeychainSecret(raw), Date.now()).token != null);
+  if (process.platform !== "darwin") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    try {
+      execFile(
+        "security",
+        ["find-generic-password", "-s", service, "-w"],
+        {
+          timeout: KEYCHAIN_TIMEOUT_MS,
+          maxBuffer: KEYCHAIN_MAX_BUFFER,
+          windowsHide: true,
+          shell: false,
+          encoding: "utf8",
+        },
+        (error, stdout) => {
+          resolve(error || !stdout ? null : stdout);
+        },
+      );
+    } catch {
+      resolve(null);
+    }
+  });
 }
 
 async function readClaudeCredential(
@@ -800,7 +810,7 @@ function readCodexCredential(
   if (!root) return missingCredential();
   const tokens = asRecord(root.tokens);
   const token = secretString(tokens?.access_token) ?? secretString(root.access_token);
-  if (!token) return root.auth_mode === "apikey" ? { ...missingCredential(), apiKeyOnly: true } : missingCredential();
+  if (!token) return missingCredential();
   const expiry = timeMs(tokens?.expires_at ?? tokens?.expiresAt ?? root.expires_at ?? root.expiresAt);
   if (expiry != null && expiry <= now) return expiredCredential();
   const accountId = secretString(tokens?.account_id) ?? secretString(root.account_id);
@@ -850,13 +860,15 @@ function readGrokCredential(
   return sawExpired ? expiredCredential() : missingCredential();
 }
 
-/** The key saved in Settings, or the login `opencode auth login` keeps: `auth.json` where OpenCode v1 wrote it, else the `credential` table of v2's `opencode.db`. */
-function readOpenCodeCredential(env: NodeJS.ProcessEnv, readText: (path: string) => string | null, now: number, readDb?: (path: string) => string | null): PlanCredential {
+/** The key saved in Settings, or the login `opencode auth login` keeps. `auth.json` is where OpenCode v1 wrote one; v2 keeps credentials in its own database, so this path covers installs migrated from v1 (the saved key covers v2). */
+function readOpenCodeCredential(env: NodeJS.ProcessEnv, readText: (path: string) => string | null, now: number): PlanCredential {
   const key = secretString(env.OPENCODE_API_KEY);
   if (key) return { token: key, accountId: null, expired: false };
-  // auth.json can hold other providers' keys with no OpenCode one, so the database is asked whenever it gave no login.
-  const entry = openCodeLogin(env.OPENCODE_AUTH_CONTENT?.trim() || openCodeAuthText(env, readText))
-    ?? (readDb ? openCodeLogin(openCodeDbText(env, readDb)) : null);
+  const raw = env.OPENCODE_AUTH_CONTENT?.trim() || openCodeAuthText(env, readText);
+  const stored = asRecord(parseJson(raw));
+  // A Go login lives under "opencode-go", a Zen one under "opencode"; the CLI lists Go first too.
+  const entry = [stored?.["opencode-go"], stored?.opencode].map((value) => asRecord(value))
+    .find((record) => secretString(record?.access) ?? secretString(record?.key));
   const token = secretString(entry?.access) ?? secretString(entry?.key);
   if (!token) return missingCredential();
   const expiry = timeMs(entry?.expires ?? entry?.expires_at ?? entry?.expiresAt);
@@ -864,13 +876,17 @@ function readOpenCodeCredential(env: NodeJS.ProcessEnv, readText: (path: string)
   return { token, accountId: null, expired: false };
 }
 
-/** A Go login lives under "opencode-go", a Zen one under "opencode"; the CLI lists Go first too. */
-function openCodeLogin(raw: string | null): Record<string, unknown> | null {
-  const stored = asRecord(parseJson(raw));
-  return [stored?.["opencode-go"], stored?.opencode].map((value) => asRecord(value))
-    .find((record) => secretString(record?.access) ?? secretString(record?.key)) ?? null;
+/** The CLI is xdg-flavoured on every platform, so the xdg data folder comes first. */
+function openCodeAuthText(env: NodeJS.ProcessEnv, readText: (path: string) => string | null): string | null {
+  const home = env.HOME || env.USERPROFILE || homedir();
+  const roots = [
+    env.XDG_DATA_HOME || join(home, ".local", "share"),
+    process.platform === "darwin" ? join(home, "Library", "Application Support") : "",
+    process.platform === "win32" ? env.LOCALAPPDATA || join(home, "AppData", "Local") : "",
+  ].filter(Boolean);
+  for (const root of roots) { const text = readText(join(root, "opencode", "auth.json")); if (text) return text; }
+  return null;
 }
-
 function errorRow(account: PlanAccount, error: string): PlanProviderRow {
   return {
     id: account.id,
@@ -901,34 +917,23 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
   };
 }
 
-async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: nothing to report, such as an engine with no key of its own or one on a pay-per-use API key
+async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: OpenCode, in every fleet, with no key of its own
   let credential: PlanCredential;
   if (account.driver === "antigravity") { const windows = await antigravityPlanUsage(account.id, deps); return windows && okRow(account, windows); } // null: no sign-in, or Google gave nothing
-  const quietWhenMissing = account.driver === "opencode" || account.driver === "deepseek";
   try {
     credential = await deps.credentials.read(account);
   } catch {
-    return quietWhenMissing ? null : errorRow(account, signInAgain(account.driver));
+    return account.driver === "opencode" ? null : errorRow(account, signInAgain(account.driver));
   }
-  if (credential.apiKeyOnly) return null;
-  if (credential.expired || !credential.token) return quietWhenMissing && !credential.expired ? null : errorRow(account, signInAgain(account.driver));
+  if (credential.expired || !credential.token) return account.driver === "opencode" && !credential.expired ? null : errorRow(account, signInAgain(account.driver));
   try {
     if (account.driver === "claude") return await fetchClaude(account, credential.token, deps);
     if (account.driver === "codex") return await fetchCodex(account, credential.token, credential.accountId, deps);
     if (account.driver === "opencode") return await fetchOpenCode(account, credential.token, deps);
-    if (account.driver === "deepseek") return await fetchDeepSeek(account, credential.token, deps);
     return await fetchGrok(account, credential.token, deps);
   } catch {
     return errorRow(account, couldNotReach(account.driver));
   }
-}
-
-async function fetchDeepSeek(account: PlanAccount, token: string, deps: PlanUsageDeps): Promise<PlanProviderRow> {
-  const result = await fetchJson(deps.fetch, DEEPSEEK_BALANCE_URL, { Authorization: `Bearer ${token}`, Accept: "application/json" }, deps.timeoutMs ?? PROVIDER_TIMEOUT_MS);
-  if (authRejected(result.status)) return errorRow(account, "DeepSeek refused the saved key");
-  if (!result.ok) return errorRow(account, result.status === 0 || result.status >= 500 ? couldNotReach("deepseek") : unexpectedUsage("deepseek"));
-  const balance = parseDeepSeekBalance(result.body);
-  return balance ? { ...okRow(account, { plan: null, fiveHour: closedWindow(), weekly: closedWindow(), extra: [], models: [] }), balance } : errorRow(account, unexpectedUsage("deepseek"));
 }
 
 interface HttpResult {
