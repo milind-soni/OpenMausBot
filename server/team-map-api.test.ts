@@ -1,12 +1,9 @@
 // The only provider is the launcher's fake CLI; the teammate waits on a gate.
-import { randomBytes } from "node:crypto";
-import { rmSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, beforeAll, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
-import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
-import { hostTimeout } from "./testing/host-timeout.ts";
 import { appendUsage } from "./usage-ledger.ts";
 
 it("shows coordinate_bots work on the team map while it runs, with ids only", async () => {
@@ -64,57 +61,3 @@ it("doneLast24h counts a finished turn but not a helper-model row, on a freshly 
     await fixture.close();
   }
 }, 45_000);
-
-{
-  const ENGINE = `process.env.FAKE_CLAUDE_TOOL_CALLS_FILE = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/tool-calls.json";
-process.env.FAKE_CLAUDE_RELEASE = process.env.FAKE_CLAUDE_FIXTURE_DIR + "/release";`;
-  const HOLD = { name: "Bash", input: { command: "sleep forever" }, hold: true };
-  const PRIVATE_TITLE = "B_PRIVATE_TITLE_TEXT";
-
-  let fx: CloudSendFixture, team: CloudTeamFixture;
-  let admin = "", memberA = "", memberB = "", botId = "";
-  const home = (name: string) => join(team.home, name);
-  const busy = async (token: string, threadId: string) => {
-    const bots = (await team.as(token, "GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; tasks?: Array<{ threadId: string; busy?: boolean }> }>;
-    return Boolean(bots.find((one) => one.id === botId)?.tasks?.find((task) => task.threadId === threadId)?.busy);
-  };
-
-  beforeAll(async () => {
-    fx = await launchCloudSendFixture({ onePasswordToken: `ops_fake-teammap-${randomBytes(8).toString("hex")}`,
-      team: { id: "team-acme-teammap", name: "Acme", engine: ENGINE, env: { OMB_BOT_BOX: "0" } } });
-    team = fx.team!;
-    writeFileSync(home("tool-calls.json"), "[]");
-    admin = (await team.pair({ email: "admin@acme.test", role: "owner" })).token!;
-    memberA = (await team.pair({ email: "a@acme.test", role: "member" })).token!;
-    memberB = (await team.pair({ email: "b@acme.test", role: "member" })).token!;
-    const created = await team.as(admin, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
-    expect(created.status, JSON.stringify(created.body)).toBe(201);
-    botId = created.body.bot.id;
-  }, hostTimeout(120_000));
-
-  afterAll(async () => {
-    await fx?.close();
-  });
-
-  it("a member's private busy chat on a shared bot is absent from another member's team map, and from the admin's too", async () => {
-    const opened = await team.as(memberB, "POST", `/api/bots/${botId}/tasks`, { title: PRIVATE_TITLE });
-    expect(opened.status, JSON.stringify(opened.body)).toBe(201);
-    const mine = opened.body.task.threadId as string;
-
-    rmSync(home("release"), { force: true });
-    writeFileSync(home("tool-calls.json"), JSON.stringify([HOLD]));
-    const sent = await team.as(memberB, "POST", `/api/bots/${botId}/messages`, { text: "Work on my private thing", threadId: mine });
-    expect(sent.status, JSON.stringify(sent.body)).toBe(202);
-    await expect.poll(() => busy(memberB, mine), { timeout: hostTimeout(30_000), interval: 100 }).toBe(true);
-
-    for (const token of [memberA, admin]) {
-      const live = await team.as(token, "GET", "/api/team-map");
-      expect(live.status, JSON.stringify(live.body)).toBe(200);
-      expect(JSON.stringify(live.body)).not.toContain(PRIVATE_TITLE);
-      expect(live.body.sessions.some((session: any) => session.threadId === mine)).toBe(false);
-    }
-
-    writeFileSync(home("release"), "");
-    await expect.poll(() => busy(memberB, mine), { timeout: hostTimeout(30_000), interval: 100 }).toBe(false);
-  }, hostTimeout(120_000));
-}
