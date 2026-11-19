@@ -7,6 +7,7 @@ import { join } from "node:path";
 
 import { DATA_DIR } from "../config.ts";
 import { readJsonFile, restrictToOwner, writeJsonAtomic } from "../json-file.ts";
+import { closeSseSessions } from "./mcp-client.ts";
 import { findApp } from "./catalog.ts";
 
 export interface StoredApp {
@@ -52,7 +53,7 @@ export function appConnection(id: string): { endpoint: string; token?: string } 
   const app = findApp(id);
   if (!app) throw new Error(`Unknown app: ${id}`);
   const saved = read()[app.id] ?? {};
-  return { endpoint: saved.endpoint ?? app.defaultEndpoint, token: saved.token || undefined };
+  return { endpoint: saved.endpoint ?? app.defaultEndpoint, token: app.auth.kind === "bearer" ? saved.token || undefined : undefined };
 }
 
 export function appSettingsSummary(id: string): { endpoint: string; customEndpoint: boolean; tokenConfigured: boolean } {
@@ -62,7 +63,7 @@ export function appSettingsSummary(id: string): { endpoint: string; customEndpoi
   return {
     endpoint: saved.endpoint ?? app.defaultEndpoint,
     customEndpoint: Boolean(saved.endpoint && saved.endpoint !== app.defaultEndpoint),
-    tokenConfigured: Boolean(saved.token),
+    tokenConfigured: app.auth.kind === "bearer" && Boolean(saved.token),
   };
 }
 
@@ -76,11 +77,13 @@ export function saveAppSettings(id: string, patch: { endpoint?: unknown; token?:
     if (patch.endpoint.trim() === "" || patch.endpoint.trim() === app.defaultEndpoint) delete next.endpoint;
     else next.endpoint = validateLocalEndpoint(patch.endpoint);
   }
-  if (typeof patch.token === "string" && patch.token.trim()) {
+  if (app.auth.kind === "bearer" && typeof patch.token === "string" && patch.token.trim()) {
     const token = patch.token.trim();
     if (token.length > 4096 || /\s/.test(token)) throw new Error("That doesn't look like an access token. Copy it again from the app.");
     next.token = token;
   }
+  if (app.auth.kind === "none") delete next.token;
+  closeSseSessions(appConnection(id).endpoint);
   apps[app.id] = next;
   write(apps);
 }
@@ -89,6 +92,7 @@ export function removeAppSettings(id: string): void {
   const app = findApp(id);
   if (!app) throw new Error(`Unknown app: ${id}`);
   const apps = read();
+  closeSseSessions(appConnection(id).endpoint);
   delete apps[app.id];
   write(apps);
 }

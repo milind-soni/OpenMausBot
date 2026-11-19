@@ -1,6 +1,6 @@
 # Affinity desktop MCP integration
 
-Requested by the user on 2026-11-19. Status: awaiting implementation approval under AGENTS.md. Work branch: `feat/affinity-mcp`; isolated worktree: `/Users/esoefildine/Documents/Dev/GBS-worktrees/yv-affinity`.
+Requested by the user on 2026-11-19. Status: approved by the user (“proceed”), 2026-11-19. Work branch: `feat/affinity-mcp`; isolated worktree: `/Users/esoefildine/Documents/Dev/GBS-worktrees/yv-affinity`.
 
 ## Verified requirements
 

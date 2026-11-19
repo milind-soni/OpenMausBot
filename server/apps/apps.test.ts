@@ -4,7 +4,7 @@
 import { createServer, type Server } from "node:http";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "../config.ts";
 import { buildAppsPrompt, taggedApps } from "./prompt.ts";
@@ -60,7 +60,13 @@ afterAll(async () => {
   await new Promise((r) => server.close(r));
 });
 
+beforeEach(() => {
+  // Never probe the real Affinity installed on the test machine.
+  saveAppSettings("affinity", { endpoint: "http://127.0.0.1:1/sse" });
+});
+
 afterEach(() => {
+  removeAppSettings("affinity");
   removeAppSettings("edits");
   invalidateAppStatus();
   calls = [];
@@ -126,6 +132,7 @@ describe("live status", () => {
 
 describe("Buddies and apps", () => {
   it("tags apps with +id, ignoring unknown apps, emails and phone numbers", () => {
+    expect(taggedApps("+affinity +edits")).toEqual(["affinity", "edits"]);
     expect(taggedApps("+edits make a montage")).toEqual(["edits"]);
     expect(taggedApps("Use (+Edits) please")).toEqual(["edits"]);
     expect(taggedApps("call +44 20 7946 or a+edits@x.com, +notanapp")).toEqual([]);

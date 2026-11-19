@@ -4,16 +4,10 @@
 // the first message answering our id instead of waiting for the server to
 // close the stream (a held-open stream must never stall a Buddy's turn).
 
-export type McpFailureKind = "not_running" | "unauthorized" | "timeout" | "protocol";
-
-export class McpError extends Error {
-  // explicit field: `node --experimental-strip-types` rejects parameter properties
-  readonly kind: McpFailureKind;
-  constructor(kind: McpFailureKind, message: string) {
-    super(message);
-    this.kind = kind;
-  }
-}
+import { McpError, type McpTarget } from "./mcp-common.ts";
+import { sseRequest } from "./mcp-sse.ts";
+export { McpError } from "./mcp-common.ts";
+export { closeSseSessions } from "./mcp-sse.ts";
 
 export interface McpTool {
   name: string;
@@ -21,11 +15,7 @@ export interface McpTool {
   inputSchema?: unknown;
 }
 
-interface Target {
-  endpoint: string;
-  token?: string;
-  timeoutMs: number;
-}
+type Target = McpTarget;
 
 type Json = Record<string, unknown>;
 
@@ -103,6 +93,7 @@ function checkStatus(res: Response) {
 
 /** Open a session, run one request in it, return its JSON-RPC result. */
 export async function mcpRequest(target: Target, method: string, params: Json): Promise<Json> {
+  if (target.transport === "local-mcp-sse") return sseRequest(target, method, params);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), target.timeoutMs);
   try {

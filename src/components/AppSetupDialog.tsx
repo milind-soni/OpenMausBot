@@ -18,13 +18,15 @@ interface TestResult {
 export function AppSetupDialog({ app, onClose }: { app: AppInfo; onClose: () => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const tokenRef = useRef<HTMLInputElement>(null);
+  const testRef = useRef<HTMLButtonElement>(null);
+  const needsToken = app.auth.kind === "bearer";
   const [token, setToken] = useState("");
   const [endpoint, setEndpoint] = useState(app.settings.endpoint);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<TestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  useDialogFocus({ open: true, containerRef, entryFocusRef: tokenRef, onClose });
+  useDialogFocus({ open: true, containerRef, entryFocusRef: needsToken ? tokenRef : testRef, onClose });
 
   const endpointChanged = endpoint.trim() !== app.settings.endpoint;
   const hasChanges = Boolean(token.trim()) || endpointChanged;
@@ -121,7 +123,7 @@ export function AppSetupDialog({ app, onClose }: { app: AppInfo; onClose: () => 
             </ol>
           </section>
 
-          <div>
+          {app.auth.kind === "bearer" ? <div>
             <label htmlFor={tokenId} className="font-medium text-ink">
               {app.auth.label}
             </label>
@@ -143,7 +145,7 @@ export function AppSetupDialog({ app, onClose }: { app: AppInfo; onClose: () => 
             <p id={`${tokenId}-help`} className="mt-1.5 text-[12px] text-ink-secondary">
               {app.auth.help} Keep it private: anyone with it can control {app.name} while its automation server is on.
             </p>
-          </div>
+          </div> : <p className="rounded-xl border border-hairline/40 bg-card/60 p-3 text-[12px] text-ink-secondary">{app.auth.help} To stop access, turn off MCP in {app.name}’s settings.</p>}
 
           <details className="group rounded-xl border border-hairline/40 bg-card/60 px-3.5 py-2.5">
             <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[12px] font-medium text-ink-secondary">
@@ -204,9 +206,11 @@ export function AppSetupDialog({ app, onClose }: { app: AppInfo; onClose: () => 
             )}
           </div>
           <div className="flex items-center gap-2">
+            {!needsToken && <button onClick={onClose} className="rounded-xl px-3 py-2 text-[13px] text-ink hover:bg-raised">Done</button>}
             <button
+              ref={testRef}
               onClick={test}
-              disabled={testing || saving || (!token.trim() && !app.settings.tokenConfigured)}
+              disabled={testing || saving || (needsToken && !token.trim() && !app.settings.tokenConfigured)}
               className="inline-flex items-center gap-2 rounded-xl bg-raised px-4 py-2 text-[13px] font-medium text-ink transition-colors hover:bg-raised-hover disabled:opacity-50"
             >
               {testing && <Loader2 size={14} className="animate-spin" />}

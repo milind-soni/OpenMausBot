@@ -92,8 +92,8 @@ permission broker turns every risky action into a decision you make, for cloud a
 
 ### 🔌 Connected apps
 
-A curated set of apps with simple setup, starting with Edits for video editing. Each app shows whether
-it's ready and which models can use it. Tag one with `+edits` to choose it for a task.
+A curated set of apps with simple setup, including Edits for video editing and Affinity by Canva for graphics, photos and page layout. Each app shows whether
+it's ready and which models can use it. Tag one with `+edits` or `+affinity` to choose it for a task.
 
 <img src="docs/screenshots/marketplace.png" alt="Connected apps marketplace" width="100%">
 
@@ -152,6 +152,12 @@ attributed to the calling bot. These tools (and peer-to-peer `ask_bot`) are only
 that can actually mount them: Claude, Codex, and the ACP-based Grok/Gemini drivers today. The default
 Antigravity (`agy`) driver doesn't get them yet — that CLI has no mechanism to register a per-turn MCP
 server, so there's nothing to wire in until it does.
+
+### Connect Affinity
+
+Open the latest Affinity by Canva desktop app. In **Settings → Model Context Protocol**, enable Affinity MCP, then quit and reopen Affinity. In Studio, open **Apps → Affinity → Test connection**. No access token is required; keep Affinity open while Buddies use it. The default address is `http://[::1]:6767/sse`.
+
+Affinity works with the same MCP-capable Buddy models as Edits. Buddies can read the SDK documentation, run design scripts, inspect document previews, and work with scripts in the library, subject to Affinity's native permissions. Turn MCP off in Affinity to stop access. File access, when enabled in Affinity, is restricted to the Desktop; Buddies ask before copying files there. Network access, shared hints, issue reports, and paid AI features require your authorization.
 
 ### Refer to projects and bots
 

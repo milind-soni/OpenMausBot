@@ -26,6 +26,7 @@ export function describeFailure(app: AppDefinition, error: unknown, hasToken: bo
       return { state: "not_running", message: `${app.name} isn't running, or its automation server is turned off.`, tools: [], checkedAt: now };
     }
     if (error.kind === "unauthorized") {
+      if (app.auth.kind === "none") return { state: "needs_setup", message: `${app.name} refused the connection. Check its Model Context Protocol settings.`, tools: [], checkedAt: now };
       return {
         state: "needs_setup",
         message: hasToken
@@ -43,7 +44,7 @@ export function describeFailure(app: AppDefinition, error: unknown, hasToken: bo
 /** Check an app with explicit connection values (used by Test connection before saving). */
 export async function checkConnection(app: AppDefinition, endpoint: string, token: string | undefined): Promise<AppStatus> {
   try {
-    const tools = await listTools({ endpoint, token, timeoutMs: CHECK_TIMEOUT_MS });
+    const tools = await listTools({ endpoint, token: app.auth.kind === "bearer" ? token : undefined, transport: app.transport, protocolVersion: app.protocolVersion, timeoutMs: CHECK_TIMEOUT_MS });
     return { state: "ready", message: `${app.name} is connected. ${tools.length} action${tools.length === 1 ? "" : "s"} available.`, tools, checkedAt: Date.now() };
   } catch (error) {
     return describeFailure(app, error, Boolean(token));

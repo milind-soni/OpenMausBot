@@ -71,6 +71,7 @@ export function AppModelTags({ compact = false }: { compact?: boolean }) {
 
 function AppCard({ app, onSetup }: { app: AppInfo; onSetup: () => void }) {
   const ready = app.status.state === "ready";
+  const configured = app.settings.tokenConfigured || (app.auth.kind === "none" && ready);
   return (
     <article className="flex flex-col justify-between rounded-2xl border border-hairline/50 bg-card p-4 shadow-sm transition-all hover:border-accent/40">
       <div>
@@ -95,10 +96,10 @@ function AppCard({ app, onSetup }: { app: AppInfo; onSetup: () => void }) {
           onClick={onSetup}
           className={cn(
             "rounded-xl px-3 py-1.5 text-[12px] font-medium transition-all",
-            app.settings.tokenConfigured ? "border border-hairline/40 bg-raised text-ink hover:bg-raised-hover" : "bg-accent text-white shadow-sm hover:brightness-110",
+            configured ? "border border-hairline/40 bg-raised text-ink hover:bg-raised-hover" : "bg-accent text-white shadow-sm hover:brightness-110",
           )}
         >
-          {app.settings.tokenConfigured ? "Manage" : "Set up"}
+          {configured ? "Manage" : "Set up"}
         </button>
       </div>
     </article>

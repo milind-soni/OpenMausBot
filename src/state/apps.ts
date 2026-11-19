@@ -15,7 +15,7 @@ export interface AppInfo {
   icon?: string;
   capabilities: string[];
   setupSteps: string[];
-  auth: { kind: "bearer"; label: string; help: string };
+  auth: { kind: "bearer"; label: string; help: string } | { kind: "none"; help: string };
   defaultEndpoint: string;
   settings: { endpoint: string; customEndpoint: boolean; tokenConfigured: boolean };
   status: { state: AppState; message: string; toolCount: number; checkedAt: number };

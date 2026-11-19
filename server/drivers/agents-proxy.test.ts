@@ -177,6 +177,13 @@ describe("agents-proxy MCP surface", () => {
     expect(lastAuth).toBe(`Bearer ${TOKEN}`);
   });
 
+  it("forwards Affinity render results as images without base64 in text", async () => {
+    const res = await callTool("use_app", { app_id: "affinity", tool: "render_spread", arguments: { document_session_uuid: "TEST-doc", spread_index: 0 } });
+    expect(lastAppCall).toMatchObject({ url: "/api/internal/apps/affinity/call", body: { tool: "render_spread" } });
+    expect(res.result.content[0].text).not.toContain("anBn");
+    expect(res.result.content[1]).toEqual({ type: "image", data: "anBn", mimeType: "image/jpeg" });
+  });
+
   it("list_bots renders the roster and authenticates with the shared token", async () => {
     const res = await callTool("list_bots", {});
     const text = res.result.content[0].text;

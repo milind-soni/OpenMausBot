@@ -31,6 +31,7 @@ import { findApp } from "./apps/catalog.ts";
 import { buildAppsPrompt } from "./apps/prompt.ts";
 import { checkConnection, describeApps, invalidateAppStatus } from "./apps/status.ts";
 import { appConnection, removeAppSettings, saveAppSettings, validateLocalEndpoint } from "./apps/store.ts";
+import { closeSseSessions } from "./apps/mcp-client.ts";
 import { listAppsForBuddy, useApp } from "./apps/use.ts";
 import { handoffMentions, mentionedBots, ROOM_DEFAULT_HOPS, ROOM_IDLE_MINUTES_MAX, ROOM_MAX_HOPS, Store, type Attachment, type GroupRecord, type Message } from "./store.ts";
 import { projectRegistryCandidates, readRegisteredProjects, resolveProjectContext } from "./projects.ts";
@@ -2444,6 +2445,7 @@ server.listen(PORT, HOST, () => {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    closeSseSessions();
     previewWatchManager.closeAll();
     clearInterval(usageTimer);
     scheduler.stop();

@@ -45,7 +45,7 @@ export async function useApp(appId: string, tool: string, args: Record<string, u
   }
   const { endpoint, token } = appConnection(app.id);
   try {
-    return await callTool({ endpoint, token, timeoutMs: CALL_TIMEOUT_MS }, tool, args);
+    return await callTool({ endpoint, token, transport: app.transport, protocolVersion: app.protocolVersion, timeoutMs: CALL_TIMEOUT_MS }, tool, args);
   } catch (error) {
     invalidateAppStatus(app.id);
     const failure = describeFailure(app, error, Boolean(token));
