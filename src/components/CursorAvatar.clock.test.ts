@@ -107,6 +107,21 @@ describe("CursorAvatar on the shared clock", () => {
     expect(mascotClock().pending()).toBe(0);
   });
 
+  it("keeps its body when drawn again with a new look", () => {
+    render([{ state: "idle", animated: false, size: 20, gradient: ["#111111", "#222222", "#333333"] }]);
+    run(100);
+    const watcher = new MutationObserver(() => {});
+    watcher.observe(host, { childList: true, subtree: true });
+    for (let turn = 1; turn <= 5; turn++) {
+      render([{ state: "idle", animated: false, size: 20, turn, gradient: ["#111111", "#222222", "#333333"] }]);
+      run(100);
+    }
+    const replaced = watcher.takeRecords();
+    watcher.disconnect();
+    expect(host.querySelector("clipPath")!.childElementCount).toBeGreaterThan(0);
+    expect(replaced).toEqual([]);
+  });
+
   it("lets a small idle mascot settle to no frames, and wakes it for a blink", () => {
     const ref = createRef<MausAvatarHandle>();
     render([{ state: "idle", size: 24, ref }]);

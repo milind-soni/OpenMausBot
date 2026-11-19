@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 // The real provider and live stream with a room of 120 messages on screen: a streamed delta draws only the bubble it
 // grows, and a store change the bubbles do not show draws none.
+import { renderMark, renderedSince } from "@/testing/render-counts";
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -112,15 +113,53 @@ describe("a room on screen", () => {
     expect(renders.bubbles).toBeGreaterThanOrEqual(120);
   });
 
+  it("touches no saved row while members take turns streaming, changing status and handing over", async () => {
+    // The window moves down as rows arrive, and its new first row takes the day's stamp.
+    const savedRows = [...document.querySelectorAll("[data-mid]")].slice(8);
+    let touched = 0;
+    const count = (records: MutationRecord[]) => {
+      for (const record of records) if (savedRows.some((row) => row.contains(record.target))) touched += record.addedNodes.length + record.removedNodes.length;
+    };
+    const watcher = new MutationObserver(count);
+    watcher.observe(document.querySelector('[role="log"]')!, { childList: true, subtree: true });
+    const runtime = (event: object) => send({ kind: "runtime", event: { provider: "claudeAgent", threadId: "room-thread", createdAt: new Date(at).toISOString(), ...event } });
+    let listOnWords = 0;
+    const savedIds = new Set(savedRows.map((row) => row.getAttribute("data-mid"))), turns = renderMark();
+    for (const [botId, name, other] of [["a", "Ada", "Bea"], ["b", "Bea", "Ada"]] as const) {
+      const turnId = `turn-${botId}`, itemId = `item-${botId}`;
+      await runtime({ eventId: `start-${botId}`, turnId, type: "turn.started", botId });
+      for (let i = 0; i < 6; i++) {
+        const mark = renderMark();
+        await runtime({ eventId: `${botId}${i}`, turnId, itemId, type: "content.delta", streamKind: "assistant_text", delta: `${name} asks @${other} word${i} `, botId });
+        if (i > 0) listOnWords += renderedSince(mark).filter((entry) => entry.component === "Transcript").length;
+        await send({ kind: "bot", bot: { ...announced(botId, name), busy: true, activity: i % 2 ? "working" : "thinking" } });
+      }
+      expect(document.querySelector(`[data-mid="live:${itemId}"]`)?.textContent, "the streaming row names whom it asks").toContain(other);
+      await runtime({ eventId: `done-${botId}`, turnId, itemId, type: "item.completed", itemType: "assistant_text", text: `${name} is done`, botId });
+      await send({ kind: "message", threadId: "room-thread", message: { id: `said-${botId}`, itemId, turnId, at: at + 200 + ++cursor, role: "bot", kind: "text", text: `${name} is done`, from: { botId, name, color: "green" } } });
+      await runtime({ eventId: `end-${botId}`, turnId, type: "turn.completed", botId });
+      await send({ kind: "bot", bot: { ...announced(botId, name), busy: false } });
+      expect(document.querySelector(`[data-mid="said-${botId}"]`)?.textContent).toContain(`${name} is done`);
+    }
+    count(watcher.takeRecords());
+    watcher.disconnect();
+    expect(document.querySelectorAll('[data-mid^="live:"]')).toHaveLength(0);
+    expect(listOnWords, "the room's list drawn for a word").toBe(0);
+    expect(renderedSince(turns).filter((entry) => savedIds.has(entry.row) && /Avatar|ClusterLabel/.test(entry.component)), "saved rows' speakers").toEqual([]);
+    expect(touched, "nodes replaced inside saved rows").toBe(0);
+  });
+
   it("draws only the streaming bubble for each delta", async () => {
     flushSync(() => noteLiveReplyEvent({ eventId: "ts", provider: "claudeAgent", threadId: "room-thread", createdAt: new Date(at).toISOString(), turnId: "t1", type: "turn.started" } as RuntimeEvent));
     delta("Starting ");
     await settle();
     expect(document.querySelector('[data-mid^="live:"]')?.textContent).toContain("Starting");
-    const before = renders.bubbles;
+    const before = renders.bubbles, mark = renderMark();
     for (let i = 0; i < 20; i++) delta(`word${i} `);
     await settle();
     expect(renders.bubbles - before).toBe(20);
+    expect(renderedSince(mark).filter((entry) => entry.component === "Transcript"), "the room's list").toEqual([]);
+    expect(renderedSince(mark).filter((entry) => entry.row !== null && !entry.row.startsWith("live:")), "saved rows").toEqual([]);
     expect(document.querySelector('[data-mid^="live:"]')?.textContent).toContain("word19");
   });
 
@@ -164,14 +203,15 @@ describe("a room on screen", () => {
     expect(renders.chips).toBe(chips);
   });
 
-  it("draws every bubble and tool chip again in a new language", async () => {
-    const before = renders.bubbles, chips = renders.chips;
+  it("draws every bubble, tool chip and speaker line again in a new language", async () => {
+    const before = renders.bubbles, chips = renders.chips, mark = renderMark();
     setLocale("de");
     try {
       flushSync(() => dispatch({ type: "connected", value: false }));
       await settle();
       expect(renders.bubbles - before).toBeGreaterThanOrEqual(120);
       expect(renders.chips).toBeGreaterThan(chips);
+      expect(renderedSince(mark).filter((entry) => entry.component === "ClusterLabel").length, "speaker lines").toBeGreaterThan(20);
     } finally {
       setLocale("en");
       flushSync(() => dispatch({ type: "connected", value: true }));
