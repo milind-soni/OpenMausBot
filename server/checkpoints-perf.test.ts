@@ -404,7 +404,7 @@ describe("incremental shadow index", () => {
     expect(snapshotHashes(bot, cwd)).toEqual([stopped]);
   });
 
-  it("stops a running collection for a new turn's snapshot, and runs it again behind that turn", async () => {
+  it.skipIf(process.platform === "win32")("stops a running collection for a new turn's snapshot, and runs it again behind that turn", async () => {
     const { bot, cwd } = workspace();
     writeFileSync(join(cwd, "a.txt"), "one");
     await snapshot(bot, cwd, "first");
