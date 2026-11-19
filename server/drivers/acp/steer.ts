@@ -162,6 +162,12 @@ export function acpPromptSteering(running: () => boolean, send: (text: string) =
   return steering;
 }
 
+/** The replies that decide a turn: its own, then each steer's, without those that only report the message was taken in. */
+export function turnAnswers(support: AcpSteerSupport | undefined, result: any, replies: readonly unknown[] = []): any[] {
+  const folded = support && "folded" in support ? support.folded : undefined;
+  return [result, ...replies.filter((reply) => !folded?.(reply))];
+}
+
 export interface AcpSteerIo {
   /** The turn's own prompt is out, nothing stopped it, and the session is live. */
   open(): boolean;

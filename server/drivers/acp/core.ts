@@ -31,7 +31,7 @@ import {
 import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
-import { advertisedCommands, turnSteering, type AcpSteerSupport } from "./steer.ts";
+import { advertisedCommands, turnAnswers, turnSteering, type AcpSteerSupport } from "./steer.ts";
 import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts";
 import { notThisCli, versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts"; import { apiKeyAccount } from "./api-key-account.ts";
 
@@ -1130,8 +1130,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           steering: support.steer && turnSteering(support.steer, {
             open: () => state.promptSent && !state.settled && !state.stopped && !session.closing,
             commands: () => session.commands,
-            initializeResult: () => session.initResult,
-            env,
+            initializeResult: () => session.initResult, env,
             prompt: (text) => request("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, undefined, undefined, promptIdleTimeoutMs()),
             extension: (method, text) => request(method, { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, STEER_REQUEST_TIMEOUT_MS),
           }),
@@ -1436,8 +1435,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 );
               }
             }
-            const folded = support.steer && "folded" in support.steer ? support.steer.folded : undefined;
-            const answers = [result, ...(current.steering?.replies ?? []).filter((reply) => !folded?.(reply))];
+            const answers = turnAnswers(support.steer, result, current.steering?.replies);
             if (current.steering?.failure !== undefined && !state.stopped) throw current.steering.failure;
             const runOf = (answer: unknown) => support.steer && "run" in support.steer ? support.steer.run?.(answer) : undefined;
             for (const [index, answer] of answers.entries()) {
