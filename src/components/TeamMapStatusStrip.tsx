@@ -92,7 +92,7 @@ export function TeamMapStatusStrip({
                       <span className={cn("block h-full rounded-full", usageTone(used))} style={{ width: `${used}%` }} />
                     </span>
                     <span className="tabular-nums">{used}%</span>
-                    <span className="text-ink-secondary/70">{window}</span>
+                    <span className="text-ink-tertiary">{window}</span>
                   </span>
                 ))}
               </span>
