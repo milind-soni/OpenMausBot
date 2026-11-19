@@ -7,7 +7,7 @@ import { t } from "@/lib/i18n";
 import { MENU_ITEM, MENU_SHEET } from "./menu-recipe";
 import { StreamingReplyContext } from "@/state/live-reply";
 
-export const ACTION_ICON = { size: 17, strokeWidth: 1.5 } as const;
+export const ACTION_ICON = { size: 16, strokeWidth: 1.5 } as const;
 
 export const messageActionClass =
   "inline-flex size-7 items-center justify-center rounded-full text-ink-tertiary transition-colors hover:bg-ink/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent";
@@ -29,9 +29,9 @@ export const ChatBusyContext = createContext(false);
 
 export const MESSAGE_ROW = "data-message-row";
 
-const INTERACTIVE = "a, button, input, textarea, select, summary, label, [role=button], [contenteditable=true]";
+export const INTERACTIVE = "a, button, input, textarea, select, summary, label, [role=button], [contenteditable=true]";
 const OWN_MENU_MEDIA = "img, video, audio";
-const LONG_PRESS_MS = 450;
+export const LONG_PRESS_MS = 450;
 
 function focusVisible(target: EventTarget | null): boolean {
   try {
@@ -44,6 +44,7 @@ function focusVisible(target: EventTarget | null): boolean {
 export function MessageActions({
   side,
   forceOpen = false,
+  preferMenuAbove = false,
   className,
   menu: items = [],
   contextItems = [],
@@ -51,6 +52,7 @@ export function MessageActions({
 }: {
   side: "user" | "bot";
   forceOpen?: boolean;
+  preferMenuAbove?: boolean;
   className?: string;
   menu?: MessageMenuItem[];
   /** Added before `menu` when a right-click on the bubble opens it, for the actions that are inline buttons otherwise. */
@@ -167,7 +169,7 @@ export function MessageActions({
       return;
     }
     const more = moreRef.current?.getBoundingClientRect();
-    if (menuBox && more) setMenuAbove(more.bottom + 4 + menuBox.height > window.innerHeight - 8 && more.top - 4 - menuBox.height > 8);
+    if (menuBox && more) setMenuAbove((preferMenuAbove || more.bottom + 4 + menuBox.height > window.innerHeight - 8) && more.top - 4 - menuBox.height > 8);
     const rowBox = rootRef.current?.getBoundingClientRect();
     if (menuBox && rowBox) {
       const rtl = getComputedStyle(rootRef.current!).direction === "rtl";
@@ -178,7 +180,7 @@ export function MessageActions({
       setMenuFlipped(mirrored ? !fitsEnd && fitsStart : !fitsStart && fitsEnd);
     }
     menuRef.current?.querySelector<HTMLButtonElement>("[role=menuitem]:not(:disabled)")?.focus();
-  }, [menuOpen, pointAt]);
+  }, [menuOpen, pointAt, preferMenuAbove]);
 
   const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
     const items = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]:not(:disabled)") ?? [])];
@@ -283,11 +285,7 @@ export function CopyButton({ text, className }: { text: string; className?: stri
       onClick={copy}
       aria-label={label}
       title={label}
-      className={cn(
-        "rounded-md p-1.5 text-ink-secondary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-100",
-        state !== "idle" && "opacity-100",
-        className,
-      )}
+      className={className ?? messageActionClass}
     >
       {state === "copied" ? <Check {...ACTION_ICON} className="text-success" /> : state === "failed" ? <X {...ACTION_ICON} className="text-danger" /> : <Copy {...ACTION_ICON} />}
     </button>

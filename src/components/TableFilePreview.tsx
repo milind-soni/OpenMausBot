@@ -2,7 +2,8 @@ import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, Table2 } from "lucide-react";
 import { requestMessageFile, type MessageAttachmentContext } from "./AttachmentPreview";
-import { RichTable, TableDialog } from "./RichTable";
+import { RichTable } from "./RichTable";
+import { FilePreviewDialog } from "./FilePreviewDialog";
 import { TABLE_FILE_MAX_BYTES, tableDelimiter, type TextTable } from "@/lib/table-data";
 import { t } from "@/lib/i18n";
 
@@ -43,7 +44,7 @@ export function TableFileButton({ path, name, message }: { path: string; name: s
   if (!delimiter) return null;
   return <>
     <button type="button" className="table-action" title={t("table.preview", { name })} aria-label={t("table.preview", { name })} onClick={() => { trigger.current = keyboardFocusTarget(); setOpen(true); }}><Table2 size={14} /></button>
-    {open && <TableDialog title={name} returnFocus={trigger.current} onClose={() => setOpen(false)}><TableFileContent key={`${message.threadId}:${message.messageId}:${path}`} path={path} name={name} message={message} delimiter={delimiter} /></TableDialog>}
+    {open && <FilePreviewDialog title={name} returnFocus={trigger.current} onClose={() => setOpen(false)}><TableFileContent key={`${message.threadId}:${message.messageId}:${path}`} path={path} name={name} message={message} delimiter={delimiter} /></FilePreviewDialog>}
   </>;
 }
 
@@ -82,5 +83,5 @@ function TableFileContent({ path, name, message, delimiter }: {
   const data = useMemo(() => table && ({ columns: table.headers.map((text) => ({ text })), rows: table.rows.map((row) => row.map((text) => ({ text }))) }), [table]);
   if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{t(error === "size" ? "table.tooLarge" : error === "columns" || error === "format" ? "table.invalid" : "table.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>;
   if (!data) return <div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("table.loading")}</div>;
-  return <RichTable {...data} name={name} expanded />;
+  return <RichTable {...data} name={name} filePreview />;
 }

@@ -74,15 +74,9 @@ export function QueuedComposerMessages({
   const multiple = items.length > 1;
   const steerLabel = steering
     ? t("composer.queued.steering")
-    : steerInterrupts
-      ? multiple
-        ? t(steerMode === "all" ? "composer.queued.stopAndSendAll" : "composer.queued.stopAndSendNext")
-        : t("composer.queued.stopAndSend")
-      : multiple
-        ? steerMode === "all"
-          ? t("composer.queued.steerAll")
-          : t("composer.queued.steerNext")
-        : t("composer.queued.steer");
+    : multiple
+      ? t(steerMode === "all" ? "composer.queued.steerAll" : "composer.queued.steerNext")
+      : t("composer.queued.steer");
   const steerDescription = steerInterrupts
     ? multiple
       ? steerMode === "all"

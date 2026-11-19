@@ -1,8 +1,6 @@
-import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
-import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { ArrowDown, ArrowUp, Check, Copy, Download, Maximize2, Search, WrapText, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Copy, Download, Search, WrapText } from "lucide-react";
 import { isTableAmount, tableCsv, tableRowOrder, type TableSort } from "@/lib/table-data";
 import { intlLocale, t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
@@ -17,45 +15,17 @@ export interface RichTableProps {
   columns: TableColumn[];
   rows: TableCell[][];
   name?: string;
-  expanded?: boolean;
+  filePreview?: boolean;
   direction?: "rtl" | "ltr";
   headless?: boolean;
 }
 
-/** The native modal supplies focus containment, Escape, an inert background and focus restoration. */
-export function TableDialog({ title, onClose, children, returnFocus }: { title: string; onClose: () => void; children: ReactNode; returnFocus: HTMLElement | null }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  const id = useId();
-  useEffect(() => {
-    const dialog = ref.current!;
-    const active = document.activeElement;
-    if (!returnFocus && active instanceof HTMLElement && !dialog.contains(active)) active.blur();
-    dialog.showModal();
-    return () => { dialog.close(); if (returnFocus?.isConnected) returnFocus.focus(); };
-  }, [returnFocus]);
-  return createPortal(
-    <dialog ref={ref} aria-labelledby={id} onCancel={onClose} onClose={onClose}
-      onKeyDown={(event) => { if (event.key === "Escape") event.stopPropagation(); }}
-      className="m-auto flex max-h-[94dvh] w-[min(96vw,1400px)] max-w-none flex-col overflow-hidden rounded-2xl border border-hairline bg-panel p-0 text-ink shadow-2xl backdrop:bg-black/55">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/40 px-4 py-3">
-        <h2 id={id} className="min-w-0 truncate text-sm font-medium">{title}</h2>
-        <button type="button" autoFocus onClick={onClose} className="table-action" aria-label={t("table.close")}><X size={16} /></button>
-      </header>
-      <div className="min-h-0 overflow-auto p-3 sm:p-5">{children}</div>
-    </dialog>, document.body,
-  );
-}
-
-const SMALL_TABLE_ROWS = 8;
-
-export function RichTable({ columns, rows, name = t("table.title"), expanded = false, direction = "ltr", headless = false }: RichTableProps) {
+export function RichTable({ columns, rows, name = t("table.title"), filePreview = false, direction = "ltr", headless = false }: RichTableProps) {
 
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
   const [sort, setSort] = useState<TableSort>(null);
   const [wrap, setWrap] = useState(true);
-  const [open, setOpen] = useState(false);
-  const trigger = useRef<HTMLElement | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const values = useMemo(() => rows.map((row) => row.map((cell) => cell.text)), [rows]);
   const order = useMemo(() => tableRowOrder(values, deferredQuery, sort), [values, deferredQuery, sort]);
@@ -81,37 +51,25 @@ export function RichTable({ columns, rows, name = t("table.title"), expanded = f
     <label className={className}>
       <Search size={13} aria-hidden="true" />
       <input value={query} onChange={(event) => setQuery(event.target.value)} aria-label={t("table.search")}
-        placeholder={t("table.search")} className="w-full min-w-0 bg-transparent py-1 text-xs text-ink outline-none placeholder:text-ink-tertiary focus-visible:ring-1 focus-visible:ring-accent" />
+        placeholder={t("table.search")} className="w-full min-w-0 bg-transparent py-1 text-xs text-ink outline-none placeholder:text-ink-tertiary focus:bg-raised/50" />
     </label>
   );
   const sortBy = (column: number) => setSort(sort?.column !== column ? { column, descending: false } : !sort.descending ? { column, descending: true } : null);
-  const surface = (large: boolean) => {
-
-    const small = !large && rows.length <= SMALL_TABLE_ROWS;
-    const actions = <>
-        {!small && <button type="button" className="table-action" aria-label={t("table.wrap")} title={t("table.wrap")} aria-pressed={wrap} onClick={() => setWrap(!wrap)}><WrapText size={14} /></button>}
+  return <div className="chat-table">
+    <div className={cn("rich-table w-fit min-w-[min(100%,var(--chat-prose-max))] max-w-full overflow-hidden rounded-xl border border-hairline/50 text-ink", "bg-panel")} dir="ltr">
+      <div className="flex flex-wrap items-center gap-1 border-b border-hairline/40 px-2 py-1.5">
+        {search("flex min-w-24 flex-1 items-center gap-2 px-1 text-ink-secondary")}
+        <button type="button" className="table-action" aria-label={t("table.wrap")} title={t("table.wrap")} aria-pressed={wrap} onClick={() => setWrap(!wrap)}><WrapText size={14} /></button>
         <button type="button" className="table-action" aria-label={t("table.copy")} title={t("table.copy")} onClick={() => void copy()}>{copyState === "copied" ? <Check size={14} /> : <Copy size={14} />}</button>
         <button type="button" className="table-action" aria-label={t("table.download")} title={t("table.download")} onClick={download}><Download size={14} /></button>
-        {!large && <button type="button" className="table-action" aria-label={t("table.expand")} title={t("table.expand")} onClick={() => { trigger.current = keyboardFocusTarget(); setOpen(true); }}><Maximize2 size={14} /></button>}
-    </>;
-    return (
-    <div className={cn("rich-table w-fit min-w-[min(100%,var(--chat-prose-max))] max-w-full overflow-hidden rounded-xl border border-hairline/50 text-ink", "bg-panel")} dir="ltr">
-      {!small && <div className="flex flex-wrap items-center gap-1 border-b border-hairline/40 px-2 py-1.5">
-        {search("flex min-w-24 flex-1 items-center gap-2 px-1 text-ink-secondary")}
-        {actions}
-      </div>}
-      <TableViewport columns={columns} rows={rows} order={order} name={name} wrap={wrap} large={large} sort={sort} direction={direction} headless={headless} onSort={sortBy} />
-      <footer className={small
-        ? "flex items-center justify-end gap-0.5 border-t border-hairline/30 px-1.5 py-1 text-[11px] text-ink-tertiary"
-        : "flex flex-wrap items-center justify-between gap-2 border-t border-hairline/40 px-3 py-2 text-[11px] text-ink-secondary"}>
-        {!small && <span role="status">{t("table.count", { shown: order.length.toLocaleString(intlLocale()), total: rows.length.toLocaleString(intlLocale()), columns: columns.length })}</span>}
-        {copyState !== "idle" && <span role={copyState === "failed" ? "alert" : "status"} className={small ? "me-auto ps-1.5" : undefined}>{t(copyState === "failed" ? "table.copyFailed" : "table.copied")}</span>}
-        {small && actions}
+      </div>
+      <TableViewport columns={columns} rows={rows} order={order} name={name} wrap={wrap} large={filePreview} sort={sort} direction={direction} headless={headless} onSort={sortBy} />
+      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline/40 px-3 py-2 text-[11px] text-ink-secondary">
+        <span role="status">{t("table.count", { shown: order.length.toLocaleString(intlLocale()), total: rows.length.toLocaleString(intlLocale()), columns: columns.length })}</span>
+        {copyState !== "idle" && <span role={copyState === "failed" ? "alert" : "status"}>{t(copyState === "failed" ? "table.copyFailed" : "table.copied")}</span>}
       </footer>
     </div>
-    );
-  };
-  return <><div hidden={open} className="chat-table">{surface(expanded)}</div>{open && <TableDialog title={name} returnFocus={trigger.current} onClose={() => setOpen(false)}>{surface(true)}</TableDialog>}</>;
+  </div>;
 }
 
 function TableViewport({ columns, rows, order, name, wrap, large, sort, onSort, direction, headless = false }: RichTableProps & {
@@ -163,9 +121,9 @@ function TableViewport({ columns, rows, order, name, wrap, large, sort, onSort, 
       <thead ref={heading} hidden={headless} className="sticky top-0 z-10 bg-raised"><tr aria-rowindex={1}>
         {columns.map((column, index) => <th key={index} scope="col" aria-sort={sort?.column === index ? sort.descending ? "descending" : "ascending" : "none"}
           className={"h-10 border-b border-hairline/60 px-3 py-2 font-medium"} style={{ textAlign: alignment(column, index) }}>
-          <div className="break-words [overflow-wrap:anywhere]" style={fit ? { minWidth: minimums[index] } : undefined}>
-            <span dir="auto">{header(column, index)}</span>
-            <button type="button" className="table-action ms-1 inline-flex align-middle" aria-label={sortLabel(column, index)} title={sortLabel(column, index)} onClick={() => onSort(index)}>{arrow(index)}</button>
+          <div className="inline-flex max-w-full items-center gap-1 whitespace-nowrap" style={fit ? { minWidth: minimums[index] } : undefined}>
+            <span dir="auto" className="min-w-0 truncate" title={column.text}>{header(column, index)}</span>
+            <button type="button" className="inline-flex shrink-0 rounded hover:bg-inset focus-visible:outline-accent" aria-label={sortLabel(column, index)} title={sortLabel(column, index)} onClick={() => onSort(index)}>{arrow(index)}</button>
           </div>
         </th>)}
       </tr></thead>

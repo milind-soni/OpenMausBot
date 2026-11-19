@@ -41,8 +41,11 @@ export function CronScheduleFields({ choice, value, onChange, runs, error }: {
       <label className="space-y-1.5 text-[12px] text-ink-secondary"><span className="block">{t("routines.cron.time")}</span><input type="time" step={60} value={value.time} onChange={(event) => update({ time: event.target.value })} className={fieldClass} /></label>
     </div>}
     {choice !== "cron" && Number(value.day) > 28 && <p className="text-[11px] text-ink-secondary">{t("routines.cron.skippedMonths")}</p>}
-    <label className="block space-y-1.5 text-[12px] text-ink-secondary"><span>{t("routines.cron.timeZone")}</span><input list="routine-time-zones" value={value.timeZone} onChange={(event) => update({ timeZone: event.target.value })} placeholder="America/New_York" spellCheck={false} autoComplete="off" aria-invalid={Boolean(error)} aria-describedby="routine-cron-error" className={cn(fieldClass, "block w-full")} /></label>
-    <datalist id="routine-time-zones">{TIME_ZONES.map(zone => <option key={zone} value={zone} />)}</datalist>
+    <label className="block space-y-1.5 text-[12px] text-ink-secondary"><span>{t("routines.cron.timeZone")}</span><input value={value.timeZone} onChange={(event) => update({ timeZone: event.target.value })} placeholder="America/New_York" spellCheck={false} autoComplete="off" aria-invalid={Boolean(error)} aria-describedby="routine-cron-error" className={cn(fieldClass, "block w-full")} /></label>
+    <Select size="sm" aria-label={t("routines.cron.timeZone")} value={TIME_ZONES.includes(value.timeZone) ? value.timeZone : ""} onChange={(event) => update({ timeZone: event.target.value })}>
+      <option value="" disabled hidden>{t("routines.cron.timeZone")}</option>
+      {TIME_ZONES.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
+    </Select>
     {error && <p id="routine-cron-error" role="alert" className="text-[12px] text-danger">{error}</p>}
     {!error && <CronRunDates runs={runs} timeZone={value.timeZone.trim()} />}
   </div>;

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ClipboardList } from "lucide-react";
 
+import { ACTION_ICON } from "./MessageActions";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { formatDuration } from "@/lib/usage-trace";
@@ -16,7 +17,7 @@ const WORK_KEY: Record<"noFiles" | "oneFile" | "files", Record<"oneTool" | "tool
 };
 const one = (count: number | string) => String(count) === "1";
 
-export function DigestChip({ message }: { message: Message }) {
+export function DigestChip({ message, inline = false }: { message: Message; inline?: boolean }) {
   const [tracing, setTracing] = useState(false);
   const digest = message.digest;
   if (!digest) return null;
@@ -32,15 +33,20 @@ export function DigestChip({ message }: { message: Message }) {
     <div className="flex justify-start" data-testid="digest-chip">
       <span
         title={message.text ?? t("chat.digestTitle")}
-        className="ui-chip max-w-[min(520px,100%)] border border-hairline/40 bg-panel text-ink-secondary"
+        className={inline
+          ? "flex min-w-0 items-center gap-1 text-[14px] text-ink-tertiary"
+          : "ui-chip max-w-[min(520px,100%)] border border-hairline/40 bg-panel text-ink-secondary"}
       >
-        <ClipboardList size={12} />
+        <ClipboardList {...(inline ? ACTION_ICON : { size: 12 })} className="shrink-0" />
         <span className="truncate">{label}</span>
-        <button type="button" onClick={() => setTracing(true)} className="shrink-0 text-accent hover:underline" data-testid="view-trace">
+        {inline && <span aria-hidden="true">·</span>}
+        <button type="button" onClick={() => setTracing(true)} className={inline
+          ? "min-h-7 shrink-0 whitespace-nowrap hover:text-ink hover:underline focus-visible:outline-focus"
+          : "shrink-0 text-accent hover:underline"} data-testid="view-trace">
           {t("trace.view")}
         </button>
       </span>
-      {tracing && <TraceDialog id={traceRootId(digest.threadId, digest.turnId)} at={digest.at} onClose={() => setTracing(false)} />}
+      <TraceDialog open={tracing} id={traceRootId(digest.threadId, digest.turnId)} at={digest.at} onClose={() => setTracing(false)} />
     </div>
   );
 }

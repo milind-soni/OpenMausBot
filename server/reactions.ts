@@ -110,7 +110,7 @@ export function createReactions(deps: ReactionDeps) {
 
   /** `on` sets (true) or clears (false) the person's `emoji`; absent, a second tap of the same emoji clears it. */
   async function react(input: {
-    auth: RequestAuth; threadId: string; messageId: string; emoji: Reaction; reactor: Reactor; on?: boolean;
+    auth: RequestAuth; threadId: string; messageId: string; emoji: Reaction; reactor: Reactor; on?: boolean; badgeOnly?: boolean;
   }): Promise<{ message: Message; delivery: ReactionDelivery }> {
     const { auth, threadId, messageId, emoji, reactor, on } = input;
     const target = store.messagesFor(threadId).find((message) => message.id === messageId);
@@ -128,7 +128,7 @@ export function createReactions(deps: ReactionDeps) {
     const withdrawPrevious = () => {
       if (previous && reactionAnswer(previous.emoji)) deps.withdraw(threadId, owner, sent.sendId(previous));
     };
-    if (!entry) {
+    if (!entry || input.badgeOnly) {
       withdrawPrevious();
       return { message, delivery: "none" };
     }

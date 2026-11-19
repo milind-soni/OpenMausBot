@@ -204,8 +204,8 @@ export function quoteSurface(inset: string, background: string): string {
   return mixSrgb(inset, background, 0.7);
 }
 
-export function userBubbleStyle(color: MausColor): CSSProperties {
-  const tone = userBubbleTone(color);
+export function userBubbleStyle(color: MausColor, { whiteInk = false } = {}): CSSProperties {
+  const tone = whiteInk ? whiteInkTone(MAUS_COLORS[color]) : userBubbleTone(color);
   return {
     backgroundColor: tone.background,
     backgroundImage: tone.gradient,

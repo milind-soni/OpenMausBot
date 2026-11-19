@@ -2,7 +2,7 @@ import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { Component, lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Code2, Download, ExternalLink, Eye, LoaderCircle, RotateCcw } from "lucide-react";
 import { requestMessageFile, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
-import { TableDialog } from "./RichTable";
+import { FilePreviewDialog } from "./FilePreviewDialog";
 import { readTableResponse } from "./TableFilePreview";
 import { t } from "@/lib/i18n";
 
@@ -64,11 +64,11 @@ export function useHtmlPreview(path: string, name: string, message?: MessageAtta
       setOpen(true);
     },
     dialog: kind && open && message
-      ? <TableDialog title={name} returnFocus={opener.current} onClose={() => setOpen(false)}>
+      ? <FilePreviewDialog title={name} returnFocus={opener.current} onClose={() => setOpen(false)}>
         {kind === "html"
           ? <HtmlFileContent key={key} path={path} name={name} message={message} />
           : <MarkdownPreviewBoundary><Suspense fallback={<div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</div>}><MarkdownFileContent key={key} path={path} name={name} message={message} /></Suspense></MarkdownPreviewBoundary>}
-      </TableDialog>
+      </FilePreviewDialog>
       : null,
   };
 }

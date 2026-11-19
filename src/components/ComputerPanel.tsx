@@ -1,4 +1,3 @@
-import { TAB_BUTTON, TAB_GROUP } from "@/components/tab-styles";
 import type { CSSProperties } from "react";
 import { boatCapableEngine, cloudEngineOf } from "@/lib/remote-desktop";
 import { canWorkOnCloud } from "../../shared/cloud-computer";
@@ -1062,7 +1061,7 @@ export function ComputerPanel({
     dispatch({ type: "updateBot", botId: profileBot.id, patch: { browser: false } });
   };
   const browserSwitchRow = (
-    <div data-testid="browser-switch-row" className="mb-3 flex items-center gap-3 border-b border-hairline/40 px-1 pb-3">
+    <div data-testid="browser-switch-row" className="mb-3 flex items-center gap-3 rounded-2xl bg-card px-3 py-2.5 ring-1 ring-inset ring-hairline/50">
       <Globe size={15} className="shrink-0 text-ink-secondary" aria-hidden="true" />
       <div className="min-w-0 flex-1">
         <div className="text-[13px] font-medium text-ink">{t("computer.browserSwitch.title", { name: bot.name })}</div>
@@ -1188,37 +1187,36 @@ export function ComputerPanel({
         onPointerCancel={onResizeEnd}
         className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-accent/40 focus-visible:bg-accent/60 max-md:hidden"
       />
-      <RightSidePanelHeader className="mb-4" {...dragProps} label={t("computer.close")} onClose={closePanel}>
-        <div className="@container/paneltabs relative flex h-[34px] min-w-0 flex-1 items-center justify-center">
-          {(
-            <button
-              onClick={() => {
-                releaseComputerPanelFocus(panelRef.current, bot.id);
-                dispatch({ type: "toggleComputer", open: false });
-                dispatch({ type: "toggleSettings", open: true, section: "access" });
-              }}
-              className="absolute left-0 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
-              title={t("computer.botSettings")}
-            >
-              <Settings size={18} />
-            </button>
-          )}
-          <div className={cn(TAB_GROUP, "min-w-0 touch-pan-x overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden", "ms-8")} data-tour="computer-tabs" data-testid="computer-tabs" role="tablist" aria-label={t("computer.tabsAria")} onWheel={scrollTabsWithWheel} onKeyDown={(event) => moveBetweenTabs(event, panelTabs, chooseTab)}>
-            {panelTabs.map((view) => {
-              const { Icon, label, tour } = PANEL_TABS[view];
-              const live = !placeLive ? undefined
-                : view === "computer" && isComputerPlace(livePlace) ? "computer-tab-live"
-                : view === "browser" && livePlace === "browser" ? "browser-tab-live" : undefined;
-              return (
-                <button key={view} type="button" data-tour={tour} {...panelTabProps(view, view === panelView)} title={t(label)} onClick={() => chooseTab(view)} className={cn(TAB_BUTTON, "@max-[28rem]/paneltabs:[&>svg]:hidden @max-[22rem]/paneltabs:px-2")}>
-                  <Icon size={13} /> {t(label)}
-                  {live && <span className="size-1.5 animate-pulse rounded-full bg-success" role="img" aria-label={t("place.live")} data-testid={live} />}
-                </button>
-              );
-            })}
-          </div>
+      <RightSidePanelHeader className="mb-3 px-4" {...dragProps} label={t("computer.close")} onClose={closePanel}>
+        <div className="flex h-[34px] min-w-0 flex-1 items-center justify-between gap-2">
+          <span className="truncate text-[16px] font-semibold tracking-tight text-ink">{bot.name}</span>
+          <button
+            onClick={() => {
+              releaseComputerPanelFocus(panelRef.current, bot.id);
+              dispatch({ type: "toggleComputer", open: false });
+              dispatch({ type: "toggleSettings", open: true });
+            }}
+            className="grid size-8 shrink-0 place-items-center rounded-xl text-ink-secondary hover:bg-control hover:text-ink"
+            title={t("computer.botSettings")}
+          >
+            <Settings size={18} aria-hidden="true" />
+          </button>
         </div>
       </RightSidePanelHeader>
+      <div className="mx-4 mb-5 flex shrink-0 items-stretch gap-1 overflow-x-auto rounded-2xl bg-control/60 p-1 [scrollbar-width:none]" data-tour="computer-tabs" data-testid="computer-tabs" role="tablist" aria-label={t("computer.tabsAria")} onWheel={scrollTabsWithWheel} onKeyDown={(event) => moveBetweenTabs(event, panelTabs, chooseTab)}>
+        {panelTabs.map((view) => {
+          const { Icon, label, tour } = PANEL_TABS[view];
+          const live = !placeLive ? undefined
+            : view === "computer" && isComputerPlace(livePlace) ? "computer-tab-live"
+            : view === "browser" && livePlace === "browser" ? "browser-tab-live" : undefined;
+          return (
+            <button key={view} type="button" data-tour={tour} {...panelTabProps(view, view === panelView)} title={t(label)} onClick={() => chooseTab(view)} className="relative flex min-w-max flex-1 flex-col items-center justify-center gap-1 rounded-xl px-2.5 py-1.5 text-center text-[12px] font-medium leading-4 text-ink-secondary transition-colors hover:text-ink focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus aria-selected:bg-card aria-selected:text-ink aria-selected:shadow-sm">
+              <Icon size={15} strokeWidth={1.65} aria-hidden="true" className="shrink-0" /><span>{t(label)}</span>
+              {live && <span className="absolute end-1.5 top-1.5 size-1.5 motion-safe:animate-pulse rounded-full bg-success" role="img" aria-label={t("place.live")} data-testid={live} />}
+            </button>
+          );
+        })}
+      </div>
 
       {panelView === "routines" ? (
         <div {...tabPanelProps("routines")} className={cn("min-h-0 flex-1 overflow-y-auto px-4 pb-4", TAB_PANEL_FOCUS)}>
@@ -1236,9 +1234,9 @@ export function ComputerPanel({
           )}
         </div>
       ) : panelView === "browser" ? (
-        <div {...tabPanelProps("browser")} className={cn("flex-1 overflow-y-auto px-5 pb-5", TAB_PANEL_FOCUS)} data-testid="browser-off">
+        <div {...tabPanelProps("browser")} className={cn("min-h-0 flex-1 overflow-y-auto px-4 pb-4", TAB_PANEL_FOCUS)} data-testid="browser-off">
           {browserSwitchRow}
-          <div className="mt-2 flex flex-col items-center gap-3 rounded-xl bg-transparent px-6 py-8 text-center">
+          <div className="flex flex-col items-center gap-3 rounded-2xl border border-hairline/50 bg-card px-5 py-8 text-center">
             <Globe size={22} className="text-ink-secondary" aria-hidden="true" />
             <div className="text-[14px] font-medium text-ink">{t("computer.browserOff.title")}</div>
             <p className="text-[12px] leading-5 text-ink-secondary">
@@ -1252,7 +1250,7 @@ export function ComputerPanel({
           </div>
         </div>
       ) : panelView === "data" ? (
-        <div {...tabPanelProps("data")} className={cn("flex min-h-0 flex-1 flex-col overflow-hidden", TAB_PANEL_FOCUS)}>
+        <div {...tabPanelProps("data")} className={cn("flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4", TAB_PANEL_FOCUS)}>
           <Suspense fallback={<div className="flex flex-1 items-center justify-center text-[13px] text-ink-secondary" role="status">{t("data.loading")}</div>}>
             <DataPanel key={bot.id} bot={bot} requestedCard={dataRequest} />
           </Suspense>
@@ -1262,8 +1260,8 @@ export function ComputerPanel({
           <AndroidDevicePanel status={androidStatus} serverPhones={usbPhoneTakeoverEnabled(state.config)} />
         </div>
       ) : (
-      <div {...tabPanelProps("computer")} className={cn("flex-1 overflow-y-auto px-5 pb-5", TAB_PANEL_FOCUS)}>
-          <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
+      <div {...tabPanelProps("computer")} className={cn("min-h-0 flex-1 overflow-y-auto px-4 pb-4", TAB_PANEL_FOCUS)}>
+          <div className="mb-2 flex items-center justify-between gap-2 text-[13px] font-medium text-ink">
             <span>{t("computer.screenOf", { name: bot.name })}</span>
             {currentTeamComputer && <span className="text-[11px]">{autoView.short}</span>}
             {phase === "local" && <span className="text-[11px]">{t("computer.badge.local")}</span>}
@@ -1274,7 +1272,7 @@ export function ComputerPanel({
             )}
             {computerStatusCurrent && bot.computer === "cloud" && cloudBackend === "vps" && (phase === "ready" || phase === "starting") && !liveHere && <span className="text-[11px]">{t("computer.badge.vps")}</span>}
         </div>
-        <div className={cn("relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-xl bg-transparent", liveHere && "ring-2 ring-accent")}>
+        <div className={cn("relative flex aspect-[16/10] w-full items-center justify-center overflow-hidden rounded-2xl border border-hairline/50 bg-card", liveHere && "ring-2 ring-accent")}>
           {liveHere && liveTarget ? (
             <Suspense fallback={<Loader2 size={18} className="animate-spin text-ink-secondary" />}>
               <LiveDesktop
@@ -1588,7 +1586,7 @@ export function ComputerPanel({
         </>}
 
         {<>
-          <div className="mt-4 rounded-xl bg-transparent p-4">
+          <div className="mt-4 rounded-2xl border border-hairline/50 bg-card p-3">
             <div className="text-[15px] font-medium text-ink">{t("computer.worksOn")}</div>
             <p className="mt-1 text-[12px] leading-5 text-ink-secondary">
               {t(state.config?.cloudHome ? "computer.worksOnHintCloudHome" : "computer.worksOnHint")}

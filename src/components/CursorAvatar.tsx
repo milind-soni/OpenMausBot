@@ -13,6 +13,7 @@ import {
   MOUTHS,
   MOUTH_STROKE,
   mouthFrame,
+  mouthPath,
   type Ring,
 } from "./cursor-face-data"
 import { GLYPH_EASE_MS, MOTION, VIEW_SPAN, bodyTransform, faceTravelUnits, frameFloorMs, morphUnitsPerMs, nextFrameAt, nextMascotFrame, type BodyMotion } from "./mascot-motion"
@@ -29,6 +30,7 @@ export {
   MOUTHS,
   MOUTH_STROKE,
   mouthFrame,
+  mouthPath,
 }
 export type { Ring }
 
@@ -862,23 +864,6 @@ const ringCentre = (ring: Ring): [number, number] => {
   return [x / ring.length, y / ring.length]
 }
 
-export function mouthPath(frame: { x: number; y: number; angle: number }, spec: number[]) {
-  const ca = Math.cos(frame.angle)
-  const sa = Math.sin(frame.angle)
-  const at = (lx: number, ly: number): [number, number] => [
-    frame.x + lx * ca - ly * sa,
-    frame.y + lx * sa + ly * ca,
-  ]
-  const a = at(-spec[0], 0)
-  const c = at(0, spec[1])
-  const b = at(spec[0], 0)
-  return (
-    'M' + a[0].toFixed(2) + ' ' + a[1].toFixed(2) +
-    ' Q' + c[0].toFixed(2) + ' ' + c[1].toFixed(2) +
-    ' ' + b[0].toFixed(2) + ' ' + b[1].toFixed(2)
-  )
-}
-
 export const anchorTransform = (a: { x: number; y: number; scale: number }) =>
   `translate(${a.x} ${a.y}) scale(${a.scale}) translate(${-FACE_CENTRE[0]} ${-FACE_CENTRE[1]})`
 
@@ -991,6 +976,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       velocity: 0,
       travel: 0,
       blinkStart: noTimestamp(),
+      resumeHopStart: noTimestamp(),
       spinStart: noTimestamp(),
       spinDuration: 900,
       last: 0,
@@ -1081,7 +1067,15 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       return () => clearTimeout(timer)
     }, [state, autoBlink, paused, reduced])
 
+    const wasPaused = useRef(paused)
     useEffect(() => {
+      if (wasPaused.current && !paused && !reduced) {
+        engine.current.blinkStart = performance.now()
+        engine.current.resumeHopStart = engine.current.blinkStart
+      } else if (paused || reduced) {
+        engine.current.resumeHopStart = null
+      }
+      wasPaused.current = paused
       engine.current.faceStale = true
       wake()
     }, [state, expression, gaze?.x, gaze?.y, turn, eyeScale, lookAround, paused, reduced, motionStrength, effects, glyphs, paint, showMouth, size])
@@ -1153,7 +1147,9 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         }
         const bodyEl = bodyGroup.current
         if (bodyEl) {
-          const transform = bodyTransform(MOTION[p.state] ?? {}, now - e.stateStart, p.motionStrength ?? 1)
+          const elapsed = e.resumeHopStart === null ? now - e.stateStart : now - e.resumeHopStart
+          const motion = e.resumeHopStart === null ? MOTION[p.state] ?? {} : MOTION.happy
+          const transform = bodyTransform(motion, elapsed, p.motionStrength ?? 1)
           if (transform !== e.lastBodyTransform) {
             e.lastBodyTransform = transform
             if (transform) bodyEl.setAttribute('transform', transform)
@@ -1211,14 +1207,15 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         if (e.faceStale || e.faceMoving || faceMoving()) drawFace(e, now, spinTurn)
         e.faceStale = false
         e.faceMoving = faceMoving()
+        if (e.resumeHopStart !== null && now - e.resumeHopStart >= MOTION.happy.bob[1]) e.resumeHopStart = null
         const showEffects = p.effects !== false && !p.paused
         const showGlyphs = p.glyphs !== false && !p.paused && !p.reduced
         drawBody(e, now, showEffects, showGlyphs)
         if (p.paused) return Infinity
         return nextMascotFrame(now, {
-          motion: MOTION[p.state] ?? {},
+          motion: e.resumeHopStart === null ? MOTION[p.state] ?? {} : MOTION.happy,
           effects: EFFECTS[p.state],
-          stateElapsedMs: now - e.stateStart,
+          stateElapsedMs: now - (e.resumeHopStart ?? e.stateStart),
           strength: p.motionStrength ?? 1,
           showEffects,
           showGlyphs,

@@ -152,15 +152,15 @@ describe("QueuedComposerMessages", () => {
     expect(withoutEdit).not.toContain("Edit queued message");
   });
 
-  it("shows Stop and send on the button when the engine cannot steer live", () => {
+  it("labels the interrupt fallback Steer", () => {
     const base = { items: oneItem, onSteer: () => undefined, onCancel: () => undefined } as const;
     const liveMarkup = renderToStaticMarkup(createElement(QueuedComposerMessages, base));
     expect(liveMarkup).toContain("aria-label=\"Steer queued message now\"");
     const interruptMarkup = renderToStaticMarkup(
       createElement(QueuedComposerMessages, { ...base, steerInterrupts: true }),
     );
-    expect(interruptMarkup).toContain(">Stop and send</button>");
-    expect(interruptMarkup).toContain('aria-label="Stop and send"');
+    expect(interruptMarkup).toContain(">Steer</button>");
+    expect(interruptMarkup).toContain('aria-label="Steer"');
     expect(interruptMarkup).toContain('title="Stop the running turn and any work it handed to other bots, then send this message now"');
     expect(interruptMarkup).not.toContain("aria-label=\"Steer queued message now\"");
   });
@@ -194,21 +194,21 @@ describe("QueuedComposerMessages", () => {
         onCancel: () => undefined,
       }),
     );
-    expect(markup).toContain(">Stop and send next</button>");
-    expect(markup).toContain('aria-label="Stop and send next"');
+    expect(markup).toContain(">Steer next</button>");
+    expect(markup).toContain('aria-label="Steer next"');
     expect(markup).toContain('title="Stop the running turn and any work it handed to other bots, then send the next queued message now"');
     expect(markup).not.toContain("aria-label=\"Steer the next queued message now\"");
   });
 
-  it("shows Stop and send all when the action will stop the turn and drain the direct queue", () => {
+  it("labels the interrupt fallback Steer all for the direct queue", () => {
     const markup = renderToStaticMarkup(createElement(QueuedComposerMessages, {
       items: [{ queueId: "q1", text: "first" }, { queueId: "q2", text: "second" }],
       onSteer: () => undefined,
       onCancel: () => undefined,
       steerInterrupts: true,
     }));
-    expect(markup).toContain(">Stop and send all</button>");
-    expect(markup).toContain('aria-label="Stop and send all"');
+    expect(markup).toContain(">Steer all</button>");
+    expect(markup).toContain('aria-label="Steer all"');
     expect(markup).toContain('title="Stop the running turn and any work it handed to other bots, then send all 2 queued messages now"');
   });
 

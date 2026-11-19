@@ -32,6 +32,12 @@ function hueDistance(a: number, b: number): number {
 }
 
 describe("user bubble tone", () => {
+  it("keeps white text readable on a yellow V2 bubble", () => {
+    const style = userBubbleStyle("yellow", { whiteInk: true });
+    expect(style).toMatchObject({ "--color-ink": "#ffffff" });
+    expect(contrastRatio("#ffffff", style.backgroundColor!)).toBeGreaterThanOrEqual(BUBBLE_TEXT_MIN);
+  });
+
   it.each(MAUS_COLOR_NAMES)("fills %s with a gradient that stays on the bot's hue", (color) => {
     const tone = userBubbleTone(color);
     expect(tone.ink).toBe(color === "yellow" ? "#101410" : "#ffffff");

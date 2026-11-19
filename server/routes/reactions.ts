@@ -6,7 +6,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 
 export interface ReactionRouteDeps {
   react(input: {
-    auth: RequestAuth; threadId: string; messageId: string; emoji: Reaction; reactor: Reactor; on?: boolean;
+    auth: RequestAuth; threadId: string; messageId: string; emoji: Reaction; reactor: Reactor; on?: boolean; badgeOnly?: boolean;
   }): Promise<{ message: Message; delivery: ReactionDelivery }>;
   /** Who is reacting, from their session alone: a request body never names them. */
   reactorFor(auth: RequestAuth): Reactor;
@@ -21,10 +21,11 @@ export function createReactionRoutes(deps: ReactionRouteDeps): RouteHandler {
     const emoji = normalizeReaction(body?.emoji);
     if (!emoji) return json(res, 400, { error: `emoji must be one of ${REACTIONS.join(" ")}` });
     if (body.on !== undefined && typeof body.on !== "boolean") return json(res, 400, { error: "on must be true or false" });
+    if (body.badgeOnly !== undefined && typeof body.badgeOnly !== "boolean") return json(res, 400, { error: "badgeOnly must be true or false" });
     const notYours = deps.cloudGuestSendRefusal(auth, m[1]);
     if (notYours) return json(res, 403, { error: notYours });
     try {
-      return json(res, 200, await deps.react({ auth, threadId: m[1], messageId: m[2], emoji, reactor: deps.reactorFor(auth), on: body.on }));
+      return json(res, 200, await deps.react({ auth, threadId: m[1], messageId: m[2], emoji, reactor: deps.reactorFor(auth), on: body.on, ...(body.badgeOnly ? { badgeOnly: true } : {}) }));
     } catch (error) {
       const { status, code } = error as { status?: unknown; code?: unknown };
       if (typeof status !== "number") throw error;

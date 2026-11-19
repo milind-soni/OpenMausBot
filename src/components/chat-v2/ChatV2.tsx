@@ -1,14 +1,24 @@
-import { memo, useMemo, useState } from "react";
-import { ArrowDown, Loader2, Monitor, Reply } from "lucide-react";
-import { currentTaskBot, type Bot, type Message } from "@/state/store";
+import { stateForBot } from "@/lib/mascot";
+import { JumpToLatestButton } from "../JumpToLatestButton";
+import { CopyButton, INTERACTIVE, LONG_PRESS_MS, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "../MessageActions";
+import { ReactAction, ReactionChips } from "../Reactions";
+import { replyAndCopy, useBotMessageMenu } from "../message-menu";
+import { ChatHeaderMenu } from "../ChatMoreMenu";
+import { ChatFindBar } from "../ChatFindBar";
+import { useChatFindRequests, useChatFindShortcut } from "@/lib/chat-find";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronRight, Loader2 } from "lucide-react";
+import { currentTaskBot, formatTime, type Bot, type Message } from "@/state/store";
+import { rememberComputerPanelOpen } from "@/lib/computer-panel-focus";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useChatHistory } from "@/state/use-chat-history";
 import { useLiveTranscript } from "@/state/live-reply";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport";
 import { useUnreadDivider } from "@/hooks/use-unread-divider";
 import { useCanWriteIn } from "@/lib/cloud-guest";
+import { userBubbleStyle } from "@/lib/user-bubble-tone";
 import { useReplyDraft } from "@/lib/drafts";
-import { botLineText, canEditTypedMessage, localDay } from "@/lib/transcript-derivations";
+import { botLineText, canEditTypedMessage } from "@/lib/transcript-derivations";
 import { botEngine, failedTurnCause } from "@/lib/failed-turn";
 import { lastNonReceipt } from "@/lib/receipts";
 import { t } from "@/lib/i18n";
@@ -43,18 +53,72 @@ import { FailedTurnRow } from "../ChatView";
 import { useSharedRun } from "../SharedQueueLine";
 import { SetupOffer } from "../SetupOffer";
 import { ReplyQuote } from "../ReplyQuote";
+import { TurnPresence, useRotatingPhrase } from "../TurnPresence";
 
 const EMPTY_TRANSCRIPT: Message[] = [];
 
-const Row = memo(function Row({ message: m, botId, botName, color, threadId, busy, hasMore, transcript, reply, failure, quoted, jumpTo, canLoadQuote, loadingQuote }: {
+function BotBubbleActions({ message, botId, threadId, text, canReact, onReply, raw, toggleRaw }: {
+  message: Message; botId: string; threadId: string; text: string; canReact: boolean;
+  onReply?: () => void; raw: boolean; toggleRaw: () => void;
+}) {
+  const menu = useBotMessageMenu({
+    text, botId, threadId, messageId: message.id, tts: undefined, localVoice: false,
+    canSpeak: false, viewRaw: raw, onToggleRaw: toggleRaw,
+  });
+  return <MessageActions side="bot" className="v2-bubble-actions" forceOpen={raw} preferMenuAbove
+    menu={menu} contextItems={onReply ? replyAndCopy(onReply, text) : []}>
+    {onReply && <ReplyAction onReply={onReply} />}
+    {canReact && <ReactAction threadId={threadId} message={message} badgeOnly />}
+    {text && <CopyButton text={text} className={messageActionClass} />}
+    <span className="v2-message-time">{formatTime(message.at)}</span>
+  </MessageActions>;
+}
+
+function ChatV2Presence({ bot }: { bot: Bot }) {
+  const visible = Boolean(bot.busy && bot.activity !== "waiting-on-you");
+  const { current } = useRotatingPhrase(
+    [t("chat.friendly.mulling"), t("chat.friendly.thinking")],
+    "thinking", `${bot.threadId}:${bot.turnStartedAt ?? ""}`, visible,
+  );
+  return <div role="status" className="v2-turn-status">
+    <TurnPresence visible={visible} label={current} avatar={
+      <span className="v2-working-symbol" aria-hidden="true">
+        <span className="v2-working-dots"><i /><i /><i /></span>
+        <span className="v2-working-avatar"><BotAvatar bot={bot} size={34} state={stateForBot(bot)} /></span>
+      </span>
+    } />
+  </div>;
+}
+
+const Row = memo(function Row({ message: m, botId, botName, color, threadId, busy, hasMore, transcript, reply, failure, quoted, jumpTo, canLoadQuote, loadingQuote, digest, ownBubbleStyle }: {
   message: Message; botId: string; botName: string; color: Bot["color"]; threadId: string;
   failure?: React.ReactNode;
   quoted?: Message;
   jumpTo: (messageId: string, loaded: boolean) => void;
   canLoadQuote: boolean;
   loadingQuote: boolean;
-  busy: boolean; hasMore: boolean; transcript: Message[]; reply?: (message: Message) => void;
+  ownBubbleStyle: ReturnType<typeof userBubbleStyle>;
+  digest?: Message; busy: boolean; hasMore: boolean; transcript: Message[]; reply?: (message: Message) => void;
 }) {
+  const inlineTrace = useRef<HTMLDivElement>(null);
+  const press = useRef<{ id: number; x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const cancelPress = () => {
+    if (press.current) clearTimeout(press.current.timer);
+    press.current = null;
+  };
+  useEffect(() => cancelPress, [digest]);
+  const [showTrace, setShowTrace] = useState(false);
+  useEffect(() => {
+    if (!showTrace) return;
+    const dismiss = (event: PointerEvent) => {
+      if (event.target instanceof Element && !inlineTrace.current?.contains(event.target) && !event.target.closest("dialog[open]")) {
+        setShowTrace(false);
+      }
+    };
+    document.addEventListener("pointerdown", dismiss, true);
+    return () => document.removeEventListener("pointerdown", dismiss, true);
+  }, [showTrace]);
+  const [raw, setRaw] = useState(false);
   const props = { botId, botName, color, threadId, message: m };
   switch (richRowKind(m)) {
     case "options": return optionsCardRow({ ...props, botColor: color, transcript });
@@ -66,7 +130,6 @@ const Row = memo(function Row({ message: m, botId, botName, color, threadId, bus
     case "routine.run": return <RoutineRunRow {...props} />;
     case "call": return m.call && <CallRecordRow {...props} transcript={transcript} busy={busy} hasMore={hasMore} />;
     case "compaction": return <CompactionChip message={m} />;
-    case "digest": return <DigestChip message={m} />;
     case "activity": return failure ?? (m.tool && <div className="v2-step"><ToolActivity tool={m.tool} live={Boolean(busy && m.tool.ok === undefined)} source={{ threadId: threadId, messageId: m.id }} />{m.comm && m.tool.output && <p>{m.tool.output}</p>}</div>);
   }
   const peer = peerLine(m) ?? peerRequest(m, botId);
@@ -75,24 +138,66 @@ const Row = memo(function Row({ message: m, botId, botName, color, threadId, bus
   if (!text && !m.attachments?.length) return null;
   return <article className="v2-message" data-own={own || undefined}>
     {peer && <b className="text-xs text-ink-secondary">{peer.name}</b>}
-    <div className="v2-body" dir="auto">
+    <div className="v2-bubble-row group" {...{ [MESSAGE_ROW]: "" }}>
+    <div className={own ? "v2-body user-bubble-colored" : "v2-body"} dir="auto"
+      style={own ? ownBubbleStyle : undefined} data-chat-bubble="" data-look={own ? "user-bubble" : undefined}
+      tabIndex={digest ? 0 : undefined}
+      onKeyDown={digest ? event => {
+        if (event.target === event.currentTarget && event.key === "Enter") setShowTrace(true);
+        if (event.key === "Escape") setShowTrace(false);
+      } : undefined}
+      onPointerDown={digest ? event => {
+        if (!event.isPrimary || event.button !== 0 || (event.target instanceof Element && event.target.closest(INTERACTIVE))) return;
+        cancelPress();
+        press.current = { id: event.pointerId, x: event.clientX, y: event.clientY, timer: setTimeout(() => {
+          press.current = null;
+          if (!window.getSelection()?.toString()) setShowTrace(true);
+        }, LONG_PRESS_MS) };
+      } : undefined}
+      onPointerMove={digest ? event => {
+        const active = press.current;
+        if (active?.id === event.pointerId && Math.hypot(event.clientX - active.x, event.clientY - active.y) > 10) cancelPress();
+      } : undefined}
+      onPointerUp={digest ? cancelPress : undefined}
+      onPointerCancel={digest ? cancelPress : undefined}
+      onPointerLeave={digest ? cancelPress : undefined}>
       {quoted ? <div className="mb-2">
-        <ReplyQuote message={quoted} fallbackName={botName} compact onJump={() => jumpTo(quoted.id, true)} inverse={own} />
+        <ReplyQuote message={quoted} fallbackName={botName} compact onJump={() => jumpTo(quoted.id, true)} />
       </div> : m.replyToId && <UnloadedReplyQuote key={m.replyToId} threadId={threadId} messageId={m.replyToId}
-        botName={botName} inverse={own} canJump={canLoadQuote} pending={loadingQuote} onJump={() => jumpTo(m.replyToId!, false)} />}
+        botName={botName} inverse={false} canJump={canLoadQuote} pending={loadingQuote} onJump={() => jumpTo(m.replyToId!, false)} />}
       <MessageAttachmentGallery text={text} attachments={m.attachments} message={{ threadId: threadId, messageId: m.id }} />
       {m.attachments?.map(a => a.kind === "audio" && <VoiceNoteBubble key={a.path} attachment={a} />)}
-      <ChatMarkdown text={text} message={{ threadId: threadId, messageId: m.id }} />
+      {raw ? <pre className="whitespace-pre-wrap">{text}</pre> : <ChatMarkdown text={text} message={{ threadId: threadId, messageId: m.id }} />}
+      {!own && Boolean(m.reactions?.length) && <div className="v2-reaction-badge">
+        <ReactionChips threadId={threadId} message={m} canReact={Boolean(reply) && !peer} badgeOnly />
+      </div>}
     </div>
-    {m.setupOffer && <SetupOffer {...props} transcript={transcript} />}
-    {reply && <button className="v2-reply" aria-label={t("chat.reply")} onClick={() => reply(m)}><Reply size={14} /></button>}
+    {own ? reply && <MessageActions side="user" className="v2-bubble-actions" contextItems={replyAndCopy(() => reply(m), text)}><ReplyAction onReply={() => reply(m)} /></MessageActions>
+      : <div className="v2-action-stack">
+        <div className="v2-action-layer" inert={showTrace}>
+          <BotBubbleActions message={m} botId={botId} threadId={threadId} text={text} canReact={Boolean(reply) && !peer}
+          onReply={reply && (() => reply(m))} raw={raw} toggleRaw={() => setRaw(value => !value)} />
+        </div>
+        {digest && <div ref={inlineTrace} className="v2-action-layer" inert={!showTrace}><DigestChip message={digest} inline /></div>}
+      </div>}
+    </div>
+
+
+    {m.setupOffer && <div className="mt-3 w-full"><SetupOffer {...props} transcript={transcript} /></div>}
   </article>;
 });
 
 export function ChatV2({ profile, onClose }: { profile: Bot; onClose: () => void }) {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
+  const ownBubbleStyle = useMemo(() => userBubbleStyle(bot.color, { whiteInk: true }), [bot.color]);
   const dispatch = useStoreDispatch();
   const writable = useCanWriteIn(bot.threadId, bot.yourAccess) !== false;
+  const [findOpen, setFindOpen] = useState(false);
+  const forkPanelOpen = useStoreSelector(s => Boolean(s.forkPanel));
+  useChatFindRequests(bot.threadId, findOpen, setFindOpen);
+  useChatFindShortcut(false, forkPanelOpen, setFindOpen);
+  const [botButtonHovered, setBotButtonHovered] = useState(false);
+  const computerOpen = useStoreSelector(s => s.computerOpen);
   const error = useStoreSelector(s => s.error);
   const focused = useStoreSelector(s => s.focusMessage);
   const historyPage = useChatHistory(bot);
@@ -101,8 +206,25 @@ export function ChatV2({ profile, onClose }: { profile: Bot; onClose: () => void
   const viewport = useTranscriptViewport({ ownerId: bot.id, threadId: bot.threadId, messages: history,
     hasMore: historyPage.hasMore, historyPage, rests: staysInView, pinOn: [bot.busy] });
   const messages = useLiveTranscript(bot.threadId, viewport.windowedMessages, history);
-  const unread = useUnreadDivider({ threadId: bot.threadId, messages: history, following: viewport.following });
-  const items = useMemo(() => messages.map(message => ({ kind: "message" as const, message })), [messages]);
+  const unread = useUnreadDivider({ threadId: bot.threadId, messages: history, following: viewport.following, hasMore: historyPage.hasMore });
+  const items = useMemo(() => messages.filter(message => !message.reaction && message.kind !== "digest").map(message => ({ kind: "message" as const, message })), [messages]);
+  const digestByReply = useMemo(() => {
+    const replies = new Map<string, string>();
+    const digests = new Map<string, Message>();
+    for (const message of history) {
+      if (message.kind === "text" && message.role === "bot" && message.turnId && (message.text || message.attachments?.length)) {
+        replies.set(message.turnId, message.id);
+      } else if (message.digest) {
+        digests.set(message.digest.turnId, message);
+      }
+    }
+    const byReply = new Map<string, Message>();
+    for (const [turnId, digest] of digests) {
+      const replyId = replies.get(turnId);
+      if (replyId) byReply.set(replyId, digest);
+    }
+    return byReply;
+  }, [history]);
   const draft = useReplyDraft(bot.threadId, `bot:${bot.id}:${bot.threadId}`, history);
   const engine = useStoreSelector(s => botEngine(bot, s.instances));
   const sharedRun = useSharedRun(bot);
@@ -116,15 +238,27 @@ export function ChatV2({ profile, onClose }: { profile: Bot; onClose: () => void
   const lastTyped = history.findLast(m => m.role === "user" && m.kind === "text" && !peerLine(m) && !m.reaction);
   return <main data-chat-v2 className="v2-page">
     <CallOverlay bot={bot} transcript={history} />
-    <header className="v2-header">
-      <div className="v2-identity"><BotAvatar bot={bot} size={28} /><strong>{bot.name}</strong></div>
-      <div className="v2-controls"><ModelPicker bot={bot} threadId={bot.threadId} />
-        <button aria-label={t("chat.botScreen")} onClick={() => dispatch({ type: "toggleComputer" })}><Monitor size={16} /></button>
-        <button aria-pressed="true" onClick={onClose}>Chat V2</button></div>
-    </header>
-    <ChatErrorBanner message={error} onDismiss={() => dispatch({ type: "error", message: null })} />
-    <div className="v2-scroll" ref={viewport.scrollRef} {...viewport.scrollHandlers}>
-      <div ref={viewport.transcriptRef} className="v2-paper" role="log" aria-label={t("chat.conversationWith", { name: bot.name })}>
+    <div className="v2-floating">
+      <div className="v2-model"><ModelPicker bot={bot} threadId={bot.threadId} /></div>
+      <button className="v2-identity" onMouseEnter={() => setBotButtonHovered(true)} onMouseLeave={() => setBotButtonHovered(false)} aria-expanded={computerOpen} title={t("chat.botScreen")} onClick={event => {
+        const keyboard = event.detail === 0;
+        if (!computerOpen) {
+          const composer = event.currentTarget.closest("[data-chat-v2]")
+            ?.querySelector<HTMLElement>('[data-tour="composer"] textarea');
+          rememberComputerPanelOpen({ botId: bot.id, opener: keyboard ? event.currentTarget : composer ?? null, tabs: keyboard });
+        }
+        if (!keyboard) event.currentTarget.blur();
+        dispatch({ type: "toggleComputer" });
+      }}><BotAvatar bot={bot} size={24} state={stateForBot(bot)} animated={botButtonHovered} /><span className="v2-identity-name">{bot.name}</span><span className="v2-identity-arrow" aria-hidden="true"><ChevronRight size={16} /></span></button>
+      <div className="v2-controls">
+        <button aria-pressed="true" onClick={onClose}>Chat V2</button><ChatHeaderMenu bot={bot} history={history} openOnHover={false} /></div>
+    </div>
+    {(findOpen || error) && <div className="v2-banners">
+      {findOpen && <ChatFindBar threadId={bot.threadId} inForkPanel={false} onClose={() => setFindOpen(false)} />}
+      <ChatErrorBanner message={error} onDismiss={() => dispatch({ type: "error", message: null })} />
+    </div>}
+    <div className="v2-scroll" data-fade-bottom={viewport.showJumpToLatest || viewport.laterCount > 0 || undefined} ref={viewport.scrollRef} {...viewport.scrollHandlers}>
+      <div ref={viewport.transcriptRef} className="v2-paper chat-column" role="log" aria-label={t("chat.conversationWith", { name: bot.name })}>
         {viewport.hasEarlier && <div ref={viewport.topSentinelRef} aria-hidden="true" className="h-px w-full" />}
         {(viewport.olderPending || bot.switchingTo || (bot.awaitingThreadSnapshot && !messages.length)) && (
           <div role="status" className="flex w-full justify-center py-1 text-ink-secondary">
@@ -133,12 +267,11 @@ export function ChatV2({ profile, onClose }: { profile: Bot; onClose: () => void
           </div>
         )}
         <ExchangeTimeline items={items} botId={bot.id} focusId={focused?.messageId ?? null} unreadId={unread.messageId}
-          render={(item, i) => item.kind === "message" && <div key={item.message.id} data-mid={item.message.id}>
+          render={item => item.kind === "message" && <div key={item.message.id} data-mid={item.message.id}>
             {item.message.id === unread.messageId && <NewMessagesDivider fading={unread.fading} />}
-            {(!i || localDay(messages[i - 1]!.at) !== localDay(item.message.at)) && <time className="v2-date">{new Date(item.message.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time>}
             {editing?.id === item.message.id ? <form onSubmit={e => { e.preventDefault(); const text = String(new FormData(e.currentTarget).get("text") ?? "").trim(); if (text) { dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: editing.id, text }); setEditing(null); } }}>
-              <input autoFocus name="text" defaultValue={editing.text} onKeyDown={e => { if (e.key === "Escape") setEditing(null); }} /></form> :
-              <Row message={item.message} botId={bot.id} botName={bot.name} color={bot.color} threadId={bot.threadId}
+              <input autoFocus className="outline-none focus:bg-raised/50" name="text" defaultValue={editing.text} onKeyDown={e => { if (e.key === "Escape") setEditing(null); }} /></form> :
+              <Row ownBubbleStyle={ownBubbleStyle} digest={digestByReply.get(item.message.id)} message={item.message} botId={bot.id} botName={bot.name} color={bot.color} threadId={bot.threadId}
                 busy={Boolean(bot.busy)} hasMore={item.message.kind === "call" && historyPage.hasMore}
                 failure={item.message.tool && failedTurnCause(item.message.tool.name) !== null
                   ? <FailedTurnRow tool={item.message.tool} engine={engine} botId={bot.id} threadId={bot.threadId}
@@ -150,11 +283,11 @@ export function ChatV2({ profile, onClose }: { profile: Bot; onClose: () => void
                 reply={writable ? draft.selectReply : undefined} />}
           </div>} />
         {viewport.laterCount > 0 && <button onClick={viewport.showLater}>{t("chat.showLater", { count: viewport.laterCount })}</button>}
-        {bot.busy && <small role="status">{t("sidebar.preview.working")}</small>}
       </div>
     </div>
-    <footer className="v2-dock">{(viewport.showJumpToLatest || viewport.laterCount > 0) && <button className="v2-jump" aria-label={t("chat.jumpToLatest")} onClick={viewport.jumpToLatest}><ArrowDown size={16} /></button>}
+    <footer className="v2-dock chat-column-dock">{(viewport.showJumpToLatest || viewport.laterCount > 0) && <JumpToLatestButton className="v2-jump-to-latest bottom-full mb-2" onClick={viewport.jumpToLatest} />}
       <LiveCallBar bot={bot} />
+      <ChatV2Presence bot={bot} />
       {writable ? <Composer bot={profile} locked={Boolean(bot.switchingTo)} replyTo={draft.replyTo} onClearReply={draft.clearReply} onRestoreReply={draft.restoreReply} onConsumeReply={draft.consumeReply}
         onEditLast={lastTyped && !bot.busy && canEditTypedMessage(lastTyped) ? () => setEditing(lastTyped) : undefined} /> :
         <NewConversationInstead bot={bot} onNew={() => dispatch({ type: "newTask", botId: bot.id })} />}

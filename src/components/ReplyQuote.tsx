@@ -69,7 +69,7 @@ export function ComposerReplyStrip({
       aria-label={who}
       title={who}
       data-composer-reply=""
-      className="mb-1 flex min-w-0 items-center gap-2 rounded-2xl bg-ink/[0.06] py-1.5 ps-3 pe-1.5 text-[13px] leading-5 text-ink-secondary"
+      className="mb-[var(--composer-reply-gap,6px)] flex min-w-0 items-center gap-2 rounded-2xl bg-ink/[0.06] py-1.5 ps-3 pe-1.5 text-[13px] leading-5 text-ink-secondary"
     >
       <Reply size={15} strokeWidth={1.5} aria-hidden="true" className="shrink-0 rtl:-scale-x-100" />
       <span className="sr-only">{who}: </span>

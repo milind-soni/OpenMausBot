@@ -48,7 +48,7 @@ export interface WorksOnOption {
 
 export function WorksOnGrid({ options, onSelect }: { options: readonly WorksOnOption[]; onSelect: (mode: WorksOnMode) => void }) {
   return (
-    <div role="group" aria-label={t("computer.destinationAria")} className="mt-3 grid auto-rows-fr grid-cols-2 gap-2">
+    <div role="group" aria-label={t("computer.destinationAria")} className="mt-3 grid grid-cols-2 gap-2">
       {options.map(({ mode, labelKey, descriptionKey, Icon, selected, managedBy, disabled, unavailableTitle, note, issue, view }) => (
         <button
           key={mode ?? "auto"}
@@ -58,10 +58,10 @@ export function WorksOnGrid({ options, onSelect }: { options: readonly WorksOnOp
           type="button"
           aria-pressed={selected}
           className={cn(
-            "min-w-0 rounded-lg border px-2.5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-card",
+            "flex min-w-0 flex-col items-start rounded-xl border px-2.5 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-card",
             selected
               ? "border-accent/60 bg-accent/10 text-ink"
-              : "border-hairline/50 bg-panel/30 text-ink-secondary",
+              : "border-hairline/50 bg-app text-ink",
             disabled
               ? "cursor-not-allowed"
               : "hover:border-accent/40 hover:bg-control/60",

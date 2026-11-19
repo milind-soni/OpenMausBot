@@ -7,6 +7,27 @@ export interface ThreadState {
   pathIndex?: { leafId: string | null; messages: Message[]; positions: Map<string, number> };
 }
 
+export function activeThreadPath(thread: ThreadState): Message[] {
+  const byId = new Map(thread.messages.map(message => [message.id, message]));
+  const path: Message[] = [];
+  let current = thread.activeLeafId ? byId.get(thread.activeLeafId) : undefined;
+  while (current) {
+    path.push(current);
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  return path.reverse();
+}
+
+export function activeThreadPathIndex(thread: ThreadState): NonNullable<ThreadState["pathIndex"]> {
+  if (thread.pathIndex?.leafId === thread.activeLeafId) return thread.pathIndex;
+  const messages = activeThreadPath(thread);
+  return thread.pathIndex = {
+    leafId: thread.activeLeafId,
+    messages,
+    positions: new Map(messages.map((message, index) => [message.id, index])),
+  };
+}
+
 /** A conversation nobody read or wrote for this long gives its parsed transcript back; the next read reloads it from messages.db. */
 export const THREAD_IDLE_MS = 10 * 60_000;
 const SWEEP_EVERY_MS = 60_000;

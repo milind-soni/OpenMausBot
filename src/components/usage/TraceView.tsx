@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, X } from "lucide-react";
 import { t } from "@/lib/i18n";
@@ -6,6 +6,8 @@ import { listenLiveFrames } from "@/lib/live-events";
 import { fetchTrace } from "@/lib/usage-trace";
 import type { TraceDetail } from "../../../shared/usage-trace";
 import { TraceWaterfall } from "./TraceWaterfall";
+import { useMenuMotion } from "../MenuMotion";
+import "./trace-dialog.css";
 
 /** Refetches at most this often while the run is live; the now-line ticks in between. */
 const LIVE_REFRESH_MS = 1_000;
@@ -65,43 +67,36 @@ export function TraceView({ id, at, actions }: { id: string; at?: number; action
 }
 
 /** The waterfall over the chat, for one turn's "View trace". */
-export function TraceDialog({ id, at, onClose }: { id: string; at?: number; onClose: () => void }) {
-  const closeRef = useRef<HTMLButtonElement>(null);
-  const close = useRef(onClose);
-  close.current = onClose;
-  useEffect(() => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeRef.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      close.current();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      if (opener?.isConnected) opener.focus();
-    };
-  }, []);
+export function TraceDialog({ id, at, open, onClose }: { id: string; at?: number; open: boolean; onClose: () => void }) {
+  const motion = useMenuMotion(open);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    if (open) dialog.showModal();
+    else dialog.close();
+  }, [open]);
+
+  if (!motion.shown) return null;
+
   return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/55 p-3 sm:p-8"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
-    >
-      <div role="dialog" aria-modal="true" aria-label={t("trace.title")} className="w-full max-w-[1100px] animate-pop-in shadow-2xl">
-        <TraceView id={id} at={at} actions={(
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={onClose}
-            aria-label={t("trace.close")}
-            className="-mr-1.5 flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
-          >
-            <X size={16} />
+    <dialog ref={dialogRef} className="trace-dialog fading-dialog" aria-label={t("trace.title")}
+      onCancel={event => { event.preventDefault(); onClose(); }}
+      onKeyDown={event => { if (event.key === "Escape") event.stopPropagation(); }}
+      onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="trace-dialog-shell">
+        <header className="trace-dialog-header">
+          <h2>{t("trace.title")}</h2>
+          <button type="button" autoFocus aria-label={t("trace.close")} onClick={onClose}
+            className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink">
+            <X size={17} />
           </button>
-        )} />
+        </header>
+        <div className="trace-dialog-content">
+          <TraceView id={id} at={at} />
+        </div>
       </div>
-    </div>,
+    </dialog>,
     document.body,
   );
 }

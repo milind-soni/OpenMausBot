@@ -249,7 +249,7 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
   const queryError = runError ?? (fullscreenError ? t("desktopViewer.fullscreenFailed") : null);
 
   return (
-    <div ref={panel} className="@container/data flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card text-ink fullscreen:h-full fullscreen:w-full" data-testid="data-panel">
+    <div ref={panel} className="@container/data flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-card text-ink fullscreen:rounded-none fullscreen:border-0 fullscreen:h-full fullscreen:w-full" data-testid="data-panel">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden [container-type:size]" data-testid="data-result">
         {!sheet && !loadError && (
           <p className="flex items-center justify-center gap-2 py-10 text-[13px] text-ink-secondary" role="status">
@@ -259,7 +259,7 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
         {loadError && <p role="alert" className="rounded-xl border border-danger/30 bg-danger/10 px-3 py-2 text-[12px] text-danger">{t("data.loadFailed", { reason: loadError })}</p>}
         {unavailable && <p role="status" className="px-3 py-8 text-center text-[13px] text-ink-secondary">{t("data.resultUnavailable")}</p>}
         {empty && (
-          <div className="flex flex-col items-center gap-3 py-12 text-center" data-testid="data-empty">
+          <div className="flex flex-col items-center gap-3 px-4 py-8 text-center" data-testid="data-empty">
             <Database size={22} className="text-ink-secondary" aria-hidden="true" />
             <p className="px-6 text-[13px] text-ink-secondary">{t("data.empty")}</p>
           </div>

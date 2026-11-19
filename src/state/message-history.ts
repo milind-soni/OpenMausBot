@@ -1,11 +1,27 @@
 import { placeUnreadDivider } from "@/lib/unread-divider";
 import { api } from "./api";
+import { foldSnapshotOntoStreamed } from "./room-frames";
 import { visibleMessages } from "./snapshot-navigation";
-import type { Action, AppState, Message } from "./store";
+import type { Action, AppState, Bot, Group, Message } from "./store";
 
 export const MESSAGE_PAGE_SIZE = 200;
 type OlderMessages = Extract<Action, { type: "olderMessages" }>;
 type LoadOlderMessages = Extract<Action, { type: "loadOlderMessages" }>;
+
+export function reduceHistoryReady(state: AppState, action: Extract<Action, { type: "historyReady" }>): AppState {
+  const merge = <T extends Bot | Group>(owner: T): T => {
+    if (owner.threadId !== action.threadId || !owner.needsHistory) return owner;
+    const merged = foldSnapshotOntoStreamed(owner.messages, new Set(action.held), action.messages);
+    const overlap = owner.messages.findIndex(m => m.id === merged[0]?.id);
+    const prefix = overlap > 0 ? owner.messages.slice(0, overlap) : [];
+    return { ...owner, messages: [...prefix, ...merged], hasMore: prefix.length ? owner.hasMore : action.hasMore,
+      activeLeafId: "activeLeafId" in owner && owner.activeLeafId !== action.leaf ? owner.activeLeafId : action.activeLeafId, needsHistory: false };
+  };
+  const bots = state.bots.map(merge), groups = state.groups.map(merge);
+  const owner = [...bots, ...groups].find(candidate => candidate.threadId === action.threadId);
+  const unreadDivider = owner ? placeUnreadDivider(state.unreadDivider, owner.threadId, visibleMessages(owner), Boolean(owner.hasMore)) : state.unreadDivider;
+  return { ...state, bots, groups, unreadDivider };
+}
 
 export function reduceOlderMessages(state: AppState, action: OlderMessages): AppState {
   const { [action.threadId]: _done, ...loadingOlder } = state.loadingOlder;

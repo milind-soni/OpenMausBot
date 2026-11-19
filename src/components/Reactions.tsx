@@ -33,7 +33,7 @@ function withOwn(message: Message, by: string, entry: Entry | null | undefined):
 const newestTap = new Map<string, number>();
 let taps = 0;
 
-function useReaction(threadId: string, message: Message) {
+function useReaction(threadId: string, message: Message, badgeOnly = false) {
   const { dispatch } = useStoreRef();
   const me = useReactor();
   const latest = useRef(message);
@@ -50,7 +50,7 @@ function useReaction(threadId: string, message: Message) {
     dispatch({ type: "messagePatched", threadId, message: withOwn(message, me, shown) });
     api<{ message?: Message }>(`/api/threads/${threadId}/messages/${message.id}/reactions`, {
       method: "POST",
-      body: JSON.stringify({ emoji, on }),
+      body: JSON.stringify({ emoji, on, ...(badgeOnly ? { badgeOnly } : {}) }),
     })
       .then((body) => { if (body.message && newest()) dispatch({ type: "messagePatched", threadId, message: body.message }); })
       .catch((error: unknown) => {
@@ -63,8 +63,8 @@ function useReaction(threadId: string, message: Message) {
   return { me, mine, react };
 }
 
-export function ReactAction({ threadId, message }: { threadId: string; message: Message }) {
-  const { mine, react } = useReaction(threadId, message);
+export function ReactAction({ threadId, message, badgeOnly }: { threadId: string; message: Message; badgeOnly?: boolean }) {
+  const { mine, react } = useReaction(threadId, message, badgeOnly);
   const [open, setOpen] = useState(false);
   const [end, setEnd] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -162,14 +162,14 @@ export function ReactAction({ threadId, message }: { threadId: string; message: 
 
 export const useCanReact = (threadId: string) => useCanWriteIn(threadId) !== false;
 
-type ChipProps = { threadId: string; message: Message; bots?: readonly Bot[]; align?: "start" | "end"; canReact?: boolean };
+type ChipProps = { threadId: string; message: Message; bots?: readonly Bot[]; align?: "start" | "end"; canReact?: boolean; badgeOnly?: boolean };
 
 export function ReactionChips(props: ChipProps) {
   return props.message.reactions?.length ? <Chips {...props} /> : null;
 }
 
-function Chips({ threadId, message, bots = [], align = "start", canReact = true }: ChipProps) {
-  const { me, mine, react } = useReaction(threadId, message);
+function Chips({ threadId, message, bots = [], align = "start", canReact = true, badgeOnly }: ChipProps) {
+  const { me, mine, react } = useReaction(threadId, message, badgeOnly);
   const reactions = message.reactions ?? [];
   const nameOf = (reaction: NonNullable<Message["reactions"]>[number]) => reaction.by === me ? t("chat.you")
     : reaction.name ?? bots.find((bot) => bot.id === reaction.by)?.name ?? t("approval.someone");
@@ -187,7 +187,7 @@ function Chips({ threadId, message, bots = [], align = "start", canReact = true 
         const chip = cn(
           "flex items-center gap-1 rounded-full border px-2 py-0.5 text-[13px] leading-5",
           fresh && "animate-pop-in",
-          mine === emoji ? "border-accent/50 bg-accent/15" : "border-hairline/40 bg-panel",
+          badgeOnly ? "min-w-7 justify-center border-hairline/40 bg-composer px-1" : mine === emoji ? "border-accent/50 bg-accent/15" : "border-hairline/40 bg-panel",
         );
         const face = (
           <>

@@ -7,6 +7,7 @@ import { BotEditorStore, type Message, type useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { WIDGET_SAMPLES } from "../../../shared/widget-samples";
 import { dayList, parseWidgetInput, type WidgetNode, type WidgetRoot } from "../../../shared/widget";
+import { Select } from "../Select";
 import { WidgetMessage } from "./WidgetMessage";
 import { widgetDayNames, widgetDaysCaption } from "./WidgetDayPicker";
 import { widgetTime, widgetTimeLabel, widgetTimeSlots } from "./WidgetTimePicker";
@@ -215,11 +216,11 @@ describe("DayPicker", () => {
 });
 
 describe("a widget table", () => {
-  it("is the app's own table: copy, CSV and expand, with the widget's columns and alignment", () => {
+  it("is the app's own table: copy, search and CSV, with the widget's columns and alignment", () => {
     mount(sample("spendTable"));
     const table = find(".rich-table")!;
-    expect(table.querySelector(`input[aria-label="${t("table.search")}"]`)).toBeNull();
-    for (const action of ["table.copy", "table.download", "table.expand"] as const) expect(table.querySelector(`button[aria-label="${t(action)}"]`)).not.toBeNull();
+    expect(table.querySelector(`input[aria-label="${t("table.search")}"]`)).not.toBeNull();
+    for (const action of ["table.copy", "table.download"] as const) expect(table.querySelector(`button[aria-label="${t(action)}"]`)).not.toBeNull();
     expect(all("thead th").map((cell) => cell.textContent)).toEqual(["Bot", "Runs", "Cost"]);
     expect(all<HTMLElement>("thead th")[2]!.style.textAlign).toBe("end");
     expect(all<HTMLElement>("tbody td").filter((_, index) => index % 3 === 2).map((cell) => cell.style.textAlign)).toEqual(["end", "end", "end", "end"]);
@@ -280,10 +281,15 @@ describe("a radio group or a dropdown the person may answer in their own words",
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  const choose = (select: HTMLSelectElement, index: number) => act(() => {
-    select.value = select.options[index]!.value;
-    select.dispatchEvent(new Event("change", { bubbles: true }));
-  });
+  const openChoices = () => {
+    act(() => field<HTMLButtonElement>("length").click());
+    return Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
+  };
+  const choose = (label: string) => {
+    const option = openChoices().find(item => item.textContent?.trim() === label);
+    expect(option).toBeDefined();
+    act(() => option!.click());
+  };
   const save = () => act(async () => { button("Save")!.click(); });
   const pressed = () => JSON.parse(String(fetchMock.mock.calls.at(-1)![1]!.body)).widgetAction;
 
@@ -302,9 +308,10 @@ describe("a radio group or a dropdown the person may answer in their own words",
 
   it("adds Other as the last choice of a dropdown, and opens a field for their words when it is picked", async () => {
     mount(form());
-    const select = field<HTMLSelectElement>("length");
-    expect(Array.from(select.options).map((option) => option.textContent)).toEqual([t("widget.choose"), "15 min", "30 min", t("question.other")]);
-    choose(select, 3);
+    expect(field("length").textContent).toBe(t("widget.choose"));
+    const options = openChoices();
+    expect(options.map(option => option.textContent?.trim())).toEqual(["15 min", "30 min", t("question.other")]);
+    act(() => options.at(-1)!.click());
     expect(document.activeElement).toBe(other("length"));
     typeInto(other("length")!, "45 min");
     await save();
@@ -314,9 +321,9 @@ describe("a radio group or a dropdown the person may answer in their own words",
 
   it("drops their words when an option of the dropdown is picked after all", async () => {
     mount(form());
-    choose(field<HTMLSelectElement>("length"), 3);
+    choose(t("question.other"));
     typeInto(other("length")!, "45 min");
-    choose(field<HTMLSelectElement>("length"), 2);
+    choose("30 min");
     expect(other("length")).toBeNull();
     await save();
     expect(pressed()).toEqual({ messageId: "w1", ref: "confirm", rev: 0, values: { size: "", length: "30 min" } });
@@ -325,7 +332,29 @@ describe("a radio group or a dropdown the person may answer in their own words",
   it("offers no Other where the bot said allowOther: false", () => {
     mount(form({ allowOther: false }));
     expect(all('input[type="radio"]')).toHaveLength(2);
-    expect(field<HTMLSelectElement>("length").options).toHaveLength(3);
+    expect(openChoices().map(option => option.textContent?.trim())).toEqual(["15 min", "30 min"]);
     expect(host.textContent).not.toContain(t("question.other"));
   });
+});
+
+it("shows grouped choices, including the selected label, and respects disabled groups", () => {
+  const changed = vi.fn();
+  const option = (value: string, label: string) => createElement("option", { value }, label);
+  act(() => root.render(createElement(Select, { defaultValue: "members", onChange: changed },
+    createElement("optgroup", { label: "People" }, option("members", "Members")),
+    createElement("optgroup", { label: "Unavailable", disabled: true }, option("guests", "Guests")),
+    createElement("optgroup", { label: "Behavior" }, option("mentions", "Mentions")),
+  )));
+  const trigger = button("Members")!;
+  act(() => trigger.click());
+  const menu = document.querySelector('[role="menu"]')!;
+  const choices = Array.from(menu.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
+  expect(menu.textContent).toContain("People");
+  expect(choices.map(choice => [choice.textContent?.trim(), choice.disabled])).toEqual([
+    ["Members", false], ["Guests", true], ["Mentions", false],
+  ]);
+  expect(choices[0]!.getAttribute("aria-checked")).toBe("true");
+  act(() => choices[2]!.click());
+  expect(changed).toHaveBeenCalledOnce();
+  expect(trigger.textContent).toBe("Mentions");
 });

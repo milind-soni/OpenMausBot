@@ -4,6 +4,7 @@ import type { TranscriptItem } from "@/lib/activity-runs";
 import { peerLine, peerRequest } from "@/lib/peer-message";
 import { t } from "@/lib/i18n";
 import { localDay } from "@/lib/transcript-derivations";
+import { DaySeparator } from "../DaySeparator";
 import "./chat-v2.css";
 
 function exchange(item: TranscriptItem, botId: string) {
@@ -22,8 +23,15 @@ export function ExchangeTimeline({ items, botId, focusId, unreadId, render }: {
   render: (item: TranscriptItem, index: number) => ReactNode;
 }) {
   const rows: ReactNode[] = [];
+  const today = localDay(Date.now());
+  let previousDay: number | undefined;
   for (let i = 0; i < items.length; i++) {
     const item = items[i]!;
+    if (item.kind === "message") {
+      const day = localDay(item.message.at);
+      if (day !== previousDay) rows.push(<DaySeparator key={`day:${item.message.id}`} at={item.message.at} today={today} />);
+      previousDay = day;
+    }
     const peer = exchange(item, botId);
     if (!peer || item.kind !== "message" || item.message.id === focusId || item.message.id === unreadId) {
       rows.push(render(item, i));

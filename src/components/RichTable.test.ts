@@ -19,11 +19,11 @@ describe("rich table rendering", () => {
     expect(html).not.toContain("<script>");
     expect(html).toContain('scope="col"');
   });
-  it("gives a short table its actions without the search box and row count a long one needs", () => {
+  it("shows the same toolbar and row count for short and long tables", () => {
     const table = (length: number) => renderToStaticMarkup(createElement(RichTable, { columns: [{ text: "ID" }], rows: Array.from({ length }, (_, i) => [{ text: String(i) }]) }));
     const short = table(8);
-    expect(short).not.toContain('aria-label="Search all rows…"');
-    expect(short).not.toContain("8 of 8 rows");
+    expect(short).toContain('aria-label="Search all rows…"');
+    expect(short).toContain("8 of 8 rows");
     expect(short).toContain('aria-label="Copy results as CSV"');
     const long = table(9);
     expect(long).toContain('aria-label="Search all rows…"');

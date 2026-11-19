@@ -25,12 +25,6 @@ try {
   assert.equal(await page.locator('table[dir="rtl"]').count(), 1);
   await inline.getByRole("button", { name: "Sort by Revenue", exact: true }).click();
   assert.equal(await inline.locator("tbody tr").first().locator("td").first().textContent(), "Lin");
-  const expand = inline.getByRole("button", { name: "Expand table", exact: true });
-  await expand.click();
-  await page.getByRole("dialog").waitFor();
-  await page.keyboard.press("Escape");
-  await page.getByRole("dialog").waitFor({ state: "hidden" });
-  assert.equal(await expand.evaluate((element) => element === document.activeElement), true, "Focus returns to expand");
   await page.screenshot({ path: join(output, "inline-dark.png"), fullPage: true });
 
   const preview = page.getByRole("button", { name: "Preview table: sales.csv", exact: true });

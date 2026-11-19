@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ComponentProps, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -184,6 +184,7 @@ export function SidebarPopoverMenu({
   triggerTitle,
   triggerLabel,
   triggerTour,
+  triggerProps,
   onOpenChange,
   renderTrigger,
   width,
@@ -198,8 +199,9 @@ export function SidebarPopoverMenu({
   triggerClassName?: string;
   triggerTitle?: string;
   /** the trigger's own name, when it says more than the menu's */
-  triggerLabel?: string;
+  triggerLabel?: string | null;
   triggerTour?: string;
+  triggerProps?: Pick<ComponentProps<"button">, "id" | "disabled" | "aria-describedby" | "aria-invalid" | "onFocus" | "onBlur"> & { "data-widget-field"?: string };
   onOpenChange?: (open: boolean) => void;
   renderTrigger: (state: { open: boolean }) => React.ReactNode;
 }) {
@@ -447,12 +449,13 @@ export function SidebarPopoverMenu({
       }}
     >
       <button
+        {...triggerProps}
         ref={triggerRef}
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
-        aria-label={triggerLabel ?? ariaLabel}
+        aria-label={triggerLabel === null ? undefined : triggerLabel ?? ariaLabel}
         title={triggerTitle}
         data-tour={triggerTour}
         onClick={(event) => {
@@ -485,7 +488,7 @@ export function SidebarPopoverMenu({
       </button>
 
       {anchored
-        ? typeof document !== "undefined" && sheet ? createPortal(<>{sheet}{subSheet}</>, document.body) : null
+        ? typeof document !== "undefined" && sheet ? createPortal(<>{sheet}{subSheet}</>, triggerRef.current?.closest("dialog[open]") ?? document.body) : null
         : <>{sheet}{typeof document !== "undefined" && subSheet ? createPortal(subSheet, document.body) : null}</>}
     </div>
   );

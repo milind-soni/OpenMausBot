@@ -45,6 +45,28 @@ function fixture(options: { queued?: boolean; refuse?: Error } = {}) {
 }
 
 describe("a reaction on a bot's message", () => {
+  it("stores a badge-only thumbs-up without sending a reply", async () => {
+    const { store, bot, calls, react, say } = fixture();
+    const message = say();
+    const result = await react({ auth: OWNER, threadId: bot.threadId, messageId: message.id, emoji: "👍", reactor: { by: "user" }, badgeOnly: true });
+    expect(result.delivery).toBe("none");
+    expect(store.messagesFor(bot.threadId).find(row => row.id === message.id)?.reactions).toMatchObject([{ emoji: "👍" }]);
+    expect(store.messagesFor(bot.threadId).some(row => row.role === "user")).toBe(false);
+    expect(calls.replies).toEqual([]);
+  });
+
+  it.each(["👍", "👎"] as const)("withdraws a queued reply when badge-only mode changes it to %s", async emoji => {
+    const { bot, calls, react, say } = fixture({ queued: true });
+    const message = say();
+    const input = { auth: OWNER, threadId: bot.threadId, messageId: message.id, reactor: { by: "user" as const } };
+    expect((await react({ ...input, emoji: "👍" })).delivery).toBe("queued");
+    const result = await react({ ...input, emoji, badgeOnly: true });
+    expect(result.delivery).toBe("none");
+    expect(result.message.reactions?.map(entry => entry.emoji)).toEqual(emoji === "👍" ? undefined : ["👎"]);
+    expect(calls.replies).toHaveLength(1);
+    expect(calls.withdrawn).toEqual([calls.replies[0]!.sendId]);
+  });
+
   it("records a 👍 and hands it to the bot as the person's reply to that message", async () => {
     const { store, bot, calls, react, say } = fixture();
     const asked = say();

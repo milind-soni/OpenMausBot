@@ -1,3 +1,4 @@
+import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import { useMenuMotion } from "@/components/MenuMotion";
 import { ModalPresence } from "@/components/ModalPresence";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -104,6 +105,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const shortcutsMotion = useMenuMotion(state.shortcutsOpen);
   const settingsMotion = useMenuMotion(state.appSettingsOpen);
   const appsMotion = useMenuMotion(state.pluginsOpen);
+  const botSettingsMotion = useMenuMotion(state.settingsOpen);
   const computerMotion = useMenuMotion(state.computerOpen);
   const inboxShown = useInboxPanel().open && inboxReady;
   // A Switch AI pick lands once its stopped turn's chat is idle, wherever the person is by then.
@@ -175,6 +177,19 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const group = state.groups.find((g) => g.id === state.selectedId);
   const chiefStep = useChiefStepOpen();
   const bot = group || chiefStep ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
+  const chatPane = useRef<HTMLDivElement>(null);
+  const chatOwnerId = group?.id ?? bot?.id;
+  const chatThreadId = group?.threadId ?? bot?.threadId;
+  useLayoutEffect(() => {
+    const pane = chatPane.current;
+    if (!pane?.animate || window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ||
+        document.documentElement.dataset.reducedMotion === "true") return;
+    const animation = pane.animate([{ opacity: 0.45 }, { opacity: 1 }], {
+      duration: 180, easing: "ease-out",
+    });
+    return () => animation.cancel();
+  }, [chatOwnerId, chatThreadId, chatV2, state.activeView]);
+
   const { open: drawerOpen, show: openDrawer, hide: hideDrawer, noteAction: noteDrawerAction } = useBotListDrawer({ selectedId: state.selectedId, botThread: bot?.threadId, groupThread: group?.threadId,
     view: state.activeView, pluginsOpen: state.pluginsOpen, settingsOpen: state.settingsOpen });
   const closeDrawer = useCallback(() => { hideDrawer(); menuButtonRef.current?.focus(); }, [hideDrawer]);
@@ -421,10 +436,13 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <CloudEngineSignIn />
       ) : chiefStep ? (
         <EmptyChatShell />
-      ) : group ? (
-        <GroupView key={group.id} group={group} />
-      ) : bot ? (
-        chatV2 ? <ChatV2 key={bot.threadId} profile={bot} onClose={() => setChatV2(false)} /> : <ChatView bot={bot} onOpenV2={() => setChatV2(true)} />
+      ) : group || bot ? (
+        <div ref={chatPane} className="flex h-full min-w-0 flex-1">
+          {group ? <GroupView key={group.id} group={group} /> : bot && (
+            chatV2 ? <ChatV2 key={bot.threadId} profile={bot} onClose={() => setChatV2(false)} />
+              : <ChatView bot={bot} onOpenV2={() => setChatV2(true)} />
+          )}
+        </div>
       ) : noEngines ? (
         <NoEngines />
       ) : (
@@ -441,10 +459,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         </main>
       )}
       {/* Sibling panels need distinct keys: two keyed `bot.id` collide in React's keyed reconciliation. */}
-      {state.settingsOpen && bot && (
+      {bot && (remoteClient ? state.settingsOpen : botSettingsMotion.shown) && (
         remoteClient
           ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
-          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={(state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit} />
+          : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} closing={botSettingsMotion.closing} overlay={(state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit} />
       )}
       {bot && (
         remoteClient ? (
@@ -467,7 +485,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       {notificationFeed && !framed && <NotificationRail />}
       </div>
       </div>
-      {settingsMotion.shown && <SettingsModal open={state.appSettingsOpen} />}
+      {settingsMotion.shown && <SettingsModal open={state.appSettingsOpen} pendingFallback={state.appSettingsOpen && (
+        <SettingsDialog title={t("settings.title")} onClose={() => dispatch({ type: "toggleAppSettings", open: false })}>
+          <progress className="h-1 w-full accent-accent" aria-label={t("settings.title")} />
+        </SettingsDialog>
+      )} />}
       {cloudAddOpened.current && <CloudAddDialog />}
       <CloudHowTo />
       <CloudSetup viewer={viewer} welcomeShown={welcomeOnScreen} />

@@ -6,7 +6,7 @@ import { t } from "@/lib/i18n";
 // up to 300 ms) and rethrows a failed import on every render. Chromium keeps a failed import() in its module map and
 // rejects every later import of it without refetching.
 
-export type LazyScreen<P> = ((props: P) => ReactNode) & {
+export type LazyScreen<P> = ((props: P & { pendingFallback?: ReactNode }) => ReactNode) & {
   preload: () => Promise<ComponentType<P>>;
 };
 
@@ -25,7 +25,7 @@ export function lazyScreen<Props>(
       throw error;
     },
   ));
-  function Screen(props: P) {
+  function Screen({ pendingFallback, ...props }: P & { pendingFallback?: ReactNode }) {
     const [Loaded, setLoaded] = useState(() => ready);
     const [failed, setFailed] = useState(false);
     useEffect(() => {
@@ -39,8 +39,8 @@ export function lazyScreen<Props>(
         live = false;
       };
     }, [Loaded]);
-    if (Loaded) return <Loaded {...props} />;
-    return failed ? <ScreenUnavailable /> : null;
+    if (Loaded) return <Loaded {...(props as P)} />;
+    return failed ? <ScreenUnavailable /> : pendingFallback ?? null;
   }
   return Object.assign(Screen, { preload });
 }

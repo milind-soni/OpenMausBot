@@ -1,6 +1,7 @@
+import { SettingsSectionRow } from "./bot-settings/SettingsSectionRow";
 import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
-import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Search } from "lucide-react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { Search } from "lucide-react";
 import { useStore, type Bot, type BotSettingsSection } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "./DesktopCapabilities";
@@ -32,9 +33,10 @@ import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
 /** Where the Library's memory, skills and folder rows lead in Advanced settings. */
 const LIBRARY_LINKS: Record<LibraryPage, BotSettingsSection> = { memory: "memory", skills: "skills", folder: "access" };
 
-export function BotSettingsDialog({ bot, overlay = false }: {
+export function BotSettingsDialog({ bot, overlay = false, closing = false }: {
   bot: Bot;
   overlay?: boolean;
+  closing?: boolean;
 }) {
   const { state, dispatch } = useStore();
   const section = state.botSettingsSection;
@@ -71,6 +73,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   }, [collapsed, section, q]);
 
   useEffect(() => {
+    if (closing) return;
     const previousFocus = keyboardFocusTarget();
     const dialog = dialogRef.current;
     dialog?.focus();
@@ -92,7 +95,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
       window.removeEventListener("keydown", onKey);
       previousFocus?.focus();
     };
-  }, [dispatch]);
+  }, [closing, dispatch]);
 
   const renderSectionBody = (id: (typeof BOT_SECTIONS)[number]["id"]) => {
     switch (id) {
@@ -169,10 +172,14 @@ export function BotSettingsDialog({ bot, overlay = false }: {
         role="dialog"
         aria-labelledby="bot-settings-title"
         tabIndex={-1}
-        className={cn("[--color-card:var(--color-app)] animate-sheet-in md:animate-panel-in absolute inset-0 z-40 min-w-0 outline-none md:w-[min(420px,42vw)]", overlay ? "md:inset-y-0 md:left-auto md:right-0 md:shadow-2xl" : "md:static md:z-auto")}
+        data-side-panel-motion={closing ? "out" : "in"}
+        inert={closing}
+        aria-hidden={closing || undefined}
+        style={{ "--side-panel-width": "min(420px, 42vw)" } as CSSProperties}
+        className={cn("absolute inset-0 z-40 min-w-0 outline-none max-md:w-full!", overlay ? "md:inset-y-0 md:left-auto md:right-0 md:shadow-2xl" : "md:static md:z-auto")}
       >
-        <RightSidePanelHeader {...dragProps} className="mb-3" label={t("botSettings.simple.close")} onClose={() => dispatch({ type: "toggleSettings", open: false })}>
-          <span id="bot-settings-title" className="flex h-[34px] min-w-0 flex-1 items-center truncate ps-1 text-[14px] font-medium text-ink">
+        <RightSidePanelHeader {...dragProps} className="mb-4 px-4" label={t("botSettings.simple.close")} onClose={() => dispatch({ type: "toggleSettings", open: false })}>
+          <span id="bot-settings-title" className="flex h-[34px] min-w-0 flex-1 items-center truncate text-[16px] font-semibold tracking-tight text-ink">
             {bot.name}
           </span>
           <span className="flex shrink-0 items-center gap-1">
@@ -180,7 +187,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
           </span>
         </RightSidePanelHeader>
 
-        <div className="mx-4 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-hairline/50 bg-transparent px-2.5 py-2">
+        <div className="mx-4 mb-4 flex h-9 shrink-0 items-center gap-2 rounded-full bg-control/70 px-3 ring-1 ring-inset ring-hairline/40 focus-within:ring-focus">
           <Search size={14} className="shrink-0 text-ink-secondary" />
           <input
             value={query}
@@ -200,7 +207,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
           />
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-4">
           {visibleSections.length === 0 && (
             <div className="px-4 py-4 text-[13px] leading-relaxed text-ink-secondary">
               {searchEmptyText(query.trim(), appSearchPhase(searchApps))}
@@ -213,46 +220,16 @@ export function BotSettingsDialog({ bot, overlay = false }: {
             if (!matched && id !== "memory") return null;
             const open = !collapsed && section === id;
             return (
-              <div
-                key={id}
-                data-bot-settings-section={id}
-                className="mx-1.5 mb-0.5"
-                hidden={!matched}
+              <SettingsSectionRow key={id} id={id} icon={Icon} label={label} open={open} hidden={!matched}
+                keepMounted={id === "memory"}
+                onToggle={() => dispatch({
+                  type: "toggleSettings",
+                  open: true,
+                  section: open ? undefined : id,
+                })}
               >
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (section === id && !collapsed) {
-                      dispatch({ type: "toggleSettings", open: true });
-                      return;
-                    }
-                    dispatch({ type: "toggleSettings", open: true, section: id });
-                  }}
-                  aria-expanded={open}
-                  className={cn(
-                    "flex w-full shrink-0 items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left text-[14px]",
-                    open ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
-                  )}
-                >
-                  <Icon size={15} className="shrink-0" />
-                  <span className="min-w-0 flex-1 truncate">{label}</span>
-                  <ChevronDown
-                    size={16}
-                    className={cn(
-                      "shrink-0 text-ink-secondary transition-transform",
-                      open && "rotate-180",
-                    )}
-                  />
-                </button>
-                {/* Memory stays mounted (hidden when collapsed) so its unsaved draft survives. */}
-                {id === "memory" ? (
-                  <div hidden={!open} className="px-4 pb-4 pt-1">
-                    {renderSectionBody("memory")}
-                  </div>
-                ) : (
-                  open && <div className="px-4 pb-4 pt-1">{renderSectionBody(id)}</div>
-                )}
-              </div>
+                {renderSectionBody(id)}
+              </SettingsSectionRow>
             );
           })}
         </div>

@@ -1,0 +1,54 @@
+.trace-dialog {
+  --trace-gutter: 28px;
+  --trace-edge: color-mix(in srgb, var(--color-ink) 10%, transparent);
+  margin: auto;
+  width: min(920px, calc(100% - 48px));
+  max-width: none;
+  max-height: calc(100dvh - 48px);
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--trace-edge);
+  border-radius: 16px;
+  background: var(--color-app);
+  color: var(--color-ink);
+  box-shadow: 0 24px 64px -16px rgb(28 28 28 / .28), 0 2px 8px rgb(28 28 28 / .06);
+}
+.trace-dialog::backdrop { background: rgb(0 0 0 / .18); }
+:root[data-skin="midnight"] .trace-dialog::backdrop { background: rgb(0 0 0 / .55); }
+.trace-dialog-shell { display: flex; flex-direction: column; max-height: inherit; }
+.trace-dialog-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 24px var(--trace-gutter) 8px;
+}
+.trace-dialog-header h2 { font-size: 20px; line-height: 28px; font-weight: 600; letter-spacing: -.01em; }
+.trace-dialog-content { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0 var(--trace-gutter) 24px; }
+.trace-dialog .trace-waterfall { overflow: visible; border: 0; background: none; }
+.trace-dialog .trace-waterfall > header { padding: 0 0 18px; border: 0; }
+.trace-dialog .trace-waterfall > header > svg,
+.trace-dialog .trace-waterfall > header > svg + span { display: none; }
+.trace-dialog .trace-waterfall > dl {
+  margin-bottom: 20px;
+  border: 1px solid var(--trace-edge);
+  border-radius: 12px;
+  background: var(--color-composer);
+}
+.trace-dialog .trace-waterfall > dl > div { border-color: var(--trace-edge); padding: 10px 14px; }
+.trace-dialog .trace-waterfall dt { text-transform: none; letter-spacing: normal; white-space: normal; }
+.trace-dialog .trace-waterfall dd { font-size: 16px; }
+.trace-dialog [role="tree"] { border: 0; }
+.trace-dialog [role="tree"] > :first-child {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-app);
+}
+.trace-dialog [role="treeitem"] { border-radius: 8px; }
+
+@media (max-width: 639px) {
+  .trace-dialog { --trace-gutter: 16px; width: calc(100% - 24px); max-height: calc(100dvh - 24px); }
+  .trace-dialog-header { padding-top: 16px; }
+}

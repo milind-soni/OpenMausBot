@@ -784,7 +784,7 @@ export function Composer({
             />
           </div>
         )}
-        <div className={singleRow ? cn("min-w-0 flex-1 rounded-[26px] px-3 py-1.5", ELEVATED_FLOAT) : "contents"}>
+        <div className={singleRow ? cn("min-w-0 flex-1 rounded-[26px] px-3 py-1.5 [--composer-reply-gap:6px]", ELEVATED_FLOAT) : "contents"}>
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
         <div data-composer-row className={cn("flex items-end", "gap-1", !singleRow && "@max-[30rem]/composer:flex-wrap", stacked && "flex-wrap")}>
           <input

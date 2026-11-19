@@ -27,6 +27,8 @@ function memoryStore() {
   };
 }
 
+const replyTarget = (id: string) => ({ id, kind: "text" as const, role: "bot" as const, at: 1 });
+
 afterEach(() => vi.unstubAllGlobals());
 
 describe("composer drafts", () => {
@@ -118,8 +120,8 @@ describe("composer drafts", () => {
   });
 
   it("keeps reply targets isolated by task", () => {
-    rememberReplyDraft("thread-reply-a", "message-a");
-    rememberReplyDraft("thread-reply-b", "message-b");
+    rememberReplyDraft("thread-reply-a", replyTarget("message-a"));
+    rememberReplyDraft("thread-reply-b", replyTarget("message-b"));
     expect(replyDraft("thread-reply-a")).toBe("message-a");
     expect(replyDraft("thread-reply-b")).toBe("message-b");
     clearReplyDraft("thread-reply-a");
@@ -135,7 +137,7 @@ describe("composer drafts", () => {
     const threadId = "thread-c";
     const revision = draftRevision(draftId);
 
-    selectReplyDraft(draftId, threadId, "new-reply");
+    selectReplyDraft(draftId, threadId, replyTarget("new-reply"));
     expect(
       recoverFailedComposerSend({
         draftId,

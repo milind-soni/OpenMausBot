@@ -683,7 +683,7 @@ export function useVisibleMessages(bot: Bot): Message[] {
 }
 
 export const BotListItem = memo(function BotListItem(props: BotRowProps) {
-  const { bot, selected, deleting, mascotMotion, pendingQueued, instances, liveCall, density, dispatch, onMenu, renameRequest, botDrag: drag, botDrop: drop, botDragging: dragging } = props;
+  const { bot, selected, deleting, pendingQueued, instances, liveCall, density, dispatch, onMenu, renameRequest, botDrag: drag, botDrop: drop, botDragging: dragging } = props;
   const showThreads = useShowThreads();
   const liveMedia = useLiveMedia();
   const remoteClient = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
@@ -705,18 +705,17 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     !iconOnly && rowSurface(selected),
   );
   const { waiting, working, failed, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued, visible);
-  const { unread, noticing } = useBotUnread(bot);
+  const { unread } = useBotUnread(bot);
+  const [avatarHovered, setAvatarHovered] = useState(false);
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   const body = (
     <>
       <span className={cn("relative flex shrink-0", !iconOnly && "-m-[3px]")}>
         <BotAvatar
           bot={bot}
-          state={stateForBot({ ...bot, messages: visible })}
+          state={stateForBot(bot)}
           size={iconOnly ? 36 : 42}
-          motion={mascotMotion?.kind ?? "none"}
-          motionKey={mascotMotion?.nonce ?? 0}
-          animated={working || noticing || (mascotMotion?.kind ?? "none") !== "none"}
+          animated={avatarHovered}
         />
         {/* Bottom-left, clear of the status dots on the right and of the row's hover actions. */}
         {iconOnly && <BotModelBadge bot={bot} instances={instances} avatarSize={36} />}
@@ -818,6 +817,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   return (
     <>
     <div className={cn("group relative", iconOnly && "mx-auto w-[54px]", botRowDropClass(drop, dragging))} data-bot-drop={drop ?? undefined} {...(drag && !renaming ? drag.row(bot.id) : {})}
+      onMouseEnter={() => setAvatarHovered(true)} onMouseLeave={() => setAvatarHovered(false)}
       title={iconOnly ? botTooltip(bot, instances) : undefined}><BotDropLine place={drop} />
       {/* Keep this wrapper mounted: replacing it remounts RenameTitle and leaves the row stuck in rename mode. */}
       <div

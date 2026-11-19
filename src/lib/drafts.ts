@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState, useSyncExternalStore, type SetStateAction } from "react";
 import type { FollowUp } from "../../shared/follow-up.js";
+import type { MausColor, WireMessage } from "../../shared/wire.ts";
 import { isAttachment, type Attachment } from "./composer-attachments.js";
+
+type ReplyTarget = Pick<WireMessage, "id" | "role" | "kind" | "at" | "text" | "peerAsk"> & {
+  from?: NonNullable<WireMessage["from"]> & { color: MausColor };
+};
 
 const KEY = "omb-drafts";
 const ATTACHMENTS_KEY = "omb-draft-attachments";
@@ -8,7 +13,7 @@ const SEND_IDS_KEY = "omb-draft-send-ids";
 const CHANNEL_MODES_KEY = "omb-draft-channel-modes";
 // Outside React, so a late failure from an unmounted composer cannot overwrite a newer draft.
 const draftRevisions = new Map<string, number>();
-const replyDrafts = new Map<string, string>();
+const replyDrafts = new Map<string, ReplyTarget>();
 type ChannelMode = "chat" | "goal";
 type DraftRestore = { text: string; attachments: Attachment[]; channelMode?: ChannelMode };
 type DraftRestoreListener = (draft: DraftRestore) => void;
@@ -174,21 +179,21 @@ export function setDraftAttachments(store: Store, id: string, attachments: Attac
   }
 }
 
-export function rememberReplyDraft(threadId: string, messageId: string): void {
-  replyDrafts.set(threadId, messageId);
+export function rememberReplyDraft(threadId: string, { id, role, kind, at, text, from, peerAsk }: ReplyTarget): void {
+  replyDrafts.set(threadId, { id, role, kind, at, text, from, peerAsk });
 }
 
 export function replyDraft(threadId: string): string | undefined {
-  return replyDrafts.get(threadId);
+  return replyDrafts.get(threadId)?.id;
 }
 
 export function clearReplyDraft(threadId: string): void {
   replyDrafts.delete(threadId);
 }
 
-export function selectReplyDraft(draftId: string, threadId: string, messageId: string): void {
+export function selectReplyDraft(draftId: string, threadId: string, message: ReplyTarget): void {
   markDraftEdited(draftId);
-  rememberReplyDraft(threadId, messageId);
+  rememberReplyDraft(threadId, message);
 }
 
 export function discardReplyDraft(draftId: string, threadId: string): void {
@@ -196,17 +201,17 @@ export function discardReplyDraft(draftId: string, threadId: string): void {
   clearReplyDraft(threadId);
 }
 
-function resolveReplyMessage<T extends { id: string }>(threadId: string, messages: T[]): T | null {
-  const replyId = replyDraft(threadId);
-  return replyId ? (messages.find((message) => message.id === replyId) ?? null) : null;
+function resolveReplyMessage(threadId: string, messages: readonly ReplyTarget[]): ReplyTarget | null {
+  const saved = replyDrafts.get(threadId);
+  return saved ? messages.find((message) => message.id === saved.id) ?? saved : null;
 }
 
-export function useReplyDraft<T extends { id: string }>(
+export function useReplyDraft(
   threadId: string,
   draftId: string,
-  messages: T[],
+  messages: readonly ReplyTarget[],
 ) {
-  const [replyState, setReplyState] = useState<{ threadId: string; message: T | null }>(() => ({
+  const [replyState, setReplyState] = useState<{ threadId: string; message: ReplyTarget | null }>(() => ({
     threadId,
     message: resolveReplyMessage(threadId, messages),
   }));
@@ -222,8 +227,8 @@ export function useReplyDraft<T extends { id: string }>(
     });
   }, [messages, threadId]);
 
-  const selectReply = useCallback((message: T) => {
-    selectReplyDraft(draftId, threadId, message.id);
+  const selectReply = useCallback((message: ReplyTarget) => {
+    selectReplyDraft(draftId, threadId, message);
     setReplyState({ threadId, message });
   }, [draftId, threadId]);
 
@@ -237,11 +242,11 @@ export function useReplyDraft<T extends { id: string }>(
     setReplyState({ threadId, message: null });
   }, [threadId]);
 
-  const restoreReply = useCallback((message: T, targetThreadId: string) => {
+  const restoreReply = useCallback((message: ReplyTarget, targetThreadId: string) => {
     const currentId = replyDraft(targetThreadId);
     if (currentId && currentId !== message.id) return;
     // Persist before touching React state: this view may have unmounted mid-request.
-    rememberReplyDraft(targetThreadId, message.id);
+    rememberReplyDraft(targetThreadId, message);
     if (threadId === targetThreadId) {
       setReplyState((current) =>
         current.threadId === targetThreadId && current.message

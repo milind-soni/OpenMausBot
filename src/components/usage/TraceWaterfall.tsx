@@ -226,7 +226,7 @@ export function TraceWaterfall({ detail, now, actions }: { detail: TraceDetail; 
   const title = runTitle(root, state.bots);
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-hairline/50 bg-card" data-testid="trace-waterfall" aria-label={t("trace.title")}>
+    <section className="trace-waterfall overflow-hidden rounded-2xl border border-hairline/50 bg-card" data-testid="trace-waterfall" aria-label={t("trace.title")}>
       <header className="flex items-center gap-3 border-b border-hairline/40 px-5 py-4">
         <Sparkles size={16} className="shrink-0 text-accent" aria-hidden />
         <span className="shrink-0 text-[15px] font-semibold text-ink">{t("trace.title")}</span>

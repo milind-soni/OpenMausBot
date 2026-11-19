@@ -246,7 +246,7 @@ describe("drawing a widget", () => {
 
   it("ties a label to its field, and names a field that has none", () => {
     mount(row(sample("routineForm")));
-    const report = field<HTMLSelectElement>("report");
+    const report = field<HTMLButtonElement>("report");
     expect(all<HTMLLabelElement>("label").find((label) => label.textContent === "Report to")!.htmlFor).toBe(report.id);
     expect(report.getAttribute("aria-label")).toBe("Report to");
     expect(find('[role="group"][aria-label="Runs on"]')).not.toBeNull();
@@ -258,10 +258,17 @@ describe("drawing a widget", () => {
     expect(field<HTMLInputElement>("starts").type).toBe("date");
     expect(field<HTMLInputElement>("starts").min).toBe("2026-10-13");
     expect(field<HTMLInputElement>("stopOnRed").checked).toBe(true);
-    expect(Array.from(report.options).map((option) => option.value).slice(0, 3)).toEqual(["", "discord:releases", "chat"]);
-    expect(Array.from(report.options).map((option) => option.textContent).slice(3)).toEqual([t("question.other")]);
-    expect(report.options[0]!.disabled).toBe(true);
-    expect(report.value).toBe("");
+    const reportOptions = find<HTMLSelectElement>('select[name="report"]')!;
+    expect(Array.from(reportOptions.options).map((option) => option.value).slice(0, 3)).toEqual(["", "discord:releases", "chat"]);
+    expect(Array.from(reportOptions.options).map((option) => option.textContent).slice(3)).toEqual([t("question.other")]);
+    expect(reportOptions.options[0]!.disabled).toBe(true);
+    expect(reportOptions.value).toBe("");
+    act(() => report.click());
+    const choices = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
+    expect(choices).toHaveLength(3);
+    act(() => choices[0]!.click());
+    expect(reportOptions.value).toBe("discord:releases");
+    expect(report.getAttribute("aria-expanded")).toBe("false");
   });
 });
 
@@ -301,7 +308,8 @@ describe("a settled widget", () => {
     expect(daysOn()).toEqual(["mon", "thu"]);
     expect(field<HTMLInputElement>("starts").value).toBe("2026-11-02");
     expect(field<HTMLButtonElement>("at").value).toBe("07:15");
-    expect(field<HTMLSelectElement>("report").value).toBe("chat");
+    expect(find<HTMLSelectElement>('select[name="report"]')!.value).toBe("chat");
+    expect(field<HTMLButtonElement>("report").disabled).toBe(true);
     expect(field<HTMLInputElement>("stopOnRed").checked).toBe(false);
     expect(all<HTMLInputElement>("[data-widget-field]").every((control) => control.disabled)).toBe(true);
 

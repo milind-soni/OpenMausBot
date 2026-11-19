@@ -79,6 +79,7 @@ async function mount(v2: boolean, speech?: Partial<Window["ogb"]>, fixture?: {
   pages: Record<string, { messages: Message[]; hasMore: boolean }>;
   setupRequests?: unknown[];
   quote?: { message: Message; onActivePath: boolean };
+  lastReadMessageId?: string;
 }) {
   snapshots = 0;
   sends = [];
@@ -100,6 +101,11 @@ async function mount(v2: boolean, speech?: Partial<Window["ogb"]>, fixture?: {
     if (path.startsWith("/api/bots?")) {
       snapshots++;
       const initial = fixture ? { ...bot("a"), activeLeafId: fixture.pages[""]?.messages.at(-1)?.id, messages: [] } : bot("a");
+      if (fixture?.lastReadMessageId) {
+        initial.unread = true;
+        initial.tasks = initial.tasks?.map(task => task.threadId === "a"
+          ? { ...task, unread: true, lastReadMessageId: fixture.lastReadMessageId } : task);
+      }
       return snapshots === 1 ? json({ bots: [initial], groups: [room("a")] }) : snapshot.promise;
     }
     const task = path.match(/^\/api\/bots\/bot\/tasks\/([ab])/);
@@ -353,9 +359,34 @@ describe("the default Chat V2", () => {
     expect(state.focusMessage).toBeFalsy();
   });
 
+  it.each(["bot", "user"] as const)("opens the %s bubble context menu and replies from it", async role => {
+    const answer: Message = { ...line("answer"), role, text: "A message" };
+    await mount(true, undefined, { pages: { "": { messages: [answer], hasMore: false } } });
+    await vi.waitFor(() => {
+      const bubble = container.querySelector('[data-mid="answer"] [data-chat-bubble]');
+      expect(bubble).not.toBeNull();
+      const event = new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2 });
+      flushSync(() => bubble!.dispatchEvent(event));
+      expect(event.defaultPrevented).toBe(true);
+    });
+    const reply = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'))
+      .find(item => item.textContent === "Reply");
+    expect(reply).toBeDefined();
+    flushSync(() => reply!.click());
+    expect(container.querySelector("[data-composer-reply]")?.textContent).toContain(answer.text);
+  });
+
   it("restores a reply to a paged message after switching away and back", async () => {
-    await mount(true);
-    const reply = () => container.querySelector<HTMLButtonElement>('[data-mid="a"] button[aria-label="Reply"]');
+    const original: Message = { ...line("original"), role: "bot" };
+    const latest = { ...line("latest"), at: 2, parentId: original.id, replyToId: original.id };
+    await mount(true, undefined, { pages: {
+      "": { messages: [latest], hasMore: true },
+      latest: { messages: [original], hasMore: false },
+    }, quote: { message: original, onActivePath: true } });
+    const jump = () => container.querySelector<HTMLButtonElement>('[data-mid="latest"] button[title="Jump to original message"]');
+    await vi.waitFor(() => expect(jump()).not.toBeNull());
+    flushSync(() => jump()!.click());
+    const reply = () => container.querySelector<HTMLButtonElement>('[data-mid="original"] button[aria-label="Reply to message"]');
     await vi.waitFor(() => expect(reply()).not.toBeNull());
     flushSync(() => reply()!.click());
     const clear = () => container.querySelector('button[aria-label="Cancel reply"]');
@@ -364,4 +395,29 @@ describe("the default Chat V2", () => {
     flushSync(() => dispatch({ type: "select", id: "bot" }));
     await vi.waitFor(() => expect(clear()).not.toBeNull());
   });
+
+  it.each([false, true])("places the unread divider when the read marker loads (older page: %s)", async older => {
+    const read: Message = { ...line("read"), role: "bot" };
+    const unread: Message = { ...line("unread"), parentId: read.id, at: 2, role: "bot", replyToId: read.id };
+    await mount(true, undefined, {
+      pages: {
+        "": { messages: older ? [unread] : [read, unread], hasMore: older },
+        unread: { messages: [read], hasMore: false },
+      },
+      quote: { message: read, onActivePath: true },
+      lastReadMessageId: read.id,
+    });
+    expect(shown().messages).toEqual([]);
+    flushSync(() => dispatch({ type: "select", id: "room" }));
+    flushSync(() => dispatch({ type: "select", id: "bot" }));
+    if (older) {
+      const quote = () => container.querySelector<HTMLButtonElement>('[data-mid="unread"] button[title="Jump to original message"]');
+      await vi.waitFor(() => expect(quote()).not.toBeNull());
+      expect(container.querySelector("[data-unread-divider]")).toBeNull();
+      flushSync(() => quote()!.click());
+    }
+    await vi.waitFor(() => expect(container.querySelector('[data-mid="unread"] [data-unread-divider]')?.getAttribute("aria-label")).toBe("New messages"));
+    expect(container.querySelector('[data-mid="read"] [data-unread-divider]')).toBeNull();
+  });
+
 });

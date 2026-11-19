@@ -39,7 +39,7 @@ import { parseConnectorTools } from "./connector-tools.ts"; import { recoverThre
 import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
 import { appsFromCreator } from "./inherited-apps.ts"; import { newBotOwner, sharedAsMaker, sharedUnlessRestricted, type NewBotSharingRule } from "./new-bot-sharing.ts";
-import { ThreadCache, type ThreadState } from "./thread-cache.ts";
+import { activeThreadPath, activeThreadPathIndex, ThreadCache, type ThreadState } from "./thread-cache.ts";
 import { messagesBefore } from "./thread-history.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 import { buildTask, threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
@@ -1109,28 +1109,8 @@ export class Store {
     return this.thread(threadId).activeLeafId;
   }
 
-  activePathIndex(threadId: string): NonNullable<ThreadState["pathIndex"]> {
-    const t = this.thread(threadId);
-    if (t.pathIndex?.leafId === t.activeLeafId) return t.pathIndex;
-    const messages = this.activePath(threadId);
-    return t.pathIndex = {
-      leafId: t.activeLeafId,
-      messages,
-      positions: new Map(messages.map((message, index) => [message.id, index])),
-    };
-  }
-
-  activePath(threadId: string): Message[] {
-    const t = this.thread(threadId);
-    const byId = new Map(t.messages.map((m) => [m.id, m]));
-    const path: Message[] = [];
-    let cur = t.activeLeafId ? byId.get(t.activeLeafId) : undefined;
-    while (cur) {
-      path.push(cur);
-      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
-    }
-    return path.reverse();
-  }
+  activePathIndex(threadId: string) { return activeThreadPathIndex(this.thread(threadId)); }
+  activePath(threadId: string): Message[] { return activeThreadPath(this.thread(threadId)); }
 
   markTerminalAssistantMessage(threadId: string, turnId: string): Message | null {
     const path = this.activePath(threadId);

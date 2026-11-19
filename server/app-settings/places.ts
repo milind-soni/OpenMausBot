@@ -6,10 +6,7 @@ const PLACES: readonly SettingsPlace[] = SETTINGS_PLACES;
 const byId = new Map(PLACES.map((place) => [place.id, place]));
 
 function described(place: SettingsPlace): string {
-  const notes = [
-    ...(place.only ? [`only in ${place.only}`] : []),
-  ];
-  return notes.length ? `${place.path} (${notes.join("; ")})` : place.path;
+  return place.only ? `${place.path} (only in ${place.only})` : place.path;
 }
 
 /** The place's path, with any restriction on where it appears. */

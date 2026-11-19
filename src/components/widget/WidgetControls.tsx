@@ -1,5 +1,6 @@
+import { Select } from "../Select";
 import { createContext, useContext, type Ref } from "react";
-import { Calendar, Check, ChevronsUpDown, LoaderCircle, X } from "lucide-react";
+import { Calendar, Check, LoaderCircle, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import {
@@ -177,17 +178,17 @@ export function WidgetSelect({ node, bare }: { node: WidgetNode; bare: boolean }
   const choosingOther = field.other !== undefined;
   const select = (
     <span className={cn("relative min-w-0 items-center", bare ? "inline-flex" : "flex w-full")}>
-      <select
+      <Select
         {...field.control}
         value={choosingOther ? OTHER_OPTION : field.text}
         onChange={(event) => (event.target.value === OTHER_OPTION ? field.chooseOther() : field.set(event.target.value))}
-        className={cn(bare ? WIDGET_BARE : WIDGET_FIELD, "appearance-none", bare ? "ps-2 pe-7 text-end [field-sizing:content]" : "pe-9", !field.text && !choosingOther && "text-ink-tertiary")}
+        variant={bare ? "bare" : "field"}
+        className={cn(!bare && "w-full")}
       >
         <option value="" disabled={!open} hidden={!open}>{widgetString(node, "placeholder") ?? t("widget.choose")}</option>
         {optionsOf(node).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         {field.takesOther && <option value={OTHER_OPTION}>{t("question.other")}</option>}
-      </select>
-      <ChevronsUpDown aria-hidden="true" size={14} className={cn("pointer-events-none absolute text-ink-tertiary", bare ? "end-2" : "end-3")} />
+      </Select>
     </span>
   );
   if (!field.takesOther) return select;

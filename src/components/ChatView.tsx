@@ -413,7 +413,6 @@ const Bubble = memo(function Bubble({
           <MessageActions
             side="user" contextItems={replyAndCopy(() => onReply(message), visibleText)}
             menu={[
-              ...([]),
               ...userMessageMenu({
                 messageId: message.id, save: botMenu.filter((item) => item.key === TEAM_MEMORY_ITEM),
                 onEdit: !speaker && message.kind === "text" && !webhookView && !hasAttachments && !message.id.startsWith("optimistic-")

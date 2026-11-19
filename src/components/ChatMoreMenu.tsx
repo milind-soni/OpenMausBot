@@ -29,9 +29,9 @@ import { TEMPLATE_SHARE_MESSAGE } from "../../shared/share-card";
 
 /** One item list for the chat's ⋯ menu wherever it sits; it lists the threads whenever the sidebar hides them. The
  * Simple bot panel draws the same items as rows, and its Share button holds the two that export. */
-export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: SidebarMenuItem[]; on: boolean } {
+export function useChatMoreItems(profile: Bot, phoneHeader = false, history?: Bot["messages"]): { items: SidebarMenuItem[]; on: boolean } {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
-  const messages = useMemo(() => visibleMessages(bot), [bot]);
+  const messages = useMemo(() => history ?? visibleMessages(bot), [bot, history]);
   const { state, dispatch } = useStore();
 
   const showThreads = useShowThreads();
@@ -255,13 +255,13 @@ function ShareMenu({ bot, className }: { bot: Bot; className: string }) {
 }
 
 /** The same menu as the chat header's plain ⋯ in Advanced mode, opening on hover below the header. */
-export function ChatHeaderMenu({ bot }: { bot: Bot }): JSX.Element {
-  const { items, on } = useChatMoreItems(bot);
+export function ChatHeaderMenu({ bot, history, openOnHover = true }: { bot: Bot; history?: Bot["messages"]; openOnHover?: boolean }): JSX.Element {
+  const { items, on } = useChatMoreItems(bot, false, history);
   return (
     <SidebarPopoverMenu
       items={items}
       ariaLabel={t("chat.more")}
-      openOnHover
+      openOnHover={openOnHover}
       placement="below"
       renderTrigger={({ open }) => (
         <span

@@ -16,6 +16,14 @@ const message: Message = {
 };
 
 describe("DigestChip", () => {
+  it("renders the inline trace without chip chrome", () => {
+    const html = renderToStaticMarkup(createElement(DigestChip, { message, inline: true }));
+    expect(html).toContain('data-testid="view-trace"');
+    expect(html).toContain('text-[14px]');
+    expect(html).toContain('<span aria-hidden="true">·</span>');
+    expect(html).not.toContain('border-hairline');
+  });
+
   it("draws only how long a reply with no recorded work took, with its trace beside it", () => {
     for (const files of [undefined, { changed: [], added: [], deleted: [] }]) {
       const quiet = { ...message.digest!, tools: [], toolsDropped: 0, toolCalls: 0, files, memory: [], memoryDropped: 0 };

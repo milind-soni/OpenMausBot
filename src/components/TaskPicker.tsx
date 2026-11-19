@@ -380,15 +380,13 @@ function ConversationTaskPicker({
                       <SquarePen size={14} />
                     </button>
                   )}
-                  {bot && onMove && (bot.projects?.length ?? 0) > 0 && <label title={t("folder.move")} className="relative rounded-md p-1 text-ink-secondary opacity-0 hover:bg-menu-hover hover:text-ink focus-within:opacity-100 group-hover:opacity-100 touch:opacity-70">
-                    <FolderInput size={14} />
-                    <select aria-label={t("folder.moveNamed", { title: task.title })} value={bot.projects?.some((project) => project.id === task.projectId) ? task.projectId : ""}
-                      onFocus={clearDismiss} onChange={(event) => { clearDismiss(); onMove(task.threadId, event.target.value || null); }}
-                      className="absolute inset-0 w-full cursor-pointer opacity-0">
+                  {bot && onMove && (bot.projects?.length ?? 0) > 0 && <div title={t("folder.move")} className="relative rounded-md p-1 text-ink-secondary opacity-0 hover:bg-menu-hover hover:text-ink focus-within:opacity-100 group-hover:opacity-100 touch:opacity-70">
+                    <Select triggerContent={<FolderInput size={14} />} aria-label={t("folder.moveNamed", { title: task.title })} value={bot.projects?.some((project) => project.id === task.projectId) ? task.projectId : ""}
+                      onFocus={clearDismiss} onChange={(event) => { clearDismiss(); onMove(task.threadId, event.target.value || null); }}>
                       <option value="">{t("folder.none")}</option>
                       {bot.projects?.map((project) => <option key={project.id} value={project.id}>{project.emoji ? `${project.emoji} ` : ""}{project.name}</option>)}
-                    </select>
-                  </label>}
+                    </Select>
+                  </div>}
                   <button
                     type="button"
                     onClick={() => onDelete(task.threadId)}

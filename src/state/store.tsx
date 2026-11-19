@@ -1,6 +1,6 @@
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError, retryRequest, snapshotArrays } from "./api";
-import { loadOlderPage, MESSAGE_PAGE_SIZE, reduceOlderMessages } from "./message-history";
+import { loadOlderPage, MESSAGE_PAGE_SIZE, reduceHistoryReady, reduceOlderMessages } from "./message-history";
 export { MESSAGE_PAGE_SIZE } from "./message-history";
 import { addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
 import { use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -19,9 +19,9 @@ import { botOpensTo, closeTrayUnlessShown, closeUnpinnedTray, openBot, openThrea
 import { patchGroupTask } from "./thread-edits"; import { unreadBeyondFrame, wholeBotFrame } from "./bot-thread-frame";
 import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
-import { foldSnapshotOntoStreamed, patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
+import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
-import { keepBotNavigation, keepGroupNavigation, navigatedSince, visibleMessages } from "./snapshot-navigation";
+import { reduceHydrate, visibleMessages } from "./snapshot-navigation";
 export { visibleMessages } from "./snapshot-navigation";
 export { awayFromMainThread, botOpensTo, markedThread, openBot, openBotRow, openBotThread, openRoomThread, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
@@ -57,7 +57,6 @@ import { parseComputerHelp, type ComputerControlSnapshot } from "@/lib/computer-
 import { answerResponse, dismissResponse } from "@/lib/card-answer";
 import { forgetLiveTurns, noteRuntimeTurn, sendStop } from "@/lib/stop-turn";
 import { readLastConversation, rememberConversation } from "@/lib/last-conversation";
-import { readLastBotSection, rememberBotSection } from "@/lib/last-bot-section";
 import { showNotification } from "@/lib/notify";
 import { randomUuid } from "@/lib/random-uuid";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -549,8 +548,6 @@ export interface AppState {
   tourOpen: boolean;
   botSettingsSection: BotSettingsSection;
   botSettingsExpandAccordion: boolean;
-  botSettingsSectionStored: boolean;
-  botSettingsExpandRemembered: boolean;
   computerStarts: Record<string, ComputerStart>;
   deletingBots: Record<string, true>;
   computerControl: Record<string, ComputerControlSnapshot>;
@@ -884,58 +881,10 @@ export function reducer(state: AppState, action: Action): AppState {
       bots: action.v2 ? state.bots : state.bots.map(bot => bot.chatPage || bot.chatPatches
         ? { ...bot, chatPage: undefined, chatPatches: undefined } : bot),
     };
-    case "historyReady": {
-      const merge = <T extends Bot | Group>(owner: T): T => {
-        if (owner.threadId !== action.threadId || !owner.needsHistory) return owner;
-        const merged = foldSnapshotOntoStreamed(owner.messages, new Set(action.held), action.messages);
-        const overlap = owner.messages.findIndex(m => m.id === merged[0]?.id);
-        const prefix = overlap > 0 ? owner.messages.slice(0, overlap) : [];
-        return { ...owner, messages: [...prefix, ...merged], hasMore: prefix.length ? owner.hasMore : action.hasMore,
-          activeLeafId: "activeLeafId" in owner && owner.activeLeafId !== action.leaf ? owner.activeLeafId : action.activeLeafId, needsHistory: false };
-
-      };
-      return { ...state, bots: state.bots.map(merge), groups: state.groups.map(merge) };
-    }
-    case "hydrate": {
-      const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
-      const resume = action.resumeId;
-      const resumed =
-        resume && (action.bots.some((b) => b.id === resume && !b.hidden) || action.groups.some((g) => g.id === resume)) ? resume : "";
-      const selectedId = state.selectedId && known(state.selectedId) ? state.selectedId : resumed || (action.bots[0]?.id ?? "");
-      const hydrated = {
-        ...state,
-        bots: action.bots.map((sent) => {
-          let bot = sent.messages ? sent : { ...sent, messages: [] };
-          const previous = state.bots.find((candidate) => candidate.id === bot.id);
-          if (bot.needsHistory && previous?.threadId === bot.threadId && (!state.chatV2 || bot.busy)) bot = { ...bot, messages: previous.messages, hasMore: previous.hasMore };
-          return keepBotNavigation(previous, previous ? { ...bot, tasks: mergeTaskStamps(previous.tasks, bot.tasks) } : bot,
-            action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration), action.taskIdsAtStart);
-        }),
-        groups: action.groups.map((group) => {
-          const previous = state.groups.find((candidate) => candidate.id === group.id);
-          const merged = previous ? { ...group, ...(group.needsHistory && previous.threadId === group.threadId ? { messages: previous.messages, hasMore: previous.hasMore } : {}), tasks: mergeTaskStamps(previous.tasks, group.tasks) } : group;
-          // The wire carries an explicitly-cleared description as null; client state keeps it absent.
-          if (merged.description === null) merged.description = undefined;
-          return keepGroupNavigation(previous, merged, action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration), action.taskIdsAtStart);
-        }),
-        sections: action.sections ?? [],
-        computerControl: action.computerControl,
-        selectedId,
-        hydrated: true as const,
-        backgroundThreadEvents: {},
-        loadingOlder: {},
-        transcriptGeneration: Object.fromEntries(
-          [...action.bots, ...action.groups].map(({ threadId }) => [threadId, (state.transcriptGeneration[threadId] ?? 0) + 1]),
-        ),
-        modelVariantSessions: {},
-      };
-      const held = [...hydrated.bots, ...hydrated.groups].find((owner) => owner.threadId === state.unreadDivider?.threadId);
-      if (held) hydrated.unreadDivider = placeUnreadDivider(state.unreadDivider, held.threadId, visibleMessages(held), Boolean(held.hasMore));
-      return reconcileSnapshotQueues(
-        action.botQueuedMessages ? replaceBotQueues(hydrated, action.botQueuedMessages) : hydrated,
-        [...action.bots, ...action.groups],
-      );
-    }
+    case "historyReady":
+      return reduceHistoryReady(state, action);
+    case "hydrate":
+      return reduceHydrate(state, action);
     case "loadOlderMessages":
       return state.loadingOlder[action.threadId]
         ? state
@@ -1033,7 +982,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "groupPatched": {
       const fenced = action.group.messages ? bumpTranscriptGeneration(state, action.group.threadId) : state;
       const groups = patchedGroups(state.groups, action.group), held = action.group.messages && groups.find((g) => g.id === action.group.id && g.threadId === state.unreadDivider?.threadId);
-      return { ...fenced, groups, ...(held ? { unreadDivider: placeUnreadDivider(state.unreadDivider, held.threadId, visibleMessages(held), Boolean(held.hasMore)) } : {}) };
+      return { ...fenced, groups, ...(held ? { unreadDivider: placeUnreadDivider(state.unreadDivider, held.threadId, visibleMessages(held), Boolean(held.hasMore || held.needsHistory)) } : {}) };
     }
     case "groupSnapshot": {
       const group = snapshotPatch(state, action);
@@ -1066,7 +1015,7 @@ export function reducer(state: AppState, action: Action): AppState {
           ...(action.id === state.selectedId && state.activeView === "chat" ? state : closeUnpinnedTray(state)),
           unreadDivider: openedUnreadDivider(state, room.threadId,
             room.tasks?.find((task) => task.threadId === room.threadId)?.unread ?? room.unread,
-            room.messages, room.lastReadMessageId, room.hasMore),
+            room.messages, room.lastReadMessageId, room.hasMore || room.needsHistory),
           activeView: "chat",
           selectedId: action.id,
           forkPanel: null,
@@ -1083,7 +1032,7 @@ export function reducer(state: AppState, action: Action): AppState {
           {
             ...(action.id === state.selectedId && state.activeView === "chat" ? state : closeUnpinnedTray(state)),
             unreadDivider: opened
-              ? openedUnreadDivider(state, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened), opened.hasMore)
+              ? openedUnreadDivider(state, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened), opened.hasMore || opened.needsHistory)
               : state.unreadDivider,
             activeView: "chat",
             selectedId: action.id,
@@ -1401,7 +1350,6 @@ export function reducer(state: AppState, action: Action): AppState {
       if (action.botId !== undefined && !state.bots.some((bot) => bot.id === action.botId && !bot.hidden)) return state;
       const selectedId = action.botId ?? state.selectedId;
       const open = action.open ?? (action.botId !== undefined || !state.settingsOpen);
-      const freshOpen = open && !state.settingsOpen;
       const named = action.section !== undefined;
       return {
         ...state,
@@ -1409,9 +1357,7 @@ export function reducer(state: AppState, action: Action): AppState {
         settingsOpen: open,
         activityOpen: open ? false : state.activityOpen,
         botSettingsSection: action.section ?? state.botSettingsSection,
-        botSettingsExpandAccordion: open ? named || (freshOpen && state.botSettingsSectionStored) : false,
-        botSettingsExpandRemembered: open ? !named && freshOpen && state.botSettingsSectionStored : false,
-        botSettingsSectionStored: named || state.botSettingsSectionStored,
+        botSettingsExpandAccordion: open && named,
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
@@ -1760,7 +1706,7 @@ export function reducer(state: AppState, action: Action): AppState {
       switched = { ...switched, backgroundThreadEvents };
       const opened = switched.bots.find((bot) => bot.id === action.bot.id);
       if (opened && opened.id === switched.selectedId) {
-        switched = { ...switched, unreadDivider: openedUnreadDivider(switched, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened), opened.hasMore) };
+        switched = { ...switched, unreadDivider: openedUnreadDivider(switched, opened.threadId, threadOpensUnread(opened), visibleMessages(opened), threadReadCursor(opened), opened.hasMore || opened.needsHistory) };
         // The snapshot predates the switch's own announcement and must not put the unread dot back.
         if (switched.activeView === "chat") switched = updateBot(switched, opened.id, (bot) => ({ ...bot,
           unread: Boolean(bot.tasks?.some((task) => task.threadId !== bot.threadId && task.unread)),
@@ -1887,8 +1833,6 @@ export const initialState: AppState = {
   tourOpen: false,
   botSettingsSection: "overview",
   botSettingsExpandAccordion: false,
-  botSettingsSectionStored: false,
-  botSettingsExpandRemembered: false,
   computerStarts: {},
   deletingBots: {},
   computerControl: {},
@@ -2081,18 +2025,13 @@ export function runtimeFrameAction(event: RuntimeEvent): Action | null {
 
 export { StoreContext } from "./store-context";
 
-function restoreBotSettingsSection(state: AppState): AppState {
-  const section = readLastBotSection();
-  return section ? { ...state, botSettingsSection: section, botSettingsSectionStored: true } : state;
-}
-
 export function StoreProvider({ children }: { children: ReactNode }) {
   const taskWrites = useRef(new Map<string, { botId: string; updatesDefault: boolean; promise: Promise<BotAnnouncement>; execution: Promise<unknown>; patch: TaskUpdatePatch }>()).current;
   const withTaskWrites = (bot: BotAnnouncement): BotAnnouncement => ({
     ...bot,
     tasks: bot.tasks?.map((task) => ({ ...task, ...taskPatchFields(taskWrites.get(task.threadId)?.patch ?? {}) })),
   });
-  const [store] = useState(() => createAppStore<AppState, Action, ServerFrame>(reducer, withRememberedTrayPin(restoreBotSettingsSection(initialState))));
+  const [store] = useState(() => createAppStore<AppState, Action, ServerFrame>(reducer, withRememberedTrayPin(initialState)));
   const rawDispatch = store.dispatch, state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
   const stateRef = useRef(state), selectionRevision = useRef(0);
   stateRef.current = state;
@@ -2120,9 +2059,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (state.selectedId) rememberConversation(state.selectedId);
   }, [state.selectedId]);
-  useEffect(() => {
-    if (state.settingsOpen && state.botSettingsExpandAccordion) rememberBotSection(state.botSettingsSection);
-  }, [state.settingsOpen, state.botSettingsExpandAccordion, state.botSettingsSection]);
   const botPatchQueue = useMemo(
     () =>
       createBotPatchQueue({

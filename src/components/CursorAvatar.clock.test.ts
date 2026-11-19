@@ -86,6 +86,20 @@ describe("CursorAvatar on the shared clock", () => {
     expect(frameRequests).toBeLessThanOrEqual(21);
   });
 
+  it("blinks and hops when a paused mascot resumes", () => {
+    render([{ animated: false }]);
+    run(100);
+    const eye = () => host.querySelector("g[clip-path] path")!.getAttribute("transform");
+    const body = () => host.querySelector("svg > g > g:nth-child(2)")!.getAttribute("transform");
+    const still = eye();
+    const stillBody = body();
+    render([{ animated: true }]);
+    run(100);
+    expect(eye()).not.toBe(still);
+    expect(body()).toContain("translate");
+    expect(body()).not.toBe(stillBody);
+  });
+
   it("paints a still mascot with its state's face and then asks for nothing", () => {
     render([{ state: "sleeping", animated: false, size: 24 }]);
     run(100);
