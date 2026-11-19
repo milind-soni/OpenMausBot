@@ -17,6 +17,11 @@ const VOICE_ID = /^[A-Za-z0-9]{20}$/;
 /** The agent's audio both ways: 16 kHz 16-bit PCM, as the client sends and plays it. */
 const AUDIO_FORMAT = "pcm_16000";
 const UNEXPECTED = "ElevenLabs returned an unexpected answer. Try the call again.";
+/** Without the prompt override ElevenLabs refuses the prompt each conversation sends, and without the voice override a bot's
+ * own voice. With auth on, a conversation needs a signed URL, which only the harness can get with the key: knowing the agent
+ * id is not enough to spend the person's credits. Sent whole on every change, so an update that replaces these settings
+ * instead of merging them keeps all three. */
+const AGENT_PLATFORM_SETTINGS = { overrides: { conversation_config_override: { agent: { prompt: { prompt: true } }, tts: { voice_id: true } } }, auth: { enable_auth: true } };
 /** What ElevenLabs sends the client. A list replaces ElevenLabs' defaults, so it names every event the client reads, with
  * `client_tool_call` so `delegate` reaches the client. */
 const CLIENT_EVENTS = [
@@ -83,9 +88,7 @@ export async function setUpElevenLabsAgent(key: string, endpoint: LiveEndpoint, 
         tts: { agent_output_audio_format: AUDIO_FORMAT },
         conversation: { client_events: CLIENT_EVENTS, max_duration_seconds: CALL_AT_MOST_SECONDS },
       },
-      // Without the override ElevenLabs refuses the prompt each conversation sends. With auth on, a conversation needs a
-      // signed URL, which only the harness can get with the key: knowing the agent id is not enough to spend the person's credits.
-      platform_settings: { overrides: { conversation_config_override: { agent: { prompt: { prompt: true } }, tts: { voice_id: true } } }, auth: { enable_auth: true } },
+      platform_settings: AGENT_PLATFORM_SETTINGS,
     });
     const agentId = typeof agent.agent_id === "string" && AGENT_ID.test(agent.agent_id) ? agent.agent_id : "";
     if (!agentId) throw new LiveSessionError(UNEXPECTED, 502);
@@ -107,7 +110,7 @@ async function allowVoiceOverride(fetchImpl: typeof fetch, key: string, apiBase:
     const agent = await elevenLabsRequest(fetchImpl, key, url);
     const settings = agent.platform_settings as { overrides?: { conversation_config_override?: { tts?: { voice_id?: unknown } } } } | undefined;
     if (settings?.overrides?.conversation_config_override?.tts?.voice_id === true) return true;
-    await elevenLabsRequest(fetchImpl, key, url, { platform_settings: { overrides: { conversation_config_override: { tts: { voice_id: true } } } } }, "PATCH");
+    await elevenLabsRequest(fetchImpl, key, url, { platform_settings: AGENT_PLATFORM_SETTINGS }, "PATCH");
     return true;
   } catch (error) {
     if ((error as { elevenlabsStatus?: number }).elevenlabsStatus === 404) throw error;

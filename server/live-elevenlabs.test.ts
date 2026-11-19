@@ -143,7 +143,8 @@ describe("an ElevenLabs Live call's voice", () => {
     const fetchImpl = fakeElevenLabs({ "/v1/convai/agents/agent_1": agentWith(false) });
     expect((await withVoice(fetchImpl, VOICE)).voice_id).toBe(VOICE);
     const patch = fetchImpl.mock.calls.find(([, init]) => init?.method === "PATCH")!;
-    expect(JSON.parse(String(patch[1]!.body))).toEqual({ platform_settings: { overrides: { conversation_config_override: { tts: { voice_id: true } } } } });
+    expect(JSON.parse(String(patch[1]!.body)), "the prompt override and auth survive an update that replaces the settings").toEqual({ platform_settings: {
+      overrides: { conversation_config_override: { agent: { prompt: { prompt: true } }, tts: { voice_id: true } } }, auth: { enable_auth: true } } });
   });
 
   it("sends no voice for a bot without one, or whose voice is not an ElevenLabs voice id, and never touches the agent", async () => {
