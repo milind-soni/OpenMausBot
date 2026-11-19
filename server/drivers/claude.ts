@@ -1698,8 +1698,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (!(await killCliTree(child, 0))) {
           session.broker?.close();
           session.broker = undefined;
-          if (!session.spare && !session.turn?.stopRequested) unconfirmedStopWarning();
-          session.releaseInterrupted?.();
+          if (!session.spare) { if (!session.turn?.stopRequested) unconfirmedStopWarning(); session.releaseInterrupted?.(); }
           return;
         }
         if (closeFinalized) return;
