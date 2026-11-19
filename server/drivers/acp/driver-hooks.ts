@@ -5,6 +5,9 @@ import type { ChildProcess } from "node:child_process";
 import type { AcpHost } from "./host.ts";
 
 export interface AcpDriverHooks {
+  /** Local video, image, audio and PDF files named in the turn text go to the model as `resource_link` blocks
+   * the agent reads itself, for an agent whose own file tool returns media as raw bytes (Antigravity). */
+  mediaLinks?: boolean;
   /** An agent that asks for a sign-in no turn can give. Its turns fail at once with `loginNote`, its process is closed
    * and `required` is told, instead of the turn waiting on a sign-in nobody sees. */
   signInRequest?: {

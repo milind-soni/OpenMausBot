@@ -14,6 +14,7 @@ import { publishedMessages } from "../../harness/text-items.testkit.ts";
 import { promptSplitFingerprints, writePromptSplitReceipt } from "../prompt-split.ts";
 import { classifyError } from "../retry.ts";
 import { createAcpDriver, skipSubscriptionAuthForLocalInject, type AcpSupport } from "./core.ts";
+import { acpMediaUri } from "./media-links.ts";
 import { DEFAULT_ACP_PROMPT_IDLE_MS } from "./quiet-status.ts";
 import { GrokAgentDriver, grokAcceptsUnadvertisedImages } from "./grok.ts";
 import { openCodePromptUnreachedModel } from "./opencode-go.ts";
@@ -52,6 +53,13 @@ const NativeImageDriver = createAcpDriver({
   ...SELECT_MODEL_SUPPORT,
   driverKind: "nativeImageTest",
   images: true,
+});
+
+/** Media named in the turn text is a per-harness opt-in for agents that read a linked file themselves. */
+const MediaLinksDriver = createAcpDriver({
+  ...SELECT_MODEL_SUPPORT,
+  driverKind: "mediaLinksTest",
+  mediaLinks: true,
 });
 
 const EnvPolicyDriver = createAcpDriver({
@@ -478,6 +486,27 @@ describe("ACP turns (fake CLI)", () => {
     const nativeLog = readFileSync(join(NATIVE_DIR, "t-acp-native-image.ndjson"), "utf8");
     expect(nativeLog).not.toContain(base64);
     expect(nativeLog).toContain(`[image data: ${base64.length} base64 chars]`);
+  });
+
+  it("links local media named in the turn text as resource_link blocks the agent reads itself", async () => {
+    const dump = join(scratch, "media-link-prompt.json");
+    const clipPath = join(scratch, "media link clip.mp4");
+    writeFileSync(clipPath, Buffer.from("private-acp-video-bytes"));
+    process.env.FAKE_ACP_DUMP = dump;
+    process.env.FAKE_ACP_DUMP_PROMPT = "1";
+    await create(MediaLinksDriver);
+
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-acp-media-link", text: `What happens in ${clipPath}?` });
+    await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+
+    const prompt = JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8"));
+    expect(prompt).toEqual([
+      { type: "text", text: expect.stringContaining(`What happens in ${clipPath}?
+
+(OpenMausBot attached these files`) },
+      { type: "resource_link", uri: acpMediaUri(clipPath), name: "media link clip.mp4" },
+    ]);
+    expect(JSON.stringify(prompt)).not.toContain("private-acp-video-bytes");
   });
 
   it("delivers the full prompt once per native session and rides volatile changes as notes", async () => {
