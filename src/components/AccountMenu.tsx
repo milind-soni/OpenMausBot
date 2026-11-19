@@ -39,7 +39,7 @@ export function useSheetOffered(enabled = true): boolean {
   useEffect(() => {
     if (!enabled || !remote) return;
     let alive = true;
-    void remote.offered().then((yes) => { if (alive) setOffered(yes === true); }).catch(() => {});
+    void remote.offered().then((yes) => { if (alive) setOffered(yes === true); }).catch(() => { if (alive) setOffered(false); });
     return () => { alive = false; };
   }, [enabled, remote]);
   return enabled && offered && Boolean(remote);

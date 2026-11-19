@@ -52,3 +52,12 @@ it("stays hidden when asking fails, and never asks when it is not wanted or the 
   render(); f.effects[0]!(); await flush(); render();
   expect(result).toBe(false);
 });
+
+it("hides the row again when a later check fails after an earlier yes", async () => {
+  const offered = vi.fn().mockResolvedValueOnce(true).mockRejectedValueOnce(new Error("no"));
+  vi.stubGlobal("window", { ogb: { accountSheet: { offered, open: vi.fn() } } });
+  render(); f.effects[0]!(); await flush(); render();
+  expect(result).toBe(true);
+  f.effects[0]!(); await flush(); render();
+  expect(result).toBe(false);
+});
