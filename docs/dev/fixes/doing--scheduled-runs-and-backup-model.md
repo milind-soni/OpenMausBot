@@ -1,7 +1,7 @@
 ---
 status: doing
 created: 2026-11-12
-updated: 2026-11-12
+updated: 2026-11-19
 scope: scheduled runs, auto-resume, backup model
 owner: SoSo
 related: [todo--usage-rings.md]
@@ -40,6 +40,7 @@ Implements `docs/dev/plans/implementation--scheduled-runs-and-backup-model.md`. 
 - [?] **Bot fields and migration** — `server/store.ts:106`, `src/state/store.tsx`. Adds `backupModelSelection` and `onUsageLimit`.
 - [?] **Usage-limit handling** — Switch to the backup and retry, or create one auto-resume schedule per thread at the reset time (with backoff when the time is unknown), or stop and notify.
 - [?] **Switch back after refresh** — Only on the next new turn. Adds the "using backup" badge with a pin option.
+- [?] **Persistent two-way failover** — Across chat and room turns, the other configured model can retry a limited request once. Both selections and the active backup flag persist. Making the backup the main model swaps the two selections. — `server/index.ts`, `src/components/ModelPicker.tsx`.
 - [?] **Bot settings UI** — Adds "Backup model" and "When usage runs out".
 
 ## 4. Docs and QA

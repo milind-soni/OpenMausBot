@@ -38,11 +38,14 @@ describe.skipIf(process.platform === "win32")("scheduled runs and recovery over 
       chmodSync(path, 0o755); return path;
     };
     const failing = wrapper("limited", "fake-codex-app-server.ts", `import {existsSync} from 'node:fs'; process.env.FAKE_CODEX_MODE=existsSync(${JSON.stringify(join(home, "primary-refreshed"))})?'happy':'usage-limit';`);
+    const alternating = (name: string) => wrapper(name, "fake-codex-app-server.ts", `import {existsSync} from 'node:fs'; process.env.FAKE_CODEX_LIMIT_USAGE_READ='1'; process.env.FAKE_CODEX_MODE=existsSync(${JSON.stringify(join(home, name + "-limited"))})?'usage-limit':'happy';`);
     const throttle = wrapper("throttle", "fake-claude-cli.ts", `process.env.FAKE_CLAUDE_MODE='usage-limit';process.env.FAKE_CLAUDE_DUMP=${JSON.stringify(join(home, "claude-dump.json"))};`);
     const happy = wrapper("happy", "fake-acp-cli.ts");
     const marker = join(home, "slow-started");
     const slow = wrapper("slow", "fake-acp-cli.ts", `import {existsSync,writeFileSync} from 'node:fs'; if(process.argv.includes('stdio')){if(!existsSync(${JSON.stringify(marker)})){writeFileSync(${JSON.stringify(marker)},'1');process.env.FAKE_ACP_MODE='hang';}else process.env.FAKE_ACP_MODE='happy';}`);
     writeFileSync(join(home, ".gbs", "config.json"), JSON.stringify({ instances: {
+      "pair-main": { driver: "codex", config: { cli: alternating("pair-main"), fullAuto: true } },
+      "pair-backup": { driver: "codex", config: { cli: alternating("pair-backup"), fullAuto: true } },
       primary: { driver: "codex", config: { cli: failing, fullAuto: true } },
       throttle: { driver: "claudeAgent", config: { cli: throttle, permissionMode: "bypassPermissions" } },
       backup: { driver: "grokAgent", config: { cli: happy, fullAuto: true } },
@@ -95,6 +98,52 @@ describe.skipIf(process.platform === "win32")("scheduled runs and recovery over 
       rmSync(join(home, "primary-refreshed"), { force: true });
     }
   });
+  it.each(["chat", "room"])("keeps both choices and retries in either direction across %s turns", async (surface) => {
+    const modelSelection = { instanceId: "pair-main", model: "gpt-new" };
+    const backupModelSelection = { instanceId: "pair-backup", model: "gpt-new" };
+    const id = await makeBot(modelSelection.instanceId, modelSelection.model, { backupModelSelection, onUsageLimit: "backup" });
+    const group = surface === "room" ? (await api("POST", "/api/groups", { name: "TEST · Alternating models", memberIds: [id] })).body.group : null;
+    const path = group ? `/api/groups/${group.id}/messages` : `/api/bots/${id}/messages`;
+    const readConversation = async () => {
+      const { body } = await api("GET", "/api/bots");
+      const bot = body.bots.find((row: any) => row.id === id);
+      const thread = group ? body.groups.find((row: any) => row.id === group.id) : bot;
+      return { bot, busy: Boolean(group ? thread.busyBotId || thread.queuedBotIds?.length : bot.busy), messages: thread.messages as any[] };
+    };
+    const mainLimited = join(home, "pair-main-limited");
+    const backupLimited = join(home, "pair-backup-limited");
+    try {
+      for (const [attempt, usingBackup] of [true, true, false, true].entries()) {
+        const repliesBefore = (await readConversation()).messages.filter((m) => m.text === "done from fake codex").length;
+        if (usingBackup) {
+          writeFileSync(mainLimited, "1");
+          rmSync(backupLimited, { force: true });
+        } else {
+          rmSync(mainLimited, { force: true });
+          writeFileSync(backupLimited, "1");
+        }
+        const text = `TEST · Work item ${attempt}`;
+        expect((await api("POST", path, { text })).status).toBe(202);
+        const { bot, messages } = await until(readConversation, ({ bot, busy, messages }) =>
+          !busy && bot.usingBackup === usingBackup && messages.filter((m) => m.text === "done from fake codex").length > repliesBefore);
+        expect(bot.modelSelection).toEqual(modelSelection);
+        expect(bot.backupModelSelection).toEqual(backupModelSelection);
+        const savedBots = JSON.parse(readFileSync(join(home, ".gbs", "bots.json"), "utf8"));
+        expect(savedBots.find((row: any) => row.id === id)).toMatchObject({ modelSelection, backupModelSelection, usingBackup });
+        expect(messages.filter((m) => m.role === "user" && m.text === text)).toHaveLength(1);
+        expect(messages.filter((m) => m.tool?.name.startsWith("Switched to"))).toHaveLength(attempt === 0 ? 1 : attempt);
+      }
+      writeFileSync(backupLimited, "1");
+      expect((await api("POST", path, { text: "TEST · Both models are limited" })).status).toBe(202);
+      const { body } = await until(() => api("GET", "/api/schedules"), ({ body }) =>
+        body.schedules.some((schedule: any) => schedule.target.botId === id || (group && schedule.target.groupId === group.id)));
+      expect(body.schedules.filter((schedule: any) => schedule.target.botId === id || (group && schedule.target.groupId === group.id))).toHaveLength(1);
+    } finally {
+      rmSync(mainLimited, { force: true });
+      rmSync(backupLimited, { force: true });
+    }
+  });
+
   it("creates one unknown-time retry at 15 minutes; Resume now backs off to 30 minutes, and Cancel removes it", async () => {
     const id = await makeBot("throttle", "default", { onUsageLimit: "wait" });
     const started = Date.now(); await api("POST", `/api/bots/${id}/messages`, { text: "Try this later" });

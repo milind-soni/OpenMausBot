@@ -15,6 +15,12 @@ import { writeFileSync } from "node:fs";
 
 if (process.argv.includes("--version")) { process.stdout.write("fake-cli 1.0\n"); process.exit(0); }
 
+const suggestion = process.env.FAKE_CLAUDE_TEXT;
+if (process.argv.includes("-p") && !process.argv.includes("stream-json") && suggestion !== undefined) {
+  process.stdout.write(suggestion);
+  process.exit(0);
+}
+
 const mode = process.env.FAKE_CLAUDE_MODE ?? "happy";
 
 const argv = process.argv.slice(2);

@@ -23,6 +23,8 @@ Execution checklist for [the detailed implementation plan](../plans/implementati
 - [?] Preserve/validate profile and recover from save failure — `src/components/Onboarding.tsx:135`.
 - [?] Show truthful installation, sign-in, readiness and plan metadata — `src/lib/onboardingCopy.ts:1`.
 - [?] Add purpose/custom-goal selection and editable, explained team proposal — `src/components/Onboarding.tsx:122`, `server/default-bots.ts:15`.
+- [?] Generate and validate editable Custom team proposals through a ready text-generation engine, with Retry and a built-in fallback — `server/index.ts`, `src/components/Onboarding.tsx`.
+- [?] Give each welcome Buddy a distinct color and keep the studio emblem blue — `src/components/OnboardingWelcome.tsx`.
 - [?] Apply approved teams safely with idempotency and existing-user preservation — `server/default-bots.ts:15`, `server/instances-default-fleet.test.ts:1`.
 - [?] Add optional restartable tour and first useful action — `src/App.tsx:136`.
 
@@ -53,3 +55,5 @@ Execution checklist for [the detailed implementation plan](../plans/implementati
 - SoSo verified Quick Preview and single-view Preview Studio in a second Electron instance with a disposable Chromium profile and Studio data folder. Both accepted a typed local URL after confirmation, kept the same native guest and Back/Forward history, reloaded the displayed page, and stopped a hanging request. Stop now restores the last committed address. Submitting the canceled address again starts a fresh request. Both cases are covered by `node scripts/testing/preview-testing-regression.mjs` after `pnpm build`.
 - In the isolated onboarding run, an injected HTTP 503 on the first profile save left both fields intact. Continue retried the save and advanced to AI engines. Approving the same proposal twice left the roster identical. An existing workspace with a custom pinned Buddy and no saved profile bypassed onboarding, rejected team approval, and retained its on-disk roster.
 - SoSo's post-fix checks on Node 24.19.0 passed: production build, typecheck, 559 tests in 73 files, and the Electron Preview regression suite.
+
+- SoSo verified the updated welcome palette and the Custom proposal loading, error, Retry, and built-in fallback states in Studio Preview with an isolated harness and fake provider. Server tests cover engine selection, invalid output, and missing engines.

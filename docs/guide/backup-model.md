@@ -6,7 +6,7 @@ A backup model is an alternate AI model your bot can use if its main AI app repo
 
 Open the bot’s settings and find **Backup model**. Choose a model from a different AI app, then choose **When usage runs out**:
 
-- **Switch to backup model:** retry the interrupted request on the backup after the failed attempt has ended. If that backup is unavailable or has also run out, save a retry for later.
+- **Switch to backup model:** retry the interrupted request once on the other configured model after the failed attempt ends. If neither model can continue, save a retry for later.
 - **Wait and continue:** keep the request and schedule a new attempt.
 - **Stop and tell me:** leave the conversation paused so you can decide what to do.
 
@@ -28,6 +28,6 @@ Automatic retries appear in **Schedules** and obey **Pause all schedules** and t
 
 Switching happens after a failed attempt ends. The original user message is kept once, and the retry uses the saved conversation. Studio asks the backup to inspect existing results before repeating actions, but you should review work with outside effects after an interruption.
 
-The **Using backup** badge shows that a backup is selected for new work while the main AI app remains unavailable or its usage is unknown. A fresh reading alone does not switch a running conversation. The next new turn can use the main model once usage is reported as available. **Keep this model** makes the backup the main choice. **Switch back now** returns to the main model for the next message, even if its usage has not refreshed yet. Neither one interrupts a running task.
+The **Using backup** badge shows which model is active while the main AI app remains exhausted or its usage is unknown. When a new request begins, Studio can return to the main model if it has a fresh usage reading. If a request on the backup hits its usage limit, Studio checks whether the main model can resume it. Both choices stay saved across switches and restarts. **Make this the main model** swaps the main and backup choices. **Switch back now** selects the saved main model for the next request, even if its usage has yet to refresh. Both actions are available when the Buddy is idle.
 
-If the main app’s usage cannot be checked, Studio does not guess that it refreshed. You can select it manually when you are ready. Read [Usage left](usage-and-limits.md) to understand unknown readings and refresh times.
+If the main app’s usage cannot be checked, Studio keeps using the backup for new requests. If the backup hits a limit, Studio can try the main model once when its usage is unknown. Read [Usage left](usage-and-limits.md) to understand unknown readings and refresh times.

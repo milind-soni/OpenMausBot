@@ -229,8 +229,8 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
           return () => listeners.delete(listener);
         },
       },
-      generateText: async (prompt: string) => {
-        const { text } = await complete([{ role: "user", content: prompt }], "grok-3-mini", { stream: false });
+      generateText: async (prompt: string, signal?: AbortSignal) => {
+        const { text } = await complete([{ role: "user", content: prompt }], "grok-3-mini", { stream: false, signal });
         return text;
       },
       dispose: async () => {

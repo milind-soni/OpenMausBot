@@ -38,7 +38,7 @@ import {
   type OnboardingEngineKind,
   type OnboardingInstanceRow,
 } from "@/lib/onboardingCopy";
-import { proposeTeam, purposes, type ProposedBuddy, type Purpose } from "@/lib/workspaceOnboarding";
+import { parseTeamProposal, proposeTeam, purposes, type ProposedBuddy, type Purpose } from "@/lib/workspaceOnboarding";
 import { api, useStore, type AppState } from "@/state/store";
 import "./Onboarding.css";
 
@@ -105,6 +105,7 @@ const purposeDetails: Record<
 const buddyColors = ["purple", "blue", "green", "orange", "mint", "teal", "coral", "cyan"] as const;
 
 type Engine = OnboardingInstanceRow & {
+  canGenerateText?: boolean;
   models?: { default: string; options: Array<{ id: string; label: string }> };
 };
 
@@ -292,6 +293,8 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
   const [checkError, setCheckError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState("");
   const [regenerating, setRegenerating] = useState(false);
   const [activeBuddy, setActiveBuddy] = useState<string | null>(null);
   const [reducedMotion, setReducedMotion] = useState(() => matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -361,21 +364,25 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
   const preferredModel = options.find((item) => item.recommended)?.selection ?? null;
   // A custom goal needs a working AI engine to turn it into a team, so the
   // Custom purpose is only offered once one is available.
-  const customAvailable = options.length > 0;
+  const customAvailable = (engines ?? []).some((engine) =>
+    engine.canGenerateText && engine.snapshot.state === "available" && engine.snapshot.authenticated !== false,
+  );
   const readyEngineCount = (engines ?? []).filter(
     (engine) => engine.snapshot.state === "available" && engine.snapshot.authenticated === true,
   ).length;
 
   const previous = () => {
     setError("");
+    setGenerationError("");
     setRegenerating(false);
     setActiveBuddy(null);
     update({ step: step - 1 });
   };
 
   const jumpToStep = (targetStep: number) => {
-    if (saving || targetStep >= step || targetStep < 1) return;
+    if (saving || generating || targetStep >= step || targetStep < 1) return;
     setError("");
+    setGenerationError("");
     setRegenerating(false);
     setActiveBuddy(null);
     update({ step: targetStep });
@@ -404,10 +411,44 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
 
   const proposalGoal = JSON.stringify([focus, focus.includes("Custom") ? custom.trim() : ""]);
 
-  function generate() {
-    update({ team: proposeTeam(focus, custom, preferredModel), edited: false, step: 4, proposalGoal });
+  function acceptProposal(proposal: ProposedBuddy[]) {
+    update({ team: proposal, edited: false, step: 4, proposalGoal });
     setActiveBuddy(null);
     setRegenerating(false);
+    setGenerationError("");
+    setError("");
+  }
+
+  function useBuiltInProposal() {
+    acceptProposal(proposeTeam(focus, custom, preferredModel));
+  }
+
+  async function generate() {
+    if (generating) return;
+    if (!focus.includes("Custom")) {
+      useBuiltInProposal();
+      return;
+    }
+    update({ step: 4 });
+    setGenerating(true);
+    setGenerationError("");
+    setError("");
+    setActiveBuddy(null);
+    setRegenerating(false);
+    try {
+      const response = await api("/api/onboarding/suggest-team", {
+        method: "POST",
+        body: JSON.stringify({ purposes: focus, customGoal: custom, instanceId: preferredModel?.instanceId ?? null }),
+        signal: AbortSignal.timeout(50_000),
+      });
+      acceptProposal(parseTeamProposal(response, preferredModel));
+    } catch (failure) {
+      setGenerationError(failure instanceof DOMException && failure.name === "TimeoutError"
+        ? "The AI engine took too long to suggest a team. Try again or use the built-in proposal."
+        : failure instanceof Error ? failure.message : "Studio couldn’t suggest a team. Try again.");
+    } finally {
+      setGenerating(false);
+    }
   }
 
   function patchBuddy(buddyId: string, patch: Partial<ProposedBuddy>) {
@@ -442,8 +483,8 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
   const profileValid = Boolean(name.trim()) && (!email.trim() || isValidOnboardingEmail(email));
 
   useEffect(() => {
-    if (engines && !customAvailable && focus.includes("Custom")) update({ focus: focus.filter((value) => value !== "Custom") });
-  }, [engines, customAvailable, focus]);
+    if (step === 3 && engines && !customAvailable && focus.includes("Custom")) update({ focus: focus.filter((value) => value !== "Custom") });
+  }, [step, engines, customAvailable, focus]);
 
   function changePurpose(purpose: Purpose) {
     if (purpose === "Custom" && !customAvailable) return;
@@ -462,6 +503,7 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
     !buddy.description.trim() ||
     duplicateNames.has(buddy.name.trim().toLowerCase());
 
+  const proposalNeedsAction = Boolean(generationError) || (focus.includes("Custom") && team.length === 0);
   const teamValid = team.length > 0 && team.every((buddy) => !isBuddyInvalid(buddy));
 
   function reviewTeam() {
@@ -543,7 +585,7 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
                 <li key={label} aria-current={current ? "step" : undefined} className="relative">
                   <button
                     type="button"
-                    disabled={!complete || saving}
+                    disabled={!complete || saving || generating}
                     onClick={() => jumpToStep(stepNumber)}
                     className={cn(
                       "flex w-full items-center gap-3.5 rounded-xl border border-transparent px-3 py-2.5 text-left transition-all focus-visible:outline-2 focus-visible:outline-accent",
@@ -816,7 +858,7 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
                         <span className="mt-1 block text-[13px] leading-relaxed text-ink-secondary">{copy}</span>
                         {unavailable && (
                           <span id="custom-purpose-unavailable" className="mt-2 block text-[12px] leading-relaxed text-ink-secondary">
-                            {engines ? "Connect an AI engine in the previous step to suggest a team for a custom goal." : "Checking your AI engines…"}
+                            {engines ? "Connect an AI engine that supports team suggestions to use a custom goal." : "Checking your AI engines…"}
                           </span>
                         )}
                       </button>
@@ -843,7 +885,31 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
             )}
 
             {/* STEP 4 — Your Team (Top-right Add/Regenerate + 2-column Buddy card grid matching wireframe) */}
-            {step === 4 && (
+            {step === 4 && generating && (
+              <p role="status" className="mt-7 flex items-center gap-2 text-[14px] text-ink-secondary">
+                <Loader2 size={17} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+                Asking your AI engine to suggest Buddies for your goal…
+              </p>
+            )}
+
+            {step === 4 && !generating && proposalNeedsAction && (
+              <div className="mt-7 space-y-3 rounded-2xl border border-warning/35 bg-warning/10 px-4 py-4">
+                <p role={generationError ? "alert" : undefined} className="text-[14px] text-ink">
+                  {generationError || "Your team proposal is ready to request."}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className={toolbarButton} onClick={() => void generate()}>
+                    <RefreshCw size={13} aria-hidden="true" />
+                    {generationError ? "Retry" : "Suggest my team"}
+                  </button>
+                  <button type="button" className={toolbarButton} onClick={useBuiltInProposal}>
+                    Use built-in proposal
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {step === 4 && !generating && !proposalNeedsAction && (
               <div className="mt-7 space-y-4">
                 {/* Compact toolbar directly above the Buddy grid */}
                 <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1138,7 +1204,7 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
         <footer className="shrink-0 border-t border-white/[0.07] bg-app/90 backdrop-blur-md">
           <div className="mx-auto flex w-full max-w-[780px] flex-wrap items-center justify-end gap-3 px-5 py-4 sm:px-9 md:px-12">
             {step > 0 && (
-              <button type="button" className={ghostButton} onClick={previous} disabled={saving}>
+              <button type="button" className={ghostButton} onClick={previous} disabled={saving || generating}>
                 Back
               </button>
             )}
@@ -1162,7 +1228,7 @@ export function Onboarding({ id, profile, onDone }: { id: string; profile: { nam
               </button>
             )}
             {step === 4 && (
-              <button type="button" className={primaryPill} disabled={!teamValid || saving} onClick={() => void approve()}>
+              <button type="button" className={primaryPill} disabled={!teamValid || saving || generating || proposalNeedsAction} onClick={() => void approve()}>
                 {saving && <Loader2 size={15} className="animate-spin" aria-hidden="true" />}
                 Approve and create workspace
               </button>

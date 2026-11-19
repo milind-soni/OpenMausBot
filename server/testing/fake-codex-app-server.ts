@@ -88,6 +88,9 @@ process.stdin.on("data", (chunk) => {
               if (window) window.resetsAt = now + window.windowDurationMins * 60;
             }
           }
+          if (mode === "usage-limit" && process.env.FAKE_CODEX_LIMIT_USAGE_READ === "1") {
+            capture.result.ordinaryUsageAllowed = false;
+          }
           out({ id: msg.id, result: capture.result });
         }
         break;

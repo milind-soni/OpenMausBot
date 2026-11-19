@@ -526,12 +526,12 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           return () => listeners.delete(listener);
         },
       },
-      generateText: (prompt: string) =>
+      generateText: (prompt: string, signal?: AbortSignal) =>
         new Promise((resolve, reject) => {
           execCli(
             config.cli,
-            ["-p", prompt, "--model", "claude-haiku-4-5", "--output-format", "text"],
-            { timeout: 60_000, env: { ...process.env, PATH: augmentedPath() } },
+            ["-p", prompt, "--model", "claude-haiku-4-5", "--output-format", "text", "--tools", "", "--strict-mcp-config", "--no-session-persistence"],
+            { timeout: 60_000, signal, env: { ...process.env, ...input.environment, PATH: augmentedPath() } },
             (err, stdout) => (err ? reject(err) : resolve(stdout.trim())),
           );
         }),

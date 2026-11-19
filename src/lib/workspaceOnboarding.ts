@@ -1,4 +1,6 @@
-export const purposes = ["Development", "Design", "Research", "Finance", "Custom"] as const;
+import { onboardingPurposes, parseSuggestedTeam } from "../../server/onboarding-proposal";
+
+export const purposes = onboardingPurposes;
 export type Purpose = typeof purposes[number];
 export type BuddyModel = { instanceId: string; model: string };
 export type ProposedBuddy = {
@@ -189,6 +191,12 @@ export function proposeTeam(focus: Purpose[], customGoal: string, modelSelection
     reason,
     modelSelection,
   }));
+}
+
+export function parseTeamProposal(response: unknown, modelSelection: BuddyModel | null): ProposedBuddy[] {
+  const team = parseSuggestedTeam((response as { team?: unknown } | null)?.team);
+  if (!team) throw new Error("Studio received an invalid team proposal. Retry or use the built-in proposal.");
+  return team.map((buddy) => ({ ...buddy, id: crypto.randomUUID(), modelSelection }));
 }
 
 export const tourKey = "gbs-alpha-tour";

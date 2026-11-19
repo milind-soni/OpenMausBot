@@ -1,9 +1,9 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 const serverEntry = fileURLToPath(new URL("./index.ts", import.meta.url));
@@ -11,18 +11,33 @@ const children: ChildProcess[] = [];
 const homes: string[] = [];
 let nextPort = 35000 + Math.floor(Math.random() * 8000);
 
-async function server(legacy = false) {
+async function server(legacy = false, generated?: string) {
   const home = mkdtempSync(join(tmpdir(), "gbs-onboard-"));
   homes.push(home);
   const data = join(home, "state");
   mkdirSync(data);
+  const instances: Record<string, unknown> = { ghost: { driver: "unavailable-for-test" } };
+  if (generated !== undefined) {
+    mkdirSync(join(home, ".claude"));
+    writeFileSync(join(home, ".claude", ".credentials.json"), "{}");
+    const fake = new URL("./testing/fake-claude-cli.ts", pathToFileURL(serverEntry));
+    for (const [id, output] of Object.entries({ first: generated, preferred: generated.replaceAll("Mira", "Nora") })) {
+      const cli = join(home, `${id}.mjs`);
+      writeFileSync(cli, `#!/usr/bin/env node
+process.env.FAKE_CLAUDE_TEXT = ${JSON.stringify(output)};
+await import(${JSON.stringify(fake.href)});
+`);
+      chmodSync(cli, 0o755);
+      instances[id] = { driver: "claudeAgent", config: { cli } };
+    }
+  }
   writeFileSync(join(data, "config.json"), JSON.stringify({
     profile: legacy ? { name: "Existing User" } : undefined,
-    instances: { ghost: { driver: "unavailable-for-test" } },
+    instances,
   }));
   const port = nextPort++;
   const child = spawn(process.execPath, [serverEntry], {
-    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home, GBS_DATA_DIR: data, GBS_PORT: String(port) },
+    env: { PATH: process.env.PATH, SystemRoot: process.env.SystemRoot, HOME: home, USERPROFILE: home, VITEST: "1", GBS_DATA_DIR: data, GBS_PORT: String(port) },
     stdio: ["ignore", "pipe", "pipe"],
   });
   children.push(child);
@@ -100,5 +115,56 @@ describe("alpha workspace approval", () => {
     expect((await request("/api/config")).body.alphaOnboarding).toBeNull();
     expect((await request(alphaRoute, "POST", { ...proposed, id: "alpha" })).status).toBe(409);
     expect((await request("/api/bots")).body.bots).toEqual(before);
+  });
+});
+
+const suggestionRoute = "/api/onboarding/suggest-team";
+const goal = { purposes: proposed.purposes, customGoal: proposed.customGoal };
+const suggestedTeam = ["Mira", "Kit", "Ivy"].map((name) => ({
+  name,
+  title: "Accessibility specialist",
+  reason: "Reviews the experience from a different perspective.",
+  description: [
+    "Role: You are the accessibility specialist.",
+    "Personality & Task: Own keyboard and screen reader reviews.",
+    "Rules:",
+    "- Check keyboard order on the main flow.",
+    "- Capture the expected and actual screen reader announcements.",
+    "- Verify contrast in both themes.",
+    "- Hand reproduction steps to the designer.",
+    "Deliver an issue list with evidence and next steps.",
+  ].join("\n"),
+}));
+
+describe("AI team suggestions", () => {
+  it.skipIf(process.platform === "win32")("uses a preferred ready engine or falls back to the first ready engine", async () => {
+    const { request } = await server(false, `\`\`\`json
+${JSON.stringify(suggestedTeam)}
+\`\`\``);
+    for (const [instanceId, name] of [["preferred", "Nora"], ["ghost", "Mira"], [null, "Mira"]] as const) {
+      expect(await request(suggestionRoute, "POST", { ...goal, instanceId })).toEqual({
+        status: 200,
+        body: { team: [{ ...suggestedTeam[0], name }, ...suggestedTeam.slice(1)] },
+      });
+    }
+    expect((await request("/api/bots")).body.bots.some((bot: { name: string }) => bot.name === "Nora")).toBe(false);
+  });
+
+  it.skipIf(process.platform === "win32").each([
+    ["invalid JSON", "This is not JSON"],
+    ["an overlong description", JSON.stringify([{ ...suggestedTeam[0], description: "X".repeat(2401) }, ...suggestedTeam.slice(1)])],
+    ["duplicate Buddy names", JSON.stringify([suggestedTeam[0], { ...suggestedTeam[1], name: "mira" }, suggestedTeam[2]])],
+  ])("rejects %s", async (_, output) => {
+    const { request } = await server(false, output);
+    expect(await request(suggestionRoute, "POST", goal)).toMatchObject({
+      status: 502, body: { error: expect.stringContaining("invalid team proposal") },
+    });
+  });
+
+  it("returns a clear error when no ready engine can generate text", async () => {
+    const { request } = await server();
+    expect(await request(suggestionRoute, "POST", goal)).toMatchObject({
+      status: 503, body: { error: expect.stringContaining("No ready AI engine") },
+    });
   });
 });

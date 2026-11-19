@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DATA_DIR } from "./config.ts";
 import { localInstant, nextScheduleRun, resumeDelay } from "./schedule-time.ts";
 import { ScheduleStore, Scheduler, canManageSchedule, validateSchedule } from "./schedules.ts";
-import { canUseBackup, turnSelection } from "./backup-model.ts";
+import { canUseBackup, resumeSelection, turnSelection } from "./backup-model.ts";
 import type { ScheduleInput } from "./schedule-types.ts";
 const instant = (text: string) => Date.parse(text);
 const input = (repeat: ScheduleInput["repeat"]): ScheduleInput => ({ target: { botId: "bot" }, prompt: "Review today's work", repeat, timezone: "UTC" });
@@ -143,6 +143,14 @@ describe("backup decisions", () => {
     expect(canUseBackup(primary, backup, true, "exhausted")).toBe(false);
     expect(canUseBackup(primary, undefined, true, "ok")).toBe(false);
     expect(canUseBackup(primary, primary, true, "ok")).toBe(false);
+  });
+  it("resumes on whichever configured model recovered, regardless of the last model used", () => {
+    const bot = { modelSelection: primary, backupModelSelection: backup, onUsageLimit: "backup" as const };
+    const available = () => true;
+    expect(resumeSelection(bot, (id) => id === backup.instanceId ? "ok" : "exhausted", available)).toBe(backup);
+    expect(resumeSelection({ ...bot, usingBackup: true }, (id) => id === primary.instanceId ? "ok" : "exhausted", available)).toBe(primary);
+    expect(resumeSelection(bot, () => "exhausted", available)).toBe(primary);
+    expect(resumeSelection(bot, () => "exhausted", (id) => id !== backup.instanceId)).toBe(primary);
   });
   it("switches back only at selection for a new turn with a fresh known primary reading", () => {
     const bot = { modelSelection: primary, backupModelSelection: backup, usingBackup: true };

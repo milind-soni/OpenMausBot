@@ -181,8 +181,8 @@ export function ModelPicker({
                       method: "PATCH",
                       body: JSON.stringify({
                         modelSelection: bot.backupModelSelection,
-                        backupModelSelection: null,
-                        onUsageLimit: "wait",
+                        backupModelSelection: bot.modelSelection,
+                        onUsageLimit: "backup",
                       }),
                     })
                       .then(({ bot: saved }) => {
@@ -190,10 +190,10 @@ export function ModelPicker({
                         setBackupOpen(false);
                         backupTriggerRef.current?.focus();
                       })
-                      .catch(() => setBackupError("Couldn’t keep this model. Wait for the Buddy to finish and try again."));
+                      .catch(() => setBackupError("Couldn’t make this the main model. Wait for the Buddy to finish and try again."));
                   }}
                 >
-                  Keep this model
+                  Make this the main model
                 </button>
                 <button
                   disabled={working}

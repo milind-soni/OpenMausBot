@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { proposeTeam } from "./workspaceOnboarding";
+import { parseTeamProposal, proposeTeam } from "./workspaceOnboarding";
 
 describe("proposeTeam", () => {
   it("writes detailed Role / Personality & Task / Rules instructions for every Buddy", () => {
@@ -27,5 +27,23 @@ describe("proposeTeam", () => {
     expect(team[0].description).toContain("Plan a product launch");
     expect(team.find((buddy) => buddy.title === "Workflow Specialist")?.description).toContain("Plan a product launch");
     expect(team.every((buddy) => buddy.modelSelection?.instanceId === "claude")).toBe(true);
+  });
+});
+
+describe("parseTeamProposal", () => {
+  const generated = proposeTeam(["Custom"], "Review accessible forms", null)
+    .map(({ name, title, reason, description }) => ({ name, title, reason, description }));
+
+  it("adds local IDs and the chosen model to validated suggestions", () => {
+    const model = { instanceId: "claude", model: "sonnet" };
+    const result = parseTeamProposal({ team: generated }, model);
+    expect(result).toEqual(generated.map((buddy) => ({ ...buddy, id: expect.any(String), modelSelection: model })));
+    expect(new Set(result.map((buddy) => buddy.id)).size).toBe(result.length);
+  });
+
+  it("rejects malformed response data and unstructured instructions", () => {
+    for (const response of [null, { team: "invalid" }, { team: [{ ...generated[0], description: "Help." }, ...generated.slice(1)] }]) {
+      expect(() => parseTeamProposal(response, null)).toThrow("invalid team proposal");
+    }
   });
 });

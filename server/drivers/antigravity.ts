@@ -366,12 +366,12 @@ export const AntigravityDriver: ProviderDriver<AntigravityConfig> = {
           return () => listeners.delete(listener);
         },
       },
-      generateText: (prompt: string) =>
+      generateText: (prompt: string, signal?: AbortSignal) =>
         new Promise((resolve, reject) => {
           execCli(
             config.cli,
-            ["-p", prompt, "--output-format", "text", "--model", "gemini-3.6-flash-low"],
-            { timeout: 60_000, env: { ...process.env, PATH: augmentedPath() } },
+            ["-p", prompt, "--output-format", "text", "--model", "gemini-3.6-flash-low", "--mode", "plan", "--sandbox", "--disable-slash-commands"],
+            { timeout: 60_000, signal, env: { ...process.env, ...input.environment, PATH: augmentedPath() } },
             (err, stdout) => (err ? reject(err) : resolve(stdout.trim())),
           );
         }),

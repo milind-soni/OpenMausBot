@@ -7,12 +7,12 @@ import "./OnboardingWelcome.css";
 const sceneCards = [
   {
     id: "design",
-    avatar: "blue",
-    glow: "rgba(55, 127, 230, 0.28)",
+    avatar: "pink",
+    glow: "rgba(216, 79, 139, 0.28)",
     state: "playful",
     icon: LayoutTemplate,
-    dotClass: "bg-sky-400",
-    accentText: "text-sky-300",
+    dotClass: "bg-pink-400",
+    accentText: "text-pink-300",
     action: "Designing",
     task: "Refining flows & layouts",
     avatarSize: 64,
@@ -73,7 +73,7 @@ export function OnboardingWelcome({ heading, reducedMotion, onStart }: {
           className="gbs-float-item pointer-events-auto relative mb-6 hidden lg:absolute lg:top-[12%] lg:left-[10%] lg:mb-0 lg:block xl:top-[14%] xl:left-[14%]"
         >
           <div className="relative flex items-center justify-center">
-            <span className="gbs-welcome-buddy-halo" style={{ "--buddy-glow": "rgba(0, 201, 168, 0.26)" } as CSSProperties} />
+            <span className="gbs-welcome-buddy-halo" style={{ "--buddy-glow": "rgba(55, 127, 230, 0.26)" } as CSSProperties} />
             <MausAvatar
               size={68}
               color="blue"
