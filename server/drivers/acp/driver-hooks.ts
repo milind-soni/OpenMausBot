@@ -23,6 +23,9 @@ export interface AcpDriverHooks {
   /** Called before each session/prompt. The check it returns gets that prompt's result and names the failure the agent
    * reported as an ordinary reply, which then fails the turn. Neither may throw. */
   promptOutcome?(instanceId: string, sessionId: string): Promise<(result: unknown) => Promise<Error | undefined>>;
+  /** The failure a turn's thrown error stands for, in the person's words (a usage limit with its reset), or undefined to
+   * keep the error as it is. Must not throw. */
+  reportedFailure?(error: unknown): Error | undefined;
 }
 
 const MAX_LINE_CHARS = 64 * 1024;
