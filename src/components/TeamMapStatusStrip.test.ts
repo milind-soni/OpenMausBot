@@ -52,20 +52,24 @@ describe("team map status strip", () => {
     expect(html).toContain('role="meter"');
   });
 
-  it("names the window it shows, preferring the weekly one, and lists both on hover", () => {
+  it("shows a separate named bar for the 5-hour and the weekly window, and lists both on hover", () => {
     fixture.report = { fetchedAt: "now", providers: [{
       id: "claude", name: "Claude", driver: "claude", plan: null, ok: true, error: null,
       fiveHour: { available: true, remainingPercent: 84, usedPercent: 16, resetsAt: null },
       weekly: { available: true, remainingPercent: 83, usedPercent: 17, resetsAt: null }, extra: [],
     }] };
     const html = render([]);
-    expect(html).toContain("17%");
+    expect(html).toContain(">16%<");
+    expect(html).toContain(">5-hour<");
+    expect(html).toContain(">17%<");
     expect(html).toContain(">Weekly<");
+    expect(html.match(/role="meter"/g)).toHaveLength(2);
     expect(html).toContain('title="Claude · 5-hour: 16% used · Weekly: 17% used"');
+    expect(html).toContain('aria-label="Claude, 5-hour"');
     expect(html).toContain('aria-label="Claude, Weekly"');
   });
 
-  it("shows OpenCode Go's monthly allowance when it is further along than the week, and lists every window on hover", () => {
+  it("shows OpenCode Go's 5-hour, weekly and monthly windows as separate bars, and lists every window on hover", () => {
     fixture.report = { fetchedAt: "now", providers: [{
       id: "opencode", name: "OpenCode", driver: "opencode", plan: "Go", ok: true, error: null,
       fiveHour: { available: true, remainingPercent: 100, usedPercent: 0, resetsAt: null },
@@ -75,10 +79,11 @@ describe("team map status strip", () => {
     const html = render([]);
     expect(html).toContain(">13%<");
     expect(html).toContain(">Monthly<");
+    expect(html.match(/role="meter"/g)).toHaveLength(3);
     expect(html).toContain('title="OpenCode · 5-hour: 0% used · Weekly: 0% used · Monthly: 13% used"');
   });
 
-  it("keeps the weekly window when the monthly allowance is behind it, and never treats a spend budget as a window", () => {
+  it("shows the weekly and monthly windows but never treats a spend budget as a window", () => {
     fixture.report = { fetchedAt: "now", providers: [{
       id: "opencode", name: "OpenCode", driver: "opencode", plan: "Go", ok: true, error: null,
       fiveHour: { available: false, remainingPercent: null, usedPercent: null, resetsAt: null },
@@ -88,6 +93,7 @@ describe("team map status strip", () => {
     const html = render([]);
     expect(html).toContain(">40%<");
     expect(html).toContain(">Weekly<");
+    expect(html).toContain(">10%<");
     expect(html).not.toContain("95%");
   });
 

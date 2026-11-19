@@ -37,14 +37,6 @@ function usageWindows(provider: PlanProvider): UsageWindow[] {
   return windows;
 }
 
-/** The weekly window when the plan has one, else the 5-hour one, unless a monthly allowance is further along, so the strip shows the limit that bites first. */
-function primaryUsage(provider: PlanProvider): UsageWindow | null {
-  const windows = usageWindows(provider);
-  const base = windows.find((entry) => entry.kind === "weekly") ?? windows.find((entry) => entry.kind === "fiveHour") ?? null;
-  const monthly = windows.find((entry) => entry.kind === "monthly") ?? null;
-  return monthly && (!base || monthly.used > base.used) ? monthly : base;
-}
-
 function percent(value: number): number {
   return Math.round(Math.min(100, Math.max(0, value)));
 }
@@ -54,7 +46,7 @@ function usageTitle(provider: PlanProvider): string {
   return [providerLabel(provider), ...usageWindows(provider).map(({ used, window }) => `${window}: ${t("planUsage.used", { used: percent(used) })}`)].join(" · ");
 }
 
-/** The Live layer's top strip: session-state counts, a compact per-provider usage readout, a department filter and the Live toggle. */
+/** The Live layer's top strip: session-state counts, one bar per quota window for each provider, a department filter and the Live toggle. */
 export function TeamMapStatusStrip({
   sessions,
   doneLast24h,
@@ -75,8 +67,8 @@ export function TeamMapStatusStrip({
   const { report } = usePlanUsage();
   const counts = teamMapSessionCounts(sessions);
   const usageProviders = (report?.providers ?? []).flatMap((provider) => {
-    const usage = provider.ok ? primaryUsage(provider) : null;
-    return usage === null ? [] : [{ provider, used: percent(usage.used), window: usage.window }];
+    const windows = provider.ok ? usageWindows(provider) : [];
+    return windows.length === 0 ? [] : [{ provider, windows: windows.map((entry) => ({ ...entry, used: percent(entry.used) })) }];
   });
   const balanceProviders = (report?.providers ?? []).flatMap((provider) => provider.ok && provider.balance ? [{ provider, text: formatPlanBalance(provider.balance) }] : []);
   return (
@@ -91,14 +83,18 @@ export function TeamMapStatusStrip({
         {doneLast24h > 0 && <span className="text-[12px] text-ink-secondary">{t("canvas.strip.doneCount", { count: doneLast24h })}</span>}
         {usageProviders.length + balanceProviders.length > 0 && (
           <div className="flex min-w-0 flex-wrap items-center gap-3 border-l border-hairline/40 pl-3">
-            {usageProviders.map(({ provider, used, window }) => (
+            {usageProviders.map(({ provider, windows }) => (
               <span key={provider.id} title={usageTitle(provider)} className="flex items-center gap-1.5 text-[11px] text-ink-secondary">
                 <span className="max-w-[88px] truncate">{providerLabel(provider)}</span>
-                <span className="h-1.5 w-10 overflow-hidden rounded-full bg-inset" role="meter" aria-label={`${providerLabel(provider)}, ${window}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={used}>
-                  <span className={cn("block h-full rounded-full", usageTone(used))} style={{ width: `${used}%` }} />
-                </span>
-                <span className="tabular-nums">{used}%</span>
-                <span className="text-ink-secondary/70">{window}</span>
+                {windows.map(({ kind, used, window }) => (
+                  <span key={kind} className="flex items-center gap-1.5">
+                    <span className="h-1.5 w-10 overflow-hidden rounded-full bg-inset" role="meter" aria-label={`${providerLabel(provider)}, ${window}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={used}>
+                      <span className={cn("block h-full rounded-full", usageTone(used))} style={{ width: `${used}%` }} />
+                    </span>
+                    <span className="tabular-nums">{used}%</span>
+                    <span className="text-ink-secondary/70">{window}</span>
+                  </span>
+                ))}
               </span>
             ))}
             {balanceProviders.map(({ provider, text }) => (
