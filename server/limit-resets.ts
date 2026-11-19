@@ -168,8 +168,9 @@ export class LimitResetClock {
     const engines = new Map([...this.usage].filter(([engine]) => this.reading(engine)));
     for (const engine of this.refusals.keys()) {
       const until = this.blockedUntil(engine);
-      const known = engines.get(engine);
+      const reading = engines.get(engine);
       if (until === null) continue;
+      const known = reading?.meter ? undefined : reading;
       const limit: EngineLimit = { ...(known ?? this.unnamed(engine)), blocked: true, usedPercent: 100, resetsAt: this.guessed.has(engine) ? known?.resetsAt ?? null : until };
       if (!known?.blocked) limit.held = true;
       engines.set(engine, limit);

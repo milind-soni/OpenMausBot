@@ -278,11 +278,15 @@ describe("an Antigravity account's usage", () => {
     expect(instance.resetAt("antigravity")).toBeNull();
   });
 
-  it("never ends a hold on the engine by Gemini's windows", () => {
+  it("never ends a hold on the engine by Gemini's windows, and shows the hold as the whole engine's", () => {
     const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
     instance.noteRefusal("antigravity", NOW + 5 * HOUR);
     instance.noteUsage(report(antigravity([10, NOW + 2 * HOUR], [20, NOW + 60 * HOUR])));
     expect(instance.blockedUntil("antigravity")).toBe(NOW + 5 * HOUR);
+    const held = instance.limit("antigravity")!;
+    expect(held).toMatchObject({ engine: "antigravity", name: "Antigravity", driver: "antigravity", blocked: true, held: true, resetsAt: NOW + 5 * HOUR });
+    expect(held.meter).toBeUndefined();
+    expect(held.windows).toBeUndefined();
   });
 
   it("has no row when Google gave nothing usable, or only allowances other than Gemini's", () => {
