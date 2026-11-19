@@ -174,9 +174,9 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     return engine.models.default === selection.model || engine.models.options.some((model) => model.id === selection.model);
   };
 
-  /** The AIs that may carry on while `from` is limited or signed out, best first: for one model's limit the same AI's own
-   * default model, then the backups the person chose. No other AI is picked for them: with none of those usable the bot
-   * waits for the reset or a sign-in. `approval`: the thread's level, when known. */
+  /** The AIs that may carry on while `from` is limited or signed out, best first: for one model's limit, when the person chose
+   * any backup, the same AI's own default model first, then the backups the person chose. A bot with no backup chosen gets
+   * none, and no other AI is picked for it: with none usable the bot waits for the reset or a sign-in. `approval`: the thread's level, when known. */
   function backups(botId: string, from: ModelSelection, scope: TakeoverScope = "engine", approval?: ApprovalMode): ModelSelection[] {
     const engines = deps.engines();
     const current = engines.find((engine) => engine.instanceId === from.instanceId);
@@ -187,8 +187,9 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
       if (out.some((known) => known.instanceId === selection.instanceId && known.model === selection.model)) return;
       if (usable(engines, current, selection, scope, approval)) out.push({ instanceId: selection.instanceId, model: selection.model });
     };
-    if (scope === "model" || scope === "credits") add({ instanceId: current.instanceId, model: current.models.default });
-    for (const selection of scope === "signed-out" ? deps.signedOutChosen?.(botId) ?? deps.chosen(botId) : deps.chosen(botId)) add(selection);
+    const chosen = deps.chosen(botId);
+    if ((scope === "model" || scope === "credits") && chosen.length) add({ instanceId: current.instanceId, model: current.models.default });
+    for (const selection of scope === "signed-out" ? deps.signedOutChosen?.(botId) ?? deps.chosen(botId) : chosen) add(selection);
     return out;
   }
 
