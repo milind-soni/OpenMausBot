@@ -1,22 +1,24 @@
-// Cline owns its saved provider/model configuration; no static OMB catalog switches providers.
+// Cline owns its saved provider/model configuration. Its free and ClinePass models run on Cline's own `cline` and
+// `cline-pass` providers, which a turn switches the session to.
 import { mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { resolveCli } from "../../procs.ts";
-import { createAcpDriver, type AcpConfig, type AcpSupport } from "./core.ts";
+import { createAcpDriver, type AcpSupport } from "./core.ts";
 import type { ModelCatalog } from "../../contracts.ts";
+import { engineFailure } from "../engine-errors.ts";
+import { AcpReportedFailure } from "./failure-words.ts";
+import { clineTierModels, clineTierProvider } from "./cline-models.ts";
 
-const MODELS: ModelCatalog = {
-  default: "cline-default",
-  options: [{ id: "cline-default", label: "Cline default (configured)" }],
-};
+const DEFAULT_OPTION = { id: "cline-default", label: "Cline default (configured)" };
+const MODELS: ModelCatalog = { default: DEFAULT_OPTION.id, options: [DEFAULT_OPTION] };
 
 type ClineSettings = { provider: string; model?: string; apiKey?: string; auth?: { accessToken?: string; apiKey?: string } };
 
-function savedProvider(env: Record<string, string | undefined>, config: AcpConfig): { settings: ClineSettings; fingerprint: string } | null {
+function savedProvider(env: Record<string, string | undefined>, cli: string): { settings: ClineSettings; fingerprint: string } | null {
   try {
-    const args = resolveCli(config.cli, [], env).args;
+    const args = resolveCli(cli, [], env).args;
     const flag = (name: string) => {
       const index = args.lastIndexOf(name);
       return index >= 0 ? args[index + 1] : args.find((arg) => arg.startsWith(`${name}=`))?.slice(name.length + 1);
@@ -49,9 +51,35 @@ function savedProvider(env: Record<string, string | undefined>, config: AcpConfi
 
 const OAUTH = new Set(["cline", "cline-pass", "openai-codex"]);
 
+function oauthSignedIn(settings: ClineSettings | undefined): boolean {
+  return Boolean(settings && OAUTH.has(settings.provider) &&
+    (settings.auth?.accessToken?.trim() || settings.apiKey?.trim() || settings.auth?.apiKey?.trim()));
+}
+
 const LOGIN_NOTE = "Cline is not configured. Run cline auth in a terminal, then try again.";
 
-const SUPPORT: AcpSupport = {
+/** Cline 3.0.74: "You have reached your weekly Clinepass limit. The limit resets in 8h 30m, please try again later." */
+const PLAN_LIMIT = /\breached your (?:session|daily|weekly|monthly|\d+-hour) [\w-]+ limit\b/i;
+const RESET_IN = /\bresets in ((?:\s*\d+\s*[dhm]\b)+)/i;
+const UNIT_MS: Record<string, number> = { d: 86_400_000, h: 3_600_000, m: 60_000 };
+
+export function clinePlanLimit(error: unknown, now = Date.now()): AcpReportedFailure | undefined {
+  const text = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  if (!PLAN_LIMIT.test(text)) return undefined;
+  let delayMs = 0;
+  for (const [, amount, unit] of RESET_IN.exec(text)?.[1]?.matchAll(/(\d+)\s*([dhm])/gi) ?? []) {
+    delayMs += Number(amount) * UNIT_MS[unit!.toLowerCase()]!;
+  }
+  // holds the whole engine, free models too; hold only the ClinePass models via limitFacts if that bites.
+  // Cline rounds the wait down to the minute.
+  const resetsAt = delayMs > 0 ? now + delayMs + 60_000 : undefined;
+  const failure = engineFailure("Cline", "", { kind: "usage_limit", status: null, resetsAt })!;
+  return new AcpReportedFailure({ ...failure, ...(resetsAt === undefined ? {} : { limitResetsAt: resetsAt }) }, true);
+}
+
+type ConfigOption = { id?: string; currentValue?: unknown };
+
+export const CLINE_SUPPORT: AcpSupport = {
   driverKind: "clineAgent",
   displayName: "Cline",
   models: MODELS,
@@ -70,42 +98,61 @@ const SUPPORT: AcpSupport = {
   restartOnMcpChange: true,
   credentialEnv: ["CLINE_API_KEY"],
   transformEnv(env, config) {
-    const saved = savedProvider(env, config)?.settings;
+    const saved = savedProvider(env, config.cli)?.settings;
+    // Not CLINE_PROVIDER: Cline 3.0.74 refuses session/set_config_option `provider` while it is set.
     if (!saved) return;
-    env.CLINE_PROVIDER ||= saved.provider;
-    env.CLINE_MODEL ||= saved.model;
     // ACP restores OAuth accounts itself but needs CLINE_API_KEY for BYOK; never another account's key.
     if (!OAUTH.has(saved.provider)) env.CLINE_API_KEY ||= saved.apiKey || saved.auth?.apiKey;
   },
-  spawnFingerprint: (env, config) => savedProvider(env, config)?.fingerprint ?? "unconfigured",
-  pickAuthMethod: (methods, env) => !env.CLINE_API_KEY && OAUTH.has(env.CLINE_PROVIDER ?? "")
-    && methods.some((method) => method.id === env.CLINE_PROVIDER) ? env.CLINE_PROVIDER! : null,
+  spawnFingerprint: (env, config) => savedProvider(env, config.cli)?.fingerprint ?? "unconfigured",
+  pickAuthMethod: (methods, env) => {
+    const provider = env.CLINE_PROVIDER || savedProvider(env, "cline")?.settings.provider || "";
+    return !env.CLINE_API_KEY && OAUTH.has(provider) && methods.some((method) => method.id === provider) ? provider : null;
+  },
   authFailure: "fail-request",
   // Missing credentials are rejected by session/new; never launch an interactive sign-in during a turn.
   isAuthenticated: (env, config) => {
     if (env.CLINE_API_KEY?.trim()) return true;
-    const saved = savedProvider(env, config)?.settings;
-    return Boolean(saved && OAUTH.has(saved.provider) &&
-      (saved.auth?.accessToken?.trim() || saved.apiKey?.trim() || saved.auth?.apiKey?.trim()));
+    return oauthSignedIn(savedProvider(env, config.cli)?.settings);
   },
   requireAuthenticationBeforeSpawn: true,
+  resolveModels: async () => ({ default: DEFAULT_OPTION.id, options: [DEFAULT_OPTION, ...await clineTierModels()] }),
   resolveTurnModel(model, env) {
-    if (model && model !== "cline-default") {
-      throw new Error("Select Cline default (configured). Change Cline's provider or model with cline auth in a terminal.");
+    if (clineTierProvider(model)) return model;
+    if (model && model !== DEFAULT_OPTION.id) {
+      throw new Error("Pick a Cline model from the list, or Cline default (configured).");
     }
     return env.CLINE_MODEL?.trim();
   },
-  async configureSession({ request, sessionId, env, currentModelId }) {
+  async configureSession({ request, sessionId, env, config, turn, currentModelId, configOptions }) {
+    const options = configOptions as ConfigOption[];
+    const option = (id: string) => options.find((entry) => entry.id === id);
+    const setOption = async (configId: string, value: string) => {
+      const current = option(configId);
+      if (current && current.currentValue !== value) await request("session/set_config_option", { sessionId, configId, value });
+    };
+    const tier = clineTierProvider(turn.model);
+    if (tier) {
+      // The agent lists only its provider's models, but runs a model it did not list.
+      await setOption("provider", tier);
+      if (option("model")) await setOption("model", turn.model!);
+      else if (turn.model !== currentModelId) await request("session/set_model", { sessionId, modelId: turn.model });
+      return;
+    }
+    const saved = savedProvider(env, config.cli)?.settings;
+    const provider = env.CLINE_PROVIDER || saved?.provider;
+    if (provider) await setOption("provider", provider);
     // session/new falls back when a saved custom model is missing from Cline's built-in catalog.
-    const model = env.CLINE_MODEL?.trim();
-    if (model && model !== currentModelId) {
+    const model = env.CLINE_MODEL?.trim() || saved?.model?.trim();
+    if (model && model !== (option("model")?.currentValue ?? currentModelId)) {
       await request("session/set_model", { sessionId, modelId: model });
     }
   },
+  reportedFailure: (error) => clinePlanLimit(error),
 };
 
 export const ClineAgentDriver = {
-  ...createAcpDriver(SUPPORT),
+  ...createAcpDriver(CLINE_SUPPORT),
   async create(input: Parameters<ReturnType<typeof createAcpDriver>["create"]>[0]) {
     // Cline 3.0.70 records ACP mcpServers without connecting them; its native settings override connects
     // the scoped stdio servers instead, without rewriting the user's MCP file.
@@ -115,7 +162,7 @@ export const ClineAgentDriver = {
     };
     try {
       const driver = createAcpDriver({
-        ...SUPPORT,
+        ...CLINE_SUPPORT,
         applyTurnEnv(env, { threadId, mcpServers }) {
           const path = join(directory, `${createHash("sha256").update(threadId).digest("hex")}.json`);
           const mcp = Object.fromEntries(mcpServers.flatMap((server) => "command" in server ? [server] : []).map(({ name, command, args, env: serverEnv }) => [name, {
