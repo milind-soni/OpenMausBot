@@ -62,6 +62,17 @@ describe("turn image admission", () => {
     expect(result.text).toContain(root);
   });
 
+  it("emits the admitted path while preserving the encoded display name", () => {
+    const root = store("&uploads");
+    const path = image(root, 0);
+    const encoded = path.replaceAll("&", "&amp;");
+    const raw = `${root}/missing/../${IDS[0]}.png`.replaceAll("&", "&amp;");
+    const result = extractTurnImages(`<attached-image path="${raw}" name="mug &amp; &quot;cup&quot;.png" />`, { attachmentsDir: root });
+
+    expect(result.text).toBe(`<attached-file path="${encoded}" name="mug &amp; &quot;cup&quot;.png" />`);
+    expect(result.images).toEqual([{ path, mime: "image/png", bytes: 4 }]);
+  });
+
   it("leaves inline, fenced, missing, outside-store, and non-generated tags as text", () => {
     const root = store();
     const outside = store("-outside");

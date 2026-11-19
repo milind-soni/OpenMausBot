@@ -6,6 +6,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { ATTACHMENTS_DIR, FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
 import type { TurnImageInput, TurnVideoInput } from "./contracts.ts";
 import { decodeAttachmentAttribute } from "./message-file.ts";
+import { escapeAttribute } from "../src/lib/composer-attachments.ts";
 import { videoFrameImages } from "./turn-video.ts";
 
 export const TURN_IMAGE_MAX_COUNT = 10;
@@ -166,9 +167,12 @@ export function extractTurnImages(
     .slice(0, maxVideoCount);
 
   let providerText = text;
-  const imageTags = admittedImages.map((item) => item.tag).sort((a, b) => b.start - a.start);
-  for (const tag of imageTags) {
-    const fileTag = text.slice(tag.start, tag.end).replace("<attached-image", "<attached-file");
+  const imageTags = [...admittedImages].sort((a, b) => b.tag.start - a.tag.start);
+  for (const { tag, image } of imageTags) {
+    const fileTag = text.slice(tag.start, tag.end).replace(
+      /^<attached-image[\t ]+path="[^"\r\n]*"/,
+      () => `<attached-file path="${escapeAttribute(image.path)}"`,
+    );
     const reference = options.imageNote ? `${options.imageNote}\n\n${fileTag}` : fileTag;
     providerText = providerText.slice(0, tag.start) + reference + providerText.slice(tag.end);
   }

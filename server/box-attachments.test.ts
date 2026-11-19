@@ -37,13 +37,14 @@ describe("attachmentsForBox", () => {
     expect(run(text)).toBe(out);
   });
 
-  it.each([false, true])("keeps an image usable by a file CLI and by vision (boxed=%s)", async (boxed) => {
+  it.each([[false, false], [false, true], [true, false], [true, true]])("keeps an image usable by a file CLI and by vision (boxed=%s, nonCanonical=%s)", async (boxed, nonCanonical) => {
     const name = "123e4567-e89b-42d3-a456-426614174000.png";
     const upload = join(uploads, name);
     const bytes = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aL1sAAAAASUVORK5CYII=", "base64");
     writeFileSync(upload, bytes);
     writeFileSync(join(uploads, "other-conversation.png"), "private");
-    const extracted = extractTurnImages(`Upload this photo\n\n<attached-image path="${upload}" name="mug.png" />`, { attachmentsDir: uploads });
+    const inputPath = nonCanonical ? `${uploads}/missing/../${name}` : upload;
+    const extracted = extractTurnImages(`Upload this photo\n\n<attached-image path="${inputPath}" name="mug.png" />`, { attachmentsDir: uploads });
     const text = run(extracted.text, cwd, boxed);
     const file = /<attached-file path="([^"]+)" name="mug.png" \/>/.exec(text)?.[1];
 

@@ -50,7 +50,8 @@ remaining `<attached-image>` tag. Read the referenced file and compare its bytes
 with the uploaded PNG.
 
 The regression test also passes the extracted prompt through `attachmentsForBox`
-with confinement on and off and reads the resulting path in a real child process.
+with confinement on and off and reads the resulting path in a real child process, including an
+admitted path spelled with a nonexistent `missing/../` segment.
 It checks that Codex still receives the same inline image bytes and that unrelated
 uploads are not copied into the conversation's uploads directory. This is not a
 kernel sandbox test; the Linux bubblewrap test supplies that coverage when the
@@ -58,7 +59,7 @@ host supports it.
 
 Last exercised on Linux with Node 24.22.3 against an isolated fake-engine server:
 the turn settled with both native image content and a readable file reference.
-The focused suite passed 71 tests, and both selected server image workflow tests
+The focused suite passed 74 tests, and both selected server image workflow tests
 passed. The bubblewrap test was skipped because this container cannot run its sandbox. No real model or marketplace upload was used.
 
 ## Gotchas
