@@ -25,7 +25,11 @@ For "check CI in 5 minutes", "check the payroll export reached the bank at 4 pm"
 or "chase the client Friday if they haven't replied", a bot uses `check_back`
 instead of a routine. It takes `when` ("in 2 hours", "Friday 9am",
 "tomorrow 16:00" in the person's zone, or an exact time with its offset),
-`note` (what to check) and an optional `if`. At that time the same bot takes an
+`note` (what to check) and an optional `if`. A day and a time are read in the
+person's zone: the computer's on a desktop, the one the person's app gave on a
+Cloud. A Team Cloud has one zone for everyone (the one its owner's app gave),
+so a member elsewhere is best served by a span or a time with its offset; the
+bot's answer names the zone and the exact time it set. At that time the same bot takes an
 ordinary turn in the same conversation with the note, checks, and carries on.
 It counts as a normal turn for usage. Nobody is asked to approve anything:
 the conversation shows one quiet line ("Will check back Fri 9:00 · Cancel"),
@@ -42,6 +46,8 @@ which becomes "Checked back Fri 9:00" once it runs. Cancel is optional.
   computer slept or the app was closed runs once, late, when it is back, and
   its turn says it is late. A Cloud wakes for the next one. One that was being
   started when the server stopped is closed with a line, never started twice.
+  A paused bot is waited out; any other refused start is tried again each
+  minute for an hour, then its line says it couldn't check back.
 - **Gone with what it belongs to:** a check-back whose conversation or bot is
   deleted is dropped. On a Team Cloud it belongs to the conversation's audience:
   one set in a member's private chat runs for that member's request (the asker

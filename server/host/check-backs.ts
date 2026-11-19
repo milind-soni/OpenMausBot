@@ -57,6 +57,8 @@ export interface CheckBackDeps {
   line(record: CheckBackRecord, line: CheckBackLine, messageId: string | undefined): string | undefined;
   /** Asks for the turn; rejects when the server refused to start it. */
   start(record: CheckBackRecord, prompt: string): Promise<void>;
+  /** The refusal is the bot being paused or held: it waits for the bot, however long, without using up its tries. */
+  paused?(error: unknown): boolean;
   log?(text: string): void;
 }
 
@@ -126,8 +128,14 @@ export function createCheckBacks(deps: CheckBackDeps) {
     drawLine(record, line);
   }
 
-  /** Pending ones whose bot and chat are still here. */
-  const live = () => records.filter((record) => deps.alive(record.botId, record.threadId));
+  /** Pending ones whose bot and chat are still here; the others are dropped, so nothing of a gone chat stays on disk. */
+  function live(): CheckBackRecord[] {
+    const here = records.filter((record) => deps.alive(record.botId, record.threadId));
+    if (here.length !== records.length) {
+      try { commit(() => { records = records.filter((record) => here.includes(record)); }); } catch (error) { log(`check-back: could not drop gone ones: ${String(error)}`); }
+    }
+    return here;
+  }
 
   function refusal(input: NewCheckBack, at: number): string | null {
     const ahead = input.dueAt - at;
@@ -146,7 +154,7 @@ export function createCheckBacks(deps: CheckBackDeps) {
     try {
       await deps.start(record, checkBackPrompt(record, at));
     } catch (error) {
-      const tries = (record.tries ?? 0) + 1;
+      const tries = (record.tries ?? 0) + (deps.paused?.(error) ? 0 : 1);
       const why = error instanceof Error ? error.message : String(error);
       if (tries >= START_TRIES || !deps.alive(record.botId, record.threadId)) {
         close(record, lineOf(record, "failed", { why: why.split("\n", 1)[0]!.slice(0, 200) }));
@@ -163,8 +171,7 @@ export function createCheckBacks(deps: CheckBackDeps) {
     if (running) return;
     running = true;
     try {
-      const gone = records.filter((record) => !deps.alive(record.botId, record.threadId));
-      if (gone.length) commit(() => { records = records.filter((record) => !gone.includes(record)); });
+      live();
       const at = now();
       for (const record of records.slice()) {
         if (record.startingAt !== undefined || at < record.dueAt || at < (waitUntil.get(record.id) ?? 0)) continue;

@@ -191,6 +191,22 @@ describe("check-backs", () => {
     expect(manager.nextDueAt()).toBeNull();
   });
 
+  it("waits out a paused bot without using up its tries", async () => {
+    const { h, manager } = harness({ paused: (error) => (error as { code?: string }).code === "bot_paused" });
+    manager.create(asked());
+    h.clock += 5 * MIN;
+    const paused = Object.assign(new Error("Scout is paused."), { code: "bot_paused" });
+    const start = async () => { throw paused; };
+    const held = harness({ paused: (error) => (error as { code?: string }).code === "bot_paused", start }, h.dir);
+    held.h.clock = h.clock;
+    for (let i = 0; i < START_TRIES + 5; i++) {
+      held.h.clock += START_RETRY_MS;
+      await held.manager.tick();
+    }
+    expect(held.manager.nextDueAt()).not.toBeNull();
+    expect([...held.h.lines.values()].some((line) => line.status === "failed")).toBe(false);
+  });
+
   it("names the soonest one to wake a sleeping Cloud", () => {
     const { manager } = harness();
     expect(manager.nextDueAt()).toBeNull();

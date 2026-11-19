@@ -2,7 +2,7 @@
 // turn runs in that same private chat for Ben's request, with nobody pressing anything. Cleo, the owner, can't read the
 // chat or its line.
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
@@ -80,10 +80,22 @@ it("runs Ben's private check-back in his chat, for his request, with no human ac
   const cleoSees = await lines(cleo);
   expect(cleoSees.status === 200 ? cleoSees.rows : []).toEqual([]);
 
+  await until(async () => !((await team.as(ben, "GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; busy?: boolean }>).find((bot) => bot.id === scout.id)?.busy, 30_000);
+  rmSync(file("release"), { force: true });
+  writeFileSync(file("hang-mode"), "");
+
   await until(() => prompt().includes("What to check: see the payroll export reached the bank"), 100_000);
   await until(async () => (await lines(ben)).rows.some((row) => row.checkBack!.status === "started"), 30_000);
-  expect(existsSync(join(team.home, ".openmausbot", "check-backs.json"))).toBe(true);
-  expect(JSON.parse(readFileSync(join(team.home, ".openmausbot", "check-backs.json"), "utf8")).checkBacks).toEqual([]);
+  const woken = dump()?.mcpConfig?.mcpServers?.agents?.env?.OMB_COMMS_TOKEN as string;
+  const next = await fetch(`${team.base}/api/internal/check-backs`, { method: "POST", headers: { authorization: `Bearer ${woken}`, "content-type": "application/json" },
+    body: JSON.stringify({ when: "in 3 hours", note: "look once more" }) });
+  expect(next.status, `the woken turn runs as Ben's request: ${await next.clone().text()}`).toBe(201);
+  expect(JSON.parse(readFileSync(join(team.home, ".openmausbot", "check-backs.json"), "utf8")).checkBacks)
+    .toMatchObject([{ threadId: benThread, note: "look once more", origin: { kind: "user", person: BEN_KEY } }]);
+  const rows = (await team.as(ben, "GET", `/api/threads/${benThread}/messages?limit=200`)).body.messages as Row[];
+  expect(rows.filter((row) => row.role === "user" && String(row.text ?? "").includes("[Check back:"))).toEqual([]);
+  rmSync(file("hang-mode"), { force: true });
+  writeFileSync(file("release"), "");
   const later = await lines(cleo);
   expect(later.status === 200 ? later.rows : []).toEqual([]);
   const cleoTasks = ((await team.as(cleo, "GET", "/api/bots")).body.bots as Array<{ id: string; tasks?: Array<{ threadId: string }> }>)

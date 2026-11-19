@@ -67,6 +67,7 @@ it("wakes the same bot in the same conversation at its time with no human action
     expect(await lines()).toMatchObject([{ status: "started" }, { status: "cancelled" }]);
     const rows = await transcript();
     expect(rows.filter((m) => m.card && !m.card.answered && !m.card.dismissed)).toEqual([]);
+    expect(rows.filter((m) => m.role === "user" && String(m.text ?? "").includes("[Check back:"))).toEqual([]);
 
     const again = await api("POST", "/api/internal/check-backs", { when: "in 5 minutes", note: "look at CI once more" }, 201, woken);
     expect(again.text).toContain("You will be woken here");
@@ -80,3 +81,27 @@ it("wakes the same bot in the same conversation at its time with no human action
     await removeTempDir(folder);
   }
 }, 180_000);
+
+it("sets a check-back through the real tool call on a bot at Ask, with no card and no question", async () => {
+  const fixture = await launchVerificationServer({
+    FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([{ server: "agents", name: "check_back", input: { when: "in 2 hours", note: "see if the client replied" } }]),
+  });
+  const api = async (method: string, path: string, body?: unknown) => {
+    const response = await fetch(fixture.info.url + path, { method, headers: { "content-type": "application/json", origin: fixture.info.url }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return { status: response.status, body: await response.json() as any };
+  };
+  try {
+    const made = await api("POST", "/api/bots", { name: "Scout" });
+    expect(made.status).toBe(201);
+    const bot = made.body.bot;
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask" })).status).toBe(200);
+    await runControlOmb(["send", "--bot", bot.id, "--task", bot.threadId, "--text", "Chase the client in two hours if they haven't replied", "--url", fixture.info.url]);
+    await runControlOmb(["wait", "--bot", bot.id, "--timeout", "60", "--url", fixture.info.url]);
+    const rows = (await api("GET", `/api/threads/${bot.threadId}/messages?limit=100`)).body.messages as any[];
+    expect(rows.filter((m) => m.checkBack).map((m) => m.checkBack)).toMatchObject([{ status: "pending", note: "see if the client replied" }]);
+    expect(rows.filter((m) => m.kind === "options" || m.card)).toEqual([]);
+    expect(rows.filter((m) => m.role === "user" && String(m.text ?? "").includes("[Check back:"))).toEqual([]);
+  } finally {
+    await fixture.close();
+  }
+}, 120_000);
