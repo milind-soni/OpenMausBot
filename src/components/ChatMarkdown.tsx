@@ -159,8 +159,8 @@ const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\
 const ADDRESS = /(?:[a-z][a-z0-9+.-]*:\/\/|www\.)\S+/giu;
 
 /** The script with more letters decides; the first letter only breaks a tie. An Arabic answer often opens on a name
- * ("Chrome 158 \u0647\u0648 \u0627\u0644\u0625\u0635\u062F\u0627\u0631 \u0627\u0644\u0623\u062D\u062F\u062B", "**Node.js** \u0628\u064A\u0626\u0629 \u062A\u0634\u063A\u064A\u0644"), and the first letter alone laid that whole paragraph or
- * list out left-to-right: the Arabic words, numbers and Latin names in it reordered, and its bullets went left (#6541). */
+ * ("Chrome 158" or "**Node.js**" then Arabic), and the first letter alone laid that whole paragraph or list out
+ * left-to-right: the Arabic words, numbers and Latin names in it reordered, and its bullets went left. */
 export function textDirection(value: string): "rtl" | "ltr" {
   let rtl = 0, ltr = 0, first: "rtl" | "ltr" | null = null;
   for (const [letter] of value.replace(ADDRESS, " ").matchAll(/\p{Letter}/gu)) {
