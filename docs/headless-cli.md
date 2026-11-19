@@ -325,7 +325,9 @@ events; `--job ID` follows every conversation of that job as it grows, and
 connection it resumes from where it was; the server's first line says whether
 it could (`"resumed": false` means read the state again). A refusal (an
 expired token, a missing scope) ends it with exit 5 instead. The output is
-always JSON lines; `--jsonl` is accepted and changes nothing.
+always JSON lines; `--jsonl` is accepted and changes nothing. A tool step's
+output longer than 1,000 characters arrives as its first 1,000 with
+`"clipped": true` on the tool, as conversation pages carry it.
 
 ## engine
 

@@ -447,13 +447,14 @@ export class ProviderRegistry {
   }
 
   /** `reuse`: answer from a status read since the last forgetSnapshots(); one older than `ms` is read again in the background
-   * and `changed` runs when that read differs. */
-  describe(options: { known?: boolean; reuse?: { ms: number; changed(): void } } = {}) {
+   * and `changed` runs when that read differs. One older than `maxAgeMs` is not reused: its engine is read first. */
+  describe(options: { known?: boolean; reuse?: { ms: number; maxAgeMs?: number; changed(): void } } = {}) {
     return this.describeWith((instance) => {
       const seed = options.known && this.unread?.has(instance.instanceId) ? this.seeds.get(instance.instanceId) : undefined;
       if (seed) return Promise.resolve(seed);
       const last = options.reuse && this.readsOf.get(instance);
       if (!options.reuse || !last || last.generation !== this.snapshotGeneration) return this.read(instance);
+      if (options.reuse.maxAgeMs !== undefined && Date.now() - last.at >= options.reuse.maxAgeMs) return this.read(instance);
       if (Date.now() - last.at >= options.reuse.ms) {
         const { changed } = options.reuse;
         void this.read(instance).then((snapshot) => { if (JSON.stringify(snapshot) !== JSON.stringify(last.snapshot)) changed(); });
