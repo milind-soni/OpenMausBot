@@ -20,6 +20,10 @@ Application updates are paused during the alpha. To install a newer build, quit 
 4. Review and edit your suggested Buddies. Each one comes with detailed instructions covering its role, how it works, and the rules it follows. You can change their names, roles, instructions, and models, and add or remove Buddies before approving the workspace.
 5. Start the guided tour or go straight to your new workspace. To reopen it, select **Restart Studio tour** in **Settings → System**.
 
+![The guided tour highlighting the Task Board in the sidebar](docs/screenshots/alpha-tour.png)
+
+Studio remembers where you were. When you reopen it, it returns to the chat, room, or screen you last had open.
+
 | Personal details | AI engines |
 | --- | --- |
 | ![Personal details step with display name and optional email](docs/screenshots/alpha-personal-details.png) | ![AI engines step showing install, sign-in, and plan status for each engine](docs/screenshots/alpha-ai-engines.png) |
@@ -41,7 +45,7 @@ You can explore Studio without an engine. Assign a model and connect its engine 
 | Apps and permissions | Check the app catalog for supported integrations and setup steps. Review approval requests when a Buddy needs to act on your behalf. |
 | Settings | Edit your profile, review models and permissions, and restart the tour. |
 
-![Studio model picker showing AI engine and model options](docs/screenshots/model-picker.png)
+![A Studio room where a project lead, developer, designer, and reviewer coordinate a website launch](docs/screenshots/alpha-room.png)
 
 Read more in the [user guide](docs/guide/README.md).
 
