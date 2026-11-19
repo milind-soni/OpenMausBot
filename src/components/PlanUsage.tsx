@@ -5,7 +5,7 @@ import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { Card, SIMPLE_CARD, SettingsEmptyRow, SettingsGroup, SettingsLook, SettingsRows } from "./SettingsPrimitives";
 import { UsageSummaryCard } from "./CloudUsageMeter";
-import { formatPlanSpend, type PlanSpend } from "@/lib/plan-spend";
+import { formatPlanBalance, formatPlanSpend, type PlanBalance, type PlanSpend } from "@/lib/plan-spend";
 
 interface PlanWindow {
   available: boolean;
@@ -38,6 +38,8 @@ export interface PlanProvider {
   weekly: PlanWindow;
   extra: PlanExtra[];
   models?: PlanModelUsage[];
+  /** A prepaid API balance, for a provider with money left instead of quota windows. */
+  balance?: PlanBalance;
 }
 
 export interface PlanUsageReport {
@@ -277,7 +279,9 @@ export function PlanUsage() {
                 <span className="truncate text-[14px] font-medium text-ink">{providerLabel(provider)}</span>
                 {provider.plan && <span className="truncate text-[12px] text-ink-secondary">{provider.plan}</span>}
               </div>
-              {provider.ok ? (
+              {provider.ok && provider.balance ? (
+                <p className="text-[13px] tabular-nums text-ink">{formatPlanBalance(provider.balance)}</p>
+              ) : provider.ok ? (
                 <div className="flex flex-col gap-2">
                   <WindowRow label={t("planUsage.fiveHour")} window={provider.fiveHour} now={now} />
                   <WindowRow label={t("planUsage.weekly")} window={provider.weekly} now={now} />

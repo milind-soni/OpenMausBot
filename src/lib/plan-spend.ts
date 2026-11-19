@@ -16,6 +16,17 @@ function money(minor: number, currency: string, exponent: number): string {
   }
 }
 
+/** A prepaid balance in its own currency, such as DeepSeek's. */
+export interface PlanBalance {
+  amount: number;
+  currency: string;
+}
+
+/** "$51.30 left". */
+export function formatPlanBalance(balance: PlanBalance): string {
+  return t("planUsage.balanceLeft", { amount: money(Math.round(balance.amount * 100), balance.currency, 2) });
+}
+
 /** "$46.31 of $500.00 spent". */
 export function formatPlanSpend(spend: PlanSpend): string {
   return t("planUsage.spendAmounts", { used: money(spend.usedMinor, spend.currency, spend.exponent), limit: money(spend.limitMinor, spend.currency, spend.exponent) });
