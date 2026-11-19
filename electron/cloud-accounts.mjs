@@ -122,10 +122,13 @@ export function createCloudAccounts({ active, saved, client, makeClient, origin,
     const hold = holding();
     if (hold) return { outcome: hold };
     const next = list.find((record) => record.account.id !== id && record.expiresAt > now());
-    const current = await activeRecord();
+    const memory = client().memorySignIn?.() ?? null, current = memory ?? await active.read().catch(() => null);
     if (next) {
-      await become(next, { list: list.filter((record) => record.account.id !== id), keep: false });
-      if (usable(current, origin)) await client().revokeSaved(current).catch((error) => log(`accounts: signed out here only (${error?.message ?? error})`));
+      let switched = false;
+      // One kept in memory only ends at the Admin even when the switch fails: a failed switch reads the file again, and that
+      // sign-in would be gone from this device with its token still good.
+      try { await become(next, { list: list.filter((record) => record.account.id !== id), keep: false }); switched = true; }
+      finally { if ((switched || memory) && usable(current, origin)) await client().revokeSaved(current).catch((error) => log(`accounts: signed out here only (${error?.message ?? error})`)); }
     } else {
       await naming(id);
       await leaving(id);

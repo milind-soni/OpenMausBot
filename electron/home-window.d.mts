@@ -22,8 +22,8 @@ export interface HomeBridge {
   /** This computer's screen only. */
   state(): Promise<HomeView>;
   onState(callback: (view: HomeView) => void): () => void;
-  /** This computer's screen only: look again now. `pressed`: the person pressed Try again (only while the click's user
-   * activation lasts), which no wait for the next sign-in code holds except the Admin's own 429. */
+  /** This computer's screen only: look again now. `pressed`: the person pressed Try again, which no wait for the next
+   * sign-in code holds except the Admin's own 429. */
   retry(pressed?: boolean): Promise<HomeView>;
   /** This computer's screen only, once the person said yes there: the Cloud it shows leaves their list (absent: an older app). */
   remove?(): Promise<import("./cloud-account.mjs").CloudRemoveOutcome>;

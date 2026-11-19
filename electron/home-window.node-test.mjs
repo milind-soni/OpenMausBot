@@ -495,11 +495,9 @@ test("My Cloud's own page, once it is home, gets this app's chat links, diagnost
   assert.equal(local.bridge.home.updating, false);
   await local.bridge.home.retry(); await local.bridge.home.state(); await local.bridge.home.signIn();
   assert.deepEqual(local.invoked.map(([channel]) => channel), ["home:retry", "home:state", "home:sign-in"]);
-  // Try again counts as pressed only while the click's user activation lasts; the screen's own looks never do.
-  await local.bridge.home.retry(true);
-  const pressing = preload(LOCAL, { activation: true });
-  await pressing.bridge.home.retry(true); await pressing.bridge.home.retry();
-  assert.deepEqual([...local.invoked, ...pressing.invoked].filter(([channel]) => channel === "home:retry").map(([, pressed]) => pressed), [false, false, true, false]);
+  // Try again's press is said as such; the screen's own looks never are.
+  await local.bridge.home.retry(true); await local.bridge.home.retry("true");
+  assert.deepEqual(local.invoked.filter(([channel]) => channel === "home:retry").map(([, pressed]) => pressed), [false, true, false]);
 });
 
 test("only the verified Cloud, open as this window's active server, counts as the Cloud page", () => {
