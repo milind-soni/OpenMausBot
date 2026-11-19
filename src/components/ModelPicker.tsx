@@ -206,14 +206,14 @@ export function ModelPicker({
   className,
   contained = false,
   label,
-  size = "md",
+  size = "md", quiet = false,
 }: {
   bot: Bot;
   threadId?: string;
   className?: string;
   contained?: boolean;
   label?: ReactNode;
-  size?: "sm" | "md";
+  size?: "sm" | "md"; quiet?: boolean;
 }) {
   const { dispatch: storeDispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStoreActions(), state = useStoreSelector((s) => ({ instances: s.instances, modelVariantSessions: s.modelVariantSessions, profile: s.bots.find((candidate) => candidate.id === shown.id) }), sameFields);
   const [open, setOpen] = useState(false);
@@ -607,7 +607,7 @@ export function ModelPicker({
       {...triggerProps}
       className={cn(
         "group flex items-center gap-1.5 rounded-full py-1 pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed",
-        contained
+        contained || quiet
           ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
           : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
         !contained && active && !showActiveAccount && cn(COMPACT_SQUARE, USAGE_WARN_WIDENS),

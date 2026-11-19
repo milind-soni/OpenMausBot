@@ -122,22 +122,8 @@ function approvalItem(name: string, choice: ApprovalChoice, simple: boolean): Si
   };
 }
 
-/** The thread's approval level as a small pill that opens its choices: in the Simple composer while it is not the
- * default, and on the bot panel's Details. */
-export function TeachTaskButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={t("composer.teachTask")}
-      title={t("composer.teachTask")}
-      className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
-    >
-      <GraduationCap size={16} strokeWidth={1.75} absoluteStrokeWidth />
-    </button>
-  );
-}
-
+/** The thread's approval level as a small pill that opens its choices: in the composer while it is not the bot's own
+ * level, and on the bot panel's Details. */
 export function ApprovalChip({ choice, quiet = false }: { choice: ApprovalChoice; quiet?: boolean }) {
   const { current, note, items } = approvalMenu(choice, !useAdvancedMode());
   const CurrentIcon = current.Icon;
@@ -164,11 +150,11 @@ export function ApprovalChip({ choice, quiet = false }: { choice: ApprovalChoice
 }
 
 /**
- * The composer's round +: attach files, Work until done (Finish together in a group) and Teach a task. A phone's + also
- * holds what its narrow composer has no room for: the thread's approval level, the call mode and where the bot works,
- * each running the handler its Advanced button runs. With attaching the only choice, the + opens the file picker.
+ * The composer's round +: attach files, Work until done (Finish together in a group) and Teach a task. A phone's + and
+ * Advanced mode's also hold the thread's approval level, the call mode and where the bot works.
+ * With attaching the only choice, the + opens the file picker.
  */
-export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, extraItems = [], circle = false }: {
+export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, extraItems = [], circle = false, quiet = false }: {
   onAttach: () => void;
   /** Starts a /learn draft in the field, where the composer offers /learn. */
   teach?: () => void;
@@ -176,6 +162,8 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
   extraItems?: SidebarMenuItem[];
   /** The phone dock: a round button of its own beside the field, not a small chip inside it. */
   circle?: boolean;
+  /** Advanced mode's footer: a bare + that opens the full menu, submenus included. */
+  quiet?: boolean;
   goal?: { on: boolean; onToggle: () => void; solo?: boolean };
   approval?: { name: string; choice: ApprovalChoice };
   /** The bot whose call button the call mode starts, as that button's own mode menu did. */
@@ -222,7 +210,17 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
       };
     })),
   ];
-  const trigger = (open: boolean) => circle ? (
+  const trigger = (open: boolean) => quiet ? (
+    <span
+      data-composer-plus
+      className={cn(
+        "flex size-8 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-control hover:text-ink",
+        open && "bg-control text-ink",
+      )}
+    >
+      <Plus size={18} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" />
+    </span>
+  ) : circle ? (
     <span
       data-composer-plus
       className={cn(
@@ -245,7 +243,7 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
       </button>
     );
   }
-  if (!circle) return <ComposerMenu items={items} renderTrigger={trigger} />;
+  if (!circle && !quiet) return <ComposerMenu items={items} renderTrigger={trigger} />;
   return (
     <SidebarPopoverMenu
       items={items}
