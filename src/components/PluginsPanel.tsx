@@ -46,6 +46,7 @@ import { botAppScope } from "@/lib/bot-app-access";
 import { AppGrantPrompt, botsForApps, useAppGrants } from "./AppGrantPrompt";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ServiceIcon, type ToolkitCard } from "./ServiceIcon"; import { AppsSection } from "./AppsSection";
+import { appCatalogMemory, loadAppCatalog, onAppCatalog, type AppCatalog, type CatalogPagination, type ConnectorSetup } from "@/lib/app-catalog-cache";
 export { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
 export { preloadConnectedApps, type ConnectorInventory } from "@/lib/connected-apps";
@@ -78,7 +79,7 @@ export function hostedShown(app: HostedApp, search: string, filter: AppsFilter, 
   return matches && (filter === "all" || (filter === "connected" && connected?.[app.id] !== false));
 }
 
-export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
+export type { CatalogPagination, ConnectorSetup } from "@/lib/app-catalog-cache";
 
 export function connectorSetupNotice(state: {
   configured: boolean;
@@ -91,13 +92,6 @@ export function connectorSetupNotice(state: {
     return { key: state.remoteClient ? "connectors.setupNeededRemote" : "connectors.setupNeeded", tone: "info" };
   }
   return { key: "connectors.notConfigured", tone: "warning" };
-}
-
-export interface CatalogPagination {
-  items: number;
-  totalItems?: number;
-  stalled: boolean;
-  reason?: string;
 }
 
 export type AppsFilter = "all" | "connected" | "mcp";
@@ -115,12 +109,12 @@ export function PluginsPanel() {
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const dialogRef = useRef<HTMLDivElement>(null);
   const surface = state.pluginsSurface;
-  const [cards, setCards] = useState<ToolkitCard[] | null>(null);
-  const [source, setSource] = useState<"api" | "curated">("curated");
-  const [pagination, setPagination] = useState<CatalogPagination | null>(null);
-  const [configured, setConfigured] = useState(false);
-  const [mode, setMode] = useState<"managed" | "self-hosted" | "unavailable">("unavailable");
-  const [setup, setSetup] = useState<ConnectorSetup | undefined>(undefined);
+  const [cards, setCards] = useState<ToolkitCard[] | null>(() => appCatalogMemory()?.cards ?? null);
+  const [source, setSource] = useState<"api" | "curated">(() => appCatalogMemory()?.source ?? "curated");
+  const [pagination, setPagination] = useState<CatalogPagination | null>(() => appCatalogMemory()?.pagination ?? null);
+  const [configured, setConfigured] = useState(() => appCatalogMemory()?.configured ?? false);
+  const [mode, setMode] = useState<AppCatalog["mode"]>(() => appCatalogMemory()?.mode ?? "unavailable");
+  const [setup, setSetup] = useState<ConnectorSetup | undefined>(() => appCatalogMemory()?.setup);
   const [status, setStatus] = useState<Record<string, ConnectorStatus>>(
     () => connectorStatusMemory()?.services ?? readCachedInventory()?.services ?? {},
   );
@@ -242,23 +236,22 @@ export function PluginsPanel() {
   useEffect(() => {
     let alive = true;
     void loadConnectionInventory();
-    api("/api/connectors/catalog")
-      .then((r) => {
-        if (!alive) return;
-        setCards(r.cards ?? []);
-        setSource(r.source ?? "curated");
-        setPagination(r.pagination ?? null);
-        setConfigured(Boolean(r.configured));
-        setMode(r.mode ?? "unavailable");
-        setSetup(r.setup);
-      })
-      .catch((e) => {
-        if (!alive) return;
-        setCards((current) => current ?? []);
-        setError(lacksAdminScope(e) ? { key: "connectors.adminOnly" } : e.message);
-      });
+    const stop = onAppCatalog((r) => {
+      setCards(r.cards);
+      setSource(r.source);
+      setPagination(r.pagination);
+      setConfigured(r.configured);
+      setMode(r.mode);
+      setSetup(r.setup);
+    });
+    loadAppCatalog().catch((e) => {
+      if (!alive) return;
+      setCards((current) => current ?? []);
+      setError(lacksAdminScope(e) ? { key: "connectors.adminOnly" } : e.message);
+    });
     return () => {
       alive = false;
+      stop();
     };
   }, [loadConnectionInventory]);
 
