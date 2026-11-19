@@ -11154,6 +11154,30 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it.skipIf(process.platform === "win32")("replaces an unreachable VPS SSH alias without requiring the old host", async () => {
+    try {
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "" } })).status).toBe(200);
+      writeFileSync(fakeSshUnavailable, "");
+      rmSync(fakeSshLog, { force: true });
+
+      const saved = await api("PUT", "/api/config", { vps: { sshAlias: "rockpi4" } });
+      expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+      expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("rockpi4");
+
+      const replaced = await api("PUT", "/api/config", { vps: { sshAlias: "dietpi" } });
+      expect(replaced.status, JSON.stringify(replaced.body)).toBe(200);
+      expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("dietpi");
+
+      const cleared = await api("PUT", "/api/config", { vps: { sshAlias: "" } });
+      expect(cleared.status).toBe(503);
+      expect(cleared.body.error).toContain("Keep the current SSH config alias");
+      expect((await api("GET", "/api/config")).body.vps.sshAlias).toBe("dietpi");
+    } finally {
+      rmSync(fakeSshUnavailable, { force: true });
+      expect((await api("PUT", "/api/config", { vps: { sshAlias: "" } })).status).toBe(200);
+    }
+  });
+
   it("keeps an active turn alive when only the room timeout changes", async () => {
     const created = await api("POST", "/api/bots", {});
     const botId = created.body.bot.id;
