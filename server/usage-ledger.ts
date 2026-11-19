@@ -214,12 +214,14 @@ export function readUsage(dataDir: string, range: { from: Date; to: Date }): Usa
  * read should call `readUsage` so it never risks a stale answer.
  */
 export function readUsageCached(dataDir: string, range: { from: Date; to: Date }): UsageRow[] {
+  const now = Date.now();
+  for (const [key, entry] of monthCache) if (now - entry.at >= MONTH_CACHE_TTL_MS) monthCache.delete(key);
   const rows: UsageRow[] = [];
   for (const key of monthsBetween(range.from, range.to)) {
     const cacheKey = monthCacheKey(dataDir, key);
     const cached = monthCache.get(cacheKey);
-    const monthRows = cached && Date.now() - cached.at < MONTH_CACHE_TTL_MS ? cached.rows : readMonthFile(dataDir, key);
-    if (!cached || monthRows !== cached.rows) monthCache.set(cacheKey, { at: Date.now(), rows: monthRows });
+    const monthRows = cached?.rows ?? readMonthFile(dataDir, key);
+    if (!cached) monthCache.set(cacheKey, { at: now, rows: monthRows });
     rows.push(...monthRows);
   }
   return rowsInRange(rows, range.from.getTime(), range.to.getTime());
