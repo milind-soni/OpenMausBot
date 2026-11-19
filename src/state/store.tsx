@@ -43,6 +43,8 @@ export interface OptionCardData {
   requestId?: string;
   requestType?: "permission" | "question";
   autoApproved?: boolean;
+  /** Explicit consent must wait for a click; never idle auto-approve. */
+  approvalSource?: "studio";
   /** permission cards: the tool asking (what "Always allow" remembers) */
   tool?: string;
 }
@@ -877,7 +879,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           ? stateRef.current.groups.find((group) => group.threadId === action.threadId)
           : stateRef.current.bots.find((bot) => bot.id === action.botId);
         const card = owner?.messages.find((message) => message.id === action.messageId)?.card;
-        if (stateRef.current.config?.autoApprovePermissions === false || card?.requestType !== "permission" || !card.requestId || card.answered || card.dismissed) return;
+        if (stateRef.current.config?.autoApprovePermissions === false || card?.requestType !== "permission" || card.approvalSource === "studio" || !card.requestId || card.answered || card.dismissed) return;
         api(`/api/bots/${action.botId}/respond`, {
           method: "POST",
           body: JSON.stringify({ requestId: card.requestId, behavior: "allow", threadId: action.threadId, autoApproved: true }),

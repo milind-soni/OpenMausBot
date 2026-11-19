@@ -76,8 +76,9 @@ export type RuntimeEvent = RuntimeEventBase &
         tool: string;
         summary: string;
         choices?: string[];
+        approvalSource?: "studio";
       }
-    | { type: "request.resolved"; behavior: string; source: string }
+    | { type: "request.resolved"; behavior: string; source: string; answer?: string }
     | { type: "thread.token-usage.updated"; input: number; output: number }
     | { type: "runtime.error"; message: string; failure?: UsageLimitFailure }
     | { type: "usage.updated"; usage: UsagePatch }

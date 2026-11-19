@@ -61,6 +61,10 @@ beforeAll(async () => {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: "unauthorized" }));
     }
+    if (req.url === "/api/internal/approval") {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ approved: false, always: false }));
+    }
     if (req.url?.startsWith("/api/internal/preview-testing/")) {
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify({ sessionId: "test-session", image: "aW1hZ2U=", artifactPath: "/project/evidence.png" }));
@@ -155,9 +159,15 @@ describe("agents-proxy MCP surface", () => {
     expect(init.result.serverInfo.name).toContain("agents");
     const list = await rpc("tools/list");
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
-      "preview_status", "preview_open", "preview_snapshot", "preview_screenshot", "preview_diagnostics", "preview_close", "preview_action",
+      "request_approval", "preview_status", "preview_open", "preview_snapshot", "preview_screenshot", "preview_diagnostics", "preview_close", "preview_action",
       "list_schedules", "cancel_schedule", "create_schedule", "list_apps", "use_app", "list_bots", "ask_bot", "list_tasks", "create_task", "claim_task", "update_task", "delegate_task", "delete_task",
     ]);
+  });
+
+  it("returns consent denial as a tool result the Buddy must respect", async () => {
+    const result = await callTool("request_approval", { action: "affinity.copy_files", scope: "/Desktop/TEST", summary: "Copy test files" });
+    expect(result.result.isError).toBe(true);
+    expect(JSON.parse(result.result.content[0].text)).toEqual({ approved: false, always: false });
   });
 
   it("returns screenshot image content without putting base64 into its text result", async () => {

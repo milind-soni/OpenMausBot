@@ -43,6 +43,8 @@ export interface OptionCardData {
   requestId?: string;
   requestType?: "permission" | "question";
   autoApproved?: boolean;
+  /** Explicit consent must wait for a click; never idle auto-approve. */
+  approvalSource?: "studio";
   /** permission cards: the tool asking (what "Always allow" remembers) */
   tool?: string;
 }

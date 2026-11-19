@@ -153,6 +153,10 @@ that can actually mount them: Claude, Codex, and the ACP-based Grok/Gemini drive
 Antigravity (`agy`) driver doesn't get them yet — that CLI has no mechanism to register a per-turn MCP
 server, so there's nothing to wire in until it does.
 
+### Approve a Buddy's action
+
+When a Buddy needs your permission, it can open an **Approval needed** box with **Allow**, **Deny**, and **Always allow**. You do not need to type “proceed.” Explicit consent boxes wait for your choice and are excluded from idle auto-approval. **Always allow** remembers the same action and scope for that Buddy; remove it in the Buddy's settings to require approval again. Stopping the turn or dismissing the box denies the request.
+
 ### Connect Affinity
 
 Open the latest Affinity by Canva desktop app. In **Settings → Model Context Protocol**, enable Affinity MCP, then quit and reopen Affinity. In Studio, open **Apps → Affinity → Test connection**. No access token is required; keep Affinity open while Buddies use it. The default address is `http://[::1]:6767/sse`.

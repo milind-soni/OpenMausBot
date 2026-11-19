@@ -149,9 +149,13 @@ function handle(msg: any) {
       result(msg.id, { sessionId: "fake-acp-session" });
       break;
     }
-    case "session/load":
+    case "session/load": {
+      sessionCwd = String(msg.params?.cwd ?? "");
+      const servers: McpEntry[] = Array.isArray(msg.params?.mcpServers) ? msg.params.mcpServers : [];
+      agentsMcp = servers.find((s: any) => s?.name === "agents") ?? null;
       result(msg.id, {});
       break;
+    }
     case "session/prompt": {
       if (mode === "hang") {
         // never resolve the prompt — lets tests exercise interrupt
@@ -199,6 +203,12 @@ function handle(msg: any) {
           },
         });
         complete();
+        return;
+      }
+      if (mode === "request-approval" && agentsMcp) {
+        void driveMcp(agentsMcp, [{ name: "request_approval", args: () => ({ action: "affinity.copy_files", scope: "/Desktop/TEST · Carousel", summary: "Copy TEST portraits into /Desktop/TEST · Carousel for Affinity." }) }])
+          .then(reply => { out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `approval result: ${reply}` } } } }); complete(); })
+          .catch(error => { out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: `approval error: ${error.message}` } } } }); complete(); });
         return;
       }
       if (mode === "ask-peer" && agentsMcp && Number(agentsMcp.env?.find(e => e.name === "GBS_TURN_DEPTH")?.value ?? "0") < 1) {

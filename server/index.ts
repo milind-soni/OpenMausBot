@@ -13,7 +13,7 @@ import { usageLimitReset } from "./usage-classifiers.ts";
 // Gerer Build Studio server — the harness host. Clients hold no transports
 // (upstream rule): the React app dispatches typed commands over HTTP and
 // folds one SSE event stream; every provider process runs here.
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { homedir } from "node:os";
@@ -25,6 +25,7 @@ import { ensureDirs, instanceConfigs, loadConfig, saveConfig, isRemovedComputerD
 import type { ModelSelection, RuntimeEvent, SendTurnInput } from "./contracts.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
+import { ApprovalRequests, APPROVAL_BOX_RULES } from "./approval-requests.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { findApp } from "./apps/catalog.ts";
@@ -111,7 +112,13 @@ const agentsProxyPath = (() => {
 // in the packaged app process.execPath is Electron — run the proxy as node
 const AGENTS_NODE_FLAG = { ELECTRON_RUN_AS_NODE: "1" };
 
-function agentsIntegration(botId: string, depth: number) {
+const approvalTokens = new Map<string, { botId: string; token: string }>();
+function agentsIntegration(botId: string, depth: number, threadId: string) {
+  // ACP reuses its MCP process across turns. Keep a conversation capability,
+  // but accept requests only while this Buddy owns the active turn.
+  const key = `${threadId}:${botId}`;
+  const token = approvalTokens.get(key)?.token ?? randomBytes(32).toString("hex");
+  approvalTokens.set(key, { botId, token });
   if (!previewToolTokens.has(botId)) previewToolTokens.set(botId, randomBytes(32).toString("hex"));
   return {
     command: process.execPath,
@@ -120,6 +127,8 @@ function agentsIntegration(botId: string, depth: number) {
       ...AGENTS_NODE_FLAG,
       GBS_HARNESS_URL: `http://127.0.0.1:${PORT}`,
       GBS_BOT_ID: botId,
+      GBS_THREAD_ID: threadId,
+      GBS_APPROVAL_TOKEN: token,
       GBS_COMMS_TOKEN: COMMS_TOKEN,
       GBS_TURN_DEPTH: String(depth),
       GBS_PREVIEW_TOKEN: previewToolTokens.get(botId)!,
@@ -278,6 +287,27 @@ const requestKey = (threadId: string, requestId: string) => `${threadId}:${reque
 // records the active member here before dispatching its turn.
 const groupSpeakers = new Map<string, { botId: string; name: string; color: string }>();
 
+const approvals = new ApprovalRequests(
+  request => {
+    const selection = activeSelections.get(request.threadId);
+    const instance = selection && registry.get(selection.instanceId);
+    if (!instance) { approvals.cancel(request.id, "Provider unavailable."); return; }
+    checkpointText(request.threadId);
+    bus.publish({ eventId: randomUUID(), createdAt: new Date().toISOString(), provider: instance.driverKind,
+      providerInstanceId: instance.instanceId, threadId: request.threadId, requestId: request.id,
+      type: "request.opened", requestType: "permission", tool: request.tool, summary: request.summary, approvalSource: "studio" });
+  },
+  (request, decision) => {
+    const selection = activeSelections.get(request.threadId);
+    const instance = selection && registry.get(selection.instanceId);
+    if (!instance) return;
+    bus.publish({ eventId: randomUUID(), createdAt: new Date().toISOString(), provider: instance.driverKind,
+      providerInstanceId: instance.instanceId, threadId: request.threadId, requestId: request.id,
+      type: "request.resolved", behavior: decision.approved ? "allow" : "deny", source: decision.reason ? "cancelled" : "user",
+      answer: decision.always ? "Always allow" : decision.approved ? "Allow" : "Deny" });
+  },
+);
+
 bus.subscribe((event: RuntimeEvent) => {
   if (event.type === "usage.updated" && event.providerInstanceId) {
     usageStore.merge(event.providerInstanceId, event.usage);
@@ -352,7 +382,7 @@ bus.subscribe((event: RuntimeEvent) => {
       // "Always allow": approve this Buddy's ask for a remembered tool right
       // away, leaving a visible activity line instead of a card
       const asker = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
-      if (permission && event.tool && event.requestId && asker?.alwaysAllowedTools?.includes(event.tool)) {
+      if (permission && event.approvalSource !== "studio" && event.tool && event.requestId && asker?.alwaysAllowedTools?.includes(event.tool)) {
         const instance = registry.get((activeSelections.get(event.threadId) ?? asker.modelSelection).instanceId);
         if (instance) {
           pushMessage({ role: "bot", kind: "activity", tool: { name: `Always allowed: ${event.tool}` } });
@@ -370,6 +400,7 @@ bus.subscribe((event: RuntimeEvent) => {
           options: permission ? (event.tool ? ["Allow", "Deny", "Always allow"] : ["Allow", "Deny"]) : event.choices ?? [],
           requestId: event.requestId,
           requestType: event.requestType,
+          ...(event.approvalSource ? { approvalSource: event.approvalSource } : {}),
           ...(permission && event.tool ? { tool: event.tool } : {}),
         },
       });
@@ -382,7 +413,7 @@ bus.subscribe((event: RuntimeEvent) => {
         const existing = store.messagesFor(event.threadId).find((m) => m.id === messageId);
         if (existing?.card && !existing.card.answered) {
           const patched = store.patchMessage(event.threadId, messageId, {
-            card: { ...existing.card, answered: autoApproved ? "Allow" : event.behavior, autoApproved, dismissed: !autoApproved && event.source !== "user" },
+            card: { ...existing.card, answered: event.answer ?? (autoApproved ? "Allow" : event.behavior), autoApproved, dismissed: !autoApproved && event.source !== "user" },
           });
           if (patched) broadcast({ kind: "message.patch", threadId: event.threadId, message: patched });
           if (autoApproved && group) pushMessage({ role: "bot", kind: "activity", tool: { name: "Permission auto-approved" } });
@@ -395,6 +426,7 @@ bus.subscribe((event: RuntimeEvent) => {
       pushMessage({ role: "bot", kind: "activity", tool: { name: event.failure?.kind === "usage_limit" ? "This AI app’s usage ran out." : `error: ${event.message.slice(0, 160)}`, ok: false } });
       break;
     case "turn.completed": {
+      approvals.cancelThread(event.threadId);
       checkpointText(event.threadId);
       liveText.delete(event.threadId);
       liveTurnIds.delete(event.threadId);
@@ -763,7 +795,7 @@ async function startTurn(
       const canMessagePeers =
         commsDepth < MAX_COMMS_DEPTH && store.bots.some((candidate) => candidate.id !== bot.id && !candidate.hidden);
       if (instance.adapter.capabilities.agentsMcp === true) {
-        integrations.agents = agentsIntegration(bot.id, commsDepth);
+        integrations.agents = agentsIntegration(bot.id, commsDepth, bot.threadId);
       }
       // @mentions in the user's message (the composer's tagging UI) become
       // an explicit delegation nudge — the agent still does the ask_bot call
@@ -794,7 +826,7 @@ async function startTurn(
           (computerHint ? ` ${computerHint}` : "") +
           (appsPrompt ? `\n\n${appsPrompt}\n\n` : "") +
           (integrations.agents
-            ? ` ${PREVIEW_BROWSER_RULES} You can create_schedule, list_schedules, and cancel_schedule for your own conversation or rooms you belong to. Schedules remain visible to the user and are capped at 20 active schedules per bot. You can use the shared task board through list_tasks, create_task, claim_task, update_task, delegate_task, and delete_task. Always use these tools for task changes; never read, edit, or replace tasks.json directly. Claim a suitable unassigned task before starting it, keep its status current, and move completed work to review so the user can verify it. If asked about your current, assigned, or in-progress work, call list_tasks (filter by your own assignee) before answering — do not guess from the filesystem or say none exist without checking.${canMessagePeers ? " You can also work with the user's other bots — list_bots shows who's available, and ask_bot sends one of them a message and returns their reply." : ""}`
+            ? ` ${APPROVAL_BOX_RULES} ${PREVIEW_BROWSER_RULES} You can create_schedule, list_schedules, and cancel_schedule for your own conversation or rooms you belong to. Schedules remain visible to the user and are capped at 20 active schedules per bot. You can use the shared task board through list_tasks, create_task, claim_task, update_task, delegate_task, and delete_task. Always use these tools for task changes; never read, edit, or replace tasks.json directly. Claim a suitable unassigned task before starting it, keep its status current, and move completed work to review so the user can verify it. If asked about your current, assigned, or in-progress work, call list_tasks (filter by your own assignee) before answering — do not guess from the filesystem or say none exist without checking.${canMessagePeers ? " You can also work with the user's other bots — list_bots shows who's available, and ask_bot sends one of them a message and returns their reply." : ""}`
             : "") +
           (tagged.length
             ? ` The user tagged ${tagged
@@ -975,7 +1007,7 @@ async function runGroupMemberTurn(
     .find((message) => message.role === "user" && message.kind === "text");
   const latestUserText = latestUserMessage?.text ?? "";
   const integrations = await computerIntegrations(bot);
-  if (instance.adapter.capabilities.agentsMcp === true) integrations.agents = agentsIntegration(bot.id, MAX_COMMS_DEPTH);
+  if (instance.adapter.capabilities.agentsMcp === true) integrations.agents = agentsIntegration(bot.id, MAX_COMMS_DEPTH, group.threadId);
 
   const attPrompt = formatAttachmentContext(latestUserMessage?.attachments);
   const projectContext = resolveProjectContext([latestUserText, group.bulletin, bot.description]);
@@ -991,6 +1023,7 @@ async function runGroupMemberTurn(
     taskContext.system,
     computerPromptHint(integrations),
     integrations.agents && PREVIEW_BROWSER_RULES,
+    integrations.agents && APPROVAL_BOX_RULES,
     appsPrompt,
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     CHAT_FORMATTING_HINT,
@@ -1187,7 +1220,7 @@ function startGroupTurn(groupId: string, text: string, attachments?: Attachment[
 // Corrections are saved before delivery, and serialized per conversation.
 const steeringDeliveries = new Map<string, Promise<void>>();
 const steeringEpoch = new Map<string, number>();
-function cancelSteering(threadId: string) { steeringEpoch.set(threadId, (steeringEpoch.get(threadId) ?? 0) + 1); }
+function cancelSteering(threadId: string) { approvals.cancelThread(threadId); steeringEpoch.set(threadId, (steeringEpoch.get(threadId) ?? 0) + 1); }
 function steerMessage(botId: string, text: string, attachments?: Attachment[], groupId?: string): boolean {
   const bot = store.bot(botId);
   const group = groupId ? store.group(groupId) : undefined;
@@ -1335,6 +1368,8 @@ function taskBoardPayload() {
  * effect without a server restart (kills any in-flight turns). */
 async function reloadProviders() {
   bus.detachAll();
+  approvals.cancelAll();
+  approvalTokens.clear();
   await registry.disposeAll();
   await registry.load(instanceConfigs(cfg));
   bus.attach(registry.instances());
@@ -1499,6 +1534,29 @@ const server = createServer(async (req, res) => {
           if (typeof body.text === "string" && body.text.length > 20_000) throw testingError("Input text is too long.");
         }
         return json(res, 200, await previewTesting.execute(session, action, body));
+      }
+      if (path === "/api/internal/approval" && method === "POST") {
+        const botId = String(req.headers["x-gbs-bot-id"] ?? "");
+        const threadId = String(req.headers["x-gbs-thread-id"] ?? "");
+        const auth = approvalTokens.get(`${threadId}:${botId}`);
+        const bot = store.bot(botId);
+        const group = store.groupByThread(threadId);
+        if (!bot || bot.hidden || !auth || auth.botId !== botId || auth.token !== req.headers["x-gbs-approval-token"] ||
+            !activeSelections.has(threadId) || (threadId === bot.threadId && !bot.busy) || (threadId !== bot.threadId && (!group?.memberIds.includes(botId) || group.busyBotId !== botId || groupSpeakers.get(threadId)?.botId !== botId))) {
+          return json(res, 403, { error: "Approval requests must come from the active Buddy turn." });
+        }
+        const body = await readBody(req);
+        const action = typeof body.action === "string" ? body.action.trim() : "";
+        const scope = typeof body.scope === "string" ? body.scope.trim() : "";
+        const summary = typeof body.summary === "string" ? body.summary.trim() : "";
+        if (!/^[a-zA-Z0-9_.-]{1,100}$/.test(action) || !scope || scope.length > 300 || !summary || summary.length > 4000) {
+          return json(res, 400, { error: "Provide an action id, a narrow scope (up to 300 characters), and a clear summary (up to 4000 characters)." });
+        }
+        const tool = `Approval: ${action} · ${scope}`;
+        if (bot.alwaysAllowedTools?.includes(tool)) return json(res, 200, { approved: true, always: true });
+        const pending = approvals.open({ botId, threadId, tool, summary: `${summary}\nAlways allow applies to this action in ${scope}.` });
+        res.on("close", () => approvals.cancel(pending.id, "Requesting Buddy disconnected."));
+        return json(res, 200, await pending.result);
       }
       // apps for Buddies (list_apps / use_app): the token is added here,
       // never handed to the agent process
@@ -1946,7 +2004,7 @@ const server = createServer(async (req, res) => {
       }
       if (patch.alwaysAllowedTools !== undefined) {
         const tools = patch.alwaysAllowedTools;
-        if (!Array.isArray(tools) || tools.length > 100 || tools.some((t) => typeof t !== "string" || !t || t.length > 200)) {
+        if (!Array.isArray(tools) || tools.length > 100 || tools.some((t) => typeof t !== "string" || !t || t.length > 600)) {
           return json(res, 400, { error: "alwaysAllowedTools must be a list of tool names." });
         }
         patch.alwaysAllowedTools = [...new Set(tools as string[])];
@@ -1983,6 +2041,8 @@ const server = createServer(async (req, res) => {
       if (!bot) return json(res, 404, { error: "no such bot" });
       // a running turn dies with its bot
       await registry.get((activeSelections.get(bot.threadId) ?? bot.modelSelection).instanceId)?.adapter.interruptTurn(bot.threadId).catch(() => {});
+      approvals.cancelThread(bot.threadId);
+      for (const [key, auth] of approvalTokens) if (auth.botId === bot.id) approvalTokens.delete(key);
       previewTesting.stopOwner(bot.id, "Bot deleted");
       store.deleteBot(bot.id);
       deleteThreadLogs(bot.threadId);
@@ -2106,6 +2166,19 @@ const server = createServer(async (req, res) => {
       }
       const requestId = String(body.requestId);
       const autoApproved = body.autoApproved === true;
+      if (requestId.startsWith("studio-approval:")) {
+        const pending = approvals.get(requestId, bot.id, requestedThreadId);
+        if (!pending) return json(res, 409, { error: "That approval request is no longer waiting." });
+        if (autoApproved || !["allow", "deny"].includes(body.behavior) || (body.always && body.behavior !== "allow")) {
+          return json(res, 400, { error: "Choose Allow, Deny, or Always allow explicitly." });
+        }
+        if (body.always === true) {
+          store.patchBot(bot.id, { alwaysAllowedTools: [...new Set([...(bot.alwaysAllowedTools ?? []), pending.tool])] });
+          broadcast({ kind: "bot", bot: store.bot(bot.id) });
+        }
+        approvals.respond(requestId, bot.id, requestedThreadId, { approved: body.behavior === "allow", always: body.always === true });
+        return json(res, 200, { ok: true });
+      }
       // "Always allow" = allow now + remember the card's tool for this Buddy
       if (body.always === true) {
         const pending = store.messagesFor(requestedThreadId).find((message) => message.card?.requestId === requestId);
@@ -2445,6 +2518,7 @@ server.listen(PORT, HOST, () => {
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
+    approvals.cancelAll();
     closeSseSessions();
     previewWatchManager.closeAll();
     clearInterval(usageTimer);

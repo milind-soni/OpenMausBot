@@ -13,6 +13,11 @@ function setup() {
 }
 
 describe("permission idle auto-approval", () => {
+  it("never schedules idle auto-approval for explicit Buddy consent", () => {
+    const bot = { id: "test", messages: [{ id: "consent", card: { requestType: "permission", requestId: "studio-approval:test", approvalSource: "studio" } }] } as Bot;
+    expect(pendingPermissions({ bots: [bot], groups: [] })).toEqual([]);
+  });
+
   it("fires once after ten idle seconds and shows a countdown", () => {
     const rig = setup();
     rig.clock.sync([permission]);

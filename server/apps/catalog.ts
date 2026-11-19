@@ -54,7 +54,7 @@ export const APP_CATALOG: readonly AppDefinition[] = [
       "Paste the token here, then click Test connection.",
     ],
     buddyNotes: [
-      "Edits is sandboxed: it can only open files inside the user's Movies folder (~/Movies). If the clips are elsewhere, ask the user before copying them into a folder under ~/Movies, then import the copies.",
+      "Edits is sandboxed: it can only open files inside the user's Movies folder (~/Movies). If the clips are elsewhere, call request_approval before copying them into a folder under ~/Movies, then import the copies.",
       "Project changes may not show in the project list until the project is saved or closed. Check the open project with appState or previewVideoFrames instead.",
     ],
   },
@@ -80,7 +80,7 @@ export const APP_CATALOG: readonly AppDefinition[] = [
       "Before running scripts, call read_sdk_documentation_topic with filename preamble, then read the relevant SDK topics. Keep scripts directly executable JavaScript and use console.log for output. After a connection reset or idle reconnect, read the preamble again.",
       "Use render_spread or render_selection to inspect your work visually. Inspect the current documents before editing; do not replace or save over unrelated user work.",
       "Affinity controls scripting, file, network, and AI permissions in its MCP settings. If a tool returns NOT_ALLOWED, explain which permission is needed; do not broaden permissions automatically.",
-      "When filesystem access is permitted, Affinity can only access files on the Desktop. Use application.js userDesktopPath (or getUserDesktopPath on older versions) to locate it. Ask before copying files from elsewhere.",
+      "When filesystem access is permitted, Affinity can only access files on the Desktop. Use application.js userDesktopPath (or getUserDesktopPath on older versions) to locate it. Call request_approval before copying files from elsewhere, unless that copy is already authorized.",
       "Do not call report_sdk_issue, search_sdk_hints, or add_sdk_hint without explicit user permission: these may send scripts, queries, or hints outside this computer. Do not use paid Canva AI without authorization.",
       "Read execute_script output carefully: script errors can appear in text even when isError is false. After a timeout, inspect the document before retrying; the script may already have changed it.",
     ],

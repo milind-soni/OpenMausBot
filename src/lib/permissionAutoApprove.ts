@@ -15,7 +15,7 @@ export function pendingPermissions(state: Pick<AppState, "bots" | "groups">): Pe
   for (const bot of state.bots) {
     for (const message of bot.messages) {
       const card = message.card;
-      if (card?.requestType === "permission" && card.requestId && !card.answered && !card.dismissed) {
+      if (card?.requestType === "permission" && card.approvalSource !== "studio" && card.requestId && !card.answered && !card.dismissed) {
         pending.push({ key: `${bot.id}:${message.id}`, botId: bot.id, messageId: message.id, requestId: card.requestId });
       }
     }
@@ -23,7 +23,7 @@ export function pendingPermissions(state: Pick<AppState, "bots" | "groups">): Pe
   for (const group of state.groups) {
     for (const message of group.messages) {
       const card = message.card;
-      if (card?.requestType === "permission" && card.requestId && message.from?.botId && !card.answered && !card.dismissed) {
+      if (card?.requestType === "permission" && card.approvalSource !== "studio" && card.requestId && message.from?.botId && !card.answered && !card.dismissed) {
         pending.push({ key: `${group.threadId}:${message.id}`, botId: message.from.botId, threadId: group.threadId, messageId: message.id, requestId: card.requestId });
       }
     }

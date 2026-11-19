@@ -59,6 +59,7 @@ posixOnly("room activity runtime", () => {
         "reject-codex": { driver: "codex", environment: { FAKE_CODEX_MODE: "steer-reject" }, config: { cli: join(serverDirectory, "testing", "fake-codex-app-server.ts") } },
         "steer-usage": { driver: "codex", environment: { FAKE_CODEX_MODE: "steer-usage" }, config: { cli: join(serverDirectory, "testing", "fake-codex-app-server.ts") } },
         "reject-hang": { driver: "codex", environment: { FAKE_CODEX_MODE: "steer-reject-hang" }, config: { cli: join(serverDirectory, "testing", "fake-codex-app-server.ts") } },
+        consent: { driver: "grokAgent", environment: { FAKE_ACP_MODE: "request-approval" }, config: { cli: fakeCli, fullAuto: false } },
         permission: {
           driver: "grokAgent",
           environment: { FAKE_ACP_MODE: "permission" },
@@ -269,6 +270,61 @@ posixOnly("room activity runtime", () => {
       "cleared responder queue",
     );
     expect(cleared.group.queuedBotIds).toEqual([]);
+  }, 20_000);
+
+  it("waits for explicit consent in the approval box and remembers only this Buddy and scope", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${bot.id}`, { name: "TEST · Consent", modelSelection: { instanceId: "consent", model: "fake-model" } });
+    let start = frames.length;
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: "Prepare the carousel" });
+    const frame = await waitForFrame(f => f.kind === "message" && f.threadId === bot.threadId && f.message.card?.approvalSource === "studio", "explicit approval card", 12_000, start);
+    const card = frame.message.card;
+    expect(card.options).toEqual(["Allow", "Deny", "Always allow"]);
+    expect(card.subtitle).toContain("TEST portraits");
+    expect(card.tool).toContain("/Desktop/TEST · Carousel");
+    expect(frames.slice(start).some(f => f.kind === "runtime" && f.event.type === "turn.completed" && f.event.threadId === bot.threadId)).toBe(false);
+    expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: card.requestId, behavior: "allow", autoApproved: true })).status).toBe(400);
+    expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: card.requestId, behavior: "allow", always: true })).status).toBe(200);
+    await waitForFrame(f => f.kind === "message" && f.threadId === bot.threadId && f.message.text?.includes('"approved":true'), "approved tool result", 12_000, start);
+    await waitForFrame(f => f.kind === "runtime" && f.event.type === "turn.completed" && f.event.threadId === bot.threadId, "consent turn done", 12_000, start);
+    expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: card.requestId, behavior: "allow", always: true })).status).toBe(409);
+    start = frames.length;
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: "Repeat that copy" });
+    await waitForFrame(f => f.kind === "runtime" && f.event.type === "turn.completed" && f.event.threadId === bot.threadId, "remembered consent", 12_000, start);
+    expect(frames.slice(start).some(f => f.kind === "message" && f.message.card?.approvalSource === "studio")).toBe(false);
+    expect(frames.slice(start).some(f => f.kind === "message" && f.threadId === bot.threadId && f.message.text?.includes('"approved":true'))).toBe(true);
+    await api("PATCH", `/api/bots/${bot.id}`, { alwaysAllowedTools: [] });
+    start = frames.length;
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: "Ask again" });
+    const denied = await waitForFrame(f => f.kind === "message" && f.threadId === bot.threadId && f.message.card?.approvalSource === "studio", "revoked consent", 12_000, start);
+    await api("POST", `/api/bots/${bot.id}/respond`, { requestId: denied.message.card.requestId, behavior: "deny" });
+    await waitForFrame(f => f.kind === "message" && f.threadId === bot.threadId && f.message.text?.includes('"approved":false'), "denied tool result", 12_000, start);
+  }, 30_000);
+
+  it("dismisses explicit consent when the turn is stopped and rejects late approval", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "consent", model: "fake-model" } });
+    const start = frames.length;
+    await api("POST", `/api/bots/${bot.id}/messages`, { text: "Prepare a copy" });
+    const card = await waitForFrame(f => f.kind === "message" && f.threadId === bot.threadId && f.message.card?.approvalSource === "studio", "cancel consent", 12_000, start);
+    expect((await api("POST", `/api/bots/${bot.id}/interrupt`)).status).toBe(200);
+    const closed = await waitForFrame(f => f.kind === "message.patch" && f.message.id === card.message.id && f.message.card?.dismissed, "dismissed consent", 12_000, start);
+    expect(closed.message.card.answered).toBe("Deny");
+    expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: card.message.card.requestId, behavior: "allow", always: true })).status).toBe(409);
+  }, 20_000);
+
+  it("attributes an explicit room approval to its requesting Buddy", async () => {
+    const bot = (await api("POST", "/api/bots")).body.bot;
+    const other = (await api("POST", "/api/bots")).body.bot;
+    await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "consent", model: "fake-model" } });
+    const group = (await api("POST", "/api/groups", { name: "TEST · Consent room", memberIds: [bot.id] })).body.group;
+    const start = frames.length;
+    await api("POST", `/api/groups/${group.id}/messages`, { text: "Prepare a carousel" });
+    const card = await waitForFrame(f => f.kind === "message" && f.threadId === group.threadId && f.message.card?.approvalSource === "studio", "room consent", 12_000, start);
+    expect(card.message.from.botId).toBe(bot.id);
+    expect((await api("POST", `/api/bots/${other.id}/respond`, { requestId: card.message.card.requestId, threadId: group.threadId, behavior: "allow" })).status).toBe(403);
+    expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: card.message.card.requestId, threadId: group.threadId, behavior: "deny" })).status).toBe(200);
+    await waitForFrame(f => f.kind === "runtime" && f.event.type === "turn.completed" && f.event.threadId === group.threadId, "room consent completed", 12_000, start);
   }, 20_000);
 
   it("remembers Always allow per Buddy and tool, then approves that tool without a card", async () => {

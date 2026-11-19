@@ -25,6 +25,15 @@ const TOKEN = process.env.GBS_COMMS_TOKEN ?? "";
 const DEPTH = Number(process.env.GBS_TURN_DEPTH ?? "0") || 0;
 
 const TOOLS = [
+  {
+    name: "request_approval",
+    description: "Show the user the Allow / Deny / Always allow approval box and wait for their choice. Use before an action that needs consent (for example copying files into Desktop for Affinity), instead of asking in plain chat. Return approved=true is required before proceeding. An existing user authorization needs no second approval. Always allow is scoped to this Buddy, action and scope.",
+    inputSchema: { type: "object", properties: {
+      action: { type: "string", description: "Stable action id, e.g. affinity.copy_files" },
+      scope: { type: "string", description: "Narrow scope, e.g. the exact destination folder. Change it when the scope changes." },
+      summary: { type: "string", description: "What will happen: affected files, destination, and why permission is needed." },
+    }, required: ["action", "scope", "summary"] },
+  },
   { name: "preview_status", description: "Check whether Studio Preview, your in-app browser, is available, and list your sessions. Call this first. Use Preview instead of Chrome to test sites, show pages to the user, open links for them and do web tasks they watch live.", inputSchema: { type: "object", properties: {} } },
   { name: "preview_open", description: "Open an owned, visible browser session in Studio Preview, the user's in-app browser: for testing, showing the user a page, opening a link they asked for, or doing a web task they can watch. Choose target from the user's prompt: \"new\" (default) opens your own Preview tab and never replaces the user's page; \"active\" attaches to the page the user is currently viewing in Quick Preview — use it only when they ask you to act on their current/open page or view (url/path/preset are then ignored). Supports website URLs and registered project HTML. Returns actual page state. Desktop required; max six sessions. Supply project_id for project-scoped screenshot evidence.", inputSchema: { type: "object", properties: { target: { type: "string", enum: ["new", "active"] }, url: { type: "string" }, project_id: { type: "string" }, path: { type: "string" }, name: { type: "string" }, preset: { type: "string", enum: ["phone", "tablet", "desktop", "responsive"] }, width: { type: "integer" }, height: { type: "integer" } } } },
   ...["snapshot", "screenshot", "diagnostics", "close"].map(operation => ({ name: `preview_${operation}`, description: `${operation} your Studio Preview session. Snapshot returns visible DOM controls with element references (take a new snapshot after navigation). Screenshot returns a real PNG image and artifact path. Close releases the session.`, inputSchema: { type: "object", properties: { session_id: { type: "string" }, full_page: { type: "boolean" } }, required: ["session_id"] } })),
@@ -178,6 +187,10 @@ async function api(path: string, init?: RequestInit): Promise<Json> {
       authorization: `Bearer ${TOKEN}`,
       "x-gbs-bot-id": BOT_ID,
       ...(path.startsWith("/api/internal/preview-testing/") ? { "x-gbs-preview-token": process.env.GBS_PREVIEW_TOKEN ?? "" } : {}),
+      ...(path === "/api/internal/approval" ? {
+        "x-gbs-thread-id": process.env.GBS_THREAD_ID ?? "",
+        "x-gbs-approval-token": process.env.GBS_APPROVAL_TOKEN ?? "",
+      } : {}),
       ...(init?.headers ?? {}),
     },
   });
@@ -233,6 +246,10 @@ function renderAppResult(result: Json): { text: string; isError?: boolean; image
 }
 
 async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean; image?: string; mimeType?: string }> {
+  if (name === "request_approval") {
+    const result = await api("/api/internal/approval", { method: "POST", body: JSON.stringify(args) });
+    return { text: JSON.stringify(result), isError: result.approved !== true };
+  }
   if (name === "list_apps") {
     const appId = typeof args.app_id === "string" && args.app_id.trim() ? args.app_id.trim() : "";
     const r = await api(`/api/internal/apps${appId ? `?app=${encodeURIComponent(appId)}` : ""}`);
