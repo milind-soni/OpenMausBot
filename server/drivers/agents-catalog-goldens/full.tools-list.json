@@ -1625,7 +1625,7 @@
     },
     {
       "name": "trigger",
-      "description": "Set up or change an automation (a routine): when something happens, a bot does the instructions. Create it in this turn, without asking to confirm, whenever the person describes recurring or event-based work (\"every morning send me…\", \"whenever I get an email from…\", \"when another app calls…\"); something to do once, now, is not one. when=schedule runs on a time rule or cron (trigger_info first for the current time); app_event when a connected app's event happens (trigger_info action=events first; better than a schedule that keeps checking); webhook when another app calls its private address, which you may paste only into that app's setup; limit_reset when an AI's usage limit resets. update, pause, resume and run_now take a trigger_id from trigger_info. Pause a temporary monitor once its goal is met, then read it back; delete_trigger only at the person's request. To the person these are automations: write name and instructions as they would say them.",
+      "description": "Set up or change an automation (a routine): when something happens, a bot does the instructions. Create it in this turn, without asking to confirm, whenever the person describes recurring or event-based work; something to do once, now, is not one, and a later look at this chat is check_back. when=schedule runs on a time rule or cron (trigger_info first for the current time); app_event when a connected app's event happens (trigger_info action=events first; better than a schedule that keeps checking); webhook when another app calls its private address, which you may paste only into that app's setup; limit_reset when an AI's usage limit resets. update, pause, resume and run_now take a trigger_id from trigger_info. Pause a temporary monitor once its goal is met, then read it back; delete_trigger only at the person's request. To the person these are automations: write name and instructions as they would say them.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1879,7 +1879,7 @@
     },
     {
       "name": "wait_until",
-      "description": "Tell the person in this chat when something happens. No AI runs while you wait, only plain code checks. Ends after hours (default 24, 1-168).",
+      "description": "Tell the person in this chat when something happens. No AI runs while you wait. Ends after hours (default 24, 1-168).",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1961,6 +1961,31 @@
         "required": [
           "id"
         ]
+      }
+    },
+    {
+      "name": "check_back",
+      "description": "Come back to this chat later on your own; no one is asked. No args lists; cancel: id or \"all\".",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "when": {
+            "type": "string",
+            "description": "\"in 2 hours\", \"Fri 9am\" (person's zone) or ISO."
+          },
+          "note": {
+            "type": "string",
+            "description": "What to check then."
+          },
+          "if": {
+            "type": "string",
+            "description": "Act only if this holds then."
+          },
+          "cancel": {
+            "type": "string"
+          }
+        }
       }
     },
     {
