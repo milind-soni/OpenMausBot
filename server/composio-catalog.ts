@@ -1,7 +1,12 @@
 // The marketplace catalog: one walk of its pages, and the copy the Apps page is answered from. A reader gets the copy held
 // for its backend at once, whatever its age; an old copy is read again behind it, by one walk however many readers ask.
+// The newest copy is also kept in the data folder, so a restart starts from it.
 import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { z } from "zod";
 
+import { writeFileAtomic } from "./atomic.ts";
 import { canonicalToolkitSlug, MAX_CONNECTED_ACCOUNT_PAGES } from "./composio-project.ts";
 
 export interface ToolkitCard {
@@ -67,7 +72,68 @@ interface HeldCatalog {
   digest: string;
 }
 
+export const CATALOG_FILE = "connector-catalog.json";
+const MAX_SAVED_CARDS = 20_000;
+const savedCatalogSchema = z.object({
+  version: z.literal(1),
+  /** Names the backend without holding its credential. */
+  key: z.string().length(64),
+  at: z.number().finite().nonnegative(),
+  cards: z.array(z.object({
+    slug: z.string().min(1).max(200),
+    label: z.string().max(400),
+    blurb: z.string().max(400),
+    logo: z.string().max(2_000).nullable(),
+    noAuth: z.boolean().optional(),
+    domain: z.string().max(400).nullable(),
+    categories: z.array(z.string().max(80)).max(8).optional(),
+  })).min(1).max(MAX_SAVED_CARDS),
+  pagination: z.object({
+    items: z.number(),
+    totalItems: z.number().optional(),
+    stalled: z.boolean(),
+    reason: z.enum(["end", "total-reached", "page-stuck", "cursor-repeated", "http-error", "bad-page", "limit"]).optional(),
+    complete: z.boolean(),
+  }),
+});
+
 const held = new Map<string, HeldCatalog>();
+let savedFile: string | null = null;
+let savedFileRead = false;
+
+/** Keeps the newest catalog in `dataDir` and starts from the one found there; null stops both. */
+export function rememberCatalogIn(dataDir: string | null): void {
+  savedFile = dataDir ? join(dataDir, CATALOG_FILE) : null;
+  savedFileRead = false;
+}
+
+const savedKey = (identity: string) => createHash("sha256").update("catalog-file\0").update(identity).digest("hex");
+
+function loadSaved(identity: string): HeldCatalog | null {
+  if (!savedFile || savedFileRead) return null;
+  savedFileRead = true;
+  let parsed;
+  try {
+    parsed = savedCatalogSchema.safeParse(JSON.parse(readFileSync(savedFile, "utf8")));
+  } catch {
+    return null;
+  }
+  if (!parsed.success || parsed.data.key !== savedKey(identity)) return null;
+  const { cards, pagination, at } = parsed.data;
+  const catalog: HeldCatalog = { at: Math.min(at, Date.now()), cards, pagination, digest: digestOf(cards) };
+  keep(identity, catalog);
+  return catalog;
+}
+
+function save(identity: string, catalog: HeldCatalog): void {
+  if (!savedFile) return;
+  try {
+    const { at, cards, pagination } = catalog;
+    writeFileAtomic(savedFile, `${JSON.stringify({ version: 1, key: savedKey(identity), at, cards, pagination })}\n`, { mode: 0o600, durable: false });
+  } catch (error) {
+    console.warn(`[composio] could not save the catalog: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 const walks = new Map<string, Promise<HeldCatalog | null>>();
 const listeners = new Set<() => void>();
 
@@ -184,6 +250,7 @@ function refresh(identity: string, readPage: CatalogPageReader): Promise<HeldCat
     if (!found) return previous;
     const next: HeldCatalog = { at: Date.now(), cards: found.cards, pagination: found.pagination, digest: digestOf(found.cards) };
     keep(identity, next);
+    save(identity, next);
     if (previous && previous.digest !== next.digest) for (const listener of listeners) listener();
     return next;
   }).finally(() => {
@@ -202,7 +269,7 @@ const answer = (catalog: HeldCatalog): Catalog => ({
 /** The catalog of the backend `identity` names; null when it has never been read and can't be now. Only a backend's first
  * read waits for the walk. */
 export async function catalogFor(identity: string, readPage: CatalogPageReader): Promise<Catalog | null> {
-  const known = held.get(identity);
+  const known = held.get(identity) ?? loadSaved(identity);
   if (known) {
     if (Date.now() - known.at >= CATALOG_FRESH_MS) void refresh(identity, readPage);
     return answer(known);
@@ -216,6 +283,8 @@ export async function catalogWalksSettled(): Promise<void> {
   while (walks.size) await Promise.all(walks.values());
 }
 
+/** What a restart leaves: nothing in memory, the saved file still there to start from. */
 export function forgetCatalogs(): void {
   held.clear();
+  savedFileRead = false;
 }

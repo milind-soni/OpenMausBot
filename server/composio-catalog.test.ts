@@ -1,6 +1,10 @@
+import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { catalogWalksSettled, forgetCatalogs, onCatalogChange } from "./composio-catalog.ts";
+import { CATALOG_FILE, catalogWalksSettled, forgetCatalogs, onCatalogChange, rememberCatalogIn } from "./composio-catalog.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
 import { listToolkits, setManagedBrokerAccess } from "./composio.ts";
 import { startFakeCatalogService, waitedOnService, type FakeCatalogService } from "./testing/fake-catalog-service.ts";
 
@@ -30,6 +34,7 @@ beforeEach(() => {
 afterEach(async () => {
   await catalogWalksSettled();
   setManagedBrokerAccess(null);
+  rememberCatalogIn(null);
   forgetCatalogs();
   vi.restoreAllMocks();
 });
@@ -81,5 +86,71 @@ describe("the catalog answers from the copy it holds", () => {
     fake.requests.catalog = 0;
     await listToolkits({});
     expect(fake.requests.catalog).toBe(3);
+  });
+});
+
+describe("the catalog kept in the data folder", () => {
+  let dataDir: string;
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), "omb-catalog-"));
+    rememberCatalogIn(dataDir);
+  });
+  afterEach(async () => {
+    await catalogWalksSettled();
+    await removeTempDir(dataDir);
+  });
+
+  it("answers the first read after a restart from the file, without waiting", async () => {
+    await listToolkits({});
+    const file = join(dataDir, CATALOG_FILE);
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(readFileSync(file, "utf8")).not.toContain(installation.toString(16).padStart(64, "0"));
+
+    forgetCatalogs();
+    fake.requests.catalog = 0;
+    const afterRestart = await listToolkits({});
+    expect(afterRestart).toMatchObject({ source: "api", fresh: true, pagination: { items: 8, complete: true } });
+    expect(afterRestart.cards).toHaveLength(8);
+    expect(fake.requests.catalog).toBe(0);
+
+    forgetCatalogs();
+    later(ELEVEN_MINUTES);
+    fake.edition = 1;
+    const old = await waitedOnService(fake, () => listToolkits({}));
+    expect(old.waited).toBe(false);
+    expect(old.value).toMatchObject({ fresh: false });
+    expect(old.value.cards[0]!.label).toBe("App 0 v0");
+    await catalogWalksSettled();
+    expect(fake.requests.catalog).toBe(3);
+
+    forgetCatalogs();
+    expect((await labels())[0]).toBe("App 0 v1");
+    expect(fake.requests.catalog).toBe(3);
+  });
+
+  it("starts from nothing when the file is another installation's, or is not a catalog", async () => {
+    await listToolkits({});
+    forgetCatalogs();
+    setManagedBrokerAccess({ url: fake.url, token: "e".repeat(64) });
+    fake.requests.catalog = 0;
+    expect((await waitedOnService(fake, () => listToolkits({}))).waited).toBe(true);
+    expect(fake.requests.catalog).toBe(3);
+
+    await catalogWalksSettled();
+    forgetCatalogs();
+    writeFileSync(join(dataDir, CATALOG_FILE), "{ not json");
+    fake.requests.catalog = 0;
+    expect((await listToolkits({})).cards).toHaveLength(8);
+    expect(fake.requests.catalog).toBe(3);
+  });
+
+  it("still answers when the file can't be written", async () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    chmodSync(dataDir, 0o500);
+    try {
+      expect((await listToolkits({})).cards).toHaveLength(8);
+    } finally {
+      chmodSync(dataDir, 0o700);
+    }
   });
 });

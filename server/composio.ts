@@ -38,7 +38,7 @@ import { brokerAccess, managedComposioBrokerOff, type BrokerAccess } from "./com
 export { applyManagedBrokerMessage, brokerAccess, setManagedBrokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
 export { prepareProjectSession, trustedSessionMcpUrl } from "./composio-session.ts";
 import { catalogFor, type CatalogPagination, type ToolkitCard } from "./composio-catalog.ts";
-export { onCatalogChange, toolkitCategories, type CatalogPagination, type CatalogStopReason, type ToolkitCard } from "./composio-catalog.ts";
+export { onCatalogChange, rememberCatalogIn, toolkitCategories, type CatalogPagination, type CatalogStopReason, type ToolkitCard } from "./composio-catalog.ts";
 
 function toolkitBase() {
   return (process.env.OMB_COMPOSIO_TOOLKITS_API ?? `${DEFAULT_BACKEND_ORIGIN}/api/v3`).replace(/\/$/, "");
