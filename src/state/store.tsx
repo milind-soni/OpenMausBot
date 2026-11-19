@@ -14,6 +14,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { readLastView, restoreView, saveLastView, viewOf } from "@/lib/lastView";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import { clearRoomActivity, foldRoomActivity, type RoomActivityState } from "@/lib/roomActivity";
 import { pendingPermissions, PermissionAutoApproveClock, type PermissionCountdown } from "@/lib/permissionAutoApprove";
@@ -798,9 +799,13 @@ const StoreContext = createContext<{
 } | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [state, rawDispatch] = useReducer(reducer, initialState);
+  const [state, rawDispatch] = useReducer(reducer, initialState, (initial) => restoreView(initial, readLastView()));
   const stateRef = useRef(state);
   stateRef.current = state;
+  const lastView = JSON.stringify(viewOf(state));
+  useEffect(() => {
+    saveLastView(JSON.parse(lastView));
+  }, [lastView]);
   // per-frame stream-delta batching (see the "runtime" SSE case); stream
   // state is intentionally OUTSIDE the reducer so token frames re-render
   // only StreamContext consumers

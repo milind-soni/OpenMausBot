@@ -92,7 +92,8 @@ export function OnboardingWelcome({ heading, reducedMotion, onStart }: {
             <MausAvatar size={54} color="mint" state="curious" animated={animated} trackPointer={animated} />
           </div>
 
-          <div className="relative inline-flex flex-wrap items-start justify-center gap-x-3 gap-y-2">
+          {/* The title is centred on its own; the version pill hangs beside it without shifting it. */}
+          <div className="relative flex flex-col items-center gap-2 sm:block">
             <h1
               ref={heading}
               id="onboarding-title"
@@ -104,7 +105,7 @@ export function OnboardingWelcome({ heading, reducedMotion, onStart }: {
             </h1>
             <span
               aria-hidden="true"
-              className="mt-1 inline-flex shrink-0 items-center rounded-full border border-accent/35 bg-accent/12 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-accent-border shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] sm:-mt-1"
+              className="gbs-welcome-version inline-flex shrink-0 items-center whitespace-nowrap rounded-full border border-accent/35 bg-accent/12 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-accent-border shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] sm:absolute sm:left-full sm:top-1/2 sm:ml-3 sm:-translate-y-1/2"
             >
               v0.1 Alpha
             </span>

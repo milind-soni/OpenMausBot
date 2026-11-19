@@ -1,19 +1,20 @@
 import { useEffect, useState } from "react";
+import { TourSpotlight } from "@/components/TourSpotlight";
 import { ArrowRight, Sparkles, X } from "lucide-react";
 import { useStore, type Action } from "@/state/store";
 import { tourEvent, tourKey } from "@/lib/workspaceOnboarding";
 import { cn } from "@/lib/cn";
 
 const tour = [
-  { title: "Buddies and chats", copy: "Open a Buddy to give it a prompt. Use Buddy settings to change its role or model." },
-  { title: "Rooms and mentions", copy: "Create a room from the sidebar when a task needs several Buddies. Mention a Buddy with @ to involve it." },
-  { title: "Projects and files", copy: "Register a project folder and reference it with # in a prompt.", action: { type: "toggleProjects", open: true } },
-  { title: "Tasks", copy: "Use the task board to capture work and assign it to a Buddy.", action: { type: "toggleTaskBoard", open: true } },
-  { title: "Studio Preview", copy: "Open web pages and project files next to your work.", action: { type: "togglePreview", open: true } },
-  { title: "Schedules", copy: "Set a prompt to run once or on a recurring cadence.", action: { type: "toggleSchedules", open: true } },
-  { title: "Apps", copy: "See which desktop apps Buddies can use and how to connect them.", action: { type: "toggleApps", open: true } },
-  { title: "Settings", copy: "Review your profile, models, and preferences. You can restart this tour in System settings.", action: { type: "toggleAppSettings", open: true, tab: "system" } },
-] satisfies Array<{ title: string; copy: string; action?: Action }>;
+  { title: "Buddies and chats", target: "conversations", copy: "Open a Buddy to give it a prompt. Use Buddy settings to change its role or model." },
+  { title: "Rooms and mentions", target: "new", copy: "Create a room from the sidebar when a task needs several Buddies. Mention a Buddy with @ to involve it." },
+  { title: "Projects and files", target: "projects", copy: "Register a project folder and reference it with # in a prompt.", action: { type: "toggleProjects", open: true } },
+  { title: "Tasks", target: "tasks", copy: "Use the task board to capture work and assign it to a Buddy.", action: { type: "toggleTaskBoard", open: true } },
+  { title: "Studio Preview", target: "preview", copy: "Open web pages and project files next to your work.", action: { type: "togglePreview", open: true } },
+  { title: "Schedules", target: "schedules", copy: "Set a prompt to run once or on a recurring cadence.", action: { type: "toggleSchedules", open: true } },
+  { title: "Apps", target: "apps", copy: "See which desktop apps Buddies can use and how to connect them.", action: { type: "toggleApps", open: true } },
+  { title: "Settings", target: "settings", copy: "Review your profile, models, and preferences. You can restart this tour in System settings.", action: { type: "toggleAppSettings", open: true, tab: "system" } },
+] satisfies Array<{ title: string; target: string; copy: string; action?: Action }>;
 
 export function StudioTour({ firstRun }: { firstRun: boolean }) {
   const { state, dispatch } = useStore();
@@ -74,6 +75,8 @@ export function StudioTour({ firstRun }: { firstRun: boolean }) {
   const step = tour[position];
 
   return (
+    <>
+    {step && <TourSpotlight target={step.target} />}
     <aside
       aria-label="Studio tour"
       className="fixed inset-x-3 bottom-3 z-40 max-w-[396px] rounded-2xl border border-white/[0.1] bg-panel/95 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl sm:inset-x-auto sm:right-6 sm:bottom-6"
@@ -157,5 +160,6 @@ export function StudioTour({ firstRun }: { firstRun: boolean }) {
         )}
       </div>
     </aside>
+    </>
   );
 }

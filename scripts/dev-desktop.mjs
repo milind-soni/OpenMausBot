@@ -144,6 +144,11 @@ async function main() {
     process.exit(1);
   }
 
+  if (process.argv.includes("--web")) {
+    console.log(`[dev:web] Studio is running at http://127.0.0.1:${VITE_PORT}/ (API on port ${SERVER_PORT}). Press Ctrl+C to stop both.`);
+    return;
+  }
+
   console.log("[dev:desktop] Launching Electron desktop shell...");
   const electronProc = spawn(electronPath, ["."], {
     cwd: rootDir,

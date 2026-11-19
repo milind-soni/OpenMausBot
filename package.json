@@ -13,6 +13,7 @@
     "dev:network": "vite --host 0.0.0.0",
     "dev:server": "node --experimental-strip-types server/index.ts",
     "dev:desktop": "node scripts/dev-desktop.mjs",
+    "dev:web": "node scripts/dev-desktop.mjs --web",
     "build": "tsc -b && tsc -p tsconfig.server.json && vite build",
     "typecheck": "tsc -b && tsc -p tsconfig.server.json",
     "test": "vitest run",

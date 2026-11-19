@@ -54,12 +54,15 @@ pnpm install --frozen-lockfile
 pnpm dev:desktop
 ```
 
-To develop the web interface, start the local service and Vite in separate terminals.
+`pnpm dev:desktop` starts everything with one command: the local Studio server (port 8899), the Vite client (port 5199), and the Electron window. Client edits reload instantly. Quit the window or press Ctrl+C to stop everything it started.
+
+To work in a browser instead of the desktop window, run the server and client together without Electron:
 
 ```sh
-pnpm dev:server
-pnpm dev
+pnpm dev:web
 ```
+
+Then open `http://127.0.0.1:5199`. If a Studio server is already running on port 8899, both commands reuse it.
 
 Run the checks and production build before packaging.
 

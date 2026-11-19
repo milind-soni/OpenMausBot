@@ -712,6 +712,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
           <button
             onClick={() => setPlusOpen((o) => !o)}
             aria-label="New Buddy or room"
+            data-tour="new"
             aria-expanded={plusOpen}
             className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
             title="New Buddy or room"
@@ -769,7 +770,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
       )}
 
       {/* Conversations */}
-      <div className="min-h-0 w-full flex-1 overflow-y-auto px-2 pb-2" aria-label="Conversations">
+      <div className="min-h-0 w-full flex-1 overflow-y-auto px-2 pb-2" aria-label="Conversations" data-tour="conversations">
         {visibleBots.length === 0 && visibleGroups.length === 0 && !collapsed && (
           <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">{q ? `Nothing matches “${query}”` : "Create a Buddy or room to get started."}</div>
         )}
@@ -787,10 +788,11 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
       {/* Footer */}
       <div className={cn("shrink-0 border-t border-hairline/40 px-3 pb-3 pt-2 flex flex-col gap-0.5", collapsed ? "w-full items-center px-1" : "w-full")}>
         {!collapsed && <h2 className="px-3 pb-1 pt-1 text-[11px] font-medium text-ink-secondary">Workspace</h2>}
-        <button onClick={() => dispatch({ type: "toggleSchedules", open: true })} aria-label="Schedules" title={collapsed ? "Schedules" : undefined} className={cn("flex items-center gap-3 rounded-xl p-2 text-left hover:bg-raised", collapsed ? "justify-center p-2.5" : "w-full px-3 py-1.5", state.schedulesOpen && "bg-raised")}>
+        <button data-tour="schedules" onClick={() => dispatch({ type: "toggleSchedules", open: true })} aria-label="Schedules" title={collapsed ? "Schedules" : undefined} className={cn("flex items-center gap-3 rounded-xl p-2 text-left hover:bg-raised", collapsed ? "justify-center p-2.5" : "w-full px-3 py-1.5", state.schedulesOpen && "bg-raised")}>
           <AlarmClock size={18} className={state.schedulesOpen ? "text-accent" : "text-ink-secondary"} />{!collapsed && <><span className="min-w-0 flex-1 truncate text-[13px] text-ink">Schedules</span><span className="rounded-full bg-raised px-2 text-[11px] text-ink-secondary">{state.schedules.paused ? "Paused" : state.schedules.schedules.filter(s => s.enabled).length}</span></>}
         </button>
         <button
+          data-tour="tasks"
           onClick={() => dispatch({ type: "toggleTaskBoard", open: true })}
           aria-label={`Task Board, ${totalTaskCount} tasks`}
           title={collapsed ? `Task Board (${totalTaskCount})` : undefined}
@@ -817,6 +819,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
         </button>
 
         <button
+          data-tour="projects"
           onClick={() => dispatch({ type: "toggleProjects", open: true })}
           aria-label="Projects"
           title={collapsed ? "Projects" : undefined}
@@ -832,6 +835,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
 
         {!collapsed && <h2 className="mt-1 border-t border-hairline/30 px-3 pb-1 pt-2 text-[11px] font-medium text-ink-secondary">Tools</h2>}
         <button
+          data-tour="preview"
           onClick={() => dispatch({ type: "togglePreview", open: true })}
           aria-label="Preview"
           aria-current={state.previewOpen ? "page" : undefined}
@@ -847,6 +851,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
         </button>
 
         <button
+          data-tour="apps"
           onClick={() => dispatch({ type: "toggleApps", open: true })}
           aria-label="Apps"
           title={collapsed ? "Apps" : undefined}
@@ -863,6 +868,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
         {collapsed ? (
           <div className="flex flex-col items-center gap-1">
             <button
+              data-tour="settings"
               onClick={() => dispatch({ type: "toggleAppSettings" })}
               aria-label="App settings"
               title="App settings"
@@ -890,6 +896,7 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean } = {}) {
               </span>
             </button>
             <button
+              data-tour="settings"
               onClick={() => dispatch({ type: "toggleAppSettings" })}
               aria-label="App settings"
               className={cn(

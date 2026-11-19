@@ -813,3 +813,21 @@ body.gbs-resizing webview {
   color: var(--md-muted);
   font-size: 0.9em;
 }
+
+/* Studio tour: dim the workspace and ring the area the current step describes. */
+.gbs-tour-spotlight {
+  box-shadow:
+    0 0 0 2px var(--color-accent),
+    0 0 0 6px color-mix(in srgb, var(--color-accent) 28%, transparent),
+    0 0 0 100vmax rgba(4, 6, 10, 0.58);
+  transition: top 220ms cubic-bezier(0.22, 1, 0.36, 1), left 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    width 220ms cubic-bezier(0.22, 1, 0.36, 1), height 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  animation: gbs-tour-pulse 2.2s ease-in-out infinite;
+}
+@keyframes gbs-tour-pulse {
+  0%, 100% { outline: 0 solid transparent; }
+  50% { outline: 4px solid color-mix(in srgb, var(--color-accent) 22%, transparent); outline-offset: 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gbs-tour-spotlight { transition: none; animation: none; }
+}
