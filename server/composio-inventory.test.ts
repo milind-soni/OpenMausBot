@@ -26,7 +26,8 @@ function guard(cfg: AppConfig = {}) {
   return host;
 }
 
-afterEach(() => {
+afterEach(async () => {
+  await composio.serviceSlugsReadSettled();
   composio.setManagedBrokerAccess(null);
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();

@@ -232,7 +232,7 @@ export async function mcpIntegration(
   }
   const serviceSlugs = context.connectorTools === undefined
     ? undefined
-    : serializeConnectorServiceSlugs(await connectedServiceSlugs(cfg, context.as));
+    : serializeConnectorServiceSlugs(await connectedServiceSlugs(cfg, context.as, { waitMs: TURN_START_SLUGS_WAIT_MS }));
   if (serviceSlugs?.oversized) {
     console.warn(
       `[composio] connector service slugs for bot ${context.botId} exceed ${CONNECTOR_SERVICE_SLUGS_MAX_BYTES} bytes;`
@@ -464,7 +464,10 @@ export function sharedConnectedInventory(cfg: AppConfig, options: { fresh?: bool
 }
 
 function connectionsChanged(cfg: AppConfig, as?: BrokerAccess): void {
-  forgetInventory(connectorToolsIdentity(cfg, as));
+  const identity = connectorToolsIdentity(cfg, as);
+  forgetInventory(identity);
+  if (connectorServiceSlugsCache?.identity === identity) connectorServiceSlugsCache = { ...connectorServiceSlugsCache, at: -Infinity };
+  if (connectorServiceSlugsRequest?.identity === identity) connectorServiceSlugsRequest = null;
 }
 
 export async function verifiedConnectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
@@ -549,33 +552,58 @@ function connectorToolsIdentity(cfg: AppConfig, as?: BrokerAccess): string {
 
 let connectorToolsRequest: { identity: string; services: Promise<Record<string, ConnectorToolListing[]>> } | null = null;
 
-/** Real backend slugs, so an underscored service (bland_ai) is never captured by a plain-prefix grant (bland); a failed read answers the last good one. */
-export async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
+/** Real backend slugs, so an underscored service (bland_ai) is never captured by a plain-prefix grant (bland); a failed read
+ * answers the last good one. An answer under a minute old is used as it is. An older one is used while it is read again
+ * behind, until it is CONNECTOR_SERVICE_SLUGS_STALE_MS old or a connection was started or removed here: from then the read
+ * is waited for, for at most `waitMs` when a caller gives one.
+ *
+ * Security: this list only decides which service a tool's name belongs to. It never makes a connection usable: the vendor
+ * refuses a removed one, and a call that names no tool is checked against verifiedConnectedServiceSlugs, which is never
+ * cached. The risk in an old list is a service connected elsewhere since (bland_ai) being read as another's (bland), so the
+ * list a call is judged by is never more than CONNECTOR_SERVICE_SLUGS_STALE_MS old. */
+export async function connectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess, options: { waitMs?: number } = {}): Promise<readonly string[]> {
   const identity = connectorToolsIdentity(cfg, as);
-  if (connectorServiceSlugsCache?.identity === identity
-    && Date.now() - connectorServiceSlugsCache.at < CONNECTOR_SERVICE_SLUGS_CACHE_MS) {
-    return connectorServiceSlugsCache.slugs;
-  }
-  if (connectorServiceSlugsRequest?.identity === identity) return connectorServiceSlugsRequest.slugs;
-  const walk = connectedServices(cfg, as).then(
+  const known = connectorServiceSlugsCache?.identity === identity ? connectorServiceSlugsCache : null;
+  const age = known ? Date.now() - known.at : Infinity;
+  if (known && age < CONNECTOR_SERVICE_SLUGS_CACHE_MS) return known.slugs;
+  const read = connectorServiceSlugsRequest?.identity === identity ? connectorServiceSlugsRequest.slugs : readServiceSlugs(cfg, as, identity);
+  if (known && age < CONNECTOR_SERVICE_SLUGS_STALE_MS) return known.slugs;
+  if (options.waitMs === undefined) return read;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const lastKnown = new Promise<readonly string[]>((resolve) => { timer = setTimeout(() => resolve(known?.slugs ?? []), options.waitMs); });
+  return Promise.race([read, lastKnown]).finally(() => clearTimeout(timer));
+}
+
+function readServiceSlugs(cfg: AppConfig, as: BrokerAccess | undefined, identity: string): Promise<readonly string[]> {
+  const read = connectedServices(cfg, as).then(
     (services) => {
       const slugs = Object.keys(services);
-      connectorServiceSlugsCache = { at: Date.now(), identity, slugs };
+      // A read that a connection change overtook answers its own caller and is not kept.
+      if (connectorServiceSlugsRequest?.slugs === read) connectorServiceSlugsCache = { at: Date.now(), identity, slugs };
       return slugs;
     },
     () => connectorServiceSlugsCache?.identity === identity ? connectorServiceSlugsCache.slugs : [] as readonly string[],
-  );
-  connectorServiceSlugsRequest = { identity, slugs: walk };
-  try {
-    return await walk;
-  } finally {
-    if (connectorServiceSlugsRequest?.slugs === walk) connectorServiceSlugsRequest = null;
-  }
+  ).finally(() => {
+    if (connectorServiceSlugsRequest?.slugs === read) connectorServiceSlugsRequest = null;
+  });
+  connectorServiceSlugsRequest = { identity, slugs: read };
+  serviceSlugReads.add(read);
+  void read.finally(() => serviceSlugReads.delete(read));
+  return read;
+}
+
+/** Resolves once no read of the service slugs is running. */
+export async function serviceSlugsReadSettled(): Promise<void> {
+  while (serviceSlugReads.size) await Promise.all(serviceSlugReads);
 }
 
 const CONNECTOR_SERVICE_SLUGS_CACHE_MS = 60_000;
+export const CONNECTOR_SERVICE_SLUGS_STALE_MS = 5 * 60_000;
+/** How long a turn's start waits for the slugs when none it may use are held. */
+const TURN_START_SLUGS_WAIT_MS = 5_000;
 let connectorServiceSlugsCache: { at: number; identity: string; slugs: readonly string[] } | null = null;
 let connectorServiceSlugsRequest: { identity: string; slugs: Promise<readonly string[]> } | null = null;
+const serviceSlugReads = new Set<Promise<readonly string[]>>();
 
 const TOOL_DESCRIPTION_MAX = 240;
 const TOOLS_LIST_PAGES_MAX = 10;
