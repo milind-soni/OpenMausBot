@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   collectLocalBotAsks,
+  formatCasError,
   formatHoldCountdown,
   inferFactoryDomain,
   readAutofabricEndpoint,
   writeAutofabricEndpoint,
 } from "./autofabric-bridge";
-import type { Bot, Message } from "@/state/store";
+import type { Bot, Message, OptionCardData } from "@/state/store";
 
 describe("inferFactoryDomain", () => {
   it("classifies infra repositories accurately", () => {
@@ -64,6 +65,19 @@ describe("formatHoldCountdown", () => {
   });
 });
 
+describe("formatCasError", () => {
+  it("formats 409 CAS conflict accurately for cross-client desync", () => {
+    expect(formatCasError(409)).toBe("并发状态冲突 (409)：该决策卡已被其他端处理，请刷新对账");
+    expect(formatCasError(409, "version mismatch")).toBe("并发状态冲突 (409)：该决策卡已被其他端处理，请刷新对账");
+  });
+
+  it("formats non-409 HTTP errors with server response text", () => {
+    expect(formatCasError(500, "Database locked")).toBe("CAS 批复失败 (HTTP 500): Database locked");
+    expect(formatCasError(502)).toBe("CAS 批复失败 (HTTP 502)");
+    expect(formatCasError(400, "Bad Request")).toBe("CAS 批复失败 (HTTP 400): Bad Request");
+  });
+});
+
 describe("collectLocalBotAsks", () => {
   const baseBot = (id: string, name: string, overrides: Partial<Bot> = {}): Bot =>
     ({
@@ -97,7 +111,6 @@ describe("collectLocalBotAsks", () => {
         tool: "Bash",
         title: "执行系统升级",
         subtitle: "需要终端命令执行权限",
-        
         dismissed: false,
         expired: false,
         options: ["允许", "拒绝"],
@@ -211,6 +224,96 @@ describe("collectLocalBotAsks", () => {
     });
   });
 
+  it("extracts interactive options cards and filters out answered/dismissed/expired cards", () => {
+    const activeOptionsMsg: Message = {
+      id: "msg-opt-active",
+      role: "bot",
+      kind: "options",
+      at: 1700000003500,
+      card: {
+        title: "部署方案选型",
+        subtitle: "请选择目标环境流水线",
+        options: ["全量金丝雀", "灰度 10%", "阻断回退"],
+        dismissed: false,
+        expired: false,
+      },
+    };
+
+    const answeredOptionsMsg: Message = {
+      id: "msg-opt-answered",
+      role: "bot",
+      kind: "options",
+      at: 1700000003200,
+      card: {
+        title: "已决断方案",
+        subtitle: "已完成选择",
+        options: ["A", "B"],
+        answered: "A",
+      },
+    };
+
+    const dismissedOptionsMsg: Message = {
+      id: "msg-opt-dismissed",
+      role: "bot",
+      kind: "options",
+      at: 1700000003100,
+      card: {
+        title: "已废弃选项",
+        subtitle: "无需操作",
+        options: ["X", "Y"],
+        dismissed: true,
+      },
+    };
+
+    const expiredOptionsMsg: Message = {
+      id: "msg-opt-expired",
+      role: "bot",
+      kind: "options",
+      at: 1700000003000,
+      card: {
+        title: "已过期选项",
+        subtitle: "已超期",
+        options: ["1", "2"],
+        expired: true,
+      },
+    };
+
+    const bot = baseBot("b-opt", "软件架构师", {
+      messages: [activeOptionsMsg, answeredOptionsMsg, dismissedOptionsMsg, expiredOptionsMsg],
+    });
+
+    const result = collectLocalBotAsks([bot]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: "options:b-opt:msg-opt-active",
+      kind: "options",
+      headline: "部署方案选型",
+      detail: "请选择目标环境流水线",
+      at: 1700000003500,
+    });
+  });
+
+  it("provides sensible headline and detail fallbacks for options cards missing titles or subtitles", () => {
+    const fallbackMsg: Message = {
+      id: "msg-opt-fallback",
+      role: "bot",
+      kind: "options",
+      at: 1700000003800,
+      card: {
+        options: ["继续重试", "取消中断"],
+      } as unknown as OptionCardData,
+    };
+
+    const bot = baseBot("b-fallback", "提示词架构师", {
+      messages: [fallbackMsg],
+    });
+
+    const result = collectLocalBotAsks([bot]);
+    expect(result).toHaveLength(1);
+    expect(result[0].headline).toBe("提示词架构师 等待你的选择");
+    expect(result[0].detail).toBe("继续重试 / 取消中断");
+  });
+
   it("extracts waiting-on-you bot activity and extracts last bot message snippet", () => {
     const botMsg: Message = {
       id: "msg-bot-text",
@@ -259,7 +362,7 @@ describe("collectLocalBotAsks", () => {
     expect(result[0].kind).toBe("signin");
   });
 
-  it("sorts items by timestamp descending", () => {
+  it("sorts items by timestamp descending across multiple bots and ask kinds", () => {
     const older: Message = {
       id: "msg-old",
       role: "bot",
@@ -267,25 +370,42 @@ describe("collectLocalBotAsks", () => {
       at: 1000,
       card: {
         requestId: "req-old",
-        tool: "Bash", title: "Old Task", subtitle: "sub", options: ["A"],
+        tool: "Bash",
+        title: "Old Task",
+        subtitle: "sub",
+        options: ["A"],
+      },
+    };
+    const middle: Message = {
+      id: "msg-mid",
+      role: "bot",
+      kind: "options",
+      at: 2000,
+      card: {
+        title: "Mid Task",
+        subtitle: "Mid Sub",
+        options: ["B"],
       },
     };
     const newer: Message = {
       id: "msg-new",
       role: "bot",
-      kind: "options",
-      at: 2000,
-      card: {
-        requestId: "req-new",
-        tool: "Bash", title: "New Task", subtitle: "sub", options: ["B"],
+      kind: "signin",
+      at: 3000,
+      signIn: {
+        site: "example.org",
+        url: "https://example.org",
+        place: "browser",
       },
     };
 
     const bot1 = baseBot("b1", "Bot1", { messages: [older] });
-    const bot2 = baseBot("b2", "Bot2", { messages: [newer] });
+    const bot2 = baseBot("b2", "Bot2", { messages: [middle] });
+    const bot3 = baseBot("b3", "Bot3", { messages: [newer] });
 
-    const result = collectLocalBotAsks([bot1, bot2]);
-    expect(result.map((r) => r.at)).toEqual([2000, 1000]);
+    const result = collectLocalBotAsks([bot1, bot2, bot3]);
+    expect(result.map((r) => r.at)).toEqual([3000, 2000, 1000]);
+    expect(result.map((r) => r.kind)).toEqual(["signin", "options", "approval"]);
   });
 });
 
@@ -294,5 +414,17 @@ describe("endpoint helpers", () => {
     expect(readAutofabricEndpoint()).toContain("http");
     const cleaned = writeAutofabricEndpoint("http://localhost:8787///");
     expect(cleaned).toBe("http://localhost:8787");
+  });
+
+  it("falls back to default endpoint on empty or whitespace strings", () => {
+    expect(writeAutofabricEndpoint("")).toBe("http://127.0.0.1:8787");
+    expect(writeAutofabricEndpoint("   ")).toBe("http://127.0.0.1:8787");
+  });
+
+  it("handles long endpoint URLs and strips multiple trailing slashes", () => {
+    const longEndpoint = "https://custom-gateway.openmausbot.internal.corp:9443/cluster-alpha/autofabric-core//////";
+    expect(writeAutofabricEndpoint(longEndpoint)).toBe(
+      "https://custom-gateway.openmausbot.internal.corp:9443/cluster-alpha/autofabric-core",
+    );
   });
 });

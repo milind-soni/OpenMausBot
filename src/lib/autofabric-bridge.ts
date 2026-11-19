@@ -118,7 +118,7 @@ export function readAutofabricEndpoint(): string {
 }
 
 export function writeAutofabricEndpoint(url: string): string {
-  const cleaned = url.trim().replace(/\/+$/, "") || DEFAULT_AUTOFABRIC_ENDPOINT;
+  const cleaned = (url || "").trim().replace(/\/+$/, "") || DEFAULT_AUTOFABRIC_ENDPOINT;
   try {
     localStorage.setItem(DEFAULT_AUTOFABRIC_ENDPOINT_KEY, cleaned);
   } catch {
@@ -142,6 +142,13 @@ export function formatHoldCountdown(expiresAtEpoch?: number | null, nowSec = Dat
   const hours = Math.floor(remaining / 3600);
   const mins = Math.floor((remaining % 3600) / 60);
   return `HOLD 剩余 ${String(hours).padStart(2, "0")}h ${String(mins).padStart(2, "0")}m`;
+}
+
+export function formatCasError(status: number, responseText?: string): string {
+  if (status === 409) {
+    return "并发状态冲突 (409)：该决策卡已被其他端处理，请刷新对账";
+  }
+  return `CAS 批复失败 (HTTP ${status})${responseText ? `: ${responseText}` : ""}`;
 }
 
 export function collectLocalBotAsks(bots: readonly Bot[]): LocalBotAskItem[] {
@@ -205,7 +212,7 @@ export function collectLocalBotAsks(bots: readonly Bot[]): LocalBotAskItem[] {
           threadTitle: bot.tasks?.find((t) => t.threadId === bot.threadId)?.title || bot.name,
           kind: "options",
           headline: m.card.title || `${bot.name} 等待你的选择`,
-          detail: m.card.subtitle || m.card.options.join(" / "),
+          detail: m.card.subtitle || (m.card.options || []).join(" / "),
           at: m.at,
           message: m,
         });
@@ -335,11 +342,7 @@ export function useAutofabricTelemetry(enabled: boolean) {
       );
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        throw new Error(
-          res.status === 409
-            ? "并发状态冲突 (409)：该决策卡已被其他端处理，请刷新对账"
-            : `CAS 批复失败 (HTTP ${res.status})${text ? `: ${text}` : ""}`,
-        );
+        throw new Error(formatCasError(res.status, text));
       }
       await refresh();
     },
