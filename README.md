@@ -4,7 +4,7 @@
 
 Gérer Build Studio is a desktop workspace for working with AI Buddies. Give each Buddy a role, bring specialists together in rooms, and keep chats, project files, tasks, and scheduled work in one place.
 
-![Gérer Build Studio with the Buddy sidebar and a conversation open](docs/screenshots/hero.png)
+![Gérer Build Studio alpha welcome screen with animated Buddies](docs/screenshots/alpha-welcome.png)
 
 ## Install the internal alpha
 
@@ -19,6 +19,8 @@ Application updates are paused during the alpha. To install a newer build, quit 
 3. Choose how you want to use Studio. Pick Development, Design, Research, Finance, or describe a custom goal.
 4. Review and edit your suggested Buddies. You can change their names, roles, responsibilities, and models, and add or remove people before approving the workspace.
 5. Start the guided tour or go straight to your new workspace. To reopen it, select **Restart Studio tour** in **Settings → System**.
+
+![Team review showing the suggested Buddies, roles, and models](docs/screenshots/alpha-team-review.png)
 
 You can explore Studio without an engine. Assign a model and connect its engine before asking a Buddy to run a task.
 

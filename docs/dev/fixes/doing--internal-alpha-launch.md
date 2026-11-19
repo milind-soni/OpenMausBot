@@ -37,7 +37,7 @@ Execution checklist for [the detailed implementation plan](../plans/implementati
 ## Release
 
 - [?] Perform scoped folder cleanup and update affected imports/build paths — `package.json:1`, `electron-builder.yml:1`.
-- [~] Rewrite README and guides with real candidate screenshots and exact developer commands — `README.md:1`, `docs/dev/RELEASING.md:1`.
+- [?] Rewrite README and guides with real candidate screenshots and exact developer commands — `README.md:1`, `docs/dev/RELEASING.md:1`.
 - [~] Complete automated checks and independent responsive/Electron regression review — `package.json:1`.
 - [~] Build and install-test target artifacts; record signing state and checksums — `electron-builder.yml:1`.
 - [~] Review final staged contents, commit, push agreed source branch, and hand over evidence. Public release publication is separate.
@@ -46,3 +46,4 @@ Execution checklist for [the detailed implementation plan](../plans/implementati
 
 - Baseline on Node 24.19.0: 548 of 550 tests passed. Two schedule retry tests depended on elapsed timestamps in the simulated Codex account response. The fixture now generates a current window; all 556 tests in 71 files passed after the fix.
 - The package version is 0.1.16. The installer target is macOS arm64. Windows packaging remains available for a separate Windows verification pass.
+- Studio Preview verified the redesigned welcome and team review at 1440 × 900. The README includes both images. The earlier pass verified profile and engine setup at 390 × 844 and an edited proposal surviving reload before approval.
