@@ -19,11 +19,10 @@ type Driver = EngineLimit["driver"];
 
 /** The drivers whose plan usage gives a limit to show. */
 const REPORTED_DRIVERS: ReadonlySet<string> = new Set(["claude", "codex", "grok", "opencode", "antigravity"]);
-/** Whose allowance a driver's windows measure when it is not the whole engine's (EngineLimit.meter). Antigravity's
- * leading windows are Gemini's alone. Every other driver's windows are the engine's: at its limit they hold the engine,
- * and its turns go to another AI. */
-const PARTIAL_METERS: Readonly<Record<string, string>> = { antigravity: "Gemini" };
-const engineWide = (driver: string) => !Object.hasOwn(PARTIAL_METERS, driver);
+/** Antigravity's 5-hour and weekly windows are Google's default Gemini allowance; its other models draw on allowances
+ * of their own. */
+const SHOWN_ONLY_METERS: Readonly<Record<string, string>> = { antigravity: "Gemini" };
+const meterHoldsEngine = (driver: string) => !Object.hasOwn(SHOWN_ONLY_METERS, driver);
 
 function windowLine(name: LimitWindowName, window: PlanWindow): { window: LimitWindowName; used: number; resetsAt: number | null } | null {
   if (!window.available || window.usedPercent === null) return null;
@@ -36,14 +35,14 @@ function windowLine(name: LimitWindowName, window: PlanWindow): { window: LimitW
 export function engineLimitFromUsage(row: PlanProviderRow): EngineLimit | null {
   if (!row.ok || !REPORTED_DRIVERS.has(row.driver)) return null;
   const windows = [windowLine("5-hour", row.fiveHour), windowLine("weekly", row.weekly)].filter((line) => line !== null);
-  const base = { engine: row.id, name: row.name, driver: row.driver as Driver, ...(engineWide(row.driver) ? {} : { meter: PARTIAL_METERS[row.driver] }),
+  const base = { engine: row.id, name: row.name, driver: row.driver as Driver, ...(meterHoldsEngine(row.driver) ? {} : { meter: SHOWN_ONLY_METERS[row.driver] }),
     windows: windows.map(({ window, used, resetsAt }) => ({ window, usedPercent: used, resetsAt })) };
-  if (!windows.length) return { ...base, window: null, usedPercent: null, resetsAt: null, blocked: false };
+  if (!windows.length) return meterHoldsEngine(row.driver) ? { ...base, window: null, usedPercent: null, resetsAt: null, blocked: false } : null;
   const full = windows.filter((line) => line.used >= 100);
   if (full.length) {
     const latest = full.reduce((left, right) => (right.resetsAt ?? 0) > (left.resetsAt ?? 0) ? right : left);
     // Claude goes on past a full window on its paid extra usage while that has room; its own refusal still holds it.
-    return { ...base, window: latest.window, usedPercent: 100, resetsAt: full.some((line) => line.resetsAt === null) ? null : latest.resetsAt, blocked: engineWide(row.driver) && !claudeHasExtraUsageRoom(row) };
+    return { ...base, window: latest.window, usedPercent: 100, resetsAt: full.some((line) => line.resetsAt === null) ? null : latest.resetsAt, blocked: meterHoldsEngine(row.driver) && !claudeHasExtraUsageRoom(row) };
   }
   const fullest = [...windows].sort((left, right) => right.used - left.used || (left.resetsAt ?? Infinity) - (right.resetsAt ?? Infinity))[0]!;
   return { ...base, window: fullest.window, usedPercent: fullest.used, resetsAt: fullest.resetsAt, blocked: false };
@@ -73,7 +72,7 @@ export function engineLabel(engine: string, instance?: { displayName?: string; d
 
 /** A line for the turn's text when its engine is nearly out of usage, so the bot can set up its own continuation. */
 export function nearLimitNote(limit: EngineLimit | undefined, name: string, timeZone: string): string {
-  if (!limit || !engineWide(limit.driver) || limit.usedPercent === null || limit.usedPercent < NEAR_LIMIT_PERCENT) return "";
+  if (!limit || !meterHoldsEngine(limit.driver) || limit.usedPercent === null || limit.usedPercent < NEAR_LIMIT_PERCENT) return "";
   let resets = "";
   if (limit.resetsAt !== null) {
     try { resets = `; it resets ${new Date(limit.resetsAt).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZone })} (${timeZone})`; }
@@ -157,7 +156,8 @@ export class LimitResetClock {
    * the Go subscription's and never covers Zen's free models. */
   private meterFor(engine: string, model?: string): EngineLimit | undefined {
     const usage = this.reading(engine);
-    return usage?.driver !== "opencode" || !model || (typedOpenCodeModel(model) ?? model).startsWith(OPENCODE_GO_MODEL_PREFIX) ? usage : undefined;
+    if (!usage || !meterHoldsEngine(usage.driver)) return undefined;
+    return usage.driver !== "opencode" || !model || (typedOpenCodeModel(model) ?? model).startsWith(OPENCODE_GO_MODEL_PREFIX) ? usage : undefined;
   }
 
   limit(engine: string): EngineLimit | undefined {
@@ -240,7 +240,7 @@ export class LimitResetClock {
       const limit = engineLimitFromUsage(row);
       if (!limit) continue;
       next.set(limit.engine, limit);
-      if (fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && holdGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
+      if (meterHoldsEngine(row.driver) && fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && holdGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
         this.refusals.delete(limit.engine);
         this.heldAt.delete(limit.engine);
         released = true;

@@ -268,19 +268,32 @@ describe("an Antigravity account's usage", () => {
     });
   });
 
-  it("at Gemini's limit shows the window full and its reset, without holding the engine or routing its turns away", () => {
+  it("at Gemini's limit shows the window full and its reset, and neither holds the engine nor times its reset", () => {
     const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
     instance.noteUsage(report(antigravity([100, NOW + 2 * HOUR], [60, NOW + 60 * HOUR])));
-    expect(instance.limit("antigravity")).toMatchObject({ window: "5-hour", usedPercent: 100, resetsAt: NOW + 2 * HOUR, blocked: false });
+    expect(instance.limit("antigravity")).toMatchObject({ meter: "Gemini", window: "5-hour", usedPercent: 100, resetsAt: NOW + 2 * HOUR, blocked: false });
     expect(instance.limit("antigravity")?.held).toBeUndefined();
     expect(instance.blockedUntil("antigravity")).toBeNull();
     expect(instance.blockedUntil("antigravity", "gemini-3-pro")).toBeNull();
-    expect(instance.resetAt("antigravity")).toBe(NOW + 2 * HOUR);
+    expect(instance.resetAt("antigravity")).toBeNull();
   });
 
-  it("has no row when Google gave nothing usable, so nothing is shown for it", () => {
+  it("never ends a hold on the engine by Gemini's windows", () => {
+    const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
+    instance.noteRefusal("antigravity", NOW + 5 * HOUR);
+    instance.noteUsage(report(antigravity([10, NOW + 2 * HOUR], [20, NOW + 60 * HOUR])));
+    expect(instance.blockedUntil("antigravity")).toBe(NOW + 5 * HOUR);
+  });
+
+  it("has no row when Google gave nothing usable, or only allowances other than Gemini's", () => {
     const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
     instance.noteUsage(report(claude([50, NOW + HOUR], [5, NOW + 90 * HOUR])));
+    expect(instance.report().engines.map((limit) => limit.engine)).toEqual(["claude"]);
+    const sharedOnly = row("antigravity", "antigravity", antigravityPlanWindows(antigravitySummaryWindows({ groups: [
+      { displayName: "Claude and GPT models", buckets: [{ bucketId: "3p-weekly", window: "weekly", remainingFraction: 0.5, resetTime: iso(NOW + 30 * HOUR), description: "used" }] },
+    ] }, NOW)));
+    expect(engineLimitFromUsage(sharedOnly)).toBeNull();
+    instance.noteUsage(report(claude([50, NOW + HOUR], [5, NOW + 90 * HOUR]), sharedOnly));
     expect(instance.report().engines.map((limit) => limit.engine)).toEqual(["claude"]);
   });
 

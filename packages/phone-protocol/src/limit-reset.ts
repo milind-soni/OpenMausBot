@@ -51,7 +51,8 @@ export interface EngineLimit {
   /** Blocked only by a refusal's hold, which "Try again now" can end; absent when a window at its limit blocks it. */
   held?: boolean;
   /** Whose allowance the windows measure when it is not the whole engine's: "Gemini" on Antigravity, whose other models
-   * draw on allowances of their own. Such windows never hold the engine. Absent when the windows are the engine's. */
+   * draw on allowances of their own. Such windows are shown only: they never hold the engine or time its reset, so
+   * `blocked`, `resetsAt` and the limit-reset automations do not follow them. Absent when the windows are the engine's. */
   meter?: string;
   /** Every window the engine reported, in the engine's order. A server that predates it sends only the deciding window above. */
   windows?: LimitWindowUsage[];

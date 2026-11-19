@@ -222,10 +222,11 @@ describe("the model menu's usage rings", () => {
     const menu = await openMenu();
     expect(rings(menu).map((ring) => [ring.dataset.usageEngine, ring.querySelector("[data-usage-ring]")?.getAttribute("data-usage-ring")]))
       .toEqual([["claude", "fine"], ["antigravity", "out"]]);
+    expect(rings(menu)[1]!.getAttribute("aria-label")).toBe("Antigravity (Gemini): 100% used, resets 3:40 PM");
     flushSync(() => rings(menu)[1]!.click());
     expect(shownRows(menu)).toEqual(["5-hour", "weekly"]);
     expect(menu.querySelector("[data-usage-rows]")?.textContent).toContain("Antigravity usage");
-    expect([...menu.querySelectorAll("[data-usage-row] > div > span:first-child")].map((label) => label.textContent)).toEqual(["Gemini 5-hour", "Gemini Weekly"]);
+    expect([...menu.querySelectorAll("[data-usage-row] > div > span:first-child")].map((label) => label.textContent)).toEqual(["Gemini 5-hour", "Gemini weekly"]);
     expect(menu.querySelector("[data-usage-row='5-hour'] [data-usage-track]")?.getAttribute("class")).toContain("bg-danger");
     expect(menu.querySelector("[data-usage-check]")).toBeNull();
     expect(menu.querySelector("[data-usage-release]")).toBeNull();
