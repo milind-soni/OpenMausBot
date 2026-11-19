@@ -3114,6 +3114,25 @@ describe("restoring the open conversation", () => {
       expect(seen.notice).toEqual(current);
     });
 
+    it("ignores a held room-steer note arriving after navigation without erasing the current notice", async () => {
+      const { stream } = await boot();
+      stream.send(hello());
+      await settle();
+      let respond!: (response: Response) => void;
+      vi.stubGlobal("fetch", () => new Promise<Response>((resolve) => { respond = resolve; }));
+      const settled = vi.fn();
+      flushSync(() => dispatch({ type: "select", id: "room-1" }));
+      flushSync(() => dispatch({ type: "steerGroupQueued", groupId: "room-1", queueId: "delayed-room-plain", onSettled: settled }));
+      await settle();
+      flushSync(() => dispatch({ type: "select", id: "bot-2" }));
+      const current = { kind: "steer-images" as const, botName: null, threadId: "bot-2-thread" };
+      flushSync(() => dispatch({ type: "notice", notice: current }));
+      respond(new Response(JSON.stringify({ ok: true, queued: true, threadId: "room-thread" })));
+      await settle();
+      expect(settled).toHaveBeenCalledOnce();
+      expect(seen.notice).toEqual(current);
+    });
+
     it("the provider restores the conversation remembered on this device", async () => {
       const { stored, stream } = await boot({ [LAST_CONVERSATION_KEY]: "room-1" });
       stream.send(hello());
