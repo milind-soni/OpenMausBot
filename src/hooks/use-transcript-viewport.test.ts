@@ -200,7 +200,11 @@ beforeEach(() => {
   });
   vi.stubGlobal("HTMLTextAreaElement", class {});
   vi.stubGlobal("HTMLInputElement", class {});
-  return () => vi.unstubAllGlobals();
+  return () => {
+    for (const slot of react.runtime.slots) (slot as { cleanup?: () => void } | undefined)?.cleanup?.();
+    react.runtime.slots = [];
+    vi.unstubAllGlobals();
+  };
 });
 
 const press = (key: string, target: unknown = {}) => {
