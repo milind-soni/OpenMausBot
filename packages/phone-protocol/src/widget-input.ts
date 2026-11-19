@@ -3,12 +3,12 @@ export function childNodes(raw: Record<string, unknown>): unknown[] {
   const children = raw.children;
   if (children === undefined || children === null) return [];
   if (Array.isArray(children)) return children;
-  if (typeof children !== "object") return [children];
+  if (!isRecord(children)) return [children];
   const keys = Object.keys(children);
   if (keys.length !== 1) return [children];
   const only = children[keys[0]!];
   if (Array.isArray(only)) return only;
-  if (typeof only === "object" && only !== null) return [only];
+  if (isRecord(only)) return [only];
   return [children];
 }
 
@@ -17,4 +17,8 @@ export function nodeTypeProblem(raw: Record<string, unknown>, known: string): st
   return raw.type === undefined
     ? `has no type; use one of ${known}`
     : `unknown type ${JSON.stringify(raw.type)}; use one of ${known}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
