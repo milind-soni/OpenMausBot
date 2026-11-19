@@ -71,12 +71,12 @@ the next turn starts small.
   ended with 100k tokens or more of context gets one about 3 minutes later.
   Claude Code summarizes by itself about 33,000 tokens below
   `OMB_CLAUDE_AUTOCOMPACT` (200,000 by default, so near 167k). A conversation
-  at 70% or more of that setting (140k) gets its summary about 10 seconds
+  within 27,000 tokens of that point (140k) gets its summary about 10 seconds
   after the turn, since one more turn of tool work can reach that point; a
   message sent meanwhile is not held up and the summary is dropped, and
   after one dropped that way the conversation goes back to the 3 minutes
-  until a summary is written. At 80% or
-  more (160k) it starts one second after the turn, because the next turn
+  until a summary is written. Within
+  7,000 tokens of it (160k) it starts one second after the turn, because the next turn
   would summarize anyway; a message sent meanwhile shows "context compaction
   started (auto)" and its turn starts when the summary is written (at most 3
   minutes, then the turn goes on without it). For an engine

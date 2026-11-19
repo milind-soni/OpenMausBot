@@ -49,7 +49,7 @@ async function setup(extra: NodeJS.ProcessEnv) {
     const lastPrompt = () => readFileSync(prompts, "utf8").trim().split("\n").filter(Boolean).map((l) => JSON.parse(l)).at(-1);
     const lastLaunch = () => JSON.parse(readFileSync(session.fixtureDumpPath, "utf8")).argv as string[];
     const compactDump = () => existsSync(env.FAKE_CLAUDE_COMPACT_DUMP) ? JSON.parse(readFileSync(env.FAKE_CLAUDE_COMPACT_DUMP, "utf8")) : null;
-    return { session, bot, thread, task, send, messages, lastPrompt, lastLaunch, compactDump,
+    return { session, bot, thread, task, send, messages, lastPrompt, lastLaunch, compactDump, cli,
       close: async () => { try { await session.close(); } finally { await removeTempDir(scratch); } } };
   } catch (error) {
     await session.close();
@@ -113,6 +113,45 @@ it("a message sent while the summary it needs is being written waits for it rath
   expect(launch[launch.indexOf("--resume") + 1]).toBe(f.task().resumeCursors.claude);
   expect(f.compactDump()).not.toBeNull();
   expect(words(f.lastPrompt())).toContain("MSG-3 and the subtitle");
+  // The person saw why: Claude Code's own compaction line, once, then the summary's.
+  const lines = (await f.messages()).filter((m) => m.kind === "activity").map((m) => String(m.tool?.name));
+  expect(lines.filter((name) => name === "context compaction started (auto)")).toHaveLength(1);
+  expect(lines.findIndex((name) => /while it was idle/.test(name))).toBeGreaterThan(lines.indexOf("context compaction started (auto)"));
+}), 120_000);
+
+// Claude Code's own compaction is out of reach in the next two (FAKE_CLAUDE_AUTOCOMPACT_AT), so the only compaction line is the wait's.
+it("a summary that fails while a turn waits for it lets the turn run on its own session", () => fixture({
+  FAKE_CLAUDE_AUTOCOMPACT_AT: "900000",
+  FAKE_CLAUDE_COMPACT_RESULT: JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, result: "API Error: 529 overloaded" }),
+}, async (f) => {
+  for (const text of ["MSG-1 build the landing page", "MSG-2 make the title bold", "MSG-3 and the subtitle"]) await f.send(text);
+  const session = f.task().resumeCursors.claude;
+  await sleep(1_000);
+  const waited = await f.send("MSG-4 what changed?");
+  record({ case: "sent during a summary that failed", nextReplyMs: waited });
+  expect(waited).toBeLessThan(COMPACT_MS + 3_000);
+  expect(f.task().resumeCursors.claude).toBe(session);
+  expect(words(f.lastPrompt())).toContain("MSG-4 what changed?");
+  const all = await f.messages();
+  expect(all.filter((m) => m.kind === "activity" && m.tool?.name === "context compaction started (auto)")).toHaveLength(1);
+  expect(all.some((m) => m.kind === "activity" && /while it was idle/.test(m.tool?.name ?? ""))).toBe(false);
+  expect(all.findLast((m) => m.role === "bot" && m.kind === "text")?.at).toBeGreaterThan(all.findLast((m) => m.role === "user")!.at);
+}), 120_000);
+
+it("Stop ends a turn that waits for a summary, and the next message is answered", () => fixture({ FAKE_CLAUDE_AUTOCOMPACT_AT: "900000" }, async (f) => {
+  for (const text of ["MSG-1 build the landing page", "MSG-2 make the title bold", "MSG-3 and the subtitle"]) await f.send(text);
+  await sleep(1_000);
+  await f.cli("send", "--bot", f.bot.id, "--task", f.thread, "--text", "MSG-4 what changed?");
+  await sleep(1_000);
+  const stopped = performance.now();
+  await f.cli("interrupt", "--bot", f.bot.id, "--task", f.thread);
+  expect((await f.cli("wait", "--bot", f.bot.id, "--task", f.thread, "--timeout", "30")).status).toBe("settled");
+  // Well before the summary (about 6 s) would have finished.
+  expect(performance.now() - stopped).toBeLessThan(COMPACT_MS - 2_500);
+  expect(words(f.lastPrompt())).not.toContain("MSG-4 what changed?");
+  const next = await f.send("MSG-5 carry on");
+  expect(next).toBeLessThan(COMPACT_MS + 3_000);
+  expect(words(f.lastPrompt())).toContain("MSG-5 carry on");
 }), 120_000);
 
 it("a message sent during a summary the turn did not need is never held up by it", () => fixture({ FAKE_CLAUDE_CONTEXT_GROWTH: "100000:10000" }, async (f) => {

@@ -225,7 +225,7 @@ describe("warm summaries for a Claude conversation", () => {
     expect(f.appended).toEqual([]);
   });
 
-  it("does nothing below 100k tokens, and starts at once from 80% of the engine's own compaction point", async () => {
+  it("does nothing below 100k tokens, and starts at once close to the engine's own compaction point", async () => {
     const small = setup({}, { tokens: 60_000 });
     small.finishTurn();
     await small.advance(WARM_SUMMARY_IDLE_MS * 3);
@@ -236,7 +236,20 @@ describe("warm summaries for a Claude conversation", () => {
     expect(near.compactCalls).toHaveLength(1);
   });
 
-  it("writes the summary ahead from 70% of the engine's own point, after the pause of a quick reply, and minutes later below that", async () => {
+  it("places both points below where the engine compacts at a lower setting too", async () => {
+    const low = setup({ nativeCompactAt: () => 100_000 }, { tokens: 60_500 });
+    low.finishTurn();
+    await low.advance(WARM_SUMMARY_NOW_MS);
+    expect(low.compactCalls).toHaveLength(1);
+    const lower = setup({ nativeCompactAt: () => 100_000 }, { tokens: 52_000 });
+    lower.finishTurn();
+    await lower.advance(WARM_SUMMARY_NOW_MS);
+    expect(lower.compactCalls).toEqual([]);
+    await lower.advance(WARM_SUMMARY_SOON_MS);
+    expect(lower.compactCalls).toHaveLength(1);
+  });
+
+  it("writes the summary ahead from 27k below the engine's own point, after the pause of a quick reply, and minutes later below that", async () => {
     const below = setup({}, { tokens: 139_000 });
     below.finishTurn();
     await below.advance(WARM_SUMMARY_IDLE_MS - 1);

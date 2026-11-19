@@ -21,12 +21,14 @@ import type { Message, Store } from "../store.ts";
 import type { WaitRecord } from "../waits.ts";
 import { createWarmSummary, WARM_SUMMARY_MIN_TOKENS, WARM_SUMMARY_RETRY_MS, type WarmSummaryOutcome, type WarmSummaryPlan, type WarmSummaryTarget } from "../warm-summary.ts";
 
-/** Claude Code summarizes at the start of a turn once its context passes about 0.81 of its window (162k of 200k measured
- * on a Team trial): from 0.8 the next turn would summarize anyway, so the warm summary starts almost at once. */
-export const NATIVE_SOON_FRACTION = 0.8;
-/** Claude Code 2.1.321 summarizes about 33k tokens below its compaction window (167k of 200k), and one whole-file read
- * adds about 22k: from 0.7 an ordinary turn of tool work can end past that point, so the summary is written ahead of it. */
-export const NATIVE_AHEAD_FRACTION = 0.7;
+/** Claude Code 2.1.321 summarizes about this far below its compaction window: near 167k with `--autocompact 200000`
+ * (162k was measured on a Team trial), and before 74k with 100000. */
+export const NATIVE_COMPACT_HEADROOM = 33_000;
+/** Within this of that point the next turn would summarize anyway: 160k at the default. */
+export const NATIVE_SOON_MARGIN = 7_000;
+/** Within this of that point an ordinary turn of tool work can end past it (one whole-file read adds about 22k): 140k at
+ * the default. */
+export const NATIVE_AHEAD_MARGIN = 27_000;
 /** The line Claude Code's own PreCompact hook puts in the chat; a turn waiting for a summary shows the same one. */
 export const COMPACTION_STARTED_LINE = "context compaction started (auto)";
 /** Kept word for word after a summary: the person's last two messages and everything since. */
@@ -111,7 +113,6 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
     const result = await compact(threadId, { instructions: summaryInstructions(sinceFreshStart(store.activePath(threadId))), session, signal: control.signal });
     if (!result.ok) return { ok: false, reason: result.reason, retry: result.busy === true && !control.signal.aborted };
     deps.book(target, result);
-    deps.log?.(`warm summary ${threadId}: its call read ${result.cacheRead} cached and ${result.input} new tokens, wrote ${result.cacheWrite} to the cache and ${result.output} out`);
     // Applied only to the conversation as it was: on the same session, and with no turn begun since (but the one waiting).
     const task = store.taskByThread(botId, threadId);
     if (task?.resumeCursors[instanceId] !== result.sessionBefore) return { ok: false, reason: "the conversation moved to another session" };
@@ -136,7 +137,8 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
       if (!instance.adapter.cacheKeepWarm?.compact) return { way: "harness", soon: false };
       const at = deps.nativeCompactAt(target.instanceId);
       if (at === undefined || contextTokens === undefined || contextTokens < Math.min(WARM_SUMMARY_MIN_TOKENS, at / 2)) return null;
-      return { way: "native", soon: contextTokens >= at * NATIVE_SOON_FRACTION, ahead: contextTokens >= at * NATIVE_AHEAD_FRACTION };
+      const point = at - NATIVE_COMPACT_HEADROOM;
+      return { way: "native", soon: contextTokens >= point - NATIVE_SOON_MARGIN, ahead: contextTokens >= point - NATIVE_AHEAD_MARGIN };
     },
     hold: ({ botId, threadId }) => {
       if (deps.busy(botId, threadId)) return { reason: "the bot is busy", retry: true };
