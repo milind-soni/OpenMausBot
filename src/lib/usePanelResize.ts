@@ -23,13 +23,22 @@ export function setStoredPanelWidth(id: string, width: number): void {
 // Panels that share the chat's right slot. A drawer overlays them, so they don't limit its width.
 const RIGHT_SLOT_PANELS = new Set(["preview", "tasks"]);
 
+// Widths each mounted panel has committed, keyed by panel id. Neighbours read these rather
+// than the DOM: while a resize event is dispatching, the DOM still shows the old widths, so
+// panels clamping against measured widths reacted to stale numbers, pushed each other back
+// and forth every frame and could recurse until React gave up and blanked the window.
+const committedWidths = new Map<string, number>();
+
 export function getOtherDockedWidths(selfId: string, docked = true): number {
   if (typeof document === "undefined") return 0;
   const panels = document.querySelectorAll<HTMLElement>("[data-panel]");
   let total = 0;
   panels.forEach((el) => {
     const panelId = el.getAttribute("data-panel");
-    if (panelId && panelId !== selfId && (docked || !RIGHT_SLOT_PANELS.has(panelId))) {
+    // Right-slot panels yield: the sidebar and fixed columns keep their width and the
+    // preview/tasks panel fits what's left, so panels never squeeze each other in turns.
+    const yields = RIGHT_SLOT_PANELS.has(panelId ?? "") && !RIGHT_SLOT_PANELS.has(selfId);
+    if (panelId && panelId !== selfId && !yields && (docked || !RIGHT_SLOT_PANELS.has(panelId))) {
       // Only count panels in horizontal flex flow (exclude floating drawers)
       const isFloating =
         el.classList.contains("absolute") ||
@@ -38,7 +47,7 @@ export function getOtherDockedWidths(selfId: string, docked = true): number {
           (window.getComputedStyle(el).position === "absolute" ||
             window.getComputedStyle(el).position === "fixed"));
       if (!isFloating) {
-        total += el.getBoundingClientRect().width;
+        total += committedWidths.get(panelId) ?? el.getBoundingClientRect().width;
       }
     }
   });
@@ -119,11 +128,14 @@ export function usePanelResize({
 
   const widthRef = useRef(width);
   widthRef.current = width;
+  committedWidths.set(id, width);
+  useEffect(() => () => void committedWidths.delete(id), [id]);
 
   const applyWidth = useCallback(
     (newWidth: number): number => {
       const effMax = getEffectiveMaxWidth();
       const clamped = Math.max(minWidth, Math.min(newWidth, effMax));
+      committedWidths.set(id, clamped);
       if (clamped !== widthRef.current) {
         widthRef.current = clamped;
         setWidthState(clamped);

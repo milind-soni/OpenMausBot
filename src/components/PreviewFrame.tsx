@@ -111,6 +111,8 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
   const [status, setStatus] = useState<PreviewFrameStatus>(
     pendingConfirmUrl ? "confirm" : source ? "loading" : "empty",
   );
+  const statusRef = useRef(status);
+  statusRef.current = status;
   const [errorMessage, setErrorMessage] = useState("");
   const [slowWarning, setSlowWarning] = useState(false);
   const [reloadNonce, setReloadNonce] = useState(0);
@@ -135,6 +137,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
 
   const updateStatus = useCallback(
     (next: PreviewFrameStatus) => {
+      statusRef.current = next;
       setStatus(next);
       onStatusChange?.(next);
     },
@@ -152,21 +155,34 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     }
   }, []);
 
+  // Only report history changes. The PDF viewer fires navigation events continuously,
+  // and a fresh object on each one re-rendered the whole panel every time.
+  const lastHistoryRef = useRef<string>("");
+  const reportHistory = useCallback(
+    (canGoBack: boolean, canGoForward: boolean) => {
+      const key = `${canGoBack}:${canGoForward}`;
+      if (lastHistoryRef.current === key) return;
+      lastHistoryRef.current = key;
+      onHistoryStateChange?.({ canGoBack, canGoForward });
+    },
+    [onHistoryStateChange],
+  );
+
   const syncWebviewHistory = useCallback(() => {
     const el = webviewRef.current as any;
     if (!el || !isElectron) {
-      onHistoryStateChange?.({ canGoBack: false, canGoForward: false });
+      reportHistory(false, false);
       return;
     }
     try {
-      onHistoryStateChange?.({
-        canGoBack: typeof el.canGoBack === "function" ? Boolean(el.canGoBack()) : false,
-        canGoForward: typeof el.canGoForward === "function" ? Boolean(el.canGoForward()) : false,
-      });
+      reportHistory(
+        typeof el.canGoBack === "function" ? Boolean(el.canGoBack()) : false,
+        typeof el.canGoForward === "function" ? Boolean(el.canGoForward()) : false,
+      );
     } catch {
-      onHistoryStateChange?.({ canGoBack: false, canGoForward: false });
+      reportHistory(false, false);
     }
-  }, [isElectron, onHistoryStateChange]);
+  }, [isElectron, reportHistory]);
 
   const reload = useCallback(() => {
     if (!source) return;
@@ -436,11 +452,10 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     const onStop = () => {
       clearTimers();
       setSlowWarning(false);
-      setStatus((prev) => {
-        const next = prev === "error" || prev === "blocked" ? prev : "loaded";
-        onStatusChange?.(next);
-        return next;
-      });
+      // Decide from the latest status outside the updater: calling the parent's setter
+      // inside a state updater is a render-phase update React warns about.
+      const prev = statusRef.current;
+      if (prev !== "error" && prev !== "blocked") updateStatus("loaded");
       syncWebviewHistory();
     };
     const onFail = (e: any) => {
