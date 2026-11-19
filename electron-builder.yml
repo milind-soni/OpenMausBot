@@ -1,6 +1,7 @@
 appId: com.gererbuildstudio.app
 productName: Gerer Build Studio
 artifactName: GererBuildStudio-${version}-${arch}.${ext}
+publish: null
 
 directories:
   buildResources: build
