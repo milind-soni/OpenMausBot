@@ -12,6 +12,7 @@ import {
   type WheelEvent,
 } from "react";
 import { BOTTOM_FOLLOW_THRESHOLD, followBottomGrowth, useBottomFollowResize } from "@/lib/bottom-follow";
+import { afterPaint } from "@/lib/after-paint";
 import { useFocusMessage } from "@/lib/focus-message";
 import {
   TRANSCRIPT_WINDOW_MAX,
@@ -176,8 +177,9 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   drawFromRef.current = drawFrom;
   const filling = useRef<{ key: string; height: number } | null>(null);
   const fillNow = useCallback(() => {
-    filling.current = { key: followNow.current.key, height: scrollRef.current?.scrollHeight ?? 0 };
-    setFirstFrame(null);
+    const key = followNow.current.key;
+    filling.current = { key, height: scrollRef.current?.scrollHeight ?? 0 };
+    setFirstFrame((staged) => staged?.key === key ? null : staged);
   }, []);
   useLayoutEffect(() => {
     const el = scrollRef.current, filled = filling.current;
@@ -192,22 +194,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     el.scrollTop = followRef.current ? el.scrollHeight : el.scrollTop + el.scrollHeight - filled.height;
     lastTop.current = el.scrollTop;
   }, [drawFrom, fillNow, transcriptKey]);
-  useEffect(() => {
-    if (!drawFrom) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const fill = () => {
-      clearTimeout(timer);
-      cancelAnimationFrame(frame);
-      timer = setTimeout(() => startTransition(fillNow), 0);
-    };
-    // A frame callback runs just before the paint; the task it queues runs after it. A hidden window gets no frames.
-    const frame = requestAnimationFrame(fill);
-    timer = setTimeout(fill, 100);
-    return () => {
-      cancelAnimationFrame(frame);
-      clearTimeout(timer);
-    };
-  }, [drawFrom, fillNow]);
+  useEffect(() => drawFrom ? afterPaint(() => startTransition(fillNow)) : undefined, [drawFrom, fillNow]);
   const windowRef = useRef(transcriptWindow);
   windowRef.current = transcriptWindow;
   restingCardId.current = windowedMessages[0] && windowedMessages[0] !== messages[startIndex] ? windowedMessages[0].id : undefined;

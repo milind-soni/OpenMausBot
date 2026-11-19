@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // The real provider, two long chats: switching between them draws the newest rows first and mounts no hover-only part.
 import { commitMark, commitsSince, countBy, renderMark, renderedSince } from "@/testing/render-counts";
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,15 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: "other" }, localComputer: { available: false } }, ready: true }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+// The frame after the click's paint, run by the test: rows queued for it are drawn exactly when `paint()` says.
+const painted = vi.hoisted(() => [] as (() => void)[]);
+vi.mock("@/lib/after-paint", () => ({ afterPaint: (callback: () => void) => {
+  painted.push(callback);
+  return () => {
+    const at = painted.indexOf(callback);
+    if (at >= 0) painted.splice(at, 1);
+  };
+} }));
 vi.mock("@/lib/cloud-guest", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/cloud-guest")>(), useReactor: () => "user" }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: vi.fn() }));
 
@@ -80,6 +89,16 @@ const settle = async () => { for (let i = 0; i < 6; i++) await task(); };
 const frames = async () => { for (let i = 0; i < 4; i++) { await new Promise((resolve) => requestAnimationFrame(resolve)); await settle(); } };
 const stream = () => FixtureEventSource.opened[0]!;
 const rows = () => document.querySelectorAll('[role="log"] [data-mid]');
+/** The paint happened: what waited for it runs, and act draws the transition it starts before returning. */
+async function paint() {
+  const flag = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+  flag.IS_REACT_ACT_ENVIRONMENT = true;
+  try {
+    await act(async () => { for (const run of painted.splice(0)) run(); });
+  } finally {
+    flag.IS_REACT_ACT_ENVIRONMENT = false;
+  }
+}
 
 /** No layout here: the scroller reads as a 900px view over rows 120px tall each. */
 function layout() {
@@ -93,6 +112,7 @@ async function switchTo(id: string) {
   const mark = renderMark(), commits = commitMark();
   flushSync(() => dispatch({ type: "select", id }));
   const first = { mounted: renderedSince(mark).filter((entry) => entry.mounted).length, rows: rows().length, ids: [...rows()].map((row) => row.getAttribute("data-mid")) };
+  await paint();
   await frames();
   const mounted = renderedSince(mark).filter((entry) => entry.mounted);
   const again = renderedSince(mark).filter((entry) => !entry.mounted && entry.row !== null);
