@@ -1,3 +1,4 @@
+import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { useEffect, useRef, type RefObject } from "react";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]';
@@ -9,7 +10,7 @@ export function useModalDialog(dialogRef: RefObject<HTMLElement | null>, onClose
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousFocus = keyboardFocusTarget();
     if (!dialog.contains(document.activeElement)) dialog.focus();
     const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE))
       .filter((element) => element.getAttribute("tabindex") !== "-1" && !element.closest("[hidden], [inert]"));

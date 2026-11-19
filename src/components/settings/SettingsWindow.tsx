@@ -1,3 +1,4 @@
+import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, X } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -106,7 +107,7 @@ export function SettingsWindow() {
   };
 
   useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousFocus = keyboardFocusTarget();
     const dialog = dialogRef.current;
     const search = dialog?.querySelector<HTMLInputElement>("[data-settings-search]");
     if (search?.checkVisibility()) search.focus({ preventScroll: true });

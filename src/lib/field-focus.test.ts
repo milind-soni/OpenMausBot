@@ -46,7 +46,7 @@ describe("text field focus", () => {
   });
 
   it("paints a focused field's own border in the focus colour, above every utility", () => {
-    const rule = unlayered(css).match(/:is\(input, textarea, select\):focus-visible(?::not\([^)]*\))?\s*\{([^}]*)\}/g) ?? [];
+    const rule = unlayered(css).match(/:is\(input(?::not\([^)]*\))?, textarea, select\):focus-visible(?::not\([^)]*\))?\s*\{([^}]*)\}/g) ?? [];
     expect(rule.join("\n")).toMatch(/border-color:\s*var\(--color-focus\)/);
   });
 

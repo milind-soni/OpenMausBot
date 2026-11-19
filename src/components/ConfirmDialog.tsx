@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { AlertTriangle } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { t } from "@/lib/i18n";
 
 export type ConfirmTone = "danger" | "neutral";
@@ -40,7 +41,8 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
   cancelAction.current = onCancel;
   useEffect(() => {
     if (!open) return;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const opener = document.activeElement;
+    const keyboardOpener = keyboardFocusTarget();
     cancelRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -65,7 +67,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
-      const target = opener?.isConnected && opener !== document.body ? opener : returnFocusRef?.current;
+      const target = opener?.isConnected && opener !== document.body ? keyboardOpener : returnFocusRef?.current;
       target?.focus();
     };
   }, [open, returnFocusRef]);

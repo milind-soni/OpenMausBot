@@ -1,3 +1,4 @@
+import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { Component, lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Check, Code2, Download, ExternalLink, Eye, LoaderCircle, RotateCcw } from "lucide-react";
 import { requestMessageFile, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
@@ -58,8 +59,8 @@ export function useHtmlPreview(path: string, name: string, message?: MessageAtta
   return {
     opens: kind !== null,
     label: t(kind === "markdown" ? "markdown.preview" : "html.preview", { name }),
-    show: (event: { currentTarget: HTMLElement }) => {
-      opener.current = event.currentTarget;
+    show: () => {
+      opener.current = keyboardFocusTarget();
       setOpen(true);
     },
     dialog: kind && open && message

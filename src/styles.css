@@ -103,7 +103,7 @@
   cursor: pointer;
 }
 .table-action:hover, .table-action[aria-pressed="true"] { background: var(--color-raised); color: var(--color-ink); }
-.table-action:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.table-action:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
 @media (pointer: coarse) { .table-action { min-width: 40px; min-height: 40px; } }
 /* inside a 28px file pill under a reply, the table preview is a 24px circle */
 .file-chip .table-action { width: 24px; height: 24px; min-width: 24px; min-height: 24px; border-radius: 9999px; }
@@ -2042,21 +2042,36 @@ body {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
-/* Settings: nav items, identity rows, search results and whole-row buttons (link, fold and card rows) take an inset
-   ring, so it is never clipped by the card or drawn into the nav's edge. */
+:is(button, summary, input:is([type="button"], [type="submit"], [type="reset"], [type="image"]), [role="button"], [role="tab"], [role="switch"], [role^="menuitem"]) {
+  &:focus-visible {
+    outline: none;
+    background-color: color-mix(in srgb, var(--color-card), var(--color-ink) 20%);
+    color: var(--color-ink);
+  }
+
+  &[class*="focus:ring-"]:focus,
+  &[class*="focus-visible:ring-"]:focus-visible {
+    --tw-ring-shadow: 0 0 transparent;
+    --tw-ring-offset-shadow: 0 0 transparent;
+  }
+
+  @media (forced-colors: active) {
+    &:focus-visible {
+      forced-color-adjust: none;
+      background-color: Highlight;
+      color: HighlightText;
+    }
+  }
+}
+/* Focus outlines stay inside settings rows that use them. */
 [data-settings-look] :is([data-settings-page], [data-settings-hit], [data-settings-key-result], [data-settings-rows] > button, [data-settings-rows] > * > button[aria-expanded], [data-settings-fold] > button, [data-settings-rows] > button[data-pair-with-cloud]):focus-visible {
   outline-offset: -2px;
-}
-/* A menu row shows keyboard focus as its hover fill. */
-[role="menu"] :is(button, [role^="menuitem"]):focus-visible {
-  outline: none;
-  background-color: var(--color-menu-hover);
 }
 
 /* Text fields already sit in a bordered card (the composer pill especially).
    Chromium treats a pointer click as :focus-visible on inputs, so the
    global ring above becomes a sharp blue rectangle inside the rounded
-   chrome. Buttons still use the :focus-visible ring. Checkboxes, radios,
+   chrome. Buttons show focus with a background fill. Checkboxes, radios,
    sliders, colour wells and file pickers are not text fields: they have no
    border to repaint, so they keep the ring, or a keyboard user tabbing onto
    one sees nothing. */
@@ -2075,7 +2090,7 @@ body {
    in the focus colour.
    A field reporting an error (aria-invalid) keeps its danger border, so the
    red does not vanish while the user is fixing it. */
-:is(input, textarea, select):focus-visible:not([aria-invalid="true"]) {
+:is(input:not([type="button"], [type="submit"], [type="reset"], [type="image"]), textarea, select):focus-visible:not([aria-invalid="true"]) {
   border-color: var(--color-focus);
 }
 /* Settings: every control shows keyboard focus the same way, as the 2 px focus ring a switch or a button gets (§6.10).

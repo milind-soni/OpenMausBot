@@ -1,3 +1,4 @@
+import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, Table2 } from "lucide-react";
 import { requestMessageFile, type MessageAttachmentContext } from "./AttachmentPreview";
@@ -37,11 +38,11 @@ export async function readTableResponse(response: Response, signal: AbortSignal,
 
 export function TableFileButton({ path, name, message }: { path: string; name: string; message: MessageAttachmentContext }) {
   const [open, setOpen] = useState(false);
-  const trigger = useRef<HTMLButtonElement>(null);
+  const trigger = useRef<HTMLElement | null>(null);
   const delimiter = tableDelimiter(name) ?? tableDelimiter(path);
   if (!delimiter) return null;
   return <>
-    <button ref={trigger} type="button" className="table-action" title={t("table.preview", { name })} aria-label={t("table.preview", { name })} onClick={() => setOpen(true)}><Table2 size={14} /></button>
+    <button type="button" className="table-action" title={t("table.preview", { name })} aria-label={t("table.preview", { name })} onClick={() => { trigger.current = keyboardFocusTarget(); setOpen(true); }}><Table2 size={14} /></button>
     {open && <TableDialog title={name} returnFocus={trigger.current} onClose={() => setOpen(false)}><TableFileContent key={`${message.threadId}:${message.messageId}:${path}`} path={path} name={name} message={message} delimiter={delimiter} /></TableDialog>}
   </>;
 }

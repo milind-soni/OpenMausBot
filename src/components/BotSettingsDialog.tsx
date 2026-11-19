@@ -1,3 +1,4 @@
+import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Search, X } from "lucide-react";
 
@@ -75,7 +76,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   }, [collapsed, section, q]);
 
   useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousFocus = keyboardFocusTarget();
     const dialog = dialogRef.current;
     dialog?.focus();
 

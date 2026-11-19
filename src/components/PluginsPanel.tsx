@@ -1,3 +1,4 @@
+import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Loader2, RefreshCw, Search, Server, TriangleAlert, X } from "lucide-react";
 import { api, useStore, type Bot, type InstanceInfo } from "@/state/store";
@@ -263,7 +264,7 @@ export function PluginsPanel() {
   }, [loadConnectionInventory]);
 
   useEffect(() => {
-    const returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const returnFocus = keyboardFocusTarget();
     const dialog = dialogRef.current;
     const focusable = () =>
       Array.from(

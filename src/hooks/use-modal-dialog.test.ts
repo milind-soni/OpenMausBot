@@ -12,6 +12,8 @@ import { useModalDialog } from "./use-modal-dialog";
 
 class FakeElement extends EventTarget {
   constructor(readonly name: string, readonly parent?: FakeElement) { super(); }
+  keyboardFocused = true;
+  matches(selector: string) { return selector === ":focus-visible" && this.keyboardFocused; }
   focus() { document.activeElement = this; }
   getAttribute() { return null; }
   closest() { return null; }
@@ -57,6 +59,18 @@ describe("modal dialog keyboard handling", () => {
     expect(document.activeElement).toBe(dialog);
     cleanup();
     expect(document.activeElement).toBe(opener);
+  });
+
+  it("does not restore a pointer-focused opener after Escape", () => {
+    cleanup();
+    opener.keyboardFocused = false;
+    opener.focus();
+    const close = fixture.effects[0]!() as () => void;
+    expect(document.activeElement).toBe(dialog);
+    key(dialog, "Escape");
+    expect(onClose).toHaveBeenCalledOnce();
+    close();
+    expect(document.activeElement).not.toBe(opener);
   });
 
   it("closes on Escape without letting the page see it", () => {
