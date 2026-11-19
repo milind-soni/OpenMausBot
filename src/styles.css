@@ -95,6 +95,26 @@ body {
   .thinking-shimmer { background: none; color: var(--color-ink-secondary); }
 }
 
+/* A choice stays visible after its one-time click feedback finishes. */
+.option-choice-selected {
+  background-color: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+.option-choice-pulse { animation: option-choice-pulse 360ms ease-out; }
+.option-check-pop { animation: option-check-pop 260ms cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes option-choice-pulse {
+  from { background-color: color-mix(in srgb, var(--color-accent) 32%, transparent); }
+  to { background-color: color-mix(in srgb, var(--color-accent) 14%, transparent); }
+}
+@keyframes option-check-pop {
+  0% { opacity: 0; transform: scale(0.5); }
+  65% { opacity: 1; transform: scale(1.15); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .option-choice-pulse, .option-check-pop { animation: none; }
+}
+
 /* SupaMaus vector motion. The fast horizontal compression is the edge-on
    moment of a turn; face parallax, surface lighting, and orbiting vector marks
    sell the 3D rotation without duplicate silhouettes, raster frames, or WebGL. */

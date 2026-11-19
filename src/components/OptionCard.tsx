@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { X } from "lucide-react";
+import { Check, X } from "lucide-react";
 import { usePermissionAutoApprove, useStore, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 
@@ -17,14 +17,20 @@ export function OptionCard({
   const { dispatch } = useStore();
   const { countdown, cancel } = usePermissionAutoApprove();
   const [custom, setCustom] = useState("");
+  const [clickedAnswer, setClickedAnswer] = useState<string | null>(null);
   const card = message.card;
   if (!card || card.dismissed) return null;
   const timerKey = `${threadId ?? botId}:${message.id}`;
   const timer = countdown[timerKey];
   const isPermission = card.requestType === "permission";
+  // Drivers can resolve with lower-case "allow"/"deny"; show the actual label.
+  const selectedAnswer = card.answered
+    ? card.options.find(option => option.toLowerCase() === card.answered?.toLowerCase()) ?? card.answered
+    : undefined;
 
   const answer = (text: string) => {
-    if (!text.trim()) return;
+    if (!text.trim() || card.answered || timer?.firing) return;
+    setClickedAnswer(text.trim());
     cancel(timerKey);
     dispatch({ type: "answerCard", botId, threadId, messageId: message.id, answer: text.trim() });
   };
@@ -65,27 +71,36 @@ export function OptionCard({
       ) : null}
 
       <div className="mt-3 overflow-hidden rounded-lg border border-hairline/40">
-        {card.options.map((opt, i) => (
-          <button
-            type="button"
-            key={opt}
-            disabled={!!card.answered || !!timer?.firing}
-            onClick={() => answer(opt)}
-            className={cn(
-              "flex w-full items-center gap-3 px-3 py-3 text-left text-[15px] text-ink",
-              i > 0 && "border-t border-hairline/40",
-              card.answered === opt
-                ? "bg-raised"
-                : "hover:bg-raised/60 disabled:hover:bg-transparent",
-            )}
-          >
-            <span className="flex size-6 items-center justify-center rounded-md bg-raised text-[12px] font-medium text-ink-secondary">
-              {LETTERS[i]}
-            </span>
-            {opt}
-          </button>
-        ))}
+        {card.options.map((opt, i) => {
+          const selected = selectedAnswer === opt;
+          const animate = selected && clickedAnswer === opt;
+          return (
+            <button
+              type="button"
+              key={opt}
+              disabled={!!card.answered || !!timer?.firing}
+              aria-pressed={selected}
+              onClick={() => answer(opt)}
+              className={cn(
+                "flex w-full items-center gap-3 px-3 py-3 text-left text-[15px] text-ink transition-[background-color,opacity] duration-200 motion-reduce:transition-none",
+                i > 0 && "border-t border-hairline/40",
+                selected
+                  ? "option-choice-selected font-semibold text-accent"
+                  : card.answered ? "opacity-40" : "hover:bg-raised/60 disabled:hover:bg-transparent",
+                animate && "option-choice-pulse",
+              )}
+            >
+              <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-md text-[12px] font-medium", selected ? "bg-accent text-white" : "bg-raised text-ink-secondary")}>
+                {selected ? <Check size={15} strokeWidth={3} aria-hidden className={animate ? "option-check-pop" : undefined} /> : LETTERS[i]}
+              </span>
+              <span className="min-w-0 flex-1">{opt}</span>
+              {selected && <span className="shrink-0 text-[11px] font-medium text-accent">Selected</span>}
+            </button>
+          );
+        })}
       </div>
+
+      {selectedAnswer && <div role="status" aria-live="polite" className="mt-3 text-[12px] text-ink-secondary">Selected: <span className="font-semibold text-accent">{selectedAnswer}</span></div>}
 
       {!card.answered && !isPermission && (
         <input
