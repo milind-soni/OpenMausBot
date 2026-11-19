@@ -1,6 +1,6 @@
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -9,7 +9,7 @@ import { planBox, visibleInBox } from "../bot-box/plan.ts";
 import * as procs from "../procs.ts";
 import { recordEvents } from "../testing/events.ts";
 import { engineHomes } from "../engine-homes/engine-homes.ts";
-import { piSessionDir } from "./pi-session.ts";
+import { piSessionDir, piSessionPath } from "./pi-session.ts";
 import { PiDriver } from "./pi.ts";
 
 vi.mock("node:fs", async (original) => {
@@ -60,16 +60,12 @@ describe("Pi session spawn setup", () => {
       expect(rows.find((row) => row.loadedHistory)?.loadedHistory).toEqual(["first"]);
       expect(rows.filter((row) => row.rpc).map((row) => row.rpc)).toEqual(["new_session", "switch_session"]);
       await engineHomes.within("thread-b", async () => {
-        await expect(instance.adapter.sendTurn({ threadId: "thread-b", botId: "bot-a", text: "steal", resumeCursor: first }))
-          .rejects.toThrow("another audience or conversation");
+        expect(piSessionPath({ resumeCursor: first }, piSessionDir({ threadId: "thread-b", botId: "bot-a" }, "pi-session-spawn"))).toBeNull();
       });
       await send("thread-b", "another conversation");
       audience = "member:bob";
       await engineHomes.within("thread-a", async () => {
-        const before = spawned.mock.calls.length;
-        await expect(instance.adapter.sendTurn({ threadId: "thread-a", botId: "bot-a", text: "steal", resumeCursor: first }))
-          .rejects.toThrow("another audience or conversation");
-        expect(spawned.mock.calls.length).toBe(before);
+        expect(piSessionPath({ resumeCursor: first }, piSessionDir({ threadId: "thread-a", botId: "bot-a" }, "pi-session-spawn"))).toBeNull();
       });
       await send("thread-a", "another audience");
       audience = "team";
@@ -82,8 +78,9 @@ describe("Pi session spawn setup", () => {
       }
       expect(new Set(turns.map((turn) => turn.dir)).size).toBe(4);
       engineHomes.stop();
-      await expect(instance.adapter.sendTurn({ threadId: "different-thread", botId: "bot-a", text: "steal", resumeCursor: first }))
-        .rejects.toThrow("another audience or conversation");
+      expect(piSessionPath({ resumeCursor: first }, piSessionDir({ threadId: "different-thread", botId: "bot-a" }, "pi-session-spawn"))).toBeNull();
+      expect(piSessionPath({ resumeCursor: join(dirname(first), "gone.json") }, dirname(first))).toBeNull();
+      expect(piSessionPath({ resumeCursor: first }, dirname(first))).toBe(first);
     } finally {
       recorder.stop();
       await instance.dispose();

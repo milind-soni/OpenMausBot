@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
 import { DATA_DIR } from "../config.ts";
@@ -19,9 +19,11 @@ export function piTurnArgs(dir: string): string[] {
   return ["--mode", "rpc", "--session-dir", dir];
 }
 
-/** Never resume another audience's or conversation's session, even with a stale cursor. */
+/** Never resume another audience's or conversation's session, even with a stale cursor. Such a cursor, or one whose file
+ * is gone (an older cursor, a conversation moved to another computer), starts a new session rather than failing every
+ * turn of the conversation. */
 export function piSessionPath(turn: Pick<SendTurnInput, "resumeCursor" | "sessionReset">, dir: string): string | null {
   if (turn.sessionReset || typeof turn.resumeCursor !== "string") return null;
-  if (dirname(resolve(turn.resumeCursor)) !== resolve(dir)) throw new Error("Pi session belongs to another audience or conversation; reset this session before retrying");
+  if (dirname(resolve(turn.resumeCursor)) !== resolve(dir) || !existsSync(turn.resumeCursor)) return null;
   return turn.resumeCursor;
 }
