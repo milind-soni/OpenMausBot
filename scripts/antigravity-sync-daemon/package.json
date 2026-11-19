@@ -1,0 +1,14 @@
+{
+  "name": "antigravity-sync-daemon",
+  "version": "1.0.0",
+  "description": "Antigravity Sync Daemon & Backup Gateway for OpenMausBot",
+  "type": "module",
+  "main": "antigravity-sync-daemon.mjs",
+  "scripts": {
+    "test": "node --test tests/**/*.spec.mjs"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "license": "MIT"
+}
