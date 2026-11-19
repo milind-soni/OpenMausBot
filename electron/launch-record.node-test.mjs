@@ -150,6 +150,13 @@ test("a launch whose hand-over never works stops trying, puts the probes back an
   assert.equal(state.timers.length, 0);
 });
 
+test("the part carries the launch id it is given once the main process has made one", () => {
+  const record = createLaunchRecord({ processStart: START, appVersion: "0.1.170", platform: "darwin", arch: "arm64" });
+  assert.equal(record.part().launchId, null);
+  record.setLaunchId("launch-0002");
+  assert.equal(record.part().launchId, "launch-0002");
+});
+
 test("with nowhere to send it, the record costs marks only", async () => {
   const state = { timers: [] };
   const record = createLaunchRecord({ processStart: START, launchId: "launch-0001", appVersion: "0.1.170", platform: "darwin", arch: "arm64", setTimer: (run, ms) => { state.timers.push({ run, ms }); } });

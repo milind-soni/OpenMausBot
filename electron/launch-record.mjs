@@ -10,12 +10,12 @@ export const RETRY_AFTER_MS = [10_000, 30_000, 90_000];
 
 /**
  * @param {{
- *   processStart: number, launchId: string, appVersion: string, platform: string, arch: string,
+ *   processStart: number, launchId?: string | null, appVersion: string, platform: string, arch: string,
  *   now?: () => number, watch?: ReturnType<typeof watchLaunchWork>,
  *   setTimer?: (run: () => void, ms: number) => unknown,
  * }} options `processStart` and `now` are epoch ms on one clock.
  */
-export function createLaunchRecord({ processStart, launchId, appVersion, platform, arch, now = () => performance.timeOrigin + performance.now(), watch = watchLaunchWork(), setTimer = (run, ms) => setTimeout(run, ms).unref?.() }) {
+export function createLaunchRecord({ processStart, launchId = null, appVersion, platform, arch, now = () => performance.timeOrigin + performance.now(), watch = watchLaunchWork(), setTimer = (run, ms) => setTimeout(run, ms).unref?.() }) {
   const marks = {};
   const spans = {};
   const begun = {};
@@ -56,6 +56,8 @@ export function createLaunchRecord({ processStart, launchId, appVersion, platfor
       pending.then(finish, finish);
       return pending;
     },
+    /** The id the server child of this launch is given; the server takes a part under no other. */
+    setLaunchId(id) { launchId = id; },
     /** Started out of sight: no window will show, so the part goes once the server is ready. */
     setHidden(value) { hidden = Boolean(value); },
     /** `send(body)` posts the part to the local server and resolves to its JSON answer. */

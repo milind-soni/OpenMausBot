@@ -1,4 +1,4 @@
-import { desktopLaunchId, launchRecord } from "./launch-record-main.mjs"; import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, net, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess, nativeTheme } from "electron";
+import { launchRecord } from "./launch-record-main.mjs"; import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, net, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess, nativeTheme } from "electron";
 import { createRequire } from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -293,7 +293,8 @@ const utilityServerExits = new WeakMap(), systemProxy = createSystemProxyCache()
 const UTILITY_SERVER_STOP_TIMEOUT_MS = 9_500; // the server's shutdown deadline (8 s, server/graceful-shutdown.ts) and its 1 s log flush
 const trustedApprovalMode = createTrustedApprovalModeCoordinator({ randomId: randomUUID, t: (...args) => nativeT(...args) });
 const desktopMutationToken = randomBytes(32).toString("base64url");
-const companionMutationToken = randomBytes(32).toString("base64url");
+const desktopLaunchId = randomUUID();
+const companionMutationToken = randomBytes(32).toString("base64url"); launchRecord.setLaunchId(desktopLaunchId);
 const serverSupervisor = createServerSupervisor({
   restart: () => startServerOn(SERVER_PORT),
   stop: stopUtilityServer, keepTrying: () => alwaysOnHome.on(),
