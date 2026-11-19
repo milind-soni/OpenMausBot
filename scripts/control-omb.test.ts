@@ -33,6 +33,15 @@ describe("the fixture's fake engine knobs", () => {
   });
 });
 
+describe("the fixture's connected-apps service", () => {
+  it("is a loopback one only, with or without a token", () => {
+    expect(childEnv({ OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:4010" })).toMatchObject({ OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:4010" });
+    expect(childEnv({ OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:4010" })).not.toHaveProperty("OMB_COMPOSIO_BROKER_TOKEN");
+    expect(childEnv({ OMB_COMPOSIO_BROKER_URL: "http://127.0.0.1:4010", OMB_COMPOSIO_BROKER_TOKEN: "t" }).OMB_COMPOSIO_BROKER_TOKEN).toBe("t");
+    expect(childEnv({ OMB_COMPOSIO_BROKER_URL: "https://broker.example", OMB_COMPOSIO_BROKER_TOKEN: "t" })).not.toHaveProperty("OMB_COMPOSIO_BROKER_URL");
+  });
+});
+
 describe("the fixture's Netlify stand-in", () => {
   it("lets only a loopback stand-in's API address cross, so a fixture never lists or deletes on Netlify", () => {
     expect(childEnv({ OMB_NETLIFY_API_URL: " http://127.0.0.1:4010/api/v1 " }).OMB_NETLIFY_API_URL).toBe("http://127.0.0.1:4010/api/v1");

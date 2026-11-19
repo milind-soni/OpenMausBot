@@ -477,7 +477,7 @@ const Bubble = memo(function Bubble({
             <div className="min-w-[300px] max-w-[520px]">
               <div className="flex items-center gap-2 border-b border-accent/15 bg-accent/[0.055] px-4 py-2.5 text-[12px] font-medium text-accent">
                 <Webhook size={13} />
-                <span>{t("chat.webhookTask")}</span>
+                <span>{webhookView.app ? t("chat.appTask", { source: webhookView.app }) : t("chat.webhookTask")}</span>
               </div>
               <div className="chat-text px-4 py-3 whitespace-pre-wrap">{webhookView.task}</div>
               {webhookView.payload && (

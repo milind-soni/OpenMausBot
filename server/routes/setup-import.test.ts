@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR, type AppConfig } from "../config.ts";
-import type { GrokConnector, GrokMove } from "../grok-move-tunnel.ts";
+import type { GrokConnector, GrokMove } from "../grok-link.ts";
 import { json, readBody } from "../harness/http.ts";
 import { IMPORTED_SKILLS_DIR, importedSkillsFor } from "../imported-skills.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -44,15 +44,16 @@ function fixtureHome() {
   return home;
 }
 
-/** A link that needs no cloudflared: the routes only pass along what it answers. */
+/** A link that reaches no service: the routes only pass along what it answers. */
 function fakeGrokMove(available = true) {
   const calls: string[] = [];
   let open = false;
-  const state = (arrived: GrokConnector["arrived"] = []): GrokConnector => ({ available, ...(open ? { connectorUrl: "https://words.trycloudflare.com/mcp/move/key", expiresAt: 9 } : {}), arrived });
+  const state = (arrived: GrokConnector["arrived"] = []): GrokConnector => ({ available, ...(open ? { link: { url: "https://broker.test/mcp/move/key", reach: "connected" as const } } : {}), arrived, handoffs: [] });
   const move: GrokMove = {
     connect: async () => { calls.push("connect"); open = available; return state(); },
     look: (after) => { calls.push(`look ${after}`); return state(open && after < 1 ? [{ seq: 1, at: 5, text: "{}" }] : []); },
-    end: () => { calls.push("end"); open = false; return state(); },
+    taken: (seq) => { calls.push(`taken ${seq}`); return state(); },
+    end: async () => { calls.push("end"); open = false; return state(); },
   };
   return { move, calls };
 }
@@ -109,16 +110,18 @@ describe("the setup import routes", () => {
     const connector = "/api/setup-import/grok/connector";
     const looked = await local.call("GET", connector);
     expect(looked.headers.get("cache-control")).toBe("no-store");
-    expect(await looked.json()).toEqual({ available: true, arrived: [] });
+    expect(await looked.json()).toEqual({ available: true, arrived: [], handoffs: [] });
     expect((await local.call("POST", connector, { body: "", type: "text/plain" })).status).toBe(415);
     expect(calls).toEqual(["look 0"]);
     const made = await (await local.call("POST", connector, { body: {} })).json() as GrokConnector;
-    expect(made).toEqual({ available: true, connectorUrl: "https://words.trycloudflare.com/mcp/move/key", expiresAt: 9, arrived: [] });
-    expect(await (await local.call("GET", connector)).json()).toMatchObject({ connectorUrl: made.connectorUrl, arrived: [{ seq: 1, at: 5, text: "{}" }] });
+    expect(made).toEqual({ available: true, link: { url: "https://broker.test/mcp/move/key", reach: "connected" }, arrived: [], handoffs: [] });
+    expect(await (await local.call("GET", connector)).json()).toMatchObject({ link: made.link, arrived: [{ seq: 1, at: 5, text: "{}" }] });
     expect(await (await local.call("GET", `${connector}?after=1`)).json()).toMatchObject({ arrived: [] });
     for (const after of ["x", "-1", "1.5"]) expect((await local.call("GET", `${connector}?after=${after}`)).status, after).toBe(400);
-    expect(await (await local.call("DELETE", connector)).json()).toEqual({ available: true, arrived: [] });
-    expect(calls).toEqual(["look 0", "connect", "look 0", "look 1", "end"]);
+    expect(await (await local.call("POST", connector, { body: { taken: 1 } })).json()).toMatchObject({ link: made.link, arrived: [] });
+    for (const taken of ["1", -1, 1.5, null]) expect((await local.call("POST", connector, { body: { taken } })).status, String(taken)).toBe(400);
+    expect(await (await local.call("DELETE", connector)).json()).toEqual({ available: true, arrived: [], handoffs: [] });
+    expect(calls).toEqual(["look 0", "connect", "look 0", "look 1", "taken 1", "end"]);
   });
 
   it("keeps the Grok Bot link to the owner's own loopback, and says plainly when no link can be made", async () => {
@@ -132,11 +135,11 @@ describe("the setup import routes", () => {
     expect((await local.call("PUT", connector, { body: {} })).status).toBe(405);
     expect(calls).toEqual([]);
 
-    expect(await (await (await serve()).call("POST", connector, { body: {} })).json()).toEqual({ available: false, arrived: [] });
-    const failing = await serve({ grokMove: { ...move, connect: async () => { throw new Error("The link could not be made: cloudflared did not open a tunnel in time."); } } });
+    expect(await (await (await serve()).call("POST", connector, { body: {} })).json()).toEqual({ available: false, arrived: [], handoffs: [] });
+    const failing = await serve({ grokMove: { ...move, connect: async () => { throw new Error("The secret could not be saved."); } } });
     const failed = await failing.call("POST", connector, { body: {} });
     expect(failed.status).toBe(502);
-    expect(await failed.json()).toEqual({ error: "The link could not be made: cloudflared did not open a tunnel in time." });
+    expect(await failed.json()).toEqual({ error: "The secret could not be saved." });
   });
 
   it("deletes an old Cursor sign-in as the routes start, on any server", async () => {

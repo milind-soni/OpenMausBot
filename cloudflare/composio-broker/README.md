@@ -167,6 +167,69 @@ changes nothing.
    every push to `main`. Without it, the hourly sweep of idle installations
    fails after it has expired old events.
 
+## The Grok Bot link
+
+A person adds MausBot to Grok Bot as a connector by pasting one address, and
+Grok Bot cannot change it afterwards. The broker holds that address, so it
+stays the same across app restarts, updates and networks. The work still runs
+in the desktop app: the broker relays each tool call to it over one socket and
+stores no call and no answer.
+
+```
+Grok Bot --POST--> /mcp/move/<key> --> the link's Durable Object <==socket== desktop app (GET /v1/grok-link)
+```
+
+| Route | Auth | Does |
+| --- | --- | --- |
+| `GET /v1/grok-link` (WebSocket upgrade) | `x-omb-link-secret` | Attaches the desktop. The secret is 32 random bytes the desktop keeps in its data folder; the address key is `base64url(SHA-256("grok-link:" + secret))`, so the address cannot attach. Makes the `grok_links` row when there is none (counted by `REGISTRATION_LIMITER`, refused while `REGISTRATION_MODE` is `closed`); attaching again only updates `attached_at`. The newest socket wins and the older one is closed with 4001. |
+| `DELETE /v1/grok-link` | `x-omb-link-secret` | Turns the link off: deletes the row, clears the object's storage and closes its socket. The address answers 404 from then on. |
+| `POST /mcp/move/<key>` | The key in the address | Grok Bot's MCP call: JSON only, at most 4 MB + 64 KB, 60 a minute per link (`LINK_LIMITER`). An address with no row answers 404 and never creates an object. |
+
+The desktop is the only author of what Grok Bot reads. On every attach it sends
+a manifest: its `initialize` and `tools/list` results and two tool results, one
+for "the app isn't open" and one for "the app didn't answer in time". The
+object stores the manifest, which holds no personal data, and answers
+`initialize`, `ping` and `tools/list` from it whether or not the desktop is
+attached. A `tools/call` goes to the desktop: no receipt within 5 seconds
+closes the socket and answers "isn't open", no answer within 40 seconds answers
+"didn't answer in time", and a link runs at most 8 calls at once. A call that
+overtakes a new link's first hello waits up to 2 seconds for it; with no
+manifest the address answers 503.
+
+D1 keeps `key_hash` (SHA-256 of the address key, also the object's name),
+`created_at` and `attached_at`: never the secret, the key or an installation.
+The hourly run deletes links no desktop attached to for 30 days, 20 an hour,
+and clears their objects. A desktop that returns attaches with the same secret
+and gets the same address back.
+
+A link's address is all a caller needs, so it must not reach a log:
+`observability.logs.invocation_logs` is `false` in `wrangler.jsonc` (invocation
+logs record every request's URL) and the catch-all error log writes
+`/mcp/move/[key]`. Traces (5% sampling) may still record request URLs.
+
+The shipped address is `https://mcp.mausbot.com`
+(`DEFAULT_MANAGED_COMPOSIO_BROKER_URL` in `electron/managed-composio.mjs`), and
+every Grok Bot link is made from it, so it can never change once released. The
+app's connected apps use the same address. `mausbot.com`'s DNS is on Vercel, not
+Cloudflare, so `wrangler.jsonc` has no route for it (a route on a zone outside
+this account fails the deploy). Before a desktop release ships, make
+`mcp.mausbot.com` reach this Worker: either Cloudflare for SaaS on a zone in this
+account (custom hostname `mcp.mausbot.com`, its CNAME and validation records in
+Vercel DNS, a Worker route for `mcp.mausbot.com/*`), or move `mausbot.com`'s DNS
+to Cloudflare and add a Custom Domain. `workers_dev` stays on for desktops
+released before this.
+
+Before the code reaches `main`: apply migration `0006_grok_links.sql` and
+create the `LINK_LIMITER` rate-limit namespace. The first deploy creates the
+`GrokLinkObject` class (migration tag `v1`, SQLite-backed, which the Free plan
+requires). Objects are evicted on every deploy, so calls in flight then fail
+and each desktop attaches again within seconds.
+
+To try it without deploying: `wrangler d1 migrations apply openmausbot-composio --local`
+and `wrangler dev --local --port 8787` with `COMPOSIO_API_KEY=dummy` in
+`.dev.vars`, then start the desktop app with
+`OMB_COMPOSIO_BROKER_URL=http://127.0.0.1:8787`.
+
 ## Erasing an installation and what the broker keeps
 
 `DELETE /v1/installation`, with the installation's own token:
