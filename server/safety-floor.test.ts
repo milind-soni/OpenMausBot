@@ -199,6 +199,9 @@ const BLOCKED: Case[] = [
   ['powershell -Command "Format-Volume -DriveLetter D -Force"', "format-disk", "win32"],
   ["Clear-Disk -Number 1 -RemoveData -Confirm:$false", "format-disk", "win32"],
   ["Get-Disk 2 | Clear-Disk -RemoveD", "format-disk", "win32"],
+  ["Clear-Disk -Number 1 \u2013RemoveData -Confirm:$false", "format-disk", "win32"],
+  ["Clear-Disk -Number 1 \u2014RemoveData", "format-disk", "win32"],
+  ["Clear-Disk -Number 1 \u2015RemoveData", "format-disk", "win32"],
   // Windows: PowerShell
   ["Remove-Item -Recurse -Force C:\\", "delete-root", "win32"],
   ["Remove-Item C:\\Users -Recurse", "delete-system-directory", "win32"],
