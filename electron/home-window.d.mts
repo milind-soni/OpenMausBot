@@ -67,6 +67,7 @@ export declare const NAME_WAIT_MS: number;
 export declare const NAME_RETRY_MS: readonly number[];
 export declare const PAIR_RETRY_MS: readonly number[];
 export declare const PAIR_LIMIT_MS: number;
+export declare const PAIR_FLOOR_MS: number;
 export declare const NETWORK_HINT_MS: number;
 export function nameNotFound(code: number): boolean;
 export function createReadyClock(input?: { store?: { read(): unknown; write(value: unknown): void } | null; now?(): number }): { seen(state: unknown): void; fresh(origin: string | null): boolean };

@@ -2,7 +2,7 @@ import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./manag
 import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudLanding, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudRoom, parseCloudTrial, parseCloudUsage, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
 import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, ORGANIZATION_BLOCKS, otherOwnClouds, ownCloud, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion } from "./cloud-list.mjs";
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
-import { cleanCode, cleanEmail, failureKind, parseSignInStart, resetOffered, retryAfterSeconds, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInBlock, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
+import { cleanCode, cleanEmail, failureKind, parseSignInStart, READ_WAIT_MS, resetOffered, retryAfterSeconds, settledWithin, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInBlock, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 import nativeText from "./native-text.cjs";
 
 const { englishText } = nativeText;
@@ -98,7 +98,7 @@ function addOffer(result) {
 
 export function createCloudAccountClient({ store, openBrowser, platform, deviceName, appVersion,
   origin = CLOUD_ORIGIN, fixture = false, fetch: fetcher = globalThis.fetch, now = Date.now, onState = () => {},
-  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false, t = englishText.t }) {
+  setTimer = setTimeout, clearTimer = clearTimeout, warn = message => console.warn(message), awaitingWake = () => false, t = englishText.t, readWaitMs = READ_WAIT_MS }) {
   origin = cloudOrigin(origin, fixture);
   const staging = origin === STAGING_CLOUD_ORIGIN;
   let grant = null, issued = null, cleanup = null, pending = null, cleanupNeeded = false;
@@ -386,7 +386,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
   /** Why a sign-in can't start now (the sheet says so, with the one thing to do), after a sign-out or a read under way ends. */
   async function blocked(connecting = false) {
     if (clearing) await clearing.catch(() => {});
-    if (restoring && reading) await reading.catch(() => {});
+    if (restoring && reading) await settledWithin(reading, readWaitMs);
     const reason = signInBlock({ closed, restoring, issued, grant, cleanupNeeded, connecting: connecting && value.status === "connecting" });
     return reason && { outcome: "blocked", reason, ...(reason === "saved" && value.reset ? { reset: true } : {}) };
   }
@@ -530,7 +530,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     async resetSaved() {
       if (closed || grant || issued || clearing || !cleanupNeeded || !value.reset) return state();
       // A read under way may yet open it: then it is kept and signed in, never cleared under that read.
-      if (restoring && reading) { await reading.catch(() => {}); if (grant) return refresh(); if (closed || issued || clearing || !cleanupNeeded) return state(); }
+      if (restoring && reading) { await settledWithin(reading, readWaitMs); if (grant) return refresh(); restoring = false; if (closed || issued || clearing || !cleanupNeeded) return state(); }
       const stamp = reset(), ended = cleanup; resetUsed = true;
       const [removed] = await Promise.all([store.write(null).then(() => true, () => false), ended ? revoke(ended).catch(() => {}) : null]);
       if (!current(stamp)) return state();
@@ -700,9 +700,8 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (!target || !current) throw new Error(t("native.cloud.notReady"));
       let result;
       try { result = await request("pairing", { method: "POST", body: {}, token: current.token }); } catch (error) {
-        const why = cloudUnreachableText(await refresh().catch(() => state()), target.origin);
-        throw why ? new Error(why) : error;
-      }
+        const why = error?.status === 429 ? null : cloudUnreachableText(await refresh().catch(() => state()), target.origin); // the Admin's limit: never asked again here
+        throw why ? Object.assign(new Error(why), { status: error?.status, opaque: error?.opaque, retryAfter: error?.retryAfter }) : error; }
       const pairing = parsePairingGrant(result, target.origin, now());
       if (!pairing) throw new Error("Invalid Cloud pairing response.");
       return pairing;

@@ -15,7 +15,7 @@ import nativeText from "./native-text.cjs";
 import { createPairWait, nameNotFound } from "./home-pairing.mjs";
 import { awayIn, parseJournal, sameCloud } from "./one-home.mjs";
 
-export { nameNotFound, NETWORK_HINT_MS, PAIR_LIMIT_MS, PAIR_RETRY_MS } from "./home-pairing.mjs";
+export { nameNotFound, NETWORK_HINT_MS, PAIR_FLOOR_MS, PAIR_LIMIT_MS, PAIR_RETRY_MS } from "./home-pairing.mjs";
 
 export const HOME_SCREEN_PATH = "/home";
 /** The look at an awake My Cloud before the window moves there: under 3 s, so the offline screen shows within 3 s. */
@@ -273,8 +273,12 @@ export function createHomeWindow(deps) {
   const still = (place) => shown?.kind === place.kind && shown.id === place.id && shown.origin === place.origin;
   const clearRenewal = () => { if (renewal) timers.clear(renewal); renewal = null; };
 
+  /** The account the pairing waits were for: signed out, or another account, they start again. */
+  let waitsFor = null;
   async function refresh() {
     clock.seen(state());
+    const who = signedOut() ? null : state()?.account?.id ?? null;
+    if (who !== waitsFor) { waits.clear(); waitsFor = who; }
     const kept = parseJournal(journal());
     let frozenCloud = null, frozenPlace = null;
     if (!awayIn(kept)) {
@@ -354,8 +358,8 @@ export function createHomeWindow(deps) {
   }
 
   /** The place didn't answer: this computer's screen says so, with the Admin's reason for My Cloud, and looks again by itself.
-   * `unreached`: My Cloud's address, named once its page has failed to connect from here for a while (home-pairing.mjs) while
-   * the Admin knows of nothing wrong. `held`: the origin whose next code waits: the screen looks again when that wait ends,
+   * `unreached`: My Cloud's address, named once its page has kept failing to connect from here (home-pairing.mjs) while the
+   * Admin knows of nothing wrong. `held`: the origin whose next code waits: the screen looks again when that wait ends,
    * and says when for the Admin's own 429. */
   function offline(token, unreached = null, held = null) {
     if (!wanted(token)) return;
@@ -363,8 +367,7 @@ export function createHomeWindow(deps) {
     const host = !cause && unreached && !otherPlace(opening) ? waits.unreachedHost(unreached) : null;
     const until = held ? waits.until(held) : null, retryAt = held && waits.limited(held) ? until : null;
     toScreen({ screen: "offline", ...(cause ? { reason: cloudUnreachableText(state(), cloudOrigin()), cause } : host ? { cause: "network", host } : {}), ...(retryAt ? { retryAt } : {}) });
-    const hint = unreached && !host ? waits.hintIn(unreached) : null;
-    later(RETRY_MS, undefined, Math.min(until === null ? Infinity : Math.max(0, until - now()), hint ?? Infinity));
+    later(RETRY_MS, undefined, until === null ? Infinity : Math.max(0, until - now()));
   }
   function later(delays = RETRY_MS, count = () => tries++, atMost = Infinity) {
     clearRetry();
@@ -514,6 +517,7 @@ export function createHomeWindow(deps) {
       let grant = null;
       if (!signedIn) {
         if (waits.held(origin)) return signInNeeded() ? toScreen({ screen: "signin" }) : offline(token, null, origin);
+        waits.asking(origin);
         try { grant = await pair(place); } catch (error) {
           if (error?.gone && wanted(token)) return gone(place);
           waits.hold(origin, { error });

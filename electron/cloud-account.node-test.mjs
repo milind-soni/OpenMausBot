@@ -123,6 +123,20 @@ test("a connection that fails while the Admin says My Cloud can't be reached say
   await assert.rejects(f.client.pairHome(), { message: "Cloud request failed." });
 });
 
+test("a pairing refused while the Admin says why keeps its status; a 429 keeps its Retry-After and doesn't read the session again", async t => {
+  const f = await fixture(t); await f.connect();
+  const origin = "https://home-7f3k2.fly.dev", since = f.now - 6 * 60_000;
+  f.entitlement = { plan: "pro", tier: "pro", status: "active", expiresAt: f.now + 86_400_000, version: 1 };
+  f.cloud = { state: "ready", origin, pairingAvailable: true, unreachable: { cause: "host", since } };
+  await f.client.refresh();
+  f.pairing = { status: 503, body: { error: "unavailable" } };
+  await assert.rejects(f.client.pairHome(), (error) => error.status === 503 && /hosting provider/.test(error.message));
+  f.pairing = { status: 429, body: { error: "rate_limited" }, headers: { "retry-after": "120" } };
+  const reads = f.requests.filter(row => row.route === "/api/cloud/desktop/session").length;
+  await assert.rejects(f.client.pairHome(), (error) => error.status === 429 && error.retryAfter === 120);
+  assert.equal(f.requests.filter(row => row.route === "/api/cloud/desktop/session").length, reads, "the Admin's limit is not met with another request");
+});
+
 test("a free trial and its AI credit come with a verified session, for display only; an Admin without them changes nothing", async t => {
   const f = await fixture(t); await f.connect();
   const DAY = 86_400_000, endsAt = f.now + 2 * DAY, origin = "https://home-7f3k2.fly.dev";
@@ -641,6 +655,27 @@ test("Clear pressed while a read of the saved sign-in is under way: a read that 
   assert.equal((await clearing).status, "connected");
   assert.ok((await stat(file)).isFile(), "the saved sign-in that opened is kept");
   assert.ok(!f.requests.some(row => row.method === "DELETE"), "and never revoked");
+});
+
+test("Clear pressed while a read never finishes (a keychain prompt nobody answers): it clears after a short wait, and a sign-in can start", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "omb-cloud-clear-hung-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "cloud-account.bin"), lock = { locked: true };
+  let hang = null, release = () => {};
+  const decrypt = async value => { if (hang) await hang; return { shouldReEncrypt: false, result: Buffer.from(value).map(byte => byte ^ 0x55).toString() }; };
+  const f = await fixture(t, { store: electron43Store(file, lock, decrypt), readWaitMs: 50 });
+  await electron43Store(file).write(savedSignIn(f));
+  await f.client.start();
+  while (!f.client.state().reset) { f.now += f.delay; f.tick(); await until(() => f.timer); }
+  hang = new Promise(resolve => { release = resolve; }); lock.locked = false; f.now += f.delay; f.tick();
+  const outcome = await Promise.race([f.client.resetSaved(), new Promise(resolve => setTimeout(() => resolve("still waiting"), 5_000))]);
+  assert.notEqual(outcome, "still waiting", "Clear never waits on a read for ever");
+  assert.equal(outcome.status, "signed-out");
+  await assert.rejects(stat(file), { code: "ENOENT" });
+  assert.equal((await f.client.begin()).status, "connecting", "the sign-in it was cleared for can start");
+  // The prompt is answered at last: that late read changes nothing.
+  release(); await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(f.client.state().status, "connecting");
 });
 
 test("a decrypt answer in a shape this app does not know is never taken for an unreadable sign-in", async t => {

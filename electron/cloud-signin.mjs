@@ -80,6 +80,15 @@ export function signInBlock({ closed, restoring, issued, grant, cleanupNeeded, c
 export const RESET_AFTER_TRIES = 3, RESET_AFTER_MS = 2 * 60_000;
 export const resetOffered = ({ failures, since, now }) => failures >= RESET_AFTER_TRIES && now - since >= RESET_AFTER_MS;
 
+/** How long Clear waits for a read of the saved sign-in already under way (an unanswered keychain prompt, a keyring that
+ * hangs) before it clears anyway. */
+export const READ_WAIT_MS = 5_000;
+/** Resolves once `promise` settles, or after `ms`, whichever is first; never rejects. */
+export const settledWithin = (promise, ms) => new Promise((done) => {
+  const timer = setTimeout(done, ms); timer.unref?.();
+  Promise.resolve(promise).then(done, done).finally(() => clearTimeout(timer));
+});
+
 /** A request to the Admin that failed, for the log: its status (and whether the answer was the Admin's own), or the network
  * error's code (a certificate, a name not found, a timeout). Never an address, an email or a token. */
 export function failureKind(error) {

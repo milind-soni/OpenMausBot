@@ -70,3 +70,23 @@ it("a checkout that wasn't finished continues where this app keeps its page, els
   await click("[data-home-action='continue']");
   expect([reopen.mock.calls.length, manage.mock.calls.length]).toEqual([2, 1]);
 });
+
+it("Try again is pressed once at a time: off while its look runs, so a held key or fast clicks never stack looks", async () => {
+  const offline = bridgeOf({ screen: "offline" });
+  await mount(offline);
+  let finish: (view: HomeView) => void = () => {};
+  offline.retry.mockImplementation(() => new Promise<HomeView>((resolve) => { finish = resolve; }));
+  const before = offline.retry.mock.calls.length;
+  const button = () => host.querySelector<HTMLButtonElement>("[data-home-action='retry']")!;
+  await act(async () => { button().click(); button().click(); });
+  await settle();
+  expect(offline.retry.mock.calls.length).toBe(before + 1);
+  expect(button().disabled).toBe(true);
+  await click("[data-home-action='retry']");
+  expect(offline.retry.mock.calls.length, "a press while it runs does nothing").toBe(before + 1);
+  await act(async () => { finish({ screen: "offline" }); });
+  await settle();
+  expect(button().disabled).toBe(false);
+  await click("[data-home-action='retry']");
+  expect(offline.retry.mock.calls.length).toBe(before + 2);
+});
