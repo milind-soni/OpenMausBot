@@ -14,6 +14,10 @@ interface Fiber {
 export interface Rendered {
   component: string;
   row: string | null;
+  /** Drawn for the first time: a component React created in this commit. */
+  mounted: boolean;
+  /** Which commit drew it, counted from the first. */
+  commit: number;
 }
 
 const FUNCTION = 0, CLASS = 1, HOST = 5, FORWARD_REF = 11, MEMO = 14, SIMPLE_MEMO = 15;
@@ -21,6 +25,7 @@ const PERFORMED_WORK = 1;
 const COMPONENTS = new Set([FUNCTION, CLASS, FORWARD_REF, MEMO, SIMPLE_MEMO]);
 
 const rendered: Rendered[] = [];
+let commits = 0;
 
 /** The component's own name: the module transform renames a memo's inner function, `Bubble` to `Bubble2`. */
 function nameOf(fiber: Fiber): string {
@@ -34,7 +39,7 @@ function walk(first: Fiber, row: string | null): void {
     const mounted = fiber.alternate === null;
     const mid = fiber.tag === HOST ? fiber.memoizedProps?.["data-mid"] : undefined;
     const here = typeof mid === "string" ? mid : row;
-    if (COMPONENTS.has(fiber.tag) && (mounted || (fiber.flags & PERFORMED_WORK) !== 0)) rendered.push({ component: nameOf(fiber), row: here });
+    if (COMPONENTS.has(fiber.tag) && (mounted || (fiber.flags & PERFORMED_WORK) !== 0)) rendered.push({ component: nameOf(fiber), row: here, mounted, commit: commits });
     if (fiber.child && (mounted || fiber.child !== fiber.alternate!.child)) walk(fiber.child, here);
   }
 }
@@ -51,6 +56,7 @@ target.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
   },
   onScheduleFiberRoot() {},
   onCommitFiberRoot(_id: number, root: { current: Fiber }) {
+    commits++;
     walk(root.current, null);
   },
   onCommitFiberUnmount() {},
@@ -66,6 +72,15 @@ export function renderMark(): number {
 
 export function renderedSince(mark: number): readonly Rendered[] {
   return rendered.slice(mark);
+}
+
+/** Where the commit count stands now; pass it to `commitsSince`. */
+export function commitMark(): number {
+  return commits;
+}
+
+export function commitsSince(mark: number): number {
+  return commits - mark;
 }
 
 export function countBy<K extends string | null>(list: readonly Rendered[], key: (entry: Rendered) => K): Map<K, number> {
