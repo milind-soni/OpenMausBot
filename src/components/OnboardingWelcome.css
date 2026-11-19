@@ -1,0 +1,75 @@
+.alpha-welcome {
+  background:
+    radial-gradient(ellipse at 50% 80%, #10151e 0%, transparent 62%),
+    var(--color-app);
+}
+
+.alpha-welcome-shell {
+  box-shadow: 0 28px 96px #0009;
+}
+
+.alpha-welcome-title {
+  font-size: clamp(2.35rem, 4.2vw, 3.85rem);
+  letter-spacing: -0.065em;
+  line-height: 1;
+  max-width: 7.5em;
+}
+
+.alpha-welcome-art {
+  isolation: isolate;
+  background:
+    radial-gradient(ellipse at 65% 28%, #1c2f50 0%, transparent 68%),
+    radial-gradient(ellipse at 25% 78%, #242047 0%, transparent 67%),
+    #101117;
+}
+
+.alpha-welcome-art::before {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  content: "";
+  background-image: radial-gradient(circle, #7b94c0 1px, transparent 1px);
+  background-size: 21px 21px;
+  mask-image: radial-gradient(ellipse, #000 10%, transparent 80%);
+  opacity: 0.36;
+  pointer-events: none;
+}
+
+.alpha-activity {
+  --activity-color: #f6a65d;
+  position: relative;
+  background: #151923f5;
+  border-color: #788dba38;
+  box-shadow: 0 12px 32px #02061366, inset 0 1px #e3ecff0d;
+}
+
+.alpha-activity--design { --activity-color: #6ab5ff; }
+.alpha-activity--research { --activity-color: #b59aff; }
+
+.alpha-activity-avatar {
+  background: color-mix(in srgb, var(--activity-color), transparent 85%);
+}
+
+.alpha-activity-icon {
+  color: var(--activity-color);
+}
+
+@media (min-width: 768px) {
+  .alpha-activity--build { margin-right: 45px; }
+  .alpha-activity--design { margin-left: 44px; }
+  .alpha-activity--research { margin-right: 24px; margin-left: 14px; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .alpha-activity {
+    animation: alpha-card-in 500ms cubic-bezier(0.2, 0.75, 0.35, 1) both;
+  }
+
+  .alpha-activity--design { animation-delay: 70ms; }
+  .alpha-activity--research { animation-delay: 140ms; }
+}
+
+@keyframes alpha-card-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
