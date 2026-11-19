@@ -54,10 +54,10 @@ function whyFailed(node: HandoffNode): string {
 
 /** The status line for one hand-off, from its record and what the host knows around it. */
 export function handoffLine(node: HandoffNode, facts: HandoffLineFacts, at: number): HandoffStatusLine {
-  const state = stateOf(node);
+  const onPerson = Boolean(node.question || node.cards?.length);
+  const state = stateOf(node) === "waiting" && !onPerson && facts.waitingBots.length === 0 ? "working" : stateOf(node);
   const line: HandoffStatusLine = { id: node.id, state, at };
   if (state === "waiting") {
-    const onPerson = Boolean(node.question || node.cards?.length) || facts.waitingBots.length === 0;
     line.waitingOn = onPerson
       ? { kind: "person", ...(facts.askedPerson ? { name: facts.askedPerson } : {}) }
       : { kind: "bot", name: facts.waitingBots.length > 2 ? `${facts.waitingBots.slice(0, 2).join(", ")} +${facts.waitingBots.length - 2}` : facts.waitingBots.join(", ") };

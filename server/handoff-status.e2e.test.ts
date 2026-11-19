@@ -52,7 +52,10 @@ it("moves the Sent-to row through claimed, working, waiting on a teammate and do
     const { row } = await sentRow();
     expect(row.handoff).toEqual({ id: expect.any(String), state: "done", at: expect.any(Number) });
     expect(row.handoff.forPerson).toBeUndefined();
-    expect(seen.filter((state) => state !== "claimed")).toEqual(["working", "waiting:Writer", "done"]);
+    const states = seen.filter((state) => state !== "claimed");
+    expect(states.slice(0, 2)).toEqual(["working", "waiting:Writer"]);
+    expect(states.at(-1)).toBe("done");
+    expect(states.slice(2, -1).every((state) => state === "working"), "after the wait only Coder's resume shows before done").toBe(true);
     expect((await coderTask())?.handoff).toMatchObject({ state: "done" });
     const rows = (await api(`/api/threads/${lead.activeTaskId}/messages?limit=100`)).messages as any[];
     expect(rows.filter((message) => message.kind === "options" && !message.card?.answered)).toEqual([]);

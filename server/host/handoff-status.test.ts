@@ -25,6 +25,10 @@ describe("handoffLine", () => {
     expect(handoffLine(node({ status: "cancelled", outcome: "stopped" }), { waitingBots: [] }, at)).toMatchObject({ state: "failed", why: "Stopped" });
   });
 
+  it("reads a wait whose teammates all answered as working: it is about to resume", () => {
+    expect(handoffLine(node({ status: "waiting" }), { waitingBots: [] }, 1)).toEqual({ id: "a1", state: "working", at: 1 });
+  });
+
   it("waits on the person when it parked on a question: by name on a team, as you elsewhere", () => {
     expect(handoffLine(node({ status: "waiting", question: "Which account?" }), { waitingBots: [] }, 1).waitingOn).toEqual({ kind: "person" });
     expect(handoffLine(node({ status: "waiting", question: "Which account?" }), { waitingBots: [], askedPerson: "Mira", forPerson: { name: "Mira" } }, 1))
