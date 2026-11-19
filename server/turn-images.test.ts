@@ -335,7 +335,7 @@ describe("native video clips", () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
-  it("keeps only the frames that fit beside a sent clip, and every frame when no clip is sent", async () => {
+  it("keeps only the frames that fit beside a sent clip, and every frame that fits when no clip is sent", async () => {
     const frame = (bytes: number) => ({ path: `/tmp/frame-${bytes}.jpg`, mime: "image/jpeg" as const, bytes, source: "video-frame" as const });
     const frames = [frame(2 * MiB), frame(4 * MiB), frame(MiB)];
     const sampler = vi.mocked(videoFrameImages), actual = sampler.getMockImplementation()!;
@@ -367,6 +367,20 @@ describe("native video clips", () => {
       const media = await turnMedia([{ images: [], videos: [clip(20 * MiB)] }, { images: pictures, videos: [] }], gemini);
       expect(media.images).toHaveLength(10);
       expect(media.images.slice(-6)).toEqual(pictures);
+    } finally { sampler.mockImplementation(actual); }
+  });
+
+  it("sends a file attached twice in a burst once, so a different clip still fits the engine's limit", () => {
+    expect(nativeClips([clip(5 * MiB), clip(5 * MiB), clip(4 * MiB)], gemini)).toEqual([clip(5 * MiB), clip(4 * MiB)]);
+  });
+
+  it("keeps only the frames that fit beside the turn's pictures when no clip is sent", async () => {
+    const frame = (bytes: number) => ({ path: `/tmp/frame-${bytes}.jpg`, mime: "image/jpeg" as const, bytes, source: "video-frame" as const });
+    const frames = [frame(2 * MiB), frame(6 * MiB), frame(MiB)];
+    const sampler = vi.mocked(videoFrameImages), actual = sampler.getMockImplementation()!;
+    sampler.mockImplementation(async (videos) => videos?.length ? frames : []);
+    try {
+      expect(await videoFramesWithin(2, [clip(MiB)], [], [image(9 * MiB), image(9 * MiB)])).toEqual([frame(2 * MiB), frame(MiB)]);
     } finally { sampler.mockImplementation(actual); }
   });
 

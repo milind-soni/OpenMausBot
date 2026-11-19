@@ -176,27 +176,28 @@ export function extractTurnImages(
 
 const mediaUrlBytes = (media: readonly { mime: string; bytes: number }[]) => media.reduce((total, item) => total + chatMediaUrlBytes(item), 0);
 
-/** The clips an engine that takes video gets as they are: those within its byte limit that also keep the turn's `images` inside the request's media budget. */
+/** The clips an engine that takes video gets as they are, each file once: those within its byte limit that also keep the turn's `images` inside the request's media budget. */
 export function nativeClips(videos: readonly TurnVideoInput[], engine: Pick<ProviderAdapter["capabilities"], "nativeImageInput" | "nativeVideoBytes">,
   images: readonly TurnImageInput[] = []): TurnVideoInput[] {
   const limit = engine.nativeImageInput ? engine.nativeVideoBytes ?? 0 : 0;
   let clipBytes = 0, encoded = mediaUrlBytes(images);
+  const paths = new Set<string>();
   return videos.filter((clip) => {
     const url = chatMediaUrlBytes(clip);
-    if (clipBytes + clip.bytes > limit || encoded + url > CHAT_IMAGE_BUDGET) return false;
+    if (paths.has(clip.path) || clipBytes + clip.bytes > limit || encoded + url > CHAT_IMAGE_BUDGET) return false;
+    paths.add(clip.path);
     clipBytes += clip.bytes;
     encoded += url;
     return true;
   });
 }
 
-/** Stills sampled from a message's videos not `sent` as clips, never taking a turn that already carries `earlier` images past its image count;
- *  beside a sent clip, only the frames that still fit the request's media budget with the clips and the turn's other pictures (`alongside`). */
+/** Stills sampled from a message's videos not `sent` as clips, never taking a turn that already carries `earlier` images past its image count,
+ *  and only the frames that still fit the request's media budget with the sent clips and the turn's other pictures (`alongside`). */
 export async function videoFramesWithin(earlier: number, videos: readonly TurnVideoInput[], sent: readonly TurnVideoInput[] = [],
   alongside: readonly TurnImageInput[] = []): Promise<TurnImageInput[]> {
   const sentPaths = new Set(sent.map((clip) => clip.path));
   const frames = await videoFrameImages(videos.filter((video) => !sentPaths.has(video.path)), TURN_IMAGE_MAX_COUNT - earlier);
-  if (!sent.length) return frames;
   let room = CHAT_IMAGE_BUDGET - mediaUrlBytes([...sent, ...alongside]);
   return frames.filter((frame) => {
     const url = chatMediaUrlBytes(frame);
