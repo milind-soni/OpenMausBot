@@ -505,7 +505,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(steerRow.uuid).toEqual(expect.any(String));
     expect(steerRow.message.content).toEqual([
       { type: "image", source: { type: "base64", media_type: "image/png", data: "[image data: 16 base64 chars]" } },
-      { type: "text", text: "and look at this\n\n" },
+      { type: "text", text: `and look at this\n\n<attached-file path="${imagePath}" name="shot.png" />` },
     ]);
   }, 40_000);
 
@@ -1030,7 +1030,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(steerRow.uuid).toEqual(expect.any(String));
     expect(steerRow.message.content).toEqual([
       { type: "image", source: { type: "base64", media_type: "image/png", data: "[image data: 20 base64 chars]" } },
-      { type: "text", text: `what about this one\n\n<attached-file path="${imagePath}" name="room.png" />` },
+      { type: "text", text: `what about this one\n\n<attached-file path="${join(home, ".openmausbot", "attachments", "123e4567-e89b-42d3-a456-426614174007.png")}" name="room.png" />` },
     ]);
   }, 40_000);
 
