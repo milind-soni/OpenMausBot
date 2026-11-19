@@ -1,10 +1,12 @@
 import { AppWindow, Brain, FileText, Folder, Globe, Zap } from "lucide-react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import type { BotLibrary } from "../../../shared/bot-library";
 import { t } from "@/lib/i18n";
 import { usePageOpener } from "@/lib/page-open";
 import { shortPath } from "@/lib/short-path";
-import { SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-media-query";
+import { localizedTaskTitle } from "@/lib/task-title";
+import { api } from "@/state/api";
 import { useStore, visibleMessages, type Bot, type Message } from "@/state/store";
 import { AttachedFileChip } from "../AttachmentPreview";
 import { recentChangedFiles, sharedFileReferences } from "../ComputerFilesPane";
@@ -15,9 +17,7 @@ import { Card, CardLabel, NavRow } from "./rows";
 import { panelMemoryNotes } from "./memory-notes";
 import { useMemoryDoc } from "./use-memory-doc";
 
-export interface LibraryItems {
-  pages: Array<{ messageId: string; title: string; url: string }>;
-  apps: Array<{ messageId: string; title: string }>;
+export interface LibraryItems extends BotLibrary {
   shared: Array<NonNullable<ReturnType<ReturnType<typeof sharedFileReferences>["get"]>>>;
   unshared: string[];
 }
@@ -31,9 +31,9 @@ export function libraryItems(bot: Bot, messages: readonly Message[] = visibleMes
     const page = message.publishedPage;
     if (page?.state === "live" && page.url && !seenPages.has(page.url)) {
       seenPages.add(page.url);
-      pages.push({ messageId: message.id, title: page.title || page.url, url: page.url });
+      pages.push({ url: page.url, title: page.title || page.url });
     }
-    if (message.kind === "app" && message.app?.doc) apps.push({ messageId: message.id, title: message.app.title });
+    if (message.kind === "app" && message.app?.doc) apps.push({ threadId: bot.threadId, messageId: message.id, title: message.app.title });
   }
   const references = sharedFileReferences(bot);
   const shared: LibraryItems["shared"] = [];
@@ -49,18 +49,33 @@ export function libraryItems(bot: Bot, messages: readonly Message[] = visibleMes
 
 const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
 
+function useBotLibrary(bot: Bot, here: BotLibrary): BotLibrary {
+  const [listed, setListed] = useState<{ botId: string; library: BotLibrary } | null>(null);
+  const changed = [...here.apps.map((app) => `${app.messageId}:${app.title}`), ...here.pages.map((page) => page.url)].join("\n");
+  useEffect(() => {
+    const request = new AbortController();
+    api<BotLibrary>(`/api/bots/${encodeURIComponent(bot.id)}/library`, { background: true, signal: request.signal })
+      .then((library) => setListed({ botId: bot.id, library }), () => undefined);
+    return () => request.abort();
+  }, [bot.id, changed]);
+  return listed?.botId === bot.id ? listed.library : here;
+}
+
+function conversationName(bot: Bot, threadId: string): string | undefined {
+  const task = bot.tasks?.find((candidate) => candidate.threadId === threadId);
+  return task && localizedTaskTitle(task.title || t("task.newShort"));
+}
+
 export function LibraryTab({ bot, onOpen }: { bot: Bot; onOpen: (page: SimplePageId) => void }) {
   const { dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
   const openPage = usePageOpener();
-  const phone = !useMediaQuery(SIDEBAR_INLINE, true);
   const skills = useManagedSkills(bot);
   const memory = useMemoryDoc(bot);
-  const { pages, apps, shared, unshared } = useMemo(() => libraryItems(bot), [bot]);
-  const showInChat = (messageId: string) => {
-    dispatch({ type: "focusMessage", threadId: bot.threadId, messageId });
-    if (phone) dispatch({ type: "toggleSettings", open: false });
-  };
+  const here = useMemo(() => libraryItems(bot), [bot]);
+  const { pages, apps } = useBotLibrary(bot, here);
+  const { shared, unshared } = here;
+  const several = new Set(apps.map((app) => app.threadId)).size > 1;
   const skillsOn = skills.skills.filter(skillSwitchOn).length;
   const notes = memory.docs ? panelMemoryNotes(memory.docs).length : null;
   const memoryValue = bot.memoryEnabled === false ? t("botPanel.memory.off")
@@ -108,9 +123,14 @@ export function LibraryTab({ bot, onOpen }: { bot: Bot; onOpen: (page: SimplePag
       )}
       {apps.length > 0 && (
         <Card label={t("botPanel.library.apps")} anchor="apps">
-          {apps.map((app) => (
-            <NavRow key={app.messageId} data-panel-row="app" icon={AppWindow} title={<span className="block truncate">{app.title}</span>} onClick={() => showInChat(app.messageId)} />
-          ))}
+          {apps.map((app) => {
+            const from = several ? conversationName(bot, app.threadId) : undefined;
+            return (
+              <NavRow key={`${app.threadId}:${app.messageId}`} data-panel-row="app" icon={AppWindow} title={<span className="block truncate">{app.title}</span>}
+                hint={from && <span className="block truncate">{from}</span>}
+                onClick={() => dispatch({ type: "showChatPage", name: app.title, page: { botId: bot.id, threadId: app.threadId, messageId: app.messageId } })} />
+            );
+          })}
         </Card>
       )}
       {shared.length + unshared.length > 0 && (
@@ -130,9 +150,9 @@ export function LibraryTab({ bot, onOpen }: { bot: Bot; onOpen: (page: SimplePag
               </li>
             ))}
           </ul>
+          <p className="mt-3 text-center text-[12px] text-ink-tertiary">{t("botPanel.library.filesScope")}</p>
         </section>
       )}
-      <p className="mt-3 text-center text-[12px] text-ink-tertiary">{t("botPanel.library.scope")}</p>
       {keeps}
     </div>
   );

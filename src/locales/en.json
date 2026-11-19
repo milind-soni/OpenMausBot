@@ -4601,7 +4601,7 @@
   "botPanel.library.pages": "Pages",
   "botPanel.library.apps": "Apps",
   "botPanel.library.files": "Files",
-  "botPanel.library.scope": "From this conversation",
+  "botPanel.library.filesScope": "Files from this conversation",
   "botPanel.thisConversation": "In this conversation",
   "botPanel.advanced.title": "More in Advanced mode",
   "botPanel.advanced.hint": "Sending on your behalf and app access are set there.",
