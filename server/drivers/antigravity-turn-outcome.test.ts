@@ -2,7 +2,7 @@
 // T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified:
 //   - apps/server/src/provider/acp/AntigravityTurnOutcome.test.ts (the error
 //     payload fixtures and the cases of the two reader tests).
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -180,8 +180,8 @@ describe("watchAntigravityPromptOutcome", () => {
     const file = join(conversations, "session.db");
     append(file, [[USER_INPUT, "first"]]);
     const check = await watchAntigravityPromptOutcome(NAME, directory, "session");
-    rmSync(file);
-    append(join(conversations, "other.db"), [[USER_INPUT, "hold the inode"]]);
+    // Keep the old inode allocated so the filesystem cannot reuse it for the replacement.
+    renameSync(file, join(conversations, "previous.db"));
     append(file, [[USER_INPUT, "second"], [USER_INPUT, "third"], [ERROR_MESSAGE, QUOTA_ERROR]]);
     expect(await check({ stopReason: "end_turn" })).toBeUndefined();
   });
