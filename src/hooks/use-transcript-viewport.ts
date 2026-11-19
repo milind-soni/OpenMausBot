@@ -127,12 +127,13 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
    * The rows on screen before a window step, each with its top in the content; the commit after it moves the view by as
    * much as the first one still drawn moved, so a step drawn a few frames later keeps where the reader has scrolled since.
    */
-  const anchor = useRef<{ key: string; rows: { rowId: string; contentTop: number }[]; height: number; window: TranscriptWindowBounds } | null>(null);
+  const anchor = useRef<{ key: string; rows: { rowId: string; contentTop: number }[]; height: number; from: TranscriptWindowBounds | null } | null>(null);
   const restingCardId = useRef<string | undefined>(undefined);
-  const holdRow = (window: TranscriptWindowBounds) => {
+  /** `from`: the window a step drawn in a transition leaves; commits that still draw it are not the step's. */
+  const holdRow = (from: TranscriptWindowBounds | null = null) => {
     const el = scrollRef.current, list = transcriptRef.current;
     const rows = el && list ? rowsInView(el, list, restingCardId.current).map((row) => ({ rowId: row.rowId, contentTop: el.scrollTop - row.offsetWithinRow })) : [];
-    anchor.current = el ? { key: transcriptKey, rows, height: el.scrollHeight, window } : null;
+    anchor.current = el ? { key: transcriptKey, rows, height: el.scrollHeight, from } : null;
   };
   const dragging = useRef(false);
   const setAside = useRef<{ key: string; selection: SetAsideSelection } | null>(null);
@@ -181,7 +182,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const next = !switched && moves ? { ...proposed, ...keepSelection(proposed) } : proposed;
   if (switched || next.start !== transcriptWindow.start || next.end !== transcriptWindow.end || first !== transcriptWindow.first) {
     // Rows came in front of the drawn ones or left their top: the DOM is still the last commit's, so it is read now.
-    if (!switched && !following && (next.added > 0 || next.start > transcriptWindow.start)) holdRow(next);
+    if (!switched && !following && (next.added > 0 || next.start > transcriptWindow.start)) holdRow();
     setTranscriptWindow({ key: transcriptKey, first, start: next.start, end: next.end });
   }
   const {
@@ -337,7 +338,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
 
   const expandingRef = useRef(false);
   const holdRowForPrepend = () => {
-    holdRow(windowRef.current);
+    holdRow();
     setBottomFollow(false);
   };
   // The commit after a window step: the row that was on screen goes back where it was (scroll anchoring is off here),
@@ -345,8 +346,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   useLayoutEffect(() => {
     const el = scrollRef.current, list = transcriptRef.current, held = anchor.current;
     if (!held || !el) return;
-    // A step drawn in a transition: commits before it are not the step's.
-    if (held.key === transcriptKey && (held.window.start !== transcriptWindow.start || held.window.end !== transcriptWindow.end)) return;
+    if (held.key === transcriptKey && held.from?.start === transcriptWindow.start && held.from.end === transcriptWindow.end) return;
     anchor.current = null;
     expandingRef.current = false;
     if (held.key !== transcriptKey) return;
@@ -389,7 +389,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const stepWindow = (step: (window: TranscriptWindowBounds, total: number) => TranscriptWindowBounds) => {
     const target = keepSelection(step(drawnBounds, messages.length), drawnBounds);
     if (target.start === drawnBounds.start && target.end === drawnBounds.end) return false;
-    holdRow(target);
+    holdRow(windowRef.current);
     startTransition(() => setTranscriptWindow((w) => w.key === transcriptKey ? { ...w, ...target } : w));
     return true;
   };
