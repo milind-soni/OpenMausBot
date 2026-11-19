@@ -1,0 +1,44 @@
+---
+status: todo
+created: 2026-11-19
+updated: 2026-11-19
+scope: curated apps and Edits integration
+owner: unassigned
+related: []
+---
+
+# Replace Composio with curated apps, starting with Edits
+
+Remove the Composio integration and replace it with curated, non-technical apps on the Apps screen, starting with Edits (local MCP automation server). Covers the app registry, live status checks, setup popup, Buddy app routing (use / explain setup / ask which / `+app` tag), and composer app tags. Plan: `docs/dev/plans/implementation--curated-apps-and-edits.md` (needs approval before code changes). Other apps, OAuth cloud apps and per-Buddy app permissions are not covered.
+
+---
+
+## 1. Remove Composio
+
+- [ ] **Delete the Composio server module and tests** — `server/composio.ts:1`. Composio needs a developer account and keys, and testing showed it only reached Claude Buddies.
+- [ ] **Remove Composio config, routes, prompt text and turn integration** — `server/config.ts:19`, `server/index.ts:528`, `server/index.ts:772`, `server/index.ts:977`, `server/index.ts:2462`, `server/contracts.ts:120`, `server/drivers/claude.ts:263`. No Buddy should be told about tools it doesn't have.
+- [ ] **Remove the Composio key fields and store flags** — `src/components/ApiKeys.tsx:9`, `src/components/SettingsScreen.tsx:234`, `src/state/store.tsx:164`.
+- [ ] **Update the user-facing docs** — `README.md`, `SECURITY.md`, `docs/guide/glossary.md`, `docs/guide/copy-sweep.md`, `.github/ISSUE_TEMPLATE/`.
+
+## 2. App registry, storage and status
+
+- [ ] **Add the curated catalog with an Edits entry** — `server/apps/catalog.ts` (new). Plain-language setup steps, capabilities, default endpoint `http://127.0.0.1:19501/mcp`, Bearer token auth.
+- [ ] **Add per-app settings with write-only, owner-only token storage** — `server/apps/store.ts` (new). Loopback-only endpoints.
+- [ ] **Add live health checks (Not running / Needs setup / Ready / Error)** — `server/apps/health.ts` (new). Uses MCP `initialize` + `tools/list` with a 5 s timeout.
+- [ ] **Add app routes (list, save, test, disconnect, internal forward)** — `server/index.ts`.
+
+## 3. Buddies use apps
+
+- [ ] **Expose `list_apps` and `use_app` through the harness proxy** — `server/drivers/agents-proxy.ts:25`. Reaches Claude, Codex and ACP Buddies, and the token stays in the harness.
+- [ ] **Add the Apps prompt section only for MCP-capable drivers** — `server/apps/prompt.ts` (new), `server/index.ts:772`, `server/index.ts:977`. Rules: use if Ready, explain setup if not, ask when more than one app fits, a `+app` tag wins.
+
+## 4. Apps screen and composer
+
+- [ ] **Rewrite the Apps screen around curated apps with status pills** — `src/components/AppsScreen.tsx:1`.
+- [ ] **Add the app setup popup with Test connection** — `src/components/AppSetupDialog.tsx` (new).
+- [ ] **Add `+app` tags in the composer and chips in message bubbles** — `src/lib/appMentions.ts` (new), `src/components/Composer.tsx:80`.
+
+## 5. Verification
+
+- [ ] **Automated tests for removal, store, health, proxy, prompt and tag parsing** — `server/apps/*.test.ts`, `src/lib/appMentions.test.ts`.
+- [ ] **Live QA with the real Edits app in an isolated second Electron instance** — follow the manual scenarios in the plan, using `TEST ·` names.
