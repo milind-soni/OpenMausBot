@@ -69,8 +69,9 @@ const source = {
   },
   dispatch: () => {},
 } as never;
+const KINDS = ["Mail", "Sheet", "Chat", "Code", "Pay", "Docs", "Cal", "Crm", "Ads", "Map"];
 const catalog = (count: number, edition = 0) => Array.from({ length: count }, (_, index) => ({
-  slug: `app${index}`, label: `App ${index}${edition ? ` v${edition}` : ""}`, blurb: `does thing ${index}`, logo: null, domain: null, categories: [`Kind ${index % 9}`],
+  slug: `app${index}`, label: `${KINDS[index % KINDS.length]} ${index}${edition ? ` v${edition}` : ""}`, blurb: `does thing ${index}`, logo: null, domain: null, categories: [`Kind ${index % 9}`],
 }));
 
 let host: HTMLDivElement;
@@ -90,12 +91,29 @@ const answerCatalog = async () => {
   await flush();
 };
 const tiles = () => host.querySelectorAll("[data-app-tile]").length;
+/** The tiles rendered, first time or again, while `step` ran. */
+const tileRenders = async (step: () => void) => {
+  const before = fixture.tileRenders;
+  await act(async () => step());
+  await flush();
+  return fixture.tileRenders - before;
+};
+const storeChange = () => {
+  fixture.state = { ...fixture.state, tick: Number(fixture.state.tick) + 1 };
+  for (const watch of Array.from(fixture.watchers)) watch();
+};
+const type = (text: string) => {
+  const input = host.querySelector("input")!;
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, text);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+};
 const loadingShown = () => host.textContent!.includes(t("connectors.loadingCatalog"));
 
 beforeEach(() => {
   host = document.createElement("div");
   document.body.append(host);
   Object.assign(fixture, { cards: catalog(40), catalogRequests: 0, held: [], hold: false, tileRenders: 0 });
+  fixture.state = { pluginsSurface: "apps", bots: [], instances: [], config: null, tick: 0 };
 });
 afterEach(async () => {
   await close();
@@ -121,6 +139,56 @@ describe("opening the Apps panel again", () => {
     expect(firstOpen).toEqual({ tiles: 0, loadingShown: true });
     expect(loaded).toBeGreaterThan(0);
     expect(reopened).toEqual({ tiles: loaded, loadingShown: false, catalogRequests: 1 });
-    expect(refreshed).toContain("App 0 v2");
+    expect(refreshed).toContain("Mail 0 v2");
+  });
+});
+
+describe("how often the Apps panel renders its tiles", () => {
+  const APPS = 300;
+  beforeEach(async () => {
+    fixture.cards = catalog(APPS);
+    await open();
+  });
+
+  it("renders no tile again for a store change that is not about apps, however many show", async () => {
+    expect(tiles()).toBeGreaterThan(0);
+    expect(await tileRenders(storeChange)).toBe(0);
+
+    const showAll = Array.from(host.querySelectorAll("button")).find((button) => button.textContent === t("apps.showAll", { count: String(APPS) }))!;
+    expect(await tileRenders(() => showAll.click())).toBeGreaterThan(0);
+    expect(tiles()).toBeGreaterThanOrEqual(APPS);
+    expect(await tileRenders(storeChange)).toBe(0);
+  });
+
+  it("renders no tile again for a config frame that brings the same policy, and every tile for one that changes it", async () => {
+    const policy = () => ({ organizationName: "Acme", apps: { allowAll: false, allowlist: ["app0"] } });
+    const withConfig = (managedPolicy: unknown) => () => {
+      fixture.state = { ...fixture.state, config: { managedPolicy } };
+      for (const watch of Array.from(fixture.watchers)) watch();
+    };
+    await tileRenders(withConfig(policy()));
+    expect(await tileRenders(withConfig(policy()))).toBe(0);
+    expect(await tileRenders(withConfig({ ...policy(), organizationName: "Other" }))).toBe(tiles());
+  });
+
+  it("renders only the tiles a search brings in, and none of those it keeps as the search narrows", async () => {
+    const all = APPS / KINDS.length;
+    expect(await tileRenders(() => type("m"))).toBeGreaterThan(0);
+    expect(tiles()).toBe(3 * all);
+    expect(await tileRenders(() => type("ma"))).toBe(0);
+    expect(tiles()).toBe(2 * all);
+    expect(await tileRenders(() => type("mai"))).toBe(0);
+    expect(tiles()).toBe(all);
+    expect(host.querySelector("input")!.value).toBe("mai");
+    expect(await tileRenders(storeChange)).toBe(0);
+  });
+
+  it("renders a tile again when its own app changes", async () => {
+    fixture.cards = catalog(APPS).map((card) => card.slug === "app0" ? { ...card, blurb: "now does more" } : card);
+    const { appCatalogAnnounced } = await import("@/lib/app-catalog-signal");
+    const shownIn = host.querySelectorAll('[data-app-tile="app0"]').length;
+    expect(shownIn).toBeGreaterThan(0);
+    expect(await tileRenders(appCatalogAnnounced)).toBe(shownIn);
+    expect(host.querySelector('[data-app-tile="app0"]')!.textContent).toContain("now does more");
   });
 });

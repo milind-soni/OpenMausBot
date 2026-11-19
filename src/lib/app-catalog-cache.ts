@@ -33,6 +33,15 @@ export function appCatalogMemory(): AppCatalog | null {
   return catalog;
 }
 
+/** The new list, with each card that is as it was kept as the same object, so only what changed is painted again. */
+function keepingKnownCards(next: ToolkitCard[], known: ToolkitCard[]): ToolkitCard[] {
+  const before = new Map(known.map((card) => [card.slug, card]));
+  return next.map((card) => {
+    const same = before.get(card.slug);
+    return same && JSON.stringify(same) === JSON.stringify(card) ? same : card;
+  });
+}
+
 /** Reads the catalog, one request however many ask at once. Cards that came back unchanged stay the same array. */
 export function loadAppCatalog(): Promise<AppCatalog> {
   request ??= api("/api/connectors/catalog")
@@ -40,7 +49,7 @@ export function loadAppCatalog(): Promise<AppCatalog> {
       const cards = r.cards ?? [];
       const text = JSON.stringify(cards);
       const next: AppCatalog = {
-        cards: catalog && text === cardsText ? catalog.cards : cards,
+        cards: !catalog ? cards : text === cardsText ? catalog.cards : keepingKnownCards(cards, catalog.cards),
         source: r.source ?? "curated",
         pagination: r.pagination ?? null,
         configured: Boolean(r.configured),
