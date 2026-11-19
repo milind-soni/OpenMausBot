@@ -217,6 +217,16 @@ Both services document this general API setup and their current model IDs
 in their OpenAI compatibility guides. See the [Z.ai guide](https://docs.z.ai/guides/develop/openai/python)
 and the [Zhipu BigModel guide](https://docs.bigmodel.cn/cn/guide/develop/openai/introduction).
 
+### Example: Venice AI
+
+Venice serves an OpenAI-compatible API, so it needs no custom instance. Open
+**Keys**, find the **Other (OpenAI-compatible)** row (searching "venice" finds
+it), set the base URL to `https://api.venice.ai/api/v1` and paste your Venice
+API key. The key is checked against the base URL saved with it, and changing
+the URL checks the saved key again. To give Venice its own bot next to another
+OpenAI-compatible server, use the `openai-compat` instance above with that base
+URL instead.
+
 ## Notes
 
 - `config.json` is written with mode 0600; values in `environment` are stored

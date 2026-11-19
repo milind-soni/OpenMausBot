@@ -315,6 +315,101 @@ describe("the OpenAI-compatible server row", () => {
   });
 });
 
+describe("the OpenAI-compatible key check", () => {
+  it("checks the saved key again at the base URL typed after it, such as Venice", async () => {
+    fx.config = { ...fx.config, openaiCompat: { configured: true, last4: "1234" } };
+    const tested: Array<string | undefined> = [];
+    fx.api.mockImplementation(async (path: string, init: { body: string }) => {
+      if (path === "/api/config") return { ...fx.config, openaiCompat: { ...(fx.config.openaiCompat as object), ...JSON.parse(init.body).openaiCompat } };
+      if (path !== "/api/keys/test") return {};
+      const url = (fx.config.openaiCompat as { url?: string }).url;
+      tested.push(url);
+      return url === "https://api.venice.ai/api/v1" ? { ok: true, check: "models", models: ["venice-uncensored"] } : { ok: false, reason: "rejected" };
+    });
+    page();
+    flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    const url = row("openaiCompat")!.querySelector<HTMLInputElement>('input[aria-label="OpenAI-compatible base URL"]')!;
+    type(url, "https://api.venice.ai/api/v1");
+    flushSync(() => url.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+    await vi.waitFor(() => expect(row("openaiCompat")!.textContent).toContain("venice-uncensored"));
+    expect(tested).toEqual(["https://api.venice.ai/api/v1"]);
+    expect(row("openaiCompat")!.textContent).not.toContain("Didn't work");
+  });
+
+  it("checks again when the base URL changes while a check is still running", async () => {
+    fx.config = { ...fx.config, openaiCompat: { configured: true, last4: "1234" } };
+    const tested: Array<string | undefined> = [];
+    let answerFirst: (result: unknown) => void = () => {};
+    fx.api.mockImplementation((path: string) => {
+      if (path !== "/api/keys/test") return Promise.resolve({});
+      const url = (fx.config.openaiCompat as { url?: string }).url;
+      tested.push(url);
+      if (tested.length === 1) return new Promise((resolve) => { answerFirst = resolve; });
+      return Promise.resolve({ ok: true, check: "models", models: ["venice-uncensored"] });
+    });
+    page();
+    flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.example.test/v1" } }));
+    await vi.waitFor(() => expect(tested).toEqual(["https://api.example.test/v1"]));
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.venice.ai/api/v1" } }));
+    answerFirst({ ok: false, reason: "rejected" });
+    await vi.waitFor(() => expect(row("openaiCompat")!.textContent).toContain("venice-uncensored"));
+    expect(tested).toEqual(["https://api.example.test/v1", "https://api.venice.ai/api/v1"]);
+    expect(row("openaiCompat")!.textContent).not.toContain("Didn't work");
+  });
+
+  it("checks again when the base URL changes while a check that then fails is still running", async () => {
+    fx.config = { ...fx.config, openaiCompat: { configured: true, last4: "1234" } };
+    const tested: Array<string | undefined> = [];
+    let failFirst: (cause: Error) => void = () => {};
+    fx.api.mockImplementation((path: string) => {
+      if (path !== "/api/keys/test") return Promise.resolve({});
+      const url = (fx.config.openaiCompat as { url?: string }).url;
+      tested.push(url);
+      if (tested.length === 1) return new Promise((_resolve, reject) => { failFirst = reject; });
+      return Promise.resolve({ ok: true, check: "models", models: ["venice-uncensored"] });
+    });
+    page();
+    flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.example.test/v1" } }));
+    await vi.waitFor(() => expect(tested).toEqual(["https://api.example.test/v1"]));
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.venice.ai/api/v1" } }));
+    failFirst(new Error("network down"));
+    await vi.waitFor(() => expect(row("openaiCompat")!.textContent).toContain("venice-uncensored"));
+    expect(tested).toEqual(["https://api.example.test/v1", "https://api.venice.ai/api/v1"]);
+    expect(row("openaiCompat")!.textContent).not.toContain("network down");
+  });
+
+  it("does not check the key when the page opens or nothing about the address changed", async () => {
+    fx.config = { ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.venice.ai/api/v1" } };
+    fx.api.mockResolvedValue({});
+    page();
+    flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.venice.ai/api/v1" } }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fx.api.mock.calls.map(([path]) => path)).not.toContain("/api/keys/test");
+  });
+
+  it("does not check when no key is saved yet", async () => {
+    fx.api.mockImplementation(async (path: string, init: { body: string }) => (path === "/api/config" ? { ...fx.config, openaiCompat: JSON.parse(init.body).openaiCompat } : {}));
+    page();
+    flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    const url = row("openaiCompat")!.querySelector<HTMLInputElement>('input[aria-label="OpenAI-compatible base URL"]')!;
+    type(url, "https://api.venice.ai/api/v1");
+    flushSync(() => url.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+    await vi.waitFor(() => expect(fx.api.mock.calls.map(([path]) => path)).toContain("/api/config"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fx.api.mock.calls.map(([path]) => path)).not.toContain("/api/keys/test");
+  });
+
+  it("is found by searching for Venice", () => {
+    page();
+    const search = host.querySelector<HTMLInputElement>("[data-keys-search]")!;
+    type(search, "venice");
+    expect(rowsShown()).toContain("openaiCompat");
+  });
+});
+
 describe("the Ollama row", () => {
   const openServers = () => flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
   const button = (text: string) => [...row("ollama")!.querySelectorAll("button")].find((candidate) => candidate.textContent === text)!;
