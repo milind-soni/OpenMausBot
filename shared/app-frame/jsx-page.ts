@@ -232,7 +232,7 @@ export const JSX_RUNTIME_SOURCE = `(function (env) {
 
 const BASE_STYLE = [
   "html,body{margin:0}",
-  "body{font-size:inherit;line-height:inherit;background:var(--color-background-primary,#fff)}",
+  "body{line-height:inherit;background:var(--color-background-primary,#fff)}",
   "#mausbot-root:empty::before{content:\"Loading\\2026\";display:block;box-sizing:border-box;min-height:100vh;padding:24px;font:14px/20px system-ui,sans-serif;opacity:.6}",
   ".mausbot-problem{position:fixed;inset:12px;overflow:auto;z-index:2147483646;border-radius:12px;padding:16px 18px;",
   "font:14px/1.5 system-ui,sans-serif;background:#fff6f5;color:#5c1712;border:1px solid #f3c2bd;box-shadow:0 8px 24px rgba(0,0,0,.12)}",
