@@ -21,6 +21,7 @@ export async function listAppsForBuddy(appId?: string) {
         status: status.state,
         message: status.message,
         good_for: app.capabilities,
+        notes: app.buddyNotes,
         ...(status.state === "ready"
           ? {
               // full schemas only when asked about one app — keeps the overview short

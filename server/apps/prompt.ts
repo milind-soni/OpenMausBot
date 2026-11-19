@@ -27,7 +27,8 @@ export async function buildAppsPrompt(latestUserText: string): Promise<string> {
     APP_CATALOG.map(async (app) => {
       const status = await appStatus(app.id).catch(() => null);
       const state = status ? STATE_LABEL[status.state] : "unavailable";
-      return `- ${app.name} (id: ${app.id}, ${state}): ${app.blurb} Good for: ${app.capabilities.join(", ")}.`;
+      const notes = app.buddyNotes.length ? ` Notes: ${app.buddyNotes.join(" ")}` : "";
+      return `- ${app.name} (id: ${app.id}, ${state}): ${app.blurb} Good for: ${app.capabilities.join(", ")}.${notes}`;
     }),
   );
   const tagged = taggedApps(latestUserText).map((id) => findApp(id)!.name);

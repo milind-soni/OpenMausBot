@@ -23,6 +23,8 @@ export interface AppDefinition {
   auth: { kind: "bearer"; label: string; help: string };
   /** Numbered, non-technical setup steps (shown in the popup and given to Buddies). */
   setupSteps: string[];
+  /** Working rules for Buddies (in the prompt and list_apps), learned from real use. */
+  buddyNotes: string[];
 }
 
 export const APP_CATALOG: readonly AppDefinition[] = [
@@ -46,6 +48,10 @@ export const APP_CATALOG: readonly AppDefinition[] = [
       "Turn on “Enable Automation Server”.",
       "Under Access token, click Copy.",
       "Paste the token here, then click Test connection.",
+    ],
+    buddyNotes: [
+      "Edits is sandboxed: it can only open files inside the user's Movies folder (~/Movies). If the clips are elsewhere, ask the user before copying them into a folder under ~/Movies, then import the copies.",
+      "Project changes may not show in the project list until the project is saved or closed. Check the open project with appState or previewVideoFrames instead.",
     ],
   },
 ];

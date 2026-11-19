@@ -7,8 +7,11 @@
 export type McpFailureKind = "not_running" | "unauthorized" | "timeout" | "protocol";
 
 export class McpError extends Error {
-  constructor(readonly kind: McpFailureKind, message: string) {
+  // explicit field: `node --experimental-strip-types` rejects parameter properties
+  readonly kind: McpFailureKind;
+  constructor(kind: McpFailureKind, message: string) {
     super(message);
+    this.kind = kind;
   }
 }
 

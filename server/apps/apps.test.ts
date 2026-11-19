@@ -138,6 +138,7 @@ describe("Buddies and apps", () => {
     expect(prompt).toContain("give them the setup steps");
     expect(prompt).toContain("ask which they want");
     expect(prompt).toContain("The user tagged: Edits");
+    expect(prompt).toContain("~/Movies");
     expect(prompt).not.toContain(TOKEN);
   });
 
