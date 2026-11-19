@@ -4,6 +4,7 @@ import { rmSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { botPermissionSnapshot } from "../../shared/bot-permission-snapshot.ts";
 import type { ConnectorScopes } from "../../shared/connector-scopes.ts";
 import type { WireBot } from "../../shared/wire.ts";
 import { VPS_BOT_ALIAS_CHANGE_ERROR, VPS_BOT_ALIAS_LIFECYCLE_ERROR, VPS_BOT_ALIAS_RESOURCES_ERROR } from "../cloud-backend.ts";
@@ -417,6 +418,15 @@ describe("PATCH /api/bots/:id while the bot works", () => {
     expect(widened.status).toBe(409);
     expect(store.bot(bot.id)?.mcpServers).toEqual(["notes"]);
   });
+});
+
+it("rejects a stale permission replacement without restoring a revoked grant", async () => {
+  const { store, bot, patch } = fixture();
+  store.patchBot(bot.id, { connectorScopes: { apps: { gmail: "read", slack: "read" } } });
+  const expectedPermissions = botPermissionSnapshot(store.bot(bot.id)!);
+  expect((await patch(bot.id, { expectedPermissions, connectorScopes: { apps: { slack: "read" } } })).status).toBe(200);
+  expect((await patch(bot.id, { expectedPermissions, connectorScopes: { apps: { gmail: "read" } } })).status).toBe(409);
+  expect(store.bot(bot.id)?.connectorScopes).toEqual({ apps: { slack: "read" } });
 });
 
 describe("PATCH /api/bots/:id connectorScopes", () => {

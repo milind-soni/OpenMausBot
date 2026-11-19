@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, useStore, type Bot } from "@/state/store";
+import { ApiError } from "@/state/api";
+import { botPermissionSnapshot } from "../../shared/bot-permission-snapshot";
 import { preloadConnectedApps, type ConnectorInventory } from "@/lib/connected-apps";
 import { permissionCell, permissionPatch, type PermissionReason, type PermissionResource } from "@/lib/bot-permission-board";
 import { Select } from "./Select";
-import { useMcpServers } from "@/lib/mcp-servers";
+import { useMcpServers, type McpServerSummary } from "@/lib/mcp-servers";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { EMAIL_SLUG, type EmailStatus } from "../../shared/email";
@@ -78,24 +80,41 @@ export function BotPermissionBoard() {
     setError("");
     setNotice("");
     try {
-      const fresh = await api<{ bots: Bot[] }>("/api/bots?messages=0");
-      const current = fresh.bots.find(entry => entry.id === bot.id);
-      if (!current) throw new Error(t("permissionBoard.botGone"));
-      dispatch({ type: "botPatched", bot: current });
-      if (resource.kind === "service" && !on && emailError && !current.connectorScopes && permissionCell(current, resource, []).checked) {
-        throw new Error(t("permissionBoard.emailError"));
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const fresh = await api<{ bots: Bot[] }>("/api/bots?messages=0");
+        const current = fresh.bots.find(entry => entry.id === bot.id);
+        if (!current) throw new Error(t("permissionBoard.botGone"));
+        dispatch({ type: "botPatched", bot: current });
+        let currentConnected = connected;
+        let currentServers = servers ?? [];
+        if (resource.kind === "service" && !on && !current.connectorScopes && permissionCell(current, resource, []).checked) {
+          const [latest, email] = await Promise.all([preloadConnectedApps(true), api<EmailStatus>("/api/email").catch(() => null)]);
+          if (!email) throw new Error(t("permissionBoard.emailError"));
+          if (!latest.authoritative || latest.refused) throw new Error(t("permissionBoard.inventoryError"));
+          currentConnected = Object.entries(latest.services).filter(([, status]) => status.connected).map(([slug]) => slug);
+          if (email.state === "connected" && !currentConnected.includes(EMAIL_SLUG)) currentConnected.push(EMAIL_SLUG);
+        } else if (resource.kind === "mcp") {
+          currentServers = (await api<{ servers: McpServerSummary[] }>("/api/mcp/servers")).servers;
+        }
+        const patch = permissionPatch(current, resource, on, currentConnected, currentServers);
+        if (patch === null) {
+          const reason = permissionCell(current, resource, currentServers).reason;
+          if (reason) throw new Error(t(reasonKeys[reason]));
+          return;
+        }
+        if (Object.keys(patch).length === 0) return;
+        try {
+          const result = await api<{ bot: Bot }>(`/api/bots/${encodeURIComponent(bot.id)}`, {
+            method: "PATCH", body: JSON.stringify({ ...patch, expectedPermissions: botPermissionSnapshot(current) }),
+          });
+          if (!result.bot || result.bot.id !== bot.id) throw new Error(t("permissionBoard.invalidResponse"));
+          dispatch({ type: "botPatched", bot: result.bot });
+          setNotice(t("permissionBoard.saved", { bot: bot.name, resource: resource.label }));
+          return;
+        } catch (cause) {
+          if (!(attempt === 0 && cause instanceof ApiError && cause.status === 409 && cause.body?.code === "bot_permissions_changed")) throw cause;
+        }
       }
-      const patch = permissionPatch(current, resource, on, connected, servers ?? []);
-      if (patch === null) {
-        const reason = permissionCell(current, resource, servers ?? []).reason;
-        if (reason) throw new Error(t(reasonKeys[reason]));
-        return;
-      }
-      if (Object.keys(patch).length === 0) return;
-      const result = await api<{ bot: Bot }>(`/api/bots/${encodeURIComponent(bot.id)}`, { method: "PATCH", body: JSON.stringify(patch) });
-      if (!result.bot || result.bot.id !== bot.id) throw new Error(t("permissionBoard.invalidResponse"));
-      dispatch({ type: "botPatched", bot: result.bot });
-      setNotice(t("permissionBoard.saved", { bot: bot.name, resource: resource.label }));
     } catch (cause) {
       setError(`${bot.name} · ${resource.label}: ${cause instanceof Error ? cause.message : String(cause)}`);
     } finally {

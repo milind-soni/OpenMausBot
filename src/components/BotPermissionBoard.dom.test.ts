@@ -3,6 +3,7 @@ import { act, createElement, useSyncExternalStore } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
+import { ApiError } from "@/state/api";
 import type { Bot } from "@/state/store";
 import type { McpServerSummary } from "@/lib/mcp-servers";
 import { BotPermissionBoard } from "./BotPermissionBoard";
@@ -37,8 +38,10 @@ beforeEach(() => {
   f.inventory.mockResolvedValue({ services: { mail: { connected: true }, calendar: { connected: true } }, authoritative: true });
   f.mcp.servers = [{ name: "files", enabled: true }];
   f.mcp.error = false;
+  f.mcp.refresh.mockImplementation(async () => f.mcp.servers);
   f.dispatch.mockImplementation((action: { type: string; bot: Bot }) => { if (action.type === "botPatched") setBots(f.state.bots.map(bot => bot.id === action.bot.id ? action.bot : bot)); });
   f.api.mockImplementation(async (path: string, init?: RequestInit) => {
+    if (path === "/api/mcp/servers") return { servers: f.mcp.servers };
     if (path === "/api/email") return { state: "not-connected" };
     if (path === "/api/bots?messages=0") return { bots: structuredClone(saved) };
     if (init?.method === "PATCH") {
@@ -74,12 +77,40 @@ it("uses a fresh bot snapshot and preserves restrictions changed elsewhere befor
   await render();
   saved[0] = makeBot("a", { connectorScopes: { apps: { mail: "read", calendar: "read" } }, connectorTools: { mail: { tools: ["MAIL_GET_MESSAGE"] }, calendar: { tools: "*" } } });
   await act(async () => cell("Alpha", "Calendar").click());
-  expect(JSON.parse(patches()[0]![1].body)).toEqual({ connectorScopes: { apps: { mail: "read" } } });
+  expect(JSON.parse(patches()[0]![1].body)).toMatchObject({ connectorScopes: { apps: { mail: "read" } }, expectedPermissions: { connectorScopes: { apps: { mail: "read", calendar: "read" } } } });
   expect(cell("Alpha", "Calendar").checked).toBe(false);
   expect(cell("Alpha", "Mail").checked).toBe(true);
   expect(host.textContent).toContain("Read only");
   expect(saved[0]!.connectorTools?.mail.tools).toEqual(["MAIL_GET_MESSAGE"]);
   expect(saved[1]!.composio).toBe(false);
+});
+
+it("rechecks the service inventory before narrowing inherited permissions", async () => {
+  f.inventory.mockResolvedValue({ services: { mail: { connected: true } }, authoritative: true });
+  await render();
+  f.inventory.mockResolvedValue({ services: { mail: { connected: true }, calendar: { connected: true } }, authoritative: true });
+  await act(async () => cell("Alpha", "Mail").click());
+  expect(saved[0]!.connectorScopes).toEqual({ apps: { calendar: "write" } });
+});
+
+it("retries a stale edit without restoring another window's revoked permission", async () => {
+  saved[0] = makeBot("a", { connectorScopes: { apps: { mail: "read", calendar: "read" } } });
+  f.state = { bots: structuredClone(saved) };
+  await render();
+  const normal = f.api.getMockImplementation()!;
+  let concurrentEdit = true;
+  f.api.mockImplementation(async (path, init) => {
+    if (concurrentEdit && init?.method === "PATCH") {
+      concurrentEdit = false;
+      saved[0] = makeBot("a", { connectorScopes: { apps: { mail: "read" } } });
+      throw new ApiError("Conflict", 409, { code: "bot_permissions_changed" });
+    }
+    return normal(path, init);
+  });
+  await act(async () => cell("Alpha", "Mail").click());
+  expect(patches()).toHaveLength(2);
+  expect(saved[0]!.connectorScopes).toEqual({ apps: {} });
+  expect(cell("Alpha", "Calendar").checked).toBe(false);
 });
 
 it("enabling one service does not resurrect a globally disabled bot's other stored grants", async () => {

@@ -50,8 +50,12 @@ re-tested here.
 
 - Every edit reads a fresh bot snapshot before deriving a minimal permission
   patch, and waits for the server's response before showing a changed check.
-  A per-bot synchronous in-flight guard prevents lost compound grants from
-  simultaneous cells; other bots can still be edited.
+  The server rejects a replacement if the bot's permissions changed since that
+  read. The board reads again and retries once, so another window's changes are
+  not overwritten by an older snapshot. Other bots can still be edited.
+- Before an inherited service revoke, the board rereads connected services and
+  native email. MCP edits also reread the server inventory before deriving the
+  selection.
 - Services reuse `botAppScope` and `appSwitchPatch`. Existing read-only scopes,
   account limits on the remaining apps, and exact-tool restrictions are
   retained. An app newly switched on receives

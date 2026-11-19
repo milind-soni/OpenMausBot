@@ -1,4 +1,6 @@
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
+import { botPermissionSnapshot } from "../../shared/bot-permission-snapshot.ts";
 
 import { approvalModeFor, isApprovalMode, type ApprovalMode } from "../../shared/approval-mode.ts";
 import { normalizeConnectorScopes, widensConnectorScopes } from "../../shared/connector-scopes.ts";
@@ -110,6 +112,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       const body = await readBody(req);
       if (!body || typeof body !== "object" || Array.isArray(body)) {
         return json(res, 400, { error: "body must be a JSON object" });
+      }
+      if (Object.hasOwn(body, "expectedPermissions") && Object.keys(body).some(key =>
+        !["expectedPermissions", "composio", "connectorScopes", "mcpServers"].includes(key))) {
+        return json(res, 400, { error: "expectedPermissions is only supported for permission edits." });
       }
       const pairedDevice = req.headers["x-openmausbot-companion"] === "1";
       if ((auth.kind === "session" && !auth.scopes.includes("admin")) || pairedDevice) {
@@ -649,6 +655,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         sectionKey(existingBot?.section) !== sectionKey(section);
       let bot: BotRecord | null;
       const freshBrowserBot = store.bot(m[1]);
+      if (Object.hasOwn(body, "expectedPermissions") && freshBrowserBot &&
+          !isDeepStrictEqual(body.expectedPermissions, JSON.parse(JSON.stringify(botPermissionSnapshot(freshBrowserBot))))) {
+        return json(res, 409, { code: "bot_permissions_changed", error: "Bot permissions changed. Try again with the current permissions." });
+      }
       // Rechecked: the awaits above can yield after the first memory check.
       if (freshBrowserBot && body.memoryEnabled !== undefined &&
           body.memoryEnabled !== (freshBrowserBot.memoryEnabled !== false) &&
