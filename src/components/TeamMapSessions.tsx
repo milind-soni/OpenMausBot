@@ -37,11 +37,11 @@ export function TeamMapSessions({ sessions, now }: { sessions: TeamMapSession[];
               else openThread(dispatch, { botId: session.botId, threadId: session.threadId }, state, showThreads);
             }}
             aria-label={t("canvas.session.openAria", { title: session.title })}
-            className="flex w-full min-w-0 flex-col gap-0.5 rounded-lg border border-hairline/40 bg-card px-2.5 py-1.5 text-left transition hover:bg-raised/50 focus-visible:outline-2 focus-visible:outline-accent"
+            className="flex w-full min-w-0 flex-col gap-0.5 rounded-lg border border-hairline/40 bg-card px-2.5 py-1.5 text-left transition animate-pop-in hover:bg-raised/50"
           >
             <span className="truncate text-[12px] font-medium text-ink">{session.title}</span>
-            <span className="flex min-w-0 items-center gap-1.5 text-[10px] text-ink-secondary">
-              <span className={cn("size-1.5 shrink-0 rounded-full", DOT[status.tone])} aria-hidden />
+            <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-ink-secondary">
+              <span className={cn("size-1.5 shrink-0 rounded-full", DOT[status.tone], status.tone === "success" && "animate-status-pulse")} aria-hidden />
               <span className="shrink-0">{status.label}</span>
               {meta && <span className="truncate">· {meta}</span>}
               <span className="ml-auto shrink-0 tabular-nums">{formatSessionElapsed(session.startedAt, now)}</span>

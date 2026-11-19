@@ -36,7 +36,7 @@ describe("team map session cards", () => {
   });
 
   it("shows each state as readable text, never colour alone", () => {
-    for (const [state, label] of [["running", "Working"], ["stuck", "Stuck"], ["waiting", "Waiting"], ["queued", "Queued"]] as const) {
+    for (const [state, label] of [["running", "Working"], ["stuck", "Stuck"], ["waiting", "Waiting for you"], ["queued", "Queued"]] as const) {
       const html = renderToStaticMarkup(createElement(TeamMapSessions, { sessions: [session({ state })], now: 0 }));
       expect(html).toContain(label);
     }
@@ -75,5 +75,12 @@ describe("team map session cards", () => {
     fixture.showThreads = false;
     const actions = clickFirst([session({ botId: "ada", threadId: "ada-chat" })]);
     expect(actions).toContainEqual({ type: "revealThread", threadId: "ada-chat" });
+  });
+
+  it("pulses only the running session's dot, leaving stuck, waiting and queued still", () => {
+    for (const [state, shouldPulse] of [["running", true], ["stuck", false], ["waiting", false], ["queued", false]] as const) {
+      const html = renderToStaticMarkup(createElement(TeamMapSessions, { sessions: [session({ state })], now: 0 }));
+      expect(html.includes("animate-status-pulse")).toBe(shouldPulse);
+    }
   });
 });

@@ -123,7 +123,7 @@ describe("team map live sessions", () => {
   it("labels each session state, with status never conveyed by color alone", () => {
     expect(teamMapSessionStatus("running")).toEqual({ label: "Working", tone: "success" });
     expect(teamMapSessionStatus("stuck")).toEqual({ label: "Stuck", tone: "danger" });
-    expect(teamMapSessionStatus("waiting")).toEqual({ label: "Waiting", tone: "warning" });
+    expect(teamMapSessionStatus("waiting")).toEqual({ label: "Waiting for you", tone: "warning" });
     expect(teamMapSessionStatus("queued")).toEqual({ label: "Queued", tone: "idle" });
   });
 

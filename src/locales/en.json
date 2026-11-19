@@ -9479,7 +9479,7 @@
   "canvas.status.ready": "Ready",
   "canvas.session.state.running": "Working",
   "canvas.session.state.stuck": "Stuck",
-  "canvas.session.state.waiting": "Waiting",
+  "canvas.session.state.waiting": "Waiting for you",
   "canvas.session.state.queued": "Queued",
   "canvas.session.elapsedMinutes": "{count} min",
   "canvas.session.elapsedHours": "{count} h",

@@ -5,7 +5,7 @@ import { teamBotName, useTeamPeople } from "@/state/team-people";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { teamMapStatus, type TeamMapSection, type TeamMapSession } from "@/lib/team-map";
+import { teamMapStatus, type TeamMapEdge, type TeamMapSection, type TeamMapSession } from "@/lib/team-map";
 import { COMPUTER_DRAG_TYPE, fitTeams, layoutTeams, orderBots, parseBotOrders, parsePositions, reorderBot, sessionStackHeight, teamSize, zoomAt, type Point, type View } from "@/lib/team-canvas";
 import { bestColumns, polylinePath, teamGeometry, type TeamGeometry } from "@/lib/team-canvas-computers";
 import { teamComputersFor, type ShownFrame } from "@/lib/map-computers";
@@ -19,6 +19,7 @@ import { openBotSettings } from "./bot-panel/panel-link";
 import { TeamMapSessions } from "./TeamMapSessions";
 
 const NO_SESSIONS: TeamMapSession[] = [];
+const NO_EDGES: TeamMapEdge[] = [];
 
 type Gesture = {
   id: number;
@@ -71,7 +72,7 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, onCom
       <button className={cn(iconButton, "size-8")} aria-label={t("canvas.openBotChat", { name: bot.name })} title={t("canvas.openChat")}
         onClick={() => openBot(dispatch, bot, showThreads)}><MessageCircle size={13} /></button>
       {status.tone !== "idle" && <span className="flex items-center gap-1.5 text-[10px] text-ink-secondary" title={status.label}>
-        <span className={cn("size-1.5 rounded-full", status.tone === "success" ? "bg-success" : status.tone === "warning" ? "bg-warning" : status.tone === "danger" ? "bg-danger" : "bg-ink-secondary/35")} />
+        <span className={cn("size-1.5 rounded-full", status.tone === "success" ? "bg-success animate-status-pulse" : status.tone === "warning" ? "bg-warning" : status.tone === "danger" ? "bg-danger" : "bg-ink-secondary/35")} />
         {status.label}
       </span>}
       {selected && onComputer && <button className={cn(iconButton, "size-8")} aria-label={t("canvas.botComputer", { name: bot.name })} title={t("computer.tab.computer")}
@@ -99,7 +100,7 @@ function currentActivity(bot: Bot | undefined, instances: ReturnType<typeof useS
   return bot.tasks?.find((task) => task.busy && task.threadId !== bot.threadId && task.title.trim())?.title;
 }
 
-export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [], computers = NO_COMPUTERS, computerFrames = {}, onOpenComputer, taggedBotIds = [], sent, bottomInset = 0, sessionsByBot }: {
+export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [], computers = NO_COMPUTERS, computerFrames = {}, onOpenComputer, taggedBotIds = [], sent, bottomInset = 0, sessionsByBot, edges = NO_EDGES }: {
   sections: TeamMapSection<Bot>[];
   canManage: boolean;
   onMove: (bot: Bot, destination: string) => Promise<boolean | void>;
@@ -125,6 +126,8 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
   bottomInset?: number;
   /** Each bot's open conversations, drawn as a card stack under its node. */
   sessionsByBot?: Map<string, TeamMapSession[]>;
+  /** Running/queued delegations; a lead→teammate edge among them animates that team's hierarchy arrow. */
+  edges?: TeamMapEdge[];
 }) {
   const { state } = useStore();
   const anySessions = (sessionsByBot?.size ?? 0) > 0;
@@ -426,6 +429,9 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
         const tile = tiles[index];
         const geometry = geometries[index];
         const hierarchy = section.chiefs.length > 0 && section.members.length > 0;
+        const activeHandoff = hierarchy && edges.some((edge) => edge.state !== "connected"
+          && section.chiefs.some((chief) => chief.id === edge.sourceBotId)
+          && section.members.some((member) => member.id === edge.targetBotId));
         const dropping = computerDropKey === section.key || (dragged && dropKey === section.key && (dragged.bot.section?.trim() ?? "") !== section.key);
         const computer = Object.hasOwn(teamComputers, section.key) ? teamComputers[section.key] : undefined;
         const renderBot = (bot: Bot, withSessions: boolean) => <div key={bot.id} className="relative">
@@ -502,7 +508,9 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
             })}
           </> : <div className="flex items-center px-5 pb-5">
             {section.chiefs.length > 0 && <div className="flex flex-col gap-4">{orderBots(section.chiefs, personalOrder(section.key)).map((bot) => renderBot(bot, true))}</div>}
-            {hierarchy && <div className="flex w-10 shrink-0 justify-center text-ink-secondary/35" aria-hidden="true"><ArrowRight size={22} strokeWidth={1} /></div>}
+            {hierarchy && <div className="flex w-10 shrink-0 justify-center text-ink-secondary/35" aria-hidden="true">
+              <ArrowRight size={22} strokeWidth={1} strokeDasharray={activeHandoff ? "7 5" : undefined} className={activeHandoff ? "animate-link-flow text-success/80" : undefined} />
+            </div>}
             {section.members.length > 0 && <div className="flex flex-col gap-4">{orderBots(section.members, personalOrder(section.key)).map((bot) => renderBot(bot, true))}</div>}
             {section.chiefs.length + section.members.length === 0 && <p className="flex h-[126px] w-[236px] items-center justify-center rounded-xl border border-dashed border-hairline/70 px-6 text-center text-[12px] leading-relaxed text-ink-secondary">{t("canvas.dropHere")}</p>}
           </div>}
