@@ -453,6 +453,8 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       const askUser = toolScope === undefined || allowsTool(toolScope, { kind: "native", name: ASK_USER_TOOL });
       const sessionDir = piSessionDir(turn, input.instanceId);
       const sessionPath = piSessionPath(turn, sessionDir);
+      // A cursor that cannot be resumed here starts a new session, which gets the conversation the harness built for it.
+      if (!sessionPath && typeof turn.resumeCursor === "string" && !turn.sessionReset && turn.recoveryText?.trim()) turn = { ...turn, text: turn.recoveryText };
       const childArgs = [...piTurnArgs(sessionDir), "-e", SPAWNED_PROXIES.piMcpExtension];
       const mcpTempDir = mkdtempSync(join(tmpdir(), "omb-pi-mcp-"));
       const scopeReadyPath = toolScope !== undefined ? join(mcpTempDir, "scope-ready.json") : undefined;

@@ -41,6 +41,22 @@ describe("Pi persisted session correctness", () => {
     }
   });
 
+  it("starts a cursor from another folder afresh, from the conversation the harness rebuilt", async () => {
+    const { instance, dump, recorder } = await setup();
+    try {
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "moved-here", text: "follow-up",
+        resumeCursor: join(tmpdir(), "another-computer", "old-session.json"), recoveryText: "Prior conversation: important context.\nfollow-up" });
+      const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      expect(done).toMatchObject({ ok: true });
+      const rows = readFileSync(dump, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+      expect(rows.filter((row) => row.rpc).map((row) => row.rpc)).toEqual(["new_session"]);
+      expect(rows.find((row) => row.prompt)?.prompt.message).toContain("Prior conversation: important context.");
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
   it("a reset gets a fresh file and full standing prompt without truncating the previous session", async () => {
     const { instance, dump, recorder } = await setup();
     const input = { threadId: "reset-persists-old", system: "Standing rules.", systemStable: "Standing rules.", systemVolatile: "" };
