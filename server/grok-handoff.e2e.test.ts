@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -80,7 +81,7 @@ describe("a task Grok Bot hands MausBot over the hosted link", () => {
     link = (opened.body as unknown as Shown).link!.url;
 
     expect((await mcp("initialize", { protocolVersion: "2025-03-26" })).protocolVersion).toBe("2025-03-26");
-    expect((await mcp("tools/list")).tools?.map((tool) => tool.name)).toEqual(["move_status", "send_export", "hand_off_task", "task_status"]);
+    expect((await mcp("tools/list")).tools?.map((tool) => tool.name)).toEqual(["move_status", "send_export", "send_page", "send_file", "hand_off_task", "task_status"]);
     const status = await call("move_status", {});
     expect(status.text).toContain("its address never changes");
     expect(status.text).toContain("Fixture Starter");
@@ -126,6 +127,45 @@ describe("a task Grok Bot hands MausBot over the hosted link", () => {
     expect(tooLarge.status).toBe(413);
   });
 
+  it("carries a Bot's page and a 3 MB file through the service, shows the app only whose they are, and brings them into the bot's folder and a live page", { timeout: 120_000 }, async () => {
+    const PAGE = "const sold = [12, 18];\nexport default function Page() { return <p className=\"p-4\">{sold.join(\", \")} sold</p>; }";
+    const SOURCE = "import { Page, Text } from \"grok/canvas\";\nexport default function Canvas() { return <Page><Text>12, 18 sold</Text></Page>; }";
+    const archive = Buffer.alloc(3 * 1024 * 1024, 7);
+    expect(await call("send_page", { bot: "Pager", title: "Sales board", page: PAGE, source: SOURCE })).toEqual({ isError: false, text: expect.stringContaining("the page \"Sales board\" for Pager") });
+    expect(await call("send_file", { bot: "Pager", path: "data/archive.bin", base64: archive.toString("base64") })).toEqual({ isError: false, text: "Arrived in MausBot: data/archive.bin for Pager." });
+    expect(await call("send_file", { bot: "Pager", path: "keys/id_rsa", text: "x" })).toEqual({ isError: true, text: expect.stringContaining("is named like a key or password file") });
+    expect((await call("move_status", {})).text).toContain("1 page and 1 file received so far");
+
+    const waiting = await app("GET", CONNECTOR);
+    expect(waiting.body.assets).toEqual([
+      { seq: expect.any(Number), kind: "page", bot: "Pager", name: "Sales board", bytes: Buffer.byteLength(PAGE) },
+      { seq: expect.any(Number), kind: "file", bot: "Pager", name: "data/archive.bin", bytes: archive.byteLength },
+    ]);
+    expect(JSON.stringify(waiting.body)).not.toContain("12, 18");
+
+    type Listed = { id: string; name: string; tasks?: Array<{ threadId: string; title: string }> };
+    const listed = async () => ((await app("GET", "/api/bots")).body.bots as Listed[]).find((bot) => bot.name === "Fixture Starter")!;
+    const bot = await listed();
+    const bring = () => app("POST", "/api/setup-import/grok/assets", { botId: bot.id, grokName: "pager" });
+    expect((await bring()).body).toEqual({ pages: 1, files: 1, skipped: [] });
+    const folder = join(fixture.info.dataDir, "workspaces", bot.id, "from-grok");
+    expect(readFileSync(join(folder, "pages", "sales-board", "page.js"), "utf8")).toBe(PAGE);
+    expect(readFileSync(join(folder, "pages", "sales-board", "source.canvas.tsx"), "utf8")).toBe(SOURCE);
+    expect(readFileSync(join(folder, "pages", "sales-board", "index.html"), "utf8")).toContain("fetch(\"page.js\")");
+    expect(readFileSync(join(folder, "data", "archive.bin")).equals(archive)).toBe(true);
+    const threads = (await listed()).tasks?.filter((task) => task.title === "Pages from Grok Bot") ?? [];
+    expect(threads).toHaveLength(1);
+    const cards = async () => ((await app("GET", `/api/threads/${threads[0]!.threadId}/messages?limit=100`)).body.messages as Array<{ kind: string; app?: { title: string; live?: boolean } }>)
+      .map((message) => ({ kind: message.kind, title: message.app?.title, live: message.app?.live }));
+    expect(await cards()).toEqual([{ kind: "app", title: "Sales board", live: true }]);
+
+    expect((await app("GET", CONNECTOR)).body.assets).toEqual([]);
+    expect((await bring()).body).toEqual({ pages: 0, files: 0, skipped: [] });
+    expect((await call("send_page", { bot: "Pager", title: "Sales board", page: PAGE })).isError).toBe(false);
+    expect((await bring()).body).toEqual({ pages: 1, files: 0, skipped: [] });
+    expect(await cards()).toHaveLength(1);
+  });
+
   it("says the app isn't open while it is closed, still shakes hands, and works again at the same address once it is back", { timeout: 180_000 }, async () => {
     const env = verificationServerEnvironment(launchEnv(), fixture.info.dataDir, Number(new URL(fixture.info.url).port));
     await waitForExit(fixture.child, { signal: "SIGTERM" });
@@ -133,7 +173,7 @@ describe("a task Grok Bot hands MausBot over the hosted link", () => {
     const closed = await call("move_status", {});
     expect(closed).toEqual({ isError: true, text: expect.stringContaining("MausBot isn't open on the person's computer") });
     expect((await mcp("initialize", {})).protocolVersion).toBe("2025-06-18");
-    expect((await mcp("tools/list")).tools).toHaveLength(4);
+    expect((await mcp("tools/list")).tools).toHaveLength(6);
 
     again = spawn(process.execPath, verificationServerArgs(env), { cwd: fileURLToPath(new URL("..", import.meta.url)), env, stdio: "ignore" });
     let state: Shown | undefined;

@@ -4,7 +4,7 @@
 // Security: nothing listens here and the main API is never exposed; the socket carries only the move MCP
 // (grok-move-mcp.ts). The link's secret lives in this process and in <data>/grok-connector-key (0600, never in a
 // backup) and leaves only as the header that attaches the socket. The address holds a one-way hash of it, so whoever
-// has the address can call the four tools and can never attach in this app's place.
+// has the address can call its tools and can never attach in this app's place.
 import { randomBytes } from "node:crypto";
 import { readFileSync, rmSync } from "node:fs";
 import { WebSocket } from "ws";
@@ -27,7 +27,7 @@ import {
   type LinkSecret,
 } from "../shared/grok-link.ts";
 import { writeFileAtomic } from "./atomic.ts";
-import { createMoveLink, moveBusy, moveManifest, moveMcp, moveRpcError, type HandoffState, type MoveHost, type MoveLink, type MoveMcpAnswer } from "./grok-move-mcp.ts";
+import { createMoveLink, moveAssetsFor, moveBusy, moveManifest, moveMcp, moveRpcError, type HandoffState, type MoveAsset, type MoveHost, type MoveLink, type MoveMcpAnswer } from "./grok-move-mcp.ts";
 
 /** In the data folder while the link is on: its secret. */
 export const GROK_CONNECTOR_KEY_FILE = "grok-connector-key";
@@ -47,9 +47,14 @@ export interface GrokConnector {
   link?: { url: string; reach: GrokReach };
   /** What arrived after the asked-for `seq`, oldest first, each as the text of one export. */
   arrived: Array<{ seq: number; at: number; text: string }>;
+  /** Every page and file waiting to be imported, oldest first. Security: never its content. */
+  assets: GrokAssetSummary[];
   /** The last few tasks Grok Bot handed off, newest first. */
   handoffs: GrokHandoff[];
 }
+
+/** `name`: a page's title or a file's path. */
+export interface GrokAssetSummary { seq: number; kind: MoveAsset["kind"]; bot: string; name: string; bytes: number }
 
 export interface GrokHandoff { title: string; state: HandoffState; botId: string; threadId: string; at: number }
 
@@ -62,6 +67,10 @@ export interface GrokMove {
   look(after: number): GrokConnector;
   /** The person imported everything up to `seq`: the link lets it go and stays on. */
   taken(seq: number): GrokConnector;
+  /** The pages and files waiting for one Bot, by its Grok Bot name. */
+  assetsFor(bot: string): MoveAsset[];
+  /** These pages and files were imported: the link lets them go. */
+  dropAssets(seqs: readonly number[]): void;
   /** Turns the connector off. Turning it on again makes a new address. */
   end(): Promise<GrokConnector>;
 }
@@ -142,6 +151,9 @@ export function createGrokMove(options: {
     available: brokerUrl() !== "",
     ...(on ? { link: { url: on.url, reach: on.reach } } : {}),
     arrived: (on?.move.inbox.arrivals ?? []).filter((arrival) => arrival.seq > after).map(({ seq, at, text }) => ({ seq, at, text })),
+    assets: (on?.move.inbox.assets ?? []).map((asset) => (asset.kind === "page"
+      ? { seq: asset.seq, kind: asset.kind, bot: asset.bot, name: asset.title, bytes: Buffer.byteLength(asset.page) }
+      : { seq: asset.seq, kind: asset.kind, bot: asset.bot, name: asset.path, bytes: asset.data.byteLength })),
     handoffs: options.host?.recent() ?? [],
   });
 
@@ -267,6 +279,8 @@ export function createGrokMove(options: {
       on?.move.inbox.take(through);
       return state(through);
     },
+    assetsFor: (bot) => (on ? moveAssetsFor(on.move.inbox, bot) : []),
+    dropAssets: (seqs) => on?.move.inbox.drop(seqs),
     async end() {
       await inTurn(async () => {
         const link = on;

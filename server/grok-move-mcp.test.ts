@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { GROK_EXPORT_FORMAT, GROK_EXPORT_MAX_CHARS, parseGrokExport } from "../shared/grok-import.ts";
-import { createMoveLink, HANDOFF_CONTEXT_MAX, HANDOFF_TASK_MAX, HANDOFFS_PER_HOUR, HandoffRefused, MOVE_MAX_BYTES, MOVE_MAX_DOCUMENTS, moveBusy, moveManifest, moveMcp, type HandoffAsk, type HandoffStatus, type MoveHost, type MoveLink } from "./grok-move-mcp.ts";
+import { GROK_LINK_BODY_MAX } from "../shared/grok-link.ts";
+import { createMoveLink, grokPageSlug, HANDOFF_CONTEXT_MAX, HANDOFF_TASK_MAX, HANDOFFS_PER_HOUR, HandoffRefused, MOVE_FILE_MAX_BYTES, MOVE_MAX_ASSET_BYTES, MOVE_MAX_ASSETS, MOVE_MAX_BYTES, MOVE_MAX_DOCUMENTS, MOVE_PAGE_MAX_BYTES, moveAssetsFor, moveBusy, moveManifest, moveMcp, type HandoffAsk, type HandoffStatus, type MoveHost, type MoveLink } from "./grok-move-mcp.ts";
 
 const TOKEN = "sk-abcdefghijklmnopqrstuvwx";
 const link = (host?: MoveHost): MoveLink => {
@@ -26,6 +27,14 @@ function place(states: HandoffStatus[] = []) {
   };
   return { host, asked, waits };
 }
+const PAGE = `import { Chart } from "mausbot";
+const visits = [12, 18, 9];
+export default function Page() {
+  return <main className="p-6"><h1 className="text-xl font-semibold">Sales</h1><Chart option={{ series: [{ type: "bar", data: visits }] }} /></main>;
+}`;
+const GROK_SOURCE = `import { Page, Section, Metrics } from "grok/canvas";
+const visits = [12, 18, 9];
+export default function Canvas() { return <Page><Section title="Sales"><Metrics data={visits} /></Section></Page>; }`;
 const document = (name: string, extra: Record<string, unknown> = {}) => ({ format: GROK_EXPORT_FORMAT, version: 1, bots: [{ name, ...extra }] });
 const rpc = (method: string, params?: unknown, id: number | null = 1) => ({ jsonrpc: "2.0", ...(id === null ? {} : { id }), method, ...(params ? { params } : {}) });
 const call = async (to: MoveLink, name: string, args: unknown = {}, now = 7) => {
@@ -49,10 +58,10 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
     expect(await moveMcp(rpc("ping"), to)).toEqual({ status: 200, body: { jsonrpc: "2.0", id: 1, result: {} } });
   });
 
-  it("lists the two tools the published bot calls, unchanged, and the two for handing a task off", async () => {
+  it("lists the two tools the published bot calls, unchanged, the two for pages and files, and the two for handing a task off", async () => {
     const tools = ((await moveMcp(rpc("tools/list"), link())).body as { result: { tools: Array<{ name: string; inputSchema: { required?: string[] } }> } }).result.tools;
-    expect(tools.map((tool) => tool.name)).toEqual(["move_status", "send_export", "hand_off_task", "task_status"]);
-    expect(tools.map((tool) => tool.inputSchema.required)).toEqual([undefined, ["document"], ["task"], ["task_id"]]);
+    expect(tools.map((tool) => tool.name)).toEqual(["move_status", "send_export", "send_page", "send_file", "hand_off_task", "task_status"]);
+    expect(tools.map((tool) => tool.inputSchema.required)).toEqual([undefined, ["document"], ["bot", "title", "page"], ["bot", "path"], ["task"], ["task_id"]]);
   });
 
   it("hands the hosted address the handshake and the tool list it gives itself, and words for when it isn't there", async () => {
@@ -70,7 +79,7 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
 
   it("keeps a sent Bot as the importer reads it, whether it came as an object or as JSON text, and counts it in the status", async () => {
     const to = link();
-    expect((await call(to, "move_status")).text).toBe("Connected to MausBot. 0 Bots received so far. This link stays on until the person turns it off, and its address never changes. To move a Bot, send it with send_export, one Bot per call. To have MausBot do something, call hand_off_task.");
+    expect((await call(to, "move_status")).text).toBe("Connected to MausBot. 0 Bots, 0 pages and 0 files received so far and waiting for the person to import. This link stays on until the person turns it off, and its address never changes. To move a Bot, send it in this order: its setup with send_export, one Bot per call; then each of its pages with send_page; then each of its files with send_file. To have MausBot do something, call hand_off_task.");
     expect((await call(link(place().host), "move_status")).text).toContain("MausBot's bots: MausBot (Chief of Staff); Scout.");
     const crowd: MoveHost = { ...place().host, bots: () => Array.from({ length: 34 }, (_, index) => ({ name: `Bot ${index}` })) };
     expect((await call(link(crowd), "move_status")).text).toMatch(/Bot 29; and 4 more\.$/);
@@ -88,7 +97,7 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
     const kept = to.inbox.arrivals[0]!.text;
     expect(kept).not.toMatch(/stray|anything|sk-abcdefghij/);
     expect(parseGrokExport(kept)).toMatchObject([{ name: "Tango", memories: ["likes cheese", expect.stringContaining("the key is")] }]);
-    expect((await call(to, "move_status")).text).toContain("2 Bots received so far");
+    expect((await call(to, "move_status")).text).toContain("2 Bots, 0 pages and 0 files received so far");
   });
 
   it("refuses what the importer refuses, with a fix the Bot can act on, and keeps none of it", async () => {
@@ -129,6 +138,147 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
     for (let count = 0; count < fits; count += 1) expect((await call(heavy, "send_export", { document: document("Big", { instructions: big }) })).refused, String(count)).toBe(false);
     expect((await call(heavy, "send_export", { document: document("Big", { instructions: big }) })).refused).toBe(true);
     expect(heavy.inbox.arrivals).toHaveLength(fits);
+  });
+
+  it("takes a Bot's page as a page file that compiles, beside its original, and counts it in the status", async () => {
+    const to = link();
+    const sent = await call(to, "send_page", { bot: "  New Bot   1731b8e0 ", title: " Sales\ndashboard ", page: PAGE, source: GROK_SOURCE });
+    expect(sent).toEqual({ refused: false, text: "Arrived in MausBot: the page \"Sales dashboard\" for New Bot 1731b8e0. The person imports it in MausBot, under Settings → Import & export, and it opens in New Bot 1731b8e0's Library." });
+    expect((await call(to, "send_page", { bot: "Tango", title: "Notes", page: PAGE })).refused).toBe(false);
+    expect(to.inbox.assets).toEqual([
+      { seq: 1, at: 7, kind: "page", bot: "New Bot 1731b8e0", title: "Sales dashboard", page: PAGE, source: GROK_SOURCE },
+      { seq: 2, at: 7, kind: "page", bot: "Tango", title: "Notes", page: PAGE },
+    ]);
+    expect(moveAssetsFor(to.inbox, "new bot 1731B8E0").map((asset) => asset.seq)).toEqual([1]);
+    expect((await call(to, "move_status")).text).toContain("0 Bots, 2 pages and 0 files received so far");
+
+    const again = await call(to, "send_page", { bot: "tango", title: "NOTES!", page: `${PAGE}\n` });
+    expect(again.refused).toBe(false);
+    expect(to.inbox.assets.map(({ seq, bot }) => ({ seq, bot }))).toEqual([{ seq: 1, bot: "New Bot 1731b8e0" }, { seq: 3, bot: "tango" }]);
+    expect(grokPageSlug("  Q3: Sales & Visits — 2026 ")).toBe("q3-sales-visits-2026");
+    expect(grokPageSlug("बिक्री रिपोर्ट")).toBe("बिक्री-रिपोर्ट");
+    expect(grokPageSlug("!!!")).toBe("page");
+  });
+
+  it("refuses a page it could not show, with the fix, and keeps none of it", async () => {
+    const to = link();
+    const good = { bot: "Tango", title: "Sales", page: PAGE };
+    const refusals: Array<[unknown, string]> = [
+      [{ ...good, bot: " " }, "say which Bot it belongs to as `bot`"],
+      [{ ...good, title: "" }, "give the page's title as `title`"],
+      [{ ...good, page: 5 }, "send the page as `page`"],
+      [{ ...good, page: "const a = 1;" }, "`page` needs `export default`"],
+      [{ ...good, page: GROK_SOURCE }, "`page`: imports grok/canvas; a page can import only react,"],
+      [{ ...good, page: "export default function Page() { return <div>; }" }, "`page`: line 1:"],
+      [{ ...good, page: `${PAGE}\n// ${"x".repeat(MOVE_PAGE_MAX_BYTES)}` }, "`page` is larger than 1 MB"],
+      [{ ...good, source: "x".repeat(MOVE_PAGE_MAX_BYTES + 1) }, "Send the page again without `source`"],
+      [{ ...good, source: { tsx: true } }, "`source` is the original file's text"],
+      [{ ...good, page: `${PAGE}\nconst key = "${TOKEN}";` }, "has a key or password in it"],
+      [{ ...good, source: `const key = "${TOKEN}";` }, "has a key or password in it"],
+      [undefined, "say which Bot it belongs to"],
+    ];
+    for (const [args, says] of refusals) {
+      const answer = await call(to, "send_page", args);
+      expect(answer.refused, says).toBe(true);
+      expect(answer.text).toContain("Nothing was saved");
+      expect(answer.text).toContain(says);
+    }
+    expect(to.inbox.assets).toEqual([]);
+  });
+
+  it("takes a Bot's file as text or as base64, one of the two, and counts it in the status", async () => {
+    const to = link();
+    const picture = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 255, 1]);
+    expect(await call(to, "send_file", { bot: "Tango", path: "./reports/2026/summary.md", text: "# Summary" })).toEqual({ refused: false, text: "Arrived in MausBot: reports/2026/summary.md for Tango." });
+    expect((await call(to, "send_file", { bot: "Tango", path: "logo.png", base64: `${picture.toString("base64").slice(0, 4)}\n${picture.toString("base64").slice(4)}` })).refused).toBe(false);
+    expect((await call(to, "send_file", { bot: "Tango", path: "empty.txt", text: "" })).refused).toBe(false);
+    expect(to.inbox.assets).toEqual([
+      { seq: 1, at: 7, kind: "file", bot: "Tango", path: "reports/2026/summary.md", data: Buffer.from("# Summary") },
+      { seq: 2, at: 7, kind: "file", bot: "Tango", path: "logo.png", data: picture },
+      { seq: 3, at: 7, kind: "file", bot: "Tango", path: "empty.txt", data: Buffer.alloc(0) },
+    ]);
+    expect((await call(to, "send_file", { bot: "Tango", path: "logo.png", text: "now text" })).refused).toBe(false);
+    expect(to.inbox.assets.map((asset) => asset.seq)).toEqual([1, 3, 4]);
+    expect((await call(to, "move_status")).text).toContain("0 Bots, 0 pages and 3 files received so far");
+    const whole = Buffer.alloc(MOVE_FILE_MAX_BYTES, 7);
+    expect(JSON.stringify(rpc("tools/call", { name: "send_file", arguments: { bot: "x".repeat(200), path: "x".repeat(300), base64: whole.toString("base64") } })).length).toBeLessThan(GROK_LINK_BODY_MAX);
+    expect((await call(to, "send_file", { bot: "Tango", path: "whole.bin", base64: whole.toString("base64") })).refused).toBe(false);
+  });
+
+  it("refuses a file with a path a folder can't hold, a credential's name or shape, both or neither content, or over 3 MB, and keeps none of it", async () => {
+    const to = link();
+    const refusals: Array<[unknown, string]> = [
+      [{ path: "a.txt", text: "x" }, "say which Bot it belongs to as `bot`"],
+      [{ bot: "Tango", text: "x" }, "give the file's path as `path`"],
+      [{ bot: "Tango", path: "../outside.txt", text: "x" }, "../outside.txt is not a path a folder can hold"],
+      [{ bot: "Tango", path: "/workspace/a.txt", text: "x" }, "is not a path a folder can hold"],
+      [{ bot: "Tango", path: "a\\b.txt", text: "x" }, "is not a path a folder can hold"],
+      [{ bot: "Tango", path: ".config/settings.json", text: "x" }, "is hidden or in a hidden folder"],
+      [{ bot: "Tango", path: "app/node_modules/x/index.js", text: "x" }, "is in a package or cache folder"],
+      [{ bot: "Tango", path: "a/b/c/d/e/f/g.txt", text: "x" }, "more than six folders deep"],
+      [{ bot: "Tango", path: ".env", text: "A=1" }, "is hidden"],
+      [{ bot: "Tango", path: "prod.env", text: "A=1" }, "is named like a key or password file"],
+      [{ bot: "Tango", path: "keys/server.pem", text: "x" }, "is named like a key or password file"],
+      [{ bot: "Tango", path: "ssh/id_rsa", text: "x" }, "is named like a key or password file"],
+      [{ bot: "Tango", path: "credentials.json", text: "{}" }, "is named like a key or password file"],
+      [{ bot: "Tango", path: "a.txt" }, "send exactly one of `text`"],
+      [{ bot: "Tango", path: "a.txt", text: "x", base64: "eA==" }, "send exactly one of `text`"],
+      [{ bot: "Tango", path: "a.txt", base64: 5 }, "send exactly one of `text`"],
+      [{ bot: "Tango", path: "a.bin", base64: "not base64!" }, "`base64` is not base64"],
+      [{ bot: "Tango", path: "big.txt", text: "x".repeat(MOVE_FILE_MAX_BYTES + 1) }, "big.txt is larger than 3 MB"],
+      [{ bot: "Tango", path: "big.bin", base64: Buffer.alloc(MOVE_FILE_MAX_BYTES + 1).toString("base64") }, "big.bin is larger than 3 MB"],
+      [{ bot: "Tango", path: "notes.txt", text: `key ${TOKEN}` }, "notes.txt has a key or password in it"],
+      [{ bot: "Tango", path: "notes.bin", base64: Buffer.from(`key ${TOKEN}`).toString("base64") }, "notes.bin has a key or password in it"],
+    ];
+    for (const [args, says] of refusals) {
+      const answer = await call(to, "send_file", args);
+      expect(answer.refused, says).toBe(true);
+      expect(answer.text).toContain("Nothing was saved");
+      expect(answer.text).toContain(says);
+    }
+    expect(to.inbox.assets).toEqual([]);
+  });
+
+  it("stops taking pages and files at a thousand, and at sixty-four megabytes, apart from the room for Bots", async () => {
+    const full = link();
+    for (let count = 0; count < MOVE_MAX_ASSETS; count += 1) expect(full.inbox.addAsset({ kind: "file", at: 1, bot: "Tango", path: `f${count}.txt`, data: Buffer.from("x") })).toBe(true);
+    expect(await call(full, "send_file", { bot: "Tango", path: "one-more.txt", text: "x" })).toEqual({ refused: true, text: expect.stringContaining("taken all the pages and files it can hold. Tell the person to import what has arrived in MausBot, then send the rest.") });
+    expect(await call(full, "send_page", { bot: "Tango", title: "One more", page: PAGE })).toMatchObject({ refused: true, text: expect.stringContaining("taken all the pages and files it can hold") });
+    expect((await call(full, "send_file", { bot: "Tango", path: "f3.txt", text: "sent again" })).refused).toBe(false);
+    expect((await call(full, "send_export", { document: document("Tango") })).refused).toBe(false);
+    full.inbox.drop([full.inbox.assets[0]!.seq]);
+    full.inbox.take(Number.MAX_SAFE_INTEGER);
+    expect(full.inbox.assets).toHaveLength(MOVE_MAX_ASSETS - 1);
+    expect((await call(full, "send_page", { bot: "Tango", title: "One more", page: PAGE })).refused).toBe(false);
+
+    const heavy = link();
+    const block = Buffer.alloc(MOVE_FILE_MAX_BYTES);
+    const fits = Math.floor(MOVE_MAX_ASSET_BYTES / MOVE_FILE_MAX_BYTES);
+    for (let count = 0; count < fits; count += 1) expect(heavy.inbox.addAsset({ kind: "file", at: 1, bot: "Tango", path: `f${count}.bin`, data: block })).toBe(true);
+    expect((await call(heavy, "send_file", { bot: "Tango", path: "over.bin", base64: block.toString("base64") })).refused).toBe(true);
+    expect((await call(heavy, "send_file", { bot: "Tango", path: "f0.bin", base64: block.toString("base64") })).refused).toBe(false);
+    expect(heavy.inbox.assets).toHaveLength(fits);
+  });
+
+  it("gives a caller no way to read back what it or anyone sent", async () => {
+    const to = link();
+    const secret = "only-the-person-sees-this";
+    const page = PAGE.replace("Sales", secret);
+    const answers = [
+      await call(to, "send_export", { document: document("Tango", { instructions: secret }) }),
+      await call(to, "send_page", { bot: "Tango", title: "Sales", page, source: secret }),
+      await call(to, "send_file", { bot: "Tango", path: "a.txt", text: secret }),
+      await call(to, "send_page", { bot: "Tango", title: "Sales", page: `${page}\nimport "fs";` }),
+      await call(to, "send_file", { bot: "Tango", path: "../a.txt", text: secret }),
+      await call(to, "move_status"),
+    ];
+    expect(to.inbox.assets).toHaveLength(2);
+    expect(JSON.stringify(answers)).not.toContain(secret);
+    for (const name of ["read_page", "get_file", "list_files", "read_exports"]) {
+      expect(await moveMcp(rpc("tools/call", { name, arguments: { bot: "Tango", path: "a.txt", title: "Sales" } }), to)).toMatchObject({ body: { error: { code: -32602 } } });
+    }
+    const listed = JSON.stringify((await moveMcp(rpc("tools/list"), to)).body);
+    expect(listed).not.toMatch(/"(?:read|get|list|download)_/);
   });
 
   it("hands a task to the place and gives back an id, the bot and the title to relay", async () => {

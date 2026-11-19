@@ -1,13 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { jsxFolderPageHtml } from "../../shared/app-frame/jsx-page.ts";
+import { createChatApps, type ChatApps } from "../chat-apps.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { GrokConnector, GrokMove } from "../grok-link.ts";
+import { createMoveLink, moveAssetsFor, moveMcp } from "../grok-move-mcp.ts";
 import { json, readBody } from "../harness/http.ts";
 import { IMPORTED_SKILLS_DIR, importedSkillsFor } from "../imported-skills.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -20,7 +23,9 @@ import { dispatchRoutes } from "./table.ts";
 
 const servers: Server[] = [];
 const homes: string[] = [];
+const shows: ChatApps[] = [];
 afterEach(async () => {
+  for (const apps of shows.splice(0)) apps.close();
   await Promise.all(servers.splice(0).map((server) => new Promise((done) => server.close(done))));
   await Promise.all(homes.splice(0).map((home) => removeTempDir(home)));
   rmSync(IMPORTED_SKILLS_DIR, { recursive: true, force: true });
@@ -50,11 +55,13 @@ function fixtureHome() {
 function fakeGrokMove(available = true) {
   const calls: string[] = [];
   let open = false;
-  const state = (arrived: GrokConnector["arrived"] = []): GrokConnector => ({ available, ...(open ? { link: { url: "https://broker.test/mcp/move/key", reach: "connected" as const } } : {}), arrived, handoffs: [] });
+  const state = (arrived: GrokConnector["arrived"] = []): GrokConnector => ({ available, ...(open ? { link: { url: "https://broker.test/mcp/move/key", reach: "connected" as const } } : {}), arrived, assets: [], handoffs: [] });
   const move: GrokMove = {
     connect: async () => { calls.push("connect"); open = available; return state(); },
     look: (after) => { calls.push(`look ${after}`); return state(open && after < 1 ? [{ seq: 1, at: 5, text: "{}" }] : []); },
     taken: (seq) => { calls.push(`taken ${seq}`); return state(); },
+    assetsFor: () => [],
+    dropAssets: () => {},
     end: async () => { calls.push("end"); open = false; return state(); },
   };
   return { move, calls };
@@ -65,6 +72,11 @@ async function serve({ local = true, home = fixtureHome(), dataDir, grokMove = f
   const bot = { id: `bot-${randomUUID().slice(0, 8)}` };
   const store = new Store(() => ({ instanceId: "fixture", model: "fixture-model" }));
   let busy = false;
+  const data = mkdtempSync(join(tmpdir(), "omb-setup-route-data-"));
+  homes.push(data);
+  const apps = createChatApps({ store, dataDir: data, sweeps: false });
+  shows.push(apps);
+  const workspace = (botId: string) => join(data, "workspaces", botId);
   const routes = [createSetupImportRoutes({
     local,
     cfg,
@@ -72,6 +84,7 @@ async function serve({ local = true, home = fixtureHome(), dataDir, grokMove = f
     mcpPolicyRefusal: () => undefined,
     persistMcpServers: (next) => { cfg.mcpServers = next; },
     store,
+    grokAssets: { apps, workspace },
     machine: () => ({ ...thisMachine(), home, platform: "darwin", env: {} }),
     ...(dataDir ? { dataDir } : {}),
     grokMove,
@@ -91,7 +104,7 @@ async function serve({ local = true, home = fixtureHome(), dataDir, grokMove = f
     headers: { "x-test-auth": options.auth ?? "owner", ...(options.body === undefined ? {} : { "content-type": options.type ?? "application/json" }) },
     ...(options.body === undefined ? {} : { body: typeof options.body === "string" ? options.body : JSON.stringify(options.body) }),
   });
-  return { call, cfg, bot, store };
+  return { call, cfg, bot, store, apps, workspace };
 }
 
 describe("the setup import routes", () => {
@@ -114,17 +127,17 @@ describe("the setup import routes", () => {
     const connector = "/api/setup-import/grok/connector";
     const looked = await local.call("GET", connector);
     expect(looked.headers.get("cache-control")).toBe("no-store");
-    expect(await looked.json()).toEqual({ available: true, arrived: [], handoffs: [] });
+    expect(await looked.json()).toEqual({ available: true, arrived: [], assets: [], handoffs: [] });
     expect((await local.call("POST", connector, { body: "", type: "text/plain" })).status).toBe(415);
     expect(calls).toEqual(["look 0"]);
     const made = await (await local.call("POST", connector, { body: {} })).json() as GrokConnector;
-    expect(made).toEqual({ available: true, link: { url: "https://broker.test/mcp/move/key", reach: "connected" }, arrived: [], handoffs: [] });
+    expect(made).toEqual({ available: true, link: { url: "https://broker.test/mcp/move/key", reach: "connected" }, arrived: [], assets: [], handoffs: [] });
     expect(await (await local.call("GET", connector)).json()).toMatchObject({ link: made.link, arrived: [{ seq: 1, at: 5, text: "{}" }] });
     expect(await (await local.call("GET", `${connector}?after=1`)).json()).toMatchObject({ arrived: [] });
     for (const after of ["x", "-1", "1.5"]) expect((await local.call("GET", `${connector}?after=${after}`)).status, after).toBe(400);
     expect(await (await local.call("POST", connector, { body: { taken: 1 } })).json()).toMatchObject({ link: made.link, arrived: [] });
     for (const taken of ["1", -1, 1.5, null]) expect((await local.call("POST", connector, { body: { taken } })).status, String(taken)).toBe(400);
-    expect(await (await local.call("DELETE", connector)).json()).toEqual({ available: true, arrived: [], handoffs: [] });
+    expect(await (await local.call("DELETE", connector)).json()).toEqual({ available: true, arrived: [], assets: [], handoffs: [] });
     expect(calls).toEqual(["look 0", "connect", "look 0", "look 1", "taken 1", "end"]);
   });
 
@@ -139,7 +152,7 @@ describe("the setup import routes", () => {
     expect((await local.call("PUT", connector, { body: {} })).status).toBe(405);
     expect(calls).toEqual([]);
 
-    expect(await (await (await serve()).call("POST", connector, { body: {} })).json()).toEqual({ available: false, arrived: [], handoffs: [] });
+    expect(await (await (await serve()).call("POST", connector, { body: {} })).json()).toEqual({ available: false, arrived: [], assets: [], handoffs: [] });
     const failing = await serve({ grokMove: { ...move, connect: async () => { throw new Error("The secret could not be saved."); } } });
     const failed = await failing.call("POST", connector, { body: {} });
     expect(failed.status).toBe(502);
@@ -270,5 +283,108 @@ describe("a moved Bot's chat from the Grok Bot app", () => {
     expect((await local.call("POST", HISTORY, { body: { ...body, botId: "no-such-bot" } })).status).toBe(404);
     expect(threads(local.store, bot.id)).toEqual([]);
     expect(threads(hosted.store, hostedBot.id)).toEqual([]);
+  });
+});
+
+describe("a moved Bot's pages and files, sent through the link", () => {
+  const ASSETS = "/api/setup-import/grok/assets";
+  const TITLE = "Pages from Grok Bot";
+  const PAGE = "const sold = [12, 18];\nexport default function Page() { return <p className=\"p-4\">{sold.join(\", \")} sold</p>; }";
+  const SOURCE = "import { Page, Text } from \"grok/canvas\";\nexport default function Canvas() { return <Page><Text>12, 18 sold</Text></Page>; }";
+  function linked() {
+    let seq = 0;
+    const link = createMoveLink(() => ++seq);
+    const send = async (name: string, args: Record<string, unknown>) => {
+      const answer = await moveMcp({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } }, link);
+      expect((answer.body as { result: { isError?: true } }).result.isError, JSON.stringify(answer.body)).toBeUndefined();
+    };
+    const move: GrokMove = { ...fakeGrokMove().move, assetsFor: (bot) => moveAssetsFor(link.inbox, bot), dropAssets: (seqs) => link.inbox.drop(seqs) };
+    return { link, send, move };
+  }
+  const tree = (folder: string): string[] => readdirSync(folder, { withFileTypes: true, recursive: true })
+    .filter((entry) => entry.isFile()).map((entry) => join(entry.parentPath, entry.name).slice(folder.length + 1)).sort();
+  const cards = (store: Store, botId: string) => (store.bot(botId)?.tasks ?? []).filter((task) => task.title === TITLE)
+    .flatMap((task) => store.messagesFor(task.threadId)).map((row) => ({ kind: row.kind, title: row.app?.title, live: row.app?.live, rev: row.app?.rev }));
+
+  it("puts the files in the bot's folder and each page in its own, shows each page live in one thread, and lets go of them", async () => {
+    const { link, send, move } = linked();
+    const { call, store, apps, workspace } = await serve({ grokMove: move });
+    const drew = store.createBot({ name: "Drew" }, { seedMessages: false });
+    const maus = store.createBot({ name: "Maus" }, { seedMessages: false });
+    await send("send_page", { bot: "Drew", title: "Sales: Q3", page: PAGE, source: SOURCE });
+    await send("send_page", { bot: "drew", title: "Notes", page: PAGE, source: "# Notes\n\n12, 18 sold" });
+    await send("send_file", { bot: "Drew", path: "reports/2026/summary.md", text: "# Summary" });
+    await send("send_file", { bot: "Drew", path: "logo.png", base64: Buffer.from([1, 2, 3]).toString("base64") });
+    await send("send_page", { bot: "Maus", title: "Sales: Q3", page: PAGE });
+    await send("send_file", { bot: "Maus", path: "todo.txt", text: "later" });
+
+    const first = await call("POST", ASSETS, { body: { botId: drew.id, grokName: "Drew" } });
+    expect(first.headers.get("cache-control")).toBe("no-store");
+    expect(await first.json()).toEqual({ pages: 2, files: 2, skipped: [] });
+    const folder = join(workspace(drew.id), "from-grok");
+    expect(tree(folder)).toEqual([
+      "logo.png", "pages/notes/index.html", "pages/notes/page.js", "pages/notes/source.md",
+      "pages/sales-q3/index.html", "pages/sales-q3/page.js", "pages/sales-q3/source.canvas.tsx", "reports/2026/summary.md",
+    ]);
+    expect(readFileSync(join(folder, "pages/sales-q3/page.js"), "utf8")).toBe(PAGE);
+    expect(readFileSync(join(folder, "pages/sales-q3/source.canvas.tsx"), "utf8")).toBe(SOURCE);
+    expect([...readFileSync(join(folder, "logo.png"))]).toEqual([1, 2, 3]);
+    expect(cards(store, drew.id)).toEqual([{ kind: "app", title: "Sales: Q3", live: true, rev: 0 }, { kind: "app", title: "Notes", live: true, rev: 0 }]);
+    const [thread] = (store.bot(drew.id)?.tasks ?? []).filter((task) => task.title === TITLE);
+    const row = store.messagesFor(thread!.threadId)[0]!;
+    const stored = apps.docs.read(row.app!.doc)!;
+    expect(stored.html).toBe(jsxFolderPageHtml({ title: "Sales: Q3", file: "page.js" }));
+    expect(apps.docs.readFile(row.app!.doc, "page.js")?.toString()).toBe(PAGE);
+
+    expect(link.inbox.assets.map(({ bot, kind }) => [bot, kind])).toEqual([["Maus", "page"], ["Maus", "file"]]);
+    expect(existsSync(workspace(maus.id))).toBe(false);
+    expect(cards(store, maus.id)).toEqual([]);
+
+    expect(await (await call("POST", ASSETS, { body: { botId: drew.id, grokName: "Drew" } })).json()).toEqual({ pages: 0, files: 0, skipped: [] });
+    await send("send_page", { bot: "Drew", title: "Sales: Q3", page: PAGE, source: SOURCE });
+    await send("send_file", { bot: "Drew", path: "logo.png", base64: Buffer.from([1, 2, 3]).toString("base64") });
+    expect(await (await call("POST", ASSETS, { body: { botId: drew.id, grokName: "Drew" } })).json()).toEqual({ pages: 1, files: 1, skipped: [] });
+    expect(tree(folder)).toHaveLength(8);
+    expect((store.bot(drew.id)?.tasks ?? []).filter((task) => task.title === TITLE)).toHaveLength(1);
+    expect(cards(store, drew.id)).toHaveLength(2);
+    expect(await apps.refreshLive()).toBe(0);
+
+    writeFileSync(join(folder, "pages/sales-q3/page.js"), PAGE.replace("[12, 18]", "[12, 18, 31]"));
+    expect(await apps.refreshLive()).toBe(1);
+    expect(cards(store, drew.id)[0]).toEqual({ kind: "app", title: "Sales: Q3", live: true, rev: 1 });
+  });
+
+  it("writes nothing through a folder the bot swapped for a link elsewhere, and names what it left", async () => {
+    const { link, send, move } = linked();
+    const { call, store, workspace } = await serve({ grokMove: move });
+    const drew = store.createBot({ name: "Drew" }, { seedMessages: false });
+    const elsewhere = mkdtempSync(join(tmpdir(), "omb-setup-route-elsewhere-"));
+    homes.push(elsewhere);
+    mkdirSync(join(workspace(drew.id), "from-grok"), { recursive: true });
+    symlinkSync(elsewhere, join(workspace(drew.id), "from-grok", "out"));
+    await send("send_file", { bot: "Drew", path: "out/a.txt", text: "x" });
+    await send("send_file", { bot: "Drew", path: "kept.txt", text: "x" });
+    expect(await (await call("POST", ASSETS, { body: { botId: drew.id, grokName: "Drew" } })).json()).toEqual({ pages: 0, files: 1, skipped: ["out/a.txt"] });
+    expect(readdirSync(elsewhere)).toEqual([]);
+    expect(link.inbox.assets).toEqual([]);
+  });
+
+  it("answers only the owner's own loopback on the desktop app, and only a POST naming a bot that is here", async () => {
+    const { link, send, move } = linked();
+    const local = await serve({ grokMove: move });
+    const bot = local.store.createBot({ name: "Drew" }, { seedMessages: false });
+    await send("send_page", { bot: "Drew", title: "Sales", page: PAGE });
+    const body = { botId: bot.id, grokName: "Drew" };
+    for (const auth of ["paired", "service"]) expect((await local.call("POST", ASSETS, { auth, body })).status, auth).toBe(403);
+    const hosted = await serve({ local: false, grokMove: move });
+    const hostedBot = hosted.store.createBot({ name: "Drew" }, { seedMessages: false });
+    expect((await hosted.call("POST", ASSETS, { body: { ...body, botId: hostedBot.id } })).status).toBe(403);
+    expect((await local.call("GET", ASSETS)).status).toBe(405);
+    expect((await local.call("POST", ASSETS, { body: JSON.stringify(body), type: "text/plain" })).status).toBe(415);
+    for (const wrong of [{ botId: bot.id }, { ...body, grokName: "  " }, { ...body, extra: true }]) expect((await local.call("POST", ASSETS, { body: wrong })).status).toBe(400);
+    expect((await local.call("POST", ASSETS, { body: { ...body, botId: "no-such-bot" } })).status).toBe(404);
+    expect(link.inbox.assets).toHaveLength(1);
+    expect(existsSync(local.workspace(bot.id))).toBe(false);
+    expect(existsSync(hosted.workspace(hostedBot.id))).toBe(false);
   });
 });

@@ -59,13 +59,13 @@ function harness(options: { host?: GrokMoveHost; keyFile?: string | null; base?:
 describe("the Grok Bot link", () => {
   it("is off until asked for, then keeps a secret, shows the address made from it and tells the service what to say", async () => {
     const { move, keyFile, dials, on, frames } = harness();
-    expect(move.look(0)).toEqual({ available: true, arrived: [], handoffs: [] });
+    expect(move.look(0)).toEqual({ available: true, arrived: [], assets: [], handoffs: [] });
     expect(dials).toEqual([]);
     const made = await on();
     const secret = readFileSync(keyFile!, "utf8").trim() as LinkSecret;
     expect(secret).toMatch(/^[\w-]{43}$/);
     if (process.platform !== "win32") expect(statSync(keyFile!).mode & 0o777).toBe(0o600);
-    expect(made).toEqual({ available: true, link: { url: `${BASE}/mcp/move/${await linkKey(secret)}`, reach: "connected" }, arrived: [], handoffs: [] });
+    expect(made).toEqual({ available: true, link: { url: `${BASE}/mcp/move/${await linkKey(secret)}`, reach: "connected" }, arrived: [], assets: [], handoffs: [] });
     expect(made.link!.url).not.toContain(secret);
     expect(dials[0]).toMatchObject({ url: "wss://broker.test/v1/grok-link", headers: { [GROK_LINK_SECRET_HEADER]: secret } });
     expect(frames(dials[0]!)).toEqual([{ t: "hello", manifest: JSON.parse(JSON.stringify(moveManifest())) }]);
@@ -82,6 +82,23 @@ describe("the Grok Bot link", () => {
     again.dials[0]!.events.open();
     expect(again.move.look(0).link).toEqual(made.link);
     expect(again.dials[0]!.headers).toEqual(first.dials[0]!.headers);
+  });
+
+  it("shows the app who a page or file is for and how large it is, never what is in it, and lets go of the ones imported", async () => {
+    const { move, dials, on, call, answered } = harness();
+    await on();
+    call(dials[0]!, "c1", "send_export", { document: { format: GROK_EXPORT_FORMAT, version: 1, bots: [{ name: "Tango" }] } });
+    await vi.waitFor(() => expect(answered(dials[0]!, "c1")).toBeDefined());
+    call(dials[0]!, "c2", "send_page", { bot: "Tango", title: "Sales", page: "export default function Page() { return <p>12 sold</p>; }", source: "# 12 sold" });
+    call(dials[0]!, "c3", "send_file", { bot: "tango", path: "notes/a.txt", text: "private words" });
+    await vi.waitFor(() => expect(answered(dials[0]!, "c3")).toBeDefined());
+    const held = move.look(Number.MAX_SAFE_INTEGER);
+    expect(held.assets).toEqual([{ seq: 2, kind: "page", bot: "Tango", name: "Sales", bytes: 57 }, { seq: 3, kind: "file", bot: "tango", name: "notes/a.txt", bytes: 13 }]);
+    expect(JSON.stringify(held)).not.toMatch(/12 sold|private words/);
+    expect(move.assetsFor("TANGO").map((asset) => asset.seq)).toEqual([2, 3]);
+    expect(move.assetsFor("Maus")).toEqual([]);
+    move.dropAssets([2]);
+    expect(move.taken(3).assets.map((asset) => asset.seq)).toEqual([3]);
   });
 
   it("answers each call with a receipt at once and then the tool's own answer", async () => {
@@ -197,7 +214,7 @@ describe("the Grok Bot link", () => {
     const { move, make, keyFile, dials, dialled, deleted, on } = harness();
     const made = await on();
     const secret = readFileSync(keyFile!, "utf8").trim();
-    expect(await move.end()).toEqual({ available: true, arrived: [], handoffs: [] });
+    expect(await move.end()).toEqual({ available: true, arrived: [], assets: [], handoffs: [] });
     expect(deleted).toEqual([{ url: `${BASE}/v1/grok-link`, secret }]);
     expect(existsSync(keyFile!)).toBe(false);
     expect(dials[0]!.closed).toBe(true);
@@ -214,7 +231,7 @@ describe("the Grok Bot link", () => {
 
   it("is unavailable without a connected-apps service, and reads only a whole secret from the file", async () => {
     const none = harness({ base: "" });
-    expect(await none.move.connect()).toEqual({ available: false, arrived: [], handoffs: [] });
+    expect(await none.move.connect()).toEqual({ available: false, arrived: [], assets: [], handoffs: [] });
     expect(existsSync(none.keyFile!)).toBe(false);
     const junk = harness();
     writeFileSync(junk.keyFile!, "not-a-secret\n");

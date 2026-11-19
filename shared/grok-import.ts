@@ -70,6 +70,9 @@ export const GROK_HISTORY_REASONS = ["noApp", "noMatch", "ambiguous", "empty"] a
 export type GrokHistoryReason = typeof GROK_HISTORY_REASONS[number];
 /** The answer to POST /api/setup-import/grok/history: how many messages of the Bot's chat are in its thread here. */
 export type GrokHistoryAnswer = { messages: number } | { reason: GrokHistoryReason };
+/** The answer to POST /api/setup-import/grok/assets: how many of the Bot's pages and files are in its folder here, and
+ * the titles and paths of those that could not be brought. */
+export interface GrokAssetsAnswer { pages: number; files: number; skipped: string[] }
 
 export class GrokImportError extends Error {
   readonly code: GrokImportErrorCode;

@@ -1,37 +1,73 @@
 // The Grok Bot connector: the MCP a Bot in Grok Bot talks to. Grok Bot calls it from its own cloud computer, so every
 // message here is untrusted internet input, and holding the link's key is all a caller has.
-// Security: a caller can add exports and read a count, never read an export back. An export is kept as the importer
-// reads it: refused whole when it holds credential-looking fields, token-shaped text redacted, anything the importer
-// does not read dropped. Nothing is written to disk, and nothing is imported until the person chooses to.
+// Security: a caller can add exports, pages and files and read counts, never read any of them back. An export is kept
+// as the importer reads it: refused whole when it holds credential-looking fields, token-shaped text redacted, anything
+// the importer does not read dropped. A page or file named like a credential store, or holding a credential's shape, is
+// refused. Nothing is written to disk, and nothing is imported until the person chooses to.
 // A caller can also hand the main bot a task and read that task back, and no other: the task reaches the bot as an
 // outside event, never as the person, and the names and one-line jobs of the bots are all it learns of this place.
 import { z } from "zod";
 
+import { JSX_PAGE_MODULES } from "../shared/app-frame/jsx-page.ts";
+import { APP_LIMITS, oneLine } from "../shared/app.ts";
 import { GROK_EXPORT_FORMAT, GrokImportError, grokExportDocument, parseGrokExport, type GrokBot } from "../shared/grok-import.ts";
 import type { LinkManifest, LinkToolResult } from "../shared/grok-link.ts";
+import { holdsCredential } from "../shared/redact.ts";
+import { skillFilePathProblem, skillFileText, type SkillFileRefusal } from "../shared/skill-files.ts";
 import { productName } from "./brand.ts";
+import { compileJsxPage } from "./jsx-compile.ts";
 
 export const MOVE_MAX_DOCUMENTS = 100;
 export const MOVE_MAX_BYTES = 16 * 1024 * 1024;
 const PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const SPLIT = "Split the Bot into several documents with the same bot name, each complete and valid on its own and holding the part the others do not, and send each one with send_export.";
 
+export const MOVE_MAX_ASSETS = 10 * MOVE_MAX_DOCUMENTS;
+export const MOVE_MAX_ASSET_BYTES = 4 * MOVE_MAX_BYTES;
+export const MOVE_PAGE_MAX_BYTES = 1024 * 1024;
+export const MOVE_FILE_MAX_BYTES = 3 * 1024 * 1024;
+const BOT_NAME_MAX = 200;
+
 export interface MoveArrival { seq: number; at: number; text: string; botNames: string[] }
+
+/** One page or file of a Bot. `bot` is the Bot's name as its export gives it. */
+export type MoveAsset = { seq: number; at: number; bot: string } & (
+  | { kind: "page"; title: string; page: string; source?: string }
+  | { kind: "file"; path: string; data: Buffer }
+);
+type Unnumbered<Asset> = Asset extends unknown ? Omit<Asset, "seq"> : never;
+type NewAsset = Unnumbered<MoveAsset>;
+
+export function grokPageSlug(title: string): string {
+  return title.normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{M}\p{N}]+/gu, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/, "") || "page";
+}
+
+const sameBot = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+const assetKey = (asset: NewAsset) => `${asset.kind}\n${asset.bot.toLowerCase()}\n${asset.kind === "page" ? grokPageSlug(asset.title) : asset.path}`;
+const assetBytes = (asset: NewAsset) => (asset.kind === "page" ? Buffer.byteLength(asset.page) + Buffer.byteLength(asset.source ?? "") : asset.data.byteLength);
 
 /** What one link has taken in. `seq` numbers its arrivals; the caller owns the counter so numbers never repeat across links. */
 export interface MoveInbox {
   readonly arrivals: readonly MoveArrival[];
+  readonly assets: readonly MoveAsset[];
   /** False when the link has taken all it may hold. */
   add(text: string, botNames: string[], at: number): boolean;
-  /** The person imported everything up to `seq`: it is let go, and its room is free again. */
+  /** A page sent again under the same title, or a file under the same path, takes the earlier one's place. False when
+   * the link has taken all the pages and files it may hold. */
+  addAsset(asset: NewAsset): boolean;
+  /** The person imported every export up to `seq`: it is let go, and its room is free again. */
   take(seq: number): void;
+  /** These pages and files were imported: they are let go. */
+  drop(seqs: readonly number[]): void;
 }
 
 export function createMoveInbox(seq: () => number): MoveInbox {
   const arrivals: MoveArrival[] = [];
+  const assets: MoveAsset[] = [];
   let bytes = 0;
   return {
     arrivals,
+    assets,
     add(text, botNames, at) {
       const size = Buffer.byteLength(text);
       if (arrivals.length >= MOVE_MAX_DOCUMENTS || bytes + size > MOVE_MAX_BYTES) return false;
@@ -39,13 +75,26 @@ export function createMoveInbox(seq: () => number): MoveInbox {
       arrivals.push({ seq: seq(), at, text, botNames });
       return true;
     },
+    addAsset(asset) {
+      const key = assetKey(asset);
+      const others = assets.filter((held) => assetKey(held) !== key);
+      const held = others.reduce((total, other) => total + assetBytes(other), 0);
+      if (others.length >= MOVE_MAX_ASSETS || held + assetBytes(asset) > MOVE_MAX_ASSET_BYTES) return false;
+      assets.splice(0, assets.length, ...others, { ...asset, seq: seq() } as MoveAsset);
+      return true;
+    },
     take(through) {
       const kept = arrivals.filter((arrival) => arrival.seq > through);
       arrivals.splice(0, arrivals.length, ...kept);
       bytes = kept.reduce((total, arrival) => total + Buffer.byteLength(arrival.text), 0);
     },
+    drop(seqs) {
+      assets.splice(0, assets.length, ...assets.filter((asset) => !seqs.includes(asset.seq)));
+    },
   };
 }
+
+export const moveAssetsFor = (inbox: MoveInbox, bot: string): MoveAsset[] => inbox.assets.filter((asset) => sameBot(asset.bot, bot));
 
 export const HANDOFF_TASK_MAX = 8_000;
 export const HANDOFF_CONTEXT_MAX = 16_000;
@@ -100,7 +149,7 @@ export const createMoveLink = (seq: () => number, host: MoveHost = NO_MOVE_HOST)
 const tools = (app = productName()) => [
   {
     name: "move_status",
-    description: `Check the link to ${app}: whether it works, how many Bots have arrived so far, and which bots ${app} has, by name and job. Call this first.`,
+    description: `Check the link to ${app}: whether it works, how many Bots, pages and files have arrived so far, and which bots ${app} has, by name and job. Call this first.`,
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
   },
   {
@@ -110,6 +159,34 @@ const tools = (app = productName()) => [
       type: "object",
       properties: { document: { type: "object", description: `The ${GROK_EXPORT_FORMAT} document.` } },
       required: ["document"],
+    },
+  },
+  {
+    name: "send_page",
+    description: `Send one of a Bot's pages (a canvas or a document) to ${app}, after that Bot's send_export. Your pages are in your user store: a canvas is /cursor/stores/user/canvases/<id>/source.canvas.tsx beside canvas.json, which has its title and, as \`contributors\`, the ids of the Bots that made it; a document is /cursor/stores/user/documents/<id>/source.md. Send every page of every Bot you move, one page per call, to the Bot whose id is in \`contributors\`. \`bot\` is that Bot's name exactly as in its send_export document. \`title\` is the page's title. \`page\` is the page rewritten by you as one ${app} page file, because ${app} cannot run grok/canvas: one React component file with \`export default\` of the page's component, styled with Tailwind classes, with every value the page shows written inline in the file, as your canvas has it. It may import only ${JSX_PAGE_MODULES.join(", ")}. \`mausbot\` gives Chart (\`<Chart option={...} height={320} />\`, an ECharts option), useTheme (returns "light" or "dark"), send, open and setContext. It cannot fetch, and it must not import grok/canvas: write each Page, Section, Text, Metrics, Columns, table and chart as plain elements and Chart. Keep the same content, numbers and order. Rewrite a document as a page that shows its text. \`source\` is the original file (the tsx or the markdown) as it is, kept beside the page. Never include passwords, API keys or tokens: a page that has one is refused. A page that does not compile is refused with the line: fix it and send it again. A page sent again under the same title replaces the earlier one.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        bot: { type: "string", description: "The Bot's name, exactly as in its send_export document." },
+        title: { type: "string", description: "The page's title." },
+        page: { type: "string", description: `The ${app} page file: one React component file with a default export, at most 1 MB.` },
+        source: { type: "string", description: "The original Grok Bot source, tsx or markdown, at most 1 MB." },
+      },
+      required: ["bot", "title", "page"],
+    },
+  },
+  {
+    name: "send_file",
+    description: `Send one of a Bot's files to ${app}, after that Bot's send_export and its pages. A Bot's files are on its computer under /workspace and in its own store, /cursor/stores/store-<id>. Send the files the Bot made or needs for its work, one file per call. \`bot\` is the Bot's name exactly as in its send_export document. \`path\` is where the file goes in the bot's folder in ${app}: relative, with forward slashes, like reports/2026/summary.md (the path under /workspace or under the store). Send exactly one of \`text\` (a text file's content) and \`base64\` (any other file's bytes, base64-encoded). A file over 3 MB is refused: leave it out and tell the person which file it was. Hidden files and folders, package and cache folders, and files named like a key or password store (.env, *.pem, id_rsa, credentials) are refused: never send those. A file sent again under the same path replaces the earlier one.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        bot: { type: "string", description: "The Bot's name, exactly as in its send_export document." },
+        path: { type: "string", description: "The file's relative path, with forward slashes." },
+        text: { type: "string", description: "The content of a text file." },
+        base64: { type: "string", description: "The bytes of any other file, base64-encoded." },
+      },
+      required: ["bot", "path"],
     },
   },
   {
@@ -191,12 +268,75 @@ function sendExport(args: unknown, inbox: MoveInbox, now: number): ToolResult {
   return said(`Arrived in ${app}. ${bots.map(received).join(" ")} The person can now import ${bots.length === 1 ? "it" : "them"} in ${app}, under Settings → Import & export.`);
 }
 
+const NOTHING_SAVED = "Nothing was saved: ";
+const input = (args: unknown) => (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
+const forBot = (value: unknown) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, BOT_NAME_MAX) : "");
+const NAME_THE_BOT = `${NOTHING_SAVED}say which Bot it belongs to as \`bot\`, with the Bot's name exactly as in its send_export document.`;
+const full = () => refused(`${NOTHING_SAVED}this link has taken all the pages and files it can hold. Tell the person to import what has arrived in ${productName()}, then send the rest.`);
+const megabytes = (bytes: number) => `${bytes / (1024 * 1024)} MB`;
+
+function sendPage(args: unknown, inbox: MoveInbox, now: number): ToolResult {
+  const { bot: named, title: titled, page: sent, source } = input(args);
+  const bot = forBot(named);
+  const title = typeof titled === "string" ? oneLine(titled).slice(0, APP_LIMITS.title) : "";
+  const page = typeof sent === "string" ? sent.trim() : "";
+  if (!bot) return refused(NAME_THE_BOT);
+  if (!title) return refused(`${NOTHING_SAVED}give the page's title as \`title\`.`);
+  if (!page) return refused(`${NOTHING_SAVED}send the page as \`page\`: one React component file with a default export.`);
+  if (source !== undefined && source !== null && typeof source !== "string") return refused(`${NOTHING_SAVED}\`source\` is the original file's text, or left out.`);
+  if (Buffer.byteLength(page) > MOVE_PAGE_MAX_BYTES) return refused(`${NOTHING_SAVED}\`page\` is larger than ${megabytes(MOVE_PAGE_MAX_BYTES)}. Show less data in it, or split it into several pages with their own titles.`);
+  if (source && Buffer.byteLength(source) > MOVE_PAGE_MAX_BYTES) return refused(`${NOTHING_SAVED}\`source\` is larger than ${megabytes(MOVE_PAGE_MAX_BYTES)}. Send the page again without \`source\`.`);
+  if (holdsCredential(page) || holdsCredential(source ?? "")) return refused(`${NOTHING_SAVED}the page has a key or password in it. Take it out and send the page again.`);
+  if (!/\bexport\s+default\b/.test(page)) return refused(`${NOTHING_SAVED}\`page\` needs \`export default\` of the page's component.`);
+  const compiled = compileJsxPage(page);
+  if (!compiled.ok) return refused(`${NOTHING_SAVED}${compiled.error.replace(/^jsx: /, "`page`: ")}`);
+  if (!inbox.addAsset({ kind: "page", at: now, bot, title, page, ...(source ? { source } : {}) })) return full();
+  const app = productName();
+  return said(`Arrived in ${app}: the page "${title}" for ${bot}. The person imports it in ${app}, under Settings → Import & export, and it opens in ${bot}'s Library.`);
+}
+
+const FILE_REFUSALS: Partial<Record<SkillFileRefusal, string>> = {
+  hidden: "is hidden or in a hidden folder",
+  generated: "is in a package or cache folder",
+  deep: "is more than six folders deep: send it with a shorter path",
+  secret_name: "is named like a key or password file",
+};
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+function sendFile(args: unknown, inbox: MoveInbox, now: number): ToolResult {
+  const { bot: named, path: at, text, base64 } = input(args);
+  const bot = forBot(named);
+  const path = typeof at === "string" ? at.trim().replace(/^(?:\.\/)+/, "") : "";
+  if (!bot) return refused(NAME_THE_BOT);
+  const problem = skillFilePathProblem(path);
+  if (problem) {
+    return refused(`${NOTHING_SAVED}${path ? `${path} ${FILE_REFUSALS[problem] ?? "is not a path a folder can hold"}` : "give the file's path as `path`"}. \`path\` is relative, with forward slashes, like reports/summary.md. Leave this file out if it cannot be sent another way.`);
+  }
+  const given = [text, base64].filter((value) => value !== undefined && value !== null);
+  if (given.length !== 1 || typeof given[0] !== "string") return refused(`${NOTHING_SAVED}send exactly one of \`text\` (a text file's content) and \`base64\` (any other file's bytes).`);
+  const tooLarge = () => refused(`${NOTHING_SAVED}${path} is larger than ${megabytes(MOVE_FILE_MAX_BYTES)}. Leave it out, and tell the person this file did not move.`);
+  let data: Buffer;
+  if (typeof text === "string") {
+    data = Buffer.from(text);
+  } else {
+    const encoded = (base64 as string).replace(/\s+/g, "");
+    if (encoded.length > Math.ceil(MOVE_FILE_MAX_BYTES / 3) * 4) return tooLarge();
+    if (!BASE64.test(encoded) || encoded.length % 4 === 1) return refused(`${NOTHING_SAVED}\`base64\` is not base64. Encode the file's bytes as standard base64 and send it again.`);
+    data = Buffer.from(encoded, "base64");
+  }
+  if (data.byteLength > MOVE_FILE_MAX_BYTES) return tooLarge();
+  if (holdsCredential(skillFileText(data) ?? "")) return refused(`${NOTHING_SAVED}${path} has a key or password in it. Leave it out, or take the key out and send it again.`);
+  if (!inbox.addAsset({ kind: "file", at: now, bot, path, data })) return full();
+  return said(`Arrived in ${productName()}: ${path} for ${bot}.`);
+}
+
 function moveStatus(link: MoveLink): ToolResult {
   const names = new Set(link.inbox.arrivals.flatMap((arrival) => arrival.botNames).map((name) => name.toLowerCase()));
   const app = productName();
   const bots = link.host.bots();
   const roster = bots.slice(0, ROSTER_MAX).map((bot) => (bot.job ? `${bot.name} (${bot.job})` : bot.name)).join("; ");
-  return said(`Connected to ${app}. ${plural(names.size, "Bot")} received so far. This link stays on until the person turns it off, and its address never changes. To move a Bot, send it with send_export, one Bot per call. To have ${app} do something, call hand_off_task.`
+  const pages = link.inbox.assets.filter((asset) => asset.kind === "page").length;
+  return said(`Connected to ${app}. ${plural(names.size, "Bot")}, ${plural(pages, "page")} and ${plural(link.inbox.assets.length - pages, "file")} received so far and waiting for the person to import. This link stays on until the person turns it off, and its address never changes. To move a Bot, send it in this order: its setup with send_export, one Bot per call; then each of its pages with send_page; then each of its files with send_file. To have ${app} do something, call hand_off_task.`
     + (roster ? ` ${app}'s bots: ${roster}${bots.length > ROSTER_MAX ? `; and ${bots.length - ROSTER_MAX} more` : ""}.` : ""));
 }
 
@@ -204,10 +344,10 @@ const words = (value: unknown): string => (typeof value === "string" ? value : "
 const over = (field: string, max: number, fix: string) => `Nothing was handed off: \`${field}\` is longer than ${max.toLocaleString("en-US")} characters. ${fix}`;
 
 async function handOffTask(args: unknown, link: MoveLink, now: number): Promise<ToolResult> {
-  const input = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
-  const task = words(input.task).trim();
-  const context = words(input.context).trim();
-  const toBot = words(input.to_bot).replace(/\s+/g, " ").trim().slice(0, TO_BOT_MAX);
+  const asked = input(args);
+  const task = words(asked.task).trim();
+  const context = words(asked.context).trim();
+  const toBot = words(asked.to_bot).replace(/\s+/g, " ").trim().slice(0, TO_BOT_MAX);
   if (!task) return refused("Nothing was handed off: say what to do as `task`, in plain words.");
   if (task.length > HANDOFF_TASK_MAX) return refused(over("task", HANDOFF_TASK_MAX, "Say what to do in fewer words and put the background in `context`."));
   if (context.length > HANDOFF_CONTEXT_MAX) return refused(over("context", HANDOFF_CONTEXT_MAX, "Send only the background the task needs."));
@@ -248,9 +388,9 @@ function statusText(status: HandoffStatus): string {
 }
 
 async function taskStatus(args: unknown, link: MoveLink): Promise<ToolResult> {
-  const input = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
-  const taskId = words(input.task_id).trim();
-  const wait = typeof input.wait_seconds === "number" && Number.isFinite(input.wait_seconds) ? Math.min(Math.max(input.wait_seconds, 0), HANDOFF_WAIT_MAX_SECONDS) : 0;
+  const asked = input(args);
+  const taskId = words(asked.task_id).trim();
+  const wait = typeof asked.wait_seconds === "number" && Number.isFinite(asked.wait_seconds) ? Math.min(Math.max(asked.wait_seconds, 0), HANDOFF_WAIT_MAX_SECONDS) : 0;
   // A task another link handed off, or one that was never there, reads the same.
   const status = link.tasks.has(taskId) ? await link.host.status(taskId, Math.round(wait * 1000)) : null;
   if (!status) return refused("No task with that task_id was handed off through this link. Use the task_id hand_off_task returned.");
@@ -260,8 +400,8 @@ async function taskStatus(args: unknown, link: MoveLink): Promise<ToolResult> {
 const initializeResult = (app = productName()) => ({
   protocolVersion: PROTOCOL_VERSIONS[0],
   capabilities: { tools: {} },
-  serverInfo: { name: app, version: "1.1.0" },
-  instructions: `Connects Grok Bot to ${app}. Call move_status first. To move a Bot, call send_export once per Bot. To have ${app} do something, call hand_off_task, then task_status for the result. The work runs in ${app} on the person's computer: when a tool says ${app} isn't open, ask the person to open it, then call the tool again.`,
+  serverInfo: { name: app, version: "1.2.0" },
+  instructions: `Connects Grok Bot to ${app}. Call move_status first. To move a Bot, call send_export once per Bot, then send_page once per page it made, then send_file once per file it needs. To have ${app} do something, call hand_off_task, then task_status for the result. The work runs in ${app} on the person's computer: when a tool says ${app} isn't open, ask the person to open it, then call the tool again.`,
 });
 
 /** What the hosted address answers without this app: the handshake and tool list as moveMcp gives them, and the two
@@ -310,9 +450,11 @@ export async function moveMcp(message: unknown, link: MoveLink, now = Date.now()
   if (method === "tools/call") {
     if (params?.name === "move_status") return result(moveStatus(link));
     if (params?.name === "send_export") return result(sendExport(params.arguments, link.inbox, now));
+    if (params?.name === "send_page") return result(sendPage(params.arguments, link.inbox, now));
+    if (params?.name === "send_file") return result(sendFile(params.arguments, link.inbox, now));
     if (params?.name === "hand_off_task") return result(await handOffTask(params.arguments, link, now));
     if (params?.name === "task_status") return result(await taskStatus(params.arguments, link));
-    return moveRpcError(id, -32602, "Unknown tool. The tools are move_status, send_export, hand_off_task and task_status.");
+    return moveRpcError(id, -32602, "Unknown tool. The tools are move_status, send_export, send_page, send_file, hand_off_task and task_status.");
   }
   return moveRpcError(id, -32601, "Method not found");
 }
