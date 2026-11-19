@@ -90,6 +90,7 @@ import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citatio
 import { highlightCitationSource } from "@/lib/citations-dom";
 
 const RoomClassroom3D = lazy(() => import("./RoomClassroom3D").then((module) => ({ default: module.RoomClassroom3D })));
+const RoomTasksWorkspace = lazy(() => import("./work-tasks/RoomTasksWorkspace").then((module) => ({ default: module.RoomTasksWorkspace })));
 import { latestFailure, latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { DataResultChip } from "./DataResultChip"; import { PublishedPageCard } from "./PublishedPageCard"; import { TemplateChatCard } from "./TemplateCard"; import { RoomRichRow, UserLineNote } from "./RichMessageRow";
@@ -913,7 +914,9 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
   const advancedMode = useAdvancedMode();
   const simpleHeader = simpleRoomHeader({ advanced: advancedMode, remoteClient, group, setupPending });
   const wideRoom = useMediaQuery("(min-width: 1024px)");
-  const canShowClassroom = wideRoom && !setupPending && !group.dm && !inForkPanel;
+  const canShowTasks = !setupPending && !group.dm && !inForkPanel;
+  const [tasksOpen, setTasksOpen] = useState(false);
+  const canShowClassroom = wideRoom && !setupPending && !group.dm && !inForkPanel && !tasksOpen;
   const [classroomOpen, setClassroomOpen] = useState(true);
   const showClassroom = canShowClassroom && classroomOpen;
   const splitPaneRef = useRef<HTMLDivElement>(null);
@@ -1035,6 +1038,9 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
         showClassroomToggle={canShowClassroom}
         classroomOpen={classroomOpen}
         onToggleClassroom={() => setClassroomOpen((open) => !open)}
+        showTasksToggle={canShowTasks}
+        tasksOpen={tasksOpen}
+        onToggleTasks={() => setTasksOpen((open) => !open)}
       />
 
       {findOpen && <ChatFindBar threadId={group.threadId} inForkPanel={inForkPanel} onClose={() => setFindOpen(false)} />}
@@ -1072,6 +1078,12 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
       </GlassBar>
 
       <div ref={splitPaneRef} className="flex min-h-0 flex-1">
+      {canShowTasks && tasksOpen ? (
+        <Suspense fallback={<div className="flex h-full flex-1 items-center justify-center"><Loader2 size={20} className="animate-spin text-ink-secondary" /></div>}>
+          <RoomTasksWorkspace group={group} members={members} onSwitchToChat={() => setTasksOpen(false)} />
+        </Suspense>
+      ) : (
+      <>
       {showClassroom && (
         <>
           <div
@@ -1255,6 +1267,8 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
       />
       </div>
       </div>
+      </>
+      )}
       </div>
       </GlassScrollFrame>
     </main>

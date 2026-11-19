@@ -36,6 +36,7 @@ import type { InboxItem, InboxTask } from "./inbox.ts";
 import type { LiveCallRecord, LiveCallState } from "./live-call-wire.ts";
 import type { ForkOrigin, TaskClosedBy, TaskOpenedBy } from "./task-provenance.ts";
 import type { CompanionEndpointsSnapshot } from "./responses.ts";
+import type { AgentTask, TaskActivity } from "./work-tasks.ts";
 /** What a team bot's main chat is called, beside each person's own chats. */
 export const SHARED_CHAT_TITLE = "Shared chat";
 
@@ -996,5 +997,8 @@ export type ServerFrame =
   | { kind: "device.job"; phone: string; id: string }
   /** Who is here on a Team Cloud (shared/team-presence.ts). */
   | PresenceFrame
+  | { kind: "work-task"; groupId: string; task: AgentTask }
+  | { kind: "work-task.deleted"; groupId: string; taskId: string }
+  | { kind: "work-task.activity"; groupId: string; taskId: string; activity: TaskActivity }
   /** The config status object spread flat into the frame. */
   | ({ kind: "config" } & Record<string, unknown>);

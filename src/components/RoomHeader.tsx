@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { Box, ChevronRight, Pause, Plus, Search } from "lucide-react";
+import { Box, ChevronRight, Kanban, Pause, Plus, Search } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { roomContextWarnings } from "@/lib/context-warning";
@@ -140,6 +140,9 @@ export function RoomHeader({
   showClassroomToggle,
   classroomOpen,
   onToggleClassroom,
+  showTasksToggle,
+  tasksOpen,
+  onToggleTasks,
 }: {
   group: Group;
   members: Bot[];
@@ -154,6 +157,9 @@ export function RoomHeader({
   showClassroomToggle?: boolean;
   classroomOpen?: boolean;
   onToggleClassroom?: () => void;
+  showTasksToggle?: boolean;
+  tasksOpen?: boolean;
+  onToggleTasks?: () => void;
 }) {
   const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle } = useCaptionChrome();
   const { state, dispatch } = useStore();
@@ -192,6 +198,24 @@ export function RoomHeader({
           </div>
           <div data-roomhead-controls className="flex shrink-0 items-center gap-1.5">
             <ThreadPresenceFaces threadId={group.threadId} />
+            {showTasksToggle && (
+              <button
+                type="button"
+                data-testid="room-tasks-toggle"
+                onClick={onToggleTasks}
+                aria-label={t("workTasks.tab")}
+                aria-pressed={tasksOpen}
+                title={t("workTasks.tab")}
+                style={headerNoDragStyle}
+                className={cn(
+                  "inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium transition-colors hover:bg-ink/[0.06]",
+                  tasksOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:text-ink",
+                )}
+              >
+                <Kanban size={15} />
+                <span>{t("workTasks.tab")}</span>
+              </button>
+            )}
             {showClassroomToggle && (
               <button
                 type="button"
@@ -257,6 +281,23 @@ export function RoomHeader({
           className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
         >
           <ThreadPresenceFaces threadId={group.threadId} />
+          {showTasksToggle && (
+            <button
+              type="button"
+              data-testid="room-tasks-toggle"
+              onClick={onToggleTasks}
+              aria-label={t("workTasks.tab")}
+              aria-pressed={tasksOpen}
+              title={t("workTasks.tab")}
+              className={cn(
+                "inline-flex h-8 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium transition-colors hover:bg-ink/[0.06]",
+                tasksOpen ? "bg-accent/10 text-accent" : "text-ink-secondary hover:text-ink",
+              )}
+            >
+              <Kanban size={15} />
+              <span>{t("workTasks.tab")}</span>
+            </button>
+          )}
           {showClassroomToggle && (
             <button
               type="button"

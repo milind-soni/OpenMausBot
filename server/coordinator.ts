@@ -23,6 +23,8 @@ export type CoordinateBotsCall = {
   projectId?: string;
   /** The assignment whose question the message answers, instead of new work. */
   answers?: string;
+  /** Optional LOOMA Agent Work Management task id or key bound to this delegation. */
+  workTaskId?: string;
   /** Files that travel with the work, already in the attachment store (server/host/handoff-files.ts). */
   files?: readonly PassedFile[];
   /** start_thread's report_back: the one target is the sender's own new thread, run on this model. */

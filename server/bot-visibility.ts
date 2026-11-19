@@ -619,6 +619,10 @@ export function frameForMember(payload: Record<string, unknown>, ctx: FrameConte
       const { help: _help, ...rest } = payload;
       return { ...rest, helpReason: null };
     }
+    case "work-task":
+    case "work-task.deleted":
+    case "work-task.activity":
+      return visible.group(str(payload.groupId)) ? payload : undefined;
     case "config":
     case "routine.deleted":
     case "webhook.deleted":

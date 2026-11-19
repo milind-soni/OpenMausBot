@@ -6,6 +6,7 @@ import { FILE_MAX_BYTES, limitMegabytes } from "../../shared/upload-limits.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
 import { DEVS_TOOL_DEFINITIONS } from "./agents-devs-tools.ts";
+import { WORK_TASK_TOOL_DEFINITIONS } from "./agents-work-task-tools.ts";
 import { HELPER_TOOL_DEFINITIONS } from "./agents-helper-tools.ts";
 import { USAGE_LIMITS_TOOL_DEFINITION } from "./agents-usage-tool.ts";
 import { APP_SETTINGS_TOOL_DEFINITION } from "./agents-app-settings-tool.ts";
@@ -181,6 +182,7 @@ const TOOL_DEFINITIONS = [
       consult: { type: "boolean", description: "True for a question answered from what they know, acting on nothing." },
       done_when: { type: "string", maxLength: 1000, description: "What must be true to count as done; the teammate is held to it." },
       answers: { type: "string", description: "Only to answer a teammate's question: the assignment id its note names; message is the answer." },
+      work_task_id: { type: "string", description: "Optional LOOMA work task id or key (e.g. LOOMA-101) to bind to this assignment." },
       files: { type: "array", items: { type: "string" }, maxItems: 5, description: "Paths as for attach_file, 100 MB together: copied into each teammate's inbox. Files a teammate attaches with attach_file come back with its result." },
     }, required: ["bot_ids", "message"] },
   },
@@ -513,7 +515,7 @@ const TOOL_DEFINITIONS = [
       required: ["text"],
     },
   },
-  ...RESEARCH_TOOL_DEFINITIONS, ...HELPER_TOOL_DEFINITIONS, ...IMAGE_TOOL_DEFINITIONS, ...MEETING_TOOL_DEFINITIONS, ...PERSON_TOOL_DEFINITIONS, ...DEVS_TOOL_DEFINITIONS, ...HOSTING_TOOL_DEFINITIONS, ...SHARE_TOOL_DEFINITIONS,
+  ...RESEARCH_TOOL_DEFINITIONS, ...HELPER_TOOL_DEFINITIONS, ...IMAGE_TOOL_DEFINITIONS, ...MEETING_TOOL_DEFINITIONS, ...PERSON_TOOL_DEFINITIONS, ...DEVS_TOOL_DEFINITIONS, ...HOSTING_TOOL_DEFINITIONS, ...SHARE_TOOL_DEFINITIONS, ...WORK_TASK_TOOL_DEFINITIONS,
   {
     name: "memory_update",
     description:

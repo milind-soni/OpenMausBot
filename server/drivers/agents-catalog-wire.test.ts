@@ -87,37 +87,37 @@ const FULL = "skills+shared+voice+x+team+images+hosting";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 57945,
-  "voice": 58726,
-  "shared": 60210,
-  "shared+voice": 60991,
-  "skills": 60031,
-  "skills+voice": 60812,
-  "skills+shared": 62296,
-  "skills+shared+voice": 63077,
-  "non-chief": 49528,
-  "voice+non-chief": 50309,
-  "shared+non-chief": 51793,
-  "shared+voice+non-chief": 52574,
-  "skills+non-chief": 51614,
-  "skills+voice+non-chief": 52395,
-  "skills+shared+non-chief": 53879,
-  "skills+shared+voice+non-chief": 54660,
-  "skills+shared+voice+cloud-home": 62843,
-  "skills+shared+voice+non-chief+cloud-home": 54426,
-  "default+legacy-switches": 57945,
-  "default+mausbot": 58596,
-  "skills+shared+voice+mausbot": 63728,
-  "skills+shared+voice+x": 67179,
-  "skills+shared+voice+x+team": 67179,
-  "default+no-computer-pick": 56733,
-  "default+room": 53729,
-  "non-chief+room": 45312,
-  "skills+shared+voice+x+team+images": 69244,
-  "default+images": 60010,
-  "skills+shared+voice+x+team+images+hosting": 71107,
-  "default+hosting": 59808,
-  "default+tools-off": 53040,
+  "default": 60886,
+  "voice": 61667,
+  "shared": 63151,
+  "shared+voice": 63932,
+  "skills": 63207,
+  "skills+voice": 63988,
+  "skills+shared": 65472,
+  "skills+shared+voice": 66253,
+  "non-chief": 52338,
+  "voice+non-chief": 53119,
+  "shared+non-chief": 54603,
+  "shared+voice+non-chief": 55384,
+  "skills+non-chief": 54659,
+  "skills+voice+non-chief": 55440,
+  "skills+shared+non-chief": 56924,
+  "skills+shared+voice+non-chief": 57705,
+  "skills+shared+voice+cloud-home": 66019,
+  "skills+shared+voice+non-chief+cloud-home": 57471,
+  "default+legacy-switches": 60886,
+  "default+mausbot": 61537,
+  "skills+shared+voice+mausbot": 66904,
+  "skills+shared+voice+x": 70092,
+  "skills+shared+voice+x+team": 70092,
+  "default+no-computer-pick": 59674,
+  "default+room": 56670,
+  "non-chief+room": 48122,
+  "skills+shared+voice+x+team+images": 72039,
+  "default+images": 62833,
+  "skills+shared+voice+x+team+images+hosting": 73902,
+  "default+hosting": 62749,
+  "default+tools-off": 56568,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -234,7 +234,7 @@ describe("agents proxy tools/list golden", () => {
       for (const alias of ["delegate_bot", "ask_bot", "send_to_bot", "check_delegation", "wait_delegation"]) expect(tools.has(alias), `${name}: ${alias}`).toBe(false);
       expect(JSON.stringify([...tools.values()])).not.toMatch(/Deprecated alias|works for this release/);
       const coordinate = tools.get("coordinate_bots")!.inputSchema.properties;
-      expect(Object.keys(coordinate)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers", "files"]);
+      expect(Object.keys(coordinate)).toEqual(["group_id", "bot_ids", "message", "reason", "rework", "thread", "title", "in_my_folder", "reply", "consult", "done_when", "answers", "work_task_id", "files"]);
       expect(coordinate.thread).toMatchObject({ type: "string", description: expect.stringContaining("threadId") });
       expect(coordinate.thread!.enum).toBeUndefined();
       expect(coordinate.reply!.enum).toEqual(["resume", "none"]);

@@ -502,6 +502,8 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   // alone, on a personal Cloud its owner alone (routes/team-slack.ts); off a Cloud they answer 404
   { methods: ["GET"], path: /^\/api\/slack\/team\/bots$/ },
   { methods: ["POST"], path: /^\/api\/slack\/team\/messages(?:\/[0-9a-f-]{36}\/stop)?$/ },
+  // Agent Work Management read & Telegram query endpoints (visibility-scoped in routes/work-tasks.ts)
+  { methods: ["GET"], path: /^\/api\/work-tasks(?:\/(?:telegram\/query|[\w-]+))?$/ },
 ];
 
 export function requiredScope(method: string, path: string, features: { sharedComputers?: boolean } = {}): Scope {

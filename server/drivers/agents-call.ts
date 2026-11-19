@@ -32,6 +32,7 @@ import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
 import { callShareTool, SHARE_TOOL_NAMES } from "./agents-share-tool.ts";
 import { callPersonTool, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
 import { callDevsTool, DEVS_TOOL_NAMES } from "./agents-devs-tools.ts";
+import { callWorkTaskTool, WORK_TASK_TOOL_NAMES } from "./agents-work-task-tools.ts";
 
 export interface ToolCallContext {
   botId: string;
@@ -254,6 +255,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   if (SHARE_TOOL_NAMES.has(name)) return callShareTool(args, context);
   if (PERSON_TOOL_NAMES.has(name)) return callPersonTool(name, args, context);
   if (DEVS_TOOL_NAMES.has(name)) return callDevsTool(name, args, context);
+  if (WORK_TASK_TOOL_NAMES.has(name)) return callWorkTaskTool(name, args, context);
   if (TRIGGER_TOOL_NAMES.has(name)) return callTriggerTool(name, args, context);
   if (WAIT_TOOL_NAMES.has(name)) return callWaitTool(name, args, context);
   if (name === USAGE_LIMITS_TOOL) return callUsageLimitsTool(context);
@@ -306,7 +308,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       && (canonical.thread === undefined || (typeof canonical.thread === "string" && /^[\w-]{1,128}$/.test(canonical.thread)))
       && (canonical.reply === undefined || canonical.reply === "resume" || canonical.reply === "none")
       && optional("consult", "boolean") && optional("in_my_folder", "boolean")
-      && optional("done_when", "string") && optional("reason", "string") && optional("title", "string") && optional("answers", "string")
+      && optional("done_when", "string") && optional("reason", "string") && optional("title", "string") && optional("answers", "string") && optional("work_task_id", "string")
       && (canonical.group_id === undefined || canonical.group_id === null || typeof canonical.group_id === "string") && (canonical.files === undefined || canonical.files === null || (Array.isArray(canonical.files) && canonical.files.every((path) => typeof path === "string") && canonical.files.filter((path) => path.trim()).length <= 5));
     if (!usable) {
       return {
@@ -321,7 +323,9 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       thread: canonical.thread, reply: canonical.reply,
       title: typeof canonical.title === "string" && canonical.title.trim() ? canonical.title.trim() : undefined, consult: canonical.consult, inMyFolder: canonical.in_my_folder,
       done_when: typeof canonical.done_when === "string" && canonical.done_when.trim() ? canonical.done_when.trim() : undefined,
-      answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined, files: Array.isArray(canonical.files) && canonical.files.some((path) => path.trim()) ? canonical.files.filter((path) => path.trim()) : undefined,
+      answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined,
+      ...(typeof canonical.work_task_id === "string" && canonical.work_task_id.trim() ? { workTaskId: canonical.work_task_id.trim() } : {}),
+      files: Array.isArray(canonical.files) && canonical.files.some((path) => path.trim()) ? canonical.files.filter((path) => path.trim()) : undefined,
     }) });
     return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
   }

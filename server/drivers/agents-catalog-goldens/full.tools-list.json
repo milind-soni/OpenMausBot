@@ -183,6 +183,10 @@
             "type": "string",
             "description": "Only to answer a teammate's question: the assignment id its note names; message is the answer."
           },
+          "work_task_id": {
+            "type": "string",
+            "description": "Optional LOOMA work task id or key (e.g. LOOMA-101) to bind to this assignment."
+          },
           "files": {
             "type": "array",
             "items": {
@@ -992,7 +996,7 @@
     },
     {
       "name": "request_sign_in",
-      "description": "Ask the person to sign in to a website themselves, in the browser or on the computer you are using now. Use it when a page needs a login you do not have, or a CAPTCHA, passkey or other step only they can do, or a one-time code you cannot read. A code the site sends to the person's own email or messages for a sign-in they asked for is not one: read it there and type it in yourself. They get a card and a notification, sign in where you work, and press Done. Never ask for a password or code in chat. After calling it, end your turn; OpenMausBot resumes you when they finish or decline, and then check you are signed in.",
+      "description": "Ask the person to sign in to a website themselves, in the browser or on the computer you are using now. Use it when a page needs a login you do not have, or a CAPTCHA, passkey or other step only they can do, or a one-time code you cannot read. A code the site sends to the person's own email or messages for a sign-in they asked for is not one: read it there and type it in yourself. They get a card and a notification, sign in where you work, and press Done. Never ask for a password or code in chat. After calling it, end your turn; Looma resumes you when they finish or decline, and then check you are signed in.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1013,7 +1017,7 @@
     },
     {
       "name": "fill_login",
-      "description": "Sign in with a login the person saved in OpenMausBot or in their connected 1Password. Call it on the login page open in your browser: OpenMausBot types the username, password and any one-time code itself (also one emailed to a connected mailbox), submits each step, and says where the page went; you never see them. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed, or call request_sign_in.",
+      "description": "Sign in with a login the person saved in Looma or in their connected 1Password. Call it on the login page open in your browser: Looma types the username, password and any one-time code itself (also one emailed to a connected mailbox), submits each step, and says where the page went; you never see them. A login fills on its own site, such as any page of example.com. With no saved login for the site, sign in another way the person allowed, or call request_sign_in.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -1444,6 +1448,186 @@
         },
         "required": [
           "action"
+        ]
+      }
+    },
+    {
+      "name": "work_task_list",
+      "description": "Read-only: list LOOMA work tasks (epics, tasks, subtasks, bugs) in the room or filtered by status/assignee.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "room_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "backlog",
+              "todo",
+              "in-progress",
+              "blocked",
+              "in-review",
+              "rework",
+              "done",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "assignee_bot_id": {
+            "type": "string"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "work_task_get",
+      "description": "Read-only: get full work task detail, subtasks, evidence and activity history by task id or key (e.g. LOOMA-101).",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "work_task_create",
+      "description": "Create a work task or subtask in LOOMA Work Management and optionally assign a teammate.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "epic",
+              "task",
+              "subtask",
+              "bug"
+            ]
+          },
+          "priority": {
+            "type": "string",
+            "enum": [
+              "lowest",
+              "low",
+              "medium",
+              "high",
+              "highest"
+            ]
+          },
+          "parent_task_id": {
+            "type": "string"
+          },
+          "assignee_bot_id": {
+            "type": "string"
+          },
+          "qa_bot_id": {
+            "type": "string"
+          },
+          "room_id": {
+            "type": "string"
+          },
+          "acceptance_criteria": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "string"
+            }
+          },
+          "labels": {
+            "type": "array",
+            "maxItems": 12,
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "work_task_update",
+      "description": "Update task status (respecting workflow: workers move to in-progress/blocked/in-review only; QA/Coordinator move in-review to done or rework), log progress/comment, or attach evidence.",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "backlog",
+              "todo",
+              "in-progress",
+              "blocked",
+              "in-review",
+              "rework",
+              "done",
+              "failed",
+              "cancelled"
+            ]
+          },
+          "status_note": {
+            "type": "string"
+          },
+          "progress": {
+            "type": "string"
+          },
+          "comment": {
+            "type": "string"
+          },
+          "assignee_bot_id": {
+            "type": "string"
+          },
+          "evidence_type": {
+            "type": "string",
+            "enum": [
+              "file",
+              "commit",
+              "test",
+              "url",
+              "message"
+            ]
+          },
+          "evidence_label": {
+            "type": "string"
+          },
+          "evidence_value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
         ]
       }
     },
