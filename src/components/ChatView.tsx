@@ -982,10 +982,10 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   const [panoramicOpen, setPanoramicOpen] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "d" || e.key === "D")) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "1") {
         e.preventDefault();
         setPanoramicOpen((prev) => !prev);
-      } else if (e.key === "Escape" && panoramicOpen) {
+      } else if (e.key === "Escape" && panoramicOpen && !e.defaultPrevented) {
         setPanoramicOpen(false);
       }
     };
@@ -1166,7 +1166,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
       </GlassBar>
 
       {panoramicOpen && (
-        <div className="absolute inset-x-0 bottom-0 top-[52px] z-[26] flex flex-col bg-app">
+        <div className="absolute inset-0 z-[26] flex flex-col bg-app">
           <PanoramicWorkspace onOpenChat={() => setPanoramicOpen(false)} />
         </div>
       )}

@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DEFAULT_AUTOFABRIC_ENDPOINT,
   collectLocalBotAsks,
   formatCasError,
   formatHoldCountdown,
   inferFactoryDomain,
   readAutofabricEndpoint,
+  sanitizeEndpoint,
   writeAutofabricEndpoint,
 } from "./autofabric-bridge";
 import type { Bot, Message, OptionCardData } from "@/state/store";
@@ -409,22 +411,87 @@ describe("collectLocalBotAsks", () => {
   });
 });
 
-describe("endpoint helpers", () => {
-  it("reads and normalizes autofabric endpoint", () => {
-    expect(readAutofabricEndpoint()).toContain("http");
-    const cleaned = writeAutofabricEndpoint("http://localhost:8787///");
-    expect(cleaned).toBe("http://localhost:8787");
+describe("endpoint helpers and protocol whitelist", () => {
+  const memoryStore = new Map<string, string>();
+
+  beforeEach(() => {
+    memoryStore.clear();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => memoryStore.get(key) ?? null,
+      setItem: (key: string, val: string) => {
+        memoryStore.set(key, String(val));
+      },
+      removeItem: (key: string) => {
+        memoryStore.delete(key);
+      },
+      clear: () => {
+        memoryStore.clear();
+      },
+    });
   });
 
-  it("falls back to default endpoint on empty or whitespace strings", () => {
-    expect(writeAutofabricEndpoint("")).toBe("http://127.0.0.1:8787");
-    expect(writeAutofabricEndpoint("   ")).toBe("http://127.0.0.1:8787");
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
-
-  it("handles long endpoint URLs and strips multiple trailing slashes", () => {
-    const longEndpoint = "https://custom-gateway.openmausbot.internal.corp:9443/cluster-alpha/autofabric-core//////";
-    expect(writeAutofabricEndpoint(longEndpoint)).toBe(
-      "https://custom-gateway.openmausbot.internal.corp:9443/cluster-alpha/autofabric-core",
+  it("sanitizes valid http and https endpoints and strips trailing slashes", () => {
+    expect(sanitizeEndpoint("http://localhost:8787///")).toBe("http://localhost:8787");
+    expect(sanitizeEndpoint("https://autofabric.corp.internal:9443/api/v1/")).toBe(
+      "https://autofabric.corp.internal:9443/api/v1",
     );
+  });
+
+  it("blocks pseudo-protocols and dangerous schemes, falling back to default endpoint", () => {
+    expect(sanitizeEndpoint("javascript:alert(1)")).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+    expect(sanitizeEndpoint("javascript:/*--></title></style></textarea>*/<script>alert(1)</script>")).toBe(
+      DEFAULT_AUTOFABRIC_ENDPOINT,
+    );
+    expect(sanitizeEndpoint("file:///etc/passwd")).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+    expect(sanitizeEndpoint("file://C:/Windows/System32/cmd.exe")).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+    expect(sanitizeEndpoint("data:text/html,<script>alert(1)</script>")).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+    expect(sanitizeEndpoint("blob:https://example.com/uuid")).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+    expect(sanitizeEndpoint("ftp://files.example.com/telemetry")).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+  });
+
+  it("falls back to default endpoint on empty, whitespace or invalid URL strings", () => {
+    expect(sanitizeEndpoint("")).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+    expect(sanitizeEndpoint("   ")).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+    expect(sanitizeEndpoint("not-a-valid-url")).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+    expect(sanitizeEndpoint("://missing-scheme")).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+  });
+
+  it("reads and normalizes autofabric endpoint from localStorage", () => {
+    localStorage.clear();
+    expect(readAutofabricEndpoint()).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+    writeAutofabricEndpoint("http://localhost:8787///");
+    expect(readAutofabricEndpoint()).toBe("http://localhost:8787");
+  });
+
+  it("safely neutralizes malicious or invalid values stored in localStorage on read", () => {
+    localStorage.setItem("omb.autofabric.endpoint", "javascript:alert(1)");
+    expect(readAutofabricEndpoint()).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+
+    localStorage.setItem("omb.autofabric.endpoint", "file:///etc/passwd");
+    expect(readAutofabricEndpoint()).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+
+    localStorage.setItem("omb.autofabric.endpoint", "   ");
+    expect(readAutofabricEndpoint()).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+  });
+
+  it("sanitizes writeAutofabricEndpoint inputs and falls back to default on invalid schemes", () => {
+    const maliciousResult = writeAutofabricEndpoint("javascript:alert(document.domain)");
+    expect(maliciousResult).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+    expect(readAutofabricEndpoint()).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+
+    const fileResult = writeAutofabricEndpoint("file:///C:/Users/frank/secret.key");
+    expect(fileResult).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+    expect(readAutofabricEndpoint()).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+
+    const emptyResult = writeAutofabricEndpoint("");
+    expect(emptyResult).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+    expect(readAutofabricEndpoint()).toBe(DEFAULT_AUTOFABRIC_ENDPOINT);
+
+    const validResult = writeAutofabricEndpoint("https://valid-endpoint.internal:8080/path///");
+    expect(validResult).toBe("https://valid-endpoint.internal:8080/path");
+    expect(readAutofabricEndpoint()).toBe("https://valid-endpoint.internal:8080/path");
   });
 });

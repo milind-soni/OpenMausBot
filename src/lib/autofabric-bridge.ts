@@ -105,26 +105,48 @@ export interface LocalBotAskItem {
 
 export type FactoryDomainKey = "infra" | "fulfill" | "app" | "other";
 
-const DEFAULT_AUTOFABRIC_ENDPOINT_KEY = "omb.autofabric.endpoint";
-const DEFAULT_AUTOFABRIC_ENDPOINT = "http://127.0.0.1:8787";
+export const DEFAULT_AUTOFABRIC_ENDPOINT_KEY = "omb.autofabric.endpoint";
+export const DEFAULT_AUTOFABRIC_ENDPOINT = "http://127.0.0.1:8787";
+
+export function sanitizeEndpoint(raw: string): string {
+  if (!raw || typeof raw !== "string") {
+    return DEFAULT_AUTOFABRIC_ENDPOINT;
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return DEFAULT_AUTOFABRIC_ENDPOINT;
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return DEFAULT_AUTOFABRIC_ENDPOINT;
+    }
+    const cleanPath = parsed.pathname.replace(/\/+$/, "");
+    return parsed.origin + cleanPath;
+  } catch {
+    return DEFAULT_AUTOFABRIC_ENDPOINT;
+  }
+}
 
 export function readAutofabricEndpoint(): string {
   try {
-    const saved = localStorage.getItem(DEFAULT_AUTOFABRIC_ENDPOINT_KEY);
-    return saved && saved.trim() ? saved.trim().replace(/\/+$/, "") : DEFAULT_AUTOFABRIC_ENDPOINT;
+    const saved = typeof localStorage !== "undefined" ? localStorage.getItem(DEFAULT_AUTOFABRIC_ENDPOINT_KEY) : null;
+    return saved ? sanitizeEndpoint(saved) : DEFAULT_AUTOFABRIC_ENDPOINT;
   } catch {
     return DEFAULT_AUTOFABRIC_ENDPOINT;
   }
 }
 
 export function writeAutofabricEndpoint(url: string): string {
-  const cleaned = (url || "").trim().replace(/\/+$/, "") || DEFAULT_AUTOFABRIC_ENDPOINT;
+  const sanitized = sanitizeEndpoint(url);
   try {
-    localStorage.setItem(DEFAULT_AUTOFABRIC_ENDPOINT_KEY, cleaned);
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(DEFAULT_AUTOFABRIC_ENDPOINT_KEY, sanitized);
+    }
   } catch {
     // ignore storage restriction
   }
-  return cleaned;
+  return sanitized;
 }
 
 export function inferFactoryDomain(name: string): FactoryDomainKey {
@@ -260,7 +282,7 @@ export function useAutofabricTelemetry(enabled: boolean) {
 
   const refresh = useCallback(
     async (customEndpoint?: string) => {
-      const target = (customEndpoint ?? endpoint).replace(/\/+$/, "");
+      const target = sanitizeEndpoint(customEndpoint ?? endpoint);
       abortRef.current?.abort();
       const ctrl = new AbortController();
       abortRef.current = ctrl;

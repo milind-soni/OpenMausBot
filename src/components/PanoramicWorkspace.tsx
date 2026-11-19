@@ -150,6 +150,7 @@ export function PanoramicWorkspace({ onOpenChat, defaultTab = "inbox" }: Panoram
         return next;
       });
       setResolveError(err instanceof Error ? err.message : String(err));
+      void telemetry.refresh();
     } finally {
       setResolvingId(null);
     }
