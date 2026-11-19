@@ -4248,6 +4248,7 @@
   "planUsage.fiveHour": "5-hour",
   "planUsage.weekly": "Weekly",
   "planUsage.left": "{remaining}% left",
+  "planUsage.balanceLeft": "{amount} left",
   "planUsage.used": "{used}% used",
   "planUsage.monthlySpend": "Monthly spend",
   "planUsage.spendAmounts": "{used} of {limit} spent",
