@@ -405,7 +405,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "piAgent")).toBe(true);
 
     const session = recorder.events.find((e) => e.type === "session.started")!;
-    expect((session as { sessionId: string }).sessionId).toMatch(/pi-session-\d+\.json$/);
+    expect((session as { sessionId: string }).sessionId).toMatch(/pi-session-\d+-\d+\.json$/);
 
     const text = recorder.events.find(
       (e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "assistant_text",
@@ -466,7 +466,7 @@ describe("PiDriver turns (fake CLI)", () => {
     const firstSession = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId) as
       | { sessionId: string }
       | undefined;
-    expect(firstSession?.sessionId).toMatch(/pi-session-\d+\.json$/);
+    expect(firstSession?.sessionId).toMatch(/pi-session-\d+-\d+\.json$/);
 
     const second = await instance.adapter.sendTurn({
       threadId: "t-resume",
@@ -511,7 +511,7 @@ describe("PiDriver turns (fake CLI)", () => {
     const firstSession = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId) as
       | { sessionId: string }
       | undefined;
-    expect(firstSession?.sessionId).toMatch(/pi-session-\d+\.json$/);
+    expect(firstSession?.sessionId).toMatch(/pi-session-\d+-\d+\.json$/);
 
     const second = await instance.adapter.sendTurn({
       threadId: "t-pi-state-session",
@@ -716,6 +716,8 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
       message: "pi prompt failed",
     });
+    const rejectedSession = recorder.events.find((event) => event.type === "session.started" && event.turnId === turnId);
+    if (rejectedSession?.type !== "session.started") throw new Error("missing rejected session");
     recorder.stop();
     await instance.dispose();
     await create(undefined, { FAKE_PI_DUMP: dump });
@@ -725,7 +727,7 @@ describe("PiDriver turns (fake CLI)", () => {
       system: "Standing rules.\n\nMemory: likes quiet hours.",
       systemStable: "Standing rules.",
       systemVolatile: "Memory: likes quiet hours.",
-      resumeCursor: join(piSessionDir({ threadId }, "pi-test"), "pi-session-1.json"),
+      resumeCursor: rejectedSession.sessionId,
     });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
     const row = readFileSync(dump, "utf8").split("\n").filter(Boolean)

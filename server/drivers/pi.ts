@@ -809,13 +809,19 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         const hsPromise = awaitResponse(command, Infinity);
         send(sessionPath ? { type: "switch_session", sessionPath } : { type: "new_session" });
         const slow = setTimeout(() => emit({ ...base(threadId, turnId), type: "runtime.notice", ...noticeFailure("chat.notice.piSessionSlow") }), PI_SESSION_SLOW_MS);
-        const hs = (await hsPromise.finally(() => clearTimeout(slow))) as { sessionFile?: string; sessionId?: string } | undefined;
+        const hs = (await hsPromise.finally(() => clearTimeout(slow))) as { sessionFile?: string; sessionId?: string; cancelled?: boolean } | undefined;
+        if (hs?.cancelled) throw new PiRpcRefusalError("pi session switch cancelled");
         if (hs?.sessionFile) sessionFile = hs.sessionFile;
         sessionId = sessionFile ?? hs?.sessionId ?? null;
         sessionReady = true;
         sessionOpened = true;
-      } catch {
-        // A prompt can still be accepted without an explicit session handshake.
+      } catch (error) {
+        if (sessionPath && !settled) {
+          emit({ ...base(threadId, turnId), type: "runtime.error", message: String((error as Error).message) });
+          await settle(false);
+          return { turnId };
+        }
+        // A new turn can still be accepted without an explicit session handshake.
       }
       if (settled) return { turnId };
 

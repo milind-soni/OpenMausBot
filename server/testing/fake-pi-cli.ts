@@ -362,7 +362,7 @@ function handle(cmd: any) {
         return;
       }
       sessionCounter += 1;
-      currentSessionFile = join(argv.includes("--session-dir") ? argv[argv.indexOf("--session-dir") + 1]! : "/fake", `pi-session-${sessionCounter}.json`);
+      currentSessionFile = join(argv.includes("--session-dir") ? argv[argv.indexOf("--session-dir") + 1]! : "/fake", `pi-session-${process.pid}-${sessionCounter}.json`);
       if (process.env.FAKE_PI_PERSIST_SESSION) writeFileSync(currentSessionFile, "[]");
       const sessionData = process.env.FAKE_PI_SESSION_FILE_IN_STATE_ONLY
         ? { cancelled: false }
@@ -381,6 +381,10 @@ function handle(cmd: any) {
       }, Number(process.env.FAKE_PI_SESSION_DELAY_MS ?? 800));
       return;
     case "switch_session":
+      if (mode === "session-cancelled") {
+        send({ type: "response", command: "switch_session", success: true, data: { cancelled: true } });
+        return;
+      }
       if (mode === "session-error") {
         send({ type: "response", command: "switch_session", success: false, error: "fake pi: session unavailable" });
         return;
@@ -415,14 +419,14 @@ function handle(cmd: any) {
       send({ type: "response", command: "set_thinking_level", success: true });
       return;
     case "prompt":
-      if (process.env.FAKE_PI_PERSIST_SESSION && currentSessionFile) {
-        const history = JSON.parse(readFileSync(currentSessionFile, "utf8"));
-        writeFileSync(currentSessionFile, JSON.stringify([...history, cmd.message]));
-      }
       if (mode === "prompt-reject") {
         // pi rejects a prompt submitted while a compaction runs.
         send({ type: "response", command: "prompt", success: false, error: "fake pi: compaction in progress" });
         return;
+      }
+      if (process.env.FAKE_PI_PERSIST_SESSION && currentSessionFile) {
+        const history = JSON.parse(readFileSync(currentSessionFile, "utf8"));
+        writeFileSync(currentSessionFile, JSON.stringify([...history, cmd.message]));
       }
       if (process.env.FAKE_PI_DUMP) {
         try {
