@@ -1,11 +1,11 @@
 // Access tokens stay in the request header only, never in the JSON result.
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
+import { readMacKeychainLogin } from "./drivers/claude-keychain.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
 import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
@@ -115,8 +115,6 @@ export interface CredentialSource {
 const PROVIDER_TIMEOUT_MS = 8_000;
 const PLAN_USAGE_CACHE_MS = 45_000;
 const CREDENTIAL_READ_MAX_BYTES = 1_000_000;
-const KEYCHAIN_TIMEOUT_MS = 5_000;
-const KEYCHAIN_MAX_BUFFER = 1_000_000;
 const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 const CLAUDE_MODEL_FAMILIES = ["opus", "sonnet", "haiku"];
 const MONTHLY_SPEND = "Monthly spend";
@@ -747,27 +745,7 @@ function claudeKeychainServices(account: PlanAccount, env: NodeJS.ProcessEnv, re
 }
 
 function readDarwinClaudeKeychain(service: string): Promise<string | null> {
-  if (process.platform !== "darwin") return Promise.resolve(null);
-  return new Promise((resolve) => {
-    try {
-      execFile(
-        "security",
-        ["find-generic-password", "-s", service, "-w"],
-        {
-          timeout: KEYCHAIN_TIMEOUT_MS,
-          maxBuffer: KEYCHAIN_MAX_BUFFER,
-          windowsHide: true,
-          shell: false,
-          encoding: "utf8",
-        },
-        (error, stdout) => {
-          resolve(error || !stdout ? null : stdout);
-        },
-      );
-    } catch {
-      resolve(null);
-    }
-  });
+  return readMacKeychainLogin(service, (raw) => claudeCredentialFromText(decodeKeychainSecret(raw), Date.now()).token != null);
 }
 
 async function readClaudeCredential(

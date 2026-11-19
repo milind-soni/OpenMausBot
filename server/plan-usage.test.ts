@@ -16,6 +16,7 @@ import {
   type PlanFetch,
   type PlanResponse,
 } from "./plan-usage.ts";
+import { claudeKeychainQueries } from "./drivers/claude-keychain.ts";
 
 const SECRET = "plan-usage-fixture-secret";
 const NOW = 1_800_000_000_000;
@@ -266,6 +267,19 @@ describe("an OpenCode Go allowance", () => {
     expect(parseOpenCodeUsage({}).plan).toBeNull();
     expect(parseOpenCodeUsage({ usage: {} }).fiveHour.available).toBe(false);
     expect(parseOpenCodeUsage({ usage: { rolling: { status: "ok", percent: "5" } } }).fiveHour.available).toBe(false);
+  });
+});
+
+describe("the Claude keychain lookup", () => {
+  it("asks for the login saved under the user's own account before any other item of that service", () => {
+    expect(claudeKeychainQueries("Claude Code-credentials", "thi")).toEqual([
+      ["find-generic-password", "-s", "Claude Code-credentials", "-a", "thi", "-w"],
+      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+    ]);
+  });
+
+  it("falls back to the service alone when the user name is unknown", () => {
+    expect(claudeKeychainQueries("Claude Code-credentials", null)).toEqual([["find-generic-password", "-s", "Claude Code-credentials", "-w"]]);
   });
 });
 
