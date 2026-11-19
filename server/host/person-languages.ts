@@ -77,6 +77,9 @@ export function createPersonLanguages(deps: PersonLanguagesDeps) {
     /** A line in this conversation: its person's language when it is private to one person, else the place's, never that
      * of whoever spoke last where others read too. */
     forThread: (threadId: string): string | undefined => forLine(deps.privateTo?.(threadId) ?? undefined),
+    /** A line for everyone here, such as a new bot's greeting: the place's language, where an app's pick counts (the
+     * server hears it only through these pings), else this computer's. */
+    forPlace: (): string => forLine() ?? Intl.DateTimeFormat().resolvedOptions().locale,
   };
 }
 
