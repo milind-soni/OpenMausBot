@@ -6,6 +6,7 @@ import { fromMarkdown } from "mdast-util-from-markdown";
 import { ATTACHMENTS_DIR, FILE_MAX_BYTES, IMAGE_MAX_BYTES } from "./attachments.ts";
 import type { TurnImageInput, TurnVideoInput } from "./contracts.ts";
 import { decodeAttachmentAttribute } from "./message-file.ts";
+import { escapeAttribute } from "../src/lib/composer-attachments.ts";
 import { videoFrameImages } from "./turn-video.ts";
 
 export const TURN_IMAGE_MAX_COUNT = 10;
@@ -116,7 +117,7 @@ const ownedVideo = (path: string, attachmentsDir: string): TurnVideoInput | null
   ownedAttachment(path, attachmentsDir, OWNED_VIDEO_NAME, VIDEO_MIME_BY_EXTENSION, FILE_MAX_BYTES);
 
 /**
- * Left where a replayed message's image was: the image itself rides on the current turn, so without this the model
+ * Added beside a replayed message's image file reference: the image itself rides on the current turn, so without this the model
  * reads an old screenshot as part of the latest message.
  */
 export const REPLAYED_IMAGE_NOTE =
@@ -127,13 +128,13 @@ export interface ExtractTurnImagesOptions {
   maxCount?: number;
   maxBytes?: number;
   maxVideoCount?: number;
-  /** Text left in place of each admitted image tag. */
+  /** Text prepended to each admitted image file reference. */
   imageNote?: string;
 }
 
 /**
- * Invalid tags stay visible as ordinary text and never become native image input. A video's <attached-file> tag
- * always stays in the text, so an engine that reads files still gets its path; sampled frames only add to it.
+ * Invalid tags stay visible as ordinary text and never become native image input. Admitted images retain an
+ * attached-file reference for file tools; videos keep their existing reference alongside sampled frames.
  */
 export function extractTurnImages(
   text: string,
@@ -166,9 +167,15 @@ export function extractTurnImages(
     .slice(0, maxVideoCount);
 
   let providerText = text;
-  const removedTags = admittedImages.map((item) => item.tag).sort((a, b) => b.start - a.start);
-  const note = options.imageNote ?? "";
-  for (const tag of removedTags) providerText = providerText.slice(0, tag.start) + note + providerText.slice(tag.end);
+  const imageTags = [...admittedImages].sort((a, b) => b.tag.start - a.tag.start);
+  for (const { tag, image } of imageTags) {
+    const fileTag = text.slice(tag.start, tag.end).replace(
+      /^<attached-image[\t ]+path="[^"\r\n]*"/,
+      () => `<attached-file path="${escapeAttribute(image.path)}"`,
+    );
+    const reference = options.imageNote ? `${options.imageNote}\n\n${fileTag}` : fileTag;
+    providerText = providerText.slice(0, tag.start) + reference + providerText.slice(tag.end);
+  }
 
   return { text: providerText, images: admittedImages.map((item) => item.image), videos };
 }

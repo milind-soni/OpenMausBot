@@ -5303,6 +5303,11 @@ describe("harness HTTP API", () => {
     expect(Buffer.from(await imageWithRange.arrayBuffer()).equals(png)).toBe(true);
   });
 
+  const imagePromptText = (prompt: { message: { content: string | Array<{ type: string; text?: string }> } }) =>
+    typeof prompt.message.content === "string"
+      ? prompt.message.content
+      : prompt.message.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
+
   it("keeps a channel image in its transcript while sending native pixels to the responder", async () => {
     const created = await api("POST", "/api/bots", {
       modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
@@ -5347,7 +5352,9 @@ describe("harness HTTP API", () => {
         text: expect.stringContaining("Describe this image"),
       });
       expect(JSON.stringify(dump.prompt)).not.toContain("attached-image");
-      expect(JSON.stringify(dump.prompt)).not.toContain(imagePath);
+      const channelMessage = imagePromptText(dump.prompt).split("\n").find((line) => line.startsWith("User: "));
+      expect(channelMessage).toBeDefined();
+      expect(JSON.parse(channelMessage!.slice("User: ".length))).toContain(`<attached-file path="${imagePath}" name="tiny.png" />`);
 
       const current = (await api("GET", "/api/bots?messages=20")).body.groups.find(
         (candidate: { id: string }) => candidate.id === room.id,
@@ -5381,7 +5388,7 @@ describe("harness HTTP API", () => {
       });
       expect(uploaded.status).toBe(201);
       const { path: imagePath } = await uploaded.json() as { path: string };
-      type Dump = { prompt: { message: { content: string | Array<{ type: string; source?: { data?: string } }> } } };
+      type Dump = { prompt: { message: { content: string | Array<{ type: string; text?: string; source?: { data?: string } }> } } };
       const imageBlocks = (dump: Dump) => {
         const { content } = dump.prompt.message;
         return typeof content === "string" ? [] : content.filter((part) => part.type === "image");
@@ -5410,7 +5417,7 @@ describe("harness HTTP API", () => {
         expect.objectContaining({ source: expect.objectContaining({ data: png.toString("base64") }) }),
       ]);
       expect(JSON.stringify(rewound.prompt)).not.toContain("attached-image");
-      expect(JSON.stringify(rewound.prompt)).not.toContain(imagePath);
+      expect(imagePromptText(rewound.prompt)).toContain(`<attached-file path="${imagePath}" name="tiny.png" />`);
       await releaseTurn(bot.id);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
