@@ -4,6 +4,7 @@ import {
   createWarmSummary,
   WARM_SUMMARY_GIVE_UP_MS,
   WARM_SUMMARY_IDLE_MS,
+  WARM_SUMMARY_NOW_MS,
   WARM_SUMMARY_RETRY_MS,
   WARM_SUMMARY_SOON_MS,
   type WarmSummaryDeps,
@@ -69,11 +70,68 @@ describe("warm summary scheduling", () => {
     expect(warm.state("t1")).toMatchObject({ running: false, last: { outcome: "summarized" } });
   });
 
-  it("starts almost at once when the next turn would summarize anyway", async () => {
-    const { time, warm, runs } = setup({}, { way: "native", soon: true });
+  it("starts as soon as the turn has settled when the next turn would summarize anyway", async () => {
+    const { time, warm, runs } = setup({}, { way: "native", soon: true, ahead: true });
     warm.turnCompleted(target, { ok: true, contextTokens: 170_000 });
+    await time.advance(WARM_SUMMARY_NOW_MS - 1);
+    expect(runs).toHaveLength(0);
+    await time.advance(1);
+    expect(runs).toHaveLength(1);
+  });
+
+  it("starts after the pause of a quick reply when an ordinary turn could reach the engine's own point", async () => {
+    const { time, warm, runs } = setup({}, { way: "native", soon: false, ahead: true });
+    warm.turnCompleted(target, { ok: true, contextTokens: 145_000 });
+    await time.advance(WARM_SUMMARY_SOON_MS - 1);
+    expect(runs).toHaveLength(0);
+    await time.advance(1);
+    expect(runs).toHaveLength(1);
+  });
+
+  it("never holds a turn up for a summary written ahead, and says nothing in the chat about it", async () => {
+    const waited: string[] = [];
+    const { time, warm, runs } = setup({ waiting: (t) => { waited.push(t.threadId); } }, { way: "native", soon: false, ahead: true });
+    warm.turnCompleted(target, { ok: true, contextTokens: 145_000 });
+    await time.advance(WARM_SUMMARY_SOON_MS);
+    expect(await warm.beforeTurn("t1")).toBe("abandoned");
+    expect(runs[0]!.signal.aborted).toBe(true);
+    expect(waited).toEqual([]);
+  });
+
+  it("writes ahead only once for a person who answers faster than the summary takes, then waits for the idle time", async () => {
+    const { time, warm, runs } = setup({}, { way: "native", soon: false, ahead: true });
+    warm.turnCompleted(target, { ok: true, contextTokens: 145_000 });
     await time.advance(WARM_SUMMARY_SOON_MS);
     expect(runs).toHaveLength(1);
+    expect(await warm.beforeTurn("t1")).toBe("abandoned");
+    runs[0]!.finish({ ok: false, reason: "a turn started while summarizing" });
+    warm.turnStarted("t1");
+    await time.advance(0);
+    warm.turnCompleted(target, { ok: true, contextTokens: 150_000 });
+    await time.advance(WARM_SUMMARY_IDLE_MS - 1);
+    expect(runs).toHaveLength(1);
+    await time.advance(1);
+    expect(runs).toHaveLength(2);
+    runs[1]!.finish({ ok: true });
+    await time.advance(0);
+    // Summarized once: the next approach is written ahead again.
+    warm.turnCompleted(target, { ok: true, contextTokens: 145_000 });
+    await time.advance(WARM_SUMMARY_SOON_MS);
+    expect(runs).toHaveLength(3);
+  });
+
+  it("tells the host once when a turn begins waiting, and lets the turn go on when the summary fails", async () => {
+    const waited: string[] = [];
+    const { time, warm, runs } = setup({ waiting: (t) => { waited.push(t.threadId); } }, { way: "native", soon: true, ahead: true });
+    warm.turnCompleted(target, { ok: true, contextTokens: 170_000 });
+    await time.advance(WARM_SUMMARY_NOW_MS);
+    const waiting = warm.beforeTurn("t1");
+    await time.advance(0);
+    expect(waited).toEqual(["t1"]);
+    runs[0]!.finish({ ok: false, reason: "the summary failed: API error" });
+    expect(await waiting).toBe("waited");
+    expect(warm.state("t1")).toMatchObject({ running: false, last: { outcome: "failed: the summary failed: API error" } });
+    expect(await warm.beforeTurn("t1")).toBe("none");
   });
 
   it("arms nothing for a conversation that does not qualify, or a turn that failed", async () => {

@@ -1041,6 +1041,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
               }
             } else if (item.type === "reasoning") {
               emit({ ...base(threadId, turnId), type: "item.updated", itemType: "reasoning", tokens: null });
+            } else if (item.type === "contextCompaction") {
+              emit({ ...base(threadId, turnId), type: "context.compacted" });
             }
             break;
           }
@@ -1554,6 +1556,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         nativeImageInput: true,
         effortLevels: ["low", "medium", "high", "xhigh", "max"],
         strictResume: true,
+        nativeCompaction: true,
       },
       sendTurn,
       interruptTurn: async (threadId) => {
