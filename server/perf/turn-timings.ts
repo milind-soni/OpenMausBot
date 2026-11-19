@@ -8,6 +8,7 @@ import type { RuntimeEvent } from "../contracts.ts";
 import type { Message } from "../store.ts";
 import { createDayLedger, DAY_HOURS, SLOW_TURN_MS } from "./day-ledger.ts";
 import { exactQuantile, PHASES, type Phase, type PhaseMs, type PhaseStats } from "./phases.ts";
+import { parseSetupMs, setupStatsOf, type SetupMs, type SetupStats } from "./setup-steps.ts";
 import {
   activeMs, ID, isLimitScope, KIND, matchOr, parseTurnTiming, retryCode, RETRY_WHY_KEPT, stopCode, TOOL_KINDS_KEPT, toolKindOf,
   type FailoverWhy, type LimitScope, type QueueWhy, type ToolKind, type ToolStat, type TurnTiming,
@@ -39,6 +40,7 @@ interface Live {
   startedAt: number;
   queueMs?: number;
   queueWhy?: QueueWhy;
+  setup?: SetupMs;
   sessionAt: number | null;
   firstOutputAt: number | null;
   state: LiveState;
@@ -59,7 +61,7 @@ interface Live {
 
 export interface LiveTurnView { botId: string | null; threadId: string | null; engine: string | null; ageMs: number; state: LiveState; stateMs: number; tool?: ToolKind; queueMs?: number }
 
-export interface WindowStats { turns: number; failed: number; phases: Partial<Record<Phase, PhaseStats>>; slow: number[]; partial: boolean }
+export interface WindowStats { turns: number; failed: number; phases: Partial<Record<Phase, PhaseStats>>; setup: SetupStats; slow: number[]; partial: boolean }
 
 /** What refused a turn before it ran: a usage limit (and on which engine), or a sign-in that expired. */
 export interface Refusal { limit?: LimitScope; engine?: string | null; resetsAt?: number; signedOut?: boolean }
@@ -97,6 +99,7 @@ export function createTurnTimings(options: TurnTimingsOptions = {}) {
   const pending = new Map<string, { at: number; behind: boolean }>();
   const held = new Map<string, QueueWhy>();
   const failovers = new Map<string, { why: FailoverWhy; at: number }>();
+  const setups = new Map<string, { ms: SetupMs; at: number }>();
   let savedAt = -Infinity, saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   const remember = <V>(map: Map<string, V>, key: string, value: V, cap: number) => {
@@ -155,10 +158,14 @@ export function createTurnTimings(options: TurnTimingsOptions = {}) {
     failovers.delete(threadId);
     const failover = moved && at - moved.at <= FAILOVER_TTL_MS ? moved.why : undefined;
     const queueMs = waiting && at - waiting.at <= PENDING_TTL_MS ? Math.max(0, at - waiting.at) : undefined;
+    const prepared = setups.get(threadId);
+    setups.delete(threadId);
+    const setup = prepared && at - prepared.at <= PENDING_TTL_MS ? prepared.ms : undefined;
     const turn: Live = {
       key: threadId, turnId: matchOr(ID, event.turnId, null), threadId: matchOr(ID, threadId, null),
       botId: matchOr(ID, options.botOf?.(threadId), null), engine: matchOr(KIND, event.provider, null), startedAt: at,
       ...(queueMs !== undefined ? { queueMs, queueWhy: why ?? (waiting!.behind ? "behind-turn" : "dispatch") } : {}),
+      ...(setup ? { setup } : {}),
       sessionAt: null, firstOutputAt: null, state: "model", stateSince: at, spent: { model: 0, tool: 0, resource: 0, person: 0, retry: 0 },
       openTools: new Map(), requests: 0, waits: 0, retrying: false, retries: 0, backoffMs: 0, retryWhy: [], tools: new Map(),
       ...(failover ? { failover } : {}),
@@ -187,7 +194,7 @@ export function createTurnTimings(options: TurnTimingsOptions = {}) {
     for (const [state, spent] of Object.entries(turn.spent) as Array<[LiveState, number]>) if (spent > 0 || state === "model") ms[STATE_PHASE[state]] = spent;
     const record: TurnTiming = {
       turnId: turn.turnId, threadId: turn.threadId, botId: turn.botId, engine: turn.engine, startedAt: turn.startedAt, endedAt: at,
-      ok, stop: stopCode(ok, stopReason), ms, ...(turn.queueWhy ? { queueWhy: turn.queueWhy } : {}),
+      ok, stop: stopCode(ok, stopReason), ms, ...(turn.setup ? { setup: turn.setup } : {}), ...(turn.queueWhy ? { queueWhy: turn.queueWhy } : {}),
       retries: turn.retries, backoffMs: turn.backoffMs, ...(turn.retryWhy.length ? { retryWhy: turn.retryWhy } : {}),
       ...(turn.limit ? { limit: turn.limit } : {}), ...(turn.limitResetsAt ? { limitResetsAt: turn.limitResetsAt } : {}),
       ...(turn.failover ? { failover: turn.failover } : {}),
@@ -265,6 +272,7 @@ export function createTurnTimings(options: TurnTimingsOptions = {}) {
     noteNotStarted(threadId: string, turnId: string | null, refusal: Refusal = {}) {
       const at = now();
       clearWaiting(threadId);
+      setups.delete(threadId);
       const turn = live.get(threadId);
       const engine = refusal.engine === undefined ? turn?.engine ?? null : matchOr(KIND, refusal.engine, null);
       const limit = isLimitScope(refusal.limit) ? refusal.limit : undefined;
@@ -276,6 +284,11 @@ export function createTurnTimings(options: TurnTimingsOptions = {}) {
         return finish(turn, false, limit ? "quota" : refusal.signedOut ? "auth_required" : "other", at);
       }
       if (limit) { day.noteRefusal(engine, limit, at); saveSoon(); }
+    },
+    /** This thread's turn is set up and its engine is about to be asked: its next turn to start carries these timings. */
+    noteSetup(threadId: string, ms: unknown) {
+      const setup = parseSetupMs(ms);
+      if (setup) remember(setups, threadId, { ms: setup, at: now() }, PENDING_CAP);
     },
     /** This thread's next turn waits for a place: under the plan's limit on turns at once, or for memory. */
     noteHeld(threadId: string, why: "plan-limit" | "memory") { remember(held, threadId, why, PENDING_CAP); },
@@ -289,7 +302,7 @@ export function createTurnTimings(options: TurnTimingsOptions = {}) {
       const threads = new Set(filter.threadIds ?? []), bots = new Set(filter.botIds ?? []);
       const all = !threads.size && !bots.size;
       const picked = ring.filter((turn) => all || (turn.threadId !== null && threads.has(turn.threadId)) || (turn.botId !== null && bots.has(turn.botId)));
-      return picked.slice(-(filter.limit ?? RING_CAP)).map((turn) => ({ ...turn, ms: { ...turn.ms }, tools: turn.tools.map((tool) => ({ ...tool })) }));
+      return picked.slice(-(filter.limit ?? RING_CAP)).map((turn) => ({ ...turn, ms: { ...turn.ms }, ...(turn.setup ? { setup: { ...turn.setup } } : {}), tools: turn.tools.map((tool) => ({ ...tool })) }));
     },
     /** Exact percentiles over the turns that ended in the last `windowMs`, from the ring; `partial` when the ring is full
      * and its oldest turn ended inside the window, so turns before it are missing. */
@@ -302,7 +315,7 @@ export function createTurnTimings(options: TurnTimingsOptions = {}) {
         if (values.length) phases[phase] = { p50: exactQuantile(values, 0.5), p95: exactQuantile(values, 0.95), max: values.at(-1)!, n: values.length };
       }
       const slow = SLOW_TURN_MS.map((edge) => turns.filter((turn) => activeMs(turn) > edge).length);
-      return { turns: turns.length, failed: turns.filter((turn) => !turn.ok).length, phases, slow, partial: ring.length >= RING_CAP && ring[0]!.endedAt > from };
+      return { turns: turns.length, failed: turns.filter((turn) => !turn.ok).length, phases, setup: setupStatsOf(turns), slow, partial: ring.length >= RING_CAP && ring[0]!.endedAt > from };
     },
     day: (windowMs = DAY_HOURS * HOUR) => day.read(windowMs),
     live(): LiveTurnView[] {

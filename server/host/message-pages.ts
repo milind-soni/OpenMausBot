@@ -1,9 +1,10 @@
 import type { Message, Store } from "../store.ts";
+import { messagesAround } from "../thread-history.ts";
 import { toolResultPrefix } from "../tool-results.ts";
 
 const MESSAGE_PAGE_MAX = 200;
-/** How much of a tool step's output a conversation page carries: the rest is fetched when the step is opened, so
- * switching to a conversation full of tool steps stays light. */
+/** How much of a tool step's output a conversation page or a live frame carries: the rest is fetched when the step is
+ * opened, so switching to a conversation full of tool steps stays light. */
 export const TOOL_OUTPUT_PREVIEW = 1_000;
 
 /** undefined = absent, null = present but unusable (the caller answers 400). */
@@ -20,8 +21,8 @@ export function slimMessage(message: Message): Message | Record<string, unknown>
   return { ...rest, hasImage: true };
 }
 
-/** A message as a conversation page carries it: slimmed, and a plain tool step's long output cut to a preview marked
- * `clipped`. Input stays whole (labels parse it), and so do rows whose tool output is the reply itself (a teammate's
+/** A message as a conversation page and a live `message` or `message.patch` frame carry it: slimmed, and a plain tool
+ * step's long output cut to a preview marked `clipped`. Input stays whole (labels parse it), and so do rows whose tool output is the reply itself (a teammate's
  * result, a relayed message, a handoff). */
 export function pageMessage(message: Message): Message | Record<string, unknown> {
   const slim = slimMessage(message);
@@ -48,13 +49,8 @@ export function messagePages(store: Pick<Store, "messagesFor" | "messagesTail" |
   }
 
   function messageWindow(threadId: string, messageId: string, limit: number) {
-    const all = store.messagesFor(threadId);
-    const index = all.findIndex((message) => message.id === messageId);
-    if (index < 0) return null;
-    const before = Math.floor((limit - 1) / 2);
-    const start = Math.max(0, Math.min(index - before, all.length - limit));
-    const stop = Math.min(all.length, start + limit);
-    return { messages: all.slice(start, stop).map(pageMessage), hasMore: start > 0 };
+    const page = messagesAround(threadId, messageId, limit, () => ({ messages: store.messagesFor(threadId), activeLeafId: store.activeLeaf(threadId) }));
+    return page ? { ...page, messages: page.messages.map(pageMessage) } : null;
   }
 
   return { messagePage, messagePageBefore, messageWindow };

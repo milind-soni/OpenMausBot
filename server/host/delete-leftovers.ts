@@ -54,6 +54,8 @@ export interface DeleteLeftoversDeps {
   deleteAttachment(name: string): void;
   engineFolders(): EngineSessionFolders;
   layers: MemoryLayerRecords;
+  /** Resolves once no git is running on the bot's checkpoints: Windows cannot remove a folder a process still has open. */
+  checkpointsQuiet?(botId: string): Promise<void>;
   /** Runs `flush` once the delete under way has finished, so one pass covers every conversation it removed. */
   defer?(flush: () => void): void;
   warn?(line: string): void;
@@ -281,7 +283,9 @@ export function createDeleteLeftovers(deps: DeleteLeftoversDeps) {
 
   function removeBot(botId: string): void {
     if (!ID.test(botId) || isLayerId(botId)) return;
-    attempt(`checkpoints of ${botId}`, () => void removeUnder(dataDir, join(dataDir, "checkpoints", botId)));
+    const removeCheckpoints = () => attempt(`checkpoints of ${botId}`, () => void removeUnder(dataDir, join(dataDir, "checkpoints", botId)));
+    if (deps.checkpointsQuiet) void deps.checkpointsQuiet(botId).then(removeCheckpoints, removeCheckpoints);
+    else removeCheckpoints();
     attempt(`box uploads of ${botId}`, () => void removeUnder(dataDir, join(dataDir, "box-uploads", botId)));
     const live = new Set(deps.store.bots.map((bot) => bot.id));
     for (const layer of entries(join(dataDir, "workspaces"))) {

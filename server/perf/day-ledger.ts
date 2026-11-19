@@ -1,6 +1,7 @@
 // The last day of turn timings by hour: one histogram per phase and per tool kind, and counts. Bounded at 25 hours of
 // fixed-size slots whatever the traffic.
 import { addTo, countOf, emptyHistogram, histogramQuantile, mergeInto, parseHistogram, PHASES, type Histogram, type Phase, type PhaseStats } from "./phases.ts";
+import { SETUP_STEPS, type SetupStats, type SetupStep } from "./setup-steps.ts";
 import { activeMs, counter, isLimitScope, isRetryCode, isToolKind, KIND, type LimitScope, type ToolKind, type TurnTiming } from "./turn-record.ts";
 
 const HOUR = 3_600_000;
@@ -16,6 +17,7 @@ interface Slot {
   failed: number;
   slow: number[];
   phases: Partial<Record<Phase, Histogram>>;
+  setup: Partial<Record<SetupStep, Histogram>>;
   tools: Partial<Record<ToolKind, ToolSlot>>;
   retries: { turns: number; n: number; backoffMs: number; why: Record<string, number> };
   /** Turns a usage limit refused, by `<engine kind>:<scope>`. */
@@ -23,7 +25,7 @@ interface Slot {
   failovers: number;
 }
 
-const emptySlot = (hour: number): Slot => ({ hour, turns: 0, failed: 0, slow: SLOW_TURN_MS.map(() => 0), phases: {}, tools: {},
+const emptySlot = (hour: number): Slot => ({ hour, turns: 0, failed: 0, slow: SLOW_TURN_MS.map(() => 0), phases: {}, setup: {}, tools: {},
   retries: { turns: 0, n: 0, backoffMs: 0, why: counter() }, limits: counter(), failovers: 0 });
 
 const bump = (map: Record<string, number>, key: string, cap: number, by = 1) => {
@@ -36,6 +38,8 @@ export interface DayAggregate {
   turns: number;
   failed: number;
   phases: Partial<Record<Phase, PhaseStats>>;
+  /** Bucketed like the phases: a step under the first bucket's edge reads as that edge at most. */
+  setup: SetupStats;
   slow: number[];
   tools: ToolAggregate[];
   retries: { turns: number; n: number; backoffMs: number; why: Record<string, number> };
@@ -75,6 +79,10 @@ export function createDayLedger(now: () => number) {
         const ms = turn.ms[phase];
         if (ms !== undefined) addTo(into.phases[phase] ??= emptyHistogram(), ms);
       }
+      for (const step of SETUP_STEPS) {
+        const ms = turn.setup?.[step];
+        if (ms !== undefined) addTo(into.setup[step] ??= emptyHistogram(), ms);
+      }
       const active = activeMs(turn);
       SLOW_TURN_MS.forEach((edge, index) => { if (active > edge) into.slow[index]! += 1; });
       if (turn.retries) {
@@ -92,13 +100,15 @@ export function createDayLedger(now: () => number) {
       const from = Math.floor((now() - windowMs) / HOUR);
       const phases: Partial<Record<Phase, Histogram>> = {};
       const tools: Partial<Record<ToolKind, ToolSlot>> = {};
-      const out: DayAggregate = { turns: 0, failed: 0, phases: {}, slow: SLOW_TURN_MS.map(() => 0), tools: [],
+      const setup: Partial<Record<SetupStep, Histogram>> = {};
+      const out: DayAggregate = { turns: 0, failed: 0, phases: {}, setup: {}, slow: SLOW_TURN_MS.map(() => 0), tools: [],
         retries: { turns: 0, n: 0, backoffMs: 0, why: counter() }, limits: counter(), failovers: 0 };
       for (const entry of slots.values()) {
         if (entry.hour <= from) continue;
         out.turns += entry.turns; out.failed += entry.failed; out.failovers += entry.failovers;
         entry.slow.forEach((count, index) => { out.slow[index]! += count; });
         for (const [phase, histogram] of Object.entries(entry.phases) as Array<[Phase, Histogram]>) mergeInto(phases[phase] ??= emptyHistogram(), histogram);
+        for (const [step, histogram] of Object.entries(entry.setup) as Array<[SetupStep, Histogram]>) mergeInto(setup[step] ??= emptyHistogram(), histogram);
         for (const [kind, tool] of Object.entries(entry.tools) as Array<[ToolKind, ToolSlot]>) {
           const into = tools[kind] ??= { hist: emptyHistogram(), errors: 0, open: 0 };
           mergeInto(into.hist, tool.hist); into.errors += tool.errors; into.open += tool.open;
@@ -108,6 +118,7 @@ export function createDayLedger(now: () => number) {
         for (const [key, count] of Object.entries(entry.limits)) bump(out.limits, key, LIMIT_KEYS_KEPT, count);
       }
       for (const phase of PHASES) if (phases[phase]) out.phases[phase] = statsOf(phases[phase]);
+      for (const step of SETUP_STEPS) if (setup[step]) out.setup[step] = statsOf(setup[step]);
       out.tools = (Object.entries(tools) as Array<[ToolKind, ToolSlot]>)
         .map(([kind, tool]) => ({ kind, n: countOf(tool.hist), errors: tool.errors, open: tool.open, ms: tool.hist.sum, p95: histogramQuantile(tool.hist, 0.95), max: tool.hist.max }))
         .sort((left, right) => right.ms - left.ms);
@@ -145,6 +156,10 @@ function parseSlot(raw: Record<string, unknown> | null): Slot | null {
   for (const phase of PHASES) {
     const value = (raw.phases as Record<string, unknown> | undefined)?.[phase];
     if (value) slot.phases[phase] = parseHistogram(value);
+  }
+  for (const step of SETUP_STEPS) {
+    const value = (raw.setup as Record<string, unknown> | undefined)?.[step];
+    if (value) slot.setup[step] = parseHistogram(value);
   }
   for (const [kind, value] of Object.entries((raw.tools ?? {}) as Record<string, Record<string, unknown>>)) {
     if (isToolKind(kind) && value) slot.tools[kind] = { hist: parseHistogram(value.hist), errors: whole(value.errors), open: whole(value.open) };
