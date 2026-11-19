@@ -11,14 +11,16 @@ export const HEAR_LANGUAGES = [
   "no", "fa", "pl", "pt", "ro", "ru", "es", "sv", "th", "tr", "uk", "ur", "vi",
 ] as const;
 
-function languageOptions(): Array<{ code: string; name: string }> {
+/** The picker's languages, plus the saved code when it is one the list does not offer, so the picker never shows "automatic" for it. */
+export function languageOptions(saved = ""): Array<{ code: string; name: string }> {
   let names: Intl.DisplayNames | null = null;
   try {
     names = new Intl.DisplayNames([intlLocale()], { type: "language" });
   } catch {
     // Without display names the codes themselves are shown.
   }
-  return HEAR_LANGUAGES.map((code) => ({ code, name: names?.of(code) ?? code })).sort((a, b) => a.name.localeCompare(b.name, intlLocale()));
+  const codes: readonly string[] = saved && !(HEAR_LANGUAGES as readonly string[]).includes(saved) ? [...HEAR_LANGUAGES, saved] : HEAR_LANGUAGES;
+  return codes.map((code) => ({ code, name: names?.of(code) ?? code })).sort((a, b) => a.name.localeCompare(b.name, intlLocale()));
 }
 
 /** "Hear me with ElevenLabs": dictation and Take turns go to Scribe with the person's own key, in the language they pick.
@@ -43,7 +45,7 @@ export function VoiceHearingSetting() {
   const picker = (
     <Select size="sm" aria-label={t("voice.hearLanguage")} value={language} disabled={saving} onChange={(event) => save({ hearLanguage: event.target.value })}>
       <option value="">{t("voice.hearLanguage.auto")}</option>
-      {languageOptions().map(({ code, name }) => <option key={code} value={code}>{name}</option>)}
+      {languageOptions(language).map(({ code, name }) => <option key={code} value={code}>{name}</option>)}
     </Select>
   );
   const alert = error ? <span role="alert" className="text-danger">{error}</span> : undefined;
