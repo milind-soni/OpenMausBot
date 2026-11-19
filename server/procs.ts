@@ -70,14 +70,14 @@ function psProcesses(pid?: number): Map<number, LinuxProcess> {
   const rows = new Map<number, LinuxProcess>();
   let out: string;
   try {
-    out = execFileSync("/bin/ps", [...(pid ? ["-p", String(pid)] : ["-A"]), "-o", "pid=,ppid=,stat=,lstart="], { encoding: "utf8", timeout: 2_000, windowsHide: true });
+    out = execFileSync("/bin/ps", [...(pid ? ["-p", String(pid)] : ["-A"]), "-o", "pid=,ppid=,stat=,lstart="], { encoding: "utf8", timeout: 2_000, windowsHide: true, env: { ...process.env, LC_ALL: "C" } });
   } catch (error) {
     if (pid && (error as { status?: number }).status === 1) return rows;
     throw error;
   }
   for (const line of out.split(/\r?\n/)) {
     const match = PS_ROW.exec(line);
-    if (match) rows.set(Number(match[1]), { pid: Number(match[1]), parent: Number(match[2]), state: match[3][0], start: match[4] });
+    if (match) rows.set(Number(match[1]), { pid: Number(match[1]), parent: Number(match[2]), state: match[3][0], start: match[4].replace(/\s+/g, " ") });
   }
   return rows;
 }
