@@ -2,9 +2,16 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { extractReplayImages, extractSteerImages, extractTurnImages, REPLAYED_IMAGE_NOTE } from "./turn-images.ts";
+import { chatUserContent } from "./drivers/chat-images.ts";
+import { extractReplayImages, extractSteerImages, extractTurnImages, nativeClips, REPLAYED_IMAGE_NOTE, turnMedia, videoFramesWithin } from "./turn-images.ts";
+import { videoFrameImages } from "./turn-video.ts";
+
+vi.mock("./turn-video.ts", async (original) => {
+  const actual = await original<typeof import("./turn-video.ts")>();
+  return { ...actual, videoFrameImages: vi.fn(actual.videoFrameImages) };
+});
 
 const IDS = [
   "123e4567-e89b-42d3-a456-426614174000",
@@ -266,5 +273,119 @@ describe("turn image admission", () => {
 
     expect(result.images.map((entry) => entry.path)).toEqual([join(root, `${IDS[2]}.png`)]);
     expect(result.transcript.slice(0, 2)).toEqual(transcript.slice(0, 2));
+  });
+});
+
+describe("native video clips", () => {
+  const clip = (bytes: number) => ({ path: `/attachments/${bytes}.mp4`, mime: "video/mp4" as const, bytes });
+
+  it("gives an engine that takes video the clips that fit its limit", () => {
+    const engine = { nativeImageInput: true, nativeVideoBytes: 100 };
+    expect(nativeClips([clip(60), clip(50), clip(40)], engine)).toEqual([clip(60), clip(40)]);
+  });
+
+  const MiB = 1024 * 1024;
+  const gemini = { nativeImageInput: true, nativeVideoBytes: 12 * MiB };
+  const image = (bytes: number) => ({ path: `/attachments/${bytes}.png`, mime: "image/png" as const, bytes });
+
+  it("leaves a clip to frames when the turn's pictures and clips would pass the request's media budget", () => {
+    const engine = gemini;
+    expect(nativeClips([clip(10 * MiB)], engine, [image(8 * MiB), image(8 * MiB)])).toEqual([]);
+    expect(nativeClips([clip(10 * MiB), clip(2 * MiB)], engine, [image(8 * MiB)])).toEqual([clip(10 * MiB), clip(2 * MiB)]);
+  });
+
+  it("chooses a burst's clips against the pictures of every line, not only the lines before", async () => {
+    const media = await turnMedia([{ images: [], videos: [clip(10 * MiB)] }, { images: [image(8 * MiB), image(8 * MiB)], videos: [] }], gemini);
+    expect(media.videos).toEqual([]);
+    expect(media.images.slice(-2)).toEqual([image(8 * MiB), image(8 * MiB)]);
+    expect((await turnMedia([{ images: [image(MiB)], videos: [clip(10 * MiB)] }], gemini)).videos).toEqual([clip(10 * MiB)]);
+  });
+
+  const folder = () => mkdtempSync(join(tmpdir(), "omb-native-clips-"));
+  const png = (root: string, name: string, bytes: number) => {
+    const data = Buffer.alloc(bytes);
+    Buffer.from("89504e470d0a1a0a0000000d49484452", "hex").copy(data);
+    writeFileSync(join(root, name), data);
+    return { path: join(root, name), mime: "image/png" as const, bytes };
+  };
+
+  it("counts each picture's and clip's full data URL, so a chosen clip never breaks the request's budget", () => {
+    const root = folder();
+    try {
+      writeFileSync(join(root, "clip.mp4"), Buffer.alloc(12 * MiB));
+      const video = { path: join(root, "clip.mp4"), mime: "video/mp4" as const, bytes: 12 * MiB };
+      const full = [png(root, "a.png", 6 * MiB), png(root, "b.png", 6 * MiB)];
+      expect(nativeClips([video], gemini, full)).toEqual([]);
+      const fits = [png(root, "c.png", 6 * MiB - 30), png(root, "d.png", 6 * MiB - 30)];
+      const videos = nativeClips([video], gemini, fits);
+      expect(videos).toEqual([video]);
+      const content = chatUserContent({ text: "look", images: fits, videos } as Parameters<typeof chatUserContent>[0]);
+      expect(content).toContainEqual({ type: "image_url", image_url: { url: `data:video/mp4;base64,${Buffer.alloc(12 * MiB).toString("base64")}` } });
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("leaves out replayed pictures that would push a turn with a clip past the request's budget", () => {
+    const root = folder();
+    try {
+      const earlier = png(root, `${IDS[0]}.png`, 5 * MiB);
+      const transcript = [{ role: "user" as const, text: `earlier\n\n<attached-image path="${earlier.path}" name="e.png" />` }];
+      expect(extractReplayImages(transcript, [], { attachmentsDir: root }, [clip(12 * MiB)]).images).toEqual([earlier]);
+      expect(extractReplayImages(transcript, [image(8 * MiB)], { attachmentsDir: root }, [clip(12 * MiB)]).images).toEqual([]);
+      expect(extractReplayImages(transcript, [image(8 * MiB)], { attachmentsDir: root }).images).toEqual([earlier]);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it("keeps only the frames that fit beside a sent clip, and every frame that fits when no clip is sent", async () => {
+    const frame = (bytes: number) => ({ path: `/tmp/frame-${bytes}.jpg`, mime: "image/jpeg" as const, bytes, source: "video-frame" as const });
+    const frames = [frame(2 * MiB), frame(4 * MiB), frame(MiB)];
+    const sampler = vi.mocked(videoFrameImages), actual = sampler.getMockImplementation()!;
+    sampler.mockImplementation(async (videos) => videos?.length ? frames : []);
+    try {
+      const lines = [{ images: [], videos: [clip(12 * MiB)] }, { images: [image(8 * MiB)], videos: [clip(MiB)] }];
+      const media = await turnMedia(lines, gemini);
+      expect(media.videos).toEqual([clip(12 * MiB)]);
+      expect(media.images).toEqual([image(8 * MiB), frame(2 * MiB), frame(MiB)]);
+      expect((await turnMedia(lines, { nativeImageInput: true })).images).toEqual([...frames, image(8 * MiB), ...frames]);
+    } finally { sampler.mockImplementation(actual); }
+  });
+
+  it("samples no frames from a clip that is sent, even when its record is a copy", async () => {
+    const sampler = vi.mocked(videoFrameImages), actual = sampler.getMockImplementation()!;
+    sampler.mockImplementation(async (videos) => videos?.length ? [{ path: "/tmp/f.jpg", mime: "image/jpeg", bytes: 1, source: "video-frame" }] : []);
+    try {
+      expect(await videoFramesWithin(0, [clip(MiB)], [{ ...clip(MiB) }])).toEqual([]);
+    } finally { sampler.mockImplementation(actual); }
+  });
+
+  it("keeps a burst's frames and pictures within the turn's picture count, counting later lines' pictures", async () => {
+    const frame = (n: number) => ({ path: `/tmp/frame-${n}.jpg`, mime: "image/jpeg" as const, bytes: 1, source: "video-frame" as const });
+    const frames = Array.from({ length: 10 }, (_, n) => frame(n));
+    const sampler = vi.mocked(videoFrameImages), actual = sampler.getMockImplementation()!;
+    sampler.mockImplementation(async (videos, limit = Infinity) => videos?.length ? frames.slice(0, Math.max(0, limit)) : []);
+    try {
+      const pictures = Array.from({ length: 6 }, (_, n) => image(n + 1));
+      const media = await turnMedia([{ images: [], videos: [clip(20 * MiB)] }, { images: pictures, videos: [] }], gemini);
+      expect(media.images).toHaveLength(10);
+      expect(media.images.slice(-6)).toEqual(pictures);
+    } finally { sampler.mockImplementation(actual); }
+  });
+
+  it("sends a file attached twice in a burst once, so a different clip still fits the engine's limit", () => {
+    expect(nativeClips([clip(5 * MiB), clip(5 * MiB), clip(4 * MiB)], gemini)).toEqual([clip(5 * MiB), clip(4 * MiB)]);
+  });
+
+  it("keeps only the frames that fit beside the turn's pictures when no clip is sent", async () => {
+    const frame = (bytes: number) => ({ path: `/tmp/frame-${bytes}.jpg`, mime: "image/jpeg" as const, bytes, source: "video-frame" as const });
+    const frames = [frame(2 * MiB), frame(6 * MiB), frame(MiB)];
+    const sampler = vi.mocked(videoFrameImages), actual = sampler.getMockImplementation()!;
+    sampler.mockImplementation(async (videos) => videos?.length ? frames : []);
+    try {
+      expect(await videoFramesWithin(2, [clip(MiB)], [], [image(9 * MiB), image(9 * MiB)])).toEqual([frame(2 * MiB), frame(MiB)]);
+    } finally { sampler.mockImplementation(actual); }
+  });
+
+  it("gives no clip to an engine without a video limit, so it keeps getting frames", () => {
+    expect(nativeClips([clip(10)], { nativeImageInput: true })).toEqual([]);
+    expect(nativeClips([clip(10)], { nativeVideoBytes: 100 })).toEqual([]);
   });
 });

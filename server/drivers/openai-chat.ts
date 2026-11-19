@@ -113,7 +113,7 @@ interface RuntimeOptions<Config> {
   tools?: boolean;
   computerUse?: boolean;
   /** A text-only model keeps the computer and browser tools but never receives a screenshot or attachment. */
-  imageInput?: (model: string) => boolean;
+  imageInput?: (model: string) => boolean; /** Bytes of video clips a turn may send as they are; unset sends frames. */ videoBytes?: number;
   /** Some models list `variants`; the picked one reaches `requestBody`. */ modelVariants?: boolean;
   /** False for a model its server says cannot call tools: its turns go without them instead of being refused. */ toolUse?: (model: string) => boolean;
   /** Why the server cannot answer now (not running, nothing to run), asked before the key is. */
@@ -488,7 +488,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const volatile = halves.volatile.trim();
     const note = halves.stable === null || (!turn.mentionTurn && replay.volatile === volatile) ? ""
       : volatileContextNote(volatile, Boolean(replay.volatile));
-    const textOnly = (text: string) => !options.computerUse || seesImages(turn) || !turn.images?.length ? text
+    const textOnly = (text: string) => !options.computerUse || seesImages(turn) || !(turn.images?.length || turn.videos?.length) ? text
       : `${text}\n\n${TEXT_ONLY_ATTACHMENT_NOTE}`;
     const userTurn = note ? { ...turn, text: withContextNote(note, turn.text) } : turn;
     const content = options.computerUse && seesImages(turn) ? chatUserContent(userTurn) : textOnly(userTurn.text);
@@ -948,9 +948,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     },
     adapter: {
       provider: options.driverKind,
-      capabilities: { ...(options.computerUse ? { computerMcp: options.tools !== false,
-        localComputerMcp: options.tools !== false,
-        browserMcp: options.tools !== false, nativeImageInput: true, images: true } : {}),
+      capabilities: { ...(options.computerUse ? { computerMcp: options.tools !== false, localComputerMcp: options.tools !== false,
+        browserMcp: options.tools !== false, nativeImageInput: true, images: true, ...(options.videoBytes ? { nativeVideoBytes: options.videoBytes } : {}) } : {}),
         ...(options.modelVariants ? { modelVariants: true } : {}), sessionModelSwitch: "in-session", customMcp: options.tools !== false, agentsMcp: options.tools !== false, composioMcp: options.tools !== false,
         dataMcp: options.tools !== false,
         emailMcp: options.tools !== false,
