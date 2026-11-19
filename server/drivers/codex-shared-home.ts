@@ -78,21 +78,15 @@ function linkEntry(target: string, link: string, name: string): boolean {
 /** Whose login a MausBot home uses: its own (a ChatGPT plan's) or the person's, linked in. */
 export type CodexHomeLogin = "own" | "person";
 
-/** Escape hatch: bot turns also load the person's own AGENTS.md, as Claude bots do with OMB_CLAUDE_INHERIT_USER_CONFIG. */
-export function inheritsUserCodexInstructions(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.OMB_CODEX_INHERIT_USER_CONFIG === "1";
-}
-
 /** Makes MausBot's Codex home and links the person's own Codex home into it. Linking never fails the turn: an entry
  * that cannot be linked (a file link Windows refuses without Developer Mode) stays as the home had it. True when the
  * home has the login it should: its own, or the person's (none when they have none). */
-export function linkSharedCodexHome(sharedHome: string | null, mausHome: string, login: CodexHomeLogin = "own",
-  inheritInstructions = inheritsUserCodexInstructions()): boolean {
+export function linkSharedCodexHome(sharedHome: string | null, mausHome: string, login: CodexHomeLogin = "own"): boolean {
   mkdirSync(mausHome, { recursive: true, mode: 0o700 });
   if (!isAbsolute(mausHome)) return false;
   const own = resolve(mausHome);
   const apart = (name: string) => CHATS.has(name) || DATABASE.test(name) || (login === "own" && PRIVATE.has(name))
-    || (!inheritInstructions && USER_INSTRUCTIONS.has(name));
+    || USER_INSTRUCTIONS.has(name);
   // A link from before chats were kept apart goes, even when sharing fails below, so no new chat is written through it;
   // the person's own files behind it stay as they are.
   for (const name of readdirSync(own)) {
