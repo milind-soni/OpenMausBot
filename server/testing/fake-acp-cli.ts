@@ -5,6 +5,8 @@
 //   FAKE_ACP_REJECT_LIVE_LOAD_FILE  while it exists, load/resume of a session live in this process errors
 //     (FAKE_ACP_REJECT_LIVE_LOAD_DSH=1: with dsh 0.2's -32602 "session is already active" instead of -32000)
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
+//   FAKE_ACP_COPY_LIVE_LOAD=1  a session/load of a session still open adds a second copy, and each open copy streams
+//     FAKE_ACP_TEXT_REPLY again, like mistral-vibe 3.1.2; session/close ends every copy
 //   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
 //   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (stream-script.ts)
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt
@@ -587,6 +589,7 @@ async function listMcpTools(entry: AnyMcpEntry, handshake: unknown): Promise<str
   });
 }
 let liveSession: string | null = null;
+const openCopies = new Map<string, number>();
 let sessionsOpened = 0;
 let rpcFailure: unknown = null;
 function emitSessionReports(): void {
@@ -970,6 +973,7 @@ function handle(msg: any) {
       sessionsOpened += 1;
       const firstSession = process.env.FAKE_ACP_SESSION_ID ?? "fake-acp-session";
       liveSession = sessionsOpened === 1 ? firstSession : `${firstSession}-${sessionsOpened}`;
+      openCopies.set(liveSession, 1);
       resultAndConfigUpdates(msg.id, {
         sessionId: liveSession,
         ...(opts ? { configOptions: opts } : {}),
@@ -980,6 +984,7 @@ function handle(msg: any) {
     }
     case "session/close":
       endWokenStep(msg.params?.sessionId);
+      openCopies.delete(String(msg.params?.sessionId));
       if (mode === "background-wake") detachedSessions.add(String(msg.params?.sessionId));
       if (process.env.FAKE_ACP_SESSION_CLOSE === "error") out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "close failed" } });
       else if (process.env.FAKE_ACP_SESSION_CLOSE_MS) setTimeout(() => result(msg.id, {}), Number(process.env.FAKE_ACP_SESSION_CLOSE_MS));
@@ -1029,6 +1034,8 @@ function handle(msg: any) {
       const mdls = sessionModels();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
       detachedSessions.delete(String(msg.params?.sessionId));
+      const copies = openCopies.get(String(msg.params?.sessionId)) ?? 0;
+      openCopies.set(String(msg.params?.sessionId), process.env.FAKE_ACP_COPY_LIVE_LOAD === "1" ? copies + 1 : 1);
       resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) }, "session/load", msg.params.sessionId);
       if (mode === "hermes-steer") advertiseHermesCommands(msg.params.sessionId);
       break;
@@ -1188,7 +1195,9 @@ function handle(msg: any) {
         return;
       }
       if (process.env.FAKE_ACP_TEXT_REPLY !== undefined) {
-        out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params?.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: process.env.FAKE_ACP_TEXT_REPLY } } } });
+        for (let copy = openCopies.get(String(msg.params?.sessionId)) ?? 1; copy > 0; copy -= 1) {
+          out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params?.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: process.env.FAKE_ACP_TEXT_REPLY } } } });
+        }
         result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 12, outputTokens: 4 } });
         return;
       }

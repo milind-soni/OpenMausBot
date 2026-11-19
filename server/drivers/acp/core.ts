@@ -188,7 +188,7 @@ export interface AcpSupport extends AcpDriverHooks {
   resendsReasoningReply?: boolean;
   /** Threads with the same spawn contract run their sessions in one process (OpenCode 1.19: about 100 MB a session
    * instead of about 450 MB a process), up to SHARED_SESSIONS_MAX. */
-  shareProcess?: boolean;
+  shareProcess?: boolean; /** mistral-vibe 3.1.2 loads its live session as a second open copy, and both stream every reply. */ closeBeforeLiveLoad?: boolean;
   /** Route workspace file access through ACP so edits retain approval cards. */
   clientFileSystem?: boolean;
   /** Additional server-owned directories this turn may read; writes remain confined to cwd. */
@@ -1225,7 +1225,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               const selectionParams = narrowsNativeTools(turn.toolScope)
                 ? support.toolScopeSessionParams!(turn, init, mcpServers.length > 0, { config: turnConfig, env, cwd }) : {};
               let loaded = false;
-              if (cursor) {
+              if (cursor && (!support.closeBeforeLiveLoad || liveSessionId !== cursor || await request("session/close", { sessionId: cursor }, 30_000).then(() => { session.sessionId = session.sessionKey = null; return true; }, () => false))) {
                 try {
                   await request(
                     support.resumeMethod === "resume" ? "session/resume" : "session/load",
