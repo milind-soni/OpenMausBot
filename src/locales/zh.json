@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "鼠标悬停时显示最近的聊天",
+  "settings.hoverThreads.subtitle": "在机器人旁显示最近的聊天，而不是在侧边栏展开。需要启用会话。",
+  "settings.hoverThreads.sessionOnly": "由于无法保存，此设置仅在本次会话中有效。",
   "hostedMcp.otherAppsSetup": "已连接：{services}。请设置或恢复连接服务以使用其他应用。",
   "agentcard.description": "用你自己的 Agentcard 账号购物和付款。",
   "agentcard.notice": "用你的 Agentcard 账号登录，不需要 API 密钥。Agentcard 保管你的卡片并处理购买审批；OpenMausBot 不保存任何卡片信息。能使用 Agentcard 的机器人可以调用它的全部工具，包括购买和展示卡片信息，所以请在“机器人访问权限”中选择哪些机器人可以使用它。",

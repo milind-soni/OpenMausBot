@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "कर्सर ले जाने पर हाल की चैट दिखाएं",
+  "settings.hoverThreads.subtitle": "साइडबार में खोलने के बजाय बॉट के पास हाल की चैट दिखाएं। इसके लिए थ्रेड चालू होने चाहिए।",
+  "settings.hoverThreads.sessionOnly": "सेटिंग सहेजी नहीं जा सकी, इसलिए यह केवल इस सत्र में लागू होगी।",
   "voice.gemini.keyPlaceholder": "अपनी Google AI Studio API कुंजी पेस्ट करें",
   "voice.gemini.model": "Gemini वाक् मॉडल",
   "keys.label.geminiTts": "Gemini वाक् API कुंजी",

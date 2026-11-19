@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "Letzte Chats beim Darüberfahren anzeigen",
+  "settings.hoverThreads.subtitle": "Letzte Chats neben dem Bot anzeigen, statt sie in der Seitenleiste aufzuklappen. Erfordert aktivierte Chats.",
+  "settings.hoverThreads.sessionOnly": "Diese Einstellung gilt nur für diese Sitzung, da sie nicht gespeichert werden konnte.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API-Schlüssel einfügen",
   "voice.gemini.model": "Gemini-Sprachmodell",
   "keys.label.geminiTts": "Gemini-Sprach-API-Schlüssel",

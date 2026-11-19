@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "Mostrar chats recientes al pasar el cursor",
+  "settings.hoverThreads.subtitle": "Muestra los chats recientes junto al bot en lugar de desplegarlos en la barra lateral. Requiere activar los hilos.",
+  "settings.hoverThreads.sessionOnly": "Esta opción solo se aplica durante esta sesión porque no se pudo guardar.",
   "voice.gemini.keyPlaceholder": "Pega tu clave de API de Google AI Studio",
   "voice.gemini.model": "Modelo de voz de Gemini",
   "keys.label.geminiTts": "Clave de API de voz de Gemini",

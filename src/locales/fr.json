@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "Afficher les conversations récentes au survol",
+  "settings.hoverThreads.subtitle": "Affiche les conversations récentes à côté du bot au lieu de les déployer dans la barre latérale. Les fils doivent être activés.",
+  "settings.hoverThreads.sessionOnly": "Ce réglage ne vaut que pour cette session car il n’a pas pu être enregistré.",
   "voice.gemini.keyPlaceholder": "Collez votre clé API Google AI Studio",
   "voice.gemini.model": "Modèle de synthèse vocale Gemini",
   "keys.label.geminiTts": "Clé API de synthèse vocale Gemini",

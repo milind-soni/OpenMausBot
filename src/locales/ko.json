@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "마우스를 올리면 최근 채팅 표시",
+  "settings.hoverThreads.subtitle": "사이드바에 펼치는 대신 봇 옆에 최근 채팅을 표시합니다. 스레드를 켜야 합니다.",
+  "settings.hoverThreads.sessionOnly": "저장하지 못해 이 설정은 현재 세션에서만 적용됩니다.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API 키를 붙여넣으세요",
   "voice.gemini.model": "Gemini 음성 합성 모델",
   "keys.label.geminiTts": "Gemini 음성 합성 API 키",

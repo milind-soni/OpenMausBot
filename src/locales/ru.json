@@ -1,4 +1,7 @@
 {
+  "settings.hoverThreads.title": "Показывать недавние чаты при наведении",
+  "settings.hoverThreads.subtitle": "Показывать недавние чаты рядом с ботом вместо раскрытия на боковой панели. Требуется включить ветки.",
+  "settings.hoverThreads.sessionOnly": "Не удалось сохранить настройку, поэтому она действует только в этом сеансе.",
   "voice.gemini.keyPlaceholder": "Вставьте свой API-ключ Google AI Studio",
   "voice.gemini.model": "Модель синтеза речи Gemini",
   "keys.label.geminiTts": "API-ключ синтеза речи Gemini",

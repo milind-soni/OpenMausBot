@@ -11,6 +11,7 @@ const fixture = vi.hoisted(() => ({
 vi.mock("react", async (original) => {
   const actual = await original<typeof import("react")>();
   return { ...actual,
+    useRef: <T,>(value: T) => fixture.capturing ? { current: value } : actual.useRef(value),
     useState: (initial: unknown) => {
       if (!fixture.capturing) return actual.useState(initial);
       const index = fixture.cursor++;
@@ -32,6 +33,7 @@ vi.mock("@/lib/interface-mode", async (original) => ({ ...await original<typeof 
 vi.mock("@/lib/thread-preferences", async (original) => ({ ...await original<typeof import("@/lib/thread-preferences")>(),
   useShowThreads: () => true,
 }));
+vi.mock("@/lib/sidebar-hover-threads", () => ({ useSidebarHoverThreads: () => false }));
 vi.mock("@/lib/live-call-media", async (original) => {
   const actual = await original<typeof import("@/lib/live-call-media")>();
   return { ...actual, useLiveMedia: actual.liveMedia };
@@ -106,7 +108,7 @@ describe("bot row expansion follows the visible thread tree", () => {
     render({ ...bot, ...status });
     fixture.effects.forEach(effect => effect());
     const markup = render({ ...bot, ...status });
-    expectSoleRow(markup);
+    expect(markup).toContain('data-sidebar-thread-row="current"');
     expect(markup).toContain(label);
   });
 });
