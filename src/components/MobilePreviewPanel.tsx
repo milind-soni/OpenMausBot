@@ -6,6 +6,8 @@ import {
   ArrowLeftRight,
   Camera,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   FileImage,
   FileText,
@@ -17,6 +19,7 @@ import {
   Monitor,
   MonitorSmartphone,
   RotateCw,
+  Square,
   SlidersHorizontal,
   Smartphone,
   Tablet,
@@ -537,8 +540,11 @@ export function MobilePreviewPanel({
   useEffect(() => {
     if (attached?.url && attached.url !== "about:blank") setInputUrl(attached.url);
   }, [attached?.url]);
+  const canStop = Boolean(window.gbs) && frameStatus === "loading" && (botTab?.source ?? activeSource)?.kind === "url";
+  const reloadLabel = canStop ? "Stop loading" : "Reload preview";
   const reloadView = () => {
     takeControl();
+    if (canStop) { viewFrame()?.stop(); return; }
     if (botTab?.source.kind === "file") testingStore.frame(botTab.id)?.loadURL(botTab.url);
     else viewFrame()?.reload();
   };
@@ -735,16 +741,19 @@ export function MobilePreviewPanel({
 
             {/* Primary Controls */}
             <div className="flex items-center gap-0.5 shrink-0 ml-auto">
-              {/* Reload */}
+              {window.gbs && (botTab?.source ?? activeSource)?.kind === "url" && <>
+                <button type="button" aria-label="Back" title="Back" disabled={!historyNav.canGoBack} onClick={() => { takeControl(); viewFrame()?.goBack(); }} className="rounded p-1 text-ink-secondary hover:bg-raised disabled:opacity-35"><ChevronLeft size={15} /></button>
+                <button type="button" aria-label="Forward" title="Forward" disabled={!historyNav.canGoForward} onClick={() => { takeControl(); viewFrame()?.goForward(); }} className="rounded p-1 text-ink-secondary hover:bg-raised disabled:opacity-35"><ChevronRight size={15} /></button>
+              </>}
               <button
                 type="button"
                 onClick={reloadView}
                 disabled={!activeSource}
-                aria-label="Reload preview"
-                title="Reload preview"
+                aria-label={reloadLabel}
+                title={reloadLabel}
                 className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35 disabled:hover:bg-transparent"
               >
-                <RotateCw className={cn("h-3.5 w-3.5", frameStatus === "loading" && "animate-spin")} />
+                {canStop ? <Square className="h-3.5 w-3.5" /> : <RotateCw className="h-3.5 w-3.5" />}
               </button>
 
               {/* Grouped Size Selector (Icon + Short Label) */}
@@ -986,6 +995,7 @@ export function MobilePreviewPanel({
           onOpenFilePicker={() => openFilePicker()}
           onStatusChange={setFrameStatus}
           onHistoryStateChange={setHistoryNav}
+            onNavigate={setInputUrl}
           frameTitle={ownLayout.current.label}
           showDeviceBezel={ownLayout.current.bezel}
           fill={ownLayout.current.fill}

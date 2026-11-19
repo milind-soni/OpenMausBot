@@ -1,16 +1,17 @@
 import { ScheduleSheet } from "./ScheduleSheet";
 import { track } from "@/lib/analytics";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ArrowUp, Clock, Mic, Paperclip, Square, X } from "lucide-react";
-import { useStore, type Attachment, type Bot, type Group } from "@/state/store";
+import { ArrowUp, Clock, File, Folder, Mic, Paperclip, Square, X } from "lucide-react";
+import { api, useStore, visibleMessages, type Attachment, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { MausAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
-import { insertProjectMention, projectMentionQueryAt } from "@/lib/projectMentions";
+import { insertProjectMention, projectMentionQueryAt, referencedProjects } from "@/lib/projectMentions";
 import { insertTaskMention, taskMentionQueryAt } from "@/lib/taskMentions";
 import { appMentionQueryAt, insertAppMention } from "@/lib/appMentions";
 import { APP_STATE_LABEL, useApps } from "@/state/apps";
 import { AppIcon } from "./AppsScreen";
+import { encodeProjectPath, pathMentionAt } from "@/lib/pathMentions";
 import { useProjects } from "@/state/projects";
 import { ProjectSuggestionList } from "./ProjectSuggestionList";
 import { StagedAttachmentsTray } from "./AttachmentViewer";
@@ -34,7 +35,6 @@ export function Composer({
   bot,
   group,
   members,
-  onEditLast,
   pendingAttachment,
   onPendingAttachmentConsumed,
   pendingText,
@@ -43,7 +43,6 @@ export function Composer({
   bot?: Bot;
   group?: Group;
   members?: Bot[];
-  onEditLast?: () => void;
   /** An attachment produced outside the composer (e.g. a mobile-preview
    * screenshot) waiting to be staged. Cleared via onPendingAttachmentConsumed
    * once it's been added, so the caller can hand off a new one later. */
@@ -79,6 +78,12 @@ export function Composer({
   const [caret, setCaret] = useState(0);
   const [highlight, setHighlight] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
+  const history = useRef<{ entries: string[]; position: number; draft: string } | null>(null);
+  const submittedPrompts = useMemo(
+    () => (group?.messages ?? (bot ? visibleMessages(bot) : []))
+      .flatMap((message) => message.role === "user" && message.kind === "text" && !message.scheduled && message.text ? [message.text] : []),
+    [bot, group?.messages],
+  );
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // what was typed before the mic went on — partials append after it
@@ -89,20 +94,53 @@ export function Composer({
   const projectMention = projectMentionQueryAt(text, caret);
   const taskMention = taskMentionQueryAt(text, caret);
   const appMention = appMentionQueryAt(text, caret);
+  const pathMention = pathMentionAt(text, caret);
+  const pathChoices = (projects ?? []).filter((project) => !project.missing);
+  const precedingText = text.slice(0, pathMention?.start ?? 0);
+  const specifiedProjects = referencedProjects(precedingText, pathChoices);
+  const nearbyProject = pathChoices.find((project) => precedingText.trimEnd().endsWith(`#${project.mention}`));
+  const pathProject = nearbyProject ?? (specifiedProjects.length === 1 ? specifiedProjects[0] : undefined)
+    ?? (pathChoices.length === 1 ? pathChoices[0] : undefined);
+  const [pathResult, setPathResult] = useState<{ key: string; entries: Array<{ name: string; directory: boolean }> } | null>(null);
+  const pathDirectory = pathMention?.directory ?? "";
+  const pathQuery = pathMention?.query ?? "";
+  const pathProjectId = pathProject?.id;
+  const pathActive = Boolean(pathMention && dismissed !== `path:${pathMention.start}`);
+  const pathKey = JSON.stringify([pathProjectId, pathDirectory, pathQuery]);
+  useEffect(() => {
+    if (!pathActive || !pathProjectId) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({ projectId: pathProjectId, directory: pathDirectory, query: pathQuery });
+    void api(`/api/projects/path-entries?${params}`, { signal: controller.signal })
+      .then(({ entries }) => { if (!controller.signal.aborted) setPathResult({ key: pathKey, entries }); })
+      .catch(() => { if (!controller.signal.aborted) setPathResult({ key: pathKey, entries: [] }); });
+    return () => controller.abort();
+  }, [pathActive, pathProjectId, pathDirectory, pathQuery, pathKey]);
+  const pathCandidates = !pathActive ? [] : !pathProject
+    ? pathChoices.slice(0, 6).map((project) => ({ kind: "project" as const, label: project.name, value: project.mention }))
+    : [
+        ...(pathDirectory && !pathQuery && pathResult?.key === pathKey ? [{ kind: "file" as const, label: "Use this folder", value: pathDirectory }] : []),
+        ...(pathResult?.key === pathKey ? pathResult.entries.slice(0, 7).map((entry) => ({
+          kind: entry.directory ? "directory" as const : "file" as const,
+          label: entry.name,
+          value: [pathDirectory, entry.name].filter(Boolean).join("/"),
+        })) : []),
+      ];
   // whichever trigger sits closest to the caret wins (matches typing order)
-  type MentionKind = "bot" | "project" | "task" | "app";
+  type MentionKind = "bot" | "project" | "task" | "app" | "path";
   const mentionKind: MentionKind = (() => {
     const present: Array<readonly [MentionKind, number]> = [
       ...(botMention ? ([["bot", botMention.start]] as const) : []),
       ...(projectMention ? ([["project", projectMention.start]] as const) : []),
       ...(taskMention ? ([["task", taskMention.start]] as const) : []),
+      ...(pathMention ? ([["path", pathMention.start]] as const) : []),
       ...(appMention ? ([["app", appMention.start]] as const) : []),
     ];
     if (!present.length) return "bot";
     return present.reduce((best, cur) => (cur[1] > best[1] ? cur : best))[0];
   })();
   const mention =
-    mentionKind === "project" ? projectMention : mentionKind === "task" ? taskMention : mentionKind === "app" ? appMention : botMention;
+    mentionKind === "path" ? pathMention : mentionKind === "project" ? projectMention : mentionKind === "task" ? taskMention : mentionKind === "app" ? appMention : botMention;
   const botCandidates = useMemo(() => {
     if (mentionKind !== "bot" || !botMention || dismissed === `bot:${botMention.start}`) return [];
     const pool = group ? (members ?? []) : state.bots.filter((b) => b.id !== bot?.id && !b.hidden);
@@ -139,6 +177,7 @@ export function Composer({
     return bot ? canUse(bot) : true;
   })();
   const candidateCount =
+    mentionKind === "path" ? pathCandidates.length :
     mentionKind === "project"
       ? projectCandidates.length
       : mentionKind === "task"
@@ -157,6 +196,28 @@ export function Composer({
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [text]);
+
+  const pickPath = (candidate: typeof pathCandidates[number] | undefined) => {
+    if (!pathMention || !candidate) return;
+    history.current = null;
+    let replacement: string;
+    if (candidate.kind === "project") {
+      replacement = `#${candidate.value} ${pathMention.prefix}${pathMention.tail}`;
+    } else if (candidate.kind === "directory") {
+      replacement = `${pathMention.prefix}${encodeProjectPath(candidate.value)}/`;
+    } else {
+      const scope = specifiedProjects.some((project) => project.id === pathProject?.id) ? "" : `#${pathProject!.mention} `;
+      replacement = `${scope}\`./${candidate.value.replace(/[`\r\n]/g, (character) => encodeURIComponent(character))}\` `;
+    }
+    const offset = pathMention.start + replacement.length;
+    setText(text.slice(0, pathMention.start) + replacement + text.slice(caret));
+    setCaret(offset);
+    setDismissed(null);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(offset, offset);
+    });
+  };
 
   const pickBotMention = (peer: Bot) => {
     if (!botMention) return;
@@ -307,6 +368,7 @@ export function Composer({
       setSizeError(tooLarge);
       return;
     }
+    history.current = null;
     if (busy && queue) {
       setQueued({ text: t, attachments: attachments });
       setText("");
@@ -485,6 +547,16 @@ export function Composer({
             )}
           </div>
         )}
+        {pathActive && mentionKind === "path" && (
+          <div role="listbox" aria-label="Project files and folders" className="absolute bottom-full left-2 z-20 mb-2 w-80 max-w-[calc(100%-1rem)] overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg">
+            <p className="px-3 py-2 text-xs text-ink-secondary">{pathProject ? pathProject.name : pathChoices.length ? "Choose a project" : "Register a project to reference its files."}</p>
+            {pathCandidates.map((candidate, index) => {
+              const Icon = candidate.kind === "file" && candidate.label !== "Use this folder" ? File : Folder;
+              return <button key={`${candidate.kind}:${candidate.value}`} type="button" role="option" aria-selected={index === highlight} onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setHighlight(index)} onClick={() => pickPath(candidate)} className={cn("flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-ink", index === highlight && "bg-raised-hover")}><Icon size={15} /><span className="truncate">{candidate.label}</span></button>;
+            })}
+            {pathProject && pathResult?.key === pathKey && !pathCandidates.length && <p className="px-3 pb-2 text-xs text-ink-secondary">No matching files or folders.</p>}
+          </div>
+        )}
         {pickerOpen && mentionKind === "bot" && (
           <div
             role="listbox"
@@ -530,6 +602,7 @@ export function Composer({
           rows={1}
           value={text}
           onChange={(e) => {
+            history.current = null;
             setText(e.target.value);
             setCaret(e.target.selectionStart ?? e.target.value.length);
             setDismissed(null);
@@ -538,6 +611,7 @@ export function Composer({
           onKeyUp={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
           onKeyDown={(e) => {
+            if (e.nativeEvent.isComposing) return;
             if (pickerOpen) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
@@ -547,7 +621,8 @@ export function Composer({
               }
               if (e.key === "Enter" || e.key === "Tab") {
                 e.preventDefault();
-                if (mentionKind === "project") pickProjectMention(projectCandidates[highlight].mention);
+                if (mentionKind === "path") pickPath(pathCandidates[highlight] ?? pathCandidates[0]);
+                else if (mentionKind === "project") pickProjectMention(projectCandidates[highlight].mention);
                 else if (mentionKind === "task") pickTaskMention(taskCandidates[highlight].mention);
                 else if (mentionKind === "app") pickAppMention(appCandidates[highlight].id);
                 else pickBotMention(botCandidates[highlight]);
@@ -559,11 +634,33 @@ export function Composer({
                 return;
               }
             }
-            // an empty composer + ArrowUp = edit your last message (like a chat app)
-            if (e.key === "ArrowUp" && !text && !attachments.length && onEditLast) {
+            if (e.key === "Escape" && pathActive && pathMention) {
               e.preventDefault();
-              onEditLast();
+              setDismissed(`path:${pathMention.start}`);
               return;
+            }
+            if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+              const up = e.key === "ArrowUp";
+              const { selectionStart, selectionEnd } = e.currentTarget;
+              const atBoundary = up ? !text.slice(0, selectionStart).includes("\n") : !text.slice(selectionEnd).includes("\n");
+              if (atBoundary && selectionStart === selectionEnd && (history.current || (up && submittedPrompts.length))) {
+                e.preventDefault();
+                const cursor = history.current ?? { entries: submittedPrompts, position: submittedPrompts.length, draft: text };
+                cursor.position = Math.max(0, Math.min(cursor.entries.length, cursor.position + (up ? -1 : 1)));
+                const restored = cursor.position === cursor.entries.length;
+                const next = restored ? cursor.draft : cursor.entries[cursor.position];
+                history.current = restored ? null : cursor;
+                setText(next);
+                setDismissed(null);
+                setCaret(next.length);
+                const field = e.currentTarget;
+                requestAnimationFrame(() => {
+                  const offset = up ? 0 : next.length;
+                  field.setSelectionRange(offset, offset);
+                  setCaret(offset);
+                });
+                return;
+              }
             }
             // Shift+Enter inserts a newline; plain Enter sends
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {

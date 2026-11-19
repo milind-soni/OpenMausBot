@@ -1,280 +1,74 @@
-> ⚠️ **No affiliation with any cryptocurrency.** Gerer Build Studio has no token. Any coin using the Gerer Build Studio, Maus, or SupaMaus name is not created, endorsed, or affiliated with this project or its maintainer. I have received no tokens, payment, or allocation from anyone, and I will not be endorsing any token.
+# Gérer Build Studio
 
-<div align="center">
+**v0.1 Alpha · Internal testing**
 
-# Gerer Build Studio
+Gérer Build Studio is a desktop workspace for working with AI Buddies. Give each Buddy a role, bring specialists together in rooms, and keep chats, project files, tasks, and scheduled work in one place.
 
-**Your own team of AI bots, in a chat app.**
+![Gérer Build Studio with the Buddy sidebar and a conversation open](docs/screenshots/hero.png)
 
-<sub>An open-source version of **Grok Bot** — bring-your-own-agent, local-first, on the models you already have.</sub>
+## Install the internal alpha
 
-Every bot in the sidebar is a real agent — Claude or Codex running locally under the hood — with its own
-personality, its own model, access to this computer, and its own connected apps.
-Talk to them like contacts. Watch them work. Approve what matters.
+The alpha installer is for **Apple silicon Macs**. Get the DMG from the internal launch handoff, open it, and drag **Gerer Build Studio** to Applications. Follow any installation instructions supplied with your internal build. The Windows packaging command is available for development. A Windows install requires a separate smoke test.
 
-![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
-![Electron](https://img.shields.io/badge/Electron-macOS%20%C2%B7%20Windows-2B2E3A?logo=electron&logoColor=9FEAF9)
-![Agents](https://img.shields.io/badge/agents-Claude%20·%20Codex-d97757)
-![PRs](https://img.shields.io/badge/PRs-welcome-38d591)
+Application updates are paused during the alpha. To install a newer build, quit Studio and replace the application in Applications. Studio keeps its workspace data separately. Back up important workspace data before replacing test builds.
 
-<br>
+## Set up your workspace
 
-<a href="https://github.com/myebstudios/GererBuildStudio/releases/latest">
-  <img src="https://img.shields.io/github/v/release/myebstudios/GererBuildStudio?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20macOS&labelColor=070707&color=1084fe" alt="Download the latest Gerer Build Studio release" height="40">
-</a>
+1. Select **Get started** and save your display name. Email is optional.
+2. Review the AI engines Studio detects. Follow the setup instructions for your engine and select **Recheck engines**. The status cards show installation, sign-in, and any subscription information the engine makes available.
+3. Choose how you want to use Studio. Pick Development, Design, Research, Finance, or describe a custom goal.
+4. Review and edit your suggested Buddies. You can change their names, roles, responsibilities, and models, and add or remove people before approving the workspace.
+5. Start the guided tour or go straight to your new workspace. To reopen it, select **Restart Studio tour** in **Settings → System**.
 
-<sub>macOS (Apple silicon) .dmg · Windows installer · [all releases](https://github.com/myebstudios/GererBuildStudio/releases)</sub>
+You can explore Studio without an engine. Assign a model and connect its engine before asking a Buddy to run a task.
 
-<br>
-<br>
+## Work in Studio
 
-<img src="docs/screenshots/hero.png" alt="Gerer Build Studio — a Telegram-style chat app where every chat is a real AI agent" width="900">
+| Area | What you can do |
+| --- | --- |
+| Buddies and chat | Give each Buddy a role and an AI model. Use ↑ and ↓ in the composer to recall submitted prompts and return to your draft. |
+| Rooms | Work with several Buddies in one conversation. Type `@` to call on a Buddy by name. |
+| Projects | Register a local project folder or clone a repository. Type `#` to reference a project. Type `/` or `./` to choose a registered project file or folder. |
+| Tasks | Capture and assign work, track its status, and open the conversation behind a task. |
+| Studio Preview | Open URLs and supported project files, including Markdown with images. Use the desktop browser controls to navigate and check layouts at different viewport sizes. |
+| Schedules | Send a prompt to a Buddy or room at a set time. Each schedule shows its time zone and next run. Studio needs to be running to start scheduled work. |
+| Apps and permissions | Check the app catalog for supported integrations and setup steps. Review approval requests when a Buddy needs to act on your behalf. |
+| Settings | Edit your profile, review models and permissions, and restart the tour. |
 
-</div>
+![Studio model picker showing AI engine and model options](docs/screenshots/model-picker.png)
 
----
+Read more in the [user guide](docs/guide/README.md).
 
-## Why
+## Develop locally
 
-One assistant in one box is the wrong shape for agents. Gerer Build Studio is an open-source take on **Grok Bot** —
-it keeps the idea (AI as a *messaging app*: a roster of bots you chat with, each with its own personality,
-memory of its thread, model, computer, and apps) and rebuilds it open, local-first, and on the agents you
-already have:
-
-- **Bring your own agents.** Bots run on the `claude`, `codex`, and `grok` CLIs installed on your Mac — your
-  existing logins and subscriptions, no new accounts, no proxy in the middle.
-- **Local first.** One small harness server on `127.0.0.1` owns every agent process. Transcripts, keys, and
-  events live in `~/.gerer-build-studio`, not a cloud.
-- **Agents with hands.** Each bot can drive your own Mac and use curated apps such as Edits, set up in a
-  minute from the Apps screen.
-
-## Features
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### 🧠 Pick a brain per bot
-
-A model picker with a provider rail — Claude and Codex models side by side, defaults marked, unavailable
-providers dimmed with the reason. The app refreshes model lists from each installed CLI or configured API
-when the picker opens and once a minute while the UI is open. Retired selections are flagged before the next
-turn. The computer-backed provider has no verified model-list endpoint, so it shows a provider alias with an
-unverified-catalog notice. Switch a bot's model mid-conversation.
-
-<img src="docs/screenshots/model-picker.png" alt="Model picker with provider rail" width="100%">
-
-</td>
-<td width="50%" valign="top">
-
-### 🖥️ Every bot gets a computer
-
-Open the Computer panel and the bot's cloud desktop spins up on its own — live screen preview while it
-works, "Open desktop" to take over in your browser, or point the bot at *this Mac* instead.
-
-<img src="docs/screenshots/computer-panel.png" alt="Computer panel with live screen preview" width="100%">
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 🙋 Bots ask before they act
-
-Shell commands, file edits, and questions surface as inline cards — Allow / Deny / answer in chat. A
-permission broker turns every risky action into a decision you make, for cloud and local computers alike.
-
-<img src="docs/screenshots/approval-card.png" alt="Approval and question cards in chat" width="100%">
-
-</td>
-<td width="50%" valign="top">
-
-### 🔌 Connected apps
-
-A curated set of apps with simple setup, including Edits for video editing and Affinity by Canva for graphics, photos and page layout. Each app shows whether
-it's ready and which models can use it. Tag one with `+edits` or `+affinity` to choose it for a task.
-
-<img src="docs/screenshots/marketplace.png" alt="Connected apps marketplace" width="100%">
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 🗂 Manage bots like chats
-
-Right-click any bot: pin, mark unread, edit profile, duplicate, copy conversation ID, hide, delete. It's a
-messaging app — your agents behave like contacts.
-
-<img src="docs/screenshots/context-menu.png" alt="Bot context menu" width="100%">
-
-</td>
-<td width="50%" valign="top">
-
-### 🔑 Keys once, everything lights up
-
-Paste credentials in App Settings — they persist locally and the provider fleet hot-reloads instantly.
-Secrets are write-only: the UI only ever sees "configured" flags.
-
-<img src="docs/screenshots/app-settings.png" alt="App-level settings with API keys" width="100%">
-
-</td>
-</tr>
-</table>
-
-**Also in the box:** streaming replies with tool-run activity chips · native macOS dictation from the
-composer mic (on-device Apple speech recognition — desktop app) · SupaMaus cursor mascots with role-aware
-expressions · screenshots of the bot's work folded into the transcript · a local Projects screen for adding
-existing folders, creating new workspaces, and cloning GitHub repositories to a chosen path · stable
-`#project` references that give agents trusted workspace context from chats, room bulletins, and bot descriptions ·
-a shared task board where users and agents coordinate structured project work.
-
-### Share work through the Task Board
-
-Task Board is a live four-column Kanban workspace for both the user and every agent: **Todo**, **Doing**,
-**Review**, and **Done**. Tasks can carry a registered project, agent assignment, type, priority, tags,
-due date, description, acceptance criteria, and an attributed activity trail. Search and filters compose
-across project, agent, status, type, priority, tag, and overdue state.
-
-Agents receive task tools during normal turns. They can list or create work, atomically claim an unassigned
-task, keep its status current, or delegate it to another visible bot. Every update is revision-checked, so
-two agents cannot silently claim or overwrite the same task; a conflict returns the latest record to the
-losing agent and refreshes the UI. Completed agent work should move to **Review** for user verification.
-
-Task assignment records intent—it does not launch a bot in the background. A user-initiated turn is still
-required for an agent to act. Runtime tasks are stored locally in `~/.gbs/tasks.json`; they are
-separate from the repository-maintenance workflow in `docs/dev/fixes/`.
-
-Agents have full parity with the UI: `list_tasks`, `create_task`, `claim_task`, `update_task`,
-`delegate_task`, and `delete_task` cover everything a user can do from the board, all revision-checked and
-attributed to the calling bot. These tools (and peer-to-peer `ask_bot`) are only offered to bots on a driver
-that can actually mount them: Claude, Codex, and the ACP-based Grok/Gemini drivers today. The default
-Antigravity (`agy`) driver doesn't get them yet — that CLI has no mechanism to register a per-turn MCP
-server, so there's nothing to wire in until it does.
-
-### Approve a Buddy's action
-
-When a Buddy needs your permission, it can open an **Approval needed** box with **Allow**, **Deny**, and **Always allow**. You do not need to type “proceed.” Explicit consent boxes wait for your choice and are excluded from idle auto-approval. **Always allow** remembers the same action and scope for that Buddy; remove it in the Buddy's settings to require approval again. Stopping the turn or dismissing the box denies the request.
-
-### Connect Affinity
-
-Open the latest Affinity by Canva desktop app. In **Settings → Model Context Protocol**, enable Affinity MCP, then quit and reopen Affinity. In Studio, open **Apps → Affinity → Test connection**. No access token is required; keep Affinity open while Buddies use it. The default address is `http://[::1]:6767/sse`.
-
-Affinity works with the same MCP-capable Buddy models as Edits. Buddies can read the SDK documentation, run design scripts, inspect document previews, and work with scripts in the library, subject to Affinity's native permissions. Turn MCP off in Affinity to stop access. File access, when enabled in Affinity, is restricted to the Desktop; Buddies ask before copying files there. Network access, shared hints, issue reports, and paid AI features require your authorization.
-
-### Refer to projects and bots
-
-Every registered project gets a stable handle shown on its Projects card. Type `#` in a message, room
-bulletin, or bot description to search for it. For example, `Review the tests in #gerer-build-studio` gives the
-agent that project's canonical folder and uses it as the turn's working directory when it is the only
-project referenced. Unknown hashtags remain plain text, and multiple project references provide paths
-without choosing an ambiguous working directory.
-
-Rooms also support `@bot` routing, so the two can be combined: `@Scout audit #gerer-build-studio` brings Scout into
-the room with the registered project as context.
-
-Room activity stays visible in a dedicated right-side workstream. It groups live agent turns, tool and
-command titles, elapsed time, approval waits, failures, and recent outcomes by agent; responders waiting
-behind the current speaker show their queue position. On compact windows the same workstream opens as a
-dismissible drawer so it does not squeeze the conversation.
-
-## How it works
-
-Two processes. The app holds no transports of its own — it sends typed commands over HTTP and folds one SSE
-event stream into state. The harness server owns every agent process and normalizes each provider's native
-protocol into one canonical runtime event stream (logged per-thread as NDJSON).
-
-```mermaid
-flowchart LR
-    subgraph app ["App — React + Tailwind (5199)"]
-        UI[Chat UI · model picker · computer panel]
-    end
-    subgraph server ["Harness server (127.0.0.1:8899)"]
-        REG[Driver registry] --> BUS[Event bus → SSE]
-        BROKER[Permission broker]
-    end
-    subgraph agents ["Agents on your Mac"]
-        CL[claude CLI]
-        CX[codex CLI]
-    end
-    UI -- "HTTP commands" --> server
-    BUS -- "one SSE stream" --> UI
-    REG --> CL & CX
-    CL & CX -- "MCP" --> BROKER
-    server -- "local MCP" --> APPS[("Apps · Edits · …")]
-```
-
-| Layer | Where | What it does |
-|---|---|---|
-| Drivers | `server/drivers/` | One per provider: Claude, Codex, and Grok Build over their local CLIs (stream-JSON / JSON-RPC / ACP), plus a cloud-computer agent. Unknown drivers degrade to "unavailable", never crash the fleet. |
-| Harness | `server/harness/` | Registry (configs → live instances) and the fan-in event bus every client folds. |
-| API | `server/index.ts` | Bots, turns, approvals, model catalog, computer lifecycle, connectors, config — HTTP + SSE. |
-| App | `src/` | The chat shell. Server-backed store, one reducer, zero client-side transports. |
-| Desktop | `electron/` | macOS + Windows shells: dictation helper (SFSpeechRecognizer, macOS only), local screen capture, CUA bridge (macOS only). |
-| Projects | `electron/projects.mjs`, `server/projects.ts`, `src/state/projects.tsx` | Desktop-only local folder registry, stable `#project` handles, trusted turn context, directory creation, and shell-free GitHub cloning. |
-| Task Board | `server/tasks.ts`, `src/components/TaskBoardScreen.tsx` | Atomic local task persistence, revision-safe claims and updates, live Kanban UI, filters, assignment, and agent task tools. |
-
-## Quick start
-
-**Easiest:** [download the latest release](https://github.com/myebstudios/GererBuildStudio/releases/latest) — the .dmg on macOS (drag it
-to Applications) or the setup .exe on Windows. The harness server is embedded — no setup.
-
-**From source:**
+Install **Node.js 24 or newer**, **pnpm 10**, and Git. macOS packaging also needs the Xcode Command Line Tools for the speech helper.
 
 ```sh
-git clone https://github.com/myebstudios/GererBuildStudio && cd GererBuildStudio
-pnpm install
-
-pnpm dev:server    # harness server → 127.0.0.1:8899
-pnpm dev           # app → http://127.0.0.1:5199
-pnpm dev:desktop   # or the Electron shell
+pnpm install --frozen-lockfile
+pnpm dev:desktop
 ```
 
-Requirements: **macOS or Windows**, **Node 24+**, **pnpm**, and at least one agent CLI — [`claude`](https://claude.com/claude-code),
-[`codex`](https://github.com/openai/codex), or [`grok`](https://x.ai/cli) — installed and logged in. They appear
-in the model picker automatically.
-
-Optional, pasted once in **App Settings** (gear in the sidebar footer):
-
-| Key | Unlocks |
-|---|---|
-| xAI API key (`xai-…`) | The direct Grok API driver |
-
-Apps (such as Edits) need no keys here: set them up from the **Apps** screen.
+To develop the web interface, start the local service and Vite in separate terminals.
 
 ```sh
-pnpm typecheck     # app + server
-pnpm build         # typecheck + production build
-pnpm package:win   # Windows installer + zip → release/
+pnpm dev:server
+pnpm dev
 ```
 
-## Status
+Run the checks and production build before packaging.
 
-Early but real — the loop works end to end: message → agent → streamed reply → tools → approvals →
-computer use. Rough edges to expect: routines (scheduled tasks) are a placeholder, sidebar sections aren't
-built yet, and the Linux shell hasn't been attempted (macOS and Windows both run end to end; the harness
-itself is portable Node).
+```sh
+pnpm typecheck
+pnpm test
+pnpm build
+```
 
-Contributions welcome — the driver SPI in [`server/contracts.ts`](server/contracts.ts) is deliberately
-small; adding a provider is one file in [`server/drivers/`](server/drivers/) plus a one-line registration.
+Use `pnpm package` on macOS to build the Apple silicon DMG and ZIP. Use `pnpm package:win` in a Windows build environment for the x64 installer and ZIP. See the [release instructions](docs/dev/RELEASING.md) for signing and verification.
 
-## Privacy
+## Data and feedback
 
-Everything runs on your machine. Chats, bots, tasks, and API keys live in `~/.gbs` (keys in a
-file only your user account can read), and the harness server only listens on `127.0.0.1` and
-only accepts requests from the app itself. Set `GBS_HOST` if you really do want it reachable
-from your network.
+Studio stores workspace data locally. When a Buddy uses an AI engine, Studio sends the prompt and relevant context to that engine under the provider’s policy. Optional usage analytics are off by default.
 
-Release builds send no analytics. In a build made with `VITE_POSTHOG_TOKEN` set, you can enable
-Usage Analytics in Settings → System & Updates. It is off by default. When enabled, it sends
-anonymous usage events and clicks to that PostHog project. It never records typed text or your email.
+Share alpha feedback with the Build Studio Launch team. Include the Studio version, your operating system, what you expected, and the steps that reproduce the issue. Remove secrets and private project content from logs or screenshots.
 
-## License
-
-[MIT](LICENSE) © 2026 Milind Soni, Esoe B. Fildine, and contributors. Gerer Build Studio is a fork of
-[OpenMausBot](https://github.com/milind-soni/OpenMausBot).
-
-Gerer Build Studio is an independent, open-source project inspired by Grok Bot. It is
-not affiliated with, endorsed by, or associated with xAI; "Grok" is a trademark
-of its respective owner.
+[License](LICENSE)

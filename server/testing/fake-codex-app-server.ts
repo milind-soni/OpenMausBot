@@ -82,6 +82,12 @@ process.stdin.on("data", (chunk) => {
         if (mode === "usage-unavailable") out({ id: msg.id, error: { code: -1, message: "Unsupported authentication" } });
         else {
           const capture = JSON.parse(readFileSync(new URL("./fixtures/usage/codex-read-observed.json", import.meta.url), "utf8"));
+          const now = Math.floor(Date.now() / 1000);
+          for (const bucket of [capture.result.rateLimits, ...Object.values(capture.result.rateLimitsByLimitId)] as Array<typeof capture.result.rateLimits>) {
+            for (const window of [bucket.primary, bucket.secondary]) {
+              if (window) window.resetsAt = now + window.windowDurationMins * 60;
+            }
+          }
           out({ id: msg.id, result: capture.result });
         }
         break;

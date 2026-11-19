@@ -15,6 +15,7 @@ import {
   Monitor,
   RefreshCw,
   RotateCw,
+  Square,
   Trash2,
 } from "lucide-react";
 import {
@@ -389,8 +390,11 @@ export default function PreviewScreen() {
   useEffect(() => {
     if (attached?.url && attached.url !== "about:blank") setInputUrl(attached.url);
   }, [attached?.url]);
+  const canStop = Boolean(window.gbs) && frameStatus === "loading" && (botTab?.source ?? activeSource)?.kind === "url";
+  const reloadLabel = canStop ? "Stop loading" : "Reload preview";
   const reloadView = () => {
     takeControl();
+    if (canStop) { viewFrame()?.stop(); return; }
     if (botTab?.source.kind === "file") testingStore.frame(botTab.id)?.loadURL(botTab.url);
     else viewFrame()?.reload();
   };
@@ -850,13 +854,11 @@ export default function PreviewScreen() {
                   type="button"
                   onClick={reloadView}
                   disabled={!activeSource && !botTab}
-                  aria-label="Reload preview"
-                  title="Reload preview"
+                  aria-label={reloadLabel}
+                  title={reloadLabel}
                   className="flex h-7 w-7 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-raised-hover hover:text-ink disabled:opacity-35"
                 >
-                  <RotateCw
-                    className={`h-3.5 w-3.5 ${frameStatus === "loading" ? "animate-spin" : ""}`}
-                  />
+                  {canStop ? <Square className="h-3.5 w-3.5" /> : <RotateCw className="h-3.5 w-3.5" />}
                 </button>
               </div>
 
@@ -1093,6 +1095,7 @@ export default function PreviewScreen() {
             onOpenFilePicker={() => openFilePicker()}
             onStatusChange={setFrameStatus}
             onHistoryStateChange={setHistoryNav}
+            onNavigate={setInputUrl}
             frameTitle={ownPreset.label}
             showDeviceBezel={ownPreset.group === "phone" || ownPreset.group === "tablet"}
           />

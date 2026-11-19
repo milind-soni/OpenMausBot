@@ -165,6 +165,7 @@ export interface ProviderSnapshot {
   state: "available" | "unavailable";
   reason?: string;
   authenticated?: boolean;
+  subscriptionPlan?: string;
   version?: string | null;
 }
 
@@ -200,6 +201,7 @@ export interface ProviderInstance {
   readonly models: ModelCatalog;
   readonly adapter: ProviderAdapter;
   snapshot(): Promise<ProviderSnapshot>;
+  setupStatus?(): Promise<Pick<ProviderSnapshot, "authenticated" | "subscriptionPlan">>;
   /** Fetch selectable models using this instance's CLI login or API credentials. */
   discoverModels?(): Promise<ModelCatalog>;
   /** Cheap one-shot text call (upstream TextGeneration) — titles, summaries. */

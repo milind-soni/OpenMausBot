@@ -144,6 +144,7 @@ export interface BotRecord {
   hidden?: boolean;
   busy?: boolean;
   createdAt: number;
+  onboardingStarter?: boolean;
 }
 
 const BOTS_FILE = join(DATA_DIR, "bots.json");
@@ -520,9 +521,36 @@ export class Store {
     this.saveBots();
   }
 
+  applyOnboardingTeam(id: string, team: Array<Pick<BotRecord, "name" | "title" | "description" | "modelSelection">>) {
+    // One atomic roster write. The first ID doubles as the retry receipt
+    // if the response or completion write is interrupted after that write.
+    if (this.bot(`${id}-0`)) return false;
+    const now = Date.now();
+    const roster: BotRecord[] = team.map((buddy, index) => ({
+      ...buddy,
+      id: `${id}-${index}`,
+      threadId: newId(),
+      color: COLORS[index % COLORS.length],
+      notifications: true,
+      unread: false,
+      resumeCursors: {},
+      onUsageLimit: "wait",
+      createdAt: now - index,
+    }));
+    const existing = this.bots.map((bot) => {
+      const started = bot.busy || this.groups.some((group) => group.memberIds.includes(bot.id))
+        || this.messagesFor(bot.threadId).some((message) => message.role === "user");
+      return bot.onboardingStarter && !started ? { ...bot, hidden: true, pinned: false } : bot;
+    });
+    const next = [...roster, ...existing];
+    writeJsonAtomic(BOTS_FILE, next);
+    this.bots = next;
+    return true;
+  }
+
   /** First-run seed: the default team, so the app opens with a ready-made
    * roster. The lead bot also carries the onboarding card. */
-  seedIfEmpty() {
+  seedIfEmpty(onboardingStarter = false) {
     if (this.bots.length) return;
     const now = Date.now();
     DEFAULT_BOTS.forEach((preset, i) => {
@@ -539,6 +567,7 @@ export class Store {
       onUsageLimit: "wait",
         resumeCursors: {},
         pinned: preset.pinned,
+        onboardingStarter: onboardingStarter || undefined,
         createdAt: now - i, // newest first, matching createBot's ordering
       };
       this.bots.push(bot);

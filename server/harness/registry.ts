@@ -123,7 +123,7 @@ export class ProviderRegistry {
     return task;
   }
 
-  async describe(refresh = false) {
+  async describe(refresh = false, setup = false) {
     return Promise.all(
       this.entries().map(async (entry) => {
         if (entry.shadow) {
@@ -144,9 +144,13 @@ export class ProviderRegistry {
         } catch (e) {
           snapshot = { state: "unavailable", reason: e instanceof Error ? e.message : String(e) };
         }
-        const models = snapshot.state === "available"
-          ? await this.modelCatalog(inst.instanceId, refresh)
-          : { default: "", options: [], status: "error" as const, source: inst.driverKind, error: snapshot.reason };
+        const [models, account] = await Promise.all([
+          snapshot.state === "available"
+            ? this.modelCatalog(inst.instanceId, refresh)
+            : { default: "", options: [], status: "error" as const, source: inst.driverKind, error: snapshot.reason },
+          setup && snapshot.state === "available" ? inst.setupStatus?.().catch(() => ({})) : undefined,
+        ]);
+        if (account) snapshot = { ...snapshot, ...account };
         return {
           instanceId: inst.instanceId,
           driverKind: inst.driverKind,

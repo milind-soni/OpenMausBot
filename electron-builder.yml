@@ -2,16 +2,6 @@ appId: com.gererbuildstudio.app
 productName: Gerer Build Studio
 artifactName: GererBuildStudio-${version}-${arch}.${ext}
 
-# In-app auto-update reads latest-mac.yml / latest.yml plus the artifacts from
-# this PUBLIC repo's GitHub Releases. Public → no token on users' machines.
-# Baked into app-update.yml; `latest*.yml` is emitted even with
-# --publish never and must be uploaded to the GitHub release alongside the
-# artifacts (see docs/dev/RELEASING.md).
-publish:
-  - provider: github
-    owner: myebstudios
-    repo: GererBuildStudio
-
 directories:
   buildResources: build
   output: release
@@ -23,6 +13,8 @@ directories:
 # ELECTRON_RUN_AS_NODE (the agentcal-hq pattern).
 files:
   - electron/**
+  - "!electron/updater.mjs"
+  - "!electron/vendor/electron-updater.cjs"
   - "!electron/resources/speech-helper"
   - "!**/node_modules/**"
   - package.json

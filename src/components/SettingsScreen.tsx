@@ -1,21 +1,19 @@
 import { UsageSettings } from "./UsageSettings";
 import { UsageRings } from "./UsageRings";
 // Dedicated full-screen Settings page with categorized sections:
-// Profile & Account, Connections & API Keys, Models & Providers, System & Updates.
+// Profile & Account, Connections & API Keys, Models & Providers, System.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   ArrowLeft,
   Check,
   CheckCircle2,
   Cpu,
-  Download,
   Folder,
   Info,
   Key,
   Keyboard,
   Loader2,
   RefreshCw,
-  RotateCw,
   Server,
   Settings,
   ShieldCheck,
@@ -27,7 +25,8 @@ import { api, ApiError, useStore, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { InitialsAvatar } from "./Avatar";
 import { ApiKeyRow } from "./ApiKeys";
-import { useUpdaterState } from "@/lib/updater";
+import { tourEvent } from "@/lib/workspaceOnboarding";
+import { version as appVersion } from "../../package.json";
 import { analyticsEnabled, setUsageAnalyticsEnabled, usageAnalyticsEnabled } from "@/lib/analytics";
 
 export type SettingsTab = "profile" | "connections" | "models" | "system";
@@ -416,8 +415,6 @@ function ModelsSection() {
 
 function SystemSection() {
   const { state, dispatch } = useStore();
-  const updaterState = useUpdaterState();
-  const updater = window.gbs?.updater;
   const [usageAnalytics, setUsageAnalytics] = useState(usageAnalyticsEnabled);
   const autoApprovePermissions = state.config?.autoApprovePermissions ?? true;
   const autoApproveDelaySeconds = state.config?.autoApproveDelaySeconds ?? 10;
@@ -472,23 +469,7 @@ function SystemSection() {
     }
   };
 
-  const appVersion = "0.1.14";
   const platform = window.gbs?.platform ?? (typeof navigator !== "undefined" ? navigator.platform : "Unknown");
-
-  const updateLabel =
-    !updater
-      ? "Automatic app updates are supported in the Desktop app. You are currently using the Web interface."
-      : updaterState?.status === "checking"
-        ? "Checking for application updates…"
-        : updaterState?.status === "available"
-          ? `Version ${updaterState.version} is available for download.`
-          : updaterState?.status === "downloading"
-            ? `Downloading update (${Math.round(updaterState.percent ?? 0)}% complete)…`
-            : updaterState?.status === "downloaded"
-              ? `Version ${updaterState.version} is downloaded and ready to install.`
-              : updaterState?.status === "error"
-                ? "Unable to check for updates. Please verify network connectivity."
-                : `Gerer Build Studio v${appVersion} is up to date.`;
 
   return (
     <div className="space-y-6">
@@ -593,59 +574,10 @@ function SystemSection() {
         </div>
       </div>
 
-      {/* App updates card */}
       <div className="rounded-2xl border border-hairline/50 bg-card p-6 shadow-sm">
-        <div className="border-b border-hairline/40 pb-4">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-[16px] font-semibold text-ink">Application Updates</h2>
-              <p className="mt-1 text-[13px] text-ink-secondary">{updateLabel}</p>
-            </div>
-            {updater && (
-              <div className="shrink-0">
-                {updaterState?.status === "available" ? (
-                  <button
-                    onClick={() => void updater.download()}
-                    className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110"
-                  >
-                    <Download size={15} /> Download Update
-                  </button>
-                ) : updaterState?.status === "downloaded" ? (
-                  <button
-                    onClick={() => void updater.install()}
-                    className="flex items-center gap-2 rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110"
-                  >
-                    <RotateCw size={15} /> Restart & Apply Update
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => void updater.check()}
-                    disabled={updaterState?.status === "checking" || updaterState?.status === "downloading"}
-                    className="flex items-center gap-2 rounded-xl bg-raised px-4 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:opacity-40"
-                  >
-                    <RefreshCw size={14} className={cn(updaterState?.status === "checking" && "animate-spin")} />
-                    {updaterState?.status === "error" ? "Retry Check" : "Check for Updates"}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {updaterState?.status === "error" && (
-            <div className="mt-3.5 flex items-center justify-between rounded-xl border border-warning/30 bg-warning/10 px-3.5 py-2.5 text-[12.5px] text-warning">
-              <span>Unable to check for updates. Please verify network connectivity.</span>
-              {updater && (
-                <button
-                  onClick={() => void updater.check()}
-                  className="ml-3 font-medium underline hover:text-ink"
-                >
-                  Retry
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
+        <h2 className="text-[16px] font-semibold text-ink">About this build</h2>
+        <p className="mt-1 text-[13px] text-ink-secondary">Application updates are paused during the internal alpha.</p>
+        <button type="button" className="mt-3 rounded-lg bg-raised px-3 py-2 text-sm font-medium text-ink hover:bg-raised-hover" onClick={() => window.dispatchEvent(new Event(tourEvent))}>Restart Studio tour</button>
         <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-[13px]">
           <div className="rounded-xl bg-panel p-3 border border-hairline/40">
             <div className="text-[11px] text-ink-secondary">App Version</div>
@@ -756,7 +688,7 @@ const TABS: Array<{ id: SettingsTab; label: string; icon: typeof User; blurb: st
   { id: "profile", label: "Profile", icon: User, blurb: "Account details & avatar" },
   { id: "connections", label: "Connections", icon: Key, blurb: "API keys & credentials" },
   { id: "models", label: "Models & Providers", icon: Cpu, blurb: "Live drivers & CLIs" },
-  { id: "system", label: "System & Updates", icon: Info, blurb: "Diagnostics & updater" },
+  { id: "system", label: "System", icon: Info, blurb: "Preferences & diagnostics" },
 ];
 
 export function SettingsScreen() {

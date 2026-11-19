@@ -16,6 +16,7 @@ export interface AppConfig {
   /** The person using the app (collected in onboarding, shown in the
    * sidebar). Not a secret — echoed back by GET /api/config. */
   profile?: { name?: string; email?: string };
+  alphaOnboarding?: { id: string; completed?: boolean; purposes?: string[]; customGoal?: string };
   /** Global setting for automatic bot-to-bot handoffs across multi-agent rooms. Defaults to true. */
   autoHandoffs?: boolean;
   /** UI-side idle approval of permission cards; questions are never automatic. */
@@ -83,6 +84,7 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   if (Number.isInteger(patch.autoApproveDelaySeconds) && patch.autoApproveDelaySeconds! >= 1 && patch.autoApproveDelaySeconds! <= 120) {
     disk.autoApproveDelaySeconds = patch.autoApproveDelaySeconds;
   }
+  if (patch.alphaOnboarding) disk.alphaOnboarding = patch.alphaOnboarding;
   if (patch.usageDisplay) disk.usageDisplay = patch.usageDisplay;
   if (patch.instances && typeof patch.instances === "object") {
     const diskInstances = { ...((disk.instances as InstanceConfigMap) ?? {}) };

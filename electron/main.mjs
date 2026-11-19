@@ -8,7 +8,6 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { startCua, stopCua, registerCuaIpc } from "./cua.mjs";
 import { startSpeech, stopSpeech } from "./speech.mjs";
-import { startUpdater, registerUpdaterIpc } from "./updater.mjs";
 
 // The compiled server and the packaged main process share this module from
 // Resources/electron. electron-builder omits it from app.asar when it is also
@@ -329,7 +328,7 @@ app.whenReady().then(async () => {
   // getDisplayMedia in the renderer → this handler → ScreenCaptureKit, all
   // inside the app's own processes — the one capture path macOS reliably
   // attributes to the app (registers it in the Screen Recording pane and
-  // prompts). Used by the onboarding "Enable screen preview" button.
+  // prompts) when the user starts screen sharing.
   session.defaultSession.setDisplayMediaRequestHandler(
     (_request, callback) => {
       desktopCapturer
@@ -340,7 +339,6 @@ app.whenReady().then(async () => {
     { useSystemPicker: false },
   );
   registerCuaIpc();
-  registerUpdaterIpc();
   registerProjectsIpc({ ipcMain, dialog, shell, dataDir: app.getPath("userData") });
   // Start the CUA daemon before the window so the harness can pick up the
   // connection descriptor on first render. Never blocks window creation on
@@ -351,10 +349,7 @@ app.whenReady().then(async () => {
   backgroundMode = createBackgroundMode({ app, ipcMain, Tray, Menu, nativeImage, iconPath: APP_ICON, getWindows: () => BrowserWindow.getAllWindows(), openWindow: createWindow });
   stopScheduleNotifications = startScheduleNotifications(app.isPackaged ? `http://127.0.0.1:${SERVER_PORT}` : new URL(DEV_URL).origin, Notification);
   previewTestingBridge = createPreviewTestingBridge({ ipcMain, webContents, guestIds: previewGuestIds, dataDir: process.env.GBS_DATA_DIR ?? path.join(app.getPath("home"), ".gbs") });
-  const win = createWindow();
-  // in-app auto-update (packaged only) — checks GitHub releases, downloads on
-  // the user's click, installs on "Restart to update"
-  startUpdater(win);
+  createWindow();
   app.on("activate", () => {
     backgroundMode?.open();
   });

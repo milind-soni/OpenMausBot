@@ -21,7 +21,7 @@ You can use Preview in two places:
 - **Web addresses** — any `http://` or `https://` address, including local servers like `http://localhost:3000` or `http://localhost:5173`.
 - **Project files** — files inside any project you have added in **Projects**:
   - Web pages (`.html`, `.htm`)
-  - Documents (`.pdf`, `.md`, `.markdown`)
+  - Documents (`.pdf`, `.md`, `.markdown`). Markdown images can be stored relative to the document inside the same project.
   - Images (`.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.svg`)
 
 > **Safety note for local addresses:** The first time you open a local or private address (like `localhost`), Gerer Build Studio asks you to confirm that you trust the server running there.
@@ -34,7 +34,7 @@ You can use Preview in two places:
 2. Enter a web address and click **Open**, or click the **folder button** to pick a file from a project.
 3. For websites and HTML, choose a screen size from the **Size** menu (**Phone**, **Tablet**, **Laptop**, **Desktop**, or **Custom size**).
 4. Use the toolbar to:
-   - **Go back**, **go forward**, or **reload**
+   - **Go back**, **go forward**, and **reload** in the desktop app. While the page is loading, the reload button becomes **Stop loading**.
    - **Rotate** (`⇄`) to swap width and height
    - Change **Zoom** (**Fit**, **50%**, **75%**, or **100%**)
    - Click the **camera button** to send a screenshot of the visible area or the full page to your current chat

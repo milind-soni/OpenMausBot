@@ -9,6 +9,7 @@ export type OnboardingInstanceSnapshot = {
   reason?: string;
   version?: string | null;
   authenticated?: boolean;
+  subscriptionPlan?: string;
 };
 
 export type OnboardingInstanceRow = {

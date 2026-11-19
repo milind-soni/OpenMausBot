@@ -8,8 +8,9 @@ import { createPortal } from "react-dom";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AlertTriangle, BookOpen, Check, Loader2, Pencil } from "lucide-react";
-import { CodeBlock } from "@/components/ChatMarkdown";
+import { CodeBlock, MarkdownImage } from "@/components/ChatMarkdown";
 import { remarkObsidian, splitFrontmatter, toggleTaskLine } from "@/lib/obsidianMarkdown";
+import { markdownUrlTransform, type MarkdownLocation } from "@/lib/markdownImages";
 import { scrollToFragment } from "@/lib/chatLinks";
 import { cn } from "@/lib/cn";
 
@@ -24,7 +25,7 @@ type SaveState = "saved" | "dirty" | "saving" | "conflict" | "error";
 const flat = (n: any): string =>
   typeof n === "string" ? n : Array.isArray(n) ? n.map(flat).join("") : n?.props?.children ? flat(n.props.children) : "";
 
-const ObsidianReading = memo(function ObsidianReading({ source, onToggleTask }: { source: string; onToggleTask: (line: number) => void }) {
+const ObsidianReading = memo(function ObsidianReading({ source, onToggleTask, location }: { source: string; onToggleTask: (line: number) => void; location: MarkdownLocation }) {
   const { properties, body, lineOffset } = useMemo(() => splitFrontmatter(source), [source]);
   return (
     <div className="markdown-reading">
@@ -41,6 +42,7 @@ const ObsidianReading = memo(function ObsidianReading({ source, onToggleTask }: 
       )}
       <Markdown
         remarkPlugins={[remarkGfm, remarkObsidian]}
+        urlTransform={markdownUrlTransform}
         components={{
           pre({ children }: { children?: ReactNode }) {
             const child: any = Array.isArray(children) ? children[0] : children;
@@ -54,7 +56,7 @@ const ObsidianReading = memo(function ObsidianReading({ source, onToggleTask }: 
             return <a href={href} target="_blank" rel="noreferrer" className="external-link">{children}</a>;
           },
           img({ src, alt }: { src?: string; alt?: string }) {
-            return <img src={src} alt={alt ?? ""} loading="lazy" />;
+            return <MarkdownImage src={src} alt={alt} location={location} />;
           },
           table({ children }: { children?: ReactNode }) {
             return <div className="md-table-wrap"><table>{children}</table></div>;
@@ -88,6 +90,7 @@ const ObsidianReading = memo(function ObsidianReading({ source, onToggleTask }: 
 export interface DocumentViewProps {
   kind: "markdown" | "text";
   fileName: string;
+  projectId: string;
   /** Latest content and modification time read from disk. */
   content: string;
   mtimeMs: number | null;
@@ -97,7 +100,7 @@ export interface DocumentViewProps {
 }
 
 export const DocumentView = forwardRef<HTMLDivElement, DocumentViewProps>(function DocumentView(
-  { kind, fileName, content, mtimeMs, onSave, onReload },
+  { kind, fileName, projectId, content, mtimeMs, onSave, onReload },
   scrollRef,
 ) {
   const [mode, setMode] = useState<"read" | "edit">(kind === "text" ? "edit" : "read");
@@ -244,7 +247,7 @@ export const DocumentView = forwardRef<HTMLDivElement, DocumentViewProps>(functi
       )}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto select-text">
         {mode === "read" && kind === "markdown" ? (
-          <ObsidianReading source={draft} onToggleTask={toggleTask} />
+          <ObsidianReading source={draft} onToggleTask={toggleTask} location={{ projectId, filePath: fileName }} />
         ) : (
           <textarea
             ref={editorRef}

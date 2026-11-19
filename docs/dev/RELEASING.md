@@ -1,51 +1,25 @@
-# Releasing Gerer Build Studio
+# Internal alpha packaging
 
-Installers are published as GitHub Releases on `myebstudios/GererBuildStudio`. The in-app updater reads the same releases (`electron-builder.yml` → `publish`), so every release must include the update manifests.
+The product label is **Gérer Build Studio (v0.1 Alpha)**. Use a unique package version for each installer so testers can identify exactly what they installed.
 
-## 1. Prepare
+## Prepare and build
 
-1. Start from a clean `main` with `pnpm typecheck` and `pnpm test` passing.
-2. Bump `version` in `package.json`, then commit (`Release vX.Y.Z`).
-3. Delete the previous output (`rm -rf release`) so stale artifacts can't be uploaded.
+1. Use Node 24 and the pnpm version declared in `package.json`.
+2. Run `pnpm install --frozen-lockfile`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+3. Build the installer from the candidate commit. macOS requires the Xcode Command Line Tools.
 
-## 2. Build
+| Target | Build command | Outputs |
+| --- | --- | --- |
+| macOS Apple silicon | `pnpm package` | DMG and arm64 ZIP |
+| Windows x64 | `pnpm package:win` | NSIS installer and x64 ZIP |
 
-| Platform | Command | Must run on |
-|---|---|---|
-| macOS (Apple silicon) | `pnpm package` | macOS (builds the Swift speech helper) |
-| Windows (x64) | `pnpm package:win` | Windows, or macOS with Wine |
+Builds land under `release/`. Pick the files for the exact version you built. The installers include compiled code built from source. Keep the generated UI, compiled server, and installer files out of Git.
 
-Both commands rebuild the UI (`dist/`) and the compiled server (`dist-server/`). If `dist-server/` changes, commit it; it is tracked.
+## Verify the artifact
 
-## 3. Signing status
+- On the target OS, install from the generated installer into a disposable profile. Check first launch, workspace setup and retry, the first useful action, Preview navigation and document images, schedules, quit, and relaunch.
+- Check Settings for the expected package version and confirm the alpha installer contains no update feed or updater bridge.
+- Record signer and notarization status and the SHA-256 checksums. A development-signed macOS installer is only suitable for approved internal testing. Verify with `codesign --verify --deep --strict` and check Gatekeeper assessment with `spctl --assess --type execute --verbose`.
+- Share only verified artifacts with the intended internal testers. Preserve their profile data when installing a candidate over an earlier build.
 
-**macOS.** A distributable build needs a **Developer ID Application** certificate. As of 2026-09-24, the signing keychain holds only an *Apple Development* identity. electron-builder signs with it, but Gatekeeper rejects the app on every other Mac (`spctl -a -vv` → `rejected`), and Squirrel.Mac auto-update will not install over it. Until a Developer ID certificate is available:
-
-- Treat macOS builds as internal/test builds.
-- Testers open the app with right-click → Open, or `xattr -dr com.apple.quarantine "/Applications/Gerer Build Studio.app"`.
-
-Once a Developer ID certificate is installed:
-
-1. Create an App Store Connect API key and export `APPLE_API_KEY` (path to the `.p8`), `APPLE_API_KEY_ID`, and `APPLE_API_ISSUER`.
-2. Set `mac.notarize: true` in `electron-builder.yml`. electron-builder then notarizes and staples during `pnpm package`.
-3. Verify with `spctl -a -vv "release/mac-arm64/Gerer Build Studio.app"` → `accepted, source=Notarized Developer ID`.
-
-**Windows.** Builds are unsigned, so SmartScreen shows "Windows protected your PC" and users must choose *More info → Run anyway*. Configure `win.signtoolOptions`/Azure Trusted Signing when a certificate is available.
-
-## 4. Publish
-
-1. Tag the release commit: `git tag vX.Y.Z && git push origin main vX.Y.Z`.
-2. Create the release and upload **all** of these from `release/`:
-   - macOS: `GererBuildStudio-X.Y.Z.dmg`, `GererBuildStudio-X.Y.Z-arm64.zip`, both `.blockmap` files, `latest-mac.yml`
-   - Windows: `GererBuildStudio-X.Y.Z-setup.exe`, its `.blockmap`, the x64 `.zip`, `latest.yml`
-
-   ```sh
-   gh release create vX.Y.Z --repo myebstudios/GererBuildStudio --title "vX.Y.Z" --notes-file NOTES.md \
-     release/*.dmg release/*.zip release/*.exe release/*.blockmap release/latest*.yml
-   ```
-
-3. Installed apps check hourly and offer "Restart to update". The updater needs the `.zip` on macOS and the `.exe` on Windows.
-
-## Analytics
-
-Release builds send no analytics. To offer opt-in PostHog analytics, build with `VITE_POSTHOG_TOKEN=phc_…` set to a project we own. Users must then enable Usage Analytics in Settings → System & Updates; consent defaults to off. Check the Privacy section of `README.md` before release.
+The alpha uses manual installer replacement. Keep release publication separate from the source branch push.

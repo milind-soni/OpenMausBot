@@ -57,15 +57,16 @@ export interface ResolvedChatFile {
 
 const cache = new Map<string, Promise<ResolvedChatFile | null>>();
 
-export function resolveChatFile(path: string): Promise<ResolvedChatFile | null> {
-  let pending = cache.get(path);
+export function resolveChatFile(path: string, projectId?: string): Promise<ResolvedChatFile | null> {
+  const key = JSON.stringify([path, projectId]);
+  let pending = cache.get(key);
   if (!pending) {
-    pending = fetch(`/api/preview/resolve?path=${encodeURIComponent(path)}`)
+    pending = fetch(`/api/preview/resolve?path=${encodeURIComponent(path)}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ""}`)
       .then((res) => (res.ok ? (res.json() as Promise<ResolvedChatFile>) : null))
       .catch(() => null);
-    cache.set(path, pending);
+    cache.set(key, pending);
     // Misses are retried later: the file may not exist yet when a model first mentions it.
-    void pending.then((hit) => { if (!hit) setTimeout(() => cache.delete(path), 5_000); });
+    void pending.then((hit) => { if (!hit) setTimeout(() => cache.delete(key), 5_000); });
   }
   return pending;
 }

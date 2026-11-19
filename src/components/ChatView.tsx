@@ -1022,7 +1022,6 @@ export function ChatView({ bot }: { bot: Bot }) {
       <Composer
         key={bot.id}
         bot={bot}
-        onEditLast={lastUserMessage ? () => setEditingId(lastUserMessage.id) : undefined}
         pendingAttachment={previewAttachment}
         onPendingAttachmentConsumed={() => setPreviewAttachment(null)}
         pendingText={starterText}

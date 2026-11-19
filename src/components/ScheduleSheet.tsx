@@ -56,9 +56,16 @@ export function ScheduleSheet({ target, schedule, prompt: initialPrompt = "", on
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onClose, pending]);
   const repeat = (): ScheduleRepeat => kind === "once" ? { kind, at: localInstant(date, time, timezone) } : kind === "every" ? { kind, hours } : kind === "weekly" ? { kind, time, days } : { kind, time };
-  let preview = "Choose when this should run.";
-  try { const next = nextScheduleRun(repeat(), timezone, Date.now()); preview = next ? `Next run: ${new Date(next).toLocaleString(undefined, { timeZone: timezone })} (${timezone}).` : "Choose a future run time."; } catch { /* fields are still being edited */ }
+  let nextRun: string | null = null;
+  let preview = "Check the date, time, and time zone.";
+  try {
+    nextRun = nextScheduleRun(repeat(), timezone, Date.now());
+    preview = nextRun
+      ? `Next run · ${new Date(nextRun).toLocaleString(undefined, { timeZone: timezone })} (${timezone})`
+      : "Choose a future run time.";
+  } catch { /* fields are still being edited */ }
   const save = async () => {
+    if (pending || !nextRun || !prompt.trim()) return;
     setPending(true); setError("");
     try {
       const [type, id] = targetValue.split(":");
@@ -76,15 +83,15 @@ export function ScheduleSheet({ target, schedule, prompt: initialPrompt = "", on
         <label className="block text-[13px] text-ink">What should they do?<ProjectMentionTextarea required maxLength={30000} rows={4} className={field} value={prompt} onValueChange={setPrompt} placeholder="Write the message the Buddy should receive — use # for projects and @ for Buddies" /></label>
         <p className="text-[12px] text-ink-secondary">For rooms, mention the Buddies that should reply.</p>
         <label className="block text-[13px] text-ink">When should it run?<select className={field} value={kind} onChange={e => setKind(e.target.value as ScheduleRepeat["kind"])}>{[["once", "One time"], ["daily", "Every day"], ["weekdays", "Monday to Friday (Weekdays)"], ["weekly", "Every week"], ["every", "Every few hours"]].map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-        {kind === "once" && <><button type="button" className="rounded-lg bg-raised px-3 py-1 text-[12px] text-ink" onClick={() => { const fields = dateFields(Date.now() + 3600_000, timezone); setDate(fields.date); setTime(fields.time); }}>In 1 hour</button><label className="block text-[13px] text-ink">Date<input required type="date" className={field} value={date} onChange={e => setDate(e.target.value)} /></label></>}
+        {kind === "once" && <><button type="button" className="rounded-lg bg-raised px-3 py-1 text-[12px] text-ink" onClick={() => { try { const fields = dateFields(Date.now() + 3600_000, timezone); setDate(fields.date); setTime(fields.time); } catch { setError("Enter a valid time zone first."); } }}>In 1 hour</button><label className="block text-[13px] text-ink">Date<input required type="date" className={field} value={date} onChange={e => setDate(e.target.value)} /></label></>}
         {kind === "weekly" && <fieldset className="flex flex-wrap gap-2"><legend className="text-[13px] text-ink">On these days</legend>{[1, 2, 3, 4, 5, 6, 0].map(d => <label key={d} className="text-[12px] text-ink"><input type="checkbox" checked={days.includes(d)} onChange={() => setDays(days.includes(d) ? days.filter(x => x !== d) : [...days, d])} />{["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d]}</label>)}</fieldset>}
         {kind === "every" ? <label className="block text-[13px] text-ink">Run every (hours)<input type="number" required min={1} max={168} className={field} value={hours} onChange={e => setHours(Number(e.target.value))} /></label> : <label className="block text-[13px] text-ink">Time<input required type="time" className={field} value={time} onChange={e => setTime(e.target.value)} /></label>}
-        <label className="block text-[13px] text-ink">Timezone<input required className={field} value={timezone} onChange={e => setTimezone(e.target.value)} /></label>
+        <label className="block text-[13px] text-ink">Time zone<input required className={field} value={timezone} onChange={e => setTimezone(e.target.value)} /><span className="block text-xs text-ink-secondary">Use a time zone name such as Africa/Douala or America/New_York.</span></label>
         <details className="text-[12px] text-ink-secondary"><summary>Catch-up window</summary><label>Start missed work within (minutes)<input type="number" min={0} max={1440} className={field} value={grace} onChange={e => setGrace(Number(e.target.value))} /></label></details>
-        <p className="rounded-xl bg-panel p-3 text-[12px] text-ink-secondary">{preview}</p>
+        <p aria-live="polite" className="rounded-xl bg-panel p-3 text-[12px] text-ink-secondary">{preview}</p>
         <p className="text-[12px] text-ink-secondary">Schedules run while Gerer Build Studio is open. If the app is closed or your computer is asleep, a missed task starts once when you return within its catch-up window.</p>
         {error && <p ref={errorNotice} tabIndex={-1} role="alert" className="text-[12px] text-danger">{error}</p>}
-        <div className="flex justify-end gap-2"><button type="button" disabled={pending} onClick={onClose} className="rounded-xl bg-raised px-4 py-2 text-[13px] text-ink">Cancel</button><button type="submit" disabled={pending || !prompt.trim()} className="rounded-xl bg-accent px-4 py-2 text-[13px] text-white disabled:opacity-40">{pending ? "Saving…" : schedule ? "Save changes" : "Schedule run"}</button></div>
+        <div className="flex justify-end gap-2"><button type="button" disabled={pending} onClick={onClose} className="rounded-xl bg-raised px-4 py-2 text-[13px] text-ink">Cancel</button><button type="submit" disabled={pending || !prompt.trim() || !nextRun} className="rounded-xl bg-accent px-4 py-2 text-[13px] text-white disabled:opacity-40">{pending ? "Saving…" : schedule ? "Save changes" : "Schedule run"}</button></div>
       </form>
     </div>
   </div>;

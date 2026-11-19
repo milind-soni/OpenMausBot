@@ -120,13 +120,15 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       if (classified.usage) emit({ ...base(threadId, turnId), type: "usage.updated", usage: classified.usage });
       return classified.failure;
     };
+    const readUsage = () => readCodexUsage(config.cli, (child) => {
+      usageChildren.add(child);
+      return () => usageChildren.delete(child);
+    });
+
     const refreshUsage = async () => {
       if (disposed || active.size) return;
       try {
-        const payload = await readCodexUsage(config.cli, child => {
-          usageChildren.add(child);
-          return () => usageChildren.delete(child);
-        });
+        const payload = await readUsage();
         if (!disposed) reportUsage(payload);
       } catch {
         if (!disposed) emit({ ...base("", ""), type: "usage.updated", usage: { source: "reported", status: "unknown" } });
@@ -488,6 +490,12 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       models: MODELS,
       discoverModels: () => discoverCodexModels(config.cli),
       snapshot,
+      async setupStatus() {
+        const payload = await readUsage() as { result?: { rateLimits?: { planType?: unknown } } };
+        const plan = payload.result?.rateLimits?.planType;
+        if (typeof plan !== "string" || !/^[a-z][a-z_ -]{0,40}$/i.test(plan) || plan === "unknown") return {};
+        return { authenticated: true, subscriptionPlan: plan.replace(/_/g, " ") };
+      },
       adapter: {
         provider: DRIVER_KIND,
         capabilities: { sessionModelSwitch: "unsupported", agentsMcp: true },

@@ -40,6 +40,7 @@ import { CHAT_FORMATTING_HINT } from "./chat-formatting.ts";
 import { createTurnWatchdog, formatDuration, type TurnExpiry } from "./turn-watchdog.ts";
 import {
   listProjectPreviewFiles,
+  listProjectPathEntries,
   PreviewWatchManager,
   isEditablePreviewKind,
   readPreviewFileContent,
@@ -182,6 +183,10 @@ const removedComputerInstances = new Set([
   LEGACY_CLOUD_COMPUTER_DRIVER,
   ...Object.entries(cfg.instances ?? {}).filter(([, entry]) => isRemovedComputerDriver(entry.driver)).map(([id]) => id),
 ]);
+if (!cfg.alphaOnboarding && !cfg.profile?.name && !cfg.profile?.email && !existsSync(join(DATA_DIR, "bots.json"))) {
+  cfg.alphaOnboarding = { id: randomUUID() };
+  saveConfig({ alphaOnboarding: cfg.alphaOnboarding });
+}
 const store = new Store(() => bootSelection, removedComputerInstances);
 const schedules = new ScheduleStore(DATA_DIR);
 type ActiveTurnContext = { botId: string; message: Message; request: string; originalMessageId: string; attempt: number; selection: ModelSelection; usedBackup: boolean; commsDepth?: number };
@@ -195,7 +200,7 @@ const taskStore = new TaskStore(DATA_DIR);
 // Match the registry the desktop app (or an isolated test) is already using.
 const projectRegistryFile = projectRegistryCandidates().find((file) => existsSync(file)) ?? projectRegistryCandidates()[0];
 const projectService = new ProjectService({ dataDir: dirname(projectRegistryFile), filePath: projectRegistryFile });
-store.seedIfEmpty();
+store.seedIfEmpty(Boolean(cfg.alphaOnboarding && !cfg.alphaOnboarding.completed));
 
 // ── SSE fan-out to clients ─────────────────────────────────────────────
 const sseClients = new Set<ServerResponse>();
@@ -1293,6 +1298,7 @@ function configStatus() {
     xai: { configured: Boolean(cfg.xai?.key) },
     // not a secret — the sidebar shows it
     profile: { name: cfg.profile?.name ?? "", email: cfg.profile?.email ?? "" },
+    alphaOnboarding: cfg.alphaOnboarding ? { id: cfg.alphaOnboarding.id, completed: Boolean(cfg.alphaOnboarding.completed) } : null,
     usageDisplay: cfg.usageDisplay,
     autoHandoffs: cfg.autoHandoffs ?? true,
     autoApprovePermissions: cfg.autoApprovePermissions ?? true,
@@ -1795,6 +1801,54 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
 
+    if (method === "POST" && path === "/api/onboarding/team") {
+      const body = await readBody(req);
+      const onboarding = cfg.alphaOnboarding;
+      if (!onboarding || onboarding.id !== body.id) return json(res, 409, { error: "This workspace already has a team." });
+      if (onboarding.completed) return json(res, 200, { ok: true });
+      if (!cfg.profile?.name) return json(res, 400, { error: "Save your name before approving a team." });
+      const { purposes, customGoal, team } = body;
+      if (!Array.isArray(purposes) || !purposes.length || new Set(purposes).size !== purposes.length
+        || purposes.some((purpose) => !["Development", "Design", "Research", "Finance", "Custom"].includes(purpose))
+        || typeof customGoal !== "string" || customGoal.length > 500
+        || (purposes.includes("Custom") && !customGoal.trim())
+        || !Array.isArray(team) || team.length < 1 || team.length > 8) {
+        return json(res, 400, { error: "Choose a workspace purpose and include one to eight Buddies." });
+      }
+      const catalog = await registry.describe();
+      const roster: Array<{ name: string; title: string; description: string; modelSelection: ModelSelection }> = [];
+      const names = new Set<string>();
+      for (const buddy of team) {
+        const name = typeof buddy?.name === "string" ? buddy.name.trim() : "";
+        const title = typeof buddy?.title === "string" ? buddy.title.trim() : "";
+        const description = typeof buddy?.description === "string" ? buddy.description.trim() : "";
+        if (!name || name.length > 48 || !title || title.length > 80 || !description || description.length > 2400 || names.has(name.toLowerCase())) {
+          return json(res, 400, { error: "Each Buddy needs a unique name, role, and responsibilities." });
+        }
+        names.add(name.toLowerCase());
+        let modelSelection: ModelSelection = { instanceId: "", model: "", label: "Unassigned" };
+        if (buddy.modelSelection != null) {
+          const selection = buddy.modelSelection;
+          const engine = catalog.find((item) => item.instanceId === selection.instanceId && item.snapshot.state === "available" && item.snapshot.authenticated !== false);
+          const model = engine?.models.options.find((option) => option.id === selection.model);
+          if (!engine || !model) return json(res, 409, { error: `Choose an available model for ${name}, or leave it unassigned.` });
+          modelSelection = { instanceId: engine.instanceId, model: model.id, label: model.label };
+        }
+        roster.push({ name, title, description, modelSelection });
+      }
+      if (cfg.alphaOnboarding?.completed) return json(res, 200, { ok: true });
+      const preferences = { id: onboarding.id, purposes, customGoal: purposes.includes("Custom") ? customGoal.trim() : "" };
+      if (!store.bot(`${onboarding.id}-0`)) {
+        saveConfig({ alphaOnboarding: preferences });
+        store.applyOnboardingTeam(onboarding.id, roster);
+      }
+      const completed = { ...loadConfig().alphaOnboarding!, completed: true };
+      saveConfig({ alphaOnboarding: completed });
+      cfg.alphaOnboarding = completed;
+      for (const bot of store.bots) broadcast({ kind: "bot", bot });
+      return json(res, 200, { ok: true });
+    }
+
     // ── bots ──
     if (method === "GET" && path === "/api/bots") {
       return json(res, 200, {
@@ -2231,7 +2285,7 @@ const server = createServer(async (req, res) => {
 
     // ── provider instances (model picker) ──
     if (method === "GET" && path === "/api/instances") {
-      return json(res, 200, { instances: await registry.describe(url.searchParams.get("refresh") === "1") });
+      return json(res, 200, { instances: await registry.describe(url.searchParams.get("refresh") === "1", url.searchParams.get("setup") === "1") });
     }
 
     // ── per-instance auto-approve permission toggle (Settings → Models) ──
@@ -2271,6 +2325,10 @@ const server = createServer(async (req, res) => {
     if (method === "GET" && path === "/api/projects") {
       const projects = (await projectService.list()).map((project) => ({ ...project, available: !project.missing }));
       return json(res, 200, { projects });
+    }
+    if (method === "GET" && path === "/api/projects/path-entries") {
+      const entries = listProjectPathEntries(await allRegisteredProjects(), url.searchParams.get("projectId") ?? "", url.searchParams.get("directory") ?? "", url.searchParams.get("query") ?? "");
+      return json(res, 200, { entries });
     }
     if (method === "POST" && path.startsWith("/api/projects/")) {
       const body = await readBody(req);
@@ -2351,7 +2409,9 @@ const server = createServer(async (req, res) => {
       return res.end(data);
     }
     if (method === "GET" && path === "/api/preview/resolve") {
-      const resolved = resolveChatFileReference(await allRegisteredProjects(), url.searchParams.get("path") ?? "", homedir());
+      const projectId = url.searchParams.get("projectId");
+      const projects = await allRegisteredProjects();
+      const resolved = resolveChatFileReference(projectId ? projects.filter((project) => project.id === projectId) : projects, url.searchParams.get("path") ?? "", homedir());
       if (resolved.kind === "resource") return json(res, 415, { error: "Unsupported preview file type" });
       return json(res, 200, {
         projectId: resolved.project.id,

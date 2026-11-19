@@ -10,6 +10,7 @@ import { memo, useEffect, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Copy } from "lucide-react";
+import { documentImageSource, markdownUrlTransform, type MarkdownLocation } from "@/lib/markdownImages";
 import { remarkObsidian } from "@/lib/obsidianMarkdown";
 import { chatFileUrl, classifyChatHref, looksLikeFilePath, openChatHref, resolveChatFile, scrollToFragment } from "@/lib/chatLinks";
 
@@ -123,35 +124,41 @@ function ChatLink({ href, children }: { href?: string; children?: ReactNode }) {
   );
 }
 
-function ChatImage({ src, alt }: { src?: string; alt?: string }) {
-  const target = classifyChatHref(src);
-  const [resolved, setResolved] = useState<string | null>(() =>
-    target?.kind === "web" || /^data:image\//i.test(src ?? "") ? src ?? null : null,
-  );
+export function MarkdownImage({ src, alt, location }: { src?: string; alt?: string; location?: MarkdownLocation }) {
+  return <ResolvedMarkdownImage key={src} src={src} alt={alt} location={location} />;
+}
+
+function ResolvedMarkdownImage({ src, alt, location }: { src?: string; alt?: string; location?: MarkdownLocation }) {
+  const target = src?.startsWith("//") ? null : classifyChatHref(src);
+  const direct = location && src ? documentImageSource(src, location) : target?.kind === "web" ? src : null;
+  const local = target?.kind === "file" && (!location || /^(?:file:\/\/|~?\/)/i.test(src ?? ""));
+  const [resolved, setResolved] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [directFailed, setDirectFailed] = useState(false);
+  const projectId = location?.projectId;
+  const lookup = local && (!direct || directFailed) && target?.kind === "file" ? target.path : null;
   useEffect(() => {
-    if (target?.kind !== "file") return;
+    if (!lookup) return;
     let alive = true;
-    void resolveChatFile(target.path).then((file) => {
+    void resolveChatFile(lookup, projectId).then((file) => {
       if (!alive) return;
       if (file?.kind === "image") setResolved(chatFileUrl(file));
       else setFailed(true);
     });
     return () => { alive = false; };
-  }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lookup, projectId]);
 
-  if (failed || (!resolved && target?.kind !== "file")) {
-    return <span className="md-image-missing" title={src}>🖼 {alt || src}</span>;
-  }
-  if (!resolved) return <span className="md-image-loading" aria-label={`Loading ${alt || "image"}`} />;
+  const imageUrl = directFailed ? resolved : direct || resolved;
+  if (failed || (!imageUrl && !lookup)) return <span className="md-image-missing" title={src}>{alt || "Image"} (unavailable)</span>;
+  if (!imageUrl) return <span className="md-image-loading" aria-label={`Loading ${alt || "image"}`} />;
+  const image = <img src={imageUrl} alt={alt ?? ""} loading="lazy" referrerPolicy="no-referrer" onError={() => {
+    if (direct && local && !directFailed) setDirectFailed(true);
+    else setFailed(true);
+  }} />;
+  if (location) return image;
   return (
-    <button
-      type="button"
-      className="md-image"
-      title={`${alt || src} — open in Preview`}
-      onClick={() => src && void openChatHref(src)}
-    >
-      <img src={resolved} alt={alt ?? ""} loading="lazy" onError={() => setFailed(true)} />
+    <button type="button" className="md-image" title={`${alt || src} — open in Preview`} onClick={() => src && void openChatHref(src)}>
+      {image}
     </button>
   );
 }
@@ -161,6 +168,7 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
     <div className="markdown-reading is-chat min-w-0">
       <Markdown
         remarkPlugins={[remarkGfm, remarkObsidian]}
+        urlTransform={markdownUrlTransform}
         components={{
           pre({ children }: { children?: ReactNode }) {
             // fenced code arrives as <pre><code class="language-x">…</code></pre>
@@ -180,7 +188,7 @@ function ChatMarkdownComponent({ text, streaming = false }: { text: string; stre
             return <code>{children}</code>;
           },
           a: ChatLink,
-          img: ChatImage,
+          img: MarkdownImage,
           table({ children }: { children?: ReactNode }) {
             return <div className="md-table-wrap"><table>{children}</table></div>;
           },

@@ -1,7 +1,7 @@
 {
   "name": "gerer-build-studio",
   "private": true,
-  "version": "0.1.15",
+  "version": "0.1.16",
   "type": "module",
   "main": "electron/main.mjs",
   "engines": {
@@ -18,11 +18,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "preview": "vite preview",
-    "build:server": "tsc -p tsconfig.server.build.json",
+    "build:server": "node scripts/build-server.mjs",
     "build:speech": "swiftc -O electron/resources/speech-helper.swift -o electron/resources/speech-helper",
     "build:updater": "node scripts/bundle-updater.mjs",
-    "package": "pnpm build && pnpm build:server && pnpm build:speech && pnpm build:updater && electron-builder --mac --publish never",
-    "package:win": "pnpm build && pnpm build:server && pnpm build:updater && electron-builder --win --publish never"
+    "package": "pnpm build && pnpm build:server && pnpm build:speech && electron-builder --mac --publish never",
+    "package:win": "pnpm build && pnpm build:server && electron-builder --win --publish never"
   },
   "dependencies": {
     "@trycua/cua-driver": "^0.19.3",

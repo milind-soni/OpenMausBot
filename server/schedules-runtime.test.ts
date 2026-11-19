@@ -83,14 +83,17 @@ describe.skipIf(process.platform === "win32")("scheduled runs and recovery over 
     expect(result.messages.filter((m: any) => m.role === "user" && m.text === "Finish this report")).toHaveLength(1);
     expect(result.messages.some((m: any) => m.tool?.name.startsWith("Switched to"))).toBe(true);
     writeFileSync(join(home, "primary-refreshed"), "1");
-    const other = await makeBot("primary", "gpt-new");
-    await api("POST", `/api/bots/${other}/messages`, { text: "Check a new main-model turn" });
-    await until(() => getBot(other), bot => !bot.busy && bot.messages.some((m: any) => m.text?.includes("fake codex")));
-    expect((await getBot(id)).usingBackup).toBe(true); // a reading alone never changes this conversation
-    await api("POST", `/api/bots/${id}/messages`, { text: "A new request after refresh" });
-    const primary = await until(() => getBot(id), bot => !bot.busy && !bot.usingBackup && bot.messages.some((m: any) => m.text?.includes("fake codex")));
-    expect(primary.modelSelection.instanceId).toBe("primary");
-    rmSync(join(home, "primary-refreshed"));
+    try {
+      const other = await makeBot("primary", "gpt-new");
+      await api("POST", `/api/bots/${other}/messages`, { text: "Check a new main-model turn" });
+      await until(() => getBot(other), bot => !bot.busy && bot.messages.some((m: any) => m.text?.includes("fake codex")));
+      expect((await getBot(id)).usingBackup).toBe(true); // a reading alone never changes this conversation
+      await api("POST", `/api/bots/${id}/messages`, { text: "A new request after refresh" });
+      const primary = await until(() => getBot(id), bot => !bot.busy && !bot.usingBackup && bot.messages.some((m: any) => m.text?.includes("fake codex")));
+      expect(primary.modelSelection.instanceId).toBe("primary");
+    } finally {
+      rmSync(join(home, "primary-refreshed"), { force: true });
+    }
   });
   it("creates one unknown-time retry at 15 minutes; Resume now backs off to 30 minutes, and Cancel removes it", async () => {
     const id = await makeBot("throttle", "default", { onUsageLimit: "wait" });

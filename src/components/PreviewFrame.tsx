@@ -34,6 +34,7 @@ export type PreviewFrameStatus = "empty" | "confirm" | "loading" | "loaded" | "b
 
 export interface PreviewFrameHandle {
   reload: () => void;
+  stop: () => void;
   goBack: () => void;
   goForward: () => void;
   /** Desktop guest id of the live page, for attaching a bot session to it. */
@@ -63,6 +64,7 @@ export interface PreviewFrameProps {
   onQuickPickUrl?: (url: string) => void;
   onOpenFilePicker?: () => void;
   onStatusChange?: (status: PreviewFrameStatus) => void;
+  onNavigate?: (url: string) => void;
   onHistoryStateChange?: (state: { canGoBack: boolean; canGoForward: boolean }) => void;
   scrollSyncSourceId?: string;
   onScrollSync?: (sourceId: string, ratioY: number) => void;
@@ -98,6 +100,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     onOpenFilePicker,
     onStatusChange,
     onHistoryStateChange,
+    onNavigate,
     scrollSyncSourceId,
     onScrollSync,
     externalScrollRatioY,
@@ -184,6 +187,14 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     }
     setReloadNonce((n) => n + 1);
   }, [isElectron, source, updateStatus]);
+
+  const stop = useCallback(() => {
+    const element = webviewRef.current as (HTMLElement & { stop?: () => void }) | null;
+    element?.stop?.();
+    clearTimers();
+    setSlowWarning(false);
+    updateStatus("loaded");
+  }, [clearTimers, updateStatus]);
 
   const goBack = useCallback(() => {
     const el = webviewRef.current as any;
@@ -273,6 +284,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     ref,
     () => ({
       reload,
+      stop,
       goBack,
       goForward,
       webContentsId: () => {
@@ -287,7 +299,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
       },
       captureScreenshot,
     }),
-    [captureScreenshot, goBack, goForward, isElectron, reload],
+    [captureScreenshot, goBack, goForward, isElectron, reload, stop],
   );
 
   // Listen for auto-refresh SSE reload events matching the active project file
@@ -464,17 +476,22 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
     el.addEventListener("did-start-loading", onStart);
     el.addEventListener("did-stop-loading", onStop);
     el.addEventListener("did-fail-load", onFail);
-    el.addEventListener("did-navigate", syncWebviewHistory);
-    el.addEventListener("did-navigate-in-page", syncWebviewHistory);
+    const onNavigation = (event: Event & { url?: string; isMainFrame?: boolean }) => {
+      if (event.isMainFrame === false) return;
+      if (source?.kind === "url" && event.url) onNavigate?.(event.url);
+      syncWebviewHistory();
+    };
+    el.addEventListener("did-navigate", onNavigation);
+    el.addEventListener("did-navigate-in-page", onNavigation);
 
     return () => {
       el.removeEventListener("did-start-loading", onStart);
       el.removeEventListener("did-stop-loading", onStop);
       el.removeEventListener("did-fail-load", onFail);
-      el.removeEventListener("did-navigate", syncWebviewHistory);
-      el.removeEventListener("did-navigate-in-page", syncWebviewHistory);
+      el.removeEventListener("did-navigate", onNavigation);
+      el.removeEventListener("did-navigate-in-page", onNavigation);
     };
-  }, [clearTimers, isElectron, live, reloadNonce, source, syncWebviewHistory, updateStatus]);
+  }, [clearTimers, isElectron, live, onNavigate, onStatusChange, reloadNonce, source, syncWebviewHistory, updateStatus]);
 
   const sourceLabel = describePreviewSource(source);
   const hostname = (() => {
@@ -733,6 +750,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
             ref={markdownScrollRef}
             kind={source.fileType}
             fileName={source.filePath}
+            projectId={source.projectId}
             content={markdownContent}
             mtimeMs={documentMtime}
             onSave={saveDocument}
@@ -761,7 +779,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
           </div>
         ) : isElectron ? (
           <webview
-            key={`${frameUrl}-${reloadNonce}`}
+            key={source.kind === "url" ? "web-preview" : `${frameUrl}-${reloadNonce}`}
             ref={(el) => {
               webviewRef.current = el;
             }}

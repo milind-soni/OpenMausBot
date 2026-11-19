@@ -362,6 +362,26 @@ export function listProjectPreviewFiles(
   return { project, files };
 }
 
+export function listProjectPathEntries(projects: RegisteredProjectLike[], projectId: string, directory: string, query: string) {
+  const project = projects.find((candidate) => candidate.id === projectId && !candidate.missing);
+  if (!project || !existsSync(project.path)) throw new PreviewFileError(404, "Registered project not found");
+  if (directory.split("/").some((part) => part.startsWith(".") || IGNORED_DIRS.has(part)) || /[\\:\0]/.test(directory) || directory.startsWith("/")) {
+    throw new PreviewFileError(403, "Choose a directory inside the registered project");
+  }
+  const root = realpathSync(project.path);
+  const target = resolve(root, directory);
+  if (target !== root && !isStrictSubpath(root, target)) throw new PreviewFileError(403, "Choose a directory inside the registered project");
+  if (!existsSync(target)) throw new PreviewFileError(404, "Project folder no longer exists");
+  const canonical = realpathSync(target);
+  if (canonical !== root && !isStrictSubpath(root, canonical)) throw new PreviewFileError(403, "Folder is outside the registered project");
+  if (!statSync(canonical).isDirectory()) throw new PreviewFileError(400, "Choose a project folder");
+  return readdirSync(canonical, { withFileTypes: true })
+    .filter((entry) => entry.name.toLowerCase().includes(query.toLowerCase()) && !entry.name.startsWith(".") && !IGNORED_DIRS.has(entry.name) && (entry.isFile() || entry.isDirectory()))
+    .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
+    .slice(0, 30)
+    .map((entry) => ({ name: entry.name, directory: entry.isDirectory() }));
+}
+
 export interface PreviewReloadPayload {
   kind: "preview.reload";
   projectId: string;

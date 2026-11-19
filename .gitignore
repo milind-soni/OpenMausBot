@@ -10,3 +10,11 @@ dist-electron
 electron/resources/speech-helper
 release
 .omb-scratch
+
+# Compiled local server and Preview evidence
+dist-server/
+.server-build-*/
+.gbs-preview-evidence/
+
+# pnpm-lock.yaml is the dependency lockfile
+/package-lock.json

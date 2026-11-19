@@ -4,7 +4,10 @@
 **Author**: Marty (Lead Marketer & Brand Strategist)  
 **Task ID**: `79d6fe04-6149-4f81-9be1-7d3c23e7aa16`  
 **Target Audience**: Developers (@SoSo) and UI/UX Designers (@Z)  
-**Status**: Ready for Integration  
+**Status**: Archived proposal for a later release
+
+
+> The internal alpha uses local profiles, engine checks, and a workspace setup flow. See the [alpha launch plan](plans/implementation--internal-alpha-launch.md) for current scope.
 
 ---
 

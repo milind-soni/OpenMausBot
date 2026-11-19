@@ -4,15 +4,15 @@ import { testingStore, useTestingState } from "@/lib/previewTestingStore";
 import { ScheduleSheet } from "@/components/ScheduleSheet";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
-import { StoreProvider, useStore } from "@/state/store";
+import { api, StoreProvider, useStore } from "@/state/store";
 import { Onboarding } from "@/components/Onboarding";
-import { emailGateDone, setEmailGateDone, initAnalytics } from "@/lib/analytics";
+import { initAnalytics } from "@/lib/analytics";
+import { StudioTour } from "@/components/StudioTour";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { SettingsPanel } from "@/components/SettingsPanel";
 import { ComputerPanel } from "@/components/ComputerPanel";
-import { UpdateBanner } from "@/components/UpdateBanner";
 import { TaskBoardScreen } from "@/components/TaskBoardScreen";
 import { ProjectsProvider } from "@/state/projects";
 import { useQueuedMessageSender } from "@/lib/useQueuedMessageSender";
@@ -50,7 +50,7 @@ function TestingFallbackPanel() {
 function Shell() {
   const { state, dispatch } = useStore();
   const group = state.groups.find((g) => g.id === state.selectedId);
-  const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
+  const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId && !b.hidden) ?? state.bots.find((b) => !b.hidden));
   useQueuedMessageSender();
 
   // App-wide shortcuts: ⌘N new bot · ⌘1–9 jump to bot · ⌘⇧[ / ⌘⇧] prev/next.
@@ -84,8 +84,6 @@ function Shell() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* fixed-position popup, bottom-left — outside the layout flow */}
-      <UpdateBanner />
       <PreviewTestingLayer />
       <TestingFallbackPanel />
       <div className="relative flex min-h-0 flex-1">
@@ -133,28 +131,47 @@ function Shell() {
   );
 }
 
-export default function App() {
-  const [gated, setGated] = useState(() => !emailGateDone());
-  useEffect(() => {
-    initAnalytics();
-    if (!emailGateDone()) {
-      fetch("/api/config")
-        .then((r) => r.json())
-        .then((cfg) => {
-          if (cfg?.profile?.email || cfg?.profile?.name) {
-            setEmailGateDone("submitted");
-            setGated(false);
-          }
-        })
-        .catch(() => {});
+type LaunchConfig = {
+  profile: { name: string; email: string };
+  alphaOnboarding: { id: string; completed: boolean } | null;
+};
+
+function Launch() {
+  const [config, setConfig] = useState<LaunchConfig | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [finished, setFinished] = useState(false);
+  useEffect(() => { initAnalytics(); }, []);
+  const connect = async (signal: AbortSignal) => {
+    setFailed(false);
+    try {
+      const config: LaunchConfig = await api("/api/config", { signal: AbortSignal.any([signal, AbortSignal.timeout(8_000)]) });
+      if (!signal.aborted) setConfig(config);
+    } catch {
+      if (!signal.aborted) setFailed(true);
     }
+  };
+  useEffect(() => {
+    const controller = new AbortController();
+    void connect(controller.signal);
+    return () => controller.abort();
   }, []);
-  return (
-    <StoreProvider>
-      <ProjectsProvider>
-        <Shell />
-        {gated && <Onboarding onDone={() => setGated(false)} />}
-      </ProjectsProvider>
-    </StoreProvider>
-  );
+
+  if (!config) {
+    if (!failed) return <div className="flex h-full items-center justify-center bg-app"><ScreenFallback /></div>;
+    return (
+      <main className="flex h-full flex-col items-center justify-center gap-4 bg-app p-4 text-center text-ink">
+        <h1 className="text-xl font-semibold">Gérer Build Studio (v0.1 Alpha)</h1>
+        <p role="alert" className="text-sm text-ink-secondary">Studio couldn’t connect to its local service.</p>
+        <button className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white" onClick={() => void connect(new AbortController().signal)}>Try again</button>
+      </main>
+    );
+  }
+  if (config.alphaOnboarding && !config.alphaOnboarding.completed && !finished) {
+    return <Onboarding id={config.alphaOnboarding.id} profile={config.profile} onDone={() => setFinished(true)} />;
+  }
+  return <><Shell /><StudioTour firstRun={finished || Boolean(config.alphaOnboarding?.completed)} /></>;
+}
+
+export default function App() {
+  return <StoreProvider><ProjectsProvider><Launch /></ProjectsProvider></StoreProvider>;
 }
