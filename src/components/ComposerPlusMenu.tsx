@@ -25,42 +25,20 @@ import { nextMenuIndex, SidebarPopoverMenu, type SidebarMenuItem } from "./Sideb
 import type { ApprovalChoice } from "./thread-approval";
 import { SIMPLE_CONTROL } from "./composer-simple";
 
-/** Finish together: the room (or, `solo`, the one bot) keeps working until the goal is done. The chip turns accent while it is on.
- * `compact` is Simple mode's chip, shown only while the mode is on: its name and a × that turns it off. */
-export function GoalToggle({ on, onToggle, solo = false, compact = false }: { on: boolean; onToggle: () => void; solo?: boolean; compact?: boolean }) {
-  if (compact) {
-    const off = t(solo ? "composer.goal.offSolo" : "composer.goal.off");
-    return (
-      <button
-        type="button"
-        data-goal-chip
-        aria-label={off}
-        title={off}
-        onClick={onToggle}
-        className="flex h-7 items-center gap-1 whitespace-nowrap rounded-full border border-accent/35 bg-accent/10 px-2.5 text-[13px] text-accent transition-colors hover:bg-accent/15"
-      >
-        {t(solo ? "composer.goal.soloAria" : "composer.goal.aria")}
-        <X size={12} aria-hidden="true" />
-      </button>
-    );
-  }
+/** Finish together (Work until done for one bot), shown while it is on: its name and a × that turns it off. */
+export function GoalToggle({ onToggle, solo = false }: { on: boolean; onToggle: () => void; solo?: boolean }) {
+  const off = t(solo ? "composer.goal.offSolo" : "composer.goal.off");
   return (
     <button
       type="button"
-      aria-pressed={on}
-      aria-label={t(solo ? "composer.goal.soloAria" : "composer.goal.aria")}
-      title={t(solo ? "composer.goal.soloTitle" : "composer.goal.title")}
+      data-goal-chip
+      aria-label={off}
+      title={off}
       onClick={onToggle}
-      className={cn(
-        "flex items-center gap-1.5 whitespace-nowrap rounded-full border text-[13px] transition-colors",
-        compact ? "h-7 px-2.5" : "h-8 px-3",
-        on
-          ? "border-accent/35 bg-accent/10 text-accent"
-          : "border-hairline/20 bg-transparent text-ink-secondary hover:bg-raised hover:text-ink",
-      )}
+      className="flex h-7 items-center gap-1 whitespace-nowrap rounded-full border border-accent/35 bg-accent/10 px-2.5 text-[13px] text-accent transition-colors hover:bg-accent/15"
     >
-      <Target size={14} aria-hidden="true" />
-      {on ? "/goal" : t("composer.goal.chip")}
+      {t(solo ? "composer.goal.soloAria" : "composer.goal.aria")}
+      <X size={12} aria-hidden="true" />
     </button>
   );
 }
@@ -218,7 +196,7 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
         open && "bg-control text-ink",
       )}
     >
-      <Plus size={18} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" />
+      <Plus size={16} aria-hidden="true" />
     </span>
   ) : circle ? (
     <span

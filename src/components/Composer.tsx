@@ -778,7 +778,7 @@ export function Composer({
             data-composer-backdrop
             className={cn("pointer-events-none absolute -left-5 -right-5 bg-app", advanced ? "-bottom-3 top-1/2" : cn("top-0", simpleDock ? "-bottom-4" : "-bottom-3"))}
           />
-        <div ref={shellRef} data-tour="composer" data-look="composer" data-multiline={multiline ? "" : undefined} className={cn("@container/composer relative z-[1]", singleRow ? "flex items-end gap-2" : simpleDock ? cn(SIMPLE_COMPOSER, multiline ? "rounded-[18px]" : "rounded-[22px]") : cn("rounded-[20px] px-2 pb-2 pt-2.5", ELEVATED_FLOAT))}>
+        <div ref={shellRef} data-tour="composer" data-look="composer" data-multiline={multiline ? "" : undefined} className={cn("@container/composer relative z-[1]", singleRow ? "flex items-end gap-2" : simpleDock ? cn(SIMPLE_COMPOSER, multiline ? "rounded-[18px]" : "rounded-[22px]") : cn("rounded-[18px] px-2 pb-2 pt-2.5", ELEVATED_FLOAT))}>
         {singleRow && !locked && (
           <div className="flex shrink-0 items-center">
             <PhonePlus
@@ -814,7 +814,7 @@ export function Composer({
             <div className="flex items-center gap-1 shrink-0">
               <ComposerPlusMenu onAttach={() => fileInput.current?.click()} goal={goal} teach={canLearn ? teachTask : undefined} />
               {/* Simple mode shows a mode's chip only while it is on, so a choice made in the + menu or the bot panel stays in view. */}
-              {goal?.on && <GoalToggle {...goal} compact />}
+              {goal?.on && <GoalToggle {...goal} />}
               {approvalChoice && profile && bot && approvalModeFor(bot) !== approvalModeFor(profile) && <ApprovalChip choice={approvalChoice} />}
             </div>
           )}
@@ -924,7 +924,7 @@ export function Composer({
               callBotId={callShown && bot && !group ? bot.id : undefined}
               onPin={(surface) => modeBot && dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } })} />
           )}
-          <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", stacked && "ml-auto")}>
+          <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", stacked && "ms-auto")}>
           {(simpleDock ? stoppable : busy && mayStop) && !locked && (
           <button
             onClick={interruptTurn}

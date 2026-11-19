@@ -63,9 +63,9 @@ describe("guided tour", () => {
     expect(ANCHOR_EFFECTS.has("closeApps")).toBe(false);
   });
 
-  it("keeps Advanced mode's steps exactly as they were", () => {
+  it("points Advanced mode's model step up at the composer's footer, where its model now sits", () => {
     expect(tourSteps(true)).toBe(TOUR_STEPS);
-    expect(step("tour.model")).toEqual({ id: "tour.model", anchor: "model", placement: "below" });
+    expect(step("tour.model")).toEqual({ id: "tour.model", anchor: "model", placement: "above" });
     expect(step("tour.computer")).toEqual({ id: "tour.computer", anchor: "computer", placement: "below", onExit: "openComputer" });
   });
 
@@ -86,6 +86,7 @@ describe("guided tour", () => {
     expect(simpleModel, "Simple mode picks no model, so its tour never points at one").not.toMatch(/\bmodel\b/i);
     // The computer step still opens the Computer panel for the next step, as its Advanced button did.
     expect(simple.find((s) => s.id === "tour.computer")!.onExit).toBe("openComputer");
+    expect(simple.find((s) => s.id === "tour.model")!.placement).toBe("below");
     expect(simple.find((s) => s.id === "tour.computer-browser")!.onEnter).toBe("openComputer");
   });
 

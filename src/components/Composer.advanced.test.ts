@@ -112,11 +112,11 @@ afterEach(() => {
 describe("the Advanced composer in a bot chat", () => {
   it("puts the field on its own line above one footer row, on the floating surface", () => {
     render({ bot });
-    expect(classes('[data-tour="composer"]')).toEqual(expect.arrayContaining(["rounded-[20px]", "bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)"]));
+    expect(classes('[data-tour="composer"]')).toEqual(expect.arrayContaining(["rounded-[18px]", "bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)"]));
     expect(classes(".mention-editor")).toContain("basis-full");
     expect(container.querySelector("[data-composer-row] > .mention-editor + [data-composer-tools]")).not.toBeNull();
     expect(classes("[data-composer-row]")).toContain("flex-wrap");
-    expect(classes("[data-composer-actions]")).toContain("ml-auto");
+    expect(classes("[data-composer-actions]")).toContain("ms-auto");
     expect(classes("[data-composer-backdrop]")).toContain("top-1/2");
     type("a short one");
     expect(classes(".mention-editor")).toContain("basis-full");

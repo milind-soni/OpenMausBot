@@ -28,13 +28,13 @@ export function ComposerAdvancedTools({ profile, bot, task, locked, remoteClient
   const place = bot && !remoteClient ? { bot, task, disabled: Boolean(bot.busy), onPin } : undefined;
   const ownLevel = approval && profile && bot && approvalModeFor(bot) !== approvalModeFor(profile);
   return (
-    <div data-composer-tools className="flex min-w-0 items-center gap-1">
+    <div data-composer-tools className="flex min-w-0 flex-wrap items-center gap-1">
       {!locked && (
         <PhonePlus quiet onAttach={onAttach} goal={goal} teach={teach} callBotId={callBotId}
           approval={approval && bot && { name: bot.name, choice: approval }} place={place} />
       )}
       {bot && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} quiet />}
-      {!locked && goal?.on && <GoalToggle {...goal} compact />}
+      {!locked && goal?.on && <GoalToggle {...goal} />}
       {!locked && ownLevel && <ApprovalChip choice={approval} quiet />}
       {!locked && place && personPin(task) && <PlaceChip bot={place.bot} task={task} live={place.disabled} disabled={place.disabled} onPin={onPin} />}
     </div>
