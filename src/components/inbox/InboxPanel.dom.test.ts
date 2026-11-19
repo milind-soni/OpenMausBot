@@ -128,12 +128,113 @@ describe("the inbox panel", () => {
     expect(listed()).toEqual([approvalRow.id, reportRow.id]);
   });
 
+  it("intersects status and search across the list and Done, including read news", async () => {
+    shown(inboxView([settledRow, { ...reportRow, unread: false }, messageRow, approvalRow, questionRow]));
+    openInbox();
+    await mount(createElement(InboxPanel));
+    const status = document.querySelector<HTMLSelectElement>('select[aria-label="Inbox status"]')!;
+    const search = document.querySelector<HTMLInputElement>('input[type="search"]')!;
+    const change = (field: HTMLInputElement | HTMLSelectElement, value: string) => act(async () => {
+      Object.getOwnPropertyDescriptor(Object.getPrototypeOf(field), "value")!.set!.call(field, value);
+      field.dispatchEvent(new Event(field === status ? "change" : "input", { bubbles: true }));
+    });
+    const ids = () => [...document.querySelectorAll<HTMLElement>("[data-inbox-row]")].map((row) => row.dataset.inboxRow);
+    expect(status.value).toBe("all");
+    expect(ids()).toEqual([approvalRow.id, questionRow.id, messageRow.id, reportRow.id]);
+    await change(status, "info");
+    expect(ids()).toEqual([messageRow.id, reportRow.id]);
+    expect(document.querySelector("[data-inbox-done]")).toBeNull();
+    await change(search, "reporter");
+    expect(ids()).toEqual([reportRow.id]);
+    await change(status, "needs-you");
+    expect(search.value).toBe("reporter");
+    expect(ids()).toEqual([approvalRow.id]);
+    await change(status, "done");
+    expect(ids()).toEqual([settledRow.id]);
+    expect(document.querySelector("[data-inbox-done] [data-inbox-row]")).toBeTruthy();
+    await change(search, "no such row");
+    expect(status.value).toBe("done");
+    expect(ids()).toEqual([]);
+    expect(document.querySelector('[role="status"]')?.textContent).toBe("Nothing in the inbox matches.");
+    await change(status, "all");
+    await change(search, "npm test");
+    expect(ids()).toEqual([settledRow.id]);
+    expect(document.querySelector('[role="status"]')).toBeNull();
+  });
+
+  it("navigates matching detail rows, advances on settlement and keeps focus on a changed filter", async () => {
+    shown(inboxView([{ ...approvalRow, unread: false }, questionRow, messageRow, reportRow, settledRow]));
+    openInbox();
+    await mount(createElement(InboxPanel));
+    const status = document.querySelector<HTMLSelectElement>('select[aria-label="Inbox status"]')!;
+    const filter = (value: string) => act(async () => {
+      status.focus();
+      status.value = value;
+      status.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await filter("needs-you");
+    await click(`[data-inbox-row="${approvalRow.id}"] button`);
+    expect(document.querySelector("[data-inbox-position]")?.textContent).toBe("1 of 2");
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="Previous"]')?.disabled).toBe(true);
+    await click('[aria-label="Next"]');
+    expect(document.querySelector("[data-inbox-position]")?.textContent).toBe("2 of 2");
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="Next"]')?.disabled).toBe(true);
+    await click('[aria-label="Previous"]');
+    await click('[data-inbox-reading] [data-inbox-action="allow"]');
+    await act(async () => {
+      shown(inboxView(currentInbox()!.rows.map((row) => row.id === approvalRow.id ? { ...row, tab: "done" } : row)));
+    });
+    expect(currentInboxPanel().reading).toBe(questionRow.id);
+    expect(document.querySelector("[data-inbox-position]")?.textContent).toBe("1 of 1");
+    await filter("info");
+    expect(currentInboxPanel().reading).toBeNull();
+    expect(document.activeElement).toBe(status);
+  });
+
+  it("returns focus to the status control when the last matching ask settles", async () => {
+    shown(inboxView([{ ...approvalRow, unread: false }, settledRow]));
+    openInbox({ reading: approvalRow.id });
+    await mount(createElement(InboxPanel));
+    await click('[data-inbox-reading] [data-inbox-action="allow"]');
+    await act(async () => {
+      shown(inboxView(currentInbox()!.rows.map((row) => row.id === approvalRow.id ? { ...row, tab: "done" } : row)));
+    });
+    expect(currentInboxPanel().reading).toBeNull();
+    expect(document.activeElement).toBe(document.querySelector('select[aria-label="Inbox status"]'));
+  });
+
   it("is a sheet at phone width", async () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("max-width"), addEventListener() {}, removeEventListener() {} }));
     openInbox();
     await mount(createElement(InboxPanel));
     expect(document.querySelector('[data-inbox-panel="sheet"]')).not.toBeNull();
     expect(document.querySelector('[data-inbox-panel="side"]')).toBeNull();
+  });
+
+  it.each([
+    { direction: "Next", offset: -1, replies: false },
+    { direction: "Previous", offset: 1, replies: false },
+    { direction: "Next", offset: -1, replies: true },
+    { direction: "Previous", offset: 1, replies: true },
+  ])("$direction routes a report with replies=$replies on the phone sheet", async ({ direction, offset, replies }) => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("max-width"), addEventListener() {}, removeEventListener() {} }));
+    const origin = { ...reportRow.origin!, messageId: "m-report" };
+    const report: InboxRow = { ...reportRow, origin, at: questionRow.at + offset, ...(replies ? { replies: true } : {}) };
+    shown(inboxView([questionRow, report]));
+    openInbox({ reading: questionRow.id });
+    await mount(createElement(InboxPanel), [{ id: "reporter", name: "Reporter", color: "orange" } as Bot]);
+    const sheet = document.querySelector('[data-inbox-panel="sheet"]')!;
+    expect(sheet.querySelector("[data-inbox-position]")?.textContent).toBe(direction === "Next" ? "1 of 2" : "2 of 2");
+    await click(`[aria-label="${direction}"]`);
+    if (replies) {
+      expect(currentInboxPanel()).toMatchObject({ open: true, reading: report.id });
+      expect(sheet.querySelector(`[data-inbox-reading="${report.id}"] textarea`)).not.toBeNull();
+      expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "revealThread" }));
+    } else {
+      expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "revealThread", threadId: origin.threadId }));
+      expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "focusMessage", threadId: origin.threadId, messageId: origin.messageId }));
+      expect(currentInboxPanel().open).toBe(false);
+    }
   });
 
   it("shows a pinned conversation once, and counts its unread news once", async () => {

@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { Check, Inbox, Maximize2, Minimize2, Search, X } from "lucide-react";
-import type { InboxRow } from "../../../shared/inbox";
+import type { InboxRow, InboxTab } from "../../../shared/inbox";
 import { cn } from "@/lib/cn";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { t } from "@/lib/i18n";
@@ -17,8 +17,17 @@ import { PinnedThreads, pinnedThreadRows } from "./PinnedThreads";
 import { matchesSearch, nextAfter } from "./inbox-answer";
 import { listedRows, rowsIn, waitingCount } from "./inbox-view";
 import { useInboxActions } from "./use-inbox-actions";
+import { Select } from "../Select";
 import { roundButtonCls } from "../bot-panel/rows";
 
+const STATUS_LABELS = {
+  all: "inbox.status.all",
+  "needs-you": "needsYou.title",
+  info: "inbox.status.info",
+  done: "common.done",
+} as const satisfies Record<InboxTab | "all", string>;
+
+type StatusFilter = keyof typeof STATUS_LABELS;
 
 export function InboxPanel() {
   const view = useInboxView();
@@ -30,6 +39,9 @@ export function InboxPanel() {
   const { run, openInChat } = useInboxActions(view);
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<StatusFilter>("all");
+  const statusControl = useRef<HTMLSelectElement>(null);
+  const doneId = useId();
   const [showDone, setShowDone] = useState(false);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
@@ -42,36 +54,56 @@ export function InboxPanel() {
     else closeInbox();
   };
   const reading = panel.reading ? view?.rows.find((row) => row.id === panel.reading) : undefined;
-  /** An ask waits for an answer here and a message waits for a reply, so those open in the panel; finished work opens
-   * the conversation it came from, at the message it is about. */
-  const open = (row: InboxRow) => {
+  const openDetail = (row: InboxRow) => {
     readInboxRow(row);
-    if (row.tab === "needs-you" || row.replies) { readInboxLine(row.id); return; }
-    openInChat(row);
+    readInboxLine(row.id);
   };
-  // Finished work the person has read leaves the list for the Done line at the foot; its conversation moves to Finished.
-  const listed = listedRows(view);
-  const rows = listed.filter((row) => matchesSearch(row, query));
-  const done = rowsIn(view, "done").filter((row) => matchesSearch(row, query)).sort((a, b) => b.at - a.at);
-  const ids = rows.map((row) => row.id);
-  const at = reading ? ids.indexOf(reading.id) : -1;
+  const open = (row: InboxRow) => {
+    if (row.tab === "needs-you" || row.replies) openDetail(row);
+    else openInChat(row);
+  };
+  const searching = Boolean(query.trim());
+  const filtering = searching || status !== "all";
+  const rows = useMemo(() => listedRows(view).filter((row) => (status === "all" || row.tab === status) && matchesSearch(row, query)), [view, status, query]);
+  const done = useMemo(() => status === "all" || status === "done"
+    ? rowsIn(view, "done").filter((row) => matchesSearch(row, query)).sort((a, b) => b.at - a.at)
+    : [], [view, status, query]);
+  const forceDoneOpen = status === "done" || searching;
+  const doneOpen = forceDoneOpen || showDone;
+  const visible = useMemo(() => doneOpen ? [...rows, ...done] : rows, [doneOpen, rows, done]);
+  const at = visible.findIndex((row) => row.id === panel.reading);
 
-  const order = useRef<string[]>([]);
-  if (at >= 0) order.current = ids;
-  const waited = useRef<string | null>(null);
+  const previous = useRef<{ reading: InboxRow | undefined; visible: InboxRow[]; status: StatusFilter; query: string }>(null);
   useEffect(() => {
-    if (!reading) { waited.current = null; return; }
-    if (reading.tab !== "done") { waited.current = reading.id; return; }
-    if (waited.current !== reading.id) return;
-    waited.current = null;
-    const next = nextAfter(order.current.filter((id) => id === reading.id || ids.includes(id)), reading.id);
-    const row = next ? view?.rows.find((one) => one.id === next) : undefined;
-    if (row) readInboxRow(row);
-    readInboxLine(row ? row.id : null);
-  }, [reading, ids, view]);
+    const before = previous.current;
+    previous.current = { reading, visible, status, query };
+    if (!panel.open) return;
+    if (!panel.reading) {
+      if (before?.reading && document.activeElement === document.body) statusControl.current?.focus();
+      return;
+    }
+    if (reading?.tab === "done" && before?.reading?.id === reading.id && before.reading.tab !== "done"
+      && before.status === status && before.query === query) {
+      const ids = new Set(visible.map((row) => row.id));
+      const order = before.visible.filter((row) => row.id === reading.id || ids.has(row.id)).map((row) => row.id);
+      const next = nextAfter(order, reading.id);
+      const row = visible.find((item) => item.id === next);
+      if (row) {
+        readInboxRow(row);
+        readInboxLine(row.id);
+        if (document.activeElement === document.body) statusControl.current?.focus();
+        return;
+      }
+      statusControl.current?.focus();
+      readInboxLine(null);
+    } else if (view && at < 0) {
+      if (document.activeElement === document.body) statusControl.current?.focus();
+      readInboxLine(null);
+    }
+  }, [at, panel.open, panel.reading, query, reading, status, view, visible]);
 
   const step = (by: -1 | 1) => {
-    const row = rows[at + by];
+    const row = at >= 0 ? visible[at + by] : undefined;
     if (row) open(row);
   };
   const pinnedThreads = new Set(pinnedThreadRows(state.bots, state.groups, state.pendingQueued).map((row) => row.task.threadId));
@@ -102,47 +134,57 @@ export function InboxPanel() {
         </button>
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        {reading && view ? (
-          <InboxReading view={view} row={reading} now={now} position={at >= 0 ? { index: at, count: rows.length } : null} onStep={step} />
+        <div className="mx-[13px] my-2.5 flex shrink-0 flex-wrap items-center gap-2">
+          <label className="flex h-8 min-w-0 flex-1 basis-24 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-focus">
+            <Search size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
+            <input dir="auto" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("inbox.search")} aria-label={t("inbox.search")}
+              className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary [&::-webkit-search-cancel-button]:hidden" />
+          </label>
+          <Select ref={statusControl} aria-label={t("inbox.status")} value={status} size="sm" variant="quiet"
+            className="max-w-full" onChange={(event) => setStatus(event.target.value as StatusFilter)}>
+            {(Object.keys(STATUS_LABELS) as StatusFilter[]).map((value) => <option key={value} value={value}>{t(STATUS_LABELS[value])}</option>)}
+          </Select>
+        </div>
+        {reading && view && at >= 0 ? (
+          <InboxReading view={view} row={reading} now={now} position={{ index: at, count: visible.length }} onStep={step} />
         ) : (
-          <>
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {/* The conversations each bot and room pinned, at the top of the list. */}
-              {!query.trim() && <PinnedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} onUnpin={(row) => dispatch(attentionUnpinAction(row))} />}
-              {listed.length > 0 && <label className="mx-[13px] my-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
-                <Search size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
-                <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("inbox.search")} aria-label={t("inbox.search")}
-                  className="min-w-0 flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-ink-tertiary [&::-webkit-search-cancel-button]:hidden" />
-              </label>}
-              <div role="list" data-inbox-list aria-label={t("inbox.panel.title")} className="space-y-0.5 px-1.5 pb-1.5">
-                {rows.length === 0
-                  ? query.trim() && listed.length
-                    ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.noMatch")}</p>
-                    : (
-                      <div data-inbox-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
-                        <Inbox size={22} strokeWidth={1.5} aria-hidden="true" className="text-ink-tertiary" />
-                        <p className="mt-3 text-[14px] font-medium text-ink">{t("inbox.empty")}</p>
-                        <p className="mt-1 text-[13px] leading-[18px] text-ink-tertiary">{t("inbox.emptyHint")}</p>
-                      </div>
-                    )
-                  : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
-              </div>
-              {!query.trim() && <InboxActive view={view} current={openThread} exclude={pinnedThreads} />}
-              {/* The finished, already-read conversations. */}
-              {!query.trim() && <FinishedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} readThreads={readNewsThreads(view)} exclude={pinnedThreads} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} />}
-              {done.length > 0 && (
-                <section data-inbox-done className="px-1.5 pb-1.5">
-                  <button type="button" data-inbox-done-toggle aria-expanded={showDone} onClick={() => setShowDone(!showDone)}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {!searching && <PinnedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} onUnpin={(row) => dispatch(attentionUnpinAction(row))} />}
+            <div role="list" data-inbox-list aria-label={t("inbox.panel.title")} className="space-y-0.5 px-1.5 pb-1.5">
+              {rows.length === 0 && done.length === 0
+                ? filtering
+                  ? <p role="status" className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.noMatch")}</p>
+                  : (
+                    <div data-inbox-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
+                      <Inbox size={22} strokeWidth={1.5} aria-hidden="true" className="text-ink-tertiary" />
+                      <p className="mt-3 text-[14px] font-medium text-ink">{t("inbox.empty")}</p>
+                      <p className="mt-1 text-[13px] leading-[18px] text-ink-tertiary">{t("inbox.emptyHint")}</p>
+                    </div>
+                  )
+                : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
+            </div>
+            {!searching && <InboxActive view={view} current={openThread} exclude={pinnedThreads} />}
+            {!searching && <FinishedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} readThreads={readNewsThreads(view)} exclude={pinnedThreads} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} />}
+            {done.length > 0 && (
+              <section data-inbox-done className="px-1.5 pb-1.5">
+                {forceDoneOpen ? (
+                  <h2 className="flex items-center gap-1.5 px-2 py-1.5 text-[12px] font-medium text-ink-secondary">
+                    <Check size={13} aria-hidden="true" />{t("common.done")}
+                  </h2>
+                ) : (
+                  <button type="button" data-inbox-done-toggle aria-controls={doneId} aria-expanded={doneOpen} onClick={() => setShowDone(!showDone)}
                     className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-ink-tertiary hover:bg-raised/70 hover:text-ink-secondary">
                     <Check size={13} aria-hidden="true" className="shrink-0" />
                     <span className="font-medium">{t("common.done")}</span>
                     <span className="tabular-nums">{done.length}</span>
                   </button>
-                  {showDone && done.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
-                </section>
-              )}
-            </div>
-          </>
+                )}
+                <div id={doneId} hidden={!doneOpen}>
+                  {doneOpen && done.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
+                </div>
+              </section>
+            )}
+          </div>
         )}
       </div>
     </>
