@@ -151,7 +151,7 @@ describe("Buddies and apps", () => {
   it("runs an action on a ready app with the stored token", async () => {
     saveAppSettings("edits", { endpoint, token: TOKEN });
     const [app] = await listAppsForBuddy("edits");
-    expect(app.actions).toEqual([{ name: "create_project", description: "Create a project", inputSchema: { type: "object" } }]);
+    expect(app).toMatchObject({ actions: [{ name: "create_project", description: "Create a project", inputSchema: { type: "object" } }] });
     expect(await useApp("edits", "create_project", { name: "TEST · montage" })).toEqual({ content: [{ type: "text", text: "ran create_project" }] });
     await expect(useApp("edits", "delete_everything", {})).rejects.toThrow("no action named");
   });
