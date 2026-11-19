@@ -116,11 +116,12 @@ The Edits tool list is not known yet (the server needs the token). The first imp
 - **Removing Composio** drops Gmail/GitHub/etc. access for Claude Buddies. This is intended. Codex Buddies keep their own built-in connectors, which are outside this app.
 - **Rollback:** the work lands as separate commits (Composio removal; registry and health; proxy and prompt; UI; composer tags). Reverting the later commits disables apps without bringing back Composio; reverting the removal commit restores Composio.
 
-## Decisions requested
+## Decisions (2026-11-19)
 
-1. **Tag character:** `+` (`+edits`). Alternatives: `/` (clashes with folder paths) or `~` (clashes with home paths). Recommendation: `+`.
-2. **Old Composio key:** delete it from `~/.gbs/config.json` on the next save (recommended), or leave it ignored.
+1. **Tag character:** `+` (`+edits`). Approved.
+2. **Old Composio key:** deleted from `~/.gbs/config.json` on the next config load. Approved.
+3. **Model support is visible (added by the user):** every app card and the setup popup show which AI providers can use the app (tags such as *Claude*, *Codex*, *Gemini*, plus a muted *Not supported* list). Support is derived from each provider instance's driver `capabilities.agentsMcp`, so it stays correct as drivers change. The composer `+app` picker shows a warning when the current Buddy's model cannot use apps.
 
 ## Approval
 
-Status: awaiting user approval
+Status: approved by the user on 2026-11-19, with decision 3 added.
