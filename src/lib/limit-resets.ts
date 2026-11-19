@@ -125,8 +125,10 @@ export function usageRows(limit: EngineLimit): UsageRow[] {
   });
 }
 
-export function windowLabel(window: LimitWindowName): string {
-  return window === "5-hour" ? t("planUsage.fiveHour") : window === "weekly" ? t("planUsage.weekly") : t("usage.title");
+/** "5-hour", or "Gemini 5-hour" when the windows measure one allowance of the engine's (EngineLimit.meter). */
+export function windowLabel(window: LimitWindowName, meter?: string): string {
+  const label = window === "5-hour" ? t("planUsage.fiveHour") : window === "weekly" ? t("planUsage.weekly") : t("usage.title");
+  return meter ? t("limits.meterWindow", { meter, window: label }) : label;
 }
 
 export interface ResetMarker { engine: string; name: string; at: number }

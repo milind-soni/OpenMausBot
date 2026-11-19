@@ -4957,6 +4957,7 @@
   "limits.atLimit": "{engine}：已達上限",
   "limits.resets": "{time} 重置",
   "limits.windowAtLimit": "已達上限",
+  "limits.meterWindow": "{meter} {window}",
   "limits.clearsOnReply": "等 {engine} 能再次回覆後會自動解除。",
   "limits.cardTitle": "{engine} 用量",
   "limits.checked": "{when}檢查",

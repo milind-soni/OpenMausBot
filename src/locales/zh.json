@@ -4971,6 +4971,7 @@
   "limits.atLimit": "{engine}：已达上限",
   "limits.resets": "{time} 重置",
   "limits.windowAtLimit": "已达上限",
+  "limits.meterWindow": "{meter} {window}",
   "limits.clearsOnReply": "等 {engine} 能再次回复后会自动解除。",
   "limits.cardTitle": "{engine} 用量",
   "limits.checked": "{when}检查",

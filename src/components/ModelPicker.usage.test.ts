@@ -216,8 +216,8 @@ describe("the model menu's usage rings", () => {
     expect(shownRows(menu)).toEqual(["5-hour", "weekly"]);
   });
 
-  it("show Antigravity's full Gemini window as at its limit, with nothing to retry since it holds no turns", async () => {
-    remember([usage(38), { ...usage(100), engine: "antigravity", name: "Antigravity", driver: "antigravity",
+  it("name Antigravity's windows as Gemini's, and show a full one at its limit with nothing to retry since it holds no turns", async () => {
+    remember([usage(38), { ...usage(100), engine: "antigravity", name: "Antigravity", driver: "antigravity", meter: "Gemini",
       windows: [{ window: "5-hour", usedPercent: 100, resetsAt: RESET }, { window: "weekly", usedPercent: 40, resetsAt: RESET }] }]);
     const menu = await openMenu();
     expect(rings(menu).map((ring) => [ring.dataset.usageEngine, ring.querySelector("[data-usage-ring]")?.getAttribute("data-usage-ring")]))
@@ -225,6 +225,7 @@ describe("the model menu's usage rings", () => {
     flushSync(() => rings(menu)[1]!.click());
     expect(shownRows(menu)).toEqual(["5-hour", "weekly"]);
     expect(menu.querySelector("[data-usage-rows]")?.textContent).toContain("Antigravity usage");
+    expect([...menu.querySelectorAll("[data-usage-row] > div > span:first-child")].map((label) => label.textContent)).toEqual(["Gemini 5-hour", "Gemini Weekly"]);
     expect(menu.querySelector("[data-usage-row='5-hour'] [data-usage-track]")?.getAttribute("class")).toContain("bg-danger");
     expect(menu.querySelector("[data-usage-check]")).toBeNull();
     expect(menu.querySelector("[data-usage-release]")).toBeNull();

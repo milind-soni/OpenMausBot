@@ -263,7 +263,7 @@ describe("an Antigravity account's usage", () => {
     await instance.refresh(true);
     expect(load.mock.calls.map(([asked]) => asked.map((account) => account.id))).toEqual([["claude", "antigravity"]]);
     expect(instance.limit("antigravity")).toEqual({
-      engine: "antigravity", name: "Antigravity", driver: "antigravity", window: "5-hour", usedPercent: 50, resetsAt: NOW + 2 * HOUR, blocked: false,
+      engine: "antigravity", name: "Antigravity", driver: "antigravity", meter: "Gemini", window: "5-hour", usedPercent: 50, resetsAt: NOW + 2 * HOUR, blocked: false,
       windows: [{ window: "5-hour", usedPercent: 50, resetsAt: NOW + 2 * HOUR }, { window: "weekly", usedPercent: 25, resetsAt: NOW + 60 * HOUR }],
     });
   });
