@@ -29,7 +29,7 @@ export function describeFailure(app: AppDefinition, error: unknown, hasToken: bo
       return {
         state: "needs_setup",
         message: hasToken
-          ? `${app.name} refused the saved access token. It may have been regenerated. Copy it again from ${app.name}.`
+          ? `${app.name} didn't accept that access token. If it was regenerated in ${app.name}, copy the new one.`
           : `${app.name} is running. Add its access token to finish setup.`,
         tools: [],
         checkedAt: now,
