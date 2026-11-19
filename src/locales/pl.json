@@ -1676,7 +1676,6 @@
   "sidebar.cloudOwner": "Chmura: {email}",
   "sidebar.search": "Szukaj",
   "sidebar.searchAria": "Szukaj botów i wiadomości",
-  "sidebar.searchClose": "Zamknij wyszukiwanie",
   "sidebar.noMatch": "Brak wyników dla „{query}”",
   "sidebar.preview.waiting": "Czeka na ciebie…",
   "sidebar.preview.waitingOnTeammate": "Czeka na członka zespołu…",
@@ -1772,11 +1771,11 @@
   "sidebar.archived.restoredOne": "Przywrócono 1 bota",
   "sidebar.archived.restoredMany": "Przywrócone boty: {count}",
   "sidebar.resize": "Zmień rozmiar panelu bocznego",
-  "sidebar.toolsLayout.title": "Układ narzędzi",
-  "sidebar.toolsLayout.subtitle": "Pokazuj rutyny, wyzwalacze i mapę zespołu jako wiersze lub jako jeden wiersz ikon. Pasek boczny zwężony do kolumny awatarów zawsze pokazuje ikony.",
-  "sidebar.toolsLayout.rows": "Wiersze",
-  "sidebar.toolsLayout.toolbar": "Pasek narzędzi",
-  "sidebar.toolsLayout.chooseAria": "Wybierz układ narzędzi",
+
+
+
+
+
   "sidebar.new": "Nowy",
   "sidebar.newOrShare": "Nowy lub udostępnij",
   "sidebar.servers": "Serwery",

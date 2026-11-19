@@ -96,7 +96,7 @@ export function SkinPicker() {
                 {/* Every preview: a 0.5 px frame. The chosen one adds the 2 px ink ring and a 16 px check at its top right. */}
                 <span className={cn("relative block rounded-lg ring-offset-2 ring-offset-(--color-menu) [&>[data-skin-preview]]:h-20 [&>[data-skin-preview]]:ring-0",
                   "after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:shadow-[inset_0_0_0_0.5px_var(--settings-edge)] after:content-['']",
-                  selected ? "ring-2 ring-ink" : "group-hover:ring-[0.5px] group-hover:ring-ink/25 group-focus-visible:ring-2 group-focus-visible:ring-focus")}>
+                  selected ? "ring-2 ring-ink" : "group-hover:ring-[0.5px] group-hover:ring-ink/25")}>
                   <Miniature skin={skin.id} />
                   {selected && <span aria-hidden="true" data-skin-check="" className="absolute -right-2 -top-2 flex size-4 items-center justify-center rounded-full bg-ink text-app"><Check size={12} strokeWidth={2.5} /></span>}
                 </span>

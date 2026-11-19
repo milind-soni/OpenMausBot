@@ -72,3 +72,11 @@ export function connectedInventoryCopy(phase: ConnectorInventoryPhase) {
     description: t("connectors.empty.noneDesc"),
   };
 }
+
+export function disconnectAccountConfirmation(
+  service: string,
+  account: { id: string; alias?: string },
+) {
+  const identity = account.alias ? `“${account.alias}” (${account.id})` : `“${account.id}”`;
+  return t("connectors.disconnectConfirm", { identity, service });
+}

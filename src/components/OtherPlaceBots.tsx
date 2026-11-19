@@ -6,9 +6,8 @@ import { BOT_BODY_IDS, type BotBodyId } from "../../shared/bot-body";
 import { MASCOT_FACE_COLORS, type MascotFaceColor } from "../../shared/bot-avatar";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { MAUS_COLOR_NAMES, type MausColor } from "@/lib/mascot";
-import { matchingRows, openOtherPlaceBot, placedKey, usePlacesTogether, type BotHome, type PlaceBotRow, type PlacesTogetherState } from "@/lib/places-together";
+import { openOtherPlaceBot, placedKey, usePlacesTogether, type BotHome, type PlaceBotRow, type PlacesTogetherState } from "@/lib/places-together";
 import { useSidebarDensity } from "@/lib/sidebar-preferences";
 import { BotAvatar } from "./Avatar";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
@@ -44,16 +43,16 @@ function avatarOf(row: PlaceBotRow) {
   return { name: row.name, color, mascotBody: body, mascotFaceColor: face };
 }
 
-function OtherPlaceBotRow({ row, dim, iconOnly, simple }: { row: PlaceBotRow; dim: boolean; iconOnly: boolean; simple: boolean }) {
+function OtherPlaceBotRow({ row, dim, iconOnly }: { row: PlaceBotRow; dim: boolean; iconOnly: boolean }) {
   const line = row.waiting ? t("sidebar.preview.waiting") : row.working ? t("sidebar.preview.working") : row.title ?? "";
   const label = [row.name, homeLabel(row.home), line, row.unread ? t("task.unread") : ""].filter(Boolean).join(" · ");
   return (
     <button type="button" data-placed-bot={placedKey(row.home, row.id)} data-bot-home={row.home} data-bot-address={row.address} title={iconOnly ? label : undefined} aria-label={label}
       onClick={() => openOtherPlaceBot(row.id)}
       className={cn("flex w-full items-center rounded-xl text-left transition-colors duration-150 hover:bg-raised/50", SIMPLE_ROW_FOCUS,
-        iconOnly ? "justify-center px-1 py-1.5" : simple ? "gap-2 rounded-[8px] px-2 py-2" : "gap-3 py-2 pl-2.5 pr-3", dim && "opacity-60")}>
+        iconOnly ? "justify-center px-1 py-1.5" : "gap-2 rounded-[8px] px-2 py-2", dim && "opacity-60")}>
       <span className="relative flex shrink-0">
-        <BotAvatar bot={avatarOf(row)} state="idle" size={iconOnly || !simple ? 44 : 36} motion="none" animated={false} />
+        <BotAvatar bot={avatarOf(row)} state="idle" size={iconOnly ? 44 : 36} motion="none" animated={false} />
         {row.home === "cloud" && iconOnly && (
           <span className="absolute -bottom-0.5 -left-0.5 flex size-[18px] items-center justify-center rounded-full border-2 border-panel bg-panel"><CloudBotMark /></span>
         )}
@@ -62,7 +61,7 @@ function OtherPlaceBotRow({ row, dim, iconOnly, simple }: { row: PlaceBotRow; di
       {!iconOnly && (
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
-            <span dir="auto" className={cn("truncate text-ink", simple ? "text-[14px] font-medium leading-5" : "text-[15px] font-semibold leading-5")}>{row.name}</span>
+            <span dir="auto" className="truncate text-[14px] font-medium leading-5 text-ink">{row.name}</span>
             {row.home === "cloud" && <CloudBotMark />}
           </span>
           {line && <span dir="auto" className={cn("truncate text-[13px] leading-[18px]", row.waiting ? "text-warning" : "text-ink-secondary")}>{line}</span>}
@@ -74,24 +73,23 @@ function OtherPlaceBotRow({ row, dim, iconOnly, simple }: { row: PlaceBotRow; di
 }
 
 /** Nothing unless main says the switch is on. */
-export function OtherPlaceBots({ query = "" }: { query?: string }) {
+export function OtherPlaceBots() {
   const together = usePlacesTogether();
   const density = useSidebarDensity();
-  const simple = !useAdvancedMode();
   const [collapsed, setCollapsed] = useState(false);
   const other = together?.on ? together.other : null;
   if (!other) return null;
-  const rows = matchingRows(other.bots, query);
+  const rows = other.bots;
   const said = stateLine(other.state, other.home);
-  if (!rows.length && (query.trim() || !said)) return null;
+  if (!rows.length && !said) return null;
   const iconOnly = density === "icons";
   const name = homeLabel(other.home);
   return (
     <div data-other-place={other.home} data-other-place-state={other.state} className={cn("flex flex-col gap-0.5", !iconOnly && "pt-3")}>
-      {!iconOnly && <SidebarSectionHeader name={name} line={simple} collapsed={collapsed}
+      {!iconOnly && <SidebarSectionHeader name={name} line collapsed={collapsed}
         onToggle={() => setCollapsed((was) => !was)} reorderable={false} dragging={false} />}
       {said && !iconOnly && <p role="status" data-other-place-line="" className="px-2 pb-1 text-[12px] leading-4 text-ink-secondary">{said}</p>}
-      {!collapsed && rows.map((row) => <OtherPlaceBotRow key={placedKey(row.home, row.id)} row={row} dim={other.state !== "ready" && other.state !== "loading"} iconOnly={iconOnly} simple={simple} />)}
+      {!collapsed && rows.map((row) => <OtherPlaceBotRow key={placedKey(row.home, row.id)} row={row} dim={other.state !== "ready" && other.state !== "loading"} iconOnly={iconOnly} />)}
     </div>
   );
 }

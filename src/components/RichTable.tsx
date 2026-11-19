@@ -1,3 +1,4 @@
+import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { useDeferredValue, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -29,6 +30,8 @@ export function TableDialog({ title, onClose, children, returnFocus }: { title: 
   const id = useId();
   useEffect(() => {
     const dialog = ref.current!;
+    const active = document.activeElement;
+    if (!returnFocus && active instanceof HTMLElement && !dialog.contains(active)) active.blur();
     dialog.showModal();
     return () => { dialog.close(); if (returnFocus?.isConnected) returnFocus.focus(); };
   }, [returnFocus]);
@@ -59,7 +62,7 @@ export function RichTable({ columns, rows, name = t("table.title"), expanded = f
   const [sort, setSort] = useState<TableSort>(null);
   const [wrap, setWrap] = useState(true);
   const [open, setOpen] = useState(false);
-  const trigger = useRef<HTMLButtonElement | null>(null);
+  const trigger = useRef<HTMLElement | null>(null);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
   const values = useMemo(() => rows.map((row) => row.map((cell) => cell.text)), [rows]);
   const order = useMemo(() => tableRowOrder(values, deferredQuery, sort), [values, deferredQuery, sort]);
@@ -95,7 +98,7 @@ export function RichTable({ columns, rows, name = t("table.title"), expanded = f
       <div className="table-plate absolute end-1.5 top-1.5 z-20 flex items-center gap-0.5 rounded-full bg-composer p-0.5 opacity-0 ring-[0.5px] ring-ink/10 transition-opacity focus-within:opacity-100 group-hover/table:opacity-100 touch:end-1 touch:top-0 touch:bg-transparent touch:p-0 touch:opacity-100 touch:ring-0">
         <button type="button" className="table-action !rounded-full" aria-label={t("table.copyPlain")} title={t("table.copyPlain")} onClick={() => void copy()}>{copyState === "copied" ? <Check size={14} /> : <Copy size={14} />}</button>
         <button type="button" className="table-action !rounded-full" aria-label={t("table.download")} title={t("table.download")} onClick={download}><Download size={14} /></button>
-        <button type="button" className="table-action !rounded-full" aria-label={t("table.expand")} title={t("table.expand")} onClick={(event) => { trigger.current = event.currentTarget; setOpen(true); }}><Maximize2 size={14} /></button>
+        <button type="button" className="table-action !rounded-full" aria-label={t("table.expand")} title={t("table.expand")} onClick={() => { trigger.current = keyboardFocusTarget(); setOpen(true); }}><Maximize2 size={14} /></button>
       </div>
       {rows.length > SMALL_TABLE_ROWS && (
         <div className="flex items-center gap-2 px-4 pb-1.5 text-ink-tertiary">
@@ -114,7 +117,7 @@ export function RichTable({ columns, rows, name = t("table.title"), expanded = f
         {!small && <button type="button" className="table-action" aria-label={t("table.wrap")} title={t("table.wrap")} aria-pressed={wrap} onClick={() => setWrap(!wrap)}><WrapText size={14} /></button>}
         <button type="button" className="table-action" aria-label={t("table.copy")} title={t("table.copy")} onClick={() => void copy()}>{copyState === "copied" ? <Check size={14} /> : <Copy size={14} />}</button>
         <button type="button" className="table-action" aria-label={t("table.download")} title={t("table.download")} onClick={download}><Download size={14} /></button>
-        {!large && <button type="button" className="table-action" aria-label={t("table.expand")} title={t("table.expand")} onClick={(event) => { trigger.current = event.currentTarget; setOpen(true); }}><Maximize2 size={14} /></button>}
+        {!large && <button type="button" className="table-action" aria-label={t("table.expand")} title={t("table.expand")} onClick={() => { trigger.current = keyboardFocusTarget(); setOpen(true); }}><Maximize2 size={14} /></button>}
     </>;
     return (
     <div className={cn("rich-table w-fit min-w-[min(100%,var(--chat-prose-max))] max-w-full overflow-hidden rounded-xl border border-hairline/50 text-ink", simple ? "bg-composer" : "bg-panel")} dir="ltr">

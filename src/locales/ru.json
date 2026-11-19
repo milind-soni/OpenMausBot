@@ -1681,7 +1681,6 @@
   "sidebar.cloudOwner": "Облако {email}",
   "sidebar.search": "Поиск",
   "sidebar.searchAria": "Поиск ботов и сообщений",
-  "sidebar.searchClose": "Закрыть поиск",
   "sidebar.noMatch": "Ничего не найдено по запросу «{query}»",
   "sidebar.preview.waiting": "Ожидает вас…",
   "sidebar.preview.waitingOnTeammate": "Ожидает коллегу…",
@@ -1819,11 +1818,11 @@
   "sidebar.archived.restoredOne": "Восстановлен 1 бот",
   "sidebar.archived.restoredMany": "Восстановлено ботов: {count}",
   "sidebar.resize": "Изменить размер боковой панели",
-  "sidebar.toolsLayout.title": "Макет инструментов",
-  "sidebar.toolsLayout.subtitle": "Показывать «Рутины», «Триггеры» и «Карту команды» строками или одной строкой иконок. Боковая панель, суженная до столбца аватаров, всегда показывает иконки.",
-  "sidebar.toolsLayout.rows": "Строки",
-  "sidebar.toolsLayout.toolbar": "Панель",
-  "sidebar.toolsLayout.chooseAria": "Выбрать макет инструментов",
+
+
+
+
+
   "sidebar.new": "Создать",
   "sidebar.newOrShare": "Создать или поделиться",
   "sidebar.servers": "Серверы",

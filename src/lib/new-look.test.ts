@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PINNED_CIRCLES_KEY, SIDEBAR_TOOLS_LAYOUT_KEY, UNIVERSAL_PINS_KEY } from "./sidebar-preferences";
+import { PINNED_CIRCLES_KEY, UNIVERSAL_PINS_KEY } from "./sidebar-preferences";
 
 const values = new Map<string, string>();
 const local = {
@@ -19,7 +19,7 @@ async function boot(simpleOnly = true) {
 }
 
 const ADVANCED_PREFS = {
-  "omb-font": "serif", "omb-chat-width": "full", "omb-show-threads": "1", "openmausbot.sidebarToolsLayout": "toolbar",
+  "omb-font": "serif", "omb-chat-width": "full", "omb-show-threads": "1",
   "openmausbot.pinnedCircles": "1", "openmausbot.universalPins": "1", "omb-show-run-card": "0", "omb-web-panels": "[]",
 };
 const KEPT = { "omb-skin": "lagoon", "openmausbot.sidebarDensity": "avatars", "omb-drafts": "{}" };
@@ -99,7 +99,7 @@ describe("the move to Simple as the only mode", () => {
 
   it("spells out the sidebar's keys as sidebar-preferences.ts names them", async () => {
     const { ADVANCED_ONLY_PREFS } = await import("./new-look");
-    expect(ADVANCED_ONLY_PREFS).toEqual(expect.arrayContaining([SIDEBAR_TOOLS_LAYOUT_KEY, PINNED_CIRCLES_KEY, UNIVERSAL_PINS_KEY]));
+    expect(ADVANCED_ONLY_PREFS).toEqual(expect.arrayContaining([PINNED_CIRCLES_KEY, UNIVERSAL_PINS_KEY]));
     expect(ADVANCED_ONLY_PREFS).toEqual(expect.arrayContaining(Object.keys(ADVANCED_PREFS)));
   });
 });

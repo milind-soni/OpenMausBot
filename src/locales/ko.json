@@ -1765,7 +1765,6 @@
   "sidebar.cloudOwner": "{email}의 클라우드",
   "sidebar.search": "검색",
   "sidebar.searchAria": "봇과 메시지 검색",
-  "sidebar.searchClose": "검색 닫기",
   "sidebar.noMatch": "“{query}”와(과) 일치하는 항목이 없어요",
   "sidebar.preview.waiting": "나를 기다리는 중…",
   "sidebar.preview.waitingOnTeammate": "팀원을 기다리는 중…",
@@ -1910,11 +1909,11 @@
   "sidebar.archived.restoredOne": "봇 1개 복원됨",
   "sidebar.archived.restoredMany": "봇 {count}개 복원됨",
   "sidebar.resize": "사이드바 크기 조절",
-  "sidebar.toolsLayout.title": "도구 배치",
-  "sidebar.toolsLayout.subtitle": "루틴, 트리거, 팀 맵을 행으로 보여 줄지 아이콘 한 줄로 보여 줄지 정해요. 사이드바를 아바타 열로 줄이면 항상 아이콘으로 보여요.",
-  "sidebar.toolsLayout.rows": "행",
-  "sidebar.toolsLayout.toolbar": "도구 모음",
-  "sidebar.toolsLayout.chooseAria": "도구 배치 선택",
+
+
+
+
+
   "sidebar.new": "새로 만들기",
   "sidebar.newOrShare": "새로 만들기 또는 공유",
   "sidebar.servers": "서버",
@@ -1944,7 +1943,7 @@
   "sidebar.nav.teamMap": "팀 맵",
   "sidebar.nav.automations": "자동화",
   "sidebar.nav.connectedApps": "연결된 앱",
-  "sidebar.connectApps": "앱 연결",
+
   "sidebar.tools": "도구",
   "sidebar.section.expand": "{name} 펼치기",
   "sidebar.section.collapse": "{name} 접기",

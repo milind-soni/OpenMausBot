@@ -1854,7 +1854,6 @@
   "sidebar.cloudOwner": "{email} の Cloud",
   "sidebar.search": "検索",
   "sidebar.searchAria": "ボットとメッセージを検索",
-  "sidebar.searchClose": "検索を閉じる",
   "sidebar.noMatch": "「{query}」に一致するものはありません",
   "sidebar.preview.waiting": "あなたの返答待ち…",
   "sidebar.preview.waitingOnTeammate": "チームメイトを待っています…",
@@ -2005,11 +2004,11 @@
   "sidebar.archived.restoredOne": "ボット 1 件を戻しました",
   "sidebar.archived.restoredMany": "ボット {count} 件を戻しました",
   "sidebar.resize": "サイドバーのサイズを変更",
-  "sidebar.toolsLayout.title": "ツールのレイアウト",
-  "sidebar.toolsLayout.subtitle": "ルーティン、トリガー、チームマップを、行として表示するか、アイコンを1行に並べて表示するかを選びます。アバターの列にしたサイドバーでは常にアイコンで表示されます。",
-  "sidebar.toolsLayout.rows": "行",
-  "sidebar.toolsLayout.toolbar": "ツールバー",
-  "sidebar.toolsLayout.chooseAria": "ツールのレイアウトを選択",
+
+
+
+
+
   "sidebar.new": "新規",
   "sidebar.newOrShare": "新規または共有",
   "sidebar.servers": "サーバー",
@@ -2039,7 +2038,7 @@
   "sidebar.nav.teamMap": "チームマップ",
   "sidebar.nav.automations": "自動化",
   "sidebar.nav.connectedApps": "連携アプリ",
-  "sidebar.connectApps": "アプリを接続",
+
   "sidebar.tools": "ツール",
   "sidebar.section.expand": "{name} を開く",
   "sidebar.section.collapse": "{name} を畳む",
@@ -3532,7 +3531,7 @@
   "keys.openPage": "AI › その他のサービスを開く",
   "engineSetup.apiKey.inline": "ここに貼り付けてください。自動で保存・確認され、モデルがここに表示されます。",
   "commandPalette.searchLabel": "ボット、グループチャット、メッセージを検索",
-  "commandPalette.searchPlaceholder": "ボット、グループチャット、メッセージを検索…",
+  "commandPalette.searchPlaceholder": "ボット、チャット、設定を検索…",
   "keys.treg.placeholder": "treg キーを貼り付け",
   "keys.postiz.placeholder": "PostizのAPIキーを貼り付け",
   "keys.treg.desc": "ボットが treg を通じて X の検索や、企業、人物、資金調達、ニュースなどの調査を行えるようにします。利用料金は treg の残高から差し引かれ、MausBot による制限はありません。",

@@ -337,7 +337,7 @@ describe("dragging a bot", () => {
     expect(actions()).toEqual([]);
   });
 
-  it("works the same in Advanced, where the bots' list has a heading", () => {
+  it("keeps department dragging in Advanced", () => {
     fixture.advanced = true;
     drag("dodo");
     row("atlas").botDrag!.row("atlas").onDrop(at() as never);
@@ -434,14 +434,14 @@ describe("a department's menu in Simple", () => {
     expect(dialog.props.body).toBe("Its bots and group chats stay, with their conversations, outside any department. The department and its shared instructions are deleted. This cannot be undone.");
   });
 
-  it("keeps Advanced's rename dialog", () => {
+  it("renames inline in Advanced too", () => {
     fixture.advanced = true;
     const button = { getBoundingClientRect: () => ({ right: 280, bottom: 300 }), focus: vi.fn(), isConnected: true } as unknown as HTMLButtonElement;
     const work = render().find((node) => node.type === SidebarSectionHeader && (node.props as unknown as HeaderProps).name === "Work")!.props as unknown as HeaderProps;
     work.onContextMenu!({ preventDefault: () => {}, clientX: 10, clientY: 10, currentTarget: { querySelector: () => button } } as never);
     (render().find((node) => node.type === TeamMenuItems)!.props as unknown as Parameters<typeof TeamMenuItems>[0]).onRename();
-    expect(render().some((node) => node.type === TeamDialog)).toBe(true);
-    expect(header("Work").naming).toBeUndefined();
+    expect(render().some((node) => node.type === TeamDialog)).toBe(false);
+    expect(header("Work").naming?.value).toBe("Work");
   });
 });
 

@@ -63,7 +63,6 @@ export const WINDOW_PREFS = {
   "appearance.userBubbles": z.boolean(),
   "appearance.runCard": z.boolean(),
   "appearance.showThreads": z.boolean(),
-  "appearance.toolsLayout": z.enum(["rows", "toolbar"]),
   "appearance.pinnedCircles": z.boolean(),
   "appearance.universalPins": z.boolean(),
   "appearance.pinnedPages": z.array(pinnedPage).max(6),

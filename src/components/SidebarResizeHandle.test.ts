@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setLocale } from "@/lib/i18n";
-import { SIDEBAR_WIDTH_KEY } from "@/lib/sidebar-preferences";
+import { SIMPLE_SIDEBAR_WIDTH_KEY } from "@/lib/sidebar-preferences";
 import { AVATARS_BELOW, nextEdgeDrag, SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -17,7 +17,7 @@ let seen: boolean[];
 function Harness({ avatars: startAvatars }: { avatars: boolean }) {
   const sidebarRef = useRef<HTMLElement>(null);
   const [avatars, setAvatars] = useState(startAvatars);
-  const sizing = useSidebarWidth({ simple: false, sidePanelOpen: false, sidebarRef });
+  const sizing = useSidebarWidth({ sidePanelOpen: false, sidebarRef });
   return createElement("aside", { ref: sidebarRef, "data-sidebar": "", style: { "--sidebar-width": `${sizing.width}px` } },
     createElement(SidebarResizeHandle, { sizing, sidebarRef, avatars, avatarsWidth: 80, onAvatars: (next: boolean) => { seen.push(next); setAvatars(next); } }));
 }
@@ -66,7 +66,7 @@ describe("a drag of the sidebar's edge", () => {
   });
 
   it("narrower than the threshold, becomes the column of avatars, and the sidebar keeps the width it had for when it opens", async () => {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, "320");
+    localStorage.setItem(SIMPLE_SIDEBAR_WIDTH_KEY, "320");
     await mount();
     await pointer("pointerdown", 320);
     expect(edge().getAttribute("data-sidebar-resize"), "the edge is marked while it is dragged").toBe("dragging");
@@ -78,14 +78,14 @@ describe("a drag of the sidebar's edge", () => {
     expect(seen).toEqual([true]);
     expect(width(), "back to the width it had").toBe("320px");
     await pointer("pointerup", 100);
-    expect(localStorage.getItem(SIDEBAR_WIDTH_KEY)).toBe("320");
+    expect(localStorage.getItem(SIMPLE_SIDEBAR_WIDTH_KEY)).toBe("320");
     expect(edge().getAttribute("data-sidebar-resize")).toBe("");
     expect(document.body.style.cursor, "and lets it go when the drag ends").toBe("");
     expect(document.body.style.userSelect).toBe("");
   });
 
   it("out of the column of avatars, opens the sidebar at its last width, then follows the pointer past that edge, and keeps where it is left", async () => {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, "300");
+    localStorage.setItem(SIMPLE_SIDEBAR_WIDTH_KEY, "300");
     await mount(true);
     expect(edge().getAttribute("aria-valuenow"), "as avatars, the edge reports the column's width").toBe("80");
     await pointer("pointerdown", 80);
@@ -99,11 +99,11 @@ describe("a drag of the sidebar's edge", () => {
     await pointer("pointermove", 340);
     expect(width()).toBe("340px");
     await pointer("pointerup", 340);
-    expect(localStorage.getItem(SIDEBAR_WIDTH_KEY)).toBe("340");
+    expect(localStorage.getItem(SIMPLE_SIDEBAR_WIDTH_KEY)).toBe("340");
   });
 
   it("goes back to the avatars and out again in one drag", async () => {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, "320");
+    localStorage.setItem(SIMPLE_SIDEBAR_WIDTH_KEY, "320");
     await mount();
     await pointer("pointerdown", 320);
     await pointer("pointermove", 120);
@@ -111,23 +111,23 @@ describe("a drag of the sidebar's edge", () => {
     expect(seen).toEqual([true, false]);
     expect(width()).toBe("320px");
     await pointer("pointerup", 220);
-    expect(localStorage.getItem(SIDEBAR_WIDTH_KEY)).toBe("320");
+    expect(localStorage.getItem(SIMPLE_SIDEBAR_WIDTH_KEY)).toBe("320");
   });
 
   it("left open, keeps the width it leaves", async () => {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, "320");
+    localStorage.setItem(SIMPLE_SIDEBAR_WIDTH_KEY, "320");
     await mount();
     await pointer("pointerdown", 320);
     await pointer("pointermove", 280);
     await pointer("pointerup", 280);
     expect(seen).toEqual([]);
-    expect(localStorage.getItem(SIDEBAR_WIDTH_KEY)).toBe("280");
+    expect(localStorage.getItem(SIMPLE_SIDEBAR_WIDTH_KEY)).toBe("280");
   });
 });
 
 describe("the sidebar's edge from the keyboard", () => {
   it("steps narrower to the open sidebar's narrowest, then to the avatars, and the right arrow opens it again", async () => {
-    localStorage.setItem(SIDEBAR_WIDTH_KEY, "256");
+    localStorage.setItem(SIMPLE_SIDEBAR_WIDTH_KEY, "256");
     await mount();
     await key("ArrowLeft");
     expect(width()).toBe("240px");

@@ -1993,7 +1993,6 @@
   "sidebar.cloudOwner": "{email} 的 Cloud",
   "sidebar.search": "搜尋",
   "sidebar.searchAria": "搜尋機器人與訊息",
-  "sidebar.searchClose": "關閉搜尋",
   "sidebar.noMatch": "沒有符合「{query}」的項目",
   "sidebar.preview.waiting": "等待你的回應…",
   "sidebar.preview.waitingOnTeammate": "正在等待隊友…",
@@ -2165,11 +2164,11 @@
   "sidebar.archived.restoredOne": "已還原 1 個機器人",
   "sidebar.archived.restoredMany": "已還原 {count} 個機器人",
   "sidebar.resize": "調整側邊欄大小",
-  "sidebar.toolsLayout.title": "工具版面",
-  "sidebar.toolsLayout.subtitle": "將例行工作、觸發器和團隊地圖顯示為多列，或一列圖示。側邊欄顯示為頭像欄時，一律顯示圖示。",
-  "sidebar.toolsLayout.rows": "多列",
-  "sidebar.toolsLayout.toolbar": "工具列",
-  "sidebar.toolsLayout.chooseAria": "選擇工具版面",
+
+
+
+
+
   "sidebar.new": "新增",
   "sidebar.newOrShare": "新增或分享",
   "sidebar.servers": "伺服器",
@@ -2199,7 +2198,7 @@
   "sidebar.nav.teamMap": "團隊地圖",
   "sidebar.nav.automations": "自動化",
   "sidebar.nav.connectedApps": "已連線的應用程式",
-  "sidebar.connectApps": "連線應用程式",
+
   "sidebar.tools": "工具",
   "sidebar.section.expand": "展開 {name}",
   "sidebar.section.collapse": "收合 {name}",
@@ -7398,7 +7397,7 @@
   "keys.openPage": "開啟 AI › 其他服務",
   "engineSetup.apiKey.inline": "請貼在這裡。系統會自動儲存並檢查，模型就會顯示在這裡。",
   "commandPalette.searchLabel": "搜尋機器人、群組聊天和訊息",
-  "commandPalette.searchPlaceholder": "搜尋機器人、群組聊天、訊息…",
+  "commandPalette.searchPlaceholder": "搜尋 Bot、對話與設定…",
   "secretCard.ref": "{app} 會保管它，只供自己的工具使用一次。你的機器人永遠看不到它，它也不會出現在聊天中。",
   "secretCard.email": "由 OpenMausBot 保管，並代你的機器人登入。它們永遠看不到。",
   "secretCard.emailResumed": "已連線。你的機器人正在繼續。",
@@ -8037,6 +8036,8 @@
   "palette.bots": "機器人",
   "palette.groups": "群組",
   "palette.messages": "訊息",
+  "palette.threads": "對話",
+  "palette.actions": "操作",
   "remote.status.pairedOne": "已配對 1 部裝置",
   "remote.status.pairedMany": "已配對 {count} 部裝置",
   "companyBackup.restorePending": "先前的還原需要先完成復原。",

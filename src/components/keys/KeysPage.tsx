@@ -191,7 +191,7 @@ export function KeysPage({ bare = false, exclude = [] }: { bare?: boolean; exclu
   return (
     <div ref={pageRef} data-keys-page className="flex flex-col gap-4">
       <p className="text-[13px] leading-[18px] text-ink-secondary">{t("settings.connections.subtitle")}</p>
-      <div className="flex h-8 items-center gap-2 rounded-lg bg-ink/[0.05] px-[9px] focus-within:ring-2 focus-within:ring-focus/60">
+      <div className="flex h-8 items-center gap-2 rounded-lg bg-ink/[0.05] px-[9px]">
         <Search size={15} aria-hidden="true" className="shrink-0 text-ink-secondary" />
         <input
           data-keys-search

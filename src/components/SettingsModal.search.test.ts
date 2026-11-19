@@ -88,7 +88,7 @@ describe("Settings search in Simple mode", () => {
     expect(hit.textContent).toContain("Advanced");
     flushSync(() => hit.click());
     expect(vi.mocked(setAdvancedMode)).toHaveBeenCalledWith(true);
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "bots" });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "bots", anchor: "parallel" });
   });
 
   it("says plainly when nothing matches, with the Help Center beside it", () => {

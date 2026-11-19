@@ -7,7 +7,7 @@ import { ChromeRail } from "../../src/components/ChromeRail";
 import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
 import { setAdvancedMode } from "../../src/lib/interface-mode";
 import { NOTICES } from "../../src/lib/notices";
-import { setSidebarDensity, SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_WIDTH_KEY } from "../../src/lib/sidebar-preferences";
+import { setSidebarDensity, SIMPLE_SIDEBAR_WIDTH_KEY } from "../../src/lib/sidebar-preferences";
 import { GROK_MOVE_NOTICE, TEAMS_NOTICE } from "../../src/lib/notices";
 import { markSimpleModePromptSeen } from "../../src/lib/simple-mode-prompt";
 import { applySkin, type SkinId } from "../../src/lib/skins";
@@ -40,7 +40,7 @@ localStorage.setItem(GROK_MOVE_NOTICE, "1");
 localStorage.setItem(TEAMS_NOTICE, "1");
 try {
   for (const notice of NOTICES) localStorage.setItem(notice, "1");
-  for (const width of [SIDEBAR_WIDTH_KEY, SIMPLE_SIDEBAR_WIDTH_KEY]) localStorage.removeItem(width);
+  localStorage.removeItem(SIMPLE_SIDEBAR_WIDTH_KEY);
 } catch {}
 setAdvancedMode(params.get("mode") !== "simple");
 setSidebarDensity(params.get("density") === "icons" ? "icons" : "comfortable");

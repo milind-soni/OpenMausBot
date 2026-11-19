@@ -98,39 +98,9 @@ describe("sidebar top row", () => {
   const order = (row: string) => ({
     lights: row.indexOf("data-traffic-light-space"),
     slot: row.indexOf("data-sidebar-top-slot"),
-    spacer: row.indexOf("data-sidebar-top-spacer"),
-    switcher: row.indexOf('data-workspace-switcher="inline"'),
     buttons: row.indexOf("data-sidebar-top-buttons"),
   });
 
-  it("leaves the traffic lights to the window frame's top bar on macOS: a drag space, then the compact server switcher beside the buttons in Advanced mode", () => {
-    fixture.windowChrome = "mac-inset";
-    desktop();
-    const html = render();
-    const row = topRow(html);
-    expect(row).toMatch(/^data-sidebar-top-row="true" class="[^"]*\bitems-center\b[^"]*\bh-12\b[^"]*" style="-webkit-app-region:drag"/);
-    const { lights, slot, spacer, switcher, buttons } = order(row);
-    expect(lights).toBe(-1);
-    expect(slot).toBeGreaterThan(-1);
-    expect(spacer).toBeGreaterThan(slot);
-    expect(switcher).toBeGreaterThan(spacer);
-    expect(buttons).toBeGreaterThan(switcher);
-    expect(row.slice(buttons).match(/<button/g)).toHaveLength(1);
-    const rowClasses = classesOf(row, "data-sidebar-top-row");
-    expect(rowClasses).toEqual(expect.arrayContaining(["relative", "pl-4", "pr-2"]));
-    expect(rowClasses).not.toContain("px-4");
-    expect(classesOf(row, "data-sidebar-top-slot")).toEqual(expect.arrayContaining(["@container/sidebar-top", "min-w-0", "flex-1"]));
-    expect(row).toContain('<div data-sidebar-top-spacer="true" class="min-w-0 flex-1 @min-[96px]/sidebar-top:min-w-6"></div>');
-    const switcherClasses = classesOf(row, "data-sidebar-top-switcher");
-    expect(switcherClasses).toEqual(expect.arrayContaining(["min-w-0", "max-w-[140px]"]));
-    expect(switcherClasses).not.toContain("flex-1");
-    expect(classesOf(row, "data-sidebar-top-buttons")).toEqual(expect.arrayContaining(["shrink-0", "gap-0.5"]));
-    expect(row).toMatch(/aria-label="Switch server: Servers"[^>]*title="Servers"[^>]*class="[^"]*\bh-7\b[^"]*\boverflow-hidden\b[^"]*\btext-\[13px\][^"]*" style="-webkit-app-region:no-drag"/);
-    expect(row).toContain('<span class="min-w-0 truncate @max-[96px]/sidebar-top:hidden">Servers</span>');
-    expect(row).toContain("focus-visible:outline-2");
-    expect(html).toContain('title="New or share"');
-    expect(html.match(/Switch server:/g)).toHaveLength(1);
-  });
 
   it.each(["mac-inset", "win-caption"] as const)("in Simple mode on %s keeps only the top corner: plain search and + at its right end, no drag region, no server pill, nothing on the edge", (windowChrome) => {
     fixture.advanced = false;
@@ -147,7 +117,7 @@ describe("sidebar top row", () => {
     expect(buttons).toBeGreaterThan(slot);
     expect(classesOf(row, "data-sidebar-top-buttons")).toEqual(expect.arrayContaining(["shrink-0", "pointer-events-auto"]));
     expect(row.slice(buttons).match(/<button/g)).toHaveLength(2);
-    expect(row).toMatch(/data-sidebar-search-toggle="true" aria-label="Search bots and messages" aria-expanded="false" title="Search bots and messages" class="[^"]*\bsize-\[26px\][^"]*\brounded-lg\b[^"]*\btext-ink-secondary\b/);
+    expect(row).toMatch(/data-sidebar-search-toggle="true" aria-label="Search bots and messages" aria-haspopup="dialog" title="Search bots and messages" class="[^"]*\bsize-\[26px\][^"]*\brounded-lg\b[^"]*\btext-ink-secondary\b/);
     expect(row, "no round box round either").not.toContain("bg-composer");
     expect(html).toMatch(/aria-label="New or share" class="[^"]*\bsize-\[26px\][^"]*\brounded-lg\b/);
     expect(html).not.toContain("data-sidebar-edge-toggle");
@@ -155,33 +125,13 @@ describe("sidebar top row", () => {
     expect(html).not.toContain("data-sidebar-search-pill");
   });
 
-  it.each([["win-caption", "Windows"], ["native", "Linux"]] as const)(
-    "keeps the same right-aligned order without traffic lights (%s)",
-    (windowChrome, hostLabel) => {
-      fixture.windowChrome = windowChrome;
-      fixture.hostLabel = hostLabel;
-      desktop();
-      const html = render();
-      const row = topRow(html);
-      expect(row).not.toContain("data-traffic-light-space");
-      expect(row).not.toContain("bg-[#ff5f57]");
-      expect(classesOf(row, "data-sidebar-top-row")).toEqual(expect.arrayContaining(["relative", "h-12", "pl-4", "pr-2"]));
-      const { slot, spacer, switcher, buttons } = order(row);
-      expect(slot).toBeGreaterThan(-1);
-      expect(spacer).toBeGreaterThan(slot);
-      expect(switcher).toBeGreaterThan(spacer);
-      expect(buttons).toBeGreaterThan(switcher);
-      expect(html.match(/Switch server:/g)).toHaveLength(1);
-    },
-  );
-
   it("with the frame turned off on macOS, makes room for the traffic lights in its corner again, the rail's button after them", () => {
     fixture.windowChrome = "mac-inset";
     fixture.windowFrame = false;
     fixture.rail = { available: true, hidden: false };
     desktop();
     const advanced = topRow(render());
-    expect(advanced).toMatch(/^data-sidebar-top-row="true" class="[^"]*" style="-webkit-app-region:drag;height:46px"/);
+    expect(advanced).toMatch(/^data-sidebar-top-row="true" class="[^"]*" style="-webkit-app-region:drag"/);
     expect(classesOf(advanced, "data-traffic-light-space")).toEqual(["w-[72px]", "shrink-0", "md:w-[calc(72px_-_var(--rail-beside,0px))]"]);
     expect(advanced.indexOf("data-traffic-light-space")).toBeLessThan(advanced.indexOf("data-rail-toggle"));
     fixture.advanced = false;
@@ -206,8 +156,8 @@ describe("sidebar top row", () => {
     const row = topRow(render());
     expect(row).not.toContain("bg-[#ff5f57]");
     expect(row).not.toContain("data-traffic-light-space");
-    const { spacer, buttons } = order(row);
-    expect(buttons).toBeGreaterThan(spacer);
+    const { slot, buttons } = order(row);
+    expect(buttons).toBeGreaterThan(slot);
   });
 
   it("collapses Simple mode to a rail: round search and + on top (the frame's top bar holds the lights), nothing on the edge, and Apps and the account at the foot", () => {
@@ -236,7 +186,7 @@ describe("sidebar top row", () => {
       at("data-sidebar-account"),
     ];
     expect(positions).toEqual([...positions].sort((a, b) => a - b));
-    expect(foot).toMatch(/data-tour="nav-apps" data-sidebar-nav="apps"[^>]*aria-label="Connect apps"[^>]*class="[^"]*\bsize-9\b[^"]*"><svg[^>]*lucide-puzzle/);
+    expect(foot).toMatch(/data-tour="nav-apps" data-sidebar-nav="apps"[^>]*aria-label="Apps"[^>]*class="[^"]*\bsize-9\b[^"]*"><svg[^>]*lucide-puzzle/);
     expect(foot).not.toContain("data-workspace-switcher");
     expect(foot).not.toContain('data-sidebar-nav="automations"');
     expect(foot).not.toContain('data-sidebar-nav="team-map"');
@@ -244,19 +194,6 @@ describe("sidebar top row", () => {
     expect(html.match(/aria-label="New or share"/g)).toHaveLength(1);
   });
 
-  it("stacks the icons rail unchanged and keeps the icon-only switcher beneath it", () => {
-    fixture.density = "icons";
-    fixture.windowChrome = "mac-inset";
-    desktop();
-    const html = render();
-    const row = topRow(html);
-    expect(row).not.toContain("data-workspace-switcher");
-    expect(row).not.toContain("data-sidebar-top-spacer");
-    expect(classesOf(row, "data-sidebar-top-row")).toEqual(["flex", "items-center", "flex-col", "gap-1", "px-2", "pt-3.5", "pb-1"]);
-    expect(row).not.toContain("data-traffic-light-space");
-    expect(classesOf(row, "data-sidebar-top-buttons")).toEqual(["relative", "flex", "shrink-0", "items-center", "flex-col", "gap-1"]);
-    expect(html.match(/Switch server:/g)).toHaveLength(1);
-  });
 });
 
 describe("the button that hides and shows the window's rail of places", () => {
@@ -288,7 +225,7 @@ describe("the button that hides and shows the window's rail of places", () => {
     const advanced = row();
     expect(advanced.indexOf("data-rail-toggle")).toBeGreaterThan(-1);
     expect(advanced.indexOf("data-rail-toggle")).toBeLessThan(advanced.indexOf("data-sidebar-top-slot"));
-    expect(toggle(advanced)).toMatch(/aria-label="Hide your computers" title="Hide your computers" aria-expanded="true" class="[^"]*\bsize-8\b[^"]*\brounded-full\b/);
+    expect(toggle(advanced)).toMatch(/aria-label="Hide your computers" title="Hide your computers" aria-expanded="true" class="[^"]*\bsize-9\b[^"]*\brounded-full\b/);
     expect(advanced).toMatch(/data-rail-toggle="true"[^>]*><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect[^>]*><\/rect><path d="M9 3v18"><\/path>(<circle[^>]*fill="currentColor"><\/circle>){3}<\/svg>/);
     fixture.advanced = false;
     const simple = row();
@@ -304,8 +241,8 @@ describe("the button that hides and shows the window's rail of places", () => {
     fixture.density = "icons";
     const column = render();
     expect(column.indexOf("data-rail-toggle")).toBeGreaterThan(-1);
-    expect(column.indexOf("data-rail-toggle")).toBeLessThan(column.indexOf("data-sidebar-top-buttons"));
-    expect(toggle(column)).toMatch(/class="[^"]*\bsize-\[46px\][^"]*\brounded-xl\b/);
+    expect(column.indexOf("data-rail-toggle")).toBeLessThan(column.indexOf("data-sidebar-rail-top"));
+    expect(toggle(column)).toMatch(/class="[^"]*\bsize-9\b[^"]*\brounded-full\b/);
     fixture.advanced = false;
     const rail = render();
     expect(rail.indexOf("data-rail-toggle")).toBeLessThan(rail.indexOf("data-sidebar-rail-top"));
@@ -336,15 +273,13 @@ describe("sidebar head and foot", () => {
       const search = at('aria-label="Search bots and messages"');
       const list = at('data-scroll-fade-frame=""');
       const foot = at('data-glass-bar="bottom"');
-      const automations = at('data-sidebar-nav="automations"');
-      const places = at('data-sidebar-nav="team-map"');
+      const apps = at('data-sidebar-nav="apps"');
       expect(head).toBeLessThan(topRow);
       expect(topRow).toBeLessThan(search);
       expect(search).toBeLessThan(list);
       expect(list).toBeLessThan(foot);
-      expect(foot).toBeLessThan(automations);
-      expect(automations).toBeLessThan(places);
-      expect(html.match(/data-sidebar-nav="automations"/g)).toHaveLength(1);
+      expect(foot).toBeLessThan(apps);
+      expect(html).not.toContain('data-sidebar-nav="automations"');
       expect(html.match(/data-glass-frame=""/g)).toHaveLength(1);
       expect(at("data-glass-frame")).toBeLessThan(head);
     },
@@ -352,8 +287,8 @@ describe("sidebar head and foot", () => {
 });
 
 describe("sidebar foot in Simple mode", () => {
-  it("puts the account avatar then the Connect apps pill in the foot, with Automations and Team map in the account menu", () => {
-    fixture.advanced = false;
+  it.each([false, true])("puts the account avatar, Inbox and Apps in the foot (advanced: %s)", (advanced) => {
+    fixture.advanced = advanced;
     const html = render();
     const foot = html.slice(html.indexOf('data-glass-bar="bottom"'));
     expect(foot).toContain('data-sidebar-footer="simple"');
@@ -361,17 +296,11 @@ describe("sidebar foot in Simple mode", () => {
     expect(html).not.toContain('data-sidebar-nav="team-map"');
     expect(html.match(/data-sidebar-nav="apps"/g)).toHaveLength(1);
     expect(foot.indexOf("data-sidebar-account")).toBeGreaterThan(-1);
-    expect(foot.indexOf("data-sidebar-account")).toBeLessThan(foot.indexOf('data-sidebar-nav="apps"'));
-    expect(foot).toMatch(/data-tour="nav-apps" data-sidebar-nav="apps"[^>]*>(<[^>]*>)*Connect apps</);
+    expect(html.match(/data-sidebar-inbox=/g)).toHaveLength(1);
+    expect(foot.indexOf("data-sidebar-account")).toBeLessThan(foot.indexOf("data-sidebar-inbox"));
+    expect(foot.indexOf("data-sidebar-inbox")).toBeLessThan(foot.indexOf('data-sidebar-nav="apps"'));
+    expect(foot).toMatch(/data-tour="nav-apps" data-sidebar-nav="apps"[^>]*>(<[^>]*>)*Apps</);
     expect(foot.match(/data-app-face="/g)).toHaveLength(3);
   });
 
-  it("keeps one Automations row in the foot and no Routines row in Advanced mode, and still one Apps", () => {
-    fixture.advanced = true;
-    const html = render();
-    expect(html).not.toContain('data-sidebar-nav="routines"');
-    expect(html.match(/data-sidebar-nav="automations"/g)).toHaveLength(1);
-    expect(html.indexOf('data-sidebar-nav="automations"')).toBeGreaterThan(html.indexOf('data-glass-bar="bottom"'));
-    expect(html.match(/data-sidebar-nav="apps"/g)).toHaveLength(1);
-  });
 });

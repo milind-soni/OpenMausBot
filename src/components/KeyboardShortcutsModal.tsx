@@ -96,7 +96,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
         </div>
 
         <div className="border-b border-hairline/30 px-5 py-2.5">
-          <div className="flex items-center gap-2 rounded-xl border border-hairline/40 bg-inset px-3 py-1.5 focus-within:border-focus">
+          <div className="flex items-center gap-2 rounded-xl border border-hairline/40 bg-inset px-3 py-1.5">
             <Search size={14} className="shrink-0 text-ink-secondary" />
             <input
               ref={inputRef}

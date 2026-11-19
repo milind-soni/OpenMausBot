@@ -4,16 +4,10 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import {
   SIDEBAR_MIN_WIDTH,
-  SIDEBAR_WIDTH_KEY,
-  SIMPLE_SIDEBAR_WIDTH_KEY,
   clampSidebarWidth,
   loadSidebarWidth,
   saveSidebarWidth,
 } from "@/lib/sidebar-preferences";
-
-export function sidebarDefaultWidth(simple: boolean): number {
-  return simple ? 280 : 320;
-}
 
 /** Narrower than this, the sidebar's dragged edge leaves its column of avatars; wider again, the sidebar opens. */
 export const AVATARS_BELOW = 160;
@@ -31,25 +25,18 @@ export function nextEdgeDrag(drag: EdgeDrag, wanted: number, from: number): Edge
 
 export type SidebarSizing = ReturnType<typeof useSidebarWidth>;
 
-export function useSidebarWidth({ simple, sidePanelOpen, sidebarRef }: {
-  simple: boolean;
+export function useSidebarWidth({ sidePanelOpen, sidebarRef }: {
   sidePanelOpen: boolean;
   sidebarRef: RefObject<HTMLElement | null>;
 }) {
-  const key = simple ? SIMPLE_SIDEBAR_WIDTH_KEY : SIDEBAR_WIDTH_KEY;
-  const defaultWidth = sidebarDefaultWidth(simple);
-  const cap = simple ? 400 : 480;
+  const defaultWidth = 280;
+  const cap = 400;
   const maxWidth = sidePanelOpen ? defaultWidth : Math.min(cap, window.innerWidth - 320);
-  const [savedWidth, setSavedWidth] = useState<number | null>(() => loadSidebarWidth(undefined, key));
+  const [savedWidth, setSavedWidth] = useState<number | null>(() => loadSidebarWidth());
   const widthRef = useRef(savedWidth);
   const [resizing, setResizing] = useState(false);
   const [snapping, setSnapping] = useState(false);
   const snapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    const width = loadSidebarWidth(undefined, key);
-    widthRef.current = width;
-    setSavedWidth(width);
-  }, [key]);
   useEffect(() => () => { if (snapTimer.current) clearTimeout(snapTimer.current); }, []);
   const current = () => Math.min(widthRef.current ?? defaultWidth, maxWidth);
   const resizeTo = (width: number) => {
@@ -61,7 +48,7 @@ export function useSidebarWidth({ simple, sidePanelOpen, sidebarRef }: {
   };
   const save = (width: number) => {
     setSavedWidth(width);
-    saveSidebarWidth(width, undefined, key);
+    saveSidebarWidth(width);
   };
   return {
     width: Math.min(widthRef.current ?? defaultWidth, cap),

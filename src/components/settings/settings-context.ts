@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import { appVersion } from "@/lib/app-links";
 import { pageIsThisComputer } from "@/lib/companion-bridge";
-import { skillsLibraryEnabled } from "@/lib/feature-flags";
+import { skillsLibraryEnabled, workspacesAvailable } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 export { useSettingsPlace, type PlaceKind, type SettingsPlace } from "./settings-place";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { railShown, usePlaces, type RailPlace } from "@/lib/places";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useStore } from "@/state/store";
-import { workspacesAvailable } from "../WorkspacesSection";
 import type { SettingsContext } from "./settings-index";
 
 export function useSettingsContext(): SettingsContext {

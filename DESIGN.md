@@ -307,9 +307,9 @@ on. Simple is the default for new installs.
 
 ## 14. Accessibility
 
-- **Never remove the focus ring without a replacement.** The global
-  `:focus-visible` ring uses `--color-focus`. Menu rows show focus as their
-  hover fill; text fields colour their border.
+- **Keyboard focus.** Buttons and search fields keep their resting appearance
+  in the app themes. Buttons use the system highlight in forced-colors mode.
+  Other fields can use a border in `--color-focus`.
 - **Everything works from the keyboard.** Menus move with the arrows, Home and
   End, type-ahead, Enter and Escape (`src/components/model-menu-keys.ts`,
   `src/lib/menu-keys.ts`). Tab never lands on something hidden.

@@ -26,14 +26,9 @@ export function appFaces(connected: readonly string[], cards: ReadonlyMap<string
   return [...own, ...POPULAR_APPS.filter((app) => !own.some((card) => card.slug === app.slug))].slice(0, APP_FACES);
 }
 
-interface SidebarApps {
-  faces: AppFace[];
-  connected: boolean;
-}
-
-function useSidebarApps(): SidebarApps {
+function useSidebarAppFaces(): AppFace[] {
   const { state } = useStore();
-  const [apps, setApps] = useState<SidebarApps>(() => ({ faces: appFaces([], new Map()), connected: false }));
+  const [faces, setFaces] = useState(() => appFaces([], new Map()));
   useEffect(() => {
     if (state.pluginsOpen) return;
     let alive = true;
@@ -41,12 +36,12 @@ function useSidebarApps(): SidebarApps {
       .then(async (inventory) => {
         const connected = Object.entries(inventory.services).filter(([, status]) => status.connected).map(([slug]) => slug).sort();
         const cards = connected.length > 0 ? await loadAppCards() : new Map<string, AppFace>();
-        if (alive) setApps({ faces: appFaces(connected, cards), connected: connected.length > 0 });
+        if (alive) setFaces(appFaces(connected, cards));
       })
       .catch(() => {});
     return () => { alive = false; };
   }, [state.pluginsOpen]);
-  return apps;
+  return faces;
 }
 
 function AppFaceIcon({ face, className }: { face: AppFace; className?: string }) {
@@ -54,7 +49,7 @@ function AppFaceIcon({ face, className }: { face: AppFace; className?: string })
   const [failed, setFailed] = useState(0);
   const src = sources[failed];
   return (
-    <span data-app-face={face.slug} className={cn("flex size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md p-px motion-safe:transition-colors group-hover/apps:bg-white group-focus-visible/apps:bg-white", className)}>
+    <span data-app-face={face.slug} className={cn("flex size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md p-px motion-safe:transition-colors group-hover/apps:bg-white", className)}>
       {src
         ? <img src={src} alt="" draggable={false} className="size-4 object-contain" onError={() => setFailed((count) => count + 1)} />
         : <span className="text-[10px] font-semibold leading-none text-neutral-700">{face.label.slice(0, 1).toUpperCase()}</span>}
@@ -68,8 +63,8 @@ const FAN = ["motion-safe:group-hover/apps:-translate-x-[3px] motion-safe:group-
 /** `circle` is the collapsed rail's round button. */
 export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
   const { state, dispatch } = useStore();
-  const { faces, connected } = useSidebarApps();
-  const label = connected ? t("sidebar.nav.apps") : t("sidebar.connectApps");
+  const faces = useSidebarAppFaces();
+  const label = t("sidebar.nav.apps");
   return (
     <button
       type="button"
@@ -84,7 +79,7 @@ export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
       {circle ? <Puzzle size={18} strokeWidth={1.5} aria-hidden="true" /> : <>
         <span className="min-w-0 truncate">{label}</span>
         {/* The logos rest grey and apart, with no tile, so the sidebar's loudest colour is never an ad; hover brings the tiles and colour back. */}
-        <span aria-hidden="true" data-app-faces="" className="flex shrink-0 items-center gap-1 opacity-60 grayscale motion-safe:transition-[filter,opacity] group-hover/apps:opacity-100 group-hover/apps:grayscale-0 group-hover/apps:invert-0 group-hover/apps:mix-blend-normal group-focus-visible/apps:opacity-100 group-focus-visible/apps:grayscale-0 group-focus-visible/apps:invert-0 group-focus-visible/apps:mix-blend-normal">
+        <span aria-hidden="true" data-app-faces="" className="flex shrink-0 items-center gap-1 opacity-60 grayscale motion-safe:transition-[filter,opacity] group-hover/apps:opacity-100 group-hover/apps:grayscale-0 group-hover/apps:invert-0 group-hover/apps:mix-blend-normal">
           {faces.map((face, index) => <AppFaceIcon key={face.slug} face={face}
             className={cn(faces.length > 1 && FAN[index === 0 ? 0 : index === faces.length - 1 ? 2 : 1], "motion-safe:transition-transform motion-safe:duration-150")} />)}
         </span>

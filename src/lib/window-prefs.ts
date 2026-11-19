@@ -14,7 +14,7 @@ import { requestNotificationPermission } from "./notify";
 import { choosePlaceColor } from "./place-look";
 import { setShowRunCard, showRunCard } from "./run-card-preferences";
 import { readSendKey, setSendKey } from "./send-key";
-import { loadPinnedCircles, loadSidebarToolsLayout, loadUniversalPins, setPinnedCircles, setSidebarToolsLayout, setUniversalPins } from "./sidebar-preferences";
+import { loadPinnedCircles, loadUniversalPins, setPinnedCircles, setUniversalPins } from "./sidebar-preferences";
 import { applySkinChoice, readSkinChoice } from "./skins";
 import { setShowThreads, showThreads } from "./thread-preferences";
 import { readColorUserBubbles, setColorUserBubbles } from "./user-bubble-preference";
@@ -46,7 +46,6 @@ const PREFS: { [I in WindowPrefId]: Pref<I> } = {
   "appearance.userBubbles": { read: () => readColorUserBubbles(), write: (on) => setColorUserBubbles(on) },
   "appearance.runCard": { read: () => showRunCard(), write: (on) => setShowRunCard(on) },
   "appearance.showThreads": { read: () => showThreads(), write: (on) => setShowThreads(on) },
-  "appearance.toolsLayout": { read: () => loadSidebarToolsLayout(), write: (layout) => setSidebarToolsLayout(layout) },
   "appearance.pinnedCircles": { read: () => loadPinnedCircles(), write: (on) => setPinnedCircles(on) },
   "appearance.universalPins": { read: () => loadUniversalPins(), write: (on) => setUniversalPins(on) },
   "appearance.pinnedPages": {

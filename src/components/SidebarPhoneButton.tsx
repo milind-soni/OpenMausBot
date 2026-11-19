@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
-import { Plus, Smartphone } from "lucide-react";
 
-import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { phonePairingSettingsAction } from "@/lib/phone-pairing";
-import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { companionBridge } from "@/lib/companion-bridge";
 import type { CompanionState } from "./PhoneSetupFlow";
 
@@ -109,7 +105,6 @@ export function deriveSidebarPhoneStatus(
   };
 }
 
-export const phoneSettingsAction = phonePairingSettingsAction;
 
 export function useSidebarPhoneStatus(): SidebarPhoneStatus {
   const [snapshot, setSnapshot] = useState<SidebarPhoneSnapshot | null>();
@@ -145,60 +140,4 @@ export function useSidebarPhoneStatus(): SidebarPhoneStatus {
   }, []);
 
   return deriveSidebarPhoneStatus(snapshot, Date.now());
-}
-
-export function SidebarPhoneStatusButton({
-  density,
-  status,
-  onOpen,
-}: {
-  density: SidebarDensity;
-  status: SidebarPhoneStatus;
-  onOpen: () => void;
-}) {
-  const connected = status.kind === "connected";
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title={status.label}
-      aria-label={status.label}
-      data-phone-status={status.kind}
-      data-sidebar-density={density}
-      className={cn(
-        "relative flex size-[46px] shrink-0 items-center justify-center rounded-xl hover:bg-raised",
-        density === "icons" && "mx-auto",
-        connected ? "text-success" : "text-ink-secondary hover:text-ink",
-      )}
-    >
-      <Smartphone size={18} strokeWidth={1.75} />
-      {status.kind === "unpaired" && (
-        <span
-          aria-hidden="true"
-          data-phone-plus
-          className="absolute bottom-1 right-1 flex size-3.5 items-center justify-center rounded-full border border-panel bg-panel"
-        >
-          <Plus size={10} strokeWidth={2.8} />
-        </span>
-      )}
-      {connected && (
-        <span
-          aria-hidden="true"
-          data-phone-connected
-          className="absolute bottom-1.5 right-1.5 size-1.5 rounded-full border border-panel bg-success"
-        />
-      )}
-    </button>
-  );
-}
-
-export function SidebarPhoneButton({
-  density,
-  onOpen,
-}: {
-  density: SidebarDensity;
-  onOpen: () => void;
-}) {
-  const status = useSidebarPhoneStatus();
-  return <SidebarPhoneStatusButton density={density} status={status} onOpen={onOpen} />;
 }

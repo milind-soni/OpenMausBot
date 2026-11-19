@@ -19,8 +19,6 @@ export function windowEntries(windowPref: WindowPref): SettingEntry[] {
       "Show the card that follows each run", "Hide the card that follows each run"),
     flag("appearance.showThreads", "Threads in the sidebar", "List each bot's conversations under it in the sidebar.", "layout", ["threads", "conversations", "sidebar"],
       "List each bot's threads in the sidebar", "Hide threads from the sidebar"),
-    windowPref("appearance.toolsLayout", "Sidebar tools layout", "How the sidebar shows its tools: rows, or a toolbar of icons.", "layout", ["tools layout", "toolbar", "rows"], "rows or toolbar",
-      { says: (layout: "rows" | "toolbar") => (layout === "rows" ? "Show the sidebar's tools as rows" : "Show the sidebar's tools as a toolbar of icons") }),
     flag("appearance.pinnedCircles", "Pinned bots as circles", "Pinned bots show as a row of circles at the top of the sidebar.", "layout", ["pinned", "circles", "pins"],
       "Show pinned bots as circles", "Show pinned bots as rows"),
     flag("appearance.universalPins", "Universal pins", "Pinned bots stay pinned in every place on the rail.", "layout", ["universal pins", "pins everywhere"],

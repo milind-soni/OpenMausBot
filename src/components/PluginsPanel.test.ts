@@ -264,7 +264,12 @@ describe("an answer the server was not sure about", () => {
 });
 
 describe("connected apps setup notice", () => {
-  const base = { configured: false, stale: false, remoteClient: false };
+  const base = { loading: false, configured: false, stale: false, remoteClient: false };
+
+  it("waits for loading to finish before showing a setup or outage notice", () => {
+    expect(connectorSetupNotice({ ...base, loading: true, setup: undefined })).toBeNull();
+    expect(connectorSetupNotice({ ...base, loading: true, setup: "service-unavailable" })).toBeNull();
+  });
 
   it("tells a fresh install what to do instead of reporting an outage", () => {
     expect(connectorSetupNotice({ ...base, setup: "needs-setup" })).toEqual({

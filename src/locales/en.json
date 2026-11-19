@@ -2216,7 +2216,6 @@
   "sidebar.cloudOwner": "{email}’s Cloud",
   "sidebar.search": "Search",
   "sidebar.searchAria": "Search bots and messages",
-  "sidebar.searchClose": "Close search",
   "sidebar.noMatch": "Nothing matches “{query}”",
   "sidebar.preview.waiting": "Waiting for you…",
   "sidebar.preview.waitingOnTeammate": "Waiting on a teammate…",
@@ -2399,11 +2398,11 @@
   "sidebar.archived.restoredOne": "1 bot restored",
   "sidebar.archived.restoredMany": "{count} bots restored",
   "sidebar.resize": "Resize sidebar",
-  "sidebar.toolsLayout.title": "Tools layout",
-  "sidebar.toolsLayout.subtitle": "Show Routines, Triggers, and Team map as rows or as one row of icons. As a column of avatars, the sidebar always shows icons.",
-  "sidebar.toolsLayout.rows": "Rows",
-  "sidebar.toolsLayout.toolbar": "Toolbar",
-  "sidebar.toolsLayout.chooseAria": "Choose tools layout",
+
+
+
+
+
   "sidebar.new": "New",
   "sidebar.newOrShare": "New or share",
   "sidebar.servers": "Servers",
@@ -2433,7 +2432,7 @@
   "sidebar.nav.teamMap": "Team map",
   "sidebar.nav.automations": "Automations",
   "sidebar.nav.connectedApps": "Connected apps",
-  "sidebar.connectApps": "Connect apps",
+
   "sidebar.tools": "Tools",
   "sidebar.section.expand": "Expand {name}",
   "sidebar.section.collapse": "Collapse {name}",
@@ -8185,7 +8184,7 @@
   "keys.openPage": "Open AI › Other services",
   "engineSetup.apiKey.inline": "Paste it here. It saves and checks itself, and the models show up here.",
   "commandPalette.searchLabel": "Search bots, group chats and messages",
-  "commandPalette.searchPlaceholder": "Search bots, group chats, messages…",
+  "commandPalette.searchPlaceholder": "Search Bots, Chats, Settings…",
   "secretCard.ref": "{app} keeps it for one use by its own tools. Your bot never sees it, and it is never added to chat.",
   "secretCard.email": "Kept by OpenMausBot, which signs in for your bots. They never see it.",
   "secretCard.emailResumed": "Connected. Your bot is continuing.",
@@ -8888,6 +8887,8 @@
   "palette.bots": "Bots",
   "palette.groups": "Groups",
   "palette.messages": "Messages",
+  "palette.threads": "Threads",
+  "palette.actions": "Actions",
   "remote.status.pairedOne": "1 device paired",
   "remote.status.pairedMany": "{count} devices paired",
   "companyBackup.restorePending": "An earlier restore needs recovery first.",

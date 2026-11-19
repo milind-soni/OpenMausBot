@@ -23,7 +23,7 @@ describe("chat text follows the writer's direction", () => {
     expectDirAuto("room-panel/RoomPanel.tsx", "value={bulletin.draft}");
     expectDirAuto("TaskPicker.tsx", "{localizedTaskTitle(task.title)}");
     expectDirAuto("TaskPicker.tsx", "task.threadId === bot.threadId");
-    expectDirAuto("SearchResults.tsx", "line-clamp-2");
+    expectDirAuto("CommandPalette.tsx", "block truncate text-[14px]");
 
     const quotes = source("CitationUI.tsx").match(/<pre dir="auto"[^>]*>\{citation\.quote\}/g) ?? [];
     expect(quotes).toHaveLength(2);

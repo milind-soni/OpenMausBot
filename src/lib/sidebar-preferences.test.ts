@@ -9,9 +9,7 @@ import {
   UNIVERSAL_PINS_KEY,
   SIDEBAR_COLLAPSED_SECTIONS_KEY,
   SIDEBAR_DENSITY_KEY,
-  SIDEBAR_TOOLS_LAYOUT_KEY,
-  SIDEBAR_WIDTH_KEY,
-  SIDEBAR_SECTION_ORDER_KEY,
+  SIMPLE_SIDEBAR_SECTION_ORDER_KEY,
   SIMPLE_SIDEBAR_WIDTH_KEY,
   clampSidebarWidth,
   loadPinnedCircles,
@@ -19,26 +17,21 @@ import {
   loadUniversalPins,
   loadSidebarAttentionPinned,
   loadCollapsedSections,
-  loadSectionOrder,
+  loadSimpleSectionOrder,
   loadSidebarDensity,
-  loadSidebarToolsLayout,
   loadSidebarWidth,
   parsePinnedCircles,
   parseUniversalPins,
   parseSidebarAttentionPinned,
   parseSidebarDensity,
-  parseSidebarToolsLayout,
   saveCollapsedSections,
   savePinnedCircles,
   setPinnedCircleOrder,
   saveUniversalPins,
-  saveSectionOrder,
+  saveSimpleSectionOrder,
   saveSidebarAttentionPinned,
   saveSidebarDensity,
-  saveSidebarToolsLayout,
   saveSidebarWidth,
-  setSidebarToolsLayout,
-  subscribeSidebarToolsLayout,
   toggleCollapsedSection,
   usePinnedCircleOrder,
 } from "./sidebar-preferences";
@@ -79,21 +72,11 @@ describe("sidebar width preference", () => {
   it("persists width without requiring local storage", () => {
     const setItem = vi.fn();
     saveSidebarWidth(360, { setItem });
-    expect(setItem).toHaveBeenCalledWith(SIDEBAR_WIDTH_KEY, "360");
+    expect(setItem).toHaveBeenCalledWith(SIMPLE_SIDEBAR_WIDTH_KEY, "360");
     expect(loadSidebarWidth({ getItem: () => { throw new Error("blocked"); } })).toBeNull();
     expect(() => saveSidebarWidth(360, { setItem: () => { throw new Error("blocked"); } })).not.toThrow();
   });
 
-  it("keeps Simple mode's width under its own key, so resizing one mode leaves the other alone", () => {
-    const setItem = vi.fn();
-    saveSidebarWidth(300, { setItem }, SIMPLE_SIDEBAR_WIDTH_KEY);
-    expect(setItem).toHaveBeenCalledExactlyOnceWith(SIMPLE_SIDEBAR_WIDTH_KEY, "300");
-    const saved: Record<string, string> = { [SIDEBAR_WIDTH_KEY]: "360", [SIMPLE_SIDEBAR_WIDTH_KEY]: "300" };
-    const storage = { getItem: (key: string) => saved[key] ?? null };
-    expect(loadSidebarWidth(storage)).toBe(360);
-    expect(loadSidebarWidth(storage, SIMPLE_SIDEBAR_WIDTH_KEY)).toBe(300);
-    expect(loadSidebarWidth({ getItem: (key) => key === SIDEBAR_WIDTH_KEY ? "360" : null }, SIMPLE_SIDEBAR_WIDTH_KEY)).toBeNull();
-  });
 });
 
 describe("sidebar section preferences", () => {
@@ -113,20 +96,33 @@ describe("sidebar section preferences", () => {
     ).toEqual(["builtin:pinned", "section:Work"]);
 
     const orderSet = vi.fn();
-    saveSectionOrder(["section:Work", "builtin:bots"], { setItem: orderSet });
+    saveSimpleSectionOrder(["section:Work", "builtin:bots"], { setItem: orderSet });
     expect(orderSet).toHaveBeenCalledWith(
-      SIDEBAR_SECTION_ORDER_KEY,
+      SIMPLE_SIDEBAR_SECTION_ORDER_KEY,
       JSON.stringify(["section:Work", "builtin:bots"]),
     );
-    expect(loadSectionOrder({ getItem: () => JSON.stringify(["section:Work", "builtin:bots"]) })).toEqual([
+    expect(loadSimpleSectionOrder({ getItem: () => JSON.stringify(["section:Work", "builtin:bots"]) })).toEqual([
       "section:Work",
       "builtin:bots",
     ]);
   });
 
+  it("uses the old Advanced section order until the unified order is saved", () => {
+    const legacy = JSON.stringify(["section:Work", "builtin:bots"]);
+    let unified: string | null = null;
+    const storage = {
+      getItem: (key: string) => key === "openmausbot.sidebarSectionOrder.v1" ? legacy : unified,
+      setItem: (_key: string, value: string) => { unified = value; },
+    };
+
+    expect(loadSimpleSectionOrder(storage)).toEqual(["section:Work", "builtin:bots"]);
+    saveSimpleSectionOrder(["builtin:bots", "section:Work"], storage);
+    expect(loadSimpleSectionOrder(storage)).toEqual(["builtin:bots", "section:Work"]);
+  });
+
   it("ignores malformed storage and toggles ids without mutating the source", () => {
     expect(loadCollapsedSections({ getItem: () => "not-json" })).toEqual([]);
-    expect(loadSectionOrder({ getItem: () => JSON.stringify({ nope: true }) })).toEqual([]);
+    expect(loadSimpleSectionOrder({ getItem: () => JSON.stringify({ nope: true }) })).toEqual([]);
     const current = ["section:Work"];
     expect(toggleCollapsedSection(current, "builtin:bots")).toEqual([
       "section:Work",
@@ -138,12 +134,12 @@ describe("sidebar section preferences", () => {
 
   it("supports newlines, caps untrusted arrays, and tolerates blocked storage", () => {
     const withNewline = "section:Line\nBreak";
-    expect(loadSectionOrder({ getItem: () => JSON.stringify([withNewline]) })).toEqual([withNewline]);
+    expect(loadSimpleSectionOrder({ getItem: () => JSON.stringify([withNewline]) })).toEqual([withNewline]);
 
     const oversized = Array.from({ length: 105 }, (_, index) => `section:${index}`);
-    expect(loadSectionOrder({ getItem: () => JSON.stringify(oversized) })).toHaveLength(100);
-    expect(loadSectionOrder({ getItem: () => { throw new Error("blocked"); } })).toEqual([]);
-    expect(() => saveSectionOrder(["section:Work"], { setItem: () => { throw new Error("blocked"); } })).not.toThrow();
+    expect(loadSimpleSectionOrder({ getItem: () => JSON.stringify(oversized) })).toHaveLength(100);
+    expect(loadSimpleSectionOrder({ getItem: () => { throw new Error("blocked"); } })).toEqual([]);
+    expect(() => saveSimpleSectionOrder(["section:Work"], { setItem: () => { throw new Error("blocked"); } })).not.toThrow();
   });
 
   it("persists raw section ids with lone surrogates and max-length emoji names", () => {
@@ -154,8 +150,8 @@ describe("sidebar section preferences", () => {
       setItem: (key: string, value: string) => values.set(key, value),
     };
 
-    saveSectionOrder(ids, storage);
-    expect(loadSectionOrder(storage)).toEqual(ids);
+    saveSimpleSectionOrder(ids, storage);
+    expect(loadSimpleSectionOrder(storage)).toEqual(ids);
   });
 });
 
@@ -232,45 +228,5 @@ describe("sidebar attention pin preference", () => {
     expect(loadSidebarAttentionPinned({ getItem: () => "true" })).toBe(true);
     expect(loadSidebarAttentionPinned({ getItem: () => "untrusted" })).toBe(false);
     expect(loadSidebarAttentionPinned({ getItem: () => { throw new Error("blocked"); } })).toBe(false);
-  });
-});
-
-describe("sidebar tools layout preference", () => {
-  it("tools layout defaults to rows and ignores malformed values", () => {
-    expect(parseSidebarToolsLayout("rows")).toBe("rows");
-    expect(parseSidebarToolsLayout("toolbar")).toBe("toolbar");
-    expect(parseSidebarToolsLayout("icons")).toBe("rows");
-    expect(parseSidebarToolsLayout("")).toBe("rows");
-    expect(parseSidebarToolsLayout(null)).toBe("rows");
-    expect(loadSidebarToolsLayout({ getItem: () => null })).toBe("rows");
-    expect(loadSidebarToolsLayout({ getItem: () => "menu" })).toBe("rows");
-    expect(loadSidebarToolsLayout({ getItem: () => { throw new Error("blocked"); } })).toBe("rows");
-
-    const setItem = vi.fn();
-    saveSidebarToolsLayout("toolbar", { setItem });
-    expect(setItem).toHaveBeenCalledWith(SIDEBAR_TOOLS_LAYOUT_KEY, "toolbar");
-    expect(loadSidebarToolsLayout({ getItem: (key) => (key === SIDEBAR_TOOLS_LAYOUT_KEY ? "toolbar" : null) })).toBe("toolbar");
-  });
-
-  it("setSidebarToolsLayout notifies subscribers and persists", () => {
-    const values = new Map<string, string>();
-    vi.stubGlobal("localStorage", {
-      getItem: (key: string) => values.get(key) ?? null,
-      setItem: (key: string, value: string) => void values.set(key, value),
-    });
-    const listener = vi.fn();
-    const unsubscribe = subscribeSidebarToolsLayout(listener);
-    try {
-      setSidebarToolsLayout("toolbar");
-      expect(listener).toHaveBeenCalledOnce();
-      expect(values.get(SIDEBAR_TOOLS_LAYOUT_KEY)).toBe("toolbar");
-      expect(loadSidebarToolsLayout()).toBe("toolbar");
-      setSidebarToolsLayout("rows");
-      expect(listener).toHaveBeenCalledTimes(2);
-      expect(values.get(SIDEBAR_TOOLS_LAYOUT_KEY)).toBe("rows");
-    } finally {
-      unsubscribe();
-      vi.unstubAllGlobals();
-    }
   });
 });

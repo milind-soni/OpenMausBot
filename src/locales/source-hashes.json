@@ -5201,11 +5201,11 @@
       "sidebar.archived.restoredOne": "e6fc1c203590c494c92c156d8130944502e804b026e10f00c3c7e548b1441fd1",
       "sidebar.archived.restoredMany": "df4d6a1f363c5b3a2ca3900bb237162053bc0b2bcc7de02b9c27cf0d13f7d78f",
       "sidebar.resize": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
-      "sidebar.toolsLayout.title": "97ca469aeb684fb6921b90467c04fb280aeb2cb4366faf13cc0da18ba5f04ad8",
-      "sidebar.toolsLayout.subtitle": "76c35881d901bc1359db31db30ec03d8edc0c926bac03111c64c82162374e53b",
-      "sidebar.toolsLayout.rows": "101f2ff3de22441fcab3e15ca0b09ac3428642cf628558f16fa404fc3137baea",
-      "sidebar.toolsLayout.toolbar": "451aa51a0fb5068da31b9bffbc63163d44e746af7b0ee37fa8f305f6e96f198c",
-      "sidebar.toolsLayout.chooseAria": "819fc5c0ce4defdf0dd58f419bc347f222b838710ea7f90e0d55071570e9de55",
+
+
+
+
+
       "sidebar.new": "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359",
       "sidebar.newOrShare": "d23251995ae60ba74b1e2d4de121199d7fc03aedd857c9cc567a350f98e13bcd",
       "sidebar.servers": "68d7beb6df59ee85bc11a6679c29ac3e6aab738833c6871c6df29ae0246d5d98",
@@ -19206,7 +19206,6 @@
       "sidebar.cloudOwner": "cf0b488f17ab085eb88d7f47eb3fe34f742298aeb359f4e771b38001d50a0fcb",
       "sidebar.search": "49c266baaaa70981ea188fa714d5c40cf13830d786a861c9943ae0d26a7f3fe9",
       "sidebar.searchAria": "71468c6a111dcb536d73c3a5dbf90cd78c31371e3139d180b59ebd0050ec2acf",
-      "sidebar.searchClose": "55656b5e434f4c069877f0c12174a14e67ef9619d30e796834b1216a03d9f677",
       "sidebar.noMatch": "5bb5e3f3f8eaec582b5d4972b1a1007e7c7704cf3c2f998524b473ac56f29eb9",
       "sidebar.preview.waiting": "3df1d52ccc2543a1a9baf123d11ebffea62659924e477be09cfec067c593652a",
       "sidebar.preview.waitingOnTeammate": "7b23fdce858e5972dca42cc31b29d48a8f40046bcf701e99b7fec5719c988663",
@@ -19298,11 +19297,11 @@
       "sidebar.archived.restoredOne": "e6fc1c203590c494c92c156d8130944502e804b026e10f00c3c7e548b1441fd1",
       "sidebar.archived.restoredMany": "df4d6a1f363c5b3a2ca3900bb237162053bc0b2bcc7de02b9c27cf0d13f7d78f",
       "sidebar.resize": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
-      "sidebar.toolsLayout.title": "97ca469aeb684fb6921b90467c04fb280aeb2cb4366faf13cc0da18ba5f04ad8",
-      "sidebar.toolsLayout.subtitle": "76c35881d901bc1359db31db30ec03d8edc0c926bac03111c64c82162374e53b",
-      "sidebar.toolsLayout.rows": "101f2ff3de22441fcab3e15ca0b09ac3428642cf628558f16fa404fc3137baea",
-      "sidebar.toolsLayout.toolbar": "451aa51a0fb5068da31b9bffbc63163d44e746af7b0ee37fa8f305f6e96f198c",
-      "sidebar.toolsLayout.chooseAria": "819fc5c0ce4defdf0dd58f419bc347f222b838710ea7f90e0d55071570e9de55",
+
+
+
+
+
       "sidebar.new": "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359",
       "sidebar.newOrShare": "d23251995ae60ba74b1e2d4de121199d7fc03aedd857c9cc567a350f98e13bcd",
       "sidebar.servers": "68d7beb6df59ee85bc11a6679c29ac3e6aab738833c6871c6df29ae0246d5d98",
@@ -24543,7 +24542,7 @@
       "sidebar.confirm.deleteChiefBody": "ee898e492ada0531c7e24505cc62560fb5721ff73f987b340f1d6d3736bda574",
       "sidebar.confirm.archiveInstead": "81e3bbaf7e53fafb995b29ffb00ca5bfa841b9e6eca7e7bccec1c932bc336c09",
       "sidebar.newBotSimple": "b88293aa253c9d4f06225b3c5c226dfcbf0d50301252e00a44ba66acc1574c72",
-      "sidebar.connectApps": "02903f49f6f5124626cab7d5ed840cb122e9c507739c9b72e279a10846ddec1b",
+
       "sidebar.account.automationsNeedYou": "e784768dbe270a506401e3cdc47416ee3ccecd1717d5d5d18921d34afd8033b1",
       "sidebar.account.moveNeedsYou": "3eafe758028c4d065aee750033cfda7e1d759ac48ca3d92b7dab651f35eed078",
       "sidebar.account.moveAndAutomationsNeedYou": "cc7c3f2585c5d3e3556769bd1d1d4844aedf24070ffcae4ab54ba3d49cf2e1dd",
@@ -25144,7 +25143,7 @@
       "keys.openPage": "c28a2d35c0f1689f7ff77b966a7cdcacc14b53573965fffb0e9ac0d6f1cb49cd",
       "engineSetup.apiKey.inline": "d74b7505cc920d6ebd7e9db00bd9afbde65a3026f7ddc6a4d5b3d357841ef10b",
       "commandPalette.searchLabel": "70103fea3e19a870f2c2717d260c07c462c5685540326ec81571dc44f3e68f04",
-      "commandPalette.searchPlaceholder": "6fb0c4af564362404ea3ad3041a23eecf20cc5c32cd9967e92220da4a6432a07",
+      "commandPalette.searchPlaceholder": "d65b583c34ae7f02bca2408a15252e773396d9191549853a54b8a3f368e7d6eb",
       "grokMove.intro": "d0eb9ec5dcbcddcfa9fda92dc91ce957af6e01fa9c9cafcff5ad259d96962aaa",
       "grokMove.step1": "3d81b4e9522b70ea77df7bfede6dcd25d582d64c43aaacbc992297f14a13339a",
       "grokMove.step1Hint": "32a6ed07617bba20e33ca5b94054484f2bc993c4d39e6f118e01e7ff72c0da1b",
@@ -27739,7 +27738,6 @@
       "sidebar.cloudOwner": "cf0b488f17ab085eb88d7f47eb3fe34f742298aeb359f4e771b38001d50a0fcb",
       "sidebar.search": "49c266baaaa70981ea188fa714d5c40cf13830d786a861c9943ae0d26a7f3fe9",
       "sidebar.searchAria": "71468c6a111dcb536d73c3a5dbf90cd78c31371e3139d180b59ebd0050ec2acf",
-      "sidebar.searchClose": "55656b5e434f4c069877f0c12174a14e67ef9619d30e796834b1216a03d9f677",
       "sidebar.noMatch": "5bb5e3f3f8eaec582b5d4972b1a1007e7c7704cf3c2f998524b473ac56f29eb9",
       "sidebar.preview.waiting": "3df1d52ccc2543a1a9baf123d11ebffea62659924e477be09cfec067c593652a",
       "sidebar.preview.failed": "213bff15eaf6048215a9f4732b2bce9b6edc2041470139400d7eb11bfaf8e7e4",
@@ -27911,11 +27909,11 @@
       "sidebar.archived.restoredOne": "e6fc1c203590c494c92c156d8130944502e804b026e10f00c3c7e548b1441fd1",
       "sidebar.archived.restoredMany": "df4d6a1f363c5b3a2ca3900bb237162053bc0b2bcc7de02b9c27cf0d13f7d78f",
       "sidebar.resize": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
-      "sidebar.toolsLayout.title": "97ca469aeb684fb6921b90467c04fb280aeb2cb4366faf13cc0da18ba5f04ad8",
-      "sidebar.toolsLayout.subtitle": "76c35881d901bc1359db31db30ec03d8edc0c926bac03111c64c82162374e53b",
-      "sidebar.toolsLayout.rows": "101f2ff3de22441fcab3e15ca0b09ac3428642cf628558f16fa404fc3137baea",
-      "sidebar.toolsLayout.toolbar": "451aa51a0fb5068da31b9bffbc63163d44e746af7b0ee37fa8f305f6e96f198c",
-      "sidebar.toolsLayout.chooseAria": "819fc5c0ce4defdf0dd58f419bc347f222b838710ea7f90e0d55071570e9de55",
+
+
+
+
+
       "sidebar.new": "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359",
       "sidebar.newOrShare": "d23251995ae60ba74b1e2d4de121199d7fc03aedd857c9cc567a350f98e13bcd",
       "sidebar.servers": "68d7beb6df59ee85bc11a6679c29ac3e6aab738833c6871c6df29ae0246d5d98",
@@ -27945,7 +27943,7 @@
       "sidebar.nav.teamMap": "ecce91f39e576f6b52bd78cede9b300a31da0cc759ffa286c52c761b92d8c089",
       "sidebar.nav.automations": "ad1fb9ec0cb3c7a4747e4c161c83af164f3f49b2b88ed79f26c2af640a7af57e",
       "sidebar.nav.connectedApps": "c023d120dd17bd620b5eec0f3e322f28243ca9b144ff678d38d0f6056a9d028e",
-      "sidebar.connectApps": "02903f49f6f5124626cab7d5ed840cb122e9c507739c9b72e279a10846ddec1b",
+
       "sidebar.tools": "ea93d6a262ecb87a9fa4d09edbd7654c046597936a8e235fc3949eb01775ff99",
       "sidebar.section.expand": "d386e9414ed2f5eeee998a520fccfaa678259bd94fbd98a7a028d2c2e9726085",
       "sidebar.section.collapse": "19f25826b84b030c2c08c3166fe344167a98e50cc672a669aa5a86397d1f7cae",
@@ -32745,7 +32743,7 @@
       "keys.openPage": "c28a2d35c0f1689f7ff77b966a7cdcacc14b53573965fffb0e9ac0d6f1cb49cd",
       "engineSetup.apiKey.inline": "d74b7505cc920d6ebd7e9db00bd9afbde65a3026f7ddc6a4d5b3d357841ef10b",
       "commandPalette.searchLabel": "70103fea3e19a870f2c2717d260c07c462c5685540326ec81571dc44f3e68f04",
-      "commandPalette.searchPlaceholder": "6fb0c4af564362404ea3ad3041a23eecf20cc5c32cd9967e92220da4a6432a07",
+      "commandPalette.searchPlaceholder": "d65b583c34ae7f02bca2408a15252e773396d9191549853a54b8a3f368e7d6eb",
       "keys.treg.placeholder": "441e353d0a61e8b6ab6b25463647f59a2d1832f22ad9fefe2829eca3bc9f631b",
       "keys.postiz.placeholder": "56b1a7228075ecbabf95ce87f5df31020cb8a644ce910e545e7eec315cb818d3",
       "keys.treg.desc": "3e3093e72c76c0a164b68143996c86d4d29cf250369189f2b97791c707d23fd9",
@@ -41404,7 +41402,6 @@
       "team.memory": "1c06ef3a2de3221f7e708a9a23e806197e11e3e4e0892cfcd407d94c5240aba1",
       "team.memoryFor": "19380a8b41322811bab04c560ec584ca43c18d2bbceee394d61c88ca6fd49dba",
       "sidebar.cloudOwner": "cf0b488f17ab085eb88d7f47eb3fe34f742298aeb359f4e771b38001d50a0fcb",
-      "sidebar.searchClose": "55656b5e434f4c069877f0c12174a14e67ef9619d30e796834b1216a03d9f677",
       "sidebar.preview.botWorkingQueued": "cb96607f752fbe7cdaaa535f0cefd3676a2ca9ff64a7f8f77b00aa97089cbae2",
       "sidebar.room.deleteConfirmTitle": "a4b982a9e0bc24133bce18717f9db74bd70095b79c24ee45c57a8194fb727d4d",
       "sidebar.room.deleteChannelBody": "b3fe05aad0a2dd200695caf6241726f73e7c6f55f9dab2d8aa86e5ed7b6f1a7b",
@@ -41424,11 +41421,11 @@
       "sidebar.confirm.deleteChiefBody": "ee898e492ada0531c7e24505cc62560fb5721ff73f987b340f1d6d3736bda574",
       "sidebar.confirm.archiveInstead": "81e3bbaf7e53fafb995b29ffb00ca5bfa841b9e6eca7e7bccec1c932bc336c09",
       "sidebar.resize": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
-      "sidebar.toolsLayout.title": "97ca469aeb684fb6921b90467c04fb280aeb2cb4366faf13cc0da18ba5f04ad8",
-      "sidebar.toolsLayout.subtitle": "76c35881d901bc1359db31db30ec03d8edc0c926bac03111c64c82162374e53b",
-      "sidebar.toolsLayout.rows": "101f2ff3de22441fcab3e15ca0b09ac3428642cf628558f16fa404fc3137baea",
-      "sidebar.toolsLayout.toolbar": "451aa51a0fb5068da31b9bffbc63163d44e746af7b0ee37fa8f305f6e96f198c",
-      "sidebar.toolsLayout.chooseAria": "819fc5c0ce4defdf0dd58f419bc347f222b838710ea7f90e0d55071570e9de55",
+
+
+
+
+
       "sidebar.servers": "68d7beb6df59ee85bc11a6679c29ac3e6aab738833c6871c6df29ae0246d5d98",
       "sidebar.switchServer": "1c7057c76ebd42cee1ad08ca5126ae029566b1131aa0c61433ae5fa573cd759d",
       "sidebar.switchServerError": "a8ee1ec65d30a29574343cedbd9d5fa28a90d3d80e6879d1426122925a9d8e12",
@@ -41442,7 +41439,7 @@
       "sidebar.newChat.open": "ed077f3d8125d60dca1979c7133601bd187d47c73ed9975028f677e49e709942",
       "sidebar.newChat.noMatch": "fde1b68b2ab83683c7f333051f7b016a382233c5ce88366a70d77f49183f1cf6",
       "sidebar.presetsImported": "d5e328eaaa390ca37b6b5fbc36e8fc99f08bf473fe264bf33d49784655a87bfd",
-      "sidebar.connectApps": "02903f49f6f5124626cab7d5ed840cb122e9c507739c9b72e279a10846ddec1b",
+
       "sidebar.section.deleteAria": "4b22ec781cf65346917ba78acfe0e86344699d7001926a3d0fe5b0a4ac2cd3d6",
       "sidebar.account.automationsNeedYou": "e784768dbe270a506401e3cdc47416ee3ccecd1717d5d5d18921d34afd8033b1",
       "sidebar.account.moveNeedsYou": "3eafe758028c4d065aee750033cfda7e1d759ac48ca3d92b7dab651f35eed078",
@@ -44031,7 +44028,7 @@
       "keys.openPage": "c28a2d35c0f1689f7ff77b966a7cdcacc14b53573965fffb0e9ac0d6f1cb49cd",
       "engineSetup.apiKey.inline": "d74b7505cc920d6ebd7e9db00bd9afbde65a3026f7ddc6a4d5b3d357841ef10b",
       "commandPalette.searchLabel": "70103fea3e19a870f2c2717d260c07c462c5685540326ec81571dc44f3e68f04",
-      "commandPalette.searchPlaceholder": "6fb0c4af564362404ea3ad3041a23eecf20cc5c32cd9967e92220da4a6432a07",
+      "commandPalette.searchPlaceholder": "d65b583c34ae7f02bca2408a15252e773396d9191549853a54b8a3f368e7d6eb",
       "botAccess.overview.byBot": "7634a914aaa0d3c0b4bf4deadefe6e55610930c079e075740035373d142f4d51",
       "botAccess.overview.byPerson": "195e76d9f5cb5d35c413afb2591b5718ccf30c617a2c9736a1e72191f7b8ff2d",
       "botAccess.overview.listBy": "bcbce3ab8d1d61cf4c3dc2e00650d570ee11df0a73a224509c59f705ba2ba297",
@@ -52619,7 +52616,6 @@
       "orgLibrary.newerRelease": "7cb155a99f6bd1d7e1e31fc67eba70046225ae30c426c1a036f3a1d191e9fe23",
       "team.memory": "1c06ef3a2de3221f7e708a9a23e806197e11e3e4e0892cfcd407d94c5240aba1",
       "team.memoryFor": "19380a8b41322811bab04c560ec584ca43c18d2bbceee394d61c88ca6fd49dba",
-      "sidebar.searchClose": "55656b5e434f4c069877f0c12174a14e67ef9619d30e796834b1216a03d9f677",
       "sidebar.preview.botWorkingQueued": "cb96607f752fbe7cdaaa535f0cefd3676a2ca9ff64a7f8f77b00aa97089cbae2",
       "sidebar.newChannel.nameLabel": "61333ac958721d504c0fab9c771b9434785f76712b46e7e5a9b3882c620527a3",
       "sidebar.bot.chiefAdminOnly": "8645573c74dd636138380aed4f6226b7a1264fc3eecbfbd8e7985212729e8855",
@@ -52658,11 +52654,11 @@
       "sidebar.bot.simple.isMainThread": "d08c46ce9415577a344e97ec11af140592767ad9f8c9abcfb6dedd933e6ee649",
       "sidebar.confirm.deleteChiefBody": "ee898e492ada0531c7e24505cc62560fb5721ff73f987b340f1d6d3736bda574",
       "sidebar.confirm.archiveInstead": "81e3bbaf7e53fafb995b29ffb00ca5bfa841b9e6eca7e7bccec1c932bc336c09",
-      "sidebar.toolsLayout.title": "97ca469aeb684fb6921b90467c04fb280aeb2cb4366faf13cc0da18ba5f04ad8",
-      "sidebar.toolsLayout.subtitle": "76c35881d901bc1359db31db30ec03d8edc0c926bac03111c64c82162374e53b",
-      "sidebar.toolsLayout.rows": "101f2ff3de22441fcab3e15ca0b09ac3428642cf628558f16fa404fc3137baea",
-      "sidebar.toolsLayout.toolbar": "451aa51a0fb5068da31b9bffbc63163d44e746af7b0ee37fa8f305f6e96f198c",
-      "sidebar.toolsLayout.chooseAria": "819fc5c0ce4defdf0dd58f419bc347f222b838710ea7f90e0d55071570e9de55",
+
+
+
+
+
       "sidebar.servers": "68d7beb6df59ee85bc11a6679c29ac3e6aab738833c6871c6df29ae0246d5d98",
       "sidebar.switchServer": "1c7057c76ebd42cee1ad08ca5126ae029566b1131aa0c61433ae5fa573cd759d",
       "sidebar.switchServerError": "a8ee1ec65d30a29574343cedbd9d5fa28a90d3d80e6879d1426122925a9d8e12",
@@ -52675,7 +52671,7 @@
       "sidebar.newChat.start": "db18382a249e0206bc28514931d423b77d55dce180c1eb8e4bf35f861c9a50ec",
       "sidebar.newChat.open": "ed077f3d8125d60dca1979c7133601bd187d47c73ed9975028f677e49e709942",
       "sidebar.newChat.noMatch": "fde1b68b2ab83683c7f333051f7b016a382233c5ce88366a70d77f49183f1cf6",
-      "sidebar.connectApps": "02903f49f6f5124626cab7d5ed840cb122e9c507739c9b72e279a10846ddec1b",
+
       "sidebar.account.automationsNeedYou": "e784768dbe270a506401e3cdc47416ee3ccecd1717d5d5d18921d34afd8033b1",
       "sidebar.account.moveNeedsYou": "3eafe758028c4d065aee750033cfda7e1d759ac48ca3d92b7dab651f35eed078",
       "sidebar.account.moveAndAutomationsNeedYou": "cc7c3f2585c5d3e3556769bd1d1d4844aedf24070ffcae4ab54ba3d49cf2e1dd",
@@ -54723,7 +54719,7 @@
       "keys.openPage": "c28a2d35c0f1689f7ff77b966a7cdcacc14b53573965fffb0e9ac0d6f1cb49cd",
       "engineSetup.apiKey.inline": "d74b7505cc920d6ebd7e9db00bd9afbde65a3026f7ddc6a4d5b3d357841ef10b",
       "commandPalette.searchLabel": "70103fea3e19a870f2c2717d260c07c462c5685540326ec81571dc44f3e68f04",
-      "commandPalette.searchPlaceholder": "6fb0c4af564362404ea3ad3041a23eecf20cc5c32cd9967e92220da4a6432a07",
+      "commandPalette.searchPlaceholder": "d65b583c34ae7f02bca2408a15252e773396d9191549853a54b8a3f368e7d6eb",
       "secretCard.email": "75123efc9fcad6bc8ad047a02ffa6fdeacc0d5bd4c22b89f8f4f2a9adcc1ca9e",
       "secretCard.emailResumed": "b9b3fbae20bd2f3b8c78a497fc708ffe6151056803c182e343d214ecbf39d720",
       "grokMove.intro": "d0eb9ec5dcbcddcfa9fda92dc91ce957af6e01fa9c9cafcff5ad259d96962aaa",
@@ -62488,11 +62484,11 @@
       "sidebar.archived.restoredOne": "e6fc1c203590c494c92c156d8130944502e804b026e10f00c3c7e548b1441fd1",
       "sidebar.archived.restoredMany": "df4d6a1f363c5b3a2ca3900bb237162053bc0b2bcc7de02b9c27cf0d13f7d78f",
       "sidebar.resize": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
-      "sidebar.toolsLayout.title": "97ca469aeb684fb6921b90467c04fb280aeb2cb4366faf13cc0da18ba5f04ad8",
-      "sidebar.toolsLayout.subtitle": "76c35881d901bc1359db31db30ec03d8edc0c926bac03111c64c82162374e53b",
-      "sidebar.toolsLayout.rows": "101f2ff3de22441fcab3e15ca0b09ac3428642cf628558f16fa404fc3137baea",
-      "sidebar.toolsLayout.toolbar": "451aa51a0fb5068da31b9bffbc63163d44e746af7b0ee37fa8f305f6e96f198c",
-      "sidebar.toolsLayout.chooseAria": "819fc5c0ce4defdf0dd58f419bc347f222b838710ea7f90e0d55071570e9de55",
+
+
+
+
+
       "sidebar.new": "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359",
       "sidebar.newOrShare": "d23251995ae60ba74b1e2d4de121199d7fc03aedd857c9cc567a350f98e13bcd",
       "sidebar.servers": "68d7beb6df59ee85bc11a6679c29ac3e6aab738833c6871c6df29ae0246d5d98",
@@ -68409,11 +68405,11 @@
       "sidebar.archived.restoredOne": "e6fc1c203590c494c92c156d8130944502e804b026e10f00c3c7e548b1441fd1",
       "sidebar.archived.restoredMany": "df4d6a1f363c5b3a2ca3900bb237162053bc0b2bcc7de02b9c27cf0d13f7d78f",
       "sidebar.resize": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
-      "sidebar.toolsLayout.title": "97ca469aeb684fb6921b90467c04fb280aeb2cb4366faf13cc0da18ba5f04ad8",
-      "sidebar.toolsLayout.subtitle": "76c35881d901bc1359db31db30ec03d8edc0c926bac03111c64c82162374e53b",
-      "sidebar.toolsLayout.rows": "101f2ff3de22441fcab3e15ca0b09ac3428642cf628558f16fa404fc3137baea",
-      "sidebar.toolsLayout.toolbar": "451aa51a0fb5068da31b9bffbc63163d44e746af7b0ee37fa8f305f6e96f198c",
-      "sidebar.toolsLayout.chooseAria": "819fc5c0ce4defdf0dd58f419bc347f222b838710ea7f90e0d55071570e9de55",
+
+
+
+
+
       "sidebar.new": "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359",
       "sidebar.newOrShare": "d23251995ae60ba74b1e2d4de121199d7fc03aedd857c9cc567a350f98e13bcd",
       "sidebar.servers": "68d7beb6df59ee85bc11a6679c29ac3e6aab738833c6871c6df29ae0246d5d98",
@@ -74589,7 +74585,6 @@
       "sidebar.cloudOwner": "cf0b488f17ab085eb88d7f47eb3fe34f742298aeb359f4e771b38001d50a0fcb",
       "sidebar.search": "49c266baaaa70981ea188fa714d5c40cf13830d786a861c9943ae0d26a7f3fe9",
       "sidebar.searchAria": "71468c6a111dcb536d73c3a5dbf90cd78c31371e3139d180b59ebd0050ec2acf",
-      "sidebar.searchClose": "55656b5e434f4c069877f0c12174a14e67ef9619d30e796834b1216a03d9f677",
       "sidebar.noMatch": "5bb5e3f3f8eaec582b5d4972b1a1007e7c7704cf3c2f998524b473ac56f29eb9",
       "sidebar.preview.waiting": "3df1d52ccc2543a1a9baf123d11ebffea62659924e477be09cfec067c593652a",
       "sidebar.preview.waitingOnTeammate": "7b23fdce858e5972dca42cc31b29d48a8f40046bcf701e99b7fec5719c988663",
@@ -74673,11 +74668,11 @@
       "sidebar.archived.restoredOne": "e6fc1c203590c494c92c156d8130944502e804b026e10f00c3c7e548b1441fd1",
       "sidebar.archived.restoredMany": "df4d6a1f363c5b3a2ca3900bb237162053bc0b2bcc7de02b9c27cf0d13f7d78f",
       "sidebar.resize": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
-      "sidebar.toolsLayout.title": "97ca469aeb684fb6921b90467c04fb280aeb2cb4366faf13cc0da18ba5f04ad8",
-      "sidebar.toolsLayout.subtitle": "76c35881d901bc1359db31db30ec03d8edc0c926bac03111c64c82162374e53b",
-      "sidebar.toolsLayout.rows": "101f2ff3de22441fcab3e15ca0b09ac3428642cf628558f16fa404fc3137baea",
-      "sidebar.toolsLayout.toolbar": "451aa51a0fb5068da31b9bffbc63163d44e746af7b0ee37fa8f305f6e96f198c",
-      "sidebar.toolsLayout.chooseAria": "819fc5c0ce4defdf0dd58f419bc347f222b838710ea7f90e0d55071570e9de55",
+
+
+
+
+
       "sidebar.new": "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359",
       "sidebar.newOrShare": "d23251995ae60ba74b1e2d4de121199d7fc03aedd857c9cc567a350f98e13bcd",
       "sidebar.servers": "68d7beb6df59ee85bc11a6679c29ac3e6aab738833c6871c6df29ae0246d5d98",
@@ -81721,7 +81716,6 @@
       "sidebar.cloudOwner": "cf0b488f17ab085eb88d7f47eb3fe34f742298aeb359f4e771b38001d50a0fcb",
       "sidebar.search": "49c266baaaa70981ea188fa714d5c40cf13830d786a861c9943ae0d26a7f3fe9",
       "sidebar.searchAria": "71468c6a111dcb536d73c3a5dbf90cd78c31371e3139d180b59ebd0050ec2acf",
-      "sidebar.searchClose": "55656b5e434f4c069877f0c12174a14e67ef9619d30e796834b1216a03d9f677",
       "sidebar.noMatch": "5bb5e3f3f8eaec582b5d4972b1a1007e7c7704cf3c2f998524b473ac56f29eb9",
       "sidebar.preview.waiting": "3df1d52ccc2543a1a9baf123d11ebffea62659924e477be09cfec067c593652a",
       "sidebar.preview.waitingOnTeammate": "7b23fdce858e5972dca42cc31b29d48a8f40046bcf701e99b7fec5719c988663",
@@ -81816,11 +81810,11 @@
       "sidebar.archived.restoredOne": "e6fc1c203590c494c92c156d8130944502e804b026e10f00c3c7e548b1441fd1",
       "sidebar.archived.restoredMany": "df4d6a1f363c5b3a2ca3900bb237162053bc0b2bcc7de02b9c27cf0d13f7d78f",
       "sidebar.resize": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
-      "sidebar.toolsLayout.title": "97ca469aeb684fb6921b90467c04fb280aeb2cb4366faf13cc0da18ba5f04ad8",
-      "sidebar.toolsLayout.subtitle": "76c35881d901bc1359db31db30ec03d8edc0c926bac03111c64c82162374e53b",
-      "sidebar.toolsLayout.rows": "101f2ff3de22441fcab3e15ca0b09ac3428642cf628558f16fa404fc3137baea",
-      "sidebar.toolsLayout.toolbar": "451aa51a0fb5068da31b9bffbc63163d44e746af7b0ee37fa8f305f6e96f198c",
-      "sidebar.toolsLayout.chooseAria": "819fc5c0ce4defdf0dd58f419bc347f222b838710ea7f90e0d55071570e9de55",
+
+
+
+
+
       "sidebar.new": "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359",
       "sidebar.newOrShare": "d23251995ae60ba74b1e2d4de121199d7fc03aedd857c9cc567a350f98e13bcd",
       "sidebar.servers": "68d7beb6df59ee85bc11a6679c29ac3e6aab738833c6871c6df29ae0246d5d98",
@@ -88871,7 +88865,6 @@
       "sidebar.cloudOwner": "cf0b488f17ab085eb88d7f47eb3fe34f742298aeb359f4e771b38001d50a0fcb",
       "sidebar.search": "49c266baaaa70981ea188fa714d5c40cf13830d786a861c9943ae0d26a7f3fe9",
       "sidebar.searchAria": "71468c6a111dcb536d73c3a5dbf90cd78c31371e3139d180b59ebd0050ec2acf",
-      "sidebar.searchClose": "55656b5e434f4c069877f0c12174a14e67ef9619d30e796834b1216a03d9f677",
       "sidebar.noMatch": "5bb5e3f3f8eaec582b5d4972b1a1007e7c7704cf3c2f998524b473ac56f29eb9",
       "sidebar.preview.waiting": "3df1d52ccc2543a1a9baf123d11ebffea62659924e477be09cfec067c593652a",
       "sidebar.preview.waitingOnTeammate": "7b23fdce858e5972dca42cc31b29d48a8f40046bcf701e99b7fec5719c988663",
@@ -88962,11 +88955,11 @@
       "sidebar.archived.restoredOne": "e6fc1c203590c494c92c156d8130944502e804b026e10f00c3c7e548b1441fd1",
       "sidebar.archived.restoredMany": "df4d6a1f363c5b3a2ca3900bb237162053bc0b2bcc7de02b9c27cf0d13f7d78f",
       "sidebar.resize": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
-      "sidebar.toolsLayout.title": "97ca469aeb684fb6921b90467c04fb280aeb2cb4366faf13cc0da18ba5f04ad8",
-      "sidebar.toolsLayout.subtitle": "76c35881d901bc1359db31db30ec03d8edc0c926bac03111c64c82162374e53b",
-      "sidebar.toolsLayout.rows": "101f2ff3de22441fcab3e15ca0b09ac3428642cf628558f16fa404fc3137baea",
-      "sidebar.toolsLayout.toolbar": "451aa51a0fb5068da31b9bffbc63163d44e746af7b0ee37fa8f305f6e96f198c",
-      "sidebar.toolsLayout.chooseAria": "819fc5c0ce4defdf0dd58f419bc347f222b838710ea7f90e0d55071570e9de55",
+
+
+
+
+
       "sidebar.new": "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359",
       "sidebar.newOrShare": "d23251995ae60ba74b1e2d4de121199d7fc03aedd857c9cc567a350f98e13bcd",
       "sidebar.servers": "68d7beb6df59ee85bc11a6679c29ac3e6aab738833c6871c6df29ae0246d5d98",
@@ -96127,7 +96120,6 @@
       "sidebar.cloudOwner": "cf0b488f17ab085eb88d7f47eb3fe34f742298aeb359f4e771b38001d50a0fcb",
       "sidebar.search": "49c266baaaa70981ea188fa714d5c40cf13830d786a861c9943ae0d26a7f3fe9",
       "sidebar.searchAria": "71468c6a111dcb536d73c3a5dbf90cd78c31371e3139d180b59ebd0050ec2acf",
-      "sidebar.searchClose": "55656b5e434f4c069877f0c12174a14e67ef9619d30e796834b1216a03d9f677",
       "sidebar.noMatch": "5bb5e3f3f8eaec582b5d4972b1a1007e7c7704cf3c2f998524b473ac56f29eb9",
       "sidebar.preview.waiting": "3df1d52ccc2543a1a9baf123d11ebffea62659924e477be09cfec067c593652a",
       "sidebar.preview.waitingOnTeammate": "7b23fdce858e5972dca42cc31b29d48a8f40046bcf701e99b7fec5719c988663",
@@ -96256,11 +96248,11 @@
       "sidebar.archived.restoredOne": "e6fc1c203590c494c92c156d8130944502e804b026e10f00c3c7e548b1441fd1",
       "sidebar.archived.restoredMany": "df4d6a1f363c5b3a2ca3900bb237162053bc0b2bcc7de02b9c27cf0d13f7d78f",
       "sidebar.resize": "243854b4d0c709a06e41005bc74a72d6b49463cc2d9ac5bc2967666f6b988c88",
-      "sidebar.toolsLayout.title": "97ca469aeb684fb6921b90467c04fb280aeb2cb4366faf13cc0da18ba5f04ad8",
-      "sidebar.toolsLayout.subtitle": "76c35881d901bc1359db31db30ec03d8edc0c926bac03111c64c82162374e53b",
-      "sidebar.toolsLayout.rows": "101f2ff3de22441fcab3e15ca0b09ac3428642cf628558f16fa404fc3137baea",
-      "sidebar.toolsLayout.toolbar": "451aa51a0fb5068da31b9bffbc63163d44e746af7b0ee37fa8f305f6e96f198c",
-      "sidebar.toolsLayout.chooseAria": "819fc5c0ce4defdf0dd58f419bc347f222b838710ea7f90e0d55071570e9de55",
+
+
+
+
+
       "sidebar.new": "18fdd549b2ed367ac0c74cbec1214644728515b30edbcb78e7d322757a7c8359",
       "sidebar.newOrShare": "d23251995ae60ba74b1e2d4de121199d7fc03aedd857c9cc567a350f98e13bcd",
       "sidebar.servers": "68d7beb6df59ee85bc11a6679c29ac3e6aab738833c6871c6df29ae0246d5d98",
@@ -96290,7 +96282,7 @@
       "sidebar.nav.teamMap": "ecce91f39e576f6b52bd78cede9b300a31da0cc759ffa286c52c761b92d8c089",
       "sidebar.nav.automations": "ad1fb9ec0cb3c7a4747e4c161c83af164f3f49b2b88ed79f26c2af640a7af57e",
       "sidebar.nav.connectedApps": "c023d120dd17bd620b5eec0f3e322f28243ca9b144ff678d38d0f6056a9d028e",
-      "sidebar.connectApps": "02903f49f6f5124626cab7d5ed840cb122e9c507739c9b72e279a10846ddec1b",
+
       "sidebar.tools": "ea93d6a262ecb87a9fa4d09edbd7654c046597936a8e235fc3949eb01775ff99",
       "sidebar.section.expand": "d386e9414ed2f5eeee998a520fccfaa678259bd94fbd98a7a028d2c2e9726085",
       "sidebar.section.collapse": "19f25826b84b030c2c08c3166fe344167a98e50cc672a669aa5a86397d1f7cae",

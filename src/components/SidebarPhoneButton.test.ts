@@ -1,13 +1,8 @@
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import {
   deriveSidebarPhoneStatus,
-  phoneSettingsAction,
   SIDEBAR_PHONE_RECENT_MS,
-  SidebarPhoneStatusButton,
-  type SidebarPhoneStatus,
 } from "./SidebarPhoneButton";
 
 const device = (lastSeenAt: number) => ({
@@ -101,59 +96,4 @@ describe("sidebar phone status", () => {
     });
   });
 
-  it("opens Settings directly on the internal Remote access section, at the phone pairing", () => {
-    expect(phoneSettingsAction()).toEqual({
-      type: "toggleAppSettings",
-      open: true,
-      section: "phone",
-      phonePairing: true,
-    });
-  });
-});
-
-describe("SidebarPhoneStatusButton", () => {
-  const render = (density: "comfortable" | "icons", status: SidebarPhoneStatus) =>
-    renderToStaticMarkup(createElement(SidebarPhoneStatusButton, {
-      density,
-      status,
-      onOpen: vi.fn(),
-    }));
-
-  it("keeps its plain status accessible in the full sidebar without exposing connection details", () => {
-    const markup = render("comfortable", {
-      kind: "connected",
-      label: "Device connected",
-      pairedCount: 1,
-      connectedCount: 1,
-    });
-
-    expect(markup).toContain('aria-label="Device connected"');
-    expect(markup).toContain('title="Device connected"');
-    expect(markup).toContain('data-sidebar-density="comfortable"');
-    expect(markup).toContain('data-phone-status="connected"');
-    expect(markup).toContain("data-phone-connected");
-    expect(markup).toContain("text-success");
-    expect(markup).not.toMatch(/192\.168|\.local|\.ts\.net|Pairing address/);
-  });
-
-  it("stays a centered compact control and shows the plus only when unpaired", () => {
-    const unpaired = render("icons", {
-      kind: "unpaired",
-      label: "Pair a device",
-      pairedCount: 0,
-      connectedCount: 0,
-    });
-    const stale = render("icons", {
-      kind: "stale",
-      label: "Device paired, not active recently",
-      pairedCount: 1,
-      connectedCount: 0,
-    });
-
-    expect(unpaired).toContain('data-sidebar-density="icons"');
-    expect(unpaired).toContain("mx-auto");
-    expect(unpaired).toContain("data-phone-plus");
-    expect(stale).not.toContain("data-phone-plus");
-    expect(stale).not.toContain("text-success");
-  });
 });

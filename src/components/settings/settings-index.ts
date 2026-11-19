@@ -135,8 +135,8 @@ export function needsAdvanced(target: SettingsTarget, ctx: SettingsContext): boo
 
 /** Where a request for Settings lands here: its page (or Overview when that page can't exist on this place) and the
  * section to scroll to. A page or row only Advanced mode shows comes back with `advanced`: opening it turns Advanced on. */
-export function resolveSettingsTarget(requested: AppSettingsSection, ctx: SettingsContext): SettingsTarget & { missing?: SettingsPageId; advanced?: true } {
-  const target = isSettingsPage(requested) ? { page: requested } : LEGACY_SETTINGS[requested](ctx);
+export function resolveSettingsTarget(requested: AppSettingsSection, ctx: SettingsContext, anchor?: string): SettingsTarget & { missing?: SettingsPageId; advanced?: true } {
+  const target = isSettingsPage(requested) ? { page: requested, ...(anchor ? { anchor } : {}) } : LEGACY_SETTINGS[requested](ctx);
   if (needsAdvanced(target, ctx)) return { ...target, advanced: true };
   if (pageById(target.page).when(ctx)) return target;
   return { page: "overview", missing: target.page };

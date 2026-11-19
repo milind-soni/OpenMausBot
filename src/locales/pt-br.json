@@ -2039,7 +2039,6 @@
   "sidebar.cloudOwner": "Cloud de {email}",
   "sidebar.search": "Buscar",
   "sidebar.searchAria": "Buscar bots e mensagens",
-  "sidebar.searchClose": "Fechar busca",
   "sidebar.noMatch": "Nenhum resultado para “{query}”",
   "sidebar.preview.waiting": "Esperando por você…",
   "sidebar.preview.waitingOnTeammate": "Esperando um colega…",
@@ -2221,11 +2220,11 @@
   "sidebar.archived.restoredOne": "1 bot restaurado",
   "sidebar.archived.restoredMany": "{count} bots restaurados",
   "sidebar.resize": "Redimensionar a barra lateral",
-  "sidebar.toolsLayout.title": "Layout das ferramentas",
-  "sidebar.toolsLayout.subtitle": "Mostra Rotinas, Gatilhos e Mapa da equipe como linhas ou como uma única linha de ícones. Quando a barra lateral é uma coluna de avatares, ela sempre mostra ícones.",
-  "sidebar.toolsLayout.rows": "Linhas",
-  "sidebar.toolsLayout.toolbar": "Barra de ferramentas",
-  "sidebar.toolsLayout.chooseAria": "Escolher o layout das ferramentas",
+
+
+
+
+
   "sidebar.new": "Novo",
   "sidebar.newOrShare": "Criar ou compartilhar",
   "sidebar.servers": "Servidores",
@@ -2255,7 +2254,7 @@
   "sidebar.nav.teamMap": "Mapa da equipe",
   "sidebar.nav.automations": "Automações",
   "sidebar.nav.connectedApps": "Apps conectados",
-  "sidebar.connectApps": "Conectar apps",
+
   "sidebar.tools": "Ferramentas",
   "sidebar.section.expand": "Expandir {name}",
   "sidebar.section.collapse": "Recolher {name}",
@@ -7521,7 +7520,7 @@
   "keys.openPage": "Abrir IA › Outros serviços",
   "engineSetup.apiKey.inline": "Cole aqui. A chave é salva e verificada automaticamente, e os modelos aparecem aqui.",
   "commandPalette.searchLabel": "Buscar bots, chats em grupo e mensagens",
-  "commandPalette.searchPlaceholder": "Buscar bots, chats em grupo, mensagens…",
+  "commandPalette.searchPlaceholder": "Buscar bots, conversas e configurações…",
   "keys.treg.placeholder": "Cole sua chave do treg",
   "keys.postiz.placeholder": "Cole a chave de API do Postiz",
   "keys.treg.desc": "Permite que os bots busquem no X e consultem empresas, pessoas, investimentos, notícias e mais pelo treg. As chamadas são cobradas do seu saldo no treg, sem limites do MausBot.",
@@ -8820,6 +8819,8 @@
   "palette.bots": "Bots",
   "palette.groups": "Grupos",
   "palette.messages": "Mensagens",
+  "palette.threads": "Conversas",
+  "palette.actions": "Ações",
   "remote.status.pairedOne": "1 dispositivo pareado",
   "remote.status.pairedMany": "{count} dispositivos pareados",
   "companyBackup.restorePending": "Uma restauração anterior precisa ser recuperada primeiro.",

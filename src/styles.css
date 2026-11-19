@@ -103,7 +103,7 @@
   cursor: pointer;
 }
 .table-action:hover, .table-action[aria-pressed="true"] { background: var(--color-raised); color: var(--color-ink); }
-.table-action:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 1px; }
+.table-action:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
 @media (pointer: coarse) { .table-action { min-width: 40px; min-height: 40px; } }
 /* inside a 28px file pill under a reply, the table preview is a 24px circle */
 .file-chip .table-action { width: 24px; height: 24px; min-width: 24px; min-height: 24px; border-radius: 9999px; }
@@ -1822,7 +1822,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   [data-settings-highlight] { animation: none; }
 }
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface {
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-solid-popup] .glass-surface {
   background: var(--color-app);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
@@ -1840,10 +1840,10 @@ body {
   background-color: transparent;
   border-color: var(--settings-edge);
 }
-:root[data-skin="midnight"] [data-settings-look] > .glass-scrim {
+:root[data-skin="midnight"] [data-solid-popup] > .glass-scrim {
   background: rgb(0 0 0 / 0.55);
 }
-:root[data-skin="daylight"] [data-settings-look] > .glass-scrim {
+:root[data-skin="daylight"] [data-solid-popup] > .glass-scrim {
   background: rgb(0 0 0 / 0.18);
 }
 /* Settings fades its bottom edge only while more lies below: the fade rides the pane's own scroll, so it is absent
@@ -1884,7 +1884,7 @@ body {
   }
 }
 /* Over a light scrim the sheet needs its own lift. */
-:root[data-skin="daylight"] [data-settings-look] .glass-surface {
+:root[data-skin="daylight"] [data-solid-popup] .glass-surface {
   box-shadow: 0 24px 64px -16px rgb(28 28 28 / 0.28), 0 2px 8px rgb(28 28 28 / 0.06);
 }
 @media (min-width: 768px) {
@@ -2042,21 +2042,34 @@ body {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
-/* Settings: nav items, identity rows, search results and whole-row buttons (link, fold and card rows) take an inset
-   ring, so it is never clipped by the card or drawn into the nav's edge. */
+:is(button, summary, input:is([type="button"], [type="submit"], [type="reset"], [type="image"]), [role="button"], [role="tab"], [role="switch"], [role^="menuitem"]) {
+  &:focus-visible {
+    outline: none;
+  }
+
+  &[class*="focus:ring-"]:focus,
+  &[class*="focus-visible:ring-"]:focus-visible {
+    --tw-ring-shadow: 0 0 transparent;
+    --tw-ring-offset-shadow: 0 0 transparent;
+  }
+
+  @media (forced-colors: active) {
+    &:focus-visible {
+      forced-color-adjust: none;
+      background-color: Highlight;
+      color: HighlightText;
+    }
+  }
+}
+/* Focus outlines stay inside settings rows that use them. */
 [data-settings-look] :is([data-settings-page], [data-settings-hit], [data-settings-key-result], [data-settings-rows] > button, [data-settings-rows] > * > button[aria-expanded], [data-settings-fold] > button, [data-settings-rows] > button[data-pair-with-cloud]):focus-visible {
   outline-offset: -2px;
-}
-/* A menu row shows keyboard focus as its hover fill. */
-[role="menu"] :is(button, [role^="menuitem"]):focus-visible {
-  outline: none;
-  background-color: var(--color-menu-hover);
 }
 
 /* Text fields already sit in a bordered card (the composer pill especially).
    Chromium treats a pointer click as :focus-visible on inputs, so the
    global ring above becomes a sharp blue rectangle inside the rounded
-   chrome. Buttons still use the :focus-visible ring. Checkboxes, radios,
+   chrome. Checkboxes, radios,
    sliders, colour wells and file pickers are not text fields: they have no
    border to repaint, so they keep the ring, or a keyboard user tabbing onto
    one sees nothing. */
@@ -2070,12 +2083,12 @@ body {
    carries as well as over a faint per-file `focus:border-*`. --color-focus
    clears 3:1 on every field surface (pnpm check:contrast). A borderless
    field has no border to paint and is left as it was: a find bar's rounded
-   wrapper takes `focus-within:border-focus`, and Simple mode's composer pill
+   wrapper keeps its resting style. Simple mode's composer pill
    shows focus as a stronger hairline (`focus-within:ring-ink/[0.22]`), not
    in the focus colour.
    A field reporting an error (aria-invalid) keeps its danger border, so the
    red does not vanish while the user is fixing it. */
-:is(input, textarea, select):focus-visible:not([aria-invalid="true"]) {
+:is(input:not([type="button"], [type="submit"], [type="reset"], [type="image"]), textarea, select):focus-visible:not([aria-invalid="true"]) {
   border-color: var(--color-focus);
 }
 /* Settings: every control shows keyboard focus the same way, as the 2 px focus ring a switch or a button gets (§6.10).
@@ -3660,4 +3673,40 @@ button:disabled.bg-danger {
 @keyframes chat-run-log-reveal {
   from { opacity: 0; transform: translateX(-0.375rem); }
   to { opacity: 1; transform: translateX(0); }
+}
+
+.command-palette {
+  max-height: 85dvh;
+  opacity: 0;
+  transition: opacity 200ms ease, display 200ms allow-discrete, overlay 200ms allow-discrete;
+}
+
+.command-palette::backdrop {
+  background: rgb(0 0 0 / 50%);
+  opacity: 0;
+  transition: opacity 200ms ease, display 200ms allow-discrete, overlay 200ms allow-discrete;
+}
+
+.command-palette[open],
+.command-palette[open]::backdrop {
+  opacity: 1;
+}
+
+@starting-style {
+  .command-palette[open],
+  .command-palette[open]::backdrop {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .command-palette,
+  .command-palette::backdrop {
+    transition: none;
+  }
+}
+
+:root[data-reduced-motion="true"] .command-palette,
+:root[data-reduced-motion="true"] .command-palette::backdrop {
+  transition: none;
 }

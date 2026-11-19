@@ -2,16 +2,6 @@ import { Crown } from "lucide-react";
 import { t } from "@/lib/i18n";
 import type { Bot } from "@/state/store";
 
-export function SidebarBotRole({ role }: { role: string }) {
-  return (
-    <span data-testid="bot-role" className="@container -ms-1.5 min-w-0 grow">
-      <span title={role} className="block truncate ps-1.5 text-[13px] font-normal leading-[18px] text-ink-secondary @max-[3rem]:sr-only">
-        <span className="sr-only">, </span>{role}
-      </span>
-    </span>
-  );
-}
-
 export function ChatHeadRole({ bot }: { bot: Pick<Bot, "title" | "chiefOfStaff"> }) {
   const role = bot.title.trim();
   const repeatsChiefBadge = bot.chiefOfStaff && role.toLocaleLowerCase() === t("chat.chiefOfStaff").toLocaleLowerCase();

@@ -1,3 +1,4 @@
+import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Search, X } from "lucide-react";
 
@@ -75,7 +76,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   }, [collapsed, section, q]);
 
   useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const previousFocus = keyboardFocusTarget();
     const dialog = dialogRef.current;
     dialog?.focus();
 
@@ -201,7 +202,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
           </span>
         </div>
 
-        <div className="mx-4 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-transparent bg-control/70 px-2.5 py-2 focus-within:border-focus">
+        <div className="mx-4 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-transparent bg-control/70 px-2.5 py-2">
           <Search size={14} className="shrink-0 text-ink-secondary" />
           <input
             value={query}

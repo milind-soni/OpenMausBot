@@ -97,13 +97,6 @@ it("a Cloud this window is not signed in to says so in one line, with no rows", 
   expect(all("[data-placed-bot]")).toEqual([]);
 });
 
-it("follows the sidebar's search, and hides the heading when nothing there matches", async () => {
-  await render(createElement(OtherPlaceBots, { key: "list", query: "research" }));
-  expect(all("[data-placed-bot]").map((item) => item.getAttribute("data-placed-bot"))).toEqual(["cloud:nova"]);
-  await render(createElement(OtherPlaceBots, { key: "list", query: "zzz" }));
-  expect(q("[data-other-place]")).toBeNull();
-});
-
 it("the switch: marked Early, off until turned on, and hidden where main does not offer it", async () => {
   said = state({ on: false, other: null });
   await render(createElement(SettingsLook.Provider, { key: "switch", value: true }, createElement(PlacesTogetherSwitch)));

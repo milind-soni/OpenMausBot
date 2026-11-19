@@ -1,7 +1,5 @@
-import { Search, X } from "lucide-react";
-import type { Ref } from "react";
-
-import { cn } from "@/lib/cn";
+import { Search } from "lucide-react";
+import { openCommandPalette } from "@/lib/command-palette";
 import { t } from "@/lib/i18n";
 import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_TINT } from "./elevated";
 
@@ -23,51 +21,18 @@ export const PHONE_TOP_BUTTON = "flex size-10 shrink-0 items-center justify-cent
 
 export const SIMPLE_RAIL_BUTTON = "flex size-9 shrink-0 items-center justify-center rounded-xl text-ink-secondary hover:bg-raised/60 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
-export function SidebarSearchToggle({ open, onToggle, corner = false, ref }: { open: boolean; onToggle: () => void; corner?: boolean; ref?: Ref<HTMLButtonElement> }) {
+export function SidebarSearchButton({ corner = false }: { corner?: boolean }) {
   return (
     <button
-      ref={ref}
       type="button"
       data-sidebar-search-toggle
-      onClick={onToggle}
+      onClick={openCommandPalette}
       aria-label={t("sidebar.searchAria")}
-      aria-expanded={open}
+      aria-haspopup="dialog"
       title={t("sidebar.searchAria")}
       className={corner ? SIMPLE_CORNER_BUTTON : SIMPLE_TOP_BUTTON}
     >
       <Search size={corner ? 17 : 18} strokeWidth={1.5} aria-hidden="true" />
     </button>
-  );
-}
-
-export function SidebarSearchPill({ query, onQuery, onClose }: { query: string; onQuery: (query: string) => void; onClose: () => void }) {
-  return (
-    <div data-sidebar-search-pill className="px-3 pb-2 pt-0.5">
-      <div className={cn("flex h-[34px] items-center gap-2 rounded-full pl-3 pr-1.5 text-ink-secondary focus-within:ring-focus", ELEVATED_CONTROL)}>
-        <Search size={15} aria-hidden="true" className="shrink-0" />
-        <input
-          autoFocus
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
-            event.preventDefault();
-            onClose();
-          }}
-          placeholder={t("sidebar.searchAria")}
-          aria-label={t("sidebar.searchAria")}
-          className="min-w-0 flex-1 bg-transparent text-[13px] text-ink placeholder:text-ink-tertiary focus:outline-none"
-        />
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label={t("sidebar.searchClose")}
-          title={t("sidebar.searchClose")}
-          className="flex size-6 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus"
-        >
-          <X size={14} aria-hidden="true" />
-        </button>
-      </div>
-    </div>
   );
 }

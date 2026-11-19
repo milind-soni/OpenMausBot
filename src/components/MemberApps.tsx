@@ -1,3 +1,4 @@
+import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Loader2, X } from "lucide-react";
 import { reserveConnectionPage } from "@/lib/connector-oauth";
@@ -45,7 +46,7 @@ export function MemberApps() {
     return () => window.removeEventListener("focus", refresh);
   }, [load]);
   useEffect(() => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const opener = keyboardFocusTarget();
     dialog.current?.focus();
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { event.preventDefault(); close(); } };
     window.addEventListener("keydown", onKey);

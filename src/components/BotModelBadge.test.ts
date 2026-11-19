@@ -64,7 +64,7 @@ describe("BotModelBadge", () => {
 describe("sidebar bot row", () => {
   const botRow = (BotListItem as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type;
   const render = (candidate: Bot, density: SidebarDensity) => renderToStaticMarkup(createElement(botRow,
-    botRowProps({ ...initialState, ...fixture.state }, vi.fn(), candidate, { density, query: "", onMenu: vi.fn() })));
+    botRowProps({ ...initialState, ...fixture.state }, vi.fn(), candidate, { density, onMenu: vi.fn() })));
   const badges = (markup: string) => markup.match(/<span data-testid="model-badge"[^>]*>/g) ?? [];
 
   beforeEach(() => {

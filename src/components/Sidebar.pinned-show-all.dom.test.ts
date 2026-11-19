@@ -34,7 +34,7 @@ const mount = async () => {
   document.body.append(host);
   root = createRoot(host);
   await act(async () => {
-    root.render(createElement(BotThreadList, { ...botRowProps(initialState, vi.fn(), bot, { density: "comfortable", query: "", onMenu: vi.fn() }), selected: true }));
+    root.render(createElement(BotThreadList, { ...botRowProps(initialState, vi.fn(), bot, { density: "comfortable", onMenu: vi.fn() }), selected: true }));
   });
 };
 const unmount = async () => {

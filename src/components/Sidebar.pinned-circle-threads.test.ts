@@ -26,7 +26,7 @@ import { BotListItem, botRowProps, PinnedBotCircle, PinnedCircleThreadPanel, Pin
 import { PinnedBotRoster } from "./PinnedCircleThreads";
 import { setPinnedCircleOrder } from "@/lib/sidebar-preferences";
 import { PINNED_CIRCLE_DRAG_TYPE } from "@/lib/pinned-circle-order";
-import { forgetSearchDisclosuresForTests } from "@/lib/search-disclosure";
+import { forgetThreadDisclosuresForTests } from "@/lib/thread-disclosure";
 
 const bot = (overrides: Partial<Bot> = {}): Bot => ({
   id: "atlas",
@@ -50,7 +50,7 @@ const frame = (markup: string) => {
 };
 
 const row = (candidate: Bot, selectedId = initialState.selectedId) =>
-  botRowProps({ ...initialState, selectedId, activeView: "chat" }, vi.fn(), candidate, { density: "comfortable", query: "", onMenu: vi.fn() });
+  botRowProps({ ...initialState, selectedId, activeView: "chat" }, vi.fn(), candidate, { density: "comfortable", onMenu: vi.fn() });
 
 function renderCircle(candidate: Bot, selected = false) {
   return renderToStaticMarkup(createElement(PinnedBotCircle, row(candidate, selected ? candidate.id : initialState.selectedId)));
@@ -235,7 +235,7 @@ describe("pinned circle order", () => {
 
 afterEach(() => {
   threads.show = true;
-  forgetSearchDisclosuresForTests();
+  forgetThreadDisclosuresForTests();
   initialState.selectedId = "";
   initialState.activeView = "chat";
 });

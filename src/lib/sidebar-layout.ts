@@ -3,7 +3,7 @@ import type { ConnectorCardData } from "../../shared/connector-card";
 import { t } from "./i18n";
 import type { LocaleKey } from "@/locales";
 import type { DefaultBotFields } from "../../shared/default-bot";
-import { hiddenFromSidebar, someoneElsesDefaultBot } from "./default-bot";
+import { hiddenFromSidebar } from "./default-bot";
 
 export const PINNED_SECTION_ID = "builtin:pinned";
 export const CHANNELS_SECTION_ID = "builtin:channels";
@@ -11,7 +11,6 @@ export const BOT_CHATS_SECTION_ID = "builtin:bot-chats";
 export const BOTS_SECTION_ID = "builtin:bots";
 export const ATTENTION_SECTION_ID = "builtin:attention";
 export const PINNED_THREADS_SECTION_ID = "builtin:pinned-threads";
-export const TOOLS_SECTION_ID = "builtin:tools";
 
 const USER_SECTION_PREFIX = "section:";
 
@@ -86,17 +85,16 @@ export function sidebarConnectorPreview(
   return `${connector.label} · ${say(key)}`;
 }
 
-export function sidebarLayoutInteractive(density: SidebarDensityMode, query: string): boolean {
-  return density !== "icons" && query.trim().length === 0;
+export function sidebarLayoutInteractive(density: SidebarDensityMode): boolean {
+  return density !== "icons";
 }
 
 export function sidebarSectionCollapsed(
   id: SidebarSectionId,
   collapsedIds: SidebarSectionId[],
   density: SidebarDensityMode,
-  query: string,
 ): boolean {
-  return sidebarLayoutInteractive(density, query) && collapsedIds.includes(id);
+  return sidebarLayoutInteractive(density) && collapsedIds.includes(id);
 }
 
 export function pinnedCircleThreadListVisible(
@@ -109,11 +107,10 @@ export function pinnedCircleThreadListVisible(
 
 export function partitionSidebarBots<T extends SidebarBot>(
   bots: T[],
-  options?: { universalPins?: boolean; viewerEmail?: string | null; welcoming?: string | null; searching?: boolean },
+  options?: { universalPins?: boolean; viewerEmail?: string | null; welcoming?: string | null },
 ) {
   const universalPins = options?.universalPins === true;
-  // A search also finds the viewer's own MausBot when it is hidden from the sidebar, so it can always be reached.
-  const listed = (bot: T) => !hiddenFromSidebar(bot, options?.viewerEmail) || (options?.searching === true && Boolean(bot.defaultBot) && !someoneElsesDefaultBot(bot, options.viewerEmail));
+  const listed = (bot: T) => !hiddenFromSidebar(bot, options?.viewerEmail);
   const visible = bots.filter((bot) => !bot.hidden && listed(bot) && bot.id !== options?.welcoming);
   // The pin flag is the server's, the same on every client. Only the main Chief keeps its own top slot when pins are
   // not universal (a device's layout choice); a pinned Chief of a group is listed with the other pinned bots.
@@ -124,9 +121,8 @@ export function partitionSidebarBots<T extends SidebarBot>(
   const sectionedBots = visible.filter(
     (bot) => !bot.chiefOfStaff && Boolean(bot.section) && !pinnedIds.has(bot.id),
   );
-  // A search can list two unsectioned Chiefs (the viewer's hidden MausBot and a shared Chief); the second is a bot row.
   const unsectionedBots = visible.filter(
-    (bot) => (!bot.chiefOfStaff || (options?.searching === true && bot !== unsectionedChief)) && !bot.section && !pinnedIds.has(bot.id),
+    (bot) => !bot.chiefOfStaff && !bot.section && !pinnedIds.has(bot.id),
   );
   return { unsectionedChief, pinnedBots, sectionChiefs, sectionedBots, unsectionedBots };
 }

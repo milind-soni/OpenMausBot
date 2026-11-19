@@ -477,7 +477,6 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           onClose={() => dispatch({ type: "toggleShortcuts", open: false })}
         />
       )}
-      {/* After the modals: same z-50 tier, so DOM order keeps the palette on top. */}
       <CommandPalette onOpenChange={setPaletteOpen} />
       {/* Blink resolves -webkit-app-region in DOM order, so this no-drag twin after the headers cuts the drawer button back out. */}
       {!calendarFocus && <span

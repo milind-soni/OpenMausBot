@@ -6,7 +6,7 @@ import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 import { AboutDialog } from "../../AboutDialog";
 import { AnalyticsRow } from "../../AnalyticsRow";
-import { ChatWidthRow, FontRow, SidebarToolsLayoutRow } from "../../AppearanceSelectRows";
+import { ChatWidthRow, FontRow } from "../../AppearanceSelectRows";
 import {
   ColorUserBubblesRow, FollowUpRow, LanguageRow, PinnedCirclesRow, ReplayTourRow, RunCardRow, SendKeyRow, ShowThreadsRow,
   ToolCallsRow, UniversalPinsRow, UpdatesRow,
@@ -179,7 +179,6 @@ export function AppearancePage() {
         <ChromeRailRow />
         <WindowFrameRow />
         {ctx.advanced && <ShowThreadsRow />}
-        {ctx.advanced && <SidebarToolsLayoutRow />}
         {ctx.advanced && <PinnedCirclesRow />}
         {ctx.advanced && <UniversalPinsRow />}
       </SettingsRows>

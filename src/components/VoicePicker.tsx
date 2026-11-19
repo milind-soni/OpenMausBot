@@ -262,7 +262,7 @@ export function VoicePicker({
       )}
     >
       <div className="shrink-0 p-1.5">
-        <div className="flex items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 focus-within:border-focus">
+        <div className="flex items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5">
           {loading ? (
             <Loader2 size={13} aria-hidden className="shrink-0 animate-spin text-ink-secondary" />
           ) : (

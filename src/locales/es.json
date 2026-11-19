@@ -1640,11 +1640,11 @@
   "sidebar.archived.restoredOne": "1 bot restaurado",
   "sidebar.archived.restoredMany": "{count} bots restaurados",
   "sidebar.resize": "Cambiar el tamaño de la barra lateral",
-  "sidebar.toolsLayout.title": "Diseño de las herramientas",
-  "sidebar.toolsLayout.subtitle": "Muestra Rutinas, Disparadores y Mapa del equipo como filas o como una sola fila de iconos. Como columna de avatares, la barra lateral siempre muestra iconos.",
-  "sidebar.toolsLayout.rows": "Filas",
-  "sidebar.toolsLayout.toolbar": "Barra de herramientas",
-  "sidebar.toolsLayout.chooseAria": "Elegir el diseño de las herramientas",
+
+
+
+
+
   "sidebar.new": "Nuevo",
   "sidebar.newOrShare": "Nuevo o compartir",
   "sidebar.servers": "Servidores",

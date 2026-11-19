@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Loader2, Plus, RefreshCw } from "lucide-react";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, useStore } from "@/state/store";
+import { workspacesAvailable } from "@/lib/feature-flags";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { formatUsd, hasFiniteCost } from "@/lib/usage";
@@ -22,10 +23,6 @@ export interface FleetView {
   domain: string;
   operator: string | null;
   workspaces: FleetWorkspaceView[];
-}
-
-export function workspacesAvailable(config: ConfigStatus | null | undefined): boolean {
-  return config?.edition?.features?.includes("admin") === true && config?.fleet?.available === true;
 }
 
 const fetchFleet = (): Promise<FleetView> => api("/api/fleet");

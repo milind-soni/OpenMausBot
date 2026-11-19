@@ -26,7 +26,7 @@ const bot = (overrides: Partial<Bot> = {}): Bot => ({
   ...overrides,
 }) as Bot;
 
-const rowProps = (value: Bot) => botRowProps(initialState, () => {}, value, { density: "comfortable", query: "", onMenu: () => {} });
+const rowProps = (value: Bot) => botRowProps(initialState, () => {}, value, { density: "comfortable", onMenu: () => {} });
 
 function renderRow(value: Bot): string {
   return renderToStaticMarkup(createElement(BotListItem, rowProps(value)));
