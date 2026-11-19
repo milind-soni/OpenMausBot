@@ -186,7 +186,7 @@ import { startUpkeep } from "./host/start-upkeep.ts";
 import { ComputerControl, type ControlSnapshot } from "./computer-control.ts"; import { createSharedVmControl } from "./host/shared-vm-control.ts";
 import { resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts"; import { engineUpdatesFor } from "./engine-updates-host.ts";
-import { appendUsage, flushUsageLedger, queuedTurnTrigger, usageTriggerFor, type UsageRow, type UsageTrigger } from "./usage-ledger.ts"; import { createUsageAttribution } from "./usage-attribution.ts";
+import { appendUsage, flushUsageLedger, queuedTurnTrigger, readUsage, usageTriggerFor, type UsageRow, type UsageTrigger } from "./usage-ledger.ts"; import { createUsageAttribution } from "./usage-attribution.ts"; import { teamMapSessions } from "./team-map-sessions.ts";
 import { createTraceRecorder } from "./usage-trace/recorder.ts";
 import { GroupUsageReader } from "./group-thread-usage.ts";
 import { ledgerCost } from "./model-prices.ts";
@@ -14438,7 +14438,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
     // Prompts and replies never leave their transcripts: this projection carries only ids, relationships, labels and timestamps.
     if (method === "GET" && path === "/api/team-map") {
-      const mapped = new Set(store.bots.filter((bot) => !bot.hidden && visible.bot(bot.id)).map((bot) => bot.id));
+      const mapped = new Set(store.bots.filter((bot) => !bot.hidden && visible.bot(bot.id)).map((bot) => bot.id)); const now = Date.now(); const sessionBots = store.bots.filter((bot) => mapped.has(bot.id)).map((bot) => ({ id: bot.id, modelSelection: bot.modelSelection, tasks: store.tasks(bot.id).filter((task) => task.archivedAt === undefined) }));
       const collaborations = store.groups
         .filter(
           (group) =>
@@ -14459,10 +14459,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           && (!edge.groupId || visible.group(edge.groupId)));
       const links = (state: "queued" | "running") =>
         handoffs.flatMap(({ state: edgeState, ...link }) => edgeState === state ? [link] : []);
+      const queuedLinks = links("queued"); const doneLast24h = readUsage(DATA_DIR, { from: new Date(now - 24 * 60 * 60_000), to: new Date(now) }).filter((row) => mapped.has(row.botId)).length;
       return json(res, 200, {
-        collaborations,
-        queued: links("queued"),
-        running: links("running"),
+        collaborations, queued: queuedLinks, running: links("running"),
+        ...teamMapSessions({ bots: sessionBots, queued: queuedLinks, lastOutputAt: (threadId) => lastRowAt(threadId), groupIdOf: (threadId) => store.groupByThread(threadId)?.id, visibleGroup: (groupId) => visible.group(groupId), createdAt: (threadId) => { const owner = store.botByThread(threadId); return owner ? store.taskByThread(owner.id, threadId)?.createdAt : undefined; }, onPlan: (instanceId) => registry.lastSnapshot(instanceId)?.billing === "subscription", doneLast24h, now }),
       });
     }
 

@@ -28,11 +28,18 @@ it("shows coordinate_bots work on the team map while it runs, with ids only", as
     const live = await api("/api/team-map");
     expect(live.running).toEqual([{ sourceBotId: sender.id, targetBotId: teammate.id, threadId: workThread }]);
     expect(JSON.stringify(live)).not.toContain("PRIVATE_REQUEST_TEXT");
+    expect(typeof live.stuckAfterMs).toBe("number");
+    expect(typeof live.doneLast24h).toBe("number");
+    const session = live.sessions.find((one: any) => one.threadId === workThread);
+    expect(session).toMatchObject({ botId: teammate.id, threadId: workThread, state: "running" });
+    expect(typeof session.startedAt).toBe("number");
 
     writeFileSync(gate, "finish the teammate");
     expect((await control(["wait", "--bot", sender.id, "--task", sender.activeTaskId, "--timeout", "15"])).status).toBe("settled");
     await expect.poll(async () => (await api("/api/team-map")).running, { timeout: 15_000 }).toEqual([]);
-    expect(JSON.stringify(await api("/api/team-map"))).not.toContain("PRIVATE_RESULT_TEXT");
+    const settled = await api("/api/team-map");
+    expect(JSON.stringify(settled)).not.toContain("PRIVATE_RESULT_TEXT");
+    expect(settled.sessions.find((one: any) => one.threadId === workThread)).toBeUndefined();
   } finally {
     await fixture.close();
   }
