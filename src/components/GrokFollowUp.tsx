@@ -6,7 +6,7 @@ import { MENU_SEPARATOR } from "./menu-recipe";
 import { SettingRow, Switch } from "./SettingsPrimitives";
 
 export function GrokFollowUp({ instance, compact = false }: { instance?: InstanceInfo; compact?: boolean }) {
-  const { refreshInstances } = useStoreActions();
+  const { dispatch, refreshInstances } = useStoreActions();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(false);
   if (instance?.driverKind !== "grokAgent" || instance.readOnly || instance.snapshot.authenticated !== true || instance.followUpBehavior === undefined) return null;
@@ -21,18 +21,16 @@ export function GrokFollowUp({ instance, compact = false }: { instance?: Instanc
     setSaving(true);
     setError(false);
     try {
-      await api(`/api/instances/${encodeURIComponent(instanceId)}`, {
+      const { followUpBehavior } = await api(`/api/instances/${encodeURIComponent(instanceId)}`, {
         method: "PATCH",
         body: JSON.stringify({ followUpBehavior: checked ? "queue" : "steer" }),
       });
+      if (followUpBehavior !== "steer" && followUpBehavior !== "queue") throw new Error("Invalid Grok follow-up preference");
+      dispatch({ type: "grokFollowUpSaved", instanceId, followUpBehavior });
     } catch {
       setError(true);
     } finally {
-      try {
-        await refreshInstances({ reportErrors: true });
-      } catch {
-        setError(true);
-      }
+      await refreshInstances().catch(() => {});
       setSaving(false);
     }
   }

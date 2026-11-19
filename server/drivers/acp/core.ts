@@ -435,7 +435,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // session/close or the end of its process stops it, and ending a shared process ends the other sessions' turns too.
       const endUncancelled = async (threadId: string, session: AcpSession): Promise<boolean> => {
         const { host } = session;
-        closeSession(threadId, "cancel-timeout");
+        if (sessions.get(threadId) === session) closeSession(threadId, "cancel-timeout");
         if (host.links.size && await session.closeConfirmed) return true;
         for (const link of host.links) {
           const other = sessions.get(link.threadId);

@@ -195,6 +195,25 @@ describe("setGrokFollowUp", () => {
     }
   });
 
+  it.each([
+    String.raw`["\u0075i"]` + '\nfollow_up_behavior = "queue"\n',
+    String.raw`ui."follow_up_\u0062ehavior" = "queue"` + "\n",
+  ])("leaves a preference with an escaped key untouched (%s)", (text) => {
+    signedIn();
+    writeFileSync(config(), text);
+    expect(setGrokFollowUp(env(), "steer")).toBe("refused-unclear");
+    expect(readFileSync(config(), "utf8")).toBe(text);
+  });
+
+  it("preserves a staged file owned by another write attempt", () => {
+    signedIn();
+    const staged = `${config()}.omb-${process.pid}.tmp`;
+    writeFileSync(staged, "pending");
+    expect(setGrokFollowUp(env(), "steer")).toBe("failed");
+    expect(readFileSync(staged, "utf8")).toBe("pending");
+    expect(existsSync(config())).toBe(false);
+  });
+
   it("reads a single-quoted steer, and leaves no temporary file behind", () => {
     signedIn();
     writeFileSync(config(), "[ui]\nfollow_up_behavior = 'steer'\n");

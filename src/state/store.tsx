@@ -647,7 +647,7 @@ export type Action =
   | { type: "deleteGroupTask"; groupId: string; threadId: string }
   | { type: "interruptGroup"; groupId: string; threadId?: string; onError?: () => void }
   | { type: "setGroupHold"; groupId: string; botId: string; held: boolean }
-  | { type: "instances"; instances: InstanceInfo[] }
+  | { type: "instances"; instances: InstanceInfo[] } | { type: "grokFollowUpSaved"; instanceId: string; followUpBehavior: "steer" | "queue" }
   | { type: "configStatus"; config: ConfigStatus }
   | { type: "liveCall"; call: LiveCallState | null }
   /** Applied only if no live.call frame landed and no later lookup answered while it was out. */
@@ -1013,8 +1013,8 @@ export function reducer(state: AppState, action: Action): AppState {
       const selectedId = state.selectedId === action.groupId ? (state.bots[0]?.id ?? "") : state.selectedId;
       return { ...state, groups, selectedId };
     }
-    case "instances":
-      return { ...state, instances: action.instances };
+    case "instances": return { ...state, instances: action.instances };
+    case "grokFollowUpSaved": return { ...state, instances: state.instances.map((instance) => instance.instanceId === action.instanceId ? { ...instance, followUpBehavior: action.followUpBehavior } : instance) };
     case "configStatus":
       return { ...state, config: action.config };
     case "liveCall":

@@ -72,6 +72,9 @@ of the sign-in, never `~/.grok`:
 Grok's shell tool needs a shell the isolated environment can find, so use its file tools
 for the check below.
 
+In the fixture, enable **Grok steering** in the chat model dropdown or
+**Settings > AI > Grok**. Reopen the control and confirm it is on.
+
 Then:
 
 1. Ask the bot for 8 files, `step1.txt` to `step8.txt`, one write per file.

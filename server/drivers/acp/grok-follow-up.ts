@@ -27,6 +27,7 @@ const INLINE_KEY = /(?:^|[{,])\s*(?:follow_up_behavior|"follow_up_behavior"|'fol
 const unescape = (text: string) => text.replace(/\\(.)/g, "$1");
 const unquote = (key: string) => key.startsWith('"') ? unescape(key.slice(1, -1)) : key.startsWith("'") ? key.slice(1, -1) : key;
 const keyPath = (path: string): string[] => (path.match(new RegExp(KEY, "g")) ?? []).map(unquote);
+const hasEscapedKey = (path: string) => (path.match(new RegExp(KEY, "g")) ?? []).some((key) => key.startsWith('"') && key.includes("\\"));
 const same = (a: string[], b: string[]) => a.length === b.length && a.every((part, i) => part === b[i]);
 
 function basicStringEnd(text: string, open: number): number {
@@ -86,6 +87,7 @@ export function readGrokFollowUp(text: string): GrokFollowUp {
     if (/^\s*(#.*)?$/.test(line)) continue;
     const header = HEADER.exec(line);
     if (header) {
+      if (hasEscapedKey(header[2])) result.unclear = true;
       const path = keyPath(header[2]);
       table = header[1] === "[[" ? null : path;
       if (header[1] === "[[" && same(path, ["ui"])) result.uiElsewhere = true;
@@ -97,6 +99,7 @@ export function readGrokFollowUp(text: string): GrokFollowUp {
     }
     const assign = ASSIGN.exec(line);
     if (!assign) { result.unclear = true; return result; }
+    if (hasEscapedKey(assign[1])) result.unclear = true;
     let rest = withoutComment(assign[2]).trim();
     if (rest.startsWith('"""') || rest.startsWith("'''")) { result.unclear = true; return result; }
     const assignmentLine = i;

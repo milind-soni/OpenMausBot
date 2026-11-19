@@ -1,6 +1,6 @@
 // Grok Build: the official `grok` CLI over ACP stdio (`grok … agent stdio`) on the grok.com
 // subscription login (~/.grok/auth.json), not the xAI API key. Verified against grok 1.0.0.
-import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse as parseYaml } from "yaml";
@@ -401,8 +401,13 @@ export function setGrokFollowUp(env: NodeJS.ProcessEnv, value: FollowUpBehavior)
   // config.toml can hold `api_key` values (ensureGrokInjectSlug writes them), so the staged copy is private from its first byte.
   const staged = `${path}.omb-${process.pid}.tmp`;
   try {
-    writeFileSync(staged, next, { mode: 0o600, flag: "wx" });
+    const fd = openSync(staged, "wx", 0o600);
     try {
+      try {
+        writeFileSync(fd, next);
+      } finally {
+        closeSync(fd);
+      }
       renameSync(staged, path);
     } finally {
       rmSync(staged, { force: true });
