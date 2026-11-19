@@ -1,6 +1,6 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -25,10 +25,7 @@ describe("Pi persisted session correctness", () => {
     const { instance, dump, recorder } = await setup(mode);
     const threadId = "resume-fails-" + mode;
     try {
-      const cursor = join(piSessionDir({ threadId }, "pi-recovery"), "unavailable.json");
-      // The file is there, so the turn resumes it; pi itself then refuses or cancels the switch.
-      mkdirSync(dirname(cursor), { recursive: true });
-      writeFileSync(cursor, "[]");
+      const cursor = join(piSessionDir({ threadId }, "pi-recovery"), "missing.json");
       const { turnId } = await instance.adapter.sendTurn({ threadId, text: "follow-up", resumeCursor: cursor,
         model: "openai/gpt-4o", recoveryText: "Prior conversation: important context.\nfollow-up" });
       const done = await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);

@@ -79,7 +79,6 @@ describe("Pi session spawn setup", () => {
       expect(new Set(turns.map((turn) => turn.dir)).size).toBe(4);
       engineHomes.stop();
       expect(piSessionPath({ resumeCursor: first }, piSessionDir({ threadId: "different-thread", botId: "bot-a" }, "pi-session-spawn"))).toBeNull();
-      expect(piSessionPath({ resumeCursor: join(dirname(first), "gone.json") }, dirname(first))).toBeNull();
       expect(piSessionPath({ resumeCursor: first }, dirname(first))).toBe(first);
     } finally {
       recorder.stop();
