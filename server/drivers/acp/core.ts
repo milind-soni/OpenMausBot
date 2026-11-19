@@ -1316,16 +1316,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 await support.configureSession({
                   request: async (method, params, timeoutMs) => {
                     const result = await request(method, params, timeoutMs ?? SESSION_CONFIG_TIMEOUT);
-                    if (method === "session/set_model" && params && typeof params === "object" &&
-                        "modelId" in params && typeof params.modelId === "string") {
-                      session.sessionConfigResult = {
-                        ...session.sessionConfigResult,
-                        models: { ...session.sessionConfigResult?.models, currentModelId: params.modelId },
-                      };
+                    if (method === "session/set_model" && params && typeof params === "object" && "modelId" in params && typeof params.modelId === "string") {
+                      session.sessionConfigResult = { ...session.sessionConfigResult, models: { ...session.sessionConfigResult?.models, currentModelId: params.modelId } };
                     }
-                    if (method === "session/set_config_option" && Array.isArray(result?.configOptions)) {
-                      session.sessionConfigResult = { ...session.sessionConfigResult, configOptions: result.configOptions };
-                    }
+                    if (method === "session/set_config_option" && Array.isArray(result?.configOptions)) session.sessionConfigResult = { ...session.sessionConfigResult, configOptions: result.configOptions };
                     return result;
                   },
                   sessionId,

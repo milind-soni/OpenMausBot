@@ -160,10 +160,38 @@ describe("Cline ACP driver", () => {
     ]);
     calls.length = 0;
     const switched = [{ id: "provider", currentValue: "cline-pass" }, { id: "model", currentValue: "cline-pass/glm-5.3" }];
-    await CLINE_SUPPORT.configureSession!({ ...base, configOptions: switched, env: { CLINE_PROVIDER: "openai-compatible", CLINE_MODEL: "fixture-model" }, turn: { model: "cline-default" } });
+    await CLINE_SUPPORT.configureSession!({ ...base, configOptions: switched, env: { OMB_CLINE_PROVIDER: "openai-compatible", CLINE_MODEL: "fixture-model" }, turn: { model: "cline-default" } });
     expect(calls).toEqual([
       ["session/set_config_option", { sessionId: "s", configId: "provider", value: "openai-compatible" }],
       ["session/set_model", { sessionId: "s", modelId: "fixture-model" }],
+    ]);
+  });
+
+  it("keeps CLINE_PROVIDER from Cline but still restores it, and returns to a tier model after Cline default", async () => {
+    const env: Record<string, string | undefined> = { CLINE_PROVIDER: "openai-compatible", CLINE_MODEL: "fixture-model", CLINE_PROVIDER_SETTINGS_PATH: join(scratch, "missing.json") };
+    CLINE_SUPPORT.transformEnv!(env, { cli: "cline" } as any, "cline", undefined as any);
+    expect(env.CLINE_PROVIDER).toBeUndefined();
+    const oauth: Record<string, string | undefined> = { CLINE_PROVIDER: "cline", CLINE_PROVIDER_SETTINGS_PATH: join(scratch, "missing.json") };
+    CLINE_SUPPORT.transformEnv!(oauth, { cli: "cline" } as any, "cline", undefined as any);
+    expect(CLINE_SUPPORT.pickAuthMethod([{ id: "cline" }], oauth)).toBe("cline");
+    const calls: Array<[string, unknown]> = [];
+    let options = [{ id: "provider", currentValue: "cline-pass" }, { id: "model", currentValue: "cline-pass/glm-5.3" }];
+    const request = async (method: string, params: any) => {
+      calls.push([method, params.value ?? params.modelId]);
+      if (method !== "session/set_config_option") return {};
+      options = options.map((entry) => entry.id === params.configId ? { ...entry, currentValue: params.value } : entry);
+      return { configOptions: options };
+    };
+    const run = (model: string) => CLINE_SUPPORT.configureSession!({
+      request, sessionId: "s", env, config: { cli: "cline" }, sessionModels: [], currentModelId: undefined, configOptions: options, notice() {}, turn: { model },
+    } as any);
+    await run("cline-default");
+    await run("cline-pass/glm-5.3");
+    expect(calls).toEqual([
+      ["session/set_config_option", "openai-compatible"],
+      ["session/set_model", "fixture-model"],
+      ["session/set_config_option", "cline-pass"],
+      ["session/set_config_option", "cline-pass/glm-5.3"],
     ]);
   });
 
@@ -171,6 +199,7 @@ describe("Cline ACP driver", () => {
     const now = Date.UTC(2026, 10, 18);
     const limit = clinePlanLimit(new Error("Internal error: You have reached your weekly Clinepass limit. The limit resets in 8h 30m, please try again later. (session/prompt)"), now);
     expect(limit).toMatchObject({ acpUsageLimit: true, facts: { limitResetsAt: now + (8 * 60 + 31) * 60_000 } });
+    expect(clinePlanLimit(new Error("You have reached your weekly Clinepass limit. The limit resets in 0m."), now)?.facts.limitResetsAt).toBe(now + 60_000);
     expect(clinePlanLimit(new Error("You have reached your daily Clinepass limit."), now)?.facts.limitResetsAt).toBeUndefined();
     expect(clinePlanLimit(new Error("You hit your rate limit"), now)).toBeUndefined();
     expect(clinePlanLimit(new Error("reached your context window limit"), now)).toBeUndefined();

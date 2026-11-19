@@ -14,7 +14,10 @@ import { clineTierModels, clineTierProvider } from "./cline-models.ts";
 const DEFAULT_OPTION = { id: "cline-default", label: "Cline default (configured)" };
 const MODELS: ModelCatalog = { default: DEFAULT_OPTION.id, options: [DEFAULT_OPTION] };
 
-type ClineSettings = { provider: string; model?: string; apiKey?: string; auth?: { accessToken?: string; apiKey?: string } };
+// Cline 3.0.74 refuses session/set_config_option `provider` while CLINE_PROVIDER is set, so the child gets this instead.
+const PROVIDER_ENV = "OMB_CLINE_PROVIDER";
+
+type ClineSettings ={ provider: string; model?: string; apiKey?: string; auth?: { accessToken?: string; apiKey?: string } };
 
 function savedProvider(env: Record<string, string | undefined>, cli: string): { settings: ClineSettings; fingerprint: string } | null {
   try {
@@ -30,7 +33,7 @@ function savedProvider(env: Record<string, string | undefined>, cli: string): { 
     const text = readFileSync(path, "utf8");
     const stored = JSON.parse(text);
     if (stored?.version !== 1 || !stored.providers || Array.isArray(stored.providers)) return null;
-    const provider = env.CLINE_PROVIDER || stored.lastUsedProvider;
+    const provider = env.CLINE_PROVIDER || env[PROVIDER_ENV] || stored.lastUsedProvider;
     if (typeof provider !== "string" || !/^[\w.-]{1,100}$/.test(provider)) return null;
     const settings = stored.providers[provider]?.settings;
     if (!settings || settings.provider !== provider) return null;
@@ -72,7 +75,7 @@ export function clinePlanLimit(error: unknown, now = Date.now()): AcpReportedFai
   }
   // holds the whole engine, free models too; hold only the ClinePass models via limitFacts if that bites.
   // Cline rounds the wait down to the minute.
-  const resetsAt = delayMs > 0 ? now + delayMs + 60_000 : undefined;
+  const resetsAt = RESET_IN.test(text) ? now + delayMs + 60_000 : undefined;
   const failure = engineFailure("Cline", "", { kind: "usage_limit", status: null, resetsAt })!;
   return new AcpReportedFailure({ ...failure, ...(resetsAt === undefined ? {} : { limitResetsAt: resetsAt }) }, true);
 }
@@ -112,14 +115,16 @@ export const CLINE_SUPPORT: AcpSupport = {
   credentialEnv: ["CLINE_API_KEY"],
   transformEnv(env, config) {
     const saved = savedProvider(env, config.cli)?.settings;
-    // Not CLINE_PROVIDER: Cline 3.0.74 refuses session/set_config_option `provider` while it is set.
+    const provider = env.CLINE_PROVIDER || saved?.provider;
+    delete env.CLINE_PROVIDER;
+    if (provider) env[PROVIDER_ENV] = provider;
     if (!saved) return;
     // ACP restores OAuth accounts itself but needs CLINE_API_KEY for BYOK; never another account's key.
     if (!OAUTH.has(saved.provider)) env.CLINE_API_KEY ||= saved.apiKey || saved.auth?.apiKey;
   },
   spawnFingerprint: (env, config) => savedProvider(env, config.cli)?.fingerprint ?? "unconfigured",
   pickAuthMethod: (methods, env) => {
-    const provider = env.CLINE_PROVIDER || savedProvider(env, "cline")?.settings.provider || "";
+    const provider = env[PROVIDER_ENV] ?? "";
     return !env.CLINE_API_KEY && OAUTH.has(provider) && methods.some((method) => method.id === provider) ? provider : null;
   },
   authFailure: "fail-request",
@@ -138,28 +143,33 @@ export const CLINE_SUPPORT: AcpSupport = {
     return env.CLINE_MODEL?.trim();
   },
   async configureSession({ request, sessionId, env, config, turn, currentModelId, configOptions }) {
-    const options = configOptions as ConfigOption[];
+    // The same array the driver keeps for the next turn, so set_model below must update its `model` entry too.
+    let options = configOptions as ConfigOption[];
     const option = (id: string) => options.find((entry) => entry.id === id);
     const setOption = async (configId: string, value: string) => {
       const current = option(configId);
-      if (current && current.currentValue !== value) await request("session/set_config_option", { sessionId, configId, value });
+      if (!current || current.currentValue === value) return;
+      const result = await request("session/set_config_option", { sessionId, configId, value }) as { configOptions?: unknown } | undefined;
+      options = Array.isArray(result?.configOptions) ? result.configOptions : options;
+    };
+    const setModel = async (modelId: string) => {
+      await request("session/set_model", { sessionId, modelId });
+      const current = option("model");
+      if (current) current.currentValue = modelId;
     };
     const tier = clineTierProvider(turn.model);
     if (tier) {
       // The agent lists only its provider's models, but runs a model it did not list.
       await setOption("provider", tier);
       if (option("model")) await setOption("model", turn.model!);
-      else if (turn.model !== currentModelId) await request("session/set_model", { sessionId, modelId: turn.model });
+      else if (turn.model !== currentModelId) await setModel(turn.model!);
       return;
     }
-    const saved = savedProvider(env, config.cli)?.settings;
-    const provider = env.CLINE_PROVIDER || saved?.provider;
+    const provider = env[PROVIDER_ENV];
     if (provider) await setOption("provider", provider);
     // session/new falls back when a saved custom model is missing from Cline's built-in catalog.
-    const model = env.CLINE_MODEL?.trim() || saved?.model?.trim();
-    if (model && model !== (option("model")?.currentValue ?? currentModelId)) {
-      await request("session/set_model", { sessionId, modelId: model });
-    }
+    const model = env.CLINE_MODEL?.trim() || savedProvider(env, config.cli)?.settings.model?.trim();
+    if (model && model !== (option("model")?.currentValue ?? currentModelId)) await setModel(model);
   },
   reportedFailure: clineReportedFailure,
 };
