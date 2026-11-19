@@ -55,6 +55,11 @@ function entries(value: unknown): Entry[] | null {
 
 let last: Option[] = tierOptions(PASS_FALLBACK, FREE_FALLBACK);
 
+/** The ClinePass models of the last list read, which share one allowance. */
+export function clinePassModels(): string[] {
+  return last.flatMap((entry) => clineTierProvider(entry.id) === "cline-pass" ? [entry.id] : []);
+}
+
 /** The free and ClinePass models, ClinePass first. A list that cannot be read gives the last one that could, then the
  * bundled one; never throws. */
 export async function clineTierModels(fetchImpl: typeof fetch = fetch): Promise<Option[]> {

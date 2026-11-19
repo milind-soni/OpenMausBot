@@ -205,6 +205,14 @@ describe("Cline ACP driver", () => {
     expect(clinePlanLimit(new Error("reached your context window limit"), now)).toBeUndefined();
   });
 
+  it("holds only the ClinePass models when the ClinePass allowance runs out", () => {
+    const pass = CLINE_SUPPORT.limitFacts!("You have reached your weekly Clinepass limit.", "cline-pass/glm-5.3");
+    expect(pass.limit).toBe("model");
+    expect(pass.limitModels).toContain("cline-pass/glm-5.3");
+    expect(pass.limitModels!.some((model) => model.startsWith("cline-free/"))).toBe(false);
+    expect(CLINE_SUPPORT.limitFacts!("You have reached your weekly Clinepass limit.", "cline-default")).toEqual({ limit: "engine" });
+  });
+
   it("says plainly that ClinePass models need a subscription", () => {
     const words = "No access to ClinePass subscription models yet. Subscribe to ClinePass, the low cost open weights model coding plan: https://app.cline.bot/dashboard/subscription?personal=true";
     const failure = clineReportedFailure(new Error(`Internal error: ${words}: ${words} (session/prompt)`));

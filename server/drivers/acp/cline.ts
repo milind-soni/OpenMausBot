@@ -9,7 +9,7 @@ import { createAcpDriver, type AcpSupport } from "./core.ts";
 import type { ModelCatalog } from "../../contracts.ts";
 import { engineFailure } from "../engine-errors.ts";
 import { AcpReportedFailure } from "./failure-words.ts";
-import { clineTierModels, clineTierProvider } from "./cline-models.ts";
+import { clinePassModels, clineTierModels, clineTierProvider } from "./cline-models.ts";
 
 const DEFAULT_OPTION = { id: "cline-default", label: "Cline default (configured)" };
 const MODELS: ModelCatalog = { default: DEFAULT_OPTION.id, options: [DEFAULT_OPTION] };
@@ -73,7 +73,6 @@ export function clinePlanLimit(error: unknown, now = Date.now()): AcpReportedFai
   for (const [, amount, unit] of RESET_IN.exec(text)?.[1]?.matchAll(/(\d+)\s*([dhm])/gi) ?? []) {
     delayMs += Number(amount) * UNIT_MS[unit!.toLowerCase()]!;
   }
-  // holds the whole engine, free models too; hold only the ClinePass models via limitFacts if that bites.
   // Cline rounds the wait down to the minute.
   const resetsAt = RESET_IN.test(text) ? now + delayMs + 60_000 : undefined;
   const failure = engineFailure("Cline", "", { kind: "usage_limit", status: null, resetsAt })!;
@@ -172,6 +171,10 @@ export const CLINE_SUPPORT: AcpSupport = {
     if (model && model !== (option("model")?.currentValue ?? currentModelId)) await setModel(model);
   },
   reportedFailure: clineReportedFailure,
+  // The ClinePass allowance holds only the ClinePass models; free models keep running.
+  limitFacts: (_text, model) => clineTierProvider(model) === "cline-pass"
+    ? { limit: "model", limitModels: [...new Set([model!, ...clinePassModels()])] }
+    : { limit: "engine" },
 };
 
 export const ClineAgentDriver = {
