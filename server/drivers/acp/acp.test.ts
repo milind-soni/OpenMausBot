@@ -10,6 +10,7 @@ import { BUILT_IN_DATA_SYSTEM_PROMPT } from "../../data/instructions.ts";
 import type { ProviderInstance } from "../../contracts.ts";
 import { TurnNotStartedError } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
+import { productName } from "../../brand.ts";
 import { publishedMessages } from "../../harness/text-items.testkit.ts";
 import { promptSplitFingerprints, writePromptSplitReceipt } from "../prompt-split.ts";
 import { classifyError } from "../retry.ts";
@@ -503,7 +504,7 @@ describe("ACP turns (fake CLI)", () => {
     expect(prompt).toEqual([
       { type: "text", text: expect.stringContaining(`What happens in ${clipPath}?
 
-(OpenMausBot attached these files`) },
+(${productName()} attached these files`) },
       { type: "resource_link", uri: acpMediaUri(clipPath), name: "media link clip.mp4" },
     ]);
     expect(JSON.stringify(prompt)).not.toContain("private-acp-video-bytes");

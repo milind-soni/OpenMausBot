@@ -4,6 +4,8 @@
 // PDF. This finds existing local media files named in the turn text and returns those blocks plus a short note.
 import { stat } from "node:fs/promises";
 
+import { productName } from "../../brand.ts";
+
 export interface AcpResourceLink {
   type: "resource_link";
   uri: string;
@@ -78,7 +80,7 @@ export async function readAcpMediaLinks(text: string, usedBytes = 0, budget = AC
   }
   let note = "";
   if (attached.length) {
-    note += `\n\n(OpenMausBot attached these files to this message so you can see and hear them directly; do not open them with a file tool: ${attached.join(" | ")})`;
+    note += `\n\n(${productName()} attached these files to this message so you can see and hear them directly; do not open them with a file tool: ${attached.join(" | ")})`;
   }
   if (skipped.length) {
     const limitMb = Math.floor(budget / 1048576);
