@@ -70,11 +70,12 @@ describe("shareThatFits", () => {
   it("keeps what fits the window llama.cpp counted, with room left for the reply", () => {
     expect(shareThatFits(LLAMA_CPP)).toBeCloseTo(0.8, 3);
     expect(shareThatFits('{"error":{"type":"exceed_context_size_error","n_prompt_tokens":400,"n_ctx":100}}')).toBeCloseTo(0.2);
+    expect(shareThatFits('{"error":{"type":"exceed_context_size_error","n_prompt_tokens":100,"n_ctx":100}}')).toBeCloseTo(0.8);
   });
 
   it.each([
     CONTEXT_CODE, CONTEXT_TYPE, NGINX_413, "",
-    '{"error":{"type":"exceed_context_size_error","n_prompt_tokens":100,"n_ctx":100}}',
+    '{"error":{"type":"exceed_context_size_error","n_prompt_tokens":99,"n_ctx":100}}',
     '{"error":{"type":"exceed_context_size_error","n_prompt_tokens":"98312","n_ctx":"98304"}}',
     '{"error":{"type":"exceed_context_size_error","n_prompt_tokens":98312,"n_ctx":0}}',
     '{"n_prompt_tokens":98312,"n_ctx":98304}',
@@ -264,7 +265,7 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
     return (bytes: number, messages: Array<{ role: string; content: unknown }>) => {
       const n_prompt_tokens = count(bytes, messages);
       n_ctx ??= window(n_prompt_tokens);
-      return n_prompt_tokens > n_ctx ? { status: 400, body: JSON.stringify({ error: { code: 400,
+      return n_prompt_tokens >= n_ctx ? { status: 400, body: JSON.stringify({ error: { code: 400,
         message: `request (${n_prompt_tokens} tokens) exceeds the available context size (${n_ctx} tokens), try increasing it`,
         type: "exceed_context_size_error", n_prompt_tokens, n_ctx } }) } : null;
     };
@@ -293,7 +294,7 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
     const done = await f.run({ system: "Fixture system prompt.", transcript: transcript(20, 3_000) });
     expect(done).toMatchObject({ ok: true });
     expect(f.requests).toHaveLength(2);
-    expect(tokens(f.requests[1]!.bytes)).toBeLessThanOrEqual(Math.floor(tokens(f.requests[0]!.bytes) / 3));
+    expect(tokens(f.requests[1]!.bytes)).toBeLessThan(Math.floor(tokens(f.requests[0]!.bytes) / 3));
     expect(f.errors()).toEqual([]);
   });
 
@@ -305,7 +306,7 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
     expect(done).toMatchObject({ ok: true });
     expect(f.requests.length).toBeGreaterThan(2);
     const sent = f.requests.at(-1)!;
-    expect(denseSystem(sent.bytes, sent.messages)).toBeLessThanOrEqual(window);
+    expect(denseSystem(sent.bytes, sent.messages)).toBeLessThan(window);
     expect(f.retries().map((retry) => (retry as { attempt: number }).attempt)).toEqual(f.requests.slice(1).map((_, index) => index + 1));
     const notes = sent.messages.filter((message) => typeof message.content === "string" && message.content.includes("omitted to fit"));
     expect(notes).toHaveLength(1);

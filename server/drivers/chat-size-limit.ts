@@ -30,7 +30,7 @@ export function refusesRequestSize(status: number, body: string): boolean {
 export function shareThatFits(body: string): number | undefined {
   const error = bodyError(body);
   const window = error?.n_ctx, prompt = error?.n_prompt_tokens;
-  if (typeof window !== "number" || typeof prompt !== "number" || window <= 0 || prompt <= window) return undefined;
+  if (typeof window !== "number" || typeof prompt !== "number" || window <= 0 || prompt < window) return undefined;
   return window / prompt * WINDOW_FILLED_BY_RESEND;
 }
 

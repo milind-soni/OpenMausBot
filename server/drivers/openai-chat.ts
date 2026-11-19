@@ -695,7 +695,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 for (const message of messages) delete message.reasoning_content;
                 continue;
               }
-              // A provider refuses an oversized request before running anything, so one smaller copy may go again.
+              // A provider refuses an oversized request before running anything, so a smaller copy may go again.
               if (error instanceof RequestTooLargeError && !abort.signal.aborted) {
                 const resend = resends < resendsAllowed(error) ? smallerResend(messages, request, error.bytes, error.fits) : null;
                 native("out", { refused: "request_too_large", bytes: error.bytes, ...(resend ? { before: resend.before, after: resend.after } : {}) });
