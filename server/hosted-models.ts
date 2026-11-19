@@ -106,7 +106,7 @@ export function hostedModelPolicy(dataDirectory: string, env: NodeJS.ProcessEnv 
         installRuntime: undefined, startAuthentication: undefined, getAuthentication: undefined,
         completeAuthentication: undefined, cancelAuthentication: undefined, signOut: undefined,
         snapshot: async () => ({ ...await instance.snapshot(), authenticated: true, billing: "metered" }),
-        adapter: { ...instance.adapter, sendTurn: async input => {
+        adapter: { ...instance.adapter, prestart: undefined, sendTurn: async input => {
           if (!input.model || !models.includes(input.model)) throw new Error(HOSTED_MODEL_SELECTION_ERROR);
           return instance.adapter.sendTurn(input);
         } },

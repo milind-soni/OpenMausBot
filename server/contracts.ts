@@ -334,6 +334,17 @@ export interface ProviderAdapter {
     hold(threadId: ThreadId, until: number | null): boolean;
     compact?(threadId: ThreadId, options: { instructions: string; session?: string; signal?: AbortSignal }): Promise<IdleCompactResult>;
   };
+  /** Starting a thread's engine before its first message, so that message finds it running. `start` launches the process
+   * exactly as a turn with this input would and sends it nothing; it resolves true once the process is launched. The next
+   * sendTurn on the thread takes that process when its launch would have been the same and it has started up (`ready`),
+   * and replaces it otherwise. `held`: one is launching or waiting. `drop` stops one that no turn took; a taken one is
+   * the turn's own. */
+  prestart?: {
+    start(input: SendTurnInput): Promise<boolean>;
+    held(threadId: ThreadId): boolean;
+    ready(threadId: ThreadId): boolean;
+    drop(threadId: ThreadId): void;
+  };
   /** The engine's own count, by category, of what fills this thread's context window. null when the thread has no live
    * engine process to ask or the engine gave no answer; never an estimate. */
   contextBreakdown?(threadId: ThreadId, options?: { signal?: AbortSignal }): Promise<ContextBreakdown | null>;

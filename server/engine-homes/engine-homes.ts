@@ -114,6 +114,7 @@ export function withEngineHomes(instance: ProviderInstance, homes: EngineHomes =
   (instance as { adapter: ProviderInstance["adapter"] }).adapter = {
     ...adapter,
     sendTurn: (input) => homes.within(input.threadId, () => adapter.sendTurn(input), input.botId),
+    ...(adapter.prestart ? { prestart: { ...adapter.prestart, start: (input) => homes.within(input.threadId, () => adapter.prestart!.start(input), input.botId) } } : {}),
     ...(warm ? { cacheKeepWarm: {
       ...warm,
       ping: (threadId, options) => homes.within(threadId, () => warm.ping(threadId, options)),
