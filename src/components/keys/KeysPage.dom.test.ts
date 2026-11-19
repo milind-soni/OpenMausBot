@@ -11,6 +11,7 @@ const fx = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   api: vi.fn(),
   dispatch: vi.fn(),
+  refreshModels: vi.fn(),
 }));
 vi.mock("@/state/store", async (original) => {
   const actual = await original<typeof import("@/state/store")>();
@@ -21,7 +22,7 @@ vi.mock("@/state/store", async (original) => {
     api: (...args: unknown[]) => fx.api(...args),
     useStore: () => {
       const config = useSyncExternalStore(subscribe, () => fx.config);
-      return { state: { ...actual.initialState, config, instances: fx.instances as never }, dispatch: fx.dispatch };
+      return { state: { ...actual.initialState, config, instances: fx.instances as never }, dispatch: fx.dispatch, refreshModels: fx.refreshModels };
     },
   };
 });
@@ -75,6 +76,8 @@ beforeEach(() => {
   setLocale("en");
   fx.api.mockReset();
   fx.dispatch.mockReset();
+  fx.refreshModels.mockReset();
+  fx.refreshModels.mockResolvedValue(undefined);
   fx.dispatch.mockImplementation((action: { type: string; config?: Record<string, unknown> }) => {
     if (action.type === "configStatus") setConfig(action.config!);
   });
@@ -365,6 +368,29 @@ describe("the Ollama row", () => {
     await found("ready");
     expect(row("ollama")!.textContent).toContain("already added");
     expect(button("Add Ollama").disabled).toBe(true);
+  });
+
+  it("reloads the added Ollama's model list when a check finds a model it lacks, as after ollama pull", async () => {
+    const served = (instanceId: string, url: string) => ({
+      instanceId, driverKind: "openai-compat", displayName: "Ollama", url, snapshot: { state: "available" },
+      models: { default: "qwen3.5:9b", options: [{ id: "qwen3.5:9b", label: "qwen3.5:9b" }, { id: "bonsai-2:9b", label: "bonsai-2:9b" }] },
+    });
+    fx.instances = [served("openai-compat-here", "http://127.0.0.1:11434/v1"), served("openai-compat-elsewhere", "http://gpu-box.local:11434/v1")];
+    answer("ready", undefined, [{ name: "qwen3.5:9b" }, { name: "bonsai-2:9b" }]);
+    page();
+    openServers();
+    await found("ready");
+    expect(fx.refreshModels).not.toHaveBeenCalled();
+    const [here, elsewhere] = fx.instances as Array<ReturnType<typeof served>>;
+    fx.instances = [{ ...here!, models: { ...here!.models, options: here!.models.options.slice(0, 1) } }, elsewhere!];
+    setConfig({ ...fx.config });
+    await Promise.resolve();
+    expect(fx.refreshModels, "a list that changes after a check that needed no reload is not reloaded from that old check").not.toHaveBeenCalled();
+    answer("ready", undefined, [{ name: "qwen3.5:9b" }, { name: "bonsai-2:9b" }, { name: "nemotron-3.5-bolt:e4b" }]);
+    flushSync(() => button("Check again").click());
+    await vi.waitFor(() => expect(row("ollama")!.textContent).toContain("Pulled models: 3."));
+    await vi.waitFor(() => expect(fx.refreshModels).toHaveBeenCalledWith("openai-compat-here"));
+    expect(fx.refreshModels).toHaveBeenCalledOnce();
   });
 });
 
