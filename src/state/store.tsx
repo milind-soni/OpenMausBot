@@ -2247,7 +2247,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (action.type !== "send") return undefined;
         return botBeforeSend ? openOnboardingCard(botBeforeSend) : undefined;
       })();
-      const threadOf = (s: AppState) => s.groups.find((g) => g.id === s.selectedId)?.threadId ?? s.bots.find((b) => b.id === s.selectedId)?.threadId, previousOpened = threadOf(store.getState());
+      const threadOf = (s: AppState) => { const bot = s.bots.find((b) => b.id === s.selectedId); return s.groups.find((g) => g.id === s.selectedId)?.threadId ?? bot?.switchingTo ?? bot?.threadId; }, previousOpened = threadOf(store.getState());
+      if (action.type === "notice" && action.notice?.kind === "steer-images" && action.notice.threadId !== previousOpened) return;
       if (
         action.type !== "cancelQueued" &&
         action.type !== "cancelGroupQueued" &&
