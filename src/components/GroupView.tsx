@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formattedReplyWidth, isFormattedReply, splitReplyBlocks } from "@/lib/formatted-reply";
 import { activeLocale, intlLocale, t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -52,7 +52,7 @@ import { botEngine, failedTurnCause } from "@/lib/failed-turn";
 import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
 import { RoomComposer } from "./bot-access/RoomComposer";
 import { ChatErrorBanner, ChatNotice } from "./ChatErrorBanner";
-import { RoomContextWarnings } from "./ContextWarning"; import { RoomChiefAbsent } from "./RoomChiefAbsent";
+import { RoomContextWarnings } from "./ContextWarning";
 import { ChatFindBar } from "./ChatFindBar";
 import { isPureLeakedSystemHarnessMessage, stripLeakedSystemHarnessMessages } from "../../shared/system-message-guard.ts";
 import { ReplyQuote } from "./ReplyQuote";
@@ -88,6 +88,8 @@ import { NewMessagesDivider } from "./NewMessagesDivider";
 import { appendDraftAttachments, useReplyDraft } from "@/lib/drafts";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { highlightCitationSource } from "@/lib/citations-dom";
+
+const RoomClassroom3D = lazy(() => import("./RoomClassroom3D").then((module) => ({ default: module.RoomClassroom3D })));
 import { latestFailure, latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { DataResultChip } from "./DataResultChip"; import { PublishedPageCard } from "./PublishedPageCard"; import { TemplateChatCard } from "./TemplateCard"; import { RoomRichRow, UserLineNote } from "./RichMessageRow";
@@ -910,6 +912,23 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
   const setupPending = !remoteClient && roomNeedsSetup(group);
   const advancedMode = useAdvancedMode();
   const simpleHeader = simpleRoomHeader({ advanced: advancedMode, remoteClient, group, setupPending });
+  const wideRoom = useMediaQuery("(min-width: 1024px)");
+  const canShowClassroom = wideRoom && !setupPending && !group.dm && !inForkPanel;
+  const [classroomOpen, setClassroomOpen] = useState(true);
+  const showClassroom = canShowClassroom && classroomOpen;
+  const splitPaneRef = useRef<HTMLDivElement>(null);
+  const [classroomShare, setClassroomShare] = useState(58);
+  const resizeClassroom = useCallback((clientX: number) => {
+    const pane = splitPaneRef.current;
+    if (!pane) return;
+    const bounds = pane.getBoundingClientRect();
+    if (bounds.width <= 0) return;
+    const rightToLeft = getComputedStyle(pane).direction === "rtl";
+    const offset = rightToLeft ? bounds.right - clientX : clientX - bounds.left;
+    const minimum = Math.min(42, (320 / bounds.width) * 100);
+    const maximum = 100 - minimum;
+    setClassroomShare(Math.min(maximum, Math.max(minimum, (offset / bounds.width) * 100)));
+  }, []);
 
   const lastGroupMessage = group.messages.at(-1);
   const toolInFlight = lastGroupMessage?.kind === "activity" && lastGroupMessage.tool?.ok === undefined;
@@ -999,7 +1018,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
       {membersOpen && !remoteClient && !group.dm && (
         <ManageMembersPanel group={group} onClose={closeMembers} triggerRef={membersTriggerRef} />
       )}
-      <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
+      <GlassScrollFrame className="flex flex-1 flex-col [--glass-tint:var(--color-app)]">
       {/* z-[25]: above the room set-up card (z-20), below the GroupCallOverlay (z-30). */}
       <GlassBar edge="top" fade={!advancedMode && !remoteClient} className="z-[25]">
       <RoomHeader
@@ -1013,12 +1032,15 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
         onToggleFolder={() => setFolderOpen((open) => !open)}
         onOpenMembers={() => setMembersOpen(true)}
         membersTriggerRef={membersTriggerRef}
+        showClassroomToggle={canShowClassroom}
+        classroomOpen={classroomOpen}
+        onToggleClassroom={() => setClassroomOpen((open) => !open)}
       />
 
       {findOpen && <ChatFindBar threadId={group.threadId} inForkPanel={inForkPanel} onClose={() => setFindOpen(false)} />}
       <ChatErrorBanner message={state.error} onDismiss={() => dispatch({ type: "error", message: null })} />
       <ChatNotice notice={state.notice} />
-      {!setupPending && <RoomContextWarnings group={group} members={members} />}{!setupPending && !remoteClient && <RoomChiefAbsent group={group} />}
+      {!setupPending && <RoomContextWarnings group={group} members={members} />}
 
       {!setupPending && !group.dm && !remoteClient && state.config && group.defaultResponder.kind === "auto" && !jevRoomRoutingOn(state.config) && (
         <div className="w-full px-5">
@@ -1048,6 +1070,58 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
       )}
 
       </GlassBar>
+
+      <div ref={splitPaneRef} className="flex min-h-0 flex-1">
+      {showClassroom && (
+        <>
+          <div
+            className={cn("min-w-0 shrink-0", (advancedMode || remoteClient) && "pt-[var(--glass-top,0px)]")}
+            style={{ flexBasis: `${classroomShare}%` }}
+          >
+          <Suspense fallback={<div className="flex h-full min-h-0 items-center justify-center"><Loader2 size={20} className="animate-spin text-ink-secondary" /><span className="sr-only">{t("room.classroom.region", { name: group.name })}</span></div>}>
+            <RoomClassroom3D
+              group={group}
+              members={members}
+              className="h-full"
+              onFocusAgentChat={(agentId, messageId) => {
+                const targetId = messageId ?? group.messages.findLast((message) => message.from?.botId === agentId)?.id;
+                if (targetId) dispatch({ type: "focusMessage", threadId: group.threadId, messageId: targetId });
+              }}
+            />
+          </Suspense>
+          </div>
+          <div
+            role="separator"
+            tabIndex={0}
+            aria-label={t("room.classroom.resize")}
+            aria-orientation="vertical"
+            aria-valuemin={32}
+            aria-valuemax={68}
+            aria-valuenow={Math.round(classroomShare)}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              resizeClassroom(event.clientX);
+            }}
+            onPointerMove={(event) => {
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) resizeClassroom(event.clientX);
+            }}
+            onPointerUp={(event) => event.currentTarget.releasePointerCapture(event.pointerId)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowLeft") setClassroomShare((value) => Math.max(32, value - 2));
+              else if (event.key === "ArrowRight") setClassroomShare((value) => Math.min(68, value + 2));
+              else if (event.key === "Home") setClassroomShare(32);
+              else if (event.key === "End") setClassroomShare(68);
+              else return;
+              event.preventDefault();
+            }}
+            className="group relative z-30 w-3 shrink-0 touch-none cursor-col-resize bg-app focus-visible:bg-accent/10 focus-visible:outline-none"
+          >
+            <span className="absolute inset-y-0 start-1/2 w-px -translate-x-1/2 bg-edge transition-colors group-hover:bg-accent group-focus-visible:bg-focus group-active:bg-accent motion-reduce:transition-none" />
+          </div>
+        </>
+      )}
+      <div className="relative min-h-0 min-w-0 flex-1">
 
       <div
         ref={scrollRef}
@@ -1179,6 +1253,8 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
         viewportRef={scrollRef}
         onAdd={(citation) => appendDraftAttachments(`group:${citation.source.ownerId}:${citation.source.threadId}`, [citation])}
       />
+      </div>
+      </div>
       </div>
       </GlassScrollFrame>
     </main>

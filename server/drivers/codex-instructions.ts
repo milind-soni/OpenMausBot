@@ -80,8 +80,8 @@ export async function syncCodexInstructions(
           role: "developer",
           content: [{
             type: "input_text",
-            text: "The following replaces the previous developer instruction block supplied by OpenMausBot, including its native configured rules and bot-specific instructions. Other Codex instructions and permissions still apply.\n\n"
-              + (instructions || "No OpenMausBot bot-specific instructions remain."),
+            text: "The following replaces the previous developer instruction block supplied by Looma, including its native configured rules and bot-specific instructions. Other Codex instructions and permissions still apply.\n\n"
+              + (instructions || "No Looma bot-specific instructions remain."),
           }],
         }],
       });

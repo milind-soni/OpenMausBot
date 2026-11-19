@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { ChevronRight, Pause, Plus, Search } from "lucide-react";
+import { Box, ChevronRight, Pause, Plus, Search } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { roomContextWarnings } from "@/lib/context-warning";
@@ -137,6 +137,9 @@ export function RoomHeader({
   onToggleFolder,
   onOpenMembers,
   membersTriggerRef,
+  showClassroomToggle,
+  classroomOpen,
+  onToggleClassroom,
 }: {
   group: Group;
   members: Bot[];
@@ -148,6 +151,9 @@ export function RoomHeader({
   onToggleFolder: () => void;
   onOpenMembers: () => void;
   membersTriggerRef: RefObject<HTMLButtonElement | null>;
+  showClassroomToggle?: boolean;
+  classroomOpen?: boolean;
+  onToggleClassroom?: () => void;
 }) {
   const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle } = useCaptionChrome();
   const { state, dispatch } = useStore();
@@ -186,6 +192,22 @@ export function RoomHeader({
           </div>
           <div data-roomhead-controls className="flex shrink-0 items-center gap-1.5">
             <ThreadPresenceFaces threadId={group.threadId} />
+            {showClassroomToggle && (
+              <button
+                type="button"
+                onClick={onToggleClassroom}
+                aria-label={t("room.classroom.toggle")}
+                aria-pressed={classroomOpen}
+                title={t("room.classroom.toggle")}
+                style={headerNoDragStyle}
+                className={cn(
+                  "flex size-8 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
+                  classroomOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+                )}
+              >
+                <Box size={17} />
+              </button>
+            )}
             {pinned}
             <button
               ref={membersTriggerRef}
@@ -235,6 +257,21 @@ export function RoomHeader({
           className="flex items-center gap-1.5 @max-3xl/roomhead:ml-auto @max-3xl/roomhead:flex-wrap @max-3xl/roomhead:justify-end"
         >
           <ThreadPresenceFaces threadId={group.threadId} />
+          {showClassroomToggle && (
+            <button
+              type="button"
+              onClick={onToggleClassroom}
+              aria-label={t("room.classroom.toggle")}
+              aria-pressed={classroomOpen}
+              title={t("room.classroom.toggle")}
+              className={cn(
+                "flex size-8 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
+                classroomOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
+              )}
+            >
+              <Box size={17} />
+            </button>
+          )}
           {pinned}
           <button
             type="button"

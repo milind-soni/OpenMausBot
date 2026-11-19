@@ -2020,6 +2020,16 @@ body {
   margin-inline: auto;
   max-width: calc(var(--chat-column-max) + 2.5rem);
 }
+@keyframes room-classroom-ticker {
+  from { transform: translateX(0); }
+  to { transform: translateX(calc(-50% - 1.5rem)); }
+}
+.room-classroom-ticker {
+  animation: room-classroom-ticker 18s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .room-classroom-ticker { animation: none; }
+}
 @media (prefers-reduced-transparency: reduce) {
   .glass-bar::before {
     background: var(--glass-tint, var(--color-panel));

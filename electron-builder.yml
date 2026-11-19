@@ -1,6 +1,6 @@
 appId: com.openmausbot.app
-productName: OpenMausBot
-artifactName: OpenMausBot-${version}-${arch}.${ext}
+productName: Looma
+artifactName: Looma-${version}-${arch}.${ext}
 
 protocols:
   - name: OpenMausBot package install
