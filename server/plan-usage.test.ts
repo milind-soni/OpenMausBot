@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join, normalize } from "node:path";
@@ -20,6 +20,7 @@ import {
 } from "./plan-usage.ts";
 import { claudeKeychainQueries } from "./drivers/claude-keychain.ts";
 import { readOpenCodeDbLogins } from "./opencode-credentials.ts";
+import { parseDeepSeekBalance } from "./deepseek-balance.ts";
 
 const SECRET = "plan-usage-fixture-secret";
 const NOW = 1_800_000_000_000;
@@ -38,7 +39,7 @@ function jsonResponse(body: unknown, status = 200): PlanResponse {
 
 /** A plan account for one driver, named as the panel names it. */
 function account(driver: PlanAccount["driver"], extras: Partial<PlanAccount> = {}): PlanAccount {
-  const name = driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : driver === "opencode" ? "OpenCode" : "Grok";
+  const name = driver === "claude" ? "Claude" : driver === "codex" ? "Codex" : driver === "opencode" ? "OpenCode" : driver === "deepseek" ? "DeepSeek" : "Grok";
   return {
     id: driver,
     name,
@@ -745,5 +746,71 @@ describe("plan usage fetcher", () => {
     expect((await load({})).providers.map((row) => row.id)).toEqual(["claude"]);
     expect((await load({ usageMeter: false })).providers).toEqual([]);
     expect((await load({})).providers.map((row) => row.id)).toEqual(["claude"]);
+  });
+
+  it("reports nothing for a Codex login made with an API key, which has no plan quota", async () => {
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({}));
+    const report = await fetchPlanUsage([account("codex")], {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: fileCredentialReader({ now: () => NOW, env: { CODEX_HOME: "/codex" }, readText: () => JSON.stringify({ auth_mode: "apikey", OPENAI_API_KEY: SECRET }) }),
+    });
+    expect(report.providers).toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("still asks a Codex user with no login at all to sign in again", async () => {
+    const report = await fetchPlanUsage([account("codex")], {
+      fetch: async () => jsonResponse({}),
+      now: () => NOW,
+      credentials: fileCredentialReader({ now: () => NOW, env: { CODEX_HOME: "/codex" }, readText: () => null }),
+    });
+    expect(report.providers[0]).toMatchObject({ ok: false });
+  });
+});
+
+describe("a DeepSeek balance", () => {
+  it("prefers the USD balance and ignores malformed entries", () => {
+    expect(parseDeepSeekBalance({ is_available: true, balance_infos: [
+      { currency: "CNY", total_balance: "110.00" },
+      { currency: "usd", total_balance: "51.30" },
+    ] })).toEqual({ amount: 51.3, currency: "USD" });
+    expect(parseDeepSeekBalance({ balance_infos: [{ currency: "CNY", total_balance: "7.5" }, { currency: "", total_balance: "1" }] })).toEqual({ amount: 7.5, currency: "CNY" });
+    expect(parseDeepSeekBalance({ balance_infos: [{ currency: "USD", total_balance: "n/a" }] })).toBeNull();
+    expect(parseDeepSeekBalance({})).toBeNull();
+  });
+
+  it("lists a DeepSeek instance and reads its balance with the dsh key", async () => {
+    expect(planAccountsFromInstances({ deepseek: { driver: "deepseekAgent" } })).toEqual([{ id: "deepseek", name: "DeepSeek", driver: "deepseek", environment: {} }]);
+    const home = mkdtempSync(join(tmpdir(), "dsh-"));
+    try {
+      writeFileSync(join(home, ".env"), `DEEPSEEK_API_KEY="${SECRET}"\n`);
+      const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ is_available: true, balance_infos: [{ currency: "USD", total_balance: "51.30" }] }));
+      const report = await fetchPlanUsage([account("deepseek")], {
+        fetch: fetchImpl,
+        now: () => NOW,
+        credentials: fileCredentialReader({ now: () => NOW, env: { DSH_HOME: home }, readText: () => null }),
+      });
+      expect(fetchImpl.mock.calls[0]?.[0]).toBe("https://api.deepseek.com/user/balance");
+      expect(JSON.stringify(fetchImpl.mock.calls[0]?.[1])).toContain(`Bearer ${SECRET}`);
+      expect(report.providers[0]).toMatchObject({ id: "deepseek", ok: true, error: null, balance: { amount: 51.3, currency: "USD" } });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("shows no DeepSeek row without a key, and names a refused one", async () => {
+    const home = mkdtempSync(join(tmpdir(), "dsh-"));
+    try {
+      const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ error: "unauthorized" }, 401));
+      const credentials = fileCredentialReader({ now: () => NOW, env: { DSH_HOME: home }, readText: () => null });
+      const none = await fetchPlanUsage([account("deepseek")], { fetch: fetchImpl, now: () => NOW, credentials });
+      expect(none.providers).toEqual([]);
+      expect(fetchImpl).not.toHaveBeenCalled();
+      const refused = await fetchPlanUsage([account("deepseek", { environment: { DEEPSEEK_API_KEY: SECRET } })], { fetch: fetchImpl, now: () => NOW, credentials });
+      expect(refused.providers[0]).toMatchObject({ ok: false, error: "DeepSeek refused the saved key" });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

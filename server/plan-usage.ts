@@ -9,8 +9,10 @@ import { codexHome } from "./drivers/codex-identity.ts";
 import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 import { openCodeAuthText, openCodeDbText, readOpenCodeDbLogins } from "./opencode-credentials.ts";
+import { DEEPSEEK_BALANCE_URL, parseDeepSeekBalance, type PlanBalance } from "./deepseek-balance.ts";
+import { readDeepSeekKey } from "./drivers/acp/deepseek.ts";
 
-export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity";
+export type PlanDriver = "claude" | "codex" | "grok" | "opencode" | "antigravity" | "deepseek";
 
 export interface PlanWindow {
   available: boolean;
@@ -60,6 +62,8 @@ export interface PlanProviderRow {
   weekly: PlanWindow;
   extra: PlanExtra[];
   models: PlanModelUsage[];
+  /** A prepaid API balance, for a provider that has money left instead of quota windows. */
+  balance?: PlanBalance;
 }
 
 export interface PlanUsageReport {
@@ -81,6 +85,8 @@ export interface PlanCredential {
   token: string | null;
   accountId: string | null;
   expired: boolean;
+  /** Signed in with a pay-per-use API key, which has no plan quota to report. */
+  apiKeyOnly?: boolean;
 }
 
 export interface CredentialReader {
@@ -137,7 +143,7 @@ const WEEK_MAX_SECONDS = 9 * 86400;
 const MONTH_MIN_SECONDS = 27 * 86400;
 const MONTH_MAX_SECONDS = 32 * 86400;
 
-const DRIVER_OF: Record<string, PlanDriver> = { claudeAgent: "claude", codex: "codex", grokAgent: "grok", opencodeGo: "opencode", antigravityAgent: "antigravity" };
+const DRIVER_OF: Record<string, PlanDriver> = { claudeAgent: "claude", codex: "codex", grokAgent: "grok", opencodeGo: "opencode", antigravityAgent: "antigravity", deepseekAgent: "deepseek" };
 
 const PRODUCT_NAME: Record<PlanDriver, string> = {
   claude: "Claude",
@@ -145,6 +151,7 @@ const PRODUCT_NAME: Record<PlanDriver, string> = {
   grok: "Grok",
   opencode: "OpenCode",
   antigravity: "Antigravity",
+  deepseek: "DeepSeek",
 };
 
 export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAccount[] {
@@ -268,6 +275,7 @@ export function fileCredentialReader(source: CredentialSource): CredentialReader
       if (account.driver === "claude") return readClaudeCredential(account, merged, source, at);
       if (account.driver === "codex") return readCodexCredential(merged, source.readText, at);
       if (account.driver === "opencode") return readOpenCodeCredential(merged, source.readText, at, source.readOpenCodeDb);
+      if (account.driver === "deepseek") { const key = readDeepSeekKey(merged); return key ? { token: key, accountId: null, expired: false } : missingCredential(); }
       return readGrokCredential(merged, source.readText, at);
     },
   };
@@ -792,7 +800,7 @@ function readCodexCredential(
   if (!root) return missingCredential();
   const tokens = asRecord(root.tokens);
   const token = secretString(tokens?.access_token) ?? secretString(root.access_token);
-  if (!token) return missingCredential();
+  if (!token) return root.auth_mode === "apikey" ? { ...missingCredential(), apiKeyOnly: true } : missingCredential();
   const expiry = timeMs(tokens?.expires_at ?? tokens?.expiresAt ?? root.expires_at ?? root.expiresAt);
   if (expiry != null && expiry <= now) return expiredCredential();
   const accountId = secretString(tokens?.account_id) ?? secretString(root.account_id);
@@ -893,23 +901,34 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
   };
 }
 
-async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: OpenCode, in every fleet, with no key of its own
+async function fetchProvider(account: PlanAccount, deps: PlanUsageDeps): Promise<PlanProviderRow | null> { // null: nothing to report, such as an engine with no key of its own or one on a pay-per-use API key
   let credential: PlanCredential;
   if (account.driver === "antigravity") { const windows = await antigravityPlanUsage(account.id, deps); return windows && okRow(account, windows); } // null: no sign-in, or Google gave nothing
+  const quietWhenMissing = account.driver === "opencode" || account.driver === "deepseek";
   try {
     credential = await deps.credentials.read(account);
   } catch {
-    return account.driver === "opencode" ? null : errorRow(account, signInAgain(account.driver));
+    return quietWhenMissing ? null : errorRow(account, signInAgain(account.driver));
   }
-  if (credential.expired || !credential.token) return account.driver === "opencode" && !credential.expired ? null : errorRow(account, signInAgain(account.driver));
+  if (credential.apiKeyOnly) return null;
+  if (credential.expired || !credential.token) return quietWhenMissing && !credential.expired ? null : errorRow(account, signInAgain(account.driver));
   try {
     if (account.driver === "claude") return await fetchClaude(account, credential.token, deps);
     if (account.driver === "codex") return await fetchCodex(account, credential.token, credential.accountId, deps);
     if (account.driver === "opencode") return await fetchOpenCode(account, credential.token, deps);
+    if (account.driver === "deepseek") return await fetchDeepSeek(account, credential.token, deps);
     return await fetchGrok(account, credential.token, deps);
   } catch {
     return errorRow(account, couldNotReach(account.driver));
   }
+}
+
+async function fetchDeepSeek(account: PlanAccount, token: string, deps: PlanUsageDeps): Promise<PlanProviderRow> {
+  const result = await fetchJson(deps.fetch, DEEPSEEK_BALANCE_URL, { Authorization: `Bearer ${token}`, Accept: "application/json" }, deps.timeoutMs ?? PROVIDER_TIMEOUT_MS);
+  if (authRejected(result.status)) return errorRow(account, "DeepSeek refused the saved key");
+  if (!result.ok) return errorRow(account, result.status === 0 || result.status >= 500 ? couldNotReach("deepseek") : unexpectedUsage("deepseek"));
+  const balance = parseDeepSeekBalance(result.body);
+  return balance ? { ...okRow(account, { plan: null, fiveHour: closedWindow(), weekly: closedWindow(), extra: [], models: [] }), balance } : errorRow(account, unexpectedUsage("deepseek"));
 }
 
 interface HttpResult {
