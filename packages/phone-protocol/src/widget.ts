@@ -140,6 +140,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+/** The children a node names: a list, one node, or the object a model wraps the list in. */
+function childNodes(raw: Record<string, unknown>): unknown[] {
+  const children = raw.children;
+  if (children === undefined || children === null) return [];
+  if (Array.isArray(children)) return children;
+  if (!isRecord(children)) return [children];
+  if (typeof children.type === "string") return [children];
+  const keys = Object.keys(children);
+  if (keys.length === 1) {
+    const only = children[keys[0]!];
+    if (Array.isArray(only)) return only;
+    if (isRecord(only)) return [only];
+  }
+  return [children];
+}
+
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
 
 // A reader turns one raw prop into its canonical value. `undefined` drops the
@@ -510,7 +526,11 @@ function normalize(input: unknown, path: string, depth: number, slot: "root" | "
   if (!isRecord(input)) return fail(path, "must be an object with a type");
   let raw = input;
   let type = typeOf(raw);
-  if (!Object.hasOwn(SPECS, type)) return fail(path, `unknown type ${JSON.stringify(raw.type)}; use one of ${WIDGET_NODE_TYPES.join(", ")}`);
+  if (!Object.hasOwn(SPECS, type)) {
+    return fail(path, raw.type === undefined
+      ? `has no type; use one of ${WIDGET_NODE_TYPES.join(", ")}`
+      : `unknown type ${JSON.stringify(raw.type)}; use one of ${WIDGET_NODE_TYPES.join(", ")}`);
+  }
   if (slot === "items" && type !== "ListViewItem") [raw, type] = [{ type: "ListViewItem", children: [raw] }, "ListViewItem"];
   if (slot === "cells" && type !== "Table.Cell") [raw, type] = [{ type: "Table.Cell", children: [raw] }, "Table.Cell"];
   if (slot === "rows" && type !== "Table.Row") return fail(path, "a Table takes Table.Row children");
@@ -562,7 +582,7 @@ function normalize(input: unknown, path: string, depth: number, slot: "root" | "
   }
 
   if (spec.children) {
-    const list = raw.children === undefined || raw.children === null ? [] : Array.isArray(raw.children) ? raw.children : [raw.children];
+    const list = childNodes(raw);
     const kept = spec.children === "one" ? list.slice(0, 1) : list;
     if (type === "ListView" && kept.length > WIDGET_LIMITS.listItems) return fail(`${path}.children`, `a list takes at most ${WIDGET_LIMITS.listItems} items`);
     if (type === "Table" && kept.length > WIDGET_LIMITS.tableRows) return fail(`${path}.children`, `a table takes at most ${WIDGET_LIMITS.tableRows} rows`);
