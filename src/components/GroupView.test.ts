@@ -44,10 +44,11 @@ describe("RoomToolChip", () => {
     expect(markup).toContain('title="Open #QA PR 245"');
   });
 
-  it("leaves an ordinary step as a plain pill", () => {
+  it("opens local details for an ordinary step instead of navigating to a room", () => {
     const markup = render(chip());
-    expect(markup).not.toContain("<button");
-    expect(markup).toContain("Posted in Standup");
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('aria-label="Posted in Standup · Completed · Tool details"');
+    expect(markup).not.toContain('title="Open Standup"');
   });
 
   it("shows a same-room teammate avatar without adding a navigation button", () => {
