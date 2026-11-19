@@ -2566,6 +2566,7 @@
   "chat.voiceNote.onLiveCall": "即時通話期間無法播放語音訊息。",
   "chat.voiceNote.transcript": "逐字稿",
   "chat.activity.thinking": "思考中",
+  "chat.activity.summarizing": "正在摘要先前的訊息…",
   "chat.activity.working": "工作中",
   "chat.typing": "正在輸入…",
   "chat.teammatesWorking": "隊友正在工作",

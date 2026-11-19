@@ -1047,6 +1047,7 @@
   "chat.speak.stop": "Зупинити озвучення",
   "chat.speak.read": "Прочитати вголос",
   "chat.activity.thinking": "Думає",
+  "chat.activity.summarizing": "Підсумовує попередні повідомлення…",
   "chat.activity.working": "Працює",
   "chat.activity.runCommand": "Виконує команду",
   "chat.activity.readFile": "Читає файл",

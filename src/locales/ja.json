@@ -2389,6 +2389,7 @@
   "chat.voiceNote.onLiveCall": "ライブ通話中は音声メモを再生できません。",
   "chat.voiceNote.transcript": "文字起こし",
   "chat.activity.thinking": "考え中",
+  "chat.activity.summarizing": "以前のメッセージを要約中…",
   "chat.activity.working": "作業中",
   "chat.typing": "入力中…",
   "chat.teammatesWorking": "チームメイトが作業中",

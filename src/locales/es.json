@@ -1984,6 +1984,7 @@
   "chat.voiceNote.seek": "Buscar en la nota de voz",
   "chat.voiceNote.onLiveCall": "Las notas de voz no se pueden reproducir durante una llamada en vivo.",
   "chat.activity.thinking": "Pensando",
+  "chat.activity.summarizing": "Resumiendo mensajes anteriores…",
   "chat.activity.working": "Trabajando",
   "chat.activity.runCommand": "Ejecutando un comando",
   "chat.activity.readFile": "Leyendo un archivo",

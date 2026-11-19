@@ -63,6 +63,8 @@ export interface ConversationCompactionDeps {
   controllers: Map<string, { generation: string; controller: AbortController }>;
   cancelled(reason: string): Error;
   idleFraction: number;
+  /** Told true when a summary of a conversation someone is waiting on starts, and false once it is written, failed or stopped. */
+  summarizing?(threadId: string, active: boolean): void;
 }
 
 export function createConversationCompaction(deps: ConversationCompactionDeps) {
@@ -110,7 +112,8 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
     try {
       if (manual && engineCompacts && await deps.engineCompact({ botId: bot.id, threadId, instanceId: instance.instanceId }, controller.signal)) return;
       controller.signal.throwIfAborted();
-      const summary = await draftSummary(fold.folded, { signal: controller.signal, generateText: deps.generateText(bot.id, instance) });
+      const summary = await draftSummary(fold.folded, { signal: controller.signal, generateText: deps.generateText(bot.id, instance),
+        ...(idle || !deps.summarizing ? {} : { onSummarizing: (active: boolean) => deps.summarizing?.(threadId, active) }) });
       if (!idle && !deps.claimIsCurrent(bot.id, generation, threadId)) throw deps.cancelled("context summarization stopped");
       controller.signal.throwIfAborted();
       if (prefix !== JSON.stringify(sinceFreshStart(store.activePath(threadId)).slice(0, messages.length))) {

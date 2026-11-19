@@ -2874,6 +2874,7 @@
   "chat.voiceNote.onLiveCall": "Voice notes can't play during a Live call.",
   "chat.voiceNote.transcript": "Transcript",
   "chat.activity.thinking": "Thinking",
+  "chat.activity.summarizing": "Summarizing earlier messages…",
   "chat.activity.working": "Working",
   "chat.typing": "Typing…",
   "chat.queue.workingFor": "Working on {name}'s request",

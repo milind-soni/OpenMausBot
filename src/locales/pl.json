@@ -2116,6 +2116,7 @@
   "chat.voiceNote.onLiveCall": "Wiadomości głosowych nie można odtwarzać podczas rozmowy na żywo.",
   "chat.voiceNote.transcript": "Transkrypcja",
   "chat.activity.thinking": "Myślenie",
+  "chat.activity.summarizing": "Podsumowuje wcześniejsze wiadomości…",
   "chat.activity.working": "Praca",
   "chat.activity.runCommand": "Uruchamianie polecenia",
   "chat.activity.readFile": "Czytanie pliku",

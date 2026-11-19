@@ -2690,6 +2690,7 @@
   "chat.voiceNote.onLiveCall": "Não é possível ouvir mensagens de voz durante uma chamada ao vivo.",
   "chat.voiceNote.transcript": "Transcrição",
   "chat.activity.thinking": "Pensando",
+  "chat.activity.summarizing": "Resumindo mensagens anteriores…",
   "chat.activity.working": "Trabalhando",
   "chat.queue.workingFor": "Trabalhando no pedido de {name}",
   "chat.queue.workingForYou": "Trabalhando no seu pedido",

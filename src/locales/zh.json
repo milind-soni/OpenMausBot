@@ -2631,6 +2631,7 @@
   "chat.voiceNote.onLiveCall": "实时通话期间无法播放语音消息。",
   "chat.voiceNote.transcript": "文字记录",
   "chat.activity.thinking": "思考中",
+  "chat.activity.summarizing": "正在总结之前的消息…",
   "chat.activity.working": "工作中",
   "chat.typing": "正在输入…",
   "chat.teammatesWorking": "队友正在工作",
