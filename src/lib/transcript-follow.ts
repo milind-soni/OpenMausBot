@@ -101,7 +101,10 @@ export function rowsInView(scroller: HTMLElement, transcript: HTMLElement, skip?
   if (typeof transcript.querySelectorAll !== "function") return [];
   const view = scroller.getBoundingClientRect();
   const ranked: { rowId: string; offsetWithinRow: number; rank: number }[] = [];
-  Array.from(transcript.querySelectorAll<HTMLElement>(ROW_SELECTOR)).some((row, index) => {
+  const rows = Array.from(transcript.querySelectorAll<HTMLElement>(ROW_SELECTOR));
+  const from = Math.max(0, firstRowEndingBelow(rows, view.top) - 1);
+  rows.slice(from).some((row, at) => {
+    const index = from + at;
     const rowId = row.dataset.mid;
     if (!rowId || rowId.startsWith("live:") || rowId === skip) return false;
     const box = rowBox(row);
@@ -110,6 +113,27 @@ export function rowsInView(scroller: HTMLElement, transcript: HTMLElement, skip?
     return false;
   });
   return ranked.sort((a, b) => a.rank - b.rank).map(({ rowId, offsetWithinRow }) => ({ rowId, offsetWithinRow }));
+}
+
+/** The first of `rows` (in page order) whose box ends below `y`, found in a few box reads; rows that draw nothing are passed. */
+function firstRowEndingBelow(rows: readonly Element[], y: number): number {
+  let low = 0, high = rows.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    let probe = middle, box = rowBox(rows[probe]!);
+    while (box.bottom === box.top && probe + 1 < high) box = rowBox(rows[++probe]!);
+    if (box.bottom === box.top) high = middle;
+    else if (box.bottom > y) high = middle;
+    else low = probe + 1;
+  }
+  return low;
+}
+
+/** Where `rowId`'s top lies in the scrolled content, or undefined when the row is not drawn. */
+export function rowContentTop(scroller: HTMLElement, transcript: HTMLElement, rowId: string): number | undefined {
+  if (typeof transcript.querySelectorAll !== "function") return undefined;
+  const row = Array.from(transcript.querySelectorAll<HTMLElement>(ROW_SELECTOR)).find((candidate) => candidate.dataset.mid === rowId);
+  return row ? scroller.scrollTop + rowBox(row).top - scroller.getBoundingClientRect().top : undefined;
 }
 
 /** The scrollTop that puts `rowId` back where `topRow` found it, or undefined when the row is not drawn. */
