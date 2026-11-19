@@ -53,4 +53,18 @@ describe("Preview page validation", () => {
       await expect(browser.perform("click", { ref: "stale" }, new AbortController().signal)).rejects.toThrow("Stale element reference");
     } finally { browser.dispose(); }
   });
+  it("types and presses keys without taking keyboard focus from the composer", async () => {
+    const wc = target();
+    wc.focus = vi.fn();
+    // every in-page step (find, focus/select, value check) succeeds
+    wc.executeJavaScriptInIsolatedWorld = async () => ({ ok: true, value: true });
+    const browser = new PreviewBrowserSession(wc, () => true);
+    try {
+      await browser.perform("fill", { ref: "field", text: "hello" }, new AbortController().signal);
+      await browser.perform("press", { key: "Enter", ref: "field" }, new AbortController().signal);
+      expect(wc.focus).not.toHaveBeenCalled();
+      expect(wc.debugger.sendCommand.mock.calls.some(([method]) => method === "Input.insertText")).toBe(true);
+      expect(wc.debugger.sendCommand.mock.calls.some(([method]) => method === "Emulation.setFocusEmulationEnabled")).toBe(true);
+    } finally { browser.dispose(); }
+  });
 });

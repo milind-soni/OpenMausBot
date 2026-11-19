@@ -175,7 +175,9 @@ export class PreviewBrowserSession {
       await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point, button: "left", clickCount: 1 });
     } else if (operation === "fill") {
       if (typeof args.text !== "string" || args.text.length > 20_000) throw new Error("Provide input text up to 20000 characters.");
-      check(); this.wc.focus();
+      // Never wc.focus(): it pulls OS keyboard focus out of the composer while the user types.
+      // Focus emulation (constructor) keeps the page acting focused, and CDP input needs no OS focus.
+      check();
       await this.element(args.ref, `if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) || ['file','checkbox','radio','button','submit','hidden'].includes(el.type)) throw new Error('Choose a text input or textarea.'); if (el.readOnly) throw new Error('Input is read-only.'); el.focus(); el.select(); return true;`);
       check();
       // CDP input works without OS window focus; wc.insertText silently drops text when Studio is in the background.
@@ -195,7 +197,7 @@ export class PreviewBrowserSession {
       const keys = { Enter: ["Enter", "Enter", 13], Tab: ["Tab", "Tab", 9], Escape: ["Escape", "Escape", 27], Space: [" ", "Space", 32], ArrowDown: ["ArrowDown", "ArrowDown", 40], ArrowUp: ["ArrowUp", "ArrowUp", 38], ArrowLeft: ["ArrowLeft", "ArrowLeft", 37], ArrowRight: ["ArrowRight", "ArrowRight", 39], Backspace: ["Backspace", "Backspace", 8], Delete: ["Delete", "Delete", 46], Home: ["Home", "Home", 36], End: ["End", "End", 35] };
       const key = keys[args.key];
       if (!key) throw new Error(`Supported keys: ${Object.keys(keys).join(', ')}`);
-      check(); this.wc.focus();
+      check();
       if (args.ref) await this.element(args.ref, "el.focus(); return true;");
       await send("Input.dispatchKeyEvent", { type: "keyDown", key: key[0], code: key[1], windowsVirtualKeyCode: key[2], ...(args.key === "Enter" ? { text: "\r" } : args.key === "Space" ? { text: " " } : {}) });
       await send("Input.dispatchKeyEvent", { type: "keyUp", key: key[0], code: key[1], windowsVirtualKeyCode: key[2] });
