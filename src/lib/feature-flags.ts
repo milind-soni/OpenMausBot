@@ -1,3 +1,4 @@
+import type { ConfigStatus } from "@/state/store";
 import { t } from "./i18n";
 
 export interface FeatureFlagConfig {
@@ -96,4 +97,8 @@ export function savedStepsHere(config: FeatureFlagConfig | null | undefined): bo
 
 export function usbPhoneTakeoverEnabled(config: FeatureFlagConfig | null | undefined): boolean {
   return config?.features?.usbPhoneTakeover === true;
+}
+
+export function workspacesAvailable(config: ConfigStatus | null | undefined): boolean {
+  return config?.edition?.features?.includes("admin") === true && config?.fleet?.available === true;
 }

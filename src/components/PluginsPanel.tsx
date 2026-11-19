@@ -82,12 +82,13 @@ export function hostedShown(app: HostedApp, search: string, filter: AppsFilter, 
 export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
 
 export function connectorSetupNotice(state: {
+  loading: boolean;
   configured: boolean;
   stale: boolean;
   setup: ConnectorSetup | undefined;
   remoteClient: boolean;
 }): { key: LocaleKey; tone: "info" | "warning" } | null {
-  if (state.configured || state.stale) return null;
+  if (state.loading || state.configured || state.stale) return null;
   if (state.setup === "needs-setup") {
     return { key: state.remoteClient ? "connectors.setupNeededRemote" : "connectors.setupNeeded", tone: "info" };
   }
@@ -418,9 +419,10 @@ export function PluginsPanel() {
   const ownServers = mcpServers.filter((server) => ownMcpServer(server));
   const ownServerShown = (server: McpServerListing) => matchesCatalogSearch(`${server.name} ${isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ")}`, search);
   const connectedCount = Object.values(status).filter(hasActiveConnection).length + connectedHosted.length + ownServers.filter(mcpServerConnected).length + Number(emailConnected === true) + Number(xConnected === true) + Number(postizConnected === true);
-  const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
+  const loadingApps = cards === null || refreshing || inventoryPhase === "loading";
+  const connectedEmptyCopy = connectedInventoryCopy(loadingApps ? "loading" : inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
-  const setupNotice = connectorSetupNotice({ configured, stale, setup, remoteClient });
+  const setupNotice = connectorSetupNotice({ loading: loadingApps, configured, stale, setup, remoteClient });
   const chooseFilter = (next: AppsFilter) => {
     setCategory(null);
     if (next === "mcp") {
@@ -463,6 +465,7 @@ export function PluginsPanel() {
   return (
     <div
       className="glass-popup-frame"
+      data-solid-popup
       style={glassPopupFrameStyle()}
       onMouseDown={(event) => event.target === event.currentTarget && close()}
     >
@@ -587,7 +590,7 @@ export function PluginsPanel() {
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-7 sm:px-7">
-          {stale ? (
+          {stale && !loadingApps ? (
             <div className="mb-3 flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-[13px] text-warning">
               <TriangleAlert size={14} className="mt-px shrink-0" />
               <span>
@@ -635,7 +638,7 @@ export function PluginsPanel() {
               {t("connectors.featuredAfter")}
             </div>
           )}
-          {error && <div role="alert" className="mb-3 rounded-xl bg-danger/10 px-3 py-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</div>}
+          {!loadingApps && error && <div role="alert" className="mb-3 rounded-xl bg-danger/10 px-3 py-2 text-[12px] text-danger">{typeof error === "string" ? error : t(error.key)}</div>}
 
           {filter !== "mcp" && (
             <div data-apps-grid className="@container flex flex-col gap-7 pt-1">
@@ -702,7 +705,7 @@ export function PluginsPanel() {
                         <div className="mt-1 text-[13px] text-ink-secondary">
                           {listing === "connected" ? connectedEmptyCopy.description : t("connectors.tryDifferentSearch")}
                         </div>
-                        {filter === "connected" && inventoryPhase === "error" && (
+                        {filter === "connected" && !loadingApps && inventoryPhase === "error" && (
                           <button
                             type="button"
                             disabled={refreshing}

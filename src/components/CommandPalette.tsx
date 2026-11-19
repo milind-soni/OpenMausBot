@@ -1,75 +1,79 @@
-import { t } from "@/lib/i18n";
-import { useEffect, useRef, useState } from "react";
-import { MessageSquare, Search, Users } from "lucide-react";
-import { BotAvatar } from "./Avatar";
-import { api, openBot, useStore, type Bot, type Group } from "@/state/store";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Loader2, MessageSquare, Search, Settings, Users } from "lucide-react";
+import { intlLocale, t } from "@/lib/i18n";
+import { COMMAND_PALETTE_OPEN_EVENT } from "@/lib/command-palette";
+import { cn } from "@/lib/cn";
+import { api, openBot, openRoomThread, openThread, useStore, visibleMessages } from "@/state/store";
 import { rankByName } from "@/lib/palette-rank";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { cn } from "@/lib/cn";
 import type { SearchHit } from "@/lib/search-hit";
 import { landOnSearchHit } from "@/lib/focus-message";
 import { imeComposing } from "@/lib/send-key";
+import { localizedRelativeTime } from "@/lib/relative-time";
+import { useAdvancedMode } from "@/lib/interface-mode";
+import { BotAvatar } from "./Avatar";
+import { botPreview } from "./sidebar-preview";
+import { openSettingsSearchHit } from "./settings/settings-search-navigation";
+import { useSettingsContext } from "./settings/settings-context";
+import { searchSettings } from "./settings/settings-index";
 
-type PaletteEntry =
-  | { kind: "bot"; bot: Bot }
-  | { kind: "room"; group: Group }
-  | { kind: "message"; hit: SearchHit };
+export { openCommandPalette } from "@/lib/command-palette";
 
-const OPEN_EVENT = "omb:open-command-palette";
-
-export function openCommandPalette() {
-  window.dispatchEvent(new Event(OPEN_EVENT));
-}
+type Entry = { id: string; icon: ReactNode; title: ReactNode; detail?: string; run: () => void };
 
 export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
+  const advanced = useAdvancedMode();
+  const settingsContext = useSettingsContext();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [messageHits, setMessageHits] = useState<SearchHit[]>([]);
+  const [results, setResults] = useState<{ query: string; hits: SearchHit[] } | null>(null);
   const [cursor, setCursor] = useState(0);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef<HTMLButtonElement>(null);
+  const q = query.trim().toLowerCase();
+  const loading = Boolean(q && results?.query !== q);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k" && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        setOpen((o) => !o);
-      }
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k" || event.shiftKey || event.altKey || imeComposing(event)) return;
+      event.preventDefault();
+      setOpen((wasOpen) => !wasOpen);
     };
     const onOpen = () => setOpen(true);
     window.addEventListener("keydown", onKey);
-    window.addEventListener(OPEN_EVENT, onOpen);
+    window.addEventListener(COMMAND_PALETTE_OPEN_EVENT, onOpen);
     return () => {
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener(OPEN_EVENT, onOpen);
+      window.removeEventListener(COMMAND_PALETTE_OPEN_EVENT, onOpen);
     };
   }, []);
 
-  useEffect(() => {
-    if (!open) return;
-    setQuery("");
-    setMessageHits([]);
-    setCursor(0);
+  useLayoutEffect(() => {
+    const element = dialog.current;
+    if (!element) return;
+    if (open) {
+      setQuery("");
+      setResults(null);
+      setCursor(0);
+      element.showModal();
+      inputRef.current?.focus();
+    } else if (element.open) {
+      element.close();
+    }
   }, [open]);
 
-  useEffect(() => {
-    onOpenChange?.(open);
-  }, [onOpenChange, open]);
-
-  const q = query.trim().toLowerCase();
+  useEffect(() => onOpenChange?.(open), [onOpenChange, open]);
 
   useEffect(() => {
-    if (!open || !q) {
-      setMessageHits([]);
-      return;
-    }
-    setMessageHits([]);
+    if (!open || !q) return;
     let alive = true;
     const timer = setTimeout(() => {
       api(`/api/search?q=${encodeURIComponent(q)}&limit=12`)
-        .then((result: { hits?: SearchHit[] }) => alive && setMessageHits(result.hits ?? []))
-        .catch(() => alive && setMessageHits([]));
+        .then((result: { hits?: SearchHit[] }) => { if (alive) setResults({ query: q, hits: result.hits ?? [] }); })
+        .catch(() => { if (alive) setResults({ query: q, hits: [] }); });
     }, 150);
     return () => {
       alive = false;
@@ -77,174 +81,169 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
     };
   }, [open, q]);
 
-  useEffect(() => setCursor(0), [q]);
-
   useEffect(() => {
-    selectedRef.current?.scrollIntoView({ block: "nearest" });
-  }, [cursor, messageHits]);
+    if (open) selectedRef.current?.scrollIntoView({ block: "nearest" });
+  }, [open, cursor, results]);
 
-  if (!open) return null;
+  const avatar = (bot: Parameters<typeof BotAvatar>[0]["bot"]) => <BotAvatar bot={bot} state="happy" size={28} animated={false} />;
+  const bots = state.bots.filter((bot) => !bot.hidden);
+  const matchingBots = rankByName(bots, q);
+  const settings = searchSettings(q, settingsContext, (entry) => t(entry.labelKey), (page) => t(page.labelKey))
+    .filter((hit) => !hit.elsewhere && (hit.entry.jump !== "bot" || bots.some((bot) => bot.id === state.selectedId)))
+    .slice(0, 6);
+  const matchingRooms = rankByName(state.groups, q);
+  const rooms: Entry[] = matchingRooms.map((group) => ({
+    id: `room:${group.id}`, icon: <Users size={20} />, title: group.name,
+    run: () => dispatch({ type: "select", id: group.id }),
+  }));
 
-  const bots = rankByName(state.bots.filter((b) => !b.hidden), q);
-  const rooms = rankByName(state.groups, q);
-  const entries: PaletteEntry[] = [
-    ...bots.map((bot): PaletteEntry => ({ kind: "bot", bot })),
-    ...rooms.map((group): PaletteEntry => ({ kind: "room", group })),
-    ...(q ? messageHits.map((hit): PaletteEntry => ({ kind: "message", hit })) : []),
+  const sections: { heading: string; entries: Entry[] }[] = [
+    {
+      heading: t("palette.bots"),
+      entries: matchingBots.map((bot) => ({
+        id: `bot:${bot.id}`, icon: avatar(bot), title: bot.name,
+        detail: botPreview(bot, visibleMessages(bot), state.instances, advanced) || bot.title,
+        run: () => openBot(dispatch, bot, showThreads),
+      })),
+    },
+    { heading: t("palette.groups"), entries: rooms },
+    {
+      heading: t("palette.threads"),
+      entries: q ? [
+        ...bots.flatMap((bot) => (bot.tasks ?? [])
+          .filter((task) => !task.routineRunId && (task.title.toLowerCase().includes(q) ||
+            bot.projects?.some((project) => project.id === task.projectId && project.name.toLowerCase().includes(q))))
+          .map((task): Entry => ({
+            id: `bot-thread:${bot.id}:${task.threadId}`, icon: avatar(bot), title: task.title, detail: bot.name,
+            run: () => openThread(dispatch, { botId: bot.id, threadId: task.threadId }, state, showThreads),
+          }))),
+        ...state.groups.flatMap((group) => (group.tasks ?? [])
+          .filter((task) => task.title.toLowerCase().includes(q))
+          .map((task): Entry => ({
+            id: `room-thread:${group.id}:${task.threadId}`, icon: <Users size={20} />, title: task.title, detail: group.name,
+            run: () => openRoomThread(dispatch, { groupId: group.id, threadId: task.threadId }, state.groups),
+          }))),
+      ].slice(0, 12) : [],
+    },
+    {
+      heading: t("palette.actions"),
+      entries: [
+        ...(t("settings.title").toLowerCase().includes(q) ? [{
+          id: "settings", icon: <Settings size={20} />, title: t("settings.title"),
+          run: () => dispatch({ type: "toggleAppSettings", open: true }),
+        }] : []),
+        ...settings.map((hit): Entry => ({
+          id: `setting:${hit.entry.id}`, icon: <Settings size={20} />, title: t(hit.entry.labelKey),
+          run: () => openSettingsSearchHit(hit, settingsContext, dispatch),
+        })),
+      ],
+    },
+    {
+      heading: t("palette.messages"),
+      entries: q && results?.query === q ? results.hits.map((hit) => {
+        const bot = bots.find((candidate) => candidate.id === hit.botId);
+        const end = hit.matchStart + hit.matchLength;
+        return {
+          id: `msg:${hit.threadId}:${hit.messageId}`, icon: bot ? avatar(bot) : <MessageSquare size={20} />,
+          title: <>{hit.snippet.slice(0, hit.matchStart)}<strong>{hit.snippet.slice(hit.matchStart, end)}</strong>{hit.snippet.slice(end)}</>,
+          detail: [hit.name, hit.task, localizedRelativeTime(hit.at, intlLocale())].filter(Boolean).join(" · "),
+          run: () => {
+            void landOnSearchHit(hit, state, dispatch, showThreads).catch((error: unknown) => {
+              dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) });
+            });
+          },
+        };
+      }) : [],
+    },
   ];
-  const selected = entries.length ? Math.min(cursor, entries.length - 1) : 0;
 
-  const activate = async (entry: PaletteEntry) => {
-    if (entry.kind === "message") {
-      const hit = entry.hit;
-      try {
-        await landOnSearchHit(hit, state, dispatch, showThreads);
-      } catch (error) {
-        dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) });
-      }
-    } else if (entry.kind === "bot") {
-      openBot(dispatch, entry.bot, showThreads);
-    } else {
-      dispatch({ type: "select", id: entry.group.id });
-    }
+  const entries = sections.flatMap((section) => section.entries);
+  const selected = Math.max(0, Math.min(cursor, entries.length - 1));
+  const activate = (entry: Entry | undefined) => {
+    if (!entry) return;
     setOpen(false);
+    entry.run();
   };
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (imeComposing(e.nativeEvent)) { e.stopPropagation(); return; }
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      setOpen(false);
-    } else if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setCursor(entries.length ? (selected + 1) % entries.length : 0);
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setCursor(entries.length ? (selected - 1 + entries.length) % entries.length : 0);
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      const entry = entries[selected];
-      if (entry) void activate(entry);
-    }
-  };
-
-  const roomOffset = bots.length;
-  const messageOffset = bots.length + rooms.length;
-
-  const row = (key: string, index: number, onPick: () => void, children: React.ReactNode, twoLine = false) => (
-    <button
-      key={key}
-      ref={index === selected ? selectedRef : undefined}
-      onClick={onPick}
-      // mousemove, not mouseenter: rows shifting under a resting pointer must not steal the keyboard selection.
-      onMouseMove={() => setCursor(index)}
-      className={cn(
-        "flex min-h-10 w-full items-center gap-3 rounded-lg px-3 py-2 text-left",
-        twoLine && "flex-col items-stretch gap-0.5",
-        index === selected ? "bg-menu-active" : "hover:bg-menu-hover",
-      )}
-    >
-      {children}
-    </button>
-  );
+  const modifier = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 p-6 pt-[14vh] [:root[data-skin=daylight]_&]:bg-black/[0.18]"
-      onMouseDown={(e) => e.target === e.currentTarget && setOpen(false)}
-      onKeyDown={onKeyDown}
+    <dialog
+      ref={dialog}
+      data-command-palette
+      data-look="dialog"
+      role="dialog"
+      aria-label={t("palette.label")}
+      className="command-palette ui-modal fixed m-auto w-[calc(100%-2rem)] max-w-[640px] overflow-hidden rounded-2xl border border-hairline/50 bg-menu text-ink"
+      onCancel={(event) => { event.preventDefault(); setOpen(false); }}
+      onClick={(event) => { if (event.target === event.currentTarget) setOpen(false); }}
+      onKeyDown={(event) => {
+        if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; }
+        if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") return;
+        event.stopPropagation();
+        if ((event.metaKey || event.ctrlKey) && /^[1-9]$/.test(event.key)) {
+          const entry = entries[Number(event.key) - 1];
+          if (entry) { event.preventDefault(); activate(entry); }
+        } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          if (entries.length) setCursor((selected + (event.key === "ArrowDown" ? 1 : entries.length - 1)) % entries.length);
+        } else if (event.key === "Enter") {
+          event.preventDefault();
+          activate(entries[selected]);
+        }
+      }}
     >
-      <div
-        role="dialog" data-look="dialog"
-        aria-modal="true"
-        aria-label={t("palette.label")}
-        className="popover-surface flex max-h-[min(480px,70vh)] w-full max-w-[560px] flex-col overflow-hidden rounded-[var(--radius-menu)] border border-hairline/50 bg-menu shadow-2xl shadow-black/60"
-      >
-        <div className="flex items-center gap-3 border-b border-hairline/40 px-4 py-3">
-          <Search size={16} className="shrink-0 text-ink-secondary" />
+      <div className="flex max-h-[min(36rem,85dvh)] flex-col">
+        <div className="flex items-center gap-4 px-5 py-4">
+          {loading
+            ? <Loader2 size={19} className="shrink-0 text-ink-tertiary motion-safe:animate-spin" aria-hidden />
+            : <Search size={19} className="shrink-0 text-ink-tertiary" aria-hidden />}
           <input
-            autoFocus
+            ref={inputRef}
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(event) => {
+              const next = event.target.value;
+              if (next.trim().toLowerCase() !== q) setResults(null);
+              setQuery(next);
+              setCursor(0);
+            }}
+            aria-busy={loading}
             aria-label={t("commandPalette.searchLabel")}
             placeholder={t("commandPalette.searchPlaceholder")}
-            className="w-full bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
+            className="min-w-0 flex-1 bg-transparent text-[22px] placeholder:text-ink-tertiary focus:outline-none"
           />
-          <kbd className="shrink-0 rounded-md border border-hairline/40 px-1.5 py-0.5 text-[11px] text-ink-secondary">
-            esc
-          </kbd>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          {entries.length === 0 && (
-            <div className="px-3 py-6 text-center text-[13px] text-ink-secondary">
-              {q ? t("sidebar.noMatch", { query }) : t("palette.empty")}
-            </div>
+        <div className="min-h-0 overflow-y-auto px-2.5 pb-2.5">
+          {!loading && entries.length === 0 && (
+            <p className="px-3 py-6 text-center text-[13px] text-ink-secondary">{q ? t("sidebar.noMatch", { query }) : t("palette.empty")}</p>
           )}
-          {bots.length > 0 && (
-            <div className="px-3 pb-1 pt-1.5 text-[12px] font-medium text-ink-tertiary">
-              {t("palette.bots")}
-            </div>
-          )}
-          {bots.map((bot, i) =>
-            row(
-              `bot:${bot.id}`,
-              i,
-              () => void activate({ kind: "bot", bot }),
-              <>
-                <BotAvatar bot={bot} state="happy" size={22} animated={false} />
-                <span className="truncate text-[14px] text-ink">{bot.name}</span>
-                {bot.title && (
-                  <span className="min-w-0 truncate text-[13px] text-ink-secondary">{bot.title}</span>
-                )}
-              </>,
-            ),
-          )}
-          {rooms.length > 0 && (
-            <div className="px-3 pb-1 pt-2 text-[12px] font-medium text-ink-tertiary">
-              {t("palette.groups")}
-            </div>
-          )}
-          {rooms.map((group, i) =>
-            row(
-              `room:${group.id}`,
-              roomOffset + i,
-              () => void activate({ kind: "room", group }),
-              <>
-                <Users size={16} strokeWidth={1.75} className="mx-[3px] shrink-0 text-ink-secondary" />
-                <span className="truncate text-[14px] text-ink">{group.name}</span>
-              </>,
-            ),
-          )}
-          {q && messageHits.length > 0 && (
-            <div className="px-3 pb-1 pt-2 text-[12px] font-medium text-ink-tertiary">
-              {t("palette.messages")}
-            </div>
-          )}
-          {q &&
-            messageHits.map((hit, i) => {
-              const before = hit.snippet.slice(0, hit.matchStart);
-              const match = hit.snippet.slice(hit.matchStart, hit.matchStart + hit.matchLength);
-              const after = hit.snippet.slice(hit.matchStart + hit.matchLength);
-              return row(
-                `msg:${hit.threadId}:${hit.messageId}`,
-                messageOffset + i,
-                () => void activate({ kind: "message", hit }),
-                <>
-                  <span className="flex items-center gap-2 truncate text-[13px] font-medium text-ink">
-                    <MessageSquare size={13} className="shrink-0 text-ink-secondary" />
-                    {hit.name}
-                    {hit.task ? <span className="font-normal text-ink-secondary"> · {hit.task}</span> : null}
-                  </span>
-                  <span className="line-clamp-2 text-[13px] text-ink-secondary">
-                    {before}<mark className="rounded-sm bg-accent/25 px-0.5 text-ink">{match}</mark>{after}
-                  </span>
-                </>,
-                true,
-              );
-            })}
+          {sections.map(({ heading, entries: rows }) => rows.length > 0 && (
+            <section key={heading} aria-label={heading} className="pt-2">
+              <div className="px-3 pb-2 text-[12px] text-ink-tertiary">{heading}</div>
+              {rows.map((entry) => {
+                const index = entries.indexOf(entry);
+                return (
+                  <button
+                    key={entry.id}
+                    type="button"
+                    ref={index === selected ? selectedRef : undefined}
+                    onClick={() => activate(entry)}
+                    onMouseMove={() => setCursor(index)}
+                    onFocus={() => setCursor(index)}
+                    className={cn("flex min-h-12 w-full items-center gap-3 rounded-xl px-3 py-2 text-start focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus", index === selected && "bg-menu-active")}
+                  >
+                    <span className="grid size-8 shrink-0 place-items-center text-ink-secondary">{entry.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span dir="auto" className="block truncate text-[14px]">{entry.title}</span>
+                      {entry.detail && <span dir="auto" className="block truncate text-[13px] text-ink-secondary">{entry.detail}</span>}
+                    </span>
+                    {index < 9 && <kbd aria-hidden className="shrink-0 rounded border border-hairline/40 bg-raised px-1 text-[11px] text-ink-secondary">{modifier}{index + 1}</kbd>}
+                  </button>
+                );
+              })}
+            </section>
+          ))}
         </div>
       </div>
-    </div>
+    </dialog>
   );
 }

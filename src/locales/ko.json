@@ -1765,7 +1765,6 @@
   "sidebar.cloudOwner": "{email}의 클라우드",
   "sidebar.search": "검색",
   "sidebar.searchAria": "봇과 메시지 검색",
-  "sidebar.searchClose": "검색 닫기",
   "sidebar.noMatch": "“{query}”와(과) 일치하는 항목이 없어요",
   "sidebar.preview.waiting": "나를 기다리는 중…",
   "sidebar.preview.waitingOnTeammate": "팀원을 기다리는 중…",

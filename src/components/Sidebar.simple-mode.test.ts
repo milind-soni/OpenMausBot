@@ -20,7 +20,7 @@ vi.mock("@/state/store", async (importOriginal) => {
 
 import { BotContextMenu, BotListItem, BotThreadList, botRowProps, GroupListItem, PinnedBotCircle, type BotRowProps } from "./Sidebar";
 import { SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
-import { forgetSearchDisclosuresForTests } from "@/lib/search-disclosure";
+import { forgetThreadDisclosuresForTests } from "@/lib/thread-disclosure";
 import { noteTurnEvent, resetTurnLive } from "@/state/turn-status";
 import type { RuntimeEvent } from "../../shared/runtime-events";
 
@@ -42,8 +42,8 @@ const quiet: Bot = { ...bot, unread: false, tasks: bot.tasks!.filter((task) => !
 const densities: SidebarDensity[] = ["comfortable", "icons"];
 const botRow = (BotListItem as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type;
 const pinnedCircle = (PinnedBotCircle as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type;
-const rowProps = (density: SidebarDensity, candidate: Bot = bot, query = "") =>
-  botRowProps({ ...initialState, ...fixture.state }, fixture.dispatch, candidate, { density, query, onMenu: vi.fn() });
+const rowProps = (density: SidebarDensity, candidate: Bot = bot) =>
+  botRowProps({ ...initialState, ...fixture.state }, fixture.dispatch, candidate, { density, onMenu: vi.fn() });
 
 type ElementProps = { children?: ReactNode; onClick?: (event: MouseEvent) => void; onKeyDown?: (event: KeyboardEvent) => void; [key: string]: unknown };
 function findElement(tree: ReactNode, attribute: string, value: string): ReactElement<ElementProps> | undefined {
@@ -556,33 +556,25 @@ describe("bot-first sidebar", () => {
     if (density !== "icons") expect(renderToStaticMarkup(createElement(BotListItem, rowProps(density)))).toContain('aria-label="Atlas threads"');
     fixture.advanced = false;
     fixture.showThreads = false;
-    for (const query of ["", "history"]) {
-      const markup = renderToStaticMarkup(createElement(BotListItem, rowProps(density, bot, query)));
-      expect(markup).toContain(`data-sidebar-bot-row="${bot.id}"`);
-      expect(markup).not.toContain("data-sidebar-thread-row");
-      expect(markup).not.toContain("data-sidebar-folder-row");
-      expect(markup).not.toContain('aria-label="Atlas threads"');
-      if (density === "icons") expect(markup).not.toContain("data-sidebar-bot-activity");
-      else {
-        // It asks the person something, or has a reply they have not read; running, queued and idle threads stay out.
-        expect([...markup.matchAll(/data-sidebar-activity-row="([^"]+)"/g)].map((match) => match[1]).sort()).toEqual(["approval", "unread"]);
-      }
-      expect(markup).toContain('data-testid="waiting-dot"');
+    const markup = renderToStaticMarkup(createElement(BotListItem, rowProps(density, bot)));
+    expect(markup).toContain(`data-sidebar-bot-row="${bot.id}"`);
+    expect(markup).not.toContain("data-sidebar-thread-row");
+    expect(markup).not.toContain("data-sidebar-folder-row");
+    expect(markup).not.toContain('aria-label="Atlas threads"');
+    if (density === "icons") expect(markup).not.toContain("data-sidebar-bot-activity");
+    else {
+      // It asks the person something, or has a reply they have not read; running, queued and idle threads stay out.
+      expect([...markup.matchAll(/data-sidebar-activity-row="([^"]+)"/g)].map((match) => match[1]).sort()).toEqual(["approval", "unread"]);
     }
+    expect(markup).toContain('data-testid="waiting-dot"');
     const unread = renderToStaticMarkup(createElement(BotListItem, rowProps(density, { ...bot, tasks: [bot.tasks![0]!, bot.tasks![5]!] })));
     expect(unread.includes('data-sidebar-activity-row="unread"')).toBe(density !== "icons");
     const read = renderToStaticMarkup(createElement(BotListItem, rowProps(density, { ...bot, unread: false, tasks: [bot.tasks![0]!, bot.tasks![1]!, bot.tasks![3]!] })));
     expect(read).not.toContain("data-sidebar-activity-row");
     expect(unread).toContain(density === "icons" ? "rounded-full border border-panel bg-accent" : density === "comfortable" ? 'data-testid="unread-dot"' : 'aria-label="Unread threads"');
-    forgetSearchDisclosuresForTests();
+    forgetThreadDisclosuresForTests();
   });
 
-  it("reveals a matching sole thread when searching a bot", () => {
-    fixture.advanced = true;
-    const single = { ...bot, projects: [], tasks: [bot.tasks![0]], unread: false };
-    const markup = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", single, "last selected")));
-    expect(markup).toContain('data-sidebar-thread-row="last-selected"');
-  });
 
   it("does not change group collaboration histories or creation", () => {
     fixture.showThreads = false;
@@ -600,10 +592,6 @@ describe("bot-first sidebar", () => {
     const single = renderToStaticMarkup(createElement(GroupListItem, { group: { ...group, tasks: [group.tasks![0]] }, density: "comfortable", onMenu: vi.fn() }));
     expect(single).not.toContain("Planning threads");
     expect(single).not.toContain('data-sidebar-thread-row=');
-    const searched = renderToStaticMarkup(createElement(GroupListItem, {
-      group: { ...group, tasks: [group.tasks![0]] }, density: "comfortable", query: "conversation", onMenu: vi.fn(),
-    }));
-    expect(searched).toContain('data-sidebar-thread-row="group-thread"');
   });
 });
 
@@ -654,14 +642,12 @@ describe("activity-only escape hatch", () => {
       { threadId: "run", title: "Morning report", createdAt: 2, routineRunId: "run-1", busy: true, activity: "working" },
     ] };
     const ended: Bot = { ...runner, tasks: runner.tasks!.map((task) => task.routineRunId ? { ...task, busy: false, activity: "idle" as const, unread: true } : task) };
-    // Searching "Main" opens the thread tree, which itself keeps routine runs out: the row is the only way in.
-    const rows = (candidate: Bot, query = "") => renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate, query))).split('data-sidebar-activity-row="run"').length - 1;
+    const rows = (candidate: Bot) => renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate))).split('data-sidebar-activity-row="run"').length - 1;
     for (const showThreads of [false, true]) for (const advanced of [false, true]) {
       fixture.showThreads = showThreads;
       fixture.advanced = advanced;
       expect(rows(runner)).toBe(1);
       expect(rows(ended)).toBe(0);
-      if (showThreads) expect(rows(runner, "Main")).toBe(1);
     }
   });
 

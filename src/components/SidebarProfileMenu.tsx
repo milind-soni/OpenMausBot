@@ -1,3 +1,4 @@
+import { ELEVATED_CONTROL, ELEVATED_OPEN, ELEVATED_TINT } from "./elevated";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowUpRight,
@@ -532,7 +533,7 @@ export function useSimpleAccount(place: WorkspacePlace, owner: string | null, ar
   return { place, owner, automationsNeedYou: useAutomationsNeedYou(), archived };
 }
 
-/** `circle` is the phone's round avatar button at the top of the bot list. */
+/** `circle` is the phone's round avatar button. */
 export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = false, simple: account }: {
   iconOnly?: boolean; rail?: boolean; circle?: boolean; simple?: SimpleAccount;
 } = {}) {
@@ -655,9 +656,9 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
           <span
             ref={triggerRef}
             data-sidebar-account=""
-            className={cn("relative flex size-9 items-center justify-center rounded-full ring-2 transition-shadow", open ? "ring-ink/15" : "ring-transparent hover:ring-ink/10")}
+            className="relative flex size-9 items-center justify-center rounded-full"
           >
-            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={36} fallback={nameless} fontSize={14} className="ring-1 ring-inset ring-ink/[0.04]" />
+            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={36} fallback={nameless} fontSize={14} className={cn(ELEVATED_CONTROL, ELEVATED_TINT, open && ELEVATED_OPEN)} />
             {dot && <span aria-hidden data-account-dot={dot} className={cn("absolute -right-0.5 -top-0.5 size-2.5 rounded-full ring-2 ring-panel", DOT_COLOR[dot])} />}
           </span>
         ) : iconOnly ? (

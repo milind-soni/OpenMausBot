@@ -17,7 +17,8 @@ import { useSwitchToComputer } from "./inert";
 import { KEY_CATALOG, keyHidden, keyMatches, type KeyEntry } from "../keys/key-catalog";
 import { openKeySettings } from "../keys/key-focus";
 import { useSettingsContext, useSettingsPlace } from "./settings-context";
-import { needsAdvanced, pageById, resolveSettingsTarget, searchSettings, visiblePages, type SearchHit, type SettingsPageId } from "./settings-index";
+import { openSettingsSearchHit } from "./settings-search-navigation";
+import { pageById, resolveSettingsTarget, searchSettings, visiblePages, type SearchHit, type SettingsPageId } from "./settings-index";
 import { SettingsShellContext, type SettingsShell } from "./settings-shell";
 import { SettingsNav, hitLabel, pageLabel } from "./SettingsNav";
 import { SettingsPageHeader } from "./SettingsPageHeader";
@@ -55,7 +56,7 @@ export function SettingsWindow() {
   const ctx = useSettingsContext();
   const place = useSettingsPlace();
   const narrow = useMediaQuery(NARROW, false);
-  const target = resolveSettingsTarget(state.appSettingsSection, ctx);
+  const target = resolveSettingsTarget(state.appSettingsSection, ctx, state.appSettingsAnchor);
   const [anchor, setAnchor] = useState<string | null>(target.anchor ?? null);
   const [narrowPage, setNarrowPage] = useState(state.appSettingsSection !== "overview");
   const [query, setQuery] = useState("");
@@ -91,14 +92,10 @@ export function SettingsWindow() {
     if (nextAnchor) window.setTimeout(() => setAnchor(nextAnchor), 0);
   };
   const openHit = (hit: SearchHit) => {
-    const entry = hit.entry;
-    if (entry.jump === "apps") { close(); dispatch({ type: "togglePlugins", open: true }); return; }
-    if (entry.jump === "automations") { close(); dispatch({ type: "showRoutines", view: "list" }); return; }
-    if (entry.jump === "shortcuts") { close(); dispatch({ type: "toggleShortcuts", open: true }); return; }
-    if (entry.jump === "bot") { close(); return; }
     if (hit.elsewhere) { computer.open?.(); return; }
-    if (hit.advanced || needsAdvanced({ page: entry.page, anchor: entry.anchor }, ctx)) setAdvancedMode(true);
-    go(entry.page, entry.anchor);
+    setNarrowPage(true);
+    setAnchor(hit.entry.anchor ?? null);
+    openSettingsSearchHit(hit, ctx, dispatch);
   };
   /** Turning Advanced off on a page Simple doesn't show lands on the place's Overview; anywhere else it stays put. */
   const setAdvanced = (on: boolean) => {
@@ -153,7 +150,7 @@ export function SettingsWindow() {
   return (
     <SettingsLook.Provider value={true}>
       <SettingsShellContext.Provider value={shell}>
-        <div className="glass-popup-frame" data-settings-sheet data-settings-look="simple" style={{ ...glassPopupFrameStyle(), ["--settings-narrow-top" as string]: `${glassPopupTopInset() === GLASS_POPUP_GUTTER ? 12 : glassPopupTopInset()}px` }} onMouseDown={(event) => event.target === event.currentTarget && close()}>
+        <div className="glass-popup-frame" data-solid-popup data-settings-sheet data-settings-look="simple" style={{ ...glassPopupFrameStyle(), ["--settings-narrow-top" as string]: `${glassPopupTopInset() === GLASS_POPUP_GUTTER ? 12 : glassPopupTopInset()}px` }} onMouseDown={(event) => event.target === event.currentTarget && close()}>
           <div aria-hidden="true" className="glass-scrim pointer-events-none absolute inset-0" />
           <div ref={dialogRef} role="dialog" data-look="settings" aria-modal="true" aria-labelledby="app-settings-title" tabIndex={-1} style={{ outline: "none" }}
             data-settings-page-open={target.page} data-settings-advanced={ctx.advanced ? "" : undefined}

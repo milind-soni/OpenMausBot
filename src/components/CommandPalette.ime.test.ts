@@ -15,6 +15,11 @@ vi.mock("@/state/store", async (importOriginal) => {
   };
 });
 
+vi.mock("./settings/settings-context", async () => {
+  const { fullContext } = await import("./settings/settings-index");
+  return { useSettingsContext: () => fullContext() };
+});
+
 import { CommandPalette, openCommandPalette } from "./CommandPalette";
 
 const bot: Bot = {
@@ -55,7 +60,7 @@ function press(input: HTMLInputElement, key: string, init: KeyboardEventInit = {
   flushSync(() => input.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init })));
 }
 
-const dialog = () => document.querySelector('[role="dialog"]');
+const dialog = () => document.querySelector('dialog[open][data-command-palette]');
 
 describe("Command palette with an input method", () => {
   it.each([
@@ -78,6 +83,18 @@ describe("Command palette with an input method", () => {
     document.removeEventListener("keydown", onDocumentKey);
     expect(dialog()).not.toBeNull();
     expect(onDocumentKey).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["gmail", { type: "togglePlugins", open: true }],
+    ["keyboard shortcuts", { type: "toggleShortcuts", open: true }],
+    ["restore", { type: "toggleAppSettings", open: true, section: "transfer", anchor: "bring-in" }],
+  ])("opens the action for %s", (query, action) => {
+    const input = open();
+    type(input, query);
+    press(input, "Enter");
+    expect(fixture.dispatch).toHaveBeenCalledWith(action);
+    expect(dialog()).toBeNull();
   });
 
   it("opens the match on the Enter after the text is committed", () => {

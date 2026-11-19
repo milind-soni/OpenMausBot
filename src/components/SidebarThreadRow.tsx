@@ -99,8 +99,7 @@ const isWaitingOnTeammate = (task: Pick<Task, "waitingForTeammates">): boolean =
 const demandsAttention = (task: ThreadRowTask, activeId: string) =>
   task.threadId === activeId || task.activity === "waiting-on-you" || isWorking(task) || isWaitingOnTeammate(task) || Boolean(task.queued) || Boolean(task.unread);
 
-export function partitionHelperThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = []): { own: T[]; helpers: T[] } {
-  if (query.trim()) return { own: tasks, helpers: [] };
+export function partitionHelperThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, folders: BotProject[] = []): { own: T[]; helpers: T[] } {
   const own: T[] = [];
   const helpers: T[] = [];
   for (const task of tasks) {
@@ -128,11 +127,7 @@ export function HelperThreadGroup<T>({ tasks, renderThread }: { tasks: T[]; rend
 }
 
 /** Default list shows each routine's newest run only; older runs stay under "Show all". */
-export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, query = "", folders: BotProject[] = [], showAll = false, routineRuns: readonly Pick<RoutineRun, "routineId" | "threadId" | "createdAt">[] = []): T[] {
-  const needle = query.trim().toLowerCase();
-  if (needle) {
-    return tasks.filter((task) => task.title.toLowerCase().includes(needle) || folders.some((folder) => folder.id === task.projectId && folder.name.toLowerCase().includes(needle)));
-  }
+export function visibleSidebarThreads<T extends ThreadRowTask>(tasks: T[], activeId: string, showAll = false, routineRuns: readonly Pick<RoutineRun, "routineId" | "threadId" | "createdAt">[] = []): T[] {
   if (showAll) return tasks;
   let open = 0;
   const runOf = new Map(routineRuns.flatMap((run) => run.threadId ? [[run.threadId, run] as const] : []));

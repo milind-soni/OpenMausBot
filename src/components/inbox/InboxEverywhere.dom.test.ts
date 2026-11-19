@@ -19,7 +19,7 @@ import { setTeamPeople } from "@/state/team-people";
 import type { InboxRow, InboxView } from "../../../shared/inbox";
 import { SidebarActiveThreads } from "../SidebarActiveThreads";
 import { NeedsYouButton } from "../TeamOwner";
-import { SidebarInboxRow } from "../SidebarInboxRow";
+import { SidebarInboxButton } from "../SidebarInboxButton";
 import { setAttentionPinned } from "./attention-pinned";
 import { InboxPanel } from "./InboxPanel";
 import { senderLabel, waitingCount } from "./inbox-view";
@@ -54,7 +54,7 @@ const mount = (child: ReactElement, bots: Bot[] = []) => act(async () => {
     { value: { state: { ...initialState, bots } as AppState, dispatch, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn() } as never }, child));
 });
 const click = (selector: string) => act(async () => { document.querySelector<HTMLElement>(selector)!.click(); });
-const row = (props: Partial<Parameters<typeof SidebarInboxRow>[0]> = {}) => createElement(SidebarInboxRow, { icons: false, large: false, running: false, ...props });
+const row = (props: Partial<Parameters<typeof SidebarInboxButton>[0]> = {}) => createElement(SidebarInboxButton, props);
 const inboxButton = () => document.querySelector<HTMLElement>("[data-sidebar-inbox]");
 
 beforeEach(() => {
@@ -75,44 +75,31 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("the Inbox row", () => {
+describe("the Inbox button", () => {
   it("counts what waits on the person, not news they read or anything settled", async () => {
     setInboxView(placeView([approval, question, news, read, settled]));
     await mount(row());
-    expect(document.querySelector("[data-inbox-count]")?.textContent).toBe("3");
     expect(inboxButton()!.getAttribute("aria-label")).toBe("Inbox, 3 waiting");
     expect(waitingCount(placeView([approval, question, news, read, settled]))).toBe(3);
   });
 
   it("stays with no count when nothing waits, and before the list arrives", async () => {
     await mount(row());
-    expect(inboxButton()!.textContent).toContain("Inbox");
-    expect(document.querySelector("[data-inbox-count]")).toBeNull();
+    expect(inboxButton()!.textContent).toBe("");
     setInboxView(placeView([read, settled]));
     await mount(row());
     expect(inboxButton()!.getAttribute("aria-label")).toBe("Inbox");
-    expect(document.querySelector("[data-inbox-count]")).toBeNull();
   });
 
-  it("opens and closes the inbox, and shows a dot while a bot is at work", async () => {
+  it("opens and closes the inbox from an icon-only button", async () => {
     setInboxView(placeView([]));
-    await mount(row({ running: true }));
-    expect(document.querySelector("[data-inbox-running]")).not.toBeNull();
+    await mount(row());
+    expect(inboxButton()!.children).toHaveLength(1);
     await click("[data-sidebar-inbox]");
     expect(currentInboxPanel().open).toBe(true);
+    expect(inboxButton()!.getAttribute("aria-pressed")).toBe("true");
     await click("[data-sidebar-inbox]");
     expect(currentInboxPanel().open).toBe(false);
-    await mount(row({ running: false }));
-    expect(document.querySelector("[data-inbox-running]")).toBeNull();
-  });
-
-  it("is a tile with the same count among the avatars", async () => {
-    setInboxView(placeView([approval]));
-    await mount(row({ icons: true }));
-    expect(document.querySelector("[data-inbox-count]")?.textContent).toBe("1");
-    setInboxView(placeView(Array.from({ length: 12 }, (_, index) => ({ ...approval, id: `a${index}` }))));
-    await mount(row({ icons: true }));
-    expect(document.querySelector("[data-inbox-count]")?.textContent).toBe("9+");
   });
 
   it("counts what a team's person has to fix, except what the inbox lists already", async () => {
@@ -124,7 +111,6 @@ describe("the Inbox row", () => {
       { kind: "message", id: "m", at: AT, botId: "eli", threadId: "t", from: "Ada", text: "An inbox line" },
     ] });
     await mount(row());
-    expect(document.querySelector("[data-inbox-count]")?.textContent).toBe("3");
     server.answer = placeView([question]);
     openInbox();
     await mount(createElement(InboxPanel), [bot({})]);

@@ -36,12 +36,12 @@ describe("glass surface", () => {
     }
   });
 
-  it("is an opaque sheet for Settings in Midnight and Daylight in both modes, 920 by 720 at most with radius 16", () => {
-    const sheet = rule(':root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface');
+  it("is an opaque sheet for Settings and Apps in Midnight and Daylight in both modes, 920 by 720 at most with radius 16", () => {
+    const sheet = rule(':root:is([data-skin="midnight"], [data-skin="daylight"]) [data-solid-popup] .glass-surface');
     expect(sheet).toContain("background: var(--color-app)");
     expect(sheet).toContain("backdrop-filter: none");
     expect(sheet).toContain("box-shadow: none");
-    expect(css.indexOf("[data-settings-look] .glass-surface {")).toBeGreaterThan(css.indexOf(".glass-surface {"));
+    expect(css.indexOf("[data-solid-popup] .glass-surface {")).toBeGreaterThan(css.indexOf(".glass-surface {"));
     const size = rule('.glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup');
     expect(size).toContain("width: min(920px, 100%)");
     expect(size).toContain("height: min(720px, 100%)");
@@ -77,6 +77,7 @@ describe("glass surface", () => {
     for (const file of ["settings/SettingsWindow.tsx", "PluginsPanel.tsx"]) {
       const source = readFileSync(join(src, "components", file), "utf8");
       expect(source, file).toContain("glass-surface");
+      expect(source, file).toContain("data-solid-popup");
       // The scrim is a sibling: a backdrop-filter on an ancestor would hide the app from the pane's own blur.
       expect(source, file).toContain('className="glass-scrim pointer-events-none absolute inset-0"');
     }

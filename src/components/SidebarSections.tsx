@@ -28,11 +28,10 @@ const SECTION_DRAG_TYPE = "application/x-openmausbot-sidebar-section";
 
 /** The sidebar's sections on this device: which are collapsed, their saved order, and dragging or Alt+Up/Down a
  * heading to reorder them. Simple and Advanced each keep their own order, so a move in one leaves the other as it was. */
-export function useSidebarSections({ simple, rail, density, query, label, sidebarRef }: {
+export function useSidebarSections({ simple, rail, density, label, sidebarRef }: {
   simple: boolean;
   rail: boolean;
   density: SidebarDensity;
-  query: string;
   label: (id: string) => string;
   sidebarRef: RefObject<HTMLElement | null>;
 }) {
@@ -43,7 +42,7 @@ export function useSidebarSections({ simple, rail, density, query, label, sideba
   const [dropTarget, setDropTarget] = useState<{ id: string; place: SectionDropPlace } | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const drag = useRef<{ from: string | null; over: { id: string; place: SectionDropPlace } | null }>({ from: null, over: null });
-  const interactive = sidebarLayoutInteractive(density, query);
+  const interactive = sidebarLayoutInteractive(density);
 
   const focusHeader = (name: string) => requestAnimationFrame(() => {
     const header = [...(sidebarRef.current?.querySelectorAll<HTMLElement>("[data-section]") ?? [])].find((element) => element.dataset.section === name);
@@ -60,7 +59,7 @@ export function useSidebarSections({ simple, rail, density, query, label, sideba
     announcement,
     announce: setAnnouncement,
     focusHeader,
-    collapsed: (id: string) => sidebarSectionCollapsed(id, collapsedIds, density, query),
+    collapsed: (id: string) => sidebarSectionCollapsed(id, collapsedIds, density),
     toggle: (id: string) => {
       if (!interactive) return;
       const next = toggleCollapsedSection(collapsedIds, id);

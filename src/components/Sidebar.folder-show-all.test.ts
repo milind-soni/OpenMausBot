@@ -16,8 +16,8 @@ const bot = (filed: NonNullable<Bot["tasks"]>): Bot => ({
   projects: [{ id: "folder", name: "Taxes" }],
   tasks: [...loose, ...filed],
 });
-const render = (value: Bot, query = "") => renderToStaticMarkup(createElement(BotThreadList, {
-  ...botRowProps(initialState, vi.fn(), value, { density: "comfortable", query, onMenu: vi.fn() }), selected: true,
+const render = (value: Bot) => renderToStaticMarkup(createElement(BotThreadList, {
+  ...botRowProps(initialState, vi.fn(), value, { density: "comfortable", onMenu: vi.fn() }), selected: true,
 }));
 
 describe("an open folder whose threads are older than the short list", () => {
@@ -38,7 +38,4 @@ describe("an open folder whose threads are older than the short list", () => {
     expect(html).not.toContain("data-sidebar-folder-show-all");
   });
 
-  it("does not offer it while searching, which already lists every match", () => {
-    expect(render(bot(older), "Filed")).not.toContain("data-sidebar-folder-show-all");
-  });
 });

@@ -2,7 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConfigStatus } from "@/state/store";
-import { WorkspacesSection, WorkspacesTable, workspacesAvailable, type FleetView } from "./WorkspacesSection";
+import { workspacesAvailable } from "@/lib/feature-flags";
+import { WorkspacesSection, WorkspacesTable, type FleetView } from "./WorkspacesSection";
 
 const fixture = vi.hoisted(() => ({ config: null as ConfigStatus | null }));
 vi.mock("@/state/store", async (importOriginal) => ({

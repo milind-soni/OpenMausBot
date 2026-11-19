@@ -1649,7 +1649,6 @@
   "sidebar.cloudOwner": "Il Cloud di {email}",
   "sidebar.search": "Cerca",
   "sidebar.searchAria": "Cerca bot e messaggi",
-  "sidebar.searchClose": "Chiudi ricerca",
   "sidebar.noMatch": "Nessun risultato per «{query}»",
   "sidebar.preview.waiting": "In attesa di te…",
   "sidebar.preview.waitingOnTeammate": "In attesa di un collega…",

@@ -8,12 +8,6 @@ export type { BotHome, PlaceBotRow, PlacesTogetherState };
 /** A bot's key in a list that holds both places: ids are unique only within one. */
 export const placedKey = (home: BotHome, id: string): string => `${home}:${id}`;
 
-/** The other place's rows that match what the person typed in the sidebar's search. */
-export function matchingRows(rows: readonly PlaceBotRow[], query: string): PlaceBotRow[] {
-  const wanted = query.trim().toLowerCase();
-  return wanted ? rows.filter((row) => row.name.toLowerCase().includes(wanted) || (row.title ?? "").toLowerCase().includes(wanted)) : [...rows];
-}
-
 const bridge = () => (typeof window === "undefined" || window.ogb?.remoteClient?.active ? undefined : window.ogb?.placesTogether);
 
 let known: PlacesTogetherState | null = null;

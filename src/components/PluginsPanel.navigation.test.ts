@@ -167,6 +167,16 @@ describe("Apps pop-up", () => {
     expect(html).toContain('data-hosted-app="whop"');
     expect(html).toContain('data-hosted-app="agentcard"');
   });
+  it("waits for both the catalog and connection inventory before displaying an outage", () => {
+    fixture.overrides.set(CONFIGURED, false);
+    fixture.overrides.set(PHASE, "loading");
+    expect(render().html).not.toContain("Connected apps are temporarily unavailable");
+    fixture.overrides.set(PHASE, "ready");
+    fixture.overrides.set(CARDS, null);
+    expect(render().html).not.toContain("Connected apps are temporarily unavailable");
+    fixture.overrides.set(CARDS, [card("gmail")]);
+    expect(render().html).toContain("Connected apps are temporarily unavailable");
+  });
   it("names the connected hosted apps in the setup notice", () => {
     fixture.overrides.set(CONFIGURED, false);
     fixture.overrides.set(HOSTED_CONNECTED, Object.fromEntries(HOSTED_MCP_APPS.map((app) => [app.id, true])));
@@ -456,6 +466,7 @@ describe("Apps pop-up", () => {
     const mobileSearch = new Control(true);
     const last = new Control();
     const opener = new Control();
+    opener.matches = (selector) => selector === ":focus-visible";
     active = opener;
     const pane = Object.assign(new Control(), {
       querySelectorAll: () => [hiddenDesktopSearch, first, mobileSearch, last],

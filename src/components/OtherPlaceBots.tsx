@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { MAUS_COLOR_NAMES, type MausColor } from "@/lib/mascot";
-import { matchingRows, openOtherPlaceBot, placedKey, usePlacesTogether, type BotHome, type PlaceBotRow, type PlacesTogetherState } from "@/lib/places-together";
+import { openOtherPlaceBot, placedKey, usePlacesTogether, type BotHome, type PlaceBotRow, type PlacesTogetherState } from "@/lib/places-together";
 import { useSidebarDensity } from "@/lib/sidebar-preferences";
 import { BotAvatar } from "./Avatar";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
@@ -74,16 +74,16 @@ function OtherPlaceBotRow({ row, dim, iconOnly, simple }: { row: PlaceBotRow; di
 }
 
 /** Nothing unless main says the switch is on. */
-export function OtherPlaceBots({ query = "" }: { query?: string }) {
+export function OtherPlaceBots() {
   const together = usePlacesTogether();
   const density = useSidebarDensity();
   const simple = !useAdvancedMode();
   const [collapsed, setCollapsed] = useState(false);
   const other = together?.on ? together.other : null;
   if (!other) return null;
-  const rows = matchingRows(other.bots, query);
+  const rows = other.bots;
   const said = stateLine(other.state, other.home);
-  if (!rows.length && (query.trim() || !said)) return null;
+  if (!rows.length && !said) return null;
   const iconOnly = density === "icons";
   const name = homeLabel(other.home);
   return (

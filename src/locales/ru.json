@@ -1681,7 +1681,6 @@
   "sidebar.cloudOwner": "Облако {email}",
   "sidebar.search": "Поиск",
   "sidebar.searchAria": "Поиск ботов и сообщений",
-  "sidebar.searchClose": "Закрыть поиск",
   "sidebar.noMatch": "Ничего не найдено по запросу «{query}»",
   "sidebar.preview.waiting": "Ожидает вас…",
   "sidebar.preview.waitingOnTeammate": "Ожидает коллегу…",

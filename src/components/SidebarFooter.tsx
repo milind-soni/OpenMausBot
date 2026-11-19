@@ -1,3 +1,4 @@
+import { SidebarInboxButton } from "./SidebarInboxButton";
 import { useRef } from "react";
 
 import { cn } from "@/lib/cn";
@@ -41,6 +42,7 @@ function SimpleSidebarFooter({ owner, archived }: { owner: string | null; archiv
       <AccountMoveStatus kind={move.kind} place={move.place} retry={move.retry} onOpen={openAccount} className="ps-1" />
       <div className="flex items-center gap-2 not-first:mt-2">
         <SidebarProfileMenu simple={account} />
+        <SidebarInboxButton />
         <SidebarConnectApps />
         <UpdateIndicator className="size-9" />
       </div>
@@ -67,6 +69,7 @@ export function SidebarFooter({ density, simple = false, owner = null, archived,
           <div className="flex flex-col items-center justify-center gap-1">
             <UpdateIndicator />
             <SidebarProfileMenu iconOnly />
+            <SidebarInboxButton className="size-[46px]" />
           </div>
         </>
       ) : (
@@ -77,6 +80,7 @@ export function SidebarFooter({ density, simple = false, owner = null, archived,
             <div className="min-w-0 flex-1">
               <SidebarProfileMenu />
             </div>
+            <SidebarInboxButton />
             <SidebarBottomButtons />
           </div>
         </>

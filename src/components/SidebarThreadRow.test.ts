@@ -45,19 +45,14 @@ describe("sidebar thread visibility", () => {
   it("keeps the active and attention-needed threads visible beyond the six recent rows", () => {
     const rows = tasks.map((task) => ({ ...task, busy: task.threadId === "7", unread: task.threadId === "9" }));
     expect(visibleSidebarThreads(rows, "8").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "7", "8", "9"]);
-    expect(visibleSidebarThreads(rows, "8", "", [], true)).toEqual(rows);
+    expect(visibleSidebarThreads(rows, "8", true)).toEqual(rows);
   });
 
   it("leaves a burst's parts to its card, unless one is open or needs the person", () => {
     const openedBy = { botId: "b", name: "Bot", at: 1, burstId: "run-1" };
     const parts = [{ threadId: "quiet", title: "Quiet", openedBy }, { threadId: "open", title: "Open", openedBy }, { threadId: "asks", title: "Asks", openedBy, unread: true }];
     expect(visibleSidebarThreads(parts, "open").map((task) => task.threadId).sort()).toEqual(["asks", "open"]);
-    expect(visibleSidebarThreads(parts, "open", "", [], true)).toEqual(parts);
-  });
-  it("searches folder names and historical thread titles without the recent-row limit", () => {
-    expect(visibleSidebarThreads(tasks, "0", " RESEARCH ", [{ id: "research", name: "Research" }]).map((task) => task.threadId)).toEqual(["8", "9"]);
-    expect(visibleSidebarThreads(tasks, "0", "thread 9").map((task) => task.threadId)).toEqual(["9"]);
-    expect(visibleSidebarThreads(tasks, "0", "missing")).toEqual([]);
+    expect(visibleSidebarThreads(parts, "open", true)).toEqual(parts);
   });
   it("shows only each routine's newest run by default; older runs stay under Show all", () => {
     const rows = [
@@ -67,23 +62,22 @@ describe("sidebar thread visibility", () => {
       { threadId: "daily-5", title: "Daily brief", createdAt: 5, unread: true },
     ];
     const runs = [...[40, 30, 20, 5].map((at) => ({ routineId: "daily", threadId: `daily-${at}`, createdAt: at })), { routineId: "weekly", threadId: "weekly-10", createdAt: 10 }, { routineId: "room", createdAt: 60 }];
-    expect(visibleSidebarThreads(rows, "chat", "", [], false, runs).map((task) => task.threadId)).toEqual(["chat", "daily-40", "weekly-10", "daily-5"]);
-    expect(visibleSidebarThreads(rows, "daily-20", "", [], false, runs).map((task) => task.threadId)).toEqual(["chat", "daily-40", "daily-20", "weekly-10", "daily-5"]);
-    expect(visibleSidebarThreads(rows, "chat", "", [], true, runs)).toEqual(rows);
-    expect(visibleSidebarThreads(rows, "chat", "daily", [], false, runs)).toHaveLength(4);
+    expect(visibleSidebarThreads(rows, "chat", false, runs).map((task) => task.threadId)).toEqual(["chat", "daily-40", "weekly-10", "daily-5"]);
+    expect(visibleSidebarThreads(rows, "daily-20", false, runs).map((task) => task.threadId)).toEqual(["chat", "daily-40", "daily-20", "weekly-10", "daily-5"]);
+    expect(visibleSidebarThreads(rows, "chat", true, runs)).toEqual(rows);
     expect(visibleSidebarThreads(rows, "chat").map((task) => task.threadId)).toEqual(rows.map((task) => task.threadId));
   });
   it("picks a routine's newest run by when it started, not by when it last replied", () => {
     // Run A started at 10 and finished at 50; run B started at 30 and finished at 35. A sorts first in the list.
     const rows = [{ threadId: "run-a", title: "Daily brief", createdAt: 10, lastThreadOrderAt: 50 }, { threadId: "run-b", title: "Daily brief", createdAt: 30, lastThreadOrderAt: 35 }];
     const runs = [{ routineId: "daily", threadId: "run-a", createdAt: 10 }, { routineId: "daily", threadId: "run-b", createdAt: 30 }];
-    expect(visibleSidebarThreads(rows, "", "", [], false, runs).map((task) => task.threadId)).toEqual(["run-b"]);
-    expect(visibleSidebarThreads([{ ...rows[0] }, { ...rows[1], archivedAt: 40 }], "", "", [], false, runs).map((task) => task.threadId)).toEqual(["run-a"]);
+    expect(visibleSidebarThreads(rows, "", false, runs).map((task) => task.threadId)).toEqual(["run-b"]);
+    expect(visibleSidebarThreads([{ ...rows[0] }, { ...rows[1], archivedAt: 40 }], "", false, runs).map((task) => task.threadId)).toEqual(["run-a"]);
   });
   it("falls back to the next run when the newest run is closed or snoozed and needs nothing", () => {
     const rows = [{ threadId: "run-a", title: "Daily brief", createdAt: 10 }, { threadId: "run-b", title: "Daily brief", createdAt: 30 }];
     const runs = [{ routineId: "daily", threadId: "run-a", createdAt: 10 }, { routineId: "daily", threadId: "run-b", createdAt: 30 }];
-    const ids = (newest: Partial<Parameters<typeof visibleSidebarThreads>[0][number]>) => visibleSidebarThreads([rows[0], { ...rows[1], ...newest }], "", "", [], false, runs).map((task) => task.threadId);
+    const ids = (newest: Partial<Parameters<typeof visibleSidebarThreads>[0][number]>) => visibleSidebarThreads([rows[0], { ...rows[1], ...newest }], "", false, runs).map((task) => task.threadId);
     expect(ids({ closedBy: { botId: "bot-a", name: "Ada", at: 1 } })).toEqual(["run-a"]);
     expect(ids({ snoozedUntil: Date.now() + 60_000 })).toEqual(["run-a"]);
     expect(ids({ closedBy: { botId: "bot-a", name: "Ada", at: 1 }, unread: true })).toEqual(["run-b"]);
@@ -168,11 +162,10 @@ describe("snoozed threads", () => {
     const snoozed = [...rows, { threadId: "approval", title: "Approve deploy", snoozedUntil: 0, activity: "waiting-on-you" as const, busy: false }];
     expect(visibleSidebarThreads(snoozed, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "approval"]);
   });
-  it("folds an idle snoozed thread out of the default list while show-all and search still list it", () => {
+  it("folds an idle snoozed thread out of the default list while show-all still lists it", () => {
     const withSnoozed = [{ ...rows[0], snoozedUntil: Date.now() + 3_600_000 }, ...rows.slice(1)];
     expect(visibleSidebarThreads(withSnoozed, "8").map((task) => task.threadId)).toEqual(["1", "2", "3", "4", "5", "6", "8"]);
-    expect(visibleSidebarThreads(withSnoozed, "8", "", [], true)).toEqual(withSnoozed);
-    expect(visibleSidebarThreads(withSnoozed, "8", "thread 0").map((task) => task.threadId)).toEqual(["0"]);
+    expect(visibleSidebarThreads(withSnoozed, "8", true)).toEqual(withSnoozed);
   });
   it("treats snoozedUntil: 0 as snoozed — presence, not truthiness — and says so in the byline", () => {
     const sentinel = [{ ...rows[0], snoozedUntil: 0 }, ...rows.slice(1)];
@@ -205,8 +198,7 @@ describe("threads a bot closed", () => {
     const helpers = Array.from({ length: 3 }, (_, index) => ({ threadId: `h${index}`, title: `Helper ${index}`, openedBy, closedBy }));
     const own = Array.from({ length: 8 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}` }));
     expect(visibleSidebarThreads([...helpers, ...own], "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5"]);
-    expect(visibleSidebarThreads([...helpers, ...own], "0", "", [], true)).toHaveLength(11);
-    expect(visibleSidebarThreads([...helpers, ...own], "0", "helper 1").map((task) => task.threadId)).toEqual(["h1"]);
+    expect(visibleSidebarThreads([...helpers, ...own], "0", true)).toHaveLength(11);
   });
   it("keeps a closed thread on screen while the person is in it or it has something new", () => {
     const rows = [
@@ -481,8 +473,7 @@ describe("archived threads", () => {
       { threadId: "6", title: "Teammates", archivedAt: 5, waitingForTeammates: true },
     ];
     expect(visibleSidebarThreads(rows, "0").map((task) => task.threadId)).toEqual(["0"]);
-    expect(visibleSidebarThreads(rows, "0", "", [], true).map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "6"]);
-    expect(visibleSidebarThreads(rows, "0", "put away").map((task) => task.threadId)).toEqual(["1"]);
+    expect(visibleSidebarThreads(rows, "0", true).map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "6"]);
   });
   it("shows an archived thread while it is the open one", () => {
     const rows = [
@@ -749,12 +740,8 @@ describe("helper threads a bot opened", () => {
       thread("archived", { openedBy: opener, archivedAt: 1 }),
       thread("snoozed", { openedBy: opener, snoozedUntil: Date.now() + 60_000 }),
     ];
-    const { helpers } = partitionHelperThreads(tasks, "mine", "", [{ id: "launch", name: "Launch" } as any]);
+    const { helpers } = partitionHelperThreads(tasks, "mine", [{ id: "launch", name: "Launch" } as any]);
     expect(helpers).toEqual([]);
   });
 
-  it("does not group search results", () => {
-    const tasks = [thread("email", { openedBy: opener })];
-    expect(partitionHelperThreads(tasks, "mine", "email")).toEqual({ own: tasks, helpers: [] });
-  });
 });

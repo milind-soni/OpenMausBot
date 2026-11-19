@@ -53,6 +53,7 @@ describe("the pages", () => {
     expect(resolveSettingsTarget("activity", simple)).toEqual({ page: "data", anchor: "activity", advanced: true });
     expect(resolveSettingsTarget("backups", simple)).toEqual({ page: "transfer", anchor: "take-out" });
     expect(resolveSettingsTarget("import", simple)).toEqual({ page: "transfer", anchor: "bring-in" });
+    expect(resolveSettingsTarget("transfer", simple, "bring-in")).toEqual({ page: "transfer", anchor: "bring-in" });
     expect(resolveSettingsTarget("decisionModel", simple)).toEqual({ page: "ai", anchor: "routing", advanced: true });
     expect(resolveSettingsTarget("phone", simple)).toEqual({ page: "phone" });
     expect(needsAdvanced({ page: "general" }, fullContext())).toBe(false);

@@ -34,7 +34,7 @@ const bot = (overrides: Partial<Bot> = {}): Bot => ({
 });
 
 function renderRow(candidate: Bot, density: "comfortable" | "icons" = "comfortable") {
-  return renderToStaticMarkup(createElement(BotListItem, botRowProps(initialState, vi.fn(), candidate, { density, query: "", onMenu: vi.fn() })));
+  return renderToStaticMarkup(createElement(BotListItem, botRowProps(initialState, vi.fn(), candidate, { density, onMenu: vi.fn() })));
 }
 
 afterEach(() => {
@@ -139,9 +139,9 @@ describe("BotListItem", () => {
       call: { callId: "c1", botId: "atlas", client: "ios", startedAt: at(0), endedAt: at(2), seconds: 102, endReason: "hung-up" },
     };
     const spoken = { id: "u1", role: "user", kind: "text", text: "what is the weather", at: at(0), via: "call", callId: "c1" };
-    const draw = (candidate: Bot, { selected = false, query = "" } = {}) => renderToStaticMarkup(createElement(BotListItem, botRowProps(
+    const draw = (candidate: Bot, { selected = false } = {}) => renderToStaticMarkup(createElement(BotListItem, botRowProps(
       selected ? { ...initialState, activeView: "chat", selectedId: candidate.id } : initialState,
-      vi.fn(), candidate, { density: "comfortable", query, onMenu: vi.fn() },
+      vi.fn(), candidate, { density: "comfortable", onMenu: vi.fn() },
     )));
 
     it("previews the last reply, not the record that follows it", () => {
@@ -177,7 +177,7 @@ describe("BotListItem", () => {
           { id: "a1", role: "bot", kind: "activity", at: at(1), requestMessageId: "u1", tool: { name: "Bash", spoken: "running the tests" } },
           record,
         ] as Bot["messages"],
-      }), { query: "current" });
+      }), { selected: true });
       expect(markup).toContain("Running the tests");
     });
   });
@@ -386,7 +386,7 @@ describe("BotListItem", () => {
     expect(renderRow(bot({ messages: [{ ...failedTurn[1]!, tool: { name: "Read", ok: true } }] }))).not.toContain('data-testid="failed-dot"');
     // A message queued behind the failed turn leaves the preview on the failure, like the dot.
     const queuedState = { ...initialState, pendingQueued: { "thread-atlas": [{ queueId: "q1", text: "try again" }] } };
-    const queuedBehind = renderToStaticMarkup(createElement(BotListItem, botRowProps(queuedState, vi.fn(), bot({ messages: failedTurn }), { density: "comfortable", query: "", onMenu: vi.fn() })));
+    const queuedBehind = renderToStaticMarkup(createElement(BotListItem, botRowProps(queuedState, vi.fn(), bot({ messages: failedTurn }), { density: "comfortable", onMenu: vi.fn() })));
     expect(queuedBehind).toContain('data-testid="failed-dot"');
     expect(queuedBehind).not.toContain(">Queued<");
   });
