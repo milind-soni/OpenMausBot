@@ -19,6 +19,7 @@ import {
   accountToReconnect,
   connectedInventoryCopy,
   connectorActionLabel,
+  disconnectAccountConfirmation,
   hasActiveConnection,
   needsReconnect,
   requiresAccountAlias,
@@ -49,15 +50,8 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { ServiceIcon, type ToolkitCard } from "./ServiceIcon"; import { AppsSection } from "./AppsSection";
 export { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
+export { disconnectAccountConfirmation } from "@/lib/connector-status";
 export { preloadConnectedApps, type ConnectorInventory } from "@/lib/connected-apps";
-
-export function disconnectAccountConfirmation(
-  service: string,
-  account: { id: string; alias?: string },
-) {
-  const identity = account.alias ? `“${account.alias}” (${account.id})` : `“${account.id}”`;
-  return t("connectors.disconnectConfirm", { identity, service });
-}
 
 export function botsWithLimitedServiceTools(bots: Bot[], instances: InstanceInfo[], slug: string): Bot[] {
   return bots.filter((bot) => {
