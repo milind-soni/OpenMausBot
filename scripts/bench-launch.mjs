@@ -4,15 +4,18 @@
 // seeded workspace, and one reused profile. Prints one JSON object, so a change can show before/after.
 //   pnpm build && pnpm build:server
 //   node scripts/bench-launch.mjs --root /tmp/openmausbot-bench-launch.XXXXXX [--app CHECKOUT] [--runs 7] [--cold]
-//     [--seed 30,60,300] [--label NAME] [--out FILE] [--no-asar]
+//     [--seed 30,60,300] [--label NAME] [--out FILE] [--no-asar] [--dev]
 // --app: the checkout whose electron/, dist/ and dist-server/ are measured (this one by default), so two checkouts run
 //   under the same bench. --cold: the page cache, its code cache and the server's compile cache are emptied before each
-//   launch (what the first launch after an update does); otherwise one primed profile is reused.
+//   launch (what the first launch after an update does); otherwise one primed profile is reused. --dev: what
+//   `pnpm dev:desktop` starts instead: electron/ from loose files, unpackaged, its page from a Vite dev server already
+//   running in front of a source server (both started here, on the bench's own ports and folders).
 // Not measured: a signed app's signature and keychain checks (a mock keychain stands in), the real engines' probes
 // (the fixture's sealed PATH hides them), the computer-control and browser helpers (not staged), any network call
 // (all refused and counted in `egress`).
 import { spawn, execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { get as httpGet } from "node:http";
 import { createRequire } from "node:module";
 import { loadavg } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -24,7 +27,7 @@ const ROOT = join(HERE, "..");
 const require = createRequire(import.meta.url);
 const { values } = parseArgs({ options: {
   root: { type: "string" }, app: { type: "string", default: ROOT }, runs: { type: "string", default: "7" }, cold: { type: "boolean", default: false },
-  seed: { type: "string", default: "30,60,300" }, label: { type: "string", default: "launch" }, out: { type: "string" }, "no-asar": { type: "boolean", default: false },
+  seed: { type: "string", default: "30,60,300" }, label: { type: "string", default: "launch" }, out: { type: "string" }, "no-asar": { type: "boolean", default: false }, dev: { type: "boolean", default: false },
 } });
 const log = (line) => process.stderr.write(`bench-launch: ${line}\n`);
 if (!values.root || !values.root.includes("openmausbot-bench-")) throw new Error("--root must be a folder made for this bench (its name holds openmausbot-bench-)");
@@ -36,7 +39,7 @@ for (const needed of ["electron/main.mjs", "dist/index.html", "dist-server/deskt
 }
 const BENCH_PORTS = [38799, 48799, 58799];
 const paths = {
-  home: join(root, "home"), tmp: join(root, "tmp"), data: join(root, "data"), userData: join(root, "user-data"), stage: join(root, `stage-${values.label}`),
+  home: join(root, "home"), tmp: join(root, "tmp"), data: join(root, "data"), userData: join(root, values.dev ? "user-data-dev" : "user-data"), stage: join(root, `stage-${values.label}`),
   egress: join(root, "egress.log"), seed: join(root, "seed.json"), results: join(root, "results"),
 };
 for (const dir of [paths.home, paths.tmp, paths.userData, paths.results]) mkdirSync(dir, { recursive: true });
@@ -60,7 +63,7 @@ function stage() {
   const blocker = join(paths.stage, "bench-launch-block.cjs");
   cpSync(join(HERE, "testing", "bench-launch-block.cjs"), blocker);
   let entry = appDir;
-  if (!values["no-asar"]) {
+  if (!values["no-asar"] && !values.dev) {
     const store = join(ROOT, "node_modules", ".pnpm");
     const packed = readdirSync(store).find((name) => name.startsWith("@electron+asar@"));
     if (!packed) throw new Error("@electron/asar is not installed; pass --no-asar");
@@ -84,14 +87,32 @@ function seed() {
     features: { smartSetupChoices: false },
     instances: { claude: { driver: "claudeAgent", config: { cli: join(appRoot, "server", "testing", "fake-claude-cli.ts") } } },
   }));
-  writeFileSync(join(paths.userData, "desktop-prefs.json"), JSON.stringify({ seen: [], analytics: false }));
   writeFileSync(paths.seed, JSON.stringify(seeded));
   return seeded;
 }
 
 const STORAGE = { "omb-analytics-opt-out": "1", "omb-email-gate": "skipped", "omb-simple-mode-prompt": "1", "grok-move-2026-11": "1", "teams-2026-11b": "1", "modelgo-offer-2026-11": "1", "omb-advanced-mode": "0" };
 const electron = require("electron");
+const DEV_PAGE_PORT = BENCH_PORTS[0] - 3600;
+const fixtureEnv = () => ({
+  PATH: dirname(process.execPath), HOME: paths.home, CFFIXED_USER_HOME: paths.home, TMPDIR: paths.tmp, LANG: process.env.LANG ?? "en_US.UTF-8",
+  OMB_DATA_DIR: paths.data, OMB_WEBHOOK_PORT: String(BENCH_PORTS[0] + 1), OMB_TEST_SEALED_PATH: "1", OMB_DISABLE_ANNOUNCEMENTS: "1", FAKE_CLAUDE_MODE: "happy",
+  OMB_BENCH_EGRESS_LOG: paths.egress,
+});
+const answers = (url) => new Promise((done) => { const request = httpGet(url, (response) => { response.resume(); done(response.statusCode < 500); }); request.on("error", () => done(false)); request.setTimeout(2000, () => request.destroy()); });
+const devChildren = [];
+async function startDevServers() {
+  const env = { ...fixtureEnv(), OMB_PORT: String(BENCH_PORTS[0]), OMB_UI_PORT: String(DEV_PAGE_PORT) };
+  devChildren.push(spawn(process.execPath, ["--require", staged.blocker, "--experimental-strip-types", join(appRoot, "server", "dev-server.ts")], { cwd: appRoot, env, stdio: "ignore" }));
+  devChildren.push(spawn(process.execPath, [join(appRoot, "node_modules", "vite", "bin", "vite.js"), "--strictPort"], { cwd: appRoot, env, stdio: "ignore" }));
+  for (const url of [`http://127.0.0.1:${BENCH_PORTS[0]}/api/health`, `http://127.0.0.1:${DEV_PAGE_PORT}/`]) {
+    const deadline = Date.now() + 60_000;
+    while (!(await answers(url))) { if (Date.now() > deadline) throw new Error(`${url} did not answer`); await new Promise((r) => setTimeout(r, 200)); }
+  }
+}
+const stopDevServers = () => { for (const child of devChildren) child.kill("SIGTERM"); };
 const staged = stage();
+if (!existsSync(join(paths.userData, "desktop-prefs.json"))) writeFileSync(join(paths.userData, "desktop-prefs.json"), JSON.stringify({ seen: [], analytics: false }));
 const seeded = seed();
 
 let logRead = 0;
@@ -99,15 +120,14 @@ function launch(name, { prime = false, screenshot = false } = {}) {
   const out = join(paths.results, `${values.label}-${name}.json`);
   rmSync(out, { force: true });
   const config = {
-    root, resources: staged.resources, blocker: staged.blocker, out, timeoutMs: 60_000, quietMs: 1500,
+    root, resources: staged.resources, blocker: staged.blocker, out, timeoutMs: 60_000, quietMs: 1500, dev: values.dev,
     target: { rows: Math.min(10, Number(values.seed.split(",")[0])), lastMessageId: seeded.bigLastMessageId },
     ...(prime ? { prime: { storage: STORAGE, botId: seeded.bigBotId } } : {}),
     ...(screenshot ? { screenshot: join(paths.results, `${values.label}-${name}.png`) } : {}),
   };
   const env = {
-    PATH: dirname(process.execPath), HOME: paths.home, CFFIXED_USER_HOME: paths.home, TMPDIR: paths.tmp, LANG: process.env.LANG ?? "en_US.UTF-8",
-    OMB_DATA_DIR: paths.data, OMB_WEBHOOK_PORT: String(BENCH_PORTS[0] + 1), OMB_TEST_SEALED_PATH: "1", OMB_DISABLE_ANNOUNCEMENTS: "1", FAKE_CLAUDE_MODE: "happy",
-    OMB_BENCH_LAUNCH: JSON.stringify(config), OMB_BENCH_EGRESS_LOG: paths.egress, NODE_OPTIONS: `--require ${staged.blocker}`,
+    ...fixtureEnv(), OMB_BENCH_LAUNCH: JSON.stringify(config), NODE_OPTIONS: `--require ${staged.blocker}`,
+    ...(values.dev ? { ELECTRON_START_URL: `http://127.0.0.1:${DEV_PAGE_PORT}` } : {}),
   };
   const args = [staged.entry, "--use-mock-keychain", "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1 , EXCLUDE localhost", `--user-data-dir=${paths.userData}`];
   return new Promise((done) => {
@@ -137,7 +157,6 @@ function phases(run) {
   const first = (name, test = () => true) => run.marks.find((entry) => entry.name === name && test(entry))?.t;
   const local = (entry) => /^http:\/\/127\.0\.0\.1:\d+\/?(\?|#|$)/.test(entry.url ?? "");
   const mainNav = run.marks.find((entry) => entry.name === "nav-start" && local(entry));
-  const mainId = mainNav?.id;
   const windowIds = run.marks.filter((entry) => entry.name === "window-created").map((entry) => entry.id);
   const shows = run.marks.filter((entry) => entry.name === "window-show");
   const page = run.page ?? {};
@@ -149,7 +168,7 @@ function phases(run) {
     entry: first("entry"), mainImported: first("main-import:end"), ready: first("ready"),
     splashCreated: first("window-created", (entry) => entry.id === windowIds[0]), splashShown: shows[0]?.t,
     credentialsRead: first("credentials-decrypt:end"), proxyRead: first("resolveProxy:end"),
-    fork: first("fork"), forkSpawned: first("fork-spawned"), serverListening: logAt(/\[out\].*(listening|http:\/\/127\.0\.0\.1)/i),
+    fork: first("fork"), forkSpawned: first("fork-spawned"), serverListening: logAt(/\[out\].*openmausbot server on /),
     mainWindowCreated: first("window-created", (entry) => entry.id === windowIds[1]), pageNavStart: mainNav?.t,
     pageResponse: at(page.nav?.responseStart), domContentLoaded: at(page.nav?.dcl), rootFilled: page.seen?.root,
     mainWindowShown: shows.find((entry) => entry.id === windowIds[1])?.t, firstContentfulPaint: at(page.paints?.["first-contentful-paint"]),
@@ -181,15 +200,18 @@ function wipeCaches() {
 
 const runs = [];
 const failures = [];
-const primed = existsSync(join(root, "primed"));
+if (values.dev) await startDevServers();
+process.on("exit", stopDevServers);
+const primedFile = join(root, values.dev ? "primed-dev" : "primed");
+const primed = existsSync(primedFile);
 if (!primed) {
   for (const name of ["prime-1", "prime-2"]) {
     log(`${name}: sets the page's kept choices and opens the long chat`);
     const run = await launch(name, { prime: name === "prime-1", screenshot: true });
-    if (run.failed) { console.error(JSON.stringify(run, null, 1)); process.exit(1); }
+    if (run.failed) { console.error(JSON.stringify(run, null, 1)); stopDevServers(); process.exit(1); }
     log(`${name}: rows=${run.page?.rows} messages=${run.page?.messages} steps=${JSON.stringify(run.steps)} egress=${run.egress.length}`);
   }
-  writeFileSync(join(root, "primed"), new Date().toISOString());
+  writeFileSync(primedFile, new Date().toISOString());
 }
 const count = Number(values.runs);
 if (!values.cold && count > 0) await launch("warmup");
@@ -203,7 +225,7 @@ for (let index = 0; index < count; index += 1) {
 }
 const names = runs[0] ? Object.keys(runs[0]).filter((name) => name !== "counts") : [];
 const result = {
-  label: values.label, app: appRoot, mode: values.cold ? "cold caches" : "warm", runs: runs.length, failures,
+  label: values.label, app: appRoot, mode: `${values.dev ? "dev, " : ""}${values.cold ? "cold caches" : "warm"}`, runs: runs.length, failures,
   medianMs: Object.fromEntries(names.map((name) => [name, median(runs.map((run) => run[name]))])),
   minMs: Object.fromEntries(names.map((name) => [name, Math.min(...runs.map((run) => run[name]).filter(Number.isFinite))])),
   counts: runs.at(-1)?.counts ?? null, loadAverage: loadavg().map((value) => Math.round(value * 10) / 10),
@@ -213,3 +235,4 @@ const result = {
 const text = JSON.stringify(result, null, 1);
 if (values.out) writeFileSync(values.out, text);
 process.stdout.write(`${text}\n`);
+stopDevServers();

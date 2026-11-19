@@ -38,8 +38,10 @@ if (outside.length || !app.commandLine.hasSwitch("use-mock-keychain") || !app.co
   await new Promise(() => {});
 }
 
-Object.defineProperty(app, "isPackaged", { value: true, configurable: true });
-Object.defineProperty(process, "resourcesPath", { value: config.resources, configurable: true, enumerable: true });
+if (!config.dev) {
+  Object.defineProperty(app, "isPackaged", { value: true, configurable: true });
+  Object.defineProperty(process, "resourcesPath", { value: config.resources, configurable: true, enumerable: true });
+}
 const refused = {};
 const refuse = (target, name, result) => { target[name] = (...args) => { refused[name] = (refused[name] ?? 0) + 1; return typeof result === "function" ? result(...args) : result; }; };
 refuse(app, "setAsDefaultProtocolClient", true);
@@ -94,7 +96,7 @@ utilityProcess.fork = function (entry, ...rest) {
   const child = fork.call(this, entry, ...rest);
   child.once("spawn", () => mark("fork-spawned", { entry: label }));
   let listening = false;
-  child.stdout?.on("data", (chunk) => { if (!listening && /listening|http:\/\/127\.0\.0\.1/i.test(String(chunk))) { listening = true; mark("server-first-listen-line"); } });
+  child.stdout?.on("data", (chunk) => { if (!listening && String(chunk).includes("openmausbot server on ")) { listening = true; mark("server-first-listen-line"); } });
   return child;
 };
 
