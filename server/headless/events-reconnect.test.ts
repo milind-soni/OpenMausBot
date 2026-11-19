@@ -15,7 +15,7 @@ function fixture(onProgress: () => void = () => undefined) {
   let attempts = 0;
   const io: HeadlessIo = { out: () => undefined, err: onProgress, readStdin: async () => "" };
   const client: HeadlessClient = {
-    baseUrl: "http://127.0.0.1:1", explicit: true,
+    baseUrl: "http://127.0.0.1:1", explicit: true, identity: { kind: "none" },
     json: async <T>() => ({} as T),
     tool: async () => ({}),
     raw: async (_path, init) => {
@@ -28,6 +28,7 @@ function fixture(onProgress: () => void = () => undefined) {
     verb: "events", flags: {}, positionals: [], env: {}, io,
     output: new Output(io, {}), client: async () => client,
     signal: controller.signal, defaultWaitMs: 1_000,
+    botShell: false, saved: null, interactive: false, confirm: async () => false, openBrowser: async () => false,
   };
   return { controller, ctx, signal: () => streamSignal!, attempts: () => attempts };
 }

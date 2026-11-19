@@ -3810,5 +3810,19 @@
   "voice.deepseek.description": "Lit les réponses et les messages vocaux avec la voix Stella ou Tide de DeepSeek. En choisissant DeepSeek, la dictée et les appels à tour de rôle vous entendent aussi via la reconnaissance vocale de DeepSeek, jusqu’à environ deux minutes par enregistrement. Utilise votre clé API DeepSeek et est facturé par DeepSeek.",
   "voice.deepseek.stella": "Stella (féminine)",
   "voice.deepseek.tide": "Tide (masculine)",
-  "call.capability.turnsNeedDeepSeekKey": "Ajoutez une clé DeepSeek pour parler à tour de rôle pendant les appels"
+  "call.capability.turnsNeedDeepSeekKey": "Ajoutez une clé DeepSeek pour parler à tour de rôle pendant les appels",
+  "alwaysOn.section": "Maison toujours allumée",
+  "alwaysOn.title": "Utiliser cet ordinateur comme maison toujours allumée",
+  "alwaysOn.add.title": "Ajouter un Mac mini ou un autre ordinateur toujours allumé",
+  "call.capability.turnsNeedDeepSeekKeyReason": "DeepSeek est votre voix : les appels à tour de rôle vous entendent donc via la reconnaissance vocale de DeepSeek. Ajoutez une clé DeepSeek dans Paramètres → Clés API.",
+  "serverError.voice.deepseekKeyRequired": "Ajoutez une clé API DeepSeek dans Paramètres → Clés API pour parler à vos bots avec la voix DeepSeek.",
+  "higgsfield.description": "Des images et des vidéos IA que vos bots créent avec les modèles Higgsfield, sur votre propre compte Higgsfield.",
+  "higgsfield.notice": "Connectez-vous avec votre compte Higgsfield. Aucune clé d’API n’est nécessaire. Un bot autorisé à utiliser Higgsfield peut lancer des générations d’images et de vidéos qui consomment des crédits de votre compte : choisissez donc quels bots y ont accès sous Accès aux bots.",
+  "imageGen.slot.needsHiggsfield": "Higgsfield doit être connecté : connectez-le ci-dessous.",
+  "imageGen.higgsfield.connected": "Connecté à votre compte Higgsfield",
+  "imageGen.higgsfield.notConnected": "Non connecté, ou la connexion a expiré",
+  "imageGen.higgsfield.help": "{app} crée des images avec le compte Higgsfield auquel vous vous connectez sous Plugins. Chaque image consomme des crédits de ce compte.",
+  "imageGen.higgsfield.open": "Ouvrir Plugins",
+  "inbox.settled.title": "Terminé",
+  "inbox.settled.read": "Lu"
 }

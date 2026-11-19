@@ -5903,5 +5903,19 @@
   "voice.deepseek.description": "Yanıtları ve sesli mesajları DeepSeek’in Stella veya Tide sesiyle okur. DeepSeek’i seçtiğinde dikte ve Sırayla konuş da seni DeepSeek konuşmadan metne dönüştürme ile duyar; kayıt başına yaklaşık iki dakikaya kadar. DeepSeek API anahtarını kullanır ve ücreti DeepSeek tarafından alınır.",
   "voice.deepseek.stella": "Stella (kadın)",
   "voice.deepseek.tide": "Tide (erkek)",
-  "call.capability.turnsNeedDeepSeekKey": "Aramalarda sırayla konuşmak için bir DeepSeek anahtarı ekle"
+  "call.capability.turnsNeedDeepSeekKey": "Aramalarda sırayla konuşmak için bir DeepSeek anahtarı ekle",
+  "alwaysOn.section": "Her zaman açık ev",
+  "alwaysOn.title": "Bu bilgisayarı her zaman açık ev olarak kullan",
+  "alwaysOn.add.title": "Mac mini veya her zaman açık başka bir bilgisayar ekle",
+  "call.capability.turnsNeedDeepSeekKeyReason": "Sesin DeepSeek olduğu için Sırayla konuş seni DeepSeek konuşmadan metne dönüştürme ile duyar. Ayarlar → API anahtarları bölümüne bir DeepSeek anahtarı ekle.",
+  "serverError.voice.deepseekKeyRequired": "Botlarınla DeepSeek sesiyle konuşmak için Ayarlar → API anahtarları bölümüne bir DeepSeek API anahtarı ekle.",
+  "higgsfield.description": "Botlarınızın Higgsfield modelleriyle oluşturduğu yapay zekâ görselleri ve videoları, kendi Higgsfield hesabınızda.",
+  "higgsfield.notice": "Higgsfield hesabınızla oturum açın. API anahtarı gerekmez. Higgsfield’i kullanabilen bir bot, hesabınızdaki kredileri harcayan görsel ve video üretimleri başlatabilir; bu yüzden hangi botların kullanacağını Bot erişimi bölümünden seçin.",
+  "imageGen.slot.needsHiggsfield": "Higgsfield’in bağlı olması gerekir: aşağıdan bağlayın.",
+  "imageGen.higgsfield.connected": "Higgsfield hesabınıza bağlı",
+  "imageGen.higgsfield.notConnected": "Bağlı değil veya oturum sona erdi",
+  "imageGen.higgsfield.help": "{app}, Eklentiler bölümünde oturum açtığınız Higgsfield hesabıyla görsel oluşturur. Her görsel o hesaptan kredi harcar.",
+  "imageGen.higgsfield.open": "Eklentileri aç",
+  "inbox.settled.title": "Tamamlandı",
+  "inbox.settled.read": "Okundu"
 }

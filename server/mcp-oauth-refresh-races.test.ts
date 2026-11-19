@@ -129,6 +129,87 @@ it("never shares an old refresh with a replacement entry at another resource URL
   expect(await nextPending).toBe("other-access");
 });
 
+it("never presents a refresh token it already sent, so a rotating server does not revoke the grant", async () => {
+  // The server rotates the token but its answer is lost. The client must not present that token again: a server
+  // that rotates refresh tokens revokes the whole grant when it sees one of them a second time.
+  const first = manager.accessToken("docs", resource);
+  const request = await nextRequest();
+  expect(request.form.get("refresh_token")).toBe("old-refresh");
+  request.response.destroy();
+  await first.catch(() => undefined);
+  expect(requests).toHaveLength(0);
+
+  // The next attempt must not send the same refresh token again.
+  const second = manager.accessToken("docs", resource);
+  await second.catch(() => undefined);
+  expect(requests).toHaveLength(0);
+  expect(manager.authState("docs", resource)).toBe("needs-sign-in");
+});
+
+it("does not present a spent refresh token again after a restart", async () => {
+  // The mark of a spent token lives in the store, not in memory: a manager that starts again reads it from the file
+  // and must not present that token, or a rotating server revokes the grant.
+  const first = manager.accessToken("docs", resource);
+  const request = await nextRequest();
+  expect(request.form.get("refresh_token")).toBe("old-refresh");
+  request.response.destroy();
+  await first.catch(() => undefined);
+
+  const restarted = new McpOAuthManager({ file: join(directory, "oauth.json") });
+  try {
+    const second = restarted.accessToken("docs", resource);
+    await second.catch(() => undefined);
+    expect(requests).toHaveLength(0);
+    expect(restarted.authState("docs", resource)).toBe("needs-sign-in");
+  } finally {
+    restarted.dispose();
+  }
+});
+
+it("presents the refresh token again when nothing reached the server", async () => {
+  // Offline, or the address does not answer: the request never left, so the token was not spent and the sign-in stays.
+  const closed = createServer();
+  await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+  const port = (closed.address() as { port: number }).port;
+  await new Promise<void>((resolve) => closed.close(() => resolve()));
+  manager.adopt("docs", resource, { ...record("old"), tokenEndpoint: `http://127.0.0.1:${port}/token` }, () => true);
+  expect(await manager.accessToken("docs", resource)).toBeNull();
+  expect(await manager.accessToken("docs", resource)).toBeNull();
+  expect(events).toEqual(["unreachable", "unreachable"]);
+  expect(manager.authState("docs", resource)).not.toBe("needs-sign-in");
+});
+
+it("presents the refresh token again after the server answered without one", async () => {
+  // A busy or rate-limited server issued nothing, so the next renewal sends the same token.
+  const first = manager.accessToken("docs", resource);
+  const request = await nextRequest();
+  reply(request, 503, { error: "temporarily_unavailable" });
+  expect(await first).toBeNull();
+  const second = manager.accessToken("docs", resource);
+  const again = await nextRequest();
+  expect(again.form.get("refresh_token")).toBe("old-refresh");
+  reply(again, 200, { access_token: "fresh-access", refresh_token: "new-refresh" });
+  expect(await second).toBe("fresh-access");
+});
+
+it("presents the refresh token again when the server kept it", async () => {
+  // A server that does not rotate refresh tokens answers without a new one, and the old token stays valid
+  // (RFC 6749 section 6). The next renewal has to present it again, so the mark of a spent token is cleared when
+  // the server answers and keeps that same token.
+  const first = manager.accessToken("docs", resource);
+  const request = await nextRequest();
+  expect(request.form.get("refresh_token")).toBe("old-refresh");
+  reply(request, 200, { access_token: "first-access" });
+  expect(await first).toBe("first-access");
+
+  // The server refused the access token, so the grant is renewed: the refresh token is presented again.
+  const refused = manager.tokenRefused("docs", resource);
+  const again = await nextRequest();
+  expect(again.form.get("refresh_token")).toBe("old-refresh");
+  reply(again, 200, { access_token: "second-access" });
+  expect(await refused).toBe("refreshed");
+});
+
 it("signs out immediately and keeps a later sign-in when revocation completes", async () => {
   const signingOut = manager.signOut("docs", resource);
   const revocation = await nextRequest();

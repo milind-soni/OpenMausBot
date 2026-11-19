@@ -478,7 +478,10 @@ export async function teamExportVerb(ctx: VerbContext): Promise<VerbOutcome> {
   const document = { version: 1, ...(Object.keys(engines).length ? { engines } : {}), ...(teamEntries.length ? { teams: teamEntries } : {}),
     bots: botEntries, ...(roomEntries.length ? { rooms: roomEntries } : {}) };
   if (!botEntries.length) throw new HeadlessError("no bots to export", EXIT.failed);
-  writeFileSync(resolve(out), `# Written by openmausbot team export on ${new Date().toISOString().slice(0, 10)}.\n# Engine keys are placeholders (SET_ME): set them before applying this elsewhere.\n${stringifyYaml(document, { lineWidth: 0 })}`);
+  const serialized = /\.json$/i.test(out)
+    ? `${JSON.stringify(document, null, 2)}\n`
+    : `# Written by openmausbot team export on ${new Date().toISOString().slice(0, 10)}.\n# Engine keys are placeholders (SET_ME): set them before applying this elsewhere.\n${stringifyYaml(document, { lineWidth: 0 })}`;
+  writeFileSync(resolve(out), serialized);
   return {
     result: { ok: true, file: resolve(out), teams: teamEntries.length, bots: botEntries.length, rooms: roomEntries.length, skills, engines: Object.keys(engines), skipped, redacted },
     exitCode: EXIT.done,

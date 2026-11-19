@@ -5903,5 +5903,19 @@
   "voice.deepseek.description": "Đọc to câu trả lời và tin nhắn thoại bằng giọng Stella hoặc Tide của DeepSeek. Khi chọn DeepSeek, tính năng đọc chính tả và chế độ Luân phiên cũng nghe bạn qua chuyển giọng nói thành văn bản của DeepSeek, tối đa khoảng hai phút mỗi lần ghi. Dùng khóa API DeepSeek của bạn và do DeepSeek tính phí.",
   "voice.deepseek.stella": "Stella (nữ)",
   "voice.deepseek.tide": "Tide (nam)",
-  "call.capability.turnsNeedDeepSeekKey": "Thêm khóa DeepSeek để nói luân phiên trong cuộc gọi"
+  "call.capability.turnsNeedDeepSeekKey": "Thêm khóa DeepSeek để nói luân phiên trong cuộc gọi",
+  "alwaysOn.section": "Nhà luôn bật",
+  "alwaysOn.title": "Dùng máy tính này làm nhà luôn bật",
+  "alwaysOn.add.title": "Thêm Mac mini hoặc máy tính luôn bật khác",
+  "call.capability.turnsNeedDeepSeekKeyReason": "DeepSeek là giọng của bạn, nên chế độ Luân phiên nghe bạn qua chuyển giọng nói thành văn bản của DeepSeek. Thêm khóa DeepSeek trong Cài đặt → Khóa API.",
+  "serverError.voice.deepseekKeyRequired": "Thêm khóa API DeepSeek trong Cài đặt → Khóa API để trò chuyện với bot bằng giọng DeepSeek.",
+  "higgsfield.description": "Ảnh và video AI mà các bot của bạn tạo bằng mô hình Higgsfield, trên chính tài khoản Higgsfield của bạn.",
+  "higgsfield.notice": "Đăng nhập bằng tài khoản Higgsfield của bạn. Không cần khóa API. Bot nào dùng được Higgsfield có thể bắt đầu tạo ảnh và video, tốn tín dụng của tài khoản bạn, nên hãy chọn bot nào được dùng trong Quyền truy cập của bot.",
+  "imageGen.slot.needsHiggsfield": "Cần kết nối Higgsfield: hãy kết nối bên dưới.",
+  "imageGen.higgsfield.connected": "Đã kết nối với tài khoản Higgsfield của bạn",
+  "imageGen.higgsfield.notConnected": "Chưa kết nối, hoặc phiên đăng nhập đã hết hạn",
+  "imageGen.higgsfield.help": "{app} tạo ảnh bằng tài khoản Higgsfield mà bạn đăng nhập trong Plugin. Mỗi ảnh tốn tín dụng của tài khoản đó.",
+  "imageGen.higgsfield.open": "Mở Plugin",
+  "inbox.settled.title": "Đã xong",
+  "inbox.settled.read": "Đã đọc"
 }

@@ -51,7 +51,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "description": "A teammate's id as list_bots prints it, or its unique name."
+              "description": "A teammate's name, preferred, or its id from list_bots; an id's first 8 characters or more work too."
             }
           },
           "message": {

@@ -9,7 +9,7 @@ export type { ServerUpdateStatus };
 /** GET /api/updates/check (server/update-check.ts). */
 export interface ServerUpdateCheck {
   current: string;
-  install: "desktop" | "managed" | "docker" | "podman" | "npm" | "git" | "unknown";
+  install: "desktop" | "managed" | "docker" | "podman" | "podman-service" | "npm" | "git" | "unknown";
   channel?: "stable" | "newest";
   latest?: string;
   available: boolean;

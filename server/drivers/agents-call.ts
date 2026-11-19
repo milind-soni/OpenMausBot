@@ -14,13 +14,13 @@ import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } fr
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
-import { boundedAgentResult } from "./agents-result.ts";
+import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
 import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callHelperTool, HELPER_TOOL_NAMES } from "./agents-helper-tools.ts";
 import { callUsageLimitsTool, USAGE_LIMITS_TOOL } from "./agents-usage-tool.ts";
-import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts";
+import { callThreadPostTool, THREAD_POST_TOOL } from "./agents-thread-post-tool.ts"; import { callListThreadsTool, LIST_THREADS_TOOL } from "./agents-list-threads-tool.ts"; import { callRenameThreadTool, RENAME_THREAD_TOOL } from "./agents-thread-title-tool.ts";
 import { callWaitTool, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { callBurstTool } from "./agents-burst-tool.ts";
 import { callComputerAskTool, COMPUTER_ASK_TOOL_NAMES } from "./agents-computer-ask-tool.ts";
@@ -314,7 +314,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
         isError: true,
       };
     }
-    const r = await api("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
+    const answer = await apiResponse("/api/internal/coordinate-bots", { method: "POST", body: JSON.stringify({
       groupId: typeof canonical.group_id === "string" && canonical.group_id.trim() ? canonical.group_id.trim() : undefined, botIds: ids, message: canonical.message,
       reason: typeof canonical.reason === "string" && canonical.reason.trim() ? canonical.reason.trim() : undefined,
       rework: canonical.rework,
@@ -323,7 +323,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       done_when: typeof canonical.done_when === "string" && canonical.done_when.trim() ? canonical.done_when.trim() : undefined,
       answers: typeof canonical.answers === "string" && canonical.answers.trim() ? canonical.answers.trim() : undefined, files: Array.isArray(canonical.files) && canonical.files.some((path) => path.trim()) ? canonical.files.filter((path) => path.trim()) : undefined,
     }) });
-    return { text: JSON.stringify(r), ...(r.error ? { isError: true } : {}) };
+    return apiAnswer(answer.ok, answer.status, answer.body);
   }
   if (name === "assignment_status") {
     const id = args.id === undefined || args.id === null || args.id === "" ? "" : String(args.id).trim();
@@ -424,23 +424,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (!r.ok) return { text: String(r.body.error ?? `reset_cloud_computer failed (HTTP ${r.status}).`), isError: true };
     return { text: String(r.body.text ?? "") };
   }
-  if (name === "list_threads") {
-    const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
-    const r = await api(`/api/internal/threads?${query.toString()}`);
-    if (r.error) return { text: `Couldn't list threads: ${String(r.error)}`, isError: true };
-    const threads = Array.isArray(r.threads) ? r.threads.filter(jsonRecord) : [];
-    if (!threads.length) return { text: "No threads yet: you have none of your own beyond this one, and you have not opened any on a teammate." };
-    const stateWord: Record<string, string> = { running: "running", "waiting-on-you": "waiting on the person", queued: "queued", idle: "idle" };
-    const lines = threads.map((thread) => {
-      const where = thread.own === true ? "yours" : `on @${String(thread.botName)}${typeof thread.openedBy === "string" && thread.openedBy ? `, opened by @${thread.openedBy}` : ""}`;
-      const state = stateWord[String(thread.state)] ?? String(thread.state);
-      const unread = thread.unread === true ? ", unread for the person" : "";
-      const handoff = typeof thread.delegationId === "string" && thread.delegationId ? ` [delegation id: ${thread.delegationId}]` : "";
-      const waiting = typeof thread.waiting === "string" && thread.waiting ? `: ${thread.waiting}` : "";
-      return `- #${String(thread.title)} (${where}, ${state}${waiting}${unread}) [thread id: ${String(thread.threadId)}]${handoff}`;
-    });
-    return { text: `Threads, newest first:\n${lines.join("\n")}` };
-  }
+  if (name === LIST_THREADS_TOOL) return callListThreadsTool(args, context);
   if (name === "close_thread") {
     const threadId = String(args.thread_id ?? "").trim();
     if (!threadId) return { text: "close_thread needs the thread_id from list_threads or start_thread.", isError: true };

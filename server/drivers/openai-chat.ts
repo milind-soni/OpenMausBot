@@ -24,7 +24,7 @@ import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, replaya
 import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
-import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
+import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, selectedReasoningEffort, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
 import { appendNative } from "./native.ts";
 import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS } from "./retry.ts";
 import { plainFailure } from "./engine-errors.ts";
@@ -35,9 +35,8 @@ import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
 import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
 import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rejectsKey } from "../key-rejections.ts";
-import { FETCH_LIMIT_MS, fetchPastLimit } from "./openai-chat-fetch.ts";
+import { FETCH_LIMIT_MS, fetchPastLimit, prepareChatModel } from "./openai-chat-fetch.ts";
 import { announcesAction } from "./chat-announcement.ts";
-
 export interface OpenAIChatMessage {
   role: "system" | "user" | "assistant" | "tool";
   content: string | ChatContentPart[] | null;
@@ -47,12 +46,11 @@ export interface OpenAIChatMessage {
   reasoning?: string;
   reasoning_details?: Record<string, unknown>[];
 }
-
 interface Usage {
   input: number;
   output: number;
+  cachedInput?: number;
 }
-
 export interface Completion {
   text: string;
   reasoning: string;
@@ -64,7 +62,6 @@ export interface Completion {
   /** Every output item of a Responses API reply, encrypted reasoning included, for the next round of this turn only. */
   responseOutput?: ResponseItem[];
 }
-
 interface CompletionJson extends ProviderBody {
   model?: string;
   choices?: Array<{
@@ -77,13 +74,11 @@ interface CompletionJson extends ProviderBody {
   /** Groq reports streaming usage in its final x_groq envelope. */
   x_groq?: { usage?: CompletionJson["usage"] };
 }
-
 interface NativeLog {
   source: string;
   outgoing(turn: SendTurnInput, messages: OpenAIChatMessage[], model: string, tools: ChatToolDefinition[]): unknown;
   incoming(completion: Completion): unknown;
 }
-
 const LIVENESS_MISSES = 3;
 
 interface RuntimeOptions<Config> {
@@ -92,7 +87,9 @@ interface RuntimeOptions<Config> {
   apiKey: string;
   apiUrl: string;
   models: () => ModelCatalog;
-  requestBody(model: string, messages: OpenAIChatMessage[], stream: boolean, variant?: string, threadId?: string): Record<string, unknown>;
+  prepareTurn?: (turn: SendTurnInput, signal: AbortSignal) => Promise<void> | undefined;
+  selectedReasoning?: (model: string, variant?: string) => boolean;
+  requestBody(model: string, messages: OpenAIChatMessage[], stream: boolean, variant?: string, threadId?: string, selectedModel?: string): Record<string, unknown>;
   httpErrorLabel: string;
   /** A refusal this provider words itself: the sentence the person sees instead of the HTTP line, or undefined. */
   plainRefusal?: (status: number, body: string) => string | undefined;
@@ -130,11 +127,13 @@ interface RuntimeOptions<Config> {
    * to fix a failed call instead of ending the turn on it. */
   localModel?: boolean;
 }
-
-const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
-  usage
-    ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0 }
+const usageFrom = (usage: CompletionJson["usage"]): Usage | null => {
+  const cachedInput = usage?.prompt_tokens_details?.cached_tokens;
+  return usage
+    ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0,
+        ...(typeof cachedInput === "number" && Number.isFinite(cachedInput) && cachedInput >= 0 ? { cachedInput } : {}) }
     : null;
+};
 
 const completionUsage = (json: CompletionJson) => json.usage ?? json.x_groq?.usage;
 
@@ -277,11 +276,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         ? AbortSignal.any([signal, timeoutController.signal])
         : timeoutController.signal;
 
-      const served = options.servedModel ? await options.servedModel(model) : model;
+      const served = options.servedModel ? await prepareChatModel(() => options.servedModel!(model), activeSignal) : model;
+      const requestBody = options.requestBody(served, messages, stream, variant, threadId, model);
+      const effort = selectedReasoningEffort(requestBody, route, variant, options.selectedReasoning?.(model, variant));
       const payload = JSON.stringify(route === "responses"
-        ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model), effort: options.requestBody(served, messages, stream, variant).reasoning_effort })
+        ? responsesRequest({ model: served, messages, tools, replay: (message) => responseOutputs.get(message), summaries: routes.summaries(model), effort })
         : {
-          ...options.requestBody(served, messages, stream, variant, threadId),
+          ...requestBody,
           ...(route === "chat-reasoning-off" ? (options.reasoningOffBody?.(served) ?? { reasoning_effort: "none" }) : {}),
           ...(tools.length ? { tools } : {}),
         });
@@ -515,15 +516,13 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
   const sendTurn = async (turn: SendTurnInput) => {
     if (!options.apiKey) throw new Error(options.missingKeyError);
     if (active.has(turn.threadId)) throw new Error("a turn is already running on this thread");
-    if (options.computerUse && ((turn.images?.length && seesImages(turn)) || turn.integrations?.localComputer || turn.integrations?.browser)) assertImageTransport(options.apiUrl);
-
+    if (options.computerUse && (turn.integrations?.localComputer || turn.integrations?.browser)) assertImageTransport(options.apiUrl);
     const turnId = newId();
     const abort = new AbortController();
-    const messages = messagesFor(turn);
-    const request = messages.at(-1)!;
+    let messages: OpenAIChatMessage[] = [];
+    let request: OpenAIChatMessage | undefined;
     const retainImages = chatImageBudget();
-    for (const message of messages) retainImages(message.content);
-    const model = turn.model || options.models().default;
+    let model = turn.model || options.models().default;
     const maskable = (value: unknown): value is string => typeof value === "string" && value.length >= 8; // a short placeholder key ("1") would redact every match
     const secrets = [options.apiKey].filter(maskable);
     for (const integration of Object.values(turn.integrations ?? {})) {
@@ -580,7 +579,6 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     const turnEntry = { abort, turnId, done, approval, asides: [] as string[], ending: false };
     active.set(turn.threadId, turnEntry);
     emit({ ...base(turn.threadId, turnId), type: "turn.started" });
-    emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
 
     void (async () => {
       let tools: ChatToolSession | undefined;
@@ -601,6 +599,14 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const repeats = options.localModel ? new ChatRepeatGuard() : undefined;
       let unreadable = false, askedAgain = false;
       try {
+        const preparation = options.prepareTurn?.(turn, abort.signal);
+        if (preparation) { await preparation; model = turn.model || options.models().default; }
+        abort.signal.throwIfAborted();
+        if (options.computerUse && turn.images?.length && seesImages(turn)) assertImageTransport(options.apiUrl);
+        messages = messagesFor(turn);
+        request = messages.at(-1)!;
+        for (const message of messages) retainImages(message.content);
+        emit({ ...base(turn.threadId, turnId), type: "session.started", sessionId: null, model });
         const parsed = parseToolScope(turn.toolScope);
         if (!parsed.ok) throw new Error(parsed.error);
         const scope = parsed.scope;
@@ -729,6 +735,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
           if (completion.usage) {
             usage.input += completion.usage.input;
             usage.output += completion.usage.output;
+            if (completion.usage.cachedInput !== undefined) usage.cachedInput = (usage.cachedInput ?? 0) + completion.usage.cachedInput;
             hasUsage = true;
             const contextWindow = options.models().options.find((entry) => entry.id === model)?.contextWindow;
             // Accounting sums the turn; context occupancy is the latest round only.
@@ -907,7 +914,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               threadId: turn.threadId, turnId, model,
               usage, hasUsage, failure, toolCalls: seenCalls.size,
               task: turn.text, updates: deliveredAsides,
-              messages: messages.slice(messages.indexOf(request) + 1),
+              messages: request ? messages.slice(messages.indexOf(request) + 1) : [],
             });
             if (handoffPath) emit({ ...base(turn.threadId, turnId), type: "cap.exhausted", handoffPath, reason: continuable });
           }

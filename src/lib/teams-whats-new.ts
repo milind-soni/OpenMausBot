@@ -36,7 +36,7 @@ export function teamsAction({ team, viewer, account, canAddCloud }: {
   return { kind: "start", inApp: canAddCloud && audience === "own", url: startTeamsUrl(account?.staging === true) };
 }
 
-export type TeamsStep = "seen" | "invite" | "start_team" | "got_it" | "not_now" | "close";
+export type TeamsStep = "seen" | "invite" | "start_team" | "see_team_plans" | "got_it" | "not_now" | "close";
 type TeamsAudience = "team_admin" | "team_member" | "no_team";
 
 export function teamsAudience(action: TeamsAction): TeamsAudience {

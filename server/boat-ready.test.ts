@@ -84,10 +84,35 @@ describe("waiting for a cloud computer to answer", () => {
 
   it("gives up after a minute and a half when the provider gives no reason for the silence", async () => {
     const h = harness(() => false);
-    const answer = await h.readiness.awaitAnswer(cfg, BOX, { woke: true });
+    h.health.answered(BOX);
+    h.advance(READY_WAIT.freshMs + 1);
+    const answer = await h.readiness.awaitAnswer(cfg, BOX);
     expect(answer).toMatchObject({ ok: false, phase: "waking" });
     expect(answer.waitedMs).toBeLessThanOrEqual(READY_WAIT.answerPatienceMs + READY_WAIT.probeTimeoutMs);
     expect(answer.waitedMs).toBeGreaterThan(READY_WAIT.answerPatienceMs - READY_WAIT.probeTimeoutMs - READY_WAIT.probeGapMs);
+  });
+
+  it("after a wake, waits three minutes with longer and longer gaps before it gives up", async () => {
+    const gaps: number[] = [];
+    const h = harness(() => false);
+    const readiness = createBoatReadiness({
+      probe: async () => { h.advance(READY_WAIT.probeTimeoutMs); return false; },
+      read: async () => ({ state: "idle", health: "ok" }), health: h.health, counters: h.counters, now: h.now,
+      sleep: async (ms) => { gaps.push(ms); h.advance(ms); },
+    });
+    const answer = await readiness.awaitAnswer(cfg, BOX, { woke: true });
+    expect(answer).toMatchObject({ ok: false, phase: "waking" });
+    expect(answer.waitedMs).toBeGreaterThan(READY_WAIT.wakePatienceMs - READY_WAIT.probeTimeoutMs - 20_000);
+    expect(answer.waitedMs).toBeLessThanOrEqual(READY_WAIT.wakePatienceMs + READY_WAIT.probeTimeoutMs);
+    expect(gaps.slice(0, 5)).toEqual([...READY_WAIT.wakeGapsMs]);
+    expect(gaps.slice(5).every((gap) => gap === 20_000)).toBe(true);
+  });
+
+  it("after a wake, a computer silent for two and a half minutes is still waited for, and answers", async () => {
+    const h = harness((at) => at >= h.start + 150_000);
+    const answer = await h.readiness.awaitAnswer(cfg, BOX, { woke: true });
+    expect(answer.ok).toBe(true);
+    expect(answer.waitedMs).toBeGreaterThanOrEqual(150_000);
   });
 
   it("waits up to ten minutes while the provider says the disk is being restored, and reports that", async () => {

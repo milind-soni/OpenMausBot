@@ -4084,5 +4084,19 @@
   "voice.deepseek.description": "Читає відповіді та голосові повідомлення голосом Stella або Tide від DeepSeek. Якщо вибрати DeepSeek, диктування й розмова по черзі теж слухають вас через розпізнавання мовлення DeepSeek — до приблизно двох хвилин на запис. Використовує ваш API-ключ DeepSeek, оплата — через DeepSeek.",
   "voice.deepseek.stella": "Stella (жіночий)",
   "voice.deepseek.tide": "Tide (чоловічий)",
-  "call.capability.turnsNeedDeepSeekKey": "Додайте ключ DeepSeek, щоб говорити по черзі в дзвінках"
+  "call.capability.turnsNeedDeepSeekKey": "Додайте ключ DeepSeek, щоб говорити по черзі в дзвінках",
+  "alwaysOn.section": "Завжди увімкнений дім",
+  "alwaysOn.title": "Використовувати цей комп’ютер як завжди увімкнений дім",
+  "alwaysOn.add.title": "Додати Mac mini або інший завжди увімкнений комп’ютер",
+  "call.capability.turnsNeedDeepSeekKeyReason": "Ваш голос — DeepSeek, тому розмова по черзі слухає вас через розпізнавання мовлення DeepSeek. Додайте ключ DeepSeek у Налаштування → API-ключі.",
+  "serverError.voice.deepseekKeyRequired": "Додайте API-ключ DeepSeek у Налаштування → API-ключі, щоб розмовляти з ботами голосом DeepSeek.",
+  "higgsfield.description": "ШІ-зображення й відео, які ваші боти створюють моделями Higgsfield, на вашому власному акаунті Higgsfield.",
+  "higgsfield.notice": "Увійдіть у свій акаунт Higgsfield. Ключ API не потрібен. Бот, якому дозволено користуватися Higgsfield, може запускати генерацію зображень і відео, що витрачає кредити вашого акаунта, тож у розділі «Доступ до ботів» виберіть, які боти це отримають.",
+  "imageGen.slot.needsHiggsfield": "Потрібно підключити Higgsfield: підключіть його нижче.",
+  "imageGen.higgsfield.connected": "Підключено до вашого акаунта Higgsfield",
+  "imageGen.higgsfield.notConnected": "Не підключено, або вхід завершився",
+  "imageGen.higgsfield.help": "{app} створює зображення через акаунт Higgsfield, у який ви входите в розділі «Плагіни». Кожне зображення витрачає кредити цього акаунта.",
+  "imageGen.higgsfield.open": "Відкрити «Плагіни»",
+  "inbox.settled.title": "Завершено",
+  "inbox.settled.read": "Прочитано"
 }

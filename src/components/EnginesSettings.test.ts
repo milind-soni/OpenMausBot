@@ -461,7 +461,8 @@ describe("Settings → AI in Simple mode", () => {
 
   it("folds every other provider under More providers, in the same card, with the count", () => {
     fixture.instances = [engine("claude", "claudeAgent", true), engine("kimi", "kimiAgent", false), engine("mistral", "mistral", false)];
-    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More providers[\s\S]*?>2</);
+    // Kimi, Mistral and the Google AI Studio row (a Gemini key).
+    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More providers[\s\S]*?>3</);
     expect(simple()).not.toContain('data-simple-engine="kimi"');
     expect(simple(true)).toContain('data-simple-engine="kimi"');
   });

@@ -153,7 +153,7 @@ No domain, no proxy, no open port. The server gets an address like `https://c-7f
 
 ```sh
 npx openmausbot setup          # once: choose AI access, connect, and choose a model
-npx openmausbot login          # once: an emailed code signs this machine in and reserves its address
+npx openmausbot account login          # once: an emailed code signs this machine in and reserves its address
 npx openmausbot serve --tunnel # runs the server there and prints the pairing link with a QR code
 ```
 
@@ -163,7 +163,7 @@ chat-only connection. More engines can be added later. See [CLI setup](cli-onboa
 
 `login` asks for your email, sends an 8-digit code, and prints the address it reserved for this machine. `serve --tunnel` downloads `cloudflared` on the first run (a pinned version with a verified digest, into `~/.openmausbot`), starts the server, connects the tunnel, and after a few seconds prints `tunnel: live at https://…`. Leave it running; see "Keep it running" for a service.
 
-The account credentials live in `~/.openmausbot/tunnel-account.json`, readable only by your user. `npx openmausbot logout` releases the address.
+The account credentials live in `~/.openmausbot/tunnel-account.json`, readable only by your user. `npx openmausbot account logout` releases the address.
 
 Skip to "Install and sign the engines in".
 
@@ -292,7 +292,7 @@ Every paired device is a session:
 ```sh
 npx openmausbot devices               # id, device, scope, last seen, expires
 npx openmausbot devices revoke ID     # signs that device out and closes its stream at once
-npx openmausbot status                # the address others use, and whether it answers as this server
+npx openmausbot account status                # the address others use, and whether it answers as this server
 ```
 
 ## Keep it running
@@ -510,6 +510,11 @@ every file's owner and mode either way. The script then:
    before (the server's own count of ready engines, `GET /api/health/engines`,
    which a hardened server answers too; `openmausbot doctor` on a version
    without it), and Caddy runs again.
+   If it does not, the new version's doctor runs on the data
+   (`openmausbot doctor --data --fix`: in the server's container while it is up,
+   else in a one-off one with the server stopped). When the doctor repaired
+   something, the new version is started once more and step 4 is tried again.
+   [What the doctor checks and repairs](self-hosting.md#the-doctor-checking-and-repairing-the-data).
 5. If any of that fails: puts back the data from the copy, `.env` and the old
    image, starts the old version, and tells you what went wrong. Your server
    is as it was before step 1, `.env` included, byte for byte. Only when `.env`
@@ -709,11 +714,11 @@ Read this before putting anything else in front of the server.
 
 ## Troubleshooting
 
-**`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot login` on this machine first; the credentials are per machine.
+**`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot account login` on this machine first; the credentials are per machine.
 
 **The server does not start and says its data "was written by a newer OpenMausBot".** An older version was started on data a newer one had already changed, which happens when a version is put back without its data. Nothing was changed. Install the version the message names (or a newer one), or put back the copy of the data from before that update.
 
-**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot logout && npx openmausbot login` issues a fresh address.
+**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot account logout && npx openmausbot account login` issues a fresh address.
 
 **Path B: the page never loads or shows a certificate error.** Caddy could not get a certificate. Check that the name resolves to the server and that ports 80 and 443 are open; `docker compose logs caddy` shows the reason.
 
@@ -725,7 +730,7 @@ Read this before putting anything else in front of the server.
 
 **A bot says the engine is not signed in.** Sign that engine in again on the server.
 
-**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx openmausbot status` prints the same on the server.
+**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx openmausbot account status` prints the same on the server.
 
 **Something else.** `journalctl -u openmausbot --since -10m` (or `docker compose logs omb --tail 100`) shows the server's startup lines. Paste them with your question in the community channel.
 

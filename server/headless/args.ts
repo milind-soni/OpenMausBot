@@ -1,16 +1,24 @@
 import { parseArgs, type ParseArgsOptionsConfig } from "node:util";
 
-/** What the process exits with. Scripts and CI branch on these. */
+/** What the process exits with. Scripts and CI branch on these. A refusal from the server maps the same way for every verb:
+ * needsLogin (401), notAllowed (403), conflict (409, busy) and notFound (404). `run`/`wait` keep 4 for a timeout,
+ * `team apply --check` 6 for changes and `doctor --host` 7, as they always have. */
 export const EXIT = {
   done: 0,
   failed: 1,
   usage: 2,
   needsInput: 3,
   timeout: 4,
+  needsLogin: 4,
   unreachable: 5,
+  notAllowed: 5,
   changes: 6,
+  conflict: 6,
+  notFound: 7,
   /** `doctor --host`: this machine is missing something the server needs. */
   hostMissing: 7,
+  /** `doctor --data`: the data folder has a problem left (after --fix, one it could not repair). */
+  dataProblems: 8,
   interrupted: 130,
 } as const;
 
@@ -55,8 +63,40 @@ const WAITING = {
   strict: { type: "boolean" },
 } satisfies ParseArgsOptionsConfig;
 
+/** Which bots a verb acts on: names or ids, a team, or every bot. */
+const SELECT = {
+  team: { type: "string" },
+  all: { type: "boolean" },
+} satisfies ParseArgsOptionsConfig;
+
+const CAREFUL = {
+  yes: { type: "boolean", short: "y" },
+  "dry-run": { type: "boolean" },
+} satisfies ParseArgsOptionsConfig;
+
+const MANY = 200;
+
 const VERBS: Record<string, { options: ParseArgsOptionsConfig; positionals: number }> = {
-  doctor: { options: { wait: { type: "string" }, host: { type: "boolean" }, "data-dir": { type: "string" }, domain: { type: "string" } }, positionals: 0 },
+  login: { options: { scope: { type: "string" }, name: { type: "string" } }, positionals: 1 },
+  logout: { options: {}, positionals: 1 },
+  whoami: { options: {}, positionals: 0 },
+  use: { options: {}, positionals: 1 },
+  servers: { options: {}, positionals: 0 },
+  status: { options: {}, positionals: 0 },
+  "bots list": { options: {}, positionals: 0 },
+  "bots get": { options: {}, positionals: 1 },
+  "bots delete": { options: { ...SELECT, ...CAREFUL }, positionals: MANY },
+  "bots pause": { options: { ...SELECT, "dry-run": { type: "boolean" } }, positionals: MANY },
+  "bots resume": { options: { ...SELECT, "dry-run": { type: "boolean" } }, positionals: MANY },
+  "bots stop": { options: { ...SELECT, ...CAREFUL }, positionals: MANY },
+  stop: { options: { ...SELECT, ...CAREFUL }, positionals: MANY },
+  "threads list": { options: {}, positionals: 1 },
+  "threads clear": { options: CAREFUL, positionals: 1 },
+  "threads delete": { options: CAREFUL, positionals: MANY },
+  "computers list": { options: {}, positionals: 0 },
+  "computers start": { options: { "dry-run": { type: "boolean" } }, positionals: 1 },
+  "computers sleep": { options: { "dry-run": { type: "boolean" } }, positionals: 1 },
+  doctor: { options: { wait: { type: "string" }, host: { type: "boolean" }, data: { type: "boolean" }, fix: { type: "boolean" }, "data-dir": { type: "string" }, domain: { type: "string" } }, positionals: 0 },
   bots: { options: {}, positionals: 0 },
   channels: { options: {}, positionals: 0 },
   models: { options: {}, positionals: 0 },
@@ -117,6 +157,7 @@ export const HEADLESS_VERBS: ReadonlySet<string> = new Set(Object.keys(VERBS).ma
 /** Verbs that change something; control-omb refuses them on a discovered server. */
 export const MUTATING_VERBS: ReadonlySet<string> = new Set([
   "send", "send-channel", "run", "interrupt", "new-bot", "new-channel", "set-model", "edit", "team apply", "engine set", "token create", "token revoke",
+  "bots delete", "bots pause", "bots resume", "bots stop", "stop", "threads clear", "threads delete", "computers start", "computers sleep",
 ]);
 
 export type Flags = Record<string, string | boolean | string[] | undefined>;
@@ -127,7 +168,10 @@ export interface ParsedCommand {
   positionals: string[];
 }
 
-const SUBCOMMANDS = new Map([["team", ["apply", "export"]], ["engine", ["set", "list"]], ["token", ["create", "list", "revoke"]]]);
+const SUBCOMMANDS = new Map([["team", ["apply", "export"]], ["engine", ["set", "list"]], ["token", ["create", "list", "revoke"]],
+  ["threads", ["list", "clear", "delete"]], ["computers", ["list", "start", "sleep"]]]);
+/** `bots` alone still lists them, as it always has. */
+const OPTIONAL_SUBCOMMANDS = new Map([["bots", ["list", "get", "delete", "pause", "resume", "stop"]]]);
 
 /** Strict: an unknown flag or a missing value is a usage error (exit 2). */
 export function parseCommand(argv: readonly string[]): ParsedCommand {
@@ -135,6 +179,10 @@ export function parseCommand(argv: readonly string[]): ParsedCommand {
   if (!head) throw usageError("name a verb", "run openmausbot help");
   let verb = head;
   let args = rest;
+  if (OPTIONAL_SUBCOMMANDS.get(head)?.includes(rest[0] ?? "")) {
+    verb = `${head} ${rest[0]}`;
+    args = rest.slice(1);
+  }
   const actions = SUBCOMMANDS.get(head);
   if (actions) {
     const action = rest[0];

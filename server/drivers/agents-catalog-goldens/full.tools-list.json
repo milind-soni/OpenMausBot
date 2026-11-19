@@ -135,7 +135,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "description": "A teammate's id as list_bots prints it, or its unique name."
+              "description": "A teammate's name, preferred, or its id from list_bots; an id's first 8 characters or more work too."
             }
           },
           "message": {
@@ -293,7 +293,12 @@
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
-        "properties": {}
+        "properties": {
+          "page": {
+            "type": "integer",
+            "description": "100 per page; default 1."
+          }
+        }
       },
       "annotations": {
         "readOnlyHint": true,
@@ -1290,6 +1295,7 @@
               "xai",
               "gemini",
               "openrouter",
+              "higgsfield",
               "custom"
             ],
             "description": "Only when the person named one; it must be their base or backup."

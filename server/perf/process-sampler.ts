@@ -64,7 +64,7 @@ export function linuxProcessList(read: (path: string) => string | null = readTex
 /** One `ps` over every process: the fallback where there is no /proc (macOS). */
 export function psProcessList(): Promise<ProcessList | null> {
   return new Promise((resolve) => {
-    execFile("ps", ["-axo", "pid=,ppid=,rss=,time=,comm="], { timeout: 10_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true }, (error, stdout) => {
+    execFile("ps", ["-axo", "pid=,ppid=,pgid=,rss=,time=,comm="], { timeout: 10_000, maxBuffer: 4 * 1024 * 1024, windowsHide: true }, (error, stdout) => {
       if (error) return resolve(null);
       const rows = stdout.split("\n").flatMap((line) => { const row = parsePsLine(line); return row ? [row] : []; });
       resolve({ rows, reapedMs: null, totalMs: null });

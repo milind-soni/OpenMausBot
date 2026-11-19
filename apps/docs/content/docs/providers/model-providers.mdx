@@ -120,8 +120,28 @@ To use more than one provider at once, add extra `openai-compat` engines to
 Give each one its own key. An engine without a key uses the key from
 Connections and sends it to that engine's address.
 
-With an OpenAI key or OpenRouter, a model that reasons gets a thinking control
-in the picker: Low, Medium or High. Leave it unset for the model's default.
+The model picker shows the reasoning levels an endpoint advertises. For other
+OpenAI-compatible models that don't list levels, it offers Low, Medium, High, Xhigh and
+Max as manual choices. They are compatibility options, not a guarantee the
+provider accepts them. With the control unset, the initial request sends no
+level and uses the provider's default. If the provider requires reasoning to be
+disabled for tools, the existing compatibility fallback may retry with reasoning
+off. When an explicit choice is rejected or marked unsupported, the turn reports
+an error rather than silently using another level.
+
+When adding an `openai-compat` engine in `config.json`, you can override the
+listed levels in that engine's `config` object, for example:
+
+```json
+{
+  "reasoningEfforts": { "vendor/model": ["low", "medium", "high", "max"] }
+}
+```
+
+When a catalog is read, its explicit declaration that a model does not support
+reasoning takes precedence over this list. A fixed `managedModels` list keeps
+its existing behavior and does not fetch a catalog. Refresh the models after a
+provider changes its catalog.
 
 ### Free OpenRouter models
 

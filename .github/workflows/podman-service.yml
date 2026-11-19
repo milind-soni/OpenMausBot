@@ -1,0 +1,44 @@
+name: Podman service
+
+# The rootless Podman install (deploy/podman/install.sh) on a stock ubuntu-24.04 runner, as its own user runs it: the
+# published server image as the user's systemd service, a turn with the repository's fake engine, Chrome, restarts,
+# the LAN switch, an update and a rolled-back one through deploy/update.sh, and an uninstall (deploy/e2e/podman.sh).
+# It talks to no production service and needs no secret.
+on:
+  pull_request:
+    paths:
+      - deploy/podman/install.sh
+      - deploy/update.sh
+      - deploy/e2e/podman.sh
+      - .github/workflows/podman-service.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: podman-service-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: install, restart, update and roll back as a rootless user service on Ubuntu 24.04
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: shellcheck
+        run: shellcheck deploy/podman/install.sh deploy/e2e/podman.sh
+      - name: Install, restart, update, roll back and uninstall
+        env:
+          OUT: ${{ runner.temp }}/podman-service
+        run: bash deploy/e2e/podman.sh
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: podman-service
+          path: ${{ runner.temp }}/podman-service
+          retention-days: 14

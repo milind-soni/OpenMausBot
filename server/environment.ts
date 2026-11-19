@@ -112,9 +112,10 @@ export function reportableServerVersion(version = serverVersion()): string | und
   return RELEASE_VERSION.test(version) ? version : undefined;
 }
 
-/** How this server was started: the Docker image (OMB_CLI_PREFIX, or Docker's own /.dockerenv), a checkout, npx, or a
- * global install. */
+/** How this server was started: the rootless Podman service (its unit sets OMB_PODMAN_SERVICE), the Docker image
+ * (OMB_CLI_PREFIX, or Docker's own /.dockerenv), a checkout, npx, or a global install. */
 export function serverInstall(env: NodeJS.ProcessEnv = process.env, script = process.argv[1] ?? "", docker = () => existsSync("/.dockerenv")): ServerInstall {
+  if (env.OMB_PODMAN_SERVICE?.trim()) return "podman-service";
   const prefix = cliPrefix(env, script);
   if (prefix.includes("docker") || docker()) return "docker";
   if (prefix === "pnpm omb" || script.endsWith(".ts")) return "source";

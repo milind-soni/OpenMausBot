@@ -106,8 +106,8 @@ describe("events against a server", () => {
     answer = (_req, res) => { res.writeHead(401, { "content-type": "application/json" }); res.end(JSON.stringify({ error: "unauthorized: this session has expired or was revoked" })); };
     const { io, out } = capture();
     const code = await runHeadless(["events", "--json"], { io, env: { OPENMAUSBOT_URL: origin, OPENMAUSBOT_TOKEN: "omb_sess_expired" } });
-    expect(code).toBe(5);
-    expect(JSON.parse(out.join("\n"))).toMatchObject({ ok: false, exitCode: 5, error: "this server needs a credential and did not accept the one given" });
+    expect(code).toBe(4);
+    expect(JSON.parse(out.join("\n"))).toMatchObject({ ok: false, exitCode: 4, error: "this server did not accept the token given" });
     expect(asked).toHaveLength(1);
   });
 

@@ -1,8 +1,25 @@
-export { HEADLESS_VERBS as HEADLESS_VERB_NAMES } from "./headless/args.ts";
+import { HEADLESS_VERBS } from "./headless/args.ts";
+
+export { HEADLESS_VERBS as HEADLESS_VERB_NAMES };
+
+/** Where a command line goes: the OpenMausBot account (`account login|logout|status`, and `login --email` or `--relay`
+ * as before) and the other classic commands to cli.ts, the headless verbs to headless/main.ts. */
+export function routeCli(argv: readonly string[]): { headless: boolean; argv: string[] } {
+  if (argv[0] === "account") return { headless: false, argv: ["login", "logout", "status"].includes(argv[1] ?? "") ? argv.slice(1) : ["--help"] };
+  if (argv[0] === "login" && argv.some((arg) => /^--(?:email|relay)(?:=|$)/.test(arg))) return { headless: false, argv: [...argv] };
+  return { headless: HEADLESS_VERBS.has((argv[0] === "help" ? argv[1] : argv[0]) ?? ""), argv: [...argv] };
+}
 
 export const HEADLESS_USAGE = `Drive a running workspace (scripts, CI, other agents):
+  openmausbot login [SERVER]            sign this terminal in once: MausBot shows a card to allow it (logout, whoami, use NAME, servers)
+  openmausbot status                    every bot at a glance: working, waiting on you, paused, failed or idle, and its computer
+  openmausbot bots delete|pause|resume|stop (BOT… | --team T | --all)   act on bots; delete asks first (--yes, --dry-run)
+  openmausbot stop (BOT… | --team T | --all)   stop their work now, without pausing
+  openmausbot threads list|clear|delete BOT    a bot's conversations
+  openmausbot computers list|start|sleep       the bots' cloud computers
   openmausbot doctor                    check the server answers and an engine is ready
   openmausbot doctor --host             check this Linux machine can run a server (exit 7 if not)
+  openmausbot doctor --data [--fix]     check (and safely repair) this computer's data folder (exit 8 if a problem is left)
   openmausbot bots | channels | models  your bots, your rooms, the engines and their models
   openmausbot run BOT "do this"         give a bot one job and wait until it and every teammate it asked are done
   openmausbot send BOT "text"           send one message and return at once
@@ -17,9 +34,10 @@ export const HEADLESS_USAGE = `Drive a running workspace (scripts, CI, other age
   openmausbot token create NAME --out FILE [--expires 90d]    a token for CI that ends on its date (token list, token revoke ID)
   openmausbot new-bot | new-channel | set-model | edit | mcp
 
-  Server: --url URL (or OPENMAUSBOT_URL), --port N (or OMB_PORT), else this computer's.
-  Token: OPENMAUSBOT_TOKEN or --token-file FILE. --json prints one JSON document;
-  progress goes to stderr (--quiet drops it). openmausbot help VERB for the details.`;
+  Server: --url URL (or OPENMAUSBOT_URL), --port N (or OMB_PORT), else the one you signed in to, else this computer's.
+  Token: your openmausbot login, or OPENMAUSBOT_TOKEN or --token-file FILE for scripts. --json prints one JSON document;
+  progress goes to stderr (--quiet drops it). Exit: 0 done, 1 failed, 2 usage, 4 needs login, 5 not allowed,
+  6 busy, 7 not found. openmausbot help VERB for the details.`;
 
 /** The usage text, its commands written the way this CLI was started (`npx openmausbot …`). */
 export function usage(prefix = "openmausbot"): string {
@@ -35,10 +53,8 @@ export const USAGE = `openmausbot — your team of AI bots, ready in a few steps
                     [--public-url https://host | --domain HOST | --tunnel | --tailscale] [--lan] [--relay]
   openmausbot pair  [--label NAME] [--phone [ios|android]] [--ttl 24h] [--public-url https://host]
   openmausbot devices [revoke ID]
-  openmausbot status
   openmausbot --version
-  openmausbot login [--email you@example.com] [--relay]
-  openmausbot logout
+  openmausbot account login [--email you@example.com] [--relay] | logout | status
   openmausbot access list | add EMAIL [--chat-only] | remove EMAIL
   openmausbot service install [the same way-in options as serve] [--port N] [--data-dir DIR] | uninstall
                     [--sentinel]   (the health scan below, every two minutes, instead of the server)
@@ -60,12 +76,11 @@ pair    a new pairing code for the running server, with its link and QR
         (--phone: chat and approvals only; --ttl keeps it open up to 24h,
         still single use)
 devices lists paired devices; "devices revoke ID" signs one out
-status  the running server, the address others reach it at, and whether
-        that address answers as this server
-login   signs this machine in to an OpenMausBot account (an emailed code)
-        and reserves its public address for --tunnel; with --relay it
-        reserves none, for serve --relay
-logout  releases that address and signs out
+account login signs this machine in to an OpenMausBot account (an emailed
+        code) and reserves its public address for --tunnel; with --relay it
+        reserves none, for serve --relay. account logout releases that
+        address and signs out. account status: the running server, the
+        address others reach it at, and whether that address answers as it
 access  who may sign in with an emailed code at /pair: an address or
         @domain; --chat-only gives chat and approvals without settings.
         Takes effect at once, no restart.
@@ -99,7 +114,7 @@ Ways in (pick one; --lan can join any):
              when serve stops
 --tunnel     serve at a public https://c-… address through a
              Cloudflare tunnel: no domain, no proxy, no open port. Run
-             \`openmausbot login\` once on this machine first.
+             \`openmausbot account login\` once on this machine first.
 --domain     serve at https://HOST on your own domain: a pinned Caddy is
              downloaded once and run alongside the server, and gets the
              certificate itself. Point the domain's DNS at this machine and
@@ -108,7 +123,7 @@ Ways in (pick one; --lan can join any):
 --relay      phones only, and it can join any of the above except --tunnel:
              the MausBot phone app pairs by QR through MausBot Relay,
              end-to-end encrypted, with no address, open port or VPN. Run
-             \`openmausbot login --relay\` once on this machine first. Not on a
+             \`openmausbot account login --relay\` once on this machine first. Not on a
              machine with a tunnel address: the relay stays off there.
 
 --no-open   do not open a browser window

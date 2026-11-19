@@ -22,6 +22,7 @@ import { KimiAgentDriver } from "./kimi.ts";
 import { DroidAgentDriver } from "./droid.ts";
 import { CursorAgentDriver } from "./cursor.ts";
 import { QwenAgentDriver } from "./qwen.ts";
+import { antigravityUpdateFilter } from "../antigravity.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { TurnWatchdog } from "../../turn-watchdog.ts";
 import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
@@ -88,6 +89,13 @@ const ClassifiedErrorDriver = createAcpDriver({
     error && typeof error === "object" && (error as { code?: unknown }).code === -32000
       ? "invalid_credentials"
       : undefined,
+});
+
+const TextStartDriver = createAcpDriver({
+  ...SELECT_MODEL_SUPPORT,
+  driverKind: "textStartTest",
+  selectModel: undefined,
+  updateFilter: antigravityUpdateFilter,
 });
 
 const CONTROL_PLANE_FIXTURE = {
@@ -836,6 +844,24 @@ describe("ACP turns (fake CLI)", () => {
       const repliesTo = await replyingThread("reasoning-append");
       expect(await repliesTo(...say("The answer is 42.", reasoned))).toEqual([`The answer is 42.${reasoned}`]);
     });
+  });
+
+  it("drops the escape artifact a text run opens with, again after a tool call", async () => {
+    const { report, send, lastTurn } = await reportingThread("text-start", TextStartDriver);
+    const say = (text: string) => ({ sessionUpdate: "agent_message_chunk", content: { type: "text", text } });
+    report(
+      say("&_a_m_p_;_\n&_a_m_p_;_"),
+      say("Prepared the reply. A mid-run &_a_m_p_;_ stays."),
+      { sessionUpdate: "tool_call", toolCallId: "call-1", title: "Ran a thing", status: "completed" },
+      say("&_a_m_p_;_ Done."),
+    );
+    await send("turn");
+    const texts = lastTurn().flatMap((event) =>
+      event.type === "item.completed" && event.itemType === "assistant_text" ? [event.text] : []);
+    // the fake's own greeting is the first assistant_text of the turn
+    expect(texts.slice(1)).toEqual(["Prepared the reply. A mid-run &_a_m_p_;_ stays.", "Done."]);
+    const streamed = lastTurn().flatMap((event) => event.type === "content.delta" ? [event.delta] : []);
+    expect(streamed.some((delta) => delta.startsWith("&_a_m_p_;_"))).toBe(false);
   });
 
   const plan = (...entries: Array<[status: string, content: string]>) => ({

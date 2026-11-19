@@ -3664,5 +3664,19 @@
   "voice.deepseek.description": "जवाब और वॉइस मैसेज DeepSeek की Stella या Tide आवाज़ में पढ़कर सुनाता है। DeepSeek चुनने पर डिक्टेशन और बारी-बारी से बात करने वाले कॉल भी DeepSeek स्पीच-टू-टेक्स्ट से आपको सुनते हैं, हर रिकॉर्डिंग में लगभग दो मिनट तक। आपकी DeepSeek API कुंजी का उपयोग होता है और बिल DeepSeek देता है।",
   "voice.deepseek.stella": "Stella (महिला)",
   "voice.deepseek.tide": "Tide (पुरुष)",
-  "call.capability.turnsNeedDeepSeekKey": "कॉल में बारी-बारी से बात करने के लिए DeepSeek कुंजी जोड़ें"
+  "call.capability.turnsNeedDeepSeekKey": "कॉल में बारी-बारी से बात करने के लिए DeepSeek कुंजी जोड़ें",
+  "alwaysOn.section": "हमेशा चालू घर",
+  "alwaysOn.title": "इस कंप्यूटर को हमेशा चालू घर की तरह इस्तेमाल करें",
+  "alwaysOn.add.title": "Mac mini या कोई और हमेशा चालू कंप्यूटर जोड़ें",
+  "call.capability.turnsNeedDeepSeekKeyReason": "DeepSeek आपकी आवाज़ है, इसलिए बारी-बारी से बात करते समय DeepSeek स्पीच-टू-टेक्स्ट आपको सुनता है। सेटिंग्स → API कुंजियाँ में DeepSeek कुंजी जोड़ें।",
+  "serverError.voice.deepseekKeyRequired": "DeepSeek आवाज़ में अपने बॉट्स से बात करने के लिए सेटिंग्स → API कुंजियाँ में DeepSeek API कुंजी जोड़ें।",
+  "higgsfield.description": "आपके बॉट Higgsfield मॉडल से जो AI तस्वीरें और वीडियो बनाते हैं, आपके अपने Higgsfield खाते पर।",
+  "higgsfield.notice": "अपने Higgsfield खाते से साइन इन करें। API कुंजी की ज़रूरत नहीं है। Higgsfield इस्तेमाल कर सकने वाला बॉट तस्वीरें और वीडियो बनाना शुरू कर सकता है, जिनमें आपके खाते के क्रेडिट खर्च होते हैं, इसलिए बॉट ऐक्सेस में चुनें कि कौन-से बॉट को यह मिले।",
+  "imageGen.slot.needsHiggsfield": "Higgsfield का कनेक्ट होना ज़रूरी है: नीचे इसे कनेक्ट करें।",
+  "imageGen.higgsfield.connected": "आपके Higgsfield खाते से कनेक्ट है",
+  "imageGen.higgsfield.notConnected": "कनेक्ट नहीं है, या साइन-इन खत्म हो गया",
+  "imageGen.higgsfield.help": "{app} उस Higgsfield खाते से तस्वीरें बनाता है जिससे आप प्लगइन में साइन इन करते हैं। हर तस्वीर उस खाते के क्रेडिट खर्च करती है।",
+  "imageGen.higgsfield.open": "प्लगइन खोलें",
+  "inbox.settled.title": "पूर्ण",
+  "inbox.settled.read": "पढ़ा गया"
 }
