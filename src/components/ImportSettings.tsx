@@ -221,7 +221,7 @@ export function GrokImportSection() {
   if (useContext(SettingsLook)) {
     return (
       <div data-import-section="grok" data-settings-block="grok-move" className="flex flex-col">
-        <SettingRow title={t("settings.import.grokTitle")} subtitle={t("settings.import.grokLine")} leading={<SettingsMark><GrokBotMark size={18} /></SettingsMark>}>
+        <SettingRow title={t("settings.import.grokTitle")} subtitle={t("settings.import.grokLineChats")} leading={<SettingsMark><GrokBotMark size={18} /></SettingsMark>}>
           <button type="button" className="ui-button" data-grok-move-open aria-expanded={open} onClick={() => { setStarted(true); setOpen(!open); }}>{t(open ? "common.close" : "settings.import.moveAction")}</button>
         </SettingRow>
         {started && <div className={open ? "px-4 pb-3" : "hidden"}><GrokMoveDialog inline onClose={() => { setStarted(false); setOpen(false); }} /></div>}

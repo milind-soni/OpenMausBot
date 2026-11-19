@@ -3814,7 +3814,6 @@
   "activity.dates": "Zeitraum",
   "settings.threadCleanup.retention.plain": "Ereignisprotokolle lange beendeter Threads entfernen. Threads bleiben.",
   "settings.threadCleanup.cap.plain": "Das Ereignisprotokoll jedes Threads klein halten. Threads bleiben.",
-  "settings.import.grokLine": "Hol einen Bot mit seinen Skills, Routinen, Erinnerungen und Apps herüber.",
   "settings.import.choose": "Auswählen…",
   "settings.experimental.skillAuthoringShort": "Speichere einen Prüflauf als Skill oder bitte einen Bot, einen zu erstellen. Jede Änderung erscheint im Chat mit Rückgängig.",
   "settings.experimental.newBrowserShort": "Die Browser der Bots nutzen den eigenen Browser-Treiber von {app}: schärfere Seiten, Uploads, Downloads und Pop-ups.",

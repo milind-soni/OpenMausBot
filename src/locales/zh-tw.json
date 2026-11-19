@@ -10055,7 +10055,6 @@
   "activity.dates": "日期",
   "settings.threadCleanup.retention.plain": "刪除很久以前結束的對話的事件記錄。對話會保留。",
   "settings.threadCleanup.cap.plain": "讓每個對話的事件記錄保持精簡。對話會保留。",
-  "settings.import.grokLine": "把一個機器人連同它的技能、例行程序、記憶和 App 一起移過來。",
   "settings.import.choose": "選擇…",
   "settings.experimental.skillAuthoringShort": "把一次驗證儲存為技能，或請機器人建立一個。每次變更都會在聊天中顯示並可復原。",
   "settings.experimental.newBrowserShort": "Bot 的瀏覽器使用 {app} 自己的瀏覽器驅動程式：頁面更清晰，並支援上傳、下載和彈出視窗。",

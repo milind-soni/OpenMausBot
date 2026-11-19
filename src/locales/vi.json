@@ -5753,7 +5753,6 @@
   "activity.dates": "Ngày",
   "settings.threadCleanup.retention.plain": "Xóa nhật ký sự kiện của các luồng đã xong từ lâu. Luồng vẫn giữ nguyên.",
   "settings.threadCleanup.cap.plain": "Giữ nhật ký sự kiện của mỗi luồng nhỏ gọn. Luồng vẫn giữ nguyên.",
-  "settings.import.grokLine": "Chuyển một bot sang cùng kỹ năng, quy trình, ký ức và ứng dụng của nó.",
   "settings.import.choose": "Chọn…",
   "settings.experimental.skillAuthoringShort": "Lưu một lần kiểm tra thành kỹ năng, hoặc nhờ bot tạo một kỹ năng. Mỗi thay đổi hiện trong cuộc trò chuyện với nút Hoàn tác.",
   "settings.experimental.newBrowserShort": "Trình duyệt của bot dùng trình điều khiển riêng của {app}: trang sắc nét hơn, tải lên, tải xuống và cửa sổ bật lên.",
