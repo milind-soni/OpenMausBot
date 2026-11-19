@@ -139,6 +139,8 @@ export interface LiveElevenLabsSession {
   session_id: string;
   signed_url: string;
   instructions: string;
+  /** The bot's own ElevenLabs voice, sent as the conversation's voice override; absent when the call keeps the agent's voice. */
+  voice_id?: string;
   /** ISO time by which the client must connect */
   expires_at: string;
 }
