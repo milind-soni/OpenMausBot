@@ -2811,7 +2811,7 @@ app.whenReady().then(async () => {
     onShow: (win) => desktopTray?.windowShown(win),
     onFinished: () => { startupScreen = null; }, onReveal: via => launchAnalytics.stage("window_shown", { reason: via }),
   });
-  bootHeadStart.start(); // the splash draws in its own process while the folder is leased and the server starts
+  bootHeadStart.start(); await startupScreen?.ready;
   if (desktopShutdownStarted) return;
   session.defaultSession.on("will-download", (_event, item) => {
     if (mediaDownloads.claim(item)) return;
@@ -2986,7 +2986,7 @@ app.whenReady().then(async () => {
     }
     if (!serverReady && !desktopShutdownStarted) serverSupervisor.startLater(startServerPackaged); // an always-on home keeps trying
   }
-  await startupScreen?.ready; if (desktopShutdownStarted) return;
+  if (desktopShutdownStarted) return;
   if (app.isPackaged && !desktopRemoteAccess) { void ensureManagedDesktop().start().then(() => companyBackupSchedule.start()).catch(() => {}); void managedDesktop.whenRestored().then(() => tailnetShare.recheck()); }
   // Fresh local use never makes a Cloud request; start only restores an existing grant.
   if (app.isPackaged && !desktopRemoteAccess) {
