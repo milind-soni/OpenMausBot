@@ -211,7 +211,7 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
       requests.push({ bytes: raw.length, messages });
       const refusal = refuse(raw.length, messages);
       if (refusal) {
-        res.writeHead(refusal.status, { "content-type": "text/html" });
+        res.writeHead(refusal.status, { "content-type": refusal.status === 200 ? "text/event-stream" : "text/html" });
         res.end(refusal.body);
         return;
       }
@@ -282,14 +282,17 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
   });
 
   const tokens = (bytes: number) => Math.ceil(bytes / 4);
-  const llamaCpp = (window: (firstTokens: number) => number, count: (bytes: number, messages: Array<{ role: string; content: unknown }>) => number = tokens) => {
+  /** llama.cpp b7200 on answers HTTP 400; b6500 streamed HTTP 200 with an SSE `error:` event holding the bare error, then [DONE]. */
+  const llamaCpp = (window: (firstTokens: number) => number, count: (bytes: number, messages: Array<{ role: string; content: unknown }>) => number = tokens,
+    delivery: "http" | "sse" = "http") => {
     let n_ctx: number | undefined;
     return (bytes: number, messages: Array<{ role: string; content: unknown }>) => {
       const n_prompt_tokens = count(bytes, messages);
       n_ctx ??= window(n_prompt_tokens);
-      return n_prompt_tokens >= n_ctx ? { status: 400, body: JSON.stringify({ error: { code: 400,
-        message: `request (${n_prompt_tokens} tokens) exceeds the available context size (${n_ctx} tokens), try increasing it`,
-        type: "exceed_context_size_error", n_prompt_tokens, n_ctx } }) } : null;
+      if (n_prompt_tokens < n_ctx) return null;
+      const error = { code: 400, message: `request (${n_prompt_tokens} tokens) exceeds the available context size (${n_ctx} tokens), try increasing it`,
+        type: "exceed_context_size_error", n_prompt_tokens, n_ctx };
+      return delivery === "http" ? { status: 400, body: JSON.stringify({ error }) } : { status: 200, body: `error: ${JSON.stringify(error)}\n\ndata: [DONE]\n\n` };
     };
   };
   const denseSystem = (bytes: number, messages: Array<{ role: string; content: unknown }>) =>
@@ -308,6 +311,30 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
     expect(resent!.messages.at(-1)).toEqual(refused!.messages.at(-1));
     expect(f.retries()).toEqual([expect.objectContaining({ attempt: 1, delayMs: 0, reason: "request_too_large" })]);
     expect(f.errors()).toEqual([]);
+  });
+
+  it("resends a request an older llama.cpp refuses in its stream's error event, with most of the history kept", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = await provider(llamaCpp((first) => first - 2, tokens, "sse"));
+    const done = await f.run({ system: "Fixture system prompt.", transcript: transcript(20, 3_000) });
+    expect(done).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(2);
+    const [refused, resent] = f.requests;
+    expect(resent!.bytes).toBeLessThanOrEqual(refused!.bytes * 0.8);
+    expect(resent!.bytes).toBeGreaterThan(refused!.bytes * 0.6);
+    expect(f.retries()).toEqual([expect.objectContaining({ attempt: 1, reason: "request_too_large" })]);
+    expect(f.errors()).toEqual([]);
+  });
+
+  it.each([
+    ['{"code":400,"message":"invalid grammar","type":"invalid_request_error"}', "upstream HTTP 400: invalid grammar"],
+    ["slot unavailable", "provider returned a streaming error: slot unavailable"],
+  ])("ends on the provider's own words for a streamed error event that is not about size: %s", async (event, message) => {
+    const f = await provider(() => ({ status: 200, body: `error: ${event}\n\ndata: [DONE]\n\n` }));
+    const done = await f.run({ transcript: transcript(2, 100) });
+    expect(done).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(1);
+    expect(f.errors()).toEqual([message]);
   });
 
   it("resends a request llama.cpp counts at three times its window small enough to fit, where half would not", async () => {

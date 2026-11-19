@@ -373,7 +373,15 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
+      // llama.cpp before b7200 (seen on b6500) refuses a streamed request with HTTP 200 and an SSE `error:` event holding the bare error.
+      const streamedFailure = (data: string): Error => {
+        let error: Record<string, unknown> | undefined;
+        try { error = object(JSON.parse(data)); } catch { error = undefined; }
+        return typeof error?.code === "number" ? failure(error.code, JSON.stringify({ error }))
+          : new ChatProtocolError(`provider returned a streaming error: ${data.slice(0, 200)}`);
+      };
       const consumeDataLine = (line: string, atEof = false): boolean => {
+        if (line.startsWith("error:")) throw streamedFailure(line.slice("error:".length).trim());
         if (!line.startsWith("data:")) return false;
         const data = line.slice(5).trim();
         if (data === "[DONE]") return true;

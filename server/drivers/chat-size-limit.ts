@@ -51,7 +51,7 @@ export const resendsAllowed = (refusal: RequestTooLargeError): number => refusal
 
 export const IMAGE_OMITTED = "[image omitted to fit the provider's size limit]";
 export const TOOL_OUTPUT_SHORTENED = "\n[tool output shortened to fit the provider's size limit]";
-export const TOOL_OUTPUT_OMITTED = "[earlier tool output omitted to fit the provider's size limit; run the tool again if it is still needed]";
+export const TOOL_OUTPUT_OMITTED = "[earlier tool output omitted to fit the provider's size limit. The call already ran: do not repeat it to see this output; if you need what it did, check the current state first.]";
 const omittedHistory = (count: number) =>
   `[${count} earlier message${count === 1 ? "" : "s"} omitted to fit the provider's size limit; full history remains in the app.]`;
 const OMITTED_HISTORY = /^\[(\d+) earlier messages? omitted to fit the provider's size limit; full history remains in the app\.\]$/;
