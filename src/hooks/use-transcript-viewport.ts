@@ -21,6 +21,7 @@ import {
   firstFrameRow,
   focusWindowRange,
   followWindowStart,
+  holdRows,
   resolveTranscriptWindow,
   restoreWindow,
   tailWindowStart,
@@ -31,11 +32,13 @@ import {
   type TranscriptWindowBounds,
 } from "@/lib/transcript-window";
 import { reducedMotion } from "@/lib/onboarding";
+import { restoreSelection, selectedRows, setSelectionAside, type SetAsideSelection } from "@/lib/transcript-selection";
 import {
   JUMP_TO_LATEST_DELAY_MS,
   initialTranscriptFollow,
   readTranscriptPosition,
   rememberTranscriptPosition,
+  rowContentTop,
   rowScrollTop,
   rowsInView,
   settleScroll,
@@ -49,6 +52,9 @@ import { hasLiveReply } from "@/state/live-reply";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export const AUTO_EXPAND_TOP_THRESHOLD = 250;
+/** How far from a window edge, in views, the next step is drawn: ahead of the reader, so it lands before they get there. */
+const STEP_AHEAD_VIEWS = 1.5;
+const stepAhead = (el: HTMLElement) => Math.max(AUTO_EXPAND_TOP_THRESHOLD, el.clientHeight * STEP_AHEAD_VIEWS);
 
 const WIDGETS_WITH_OWN_ARROW_KEYS = '[role="menu"], [role="menubar"], [role="listbox"], [role="tree"], [role="grid"], [role="tablist"], [role="radiogroup"], [role="slider"], select, [contenteditable="true"]';
 
@@ -117,12 +123,33 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
 
   const transcriptKey = `${ownerId}:${threadId}`;
   const tailStart = tailWindowStart(messages.length);
-  /** The rows on screen before a window step; the commit after it puts the first one still drawn back in place. */
-  const anchor = useRef<{ key: string; rows: ReturnType<typeof rowsInView>; height: number } | null>(null);
+  /**
+   * The rows on screen before a window step, each with its top in the content; the commit after it moves the view by as
+   * much as the first one still drawn moved, so a step drawn a few frames later keeps where the reader has scrolled since.
+   */
+  const anchor = useRef<{ key: string; rows: { rowId: string; contentTop: number }[]; height: number; window: TranscriptWindowBounds } | null>(null);
   const restingCardId = useRef<string | undefined>(undefined);
-  const holdRow = () => {
+  const holdRow = (window: TranscriptWindowBounds) => {
     const el = scrollRef.current, list = transcriptRef.current;
-    anchor.current = el ? { key: transcriptKey, rows: list ? rowsInView(el, list, restingCardId.current) : [], height: el.scrollHeight } : null;
+    const rows = el && list ? rowsInView(el, list, restingCardId.current).map((row) => ({ rowId: row.rowId, contentTop: el.scrollTop - row.offsetWithinRow })) : [];
+    anchor.current = el ? { key: transcriptKey, rows, height: el.scrollHeight, window } : null;
+  };
+  const dragging = useRef(false);
+  const setAside = useRef<{ key: string; selection: SetAsideSelection } | null>(null);
+  /**
+   * `next`, widened over the rows a text selection spans so a step never lets them go. Past the hold's cap a drag keeps
+   * `refused` (the drawn window), and anything else sets the selection aside until its rows are drawn again.
+   */
+  const keepSelection = (next: TranscriptWindowBounds, refused?: TranscriptWindowBounds): TranscriptWindowBounds => {
+    const list = transcriptRef.current;
+    if (!list || typeof document === "undefined") return next;
+    const held = selectedRows(list, (rowId) => rowId.startsWith("live:") ? messages.length - 1 : messages.findIndex((message) => message.id === rowId));
+    const kept = held && holdRows(next, messages.length, held);
+    if (!held || kept) return kept ?? next;
+    if (dragging.current && refused) return refused;
+    const aside = setSelectionAside(list);
+    if (aside) setAside.current = { key: transcriptKey, selection: aside };
+    return next;
   };
   const readingBottom = () => {
     const el = scrollRef.current;
@@ -147,12 +174,14 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const follow = followNow.current.follow;
   const following = follow.mode === "following";
   const first = messages[0]?.id;
-  const next = switched
+  const proposed = switched
     ? { start: current.restore?.start ?? tailStart, end: current.restore?.end ?? null, added: -1 }
     : nextWindow(transcriptWindow, messages, following, readingBottom);
+  const moves = proposed.start !== transcriptWindow.start || proposed.end !== transcriptWindow.end;
+  const next = !switched && moves ? { ...proposed, ...keepSelection(proposed) } : proposed;
   if (switched || next.start !== transcriptWindow.start || next.end !== transcriptWindow.end || first !== transcriptWindow.first) {
     // Rows came in front of the drawn ones or left their top: the DOM is still the last commit's, so it is read now.
-    if (!switched && !following && (next.added > 0 || next.start > transcriptWindow.start)) holdRow();
+    if (!switched && !following && (next.added > 0 || next.start > transcriptWindow.start)) holdRow(next);
     setTranscriptWindow({ key: transcriptKey, first, start: next.start, end: next.end });
   }
   const {
@@ -205,7 +234,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const atLiveEnd = (el: HTMLElement | null) => laterRef.current === 0 && atEndOf(el);
   const nearWindowBottom = () => {
     const el = scrollRef.current;
-    return laterCount > 0 && Boolean(el) && gapBelow(el!) <= AUTO_EXPAND_TOP_THRESHOLD;
+    return laterCount > 0 && Boolean(el) && gapBelow(el!) <= stepAhead(el!);
   };
 
   const [, setFollowShown] = useState(follow);
@@ -291,7 +320,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     followEvent({ type: "navigated" });
     followEvent({ type: "leftEnd" });
     if (drawFromRef.current) setFirstFrame(null);
-    setTranscriptWindow({ key: transcriptKey, first: messages[0]?.id, start: range.start, end: range.end });
+    setTranscriptWindow({ key: transcriptKey, first: messages[0]?.id, ...keepSelection(range) });
   }, [threadId, messages, followEvent, focusMessage, transcriptKey]);
   useFocusMessage(threadId, messages.length > 0, scrollRef);
 
@@ -308,7 +337,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
 
   const expandingRef = useRef(false);
   const holdRowForPrepend = () => {
-    holdRow();
+    holdRow(windowRef.current);
     setBottomFollow(false);
   };
   // The commit after a window step: the row that was on screen goes back where it was (scroll anchoring is off here),
@@ -316,21 +345,53 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   useLayoutEffect(() => {
     const el = scrollRef.current, list = transcriptRef.current, held = anchor.current;
     if (!held || !el) return;
+    // A step drawn in a transition: commits before it are not the step's.
+    if (held.key === transcriptKey && (held.window.start !== transcriptWindow.start || held.window.end !== transcriptWindow.end)) return;
     anchor.current = null;
     expandingRef.current = false;
     if (held.key !== transcriptKey) return;
-    let top: number | undefined;
+    let moved: number | undefined;
     for (const row of list ? held.rows : []) {
-      top = rowScrollTop(el, list!, row.rowId, row.offsetWithinRow);
-      if (top !== undefined) break;
+      const top = rowContentTop(el, list!, row.rowId);
+      if (top !== undefined) {
+        moved = top - row.contentTop;
+        break;
+      }
     }
-    el.scrollTop = top ?? el.scrollTop + el.scrollHeight - held.height;
+    el.scrollTop += moved ?? el.scrollHeight - held.height;
     lastTop.current = el.scrollTop;
   });
 
+  // A selection set aside comes back once both of its rows are drawn again; a click elsewhere lets it go.
+  useLayoutEffect(() => {
+    const aside = setAside.current, list = transcriptRef.current;
+    if (!aside || !list) return;
+    if (aside.key !== transcriptKey || restoreSelection(list, aside.selection) !== "waiting") setAside.current = null;
+  });
+  useEffect(() => {
+    const pressed = () => {
+      setAside.current = null;
+    };
+    const released = () => {
+      dragging.current = false;
+    };
+    window.addEventListener("pointerdown", pressed, true);
+    window.addEventListener("pointerup", released, true);
+    window.addEventListener("pointercancel", released, true);
+    return () => {
+      window.removeEventListener("pointerdown", pressed, true);
+      window.removeEventListener("pointerup", released, true);
+      window.removeEventListener("pointercancel", released, true);
+    };
+  }, []);
+
+  /** Draws the window `step` gives, in a transition so its rows mount between frames; false when there is nothing to draw. */
   const stepWindow = (step: (window: TranscriptWindowBounds, total: number) => TranscriptWindowBounds) => {
-    holdRow();
-    setTranscriptWindow((w) => ({ ...w, ...step(drawnBounds, messages.length) }));
+    const target = keepSelection(step(drawnBounds, messages.length), drawnBounds);
+    if (target.start === drawnBounds.start && target.end === drawnBounds.end) return false;
+    holdRow(target);
+    startTransition(() => setTranscriptWindow((w) => w.key === transcriptKey ? { ...w, ...target } : w));
+    return true;
   };
   const showEarlier = () => {
     setBottomFollow(false);
@@ -362,9 +423,8 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const triggerAutoEarlier = useCallback(() => {
     if (expandingRef.current || drawFromRef.current) return;
     if (hiddenCount > 0) {
-      expandingRef.current = true;
       setBottomFollow(false);
-      stepWindow(windowEarlier);
+      expandingRef.current = stepWindow(windowEarlier);
     } else if (hasMore && !olderPending) {
       expandingRef.current = true;
       holdRowForPrepend();
@@ -373,8 +433,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   }, [hiddenCount, startIndex, laterCount, endIndex, messages.length, hasMore, olderPending, threadId, dispatch, transcriptKey]);
   const triggerAutoLater = () => {
     if (expandingRef.current || drawFromRef.current || laterCount === 0) return;
-    expandingRef.current = true;
-    stepWindow(windowLater);
+    expandingRef.current = stepWindow(windowLater);
   };
 
   useEffect(() => {
@@ -388,7 +447,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
           triggerAutoEarlier();
         }
       },
-      { root, rootMargin: "250px 0px 0px 0px" },
+      { root, rootMargin: `${STEP_AHEAD_VIEWS * 100}% 0px 0px 0px` },
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
@@ -416,7 +475,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const canScrollUp = () => canScroll() || hiddenCount > 0 || Boolean(hasMore);
   const jumpToLatest = () => {
     setBottomFollow(true);
-    setTranscriptWindow({ key: transcriptKey, first: messages[0]?.id, start: tailStart, end: null });
+    setTranscriptWindow({ key: transcriptKey, first: messages[0]?.id, ...keepSelection({ start: tailStart, end: null }) });
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: reducedMotion() ? "auto" : "smooth" });
     });
@@ -427,13 +486,14 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
       // Grabbing the scrollbar is a scroll gesture: its lane lies past clientWidth.
       const el = scrollRef.current;
       if (el && e.target === el && e.nativeEvent.offsetX >= el.clientWidth) setBottomFollow(false);
+      else if (e.button === 0) dragging.current = true;
     },
     onWheel: (e: WheelEvent<HTMLDivElement>) => {
       movingDown.current = e.deltaY > 0;
       if (e.deltaY < 0 && canScrollUp()) {
         setBottomFollow(false);
         const el = scrollRef.current;
-        if (el && el.scrollTop <= AUTO_EXPAND_TOP_THRESHOLD) {
+        if (el && el.scrollTop <= stepAhead(el)) {
           triggerAutoEarlier();
         }
       } else if (nearEnd()) {
@@ -451,7 +511,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
       if (y > touchY.current + 4 && canScrollUp()) {
         setBottomFollow(false);
         const el = scrollRef.current;
-        if (el && el.scrollTop <= AUTO_EXPAND_TOP_THRESHOLD) {
+        if (el && el.scrollTop <= stepAhead(el)) {
           triggerAutoEarlier();
         }
       } else if (nearEnd()) {
@@ -470,7 +530,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
       recordPosition();
       if (followRef.current) return;
       // Each edge steps only on a move toward it, so the scrollTop set after a step never steps the other way.
-      if (moved < 0 && el.scrollTop <= AUTO_EXPAND_TOP_THRESHOLD) triggerAutoEarlier();
+      if (moved < 0 && el.scrollTop <= stepAhead(el)) triggerAutoEarlier();
       else if (moved > 0 && nearWindowBottom()) triggerAutoLater();
     },
   };
