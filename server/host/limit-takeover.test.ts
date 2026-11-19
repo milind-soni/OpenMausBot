@@ -7,8 +7,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeEvent } from "../../shared/runtime-events.ts";
 import type { ModelSelection } from "../../shared/wire.ts";
 import type { InstanceConfigMap } from "../contracts.ts";
+import { LimitFailovers } from "../limit-failover.ts";
 import { LimitResetClock, UNNAMED_LIMIT_MS } from "../limit-resets.ts";
-import { parseOpenCodeUsage } from "../plan-usage.ts";
+import { parseCodexUsage, parseOpenCodeUsage } from "../plan-usage.ts";
 import { MODEL_HOLD_MS, SIGNED_OUT_RECHECK_MS, SIGNED_OUT_REPEAT_MS, createLimitTakeover, signedOutStop, type LimitTakeoverDeps, type TakeoverEngine } from "./limit-takeover.ts";
 
 const NOW = Date.parse("2026-10-27T10:00:00Z");
@@ -476,4 +477,43 @@ it("sends a signed-out AI's turns only to the backups a turn its AI never starte
   expect(instance.backups("kai", on("codex", "gpt-6")), "a usage limit's backups stay its own").toEqual([on("opencode", "go-default")]);
   startup = [on("codex", "gpt-6")];
   expect(instance.heldAtStart(KAI, on("claude", "claude-opus-5-5"))).toEqual({ scope: "signed-out" });
+});
+
+describe("a conversation moved off Codex while its window was full", () => {
+  const rolling = (credits?: unknown) => ({ fetchedAt: new Date(NOW).toISOString(), providers: [{ id: "codex", name: "Codex", driver: "codex", ok: true, error: null, ...parseCodexUsage({
+    rate_limit: { secondary_window: { used_percent: 100, limit_window_seconds: 7 * 86400, reset_at: Math.floor((NOW + 90 * HOUR) / 1000) } },
+    ...(credits ? { credits } : {}),
+  }) }] });
+
+  function moved(refused = false) {
+    const dir = freshDir();
+    const now = { at: NOW };
+    const clock = new LimitResetClock({ accounts: () => [{ id: "codex", name: "Codex", driver: "codex", environment: {} }], now: () => now.at });
+    clock.noteUsage(rolling());
+    if (refused) clock.noteLimit("codex", NOW + 2 * HOUR);
+    let current = on("claude", "claude-sonnet-5");
+    const failovers = new LimitFailovers({ file: join(dir, "limit-failovers.json"), now: () => now.at, blockedUntil: (id, model) => clock.blockedUntil(id, model),
+      threadModel: () => current, switchBack: (row) => { current = row.from; return true; }, note: () => {}, engineName: (id) => NAMES[id] ?? id });
+    const { instance } = takeover({ chosen: () => [on("claude", "claude-sonnet-5")], blockedUntil: (id, model) => clock.blockedUntil(id, model),
+      resetAt: (id, model) => clock.resetAt(id, model), meterOnly: (id, model) => clock.meterOnly(id, model), record: (row) => failovers.record(row), now: () => now.at }, dir);
+    const codexOn = on("codex", "gpt-6");
+    const held = instance.heldAtStart(KAI, codexOn);
+    expect(held).toMatchObject({ scope: "engine" });
+    instance.carriedOn(KAI, "t1", codexOn, on("claude", "claude-sonnet-5"), held!);
+    current = on("claude", "claude-sonnet-5");
+    return { clock, failovers, instance, now, codexOn, held: held! };
+  }
+
+  it("goes back at its next turn once credits appear, though the window is still full", () => {
+    const { clock, failovers } = moved();
+    expect(failovers.restore("kai", "t1"), "the meter still holds Codex").toBe(false);
+    clock.noteUsage(rolling({ has_credits: true, unlimited: false, balance: "12.50" }));
+    expect(failovers.restore("kai", "t1")).toBe(true);
+  });
+
+  it("stays on the backup after a refusal from Codex itself, credits or not", () => {
+    const { clock, failovers } = moved(true);
+    clock.noteUsage(rolling({ has_credits: true, unlimited: false, balance: "12.50" }));
+    expect(failovers.restore("kai", "t1")).toBe(false);
+  });
 });
