@@ -48,7 +48,7 @@ import {
 import { appendNative } from "./native.ts";
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
-import { piSessionDir, piTurnArgs } from "./pi-session.ts";
+import { piSessionDir, piSessionPath, piTurnArgs } from "./pi-session.ts";
 import { noticeFailure } from "../chat-notices.ts";
 
 import { decodePiFrame, PiRpcChunks, piLineReader, piNativeLogMessage, readPiPromptImages } from "./pi-rpc.ts";
@@ -451,7 +451,9 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // Written on every turn: the extension also carries ask_user.
       const mcpServers = buildMcpServers(turn);
       const askUser = toolScope === undefined || allowsTool(toolScope, { kind: "native", name: ASK_USER_TOOL });
-      const childArgs = [...piTurnArgs(), "-e", SPAWNED_PROXIES.piMcpExtension];
+      const sessionDir = piSessionDir(turn, input.instanceId);
+      const sessionPath = piSessionPath(turn, sessionDir);
+      const childArgs = [...piTurnArgs(sessionDir), "-e", SPAWNED_PROXIES.piMcpExtension];
       const mcpTempDir = mkdtempSync(join(tmpdir(), "omb-pi-mcp-"));
       const scopeReadyPath = toolScope !== undefined ? join(mcpTempDir, "scope-ready.json") : undefined;
       try {
@@ -470,7 +472,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           return spawnCli(config.cli, childArgs, {
             stdio: ["pipe", "pipe", "pipe"],
             cwd: turn.cwd,
-            box: { rw: [piSessionDir()] },
+            box: { rw: [sessionDir] },
             env: piEnvironment({
               ...process.env,
               ...input.environment,
@@ -797,7 +799,6 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       emit({ ...base(threadId, turnId), type: "turn.started" });
 
       // The resumeCursor is pi's sessionFile, which switch_session takes as `sessionPath`.
-      const sessionPath = typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
       let sessionFile = sessionPath;
       let sessionId: string | null = sessionFile;
       let sessionReady = false;

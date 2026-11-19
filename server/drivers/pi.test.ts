@@ -405,7 +405,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "piAgent")).toBe(true);
 
     const session = recorder.events.find((e) => e.type === "session.started")!;
-    expect((session as { sessionId: string }).sessionId).toMatch(/\/fake\/pi-session-\d+\.json/);
+    expect((session as { sessionId: string }).sessionId).toMatch(/pi-session-\d+\.json$/);
 
     const text = recorder.events.find(
       (e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "assistant_text",
@@ -466,7 +466,7 @@ describe("PiDriver turns (fake CLI)", () => {
     const firstSession = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId) as
       | { sessionId: string }
       | undefined;
-    expect(firstSession?.sessionId).toMatch(/\/fake\/pi-session-\d+\.json/);
+    expect(firstSession?.sessionId).toMatch(/pi-session-\d+\.json$/);
 
     const second = await instance.adapter.sendTurn({
       threadId: "t-resume",
@@ -496,10 +496,10 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(probes.some((row) => row.argv!.join(" ") === "--mode rpc --no-session")).toBe(true);
     expect(turns.length).toBeGreaterThan(0);
     for (const row of turns) {
-      expect(row.argv).toEqual(["--mode", "rpc", "--session-dir", piSessionDir(), "-e", expect.any(String)]);
+      expect(row.argv).toEqual(["--mode", "rpc", "--session-dir", piSessionDir({ threadId: "t-pi-session-dir" }, "pi-test"), "-e", expect.any(String)]);
       expect(row.argv).not.toContain("--no-session");
     }
-    expect(piSessionDir()).toBe(join(DATA_DIR, "pi-sessions"));
+    expect(piSessionDir({ threadId: "t-pi-session-dir" }, "pi-test")).toContain(join(DATA_DIR, "pi-sessions", "local"));
   });
 
   it("reads sessionFile from get_state when new_session omits it, then resumes with switch_session", async () => {
@@ -511,7 +511,7 @@ describe("PiDriver turns (fake CLI)", () => {
     const firstSession = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId) as
       | { sessionId: string }
       | undefined;
-    expect(firstSession?.sessionId).toMatch(/\/fake\/pi-session-\d+\.json/);
+    expect(firstSession?.sessionId).toMatch(/pi-session-\d+\.json$/);
 
     const second = await instance.adapter.sendTurn({
       threadId: "t-pi-state-session",
@@ -725,7 +725,7 @@ describe("PiDriver turns (fake CLI)", () => {
       system: "Standing rules.\n\nMemory: likes quiet hours.",
       systemStable: "Standing rules.",
       systemVolatile: "Memory: likes quiet hours.",
-      resumeCursor: "/fake/pi-session-1.json",
+      resumeCursor: join(piSessionDir({ threadId }, "pi-test"), "pi-session-1.json"),
     });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
     const row = readFileSync(dump, "utf8").split("\n").filter(Boolean)

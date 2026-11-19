@@ -9,10 +9,12 @@
 //   FAKE_PI_DUMP  path to append {argv, env} JSON to
 //   FAKE_PI_SESSION_FILE_IN_STATE_ONLY  new_session/switch_session return only {cancelled}, like official pi;
 //     sessionFile is available from get_state
+//   FAKE_PI_PERSIST_SESSION  persist prompts to disk and load them on switch_session
 //   FAKE_PI_STEER_REFUSE  answer a steer with an explicit success:false
 //   FAKE_PI_STEER_OUT_OF_ORDER  hold the first steer until a second arrives, then refuse the first and accept the second
 
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { playStreamScript, streamScript, type StreamScript } from "./stream-script.ts";
 
 const mode = process.env.FAKE_PI_MODE ?? "happy";
@@ -360,7 +362,8 @@ function handle(cmd: any) {
         return;
       }
       sessionCounter += 1;
-      currentSessionFile = `/fake/pi-session-${sessionCounter}.json`;
+      currentSessionFile = join(argv.includes("--session-dir") ? argv[argv.indexOf("--session-dir") + 1]! : "/fake", `pi-session-${sessionCounter}.json`);
+      if (process.env.FAKE_PI_PERSIST_SESSION) writeFileSync(currentSessionFile, "[]");
       const sessionData = process.env.FAKE_PI_SESSION_FILE_IN_STATE_ONLY
         ? { cancelled: false }
         : { sessionId: `s-${sessionCounter}`, sessionFile: currentSessionFile };
@@ -383,6 +386,9 @@ function handle(cmd: any) {
         return;
       }
       currentSessionFile = cmd.sessionPath ?? currentSessionFile;
+      if (process.env.FAKE_PI_PERSIST_SESSION && currentSessionFile && process.env.FAKE_PI_DUMP) {
+        appendFileSync(process.env.FAKE_PI_DUMP, JSON.stringify({ loadedHistory: JSON.parse(readFileSync(currentSessionFile, "utf8")) }) + "\n");
+      }
       const switchData = process.env.FAKE_PI_SESSION_FILE_IN_STATE_ONLY
         ? { cancelled: false }
         : { sessionId: "s-resumed", sessionFile: currentSessionFile };
@@ -409,6 +415,10 @@ function handle(cmd: any) {
       send({ type: "response", command: "set_thinking_level", success: true });
       return;
     case "prompt":
+      if (process.env.FAKE_PI_PERSIST_SESSION && currentSessionFile) {
+        const history = JSON.parse(readFileSync(currentSessionFile, "utf8"));
+        writeFileSync(currentSessionFile, JSON.stringify([...history, cmd.message]));
+      }
       if (mode === "prompt-reject") {
         // pi rejects a prompt submitted while a compaction runs.
         send({ type: "response", command: "prompt", success: false, error: "fake pi: compaction in progress" });

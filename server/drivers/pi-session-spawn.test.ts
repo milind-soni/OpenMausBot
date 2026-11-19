@@ -1,5 +1,5 @@
-import { chmodSync, mkdirSync, mkdtempSync } from "node:fs";
-import { homedir } from "node:os";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -8,6 +8,7 @@ import { DATA_DIR, ensureDirs } from "../config.ts";
 import { planBox, visibleInBox } from "../bot-box/plan.ts";
 import * as procs from "../procs.ts";
 import { recordEvents } from "../testing/events.ts";
+import { engineHomes } from "../engine-homes/engine-homes.ts";
 import { piSessionDir } from "./pi-session.ts";
 import { PiDriver } from "./pi.ts";
 
@@ -18,37 +19,88 @@ vi.mock("node:fs", async (original) => {
 
 const cli = fileURLToPath(new URL("../testing/fake-pi-cli.ts", import.meta.url));
 const create = () => PiDriver.create({ instanceId: "pi-session-spawn", displayName: undefined, enabled: true, environment: {}, config: { cli, fullAuto: false } });
-afterEach(() => { vi.restoreAllMocks(); vi.mocked(mkdirSync).mockRestore(); vi.mocked(mkdtempSync).mockClear(); });
+afterEach(() => { engineHomes.stop(); vi.restoreAllMocks(); vi.mocked(mkdirSync).mockRestore(); vi.mocked(mkdtempSync).mockClear(); });
 
 describe("Pi session spawn setup", () => {
-  it.skipIf(process.platform === "win32")("binds persisted sessions through the data tmpfs without exposing sibling data", async () => {
+  it.skipIf(process.platform === "win32")("isolates audience/conversation sandbox plans while resuming persisted turns", async () => {
+    ensureDirs();
+    chmodSync(cli, 0o755);
+    const dump = join(mkdtempSync(join(tmpdir(), "omb-pi-audience-")), "rpc.jsonl");
+    const instance = await PiDriver.create({ instanceId: "pi-session-spawn", displayName: undefined, enabled: true,
+      environment: { FAKE_PI_DUMP: dump, FAKE_PI_PERSIST_SESSION: "1", FAKE_PI_SESSION_FILE_IN_STATE_ONLY: "1" }, config: { cli, fullAuto: false } });
+    const recorder = recordEvents(instance.adapter);
+    const spawned = vi.spyOn(procs, "spawnCli");
+    let audience: "member:alice" | "member:bob" | "team" = "member:alice";
+    engineHomes.start({ dataDir: DATA_DIR, audienceOf: () => audience, threads: () => [] });
+    // Keep the fake process environment unchanged; audience identity still comes from the real async context.
+    vi.spyOn(engineHomes, "forSpawn").mockReturnValue(null);
+    const turns: Array<{ dir: string; path: string; plan: ReturnType<typeof planBox> }> = [];
+    const send = async (threadId: string, text: string, resumeCursor?: string) => engineHomes.within(threadId, async () => {
+      const turn = { threadId, botId: "bot-a", text, resumeCursor };
+      const dir = piSessionDir(turn, "pi-session-spawn");
+      const before = spawned.mock.calls.length;
+      const { turnId } = await instance.adapter.sendTurn(turn);
+      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
+      const started = recorder.events.find((event) => event.type === "session.started" && event.turnId === turnId);
+      if (started?.type !== "session.started" || !started.sessionId) throw new Error("missing session file");
+      const call = spawned.mock.calls.slice(before).find(([, args]) => args.includes("--session-dir"))!;
+      expect(call[2]!.box).toEqual({ rw: [dir] });
+      const setup = { dataDir: DATA_DIR, home: join(DATA_DIR, ".."), codeRoots: [], engineRoots: [], bridges: [] };
+      const request = { command: cli, args: call[1], env: {}, audience: { teamReadOnly: audience !== "team" } };
+      expect(visibleInBox(planBox(setup, request), dir)).toBe("none");
+      const plan = planBox(setup, { ...request, ...(call[2]!.box as { rw: string[] }) });
+      turns.push({ dir, path: started.sessionId, plan });
+      return started.sessionId;
+    }, "bot-a");
+    try {
+      const first = await send("thread-a", "first");
+      expect(await send("thread-a", "second", first)).toBe(first);
+      expect(JSON.parse(readFileSync(first, "utf8"))).toEqual(["first", "second"]);
+      const rows = readFileSync(dump, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
+      expect(rows.find((row) => row.loadedHistory)?.loadedHistory).toEqual(["first"]);
+      expect(rows.filter((row) => row.rpc).map((row) => row.rpc)).toEqual(["new_session", "switch_session"]);
+      await engineHomes.within("thread-b", async () => {
+        await expect(instance.adapter.sendTurn({ threadId: "thread-b", botId: "bot-a", text: "steal", resumeCursor: first }))
+          .rejects.toThrow("another audience or conversation");
+      });
+      await send("thread-b", "another conversation");
+      audience = "member:bob";
+      await engineHomes.within("thread-a", async () => {
+        const before = spawned.mock.calls.length;
+        await expect(instance.adapter.sendTurn({ threadId: "thread-a", botId: "bot-a", text: "steal", resumeCursor: first }))
+          .rejects.toThrow("another audience or conversation");
+        expect(spawned.mock.calls.length).toBe(before);
+      });
+      await send("thread-a", "another audience");
+      audience = "team";
+      await send("thread-a", "team conversation");
+      for (const own of turns) {
+        expect(visibleInBox(own.plan, own.path)).toBe("rw");
+        for (const other of turns.filter((entry) => entry.dir !== own.dir)) expect(visibleInBox(own.plan, other.path)).toBe("none");
+        expect(visibleInBox(own.plan, join(DATA_DIR, "config.json"))).toBe("none");
+        expect(visibleInBox(own.plan, join(DATA_DIR, "pi-sessions", "legacy.jsonl"))).toBe("none");
+      }
+      expect(new Set(turns.map((turn) => turn.dir)).size).toBe(4);
+      engineHomes.stop();
+      await expect(instance.adapter.sendTurn({ threadId: "different-thread", botId: "bot-a", text: "steal", resumeCursor: first }))
+        .rejects.toThrow("another audience or conversation");
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
+  it("refuses a Team Cloud turn without audience context before creating credentials", async () => {
     ensureDirs();
     chmodSync(cli, 0o755);
     const instance = await create();
-    const recorder = recordEvents(instance.adapter);
-    const spawned = vi.spyOn(procs, "spawnCli");
+    engineHomes.start({ dataDir: DATA_DIR, audienceOf: () => "team", threads: () => [] });
+    vi.mocked(mkdtempSync).mockClear();
     try {
-      const { turnId } = await instance.adapter.sendTurn({ threadId: "pi-box-session", text: "hi" });
-      await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
-      const call = spawned.mock.calls.find(([, args]) => args.includes("--session-dir"));
-      expect(call).toBeDefined();
-      const options = call![2]!;
-      expect(options.box).toEqual({ rw: [piSessionDir()] });
-      // Put DATA_DIR under a home in the plan, reproducing the default hidden-data layout
-      // even when the test runner's OMB_DATA_DIR is outside the real home.
-      const home = join(DATA_DIR, "..");
-      const request = { command: cli, args: call![1], cwd: homedir(), env: { HOME: home } };
-      const setup = { dataDir: DATA_DIR, home, codeRoots: [], engineRoots: [], bridges: [] };
-      const hidden = planBox(setup, request);
-      expect(visibleInBox(hidden, piSessionDir())).toBe("none");
-      for (let turn = 0; turn < 2; turn++) {
-        const plan = planBox(setup, { ...request, ...(options.box as { rw: string[] }) });
-        expect(visibleInBox(plan, join(piSessionDir(), "saved.jsonl"))).toBe("rw");
-        expect(visibleInBox(plan, join(DATA_DIR, "config.json"))).toBe("none");
-        expect(visibleInBox(plan, join(DATA_DIR, "pi-sessions-other", "secret"))).toBe("none");
-      }
+      await expect(instance.adapter.sendTurn({ threadId: "missing-audience", text: "hi" }))
+        .rejects.toThrow("requires an audience context");
+      expect(mkdtempSync).not.toHaveBeenCalled();
     } finally {
-      recorder.stop();
       await instance.dispose();
     }
   });
@@ -60,7 +112,7 @@ describe("Pi session spawn setup", () => {
     const originalMkdir = await vi.importActual<typeof import("node:fs")>("node:fs");
     vi.mocked(mkdtempSync).mockClear();
     vi.mocked(mkdirSync).mockImplementation((path, options) => {
-      if (path === piSessionDir()) throw new Error("session directory is not writable");
+      if (String(path).startsWith(join(DATA_DIR, "pi-sessions"))) throw new Error("session directory is not writable");
       return originalMkdir.mkdirSync(path, options as { recursive: true });
     });
     const spawned = vi.spyOn(procs, "spawnCli");
