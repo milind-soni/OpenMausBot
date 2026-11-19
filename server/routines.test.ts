@@ -2397,6 +2397,31 @@ describe("RoutineManager", () => {
     ]);
   });
 
+  it("keeps a run that already delivered its report as partly done when its limit stops it", async () => {
+    const h = harness();
+    const routine = h.manager.create({
+      name: "Bounded check",
+      prompt: "Check the queue",
+      botId: "maus-timeout",
+      schedule: { type: "daily", time: "23:59", weekdays: [1] },
+      timeoutMinutes: 5,
+    });
+    const run = h.manager.runNow(routine.id)!;
+    await h.manager.tick();
+    const startedAt = h.manager.listRuns().find((candidate) => candidate.id === run.id)?.startedAt;
+    h.manager.handleRuntimeEvent({ eventId: "reply", provider: "fake", threadId: "thread-1", createdAt: new Date().toISOString(), type: "item.completed", itemType: "assistant_text", itemId: "reply", text: "The invoice is issued and validated." } as Parameters<typeof h.manager.handleRuntimeEvent>[0]);
+
+    h.setNow(startedAt! + 5 * 60_000);
+    await h.manager.tick();
+
+    expect(h.manager.listRuns().find((candidate) => candidate.id === run.id)).toMatchObject({
+      status: "failed",
+      partial: true,
+      output: "The invoice is issued and validated.",
+      error: "Stopped after reaching the 5-minute run limit",
+    });
+  });
+
   it("keeps legacy duration metadata without imposing a timeout", async () => {
     const h = harness();
     const routine = h.manager.create({

@@ -10077,6 +10077,7 @@
   "routines.server.backupSignedOut": "Começando novamente na IA reserva: a IA deste bot está sem login",
   "routines.server.busyTooLong": "Não rodou: o bot ficou ocupado por mais de {minutes} minutos",
   "routines.server.overLimit": "Interrompida: esta execução passou do limite de {hours} horas",
+  "routines.server.overOwnLimit": "Interrompida: esta execução passou do limite de {minutes} minutos",
   "routines.server.stopPending": "O turno ainda não confirmou que parou. A próxima execução espera por isso, por até {minutes} minutos.",
   "routines.server.stopUnconfirmed": "O turno nunca confirmou que parou, então a próxima execução começou sem essa confirmação.",
   "routines.server.skippedOne": "Pulada porque {why}",

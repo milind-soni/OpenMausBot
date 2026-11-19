@@ -1373,7 +1373,7 @@ export class RoutineManager {
 
   private async stopRun(run: RoutineRun, detail: string, status: "stopped" | "limit-reached") {
     if (run.target === "room-goal") run.goalStatus = status;
-    this.failRun(run, detail);
+    this.failRun(Object.assign(run, { partial: Boolean(run.output) || undefined }), detail);
     if (!run.threadId) return;
     if (run.target === "room-goal") await this.options.interruptGoal?.(run.groupId, run.threadId, { status, detail }).catch(() => {});
     else await this.options.interruptTurn?.(run.botId, run.threadId).catch(() => {});
