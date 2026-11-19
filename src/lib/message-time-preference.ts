@@ -47,9 +47,12 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function setAlwaysShowMessageTimes(enabled: boolean): void {
+  const value = enabled ? "1" : "0";
   sessionChoice = enabled;
   try {
-    storage()?.setItem(MESSAGE_TIMES_KEY, enabled ? "1" : "0");
+    const store = storage();
+    store?.setItem(MESSAGE_TIMES_KEY, value);
+    if (store?.getItem(MESSAGE_TIMES_KEY) === value) sessionChoice = undefined;
   } catch {
   }
   notify();

@@ -120,6 +120,18 @@ describe("always showing message times", () => {
     expect(listener).toHaveBeenCalledTimes(2);
   });
 
+  it("rereads storage when a window subscribes again after missing a change", async () => {
+    const preference = await import("./message-time-preference");
+    const unsubscribe = hook.subscribe!(vi.fn());
+    preference.setAlwaysShowMessageTimes(true);
+    unsubscribe();
+    local.setItem(preference.MESSAGE_TIMES_KEY, "0");
+    storageEvent(preference.MESSAGE_TIMES_KEY);
+    const again = hook.subscribe!(vi.fn());
+    expect(hook.snapshot!()).toBe(false);
+    again();
+  });
+
   it.each(["getter", "read", "write", "missing"])("keeps the choice usable when storage fails at %s", async (failure) => {
     if (failure === "getter") {
       Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("blocked"); } });

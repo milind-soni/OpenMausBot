@@ -405,7 +405,7 @@ const Bubble = memo(function Bubble({
 
   // A long request from another bot is one line until opened.
   const peerLong = peer ? peerPreview(text) : null;
-  if (peer && peerLong && !expanded && (!focusedSearch || folded)) return <div {...{ [MESSAGE_ROW]: "" }} className="group flex w-full flex-col items-start"><PeerLabel peer={peer} bots={bots} /><PeerCompactRow preview={peerLong} onOpen={() => setExpanded(true)} /></div>;
+  if (peer && peerLong && !expanded && (!focusedSearch || folded)) return <div {...{ [MESSAGE_ROW]: "" }} className="group flex w-full flex-col items-start"><PeerLabel peer={peer} bots={bots} /><div className="flex items-center"><PeerCompactRow preview={peerLong} onOpen={() => setExpanded(true)} />{alwaysTime && <span className="ml-2 self-end pb-1 text-[11px] tabular-nums text-ink-tertiary">{formatTime(message.at)}</span>}</div></div>;
   const forks = user && versions ? versions : [message];
   const versionIndex = forks.findIndex((v) => v.id === message.id);
   const switchTo = (v: Message | undefined) => {
