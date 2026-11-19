@@ -1389,7 +1389,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 : promptInput.text;
             const imageBlocks = support.images === true && runtimeAcceptsImages
               ? await readAcpImageBlocks(turn.images ?? [])
-              : []; const media = await readAcpMediaLinks(support.mediaLinks === true && !turn.guestConfined ? promptTurn.text : "");
+              : []; const media = await readAcpMediaLinks(support.mediaLinks === true && !turn.guestConfined ? turn.text : "", imageBlocks.reduce((sum, block) => sum + Math.floor(block.data.length * 3 / 4), 0));
             if (support.modelVariants && !modelControls.confirms(cliTurn.model)) {
               throw new Error(`${support.displayName} changed model before the prompt`);
             }

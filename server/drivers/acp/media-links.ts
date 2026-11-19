@@ -34,37 +34,39 @@ export function acpMediaUri(path: string, platform: NodeJS.Platform = process.pl
   return platform === "win32" ? `file:${encoded.replace(/^([A-Za-z])%3A/u, "$1:")}` : `file://${encoded}`;
 }
 
-/** Existing local media files named in `text`, in order and without repeats. Spaces in a path are allowed:
- * each candidate start on the line is tried from the nearest, and the first that names a file wins. */
+/** Existing local media files named in `text`, in order and without repeats (the same file named twice, by
+ * file identity, so case-sensitive file systems keep distinct names). Spaces in a path are allowed: each
+ * candidate start on the line is tried from the nearest, and the first that names a file wins. */
 export async function findMediaPaths(text: string): Promise<Array<{ path: string; size: number }>> {
   const found: Array<{ path: string; size: number }> = [];
   const seen = new Set<string>();
   for (const match of text.matchAll(MEDIA_END)) {
-    if (found.length >= ACP_MEDIA_MAX_FILES * 2) break;
     const end = match.index + match[0].length;
     const line = text.slice(text.lastIndexOf("\n", match.index) + 1, end);
     const starts = [...line.matchAll(PATH_START)].map((start) => start.index).reverse();
     for (const start of starts) {
       const path = line.slice(start).trim();
-      const key = path.toLowerCase().replaceAll("\\", "/");
-      if (seen.has(key)) break;
-      const info = await stat(path).catch(() => null);
-      if (info?.isFile()) {
+      const info = await stat(path, { bigint: true }).catch(() => null);
+      if (!info?.isFile()) continue;
+      const key = `${info.dev}:${info.ino}`;
+      if (!seen.has(key)) {
         seen.add(key);
-        found.push({ path, size: info.size });
-        break;
+        found.push({ path, size: Number(info.size) });
       }
+      break;
     }
   }
   return found;
 }
 
-/** Prompt blocks for the media named in `text`, within one prompt's budget, and a note saying what was and was not attached. */
-export async function readAcpMediaLinks(text: string, budget = ACP_MEDIA_MAX_BYTES): Promise<AcpMediaLinks> {
+/** Prompt blocks for the media named in `text`, within one prompt's budget, and a note saying what was and was
+ * not attached. `usedBytes` is media the prompt already carries (composer images): it counts against the same
+ * budget, so when it alone fills the budget every named file is left out and named in the note. */
+export async function readAcpMediaLinks(text: string, usedBytes = 0, budget = ACP_MEDIA_MAX_BYTES): Promise<AcpMediaLinks> {
   const blocks: AcpResourceLink[] = [];
   const attached: string[] = [];
   const skipped: Array<{ path: string; size: number }> = [];
-  let total = 0;
+  let total = usedBytes;
   for (const file of await findMediaPaths(text)) {
     if (attached.length < ACP_MEDIA_MAX_FILES && total + file.size <= budget) {
       total += file.size;
@@ -81,7 +83,7 @@ export async function readAcpMediaLinks(text: string, budget = ACP_MEDIA_MAX_BYT
   if (skipped.length) {
     const limitMb = Math.floor(budget / 1048576);
     note += `\n\n(Not attached: ${skipped.map((file) => `${file.path} (${(file.size / 1048576).toFixed(1)} MB)`).join(" | ")}.` +
-      ` One message carries at most ${limitMb} MB of media and a file tool cannot show media, so you cannot see these.` +
+      ` One message carries at most ${limitMb} MB of media${usedBytes > 0 ? ", images attached to it included," : ""} and a file tool cannot show media, so you cannot see these.` +
       ` Say so plainly; to view one, shrink or split it into parts of ${limitMb} MB or less and ask to have each part sent in its own message.)`;
   }
   return { blocks, note };

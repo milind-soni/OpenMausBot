@@ -29,6 +29,11 @@ describe("findMediaPaths", () => {
     expect((await findMediaPaths(text)).map((file) => file.path)).toEqual([clip, photo]);
   });
 
+  it("treats two spellings of the same file as one", async () => {
+    const other = process.platform === "win32" ? photo.replaceAll("\\", "/") : photo.replace(scratch, `${scratch}/.`);
+    expect((await findMediaPaths(`${photo} and ${other}`)).map((file) => file.path)).toEqual([photo]);
+  });
+
   it("ignores text without media", async () => {
     expect(await findMediaPaths("see notes.md and https://example.com/a.png")).toEqual([]);
   });
@@ -36,13 +41,31 @@ describe("findMediaPaths", () => {
 
 describe("readAcpMediaLinks", () => {
   it("links files within the budget and names the ones left out", async () => {
-    const { blocks, note } = await readAcpMediaLinks(`${clip}\n${big}\n${photo}`, 600);
+    const { blocks, note } = await readAcpMediaLinks(`${clip}\n${big}\n${photo}`, 0, 600);
     expect(blocks).toEqual([
       { type: "resource_link", uri: acpMediaUri(clip), name: "clip one.mp4" },
       { type: "resource_link", uri: acpMediaUri(photo), name: "photo.png" },
     ]);
     expect(note).toContain(`attached these files to this message so you can see and hear them directly; do not open them with a file tool: ${clip} | ${photo}`);
     expect(note).toContain(`Not attached: ${big} (0.0 MB)`);
+  });
+
+  it("counts media the prompt already carries against the same budget", async () => {
+    const { blocks, note } = await readAcpMediaLinks(`${clip}\n${photo}`, 350, 600);
+    expect(blocks).toEqual([{ type: "resource_link", uri: acpMediaUri(photo), name: "photo.png" }]);
+    expect(note).toContain(`Not attached: ${clip} (0.0 MB)`);
+    expect(note).toContain("images attached to it included");
+  });
+
+  it("keeps looking past many files that do not fit for one that does", async () => {
+    const many = Array.from({ length: 20 }, (_, index) => {
+      const file = join(scratch, `huge ${index}.mp4`);
+      writeFileSync(file, Buffer.alloc(900));
+      return file;
+    });
+    const { blocks, note } = await readAcpMediaLinks([...many, photo].join("\n"), 0, 600);
+    expect(blocks).toEqual([{ type: "resource_link", uri: acpMediaUri(photo), name: "photo.png" }]);
+    expect(note).toContain(many[19]);
   });
 
   it("adds nothing when the text names no media", async () => {
