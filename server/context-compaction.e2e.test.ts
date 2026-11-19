@@ -98,6 +98,10 @@ it("Compact now runs Claude Code's own compaction and keeps the conversation on 
   const summarized = f.task().resumeCursors.claude;
   expect(summarized).not.toBe(oldSession);
   expect(summarized).toMatch(/^fork-/);
+  await f.compact();
+  await f.idle();
+  expect((await f.messages()).filter(m => m.kind === "compaction")).toHaveLength(1);
+  expect(f.task().resumeCursors.claude).toBe(summarized);
   expect(f.task().appliedCompactionId).toBeUndefined();
   await f.send("What port did we settle on?");
   const prompt = String(f.turns().at(-1).prompt.message.content);
@@ -217,11 +221,11 @@ it.each([
 }, false, { FAKE_CLAUDE_CONTEXT_TOKENS: String(tokens) }), 90_000);
 
 it.each([
-  { name: "leaves a session Claude Code will compact itself", tokens: 165_000, environment: {}, compactions: 0 },
-  { name: "folds a session that Claude Code left uncompacted near its limit", tokens: 191_000, environment: {}, compactions: 1 },
-  { name: "folds at 80% when Claude Code's own compaction is switched off", tokens: 165_000, environment: { DISABLE_AUTO_COMPACT: "1" }, compactions: 1 },
-])("on a 200k model, $name", ({ tokens, environment, compactions }) => fixture(async f => {
-  if (Object.keys(environment).length) await claudeEnvironment(f, environment);
+  { name: "leaves a session Claude Code will compact itself", tokens: 165_000, engineOff: false, compactions: 0 },
+  { name: "folds a session that Claude Code left uncompacted near its limit", tokens: 191_000, engineOff: false, compactions: 1 },
+  { name: "folds at 80% when Claude Code's own compaction is switched off", tokens: 165_000, engineOff: true, compactions: 1 },
+])("on a 200k model, $name", ({ tokens, engineOff, compactions }) => fixture(async f => {
+  if (engineOff) await claudeEnvironment(f, { DISABLE_AUTO_COMPACT: "1" });
   await f.api(`/api/bots/${f.bot.id}/tasks/${f.thread}`, {
     modelSelection: { instanceId: "claude", model: "claude-sonnet-4-6" },
   }, "PATCH");

@@ -78,6 +78,7 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
     // A retry must apply the existing record before considering another fold.
     if (!manual && record && record.id !== task.appliedCompactionId) return;
     if (manual && record?.id === messages.at(-1)?.id && !record?.firstKeptId) return;
+    if (manual && messages.at(-1)?.kind === "compaction" && messages.at(-1)?.engineCompaction) return;
     const selected = selectReplay(context, {
       budgetBytes: Math.max(1_024, context.reduce((n, entry) => n + Buffer.byteLength(entry.text) + 16, 0) + 4 * MAX_SUMMARY_BYTES + 1_024),
       maxMessages: Number.MAX_SAFE_INTEGER, excludedIds, compaction: record as never,
