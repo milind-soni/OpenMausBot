@@ -4,7 +4,7 @@ import type { UsagePreferences } from "./usage-types.ts";
 //     "instances": { "<instanceId>": {"driver":"grok", …} } }
 // `instances.<id>` entries are hand-editable but also written by the app
 // itself (e.g. the Settings permission toggle), via saveConfig's per-id merge.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { readJsonFile, restrictToOwner, writeJsonAtomic } from "./json-file.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -13,11 +13,6 @@ import type { InstanceConfigMap } from "./contracts.ts";
 
 export interface AppConfig {
   xai?: { key?: string; url?: string };
-  /** key = a Trello Power-Up API key (identifies this app, not secret);
-   * token = the connected user's personal Trello token, obtained through
-   * Trello's own browser authorize flow. Powers per-project board linking
-   * and sync in trello.ts / trelloLinks.ts / trelloSync.ts. */
-  trello?: { key?: string; token?: string };
   /** The person using the app (collected in onboarding, shown in the
    * sidebar). Not a secret — echoed back by GET /api/config. */
   profile?: { name?: string; email?: string };
@@ -48,15 +43,16 @@ export function loadConfig(): AppConfig {
   restrictToOwner(p);
   // first run (or a corrupt file, which is kept aside) — env fallbacks below
   const cfg = readJsonFile<AppConfig>(p, {});
-  // Composio was removed (curated apps replaced it): drop its stored keys
-  // from disk rather than leaving an unused secret behind.
-  if ("composio" in cfg) {
+  // Composio and Trello were removed: drop their stored keys/tokens (and
+  // Trello's board links) from disk rather than leaving unused secrets behind.
+  if ("composio" in cfg || "trello" in cfg) {
     delete (cfg as Record<string, unknown>).composio;
+    delete (cfg as Record<string, unknown>).trello;
     writeJsonAtomic(p, cfg);
   }
+  rmSync(join(DATA_DIR, "trello-links.json"), { force: true });
   cfg.xai = { key: process.env.XAI_API_KEY, ...cfg.xai };
   delete (cfg as Record<string, unknown>).box;
-  cfg.trello = { key: process.env.TRELLO_API_KEY, ...cfg.trello };
   cfg.autoHandoffs = cfg.autoHandoffs ?? true;
   cfg.autoApprovePermissions = typeof cfg.autoApprovePermissions === "boolean" ? cfg.autoApprovePermissions : true;
   const approvalDelay = cfg.autoApproveDelaySeconds;
@@ -74,7 +70,8 @@ export function saveConfig(patch: Partial<AppConfig>): void {
   const disk = readJsonFile<Record<string, unknown>>(p, {});
   delete disk.box;
   delete disk.composio;
-  for (const key of ["xai", "trello", "profile"] as const) {
+  delete disk.trello;
+  for (const key of ["xai", "profile"] as const) {
     if (patch[key] && typeof patch[key] === "object") {
       disk[key] = { ...(disk[key] as object), ...patch[key] };
     }

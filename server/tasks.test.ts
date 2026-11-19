@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   TaskConflictError,
-  TaskNotFoundError,
   TaskStore,
   TaskValidationError,
   filterTasks,
@@ -80,17 +79,17 @@ describe("TaskStore", () => {
   it("reloads tasks when another process replaces the persistence file", () => {
     const { root, store } = fixture();
     const original = store.create({ title: "Original" }, user);
-    const imported = { ...original, id: "external-task", title: "Imported from Trello" };
+    const imported = { ...original, id: "external-task", title: "Imported externally" };
 
     writeFileSync(join(root, "tasks.json"), JSON.stringify([original, imported], null, 2));
 
-    expect(store.list().map((task) => task.title)).toEqual(["Original", "Imported from Trello"]);
+    expect(store.list().map((task) => task.title)).toEqual(["Original", "Imported externally"]);
   });
 
   it("preserves externally imported tasks when creating more work", () => {
     const { root, store } = fixture();
     const original = store.create({ title: "Original" }, user);
-    const imported = { ...original, id: "external-task", title: "Imported from Trello" };
+    const imported = { ...original, id: "external-task", title: "Imported externally" };
     const file = join(root, "tasks.json");
     writeFileSync(file, JSON.stringify([imported], null, 2));
 
@@ -98,7 +97,7 @@ describe("TaskStore", () => {
 
     expect(JSON.parse(readFileSync(file, "utf8")).map((task: { title: string }) => task.title).sort()).toEqual([
       "Created after import",
-      "Imported from Trello",
+      "Imported externally",
     ]);
   });
 
@@ -155,25 +154,16 @@ describe("TaskStore", () => {
     expect(store.list()).toEqual([]);
   });
 
-  it("defaults trelloCardId/Url to null and links a card without a revision check", () => {
+  it("drops card fields from saves made before Trello was removed, keeping their history", () => {
     const { root, store } = fixture();
     const created = store.create({ title: "Mirror me" }, user);
-    expect(created).toMatchObject({ trelloCardId: null, trelloCardUrl: null });
-
-    const linked = store.linkTrelloCard(created.id, "card-1", "https://trello.com/c/abc123");
-    expect(linked).toMatchObject({ trelloCardId: "card-1", trelloCardUrl: "https://trello.com/c/abc123", revision: 2 });
-    expect(store.linkTrelloCard(created.id, "card-1", "https://trello.com/c/abc123")).toEqual(linked);
-    expect(() => store.linkTrelloCard("missing", "card-1", "https://trello.com/c/abc123")).toThrow(TaskNotFoundError);
-    expect(new TaskStore(root).get(created.id)).toEqual(linked);
-  });
-
-  it("attributes a Trello-sync actor distinctly and round-trips it through persistence", () => {
-    const { root, store } = fixture();
-    const sync: TaskActor = { kind: "sync", source: "trello" };
-    const created = store.create({ title: "Imported from Trello" }, sync);
-    const updated = store.update(created.id, created.revision, { description: "Edited on Trello" }, sync);
-    expect(updated.activity.at(-1)?.actor).toEqual(sync);
-    expect(new TaskStore(root).get(created.id)?.updatedBy).toEqual(sync);
+    const legacySync: TaskActor = { kind: "sync", source: "trello" };
+    const legacy = { ...created, trelloCardId: "card-1", trelloCardUrl: "https://trello.com/c/abc123", updatedBy: legacySync };
+    writeFileSync(join(root, "tasks.json"), JSON.stringify([legacy]));
+    const reloaded = new TaskStore(root).get(created.id)!;
+    expect(reloaded).not.toHaveProperty("trelloCardId");
+    expect(reloaded).not.toHaveProperty("trelloCardUrl");
+    expect(reloaded.updatedBy).toEqual(legacySync);
   });
 
   it("composes task filters and keeps board ordering", () => {
@@ -244,8 +234,6 @@ describe("TaskStore", () => {
       createdBy: user,
       updatedBy: user,
       activity: [],
-      trelloCardId: null,
-      trelloCardUrl: null,
       // no `mention` field — simulates a save from before this feature
     };
     writeFileSync(join(root, "tasks.json"), JSON.stringify([legacy]));
@@ -264,7 +252,6 @@ function task(patch: Partial<TaskRecord>): TaskRecord {
     status: "todo", type: "feature", priority: "normal", tags: [], dueAt: null,
     projectId: null, assigneeBotId: null, position: 1024, revision: 1,
     createdAt: 1, updatedAt: 1, createdBy: user, updatedBy: user, activity: [],
-    trelloCardId: null, trelloCardUrl: null,
     ...patch,
   };
 }

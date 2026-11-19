@@ -5,7 +5,7 @@ export const TASK_PRIORITIES = ["low", "normal", "high", "urgent"] as const;
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 export type TaskType = (typeof TASK_TYPES)[number];
 export type TaskPriority = (typeof TASK_PRIORITIES)[number];
-export type TaskActor = { kind: "user" } | { kind: "bot"; botId: string; name: string } | { kind: "sync"; source: "trello" };
+export type TaskActor = { kind: "user" } | { kind: "bot"; botId: string; name: string } | { kind: "sync"; source: string };
 
 export interface TaskActivity {
   id: string;
@@ -51,8 +51,6 @@ export interface TaskRecord {
   activity: TaskActivity[];
   project: TaskProject | null;
   assignee: TaskAssignee | null;
-  trelloCardId: string | null;
-  trelloCardUrl: string | null;
 }
 
 export interface TaskFilters {

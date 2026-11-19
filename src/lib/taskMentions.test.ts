@@ -25,8 +25,6 @@ function task(patch: Partial<TaskRecord>): TaskRecord {
     activity: [],
     project: null,
     assignee: null,
-    trelloCardId: null,
-    trelloCardUrl: null,
     ...patch,
   };
 }

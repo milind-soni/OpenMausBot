@@ -6,14 +6,13 @@ import { Check, Loader2 } from "lucide-react";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 
-export type ConfigSection = "xai" | "trello";
+export type ConfigSection = "xai";
 
 const SECTIONS: Record<
   ConfigSection,
   { body: (value: string) => unknown; flag: (config: ConfigStatus) => boolean }
 > = {
   xai: { body: (v) => ({ xai: { key: v } }), flag: (c) => c.xai?.configured ?? false },
-  trello: { body: (v) => ({ trello: { key: v } }), flag: (c) => c.trello?.keyConfigured ?? false },
 };
 
 export function ApiKeyRow({

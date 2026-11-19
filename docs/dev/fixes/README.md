@@ -43,16 +43,6 @@ The implementer never changes `[?]` to `[x]` and never moves a task to `done--` 
 
 The user or designated reviewer verifies review items. Approved items change from `[?]` to `[x]`. When every item is `[x]`, the reviewer moves `review--` to `done--`. A rejected item returns to `[~]` with a note explaining what remains.
 
-## Trello synchronization
-
-Trello mirroring is optional until `.env.local` has been configured according to `TRELLO.md`. Once enabled, run `pnpm trello:sync` immediately after:
-
-- creating a status-prefixed task document;
-- renaming a task document to change status; or
-- updating any task checkbox.
-
-Local Markdown remains authoritative. If a sync fails, retain the local change and report that remote synchronization is pending.
-
 ## Relationship and history rules
 
 - Link related task filenames in the `related:` frontmatter list.

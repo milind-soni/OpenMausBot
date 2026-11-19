@@ -53,3 +53,12 @@ Remove the Composio integration and replace it with curated, non-technical apps 
 - Not run live: the "app not set up" conversation (covered by unit tests) and a Codex Buddy turn (Claude usage was at 10%).
 - `pnpm test`: 543 passed, 2 failed in `server/schedules-runtime.test.ts`. Both fail identically on `main` and are unrelated.
 
+
+## User-requested follow-ups (2026-11-19)
+
+- [?] Bundle the actual Edits desktop app icon and use it in the catalog UI — `public/apps/edits.png`, `server/apps/catalog.ts`, `src/components/AppsScreen.tsx`.
+- [?] Show Allow / Deny / Always allow on tool approval cards. Remember the choice per Buddy and tool, with removal in Buddy settings — `server/index.ts`, `server/room-activity.test.ts`, `src/components/SettingsPanel.tsx`.
+- [?] Remove Trello settings, linking UI, API routes, polling, client modules, task-card fields, sync script, and setup docs. Remove legacy credentials and links at load; preserve tasks and historical attribution — `server/config.ts`, `server/tasks.ts`, `server/index.ts`, `src/components/TaskBoardScreen.tsx`.
+- [?] Validate and merge into main under the user's explicit instruction to do the fixes and merge independently.
+
+Follow-up validation: production build and typecheck pass. Full suite: 523 passed, 2 failed (the same two previously established schedule recovery failures). After adding removed-route assertions, focused API/config tests: 36 passed. Existing room-activity tests cover approval option order, remembered tool approval, and revocation. Studio Preview at 1440×900 against fresh disposable data on port 8978: actual Edits icon loads, Needs setup state shown, Task Board has no Trello control, Connections has only xAI. No new console/network errors on that origin; earlier port-5388 checks encountered an invalid stale QA project registry, so validation moved to a fresh isolated registry. No real AI turns or Trello requests performed for these follow-ups.

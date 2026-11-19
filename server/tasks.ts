@@ -14,10 +14,9 @@ export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export type TaskActor =
   | { kind: "user" }
   | { kind: "bot"; botId: string; name: string }
-  // a background Trello pull applied a change the user didn't make
-  // themselves — kept distinct so the activity trail never misattributes
-  // it to "You". See server/trelloSync.ts.
-  | { kind: "sync"; source: "trello" };
+  // legacy history only: changes applied by the removed Trello sync. Old
+  // activity entries keep it so the trail never misattributes them to "You".
+  | { kind: "sync"; source: string };
 
 export interface TaskActivity {
   id: string;
@@ -50,11 +49,6 @@ export interface TaskRecord {
   createdBy: TaskActor;
   updatedBy: TaskActor;
   activity: TaskActivity[];
-  /** The linked Trello card mirroring this task, if its project is linked
-   * to a board (server/trelloLinks.ts). Set by TaskStore.linkTrelloCard;
-   * never accepted through CreateTaskInput/UpdateTaskInput. */
-  trelloCardId: string | null;
-  trelloCardUrl: string | null;
 }
 
 const MENTION_PATTERN = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/;
@@ -214,8 +208,6 @@ function validateSavedTask(value: unknown): TaskRecord {
     (task.dueAt === null || typeof task.dueAt === "number") &&
     (task.projectId === null || typeof task.projectId === "string") &&
     (task.assigneeBotId === null || typeof task.assigneeBotId === "string") &&
-    (task.trelloCardId === undefined || task.trelloCardId === null || typeof task.trelloCardId === "string") &&
-    (task.trelloCardUrl === undefined || task.trelloCardUrl === null || typeof task.trelloCardUrl === "string") &&
     typeof task.position === "number" && Number.isFinite(task.position) &&
     typeof task.revision === "number" && Number.isInteger(task.revision) && task.revision > 0 &&
     typeof task.createdAt === "number" && typeof task.updatedAt === "number" &&
@@ -226,21 +218,21 @@ function validateSavedTask(value: unknown): TaskRecord {
       return typeof event.id === "string" && typeof event.at === "number" && typeof event.action === "string" && isActor(event.actor);
     });
   if (!valid) throw new TaskValidationError("Saved task data is invalid. The file was left unchanged.");
+  // saves from before Trello's removal carry card fields — drop them
+  const { trelloCardId: _cardId, trelloCardUrl: _cardUrl, ...rest } = task;
   return {
-    ...(task as unknown as TaskRecord),
+    ...(rest as unknown as TaskRecord),
     // "" is a backfill marker for legacy saves predating `mention` — filled
     // in by reloadIfChanged() once the full task list is in hand (dedup
     // needs siblings), never persisted as an empty string.
     mention: (task.mention as string | undefined) ?? "",
-    trelloCardId: (task.trelloCardId as string | null | undefined) ?? null,
-    trelloCardUrl: (task.trelloCardUrl as string | null | undefined) ?? null,
   };
 }
 
 function actorLabel(actor: TaskActor): string {
   if (actor.kind === "user") return "You";
   if (actor.kind === "bot") return actor.name;
-  return "Trello sync";
+  return "Trello sync (removed)";
 }
 
 function activity(action: TaskActivity["action"], actor: TaskActor, detail?: string): TaskActivity {
@@ -431,8 +423,6 @@ export class TaskStore {
       createdBy: actor,
       updatedBy: actor,
       activity: [activity("created", actor)],
-      trelloCardId: null,
-      trelloCardUrl: null,
     };
     this.tasks.push(task);
     this.tasks.sort(compareTasks);
@@ -524,21 +514,6 @@ export class TaskStore {
       updatedBy: actor,
       activity: [...current.activity, activity("delegated", actor, `Assigned to ${cleanText(targetName, "Assignee name", 200, true)}`)].slice(-MAX_ACTIVITY),
     };
-    this.tasks = this.tasks.map((task) => task.id === id ? next : task).sort(compareTasks);
-    this.save();
-    return next;
-  }
-
-  /** Attaches (or updates) the Trello card mirroring this task. Used only
-   * by server/trelloSync.ts, which owns the id/url pair end to end — no
-   * revision check, since this never touches user-authored content and is
-   * safe to retry. A no-op activity entry so the trail stays about work,
-   * not plumbing. */
-  linkTrelloCard(id: string, cardId: string, cardUrl: string): TaskRecord {
-    const current = this.get(id);
-    if (!current) throw new TaskNotFoundError();
-    if (current.trelloCardId === cardId && current.trelloCardUrl === cardUrl) return current;
-    const next: TaskRecord = { ...current, trelloCardId: cardId, trelloCardUrl: cardUrl, revision: current.revision + 1, updatedAt: Date.now() };
     this.tasks = this.tasks.map((task) => task.id === id ? next : task).sort(compareTasks);
     this.save();
     return next;

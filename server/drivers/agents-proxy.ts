@@ -209,7 +209,6 @@ function renderTask(task: Json): string {
     `assignee: ${assignee?.name ?? "unassigned"}${assignee?.id ? ` (${assignee.id})` : ""}`,
     `project: ${project ? `#${project.mention} (${project.name})${project.path ? ` at ${project.path}` : project.available ? "" : " [unavailable]"}` : "none"}`,
   ];
-  if (task.trelloCardUrl) lines.push(`trello: ${task.trelloCardUrl}`);
   if (task.tags && (task.tags as unknown[]).length) lines.push(`tags: ${(task.tags as unknown[]).join(", ")}`);
   if (task.dueAt) lines.push(`due: ${new Date(Number(task.dueAt)).toISOString()}`);
   if (task.description) lines.push(`description: ${task.description}`);

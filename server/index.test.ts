@@ -76,6 +76,15 @@ afterAll(async () => {
 });
 
 describe("harness HTTP API", () => {
+  it("does not expose removed Trello integration routes or config", async () => {
+    const config = await api("GET", "/api/config");
+    expect(config.body).not.toHaveProperty("trello");
+    for (const path of ["/api/trello/boards", "/api/trello/links", "/api/trello/authorize-url"]) {
+      expect((await api("GET", path)).status).toBe(404);
+    }
+    expect((await api("POST", "/api/trello/token", { token: "TEST · obsolete" })).status).toBe(404);
+  });
+
   it("rejects opaque asset-prefix requests that normalize into API routes", async () => {
     for (const segment of ["..", "%2e%2e", ".%2E", "%2e."]) {
       const status = await new Promise<number | undefined>((resolve, reject) => {
@@ -548,52 +557,6 @@ describe("harness HTTP API", () => {
 
     const after = await api("GET", "/api/config");
     expect(after.body.profile).toEqual({ name: "Ada Lovelace", email: "Ada@Example.com" });
-  });
-
-  it("connects Trello through the token callback and disconnects write-only, without a key or network", async () => {
-    const before = await api("GET", "/api/config");
-    expect(before.body.trello).toEqual({ keyConfigured: false, configured: false });
-
-    // no API key yet — the browser authorize URL can't be built
-    const noKey = await api("GET", "/api/trello/authorize-url");
-    expect(noKey.status).toBe(400);
-
-    const withKey = await api("PUT", "/api/config", { trello: { key: "app-key" } });
-    expect(withKey.body.trello).toEqual({ keyConfigured: true, configured: false });
-
-    const authorize = await api("GET", "/api/trello/authorize-url");
-    expect(authorize.status).toBe(200);
-    const url = new URL(authorize.body.url);
-    expect(url.hostname).toBe("trello.com");
-    expect(url.searchParams.get("key")).toBe("app-key");
-
-    // the /trello/callback page hands the token to this route (see its inline script)
-    const tokened = await api("POST", "/api/trello/token", { token: "user-token" });
-    expect(tokened.status).toBe(200);
-    expect(tokened.body.trello).toEqual({ keyConfigured: true, configured: true });
-    expect(JSON.stringify(tokened.body)).not.toContain("user-token");
-
-    // disconnect goes through the same write-only PUT convention as other keys
-    const disconnected = await api("PUT", "/api/config", { trello: { token: "" } });
-    expect(disconnected.body.trello).toEqual({ keyConfigured: true, configured: false });
-  });
-
-  it("serves the Trello callback page and gates board/link routes on connection state", async () => {
-    const page = await fetch(`${BASE}/trello/callback`);
-    expect(page.status).toBe(200);
-    expect(page.headers.get("content-type")).toContain("text/html");
-    expect(await page.text()).toContain("api/trello/token");
-
-    const boards = await api("GET", "/api/trello/boards");
-    expect(boards.body).toEqual({ configured: false, boards: [] });
-
-    expect((await api("GET", "/api/trello/links")).body).toEqual({ links: [] });
-
-    const linkMissingProject = await api("POST", "/api/trello/links/no-such-project", { createBoard: "New board" });
-    expect(linkMissingProject.status).toBe(400); // Trello isn't connected yet in this isolated server instance
-
-    expect((await api("DELETE", "/api/trello/links/no-such-project")).body).toEqual({ ok: true });
-    expect((await api("POST", "/api/trello/links/no-such-project/sync")).status).toBe(404);
   });
 
   it("accepts messages with attachments even when text is empty and enforces validation", async () => {

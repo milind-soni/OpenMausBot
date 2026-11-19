@@ -165,7 +165,6 @@ export function messageVersions(bot: Bot, message: Message): Message[] {
 export interface ConfigStatus {
   usageDisplay?: UsagePreferences;
   xai?: { configured: boolean };
-  trello?: { configured: boolean; keyConfigured: boolean };
   /** who's using the app — collected in onboarding, shown in the sidebar */
   profile?: { name: string; email: string };
   /** Global setting for automatic bot-to-bot handoffs across multi-agent rooms */
@@ -1243,7 +1242,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "config":
           rawDispatch({
             type: "configStatus",
-            config: { usageDisplay: frame.usageDisplay, xai: frame.xai, trello: frame.trello, profile: frame.profile,
+            config: { usageDisplay: frame.usageDisplay, xai: frame.xai, profile: frame.profile,
               autoHandoffs: frame.autoHandoffs, autoApprovePermissions: frame.autoApprovePermissions, autoApproveDelaySeconds: frame.autoApproveDelaySeconds },
           });
           api("/api/instances")

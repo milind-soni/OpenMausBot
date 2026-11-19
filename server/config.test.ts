@@ -1,7 +1,7 @@
 // saveConfig merge behavior — the per-instance permission toggle relies on
 // an `instances` patch merging by instanceId instead of clobbering sibling
 // config, and previously `instances` wasn't merged into disk at all.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -23,6 +23,23 @@ describe("saveConfig instances merge", () => {
     expect(disk).not.toHaveProperty("composio");
     expect(disk.profile).toEqual({ name: "TEST · Person" });
   });
+  it("removes legacy Trello credentials and links without changing other settings", () => {
+    mkdirSync(DATA_DIR, { recursive: true });
+    const file = join(DATA_DIR, "config.json");
+    const links = join(DATA_DIR, "trello-links.json");
+    writeFileSync(file, JSON.stringify({ trello: { key: "TEST · old key", token: "TEST · old token" }, profile: { name: "Ada" } }));
+    writeFileSync(links, JSON.stringify([{ projectId: "test-project", boardId: "old-board" }]));
+    expect(loadConfig()).not.toHaveProperty("trello");
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ profile: { name: "Ada" } });
+    expect(existsSync(links)).toBe(false);
+    // A stale client's save cannot bring the removed integration back.
+    saveConfig({ trello: { token: "TEST · stale token" }, autoHandoffs: false } as Parameters<typeof saveConfig>[0]);
+    const saved = JSON.parse(readFileSync(file, "utf8"));
+    expect(saved).not.toHaveProperty("trello");
+    expect(saved.profile).toEqual({ name: "Ada" });
+    expect(saved.autoHandoffs).toBe(false);
+  });
+
   it("writes a brand-new instances entry", () => {
     saveConfig({ instances: { claude: { driver: "claudeAgent", config: { permissionMode: "bypassPermissions" } } } });
     const cfg = loadConfig();

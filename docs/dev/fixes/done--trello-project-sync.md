@@ -8,6 +8,8 @@ owner: claude
 related: [done--shared-task-board]
 ---
 
+> Historical record: Trello integration and repository sync were removed on 2026-11-19 at the user’s request. The implementation references below describe the former feature.
+
 # Complete the shared task board and add per-project Trello sync
 
 Finish the shared task board's agent/user parity, then add a genuinely new capability: connect

@@ -8,17 +8,14 @@ import {
   CircleDot,
   ClipboardCheck,
   Clock3,
-  ExternalLink,
   GripVertical,
   Loader2,
   Plus,
-  RefreshCw,
   Search,
   SlidersHorizontal,
   Sparkles,
   Tag,
   Trash2,
-  Trello,
   UserRound,
   X,
 } from "lucide-react";
@@ -41,7 +38,6 @@ import {
   type TaskStatus,
   type TaskType,
 } from "@/lib/taskBoard";
-import type { TrelloBoardOption, TrelloProjectLink } from "@/lib/trello";
 import { ApiError, api, useStore } from "@/state/store";
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
@@ -236,11 +232,6 @@ function TaskModal({
             {task && <p className="mt-0.5 text-[11px] text-ink-secondary">Revision {latestTask?.revision} · updated {new Date(latestTask?.updatedAt ?? task.updatedAt).toLocaleString()}</p>}
           </div>
           <div className="flex items-center gap-1">
-            {latestTask?.trelloCardUrl && (
-              <a href={latestTask.trelloCardUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-accent">
-                <Trello size={13} /> Open on Trello
-              </a>
-            )}
             <button onClick={onClose} disabled={busy} className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40" aria-label="Close task dialog"><X size={18} /></button>
           </div>
         </header>
@@ -272,7 +263,7 @@ function TaskModal({
               <div className="mt-2 space-y-2">
                 {[...task.activity].reverse().slice(0, 8).map((entry) => (
                   <div key={entry.id} className="flex items-start justify-between gap-3 text-[12px]">
-                    <span className="text-ink"><span className="font-medium">{entry.actor.kind === "user" ? "You" : entry.actor.kind === "bot" ? entry.actor.name : "Trello sync"}</span> {entry.detail ?? entry.action}</span>
+                    <span className="text-ink"><span className="font-medium">{entry.actor.kind === "user" ? "You" : entry.actor.kind === "bot" ? entry.actor.name : "Trello sync (removed)"}</span> {entry.detail ?? entry.action}</span>
                     <time className="shrink-0 text-ink-secondary">{new Date(entry.at).toLocaleString()}</time>
                   </div>
                 ))}
@@ -294,191 +285,6 @@ function TaskModal({
             <button onClick={() => void save()} disabled={busy || !draft.title.trim()} className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-40">{busy && <Loader2 size={14} className="animate-spin" />}{task ? "Save changes" : "Create task"}</button>
           </div>
         </footer>
-      </div>
-    </div>
-  );
-}
-
-function TrelloLinkModal({ onClose }: { onClose: () => void }) {
-  const { state, dispatch } = useStore();
-  const connected = state.config?.trello?.configured ?? false;
-  const [links, setLinks] = useState<TrelloProjectLink[] | null>(null);
-  const [boards, setBoards] = useState<TrelloBoardOption[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busyProjectId, setBusyProjectId] = useState<string | null>(null);
-  const [syncingProjectId, setSyncingProjectId] = useState<string | null>(null);
-  const [syncedProjectId, setSyncedProjectId] = useState<string | null>(null);
-  const [pickerProjectId, setPickerProjectId] = useState<string | null>(null);
-  const [boardQuery, setBoardQuery] = useState("");
-  const [newBoardName, setNewBoardName] = useState("");
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  useEffect(() => {
-    let alive = true;
-    api("/api/trello/links").then(({ links }) => { if (alive) setLinks(links); }).catch((reason) => { if (alive) setError(errorMessage(reason)); });
-    return () => { alive = false; };
-  }, []);
-
-  useEffect(() => {
-    if (!connected) return;
-    let alive = true;
-    api("/api/trello/boards").then(({ boards }) => { if (alive) setBoards(boards); }).catch((reason) => { if (alive) setError(errorMessage(reason)); });
-    return () => { alive = false; };
-  }, [connected]);
-
-  const openPicker = (project: { id: string; name: string }) => {
-    setPickerProjectId(project.id);
-    setNewBoardName(project.name);
-    setBoardQuery("");
-    setError(null);
-  };
-
-  const link = async (projectId: string, body: object) => {
-    setBusyProjectId(projectId);
-    setError(null);
-    try {
-      const { link } = await api(`/api/trello/links/${projectId}`, { method: "POST", body: JSON.stringify(body) });
-      setLinks((prev) => [...(prev ?? []).filter((entry) => entry.projectId !== projectId), link]);
-      setPickerProjectId(null);
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setBusyProjectId(null);
-    }
-  };
-
-  const unlink = async (projectId: string) => {
-    setBusyProjectId(projectId);
-    setError(null);
-    try {
-      await api(`/api/trello/links/${projectId}`, { method: "DELETE" });
-      setLinks((prev) => (prev ?? []).filter((entry) => entry.projectId !== projectId));
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setBusyProjectId(null);
-    }
-  };
-
-  const syncNow = async (projectId: string) => {
-    setSyncingProjectId(projectId);
-    setError(null);
-    try {
-      await api(`/api/trello/links/${projectId}/sync`, { method: "POST" });
-      setSyncedProjectId(projectId);
-      setTimeout(() => setSyncedProjectId((current) => current === projectId ? null : current), 2000);
-    } catch (reason) {
-      setError(errorMessage(reason));
-    } finally {
-      setSyncingProjectId(null);
-    }
-  };
-
-  const filteredBoards = useMemo(() => {
-    const needle = boardQuery.trim().toLowerCase();
-    const list = boards ?? [];
-    return needle ? list.filter((board) => board.name.toLowerCase().includes(needle)) : list;
-  }, [boards, boardQuery]);
-
-  return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div className="animate-pop-in flex max-h-[calc(100vh-32px)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-hairline/60 bg-panel shadow-2xl shadow-black/70">
-        <header className="flex items-center justify-between border-b border-hairline/50 px-5 py-4">
-          <div className="flex items-center gap-2.5"><Trello size={18} className="text-accent" /><div><h2 className="text-[16px] font-semibold text-ink">Trello sync</h2><p className="mt-0.5 text-[11px] text-ink-secondary">Link a registered project to a Trello board.</p></div></div>
-          <button onClick={onClose} className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink" aria-label="Close Trello sync dialog"><X size={18} /></button>
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
-          {!connected ? (
-            <div className="rounded-xl border border-dashed border-hairline bg-card p-6 text-center">
-              <Trello size={26} className="mx-auto text-accent" />
-              <p className="mx-auto mt-3 max-w-xs text-[13px] leading-5 text-ink-secondary">Connect your Trello account in Settings to link projects to boards.</p>
-              <button onClick={() => { onClose(); dispatch({ type: "toggleAppSettings", open: true }); }} className="mt-4 rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110">Open Settings</button>
-            </div>
-          ) : links === null ? (
-            <div className="flex items-center justify-center gap-2 py-10 text-[13px] text-ink-secondary"><Loader2 size={16} className="animate-spin" /> Loading…</div>
-          ) : state.taskProjects.length === 0 ? (
-            <div className="py-10 text-center text-[13px] text-ink-secondary">No registered projects yet.</div>
-          ) : (
-            <div className="space-y-2.5">
-              {state.taskProjects.map((project) => {
-                const linked = links.find((entry) => entry.projectId === project.id) ?? null;
-                const busy = busyProjectId === project.id;
-                return (
-                  <div key={project.id} className="rounded-xl border border-hairline/50 bg-card p-3.5">
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate text-[13px] font-medium text-ink">{project.name}</span>
-                          <span className="shrink-0 rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">#{project.mention}</span>
-                        </div>
-                        {linked && (
-                          <a href={linked.boardUrl} target="_blank" rel="noreferrer" className="mt-1 flex items-center gap-1 text-[11px] text-ink-secondary hover:text-accent">
-                            <Trello size={11} /> {linked.boardName} <ExternalLink size={10} />
-                          </a>
-                        )}
-                      </div>
-                      {linked ? (
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <button
-                            onClick={() => void syncNow(project.id)}
-                            disabled={syncingProjectId === project.id}
-                            title="Pull the latest changes from this board now"
-                            className={cn("rounded-lg bg-raised p-1.5 hover:bg-raised-hover disabled:opacity-40", syncedProjectId === project.id ? "text-success" : "text-ink-secondary hover:text-accent")}
-                          >
-                            {syncingProjectId === project.id ? <Loader2 size={14} className="animate-spin" /> : syncedProjectId === project.id ? <CheckCircle2 size={14} /> : <RefreshCw size={14} />}
-                          </button>
-                          <button onClick={() => void unlink(project.id)} disabled={busy} className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised-hover hover:text-danger disabled:opacity-40">
-                            {busy && <Loader2 size={12} className="animate-spin" />} Unlink
-                          </button>
-                        </div>
-                      ) : (
-                        <button onClick={() => openPicker(project)} disabled={busy} className="shrink-0 rounded-lg bg-accent/10 px-3 py-1.5 text-[12px] font-medium text-accent hover:bg-accent/20 disabled:opacity-40">
-                          Link to Trello
-                        </button>
-                      )}
-                    </div>
-
-                    {pickerProjectId === project.id && (
-                      <div className="mt-3 space-y-2.5 border-t border-hairline/40 pt-3">
-                        <div className="flex items-center gap-2 rounded-lg border border-hairline/50 bg-inset px-2.5 py-1.5">
-                          <Search size={13} className="text-ink-secondary" />
-                          <input autoFocus value={boardQuery} onChange={(event) => setBoardQuery(event.target.value)} placeholder="Search your boards" className="min-w-0 flex-1 bg-transparent text-[12px] text-ink placeholder:text-ink-secondary focus:outline-none" />
-                        </div>
-                        {boards === null ? (
-                          <div className="py-2 text-center text-[11px] text-ink-secondary">Loading boards…</div>
-                        ) : filteredBoards.length > 0 ? (
-                          <div className="max-h-32 space-y-1 overflow-y-auto">
-                            {filteredBoards.map((board) => (
-                              <button key={board.id} onClick={() => void link(project.id, { boardId: board.id, boardName: board.name, boardUrl: board.url })} disabled={busy} className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">
-                                <span className="truncate">{board.name}</span>
-                              </button>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="py-1 text-[11px] text-ink-secondary">No matching boards.</div>
-                        )}
-                        <div className="flex gap-2">
-                          <input value={newBoardName} onChange={(event) => setNewBoardName(event.target.value)} placeholder="New board name" className="min-w-0 flex-1 rounded-lg border border-hairline/50 bg-inset px-2.5 py-1.5 text-[12px] text-ink placeholder:text-ink-secondary focus:border-accent/70 focus:outline-none" />
-                          <button onClick={() => void link(project.id, { createBoard: newBoardName })} disabled={!newBoardName.trim() || busy} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-40">
-                            {busy && <Loader2 size={12} className="animate-spin" />} Create
-                          </button>
-                        </div>
-                        <button onClick={() => setPickerProjectId(null)} className="text-[11px] text-ink-secondary hover:text-ink">Cancel</button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          {error && <div className="mt-4 flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2.5 text-[12px] text-danger"><AlertTriangle size={15} className="mt-0.5 shrink-0" /> {error}</div>}
-        </div>
       </div>
     </div>
   );
@@ -575,18 +381,6 @@ function TaskCard({
               #{task.project.mention}
             </span>
           )}
-          {task.trelloCardUrl && (
-            <a
-              href={task.trelloCardUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={(event) => event.stopPropagation()}
-              className="flex items-center gap-1 rounded bg-raised px-1.5 py-0.5 text-[10px] text-ink-secondary hover:text-accent"
-              title="Open on Trello"
-            >
-              <Trello size={10} /> Trello
-            </a>
-          )}
         </div>
         {(task.assignee || task.dueAt || task.tags.length > 0) && (
           <div className="mt-3 space-y-1.5 border-t border-hairline/40 pt-2.5 text-[10px] text-ink-secondary">
@@ -637,7 +431,6 @@ export function TaskBoardScreen() {
   const [newStatus, setNewStatus] = useState<TaskStatus>("todo");
   const [starterPreset, setStarterPreset] = useState<TaskStarterPreset | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [trelloOpen, setTrelloOpen] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dragOverStatus, setDragOverStatus] = useState<TaskStatus | null>(null);
   const [dragOverTaskId, setDragOverTaskId] = useState<string | null>(null);
@@ -732,7 +525,6 @@ export function TaskBoardScreen() {
         </div>
         <div className="flex items-center gap-2" style={{ WebkitAppRegion: "no-drag" } as CSSProperties}>
           <UsageRings />
-          <button onClick={() => setTrelloOpen(true)} className="flex items-center gap-2 rounded-lg bg-raised px-3.5 py-2 text-[13px] text-ink hover:bg-raised-hover" title="Link projects to Trello boards"><Trello size={16} /> Trello</button>
           <button onClick={() => openNewTask("todo")} className="flex items-center gap-2 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-medium text-white hover:brightness-110"><Plus size={16} /> New task</button>
         </div>
       </header>
@@ -1065,7 +857,6 @@ export function TaskBoardScreen() {
           }}
         />
       )}
-      {trelloOpen && <TrelloLinkModal onClose={() => setTrelloOpen(false)} />}
     </main>
   );
 }

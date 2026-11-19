@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   Cpu,
   Download,
-  ExternalLink,
   Folder,
   Info,
   Key,
@@ -21,8 +20,6 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
-  Trello,
-  Unplug,
   User,
   XCircle,
 } from "lucide-react";
@@ -149,74 +146,6 @@ function ProfileSection() {
   );
 }
 
-function TrelloConnectionRow() {
-  const { state, dispatch } = useStore();
-  const configured = state.config?.trello?.configured ?? false;
-  const keyConfigured = state.config?.trello?.keyConfigured ?? false;
-  const [connecting, setConnecting] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const connect = async () => {
-    setConnecting(true);
-    setError(null);
-    try {
-      const { url } = await api("/api/trello/authorize-url");
-      window.open(url, "_blank", "noopener");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setConnecting(false);
-    }
-  };
-
-  const disconnect = async () => {
-    setDisconnecting(true);
-    setError(null);
-    try {
-      const status = await api("/api/config", { method: "PUT", body: JSON.stringify({ trello: { token: "" } }) });
-      dispatch({ type: "configStatus", config: status });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setDisconnecting(false);
-    }
-  };
-
-  return (
-    <div>
-      <div className="mb-1.5 flex items-center gap-2 text-[13px] text-ink-secondary">
-        <span className={cn("size-1.5 rounded-full", configured ? "bg-success" : "bg-raised-hover")} />
-        Trello Account
-        {configured && <span className="text-[11px] text-success">Connected</span>}
-      </div>
-      <div className="flex gap-2">
-        {configured ? (
-          <button
-            onClick={() => void disconnect()}
-            disabled={disconnecting}
-            className="flex items-center gap-1.5 rounded-lg bg-raised px-3.5 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
-          >
-            {disconnecting ? <Loader2 size={13} className="animate-spin" /> : <Unplug size={13} />}
-            Disconnect
-          </button>
-        ) : (
-          <button
-            onClick={() => void connect()}
-            disabled={connecting || !keyConfigured}
-            title={keyConfigured ? undefined : "Add your Trello API key below first"}
-            className="flex items-center gap-1.5 rounded-lg bg-raised px-3.5 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {connecting ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
-            Connect Trello
-          </button>
-        )}
-      </div>
-      {error && <div className="mt-1 text-[12px] text-danger">{error}</div>}
-    </div>
-  );
-}
-
 function ConnectionsSection() {
   return (
     <div className="space-y-6">
@@ -237,25 +166,6 @@ function ConnectionsSection() {
             />
             <p className="mt-2 text-[12px] text-ink-secondary">
               Configures credentials for xAI Grok provider models and ACP drivers without requiring local CLI login.
-            </p>
-          </div>
-
-          <div className="rounded-xl border border-hairline/40 bg-panel/60 p-4">
-            <div className="mb-4 flex items-center gap-2">
-              <Trello size={16} className="text-accent" />
-              <h3 className="text-[13px] font-medium text-ink">Trello</h3>
-            </div>
-            <div className="space-y-4">
-              <ApiKeyRow
-                section="trello"
-                label="Trello API Key"
-                placeholder="Get one from trello.com/power-ups/admin"
-              />
-              <TrelloConnectionRow />
-            </div>
-            <p className="mt-3 text-[12px] text-ink-secondary">
-              Link registered projects to Trello boards from the Task Board to sync tasks both ways. The API key
-              identifies this app; connecting authorizes it with your own Trello account and never leaves your machine.
             </p>
           </div>
         </div>
