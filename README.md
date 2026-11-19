@@ -8,7 +8,7 @@ Gérer Build Studio is a desktop workspace for working with AI Buddies. Give eac
 
 ## Install the internal alpha
 
-The alpha installer is for **Apple silicon Macs**. Get the DMG from the internal launch handoff, open it, and drag **Gerer Build Studio** to Applications. Follow any installation instructions supplied with your internal build. The Windows packaging command is available for development. A Windows install requires a separate smoke test.
+The alpha installer is for **Apple silicon Macs**. Get the DMG from the internal launch handoff, open it, and drag **Gerer Build Studio** to Applications. This build uses an Apple Development signature and macOS Gatekeeper can block it. Follow the installation instructions supplied with your internal build. The Windows packaging command is available for development. A Windows install requires a separate smoke test.
 
 Application updates are paused during the alpha. To install a newer build, quit Studio and replace the application in Applications. Studio keeps its workspace data separately. Back up important workspace data before replacing test builds.
 
