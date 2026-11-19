@@ -186,7 +186,7 @@ import { startUpkeep } from "./host/start-upkeep.ts";
 import { ComputerControl, type ControlSnapshot } from "./computer-control.ts"; import { createSharedVmControl } from "./host/shared-vm-control.ts";
 import { resetPathCache } from "./env-path.ts";
 import { registerEnginesBinDir } from "./engine-install.ts"; import { engineUpdatesFor } from "./engine-updates-host.ts";
-import { appendUsage, flushUsageLedger, queuedTurnTrigger, readUsageCached, usageTriggerFor, type UsageRow, type UsageTrigger } from "./usage-ledger.ts"; import { createUsageAttribution } from "./usage-attribution.ts"; import { teamMapSessions } from "./team-map-sessions.ts";
+import { appendUsage, flushUsageLedger, queuedTurnTrigger, usageTriggerFor, type UsageRow, type UsageTrigger } from "./usage-ledger.ts"; import { createUsageAttribution } from "./usage-attribution.ts"; import { createTeamMapHost } from "./host/team-map-host.ts";
 import { createTraceRecorder } from "./usage-trace/recorder.ts";
 import { GroupUsageReader } from "./group-thread-usage.ts";
 import { ledgerCost } from "./model-prices.ts";
@@ -12490,6 +12490,7 @@ ROUTES.push(createLiveRoutes({
 }));
 
 const toolResults = new ToolResults();
+const teamMap = createTeamMapHost({ dataDir: DATA_DIR, store: () => store, liveEdges: () => coordinator.liveEdges(), lastRowAt, onPlan: (instanceId) => registry.lastSnapshot(instanceId)?.billing === "subscription" });
 const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   markRequestArrival(); if (CLOUD_TEAM) holdBodyDeadline(req, res);
   let url: URL;
@@ -14437,31 +14438,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
 
     // Prompts and replies never leave their transcripts: this projection carries only ids, relationships, labels and timestamps.
-    if (method === "GET" && path === "/api/team-map") {
-      const mapped = new Set(store.bots.filter((bot) => !bot.hidden && visible.bot(bot.id)).map((bot) => bot.id)); const now = Date.now(); const sessionBots = store.bots.filter((bot) => mapped.has(bot.id)).map((bot) => ({ id: bot.id, modelSelection: bot.modelSelection, tasks: store.tasks(bot.id).filter((task) => task.archivedAt === undefined && visible.thread(task.threadId)) }));
-      const collaborations = store.groups
-        .filter(
-          (group) =>
-            group.dm === true &&
-            group.memberIds.length === 2 &&
-            group.memberIds.every((botId) => mapped.has(botId)),
-        )
-        .map((group) => ({
-          groupId: group.id,
-          botIds: [group.memberIds[0], group.memberIds[1]] as [string, string],
-          lastAt: lastRowAt(group.threadId) ?? group.createdAt,
-        }))
-        .sort((a, b) => b.lastAt - a.lastAt);
-      const roomBusy = store.groups.filter((group) => group.busyBotId && mapped.has(group.busyBotId) && visible.group(group.id) && !visible.hides(group.threadId)).map((group) => ({ botId: group.busyBotId!, threadId: group.threadId, title: group.name, groupId: group.id, startedAt: group.turnStartedAt }));
-      const handoffs = coordinator.liveEdges().filter((edge) => mapped.has(edge.sourceBotId) && mapped.has(edge.targetBotId) && (!edge.groupId || visible.group(edge.groupId)) && !visible.hides(edge.threadId));
-      const links = (state: "queued" | "running") =>
-        handoffs.flatMap(({ state: edgeState, ...link }) => edgeState === state ? [link] : []);
-      const queuedLinks = links("queued"); const doneLast24h = readUsageCached(DATA_DIR, { from: new Date(now - 24 * 60 * 60_000), to: new Date(now) }).filter((row) => mapped.has(row.botId) && row.turnId !== undefined && !visible.hides(row.threadId)).length;
-      return json(res, 200, {
-        collaborations, queued: queuedLinks, running: links("running"),
-        ...teamMapSessions({ bots: sessionBots, queued: queuedLinks, roomBusy, lastOutputAt: (threadId) => lastRowAt(threadId), groupIdOf: (threadId) => store.groupByThread(threadId)?.id, visibleGroup: (groupId) => visible.group(groupId), createdAt: (threadId) => { const owner = store.botByThread(threadId); return owner ? store.taskByThread(owner.id, threadId)?.createdAt : undefined; }, onPlan: (instanceId) => registry.lastSnapshot(instanceId)?.billing === "subscription", doneLast24h, now }),
-      });
-    }
+    if (method === "GET" && path === "/api/team-map") return json(res, 200, teamMap.view(visible));
 
     if (path === "/api/routines" && method === "GET") {
       return json(res, 200, {
