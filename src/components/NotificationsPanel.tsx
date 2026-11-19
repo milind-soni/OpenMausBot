@@ -80,7 +80,7 @@ export function NotificationBell({ bar }: { bar?: string }) {
       aria-pressed={state.notificationsOpen}
       className={cn("relative", bar ?? "flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink", bar && state.notificationsOpen && "text-accent hover:text-accent")}
     >
-      <Bell size={bar ? 15 : 17} strokeWidth={bar ? 1.75 : undefined} aria-hidden="true" />
+      <Bell size={bar ? 15 : 17} aria-hidden="true" />
       {unread > 0 && (
         <span className={cn("absolute flex items-center justify-center rounded-full bg-accent font-semibold text-accent-ink", bar ? "-right-1 -top-0.5 h-[13px] min-w-[13px] px-0.5 text-[9px]" : "-right-0.5 -top-0.5 h-[15px] min-w-[15px] px-1 text-[10px]")}>
           {unread > 99 ? "99+" : unread}

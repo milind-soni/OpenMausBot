@@ -369,7 +369,7 @@ describe("the model picker in Simple mode", () => {
     expect(markup.replace(/title="[^"]*"/, "")).not.toContain("High");
     expect(String(chip.props.title)).toContain("High thinking");
     expect(String(chip.props.title)).not.toContain("effort");
-    expect(String(chip.props.className)).toContain("h-8");
+    expect(String(chip.props.className)).toContain("h-9");
     expect(String(chip.props.className)).toContain("rounded-full");
     expect(String(chip.props.className)).not.toMatch(/\bborder\b|bg-control/);
     expect(markup).not.toContain("@max-4xl/chathead");

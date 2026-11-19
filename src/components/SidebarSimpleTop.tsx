@@ -35,7 +35,7 @@ export function SidebarSearchToggle({ open, onToggle, corner = false, ref }: { o
       title={t("sidebar.searchAria")}
       className={corner ? SIMPLE_CORNER_BUTTON : SIMPLE_TOP_BUTTON}
     >
-      <Search size={corner ? 17 : 18} strokeWidth={1.5} aria-hidden="true" />
+      <Search size={16} aria-hidden="true" />
     </button>
   );
 }

@@ -18,7 +18,7 @@ export function WatchScreenButton({ botId, messages, liveTools, place }: { botId
     <button
       data-testid="watch-screen"
       onClick={(event) => { writeComputerPanelView(botId, screen === "browser" ? "browser" : "computer"); rememberComputerPanelOpen({ botId, opener: event.currentTarget, tabs: event.detail === 0, browser: screen === "browser" }); dispatch({ type: "toggleComputer", open: true }); }}
-      className={cn("flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink", COMPACT_BUBBLE)}
+      className={cn("flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 h-9 px-3 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink", COMPACT_BUBBLE)}
       title={t("chat.watchScreenHint")}
     >
       <Monitor size={13} aria-hidden="true" />
