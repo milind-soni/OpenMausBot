@@ -110,7 +110,7 @@ import { askForMicrophone, openPrivacySettings } from "./privacy-settings.mjs";
 import { createHomeWindow, installHomeWindowIpc, HOME_SCREEN_PATH } from "./home-window.mjs";
 import { createTeamProfileSeeds } from "./team-profile-seed.mjs";
 import { createHomePlaces } from "./home-places.mjs"; import { openStartPlace } from "./start-place.mjs"; import { createDesktopRing, installAccounts } from "./accounts-main.mjs"; import { createAddedCloudNotice, installCloudRail, railPlaces } from "./cloud-rail.mjs"; import { createPlaceInboxWatch } from "./place-inbox-watch.mjs"; import { homeLook, otherOwnClouds, withoutOldCloudHome } from "./cloud-list.mjs"; import { installPlaceLook } from "./place-look.mjs"; import { CHROME_RAIL_PATH, createChromeRail } from "./chrome-rail.mjs"; import { openComputerSettings } from "./open-computer-settings.mjs"; import { createPlacesTogether, installPlacesTogether, PLACES_TOGETHER_FILE } from "./places-together.mjs"; import { createBotLinkMain } from "./bot-link-main.mjs";
-import { createWindowStateFile } from "./window-state-file.mjs"; import { createSystemProxyCache } from "./system-proxy.mjs";
+import { createWindowStateFile } from "./window-state-file.mjs"; import { createSystemProxyCache } from "./system-proxy.mjs"; import { createBootHeadStart } from "./boot-head-start.mjs";
 import { createEnvironmentsFile, ENVIRONMENTS_SAVE_FAILED } from "./environments-file.mjs";
 import { createOrgLibrary } from "./org-library.mjs";
 import { createCompanyBackups } from "./company-backups.mjs";
@@ -289,7 +289,7 @@ let companyBackupConfigurationRevision = 0;
 const managedDesktopRelay = createManagedDesktopRelay();
 const includedX = createDesktopIncludedX({ account: () => cloudAccount, server: () => serverProc, log: slog }), includedPages = createDesktopIncludedPages({ account: () => cloudAccount, server: () => serverProc, log: slog }), phoneLinkFact = createPhoneLinkFact({ retired: () => companionTunnelRetired(secureCredentialState?.read() ?? secureCredentials), server: () => (serverReady ? serverProc : null), log: slog }), phonePushAccess = createPhonePushAccessSync({ server: () => (serverReady ? serverProc : null), credentials: () => secureCredentialState?.read() ?? secureCredentials, controlPlane: () => resolveCompanionControlPlaneURL({ isPackaged: app.isPackaged, environment: process.env }), log: slog });
 const cloudPower = createCloudPowerGate({ power: () => cloudAccount?.power() ?? null, wanted: () => Boolean(cloudSync?.running() || computerSharing?.lendingToCloud()) });
-const utilityServerExits = new WeakMap(), systemProxy = createSystemProxyCache(); // A Mac app opened from Finder never gets the shell's proxy.
+const utilityServerExits = new WeakMap(), systemProxy = createSystemProxyCache(), bootHeadStart = createBootHeadStart({ credentials: () => loadSecureCredentials(), proxy: () => systemProxy.refresh() }); // A Mac app opened from Finder never gets the shell's proxy.
 const UTILITY_SERVER_STOP_TIMEOUT_MS = 9_500; // the server's shutdown deadline (8 s, server/graceful-shutdown.ts) and its 1 s log flush
 const trustedApprovalMode = createTrustedApprovalModeCoordinator({ randomId: randomUUID, t: (...args) => nativeT(...args) });
 const desktopMutationToken = randomBytes(32).toString("base64url");
@@ -1190,7 +1190,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
 
 async function startServerPackaged() {
   let everyPortForeignOwned = true;
-  await systemProxy.refresh();
+  await bootHeadStart.take("proxy");
   for (let attempt = 0; attempt < 2; attempt++) {
     for (const port of DESKTOP_PORTS) {
       if (desktopShutdownStarted) return false;
@@ -2785,6 +2785,7 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
+  bootHeadStart.start(); // read while the splash is made; the splash then draws in its own process as the server starts
   await evictStartupCacheOnce({
     userData: app.getPath("userData"),
     currentVersion: app.getVersion(),
@@ -2811,7 +2812,6 @@ app.whenReady().then(async () => {
     onShow: (win) => desktopTray?.windowShown(win),
     onFinished: () => { startupScreen = null; }, onReveal: via => launchAnalytics.stage("window_shown", { reason: via }),
   });
-  await startupScreen?.ready;
   if (desktopShutdownStarted) return;
   session.defaultSession.on("will-download", (_event, item) => {
     if (mediaDownloads.claim(item)) return;
@@ -2850,7 +2850,7 @@ app.whenReady().then(async () => {
     ownerToken: () => (app.isPackaged && serverReady ? desktopMutationToken : null) });
   if (app.isPackaged) app.setAsDefaultProtocolClient("openmausbot");
   if (process.platform === "darwin") app.dock.setIcon(APP_ICON);
-  secureCredentials = await loadSecureCredentials();
+  secureCredentials = await bootHeadStart.take("credentials");
   // An orphaned third-party key with no clear handler left: drop it rather than keep it at rest.
   if (secureCredentials && Object.hasOwn(secureCredentials, "assemblyAiApiKey") && !credentialStoreUnavailable) {
     try {
@@ -2986,7 +2986,7 @@ app.whenReady().then(async () => {
     }
     if (!serverReady && !desktopShutdownStarted) serverSupervisor.startLater(startServerPackaged); // an always-on home keeps trying
   }
-  if (desktopShutdownStarted) return;
+  await startupScreen?.ready; if (desktopShutdownStarted) return;
   if (app.isPackaged && !desktopRemoteAccess) { void ensureManagedDesktop().start().then(() => companyBackupSchedule.start()).catch(() => {}); void managedDesktop.whenRestored().then(() => tailnetShare.recheck()); }
   // Fresh local use never makes a Cloud request; start only restores an existing grant.
   if (app.isPackaged && !desktopRemoteAccess) {
