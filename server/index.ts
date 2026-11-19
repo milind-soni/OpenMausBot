@@ -30,6 +30,11 @@ import type { ModelSelection, RuntimeEvent, SendTurnInput } from "./contracts.ts
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
+import { findApp } from "./apps/catalog.ts";
+import { buildAppsPrompt } from "./apps/prompt.ts";
+import { checkConnection, describeApps, invalidateAppStatus } from "./apps/status.ts";
+import { appConnection, removeAppSettings, saveAppSettings, validateLocalEndpoint } from "./apps/store.ts";
+import { listAppsForBuddy, useApp } from "./apps/use.ts";
 import { handoffMentions, mentionedBots, ROOM_DEFAULT_HOPS, ROOM_IDLE_MINUTES_MAX, ROOM_MAX_HOPS, Store, type Attachment, type GroupRecord, type Message } from "./store.ts";
 import { projectRegistryCandidates, readRegisteredProjects, resolveProjectContext } from "./projects.ts";
 import { CHAT_FORMATTING_HINT } from "./chat-formatting.ts";
@@ -518,9 +523,10 @@ function formatAttachmentContext(attachments?: Attachment[]): string {
 // ── turn dispatch (upstream ProviderCommandReactor, miniature) ──────────
 type TurnIntegrations = NonNullable<SendTurnInput["integrations"]>;
 
-/** Connected apps and the bot's computer on this machine — shared
- * by 1:1 and room turns so the two paths can't drift apart. */
-async function computerAndAppIntegrations(
+/** The bot's computer on this machine — shared by 1:1 and room turns so
+ * the two paths can't drift apart. (Apps reach Buddies through the agents
+ * proxy instead: see server/apps/.) */
+async function computerIntegrations(
   bot: { id: string; name: string; computer?: string },
 ): Promise<TurnIntegrations> {
   const integrations: TurnIntegrations = {};
@@ -743,7 +749,7 @@ async function startTurn(
 
   void (async () => {
     try {
-      const integrations = await computerAndAppIntegrations(bot);
+      const integrations = await computerIntegrations(bot);
       const computerHint = computerPromptHint(integrations);
       // peer-agent comms: give a user-initiated turn the list_bots/ask_bot
       // tools. Delegated turns retain the proxy for Preview/task/schedule
@@ -766,6 +772,8 @@ async function startTurn(
             store.bots.filter((b) => b.id !== bot.id),
           )
         : [];
+      // apps travel through the same proxy, so only Buddies that have it hear about them
+      const appsPrompt = integrations.agents ? await buildAppsPrompt(text) : "";
 
       if (turnContexts.get(bot.threadId) !== context || stoppedConversations.has(bot.threadId)) return;
       await instance.adapter.sendTurn({
@@ -782,6 +790,7 @@ async function startTurn(
           (projectContext.system ? `\n\n${projectContext.system}` : "") +
           (taskContext.system ? `\n\n${taskContext.system}` : "") +
           (computerHint ? ` ${computerHint}` : "") +
+          (appsPrompt ? `\n\n${appsPrompt}\n\n` : "") +
           (integrations.agents
             ? ` ${PREVIEW_BROWSER_RULES} You can create_schedule, list_schedules, and cancel_schedule for your own conversation or rooms you belong to. Schedules remain visible to the user and are capped at 20 active schedules per bot. You can use the shared task board through list_tasks, create_task, claim_task, update_task, delegate_task, and delete_task. Always use these tools for task changes; never read, edit, or replace tasks.json directly. Claim a suitable unassigned task before starting it, keep its status current, and move completed work to review so the user can verify it. If asked about your current, assigned, or in-progress work, call list_tasks (filter by your own assignee) before answering — do not guess from the filesystem or say none exist without checking.${canMessagePeers ? " You can also work with the user's other bots — list_bots shows who's available, and ask_bot sends one of them a message and returns their reply." : ""}`
             : "") +
@@ -963,12 +972,13 @@ async function runGroupMemberTurn(
     .reverse()
     .find((message) => message.role === "user" && message.kind === "text");
   const latestUserText = latestUserMessage?.text ?? "";
-  const integrations = await computerAndAppIntegrations(bot);
+  const integrations = await computerIntegrations(bot);
   if (instance.adapter.capabilities.agentsMcp === true) integrations.agents = agentsIntegration(bot.id, MAX_COMMS_DEPTH);
 
   const attPrompt = formatAttachmentContext(latestUserMessage?.attachments);
   const projectContext = resolveProjectContext([latestUserText, group.bulletin, bot.description]);
   const taskContext = resolveTaskContext([latestUserText, group.bulletin, bot.description], taskStore.list());
+  const appsPrompt = integrations.agents ? await buildAppsPrompt(latestUserText) : "";
   const system = [
     `You are ${bot.name}, a bot in the room "${group.name}" in Gerer Build Studio.`,
     bot.title && `Role: ${bot.title}.`,
@@ -979,6 +989,7 @@ async function runGroupMemberTurn(
     taskContext.system,
     computerPromptHint(integrations),
     integrations.agents && PREVIEW_BROWSER_RULES,
+    appsPrompt,
     `Reply as yourself, briefly and conversationally. To bring a teammate in, mention them like @Name — they'll see the conversation and respond.`,
     CHAT_FORMATTING_HINT,
   ]
@@ -1549,6 +1560,27 @@ const server = createServer(async (req, res) => {
           if (typeof body.text === "string" && body.text.length > 20_000) throw testingError("Input text is too long.");
         }
         return json(res, 200, await previewTesting.execute(session, action, body));
+      }
+      // apps for Buddies (list_apps / use_app): the token is added here,
+      // never handed to the agent process
+      if (method === "GET" && path === "/api/internal/apps") {
+        try {
+          return json(res, 200, { apps: await listAppsForBuddy(url.searchParams.get("app") ?? undefined) });
+        } catch (e) {
+          return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      const appCall = path.match(/^\/api\/internal\/apps\/([\w-]+)\/call$/);
+      if (appCall && method === "POST") {
+        const body = await readBody(req);
+        const tool = typeof body.tool === "string" ? body.tool.trim() : "";
+        if (!tool) return json(res, 400, { error: "use_app needs the name of one of the app's actions (tool)." });
+        const args = body.arguments && typeof body.arguments === "object" && !Array.isArray(body.arguments) ? body.arguments : {};
+        try {
+          return json(res, 200, { result: await useApp(appCall[1], tool, args as Record<string, unknown>) });
+        } catch (e) {
+          return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+        }
       }
       if (method === "GET" && path === "/api/internal/agents") {
         const self = url.searchParams.get("self");
@@ -2446,6 +2478,44 @@ const server = createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
 
+    // ── apps (curated, local MCP; tokens are write-only) ──
+    if (method === "GET" && path === "/api/apps") {
+      return json(res, 200, { apps: await describeApps(url.searchParams.get("refresh") === "1") });
+    }
+    m = path.match(/^\/api\/apps\/([\w-]+)\/test$/);
+    if (m && method === "POST") {
+      const app = findApp(m[1]);
+      if (!app) return json(res, 404, { error: "no such app" });
+      const body = await readBody(req);
+      const saved = appConnection(app.id);
+      let endpoint = saved.endpoint;
+      try {
+        if (typeof body.endpoint === "string" && body.endpoint.trim()) endpoint = validateLocalEndpoint(body.endpoint);
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+      const token = typeof body.token === "string" && body.token.trim() ? body.token.trim() : saved.token;
+      const status = await checkConnection(app, endpoint, token);
+      return json(res, 200, { status: { state: status.state, message: status.message, toolCount: status.tools.length, toolNames: status.tools.map((t) => t.name) } });
+    }
+    m = path.match(/^\/api\/apps\/([\w-]+)$/);
+    if (m && method === "PUT") {
+      if (!findApp(m[1])) return json(res, 404, { error: "no such app" });
+      const body = await readBody(req);
+      try {
+        saveAppSettings(m[1], { endpoint: body.endpoint, token: body.token });
+      } catch (e) {
+        return json(res, 400, { error: e instanceof Error ? e.message : String(e) });
+      }
+      invalidateAppStatus(m[1]);
+      return json(res, 200, { apps: await describeApps() });
+    }
+    if (m && method === "DELETE") {
+      if (!findApp(m[1])) return json(res, 404, { error: "no such app" });
+      removeAppSettings(m[1]);
+      invalidateAppStatus(m[1]);
+      return json(res, 200, { apps: await describeApps() });
+    }
 
     // packaged app: the server serves the built UI too (window → :8899 for
     // everything, no dev proxy to die). GBS_STATIC_DIR is set by Electron.

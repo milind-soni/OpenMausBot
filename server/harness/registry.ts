@@ -134,6 +134,7 @@ export class ProviderRegistry {
             snapshot: { state: "unavailable", reason: entry.shadow.reason } satisfies ProviderSnapshot,
             models: { default: "", options: [] },
             autoApprove: null,
+            appsCapable: false,
           };
         }
         const inst = entry.live;
@@ -153,6 +154,9 @@ export class ProviderRegistry {
           snapshot,
           models,
           autoApprove: entry.driver.getAutoApprove?.(entry.config) ?? null,
+          // apps reach a Buddy through the harness MCP proxy, so only drivers
+          // that mount it can use them (shown as model tags on the Apps screen)
+          appsCapable: inst.adapter.capabilities.agentsMcp === true,
         };
       }),
     );

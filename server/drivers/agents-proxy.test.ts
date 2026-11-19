@@ -21,6 +21,7 @@ let lastAskBody: any = null;
 let askResponse: unknown = { botName: "Helper", text: "hi from helper" };
 let lastTaskRequest: { method?: string; url?: string; body?: any } | null = null;
 let taskStatus = 200;
+let lastAppCall: { url?: string; body?: any } | null = null;
 const task = {
   id: "task-one",
   title: "Build board",
@@ -63,6 +64,20 @@ beforeAll(async () => {
     if (req.url?.startsWith("/api/internal/preview-testing/")) {
       res.writeHead(200, { "content-type": "application/json" });
       return res.end(JSON.stringify({ sessionId: "test-session", image: "aW1hZ2U=", artifactPath: "/project/evidence.png" }));
+    }
+    if (req.method === "GET" && req.url?.startsWith("/api/internal/apps")) {
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ apps: [{ id: "edits", name: "Edits", status: "ready", actions: [{ name: "create_project" }] }] }));
+    }
+    if (req.method === "POST" && req.url?.startsWith("/api/internal/apps/")) {
+      let data = "";
+      req.on("data", (c) => (data += c));
+      req.on("end", () => {
+        lastAppCall = { url: req.url, body: JSON.parse(data) };
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ result: { content: [{ type: "text", text: "Project TEST · montage created" }, { type: "image", data: "anBn", mimeType: "image/jpeg" }] } }));
+      });
+      return;
     }
     if (req.method === "GET" && req.url?.startsWith("/api/internal/agents")) {
       res.writeHead(200, { "content-type": "application/json" });
@@ -141,7 +156,7 @@ describe("agents-proxy MCP surface", () => {
     const list = await rpc("tools/list");
     expect(list.result.tools.map((t: { name: string }) => t.name)).toEqual([
       "preview_status", "preview_open", "preview_snapshot", "preview_screenshot", "preview_diagnostics", "preview_close", "preview_action",
-      "list_schedules", "cancel_schedule", "create_schedule", "list_bots", "ask_bot", "list_tasks", "create_task", "claim_task", "update_task", "delegate_task", "delete_task",
+      "list_schedules", "cancel_schedule", "create_schedule", "list_apps", "use_app", "list_bots", "ask_bot", "list_tasks", "create_task", "claim_task", "update_task", "delegate_task", "delete_task",
     ]);
   });
 
@@ -150,6 +165,16 @@ describe("agents-proxy MCP surface", () => {
     expect(res.result.content[0].text).toContain("/project/evidence.png");
     expect(res.result.content[0].text).not.toContain("aW1hZ2U=");
     expect(res.result.content[1]).toEqual({ type: "image", data: "aW1hZ2U=", mimeType: "image/png" });
+  });
+
+  it("list_apps and use_app go through the harness, never straight to the app", async () => {
+    const list = await callTool("list_apps", {});
+    expect(list.result.content[0].text).toContain("create_project");
+    const res = await callTool("use_app", { app_id: "edits", tool: "create_project", arguments: { name: "TEST · montage" } });
+    expect(lastAppCall).toEqual({ url: "/api/internal/apps/edits/call", body: { tool: "create_project", arguments: { name: "TEST · montage" } } });
+    expect(res.result.content[0].text).toBe("Project TEST · montage created");
+    expect(res.result.content[1]).toEqual({ type: "image", data: "anBn", mimeType: "image/jpeg" });
+    expect(lastAuth).toBe(`Bearer ${TOKEN}`);
   });
 
   it("list_bots renders the roster and authenticates with the shared token", async () => {

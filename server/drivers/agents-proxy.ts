@@ -7,6 +7,8 @@
 //   list_bots()            → the other bots in this workspace + their status
 //   ask_bot(bot_id, msg)   → send msg to that bot, wait, return its reply
 //   list/create/claim/update/delegate_task → shared task-board operations
+//   list_apps / use_app    → the user's curated desktop apps (e.g. Edits);
+//                            the harness adds each app's token when forwarding
 //
 // Speaks raw JSON-RPC 2.0 over stdio (no MCP SDK — house style, matches
 // permission-proxy). All state comes from env, injected by
@@ -33,6 +35,22 @@ const TOOLS = [
     group_id: { type: "string" }, prompt: { type: "string" }, timezone: { type: "string" },
     repeat: { type: "object", properties: { kind: { type: "string", enum: ["once", "daily", "weekdays", "weekly", "every"] }, at: { type: "string" }, time: { type: "string" }, days: { type: "array", items: { type: "integer", minimum: 0, maximum: 6 } }, hours: { type: "integer", minimum: 1, maximum: 168 } }, required: ["kind"] },
   }, required: ["prompt", "timezone", "repeat"] } },
+  {
+    name: "list_apps",
+    description:
+      "List the user's desktop apps (e.g. Edits for video editing) with live status. Ready apps include their actions; apps that aren't ready include setup steps to give the user. Pass app_id to get that app's full action schemas before calling use_app.",
+    inputSchema: { type: "object", properties: { app_id: { type: "string" } } },
+  },
+  {
+    name: "use_app",
+    description:
+      "Run one action in a ready app from list_apps. tool is the action name; arguments must match its input schema. Only report success when this returns a successful result.",
+    inputSchema: {
+      type: "object",
+      properties: { app_id: { type: "string" }, tool: { type: "string" }, arguments: { type: "object" } },
+      required: ["app_id", "tool"],
+    },
+  },
   {
     name: "list_bots",
     description:
@@ -201,7 +219,35 @@ function renderTask(task: Json): string {
   return lines.join("\n");
 }
 
-async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean; image?: string }> {
+/** An app's MCP tools/call result → proxy text (+ first image, if any). */
+function renderAppResult(result: Json): { text: string; isError?: boolean; image?: string; mimeType?: string } {
+  const content = Array.isArray(result.content) ? (result.content as Json[]) : [];
+  const texts = content.filter((c) => c.type === "text").map((c) => String(c.text ?? ""));
+  const image = content.find((c) => c.type === "image" && typeof c.data === "string");
+  if (!texts.length && result.structuredContent) texts.push(JSON.stringify(result.structuredContent, null, 2));
+  return {
+    text: texts.join("\n\n") || (image ? "The app returned an image." : "The app finished without a message."),
+    isError: result.isError === true,
+    image: image ? String(image.data) : undefined,
+    mimeType: image ? String(image.mimeType ?? "image/png") : undefined,
+  };
+}
+
+async function callTool(name: string, args: Json): Promise<{ text: string; isError?: boolean; image?: string; mimeType?: string }> {
+  if (name === "list_apps") {
+    const appId = typeof args.app_id === "string" && args.app_id.trim() ? args.app_id.trim() : "";
+    const r = await api(`/api/internal/apps${appId ? `?app=${encodeURIComponent(appId)}` : ""}`);
+    return { text: JSON.stringify(r.apps, null, 2) };
+  }
+  if (name === "use_app") {
+    const appId = String(args.app_id ?? "").trim();
+    if (!appId) return { text: "use_app needs app_id (from list_apps).", isError: true };
+    const r = await api(`/api/internal/apps/${encodeURIComponent(appId)}/call`, {
+      method: "POST",
+      body: JSON.stringify({ tool: args.tool, arguments: args.arguments ?? {} }),
+    });
+    return renderAppResult((r.result ?? {}) as Json);
+  }
   if (name.startsWith("preview_")) {
     const operation = name.slice("preview_".length);
     const result = await api(`/api/internal/preview-testing/${operation}`, operation === "status" ? undefined : { method: "POST", body: JSON.stringify(args) });
@@ -327,8 +373,8 @@ async function handle(msg: Json) {
       const name = params.name as string;
       if (!TOOLS.some((t) => t.name === name)) return rpcErr(id, -32602, `Unknown tool: ${name}`);
       try {
-        const { text, isError, image } = await callTool(name, (params.arguments ?? {}) as Json);
-        if (image) ok(id, { content: [{ type: "text", text }, { type: "image", data: image, mimeType: "image/png" }], isError: Boolean(isError) });
+        const { text, isError, image, mimeType } = await callTool(name, (params.arguments ?? {}) as Json);
+        if (image) ok(id, { content: [{ type: "text", text }, { type: "image", data: image, mimeType: mimeType ?? "image/png" }], isError: Boolean(isError) });
         else textResult(id, text, isError);
       } catch (e) {
         textResult(id, (e as Error).message, true);
