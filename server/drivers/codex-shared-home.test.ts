@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { keepChatsOutOfCodexHistory, linkSharedCodexHome } from "./codex-shared-home.ts";
+import { inheritsUserCodexInstructions, keepChatsOutOfCodexHistory, linkSharedCodexHome } from "./codex-shared-home.ts";
 
 let root: string;
 let shared: string;
@@ -59,6 +59,56 @@ describe("linkSharedCodexHome", () => {
       "session_index.jsonl", "state_5.sqlite", "logs_2.sqlite", "archived_sessions", "shell_snapshots", "thread-writer-locks"]) {
       expect(existsSync(join(plan, name)), name).toBe(false);
     }
+  });
+
+  it("leaves the person's own AGENTS.md out of the plan's home, and keeps their sign-in, config and skills linked", () => {
+    write(join(shared, "AGENTS.md"), "person's instructions");
+    write(join(shared, "AGENTS.override.md"), "person's override");
+    write(join(shared, "config.toml"));
+    write(join(shared, "skills", "review", "SKILL.md"));
+    write(join(shared, "auth.json"), "person's sign-in");
+
+    expect(linkSharedCodexHome(shared, plan, "person", false)).toBe(true);
+
+    for (const name of ["AGENTS.md", "AGENTS.override.md"]) expect(existsSync(join(plan, name)), name).toBe(false);
+    for (const name of ["config.toml", "skills", "auth.json"]) expect(linksTo(join(plan, name), join(shared, name)), name).toBe(true);
+    expect(readFileSync(join(shared, "AGENTS.md"), "utf8")).toBe("person's instructions");
+  });
+
+  it("links the person's AGENTS.md when asked to inherit their setup", () => {
+    write(join(shared, "AGENTS.md"), "person's instructions");
+    write(join(shared, "AGENTS.override.md"), "person's override");
+
+    linkSharedCodexHome(shared, plan, "own", true);
+
+    for (const name of ["AGENTS.md", "AGENTS.override.md"]) expect(linksTo(join(plan, name), join(shared, name)), name).toBe(true);
+  });
+
+  it("removes an AGENTS.md link from before, and leaves the person's file where it is", () => {
+    write(join(shared, "AGENTS.md"), "person's instructions");
+    write(join(shared, "config.toml"));
+    mkdirSync(plan, { recursive: true });
+    symlinkSync(join(shared, "AGENTS.md"), join(plan, "AGENTS.md"));
+
+    linkSharedCodexHome(shared, plan, "own", false);
+
+    expect(() => lstatSync(join(plan, "AGENTS.md"))).toThrow();
+    expect(linksTo(join(plan, "config.toml"), join(shared, "config.toml"))).toBe(true);
+    expect(readFileSync(join(shared, "AGENTS.md"), "utf8")).toBe("person's instructions");
+  });
+
+  it("follows OMB_CODEX_INHERIT_USER_CONFIG when no choice is passed", () => {
+    write(join(shared, "AGENTS.md"), "person's instructions");
+    expect(inheritsUserCodexInstructions({})).toBe(false);
+    expect(inheritsUserCodexInstructions({ OMB_CODEX_INHERIT_USER_CONFIG: "1" })).toBe(true);
+
+    linkSharedCodexHome(shared, plan);
+    expect(existsSync(join(plan, "AGENTS.md"))).toBe(false);
+
+    vi.stubEnv("OMB_CODEX_INHERIT_USER_CONFIG", "1");
+    linkSharedCodexHome(shared, plan);
+    expect(linksTo(join(plan, "AGENTS.md"), join(shared, "AGENTS.md"))).toBe(true);
+    vi.unstubAllEnvs();
   });
 
   it("removes links to the person's chats from before, and leaves the chats themselves where they are", () => {
@@ -208,6 +258,17 @@ describe("keepChatsOutOfCodexHistory", () => {
     expect(linksTo(join(mausHome("codex"), "auth.json"), join(shared, "auth.json"))).toBe(true);
     expect(linksTo(join(mausHome("codex"), "config.toml"), join(shared, "config.toml"))).toBe(true);
     expect(turnEnv({ CODEX_HOME: shared, CODEX_SQLITE_HOME: join(root, "elsewhere") }).CODEX_SQLITE_HOME).toBe(mausHome("codex"));
+  });
+
+  it("keeps the person's AGENTS.md out of MausBot's Codex home for a turn on their own login", () => {
+    write(join(shared, "auth.json"), "person's sign-in");
+    write(join(shared, "AGENTS.md"), "person's instructions");
+    write(join(shared, "config.toml"));
+    const env = turnEnv();
+    expect(env.CODEX_HOME).toBe(mausHome("codex"));
+    expect(existsSync(join(mausHome("codex"), "AGENTS.md"))).toBe(false);
+    expect(linksTo(join(mausHome("codex"), "auth.json"), join(shared, "auth.json"))).toBe(true);
+    expect(linksTo(join(mausHome("codex"), "config.toml"), join(shared, "config.toml"))).toBe(true);
   });
 
   it("keeps the person's home when the login may be in the keyring, cannot be linked, or the home is MausBot's already", () => {
