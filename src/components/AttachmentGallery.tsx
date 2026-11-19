@@ -520,7 +520,7 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
           <div className="flex max-w-full flex-wrap gap-2">
             {thumbs.map((item) => item.kind === "image" && (
               <div key={item.key} className="min-w-0 max-w-full" title={item.image.name} {...reveal.targetProps(item.source)}>
-                <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} gallery={previews} onPreview={(items) => setSelected({ image: item.image, items })} layout="oriented" className="max-w-full border-0" />
+                <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} gallery={previews} onPreview={(items) => setSelected({ image: item.image, items })} className="h-24 w-auto max-w-48 rounded-2xl border-0" />
               </div>
             ))}
           </div>
