@@ -180,7 +180,7 @@ describe("ensureGrokSteer", () => {
 
   it("writes nothing when ui is defined another way, or the file cannot be read with confidence", () => {
     signedIn();
-    for (const text of ['ui.screen_mode = "minimal"\n', 'ui = { screen_mode = "minimal" }\n', 'note = """\n[ui]\n"""\n']) {
+    for (const text of ['ui.screen_mode = "minimal"\n', 'ui = { screen_mode = "minimal" }\n', 'note = """\n[ui]\n"""\n', "ui = []\n", "[[ui]]\nx = 1\n"]) {
       writeFileSync(config(), text);
       ensureGrokSteer(env());
       expect(readFileSync(config(), "utf8"), text).toBe(text);

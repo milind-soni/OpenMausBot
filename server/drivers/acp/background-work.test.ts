@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { closeEndsBackgroundWork } from "./background-work.ts";
+import { closeEndsBackgroundWork, WAKE_GRACE_MS } from "./background-work.ts";
 
 const capable = { agentCapabilities: { sessionCapabilities: { close: {} } } };
 
@@ -15,6 +15,14 @@ describe("close-ends background work", () => {
     expect(work.wakes(undefined)).toBe(false);
   });
 
+  it("takes an update that trails a turn of ours as that turn's tail, not a wake", () => {
+    const work = closeEndsBackgroundWork();
+    expect(work.wakes({ sessionUpdate: "tool_call_update" }, 0)).toBe(false);
+    expect(work.wakes({ sessionUpdate: "agent_message_chunk" }, WAKE_GRACE_MS - 1)).toBe(false);
+    expect(work.wakes({ sessionUpdate: "agent_message_chunk" }, WAKE_GRACE_MS)).toBe(true);
+    expect(work.wakes({ sessionUpdate: "agent_message_chunk" })).toBe(true);
+  });
+
   it("closes the session, forgets its live id, and resumes the same id", async () => {
     const work = closeEndsBackgroundWork();
     const calls: string[] = [];
@@ -28,11 +36,11 @@ describe("close-ends background work", () => {
     expect(work.resumeCursor(undefined, null, {})).toBeNull();
   });
 
-  it("does nothing when the agent cannot close sessions, and keeps the session when the close fails", async () => {
+  it("reports it could not end the work when the agent cannot close sessions, and keeps the session when the close fails", async () => {
     const work = closeEndsBackgroundWork();
     const calls: string[] = [];
     const noClose = { sessionId: "s1" as string | null, cwd: "/w", initResult: { agentCapabilities: { sessionCapabilities: {} } } };
-    await work.end(noClose, async (method: string) => { calls.push(method); return {}; });
+    expect(await work.end(noClose, async (method: string) => { calls.push(method); return {}; })).toBe(false);
     expect(calls).toEqual([]);
     expect(noClose.sessionId).toBe("s1");
 

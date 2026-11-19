@@ -30,8 +30,9 @@
 //       STOP_ME in it waits for session/cancel; FAKE_ACP_WAKE_MS (300) later that shell's finish wakes a turn no prompt
 //       asked for, one step every FAKE_ACP_STEP_MS (50), each appended to FAKE_ACP_WOKEN_FILE, until session/close or
 //       session/delete interrupts it; only session/delete ends the job. session/fork answers <id>-fork; a closed or
-//       deleted session refuses session/prompt until loaded. Advertises close, delete and, unless FAKE_ACP_NO_FORK=1, fork; FAKE_ACP_CLOSE_ENDS_JOBS=1: session/close
-//       ends the job too, as grok 1.0.89's does)
+//       deleted session refuses session/prompt until loaded. Advertises close (unless FAKE_ACP_NO_CLOSE=1), delete and, unless
+//       FAKE_ACP_NO_FORK=1, fork; FAKE_ACP_CLOSE_ENDS_JOBS=1: session/close ends the job too, as grok 1.0.89's does;
+//       FAKE_ACP_LATE_UPDATE=1: a tool_call_update of the finished prompt arrives 50 ms after its answer)
 //   FAKE_ACP_GROK_NATIVE_MCP  _x.ai/mcp/list reports these comma-separated native servers after the session's accepted ones
 //   FAKE_ACP_MCP_TRANSPORTS  remote MCP transports advertised in initialize, e.g. "http,sse"
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
@@ -927,7 +928,8 @@ function handle(msg: any) {
               ...(agentName ? { loadSession: true, sessionCapabilities: { resume: true }, auth: { logout: true } } : {}),
               ...(closesSessions || deletesSessions
                 ? { sessionCapabilities: { ...(closesSessions ? { close: {} } : {}), ...(deletesSessions ? { delete: {} } : {}),
-                  ...(mode === "background-wake" ? { close: {}, ...(process.env.FAKE_ACP_NO_FORK === "1" ? {} : { fork: {} }) } : {}) } }
+                  ...(mode === "background-wake" ? { ...(process.env.FAKE_ACP_NO_CLOSE === "1" ? {} : { close: {} }),
+                    ...(process.env.FAKE_ACP_NO_FORK === "1" ? {} : { fork: {} }) } : {}) } }
                 : {}),
               ...(acceptsImages ? { promptCapabilities: { image: true } } : {}),
               ...(mcpTransports.length ? { mcpCapabilities: { http: mcpTransports.includes("http"), sse: mcpTransports.includes("sse") } } : {}),
@@ -989,15 +991,19 @@ function handle(msg: any) {
       break;
     }
     case "session/close":
-      if (process.env.FAKE_ACP_SESSION_CLOSE !== "error") endWokenStep(msg.params?.sessionId);
+      // A failed close leaves the session, its woken steps and its jobs exactly as they were.
+      if (process.env.FAKE_ACP_SESSION_CLOSE === "error") {
+        out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "close failed" } });
+        break;
+      }
+      endWokenStep(msg.params?.sessionId);
       if (process.env.FAKE_ACP_CLOSE_ENDS_JOBS === "1") {
         const job = backgroundJobs.get(String(msg.params?.sessionId))?.job;
         if (job) clearTimeout(job);
         backgroundJobs.delete(String(msg.params?.sessionId));
       }
       if (mode === "background-wake") detachedSessions.add(String(msg.params?.sessionId));
-      if (process.env.FAKE_ACP_SESSION_CLOSE === "error") out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "close failed" } });
-      else if (process.env.FAKE_ACP_SESSION_CLOSE_MS) setTimeout(() => result(msg.id, {}), Number(process.env.FAKE_ACP_SESSION_CLOSE_MS));
+      if (process.env.FAKE_ACP_SESSION_CLOSE_MS) setTimeout(() => result(msg.id, {}), Number(process.env.FAKE_ACP_SESSION_CLOSE_MS));
       else result(msg.id, {});
       break;
     case "session/delete": {
@@ -1372,6 +1378,9 @@ function handle(msg: any) {
           return;
         }
         complete();
+        if (process.env.FAKE_ACP_LATE_UPDATE === "1") {
+          setTimeout(() => update({ sessionUpdate: "tool_call_update", toolCallId: "tc-build", status: "completed" }), 50);
+        }
         return;
       }
       if (mode === "finished-tools") {

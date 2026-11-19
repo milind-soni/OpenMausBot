@@ -43,12 +43,25 @@ function stringValue(text: string): string | undefined {
   return end > 0 ? unescape(text.slice(1, end)) : undefined;
 }
 
-/** How many brackets and braces a value leaves open, ignoring strings and a trailing comment. */
+/** `text` without a trailing `#` comment; a `#` inside a string is kept. */
+function withoutComment(text: string): string {
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === "#") return text.slice(0, i);
+    if (c === '"' || c === "'") {
+      const close = c === '"' ? basicStringEnd(text, i) : text.indexOf("'", i + 1);
+      if (close < 0) return text;
+      i = close;
+    }
+  }
+  return text;
+}
+
+/** How many brackets and braces a value without comments leaves open, ignoring strings. */
 function openDepth(text: string): number {
   let depth = 0;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
-    if (c === "#") break;
     if (c === '"' || c === "'") {
       const close = c === '"' ? basicStringEnd(text, i) : text.indexOf("'", i + 1);
       if (close < 0) return depth;
@@ -71,24 +84,26 @@ export function readGrokFollowUp(text: string): GrokFollowUp {
     if (/^\s*(#.*)?$/.test(line)) continue;
     const header = HEADER.exec(line);
     if (header) {
-      table = header[1] === "[[" ? null : keyPath(header[2]);
+      const path = keyPath(header[2]);
+      table = header[1] === "[[" ? null : path;
+      if (header[1] === "[[" && same(path, ["ui"])) result.uiElsewhere = true;
       if (table && same(table, ["ui"]) && result.insertAt === undefined) result.insertAt = ends[i];
       continue;
     }
     const assign = ASSIGN.exec(line);
     if (!assign) { result.unclear = true; return result; }
-    let rest = assign[2].trim();
+    let rest = withoutComment(assign[2]).trim();
     if (rest.startsWith('"""') || rest.startsWith("'''")) { result.unclear = true; return result; }
-    while (openDepth(rest) > 0 && i + 1 < lines.length) rest += " " + lines[++i].replace(/\r$/, "").trim();
+    while (openDepth(rest) > 0 && i + 1 < lines.length) rest += " " + withoutComment(lines[++i].replace(/\r$/, "")).trim();
     if (table === null) continue;
     const path = [...table, ...keyPath(assign[1])];
     if (same(path, ["ui", "follow_up_behavior"])) {
       result.present = true;
       result.value = stringValue(rest);
       if (table.length === 0) result.uiElsewhere = true;
-    } else if (same(path, ["ui"]) && rest.startsWith("{")) {
+    } else if (same(path, ["ui"])) {
       result.uiElsewhere = true;
-      const inner = INLINE_KEY.exec(rest);
+      const inner = rest.startsWith("{") ? INLINE_KEY.exec(rest) : null;
       if (inner) { result.present = true; result.value = stringValue(inner[1].trim()); }
     } else if (path[0] === "ui" && table.length === 0 && path.length > 1) {
       result.uiElsewhere = true;

@@ -43,8 +43,17 @@ describe("Grok's ui.follow_up_behavior in config.toml", () => {
     expect(read("x = 1\n").insertAt).toBeUndefined();
   });
 
+  it("counts any other definition of ui, so no [ui] table is added after it", () => {
+    for (const text of ["ui = []\n", 'ui = "minimal"\n', "[[ui]]\nx = 1\n"]) {
+      expect(read(text), text).toMatchObject({ uiElsewhere: true, present: false });
+      expect(read(text).insertAt, text).toBeUndefined();
+    }
+  });
+
   it("steps over multi-line arrays and tables, and reports what it cannot place", () => {
     expect(read('args = [\n  "a",\n  "[ui]",\n]\n[ui]\nfollow_up_behavior = "steer"\n')).toMatchObject({ value: "steer", unclear: false });
+    expect(read('args = [ # arguments\n  "a", # one\n]\n[ui]\nfollow_up_behavior = "queue"\n')).toMatchObject({ value: "queue", unclear: false });
+    expect(read('args = ["a#b"]\n[ui]\nfollow_up_behavior = "steer" # on\n')).toMatchObject({ value: "steer" });
     expect(read('note = """\n[ui]\n"""\n')).toMatchObject({ unclear: true });
     expect(read("this is not toml\n")).toMatchObject({ unclear: true });
   });

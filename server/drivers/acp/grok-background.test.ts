@@ -107,6 +107,45 @@ describe("Grok background work", () => {
     }
   });
 
+  it("takes an update that trails our finished turn as its tail, not a wake, and keeps the session open", async () => {
+    const { instance, recorder, calls, ask } = await start("grok-background-late", { FAKE_ACP_LATE_UPDATE: "1", FAKE_ACP_WAKE_MS: "60000" });
+    const threadId = "t-grok-background-late";
+    try {
+      expect(await ask(threadId, "build it")).toMatchObject({ ok: true });
+      const session = promptedSession(calls)!;
+      await pause(600);
+      expect(calls().filter((call) => call.method === "session/close")).toEqual([]);
+      expect(await ask(threadId, "and now?")).toMatchObject({ ok: true });
+      expect(promptedSession(calls)).toBe(session);
+      expect(calls().filter((call) => call.method === "session/load")).toEqual([]);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
+  it("ends the session's process when the agent cannot close sessions, so no turn wakes unseen", async () => {
+    const { instance, recorder, calls, steps, ask } = await start("grok-background-no-close", { FAKE_ACP_NO_CLOSE: "1" });
+    const threadId = "t-grok-background-no-close";
+    try {
+      expect(await ask(threadId, "build it")).toMatchObject({ ok: true });
+      await until(() => steps() > 0);
+      let last = -1;
+      for (let i = 0; steps() !== last; i++) {
+        if (i > 40) throw new Error("the woken turn never stopped");
+        last = steps();
+        await pause(300);
+      }
+      expect(calls().filter((call) => call.method === "session/close")).toEqual([]);
+      expect(JSON.stringify(recorder.events)).not.toContain("WOKEN");
+      expect(await ask(threadId, "and now?")).toMatchObject({ ok: true });
+      expect(JSON.stringify(recorder.events)).not.toContain("WOKEN");
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+    }
+  });
+
   it("ends the session's background work when the person stops the turn, before it can wake a turn", async () => {
     const { instance, recorder, calls, steps, ask } = await start("grok-background-stop", { FAKE_ACP_WAKE_MS: String(STOP_WAKE_MS) });
     const threadId = "t-grok-background-stop";

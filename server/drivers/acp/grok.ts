@@ -1,6 +1,6 @@
 // Grok Build: the official `grok` CLI over ACP stdio (`grok … agent stdio`) on the grok.com
 // subscription login (~/.grok/auth.json), not the xAI API key. Verified against grok 1.0.0.
-import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse as parseYaml } from "yaml";
@@ -377,11 +377,13 @@ export function ensureGrokSteer(env: Record<string, string | undefined> = proces
   const next = found.insertAt !== undefined
     ? text.slice(0, found.insertAt) + (text.slice(0, found.insertAt).endsWith("\n") ? "" : eol) + line + text.slice(found.insertAt)
     : `${text}${text && !text.endsWith("\n") ? eol : ""}${text ? eol : ""}[ui]${eol}${line}`;
+  // config.toml can hold `api_key` values (ensureGrokInjectSlug writes them), so the staged copy is private from its first byte.
+  const staged = `${path}.omb-${process.pid}.tmp`;
   try {
-    const staged = `${path}.omb-${process.pid}.tmp`;
-    writeFileSync(staged, next);
+    writeFileSync(staged, next, { mode: 0o600, flag: "wx" });
     renameSync(staged, path);
   } catch {
+    rmSync(staged, { force: true });
     // Grok then keeps queueing mid-turn messages, its default.
   }
 }

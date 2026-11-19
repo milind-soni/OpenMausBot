@@ -24,8 +24,15 @@ OpenMausBot adds the line itself, for a signed-in Grok, when a turn starts. A
 the real CLI needs a server started by hand. Use a temporary data directory and a copy
 of the sign-in, never `~/.grok`:
 
-1. Make a data directory `$D` with `$D/grokhome/` holding a copy of `~/.grok/auth.json`
-   and an empty `$D/tmp/`.
+1. Make a private data directory, export it so the start script below can read it, and copy
+   the sign-in into it:
+
+   ```sh
+   export D="$(mktemp -d)"   # mode 0700 on Linux and macOS
+   mkdir -p "$D/grokhome" "$D/tmp"
+   cp ~/.grok/auth.json "$D/grokhome/auth.json"
+   ```
+
 2. Write `$D/config.json` (the server reads `config.json` from `OMB_DATA_DIR`):
 
    ```json
@@ -57,6 +64,8 @@ of the sign-in, never `~/.grok`:
    ```
 
 4. Open `http://127.0.0.1:19975` and create the first bot; it uses the Grok instance.
+5. When done, stop the server (Ctrl-C) and delete the directory, which holds the copied
+   sign-in: `rm -rf "$D"`.
 
 Grok's shell tool needs a shell the isolated environment can find, so use its file tools
 for the check below.
@@ -94,13 +103,19 @@ turn pays a `session/load`.
 
 When it cannot end the work:
 
-- **No `sessionCapabilities.close`.** An agent that does not advertise it gets no
-  `session/close`, and the driver leaves its background work as it was: it can still wake a
-  turn nobody prompted, and that turn runs unseen.
+- **No `sessionCapabilities.close`.** An agent that does not advertise it cannot have its
+  work ended that way, so the driver ends the session's process instead (the same step it
+  takes for a session that ignores `session/cancel`). For such an agent that happens at every
+  Stop and every wake.
 - **The close fails or times out.** The driver tries it once more. If that fails too, it ends
-  the session's process (the same step it takes for a session that ignores `session/cancel`),
-  which also stops the work; the thread's next turn loads its history in a new process. If
-  even that fails, the work can keep running.
+  the session's process the same way. The thread's next turn loads its history in a new
+  process, and does not start until the old one has ended. If even that fails, the work can
+  keep running.
+
+A turn of ours can settle before its last updates arrive (a cancel timeout, a stuck turn, a
+failed prompt). An update in the first 2 seconds after one of our turns settles is taken for
+that turn's tail, not a wake. A woken turn keeps streaming past that, so it is still caught; a
+woken turn shorter than that window would be missed.
 
 Recorded on the real CLI (2026-11-19): a subagent launched in the background
 finished after the turn and Grok then ran a turn that confirmed its file; with
