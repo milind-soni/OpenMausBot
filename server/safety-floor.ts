@@ -664,6 +664,16 @@ function judge(command: Command, source: string, pass: Pass, mode: Mode, depth: 
     return null;
   }
   if (program === "format") return args.some((arg) => /^[A-Za-z]:\\?$/.test(arg)) ? FORMAT_DISK : null;
+  // Windows Storage module: Format-Volume formats whatever volume it is given, also one piped in; Clear-Disk erases
+  // a disk's data only with -RemoveData, and refuses a disk holding data partitions without it. PowerShell also takes
+  // an en dash, em dash or horizontal bar where a parameter's dash goes.
+  if (program === "format-volume") return FORMAT_DISK;
+  if (program === "clear-disk") {
+    return args.some((arg) => {
+      const name = arg.split(":")[0].toLowerCase().replace(/^[\u2013\u2014\u2015]/, "-");
+      return name.length >= "-removed".length && "-removedata".startsWith(name);
+    }) ? FORMAT_DISK : null;
+  }
   return null;
 }
 
