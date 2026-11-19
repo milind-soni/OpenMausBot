@@ -23,6 +23,7 @@ import {
   buildProjectFilePreviewUrl,
   describePreviewSource,
   type PreviewSource,
+  type PreviewUrlSource,
 } from "@/lib/mobilePreviewUrl";
 import { captureMarkdown, captureProjectFileSizes } from "@/lib/previewSharing";
 import type { Attachment } from "@/state/store";
@@ -124,6 +125,7 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
   const loadedDocumentKey = useRef("");
 
   const webviewRef = useRef<HTMLElement | null>(null);
+  const previousWebSource = useRef<{ source: PreviewUrlSource; element: HTMLElement } | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const markdownScrollRef = useRef<HTMLDivElement | null>(null);
@@ -205,12 +207,14 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
   }, [isElectron, source, updateStatus]);
 
   const stop = useCallback(() => {
-    const element = webviewRef.current as (HTMLElement & { stop?: () => void }) | null;
+    const element = webviewRef.current as (HTMLElement & { stop?: () => void; getURL?: () => string }) | null;
     element?.stop?.();
+    const committedUrl = element?.getURL?.();
+    if (source?.kind === "url" && committedUrl && committedUrl !== "about:blank") onNavigate?.(committedUrl);
     clearTimers();
     setSlowWarning(false);
     updateStatus("loaded");
-  }, [clearTimers, updateStatus]);
+  }, [clearTimers, onNavigate, source, updateStatus]);
 
   const goBack = useCallback(() => {
     const el = webviewRef.current as any;
@@ -509,6 +513,18 @@ export const PreviewFrame = forwardRef<PreviewFrameHandle, PreviewFrameProps>(fu
       el.removeEventListener("did-navigate-in-page", onNavigation);
     };
   }, [clearTimers, isElectron, live, onNavigate, onStatusChange, reloadNonce, source, syncWebviewHistory, updateStatus]);
+
+  useEffect(() => {
+    const element = webviewRef.current as (HTMLElement & { loadURL: (url: string) => Promise<void> }) | null;
+    const previous = previousWebSource.current;
+    const next = isElectron && live && element && source?.kind === "url" ? { source, element } : null;
+    previousWebSource.current = next;
+    // A submitted address replaces the source object. React leaves an identical src
+    // prop alone, even if Back or Stop has since changed the visible page.
+    if (next && previous?.element === next.element && previous.source !== next.source && previous.source.url === next.source.url) {
+      void next.element.loadURL(next.source.url).catch(() => {});
+    }
+  }, [isElectron, live, source]);
 
   const sourceLabel = describePreviewSource(source);
   const hostname = (() => {

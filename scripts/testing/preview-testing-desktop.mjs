@@ -2,6 +2,7 @@
 import { app, BrowserWindow, ipcMain, webContents } from "electron";
 import { createServer } from "node:http";
 import fs from "node:fs";
+import { checkPreviewNavigation } from "./preview-navigation-checks.mjs";
 import { createPreviewTestingBridge } from "../../electron/preview-testing.mjs";
 const { GBS_QA_BASE: base, GBS_QA_SECRET: secret, GBS_QA_CONTROL_PORT: port, GBS_QA_PRELOAD: preload, GBS_QA_USER_DATA: userData, GBS_DATA_DIR: dataDir } = process.env;
 if (!base || !secret || !port || !preload || !userData || !dataDir) throw new Error("Use the disposable Preview regression runner.");
@@ -21,6 +22,12 @@ app.whenReady().then(async () => {
     try {
       let raw = ""; for await (const chunk of req) raw += chunk;
       const body = raw ? JSON.parse(raw) : {}; let value = { ok: true };
+      if (req.url === "/navigation") {
+        await checkPreviewNavigation(win.webContents, body.fixtureURL);
+        // The bot-control checks start with an empty Preview in this disposable host.
+        await win.webContents.executeJavaScript("localStorage.clear()");
+        await win.loadURL(base);
+      }
       if (req.url === "/state") value = await win.webContents.executeJavaScript(`(() => { const panel = document.querySelector('aside[aria-label="Quick preview panel"]'); return { text: panel?.innerText, count: document.querySelectorAll('webview').length, panel: panel?.getBoundingClientRect().toJSON() }; })()`);
       if (req.url === "/open-page") await win.webContents.executeJavaScript(`(async () => { document.querySelector('[role="tab"]')?.click(); window.dispatchEvent(new CustomEvent("gbs-open-preview", { detail: { url: ${JSON.stringify(body.url)} } })); for (let i = 0; i < 50; i++) { const load = [...document.querySelectorAll("button")].find(b => b.textContent.trim() === "Load preview"); if (load) { load.click(); return; } await new Promise(r => setTimeout(r, 100)); } })()`);
       if (req.url === "/control") await win.webContents.executeJavaScript(`window.gbs.previewTesting.control(${JSON.stringify(body)})`);

@@ -28,7 +28,7 @@ Execution checklist for [the detailed implementation plan](../plans/implementati
 
 ## Daily workflows
 
-- [~] Verify browser-like web navigation on all relevant Preview surfaces — `src/components/PreviewFrame.tsx:82`, `src/components/PreviewScreen.tsx:57`.
+- [?] Verify browser-like web navigation on all relevant Preview surfaces — `src/components/PreviewFrame.tsx:82`, `src/components/PreviewScreen.tsx:57`.
 - [?] Resolve authorized Markdown images with safe local paths and error states — `src/components/DocumentView.tsx:1`, `src/components/ChatMarkdown.tsx:1`.
 - [?] Add per-conversation prompt history with draft restoration and caret/autocomplete priority — `src/components/Composer.tsx:540`, `src/lib/composerDrafts.ts:29`.
 - [?] Add project-scoped file/folder autocomplete for / and ./ — `src/components/Composer.tsx:23`.
@@ -49,3 +49,7 @@ Execution checklist for [the detailed implementation plan](../plans/implementati
 - Schedules (2026-11-19): each schedule shows an Active, Paused or Off pill, a readable time zone such as `London (GMT)` and a relative next run. Execution code is unchanged. `src/lib/scheduleLabels.test.ts` covers the labels. Suite: 559 tests in 73 files pass, build passes.
 - README now uses Z's wireframe-matched screenshots for all five onboarding steps (resized to 1600 px).
 - Studio Preview verified the redesigned welcome and team review at 1440 × 900. The README includes both images. The earlier pass verified profile and engine setup at 390 × 844 and an edited proposal surviving reload before approval.
+
+- SoSo verified Quick Preview and single-view Preview Studio in a second Electron instance with a disposable Chromium profile and Studio data folder. Both accepted a typed local URL after confirmation, kept the same native guest and Back/Forward history, reloaded the displayed page, and stopped a hanging request. Stop now restores the last committed address. Submitting the canceled address again starts a fresh request. Both cases are covered by `node scripts/testing/preview-testing-regression.mjs` after `pnpm build`.
+- In the isolated onboarding run, an injected HTTP 503 on the first profile save left both fields intact. Continue retried the save and advanced to AI engines. Approving the same proposal twice left the roster identical. An existing workspace with a custom pinned Buddy and no saved profile bypassed onboarding, rejected team approval, and retained its on-disk roster.
+- SoSo's post-fix checks on Node 24.19.0 passed: production build, typecheck, 559 tests in 73 files, and the Electron Preview regression suite.

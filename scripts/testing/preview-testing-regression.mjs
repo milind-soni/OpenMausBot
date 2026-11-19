@@ -32,7 +32,32 @@ const text = result => JSON.parse(result.content[0].text);
 try {
   const html = `<!doctype html><html><head><title>Preview testing fixture</title><style>body{font:18px system-ui;padding:32px;background:#f5f7fb;color:#172033;min-height:1500px}form{display:grid;gap:16px;max-width:420px}input,select,button{font:inherit;padding:10px}#narrow{display:none}@media(max-width:500px){#narrow{display:block}#wide{display:none}}</style></head><body><h1>Preview testing fixture</h1><p id="narrow">Narrow layout</p><p id="wide">Wide layout</p><form><label>Name<input name="name" required></label><label>Plan<select name="plan"><option value="basic">Basic</option><option value="pro">Pro</option></select></label><button>Save profile</button></form><p role="status" id="result">Waiting for input</p><button id="error">Report error</button><script>document.querySelector('form').onsubmit=e=>{e.preventDefault();document.querySelector('#result').textContent='Saved '+document.querySelector('input').value+' '+document.querySelector('select').value;fetch('/record?name='+encodeURIComponent(document.querySelector('input').value))};document.querySelector('#error').onclick=()=>{console.error('Fixture diagnostic');fetch('/missing')};</script></body></html>`;
   writeFileSync(join(project, "index.html"), html);
-  fixture = createServer((req, res) => { if (req.url.startsWith("/record?")) { submissions.push(new URL(req.url,"http://fixture").searchParams.get("name")); res.setHeader("content-type","application/json"); return res.end("{}"); } if (req.url === "/missing") { res.writeHead(404); return res.end("Missing fixture"); } if (req.url === "/redirect-app") { res.writeHead(302, { location: base + "/api/config" }); return res.end(); } res.setHeader("content-type", "text/html"); res.end(html); });
+  const navigationHits = new Map();
+  fixture = createServer((req, res) => {
+    if (req.url === "/navigation/counts") return res.end(JSON.stringify(Object.fromEntries(navigationHits)));
+    if (req.url.startsWith("/navigation/")) {
+      const page = req.url.slice("/navigation/".length);
+      navigationHits.set(page, (navigationHits.get(page) ?? 0) + 1);
+      if (page.endsWith("-slow")) return; // The Stop control must cancel an uncommitted page.
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
+      return res.end("<title>TEST · Preview navigation</title>");
+    }
+    if (req.url.startsWith("/record?")) {
+      submissions.push(new URL(req.url, "http://fixture").searchParams.get("name"));
+      res.setHeader("content-type", "application/json");
+      return res.end("{}");
+    }
+    if (req.url === "/missing") {
+      res.writeHead(404);
+      return res.end("Missing fixture");
+    }
+    if (req.url === "/redirect-app") {
+      res.writeHead(302, { location: base + "/api/config" });
+      return res.end();
+    }
+    res.setHeader("content-type", "text/html");
+    res.end(html);
+  });
   await new Promise(r => fixture.listen(0, "127.0.0.1", r)); const fixtureURL = `http://127.0.0.1:${fixture.address().port}/`;
   const wrapper = join(temp, "fake-claude.mjs"), dump = join(temp, "claude.json");
   writeFileSync(wrapper, `#!/usr/bin/env node\nif(process.argv.includes('--version')){console.log('fake-cli 2.1.312');process.exit(0)}\nprocess.env.FAKE_CLAUDE_MODE='happy';process.env.FAKE_CLAUDE_DUMP=${JSON.stringify(dump)};await import(${JSON.stringify(pathToFileURL(join(root, "server/testing/fake-claude-cli.ts")).href)});`); chmodSync(wrapper, 0o755);
@@ -58,6 +83,8 @@ try {
   const runner = join(root, "scripts/testing/preview-testing-desktop.mjs");
   child(electronPath, [runner], { ...env, ELECTRON_RUN_AS_NODE: undefined, GBS_QA_BASE: base, GBS_QA_SECRET: secret, GBS_QA_CONTROL_PORT: String(controlPort), GBS_QA_PRELOAD: join(root, "electron/preload.cjs"), GBS_QA_USER_DATA: join(temp, "electron-profile") });
   await until(() => desktop("/state"), x => x !== undefined);
+  await desktop("/navigation", { fixtureURL });
+  console.log("Quick Preview and Preview Studio navigation passed");
   await until(async () => text(await proxy.call("preview_status")), s => s.available);
   console.log("Desktop bridge ready; opening fixture");
   const result = text(await proxy.call("preview_open", { url: fixtureURL, project_id: "fixture-project", name: "Profile form", preset: "phone" }));
