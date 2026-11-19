@@ -18,3 +18,4 @@ export declare const RESET_AFTER_TRIES: number;
 export declare const RESET_AFTER_MS: number;
 export declare function resetOffered(input: { platform: string; failures: number; since: number; now: number }): boolean;
 export declare function failureKind(error: unknown): string;
+export declare function retryAfterSeconds(headers: { get(name: string): string | null } | null | undefined, now?: number): number | undefined;

@@ -7888,6 +7888,7 @@
   "homeScreen.setup": "Setting up My Cloud…",
   "homeScreen.setupBody": "This takes about a minute. It opens by itself when it's ready.",
   "homeScreen.offline": "Can't reach My Cloud right now.",
+  "homeScreen.offlineNetwork": "This computer couldn't connect to {host}. If My Cloud opens on another device or network, check whether a VPN, firewall or DNS filter here blocks that address.",
   "homeScreen.offlineBack": "It comes back by itself when it answers.",
   "homeScreen.signIn": "Sign in to open My Cloud",
   "homeScreen.signInEnded": "This computer's sign-in to MausBot Cloud has ended. Your bots and chats are safe on My Cloud.",

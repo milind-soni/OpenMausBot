@@ -86,3 +86,11 @@ export function failureKind(error) {
   const named = [error?.cause?.code, error?.code, error?.cause?.name, error?.name].find(value => typeof value === "string" && /^[A-Za-z_]{1,60}$/.test(value));
   return named ?? "error";
 }
+
+/** An answer's Retry-After in whole seconds (seconds or an HTTP date), or undefined. */
+export function retryAfterSeconds(headers, now = Date.now()) {
+  const value = headers?.get?.("retry-after")?.trim();
+  if (!value) return undefined;
+  const seconds = /^\d{1,7}$/.test(value) ? Number(value) : Math.ceil((Date.parse(value) - now) / 1000);
+  return Number.isFinite(seconds) ? Math.max(0, seconds) : undefined;
+}

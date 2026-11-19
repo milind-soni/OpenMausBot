@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createServer } from "node:http";
 import { createCloudAccountClient } from "./cloud-account.mjs";
-import { cleanCode, cleanEmail, failureKind, parseSignInStart, SIGN_IN_TRIES, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
+import { cleanCode, cleanEmail, failureKind, parseSignInStart, retryAfterSeconds, SIGN_IN_TRIES, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 
 const accessToken = `omc_${"E".repeat(43)}`, ATTEMPT = "a".repeat(43), CODE = "48201937";
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -257,4 +257,13 @@ test("a sign-in request that fails is logged by its kind only: status, or the ne
   assert.equal(failureKind(Object.assign(new Error("x"), { status: 503, code: "unavailable" })), "HTTP 503 unavailable");
   assert.equal(failureKind(Object.assign(new Error("x"), { name: "TimeoutError" })), "TimeoutError");
   assert.equal(failureKind(Object.assign(new Error("x"), { status: 400, code: "person@example.test" })), "HTTP 400", "nothing the answer names is logged as is");
+});
+
+test("the Admin's Retry-After reaches whoever asked, in seconds or as a date", async t => {
+  const headers = value => new Headers(value === null ? {} : { "retry-after": value });
+  assert.equal(retryAfterSeconds(headers("120")), 120);
+  assert.equal(retryAfterSeconds(headers(new Date(1_800_000_090_000).toUTCString()), 1_800_000_000_000), 90);
+  for (const value of [null, "soon", ""]) assert.equal(retryAfterSeconds(headers(value)), undefined, String(value));
+  const f = await fixture(t, { fetch: async () => new Response(JSON.stringify({ error: "rate_limited" }), { status: 429, headers: { "content-type": "application/json", "retry-after": "120" } }) });
+  await assert.rejects(f.client.updatesConsentByEmail({ email: "person@example.test", installId: "x", textVersion: 1 }), { status: 429, code: "rate_limited", retryAfter: 120 });
 });

@@ -2,7 +2,7 @@ import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./manag
 import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudLanding, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudRoom, parseCloudTrial, parseCloudUsage, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
 import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, ORGANIZATION_BLOCKS, otherOwnClouds, ownCloud, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion } from "./cloud-list.mjs";
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
-import { cleanCode, cleanEmail, failureKind, parseSignInStart, resetOffered, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInBlock, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
+import { cleanCode, cleanEmail, failureKind, parseSignInStart, resetOffered, retryAfterSeconds, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInBlock, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 import nativeText from "./native-text.cjs";
 
 const { englishText } = nativeText;
@@ -171,12 +171,12 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       }
     } catch (error) { await reader?.cancel().catch(() => {}); throw error; }
     finally { reader?.releaseLock(); }
-    let data;
+    let data; const wait = response.ok ? undefined : retryAfterSeconds(response.headers, now()), retryAfter = wait === undefined ? {} : { retryAfter: wait };
     try { data = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch {
-      if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, opaque: true });
+      if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, opaque: true, ...retryAfter });
       throw new Error("Invalid Cloud response.");
     }
-    if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, code: data?.error, interval: data?.interval, blocked: data?.addBlocked,
+    if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, code: data?.error, interval: data?.interval, blocked: data?.addBlocked, ...retryAfter,
       ...(typeof data?.checkoutUrl === "string" ? { checkoutUrl: data.checkoutUrl } : {}) });
     return data;
   }
@@ -333,7 +333,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     if (!current(stamp) || !wanted()) { await revoke(next).catch(() => {}); return false; }
     if (next.expiresAt <= now()) throw new Error("Expired Cloud credential.");
     issued = next;
-    try { await store.write(next); } catch (error) { if (!resetUsed) throw error; unsaved = true; }
+    try { await store.write(next); } catch (error) { if (!resetUsed) throw error; if (current(stamp)) unsaved = true; }
     if (!current(stamp)) return false;
     grant = next; issued = null; pending = null; emailed = null; savedHint = null;
     if (plan?.accountId !== next.account.id) plan = null;
@@ -529,8 +529,8 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * this run. One that still can't be removed stays on disk; this run's next sign-in is kept in memory if it can't be saved. */
     async resetSaved() {
       if (closed || grant || issued || clearing || !cleanupNeeded || !value.reset) return state();
-      const stamp = reset(); resetUsed = true;
-      const removed = await store.write(null).then(() => true, () => false);
+      const stamp = reset(), ended = cleanup; resetUsed = true;
+      const [removed] = await Promise.all([store.write(null).then(() => true, () => false), ended ? revoke(ended).catch(() => {}) : null]);
       if (!current(stamp)) return state();
       cleanup = null; cleanupNeeded = false; stuckSince = null;
       return publish({ status: "signed-out", ...(removed ? {} : { message: "reset-kept" }) });
