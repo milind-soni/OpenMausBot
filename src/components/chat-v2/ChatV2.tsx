@@ -1,3 +1,4 @@
+import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { stateForBot } from "@/lib/mascot";
 import { JumpToLatestButton } from "../JumpToLatestButton";
 import { CopyButton, INTERACTIVE, LONG_PRESS_MS, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "../MessageActions";
@@ -32,7 +33,7 @@ import { BotAvatar } from "../Avatar";
 import { Composer } from "../Composer";
 import { ModelPicker } from "../ModelPicker";
 import { ChatMarkdown } from "../ChatMarkdown";
-import { MessageAttachmentGallery } from "../AttachmentGallery";
+import { AttachmentGallery, collectMessageFiles, MessageAttachmentGallery, splitMessageAttachments } from "../AttachmentGallery";
 import { VoiceNoteBubble } from "../VoiceNoteBubble";
 import { ScreenFrame } from "../ScreenFrame";
 import { optionsCardRow } from "../OptionsCardRow";
@@ -90,7 +91,7 @@ function ChatV2Presence({ bot }: { bot: Bot }) {
   </div>;
 }
 
-const Row = memo(function Row({ message: m, botId, botName, color, threadId, busy, hasMore, transcript, reply, failure, quoted, jumpTo, canLoadQuote, loadingQuote, digest, ownBubbleStyle }: {
+export const Row = memo(function Row({ message: m, botId, botName, color, threadId, busy, hasMore, transcript, reply, failure, quoted, jumpTo, canLoadQuote, loadingQuote, digest, ownBubbleStyle }: {
   message: Message; botId: string; botName: string; color: Bot["color"]; threadId: string;
   failure?: React.ReactNode;
   quoted?: Message;
@@ -134,11 +135,22 @@ const Row = memo(function Row({ message: m, botId, botName, color, threadId, bus
   }
   const peer = peerLine(m) ?? peerRequest(m, botId);
   const own = m.role === "user" && !peer;
-  const text = peer?.body ?? (own ? m.text : stripLeakedSystemHarnessMessages(botLineText(m))) ?? "";
-  if (!text && !m.attachments?.length) return null;
+  const messageText = peer?.body ?? (own ? m.text : stripLeakedSystemHarnessMessages(botLineText(m))) ?? "";
+  const legacy = own ? splitTranscriptAttachments(messageText) : null;
+  const text = legacy?.display ?? messageText;
+  const attached = legacy && splitMessageAttachments(m.attachments);
+  const images = legacy && attached && [...legacy.images, ...attached.images];
+  const files = legacy && attached && [...legacy.files, ...attached.files];
+  const attachmentContext = { threadId, messageId: m.id };
+  if (!text && !m.attachments?.length && !images?.length && !files?.length) return null;
   return <article className="v2-message" data-own={own || undefined}>
     {peer && <b className="text-xs text-ink-secondary">{peer.name}</b>}
     <div className="v2-bubble-row group" {...{ [MESSAGE_ROW]: "" }}>
+    <div className={own ? "v2-user-content" : "contents"}>
+    {images && files && <AttachmentGallery images={images}
+      files={[...files, ...collectMessageFiles(text, [...images.map(image => typeof image === "string" ? image : image.path), ...files.map(file => file.path)])]}
+      originals={attached?.originals} message={attachmentContext} photoStrip />}
+    {(text || m.replyToId || !own || m.attachments?.some(a => a.kind === "audio")) &&
     <div className={own ? "v2-body user-bubble-colored" : "v2-body"} dir="auto"
       style={own ? ownBubbleStyle : undefined} data-chat-bubble="" data-look={own ? "user-bubble" : undefined}
       tabIndex={digest ? 0 : undefined}
@@ -165,12 +177,13 @@ const Row = memo(function Row({ message: m, botId, botName, color, threadId, bus
         <ReplyQuote message={quoted} fallbackName={botName} compact onJump={() => jumpTo(quoted.id, true)} />
       </div> : m.replyToId && <UnloadedReplyQuote key={m.replyToId} threadId={threadId} messageId={m.replyToId}
         botName={botName} inverse={false} canJump={canLoadQuote} pending={loadingQuote} onJump={() => jumpTo(m.replyToId!, false)} />}
-      <MessageAttachmentGallery text={text} attachments={m.attachments} message={{ threadId: threadId, messageId: m.id }} />
+      {!own && <MessageAttachmentGallery text={text} attachments={m.attachments} message={attachmentContext} />}
       {m.attachments?.map(a => a.kind === "audio" && <VoiceNoteBubble key={a.path} attachment={a} />)}
       {raw ? <pre className="whitespace-pre-wrap">{text}</pre> : <ChatMarkdown text={text} message={{ threadId: threadId, messageId: m.id }} />}
       {!own && Boolean(m.reactions?.length) && <div className="v2-reaction-badge">
         <ReactionChips threadId={threadId} message={m} canReact={Boolean(reply) && !peer} badgeOnly />
       </div>}
+    </div>}
     </div>
     {own ? reply && <MessageActions side="user" className="v2-bubble-actions" contextItems={replyAndCopy(() => reply(m), text)}><ReplyAction onReply={() => reply(m)} /></MessageActions>
       : <div className="v2-action-stack">
@@ -181,7 +194,6 @@ const Row = memo(function Row({ message: m, botId, botName, color, threadId, bus
         {digest && <div ref={inlineTrace} className="v2-action-layer" inert={!showTrace}><DigestChip message={digest} inline /></div>}
       </div>}
     </div>
-
 
     {m.setupOffer && <div className="mt-3 w-full"><SetupOffer {...props} transcript={transcript} /></div>}
   </article>;

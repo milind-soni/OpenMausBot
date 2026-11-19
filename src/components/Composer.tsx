@@ -1,7 +1,7 @@
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
-import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type SetStateAction } from "react";
 import { Mic, Paperclip, Square, X } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
@@ -472,6 +472,8 @@ export function Composer({
     const timeout = window.setTimeout(() => setSteering(false), 20_000);
     return () => window.clearTimeout(timeout);
   }, [busy, pendingCount, steering]);
+  const photoInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const modeBot = group ? undefined : bot;
@@ -496,6 +498,10 @@ export function Composer({
     refocusInput();
   };
 
+  const onPickFiles = (event: ChangeEvent<HTMLInputElement>) => {
+    void pickFiles(event.currentTarget.files);
+    event.currentTarget.value = "";
+  };
   const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
   const mayAct = useMayAct(), mayStop = !sharedChat || mayAct(profile?.tasks?.find((task) => task.threadId === threadId)?.askedBy);
 
@@ -771,6 +777,8 @@ export function Composer({
           <div className="flex shrink-0 items-center">
             <PhonePlus
               onAttach={() => fileInput.current?.click()}
+              onChoosePhoto={() => photoInput.current?.click()}
+              onTakePhoto={() => cameraInput.current?.click()}
               goal={goal}
               teach={canLearn ? teachTask : undefined}
               approval={approvalChoice && modeBot && { name: modeBot.name, choice: approvalChoice }}
@@ -787,16 +795,16 @@ export function Composer({
         <div className={singleRow ? cn("min-w-0 flex-1 rounded-[26px] px-3 py-1.5 [--composer-reply-gap:6px]", ELEVATED_FLOAT) : "contents"}>
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
         <div data-composer-row className={cn("flex items-end", "gap-1", !singleRow && "@max-[30rem]/composer:flex-wrap", stacked && "flex-wrap")}>
+          {singleRow && !locked && <>
+            <input ref={photoInput} type="file" accept="image/*" multiple hidden onChange={onPickFiles} />
+            <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={onPickFiles} />
+          </>}
           <input
             ref={fileInput}
             type="file"
             multiple
             className="hidden"
-            onChange={(e) => {
-              void pickFiles(e.target.files);
-              // Reset so picking the same file again still fires onChange.
-              e.target.value = "";
-            }}
+            onChange={onPickFiles}
           />
           {!locked && !singleRow && (
             <div className={cn("flex items-center gap-1", "flex-wrap")}>

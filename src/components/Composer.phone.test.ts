@@ -101,6 +101,21 @@ describe("the phone composer", () => {
     expect(item("place")?.textContent).toContain("Works on");
   });
 
+  it("opens separate camera and photo-library inputs from the + menu", () => {
+    render({ bot });
+    const camera = container.querySelector<HTMLInputElement>('input[capture="environment"]')!;
+    const library = container.querySelector<HTMLInputElement>('input[accept="image/*"][multiple]:not([capture])')!;
+    expect(camera.accept).toBe("image/*");
+    const take = vi.spyOn(camera, "click").mockImplementation(() => {});
+    const choose = vi.spyOn(library, "click").mockImplementation(() => {});
+    openPlus();
+    click(item("take-photo"));
+    expect(take).toHaveBeenCalledOnce();
+    openPlus();
+    click(item("choose-photo"));
+    expect(choose).toHaveBeenCalledOnce();
+  });
+
   it("keeps the buttons in a row on a wider screen", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: !query.includes("max-width"), addEventListener() {}, removeEventListener() {} }));
     render({ bot });

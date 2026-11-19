@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { AudioLines, Check, GraduationCap, ListChecks, Paperclip, Phone, Plus, Target } from "lucide-react";
+import { AudioLines, Camera, Check, Image, GraduationCap, ListChecks, Paperclip, Phone, Plus, Target } from "lucide-react";
 import { approvalModeFor } from "../../shared/approval-mode";
 import {
   approvalModeOptions, approvalModeOptionsFor, approvalModeSelectionRequiresLocalDesktop, shownApprovalMode,
@@ -120,8 +120,10 @@ export function TeachTaskButton({ onClick }: { onClick: () => void }) {
  * holds what its narrow composer has no room for: the thread's approval level, the call mode and where the bot works,
  * each running the handler its Advanced button runs. With attaching the only choice, the + opens the file picker.
  */
-export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, extraItems = [], circle = false }: {
+export function ComposerPlusMenu({ onAttach, onChoosePhoto, onTakePhoto, goal, teach, approval, callBotId, extraItems = [], circle = false }: {
   onAttach: () => void;
+  onChoosePhoto?: () => void;
+  onTakePhoto?: () => void;
   /** Starts a /learn draft in the field, where the composer offers /learn. */
   teach?: () => void;
   /** Entries a phone composer moves here from its hidden buttons, such as where the bot works. */
@@ -147,6 +149,8 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
 
   const items: SidebarMenuItem[] = [
     { key: "attach", label: t("composer.attachFiles"), icon: <Paperclip size={16} />, onSelect: onAttach },
+    ...(onChoosePhoto ? [{ key: "choose-photo", label: t("settings.profile.avatar.choose"), icon: <Image size={16} />, onSelect: onChoosePhoto }] : []),
+    ...(onTakePhoto ? [{ key: "take-photo", label: t("composer.takePhoto"), icon: <Camera size={16} />, onSelect: onTakePhoto }] : []),
     ...(goal ? [{
       key: "goal",
       label: t(goal.solo ? "composer.goal.soloAria" : "composer.goal.aria"),

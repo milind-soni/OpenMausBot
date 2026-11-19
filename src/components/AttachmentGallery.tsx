@@ -441,17 +441,18 @@ type GalleryItem = { key: string; source?: string } & (
 
 const BENEATH_LIMIT = 6;
 
-export function AttachmentGallery({ images = [], files = [], originals, message, eager = false, beneath = false, className }: {
+export function AttachmentGallery({ images = [], files = [], originals, message, eager = false, beneath = false, photoStrip = false, className }: {
   images?: Array<string | TranscriptImageAttachment>;
   files?: GalleryFile[];
   originals?: AttachmentOriginals;
   message?: MessageAttachmentContext;
   eager?: boolean;
   beneath?: boolean;
+  photoStrip?: boolean;
   className?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [selected, setSelected] = useState<PreviewImage | null>(null);
+  const [selected, setSelected] = useState<{ image: PreviewImage; items: PreviewImage[] } | null>(null);
   const items = useMemo(() => {
     const seen = new Set<string>();
     const result: GalleryItem[] = [];
@@ -481,11 +482,13 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
   const limit = beneath ? BENEATH_LIMIT : 4;
   const shown = expanded ? items : items.slice(0, limit);
   const media = shown.filter((item) => item.kind === "image" || item.kind === "video");
+  const compactPhotos = photoStrip && media.length > 0 && media.every((item) => item.kind === "image");
+  const photoWidth = media.length === 1 ? "w-[min(9rem,calc(42.5vw-0.25rem))]" : "w-[min(18.5rem,85vw)]";
   const documents = shown.filter((item) => item.kind === "file" || item.kind === "audio");
   const previews = items.flatMap((item) => item.kind === "image" ? [item.image] : []);
   const label = items.length === 1 ? t("attach.gallerySingle") : t("attach.galleryCount", { count: items.length });
-  const dialog = selected && previews.some((image) => image.src === selected.src) && (
-    <AttachmentPreviewDialog image={selected} images={previews} initialIndex={previews.findIndex((image) => image.src === selected.src)} onClose={() => setSelected(null)} />
+  const dialog = selected && previews.some((image) => image.src === selected.image.src) && (
+    <AttachmentPreviewDialog image={selected.image} images={selected.items} initialIndex={selected.items.findIndex((image) => image.src === selected.image.src)} onClose={() => setSelected(null)} />
   );
 
   if (beneath) {
@@ -498,7 +501,7 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
           <div className="flex max-w-full flex-wrap gap-2">
             {thumbs.map((item) => item.kind === "image" && (
               <div key={item.key} className="min-w-0" title={item.image.name} {...reveal.targetProps(item.source)}>
-                <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} onPreview={() => setSelected(item.image)} className="h-24 w-auto max-w-48 rounded-2xl border-0" />
+                <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} gallery={previews} onPreview={(items) => setSelected({ image: item.image, items })} className="h-24 w-auto max-w-48 rounded-2xl border-0" />
               </div>
             ))}
           </div>
@@ -528,12 +531,12 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
   }
 
   return (
-    <section aria-label={label} className={cn("mb-1.5 w-[min(34rem,70vw)] max-w-full space-y-1.5 text-left whitespace-normal", className)}>
+    <section aria-label={label} className={cn("mb-1 max-w-full space-y-1.5 text-left whitespace-normal", compactPhotos && !documents.length ? photoWidth : "mb-1.5 w-[min(34rem,70vw)]", className)}>
       {media.length > 0 && (
-        <div className={cn("grid gap-2", media.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
+        <div className={cn("grid max-w-full gap-2", compactPhotos && photoWidth, media.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
           {media.map((item) => item.kind === "image" ? (
             <div key={item.key} className="min-w-0" title={item.image.name} {...reveal.targetProps(item.source)}>
-              <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} onPreview={() => setSelected(item.image)} className="max-h-72 rounded-2xl border-0 bg-transparent" />
+              <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} gallery={previews} onPreview={(items) => setSelected({ image: item.image, items })} fixedRatio={compactPhotos ? 3 / 4 : undefined} className={cn("max-h-72 rounded-2xl border-0 bg-transparent", compactPhotos && "w-full rounded-xl")} />
             </div>
           ) : item.kind === "video" && message ? (
             <span key={`${message.threadId}:${message.messageId}:${item.key}`} className="contents" {...reveal.targetProps(item.source)}><VideoAttachment file={item.file} message={message} /></span>

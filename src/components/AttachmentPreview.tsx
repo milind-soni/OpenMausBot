@@ -39,6 +39,9 @@ import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
 import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu";
 
+import { conversationImages, previewKeyAction, registerPreviewThumbnail, usePreviewSwipe, wrappedImageIndex } from "./AttachmentPreviewNavigation";
+export { previewKeyAction, wrappedImageIndex, type PreviewKeyAction } from "./AttachmentPreviewNavigation";
+
 export interface PreviewImage {
   src: string;
   name: string;
@@ -58,20 +61,6 @@ export function previewImage(path: string, name = attachmentBasename(path)): Pre
     downloadUrl: src,
     downloadName: canonicalDownloadFilename({ fallback: name, source: path }),
   };
-}
-
-export function wrappedImageIndex(index: number, step: -1 | 1, count: number): number {
-  if (count <= 0) return 0;
-  return (index + step + count) % count;
-}
-
-export type PreviewKeyAction = "close" | "previous" | "next" | null;
-
-export function previewKeyAction(key: string, count: number): PreviewKeyAction {
-  if (key === "Escape") return "close";
-  if (count > 1 && key === "ArrowLeft") return "previous";
-  if (count > 1 && key === "ArrowRight") return "next";
-  return null;
 }
 
 export function imageGalleryLayout(count: number): string {
@@ -486,6 +475,7 @@ export function AttachmentPreviewDialog({
     setIndex((value) => wrappedImageIndex(value, step, items.length));
     setFailedSource(null);
   }, [items.length]);
+  const swipeHandlers = usePreviewSwipe(items.length, navigate);
 
   useEffect(() => {
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -595,7 +585,9 @@ export function AttachmentPreviewDialog({
             </button>
           </div>
         </header>
-        <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden p-4 sm:p-8">
+        <div className="relative flex min-h-0 flex-1 touch-pan-y touch-pinch-zoom items-center justify-center overflow-hidden p-4 sm:p-8"
+          {...swipeHandlers}
+        >
           {!loaded && !failed && (
             <div className="absolute inset-4 flex animate-pulse items-center justify-center rounded-xl bg-white/[0.055] sm:inset-8" role="status">
               <span className="flex items-center gap-2 text-[13px] text-white/55">
@@ -661,9 +653,13 @@ export function AttachmentThumbnail({
   className,
   eager = false,
   explainRefusal = false,
+  gallery,
+  fixedRatio,
 }: {
   image: PreviewImage;
-  onPreview: () => void;
+  onPreview: (images: PreviewImage[]) => void;
+  gallery?: PreviewImage[];
+  fixedRatio?: number;
   className?: string;
   eager?: boolean;
   explainRefusal?: boolean;
@@ -675,9 +671,11 @@ export function AttachmentThumbnail({
   const [outsideWorkspace, setOutsideWorkspace] = useState(false);
   const [ratio, setRatio] = useState<number | null>(null);
 
+  const previewItems = gallery ?? [image];
+
   return (
     <span
-      style={ratio ? { aspectRatio: String(ratio) } : undefined}
+      style={{ aspectRatio: fixedRatio ?? ratio ?? undefined }}
       className={cn("group/image relative block aspect-[4/3] min-w-0 overflow-hidden rounded-xl border border-hairline/40 bg-inset", className)}
     >
       {state === "loading" && <ImageLoading name={image.name} className="absolute inset-0 bg-raised/65" />}
@@ -713,18 +711,20 @@ export function AttachmentThumbnail({
         </span>
       ) : (
         <span
+          data-preview-thumbnail=""
+          ref={(element) => registerPreviewThumbnail(element, previewItems)}
           role="button"
           tabIndex={state === "ready" ? 0 : -1}
           aria-disabled={state !== "ready"}
           onClick={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            if (state === "ready") onPreview();
+            if (state === "ready") onPreview(conversationImages(event.currentTarget, previewItems));
           }}
           onKeyDown={(event) => {
             if (state === "ready" && (event.key === "Enter" || event.key === " ")) {
               event.preventDefault();
-              onPreview();
+              onPreview(conversationImages(event.currentTarget, previewItems));
             }
           }}
           className="absolute inset-0 block size-full cursor-pointer text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 aria-disabled:cursor-default"
@@ -776,21 +776,21 @@ export function AttachedImageGallery({
     const image = previewImage(path, name);
     return image ? [image] : [];
   }), [paths]);
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
+  const [preview, setPreview] = useState<{ image: PreviewImage; items: PreviewImage[] } | null>(null);
   if (images.length === 0) return null;
   return (
     <>
       <div className={cn("mb-2 grid max-w-full gap-2", imageGalleryLayout(images.length), className)}>
         {images.map((image, index) => (
-          <AttachmentThumbnail key={`${image.src}:${index}`} image={image} onPreview={() => setSelectedIndex(index)} eager={eager} />
+          <AttachmentThumbnail key={`${image.src}:${index}`} image={image} gallery={images} onPreview={(items) => setPreview({ image, items })} eager={eager} />
         ))}
       </div>
-      {selectedIndex !== null && images[selectedIndex] && (
+      {preview && (
         <AttachmentPreviewDialog
-          image={images[selectedIndex]}
-          images={images}
-          initialIndex={selectedIndex}
-          onClose={() => setSelectedIndex(null)}
+          image={preview.image}
+          images={preview.items}
+          initialIndex={preview.items.findIndex((item) => item.src === preview.image.src)}
+          onClose={() => setPreview(null)}
         />
       )}
     </>
@@ -812,7 +812,7 @@ export function MarkdownImagePreview({
   filePath?: string;
   sourceOffset?: number;
 }) {
-  const [open, setOpen] = useState(false);
+  const [gallery, setGallery] = useState<PreviewImage[] | null>(null);
   const containerRef = useRef<HTMLSpanElement>(null);
   const threadId = message?.threadId;
   const messageId = message?.messageId;
@@ -844,7 +844,7 @@ export function MarkdownImagePreview({
     return () => observer.disconnect();
   }, [localImageKey]);
 
-  const shouldLoadLocalImage = localMessageImage && (visibleLocalImageKey === localImageKey || open);
+  const shouldLoadLocalImage = localMessageImage && (visibleLocalImageKey === localImageKey || gallery);
   const externalAllowed = !external || approvedExternalSource === src;
   const visibleSource = externalAllowed
     ? localMessageImage
@@ -876,7 +876,7 @@ export function MarkdownImagePreview({
             <ImageOff size={17} /> {t("attach.oldImage")}
           </span>
         ) : visibleSource ? (
-          <AttachmentThumbnail key={image.src} image={image} onPreview={() => setOpen(true)} className="max-h-96" eager explainRefusal={localMessageImage} />
+          <AttachmentThumbnail key={image.src} image={image} onPreview={setGallery} className="max-h-96" eager explainRefusal={localMessageImage} />
         ) : (
           <ImageLoading name={name} className="aspect-[4/3] max-h-96 rounded-xl border border-hairline/40 bg-inset" />
         )}
@@ -886,7 +886,7 @@ export function MarkdownImagePreview({
           </a>
         )}
       </span>
-      {open && visibleSource && <AttachmentPreviewDialog image={image} onClose={() => setOpen(false)} />}
+      {gallery && visibleSource && <AttachmentPreviewDialog image={image} images={gallery} initialIndex={gallery.findIndex((item) => item.src === image.src)} onClose={() => setGallery(null)} />}
     </>
   );
 }

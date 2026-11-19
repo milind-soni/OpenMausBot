@@ -1,4 +1,5 @@
 {
+  "composer.takePhoto": "Zrób zdjęcie",
   "voice.gemini.keyPlaceholder": "Wklej swój klucz API Google AI Studio",
   "voice.gemini.model": "Model syntezy mowy Gemini",
   "keys.label.geminiTts": "Klucz API syntezy mowy Gemini",

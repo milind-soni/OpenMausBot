@@ -2691,6 +2691,7 @@
   "devs.report.tryAgain": "已在 {version} 中修正。要再試一次嗎？",
   "composer.attach": "附加檔案",
   "composer.attachFiles": "附加檔案",
+  "composer.takePhoto": "拍照",
   "composer.teachTask": "教導一項工作",
   "composer.goal.aria": "一起完成",
   "composer.goal.title": "一起完成——團隊會持續進行，直到目標達成",

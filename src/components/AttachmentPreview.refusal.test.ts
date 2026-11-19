@@ -76,3 +76,23 @@ describe("a message image that fails", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+it("opens the same ordered conversation gallery from any thumbnail", () => {
+  const first = { src: "/first.png", name: "First" };
+  const second = { src: "/second.png", name: "Second" };
+  const collapsed = { src: "/collapsed.png", name: "Collapsed" };
+  const onPreview = vi.fn();
+  const thumb = (image: typeof first, gallery?: (typeof first)[]) =>
+    createElement(AttachmentThumbnail, { image, gallery, onPreview });
+  flushSync(() => root.render(createElement("div", { role: "log" },
+    thumb(first),
+    thumb(second, [second, first, collapsed]),
+    createElement("div", { role: "log" }, thumb({ src: "/nested.png", name: "Nested" })),
+  )));
+  const buttons = host.querySelectorAll<HTMLElement>("[data-preview-thumbnail]");
+  for (const button of [buttons[0]!, buttons[1]!]) {
+    flushSync(() => button.parentElement!.querySelector("img")!.dispatchEvent(new Event("load")));
+    button.click();
+  }
+  expect(onPreview.mock.calls).toEqual([[[first, second, collapsed]], [[first, second, collapsed]]]);
+});
