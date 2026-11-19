@@ -12,7 +12,7 @@ import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/
 import { avatarMarks, type AvatarKind } from "@/lib/avatar-marks";
 import { CARVED_BODIES, type CarvedBody, type CarvedBodyId } from "../../shared/carved-bodies";
 import type { CursorAvatarHandle } from "./CursorAvatar";
-import { mascotClock, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock";
+import { mascotClock, put, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock";
 import { ACTIVE_STATES, HOVER_BLINK_MS, blinkOpenness, frameFloorMs, nextFrameAt } from "./mascot-motion";
 import { mascotFaceInk, type MascotFaceColor } from "../../shared/bot-avatar";
 
@@ -197,18 +197,18 @@ function CarvedAvatarComponent(
 
   const paint = (p: CarvedPose) => {
     const g = carvedGeometry(body, p);
-    group.current?.setAttribute("transform", g.body);
+    if (group.current) put(group.current, "transform", g.body);
     g.eyes.forEach((rect, i) => {
       const el = eyes[i].current;
       if (!el) return;
-      for (const [k, v] of Object.entries(rect)) el.setAttribute(k, String(v));
+      for (const [k, v] of Object.entries(rect)) put(el, k, String(v));
     });
     if (smile.current) {
-      smile.current.setAttribute("d", g.smile.d);
-      smile.current.setAttribute("transform", g.smile.transform);
-      smile.current.setAttribute("opacity", String(g.smile.opacity));
+      put(smile.current, "d", g.smile.d);
+      put(smile.current, "transform", g.smile.transform);
+      put(smile.current, "opacity", String(g.smile.opacity));
     }
-    if (open.current) for (const [k, v] of Object.entries(g.open)) open.current.setAttribute(k, String(v));
+    if (open.current) for (const [k, v] of Object.entries(g.open)) put(open.current, k, String(v));
   };
 
   useEffect(() => {

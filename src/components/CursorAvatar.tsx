@@ -19,7 +19,7 @@ import {
   BLEND_OMEGA, COMPACT_MASCOT_PX, FRAME_SLACK_MS, GLYPH_EASE_MS, HOVER_BLINK_MS, MOTION, PoseBlend, REST_POSE, VIEW_SPAN, blinkOpenness, bodyPose,
   bodyTransform, faceTravelUnits, frameFloorMs, loopSeed, morphUnitsPerMs, nextFrameAt, nextMascotFrame, poseTransform, restPose, type BodyMotion,
 } from "./mascot-motion"
-import { mascotClock, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock"
+import { mascotClock, put, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock"
 
 export { MOTION, bodyTransform, type BodyMotion }
 export {
@@ -543,19 +543,6 @@ const LEAN_DEGREES = 3
 const FIRST_HOVER_BLINK_MS: [number, number] = [250, 700]
 
 const between = ([lo, hi]: [number, number]) => lo + Math.random() * (hi - lo)
-
-type Written = Map<string, string>
-const written = new WeakMap<Element, Written>()
-
-function put(el: Element, name: string, value: string | null) {
-  let seen = written.get(el)
-  if (!seen) written.set(el, (seen = new Map()))
-  if (seen.get(name) === (value ?? '')) return
-  seen.set(name, value ?? '')
-  if (name === 'opacity') (el as SVGElement).style.opacity = value ?? ''
-  else if (value === null) el.removeAttribute(name)
-  else el.setAttribute(name, value)
-}
 
 export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarProps>(
   function CursorAvatar(
