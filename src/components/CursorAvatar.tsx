@@ -536,11 +536,16 @@ export interface CursorAvatarHandle {
   setExpression: (index: number) => void
 }
 
-const HOVER_SCOPE = 'a, button, [role="button"], [role="link"], [role="option"], [role="menuitem"], [role="row"], li'
+const HOVER_SCOPE = 'a, button, [role="button"], [role="link"], [role="option"], [role="menuitem"]'
 const POINTER_REACH = 2
 const LOOK_SMOOTHING = 0.86
 const LEAN_DEGREES = 3
 const FIRST_HOVER_BLINK_MS: [number, number] = [250, 700]
+
+const engagedMotion = ({ state, resting }: { state: CursorState; resting: boolean }): BodyMotion => {
+  const own: BodyMotion = MOTION[state]
+  return resting ? { ...MOTION.idle, tilt: own.tilt, settle: own.settle } : own
+}
 
 const between = ([lo, hi]: [number, number]) => lo + Math.random() * (hi - lo)
 
@@ -834,7 +839,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           e.lastState = p.state
           e.stateStart = now
         }
-        const motion: BodyMotion = MOTION[p.state] ?? {}
+        const motion = engagedMotion(p)
         const strength = p.motionStrength ?? 1
         const target = engaged
           ? bodyPose(motion, now - e.stateStart, strength, { seed: e.seed, compact: p.compact })
@@ -946,11 +951,11 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         e.faceStale = false
         e.faceMoving = faceMoving()
         drawPose(e, now, engaged)
-        const showEffects = p.effects !== false && engaged && !p.compact
-        const showGlyphs = p.glyphs !== false && engaged
+        const showEffects = p.effects !== false && engaged && !p.resting && !p.compact
+        const showGlyphs = p.glyphs !== false && engaged && !p.resting
         drawEffects(e, now, showEffects, showGlyphs)
         const due = nextMascotFrame(now, {
-          motion: MOTION[p.state] ?? {},
+          motion: engagedMotion(p),
           effects: EFFECTS[p.state],
           stateElapsedMs: now - e.stateStart,
           strength: engaged ? p.motionStrength ?? 1 : 0,

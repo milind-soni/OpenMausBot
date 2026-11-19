@@ -279,4 +279,68 @@ describe("CursorAvatar at rest and under the pointer", () => {
     expect(changes.nodes()).toEqual([]);
     changes.stop();
   });
+
+  it("follows from anywhere in its row and lets go when the pointer leaves the row", () => {
+    const adds = vi.spyOn(document, "addEventListener");
+    const removes = vi.spyOn(document, "removeEventListener");
+    act(() => root.render(createElement("button", { type: "button" }, createElement(MausAvatar, { color: "green", state: "idle", size: 36, animated: false }))));
+    run(200);
+    const svg = svgs()[0]!;
+    placeAt(svg, 36);
+    const row = host.querySelector("button")!;
+    const listening = () => adds.mock.calls.filter(([type]) => type === "pointermove").length - removes.mock.calls.filter(([type]) => type === "pointermove").length;
+    act(() => { row.dispatchEvent(pointer("pointerenter", 400, 118)); });
+    expect(listening()).toBe(1);
+    act(() => { document.dispatchEvent(pointer("pointermove", 420, 118)); });
+    run(300);
+    const shift = svg.querySelector("g[clip-path] > g > g")!;
+    expect(shift.getAttribute("transform")).toMatch(/^translate\(\d/);
+    act(() => { row.dispatchEvent(pointer("pointerleave", 500, 118)); });
+    expect(listening()).toBe(0);
+    run(1500);
+    expect(shift.getAttribute("transform")).toBeNull();
+    expect(mascotClock().pending()).toBe(0);
+  });
+
+  it.each(["excited", "alerting", "celebrate"] as const)("only glances and breathes when a resting %s mascot is hovered", (state) => {
+    render([{ state, size: 56, animated: false }]);
+    run(300);
+    const svg = svgs()[0]!;
+    placeAt(svg, 56);
+    act(() => { svg.dispatchEvent(pointer("pointerenter", 128, 128)); });
+    const glyph = bodyOf(svg).children[1] as SVGGElement;
+    let lowest = 0;
+    let glyphShown = false;
+    for (let i = 0; i < 70; i++) {
+      run(50);
+      const lift = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(bodyOf(svg).getAttribute("transform") ?? "");
+      lowest = Math.min(lowest, Number(lift?.[2] ?? 0));
+      glyphShown ||= glyph.childElementCount > 0 || glyph.style.opacity !== "0";
+    }
+    expect(lowest).toBeGreaterThan(-1);
+    expect(glyphShown).toBe(false);
+    expect(svg.querySelector(":scope > g > g:first-child")!.childElementCount).toBe(0);
+    expect(svg.querySelector(":scope > g > g:last-child")!.childElementCount).toBe(0);
+  });
+
+  it("plays a festival body's beats and spins when nothing animates it, and never sticks wide-eyed", () => {
+    const ref = createRef<MausAvatarHandle>();
+    render([{ state: "idle", size: 44, bodyId: "pumpkin", ref }]);
+    run(1000);
+    const smile = host.querySelector("[data-carved-body] path[stroke]") as SVGPathElement;
+    const changes = watch();
+    render([{ state: "idle", size: 44, bodyId: "pumpkin", ref, motion: "surprise", motionKey: 1 }]);
+    run(200);
+    expect(Number(smile.style.opacity)).toBeLessThan(0.1);
+    run(3000);
+    expect(smile.style.opacity).toBe("1");
+    expect(mascotClock().pending()).toBe(0);
+    const before = changes.attributes().length;
+    act(() => ref.current!.spin());
+    run(300);
+    expect(changes.attributes().length).toBeGreaterThan(before);
+    run(3000);
+    expect(mascotClock().pending()).toBe(0);
+    changes.stop();
+  });
 });

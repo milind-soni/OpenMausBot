@@ -184,16 +184,19 @@ function CarvedAvatarComponent(
   };
   useImperativeHandle(ref, () => ({
     blink: () => { cue.current.blinkAt = performance.now(); ticket.current?.wake(); },
-    spin: () => startle(),
+    spin: () => {
+      startle();
+      ticket.current?.wake();
+    },
     setExpression: () => {},
   }));
 
   useEffect(() => {
-    ticket.current?.wake();
-    if (!live || motion === "none") return;
+    if (reduced || animated === false || motion === "none") return;
     if (motion === "blink") cue.current.blinkAt = performance.now();
     else if (STARTLE.has(motion)) startle();
-  }, [motion, motionKey, live]);
+    ticket.current?.wake();
+  }, [motion, motionKey, animated, reduced]);
 
   const paint = (p: CarvedPose) => {
     const g = carvedGeometry(body, p);
@@ -259,7 +262,7 @@ function CarvedAvatarComponent(
       p.shut += (Math.max(want.shut, blink) - p.shut) * (open !== null ? 1 : k(10));
       paint(p);
       const settled = open === null && (Object.keys(want) as Array<keyof CarvedPose>).every((key) => Math.abs(want[key] - p[key]) < 0.003);
-      if (!engaged && settled) return Infinity;
+      if (!engaged && settled) return now < cue.current.startleUntil ? cue.current.startleUntil : Infinity;
       return nextFrameAt(now, frameFloorMs(size, cue.current.hovered));
     };
     const added = mascotClock().add(step, group.current?.ownerSVGElement);
