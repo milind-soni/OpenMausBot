@@ -38,6 +38,7 @@ import { brokerAccess, managedComposioBrokerOff, type BrokerAccess } from "./com
 export { applyManagedBrokerMessage, brokerAccess, setManagedBrokerAccess, type BrokerAccess } from "./composio-broker-access.ts";
 export { prepareProjectSession, trustedSessionMcpUrl } from "./composio-session.ts";
 import { catalogFor, type CatalogPagination, type ToolkitCard } from "./composio-catalog.ts";
+import { forgetInventory, inventoryDiffers, sharedInventory } from "./composio-inventory-cache.ts";
 export { onCatalogChange, rememberCatalogIn, toolkitCategories, type CatalogPagination, type CatalogStopReason, type ToolkitCard } from "./composio-catalog.ts";
 
 function toolkitBase() {
@@ -456,6 +457,16 @@ export async function connectedServicesInventory(cfg: AppConfig, as?: BrokerAcce
   };
 }
 
+/** The inventory as the Apps page shows it: one read for readers together or within 20 s, read anew after a connection is
+ * started or removed here, or a status check differs from it. `fresh` always reads. */
+export function sharedConnectedInventory(cfg: AppConfig, options: { fresh?: boolean } = {}): Promise<ConnectedServicesInventory> {
+  return sharedInventory(connectorToolsIdentity(cfg), () => connectedServicesInventory(cfg), options.fresh);
+}
+
+function connectionsChanged(cfg: AppConfig, as?: BrokerAccess): void {
+  forgetInventory(connectorToolsIdentity(cfg, as));
+}
+
 export async function verifiedConnectedServiceSlugs(cfg: AppConfig, as?: BrokerAccess): Promise<readonly string[]> {
   const { services, complete } = await connectedServicesInventory(cfg, as);
   if (!complete) throw new Error("Connected-app inventory is incomplete; account discovery did not finish.");
@@ -659,6 +670,12 @@ async function responseErrorFromBytes(status: number, bytes: Uint8Array): Promis
 }
 
 export async function connectionStatus(cfg: AppConfig, slugs: string[]) {
+  const status = await readConnectionStatus(cfg, slugs);
+  if (inventoryDiffers(connectorToolsIdentity(cfg), status, canonicalToolkitSlug)) connectionsChanged(cfg);
+  return status;
+}
+
+async function readConnectionStatus(cfg: AppConfig, slugs: string[]) {
   const canonicalSlugs = [...new Set(slugs.map(canonicalToolkitSlug))];
   const apiKey = projectApiKey(cfg);
   if (!apiKey) {
@@ -715,6 +732,7 @@ export async function removeService(cfg: AppConfig, slug: string, as?: BrokerAcc
   const apiKey = as ? null : projectApiKey(cfg);
   if (!apiKey) {
     const response = await brokerRequest(`/v1/connectors/${encodeURIComponent(toolkit)}`, { method: "DELETE" }, as);
+    connectionsChanged(cfg, as);
     if (!response.ok) await throwBrokerError(response, `Connected apps: HTTP ${response.status}`);
     return removalResponseSchema.parse(await response.json());
   }
@@ -728,6 +746,7 @@ export async function removeService(cfg: AppConfig, slug: string, as?: BrokerAcc
   const body = toolkitPageSchema.parse(await list.json());
   const id = body.items?.find((item) => item.slug && canonicalToolkitSlug(item.slug) === toolkit)?.connected_account?.id;
   if (!id) return { removed: 0 };
+  connectionsChanged(cfg);
   await deleteConnectedAccount(apiKey, id);
   return { removed: 1 };
 }
@@ -742,6 +761,7 @@ export async function removeAccount(cfg: AppConfig, slug: string, accountId: str
       `/v1/connectors/${encodeURIComponent(toolkit)}/accounts/${encodeURIComponent(accountId)}`,
       { method: "DELETE" },
     );
+    connectionsChanged(cfg);
     if (!response.ok) await throwBrokerError(response, `Connected apps: HTTP ${response.status}`);
     return removalResponseSchema.parse(await response.json());
   }
@@ -755,6 +775,7 @@ export async function removeAccount(cfg: AppConfig, slug: string, accountId: str
       && canonicalToolkitSlug(account.toolkit.slug) === toolkit
   );
   if (!owned) return { removed: 0 };
+  connectionsChanged(cfg);
   await deleteConnectedAccount(apiKey, accountId);
   return { removed: 1 };
 }
@@ -788,6 +809,7 @@ export async function authorizeService(cfg: AppConfig, slug: string, requestedAl
   const unavailable = managedConnectorUnavailableReason(as ? "managed" : connectionMode(cfg), toolkit);
   if (unavailable) throw inputError(unavailable, 409);
   const apiKey = as ? null : projectApiKey(cfg);
+  connectionsChanged(cfg, as);
   if (!apiKey) {
     const request: RequestInit = { method: "POST" };
     if (alias) request.body = JSON.stringify({ alias });

@@ -6,14 +6,14 @@ import { PASS, type RouteHandler } from "./table.ts";
 
 export interface ConnectorListingDeps {
   cfg(): AppConfig;
-  composio: Pick<typeof Composio, "listToolkits" | "configured" | "connectionMode" | "connectorSetup" | "connectorAvailability" | "connectedServicesInventory">;
+  composio: Pick<typeof Composio, "listToolkits" | "configured" | "connectionMode" | "connectorSetup" | "connectorAvailability" | "sharedConnectedInventory">;
   /** The desktop app or a Cloud home: a host the managed service comes with. */
   managedHost: boolean;
 }
 
 export function createConnectorListingRoutes(deps: ConnectorListingDeps): RouteHandler {
   const { composio } = deps;
-  return async ({ res, path, method, json }) => {
+  return async ({ req, res, path, method, json }) => {
     if (method !== "GET") return PASS;
     if (path === "/api/connectors/catalog") {
       const cfg = deps.cfg();
@@ -37,7 +37,8 @@ export function createConnectorListingRoutes(deps: ConnectorListingDeps): RouteH
           services: {},
         });
       }
-      const inventory = await composio.connectedServicesInventory(cfg);
+      // The page's Refresh asks with no-cache; every other reader shares one read.
+      const inventory = await composio.sharedConnectedInventory(cfg, { fresh: req.headers["cache-control"] === "no-cache" });
       return json(res, 200, {
         configured: true,
         credentialStore: "ok",
