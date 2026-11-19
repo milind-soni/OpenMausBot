@@ -98,7 +98,7 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
   const { store } = deps;
   const now = deps.now ?? Date.now;
 
-  const native = async (target: WarmSummaryTarget, control: { signal: AbortSignal; awaited(): boolean }): Promise<WarmSummaryOutcome> => {
+  const native = async (target: WarmSummaryTarget, control: { signal: AbortSignal; awaited(): boolean }, askedByPerson = false): Promise<WarmSummaryOutcome> => {
     const { threadId, botId, instanceId } = target;
     const compact = deps.instance(instanceId)?.adapter.cacheKeepWarm?.compact;
     const session = store.taskByThread(botId, threadId)?.resumeCursors[instanceId];
@@ -113,8 +113,9 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
     const { state, exchanges } = keptAfterSummary(sinceFreshStart(store.activePath(threadId)), result.session, task.handedMessages?.[instanceId]);
     store.setResumeCursor(botId, instanceId, result.session, threadId);
     store.setHandedMessages(botId, threadId, instanceId, state);
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(deps.language?.(threadId), "server.warmSummary.summarized"), ok: true } });
-    deps.log?.(`warm summary ${threadId}: moved to its summarized session, keeping ${exchanges} exchange(s) word for word`);
+    store.appendMessage(threadId, askedByPerson ? { role: "bot", kind: "compaction", engineCompaction: true }
+      : { role: "bot", kind: "activity", tool: { name: serverLine(deps.language?.(threadId), "server.warmSummary.summarized"), ok: true } });
+    deps.log?.(`${askedByPerson ? "compact now" : "warm summary"} ${threadId}: moved to its summarized session, keeping ${exchanges} exchange(s) word for word`);
     return { ok: true };
   };
 
@@ -163,6 +164,14 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
 
   return {
     ...warm,
+    /** The person asked for a summary now: the engine's own compaction of the conversation's session, where the engine has
+     * one to run outside a turn. False leaves the conversation as it was. */
+    async compactNow(target: WarmSummaryTarget, signal: AbortSignal): Promise<boolean> {
+      warm.forget(target.threadId);
+      const outcome = await native(target, { signal, awaited: () => true }, true);
+      if (!outcome.ok) deps.log?.(`compact now ${target.threadId}: not by the engine (${outcome.reason})`);
+      return outcome.ok;
+    },
     /** The person has the conversation in front of them (opened it, or is active in the app with it open). */
     sawThread(threadId: string): void {
       warm.seen(threadId);
