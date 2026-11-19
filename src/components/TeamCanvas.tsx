@@ -5,8 +5,8 @@ import { teamBotName, useTeamPeople } from "@/state/team-people";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { teamMapStatus, type TeamMapSection } from "@/lib/team-map";
-import { COMPUTER_DRAG_TYPE, fitTeams, layoutTeams, orderBots, parseBotOrders, parsePositions, reorderBot, teamSize, zoomAt, type Point, type View } from "@/lib/team-canvas";
+import { teamMapStatus, type TeamMapSection, type TeamMapSession } from "@/lib/team-map";
+import { COMPUTER_DRAG_TYPE, fitTeams, layoutTeams, orderBots, parseBotOrders, parsePositions, reorderBot, sessionStackHeight, teamSize, zoomAt, type Point, type View } from "@/lib/team-canvas";
 import { bestColumns, polylinePath, teamGeometry, type TeamGeometry } from "@/lib/team-canvas-computers";
 import { teamComputersFor, type ShownFrame } from "@/lib/map-computers";
 import { activityPreview, botEngine } from "@/lib/failed-turn";
@@ -16,6 +16,9 @@ import { BotAvatar } from "./Avatar";
 import { ComputerNode } from "./ComputerNode";
 import { InstanceProviderMark, ProviderMark } from "./ProviderIcons";
 import { openBotSettings } from "./bot-panel/panel-link";
+import { TeamMapSessions } from "./TeamMapSessions";
+
+const NO_SESSIONS: TeamMapSession[] = [];
 
 type Gesture = {
   id: number;
@@ -96,7 +99,7 @@ function currentActivity(bot: Bot | undefined, instances: ReturnType<typeof useS
   return bot.tasks?.find((task) => task.busy && task.threadId !== bot.threadId && task.title.trim())?.title;
 }
 
-export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [], computers = NO_COMPUTERS, computerFrames = {}, onOpenComputer, taggedBotIds = [], sent, bottomInset = 0 }: {
+export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [], computers = NO_COMPUTERS, computerFrames = {}, onOpenComputer, taggedBotIds = [], sent, bottomInset = 0, sessionsByBot }: {
   sections: TeamMapSection<Bot>[];
   canManage: boolean;
   onMove: (bot: Bot, destination: string) => Promise<boolean | void>;
@@ -120,8 +123,18 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
   sent?: { botIds: string[]; key: number } | null;
   /** Height covered at the bottom (the map composer): fitting keeps the teams above it. */
   bottomInset?: number;
+  /** Each bot's open conversations, drawn as a card stack under its node. */
+  sessionsByBot?: Map<string, TeamMapSession[]>;
 }) {
   const { state } = useStore();
+  const anySessions = (sessionsByBot?.size ?? 0) > 0;
+  const [sessionsNow, setSessionsNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!anySessions) return;
+    const timer = window.setInterval(() => setSessionsNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [anySessions]);
+  const extraHeightFor = useCallback((botId: string) => sessionStackHeight(sessionsByBot?.get(botId)?.length ?? 0), [sessionsByBot]);
   const viewport = useRef<HTMLDivElement>(null);
   const gesture = useRef<Gesture | null>(null);
   const suppressClick = useRef(false);
@@ -146,11 +159,11 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
     return teamGeometry({ chiefs, members }, teamComputersFor(section.key, [...chiefs, ...members].map((bot) => bot.id), computers));
   }), [sections, computers, botOrders]);
   const columnsFor = useMemo(() => {
-    if (!geometries.some(Boolean)) return undefined;
-    const sizes = geometries.map((geometry, index) => geometry ?? teamSize(sections[index]));
+    const sizes = geometries.map((geometry, index) => geometry ?? teamSize(sections[index], extraHeightFor));
+    if (!geometries.some(Boolean)) return { sizes, columns: 2 };
     // Rounded so a small window resize never reshuffles the teams.
     return { sizes, columns: bestColumns(sizes, { width: Math.round(viewportSize.width / 200) * 200, height: Math.round(viewportSize.height / 200) * 200 }) };
-  }, [geometries, sections, viewportSize]);
+  }, [geometries, sections, viewportSize, extraHeightFor]);
   const tiles = useMemo(() => layoutTeams(sections, positions, columnsFor), [sections, positions, columnsFor]);
   const current = useRef({ view, positions, tiles, selectedId: state.selectedId, settingsOpen: state.settingsOpen, bottomInset });
   current.current = { view, positions, tiles, selectedId: state.selectedId, settingsOpen: state.settingsOpen, bottomInset };
@@ -415,10 +428,11 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
         const hierarchy = section.chiefs.length > 0 && section.members.length > 0;
         const dropping = computerDropKey === section.key || (dragged && dropKey === section.key && (dragged.bot.section?.trim() ?? "") !== section.key);
         const computer = Object.hasOwn(teamComputers, section.key) ? teamComputers[section.key] : undefined;
-        const renderBot = (bot: Bot) => <div key={bot.id} className="relative">
+        const renderBot = (bot: Bot, withSessions: boolean) => <div key={bot.id} className="relative">
           {insertion?.botId === bot.id && <div className={cn("pointer-events-none absolute inset-x-1 h-0.5 rounded bg-accent", insertion.after ? "-bottom-[9px]" : "-top-[9px]")} />}
           <BotCard bot={bot} selected={state.selectedId === bot.id && state.settingsOpen} moving={dragged?.bot.id === bot.id || moving === bot.id}
             connected={connectedBotIds.includes(bot.id)} tagged={taggedBotIds.includes(bot.id)} sent={sent?.botIds.includes(bot.id) ? sent.key : undefined} onComputer={onComputer} onArrange={layoutLoaded ? arrangeBot : undefined} />
+          {withSessions && <TeamMapSessions sessions={sessionsByBot?.get(bot.id) ?? NO_SESSIONS} now={sessionsNow} />}
         </div>;
         return <section key={section.key} data-team-key={section.key} aria-label={t("canvas.teamRegion", { name: section.name })}
           className={cn("absolute rounded-2xl border bg-panel/90 shadow-sm has-[details[open]]:z-20 data-[computer-dropping=true]:border-accent data-[computer-dropping=true]:ring-2 data-[computer-dropping=true]:ring-accent/25", dropping ? "border-accent ring-2 ring-accent/25" : "border-hairline/50")}
@@ -475,7 +489,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
             </svg>
             {geometry.cards.map((card) => {
               const bot = botById.get(card.botId);
-              return bot ? <div key={bot.id} className="absolute" style={{ left: card.x, top: card.y }}>{renderBot(bot)}</div> : null;
+              return bot ? <div key={bot.id} className="absolute" style={{ left: card.x, top: card.y }}>{renderBot(bot, false)}</div> : null;
             })}
             {geometry.monitors.map((monitor) => {
               const computer = computerById.get(monitor.id);
@@ -487,9 +501,9 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
                 onOpen={onOpenComputer ? () => onOpenComputer(computer) : undefined} />;
             })}
           </> : <div className="flex items-center px-5 pb-5">
-            {section.chiefs.length > 0 && <div className="flex flex-col gap-4">{orderBots(section.chiefs, personalOrder(section.key)).map(renderBot)}</div>}
+            {section.chiefs.length > 0 && <div className="flex flex-col gap-4">{orderBots(section.chiefs, personalOrder(section.key)).map((bot) => renderBot(bot, true))}</div>}
             {hierarchy && <div className="flex w-10 shrink-0 justify-center text-ink-secondary/35" aria-hidden="true"><ArrowRight size={22} strokeWidth={1} /></div>}
-            {section.members.length > 0 && <div className="flex flex-col gap-4">{orderBots(section.members, personalOrder(section.key)).map(renderBot)}</div>}
+            {section.members.length > 0 && <div className="flex flex-col gap-4">{orderBots(section.members, personalOrder(section.key)).map((bot) => renderBot(bot, true))}</div>}
             {section.chiefs.length + section.members.length === 0 && <p className="flex h-[126px] w-[236px] items-center justify-center rounded-xl border border-dashed border-hairline/70 px-6 text-center text-[12px] leading-relaxed text-ink-secondary">{t("canvas.dropHere")}</p>}
           </div>}
         </section>;

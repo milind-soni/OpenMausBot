@@ -1,4 +1,7 @@
 import { t } from "./i18n";
+import type { TeamMapSession, TeamMapSessionState } from "../../shared/team-map-sessions";
+
+export type { TeamMapSession, TeamMapSessionState } from "../../shared/team-map-sessions";
 
 export interface TeamMapBot {
   id: string;
@@ -14,6 +17,10 @@ export interface TeamMapSnapshot {
   collaborations: Array<{ groupId: string; botIds: [string, string]; lastAt: number }>;
   queued: Array<{ sourceBotId: string; targetBotId: string; reason?: string; threadId?: string; groupId?: string }>;
   running: Array<{ sourceBotId: string; targetBotId: string; threadId: string; groupId?: string }>;
+  /** Not yet sent by every server; treat as absent until `GET /api/team-map` reports it. */
+  sessions?: TeamMapSession[];
+  doneLast24h?: number;
+  stuckAfterMs?: number;
 }
 
 export interface TeamMapSection<T extends TeamMapBot = TeamMapBot> {
@@ -42,6 +49,8 @@ export const EMPTY_TEAM_MAP_SNAPSHOT: TeamMapSnapshot = {
   collaborations: [],
   queued: [],
   running: [],
+  sessions: [],
+  doneLast24h: 0,
 };
 
 export function buildTeamMapSections<T extends TeamMapBot>(bots: T[], names: string[] = []): TeamMapSection<T>[] {
@@ -114,4 +123,38 @@ export function teamMapStatus(bot: TeamMapBot): TeamMapStatus {
 
 export function teamMapBotCount(count: number): string {
   return count === 1 ? t("canvas.botCountOne") : t("canvas.botCount", { count });
+}
+
+export function groupSessionsByBot(sessions: TeamMapSession[]): Map<string, TeamMapSession[]> {
+  const out = new Map<string, TeamMapSession[]>();
+  for (const session of sessions) out.set(session.botId, [...(out.get(session.botId) ?? []), session]);
+  return out;
+}
+
+const SESSION_PRIORITY: Record<TeamMapSessionState, number> = { stuck: 0, waiting: 1, running: 2, queued: 3 };
+
+/** Sessions that need attention (stuck, then waiting) lead; a tie breaks toward the one started most recently. */
+export function sortSessionsForDisplay(sessions: TeamMapSession[]): TeamMapSession[] {
+  return [...sessions].sort((a, b) => SESSION_PRIORITY[a.state] - SESSION_PRIORITY[b.state] || b.startedAt - a.startedAt);
+}
+
+export function teamMapSessionCounts(sessions: TeamMapSession[]): Record<TeamMapSessionState, number> {
+  const counts: Record<TeamMapSessionState, number> = { running: 0, stuck: 0, queued: 0, waiting: 0 };
+  for (const session of sessions) counts[session.state]++;
+  return counts;
+}
+
+export function teamMapSessionStatus(state: TeamMapSessionState): TeamMapStatus {
+  switch (state) {
+    case "running": return { label: t("canvas.session.state.running"), tone: "success" };
+    case "stuck": return { label: t("canvas.session.state.stuck"), tone: "danger" };
+    case "waiting": return { label: t("canvas.session.state.waiting"), tone: "warning" };
+    case "queued": return { label: t("canvas.session.state.queued"), tone: "idle" };
+  }
+}
+
+export function formatSessionElapsed(startedAt: number, now: number): string {
+  const minutes = Math.max(0, Math.round((now - startedAt) / 60_000));
+  if (minutes < 60) return t("canvas.session.elapsedMinutes", { count: minutes });
+  return t("canvas.session.elapsedHours", { count: Math.round(minutes / 60) });
 }

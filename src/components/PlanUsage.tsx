@@ -27,7 +27,7 @@ interface PlanModelUsage {
   windows: PlanExtra[];
 }
 
-interface PlanProvider {
+export interface PlanProvider {
   id: string;
   name: string;
   driver: string;
@@ -40,7 +40,7 @@ interface PlanProvider {
   models?: PlanModelUsage[];
 }
 
-interface PlanUsageReport {
+export interface PlanUsageReport {
   fetchedAt: string;
   providers: PlanProvider[];
 }
@@ -78,7 +78,7 @@ function dueResetDeadlines(report: PlanUsageReport, now: number, seen: Set<strin
   return due;
 }
 
-function usageTone(used: number): string {
+export function usageTone(used: number): string {
   if (used >= 90) return "bg-danger";
   if (used >= 70) return "bg-warning";
   return "bg-success";
@@ -91,7 +91,7 @@ function windowLabel(label: string): string {
   return label;
 }
 
-function providerLabel(provider: Pick<PlanProvider, "name">): string {
+export function providerLabel(provider: Pick<PlanProvider, "name">): string {
   const normalized = provider.name.trim().toLowerCase();
   if (normalized === "chatgpt plan") return t("planUsage.provider.chatgptPlan");
   if (normalized === "claude (api key)") return t("planUsage.provider.claudeApiKey");
@@ -151,7 +151,7 @@ function WindowRow({
   );
 }
 
-function usePlanUsage() {
+export function usePlanUsage() {
   const [report, setReport] = useState<PlanUsageReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");

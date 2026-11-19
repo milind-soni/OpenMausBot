@@ -1,5 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { fitTeams, layoutTeams, orderBots, parseBotOrders, parsePositions, reorderBot, teamSize, zoomAt, type Tile } from "./team-canvas";
+import {
+  CARD_HEIGHT,
+  fitTeams,
+  layoutTeams,
+  orderBots,
+  parseBotOrders,
+  parsePositions,
+  reorderBot,
+  SESSION_ROW_GAP,
+  SESSION_ROW_HEIGHT,
+  SESSION_STACK_GAP,
+  sessionStackHeight,
+  teamSize,
+  zoomAt,
+  type Tile,
+} from "./team-canvas";
 import type { TeamMapSection } from "./team-map";
 
 function section(key: string, chiefs = 0, members = 0): TeamMapSection {
@@ -17,6 +32,21 @@ describe("team canvas geometry", () => {
     expect(teamSize(section("Members", 0, 3))).toEqual({ width: 276, height: 494 });
     expect(teamSize(section("Chiefs", 2))).toEqual({ width: 276, height: 352 });
     expect(teamSize(section("Team", 1, 3))).toEqual({ width: 552, height: 494 });
+  });
+
+  it("grows a bot's lane by its own session stack, independently of the other lane", () => {
+    const extra = (botId: string) => (botId === "Team-chief-0" ? sessionStackHeight(2) : 0);
+    expect(teamSize(section("Team", 1, 3), extra)).toEqual({ width: 552, height: 494 });
+    const grown = teamSize(section("Members", 0, 1), (botId) => (botId === "Members-member-0" ? sessionStackHeight(5) : 0));
+    expect(grown.height).toBe(84 + CARD_HEIGHT + sessionStackHeight(5));
+    expect(teamSize(section("Empty"), () => 40)).toEqual({ width: 276, height: 210 });
+  });
+
+  it("stacks session cards up to four, adding one more row past that", () => {
+    expect(sessionStackHeight(0)).toBe(0);
+    expect(sessionStackHeight(1)).toBe(SESSION_STACK_GAP + SESSION_ROW_HEIGHT);
+    expect(sessionStackHeight(4)).toBe(SESSION_STACK_GAP + 4 * (SESSION_ROW_HEIGHT + SESSION_ROW_GAP) - SESSION_ROW_GAP);
+    expect(sessionStackHeight(7)).toBe(SESSION_STACK_GAP + 5 * (SESSION_ROW_HEIGHT + SESSION_ROW_GAP) - SESSION_ROW_GAP);
   });
 
   it("uses the widest first column and tallest row while preserving saved positions", () => {
