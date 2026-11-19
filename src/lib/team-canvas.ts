@@ -11,6 +11,18 @@ export const TEAM_PADDING = 20;
 export const HEADER_HEIGHT = 64;
 export const COMPUTER_DRAG_TYPE = "application/x-omb-computer";
 
+export const SESSION_ROW_HEIGHT = 44;
+export const SESSION_ROW_GAP = 6;
+export const SESSION_STACK_GAP = 10;
+export const SESSION_MAX_VISIBLE = 4;
+
+/** Extra vertical space a bot's session-card stack needs below its card; 0 when it has none. */
+export function sessionStackHeight(count: number): number {
+  if (count <= 0) return 0;
+  const rows = Math.min(count, SESSION_MAX_VISIBLE) + (count > SESSION_MAX_VISIBLE ? 1 : 0);
+  return SESSION_STACK_GAP + rows * (SESSION_ROW_HEIGHT + SESSION_ROW_GAP) - SESSION_ROW_GAP;
+}
+
 export function orderBots<T extends { id: string }>(bots: T[], order: string[] = []): T[] {
   const rank = new Map(order.map((id, index) => [id, index]));
   return [...bots].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
@@ -36,14 +48,20 @@ export function parseBotOrders(raw: string | null): Record<string, string[]> {
   }
 }
 
-export function teamSize(section: TeamMapSection): { width: number; height: number } {
+/** A lane's height is each card's own height plus its session stack, stacked with the usual gap. */
+function laneHeight(bots: { id: string }[], extraHeightFor?: (botId: string) => number): number {
+  if (bots.length === 0) return 0;
+  return bots.reduce((total, bot) => total + CARD_HEIGHT + (extraHeightFor?.(bot.id) ?? 0), 0) + GAP * (bots.length - 1);
+}
+
+export function teamSize(section: TeamMapSection, extraHeightFor?: (botId: string) => number): { width: number; height: number } {
   const hierarchy = section.chiefs.length > 0 && section.members.length > 0;
-  const rows = hierarchy
-    ? Math.max(section.chiefs.length, section.members.length)
-    : Math.max(1, section.chiefs.length + section.members.length);
+  const chiefsHeight = laneHeight(section.chiefs, extraHeightFor);
+  const membersHeight = laneHeight(section.members, extraHeightFor);
+  const empty = section.chiefs.length + section.members.length === 0;
   return {
     width: CARD_WIDTH * (hierarchy ? 2 : 1) + TEAM_PADDING * 2 + (hierarchy ? 40 : 0),
-    height: HEADER_HEIGHT + TEAM_PADDING + rows * (CARD_HEIGHT + GAP) - GAP,
+    height: HEADER_HEIGHT + TEAM_PADDING + Math.max(chiefsHeight, membersHeight, empty ? CARD_HEIGHT : 0),
   };
 }
 
@@ -52,7 +70,7 @@ export function layoutTeams(
   positions: Record<string, Point>,
   options: { sizes?: ReadonlyArray<{ width: number; height: number }>; columns?: number } = {},
 ): Tile[] {
-  const sizes = options.sizes ?? sections.map(teamSize);
+  const sizes = options.sizes ?? sections.map((section) => teamSize(section));
   const columns = Math.max(1, Math.floor(options.columns ?? 2));
   const columnX = [40];
   for (let column = 1; column < columns; column++) {

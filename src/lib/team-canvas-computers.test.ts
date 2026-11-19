@@ -73,7 +73,7 @@ describe("computers on the team canvas", () => {
     const sections: TeamMapSection[] = ["A", "B", "C"].map((key) => ({ key, name: key, chiefs: [], members: bots(key, 1) }));
     const tiles = layoutTeams(sections, {}, { sizes: [tall, tall, tall], columns: 3 });
     expect(tiles.map((tile) => [tile.x, tile.y])).toEqual([[40, 40], [40 + 600 + 56, 40], [40 + 2 * (600 + 56), 40]]);
-    expect(layoutTeams(sections, {})).toEqual(layoutTeams(sections, {}, { sizes: sections.map(teamSize), columns: 2 }));
+    expect(layoutTeams(sections, {})).toEqual(layoutTeams(sections, {}, { sizes: sections.map((section) => teamSize(section)), columns: 2 }));
   });
 
   it("draws polylines as SVG paths", () => {

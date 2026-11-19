@@ -7,6 +7,7 @@ import {
   EMPTY_TEAM_MAP_SNAPSHOT,
   buildTeamMapEdges,
   buildTeamMapSections,
+  groupSessionsByBot,
   teamMapBotCount,
   type TeamMapEdge,
   type TeamMapSnapshot,
@@ -25,6 +26,7 @@ import { useMapComputers, useShowComputers } from "@/lib/map-computers";
 import { MapComposer } from "./MapComposer";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { openBotSettings } from "./bot-panel/panel-link";
+import { ALL_SECTIONS_FILTER, TeamMapStatusStrip } from "./TeamMapStatusStrip";
 import type { TeamComputer } from "../../shared/team-computer";
 
 export function EdgeRow({ edge, bots }: { edge: TeamMapEdge; bots: Bot[] }) {
@@ -294,6 +296,14 @@ export function TeamMapPage() {
     return buildTeamMapSections(bots, names).sort((a, b) => order(a.key) - order(b.key));
   }, [bots, state.sections, state.groups]);
   const edges = useMemo(() => buildTeamMapEdges(bots, snapshot), [bots, snapshot]);
+  const hasLiveData = snapshot.sessions !== undefined;
+  const sessionsByBot = useMemo(() => groupSessionsByBot(snapshot.sessions ?? []), [snapshot.sessions]);
+  const [sectionFilter, setSectionFilter] = useState(ALL_SECTIONS_FILTER);
+  const visibleSections = useMemo(
+    () => sectionFilter === ALL_SECTIONS_FILTER ? sections : sections.filter((section) => section.key === sectionFilter),
+    [sections, sectionFilter],
+  );
+  const [live, setLive] = useState(true);
   const anyComputer = bots.some((bot) => bot.computer === "cloud" && bot.cloudBackend !== "vps") || computers.some((computer) => computer.section !== null);
   const { show: showComputers, loaded: computersChoiceLoaded, choose: setShowComputers } = useShowComputers(anyComputer);
   const mapComputers = useMapComputers(!remoteClient && computersChoiceLoaded && showComputers);
@@ -320,11 +330,12 @@ export function TeamMapPage() {
 
   useEffect(() => {
     void refresh();
+    if (!live) return;
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") void refresh(true);
     }, 3_000);
     return () => window.clearInterval(timer);
-  }, [refresh]);
+  }, [refresh, live]);
 
   const moveBot = async (bot: Bot, destination: string) => {
     setError(null);
@@ -387,9 +398,12 @@ export function TeamMapPage() {
         {error || refreshError}
         <button aria-label={t("common.close")} className="rounded p-1 hover:bg-danger/10" onClick={() => { setError(null); setRefreshError(null); }}><X size={14} /></button>
       </div>}
+      {hasLiveData && <TeamMapStatusStrip sessions={snapshot.sessions ?? []} doneLast24h={snapshot.doneLast24h ?? 0}
+        sectionOptions={composerTeams} sectionFilter={sectionFilter} onSectionFilterChange={setSectionFilter}
+        live={live} onToggleLive={() => setLive((value) => !value)} />}
       <div className="relative flex min-h-0 flex-1">
       <div className="relative flex min-h-0 min-w-0 flex-1">
-      <TeamCanvas sections={sections} canManage={!remoteClient && admin !== false} onMove={requestMove} taggedBotIds={taggedBotIds} sent={sent} bottomInset={bots.length ? 96 : 0}
+      <TeamCanvas sections={visibleSections} sessionsByBot={sessionsByBot} edges={edges} canManage={!remoteClient && admin !== false} onMove={requestMove} taggedBotIds={taggedBotIds} sent={sent} bottomInset={bots.length ? 96 : 0}
         connectedBotIds={state.settingsOpen ? edges.flatMap((edge) => edge.sourceBotId === state.selectedId ? [edge.targetBotId] : edge.targetBotId === state.selectedId ? [edge.sourceBotId] : []) : []}
         onComputer={(bot) => openBotSettings(dispatch, "access", { botId: bot.id })}
         computers={showComputers && computersChoiceLoaded && !remoteClient ? mapComputers.computers : undefined} computerFrames={mapComputers.frames}
