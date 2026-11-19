@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { FilePreviewDialog } from "./FilePreviewDialog";
+import { MENU_MOTION_MS } from "./MenuMotion";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -10,6 +12,7 @@ import {
   AttachedFileChips,
   AttachedImageGallery,
   AttachmentPreviewDialog,
+  AttachmentThumbnail,
   MarkdownImagePreview,
   OutsideWorkspaceFile,
   canonicalDownloadFilename,
@@ -303,16 +306,46 @@ describe("local Markdown image lifecycle", () => {
   });
 });
 
-describe("image preview copy button", () => {
+it("sizes AI thumbnails by their source orientation and crops uploaded photos to squares", async () => {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    for (const [width, height, layout, aspect, fit] of [
+      [400, 800, "oriented", "aspect-[3/4]", "object-contain"],
+      [800, 400, "oriented", "aspect-[4/3]", "object-contain"],
+      [400, 800, "square", "aspect-square", "object-cover"],
+    ] as const) {
+      const image = { src: `/api/${width}-${layout}.png`, name: "photo.png" };
+      await act(() => root.render(createElement(AttachmentThumbnail, { key: image.src, image, layout, onPreview: () => {} })));
+      const img = container.querySelector("img")!;
+      Object.defineProperties(img, { naturalWidth: { value: width }, naturalHeight: { value: height } });
+      await act(() => img.dispatchEvent(new Event("load")));
+      expect(container.firstElementChild?.classList.contains(aspect)).toBe(true);
+      expect(img.classList.contains(fit)).toBe(true);
+    }
+  } finally {
+    await act(() => root.unmount());
+    container.remove();
+  }
+});
+
+describe("full-screen image actions", () => {
   const image = { src: "/api/files/shot.png", name: "shot.png", downloadUrl: "/api/files/shot.png" };
 
   async function openPreview() {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
-    await act(async () => { root.render(createElement(AttachmentPreviewDialog, { image, onClose: () => {} })); });
+    const onClose = vi.fn();
+    await act(async () => { root.render(createElement(AttachmentPreviewDialog, { image, onClose })); });
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.className).toContain("fixed inset-0");
     const button = () => document.querySelector<HTMLButtonElement>('button[title="Copy image"], button[title="Image copied"]');
-    return { button, close: () => act(() => root.unmount()) };
+    const openMenu = () => act(() => {
+      dialog.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
+    });
+    return { button, dialog, onClose, openMenu, close: async () => { await act(() => root.unmount()); container.remove(); } };
   }
 
   it("copies the shown image as a PNG and says so", async () => {
@@ -324,6 +357,8 @@ describe("image preview copy button", () => {
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { write } });
     const preview = await openPreview();
     try {
+      expect(preview.button()).toBeNull();
+      await preview.openMenu();
       expect(preview.button()?.getAttribute("aria-label")).toBe("Copy shot.png as an image");
       await act(async () => { preview.button()!.click(); });
       expect(write).toHaveBeenCalledOnce();
@@ -335,15 +370,75 @@ describe("image preview copy button", () => {
     }
   });
 
-  it("is hidden where the clipboard cannot take images", async () => {
+  it("fades the actions and preview independently before removing them", async () => {
+    vi.useFakeTimers();
+    const preview = await openPreview();
+    try {
+      expect(preview.dialog.getAttribute("data-overlay-fade")).toBe("in");
+      await preview.openMenu();
+      await act(() => preview.dialog.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true })));
+      await act(() => (preview.dialog as HTMLElement).click());
+      expect(preview.button()?.closest("[data-overlay-fade]")?.getAttribute("data-overlay-fade")).toBe("out");
+      expect(preview.button()?.closest("[inert]")).toBeTruthy();
+      expect(preview.onClose).not.toHaveBeenCalled();
+      await act(() => { vi.advanceTimersByTime(MENU_MOTION_MS); });
+      expect(preview.button()).toBeNull();
+      await act(() => (preview.dialog as HTMLElement).click());
+      expect(preview.dialog.getAttribute("data-overlay-fade")).toBe("out");
+      expect(preview.dialog.hasAttribute("inert")).toBe(true);
+      expect(preview.onClose).not.toHaveBeenCalled();
+      await act(() => { vi.advanceTimersByTime(MENU_MOTION_MS); });
+      expect(preview.dialog.isConnected).toBe(false);
+      expect(preview.onClose).toHaveBeenCalledOnce();
+    } finally {
+      await preview.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("can download when image copying is unavailable", async () => {
     vi.stubGlobal("ClipboardItem", undefined);
     const preview = await openPreview();
     try {
-      expect(preview.button()).toBeNull();
-      expect(document.querySelector('a[title="Download"]')).not.toBeNull();
+      await preview.openMenu();
+      expect(preview.button()?.disabled).toBe(true);
+      expect(document.querySelector('a[download="shot.png"]')?.getAttribute("href")).toBe(image.downloadUrl);
     } finally {
       await preview.close();
       vi.unstubAllGlobals();
     }
   });
+});
+
+it.each([false, true])("closes a native file preview and respects reduced motion (%s)", async (reducedMotion) => {
+  vi.useFakeTimers();
+  const host = document.body.appendChild(document.createElement("div"));
+  const trigger = host.appendChild(document.createElement("button"));
+  const root = createRoot(host.appendChild(document.createElement("div")));
+  const onClose = vi.fn();
+  const previous = document.documentElement.dataset.reducedMotion;
+  document.documentElement.dataset.reducedMotion = String(reducedMotion);
+  try {
+    trigger.focus();
+    await act(() => root.render(createElement(FilePreviewDialog, {
+      title: "Report.html", onClose, returnFocus: trigger, children: "Report",
+    })));
+    const dialog = document.querySelector("dialog.fading-dialog")!;
+    expect(dialog.hasAttribute("open")).toBe(true);
+    await act(() => dialog.dispatchEvent(new Event("cancel", { cancelable: true })));
+    expect(dialog.hasAttribute("open")).toBe(false);
+    expect(dialog.isConnected).toBe(!reducedMotion);
+    if (!reducedMotion) {
+      expect(onClose).not.toHaveBeenCalled();
+      await act(() => { vi.advanceTimersByTime(MENU_MOTION_MS); });
+    }
+    expect(dialog.isConnected).toBe(false);
+    expect(onClose).toHaveBeenCalledOnce();
+  } finally {
+    await act(() => root.unmount());
+    host.remove();
+    if (previous === undefined) delete document.documentElement.dataset.reducedMotion;
+    else document.documentElement.dataset.reducedMotion = previous;
+    vi.useRealTimers();
+  }
 });

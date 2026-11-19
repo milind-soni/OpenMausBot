@@ -18,10 +18,23 @@ import {
   type MessageAttachmentContext,
   type PreviewImage,
 } from "./AttachmentPreview";
+import { useHeldMenuMotion } from "./MenuMotion";
 import { useRevealOriginalMenu } from "./RevealOriginalMenu";
 
 export interface GalleryFile extends TranscriptFileAttachment {
   linked?: boolean;
+}
+
+export function isImageOnlyMarkdown(text: string): boolean {
+  if (!text.includes("![")) return false;
+  const { children } = fromMarkdown(text, { mdastExtensions: [windowsPathDestinations] });
+  const blocks = children.filter(block => block.type !== "definition");
+  return blocks.length > 0 && blocks.every(block => block.type === "paragraph" && block.children.every(
+    node => node.type === "image" || node.type === "imageReference" || node.type === "break"
+      || (node.type === "text" && !node.value.trim())
+      || ((node.type === "link" || node.type === "linkReference") && node.children.length === 1
+        && (node.children[0]?.type === "image" || node.children[0]?.type === "imageReference")),
+  ));
 }
 
 type MarkdownNode = {
@@ -127,7 +140,7 @@ export function MessageAttachmentGallery({ text, attachments = NO_GENERATED_ATTA
     () => [...attached.files, ...collectMessageFiles(text, [...attached.images, ...attached.files.map((file) => file.path)])],
     [text, attached],
   );
-  return <AttachmentGallery images={attached.images} files={files} originals={attached.originals} message={message} eager={eager} className={className} />;
+  return <AttachmentGallery images={attached.images} files={files} originals={attached.originals} message={message} eager={eager} photoStrip="oriented" className={className} />;
 }
 
 const MEDIA_STALL_MS = 15_000;
@@ -242,6 +255,8 @@ export function previewTooLarge(bytes: number): Error {
 
 function VideoAttachment({ file, message }: { file: GalleryFile; message: MessageAttachmentContext }) {
   const [preview, setPreview] = useState<string | null>(null);
+  const previewMotion = useHeldMenuMotion(preview);
+  const shownSource = previewMotion.shown ? previewMotion.value : null;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [tooLarge, setTooLarge] = useState(false);
@@ -251,8 +266,8 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
   useEffect(() => () => request.current?.abort(), []);
   useEffect(() => {
     if (preview) videoRef.current?.focus();
-    return () => { if (preview?.startsWith("blob:")) URL.revokeObjectURL(preview); };
   }, [preview]);
+  useEffect(() => () => { if (shownSource?.startsWith("blob:")) URL.revokeObjectURL(shownSource); }, [shownSource]);
 
   const load = async () => {
     if (request.current) return;
@@ -275,6 +290,7 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
     }
   };
   const close = () => {
+    videoRef.current?.pause();
     request.current?.abort();
     request.current = null;
     setLoading(false);
@@ -296,19 +312,23 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
               <Download size={14} aria-hidden="true" />{t("attach.download")}
             </a>
           </div>
-        ) : preview ? (
-          <video
-            ref={videoRef}
-            src={preview}
-            tabIndex={0}
-            controls
-            playsInline
-            preload="metadata"
-            aria-label={t("attach.previewVideo", { name: file.name })}
-            className="max-h-full max-w-full"
-            onError={() => setError(t("attach.videoUnavailable"))}
-          />
-        ) : (
+        ) : null}
+        {shownSource && (!error || previewMotion.closing) && (
+          <div {...previewMotion.exitProps} data-overlay-fade={previewMotion.closing ? "out" : "in"} className="absolute inset-0 z-10 flex items-center justify-center bg-inset">
+            <video
+              ref={videoRef}
+              src={shownSource}
+              tabIndex={0}
+              controls
+              playsInline
+              preload="metadata"
+              aria-label={t("attach.previewVideo", { name: file.name })}
+              className="max-h-full max-w-full"
+              onError={() => { if (preview) setError(t("attach.videoUnavailable")); }}
+            />
+          </div>
+        )}
+        {!preview && (
           <button
             ref={playButton}
             type="button"
@@ -323,7 +343,7 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
           </button>
         )}
         {(preview || loading || error) && (
-          <button type="button" aria-label={t("attach.closeVideo")} onClick={close} className="absolute right-2 top-2 flex size-7 items-center justify-center rounded-full bg-panel/90 text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
+          <button type="button" aria-label={t("attach.closeVideo")} onClick={close} className="absolute right-2 top-2 z-20 flex size-7 items-center justify-center rounded-full bg-panel/90 text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
             <X size={14} />
           </button>
         )}
@@ -441,14 +461,14 @@ type GalleryItem = { key: string; source?: string } & (
 
 const BENEATH_LIMIT = 6;
 
-export function AttachmentGallery({ images = [], files = [], originals, message, eager = false, beneath = false, photoStrip = false, className }: {
+export function AttachmentGallery({ images = [], files = [], originals, message, eager = false, beneath = false, photoStrip, className }: {
   images?: Array<string | TranscriptImageAttachment>;
   files?: GalleryFile[];
   originals?: AttachmentOriginals;
   message?: MessageAttachmentContext;
   eager?: boolean;
   beneath?: boolean;
-  photoStrip?: boolean;
+  photoStrip?: "square" | "oriented";
   className?: string;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -483,7 +503,6 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
   const shown = expanded ? items : items.slice(0, limit);
   const media = shown.filter((item) => item.kind === "image" || item.kind === "video");
   const compactPhotos = photoStrip && media.length > 0 && media.every((item) => item.kind === "image");
-  const photoWidth = media.length === 1 ? "w-[min(9rem,calc(42.5vw-0.25rem))]" : "w-[min(18.5rem,85vw)]";
   const documents = shown.filter((item) => item.kind === "file" || item.kind === "audio");
   const previews = items.flatMap((item) => item.kind === "image" ? [item.image] : []);
   const label = items.length === 1 ? t("attach.gallerySingle") : t("attach.galleryCount", { count: items.length });
@@ -500,8 +519,8 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
         {thumbs.length > 0 && (
           <div className="flex max-w-full flex-wrap gap-2">
             {thumbs.map((item) => item.kind === "image" && (
-              <div key={item.key} className="min-w-0" title={item.image.name} {...reveal.targetProps(item.source)}>
-                <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} gallery={previews} onPreview={(items) => setSelected({ image: item.image, items })} className="h-24 w-auto max-w-48 rounded-2xl border-0" />
+              <div key={item.key} className="min-w-0 max-w-full" title={item.image.name} {...reveal.targetProps(item.source)}>
+                <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} gallery={previews} onPreview={(items) => setSelected({ image: item.image, items })} layout="oriented" className="max-w-full border-0" />
               </div>
             ))}
           </div>
@@ -531,12 +550,12 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
   }
 
   return (
-    <section aria-label={label} className={cn("mb-1 max-w-full space-y-1.5 text-left whitespace-normal", compactPhotos && !documents.length ? photoWidth : "mb-1.5 w-[min(34rem,70vw)]", className)}>
+    <section aria-label={label} className={cn("mb-1 max-w-full space-y-1.5 text-left whitespace-normal", compactPhotos && !documents.length ? "w-fit" : "mb-1.5 w-[min(34rem,70vw)]", className)}>
       {media.length > 0 && (
-        <div className={cn("grid max-w-full gap-2", compactPhotos && photoWidth, media.length === 1 ? "grid-cols-1" : "grid-cols-2")}>
+        <div className={cn("max-w-full gap-2", compactPhotos ? "flex flex-wrap" : cn("grid", media.length === 1 ? "grid-cols-1" : "grid-cols-2"))}>
           {media.map((item) => item.kind === "image" ? (
-            <div key={item.key} className="min-w-0" title={item.image.name} {...reveal.targetProps(item.source)}>
-              <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} gallery={previews} onPreview={(items) => setSelected({ image: item.image, items })} fixedRatio={compactPhotos ? 3 / 4 : undefined} className={cn("max-h-72 rounded-2xl border-0 bg-transparent", compactPhotos && "w-full rounded-xl")} />
+            <div key={item.key} className="min-w-0 max-w-full" title={item.image.name} {...reveal.targetProps(item.source)}>
+              <AttachmentThumbnail key={item.image.src} image={item.image} eager={eager} gallery={previews} onPreview={(items) => setSelected({ image: item.image, items })} layout={photoStrip} className={cn("max-h-72 max-w-full border-0 bg-transparent", !photoStrip && "rounded-2xl")} />
             </div>
           ) : item.kind === "video" && message ? (
             <span key={`${message.threadId}:${message.messageId}:${item.key}`} className="contents" {...reveal.targetProps(item.source)}><VideoAttachment file={item.file} message={message} /></span>

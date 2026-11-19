@@ -31,7 +31,7 @@ export const MESSAGE_ROW = "data-message-row";
 
 export const INTERACTIVE = "a, button, input, textarea, select, summary, label, [role=button], [contenteditable=true]";
 const OWN_MENU_MEDIA = "img, video, audio";
-export const LONG_PRESS_MS = 450;
+const LONG_PRESS_MS = 450;
 
 function focusVisible(target: EventTarget | null): boolean {
   try {

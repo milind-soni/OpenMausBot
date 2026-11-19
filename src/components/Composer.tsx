@@ -683,7 +683,7 @@ export function Composer({
   const goal = !group?.dm ? { on: effectiveChannelMode === "goal", onToggle: toggleGoal, solo: !group } : undefined;
 
   return (
-    <div className={cn("pointer-events-none relative px-5", "pb-3")}>
+    <div className={cn("pointer-events-none relative px-5 max-md:px-3", "pb-3")}>
       {speechError && (
         <div className="pointer-events-auto mb-2 w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
           {speechError}
@@ -772,7 +772,7 @@ export function Composer({
             data-composer-backdrop
             className={cn("pointer-events-none absolute -left-5 -right-5 bg-app", "-bottom-3 top-1/2")}
           />
-        <div ref={shellRef} data-tour="composer" data-look="composer" className={cn("@container/composer relative z-[1]", singleRow ? "flex items-end gap-2" : cn("rounded-2xl px-2 py-1.5", ELEVATED_FLOAT))}>
+        <div ref={shellRef} data-tour="composer" data-look="composer" className={cn("@container/composer relative z-[1]", singleRow ? "flex min-w-0 items-center gap-2 pb-1" : cn("rounded-2xl px-2 py-1.5", ELEVATED_FLOAT))}>
         {singleRow && !locked && (
           <div className="flex shrink-0 items-center">
             <PhonePlus
@@ -834,6 +834,7 @@ export function Composer({
             </div>
           )}
           <MentionTextarea
+          singleLinePlaceholder={singleRow}
           wrapperClassName={singleRow ? undefined : cn("@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full", stacked && "order-first basis-full")}
           inputRef={inputRef}
           peers={[...(group ? members ?? [] : bots.filter((member) => member.id !== bot?.id)), ...teammates.peers]}

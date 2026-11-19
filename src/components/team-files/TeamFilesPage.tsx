@@ -1,3 +1,4 @@
+import { useHeldMenuMotion } from "../MenuMotion";
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { Download, FileText, Folder, FolderPlus, Image as ImageIcon, Pencil, Trash2, Upload, X } from "lucide-react";
 
@@ -77,6 +78,8 @@ export function TeamFilesPage() {
   const [editing, setEditing] = useState<Editing>(null);
   const [name, setName] = useState("");
   const [preview, setPreview] = useState<Preview>(null);
+  const motion = useHeldMenuMotion(preview);
+  const shownPreview = motion.shown ? motion.value : null;
   const back = useRef<HTMLButtonElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const loading = useRef<AbortController | null>(null);
@@ -222,17 +225,17 @@ export function TeamFilesPage() {
               })}
             </ul>
           ) : null}
-          {preview && (
-            <section aria-label={preview.entry.name} className="mt-4 rounded-xl border border-hairline/40 bg-card">
+          {shownPreview && (
+            <section key={shownPreview.entry.path} {...motion.exitProps} data-overlay-fade={motion.closing ? "out" : "in"} aria-label={shownPreview.entry.name} className="mt-4 rounded-xl border border-hairline/40 bg-card">
               <header className="flex items-center gap-2 border-b border-hairline/40 px-3 py-2">
-                <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{preview.entry.name}</span>
-                <a className="ui-icon-button" href={fileUrl(preview.entry.path, true)} download={preview.entry.name} aria-label={t("teamFiles.download")}><Download size={15} /></a>
+                <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-ink">{shownPreview.entry.name}</span>
+                <a className="ui-icon-button" href={fileUrl(shownPreview.entry.path, true)} download={shownPreview.entry.name} aria-label={t("teamFiles.download")}><Download size={15} /></a>
                 <button type="button" className="ui-icon-button" aria-label={t("teamFiles.closePreview")} onClick={() => setPreview(null)}><X size={15} /></button>
               </header>
               <div className="max-h-[60vh] overflow-auto p-3">
-                {previewKind(preview.entry.name) === "picture" ? <img src={fileUrl(preview.entry.path)} alt={preview.entry.name} className="mx-auto max-h-[56vh] max-w-full" />
-                  : preview.tooLarge ? <p className="text-[13px] text-ink-secondary">{t("teamFiles.previewTooLarge")}</p>
-                    : preview.text !== undefined ? <pre data-team-file-preview="" className="whitespace-pre-wrap break-words text-[13px] text-ink">{preview.text}</pre>
+                {previewKind(shownPreview.entry.name) === "picture" ? <img src={fileUrl(shownPreview.entry.path)} alt={shownPreview.entry.name} className="mx-auto max-h-[56vh] max-w-full" />
+                  : shownPreview.tooLarge ? <p className="text-[13px] text-ink-secondary">{t("teamFiles.previewTooLarge")}</p>
+                    : shownPreview.text !== undefined ? <pre data-team-file-preview="" className="whitespace-pre-wrap break-words text-[13px] text-ink">{shownPreview.text}</pre>
                       : <p className="text-[13px] text-ink-secondary">{t("teamFiles.noPreview")}</p>}
               </div>
             </section>

@@ -36,3 +36,15 @@ describe("quote chip in the composer", () => {
     expect(chip).not.toContain("bg-app");
   });
 });
+
+it("renders a draft photo as a bare thumbnail with the sent photo's size", () => {
+  const html = renderToStaticMarkup(createElement(ComposerAttachments, {
+    items: [{ kind: "image", id: "photo", path: "", previewUrl: "blob:preview", name: "photo.png", size: 4096, mime: "image/png" }],
+    onAdd: noop, onRemove: noop, onChangeCitation: noop, onDisplayInChatBox: noop,
+    notice: null, onNotice: noop, uploadImage: async () => null,
+  }));
+  expect(html).toContain("w-[min(150px,40vw)]");
+  expect(html).toContain('aria-label="Remove file"');
+  expect(html).toContain('alt="photo.png"');
+  expect(html).not.toMatch(/border-hairline|>IMAGE<|4 KB/);
+});

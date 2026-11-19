@@ -6,8 +6,9 @@ import { MentionText } from "./MentionText";
 const TEXT_LAYOUT = ["font-family", "font-size", "font-weight", "font-style", "font-stretch", "font-feature-settings", "font-variation-settings",
   "letter-spacing", "word-spacing", "line-height", "text-indent", "tab-size", "padding-top", "padding-right", "padding-bottom", "padding-left"] as const;
 
-export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClassName, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & {
+export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClassName, singleLinePlaceholder, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement> & {
   wrapperClassName?: string;
+  singleLinePlaceholder?: boolean;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   peers: readonly MentionPeer[];
   everyone?: boolean;
@@ -49,6 +50,11 @@ export function MentionTextarea({ inputRef, peers, everyone = false, wrapperClas
     <div ref={mirrorRef} dir={props.dir} aria-hidden="true" className="mention-editor-mirror pointer-events-none absolute inset-0 overflow-hidden">
       <MentionText text={String(props.value ?? "")} peers={peers} everyone={everyone} />{"\n"}
     </div>
-    <textarea {...props} ref={inputRef} onScroll={(event) => { sync(); props.onScroll?.(event); }} />
+    {singleLinePlaceholder && !props.value && props.placeholder && (
+      <span dir={props.dir} aria-hidden="true" className="pointer-events-none absolute inset-x-1 top-1 truncate text-[14px] leading-6 text-ink-tertiary">
+        {props.placeholder}
+      </span>
+    )}
+    <textarea {...props} className={cn(props.className, singleLinePlaceholder && "placeholder:whitespace-nowrap placeholder:text-transparent")} ref={inputRef} onScroll={(event) => { sync(); props.onScroll?.(event); }} />
   </div>;
 }

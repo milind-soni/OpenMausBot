@@ -580,6 +580,7 @@ export function messageNeedsKatex(text: string): boolean {
  * remount the whole message. Per-message values reach them through this context.
  */
 interface MessageScope {
+  userImages?: boolean;
   message?: MessageAttachmentContext;
   imageOffsets?: Map<number, number>;
   threads: ThreadRefsValue["threads"];
@@ -613,7 +614,7 @@ function MarkdownCode({ node, children }: BlockProps) {
 }
 
 function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
-  const { message, imageOffsets } = useContext(MessageScopeContext);
+  const { message, imageOffsets, userImages } = useContext(MessageScopeContext);
   const { src, alt } = props;
   if (!src) {
     return <span className="text-[12px] text-danger" role="alert">{t("attach.imageUnavailable")}</span>;
@@ -624,6 +625,7 @@ function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
     <MarkdownImagePreview
       src={src}
       name={markdownImageName(src, alt)}
+      layout={userImages ? "square" : "oriented"}
       openUrl={markdownImageOpenUrl(typeof (props as Record<string, unknown>)["data-open-url"] === "string" ? String((props as Record<string, unknown>)["data-open-url"]) : src)}
       filePath={filePath}
       message={filePath ? message : undefined}
@@ -808,8 +810,8 @@ function markdownParts(text: string, streaming: boolean): MarkdownPart[] {
   });
 }
 
-function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false, mentionPerson, delivered, originals }: {
-  text: string; message?: MessageAttachmentContext;
+function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false, mentionPerson, delivered, originals, userImages }: {
+  text: string; message?: MessageAttachmentContext; userImages?: boolean;
   mentionPeers?: readonly MentionPeer[]; everyone?: boolean; mentionPerson?: MentionPerson;
   /** Delivered copies by file name, and the originals those copies came from (copy path -> original). */
   delivered?: DeliveredFiles; originals?: DeliveredFiles;
@@ -851,7 +853,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
     return finished ? markdownCache.render(partText, variant, render) : <StreamSourceContext value={source}>{render()}</StreamSourceContext>;
   };
   // A message still streaming has no saved files to fetch yet.
-  const scope = { message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals };
+  const scope = { message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals, userImages };
   return (
     <MessageScopeContext.Provider value={scope}>
       <div data-look="bot-text" className="chat-md min-w-0 [&>*+*]:mt-2">
@@ -874,7 +876,7 @@ export function samePeers(previous: readonly MentionPeer[], next: readonly Menti
 }
 
 export const ChatMarkdown = memo(ChatMarkdownComponent, (previous, next) => (
-  previous.text === next.text
+  previous.text === next.text && previous.userImages === next.userImages
   && samePeers(previous.mentionPeers ?? NO_MENTION_PEERS, next.mentionPeers ?? NO_MENTION_PEERS)
   && previous.everyone === next.everyone && sameMentionPerson(previous.mentionPerson, next.mentionPerson)
   && previous.message?.threadId === next.message?.threadId

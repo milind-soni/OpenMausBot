@@ -3,18 +3,13 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
 import {
   Check,
-  ChevronLeft,
-  ChevronRight,
   Download,
-  ExternalLink,
   Eye,
   FileText,
   FolderOpen,
@@ -22,7 +17,6 @@ import {
   LoaderCircle,
   Maximize2,
   RotateCcw,
-  X,
 } from "lucide-react";
 
 import {
@@ -34,12 +28,15 @@ import {
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { serverErrorText } from "@/lib/server-error";
-import { CopyImageButton } from "./CopyImageButton";
+import { canonicalDownloadFilename } from "@/lib/download-filename";
+import { AttachmentPreviewDialog } from "./ImagePreviewDialog";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { chipNameAction, SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
 import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from "./RevealOriginalMenu";
 
-import { conversationImages, previewKeyAction, registerPreviewThumbnail, usePreviewSwipe, wrappedImageIndex } from "./AttachmentPreviewNavigation";
+import { conversationImages, registerPreviewThumbnail } from "./AttachmentPreviewNavigation";
+export { AttachmentPreviewDialog } from "./ImagePreviewDialog";
+export { canonicalDownloadFilename, contentDispositionFilename, safeDownloadFilename } from "@/lib/download-filename";
 export { previewKeyAction, wrappedImageIndex, type PreviewKeyAction } from "./AttachmentPreviewNavigation";
 
 export interface PreviewImage {
@@ -47,7 +44,6 @@ export interface PreviewImage {
   name: string;
   downloadUrl?: string;
   downloadName?: string;
-  openUrl?: string;
 }
 
 export interface MessageAttachmentContext { threadId: string; messageId: string }
@@ -67,107 +63,6 @@ export function imageGalleryLayout(count: number): string {
   if (count <= 1) return "w-[min(32rem,70vw)] grid-cols-1";
   if (count === 2) return "w-[min(36rem,70vw)] grid-cols-2";
   return "w-[min(38rem,70vw)] grid-cols-2 sm:grid-cols-3";
-}
-
-const IMAGE_EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
-  "image/avif": "avif",
-  "image/bmp": "bmp",
-  "image/gif": "gif",
-  "image/heic": "heic",
-  "image/heif": "heif",
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/tiff": "tiff",
-  "image/webp": "webp",
-};
-
-const IMAGE_EXTENSIONS = new Set([
-  "avif",
-  "bmp",
-  "gif",
-  "heic",
-  "heif",
-  "jpeg",
-  "jpg",
-  "png",
-  "tif",
-  "tiff",
-  "webp",
-]);
-
-export function safeDownloadFilename(value: string | null | undefined): string {
-  const basename = (value ?? "").split(/[\\/]/).at(-1) ?? "";
-  const cleaned = basename
-    .normalize("NFC")
-    // oxlint-disable-next-line no-control-regex -- strips control and bidi characters from a filename
-    .replace(/[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g, "")
-    .replace(/[<>:"|?*]/g, "_")
-    .trim()
-    .replace(/[. ]+$/g, "");
-  const bounded = Array.from(cleaned)
-    .filter((character) => {
-      const code = character.charCodeAt(0);
-      return character.length > 1 || code < 0xd800 || code > 0xdfff;
-    })
-    .slice(0, 180)
-    .join("");
-  if (!bounded) return "download";
-  const stem = bounded.split(".", 1)[0]!.toUpperCase();
-  return /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/.test(stem) ? `_${bounded}` : bounded;
-}
-
-/** Prefers RFC 5987's UTF-8 filename* form. */
-export function contentDispositionFilename(header: string | null): string | null {
-  if (!header) return null;
-  const encoded = /(?:^|;)\s*filename\*\s*=\s*(?:UTF-8'[^']*')?([^;]*)/i.exec(header)?.[1]?.trim();
-  if (encoded) {
-    const unquoted = encoded.replace(/^"|"$/g, "");
-    try {
-      return safeDownloadFilename(decodeURIComponent(unquoted));
-    } catch {
-    }
-  }
-  const quoted = /(?:^|;)\s*filename\s*=\s*"((?:\\.|[^"\\])*)"/i.exec(header)?.[1];
-  if (quoted !== undefined) return safeDownloadFilename(quoted.replace(/\\(.)/g, "$1"));
-  const plain = /(?:^|;)\s*filename\s*=\s*([^;]*)/i.exec(header)?.[1]?.trim();
-  return plain ? safeDownloadFilename(plain) : null;
-}
-
-function sourceImageExtension(source: string | undefined): string | null {
-  if (!source) return null;
-  let pathname = source;
-  try {
-    pathname = decodeURIComponent(new URL(source, "https://openmausbot.invalid").pathname);
-  } catch {
-    pathname = source.split(/[?#]/, 1)[0] ?? source;
-  }
-  const extension = /\.([a-z0-9]+)$/i.exec(pathname)?.[1]?.toLowerCase();
-  return extension && IMAGE_EXTENSIONS.has(extension) ? extension : null;
-}
-
-function replaceExtension(name: string, extension: string): string {
-  const suffix = `.${extension}`;
-  const stem = name.replace(/\.[^.]*$/, "") || "image";
-  const available = Math.max(1, 180 - Array.from(suffix).length);
-  return `${Array.from(stem).slice(0, available).join("")}${suffix}`;
-}
-
-export function canonicalDownloadFilename({
-  contentDisposition,
-  fallback,
-  source,
-  mime,
-}: {
-  contentDisposition?: string | null;
-  fallback?: string;
-  source?: string;
-  mime?: string | null;
-}): string {
-  const selected = contentDispositionFilename(contentDisposition ?? null)
-    ?? safeDownloadFilename(fallback);
-  const mediaType = mime?.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-  const imageExtension = IMAGE_EXTENSION_BY_MIME[mediaType] ?? sourceImageExtension(source);
-  return imageExtension ? replaceExtension(selected, imageExtension) : selected;
 }
 
 export function isExternalImageSource(src: string): boolean {
@@ -447,205 +342,7 @@ export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
   );
 }
 
-export function AttachmentPreviewDialog({
-  image,
-  images,
-  initialIndex = 0,
-  onClose,
-}: {
-  image: PreviewImage;
-  images?: PreviewImage[];
-  initialIndex?: number;
-  onClose: () => void;
-}) {
-  const items = images?.length ? images : [image];
-  const [index, setIndex] = useState(() => Math.min(Math.max(initialIndex, 0), items.length - 1));
-  const current = items[index] ?? image;
-  const dialogRef = useRef<HTMLDivElement>(null);
-  const closeRef = useRef(onClose);
-  const [loadedSources, setLoadedSources] = useState<Set<string>>(() => new Set());
-  const [failedSource, setFailedSource] = useState<string | null>(null);
-  const [attempt, setAttempt] = useState(0);
-
-  useLayoutEffect(() => {
-    closeRef.current = onClose;
-  }, [onClose]);
-
-  const navigate = useCallback((step: -1 | 1) => {
-    setIndex((value) => wrappedImageIndex(value, step, items.length));
-    setFailedSource(null);
-  }, [items.length]);
-  const swipeHandlers = usePreviewSwipe(items.length, navigate);
-
-  useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    dialogRef.current?.focus();
-    const onKey = (event: KeyboardEvent) => {
-      const action = previewKeyAction(event.key, items.length);
-      if (action) {
-        event.preventDefault();
-        event.stopPropagation();
-        if (action === "close") closeRef.current();
-        else navigate(action === "previous" ? -1 : 1);
-        return;
-      }
-      if (event.key !== "Tab") return;
-      const dialog = dialogRef.current;
-      if (!dialog) return;
-      const focusable = [...dialog.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-      )];
-      if (focusable.length === 0) {
-        event.preventDefault();
-        dialog.focus();
-        return;
-      }
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && (document.activeElement === dialog || document.activeElement === first)) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      previousFocus?.focus();
-    };
-  }, [items.length, navigate]);
-
-  const loaded = loadedSources.has(current.src);
-  const failed = failedSource === current.src;
-  const retry = () => {
-    setFailedSource(null);
-    setLoadedSources((sources) => {
-      const next = new Set(sources);
-      next.delete(current.src);
-      return next;
-    });
-    setAttempt((value) => value + 1);
-  };
-
-  return createPortal(
-    <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-3 backdrop-blur-sm sm:p-6"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label={t("attach.previewAria", { name: current.name })}
-        tabIndex={-1}
-        className="animate-pop-in flex h-full max-h-[900px] w-full max-w-[1200px] flex-col overflow-hidden rounded-2xl border border-white/15 bg-black/70 shadow-2xl outline-none"
-      >
-        <header className="flex shrink-0 items-center justify-between gap-4 border-b border-white/10 bg-black/45 px-4 py-3">
-          <div className="min-w-0">
-            <div className="truncate text-[13px] font-medium text-white">{current.name}</div>
-            <div className="text-[11px] text-white/50">
-              {items.length > 1
-                ? t("attach.position", { index: index + 1, count: items.length })
-                : t("attach.imagePreview")}
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            <CopyImageButton key={current.src} src={current.src} name={current.name} />
-            {current.downloadUrl && (
-              <a
-                href={current.downloadUrl}
-                download={current.downloadName ?? canonicalDownloadFilename({ fallback: current.name, source: current.downloadUrl })}
-                className="flex size-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white"
-                aria-label={t("attach.downloadAria", { name: current.name })}
-                title={t("attach.download")}
-              >
-                <Download size={17} />
-              </a>
-            )}
-            {current.openUrl && (
-              <a
-                href={current.openUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="flex size-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white"
-                aria-label={t("attach.openOriginalAria", { name: current.name })}
-                title={t("attach.openOriginal")}
-              >
-                <ExternalLink size={17} />
-              </a>
-            )}
-            <button
-              onClick={onClose}
-              className="flex size-9 items-center justify-center rounded-lg text-white/65 hover:bg-white/10 hover:text-white"
-              aria-label={t("attach.close")}
-            >
-              <X size={19} />
-            </button>
-          </div>
-        </header>
-        <div className="relative flex min-h-0 flex-1 touch-pan-y touch-pinch-zoom items-center justify-center overflow-hidden p-4 sm:p-8"
-          {...swipeHandlers}
-        >
-          {!loaded && !failed && (
-            <div className="absolute inset-4 flex animate-pulse items-center justify-center rounded-xl bg-white/[0.055] sm:inset-8" role="status">
-              <span className="flex items-center gap-2 text-[13px] text-white/55">
-                <LoaderCircle size={17} className="animate-spin" /> {t("attach.imageLoading")}
-              </span>
-            </div>
-          )}
-          {failed ? (
-            <div className="flex flex-col items-center gap-3 text-white/60" role="alert">
-              <ImageOff size={34} />
-              <span className="text-[13px]">{t("attach.imageFailed")}</span>
-              <button
-                type="button"
-                onClick={retry}
-                className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/10 px-3 py-1.5 text-[12px] text-white hover:bg-white/15"
-              >
-                <RotateCcw size={13} /> {t("chat.retry")}
-              </button>
-            </div>
-          ) : (
-            <img
-              key={`${current.src}:${attempt}`}
-              src={current.src}
-              alt={current.name}
-              onLoad={() => setLoadedSources((sources) => new Set(sources).add(current.src))}
-              onError={() => setFailedSource(current.src)}
-              className={cn(
-                "block max-h-full max-w-full rounded-lg object-contain shadow-2xl transition-opacity duration-150",
-                loaded ? "opacity-100" : "opacity-0",
-              )}
-            />
-          )}
-          {items.length > 1 && (
-            <>
-              <button
-                type="button"
-                onClick={() => navigate(-1)}
-                aria-label={t("attach.previous")}
-                className="absolute left-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm hover:bg-black/75 hover:text-white sm:left-4"
-              >
-                <ChevronLeft size={21} />
-              </button>
-              <button
-                type="button"
-                onClick={() => navigate(1)}
-                aria-label={t("attach.next")}
-                className="absolute right-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm hover:bg-black/75 hover:text-white sm:right-4"
-              >
-                <ChevronRight size={21} />
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
+export const CHAT_IMAGE_THUMBNAIL = "aspect-square w-[min(150px,40vw)] max-w-full rounded-lg";
 
 export function AttachmentThumbnail({
   image,
@@ -654,12 +351,12 @@ export function AttachmentThumbnail({
   eager = false,
   explainRefusal = false,
   gallery,
-  fixedRatio,
+  layout,
 }: {
   image: PreviewImage;
   onPreview: (images: PreviewImage[]) => void;
   gallery?: PreviewImage[];
-  fixedRatio?: number;
+  layout?: "square" | "oriented";
   className?: string;
   eager?: boolean;
   explainRefusal?: boolean;
@@ -672,11 +369,13 @@ export function AttachmentThumbnail({
   const [ratio, setRatio] = useState<number | null>(null);
 
   const previewItems = gallery ?? [image];
+  const layoutClass = layout === "square" ? CHAT_IMAGE_THUMBNAIL
+    : layout === "oriented" ? (ratio !== null && ratio < 1 ? "w-36 aspect-[3/4]" : "w-48 aspect-[4/3]") : undefined;
 
   return (
     <span
-      style={{ aspectRatio: fixedRatio ?? ratio ?? undefined }}
-      className={cn("group/image relative block aspect-[4/3] min-w-0 overflow-hidden rounded-xl border border-hairline/40 bg-inset", className)}
+      style={{ aspectRatio: layout ? undefined : ratio ?? undefined }}
+      className={cn("group/image relative block aspect-[4/3] min-w-0 overflow-hidden rounded-xl border border-hairline/40 bg-inset", layoutClass, className)}
     >
       {state === "loading" && <ImageLoading name={image.name} className="absolute inset-0 bg-raised/65" />}
       {state === "failed" ? (
@@ -747,7 +446,8 @@ export function AttachmentThumbnail({
               if (explainRefusal) void messageImageOutsideWorkspace(image.src).then(setOutsideWorkspace);
             }}
             className={cn(
-              "block size-full object-cover transition duration-200 group-hover/image:scale-[1.015]",
+              "block size-full object-cover motion-safe:transition motion-safe:duration-200 motion-safe:group-hover/image:scale-[1.015] [html[data-reduced-motion=true]_&]:transition-none [html[data-reduced-motion=true]_&]:transform-none",
+              layout === "oriented" && "object-contain",
               state === "ready" ? "opacity-100" : "opacity-0",
             )}
           />
@@ -801,6 +501,7 @@ export function MarkdownImagePreview({
   src,
   name,
   openUrl,
+  layout = "oriented",
   message,
   filePath,
   sourceOffset,
@@ -808,6 +509,7 @@ export function MarkdownImagePreview({
   src: string;
   name: string;
   openUrl?: string;
+  layout?: "square" | "oriented";
   message?: MessageAttachmentContext;
   filePath?: string;
   sourceOffset?: number;
@@ -856,7 +558,6 @@ export function MarkdownImagePreview({
   const image: PreviewImage = {
     src: visibleSource ?? "",
     name,
-    openUrl,
     downloadUrl: localMessageImage ? visibleSource ?? undefined : undefined,
     downloadName: localMessageImage
       ? canonicalDownloadFilename({ fallback: name, source: filePath })
@@ -864,21 +565,21 @@ export function MarkdownImagePreview({
   };
   return (
     <>
-      <span ref={containerRef} className="my-2 block w-[min(36rem,70vw)] max-w-full">
+      <span ref={containerRef} className="my-1 block w-fit max-w-full">
         {external && !externalAllowed ? (
-          <span className="flex aspect-[4/3] max-h-96 flex-col items-center justify-center gap-2 rounded-xl border border-hairline/40 bg-inset px-4 text-center text-[12px] text-ink-secondary">
+          <span className="flex aspect-[4/3] w-48 max-w-full flex-col items-center justify-center gap-2 rounded-xl border border-hairline/40 bg-inset px-4 text-center text-[12px] text-ink-secondary">
             <ImageOff size={20} />
             <span>{t("attach.externalHidden")}</span>
             <button type="button" className="rounded-md border border-hairline/50 bg-panel px-2.5 py-1 text-ink hover:bg-raised" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setApprovedExternalSource(src); }}>{t("attach.loadImage")}</button>
           </span>
         ) : filePath && (!threadId || !messageId || localSourceOffset === null) ? (
-          <span className="flex aspect-[4/3] max-h-96 items-center justify-center gap-2 rounded-xl border border-hairline/40 bg-inset text-[12px] text-ink-secondary" role="alert">
+          <span className="flex aspect-[4/3] w-48 max-w-full items-center justify-center gap-2 rounded-xl border border-hairline/40 bg-inset text-[12px] text-ink-secondary" role="alert">
             <ImageOff size={17} /> {t("attach.oldImage")}
           </span>
         ) : visibleSource ? (
-          <AttachmentThumbnail key={image.src} image={image} onPreview={setGallery} className="max-h-96" eager explainRefusal={localMessageImage} />
+          <AttachmentThumbnail key={image.src} image={image} onPreview={setGallery} layout={layout} className="max-w-full" eager explainRefusal={localMessageImage} />
         ) : (
-          <ImageLoading name={name} className="aspect-[4/3] max-h-96 rounded-xl border border-hairline/40 bg-inset" />
+          <ImageLoading name={name} className="aspect-[4/3] w-48 max-w-full rounded-xl border border-hairline/40 bg-inset" />
         )}
         {openUrl && (
           <a href={openUrl} target="_blank" rel="noreferrer" className="mt-1 inline-flex text-[11px] text-accent hover:underline">

@@ -52,5 +52,18 @@ it("renders stored user photos above the text and hides their attachment tags", 
   expect(render(`Dinner\n\n${photo}`)).toMatch(/Photo\.jpg[\s\S]*v2-body[\s\S]*Dinner/);
   expect(render(photo)).not.toMatch(/attached-image|v2-body/);
   const second = photo.replace(filename, "422cfa30-c3cf-4e09-9cb8-5fee3ec6c5cb.jpg");
-  expect(render(`${photo}\n${second}`).match(/aspect-ratio:0\.75/g)).toHaveLength(2);
+  expect(render(`${photo}\n${second}`).match(/aspect-square/g)).toHaveLength(2);
+});
+
+it("keeps message actions hidden until interaction when a phone reply has a trace", async () => {
+  const { Row } = await import("./ChatV2");
+  const html = renderToStaticMarkup(createElement(Row, {
+    message: { id: "reply", at: 1, role: "bot", kind: "text", text: "Done" },
+    digest: { id: "receipt", at: 1, role: "bot", kind: "digest" },
+    botId: "bot", botName: "Bot", threadId: "thread", color: "purple",
+    busy: false, hasMore: false, transcript: [], phoneLayout: true, ownBubbleStyle: {},
+    jumpTo: () => {}, canLoadQuote: false, loadingQuote: false,
+  }));
+  expect(html).toContain('data-testid="message-actions"');
+  expect(html).not.toContain('data-shown="true"');
 });

@@ -2,12 +2,20 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PREVIEW_MAX_BYTES } from "@/lib/composer-attachments";
-import { AttachmentGallery, collectMessageFiles, isAudioAttachment, isVideoAttachment, loadMessageAudio, loadMessageVideo, MessageAttachmentGallery, splitMessageAttachments } from "./AttachmentGallery";
+import { AttachmentGallery, collectMessageFiles, isImageOnlyMarkdown, isAudioAttachment, isVideoAttachment, loadMessageAudio, loadMessageVideo, MessageAttachmentGallery, splitMessageAttachments } from "./AttachmentGallery";
 
 const message = { threadId: "thread/one", messageId: "message two" };
 const file = { path: "/workspace/demo.mp4", name: "demo.mp4", linked: true };
 const image = { path: "/store/123e4567-e89b-42d3-a456-426614174000.png", name: "Overview.png", private: true };
 afterEach(() => vi.unstubAllGlobals());
+
+it("only removes the bubble for Markdown images without a caption or other content", () => {
+  expect(isImageOnlyMarkdown("![one](/workspace/one.png)\n\n[![two](two.png)](https://example.com)")).toBe(true);
+  expect(isImageOnlyMarkdown("![one][asset]\n\n[asset]: one.png")).toBe(true);
+  expect(isImageOnlyMarkdown("[![one][asset]][destination]\n\n[asset]: one.png\n[destination]: https://example.com")).toBe(true);
+  expect(isImageOnlyMarkdown("![one](one.png) A caption")).toBe(false);
+  expect(isImageOnlyMarkdown("`![one](one.png)`")).toBe(false);
+});
 
 describe("bot-attached files", () => {
   const attachments = [

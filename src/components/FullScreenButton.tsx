@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Hand, Loader2, Maximize2, Minimize2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useDismissMotion } from "./MenuMotion";
 import { useModalDialog } from "@/hooks/use-modal-dialog";
 import { useCaptionChrome, useDesktopCapabilities } from "./DesktopCapabilities";
 
@@ -67,38 +68,40 @@ function WatchFullScreen({ frame, name, takeDisabled, error, onClose, onTakeCont
   const macInset = useDesktopCapabilities().capabilities.windowChrome === "mac-inset";
   const takeRef = useRef<HTMLButtonElement>(null);
   const [tried, setTried] = useState(false);
-  useModalDialog(dialogRef, onClose);
+  const motion = useDismissMotion(onClose);
+  useModalDialog(dialogRef, motion.dismiss);
   // After the dialog has noted Full screen as the place to return to, so autoFocus can't take that place.
   useEffect(() => exitRef.current?.focus(), []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (!motion.open || event.key !== "Escape" || event.defaultPrevented) return;
       if (!(event.target instanceof Node) || !dialogRef.current?.contains(event.target)) return;
       event.preventDefault();
       event.stopPropagation();
-      onClose();
+      motion.dismiss();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
+  }, [motion.open, motion.dismiss]);
 
   // A disabled button loses focus to the page, where Escape would no longer reach this view.
   useEffect(() => {
     const active = document.activeElement;
-    if (takeDisabled && (active === takeRef.current || active === document.body)) dialogRef.current?.focus();
-  }, [takeDisabled]);
+    if (motion.open && takeDisabled && (active === takeRef.current || active === document.body)) dialogRef.current?.focus();
+  }, [motion.open, takeDisabled]);
 
   const iconButton = "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] focus-visible:outline-2 focus-visible:outline-focus disabled:opacity-50";
   const label = t("computer.screenOf", { name });
+  if (!motion.shown) return null;
   return (
-    <div ref={dialogRef} tabIndex={-1} data-watch-full-screen role="dialog" aria-modal="true" aria-label={label} className="fixed inset-0 z-[65] flex flex-col bg-app outline-none">
+    <div ref={dialogRef} {...motion.exitProps} data-overlay-fade={motion.open ? "in" : "out"} tabIndex={-1} data-watch-full-screen role="dialog" aria-modal="true" aria-label={label} className="fixed inset-0 z-[65] flex flex-col bg-app outline-none">
       <header {...dragProps} className={cn("flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline/40 bg-panel px-3 py-2", macInset && "pl-[86px]")}>
         <span className="min-w-0 truncate text-[13px] font-medium text-ink">{label}</span>
         <span className="pointer-events-none rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm">
           {t("computer.watchingBotWorks")}
         </span>
-        <button ref={exitRef} type="button" style={noDragStyle} onClick={onClose} aria-label={t("desktopViewer.exitFullscreen")} className={cn(iconButton, "ml-auto bg-control text-ink hover:bg-raised-hover")}>
+        <button ref={exitRef} type="button" style={noDragStyle} onClick={motion.dismiss} aria-label={t("desktopViewer.exitFullscreen")} className={cn(iconButton, "ml-auto bg-control text-ink hover:bg-raised-hover")}>
           <Minimize2 size={14} aria-hidden="true" />
           <span className="max-sm:hidden">{t("desktopViewer.exitFullscreen")}</span>
         </button>

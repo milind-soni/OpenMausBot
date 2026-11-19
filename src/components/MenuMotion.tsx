@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
 
 /** Same length as `--animate-pop-in` in styles.css. */
 export const MENU_MOTION_MS = 200;
@@ -49,4 +49,15 @@ export function useHeldMenuMotion<T>(value: T | null): MenuMotion & { value: T |
   const held = useRef<T | null>(value);
   if (value != null) held.current = value;
   return { ...motion, value: value ?? held.current };
+}
+
+export function useDismissMotion(onDismiss: () => void) {
+  const [open, setOpen] = useState(true);
+  const motion = useMenuMotion(open);
+  const finishDismiss = useEffectEvent(onDismiss);
+  useEffect(() => {
+    if (!motion.shown) finishDismiss();
+  }, [motion.shown]);
+  const dismiss = useCallback(() => setOpen(false), []);
+  return { ...motion, open, dismiss };
 }

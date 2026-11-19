@@ -182,12 +182,11 @@ export function ComposerPlusMenu({ onAttach, onChoosePhoto, onTakePhoto, goal, t
     <span
       data-composer-plus
       className={cn(
-        "flex size-11 items-center justify-center rounded-full bg-composer text-ink ring-1 ring-composer-ring transition-colors",
-        // An ink tint, not a fill token: in some skins the control fill is the composer's own colour.
-        open ? "bg-ink/[0.12]" : "bg-ink/[0.05] hover:bg-ink/[0.1]",
+        "flex size-9 items-center justify-center rounded-full border border-edge bg-panel text-ink transition-colors",
+        open ? "bg-raised" : "hover:bg-raised",
       )}
     >
-      <Plus size={22} aria-hidden="true" />
+      <Plus size={18} aria-hidden="true" />
     </span>
   ) : (
     <span data-composer-plus className={cn("flex items-center justify-center transition-colors", SIMPLE_CONTROL, open && "bg-ink/[0.09] text-ink")}>

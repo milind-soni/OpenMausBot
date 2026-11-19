@@ -1,10 +1,12 @@
-[data-chat-v2] [data-look="composer"] {
-  border: 1px solid var(--color-edge);
-  border-radius: 24px;
-  background: var(--color-composer);
-  --composer-reply-gap: 10px;
-  padding: var(--composer-reply-gap) 8px;
-  box-shadow: 0 3px 14px color-mix(in srgb, var(--color-ink) 8%, transparent);
+@media (min-width: 768px) {
+  [data-chat-v2] [data-look="composer"] {
+    border: 1px solid var(--color-edge);
+    border-radius: 24px;
+    background: var(--color-composer);
+    --composer-reply-gap: 10px;
+    padding: var(--composer-reply-gap) 8px;
+    box-shadow: 0 3px 14px color-mix(in srgb, var(--color-ink) 8%, transparent);
+  }
 }
 .v2-exchange { width: 100%; margin-block: .45rem; }
 .v2-exchange summary { display: flex; width: fit-content; max-width: 100%; align-items: center; gap: .45rem; margin: auto; padding: .35rem .65rem; color: var(--color-ink-secondary); font-size: .8rem; cursor: pointer; border-radius: .65rem; }
@@ -12,7 +14,7 @@
 .v2-exchange summary::-webkit-details-marker { display: none; }
 .v2-exchange[open] > summary { margin-bottom: .6rem; }
 .v2-exchange[open] > summary > svg:last-child { transform: rotate(90deg); }
-.v2-page { position:relative; isolation:isolate; display:grid; grid-template-rows:auto minmax(0,1fr) auto; flex:1; min-width:0; height:100%; color:var(--color-ink); background:var(--color-app); container-type:inline-size; }
+.v2-page { position:relative; isolation:isolate; display:grid; grid-template-rows:auto minmax(0,1fr) auto; grid-template-columns:minmax(0,1fr); flex:1; min-width:0; height:100%; color:var(--color-ink); background:var(--color-app); container-type:inline-size; }
 .v2-floating { --v2-control-height:44px; position:absolute; inset:10px 12px auto; z-index:5; display:grid; grid-template-columns:minmax(0,1fr) auto minmax(0,1fr); align-items:center; gap:8px; min-height:var(--v2-control-height); pointer-events:none; }
 .v2-floating > * { pointer-events:auto; }
 .v2-identity,.v2-controls { display:flex; align-items:center; gap:6px; min-width:0; }
@@ -24,7 +26,7 @@
 .v2-identity-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; font-weight:500; }
 .v2-controls > button { padding:7px 10px; border-radius:10px; background:var(--color-panel); color:var(--color-ink-secondary); font-size:12px; white-space:nowrap; }
 .v2-controls [aria-pressed=true] { background:var(--color-ink); color:var(--color-app); }
-.v2-scroll { isolation:isolate; mask-image:linear-gradient(to bottom, transparent, #000 var(--v2-fade-height,56px)); grid-row:2; padding-inline:1.25rem; overflow:auto; overscroll-behavior:contain; overflow-anchor:none; }
+.v2-scroll { isolation:isolate; mask-image:linear-gradient(to bottom, transparent, #000 var(--v2-fade-height,56px)); grid-row:2; padding-inline:1.25rem; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; overflow-anchor:none; }
 .v2-scroll[data-fade-bottom] {
   mask-image: linear-gradient(to bottom,
     transparent, #000 var(--v2-fade-height,56px),
@@ -40,6 +42,7 @@
 .v2-body { max-width:100%; overflow-wrap:anywhere; min-width:0; padding:10px 15px; border-radius:8px 17px 17px; background:var(--color-panel); line-height:1.55; }
 .v2-user-content { display:flex; flex-direction:column; align-items:flex-end; max-width:90%; min-width:0; }
 .v2-message[data-own] .v2-body { border-radius:20px 20px 8px 20px; color:var(--color-bubble-user-ink); }
+.v2-body.v2-body-image { padding:0; background:transparent; }
 .v2-step { font-size:13px; color:var(--color-ink-secondary); }
 .v2-step p { white-space:pre-wrap; overflow-wrap:anywhere; }
 .v2-dock { grid-row:3; position:relative; width:100%; padding-top:8px; }
@@ -104,4 +107,14 @@
 .v2-action-layer[inert] { opacity:0; pointer-events:none; }
 @media (prefers-reduced-motion:no-preference) {
   .v2-action-layer { transition:opacity 180ms ease-in-out; }
+}
+
+@media (width < 768px) {
+  .v2-floating { --v2-control-height:36px; inset-inline:8px; }
+  .v2-model { margin-inline-start:42px; }
+  .v2-identity { max-width:min(13rem, calc(100cqw - 184px)); padding-inline:8px; }
+  .v2-identity-name { font-size:13px; }
+  .v2-identity-arrow { display:none; }
+  .v2-scroll { padding-inline:12px; touch-action:pan-y pinch-zoom; }
+  html:has([data-chat-v2]) { overscroll-behavior-x:none; }
 }

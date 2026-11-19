@@ -205,13 +205,14 @@ function variantSuffix(instance: InstanceInfo | undefined, model: string, varian
 }
 
 export function ModelPicker({
-  bot: shown, threadId, className, contained = false, label,
+  bot: shown, threadId, className, contained = false, label, iconOnly = false,
 }: {
   bot: Bot;
   threadId?: string;
   className?: string;
   contained?: boolean;
   label?: ReactNode;
+  iconOnly?: boolean;
   size?: "sm" | "md";
 }) {
   const { dispatch: storeDispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStoreActions(), state = useStoreSelector((s) => ({ instances: s.instances, modelVariantSessions: s.modelVariantSessions, profile: s.bots.find((candidate) => candidate.id === shown.id) }), sameFields);
@@ -555,6 +556,7 @@ export function ModelPicker({
         openMenu();
       }
     },
+    "aria-label": iconOnly ? summary : undefined,
     "aria-expanded": open && !locked,
     "aria-haspopup": "dialog" as const,
     "aria-controls": open ? menuId : undefined,
@@ -568,43 +570,48 @@ export function ModelPicker({
         "group flex items-center gap-1.5 rounded-full py-1 pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed",
         contained
           ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
-          : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
-        !contained && active && !showActiveAccount && cn(COMPACT_SQUARE, USAGE_WARN_WIDENS),
+          : iconOnly
+            ? "size-9 justify-center border border-edge bg-composer p-0 hover:bg-raised"
+            : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
+        !iconOnly && !contained && active && !showActiveAccount && cn(COMPACT_SQUARE, USAGE_WARN_WIDENS),
       )}
     >
       {active && (contained
         ? <InstanceProviderMark instance={active} size={14} subtle />
         : <span className="flex shrink-0 group-disabled:opacity-50"><InstanceProviderMark instance={active} size={14} subtle /></span>)}
-      {!contained && active && showActiveAccount && (
-        <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{engineDisplayName(active)}</span>
-      )}
-      <span className={cn("flex min-w-0 items-center gap-1", !contained && active && "@max-4xl/chathead:hidden")}>
-        <span className="max-w-[160px] truncate">
-          {active && showActiveAccount && (
-            <span data-model-account className="text-ink-secondary">{engineDisplayName(active)} · </span>
-          )}
-          {modelLabel(active, selection.model)}
-          {active && modelProvider(active, selection.model) && (
-            <span className="text-ink-secondary"> · {modelProvider(active, selection.model)}</span>
+      {iconOnly && !active && <ChevronDown size={14} />}
+      {!iconOnly && <>
+        {!contained && active && showActiveAccount && (
+          <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{engineDisplayName(active)}</span>
+        )}
+        <span className={cn("flex min-w-0 items-center gap-1", !contained && active && "@max-4xl/chathead:hidden")}>
+          <span className="max-w-[160px] truncate">
+            {active && showActiveAccount && (
+              <span data-model-account className="text-ink-secondary">{engineDisplayName(active)} · </span>
+            )}
+            {modelLabel(active, selection.model)}
+            {active && modelProvider(active, selection.model) && (
+              <span className="text-ink-secondary"> · {modelProvider(active, selection.model)}</span>
+            )}
+          </span>
+          {selectedVariantLabel !== undefined ? (
+            <span data-model-variant className="max-w-[120px] truncate text-ink-secondary">· {selectedVariantLabel}</span>
+          ) : selection.effort && (
+            <span data-model-effort className="shrink-0 text-ink-secondary">
+              · {effortLabel(selection.effort)}
+            </span>
           )}
         </span>
-        {selectedVariantLabel !== undefined ? (
-          <span data-model-variant className="max-w-[120px] truncate text-ink-secondary">· {selectedVariantLabel}</span>
-        ) : selection.effort && (
-          <span data-model-effort className="shrink-0 text-ink-secondary">
-            · {effortLabel(selection.effort)}
-          </span>
-        )}
-      </span>
-      <UsageBars engine={selection.instanceId} compact={!contained} />
-      <ChevronDown
-        size={12}
-        className={cn(
-          "text-ink-tertiary transition-transform",
-          open && "rotate-180",
-          !contained && active && "@max-4xl/chathead:hidden",
-        )}
-      />
+        <UsageBars engine={selection.instanceId} compact={!contained} />
+        <ChevronDown
+          size={12}
+          className={cn(
+            "text-ink-tertiary transition-transform",
+            open && "rotate-180",
+            !contained && active && "@max-4xl/chathead:hidden",
+          )}
+        />
+      </>}
     </button>
   );
 

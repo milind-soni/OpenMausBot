@@ -18,6 +18,10 @@ describe("MausBot's rendered steel body", () => {
     expect(steelBodyImage("cursor", 28, 0, images)).toBe("/steel/cursor-40.webp");
   });
 
+  it.each([1, 1.5, 2, 3])("embeds the 56px sidebar avatar at %sx density", (density) => {
+    expect(steelBodyImage("cursor", 56, density)).toMatch(/^data:image\/webp;base64,/);
+  });
+
   it("keeps the drawn steel for a body with no images", () => {
     expect(steelBodyImage("circle", 44, 2, images)).toBeNull();
     expect(steelBodyImage("cursor", 44, 2, [])).toBeNull();

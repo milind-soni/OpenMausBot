@@ -1,14 +1,14 @@
 import { splitTranscriptAttachments } from "@/lib/composer-attachments";
 import { stateForBot } from "@/lib/mascot";
 import { JumpToLatestButton } from "../JumpToLatestButton";
-import { CopyButton, INTERACTIVE, LONG_PRESS_MS, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "../MessageActions";
+import { CopyButton, INTERACTIVE, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "../MessageActions";
 import { ReactAction, ReactionChips } from "../Reactions";
 import { replyAndCopy, useBotMessageMenu } from "../message-menu";
 import { ChatHeaderMenu } from "../ChatMoreMenu";
 import { ChatFindBar } from "../ChatFindBar";
 import { useChatFindRequests, useChatFindShortcut } from "@/lib/chat-find";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Loader2 } from "lucide-react";
+import { ClipboardList, ChevronRight, Loader2 } from "lucide-react";
 import { currentTaskBot, formatTime, type Bot, type Message } from "@/state/store";
 import { rememberComputerPanelOpen } from "@/lib/computer-panel-focus";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
@@ -33,7 +33,7 @@ import { BotAvatar } from "../Avatar";
 import { Composer } from "../Composer";
 import { ModelPicker } from "../ModelPicker";
 import { ChatMarkdown } from "../ChatMarkdown";
-import { AttachmentGallery, collectMessageFiles, MessageAttachmentGallery, splitMessageAttachments } from "../AttachmentGallery";
+import { AttachmentGallery, collectMessageFiles, isImageOnlyMarkdown, MessageAttachmentGallery, splitMessageAttachments } from "../AttachmentGallery";
 import { VoiceNoteBubble } from "../VoiceNoteBubble";
 import { ScreenFrame } from "../ScreenFrame";
 import { optionsCardRow } from "../OptionsCardRow";
@@ -58,16 +58,16 @@ import { TurnPresence, useRotatingPhrase } from "../TurnPresence";
 
 const EMPTY_TRANSCRIPT: Message[] = [];
 
-function BotBubbleActions({ message, botId, threadId, text, canReact, onReply, raw, toggleRaw }: {
+function BotBubbleActions({ message, botId, threadId, text, canReact, onReply, raw, toggleRaw, onShowTrace }: {
   message: Message; botId: string; threadId: string; text: string; canReact: boolean;
-  onReply?: () => void; raw: boolean; toggleRaw: () => void;
+  onReply?: () => void; raw: boolean; toggleRaw: () => void; onShowTrace?: () => void;
 }) {
   const menu = useBotMessageMenu({
     text, botId, threadId, messageId: message.id, tts: undefined, localVoice: false,
     canSpeak: false, viewRaw: raw, onToggleRaw: toggleRaw,
   });
   return <MessageActions side="bot" className="v2-bubble-actions" forceOpen={raw} preferMenuAbove
-    menu={menu} contextItems={onReply ? replyAndCopy(onReply, text) : []}>
+    menu={onShowTrace ? [{ key: "view-trace", label: t("trace.view"), icon: <ClipboardList size={16} />, onSelect: onShowTrace }, ...menu] : menu} contextItems={onReply ? replyAndCopy(onReply, text) : []}>
     {onReply && <ReplyAction onReply={onReply} />}
     {canReact && <ReactAction threadId={threadId} message={message} badgeOnly />}
     {text && <CopyButton text={text} className={messageActionClass} />}
@@ -91,7 +91,7 @@ function ChatV2Presence({ bot }: { bot: Bot }) {
   </div>;
 }
 
-export const Row = memo(function Row({ message: m, botId, botName, color, threadId, busy, hasMore, transcript, reply, failure, quoted, jumpTo, canLoadQuote, loadingQuote, digest, ownBubbleStyle }: {
+export const Row = memo(function Row({ message: m, botId, botName, color, threadId, busy, hasMore, transcript, reply, failure, quoted, jumpTo, canLoadQuote, loadingQuote, digest, ownBubbleStyle, phoneLayout = false }: {
   message: Message; botId: string; botName: string; color: Bot["color"]; threadId: string;
   failure?: React.ReactNode;
   quoted?: Message;
@@ -99,15 +99,10 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
   canLoadQuote: boolean;
   loadingQuote: boolean;
   ownBubbleStyle: ReturnType<typeof userBubbleStyle>;
+  phoneLayout?: boolean;
   digest?: Message; busy: boolean; hasMore: boolean; transcript: Message[]; reply?: (message: Message) => void;
 }) {
   const inlineTrace = useRef<HTMLDivElement>(null);
-  const press = useRef<{ id: number; x: number; y: number; timer: ReturnType<typeof setTimeout> } | null>(null);
-  const cancelPress = () => {
-    if (press.current) clearTimeout(press.current.timer);
-    press.current = null;
-  };
-  useEffect(() => cancelPress, [digest]);
   const [showTrace, setShowTrace] = useState(false);
   useEffect(() => {
     if (!showTrace) return;
@@ -141,6 +136,9 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
   const attached = legacy && splitMessageAttachments(m.attachments);
   const images = legacy && attached && [...legacy.images, ...attached.images];
   const files = legacy && attached && [...legacy.files, ...attached.files];
+  const imageOnly = !m.replyToId && !m.attachments?.some(a => a.kind === "audio") &&
+    (!text.trim() ? Boolean(images?.length || m.attachments?.some(a => a.kind === "image" || !a.kind))
+      : !raw && isImageOnlyMarkdown(text));
   const attachmentContext = { threadId, messageId: m.id };
   if (!text && !m.attachments?.length && !images?.length && !files?.length) return null;
   return <article className="v2-message" data-own={own || undefined}>
@@ -149,37 +147,28 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
     <div className={own ? "v2-user-content" : "contents"}>
     {images && files && <AttachmentGallery images={images}
       files={[...files, ...collectMessageFiles(text, [...images.map(image => typeof image === "string" ? image : image.path), ...files.map(file => file.path)])]}
-      originals={attached?.originals} message={attachmentContext} photoStrip />}
+      originals={attached?.originals} message={attachmentContext} photoStrip="square" />}
     {(text || m.replyToId || !own || m.attachments?.some(a => a.kind === "audio")) &&
-    <div className={own ? "v2-body user-bubble-colored" : "v2-body"} dir="auto"
-      style={own ? ownBubbleStyle : undefined} data-chat-bubble="" data-look={own ? "user-bubble" : undefined}
+    <div className={imageOnly ? "v2-body v2-body-image" : own ? "v2-body user-bubble-colored" : "v2-body"} dir="auto"
+      style={own && !imageOnly ? ownBubbleStyle : undefined} data-chat-bubble="" data-look={own && !imageOnly ? "user-bubble" : undefined}
       tabIndex={digest ? 0 : undefined}
       onKeyDown={digest ? event => {
         if (event.target === event.currentTarget && event.key === "Enter") setShowTrace(true);
         if (event.key === "Escape") setShowTrace(false);
       } : undefined}
-      onPointerDown={digest ? event => {
-        if (!event.isPrimary || event.button !== 0 || (event.target instanceof Element && event.target.closest(INTERACTIVE))) return;
-        cancelPress();
-        press.current = { id: event.pointerId, x: event.clientX, y: event.clientY, timer: setTimeout(() => {
-          press.current = null;
-          if (!window.getSelection()?.toString()) setShowTrace(true);
-        }, LONG_PRESS_MS) };
-      } : undefined}
-      onPointerMove={digest ? event => {
-        const active = press.current;
-        if (active?.id === event.pointerId && Math.hypot(event.clientX - active.x, event.clientY - active.y) > 10) cancelPress();
-      } : undefined}
-      onPointerUp={digest ? cancelPress : undefined}
-      onPointerCancel={digest ? cancelPress : undefined}
-      onPointerLeave={digest ? cancelPress : undefined}>
+      onContextMenuCapture={digest ? event => {
+        if (event.target instanceof Element && event.target.closest(INTERACTIVE)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setShowTrace(true);
+      } : undefined}>
       {quoted ? <div className="mb-2">
         <ReplyQuote message={quoted} fallbackName={botName} compact onJump={() => jumpTo(quoted.id, true)} />
       </div> : m.replyToId && <UnloadedReplyQuote key={m.replyToId} threadId={threadId} messageId={m.replyToId}
         botName={botName} inverse={false} canJump={canLoadQuote} pending={loadingQuote} onJump={() => jumpTo(m.replyToId!, false)} />}
       {!own && <MessageAttachmentGallery text={text} attachments={m.attachments} message={attachmentContext} />}
       {m.attachments?.map(a => a.kind === "audio" && <VoiceNoteBubble key={a.path} attachment={a} />)}
-      {raw ? <pre className="whitespace-pre-wrap">{text}</pre> : <ChatMarkdown text={text} message={{ threadId: threadId, messageId: m.id }} />}
+      {raw ? <pre className="whitespace-pre-wrap">{text}</pre> : <ChatMarkdown text={text} userImages={own} message={{ threadId: threadId, messageId: m.id }} />}
       {!own && Boolean(m.reactions?.length) && <div className="v2-reaction-badge">
         <ReactionChips threadId={threadId} message={m} canReact={Boolean(reply) && !peer} badgeOnly />
       </div>}
@@ -189,7 +178,7 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
       : <div className="v2-action-stack">
         <div className="v2-action-layer" inert={showTrace}>
           <BotBubbleActions message={m} botId={botId} threadId={threadId} text={text} canReact={Boolean(reply) && !peer}
-          onReply={reply && (() => reply(m))} raw={raw} toggleRaw={() => setRaw(value => !value)} />
+          onReply={reply && (() => reply(m))} raw={raw} onShowTrace={phoneLayout && digest ? () => setShowTrace(true) : undefined} toggleRaw={() => setRaw(value => !value)} />
         </div>
         {digest && <div ref={inlineTrace} className="v2-action-layer" inert={!showTrace}><DigestChip message={digest} inline /></div>}
       </div>}
@@ -199,7 +188,7 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
   </article>;
 });
 
-export function ChatV2({ profile, onClose }: { profile: Bot; onClose: () => void }) {
+export function ChatV2({ profile, phoneLayout = false, onClose }: { profile: Bot; phoneLayout?: boolean; onClose: () => void }) {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const ownBubbleStyle = useMemo(() => userBubbleStyle(bot.color, { whiteInk: true }), [bot.color]);
   const dispatch = useStoreDispatch();
@@ -251,7 +240,7 @@ export function ChatV2({ profile, onClose }: { profile: Bot; onClose: () => void
   return <main data-chat-v2 className="v2-page">
     <CallOverlay bot={bot} transcript={history} />
     <div className="v2-floating">
-      <div className="v2-model"><ModelPicker bot={bot} threadId={bot.threadId} /></div>
+      <div className="v2-model"><ModelPicker bot={bot} threadId={bot.threadId} iconOnly={phoneLayout} /></div>
       <button className="v2-identity" onMouseEnter={() => setBotButtonHovered(true)} onMouseLeave={() => setBotButtonHovered(false)} aria-expanded={computerOpen} title={t("chat.botScreen")} onClick={event => {
         const keyboard = event.detail === 0;
         if (!computerOpen) {
@@ -263,7 +252,7 @@ export function ChatV2({ profile, onClose }: { profile: Bot; onClose: () => void
         dispatch({ type: "toggleComputer" });
       }}><BotAvatar bot={bot} size={24} state={stateForBot(bot)} animated={botButtonHovered} /><span className="v2-identity-name">{bot.name}</span><span className="v2-identity-arrow" aria-hidden="true"><ChevronRight size={16} /></span></button>
       <div className="v2-controls">
-        <button aria-pressed="true" onClick={onClose}>Chat V2</button><ChatHeaderMenu bot={bot} history={history} openOnHover={false} /></div>
+        {!phoneLayout && <button aria-pressed="true" onClick={onClose}>Chat V2</button>}<ChatHeaderMenu bot={bot} history={history} openOnHover={false} /></div>
     </div>
     {(findOpen || error) && <div className="v2-banners">
       {findOpen && <ChatFindBar threadId={bot.threadId} inForkPanel={false} onClose={() => setFindOpen(false)} />}
@@ -283,7 +272,7 @@ export function ChatV2({ profile, onClose }: { profile: Bot; onClose: () => void
             {item.message.id === unread.messageId && <NewMessagesDivider fading={unread.fading} />}
             {editing?.id === item.message.id ? <form onSubmit={e => { e.preventDefault(); const text = String(new FormData(e.currentTarget).get("text") ?? "").trim(); if (text) { dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: editing.id, text }); setEditing(null); } }}>
               <input autoFocus className="outline-none focus:bg-raised/50" name="text" defaultValue={editing.text} onKeyDown={e => { if (e.key === "Escape") setEditing(null); }} /></form> :
-              <Row ownBubbleStyle={ownBubbleStyle} digest={digestByReply.get(item.message.id)} message={item.message} botId={bot.id} botName={bot.name} color={bot.color} threadId={bot.threadId}
+              <Row phoneLayout={phoneLayout} ownBubbleStyle={ownBubbleStyle} digest={digestByReply.get(item.message.id)} message={item.message} botId={bot.id} botName={bot.name} color={bot.color} threadId={bot.threadId}
                 busy={Boolean(bot.busy)} hasMore={item.message.kind === "call" && historyPage.hasMore}
                 failure={item.message.tool && failedTurnCause(item.message.tool.name) !== null
                   ? <FailedTurnRow tool={item.message.tool} engine={engine} botId={bot.id} threadId={bot.threadId}

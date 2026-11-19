@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ClipboardPaste, File as FileIcon, Image as ImageIcon, LoaderCircle, MessageSquareText, X } from "lucide-react";
+import { ClipboardPaste, File as FileIcon, LoaderCircle, MessageSquareText, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import {
   attachmentImageUrl,
@@ -9,7 +9,7 @@ import {
   type Attachment,
   type PasteAttachment,
 } from "@/lib/composer-attachments";
-import { AttachmentPreviewDialog, previewImage, type PreviewImage } from "./AttachmentPreview";
+import { AttachmentPreviewDialog, CHAT_IMAGE_THUMBNAIL, previewImage, type PreviewImage } from "./AttachmentPreview";
 import { CitationBadge } from "./CitationUI";
 import type { CitationAttachment } from "@/lib/citations";
 import { t } from "@/lib/i18n";
@@ -132,7 +132,7 @@ export function ComposerAttachments({
       )}
 
       {items.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-2">
+        <div className="mb-2 flex min-w-0 flex-wrap gap-2">
           {items.map((a) =>
             a.kind === "citation" ? (
               <CitationBadge
@@ -168,7 +168,7 @@ export function ComposerAttachments({
                 </button>
               </Chip>
             ) : a.kind === "image" ? (
-              <Chip key={a.id} label="IMAGE" title={a.name} onRemove={() => onRemove(a.id)}>
+              <div key={a.id} className={cn(CHAT_IMAGE_THUMBNAIL, "group relative motion-safe:animate-fade-in")}>
                 <button
                   type="button"
                   onClick={() => {
@@ -178,7 +178,7 @@ export function ComposerAttachments({
                   }}
                   disabled={!attachmentImageUrl(a.path) && !a.previewUrl}
                   aria-busy={a.uploading || undefined}
-                  className="relative flex h-[76px] w-full items-center justify-center overflow-hidden rounded-lg bg-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-default"
+                  className="relative block size-full overflow-hidden rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-default"
                   aria-label={t("attach.previewAria", { name: a.name })}
                 >
                   <img
@@ -186,18 +186,23 @@ export function ComposerAttachments({
                     alt={a.name}
                     loading="eager"
                     fetchPriority="high"
-                    className="max-h-[76px] max-w-full object-contain"
+                    className="size-full object-cover"
                   />
                   {a.uploading && (
-                    <span className="absolute bottom-1.5 right-1.5 flex size-6 items-center justify-center rounded-full bg-black/65 text-white shadow-sm">
+                    <span className="absolute bottom-1.5 end-1.5 flex size-6 items-center justify-center rounded-full bg-black/65 text-white shadow-sm">
                       <LoaderCircle size={14} className="animate-spin" aria-hidden="true" />
                     </span>
                   )}
                 </button>
-                <div className="mt-1 truncate text-[11px] text-ink-tertiary">
-                  {a.uploading ? t("composer.chip.uploading") : sizeText(a.size)}
-                </div>
-              </Chip>
+                <button
+                  type="button"
+                  onClick={() => onRemove(a.id)}
+                  aria-label={t("composer.chip.removeFile")}
+                  className="absolute end-1 top-1 flex size-8 items-center justify-center rounded-full bg-black/65 text-white opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100"
+                >
+                  <X size={15} aria-hidden="true" />
+                </button>
+              </div>
             ) : (
               <Chip key={a.id} label="FILE" title={a.path} onRemove={() => onRemove(a.id)}>
                 <div className="flex h-[76px] items-center gap-2">
@@ -217,7 +222,7 @@ export function ComposerAttachments({
   );
 }
 
-const CHIP_LABEL = { PASTED: "composer.chip.pasted", IMAGE: "composer.chip.image", FILE: "composer.chip.file" } as const;
+const CHIP_LABEL = { PASTED: "composer.chip.pasted", FILE: "composer.chip.file" } as const;
 
 function Chip({
   children,
@@ -226,11 +231,11 @@ function Chip({
   onRemove,
 }: {
   children: React.ReactNode;
-  label: "PASTED" | "FILE" | "IMAGE";
+  label: keyof typeof CHIP_LABEL;
   title: string;
   onRemove: () => void;
 }) {
-  const Icon = label === "PASTED" ? ClipboardPaste : label === "IMAGE" ? ImageIcon : FileIcon;
+  const Icon = label === "PASTED" ? ClipboardPaste : FileIcon;
   return (
     <div
       title={title}

@@ -1169,9 +1169,9 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         rail ? "w-[92px]" : "w-[280px] md:w-[max(var(--sidebar-min),min(var(--sidebar-width),var(--sidebar-max)))]",
         // max-md: rather than an md: cancel: Tailwind v4 emits the native `translate`, and any value but `none` makes
         // this a containing block for its `fixed` descendants.
-        "max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-full max-md:bg-app",
+        "max-md:absolute max-md:inset-y-0 max-md:start-0 max-md:z-40 max-md:w-full max-md:bg-app",
         "max-md:transition-[translate] max-md:duration-200 motion-reduce:max-md:transition-none",
-        open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
+        open ? "max-md:translate-x-0" : "max-md:-translate-x-full max-md:rtl:translate-x-full",
       )}
     >
       <GlassScrollFrame className="flex-1" fade><PlaceTint />

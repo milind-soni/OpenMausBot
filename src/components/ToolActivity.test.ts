@@ -8,11 +8,10 @@ const { ToolActivity } = await import("./ToolActivity");
 describe("ToolActivity", () => {
   it("starts collapsed with an accessible status and escaped input/output", () => {
     const html = renderToStaticMarkup(createElement(ToolActivity, { tool: { name: "Bash", ok: true, input: "echo hi", output: "<script>unsafe()</script>" } }));
-    expect(html).toContain("<details");
-    expect(html).not.toContain(" open=");
-    expect(html).toContain("Bash · Completed · Tool details");
-    expect(html).toContain('role="button"');
+    expect(html).toContain("grid-rows-[0fr]");
     expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain("Bash · Completed · Tool details");
+    expect(html).toContain('<button type="button"');
     expect(html).toContain("echo hi");
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>");

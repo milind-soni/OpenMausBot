@@ -21,7 +21,7 @@ import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
-import { reduceHydrate, visibleMessages } from "./snapshot-navigation";
+import { reduceChatView, reduceHydrate, usePhoneLayout, visibleMessages } from "./snapshot-navigation";
 export { visibleMessages } from "./snapshot-navigation";
 export { awayFromMainThread, botOpensTo, markedThread, openBot, openBotRow, openBotThread, openRoomThread, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
@@ -504,6 +504,8 @@ export interface ModelVariantSession {
 
 export interface AppState {
   chatV2?: boolean;
+  desktopChatV2?: boolean;
+  phoneLayout?: boolean;
   bots: Bot[];
   groups: Group[];
   sections?: string[];
@@ -580,6 +582,7 @@ export type BotAnnouncement = Omit<Bot, "messages"> & { messages?: Message[] };
 
 export type Action =
   | { type: "chatView"; v2: boolean }
+  | { type: "phoneLayout"; enabled: boolean }
   | { type: "historyReady"; held: Message[]; leaf?: string | null; threadId: string; messages: Message[]; hasMore: boolean; activeLeafId: string | null }
   | {
       type: "hydrate";
@@ -876,11 +879,7 @@ export function reducer(state: AppState, action: Action): AppState {
   }
   if (isNotificationFeedAction(action)) return { ...state, notifications: reduceNotificationFeed(state.notifications, action) };
   switch (action.type) {
-    case "chatView": return {
-      ...state, chatV2: action.v2,
-      bots: action.v2 ? state.bots : state.bots.map(bot => bot.chatPage || bot.chatPatches
-        ? { ...bot, chatPage: undefined, chatPatches: undefined } : bot),
-    };
+    case "chatView": case "phoneLayout": return reduceChatView(state, action);
     case "historyReady":
       return reduceHistoryReady(state, action);
     case "hydrate":
@@ -2033,6 +2032,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   });
   const [store] = useState(() => createAppStore<AppState, Action, ServerFrame>(reducer, withRememberedTrayPin(initialState)));
   const rawDispatch = store.dispatch, state = useSyncExternalStore(store.subscribe, store.getState, store.getState);
+  usePhoneLayout(state.phoneLayout, rawDispatch);
   const stateRef = useRef(state), selectionRevision = useRef(0);
   stateRef.current = state;
   const selectedBot = state.bots.find(bot => bot.id === state.selectedId);

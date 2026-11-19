@@ -94,7 +94,7 @@ import { refreshPublishedApps } from "@/lib/own-published-apps";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
-  const chatV2 = state.chatV2;
+  const { chatV2, phoneLayout } = state;
   const setChatV2 = (v2: boolean) => dispatch({ type: "chatView", v2 });
   useTeamChats(state.config);
   const needsYou = needsYouVersion(state.bots, state.groups, state.notifications);
@@ -192,6 +192,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
 
   const { open: drawerOpen, show: openDrawer, hide: hideDrawer, noteAction: noteDrawerAction } = useBotListDrawer({ selectedId: state.selectedId, botThread: bot?.threadId, groupThread: group?.threadId,
     view: state.activeView, pluginsOpen: state.pluginsOpen, settingsOpen: state.settingsOpen });
+  const edgeStart = useRef<{ x: number; y: number; rtl: boolean } | null>(null);
   const closeDrawer = useCallback(() => { hideDrawer(); menuButtonRef.current?.focus(); }, [hideDrawer]);
   const notificationFeed = useNotificationFeed() && !remoteClient;
 
@@ -367,22 +368,22 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     <CliLoginCard />
   </>;
   return (
-    <div data-look="app" className={cn("flex h-full flex-col", framed && "bg-frame")} onClickCapture={drawerOpen ? noteDrawerAction : undefined} onKeyDownCapture={drawerOpen ? noteDrawerAction : undefined}>
+    <div data-look="app" className={cn("flex h-full min-w-0 flex-col max-md:overflow-x-clip", framed && "bg-frame")} onClickCapture={drawerOpen ? noteDrawerAction : undefined} onKeyDownCapture={drawerOpen ? noteDrawerAction : undefined}>
       <WindowFrameBar notifications={notificationFeed} />
       <BotLimitPopup />
       <ConversationShareDialogs />
       {!framed && strips}
-      <div className="relative flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 min-w-0 flex-1">
       <button
         type="button"
         ref={menuButtonRef}
         aria-label={t("app.openBotList")}
         aria-expanded={drawerOpen}
         onClick={openDrawer}
-        className="absolute left-3 top-3 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink max-md:flex max-md:size-9 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-hairline max-md:bg-card max-md:p-0 max-md:text-ink md:hidden"
+        className="absolute start-2 top-2.5 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink max-md:flex max-md:size-9 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-edge max-md:bg-composer max-md:p-0 max-md:text-ink md:hidden"
       >
         <Menu size={18} className="max-md:hidden" />
-        <ChevronLeft size={20} aria-hidden="true" className="hidden max-md:block" />
+        <ChevronLeft size={20} aria-hidden="true" className="hidden max-md:block rtl:-scale-x-100" />
       </button>
 
         <div
@@ -437,9 +438,28 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       ) : chiefStep ? (
         <EmptyChatShell />
       ) : group || bot ? (
-        <div ref={chatPane} className="flex h-full min-w-0 flex-1">
+        <div ref={chatPane} className="flex h-full min-w-0 flex-1 max-md:max-w-full max-md:overflow-x-clip"
+          onTouchStart={event => {
+            const touch = event.touches[0];
+            edgeStart.current = null;
+            if (!phoneLayout || drawerOpen || event.touches.length !== 1
+              || !(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return;
+            const rtl = getComputedStyle(event.currentTarget).direction === "rtl";
+            if ((rtl ? window.innerWidth - touch.clientX : touch.clientX) <= 24) {
+              edgeStart.current = { x: touch.clientX, y: touch.clientY, rtl };
+            }
+          }}
+          onTouchCancel={() => { edgeStart.current = null; }}
+          onTouchEnd={event => {
+            const start = edgeStart.current;
+            edgeStart.current = null;
+            const touch = event.changedTouches[0];
+            if (!start || !touch) return;
+            const dx = start.rtl ? start.x - touch.clientX : touch.clientX - start.x;
+            if (dx >= 56 && dx > 1.5 * Math.abs(touch.clientY - start.y)) openDrawer();
+          }}>
           {group ? <GroupView key={group.id} group={group} /> : bot && (
-            chatV2 ? <ChatV2 key={bot.threadId} profile={bot} onClose={() => setChatV2(false)} />
+            chatV2 ? <ChatV2 key={bot.threadId} profile={bot} phoneLayout={phoneLayout} onClose={() => setChatV2(false)} />
               : <ChatView bot={bot} onOpenV2={() => setChatV2(true)} />
           )}
         </div>

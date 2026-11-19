@@ -1,6 +1,9 @@
 // MausBot's chrome as finished pictures, face included: src/assets/mausbot-steel/<body>-<px>.webp, square, framing the
 // mascot's whole SVG viewBox, at <px> device pixels. A body with no pictures keeps the drawn steel finish.
-const files = import.meta.glob<string>("../assets/mausbot-steel/*.{webp,png}", { eager: true, query: "?url", import: "default" });
+const files = {
+  ...import.meta.glob<string>(["../assets/mausbot-steel/*.{webp,png}", "!../assets/mausbot-steel/cursor-{56,88,128,192}.webp"], { eager: true, query: "?url", import: "default" }),
+  ...import.meta.glob<string>("../assets/mausbot-steel/cursor-{56,88,128,192}.webp", { eager: true, query: "?inline", import: "default" }),
+};
 
 export interface SteelImage { body: string; px: number; url: string }
 

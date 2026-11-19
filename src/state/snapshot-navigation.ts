@@ -1,7 +1,27 @@
+import { useLayoutEffect, type Dispatch } from "react";
+import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { placeUnreadDivider } from "@/lib/unread-divider";
 import { reconcileSnapshotQueues, replaceBotQueues } from "./queue-receipts";
 import { mergeTaskStamps } from "./thread-stamps";
 import type { Action, AppState, Bot, Group, Message } from "./store";
+
+export function usePhoneLayout(current: boolean | undefined, dispatch: Dispatch<Action>) {
+  const phoneLayout = useMediaQuery(PHONE_LAYOUT);
+  useLayoutEffect(() => {
+    if (phoneLayout !== Boolean(current)) dispatch({ type: "phoneLayout", enabled: phoneLayout });
+  }, [current, dispatch, phoneLayout]);
+}
+
+export function reduceChatView(state: AppState, action: Extract<Action, { type: "chatView" | "phoneLayout" }>): AppState {
+  const phoneLayout = action.type === "phoneLayout" ? action.enabled : state.phoneLayout;
+  const desktopChatV2 = action.type === "chatView" ? action.v2 : state.desktopChatV2 ?? state.chatV2;
+  const chatV2 = Boolean(phoneLayout || desktopChatV2);
+  return {
+    ...state, chatV2, desktopChatV2, phoneLayout,
+    bots: !chatV2 && state.chatV2 ? state.bots.map(bot => bot.chatPage || bot.chatPatches
+      ? { ...bot, chatPage: undefined, chatPatches: undefined } : bot) : state.bots,
+  };
+}
 
 // One branch per transcript array and leaf: every sidebar row, the composer and the chat ask for it on each store
 // change, and an unchanged transcript keeps the same array (so memos keyed on it hold).

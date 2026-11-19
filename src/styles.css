@@ -2400,6 +2400,7 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
 /* The onboarding preview page flips this to show the reduced variant
    without touching system settings; the welcome flow also reads it to skip
    its view transitions. Mirrors the media block above for its own classes. */
+:root[data-reduced-motion="true"] :is(.animate-fade-in, .motion-safe\:animate-fade-in),
 :root[data-reduced-motion="true"] .animate-rise,
 :root[data-reduced-motion="true"] .animate-spot-in,
 :root[data-reduced-motion="true"] .animate-pop-in,

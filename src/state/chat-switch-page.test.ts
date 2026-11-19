@@ -107,3 +107,26 @@ it("updates a card loaded only in a compact page when its server patch arrives",
   flushSync(() => dispatch({ type: "messagePatched", threadId: "B-old", message: { ...card, text: "Answered" } }));
   expect(host.textContent).toBe("Answered");
 });
+
+it("shares the phone's forced V2 mode with history loading and restores the desktop choice", async () => {
+  const media = window.matchMedia("(max-width: 767.98px)");
+  const originalMatchMedia = window.matchMedia.bind(window);
+  let narrow = false;
+  Object.defineProperty(media, "matches", { get: () => narrow });
+  const spy = vi.spyOn(window, "matchMedia").mockImplementation(query =>
+    query === media.media ? media : originalMatchMedia(query),
+  );
+  try {
+    flushSync(() => dispatch({ type: "chatView", v2: false }));
+    narrow = true;
+    flushSync(() => media.dispatchEvent(new Event("change")));
+    flushSync(() => dispatch({ type: "switchTask", botId: "B", threadId: "B-other" }));
+    await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-other?messages=80&view=chat", expect.anything()));
+    narrow = false;
+    flushSync(() => media.dispatchEvent(new Event("change")));
+    flushSync(() => dispatch({ type: "switchTask", botId: "B", threadId: "B-other" }));
+    await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-other?messages=80", expect.anything()));
+  } finally {
+    spy.mockRestore();
+  }
+});

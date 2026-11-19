@@ -18,8 +18,8 @@ afterEach(() => { act(() => root.unmount()); host.remove(); });
 
 const render = (tool: Record<string, unknown>) => act(() => root.render(createElement(ToolActivity, { tool: { name: "Bash", ok: true, ...tool }, source })));
 const toggle = async (open: boolean) => {
-  const details = host.querySelector("details")!;
-  await act(async () => { details.open = open; details.dispatchEvent(new Event("toggle")); });
+  const button = host.querySelector("button")!;
+  await act(async () => { if (button.getAttribute("aria-expanded") !== String(open)) button.click(); });
 };
 const shown = () => [...host.querySelectorAll("pre")].at(-1)?.textContent;
 
