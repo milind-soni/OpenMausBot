@@ -8,6 +8,9 @@ import { MausAvatar } from "./Avatar";
 import { normalizeState } from "@/lib/mascot";
 import { insertProjectMention, projectMentionQueryAt } from "@/lib/projectMentions";
 import { insertTaskMention, taskMentionQueryAt } from "@/lib/taskMentions";
+import { appMentionQueryAt, insertAppMention } from "@/lib/appMentions";
+import { APP_STATE_LABEL, useApps } from "@/state/apps";
+import { AppIcon } from "./AppsScreen";
 import { useProjects } from "@/state/projects";
 import { ProjectSuggestionList } from "./ProjectSuggestionList";
 import { StagedAttachmentsTray } from "./AttachmentViewer";
@@ -53,6 +56,7 @@ export function Composer({
 }) {
   const { state, dispatch } = useStore();
   const { projects } = useProjects();
+  const apps = useApps();
   // Unified target: a 1:1 bot thread or a room. In a room the @ picker
   // offers the members (Buzz rule: only mentioned bots reply).
   const busy = group ? Boolean(group.busyBotId) : Boolean(bot?.busy);
@@ -84,17 +88,21 @@ export function Composer({
   const botMention = mentionQueryAt(text, caret);
   const projectMention = projectMentionQueryAt(text, caret);
   const taskMention = taskMentionQueryAt(text, caret);
+  const appMention = appMentionQueryAt(text, caret);
   // whichever trigger sits closest to the caret wins (matches typing order)
-  const mentionKind: "bot" | "project" | "task" = (() => {
-    const present: Array<readonly ["bot" | "project" | "task", number]> = [
+  type MentionKind = "bot" | "project" | "task" | "app";
+  const mentionKind: MentionKind = (() => {
+    const present: Array<readonly [MentionKind, number]> = [
       ...(botMention ? ([["bot", botMention.start]] as const) : []),
       ...(projectMention ? ([["project", projectMention.start]] as const) : []),
       ...(taskMention ? ([["task", taskMention.start]] as const) : []),
+      ...(appMention ? ([["app", appMention.start]] as const) : []),
     ];
     if (!present.length) return "bot";
     return present.reduce((best, cur) => (cur[1] > best[1] ? cur : best))[0];
   })();
-  const mention = mentionKind === "project" ? projectMention : mentionKind === "task" ? taskMention : botMention;
+  const mention =
+    mentionKind === "project" ? projectMention : mentionKind === "task" ? taskMention : mentionKind === "app" ? appMention : botMention;
   const botCandidates = useMemo(() => {
     if (mentionKind !== "bot" || !botMention || dismissed === `bot:${botMention.start}`) return [];
     const pool = group ? (members ?? []) : state.bots.filter((b) => b.id !== bot?.id && !b.hidden);
@@ -118,8 +126,26 @@ export function Composer({
       .filter((task) => !q || task.mention.includes(q) || task.title.toLowerCase().includes(q))
       .slice(0, 6);
   }, [dismissed, mentionKind, taskMention, state.tasks]);
+  const appCandidates = useMemo(() => {
+    if (mentionKind !== "app" || !appMention || dismissed === `app:${appMention.start}`) return [];
+    const q = appMention.query.toLowerCase();
+    return (apps ?? []).filter((app) => !q || app.id.includes(q) || app.name.toLowerCase().includes(q)).slice(0, 6);
+  }, [apps, appMention, dismissed, mentionKind]);
+  // apps reach Buddies through MCP tools; warn in the picker when this
+  // conversation's Buddy (or every room member) is on a model without them
+  const appsUsable = (() => {
+    const canUse = (b: Bot) => state.instances.find((i) => i.instanceId === b.modelSelection.instanceId)?.appsCapable === true;
+    if (group) return (members ?? []).some(canUse);
+    return bot ? canUse(bot) : true;
+  })();
   const candidateCount =
-    mentionKind === "project" ? projectCandidates.length : mentionKind === "task" ? taskCandidates.length : botCandidates.length;
+    mentionKind === "project"
+      ? projectCandidates.length
+      : mentionKind === "task"
+        ? taskCandidates.length
+        : mentionKind === "app"
+          ? appCandidates.length
+          : botCandidates.length;
   const pickerOpen = candidateCount > 0;
 
   useEffect(() => setHighlight(0), [mention?.start, mention?.query]);
@@ -165,6 +191,18 @@ export function Composer({
     setText(next.text);
     setCaret(next.caret);
     setDismissed(`task:${taskMention.start}`);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(next.caret, next.caret);
+    });
+  };
+
+  const pickAppMention = (appId: string) => {
+    if (!appMention) return;
+    const next = insertAppMention(text, caret, appMention, appId);
+    setText(next.text);
+    setCaret(next.caret);
+    setDismissed(`app:${appMention.start}`);
     requestAnimationFrame(() => {
       inputRef.current?.focus();
       inputRef.current?.setSelectionRange(next.caret, next.caret);
@@ -410,6 +448,43 @@ export function Composer({
             ))}
           </div>
         )}
+        {pickerOpen && mentionKind === "app" && (
+          <div
+            role="listbox"
+            aria-label="Choose an app"
+            className="absolute bottom-full left-2 z-20 mb-2 w-80 max-w-[calc(100%-1rem)] overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg"
+          >
+            {appCandidates.map((app, i) => (
+              <button
+                key={app.id}
+                type="button"
+                role="option"
+                aria-selected={i === highlight}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => pickAppMention(app.id)}
+                onMouseEnter={() => setHighlight(i)}
+                className={cn("flex w-full items-center gap-2.5 px-3 py-2 text-left", i === highlight ? "bg-raised-hover" : "")}
+              >
+                <AppIcon app={app} size={28} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium text-ink">{app.name}</span>
+                  <span className={cn("block truncate text-[11px]", app.status.state === "ready" ? "text-success" : "text-ink-secondary")}>
+                    {APP_STATE_LABEL[app.status.state]}
+                  </span>
+                </span>
+                <span className="shrink-0 text-[12px] font-medium text-accent">+{app.id}</span>
+              </button>
+            ))}
+            {!appsUsable && (
+              <p className="border-t border-hairline/40 px-3 py-2 text-[11px] text-warning">
+                {group
+                  ? "No Buddy in this room is on a model that can use apps."
+                  : `${bot?.name ?? "This Buddy"} is on a model that can't use apps.`}{" "}
+                See supported models on the Apps screen.
+              </p>
+            )}
+          </div>
+        )}
         {pickerOpen && mentionKind === "bot" && (
           <div
             role="listbox"
@@ -474,6 +549,7 @@ export function Composer({
                 e.preventDefault();
                 if (mentionKind === "project") pickProjectMention(projectCandidates[highlight].mention);
                 else if (mentionKind === "task") pickTaskMention(taskCandidates[highlight].mention);
+                else if (mentionKind === "app") pickAppMention(appCandidates[highlight].id);
                 else pickBotMention(botCandidates[highlight]);
                 return;
               }

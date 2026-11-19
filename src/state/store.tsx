@@ -191,6 +191,8 @@ export interface InstanceInfo {
   };
   /** null when the driver has no configurable permission mode. */
   autoApprove: boolean | null;
+  /** True when Buddies on this instance can use apps (driver mounts MCP tools). */
+  appsCapable?: boolean;
 }
 
 export interface AppState {
