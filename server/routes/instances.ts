@@ -1,3 +1,4 @@
+import { setGrokFollowUp } from "../drivers/acp/grok.ts";
 import { agentEndpointAddress, discoverAgentEndpointModels, hasExplicitModel, isGatewayEndpoint } from "../agent-endpoint-models.ts";
 import { codexEndpointSchema, codexEndpointUpdateSchema, newCodexEndpoint, updateCodexEndpoint, withCodexEndpointInfo, isCodexEndpoint } from "../codex-endpoints.ts";
 import { userError, userErrorFields } from "../user-errors.ts";
@@ -476,6 +477,18 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       if (!parsed.success) return json(res, 400, { ...userError("serverError.instance.settingsInvalid") });
       const body = parsed.data;
       const instanceId = instancePatch[1];
+      if (body.followUpBehavior !== undefined) {
+        if (!ownerOrAdmin(auth)) return json(res, 403, { ...userError("serverError.instance.grokFollowUpUnavailable") });
+        const instances = persistableInstanceConfigs(cfg);
+        if (!Object.hasOwn(instances, instanceId)) return json(res, 404, { error: `unknown instance "${instanceId}"` });
+        const entry = instances[instanceId];
+        if (entry.driver !== "grokAgent" || Object.keys(body).length !== 1) {
+          return json(res, 400, { ...userError("serverError.instance.grokFollowUpUnsupported") });
+        }
+        const outcome = setGrokFollowUp({ ...process.env, ...entry.environment }, body.followUpBehavior);
+        if (outcome === "written" || outcome === "unchanged") return json(res, 200, { followUpBehavior: body.followUpBehavior });
+        return json(res, outcome === "failed" ? 500 : 409, { ...userError("serverError.instance.grokFollowUpUnavailable") });
+      }
       if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
       if (busyProviderSelections().some((selection) => selection.instanceId === instanceId)) {
         return json(res, 409, { error: "Wait for bots using this account to finish before changing its settings." });

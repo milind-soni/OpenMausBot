@@ -56,8 +56,8 @@ function ownModelThread(threadModel: string, botModel: string, others: Array<[st
 let host: HTMLDivElement;
 let root: Root;
 const parentKey = vi.fn();
-const render = (bot = scout()) => flushSync(() => root.render(createElement("div", { onKeyDown: (event: { key: string }) => parentKey(event.key) },
-  createElement(ModelPicker, { bot, threadId: bot.threadId }))));
+const render = (bot = scout(), chatHeader = false) => flushSync(() => root.render(createElement("div", { onKeyDown: (event: { key: string }) => parentKey(event.key) },
+  createElement(ModelPicker, { bot, threadId: bot.threadId, chatHeader }))));
 const settle = async () => {
   for (let i = 0; i < 4; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 };
@@ -526,4 +526,28 @@ describe("while the bot is working", () => {
     render(busy);
     expect(chip().disabled).toBe(true);
   });
+});
+
+it("shows the active Grok account's steering preference only from the chat header", async () => {
+  fixture.instances = [...fixture.instances, {
+    ...claude(three), instanceId: "grok", driverKind: "grokAgent", displayName: "Grok", followUpBehavior: "steer",
+  }];
+  expect(menu()).toBeNull();
+  render(scout(), true);
+  await openWith("click");
+  expect(menu()?.querySelector('[role="switch"][aria-label="Grok steering"]')).toBeNull();
+  press("Escape");
+
+  const bot = { ...scout(), modelSelection: { instanceId: "grok", model: three[0]!.id } };
+  render(bot);
+  await openWith("click");
+  expect(menu()?.querySelector('[role="switch"][aria-label="Grok steering"]')).toBeNull();
+  press("Escape");
+
+  render(bot, true);
+  await openWith("click");
+  const thinking = menu()?.querySelector("[data-simple-thinking]");
+  const separator = thinking?.nextElementSibling;
+  expect(separator?.getAttribute("role")).toBe("separator");
+  expect(separator?.nextElementSibling?.querySelector('[role="switch"][aria-label="Grok steering"]')?.getAttribute("aria-checked")).toBe("true");
 });

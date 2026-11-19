@@ -1,4 +1,8 @@
 {
+  "engines.grokSteering": "Grok のステアリング",
+  "engines.grokFollowUp": "Grok が作業中に送信されたメッセージを読めるようにする",
+  "serverError.instance.grokFollowUpUnavailable": "Grok 自体の設定で変更してください。",
+  "serverError.instance.grokFollowUpUnsupported": "この設定は Grok 専用で、単独で変更できます。",
   "connectedWorkspaces.localTitle": "このコンピューターの環境",
   "connectedWorkspaces.missing": "見つかりません",
   "connectedWorkspaces.current": "使用中",

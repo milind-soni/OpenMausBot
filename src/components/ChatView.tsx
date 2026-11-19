@@ -1073,7 +1073,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
           <ThreadContextWarning bot={bot} messages={messages} />
           {phone && <UsageAlert engine={bot.modelSelection?.instanceId} />}
           {/* The model and the bot's computer stay in view in both modes; Simple mode moves only ⋯ into the bot panel. */}
-          {!phone && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} />}
+          {!phone && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} chatHeader />}
           <LiveCallChip currentBotId={bot.id} onOpen={(botId, threadId) => openThread(dispatch, { botId, threadId }, store.state(), showThreads)} />{!phoneMenu && <WatchScreenButton botId={bot.id} messages={messages} liveTools={liveTools} place={place} />}
           <PinnedMessagesMenu
             pins={pinnedPreview(messages, bot.pinnedMessageId, bot.name)}

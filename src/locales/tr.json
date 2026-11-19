@@ -1,4 +1,8 @@
 {
+  "engines.grokSteering": "Grok yönlendirme",
+  "engines.grokFollowUp": "Grok çalışırken gönderilen mesajları okuyabilsin",
+  "serverError.instance.grokFollowUpUnavailable": "Bunu Grok’un kendi ayarlarından değiştirin.",
+  "serverError.instance.grokFollowUpUnsupported": "Bu ayar yalnızca Grok için tek başına değiştirilebilir.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API anahtarınızı yapıştırın",
   "voice.gemini.model": "Gemini konuşma modeli",
   "keys.label.geminiTts": "Gemini konuşma API anahtarı",

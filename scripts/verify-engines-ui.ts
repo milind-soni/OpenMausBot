@@ -45,6 +45,8 @@ const instances: InstanceInfo[] = [
   models: { default: "fixture", options: [] },
   install: { command: { darwin: "echo 'Isolated preview — no installation'", linux: "echo 'Isolated preview — no installation'", win32: "echo Isolated preview — no installation" } },
 }));
+const grok = instances.find((instance) => instance.instanceId === "grok")!;
+grok.followUpBehavior = "queue";
 instances.find((instance) => instance.instanceId === "omp")!.access = "custom";
 instances[0].snapshot.account = { email: "personal@example.test" };
 instances[0].claudeAccount = { configDir: "", isDefault: true, signInCommand: "echo 'Preview only'", signInShell: "sh" };
@@ -89,6 +91,15 @@ try {
         const path = req.url?.split("?")[0];
         const json = (value: unknown, status = 200) => { res.statusCode = status; res.setHeader("content-type", "application/json"); res.end(JSON.stringify(value)); };
         if (path === "/api/instances" && req.method === "GET") return json({ instances });
+        if (path === "/api/instances/grok" && req.method === "PATCH") {
+          void requestJson(req).then((value) => {
+            const followUpBehavior = (value as { followUpBehavior?: unknown } | null)?.followUpBehavior;
+            if (followUpBehavior !== "steer" && followUpBehavior !== "queue") return json({ error: "Invalid follow-up behavior." }, 400);
+            grok.followUpBehavior = followUpBehavior;
+            return json({ followUpBehavior });
+          }).catch(() => json({ error: "Invalid request." }, 400));
+          return;
+        }
         const iconPatch = /^\/api\/instances\/([\w.-]+)\/icon$/.exec(path ?? "");
         if (iconPatch && req.method === "PATCH") {
           void requestJson(req).then((value) => {

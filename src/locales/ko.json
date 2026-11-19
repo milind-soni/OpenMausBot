@@ -1,4 +1,8 @@
 {
+  "engines.grokSteering": "Grok 작업 방향 조정",
+  "engines.grokFollowUp": "Grok이 작업 중에 받은 메시지를 읽도록 허용",
+  "serverError.instance.grokFollowUpUnavailable": "Grok 자체 설정에서 변경하세요.",
+  "serverError.instance.grokFollowUpUnsupported": "이 설정은 Grok에서만 별도로 변경할 수 있습니다.",
   "voice.gemini.keyPlaceholder": "Google AI Studio API 키를 붙여넣으세요",
   "voice.gemini.model": "Gemini 음성 합성 모델",
   "keys.label.geminiTts": "Gemini 음성 합성 API 키",

@@ -1,4 +1,8 @@
 {
+  "engines.grokSteering": "Управление ходом работы Grok",
+  "engines.grokFollowUp": "Разрешить Grok читать сообщения, отправленные во время работы",
+  "serverError.instance.grokFollowUpUnavailable": "Измените это в настройках Grok.",
+  "serverError.instance.grokFollowUpUnsupported": "Эту настройку можно изменить отдельно только для Grok.",
   "voice.gemini.keyPlaceholder": "Вставьте свой API-ключ Google AI Studio",
   "voice.gemini.model": "Модель синтеза речи Gemini",
   "keys.label.geminiTts": "API-ключ синтеза речи Gemini",

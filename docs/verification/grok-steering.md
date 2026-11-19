@@ -2,8 +2,10 @@
 
 A message sent while a Grok turn runs is taken into that turn instead of
 waiting for it to end, once Grok's own config has `follow_up_behavior = "steer"`.
-OpenMausBot adds the line itself, for a signed-in Grok, when a turn starts. A
-`follow_up_behavior` the person already set, `"queue"` included, is left alone.
+Enable **Grok steering** from the chat's model dropdown while Grok is selected,
+or from the signed-in Grok row in **Settings > AI**. Both controls reflect
+Grok's account-wide preference. Turning it off writes `"queue"` to Grok's
+own settings. Starting a turn leaves the setting alone.
 
 ## What Grok does (grok 1.0.89, 2026-11-19)
 
@@ -78,7 +80,7 @@ Then:
    exist (6 on the recorded run). The files that were already in flight still land.
 
 Automated: `server/drivers/acp/grok-steer.test.ts` against the scripted peer
-(`FAKE_ACP_MODE=grok-steer`), including `ensureGrokSteer` on a config with no
+(`FAKE_ACP_MODE=grok-steer`), including `setGrokFollowUp` on a config with no
 `[ui]`, one with `[ui]`, none at all, a `"queue"` choice and a signed-out home, plus the
 spellings a TOML file allows: a quoted key, a single-quoted value, a `[ui]` header with a
 comment or at the end of the file, and `ui` defined by dotted keys or an inline table

@@ -1,4 +1,8 @@
 {
+  "engines.grokSteering": "Grok 工作引導",
+  "engines.grokFollowUp": "允許 Grok 閱讀工作期間傳送的訊息",
+  "serverError.instance.grokFollowUpUnavailable": "請在 Grok 本身的設定中變更此選項。",
+  "serverError.instance.grokFollowUpUnsupported": "此選項僅適用於 Grok，且須單獨變更。",
   "connectedWorkspaces.localTitle": "這台電腦上的環境",
   "connectedWorkspaces.missing": "遺失",
   "connectedWorkspaces.current": "目前",

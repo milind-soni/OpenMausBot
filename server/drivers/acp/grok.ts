@@ -361,30 +361,55 @@ export const GROK_STEER: AcpPromptSteer = {
 const GROK_BACKGROUND = closeEndsBackgroundWork();
 
 /** Turns on Grok's mid-turn steering for a signed-in account, unless its config.toml already sets `follow_up_behavior`. */
-export function ensureGrokSteer(env: Record<string, string | undefined> = process.env): void {
-  if (!grokSignedIn(env)) return;
+type FollowUpBehavior = "steer" | "queue";
+
+function grokFollowUpEditable(found: ReturnType<typeof readGrokFollowUp>): boolean {
+  return !found.unclear && (found.present ? found.valueRange !== undefined : found.insertAt !== undefined || !found.uiElsewhere);
+}
+
+export function grokFollowUpState(env: NodeJS.ProcessEnv): FollowUpBehavior | "unset" | "unreadable" | undefined {
+  if (!grokSignedIn(env)) return undefined;
+  try {
+    const found = readGrokFollowUp(readFileSync(join(grokHome(env), "config.toml"), "utf8"));
+    if (!grokFollowUpEditable(found)) return "unreadable";
+    return found.value === "steer" || found.value === "queue" ? found.value : "unset";
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "ENOENT" ? "unset" : "unreadable";
+  }
+}
+
+export function setGrokFollowUp(env: NodeJS.ProcessEnv, value: FollowUpBehavior):
+  "written" | "unchanged" | "refused-unclear" | "not-signed-in" | "failed" {
+  if (!grokSignedIn(env)) return "not-signed-in";
   const path = join(grokHome(env), "config.toml");
   let text = "";
   try {
     text = readFileSync(path, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return "failed";
   }
   const found = readGrokFollowUp(text);
-  if (found.present || found.unclear || (found.insertAt === undefined && found.uiElsewhere)) return;
+  if (!grokFollowUpEditable(found)) return "refused-unclear";
+  if (found.value === value) return "unchanged";
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  const line = `follow_up_behavior = "steer"${eol}`;
-  const next = found.insertAt !== undefined
+  const line = `follow_up_behavior = "${value}"${eol}`;
+  const next = found.valueRange
+    ? `${text.slice(0, found.valueRange.start)}"${value}"${text.slice(found.valueRange.end)}`
+    : found.insertAt !== undefined
     ? text.slice(0, found.insertAt) + (text.slice(0, found.insertAt).endsWith("\n") ? "" : eol) + line + text.slice(found.insertAt)
     : `${text}${text && !text.endsWith("\n") ? eol : ""}${text ? eol : ""}[ui]${eol}${line}`;
   // config.toml can hold `api_key` values (ensureGrokInjectSlug writes them), so the staged copy is private from its first byte.
   const staged = `${path}.omb-${process.pid}.tmp`;
   try {
     writeFileSync(staged, next, { mode: 0o600, flag: "wx" });
-    renameSync(staged, path);
+    try {
+      renameSync(staged, path);
+    } finally {
+      rmSync(staged, { force: true });
+    }
+    return "written";
   } catch {
-    rmSync(staged, { force: true });
-    // Grok then keeps queueing mid-turn messages, its default.
+    return "failed";
   }
 }
 
@@ -536,7 +561,6 @@ const support: AcpSupport = {
     delete env.XAI_API_KEY;
   },
   applyTurnEnv: (env, { toolScope }) => {
-    ensureGrokSteer(env);
     if (toolScope !== undefined) {
       // These env switches outrank account defaults in the verified runtime.
       env.GROK_MANAGED_MCPS_ENABLED = "false";

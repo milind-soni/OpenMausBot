@@ -176,6 +176,8 @@ export const USER_ERROR = {
   "serverError.inbox.lineMissing": "That line is not in your inbox.",
   "serverError.inbox.answerRequired": "This waits on your answer: answer it, or close it, where it asks.",
   "serverError.instance.settingsInvalid": "Supply a valid CLI path, account name, configuration directory, boolean tools setting or a reply wait of 1 to 60 minutes.",
+  "serverError.instance.grokFollowUpUnavailable": "Change this in Grok's own settings.",
+  "serverError.instance.grokFollowUpUnsupported": "This setting is available on its own for Grok only.",
   "serverError.instance.replyWaitUnsupported": "The reply wait is available for OpenAI-compatible servers only.",
   "serverError.instance.modelsUnsupported": "Model IDs can be changed for added OpenAI-compatible servers only.",
   "serverError.instance.defaultModelRemoved": "{model} is the default model. Choose another default model before removing it from this server.",

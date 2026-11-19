@@ -9,7 +9,7 @@ import { ensureDirs } from "../../config.ts";
 import type { AnyProviderDriver, ProviderInstance } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
-import { ensureGrokSteer, GROK_STEER, GrokAgentDriver } from "./grok.ts";
+import { setGrokFollowUp, GROK_STEER, GrokAgentDriver } from "./grok.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
 
@@ -95,6 +95,16 @@ const methods = () => existsSync(join(scratch, "rpc.jsonl"))
   : [];
 
 describe("Grok steering", () => {
+  it("starts a turn without creating a follow-up setting", async () => {
+    const home = join(scratch, "grok");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "auth.json"), "{}");
+    await start(GrokAgentDriver, "grok-steer");
+    const turnId = await runningTurn();
+    expect(existsSync(join(home, "config.toml"))).toBe(false);
+    await finished(turnId);
+  });
+
   it("steers a message into the running turn as a second prompt and ends with the turn's own reply", async () => {
     configure(true);
     await start(GrokAgentDriver, "grok-steer");
@@ -120,7 +130,7 @@ describe("Grok steering", () => {
   });
 });
 
-describe("ensureGrokSteer", () => {
+describe("setGrokFollowUp", () => {
   const home = () => join(scratch, "grok");
   const config = () => join(home(), "config.toml");
   const env = () => ({ GROK_HOME: home() });
@@ -129,60 +139,58 @@ describe("ensureGrokSteer", () => {
   it("adds a [ui] section to a config without one", () => {
     signedIn();
     writeFileSync(config(), '[cli]\ninstaller = "internal"\n');
-    ensureGrokSteer(env());
+    setGrokFollowUp(env(), "steer");
     expect(readFileSync(config(), "utf8")).toBe('[cli]\ninstaller = "internal"\n\n[ui]\nfollow_up_behavior = "steer"\n');
   });
 
   it("adds the key under an existing [ui]", () => {
     signedIn();
     writeFileSync(config(), '[ui]\nscreen_mode = "minimal"\n');
-    ensureGrokSteer(env());
+    setGrokFollowUp(env(), "steer");
     expect(readFileSync(config(), "utf8")).toBe('[ui]\nfollow_up_behavior = "steer"\nscreen_mode = "minimal"\n');
   });
 
   it("creates the config for a signed-in account that has none", () => {
     signedIn();
-    ensureGrokSteer(env());
+    setGrokFollowUp(env(), "steer");
     expect(readFileSync(config(), "utf8")).toBe('[ui]\nfollow_up_behavior = "steer"\n');
   });
 
-  it("keeps a choice the person already made", () => {
+  it.each([
+    '[ui]\n  follow_up_behavior',
+    '[ui]\n"follow_up_behavior"',
+    "'ui'.follow_up_behavior",
+  ])("switches both ways while preserving the assignment and comment (%s)", (key) => {
     signedIn();
-    writeFileSync(config(), '[ui]\nfollow_up_behavior = "queue"\n');
-    ensureGrokSteer(env());
-    expect(readFileSync(config(), "utf8")).toBe('[ui]\nfollow_up_behavior = "queue"\n');
+    writeFileSync(config(), `${key} = 'queue' # comment\r\n`);
+    expect(setGrokFollowUp(env(), "steer")).toBe("written");
+    expect(readFileSync(config(), "utf8")).toBe(`${key} = "steer" # comment\r\n`);
+    expect(setGrokFollowUp(env(), "steer")).toBe("unchanged");
+    expect(setGrokFollowUp(env(), "queue")).toBe("written");
+    expect(readFileSync(config(), "utf8")).toBe(`${key} = "queue" # comment\r\n`);
   });
 
   it("leaves a signed-out home alone", () => {
-    ensureGrokSteer(env());
+    expect(setGrokFollowUp(env(), "steer")).toBe("not-signed-in");
     expect(existsSync(home())).toBe(false);
-  });
-
-  it("keeps a choice written with a quoted key or a single-quoted value", () => {
-    signedIn();
-    for (const text of ['[ui]\n"follow_up_behavior" = "queue"\n', "[ui]\nfollow_up_behavior = 'steer'\n"]) {
-      writeFileSync(config(), text);
-      ensureGrokSteer(env());
-      expect(readFileSync(config(), "utf8")).toBe(text);
-    }
   });
 
   it("adds the key under a [ui] header that has a comment, or that ends the file without a newline", () => {
     signedIn();
     writeFileSync(config(), '[ui] # display settings\nscreen_mode = "minimal"\n');
-    ensureGrokSteer(env());
+    setGrokFollowUp(env(), "steer");
     expect(readFileSync(config(), "utf8")).toBe('[ui] # display settings\nfollow_up_behavior = "steer"\nscreen_mode = "minimal"\n');
 
     writeFileSync(config(), "[ui]");
-    ensureGrokSteer(env());
+    setGrokFollowUp(env(), "steer");
     expect(readFileSync(config(), "utf8")).toBe('[ui]\nfollow_up_behavior = "steer"\n');
   });
 
   it("writes nothing when ui is defined another way, or the file cannot be read with confidence", () => {
     signedIn();
-    for (const text of ['ui.screen_mode = "minimal"\n', 'ui = { screen_mode = "minimal" }\n', 'note = """\n[ui]\n"""\n', "ui = []\n", "[[ui]]\nx = 1\n"]) {
+    for (const text of ['ui.screen_mode = "minimal"\n', 'ui = { follow_up_behavior = "queue" }\n', 'note = """\n[ui]\n"""\n', "ui = []\n", "[[ui]]\nx = 1\n"]) {
       writeFileSync(config(), text);
-      ensureGrokSteer(env());
+      expect(setGrokFollowUp(env(), "steer")).toBe("refused-unclear");
       expect(readFileSync(config(), "utf8"), text).toBe(text);
     }
   });
@@ -193,7 +201,7 @@ describe("ensureGrokSteer", () => {
     expect(GROK_STEER.enabled!(env())).toBe(true);
     writeFileSync(config(), '[other]\nfollow_up_behavior = "steer"\n');
     expect(GROK_STEER.enabled!(env())).toBe(false);
-    ensureGrokSteer(env());
+    setGrokFollowUp(env(), "steer");
     expect(readFileSync(config(), "utf8")).toBe('[other]\nfollow_up_behavior = "steer"\n\n[ui]\nfollow_up_behavior = "steer"\n');
     expect(readdirSync(home()).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });

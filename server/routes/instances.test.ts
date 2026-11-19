@@ -1,4 +1,7 @@
 // A finished sign-in step changes what an engine reports: the next engine list probes its CLI again.
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
@@ -356,5 +359,32 @@ describe("looking for Ollama", () => {
     expect((await fetch(`${shell.base}/api/instances/ollama?url=${encodeURIComponent("http://127.0.0.1:9")}`)).status).toBe(403);
     const hosted = await serve({ hostedModels: true });
     expect((await fetch(`${hosted.base}/api/instances/ollama`)).status).toBe(403);
+  });
+});
+
+describe("Grok follow-up settings", () => {
+  it("writes only the selected Grok home and refuses inline settings and other drivers", async () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-grok-follow-up-"));
+    try {
+      const path = join(home, "config.toml");
+      writeFileSync(join(home, "auth.json"), "{}");
+      const { base } = await serve({
+        cfg: { instances: { a: { driver: "claudeAgent" }, grok: { driver: "grokAgent", environment: { GROK_HOME: home } } } } as AppConfig,
+      });
+      const patch = (id: string, followUpBehavior: string) => fetch(`${base}/api/instances/${id}`, {
+        method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ followUpBehavior }),
+      });
+      expect((await patch("a", "steer")).status).toBe(400);
+      expect((await patch("grok", "steer")).status).toBe(200);
+      expect(readFileSync(path, "utf8")).toContain('follow_up_behavior = "steer"');
+      expect((await patch("grok", "queue")).status).toBe(200);
+      expect(readFileSync(path, "utf8")).toContain('follow_up_behavior = "queue"');
+      const inline = 'ui = { follow_up_behavior = "steer" }';
+      writeFileSync(path, inline);
+      expect((await patch("grok", "queue")).status).toBe(409);
+      expect(readFileSync(path, "utf8")).toBe(inline);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

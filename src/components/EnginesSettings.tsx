@@ -18,6 +18,7 @@ import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
 import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
+import { GrokFollowUp } from "./GrokFollowUp";
 import { SettingsFoldRow, SettingsGroup, SettingsMark, SettingsRows, StatusDot } from "./SettingsPrimitives";
 import { OllamaModels, ollamaShortStatus } from "./OllamaStatusLine";
 import { isAddedServer } from "@/lib/openai-compat-endpoints";
@@ -401,6 +402,7 @@ function EngineRow({ instance, bare = false }: { instance: InstanceInfo; bare?: 
     <EngineCard instance={instance} bare={bare}>
       {policyNote}
       {!engineReady(instance) && <EngineSetup instance={instance} intent={instance.access === "custom" ? "inject" : "cloud"} description={instance.codexEndpoint ? t("agentEndpoints.codexHint") : undefined} unframed />}
+      <GrokFollowUp key={instance.instanceId} instance={instance} />
       {engineReady(instance) && <ApiKeyEngineManage instance={instance} className="mt-3" />}
       {engineReady(instance) && instance.serverKind === "ollama" && <OllamaModels instance={instance} className="mt-3" />}
       {/* A server added by address (LM Studio, Ollama, a gateway) is removed here too, not only from API keys. */}

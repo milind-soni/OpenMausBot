@@ -27,7 +27,7 @@ import { apiKeysLabel, ClaudeAccountSelect, engineStatus, FollowBotModelRow, Mod
 import { MENU_LABEL, MENU_LINE, MENU_ROW, MENU_SEPARATOR, MENU_STROKE, MENU_TRAILING } from "./menu-recipe";
 import { modelMenuKey, modelMenuPointerMove } from "./model-menu-keys";
 import { lockedWhileBusy, offersReasoning, useRefocusAfterPick, variantChoices, variantLabel } from "./model-picker-reasoning";
-import { BusyModelMenu } from "./ModelPickerBusyMenu";
+import { BusyModelMenu } from "./ModelPickerBusyMenu"; import { GrokFollowUp } from "./GrokFollowUp";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
@@ -202,14 +202,14 @@ const MENU_ITSELF = ":scope";
 
 export function ModelPicker({
   bot: shown,
-  threadId,
+  threadId, chatHeader = false,
   className,
   contained = false,
   label,
   size = "md",
 }: {
   bot: Bot;
-  threadId?: string;
+  threadId?: string; chatHeader?: boolean;
   className?: string;
   contained?: boolean;
   label?: ReactNode;
@@ -683,6 +683,7 @@ export function ModelPicker({
     refreshing: refreshingId,
   }) : null;
 
+  const steering = chatHeader && ownerOrAdmin === true && active?.followUpBehavior !== undefined && <GrokFollowUp key={active.instanceId} instance={active} compact />;
   const fullPane = (
     <>
       {fullView && !advanced && (
@@ -890,7 +891,7 @@ export function ModelPicker({
                   className="shrink-0 border-t-[0.5px] border-ink/10 px-3.5 py-[5px]"
                   label={<span className="text-[13px] leading-[18px] text-ink">{active?.capabilities?.modelVariants ? t("model.simple.reasoning") : t("model.section.effort")}</span>}
                 />
-              )}
+              )}{steering}
 
               {pane === "main" && offersLocalModels(railInstance, custom.length) && (
                 <button
@@ -962,14 +963,13 @@ export function ModelPicker({
       className={cn("menu-surface z-[80] flex flex-col overflow-hidden", motion.className)}
     >
       <UsageMenuRows engine={selection.instanceId} />
-      {bot.busy ? <BusyModelMenu bot={shown} threadId={threadId} updateBotDefault={busyUpdatesBotDefault} variants={Boolean(active?.capabilities?.modelVariants)} /> : simpleMenu ? (
+      {bot.busy ? <BusyModelMenu bot={shown} threadId={threadId} updateBotDefault={busyUpdatesBotDefault} variants={Boolean(active?.capabilities?.modelVariants)}>{steering}</BusyModelMenu> : simpleMenu ? (
         <SimpleModelMenu
           menu={simpleMenu}
           query={query}
           bot={profile}
           botModel={{ label: modelName(botModelInstance, profile.modelSelection.model, profile.modelSelection.variant), title: botModelName }}
-          thinking={thinking}
-          idPrefix={menuId}
+          thinking={thinking} afterThinking={steering} idPrefix={menuId}
           onQuery={setQuery}
           onPick={pick}
           onPickCurrent={() => close(true)}

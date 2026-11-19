@@ -1,4 +1,8 @@
 {
+  "engines.grokSteering": "Pilotage de Grok",
+  "engines.grokFollowUp": "Laisser Grok lire les messages envoyés pendant qu’il travaille",
+  "serverError.instance.grokFollowUpUnavailable": "Modifiez cette option dans les paramètres de Grok.",
+  "serverError.instance.grokFollowUpUnsupported": "Cette option peut uniquement être modifiée séparément pour Grok.",
   "voice.gemini.keyPlaceholder": "Collez votre clé API Google AI Studio",
   "voice.gemini.model": "Modèle de synthèse vocale Gemini",
   "keys.label.geminiTts": "Clé API de synthèse vocale Gemini",

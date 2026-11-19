@@ -20,6 +20,8 @@ export const instanceSettingsSchema = z.object({
   tools: z.boolean().optional(),
   hidden: z.boolean().optional(),
   /** null goes back to the server's default wait. */
+  /** Update the signed-in Grok CLI?s follow-up behavior. */
+  followUpBehavior: z.enum(["steer", "queue"]).optional(),
   replyWaitMinutes: z.number().int().min(1).max(60).nullable().optional(),
   /** An added OpenAI-compatible server's model IDs; [] goes back to its /models list. */
   models: addEndpointSchema.shape.models,

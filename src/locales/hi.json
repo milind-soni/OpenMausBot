@@ -1,4 +1,8 @@
 {
+  "engines.grokSteering": "Grok का दिशा-निर्देशन",
+  "engines.grokFollowUp": "Grok को काम करते समय भेजे गए संदेश पढ़ने दें",
+  "serverError.instance.grokFollowUpUnavailable": "इसे Grok की अपनी सेटिंग में बदलें।",
+  "serverError.instance.grokFollowUpUnsupported": "यह सेटिंग केवल Grok के लिए अलग से बदली जा सकती है।",
   "voice.gemini.keyPlaceholder": "अपनी Google AI Studio API कुंजी पेस्ट करें",
   "voice.gemini.model": "Gemini वाक् मॉडल",
   "keys.label.geminiTts": "Gemini वाक् API कुंजी",

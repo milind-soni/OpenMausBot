@@ -1,4 +1,8 @@
 {
+  "engines.grokSteering": "Điều hướng Grok",
+  "engines.grokFollowUp": "Cho phép Grok đọc tin nhắn được gửi trong khi làm việc",
+  "serverError.instance.grokFollowUpUnavailable": "Hãy đổi tùy chọn này trong phần cài đặt của Grok.",
+  "serverError.instance.grokFollowUpUnsupported": "Chỉ có thể thay đổi riêng tùy chọn này cho Grok.",
   "voice.gemini.keyPlaceholder": "Dán khóa API Google AI Studio của bạn",
   "voice.gemini.model": "Mô hình giọng nói Gemini",
   "keys.label.geminiTts": "Khóa API giọng nói Gemini",

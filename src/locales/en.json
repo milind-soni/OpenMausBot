@@ -1,4 +1,8 @@
 {
+  "engines.grokSteering": "Grok steering",
+  "engines.grokFollowUp": "Let Grok read messages sent while it works",
+  "serverError.instance.grokFollowUpUnavailable": "Change this in Grok’s own settings.",
+  "serverError.instance.grokFollowUpUnsupported": "This setting is available on its own for Grok only.",
   "connectedWorkspaces.localTitle": "Environments on this computer",
   "connectedWorkspaces.missing": "missing",
   "connectedWorkspaces.current": "Current",

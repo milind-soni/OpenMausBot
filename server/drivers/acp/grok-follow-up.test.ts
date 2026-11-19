@@ -58,3 +58,11 @@ describe("Grok's ui.follow_up_behavior in config.toml", () => {
     expect(read("this is not toml\n")).toMatchObject({ unclear: true });
   });
 });
+
+it("locates the editable value without including the comment", () => {
+  for (const text of ['[ui]\r\n  "follow_up_behavior" = \'queue\' # keep', "'ui'.follow_up_behavior = 'queue'"]) {
+    const range = readGrokFollowUp(text).valueRange!;
+    expect(text.slice(range.start, range.end)).toBe("'queue'");
+  }
+  expect(readGrokFollowUp("ui = { follow_up_behavior = 'queue' }").valueRange).toBeUndefined();
+});
