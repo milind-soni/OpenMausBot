@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Gauge, RotateCcw, Shrink } from "lucide-react";
-
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { cn } from "@/lib/cn";
 import { compactedSinceReading } from "@/lib/context-warning";
 import { contextReading, contextRowLabel, contextRows, roomContextReadings, type ContextReading, type ContextRow } from "@/lib/context-usage";
 import { t } from "@/lib/i18n";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { formatTokens, type ContextTone } from "@/lib/usage";
 import { api } from "@/state/api";
 import { visibleMessages, type Bot, type Group, type Message } from "@/state/store";
@@ -204,8 +202,8 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
   useEffect(() => {
     if (open) panel.current?.focus();
   }, [open]);
-  const advanced = useAdvancedMode();
-  const breakdown = useContextBreakdown(group || !advanced ? undefined : bot, open);
+
+  const breakdown = useContextBreakdown(group ? undefined : bot, open);
   if (!bot && !group) return null;
   const context = bot && currentContext(bot, visibleMessages(bot));
   const fullest = group
@@ -222,7 +220,7 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
       {open && (
         <div ref={panel} role="dialog" tabIndex={-1} aria-label={t("contextMenu.title")} data-context-panel
           className={cn("animate-pop-in absolute bottom-full end-0 z-50 mb-2 max-h-[min(28rem,calc(100dvh-8rem))] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain outline-none", MENU_SHEET)}>
-          {group ? <RoomContext group={group} members={members ?? []} detailed={advanced} /> : bot && <ChatContext bot={bot} reading={fullest ?? null} breakdown={breakdown} detailed={advanced} onDone={close} />}
+          {group ? <RoomContext group={group} members={members ?? []} detailed={true} /> : bot && <ChatContext bot={bot} reading={fullest ?? null} breakdown={breakdown} detailed={true} onDone={close} />}
         </div>
       )}
     </span>

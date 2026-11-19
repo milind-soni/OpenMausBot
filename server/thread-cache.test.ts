@@ -51,6 +51,25 @@ describe("Store message cache", () => {
     expect({ messages: after, leaf: store.activeLeaf(bot.threadId), path: store.activePath(bot.threadId) }).toEqual(snapshot);
   });
 
+  it("reuses the active-path index until a patch or branch switch changes the transcript", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Branches" }, { seedMessages: false });
+    const question = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "first" });
+    const answer = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "answer" });
+    const first = store.activePathIndex(bot.threadId);
+    expect(store.activePathIndex(bot.threadId)).toBe(first);
+
+    store.patchMessage(bot.threadId, answer.id, { text: "updated" });
+    expect(store.activePathIndex(bot.threadId).messages.at(-1)?.text).toBe("updated");
+
+    const branch = store.branchMessage(bot.threadId, question.id, "second")!;
+    expect(store.activePathIndex(bot.threadId).positions.has(answer.id)).toBe(false);
+    expect(store.activePathIndex(bot.threadId).leafId).toBe(branch.id);
+
+    store.setActiveLeaf(bot.threadId, question.id);
+    expect(store.activePathIndex(bot.threadId).positions.get(answer.id)).toBe(1);
+  });
+
   it("keeps a conversation someone used within the idle window", () => {
     const store = new Store(selection);
     const bot = store.createBot({ name: "Recent" });

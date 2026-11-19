@@ -27,8 +27,7 @@ import { PlaceLookRows } from "../../PlaceLookCard";
 import { ProfileFields } from "../../ProfileSettings";
 import { RoomTurnTimeoutSettings } from "../../RoomTurnTimeoutSettings";
 import { SavedStepsRow } from "../../SavedStepsRow";
-import { Card, SettingRow, SettingsDisclosureRow, SettingsFoldRow, SettingsGroup, SettingsLinkRow, SettingsRows } from "../../SettingsPrimitives";
-import { KEY_SECTIONS } from "../../keys/key-catalog";
+import { Card, SettingRow, SettingsDisclosureRow, SettingsGroup, SettingsLinkRow, SettingsRows } from "../../SettingsPrimitives";
 import { DesktopKinds } from "../DesktopKinds";
 import { SkillsSection } from "../../SkillsSection";
 import { ThreadConcurrencySettings } from "../../ThreadConcurrencySettings";
@@ -38,7 +37,6 @@ import { BrowserProfilesRow, ExperimentalFeaturesRow, NewBotEffortRow } from "..
 import { ServerUpdateRow } from "../../ServerUpdateRow";
 import { versionLine } from "../settings-context";
 import { useSettingsShell } from "../settings-shell";
-import { AdvancedSection } from "../AdvancedSection";
 
 const GROUPED_NOTE = "omb-settings-grouped-note";
 const GROUPED_DAYS = 30;
@@ -52,7 +50,7 @@ function useGroupedNote(): [boolean, () => void] {
       if (raw === "dismissed") return;
       const first = raw ? Number(raw) : null;
       if (first === null) {
-        const before = ["omb-skin", "omb-advanced-mode", "omb-send-key"].some((key) => localStorage.getItem(key) !== null);
+        const before = ["omb-skin", "omb-send-key"].some((key) => localStorage.getItem(key) !== null);
         if (!before) { localStorage.setItem(GROUPED_NOTE, "dismissed"); return; }
         localStorage.setItem(GROUPED_NOTE, String(Date.now()));
         setShown(true);
@@ -90,9 +88,7 @@ export function OverviewPage() {
         {!ctx.client && <SettingsLinkRow title={t("settings.section.phoneDevices")} value={phoneValue} onClick={() => go("phone")} data={{ "data-glance": "phone" }} />}
         {!ctx.client && <SettingsLinkRow title={t("settings.group.ai")} onClick={() => go("ai", "providers")} data={{ "data-glance": "ai" }}
           value={ctx.admin ? engines > 0 ? t("settings.glance.aiReady", { count: engines }) : t("settings.glance.aiStart") : t("settings.glance.aiAdmin")} />}
-        {/* Simple's sidebar footer has Connect apps right beside the avatar, so Simple's Overview leaves the jump out and
-            stays one window tall at 900 px even while the grouped note shows. */}
-        {ctx.advanced && <SettingsLinkRow title={t("settings.glance.apps")} external value={apps === null ? undefined : apps > 0 ? t("settings.glance.appsConnected", { count: apps }) : t("settings.glance.appsNone")}
+        {<SettingsLinkRow title={t("settings.glance.apps")} external value={apps === null ? undefined : apps > 0 ? t("settings.glance.appsConnected", { count: apps }) : t("settings.glance.appsNone")}
           onClick={() => { dispatch({ type: "toggleAppSettings", open: false }); dispatch({ type: "togglePlugins", open: true }); }} data={{ "data-glance": "apps" }} />}
       </SettingsRows>
     </SettingsGroup>
@@ -102,7 +98,7 @@ export function OverviewPage() {
     {ctx.desktop && ctx.cloud && team && team.cloudPage && <div data-settings-block="people-and-plan"><TeamPeopleCard team={team} admin={ctx.admin} owner={teamOwner} /></div>}
     {/* Address: a self-hosted server's own web address, Advanced only. A Cloud's address is MausBot's to manage, so it
         has none here (no administrator or proxy steps for a person who has no server to set up). */}
-    {place.kind === "server" && !ctx.client && ctx.advanced && <CustomDomainSettings />}
+    {place.kind === "server" && !ctx.client && <CustomDomainSettings />}
   </>;
 }
 
@@ -118,33 +114,23 @@ function useConnectedAppCount(): number | null {
 }
 
 export function AiPage() {
-  const { ctx, anchor } = useSettingsShell();
+  const { anchor } = useSettingsShell();
   const [more, setMore] = useState(false);
-  // Simple ends after Providers: Other services is one closed fold row, so the page fits one window.
-  const [services, setServices] = useState(ctx.advanced || anchor === "ai-keys");
-  // A key asked for by search or a link opens Other services whatever the fold says.
-  const shown = ctx.advanced || services || anchor === "ai-keys";
-  const count = KEY_SECTIONS.filter((section) => section.id !== "ai").length;
+
   return <>
     <AdminOnly>
       <div data-settings-block="providers" className="flex scroll-mt-4 flex-col gap-6">
         <EnginesSettings simple more={{ id: "ai-more", open: more, onToggle: () => setMore((open) => !open) }} />
       </div>
-      {!ctx.advanced && (
-        <SettingsGroup block="ai-keys-fold">
-          <SettingsRows>
-            <SettingsFoldRow id="ai-other-services" title={t("settings.ai.otherServices")} value={String(count)} open={shown} onToggle={() => setServices(!shown)} />
-          </SettingsRows>
-        </SettingsGroup>
-      )}
-      {shown && (
-        <SettingsGroup label={ctx.advanced ? t("settings.ai.otherServices") : undefined} block="ai-keys">
+
+      {(
+        <SettingsGroup label={t("settings.ai.otherServices")} block="ai-keys">
           <KeysPage bare exclude={anchor === "ai-keys" ? [] : ["ai"]} />
         </SettingsGroup>
       )}
-      <AdvancedSection anchor="backup-model"><SettingsGroup label={t("settings.ai.backupModel")} block="backup-model"><AutomaticRecoverySettings /></SettingsGroup></AdvancedSection>
-      <AdvancedSection anchor="routing"><DecisionModelSettings /></AdvancedSection>
-      <AdvancedSection anchor="images"><ImageGenerationSettings /></AdvancedSection>
+      <SettingsGroup label={t("settings.ai.backupModel")} block="backup-model"><AutomaticRecoverySettings /></SettingsGroup>
+      <DecisionModelSettings />
+      <ImageGenerationSettings />
     </AdminOnly>
   </>;
 }
@@ -165,29 +151,29 @@ export function BotsPage() {
     <SettingsGroup label={t("settings.bots.newBots")} block="new-bots">
       <SettingsRows><NewBotEffortRow /><DefaultBotSettings simple /></SettingsRows>
     </SettingsGroup>
-    {!(ctx.team && !ctx.admin) && <AdvancedSection anchor="limits" also={["parallel", "group-turns", "tool-time", "keep-warm"]}><SettingsGroup label={t("settings.simple.more.limits")} block="limits">
+    {!(ctx.team && !ctx.admin) && <SettingsGroup label={t("settings.simple.more.limits")} block="limits">
       <SettingsRows selectWidth={160}>
         <div data-settings-block="group-turns" className="contents"><RoomTurnTimeoutSettings /></div>
         <div data-settings-block="tool-time" className="contents"><McpCallTimeoutSettings /></div>
         <ThreadConcurrencySettings />
         <div data-settings-block="keep-warm" className="contents"><CacheKeepWarmSettings /></div>
       </SettingsRows>
-    </SettingsGroup></AdvancedSection>}
+    </SettingsGroup>}
     {skillsLibraryEnabled(state.config) && <div data-settings-block="skills"><SkillsSection /></div>}
-    <AdvancedSection anchor="early"><div data-settings-block="early"><ExperimentalFeaturesRow /></div></AdvancedSection>
+    <div data-settings-block="early"><ExperimentalFeaturesRow /></div>
   </>;
 }
 
 export function DesktopsPage() {
-  const { ctx, anchor } = useSettingsShell();
+  const { anchor } = useSettingsShell();
   const [details, setDetails] = useState(anchor === "desktop-details");
   return <>
     <SettingsGroup label={t("settings.desktops.browserSection")} block="browser">
-      <SettingsRows><BuiltInBrowserRow /><ServerSitesRow /><BrowserProxyRow />{ctx.advanced && <div data-settings-block="new-browser" className="contents"><NewBrowserSettings /></div>}</SettingsRows>
+      <SettingsRows><BuiltInBrowserRow /><ServerSitesRow /><BrowserProxyRow />{<div data-settings-block="new-browser" className="contents"><NewBrowserSettings /></div>}</SettingsRows>
     </SettingsGroup>
     <AdminOnly><DesktopKinds /></AdminOnly>
     <BrowserProfilesRow />
-    {ctx.advanced && (
+    {(
       <AdminOnly>
         <SettingsDisclosureRow id="desktop-details" block="desktop-details" title={t("settings.desktops.detailsTitle")} subtitle={t("settings.desktops.detailsLine")}
           open={details} onToggle={() => setDetails((open) => !open)}>
@@ -195,7 +181,7 @@ export function DesktopsPage() {
         </SettingsDisclosureRow>
       </AdminOnly>
     )}
-    <AdvancedSection anchor="automation"><SettingsGroup label={t("settings.desktops.automation")} block="automation"><SettingsRows><SavedStepsRow /></SettingsRows></SettingsGroup></AdvancedSection>
+    <SettingsGroup label={t("settings.desktops.automation")} block="automation"><SettingsRows><SavedStepsRow /></SettingsRows></SettingsGroup>
   </>;
 }
 

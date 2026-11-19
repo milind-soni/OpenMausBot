@@ -26,7 +26,6 @@ vi.mock("./conversation-share/conversation-share", async (importOriginal) => ({
   ...await importOriginal<typeof import("./conversation-share/conversation-share")>(),
   openConversationDialog: fixture.open,
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced && fixture.threadsChosen }));
 vi.mock("@/lib/chat-find", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/chat-find")>(),
@@ -80,26 +79,7 @@ beforeEach(() => {
 });
 
 describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
-  it("is a round 32px button labelled More, on the raised surface in Simple mode", () => {
-    const menu = menuOf(createElement(ChatMoreMenu, { bot }));
-    expect(menu.ariaLabel).toBe("More");
-    expect(menu.placement).toBeUndefined();
-    expect(menu.trigger).toContain('data-testid="chat-more"');
-    expect(menu.trigger).toMatch(/class="[^"]*\bsize-8\b[^"]*\brounded-full\b[^"]*\bbg-composer\b[^"]*\bring-inset\b/);
-    fixture.advanced = true;
-    expect(menuOf(createElement(ChatMoreMenu, { bot })).trigger).toMatch(/class="[^"]*\bsize-8\b[^"]*\brounded-full\b[^"]*\bbg-raised\/50\b/);
-  });
 
-  it("offers threads in Simple mode, and Usage and the Inspector unlocked", () => {
-    const menu = menuOf(createElement(ChatMoreMenu, { bot }));
-    expect(keys(menu.items)).toEqual(["find", "new-thread", "threads", "start-fresh", "as-template", "copy", "download", "activity", "inspector"]);
-    for (const item of menu.items) {
-      expect(item.disabled, item.key).toBeFalsy();
-      expect(item.heading ?? "", item.key).not.toBe("In Advanced mode");
-    }
-    expect(menu.items.find((item) => item.key === "new-thread")).toMatchObject({ label: "New thread", heading: "Threads", separatorBefore: true });
-    expect(menu.items.find((item) => item.key === "inspector")?.separatorBefore).toBe(false);
-  });
 
   it("starts the open conversation fresh with one press, and not while it is working or already fresh", () => {
     const item = menuOf(createElement(ChatMoreMenu, { bot })).items.find((one) => one.key === "start-fresh")!;
@@ -152,21 +132,6 @@ describe("ChatMoreMenu, the round ⋯ for the bot panel", () => {
     expect(fixture.find).toHaveBeenCalledWith("side");
   });
 
-  it("shows Usage when the thread has some, and opens the inspector from Simple mode", () => {
-    fixture.inspectorOpen = true;
-    const withUsage: Bot = { ...bot, tasks: bot.tasks!.map((entry) => entry.threadId === "side"
-      ? { ...entry, usage: { input: 1200, output: 300, costUsd: null, turns: 2 } }
-      : entry) };
-    const menu = menuOf(createElement(ChatMoreMenu, { bot: withUsage }));
-    const usage = menu.items.find((item) => item.key === "usage");
-    expect(usage?.disabled).toBeFalsy();
-    expect(usage?.heading).toBeUndefined();
-    const inspector = menu.items.find((item) => item.key === "inspector")!;
-    expect(inspector.active).toBe(true);
-    inspector.onSelect();
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleInspector" });
-    expect(menu.trigger).toContain("text-accent");
-  });
 });
 
 describe("the phone header's ⋯", () => {
@@ -197,30 +162,6 @@ describe("ChatShareMenu, the bot panel's Share", () => {
   });
 });
 
-describe("ChatHeaderMenu, Advanced mode's header ⋯", () => {
-  it("keeps main's items, trigger and hover menu below the header", () => {
-    fixture.advanced = true;
-    const menu = menuOf(createElement(ChatHeaderMenu, { bot }));
-    expect(keys(menu.items)).toEqual(["find", "start-fresh", "as-template", "copy", "download", "activity", "inspector"]);
-    expect(menu.items.find((item) => item.key === "inspector")).toMatchObject({ separatorBefore: true });
-    expect(menu.items.every((item) => !item.disabled && item.heading !== "In Advanced mode")).toBe(true);
-    expect(menu).toMatchObject({ placement: "below", openOnHover: true });
-    expect(menu.trigger).toMatch(/data-testid="chat-more" class="flex size-8 items-center justify-center rounded-full /);
-  });
-
-  it("has no thread items even if rendered by ChatMoreMenu in Advanced mode", () => {
-    fixture.advanced = true;
-    expect(keys(menuOf(createElement(ChatMoreMenu, { bot })).items)).not.toContain("threads");
-  });
-
-  it("lists the threads when the Threads setting hides them from the sidebar", () => {
-    fixture.advanced = true;
-    fixture.threadsChosen = false;
-    const items = menuOf(createElement(ChatHeaderMenu, { bot })).items;
-    expect(keys(items)).toEqual(expect.arrayContaining(["new-thread", "threads"]));
-    expect(items.find((item) => item.key === "threads")!.submenu).toHaveLength(3);
-  });
-});
 
 describe("sharing the conversation on screen, on a team", () => {
   const withSide = (extra: Partial<Task>): Bot => ({ ...bot, tasks: bot.tasks!.map((each) => (each.threadId === "side" ? { ...each, ...extra } : each)) });

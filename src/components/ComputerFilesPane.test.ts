@@ -1,16 +1,6 @@
-// @vitest-environment happy-dom
-import { createElement } from "react";
-import { flushSync } from "react-dom";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { Bot, Message } from "@/state/store";
-
-vi.mock("@/state/store", async (original) => ({
-  ...await original<typeof import("@/state/store")>(),
-  useStore: () => ({ dispatch: vi.fn() }),
-}));
-
-import { ComputerFilesPane, recentChangedFiles, sharedFileReferences } from "./ComputerFilesPane";
+import { recentChangedFiles, sharedFileReferences } from "./ComputerFilesPane";
 
 const reply = (id: string, text: string, patch: Partial<Message> = {}) =>
   ({ id, role: "bot", kind: "text", at: 1, text, ...patch }) as Message;
@@ -122,69 +112,5 @@ describe("file grants in the visible conversation", () => {
       digest(["/workspace/removed.md", "/workspace/kept.md"]),
       { ...digest([], ["/workspace/removed.md"]), id: "later" },
     ]))).toEqual(["/workspace/kept.md"]);
-  });
-});
-
-describe("recent file actions", () => {
-  let root: Root;
-  let container: HTMLDivElement;
-  const render = (value: Bot) => flushSync(() => root.render(createElement(ComputerFilesPane, { bot: value })));
-  const saveButton = (name: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="Save a copy of ${name}"]`);
-
-  beforeEach(() => {
-    container = document.createElement("div");
-    document.body.append(container);
-    root = createRoot(container);
-    vi.stubGlobal("fetch", vi.fn());
-  });
-
-  afterEach(() => {
-    flushSync(() => root.unmount());
-    container.remove();
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  });
-
-  it("offers the existing CSV preview and save controls, with no eager file request", () => {
-    render(bot([
-      reply("shared", "[data](/workspace/data.csv)"),
-      digest(["/workspace/data.csv", "/workspace/unshared.txt"]),
-    ]));
-    expect(saveButton("data.csv")).not.toBeNull();
-    expect(container.querySelector('button[aria-label="Preview table: data.csv"]')).not.toBeNull();
-    expect(saveButton("unshared.txt")).toBeNull();
-    expect(container.textContent).toContain("Not shared");
-    expect(container.querySelector('[title="Ask the bot to share a file link in this chat to save a copy."]')).not.toBeNull();
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
-  it("downloads through the exact shared message and preserves the original URL", async () => {
-    const href = "file:///workspace/release%20notes%231.md";
-    vi.mocked(fetch).mockResolvedValue(new Response("Sample report", {
-      headers: { "content-type": "text/plain", "content-disposition": 'attachment; filename="release.md"' },
-    }));
-    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fixture");
-    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
-    const download = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
-    render(bot([reply("message / 1", `[report](${href})`), digest(["/workspace/release notes#1.md"])], { threadId: "thread / 1" }));
-    saveButton("release notes#1.md")!.click();
-    await vi.waitFor(() => expect(container.textContent).toContain("Downloaded"));
-    expect(fetch).toHaveBeenCalledWith("/api/threads/thread%20%2F%201/messages/message%20%2F%201/file", expect.objectContaining({
-      method: "POST", body: JSON.stringify({ path: href, listFolder: true }),
-    }));
-    expect(download).toHaveBeenCalledOnce();
-  });
-
-  it("shows the existing workspace refusal and clears it when switching conversations", async () => {
-    vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({
-      error: "outside", code: "outside_workspace",
-    }), { status: 403, headers: { "content-type": "application/json" } }));
-    const messages = [reply("shared", "[report](/workspace/report.md)"), digest(["/workspace/report.md"])];
-    render(bot(messages));
-    saveButton("report.md")!.click();
-    await vi.waitFor(() => expect(container.querySelector('[role="alert"]')?.textContent).toContain("outside this chat's working folder"));
-    render(bot(messages, { threadId: "thread-2" }));
-    expect(container.querySelector('[role="alert"]')).toBeNull();
-    expect(saveButton("report.md")).not.toBeNull();
   });
 });

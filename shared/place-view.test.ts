@@ -150,11 +150,10 @@ describe("a failed place, by where it came from", () => {
   const row = (source: PlaceSource, state: PlaceState = "cc-unavailable") => ({ state, params: { bot: "Scout" }, source });
 
   it("has its own way on per source for a passing cause", () => {
-    const view = (source: PlaceSource, mode?: "simple" | "advanced") =>
-      placeRowView(row(source), { role: "admin", mode, worksOnLabel: "Auto" });
+    const view = (source: PlaceSource) =>
+      placeRowView(row(source), { role: "admin" });
     expect(view("works-on").action).toEqual({ id: "try-again", label: "Try again" });
-    expect(view("pin", "advanced").action).toEqual({ id: "clear-pin", label: "Clear this conversation's place" });
-    expect(view("pin", "simple").action).toEqual({ id: "clear-pin", label: "Use Auto" });
+    expect(view("pin").action).toEqual({ id: "clear-pin", label: "Clear this conversation's place" });
     expect(view("auto-pin")).toMatchObject({ line: "Cloud desktops can't start right now. It isn't anything you did. This conversation is back on Auto.", action: { id: "try-again" } });
     expect(view("routine").action).toEqual({ id: "change-routine", label: "Change where it runs" });
     expect(view("room").action).toBeNull();

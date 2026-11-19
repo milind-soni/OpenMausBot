@@ -57,7 +57,7 @@ it("any dialog on screen counts, modal or not, the tour's cards and the card tha
   const inside = document.querySelector('[role="dialog"]')!.appendChild(document.createElement("div"));
   inside.setAttribute("role", "alertdialog");
   expect(otherDialogOpen(), "inside the popup").toBe(false);
-  for (const own of ["data-simple-mode-prompt", "data-updates-consent-popup"]) {
+  for (const own of ["data-updates-consent-popup"]) {
     const popup = document.body.appendChild(document.createElement("div"));
     popup.setAttribute(own, ""); popup.setAttribute("role", "dialog");
     expect(otherDialogOpen(), own).toBe(false);

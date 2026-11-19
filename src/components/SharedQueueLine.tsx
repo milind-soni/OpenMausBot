@@ -75,7 +75,7 @@ export function SharedQueueLine({ waiting, viewer, onRemove, className }: {
 
 /** In a Team Cloud conversation several people write in: the working line's lead, the quiet line under it, and whether
  * the viewer may act on a request someone made. */
-export function useSharedRun(bot: Bot, advanced: boolean): { label?: string; line: ReactNode; mayAct: (asker: ResolvedSender | undefined) => boolean } {
+export function useSharedRun(bot: Bot): { label?: string; line: ReactNode; mayAct: (asker: ResolvedSender | undefined) => boolean } {
   const team = useStoreSelector((state) => Boolean(state.config?.team)), waiting = useStoreSelector((state) => state.pendingQueued[bot.threadId]), dispatch = useStoreDispatch();
   const viewer = useReactor();
   const mayAct = useMayAct();
@@ -83,7 +83,7 @@ export function useSharedRun(bot: Bot, advanced: boolean): { label?: string; lin
   if (!task) return { line: null, mayAct: () => true };
   return {
     label: workingForLabel(task.askedBy, viewer),
-    line: <SharedQueueLine waiting={waiting ?? []} viewer={viewer} className={advanced ? "ps-11" : "ps-12"}
+    line: <SharedQueueLine waiting={waiting ?? []} viewer={viewer} className="ps-11"
       onRemove={(queueId) => dispatch({ type: "cancelQueued", botId: bot.id, threadId: bot.threadId, queueId })} />,
     mayAct,
   };

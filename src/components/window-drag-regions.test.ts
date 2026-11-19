@@ -10,7 +10,6 @@ type Chrome = "mac-inset" | "win-caption" | "native";
 const PLATFORM: Record<Chrome, string> = { "mac-inset": "darwin", "win-caption": "win32", native: "linux" };
 const fixture = { chrome: "native" as Chrome };
 
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
 
 const { ChatView } = await import("./ChatView");
 const { GroupView } = await import("./GroupView");

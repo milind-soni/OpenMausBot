@@ -11,7 +11,7 @@ import { saveXmindUpload, XMIND_MIME } from "../xmind.ts";
 import { deliveredCopy } from "../bot-attachment.ts";
 import { memberBot, memberGroup, type Viewer, type VisibleSet } from "../bot-visibility.ts";
 import type { ComputerControl } from "../computer-control.ts";
-import { speakerOf, type PersonName } from "../replies.ts";
+import { replyTargetIn, speakerOf, type PersonName } from "../replies.ts";
 import type { Coordinator } from "../coordinator.ts";
 import type { WorkspaceAccess } from "../enterprise.ts";
 import type { GroupUsageReader } from "../group-thread-usage.ts";
@@ -34,7 +34,7 @@ export type MessagePage = { messages: Array<Message | Record<string, unknown>>; 
 
 export interface ThreadRouteDeps {
   store: Pick<Store,
-    | "activeLeaf" | "activePath" | "bot" | "botByThread" | "bots" | "groupByThread" | "groupTaskByThread" | "groups" | "messagesFor"
+    | "activeLeaf" | "activePathIndex" | "activePath" | "bot" | "botByThread" | "bots" | "groupByThread" | "groupTaskByThread" | "groups" | "messagesFor"
     | "onChange" | "sections" | "taskByThread" | "tasks">;
   coordinator: Pick<Coordinator, "job">;
   groupThreadIsWorking(groupId: string, threadId: string): boolean;
@@ -148,6 +148,17 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       const before = url.searchParams.get("before");
       const around = url.searchParams.get("around");
       if (before && around) return json(res, 400, { error: "before and around cannot be combined" });
+      if (around && url.searchParams.get("view") === "quote") {
+        const index = store.activePathIndex(threadId);
+        const position = index.positions.get(around);
+        const target = position === undefined ? readMessage(threadId, around) : index.messages[position];
+        try {
+          const message = replyTargetIn(target ? [target] : [], around);
+          return json(res, 200, { message, onActivePath: position !== undefined });
+        } catch {
+          return json(res, 404, { error: "no such message" });
+        }
+      }
       if (around) {
         const window = messageWindow(threadId, around, limit ?? DEFAULT_PAGE, url.searchParams.get("view") === "chat");
         if (!window) return json(res, 404, { error: "no such message" });

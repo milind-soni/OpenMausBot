@@ -8,7 +8,6 @@ import { companionBridge, pageIsThisComputer } from "./companion-bridge";
 import type { CompanionRoute } from "./companion-types";
 import { applyFont, readFont } from "./fonts";
 import { readFollowUpDefault, setFollowUpDefault } from "./follow-up";
-import { readAdvancedMode, setAdvancedMode } from "./interface-mode";
 import { finishedNotificationsEnabled, notificationFeedEnabled, notificationSoundsEnabled, setFinishedNotifications, setNotificationFeed, setNotificationSounds } from "./notification-preferences";
 import { requestNotificationPermission } from "./notify";
 import { choosePlaceColor } from "./place-look";
@@ -38,7 +37,6 @@ const route = (name: CompanionRoute): { read(): unknown; write(on: boolean): unk
 // Called, never referenced at load: many tests mock these modules with only the exports they use.
 const PREFS: { [I in WindowPrefId]: Pref<I> } = {
   "appearance.skin": { read: () => readSkinChoice(), write: (choice) => applySkinChoice(choice) },
-  "appearance.advanced": { read: () => readAdvancedMode(), write: (on) => setAdvancedMode(on) },
   "appearance.font": { read: () => readFont(), write: (font) => applyFont(font) },
   "appearance.chatWidth": { read: () => readChatWidth(), write: (width) => applyChatWidth(width) },
   "general.sendKey": { read: () => readSendKey(), write: (key) => setSendKey(key) },

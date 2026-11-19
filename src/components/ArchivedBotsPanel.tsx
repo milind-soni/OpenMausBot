@@ -1,3 +1,4 @@
+import { useMenuMotion } from "./MenuMotion";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Archive, Loader2, Trash2, X } from "lucide-react";
@@ -105,14 +106,17 @@ export function ArchivedBotRow({
 }
 
 export function ArchivedBotsPanel({
+  open = true,
   bots,
   onClose,
   onRestored,
 }: {
+  open?: boolean;
   bots: Bot[];
   onClose: () => void;
   onRestored: (message: string) => void;
 }) {
+  const motion = useMenuMotion(open);
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -124,17 +128,18 @@ export function ArchivedBotsPanel({
   const locked = restoringAll || Boolean(busyId) || deleting || Boolean(pendingDelete);
 
   useEffect(() => {
-    if (bots.length === 0) onClose();
-  }, [bots.length, onClose]);
+    if (open && bots.length === 0) onClose();
+  }, [open, bots.length, onClose]);
 
   useEffect(() => {
+    if (!open) return;
     dialogRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !locked) onClose();
+      if (event.key === "Escape" && !event.defaultPrevented && !locked) { event.preventDefault(); onClose(); }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [locked, onClose]);
+  }, [open, locked, onClose]);
 
   const restore = async (bot: Bot) => {
     setBusyId(bot.id);
@@ -183,8 +188,11 @@ export function ArchivedBotsPanel({
     }
   };
 
+  if (!motion.shown) return null;
   return createPortal(
     <div
+      {...motion.exitProps}
+      data-overlay-fade={motion.closing ? "out" : "in"}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px] sm:p-6"
       onMouseDown={(event) => event.target === event.currentTarget && !locked && onClose()}
     >
@@ -194,7 +202,7 @@ export function ArchivedBotsPanel({
         aria-modal="true"
         aria-labelledby="archived-bots-title"
         tabIndex={-1}
-        className="animate-pop-in flex max-h-[min(680px,calc(100dvh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
+        className="flex max-h-[min(680px,calc(100dvh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
       >
         <header className="flex items-start justify-between gap-4 px-6 pb-4 pt-6 sm:px-8 sm:pt-7">
           <div>

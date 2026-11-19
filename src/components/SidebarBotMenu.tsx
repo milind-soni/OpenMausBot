@@ -1,44 +1,34 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Archive, BellDot, Check, CheckCheck, ChevronRight, ClipboardCopy, Copy, Crown, FolderMinus, FolderOpen, FolderPlus, Loader2, MessagesSquare, MoreHorizontal, Pause, Pencil, Pin, PinOff, Play, SquarePen, Star, Trash2, Users } from "lucide-react";
+import { Archive, BellDot, CheckCheck, ClipboardCopy, Copy, Crown, FolderOpen, FolderPlus, Loader2, MessagesSquare, Pause, Pencil, Pin, PinOff, Play, SquarePen, Trash2, Users } from "lucide-react";
 import { isBotHeld, isEveryBotPaused, isPausedHere, setEveryBotPaused, setPaused } from "@/lib/bot-pause";
 import { api, useStore, openBot, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
-import { allThreadRows, BotDeleteMenuItem, useDeleteAllThreads } from "./BotMenuDelete";
+import { BotDeleteMenuItem, useDeleteAllThreads } from "./BotMenuDelete";
 import { DemoteDefaultBotItem, HideDefaultBotItem } from "./DefaultBotControls";
 import { navigateThreadMenu } from "./BotProjects";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { userBotMenu } from "@/lib/own-team-bot";
 import { botUnreadThreadIds, markBotRead } from "@/lib/folder-read";
 import { ownerMenuLabel, pickOwnerOf } from "./TeamOwner";
-import { mayChangeOwner, mayRename, useTeamPeople } from "@/state/team-people";
+import { mayChangeOwner, useTeamPeople } from "@/state/team-people";
 import { MENU_ITEM, MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { submenuPosition } from "./SidebarPopoverMenu";
 import { submenuIntent, type SubmenuIntent } from "@/lib/submenu-intent";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { useMoveToMyCloud } from "./MoveToMyCloud";
 import { useMoveToTeam } from "./MoveToTeam";
 import type { MenuState } from "./Sidebar";
-import { departmentNames, moveBotsToSection, useMayMoveBots } from "./bot-sections";
+import { useMayMoveBots } from "./bot-sections";
 import { openBotSettings } from "./bot-panel/panel-link";
-import { isArchived } from "./SidebarThreadRow";
 
 type Flyout = "more" | "move";
 
 export function BotContextMenu({
-  menu,
-  onClose,
-  onArchive,
-  onDelete,
-  onMoveToSection,
-  onNewFolder,
-  onNewTaskFolder,
-  onRename,
-  onNewSection,
+  menu, onClose, onArchive, onDelete, onMoveToSection, onNewFolder, onNewTaskFolder,
 }: {
   menu: MenuState | null;
   onClose: () => void;
@@ -52,13 +42,13 @@ export function BotContextMenu({
   onNewSection?: (botId: string) => void;
 }) {
   const motion = useHeldMenuMotion(menu);
-  const simpleMenu = !useAdvancedMode();
+
   const moreRef = useRef<HTMLButtonElement>(null);
   const moveRef = useRef<HTMLButtonElement>(null);
   const flyoutRef = useRef<HTMLDivElement>(null);
   const hoveredRow = useRef<Element | null>(null);
   const [flyout, setFlyout] = useState<Flyout | null>(null);
-  const [moreEngaged, setMoreEngaged] = useState(false);
+  const [, setMoreEngaged] = useState(false);
   const moreIntent = useRef<SubmenuIntent | null>(null);
   moreIntent.current ??= submenuIntent({
     open: (key) => setFlyout(key as Flyout),
@@ -66,15 +56,13 @@ export function BotContextMenu({
     submenuBox: () => flyoutRef.current?.getBoundingClientRect() ?? null,
   });
   const flyoutRow = (key: Flyout | null) => (key === "more" ? moreRef.current : key === "move" ? moveRef.current : null);
-  const rowFlyout = (row: Element | null): Flyout | null => (row && row === moreRef.current ? "more" : row && row === moveRef.current ? "move" : null);
-  const more = moreIntent.current;
   const shown = motion.value;
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const admin = useOwnerOrAdmin();
   const member = admin === false;
   const mayMove = useMayMoveBots();
-  const clearThreads = useDeleteAllThreads(simpleMenu), moveToTeam = useMoveToTeam({ blocked: (bot) => (bot.defaultBot ? t("teamMove.blockedDefault", { name: bot.name }) : bot.chiefOfStaff ? t("teamMove.blockedChief") : state.bots.filter((candidate) => !candidate.hidden).length <= 1 ? t("teamMove.blockedLast") : undefined) });
+  const clearThreads = useDeleteAllThreads(false), moveToTeam = useMoveToTeam({ blocked: (bot) => (bot.defaultBot ? t("teamMove.blockedDefault", { name: bot.name }) : bot.chiefOfStaff ? t("teamMove.blockedChief") : state.bots.filter((candidate) => !candidate.hidden).length <= 1 ? t("teamMove.blockedLast") : undefined) });
   const moveToCloud = useMoveToMyCloud();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
@@ -219,166 +207,10 @@ export function BotContextMenu({
 
   const viewThreads = item(<MessagesSquare size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.viewThreads"), () => {
     openForSettings();
-    openBotSettings(dispatch, "history", { botId: bot.id, anchor: "conversations" });
+    openBotSettings(dispatch, "history", { botId: bot.id });
   });
 
-  if (simpleMenu) {
-    const showFlyout = (key: Flyout, focus: boolean) => {
-      more.openNow(key);
-      if (focus) requestAnimationFrame(() => flyoutRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus());
-    };
-    const copyId = item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => { void copyText(bot.threadId); });
-    const current = bot.section?.trim() ?? "";
-    const departments = departmentNames(state);
-    const moveItems = [
-      ...departments.map((name) => item(
-        <span className="flex size-4 shrink-0 items-center justify-center">{name === current && <Check size={15} className="text-accent" />}</span>,
-        name, () => moveBotsToSection(dispatch, [bot.id], name), { disabled: name === current },
-      )),
-      ...(departments.length ? [divider("move-new")] : []),
-      ...(onNewSection ? [item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.section.newContext"), () => onNewSection(bot.id))] : []),
-      ...(current ? [item(<FolderMinus size={16} className="text-ink-secondary" />, t("sidebar.section.removeFromDepartment"), () => moveBotsToSection(dispatch, [bot.id], ""))] : []),
-    ];
-    const flyoutButton = (key: Flyout, ref: React.RefObject<HTMLButtonElement | null>, icon: React.ReactNode, label: string) => (
-      <button
-        key={key}
-        ref={ref}
-        type="button"
-        role="menuitem"
-        data-bot-menu-more={key === "more" ? "" : undefined}
-        data-bot-menu-move={key === "move" ? "" : undefined}
-        aria-haspopup="menu"
-        aria-expanded={flyout === key}
-        onClick={(event) => (flyout === key ? more.closeNow() : showFlyout(key, event.detail === 0))}
-        onKeyDown={(event) => {
-          if (event.key !== "ArrowRight") return;
-          event.preventDefault();
-          showFlyout(key, true);
-        }}
-        className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover", flyout === key && moreEngaged && "bg-menu-active")}
-      >
-        {icon}
-        <span className="flex-1">{label}</span>
-        <ChevronRight size={15} aria-hidden="true" className="text-ink-secondary rtl:-scale-x-100" />
-      </button>
-    );
-    const moveToSection = mayMove ? flyoutButton("move", moveRef, <FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection")) : null;
-    const rename = onRename && (team ? mayRename(bot, team) : !state.config?.team) && item(<SquarePen size={16} className="text-ink-secondary" />, t("sidebar.bot.rename"), () => onRename(bot.id));
-    const editProfile = item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.editProfile"), () => {
-      openForSettings();
-      if (!state.settingsOpen) dispatch({ type: "toggleSettings", open: true });
-    });
-    const owner = team && mayChangeOwner(bot, team) ? item(<Users size={16} className="text-ink-secondary" />, ownerMenuLabel(bot, team), () => pickOwnerOf(bot, team, shown)) : null;
-    const deleteAll = !member && allThreadRows(bot).length >= 2 ? [divider("more-threads"), item(<Trash2 size={16} />, t("task.deleteAllConversations"), () => clearThreads.ask(bot.id), { danger: true })] : [];
-    const readState = readingBotId === bot.id || botUnreadThreadIds(bot).length > 0
-      ? item(
-        readingBotId === bot.id ? <Loader2 size={16} className="animate-spin text-ink-secondary" /> : <CheckCheck size={16} className="text-ink-secondary" />,
-        readingBotId === bot.id ? t("sidebar.bot.markingAllRead") : t("sidebar.bot.simple.markRead"),
-        () => { void readAll(bot); },
-        { disabled: readingBotId !== null, keepOpen: true },
-      )
-      : item(<BellDot size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.markUnread"), () => dispatch({ type: "markUnread", botId: bot.id }));
-    const moreItems = remoteClient ? [editProfile, owner, ...deleteAll] : [
-      editProfile,
-      pause,
-      pauseAll,
-      team ? null : chiefItem(),
-      member && !ownEdit ? null : item(<Copy size={16} className="text-ink-secondary" />, t("sidebar.bot.duplicate"), () => dispatch({ type: "duplicateBot", botId: bot.id })),
-      owner,
-      ...moveToTeam.items(bot, item),
-      ...moveToCloud.items(bot, item),
-      ...deleteAll,
-    ];
-    // Simple view hides the thread list: start one, see them all (the panel's Conversations), and choose the one it opens.
-    const newThread = bot.yourAccess === "view" ? null : item(<SquarePen size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }));
-    const openTask = state.selectedId === bot.id ? bot.tasks?.find((task) => task.threadId === bot.threadId) : undefined;
-    const setMain = remoteClient || admin !== true || !openTask || openTask.routineRunId || openTask.private || isArchived(openTask) ? null : item(
-      <Star size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.setMainThread"),
-      () => dispatch({ type: "updateBot", botId: bot.id, patch: { mainThreadChoice: bot.threadId } }),
-      bot.mainThreadId === bot.threadId ? { disabled: true, hint: t("sidebar.bot.simple.isMainThread") } : undefined,
-    );
-    const threads = [divider("threads"), newThread, viewThreads, setMain];
-    const moreRow = flyoutButton("more", moreRef, <MoreHorizontal size={16} className="text-ink-secondary" />, t("sidebar.bot.more"));
-    const leave = bot.defaultBot ? [<HideDefaultBotItem key="hide" bot={bot} onDone={onClose} className={MENU_ITEM} />, ...(member ? [] : [<DemoteDefaultBotItem key="demote" bot={bot} onDone={onClose} className={MENU_ITEM} />])] : member ? ownDelete() : [
-      item(<Archive size={16} className="text-ink-secondary" />, t("sidebar.bot.archive"), () => onArchive(bot), { disabled: archiveBlocked, hint: archiveHint }),
-      <BotDeleteMenuItem key="delete" deleting={deleting} className={MENU_ITEM} onClick={() => { onClose(); onDelete(bot); }} />,
-    ];
-    return <>{clearThreads.dialog}{moveToTeam.dialog}{moveToCloud.dialog}{createPortal(
-      <div
-        ref={menuRef}
-        data-bot-menu
-        data-sidebar
-        role="menu" data-look="menu"
-        aria-label={t("sidebar.bot.actions", { name: bot.name })}
-        onKeyDown={navigateThreadMenu}
-        onPointerOver={(event) => {
-          const row = event.target instanceof Element ? event.target.closest('[role="menuitem"]') : null;
-          if (!row || row === hoveredRow.current) return;
-          const left = rowFlyout(hoveredRow.current);
-          if (left) more.leaveRow(left);
-          hoveredRow.current = row;
-          const key = rowFlyout(row);
-          more.enterRow(key ?? "row", key !== null, { x: event.clientX, y: event.clientY });
-        }}
-        onPointerMove={(event) => more.move({ x: event.clientX, y: event.clientY }, flyoutRow(flyout)?.contains(event.target as Node) === true)}
-        onPointerLeave={() => {
-          const left = rowFlyout(hoveredRow.current);
-          if (left) more.leaveRow(left);
-          hoveredRow.current = null;
-          more.leaveMenu();
-        }}
-        style={{ top: shown.y, left: shown.x }}
-        className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-max min-w-[198px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain", MENU_SHEET, motion.className)} {...motion.exitProps}
-      >
-        {remoteClient ? [moveToSection, ...threads, ...(rename ? [divider("rename"), rename] : []), divider("copy"), copyId, moreRow] : [
-          item(
-            bot.pinned ? <PinOff size={16} className="text-ink-secondary" /> : <Pin size={16} className="text-ink-secondary" />,
-            bot.pinned ? t("sidebar.bot.unpin") : t("sidebar.bot.pin"),
-            () => dispatch({ type: "updateBot", botId: bot.id, patch: { pinned: !bot.pinned } }),
-          ),
-          moveToSection,
-          readState,
-          ...threads,
-          ...(rename ? [divider("rename"), rename] : []),
-          divider("copy"),
-          copyId,
-          moreRow,
-          ...(leave.length ? [divider("leave"), ...leave] : []),
-        ]}
-        {readError?.botId === bot.id && <p role="alert" className="px-2 py-1.5 text-[12px] text-danger">{readError.message}</p>}
-      </div>,
-      document.body,
-    )}{flyout && createPortal(
-      <div
-        ref={flyoutRef}
-        data-bot-menu
-        data-bot-menu-flyout={flyout}
-        data-sidebar
-        role="menu" data-look="menu"
-        aria-label={flyout === "more" ? t("sidebar.bot.more") : t("sidebar.bot.moveToSection")}
-        onPointerEnter={() => { more.enterSubmenu(); setMoreEngaged(true); }}
-        onPointerLeave={() => setMoreEngaged(false)}
-        onFocus={() => setMoreEngaged(true)}
-        onBlur={(event) => { if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) setMoreEngaged(false); }}
-        onKeyDown={(event) => {
-          if (event.key === "ArrowLeft" || event.key === "Escape") {
-            event.preventDefault();
-            event.stopPropagation();
-            const row = flyoutRow(flyout);
-            more.closeNow();
-            row?.focus();
-            return;
-          }
-          navigateThreadMenu(event);
-        }}
-        style={{ top: shown.y, left: shown.x }}
-        className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-max min-w-[180px] max-w-[calc(100vw-16px)] animate-pop-in overflow-y-auto overscroll-contain", MENU_SHEET)}
-      >
-        {flyout === "more" ? moreItems : moveItems}
-      </div>,
-      document.body,
-    )}</>;
-  }
+
 
   return <>{clearThreads.dialog}{moveToTeam.dialog}{moveToCloud.dialog}{createPortal(
     <div

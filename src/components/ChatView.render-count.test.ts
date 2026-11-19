@@ -16,9 +16,12 @@ vi.mock("@/lib/drafts", async (importOriginal) => {
     useComposerDraft: (...args: Parameters<typeof original.useComposerDraft>) => { renders.composer++; return original.useComposerDraft(...args); },
   };
 });
-vi.mock("./SidebarBotActivity", async (importOriginal) => {
-  const original = await importOriginal<typeof import("./SidebarBotActivity")>();
-  return { ...original, sidebarBotActivityTasks: (...args: Parameters<typeof original.sidebarBotActivityTasks>) => { renders.header++; return original.sidebarBotActivityTasks(...args); } };
+vi.mock("./ChatActivity", async (importOriginal) => {
+  const original = await importOriginal<typeof import("./ChatActivity")>();
+  return { ...original, ChatActivityControls: (props: Parameters<typeof original.ChatActivityControls>[0]) => {
+    renders.header++;
+    return createElement(original.ChatActivityControls, props);
+  } };
 });
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
@@ -26,7 +29,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => true, useReactor: () => "user" }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, setAdvancedMode: vi.fn() }));
 
 class FixtureEventSource {
   static opened: FixtureEventSource[] = [];

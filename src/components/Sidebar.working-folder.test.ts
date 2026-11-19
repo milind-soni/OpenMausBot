@@ -8,9 +8,6 @@ import type { Bot } from "@/state/store";
 
 const access = vi.hoisted(() => ({ admin: true, advanced: true }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => access.admin }));
-vi.mock("@/lib/interface-mode", async (original) => ({
-  ...await original<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => access.advanced,
-}));
 vi.mock("./DesktopCapabilities", async (original) => ({
   ...await original<typeof import("./DesktopCapabilities")>(),
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: false, platform: "other" }, localComputer: { available: false } }, ready: true }),
@@ -83,11 +80,4 @@ describe("working folder through the rendered sidebar", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it("keeps new-thread folder creation out of Simple mode", () => {
-    access.advanced = false;
-    render();
-    openMenu();
-    expect(menuItem("New thread")).toBeDefined();
-    expect(menuItem("New thread in a working folder…")).toBeUndefined();
-  });
 });

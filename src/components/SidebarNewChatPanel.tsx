@@ -38,12 +38,14 @@ export function newChatSubtext(bot: Pick<Bot, "title" | "description">): string 
 }
 
 export function SidebarNewChatPanel({
+  open = true,
   anchor,
   onClose,
   onNewBot,
   onNewGroup,
   style,
 }: {
+  open?: boolean;
   anchor: HTMLElement | null;
   onClose: () => void;
   /** Absent for someone who can't make a bot here. */
@@ -60,7 +62,7 @@ export function SidebarNewChatPanel({
   const rootRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLButtonElement>(null);
 
-  usePopoverDismiss(true, rootRef, onClose);
+  usePopoverDismiss(open, rootRef, onClose);
 
   useLayoutEffect(() => {
     const measure = () => setPlace(newChatPanelPlacement(
@@ -132,12 +134,15 @@ export function SidebarNewChatPanel({
       aria-modal="false"
       aria-label={t("sidebar.newChat.title")}
       data-new-chat-panel=""
+      inert={!open}
+      aria-hidden={!open || undefined}
+      data-overlay-fade={open ? "in" : "out"}
       data-native-view-overlay=""
       data-floating={place.floating ? "" : undefined}
       onKeyDown={onKeyDown}
       style={{ ...style, left: place.left, width: place.width }}
       className={cn(
-        "fixed top-0 z-40 flex animate-panel-in flex-col",
+        "fixed top-0 z-40 flex flex-col",
         !place.floating && "bottom-0 border-e border-hairline/40 bg-app shadow-2xl shadow-black/40",
       )}
     >

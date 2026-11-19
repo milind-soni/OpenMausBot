@@ -33,7 +33,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
     },
   }),
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, setAdvancedMode: () => {} }));
 vi.mock("./CloudScreenPreview", () => ({
   CloudScreenPreview: ({ onOpen }: { onOpen: () => void }) => createElement("button", { "data-preview": "", onClick: onOpen }, "preview"),
 }));
@@ -183,9 +182,6 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function pressEscape() {
-  (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
-}
 
 describe("taking control of a Local VM", () => {
   it("turns the panel's own picture into the live desktop at once; no window or tab opens", async () => {
@@ -218,100 +214,6 @@ describe("taking control of a Local VM", () => {
     await shownLive();
     await press("Hand control back");
     expect(fixture.controls.at(-1)).toEqual({ action: "release", target: `local/bot-${"a".repeat(64)}` });
-  });
-
-  it("Full screen only watches: the bot keeps working until the person takes control from there", async () => {
-    await open(makeBot({ computer: "vm" }));
-    await press("Full screen");
-    const watch = () => document.querySelector<HTMLElement>("[data-watch-full-screen]");
-    expect(watch(), "Full screen must fill the window with the bot's screen").not.toBeNull();
-    expect(watch()!.querySelector("img")!.getAttribute("src")).toBe("data:image/png;base64,FRAME");
-    expect(fixture.controls, "watching must not pause the bot").toEqual([]);
-    expect(liveDesktop()).toBeNull();
-
-    const exit = watch()!.querySelector<HTMLButtonElement>("header button")!;
-    expect(exit.getAttribute("aria-label"), "Exit keeps its name when its text is hidden on narrow windows").toBe("Exit fullscreen");
-
-    // Something beneath the view that also listens for Escape (a turns call ends on it) must not get the same press.
-    const beneath: string[] = [];
-    const listen = (event: KeyboardEvent) => beneath.push(event.key);
-    window.addEventListener("keydown", listen);
-    try {
-      pressEscape();
-      await settle();
-    } finally {
-      window.removeEventListener("keydown", listen);
-    }
-    expect(watch(), "Escape leaves full screen").toBeNull();
-    expect(beneath, "the Escape that closes full screen is not also handled beneath it").toEqual([]);
-    expect(fixture.controls).toEqual([]);
-
-    await press("Full screen");
-    const take = [...watch()!.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === "Take control")!;
-    flushSync(() => take.click());
-    await settle();
-    expect(fixture.controls.map((control) => control.action)).toEqual(["take"]);
-    await shownLive();
-    expect(liveDesktop()!.dataset.expanded, "taking control from full screen stays full screen").toBe("true");
-    expect(watch()).toBeNull();
-  });
-
-  it("full screen shows only errors from a Take control tried there, and leaves Escape to a dialog opened over it", async () => {
-    fixture.refuse = true;
-    await open(makeBot({ computer: "vm" }));
-    await press("Take control");
-    expect(fixture.controls.map((control) => control.action)).toEqual(["take"]);
-    await press("Full screen");
-    const watch = () => document.querySelector<HTMLElement>("[data-watch-full-screen]");
-    expect(watch()!.querySelector("[role=alert]"), "an earlier panel error is not news in full screen").toBeNull();
-
-    const over = document.createElement("button");
-    const overKeys = vi.fn();
-    over.addEventListener("keydown", overKeys);
-    document.body.append(over);
-    over.focus();
-    const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
-    over.dispatchEvent(escape);
-    await settle();
-    expect(overKeys, "the dialog over full screen gets its Escape").toHaveBeenCalledOnce();
-    expect(escape.defaultPrevented).toBe(false);
-    expect(watch(), "Escape in a dialog over full screen belongs to that dialog").not.toBeNull();
-    over.remove();
-  });
-
-  it("a refused Take control in full screen keeps watching and says why", async () => {
-    fixture.refuse = true;
-    await open(makeBot({ computer: "vm" }));
-    await press("Full screen");
-    const watch = () => document.querySelector<HTMLElement>("[data-watch-full-screen]");
-    const take = [...watch()!.querySelectorAll("button")].find((candidate) => candidate.textContent?.trim() === "Take control")!;
-    take.focus();
-    flushSync(() => take.click());
-    expect(take.disabled, "Take control waits while the request is out").toBe(true);
-    expect(document.activeElement, "focus stays in full screen, not on a button that went disabled").toBe(watch());
-    await settle();
-    expect(fixture.controls.map((control) => control.action)).toEqual(["take"]);
-    expect(watch(), "a failed take must not drop the person out of full screen").not.toBeNull();
-    expect(watch()!.querySelector("[role=alert]")?.textContent).toBeTruthy();
-    pressEscape();
-    await settle();
-    expect(watch(), "Escape still leaves full screen after a refused take").toBeNull();
-  });
-
-  it("full screen keeps Tab inside and gives focus back to Full screen when it closes", async () => {
-    await open(makeBot({ computer: "vm" }));
-    const trigger = button("Full screen")!;
-    trigger.focus();
-    await press("Full screen");
-    const watch = document.querySelector<HTMLElement>("[data-watch-full-screen]")!;
-    const [exit, take] = [...watch.querySelectorAll("button")];
-    expect(document.activeElement).toBe(exit);
-    exit!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }));
-    expect(document.activeElement, "Shift+Tab from Exit must stay in full screen").toBe(take);
-    pressEscape();
-    await settle();
-    expect(document.querySelector("[data-watch-full-screen]")).toBeNull();
-    expect(document.activeElement).toBe(trigger);
   });
 
   it("closing the panel, leaving its Screen view or closing the page gives back the hold it took", async () => {
@@ -423,13 +325,5 @@ describe("taking control of other computers", () => {
     expect(viewerClosedRelease("scout")).toEqual({ action: "release", controlLeaseId: fixture.controls[0]!.controlLeaseId });
   });
 
-  it("a cloud computer's desktop is taken before it opens even while the bot shows a hold another device has elsewhere", async () => {
-    fixture.held = true;
-    heldElsewhere(true);
-    await open(makeBot({ computer: "cloud" }));
-    await press("Full screen");
-    expect(fixture.controls).toEqual([{ action: "take", controlLeaseId: expect.stringMatching(/^[0-9a-f]{36}$/) }]);
-    expect(fixture.controlPaths.at(-1)).toContain("threadId=thread");
-    expect(window.ogb!.desktopViewer!.open).toHaveBeenCalledWith("https://desktop.invalid/scout", "Scout's live desktop", "scout");
-  });
+
 });

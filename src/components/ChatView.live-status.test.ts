@@ -27,7 +27,6 @@ vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
   useShowThreads: () => true,
 }));
 const mode = vi.hoisted(() => ({ advanced: true }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => mode.advanced, setAdvancedMode: vi.fn() }));
 vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
   ...await importOriginal<typeof import("./SidebarPopoverMenu")>(),
   SidebarPopoverMenu: (props: { renderTrigger: (state: { open: boolean }) => unknown }) => props.renderTrigger({ open: false }),
@@ -88,36 +87,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("Simple mode's working line", () => {
-  it("is the bot's 28px avatar and one quiet friendly phrase, with the timer and size kept in its tooltip", () => {
-    mode.advanced = false;
-    engine({ type: "turn.started" });
-    render(busyBot([ask]));
-    expect(mascot()).not.toBeNull();
-    expect(statusLine()).toBe("Thinking it through");
-    expect(mascot()!.innerHTML).toContain('width="28px"');
-    const row = mascot()!.firstElementChild as HTMLElement;
-    expect([...row.classList]).toEqual(expect.arrayContaining(["h-9", "ps-2", "gap-2"]));
-    expect(row.title).toMatch(/^Working · /);
-    expect(mascot()!.querySelector("[data-turn-status]")!.classList).toContain("text-ink-tertiary");
-    expect(mascot()!.classList).not.toContain("-mt-3");
-
-    engine({ type: "item.completed", itemType: "assistant_text", text: intro.text! } as Partial<RuntimeEvent>);
-    render(busyBot([ask, intro]));
-    expect(mascot()!.classList, "under the bot's own bubble it sits close, as one more part of the reply").toContain("-mt-3");
-    // The reply that just arrived pops in first; the line comes back once it has.
-    act(() => void vi.advanceTimersByTime(600));
-    engine({ type: "turn.progress", activity: "write", itemId: "toolu_write", file: "index.html", bytes: 14 * 1024 + 300 } as Partial<RuntimeEvent>);
-    expect(statusLine()).toBe("Writing some code");
-  });
-
-  it("says Teammates working while the bot waits on its teammates", () => {
-    mode.advanced = false;
-    const waiting = busyBot([ask, intro], false);
-    render({ ...waiting, waitingForTeammates: true, tasks: waiting.tasks!.map((task) => ({ ...task, waitingForTeammates: true })) });
-    expect(statusLine()).toBe("Teammates working");
-  });
-});
 
 describe("the mascot and its status line through a long turn", () => {
   it("stays after the bot's words while the engine writes a file, saying what and how much", () => {
@@ -231,14 +200,4 @@ describe("what the bot is doing right now", () => {
     expect(host.querySelector("[data-now-output]")?.textContent).toBe("page 39 of 40\npage 40 of 40");
   });
 
-  it("is the same calm line in Simple mode, where the card unfolds too", () => {
-    mode.advanced = false;
-    engine({ type: "turn.started" });
-    engine({ type: "item.started", itemType: "tool", itemId: "b1", title: "Bash" } as Partial<RuntimeEvent>);
-    engine({ type: "turn.progress", activity: "command", itemId: "b1", target: "scrape.py", quiet: { kind: "idle" } } as Partial<RuntimeEvent>);
-    render(busyBot([ask, search, bash]));
-    expect(statusLine()).toBe("Running scrape.py · idle, no output yet");
-    act(() => toggle()!.click());
-    expect(steps()).toEqual(["done: Searched the web for “Acme construction leads”", "now: Running scrape.py"]);
-  });
 });

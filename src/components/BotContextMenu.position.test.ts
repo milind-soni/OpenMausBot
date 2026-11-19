@@ -21,7 +21,6 @@ vi.mock("react-dom", async (importOriginal) => {
 });
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: { ...original.initialState, bots: [bot, { ...bot, id: "other" }] }, dispatch: vi.fn() }) };
@@ -109,13 +108,6 @@ describe("bot actions menu viewport placement", () => {
     const negative = measuredMenu(228, 468);
     layoutEffects();
     expect(negative.style).toEqual({ top: "8px", left: "8px" });
-  });
-
-  it("lets Simple pin or unpin a bot first, and offers no folders", () => {
-    const html = render();
-    expect(html.indexOf(t("sidebar.bot.pin"))).toBeGreaterThan(-1);
-    expect(html.indexOf(t("sidebar.bot.pin"))).toBeLessThan(html.indexOf(t("sidebar.copyConversationId")));
-    for (const key of ["folder.new", "task.folder.new"] as const) expect(html, key).not.toContain(`>${t(key)}<`);
   });
 
   it("keeps Advanced's flat list of bot actions, drawn on the shared menu sheet", () => {

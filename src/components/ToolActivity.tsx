@@ -6,7 +6,6 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { placeLabelKey, type Place } from "@/lib/place";
 import { nameIsCommand } from "@/lib/verify-steps";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { toolStepLabel } from "@/lib/tool-step-label";
 import { isNoticeCode, routineLineText } from "@/lib/activity-text";
 import type { MessageAttachmentContext } from "./AttachmentPreview";
@@ -19,11 +18,11 @@ export function ToolActivity({ tool, place = null, live = false, source }: { too
   const full = useFullOutput(expanded && tool.clipped ? source : undefined, tool.output);
   const output = full.output ?? tool.output;
   const failed = tool.ok === false;
-  const advanced = useAdvancedMode();
+
   const notice = isNoticeCode(tool.nameCode);
   const summary = routineLineText(tool.summaryCode, tool.summary ?? "", tool.summaryParams);
   const problem = failed ? tool.problem : undefined;
-  const label = problem ?? (advanced && !notice ? tool.label ?? tool.name : toolStepLabel(tool));
+  const label = problem ?? (!notice ? tool.label ?? tool.name : toolStepLabel(tool));
   const status = tool.ok === undefined ? (live ? t("toolDetail.running") : t("toolDetail.unverified")) : failed ? t("toolDetail.failed") : t("toolDetail.completed");
   return (
     <details onToggle={(event) => setExpanded(event.currentTarget.open)} className="group/tool w-fit max-w-full rounded-xl border border-hairline/40 bg-panel text-[13px] open:w-[min(38rem,100%)]" data-testid="tool-activity">
@@ -35,8 +34,8 @@ export function ToolActivity({ tool, place = null, live = false, source }: { too
       >
         <span className="shrink-0" aria-hidden="true">{tool.ok === undefined ? (live ? <WorkingDots size={3.5} /> : <Circle size={13} />) : failed ? <X size={13} /> : <Check size={13} className="text-success" />}</span>
         {place && <PlaceIcon place={place} size={13} className="shrink-0 opacity-70" role="img" aria-label={t(placeLabelKey(place))} data-testid="tool-place" />}
-        <span className={cn("min-w-0 max-w-[30rem]", !problem && "truncate", "leading-5", advanced && !notice && !problem ? "font-mono" : "font-medium")}>{label}</span>
-        {advanced && tool.summary && tool.summary !== tool.name && !nameIsCommand(tool.name) && <span className="min-w-0 flex-1 truncate font-mono" title={summary}>{summary}</span>}
+        <span className={cn("min-w-0 max-w-[30rem]", !problem && "truncate", "leading-5", !notice && !problem ? "font-mono" : "font-medium")}>{label}</span>
+        {tool.summary && tool.summary !== tool.name && !nameIsCommand(tool.name) && <span className="min-w-0 flex-1 truncate font-mono" title={summary}>{summary}</span>}
         <ChevronRight size={13} className="ml-auto shrink-0 group-open/tool:rotate-90" aria-hidden="true" />
       </summary>
       <div className="space-y-3 border-t border-hairline/40 p-3 text-ink-secondary">

@@ -32,7 +32,6 @@ vi.mock("./DesktopCapabilities", async () => {
   return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }), windowFramed: () => false };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
 vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
@@ -87,6 +86,7 @@ beforeEach(() => {
   fixture.values = [];
   window = new EventTarget();
   vi.stubGlobal("window", Object.assign(window, { innerWidth: 1280, innerHeight: 800, ogb: undefined, setTimeout, clearTimeout }));
+  vi.stubGlobal("document", { querySelector: () => null });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {}, removeItem: () => {} });
 });
 afterEach(() => { vi.unstubAllGlobals(); });

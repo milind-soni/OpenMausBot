@@ -7,7 +7,6 @@ import { initialState, type Bot } from "@/state/store";
 import { forgetSidebarShowAllForTests, SIDEBAR_SHOW_ALL_KEY } from "@/lib/sidebar-preferences";
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
-vi.mock("@/lib/interface-mode", async (original) => ({ ...await original<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => true }));
 
 const { BotThreadList, botRowProps } = await import("./Sidebar");
 const { SidebarBotActivity } = await import("./SidebarBotActivity");

@@ -7,7 +7,6 @@ import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelect
 import type { EffortLevel } from "../../shared/wire";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, modelsAwaitEngine, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
-import { modelName, simpleModelMenu, variantSuffix } from "@/lib/simple-model-menu";
 import { choiceIsSelected, modelChoices, modelSelectionForPick, takesTypedModels, withTypedModels, type ModelChoice } from "@/lib/model-choices";
 export { modelSelectionForPick } from "@/lib/model-choices";
 import { pickerPlacement, type PickerPlacement } from "@/lib/picker-placement";
@@ -22,15 +21,12 @@ import { ChatGptPlanStatus } from "./ChatGptPlanStatus";
 import { approvalModeFor, modelSwitchNeedsAsk } from "../../shared/approval-mode";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
-import { SimpleModelMenu, type SimpleThinking } from "./SimpleModelMenu";
 import { apiKeysLabel, ClaudeAccountSelect, engineStatus, FollowBotModelRow, ModelEngineRail, ModelRow, ModelSearch } from "./ModelPickerFull";
 import { MENU_LABEL, MENU_LINE, MENU_ROW, MENU_SEPARATOR, MENU_STROKE, MENU_TRAILING } from "./menu-recipe";
 import { modelMenuKey, modelMenuPointerMove } from "./model-menu-keys";
 import { lockedWhileBusy, offersReasoning, useRefocusAfterPick, variantChoices, variantLabel } from "./model-picker-reasoning";
 import { BusyModelMenu } from "./ModelPickerBusyMenu";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-
 import { t } from "@/lib/i18n";
 import { COMPACT_SQUARE } from "@/lib/compact-chip";
 import { useAiSwitch } from "@/lib/ai-switch";
@@ -200,13 +196,16 @@ const POPOVER_HEIGHT = 600;
 export const SIMPLE_POPOVER_WIDTH = 324;
 const MENU_ITSELF = ":scope";
 
+function variantSuffix(instance: InstanceInfo | undefined, model: string, variant?: string): string {
+  const option = instance?.models.options.find((candidate) => candidate.id === model);
+  if (!instance || !option || variant === undefined) return "";
+  const listed = modelChoices(instance, [option]).some((choice) => choiceIsSelected(choice, { instanceId: instance.instanceId, model, variant }));
+  const label = listed ? option.variants?.find((candidate) => candidate.id === variant)?.label : undefined;
+  return label ? ` · ${label}` : "";
+}
+
 export function ModelPicker({
-  bot: shown,
-  threadId,
-  className,
-  contained = false,
-  label,
-  size = "md",
+  bot: shown, threadId, className, contained = false, label,
 }: {
   bot: Bot;
   threadId?: string;
@@ -226,13 +225,13 @@ export function ModelPicker({
   const [loadingInstances, setLoadingInstances] = useState(false);
   const [refreshingId, setRefreshingId] = useState<string | null>(null);
   const [probing, setProbing] = useState<ReadonlySet<string>>(() => new Set());
-  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const [, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
   const [scope, setScope] = useState<"bot" | "thread">("thread");
-  const advanced = useAdvancedMode();
+
   const ownerOrAdmin = useOwnerOrAdmin();
   // A guest changes only their own conversation's model, never the shared bot's default; thread-only until authority loads.
-  const simpleUpdatesBotDefault = ownerOrAdmin === true;
-  const [fullView, setFullView] = useState(false);
+  const canUpdateBotDefault = ownerOrAdmin === true;
+  const [, setFullView] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<{ botId: string; threadId: string;
     selection: ModelSelection; updateBotDefault: boolean; name: string } | null>(null);
   const [placement, setPlacement] = useState<PickerPlacement | null>(null);
@@ -249,8 +248,8 @@ export function ModelPicker({
   const inside = useRef({ contains: (target: unknown) => [rootRef.current, menuRef.current].some((node) => node?.contains(target as Node)) });
 
   const floating = typeof document !== "undefined";
-  const simpleView = !advanced && !fullView;
-  const popoverWidth = simpleView ? SIMPLE_POPOVER_WIDTH : POPOVER_WIDTH;
+
+  const popoverWidth = POPOVER_WIDTH;
   useLayoutEffect(() => {
     if (!open) return;
     const place = (event?: Event) => {
@@ -260,7 +259,7 @@ export function ModelPicker({
       if (!anchor || !menu) return;
       const viewport = { width: window.innerWidth, height: window.innerHeight };
       setPlacement((locked) => pickerPlacement(anchor, { width: popoverWidth, height: menu.offsetHeight }, viewport, locked ?? undefined,
-        simpleView ? undefined : POPOVER_HEIGHT));
+        POPOVER_HEIGHT));
     };
     const settled = (event: Event) => {
       if (event.target instanceof Node && triggerRef.current && event.target.contains(triggerRef.current)) place();
@@ -274,7 +273,7 @@ export function ModelPicker({
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("animationend", settled, true);
     };
-  }, [open, popoverWidth, simpleView]);
+  }, [open, popoverWidth]);
 
   useEffect(() => {
     if (!open || !placement || focusOnPlace.current === null) return;
@@ -381,9 +380,6 @@ export function ModelPicker({
       return next;
     }));
   };
-  const lookForLocalIn = (instance: InstanceInfo) => {
-    if (offersLocalModels(instance, instance.models.options.filter((option) => option.custom).length)) lookForLocal(instance);
-  };
 
   const openLocalModels = (instance: InstanceInfo) => {
     setPane("custom");
@@ -424,23 +420,12 @@ export function ModelPicker({
     setOpen(true);
   };
 
-  const openFull = (instance: InstanceInfo, keyboard: boolean) => {
-    selectRail(instance);
-    setScope(simpleUpdatesBotDefault ? "bot" : "thread");
-    focusOnPlace.current = keyboard ? "[data-model-back]" : MENU_ITSELF;
-    setFullView(true);
-  };
-  const backToList = (keyboard: boolean) => {
-    focusOnPlace.current = keyboard && railInstance ? `[data-simple-provider="${railInstance.instanceId.replace(/["\\]/g, "\\$&")}"] [data-menu-row]` : MENU_ITSELF;
-    resetList();
-    setFullView(false);
-  };
 
   const profile = (state.profile?.id === bot.id ? state.profile : undefined) ?? bot;
   const follows = threadId ? profile.tasks?.find((task) => task.threadId === threadId)?.followsBotModel : undefined;
   const botModelInstance = state.instances.find((instance) => instance.instanceId === profile.modelSelection.instanceId);
   const botModelName = botModelInstance ? `${engineDisplayName(botModelInstance)} · ${modelLabel(botModelInstance, profile.modelSelection.model)}${variantSuffix(botModelInstance, profile.modelSelection.model, profile.modelSelection.variant)}` : profile.modelSelection.model;
-  const busyUpdatesBotDefault = Boolean(threadId) && simpleUpdatesBotDefault && (simpleView || scope === "bot")
+  const busyUpdatesBotDefault = Boolean(threadId) && canUpdateBotDefault && (scope === "bot")
     && bot.modelSelection.instanceId === profile.modelSelection.instanceId && bot.modelSelection.model === profile.modelSelection.model;
   const ownModelThreads = threadsOnOwnModel(profile.modelSelection, profile.tasks ?? []).length;
 
@@ -466,7 +451,7 @@ export function ModelPicker({
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
     if (variant !== undefined) nextSelection.variant = variant;
-    const updateBotDefault = !threadId || (simpleUpdatesBotDefault && (simpleView || scope === "bot"));
+    const updateBotDefault = !threadId || (canUpdateBotDefault && (scope === "bot"));
     const targets = [currentTaskBot(profile, threadId ?? bot.threadId), ...(updateBotDefault ? [profile] : [])];
     if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
       state.instances.find((candidate) => candidate.instanceId === target.modelSelection.instanceId)?.driverKind,
@@ -490,11 +475,6 @@ export function ModelPicker({
     else refocusAfterPick();
   };
 
-  const resetVariant = contained && selection.variant !== undefined ? () => {
-    const { variant: _variant, ...nextSelection } = selection;
-    dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: !threadId || simpleUpdatesBotDefault, selection: nextSelection });
-    close(true);
-  } : undefined;
 
   const official = railInstance ? modelChoices(railInstance, railInstance.models.options.filter((option) => !option.custom)) : [];
   const custom = railInstance?.models.options.filter((option) => option.custom) ?? [];
@@ -523,21 +503,6 @@ export function ModelPicker({
   );
   const remote = window.ogb?.remoteClient?.active === true;
 
-  const levels = active?.capabilities?.effortLevels ?? [];
-  const writeEffort = (effort: EffortLevel | undefined) => {
-    const { effort: _effort, ...model } = selection;
-    dispatch({ type: "setModel", botId: bot.id, threadId, ...(threadId && simpleUpdatesBotDefault ? { updateBotDefault: true } : {}),
-      selection: effort ? { ...model, effort } : model });
-  };
-  const thinking: SimpleThinking | null = contained ? null
-    : variantChoices(state, selection, threadId ?? bot.threadId) ? {
-      variants: (
-        <ModelVariantRow compact quiet bot={shown} threadId={threadId} updateBotDefault={Boolean(threadId) && simpleUpdatesBotDefault} className="px-2 py-1"
-          label={<span className="shrink-0 text-[12px] font-medium leading-4 text-ink-tertiary">{t("botSettings.simple.thinking")}</span>} />
-      ),
-    }
-    : levels.length > 0 && !shown.busy ? { levels, current: selection.effort, onPick: writeEffort, onReset: () => writeEffort(undefined) }
-    : null;
 
   const botModelSelection = follows !== undefined && profile.modelSelection.instanceId === railInstance?.instanceId
     ? profile.modelSelection : undefined;
@@ -560,24 +525,18 @@ export function ModelPicker({
     if (query) {
       setQuery("");
       refocusAfterPick();
-    } else if (!simpleView && pane === "custom" && canReturnToOfficial) setPane("main");
-    else if (fullView && !advanced) backToList(true);
+    } else if (pane === "custom" && canReturnToOfficial) setPane("main");
     else close(true);
   };
 
-  const currentOption = active?.models.options.find((option) => option.id === selection.model);
-  const attention = !active ? undefined
-    : active.policy ? t("policy.managedBy", { organization: active.policy.organizationName })
-      : needsCli(active) ? t("model.setupRequired")
-        : needsSignIn(active) && !isCustomOnly(active) && !currentOption?.custom ? t("model.signInRequired") : currentOption?.orgBlocked ? t("model.orgBlocked") : currentOption?.needsCliUpdate ? t("engines.updateClaude") : undefined;
   const summary = active
     ? `${engineDisplayName(active)} · ${modelLabel(active, selection.model)}${
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
       }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort
-        ? ` · ${t(advanced ? "model.effort.summary" : "model.simple.thinkingSummary", { level: effortLabel(selection.effort) })}` : ""}`
+        ? ` · ${t("model.effort.summary", { level: effortLabel(selection.effort) })}` : ""}`
     : selection.model;
   const followLine = follows === true ? `\n${t("model.followsBot", { name: profile.name })}` : follows === false ? `\n${t("model.ownModel")}` : "";
-  const attentionLine = !advanced && attention ? `\n${attention}` : "";
+  const attentionLine = "";
   const busyLine = bot.busy ? `\n${t(threadId ? "model.threadBusy" : "model.busy")}` : "";
 
   const triggerProps = {
@@ -602,7 +561,7 @@ export function ModelPicker({
     title: `${summary}${followLine}${attentionLine}${busyLine}`,
   };
 
-  const trigger = advanced ? (
+  const trigger = (
     <button
       {...triggerProps}
       className={cn(
@@ -647,52 +606,13 @@ export function ModelPicker({
         )}
       />
     </button>
-  ) : (
-    <button
-      {...triggerProps}
-      className={cn(
-        "group flex items-center rounded-full text-[13px] leading-[18px] text-ink-secondary disabled:cursor-not-allowed disabled:text-ink-tertiary",
-        contained
-          ? "min-w-0 max-w-[72%] transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:hover:bg-transparent"
-          : cn("shrink-0", ELEVATED_FLOAT, ELEVATED_HOVER, "hover:text-ink aria-expanded:text-ink disabled:hover:bg-composer"),
-        size === "sm" ? "h-7 pl-2 pr-1.5" : "h-8 pl-2.5 pr-2",
-      )}
-    >
-      <span className="relative mr-1.5 flex shrink-0 group-disabled:opacity-50">
-        {active
-          ? <InstanceProviderMark instance={active} size={14} subtle />
-          : <span className="size-3.5 rounded-full bg-ink/[0.08]" aria-hidden="true" />}
-        {attention && <span data-model-attention className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-warning ring-[1.5px] ring-app" />}
-      </span>
-      <span className={cn("min-w-0 truncate", !contained && "max-w-[160px]")}>{modelName(active, selection.model)}</span>
-      {selection.variant !== undefined && <span className="shrink-0 whitespace-pre">{variantSuffix(active, selection.model, selection.variant)}</span>}
-      <UsageBars engine={selection.instanceId} className="ml-1.5" />
-      <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="ml-1 shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />
-    </button>
   );
 
-  const simpleMenu = simpleView ? simpleModelMenu({
-    instances,
-    listed: pickerInstances,
-    selection,
-    bot: { name: profile.name, selection: profile.modelSelection, follows }, updatesBotDefault: !threadId || simpleUpdatesBotDefault,
-    query,
-    expanded,
-    probing,
-    loading: loadingInstances,
-    refreshing: refreshingId,
-  }) : null;
+
 
   const fullPane = (
     <>
-      {fullView && !advanced && (
-        <div className="shrink-0 border-b-[0.5px] border-ink/10 p-1.5">
-          <button type="button" data-menu-row data-model-back onClick={(event) => backToList(event.detail === 0)} className={cn(MENU_ROW, "text-ink-secondary hover:text-ink")}>
-            <ChevronLeft size={16} strokeWidth={MENU_STROKE} className="shrink-0 rtl:-scale-x-100" aria-hidden="true" />
-            <span className="min-w-0 flex-1 truncate">{t("model.simple.back")}</span>
-          </button>
-        </div>
-      )}
+
       {follows !== undefined && (
         <FollowBotModelRow name={profile.name} model={botModelName} follows={follows} onPick={pickBotModel} />
       )}
@@ -701,7 +621,7 @@ export function ModelPicker({
           onAddApiKeys={remote ? undefined : openApiKeys} />}
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-          {threadId && simpleUpdatesBotDefault && (
+          {threadId && canUpdateBotDefault && (
             <div className="shrink-0 border-b-[0.5px] border-ink/10 px-3.5 py-2">
               <div role="group" aria-label={t("model.scope.label")} className="flex gap-1">
                 {(["thread", "bot"] as const).map((value) => (
@@ -791,7 +711,7 @@ export function ModelPicker({
                 </div>
               ) : blocked ? (
                 <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3 pt-1">
-                  <EngineSetup instance={railInstance} intent={pane === "custom" ? "inject" : "cloud"} quiet={!advanced} onHost={remote} />
+                  <EngineSetup instance={railInstance} intent={pane === "custom" ? "inject" : "cloud"} quiet={false} onHost={remote} />
                   {!remote && railInstance.claudeAccount && needsSignIn(railInstance) && pane !== "custom" && (
                     <p className="mt-2 px-1.5 text-[12px] leading-4 text-ink-tertiary">
                       {railInstance.claudeAccount.signInShell === "powershell" && `${t("engines.account.powershell")} `}
@@ -886,7 +806,7 @@ export function ModelPicker({
                   compact
                   bot={shown}
                   threadId={threadId}
-                  updateBotDefault={Boolean(threadId && simpleUpdatesBotDefault && scope === "bot")}
+                  updateBotDefault={Boolean(threadId && canUpdateBotDefault && scope === "bot")}
                   className="shrink-0 border-t-[0.5px] border-ink/10 px-3.5 py-[5px]"
                   label={<span className="text-[13px] leading-[18px] text-ink">{active?.capabilities?.modelVariants ? t("model.simple.reasoning") : t("model.section.effort")}</span>}
                 />
@@ -962,34 +882,7 @@ export function ModelPicker({
       className={cn("menu-surface z-[80] flex flex-col overflow-hidden", motion.className)}
     >
       <UsageMenuRows engine={selection.instanceId} />
-      {bot.busy ? <BusyModelMenu bot={shown} threadId={threadId} updateBotDefault={busyUpdatesBotDefault} variants={Boolean(active?.capabilities?.modelVariants)} /> : simpleMenu ? (
-        <SimpleModelMenu
-          menu={simpleMenu}
-          query={query}
-          bot={profile}
-          botModel={{ label: modelName(botModelInstance, profile.modelSelection.model, profile.modelSelection.variant), title: botModelName }}
-          thinking={thinking}
-          idPrefix={menuId}
-          onQuery={setQuery}
-          onPick={pick}
-          onPickCurrent={() => close(true)}
-          onFollowBot={pickBotModel}
-          onToggle={(instance) => {
-            const opening = !expanded.has(instance.instanceId);
-            setExpanded((current) => {
-              const next = new Set(current);
-              if (opening) next.add(instance.instanceId);
-              else next.delete(instance.instanceId);
-              return next;
-            });
-            if (opening) lookForLocalIn(instance);
-          }}
-          onSetUp={openFull}
-          onCheckAgain={(instance) => refreshModels(instance.instanceId)}
-          onManage={remote ? undefined : openEngines}
-          onResetVariant={resetVariant}
-        />
-      ) : fullPane}
+      {bot.busy ? <BusyModelMenu bot={shown} threadId={threadId} updateBotDefault={busyUpdatesBotDefault} variants={Boolean(active?.capabilities?.modelVariants)} /> : fullPane}
     </div>
   );
 

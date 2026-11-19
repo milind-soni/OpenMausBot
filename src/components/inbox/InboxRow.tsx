@@ -1,3 +1,4 @@
+import { sidebarRowTone } from "../SidebarRowMarkers";
 import { Check, CornerUpLeft, ExternalLink, Split, X, type LucideIcon } from "lucide-react";
 import type { InboxRow } from "../../../shared/inbox";
 import { cn } from "@/lib/cn";
@@ -37,8 +38,8 @@ export function InboxRowItem({ row, now, onOpen, onAction, inCard = false }: {
   const unreadish = row.unread || row.tab === "needs-you";
   return (
     <div data-inbox-row={row.id} data-tab={row.tab} data-unread={row.unread ? "" : undefined}
-      className={cn("group relative flex min-w-0 items-center gap-2 pr-1.5 focus-within:bg-raised/70 hover:bg-raised/70",
-        inCard ? (row.unread ? "bg-raised/45" : "bg-transparent") : "rounded-lg")}>
+      className={cn("group relative flex min-w-0 items-center gap-2 pr-1.5 transition-colors duration-150",
+        inCard ? (row.unread ? "bg-raised/45 hover:bg-raised/50" : sidebarRowTone(false)) : cn("rounded-[8px]", sidebarRowTone(false)))}>
       <button type="button" onClick={() => onOpen(row)} title={[sender, inCard ? subject : headline, place].filter(Boolean).join(" · ")}
         className={cn("flex min-w-0 flex-1 gap-2 pl-2.5 text-left text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60", inCard ? "items-center py-1.5" : "items-start py-2",
           row.unread ? "font-semibold text-ink" : "font-normal text-ink-secondary")}>

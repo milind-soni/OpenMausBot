@@ -1,6 +1,7 @@
+import { RightSidePanel, RightSidePanelHeader, useRightSidePanelEscape } from "./RightSidePanel";
 import { boatCapableEngine } from "@/lib/remote-desktop";
 import { useEffect, useRef, useState } from "react";
-import { CalendarClock, CalendarDays, Globe, ImageOff, Loader2, Monitor, Plus, X } from "lucide-react";
+import { CalendarClock, CalendarDays, Globe, ImageOff, Loader2, Monitor, Plus } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
@@ -63,10 +64,15 @@ function nextRunLabel(at: number | null) {
   return `${sameDay ? t("routines.today") : date.toLocaleDateString(intlLocale(), { month: "short", day: "numeric" })}, ${date.toLocaleTimeString(intlLocale(), { hour: "numeric", minute: "2-digit" })}`;
 }
 
-export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
+export function RemoteDesktopPanel({ bot, closing = false }: { bot: Bot; closing?: boolean }) {
   const { state, dispatch } = useStore();
   const { dragProps } = useCaptionChrome();
   const panelRef = useComputerPanelEntry(bot.id);
+  const closePanel = () => {
+    releaseComputerPanelFocus(panelRef.current, bot.id);
+    dispatch({ type: "toggleComputer", open: false });
+  };
+  useRightSidePanelEscape("computer", !closing, closePanel);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [frame, setFrame] = useState<string | null>(null);
@@ -217,10 +223,11 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   };
 
   return (
-    <aside className="relative z-20 flex h-full w-[400px] shrink-0 flex-col border-l border-hairline bg-panel" ref={panelRef} data-computer-panel>
-      <div {...dragProps} className="flex items-center justify-between border-b border-hairline px-5 py-4">
-        <div>
-          <div className="text-[14px] font-medium text-ink">{t("remoteDesktop.title", { name: bot.name })}</div>
+    <RightSidePanel className="z-20 [--side-panel-width:400px] max-md:absolute max-md:inset-0 max-md:z-40 max-md:w-full!"
+      ref={panelRef} data-computer-panel data-right-side-panel="computer" data-side-panel-motion={closing ? "out" : "in"} inert={closing} aria-hidden={closing || undefined}>
+      <RightSidePanelHeader {...dragProps} label={t("remoteDesktop.close")} onClose={closePanel}>
+        <div className="min-w-0 flex-1 truncate">
+          <div className="truncate text-[14px] font-medium text-ink">{t("remoteDesktop.title", { name: bot.name })}</div>
           <div className="mt-0.5 text-[11px] text-ink-secondary">
             {t(localVm ? "vm.dest.vm" : bot.cloudBackend === "vps" ? "botAccess.cloud.selfHostedVps" : "remoteDesktop.cloudDesktop")}
           </div>
@@ -240,20 +247,8 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            data-computer-panel-close
-            onClick={() => {
-              releaseComputerPanelFocus(panelRef.current, bot.id);
-              dispatch({ type: "toggleComputer", open: false });
-            }}
-            className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
-            aria-label={t("remoteDesktop.close")}
-          >
-            <X size={18} />
-          </button>
         </div>
-      </div>
+      </RightSidePanelHeader>
 
       {view === "browser" ? (
         <div className="flex min-h-0 flex-1 flex-col px-4 pb-4 pt-1">
@@ -389,6 +384,6 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
           onClose={() => setCreatingRoutine(false)}
         />
       )}
-    </aside>
+    </RightSidePanel>
   );
 }

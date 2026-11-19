@@ -28,7 +28,6 @@ vi.mock("@/state/store", async (importOriginal) => {
 });
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 vi.mock("./CallView", () => ({ CallButton: (props: Record<string, unknown>) => {
   fixture.call = props;
   return null;
@@ -68,7 +67,6 @@ function openPlus() {
 }
 
 beforeEach(() => {
-  fixture.advanced = false;
   vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("max-width: 767.98px"), addEventListener() {}, removeEventListener() {} }));
   fixture.liveCall = null;
   setCallMode("turns");
@@ -91,15 +89,7 @@ afterEach(() => {
 });
 
 describe("the phone composer", () => {
-  it("shows only the + and the pill in Simple mode, with an inverse voice button", () => {
-    render({ bot });
-    expect(plus()).not.toBeNull();
-    expect(fixture.call).toMatchObject({ placement: "composer", inverse: true });
-    expect(fixture.call?.fill).toBeUndefined();
-  });
-
-  it("moves Advanced mode's row of buttons into the +", () => {
-    fixture.advanced = true;
+  it("moves the row of buttons into the +", () => {
     render({ bot });
     expect(container.querySelector('button[aria-label="Attach a file"]')).toBeNull();
     expect(container.querySelector('[aria-label^="Ask for approval for"]')).toBeNull();
@@ -111,9 +101,8 @@ describe("the phone composer", () => {
     expect(item("place")?.textContent).toContain("Works on");
   });
 
-  it("keeps Advanced mode's buttons in a row on a wider screen", () => {
+  it("keeps the buttons in a row on a wider screen", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: !query.includes("max-width"), addEventListener() {}, removeEventListener() {} }));
-    fixture.advanced = true;
     render({ bot });
     expect(container.querySelector('button[aria-label="Attach a file"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="place-chip"]')).not.toBeNull();

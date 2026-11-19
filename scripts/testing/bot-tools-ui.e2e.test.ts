@@ -53,21 +53,13 @@ describe("bot setup and tools in the real renderer", () => {
     const press = (keys: string) => ui("press", "--keys", keys);
     const bots = async (): Promise<SavedBot[]> => (await fetch(`${info.url}/api/bots`).then((response) => response.json())).bots;
     const snapshot = async () => (await ui("snapshot")).snapshot as string;
-    // The bot's panel opens from the chat header's pill; click it only while closed.
-    const openPanel = () => expect.poll(() => evaluate(`(() => {
-      if (document.querySelector('[data-chathead-pill][aria-expanded="true"]')) return true;
-      document.querySelector('[data-chathead-pill]')?.click();
+    const openAccess = () => expect.poll(() => evaluate(`(() => {
+      const access = document.querySelector('[data-bot-settings-section="access"] > button');
+      if (access?.getAttribute("aria-expanded") === "true") return true;
+      if (access) access.click();
+      else document.querySelector('[data-chathead-pill] button')?.click();
       return false;
     })()`), { timeout: 10_000 }).toBe(true);
-    // Its MCP servers are on Bot settings → Apps it can use.
-    const openApps = async () => {
-      await openPanel();
-      // The panel is a lazy chunk; its gear opens Bot settings once it has painted.
-      await expect.poll(() => evaluate("(() => { const gear = document.querySelector('[data-panel-gear]'); gear?.click(); return Boolean(gear); })()"), { timeout: 10_000 }).toBe(true);
-      await expect.poll(() => evaluate("Boolean(document.querySelector('[data-panel-page=\"apps\"]'))"), { timeout: 10_000 }).toBe(true);
-      await evaluate("document.querySelector('[data-panel-page=\"apps\"]').click(); true");
-      await expect.poll(snapshot, { timeout: 10_000 }).toContain("Connect another app");
-    };
     const reviewReadyBot = async (name: string, title: string) => {
       await click("New or share");
       await click("Templates");
@@ -110,56 +102,8 @@ describe("bot setup and tools in the real renderer", () => {
     await expect.poll(() => evaluate("document.activeElement?.getAttribute('aria-label')"), { timeout: 10_000 }).toBe(`Message ${created[0].name}`);
     expect(await dialogCount()).toBe(0);
 
-    // Give the selected disposable bot real usage so its header shortcut
-    // exercises the same external open action as the shipped chat header.
-    await runControlOmb(["send", "--bot", created[0].id, "--text", "Reply briefly for the sidebar test.", "--url", info.url]);
-    expect((await runControlOmb(["wait", "--bot", created[0].id, "--timeout", "20", "--url", info.url]) as { status: string }).status).toBe("settled");
-    await openApps();
-    expect(await evaluate("Boolean(document.querySelector('[data-simple-mcp]'))")).toBe(false);
-    const settingsPage = () => evaluate("document.querySelector('[data-settings-page][aria-current=\"page\"]')?.getAttribute('data-settings-page') ?? null");
-    const searchValue = () => evaluate("document.querySelector('[data-settings-search]')?.value ?? null");
-    // The panel's Usage row shows what this bot has spent and opens Settings on Spending, in Advanced mode.
-    const openPanelUsage = async () => {
-      await openPanel();
-      // Back out of any page to the panel's tabs, then to Details.
-      await expect.poll(() => evaluate(`(() => {
-        const back = document.querySelector('[data-panel-back]');
-        if (back) { back.click(); return false; }
-        if (document.querySelector('[data-panel-tabpanel="details"]')) return true;
-        [...document.querySelectorAll('[role="tab"]')].find((tab) => tab.textContent.trim() === 'Details')?.click();
-        return false;
-      })()`), { timeout: 10_000 }).toBe(true);
-      const state = await ui("snapshot", "--interactive");
-      const cost = Object.entries(state.refs as Record<string, { role: string; name: string }>)
-        .filter(([, entry]) => entry.role === "button" && entry.name.startsWith("Usage") && entry.name.includes("$0.01"));
-      expect(cost).toHaveLength(1);
-      await ui("click", "--ref", `@${cost[0][0]}`);
-      await expect.poll(settingsPage, { timeout: 10_000 }).toBe("usage");
-    };
-    // The bot panel's close button has the same name, so press the one in the Settings dialog.
-    const closeSettings = async () => {
-      // Spending is an Advanced page, so opening it turned Advanced mode on; Simple's chat head comes back with it off.
-      await evaluate("document.querySelector('[data-settings-advanced-switch][aria-checked=\"true\"]')?.click(); true");
-      await evaluate("document.querySelector('[data-settings-search]').closest('[role=dialog]').querySelector('button[aria-label=\"Close settings\"]').click(); true");
-      await expect.poll(() => evaluate("Boolean(document.querySelector('[data-settings-search]'))"), { timeout: 10_000 }).toBe(false);
-    };
-    await openPanelUsage();
-    await ui("screenshot", "--out", `${info.logPath}.settings.png`);
-    const search = await ui("snapshot", "--interactive");
-    const searchRef = Object.entries(search.refs as Record<string, { role: string; name: string }>)
-      .find(([, entry]) => entry.role === "textbox" && entry.name === "Search settings");
-    expect(searchRef).toBeDefined();
-    await ui("type", "--ref", `@${searchRef![0]}`, "--text", "standing");
-    expect(await searchValue()).toBe("standing");
-    await closeSettings();
-    await openPanelUsage(); // a stale search must not hide an external target
-    expect(await searchValue()).toBe("");
-    await closeSettings();
-
-    // Add the server where every app is added, from the panel's Connect another app.
-    await openApps();
-    await evaluate("document.querySelector('[data-panel-link=\"add-app\"]').click(); true");
-    await click("MCP servers");
+    await openAccess();
+    await click("Add an MCP server…");
     // The registry loads on mount; Add MCP server is disabled until it finishes.
     await expect.poll(() => evaluate("[...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Add MCP server')?.disabled"), { timeout: 10_000 }).toBe(false);
     await click("Add MCP server");
@@ -187,14 +131,14 @@ describe("bot setup and tools in the real renderer", () => {
     await click("Turn fixture on");
     await expect.poll(registry, { timeout: 10_000 }).toMatchObject([{ name: "fixture", enabled: true }]);
     await press("Escape");
-    const useFixture = `${created[0].name} can use fixture`;
+    const useFixture = "Let this bot use fixture";
     const fixtureSwitch = () => evaluate(`document.querySelector(${JSON.stringify(`[aria-label="${useFixture}"]`)})?.getAttribute('aria-checked') ?? null`);
-    await openApps();
+    await openAccess();
     await expect.poll(fixtureSwitch, { timeout: 10_000 }).toBe("true");
     await click(useFixture);
     await expect.poll(async () => (await bots()).find((bot) => bot.id === created[0].id)?.mcpServers, { timeout: 10_000 }).toEqual([]);
     await press("Escape");
-    await openApps();
+    await openAccess();
     await expect.poll(fixtureSwitch, { timeout: 10_000 }).toBe("false");
 
     // New bot from above settings puts the new bot's chat in front: no

@@ -4,7 +4,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { contextReading, contextRows, roomContextReadings } from "@/lib/context-usage";
-import { ADVANCED_MODE_KEY } from "@/lib/interface-mode";
 import { BotEditorStore, type Bot, type Group, type Message, type TaskUsage, type useStore } from "@/state/store";
 import type { ContextBreakdown } from "../../shared/context-breakdown";
 import { ComposerContextMenu } from "./ComposerContextMenu";
@@ -33,7 +32,6 @@ const panel = () => host.querySelector<HTMLElement>("[data-context-panel]");
 const press = (element: HTMLElement) => act(async () => { element.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 const words = () => panel()!.textContent!.replace(/\s+/g, " ");
 const requests = () => fetched.mock.calls.map(([url, init]) => [String(url).replace(/^.*(?=\/api\/)/, ""), JSON.parse(String((init as RequestInit).body))]);
-const advancedMode = () => localStorage.setItem(ADVANCED_MODE_KEY, "1");
 const posted = () => requests().filter(([path]) => !path.endsWith("/context"));
 const counted: ContextBreakdown = {
   tokens: 136_000, window: 200_000,
@@ -52,7 +50,6 @@ beforeEach(() => {
   breakdown = null;
   fetched = vi.fn(async (url: unknown) => new Response(String(url).endsWith("/context") ? JSON.stringify({ threadId: "t1", breakdown }) : "{}", { status: 200, headers: { "content-type": "application/json" } }));
   vi.stubGlobal("fetch", fetched);
-  localStorage.setItem(ADVANCED_MODE_KEY, "0");
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -61,7 +58,6 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
-  localStorage.clear();
   vi.unstubAllGlobals();
 });
 
@@ -74,11 +70,11 @@ describe("the composer's context button", () => {
     expect(panel()).toBeNull();
     await press(trigger());
     expect(trigger().getAttribute("aria-expanded")).toBe("true");
-    expect(words()).toBe("Context68% usedCompact contextStart fresh");
+    expect(words()).toContain("Context68% used136k of 200k tokens");
     expect(panel()!.querySelector("[data-context-meter]")!.getAttribute("data-context-meter")).toBe("68");
     expect([...panel()!.querySelectorAll("button")].map((button) => [button.textContent, button.disabled]))
       .toEqual([["Compact context", false], ["Start fresh", false]]);
-    expect(requests()).toEqual([]);
+    expect(requests().map(([path]) => path)).toEqual(["/api/bots/b1/context"]);
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(panel()).toBeNull();
   });
@@ -116,37 +112,9 @@ describe("the composer's context button", () => {
     expect(document.activeElement).toBe(trigger());
   });
 
-  it("keeps token counts out of Simple mode: a reading without a window shows as none, a room bot by name alone", async () => {
-    await render({ bot: chat({ tokens: 170_000 }) });
-    expect(trigger().getAttribute("aria-label")).toBe("Context");
-    await press(trigger());
-    expect(words()).toBe("ContextNo reading yet. It shows after the bot's next reply.Compact contextStart fresh");
-    await press(trigger());
-    await render({ group: { id: "g1", memberContext: { s: { tokens: 170_000 } } } as unknown as Group, members: [{ id: "s", name: "Scout" }] as Bot[] });
-    await press(trigger());
-    expect(words()).toBe("Context of each bot in this roomScoutCompact context");
-    expect(requests()).toEqual([]);
-  });
 
-  it("in Advanced mode adds the tokens and asks the engine what fills the context when the panel opens", async () => {
-    advancedMode();
-    breakdown = counted;
-    await render({ bot: chat({ tokens: 136_000, window: 200_000 }) });
-    expect(requests()).toEqual([]);
-    await press(trigger());
-    expect(requests()).toEqual([["/api/bots/b1/context", { threadId: "t1" }]]);
-    expect(words()).toContain("68% used136k of 200k tokens");
-    expect([...panel()!.querySelectorAll("[data-context-breakdown] > div")].map((row) => [row.querySelector("dt")!.textContent, row.querySelector("dd")!.textContent]))
-      .toEqual([
-        ["System prompt", "8k · 4%"], ["Memory files", "2k · 1%"], ["Tools", "16k · 8%"], ["Skills and subagents", "4k · 2%"],
-        ["Tool calls and results", "36k · 18%"], ["Messages", "64k · 32%"], ["Other", "6k · 3%"],
-        ["Reserved for compacting", "24k · 12%"], ["Free space", "40k · 20%"],
-      ]);
-    expect(words()).toContain("The provider compacts this conversation automatically.");
-  });
 
   it("takes the total from the engine's count when it differs from the last turn's reading", async () => {
-    advancedMode();
     breakdown = {
       tokens: 6_000, window: 200_000,
       categories: [
@@ -180,7 +148,6 @@ describe("the composer's context button", () => {
   });
 
   it("shows no count after the chat was summarized, even when the engine still answers, until a new turn ends", async () => {
-    advancedMode();
     const before: ContextBreakdown = {
       tokens: 6_000, window: 200_000,
       categories: [{ id: "system_prompt", kind: "used", tokens: 1_900 }, { id: "messages", kind: "used", tokens: 4_100 }, { id: "free_space", kind: "free", tokens: 194_000 }],
@@ -220,7 +187,6 @@ describe("the composer's context button", () => {
   });
 
   it("drops the count and asks again when another branch of the conversation is picked", async () => {
-    advancedMode();
     const bot = chat({ tokens: 12, window: 200_000 }, {
       id: "b5", activeLeafId: "m2",
       messages: [line("m1", "user"), line("m2", "bot", "text", { parentId: "m1" }), line("m2b", "bot", "text", { parentId: "m1" })],
@@ -241,7 +207,6 @@ describe("the composer's context button", () => {
   });
 
   it("keeps the total alone when the engine has no count, and the last count on screen while a new one loads", async () => {
-    advancedMode();
     await render({ bot: chat({ tokens: 136_000, window: 200_000 }, { id: "b2" }) });
     await press(trigger());
     expect(words()).toContain("68% used");
@@ -266,7 +231,6 @@ describe("the composer's context button", () => {
   });
 
   it("keeps the newest count when an older request answers last, also for a panel mounted afterwards", async () => {
-    advancedMode();
     const bot = chat({ tokens: 12, window: 200_000 }, { id: "b5" });
     const waiting: Array<(response: Response) => void> = [];
     fetched.mockImplementation(() => new Promise<Response>((resolve) => waiting.push(resolve)));
@@ -305,24 +269,6 @@ describe("the composer's context button", () => {
     expect(words()).toContain("No reading yet");
   });
 
-  it("in Advanced mode adds each room bot's tokens under its share, and keeps them out of Simple mode", async () => {
-    const members = [{ id: "s", name: "Scout" }, { id: "q", name: "Quill" }] as Bot[];
-    const group = { id: "g1", memberContext: { s: { tokens: 170_000, window: 200_000 }, q: { tokens: 41_400, window: 200_000 } } } as unknown as Group;
-    const meters = () => [...panel()!.querySelectorAll("[data-context-member] [data-context-meter]")].map((meter) => [...meter.children].map((part) => part.textContent));
-    await render({ group, members });
-    await press(trigger());
-    expect(meters()).toEqual([["Scout85% used", ""], ["Quill21% used", ""]]);
-    await press(trigger());
-    advancedMode();
-    await render({ group, members });
-    await press(trigger());
-    expect(meters()).toEqual([["Scout85% used", "", "170k of 200k tokens"], ["Quill21% used", "", "41.4k of 200k tokens"]]);
-    expect(requests()).toEqual([]);
-    await press(trigger());
-    await render({ bot: chat({ tokens: 136_000, window: 200_000 }) });
-    await press(trigger());
-    expect([...panel()!.querySelector("[data-context-meter]")!.children].map((part) => part.textContent)).toEqual(["68% used136k of 200k tokens", ""]);
-  });
 });
 
 describe("context readings", () => {

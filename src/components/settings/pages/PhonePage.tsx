@@ -66,8 +66,8 @@ export function PhonePage() {
   const focus = state.appSettingsPhonePairing;
   return <>
     {ctx.here
-      ? <PhoneDevicesSection profileEmail={state.config?.profile?.email} focusRequest={focus} simple={!ctx.advanced} placeName={place.name} top={<PairWithCloud />} />
-      : <ServerPairingCard cloudHome={ctx.cloud} focusRequest={focus} team={state.config?.team?.name} placeName={place.name} simple={!ctx.advanced}
+      ? <PhoneDevicesSection profileEmail={state.config?.profile?.email} focusRequest={focus} placeName={place.name} top={<PairWithCloud />} />
+      : <ServerPairingCard cloudHome={ctx.cloud} focusRequest={focus} team={state.config?.team?.name} placeName={place.name} simple={false}
         teamPhoneBlocked={state.config?.managedPolicy?.remoteAccess === false ? t("policy.teamRemoteBlocked", { organization: state.config.managedPolicy.organizationName }) : null} />}
     <OtherPlaces />
   </>;

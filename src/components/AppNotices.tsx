@@ -14,14 +14,10 @@ import { buyOfferAllowed, cloudNoticeKind, cloudPlanView, cloudTrialNotice, clou
 import { jobRoutine, useCloudIntent } from "@/lib/cloud-intent";
 import { CLOUD_INTENT_GIVEN, cloudSetupStage } from "@/lib/cloud-setup";
 import { cornerPopupWaits, firstChatQuiet, firstReplyPending } from "@/lib/corner-popup";
-import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, SIMPLE_MODE_NOTICE, STAR_NOTICE, TEAMS_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
+import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, markLaunchNotice, MODELGO_OFFER_NOTICE, nextNotice, noticeSeen, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, TEAMS_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { rememberNoticeSeen } from "@/lib/announcement-history";
 import { reportTeams, teamsAction } from "@/lib/teams-whats-new";
 import { useTwoPlaces } from "@/lib/two-places";
-import { SIMPLE_ONLY } from "@/lib/simple-only";
-import { useAdvancedBackDue, useNewLookDue } from "@/lib/new-look";
-import { useAdvancedMode } from "@/lib/interface-mode";
-import { useSimpleModePromptSeen } from "@/lib/simple-mode-prompt";
 import { reportWhatsNew, WHATS_NEW_SOURCES, whatsNewAudience, whatsNewView, type WhatsNewAction, type WhatsNewSlide } from "@/lib/whats-new";
 import { cloudSignInDue, onboardingCloudOffered, welcomeFinishedThisLaunch, type WelcomeViewer } from "@/lib/onboarding";
 import { launchDialogShown, markLaunchDialog } from "@/lib/launch-dialogs";
@@ -43,9 +39,7 @@ import { useDesktopNotices, useOtherDialogOpen } from "./notice-dialogs";
 import { localDesktopPage } from "./onboarding/WelcomeGate";
 import { UpdatesConsentDialog, updatesConsentBridge, useUpdatesConsent } from "./UpdatesConsent";
 import { useMausBotWelcomeDue } from "./MausBotWelcome";
-import { NewLookNotice, reportNewLook } from "./NewLookNotice";
 import { PhoneUpdateCard, phonesToTell, useRetiredLinkPhones } from "./PhoneUpdateNotice";
-import { reportSimpleModePrompt, SimpleModePrompt } from "./SimpleModePrompt";
 import { TwoPlacesCard } from "./TwoPlacesCard";
 import { TeamsPopup } from "./whats-new/TeamsPopup";
 import { WhatsNewPopup } from "./whats-new/WhatsNewPopup";
@@ -94,7 +88,6 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const [toast, setToast] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [simpleShown, setSimpleShown] = useState(false);
   const [boatShown, setBoatShown] = useState(false);
   const [modelgoShown, setModelgoShown] = useState(false);
   const [announcementShown, setAnnouncementShown] = useState<string | null>(null);
@@ -160,13 +153,6 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   const consentDue = consent.state?.available === true && consent.state.due && !consentDone;
   const consentBlocked = useOtherDialogOpen(consentDue) || Boolean(state.liveCall && state.liveCall.status !== "ended");
   const consentFact = !consentHere || consentDone ? false : consent.state === undefined ? null : consentDue ? (consentBlocked ? null : true) : false;
-  // Every page with the app's chrome, desktop or Cloud, new install or not: once per browser, as the mode is. With Simple
-  // the only mode, its place goes to the word about the new look, only where Advanced was on; a browser put back on
-  // Advanced gets the word that it is back there instead.
-  const promptSeen = useSimpleModePromptSeen(), newLookDue = useNewLookDue(), backDue = useAdvancedBackDue(), advanced = useAdvancedMode();
-  const advancedBack = backDue && advanced;
-  const simpleDue = SIMPLE_ONLY ? newLookDue : advancedBack || !promptSeen;
-  const simpleBlocked = useOtherDialogOpen(simpleDue) || Boolean(state.liveCall && state.liveCall.status !== "ended");
   // A sponsor's card is for whoever chooses a team's providers: its Owner and Admins, never its members.
   const sponsorsHere = SPONSOR_CARDS_FOR_TEAM_MEMBERS || !state.config?.team || viewer?.canSave === true;
   const boatHere = sponsorsHere && boatOfferRuns(now()) && brandStatus().source !== "file";
@@ -249,12 +235,11 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
   // FOLLOWERS); nothing else does.
   const notice = waits ? null
     : firstChatQuiet(state) ? (grokNow === true && (launch === null || launch === GROK_MOVE_NOTICE) ? GROK_MOVE_NOTICE : null)
-    : teamsHere || cards || whatsNewHere || consentHere || simpleDue || boatHere || modelgoHere || announcementNow !== false || twoFact !== false || grokNow !== false || phoneNow !== false ? nextNotice({
+    : teamsHere || cards || whatsNewHere || consentHere || boatHere || modelgoHere || announcementNow !== false || twoFact !== false || grokNow !== false || phoneNow !== false ? nextNotice({
     [TEAMS_NOTICE]: teamsNow,
     [GROK_MOVE_NOTICE]: grokNow,
     [PHONE_UPDATE_NOTICE]: phoneNow,
     // As the What's new popup: never in the launch whose welcome just finished, nor over MausBot's first-launch card.
-    [SIMPLE_MODE_NOTICE]: !simpleDue || afterWelcome === true ? false : afterWelcome === null || mausBotFirst || simpleBlocked ? null : true,
     [WHATS_NEW_NOTICE]: whatsNewDue === false || whatsNewState === "none" || moving || afterWelcome === true ? false
       : whatsNewDue === null || whatsNewState === "loading" || !viewer || afterWelcome === null || mausBotFirst || moving === null || whatsNewBlocked ? null : true,
     [UPDATES_CONSENT_NOTICE]: consentNow,
@@ -278,7 +263,7 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     if (!shownKey || !notice) return;
     markLaunchNotice(notice);
     // The popups and the question own this launch: MausBot's first-launch card waits for a later one.
-    if (shownKey === TEAMS_NOTICE || shownKey === GROK_MOVE_NOTICE || shownKey === SIMPLE_MODE_NOTICE || shownKey === WHATS_NEW_NOTICE || shownKey === UPDATES_CONSENT_NOTICE) markLaunchDialog("notices");
+    if (shownKey === TEAMS_NOTICE || shownKey === GROK_MOVE_NOTICE || shownKey === WHATS_NEW_NOTICE || shownKey === UPDATES_CONSENT_NOTICE) markLaunchDialog("notices");
     if (shownKey === CLOUD_INTRO) {
       setIntroOpen(true);
       track("cloud_card_shown", { variant: view?.kind === "signed-out" ? "signed_out" : "free" });
@@ -287,10 +272,6 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     } else if (notice === CLOUD_TRIAL_NOTICE && trialOpen !== shownKey) {
       setTrialOpen(shownKey);
       void planBridge?.noticeSeen?.().catch(() => {});
-    } else if (shownKey === SIMPLE_MODE_NOTICE && !simpleShown) {
-      setSimpleShown(true);
-      if (SIMPLE_ONLY || advancedBack) reportNewLook("shown", advancedBack);
-      else reportSimpleModePrompt("shown");
     } else if (shownKey === BOAT_OFFER_NOTICE && !boatShown) {
       setBoatShown(true);
       reportBoatOffer("shown", "card");
@@ -337,10 +318,6 @@ export function AppNotices({ quiet = false, viewer = null, now = Date.now }: { q
     const done = () => { close(); const patch = dismissNotices(record, retiredPhones.map(phone => phoneUpdateHint(phone.id)));
       if (patch) void api("/api/config", { method: "PUT", body: JSON.stringify(patch) }).then(config => dispatch({ type: "configStatus", config })).catch(() => {}); };
     return <PhoneUpdateCard phones={retiredPhones} onOpen={() => { done(); dispatch(phonePairingSettingsAction()); }} onDismiss={done} />;
-  }
-
-  if (notice === SIMPLE_MODE_NOTICE) {
-    return SIMPLE_ONLY || advancedBack ? <NewLookNotice onClose={close} back={advancedBack} /> : <SimpleModePrompt onClose={close} />;
   }
 
   if (notice === WHATS_NEW_NOTICE && whatsNew && desktop) {

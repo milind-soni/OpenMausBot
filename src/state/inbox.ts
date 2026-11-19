@@ -144,7 +144,7 @@ export async function replyToInboxRow(view: Pick<InboxView, "botId" | "threadId"
   void refreshInbox();
 }
 
-export interface InboxPanelState { open: boolean; reading: string | null; wide?: boolean }
+export interface InboxPanelState { open: boolean; reading: string | null }
 const panel = store<InboxPanelState>({ open: false, reading: null });
 export const useInboxPanel = (): InboxPanelState => useSyncExternalStore(panel.subscribe, panel.get, panel.get);
 export const currentInboxPanel = panel.get;
@@ -156,5 +156,3 @@ export function openInbox(at: { reading?: string } = {}): void {
 }
 export const closeInbox = (): void => panel.set({ ...panel.get(), open: false, reading: null });
 export const readInboxLine = (id: string | null): void => panel.set({ ...panel.get(), reading: id });
-/** The panel at its usual width or wider, for a long message. */
-export const widenInbox = (wide: boolean): void => panel.set({ ...panel.get(), wide });

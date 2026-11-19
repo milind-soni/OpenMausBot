@@ -15,8 +15,6 @@ import { effortLabel } from "./ModelPicker";
 import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
 import { setColorUserBubbles, useColorUserBubbles } from "@/lib/user-bubble-preference";
 import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
-import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
-import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { setPinnedCircles, setUniversalPins, usePinnedCircles, useUniversalPins } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
@@ -272,21 +270,6 @@ export function ColorUserBubblesRow({ simple = false }: { simple?: boolean }) {
         checked={enabled}
         aria-label={t("settings.userBubbles.aria")}
         onClick={() => setColorUserBubbles(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
-export function AdvancedModeRow({ simple = false }: { simple?: boolean }) {
-  const enabled = useAdvancedMode();
-  if (SIMPLE_ONLY) return null;
-  return (
-    <SettingRow className={simple ? undefined : "rounded-2xl border border-accent-border/40 bg-raised-hover/40 py-4"} title={t("settings.advancedMode.title")}
-      subtitle={t(simple ? "settings.simple.advancedMode" : "settings.advancedMode.subtitle")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.advancedMode.title")}
-        onClick={() => setAdvancedMode(!enabled)}
       />
     </SettingRow>
   );

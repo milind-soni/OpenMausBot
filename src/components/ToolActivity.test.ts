@@ -1,9 +1,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { setLocale } from "@/lib/i18n";
 
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true }));
 const { ToolActivity } = await import("./ToolActivity");
 
 describe("ToolActivity", () => {

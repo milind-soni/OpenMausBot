@@ -10,10 +10,6 @@ import type { BotAvatarCrop } from "../../shared/bot-avatar";
 const threads = vi.hoisted(() => ({ show: true }));
 
 // Threads are an Advanced-mode surface (Simple keeps one conversation per bot), so these render as Advanced.
-vi.mock("@/lib/interface-mode", async (original) => ({
-  ...await original<typeof import("@/lib/interface-mode")>(),
-  useAdvancedMode: () => true,
-}));
 vi.mock("@/lib/thread-preferences", async (original) => ({
   ...await original<typeof import("@/lib/thread-preferences")>(),
   useShowThreads: () => threads.show,

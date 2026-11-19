@@ -33,7 +33,6 @@ vi.mock("./DesktopCapabilities", async () => {
   return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }), windowFramed: () => false };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, setAdvancedMode: () => {} }));
 vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
@@ -84,34 +83,5 @@ describe("the sidebar's + menu", () => {
 
   it("offers neither to someone without the admin scope anywhere else, who keeps New group chat", () => {
     expect(plusMenu(false)).toEqual(["New chat", "New group chat"]);
-  });
-});
-
-describe("the sidebar's + menu with a long bot name (simple mode)", () => {
-  const longName = "A bot with a very long name that would push the menu past the window edge";
-  const withLongBot = () => openPlusMenu(true, false, { bots: [{ id: "long", threadId: "t", name: longName, title: "", description: "", notifications: true, color: "green", unread: false, modelSelection: { instanceId: "fake", model: "test" }, messages: [], tasks: [] }], selectedId: "long", activeView: "chat" });
-
-  it("keeps the right-anchored menu no wider than the sidebar, so it can't run off the left edge", () => {
-    const menu = withLongBot().find((node) => node.props.role === "menu")!;
-    expect(menu.props.className).toContain("right-0");
-    expect(menu.props.className).toContain("md:max-w-[calc(min(var(--sidebar-width),var(--sidebar-max))_-_48px)]");
-    // Below md the sidebar fills the window, so the menu is capped by the window instead.
-    expect(menu.props.className).toMatch(/(^|\s)max-w-\[calc\(100vw_-_48px\)\]/);
-  });
-
-  it("caps the menu by the sidebar's own cap, which is narrower than a saved width while a side panel is open", () => {
-    const root = (state: Record<string, unknown>) => openPlusMenu(true, false, state).find((node) => node.type === "aside")!;
-    const style = (state: Record<string, unknown>) => root(state).props.style as Record<string, string>;
-    expect(style({ computerOpen: true })["--sidebar-max"]).toBe("280px");
-    expect(style({ inspectorOpen: true })["--sidebar-max"]).toBe("280px");
-    expect(style({})["--sidebar-max"]).toBe("calc(100vw - 320px)");
-    expect(root({ computerOpen: true }).props.className).toContain("md:max-w-[var(--sidebar-max)]");
-  });
-
-  it("truncates the bot's name in New conversation with … and keeps the full name on hover", () => {
-    const item = withLongBot().find((node) => node.props.role === "menuitem" && words(node.props.children).includes(longName))!;
-    const label = nodes(item.props.children).find((node) => node.type === "span" && node.props.title === longName);
-    expect(label?.props.className).toContain("truncate");
-    expect(label?.props.className).toContain("min-w-0");
   });
 });

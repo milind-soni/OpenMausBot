@@ -6,7 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { AppState, Bot, InstanceInfo } from "@/state/store";
 import { setLocale, t } from "@/lib/i18n";
 
-const fixture = vi.hoisted(() => ({ advanced: true, android: false, browser: false, page: undefined as unknown }));
+const fixture = vi.hoisted(() => ({ android: false, browser: false, page: undefined as unknown }));
 
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
@@ -22,7 +22,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
     },
   }),
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("./CloudScreenPreview", () => ({ CloudScreenPreview: () => null }));
 vi.mock("./AndroidDevicePanel", () => ({ AndroidDevicePanel: () => null, useAndroidUsbDevices: () => ({ devices: fixture.android ? [{ serial: "p1" }] : [] }) }));
@@ -101,7 +100,6 @@ beforeEach(() => {
     setItem: (key: string, value: string) => void saved.set(key, value),
     removeItem: (key: string) => void saved.delete(key),
   });
-  fixture.advanced = true;
   fixture.android = false;
   fixture.browser = false;
   fixture.page = undefined;
@@ -122,7 +120,7 @@ describe("Computer panel tab", () => {
     expect(tabListName()).not.toBe("Bot panel view");
   });
 
-  it("stays on Data through a model change and follows a conversation change", async () => {
+  it("stays on Data for the same bot when the model or conversation changes", async () => {
     await open(makeBot());
     expect(selected()).toBe("Screen");
     flushSync(() => tab("Data").click());
@@ -135,7 +133,7 @@ describe("Computer panel tab", () => {
     expect(document.querySelector('[data-testid="data-panel"]')).not.toBeNull();
 
     await open(makeBot({ threadId: "thread-2", tasks: [{ threadId: "thread-2", title: "Second", createdAt: 2, approvalMode: "ask" }] } as Partial<Bot>));
-    expect(selected()).toBe("Screen");
+    expect(selected()).toBe("Data");
   });
 
   it("shows the Browser tab with a published page's Open, and hands the page to the browser to open", async () => {
@@ -227,15 +225,6 @@ describe("Computer panel tab", () => {
     expect(selected()).toBe("Screen");
   });
 
-  it("stops on the Files tab in Simple mode", async () => {
-    fixture.advanced = false;
-    await open(makeBot());
-    expect(tabLabels()).toEqual(["Screen", "Browser", "Data", "Files"]);
-    press("Screen", "End");
-    await settle();
-    expect(selected()).toBe("Files");
-    expect(document.activeElement).toBe(tab("Files"));
-  });
 
   it("points every selected trigger at its panel and the panel back", async () => {
     await open(makeBot());

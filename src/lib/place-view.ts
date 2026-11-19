@@ -5,7 +5,6 @@ import { cloudPlanView } from "@/lib/cloud-plan";
 import { engineSignedOut } from "@/lib/failed-turn";
 import { browserAvailable, builtInBrowserEnabled, type FeatureFlagConfig } from "@/lib/feature-flags";
 import { writeComputerPanelView } from "@/lib/computer-panel-view";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { pageOnRemoteServer } from "@/lib/local-computer";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { openBotSettings } from "@/components/bot-panel/panel-link";
@@ -31,7 +30,6 @@ export interface PlaceSeat {
   server: ServerKind;
   plan: boolean;
   role: "admin" | "user";
-  mode: "simple" | "advanced";
 }
 
 export function serverKind(config: Pick<ConfigStatus, "cloudHome"> | null | undefined, capabilities: DesktopCapabilities): ServerKind {
@@ -75,7 +73,6 @@ export function placeFacts(input: {
     toolsAllowComputer: canUseMcpServer(bot.toolScope, "computer"),
     browserOn: builtInBrowserEnabled(config) && browserAvailable(config),
     role: seat.role,
-    mode: seat.mode,
     ...(input.local ? { local: input.local } : {}),
     ...(input.computer ? { computer: input.computer } : {}),
     ...(input.teamComputer ? { teamComputer: input.teamComputer } : {}),
@@ -86,9 +83,9 @@ export function placeViewFor(facts: PlaceFacts): PlaceView {
   return placeView(facts, { translate: placeTranslate, locale: activeLocale() });
 }
 
-export function placeRowViewFor(row: PlaceRow, seat: PlaceSeat, worksOnLabel?: string): PlaceView {
+export function placeRowViewFor(row: PlaceRow, seat: PlaceSeat): PlaceView {
   const read = row.state === "cc-needs-key" && seat.plan && seat.server !== "my-cloud" ? { ...row, state: "cc-on-my-cloud" as const } : row;
-  return placeRowView(read, { server: seat.server, role: seat.role, mode: seat.mode, worksOnLabel, translate: placeTranslate, locale: activeLocale() });
+  return placeRowView(read, { server: seat.server, role: seat.role, translate: placeTranslate, locale: activeLocale() });
 }
 
 export function placeBlocked(view: PlaceView): boolean {
@@ -117,8 +114,8 @@ export function useCloudPlanPaid(): boolean {
 export function usePlaceSeat(config: Pick<ConfigStatus, "cloudHome"> | null | undefined, capabilities: DesktopCapabilities): PlaceSeat {
   const plan = useCloudPlanPaid();
   const ownerOrAdmin = useOwnerOrAdmin();
-  const advanced = useAdvancedMode();
-  return { server: serverKind(config, capabilities), plan, role: ownerOrAdmin === false ? "user" : "admin", mode: advanced ? "advanced" : "simple" };
+
+  return { server: serverKind(config, capabilities), plan, role: ownerOrAdmin === false ? "user" : "admin" };
 }
 
 export function openPlaceAction(
@@ -130,7 +127,7 @@ export function openPlaceAction(
     dispatch({ type: "toggleAppSettings", open: true, section });
   switch (id) {
     case "choose-model": openBotSettings(dispatch, "model", { botId: target.botId }); return true;
-    case "open-tools": openBotSettings(dispatch, "access", { botId: target.botId, page: "tools" }); return true;
+    case "open-tools": openBotSettings(dispatch, "access", { botId: target.botId }); return true;
     case "change-routine": openBotSettings(dispatch, "routines", { botId: target.botId }); return true;
     case "sign-in": appSettings("engines"); return true;
     case "manage-computers": appSettings("computer"); return true;
@@ -166,17 +163,4 @@ export function openPlaceAction(
     default:
       return false;
   }
-}
-
-export const SIMPLE_PLACE_LABEL = {
-  auto: "vm.dest.auto",
-  cloud: "place.cloud",
-  vm: "vm.dest.vm",
-  browser: "vm.dest.browser",
-  off: "vm.dest.off",
-} as const satisfies Record<string, LocaleKey>;
-
-export function worksOnSimpleLabel(computer: Bot["computer"], platform: DesktopCapabilities["host"]["platform"]): string {
-  if (computer === "local") return t(platform === "darwin" ? "computer.simple.dest.thisMac" : "computer.simple.dest.thisPc");
-  return t(SIMPLE_PLACE_LABEL[computer ?? "auto"]);
 }

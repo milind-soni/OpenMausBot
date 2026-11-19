@@ -33,7 +33,7 @@ const KINDS: Array<{ kind: Kind; titleKey: LocaleKey; hintKey: LocaleKey }> = [
   { kind: "term", titleKey: "teamMemory.kind.terms", hintKey: "teamMemory.kind.termsHint" },
 ];
 
-export function TeamMemoryDialog({ section, label, onClose }: { section: string; label: string; onClose: () => void }) {
+export function TeamMemoryDialog({ section, label, onClose, open = true }: { section: string; label: string; onClose: () => void; open?: boolean }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [loadedIds, setLoadedIds] = useState<string[]>([]);
@@ -68,9 +68,11 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
   }, [load]);
 
   useEffect(() => {
+    if (!open) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialogRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
       if (event.key === "Escape") {
         event.preventDefault();
         onClose();
@@ -88,7 +90,7 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
       window.removeEventListener("keydown", onKey);
       previousFocus?.focus();
     };
-  }, [onClose]);
+  }, [open, onClose]);
 
   const run = async (id: string | null, request: () => Promise<{ entries: Entry[]; loadedIds?: string[] }>) => {
     if (busy.current) return false;
@@ -136,6 +138,9 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
 
   return createPortal(
     <div
+      inert={!open}
+      aria-hidden={!open || undefined}
+      data-overlay-fade={open ? "in" : "out"}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 sm:p-6"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >
@@ -145,7 +150,7 @@ export function TeamMemoryDialog({ section, label, onClose }: { section: string;
         aria-modal="true"
         aria-labelledby="team-memory-title"
         tabIndex={-1}
-        className="animate-pop-in flex max-h-[min(720px,calc(100dvh-2rem))] w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
+        className="flex max-h-[min(720px,calc(100dvh-2rem))] w-full max-w-[720px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
       >
         <header className="flex items-start justify-between gap-4 border-b border-hairline/40 px-6 pb-4 pt-6 sm:px-8 sm:pt-7">
           <div>

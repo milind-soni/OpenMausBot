@@ -28,7 +28,6 @@ vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/thread-preferences")>(),
   useShowThreads: () => true,
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: vi.fn() }));
 vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
   ...await importOriginal<typeof import("./SidebarPopoverMenu")>(),
   SidebarPopoverMenu: (props: { renderTrigger: (state: { open: boolean }) => unknown }) => props.renderTrigger({ open: false }),

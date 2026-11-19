@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chiefChoices, chiefFor, chiefStepFits, createChiefPatch, hiddenFromSidebar, INTRO_CHIPS, introChips, myDefaultBot, setupSteps, someoneElsesDefaultBot } from "./default-bot";
+import { chiefChoices, chiefFor, chiefStepFits, createChiefPatch, hiddenFromSidebar, myDefaultBot, setupSteps, someoneElsesDefaultBot } from "./default-bot";
 import { partitionSidebarBots } from "./sidebar-layout";
 import type { DefaultBotFields } from "../../shared/default-bot";
 
@@ -53,21 +53,7 @@ describe("what MausBot offers to set up", () => {
     expect(setupSteps({ ...fresh, team: true })).toEqual([]);
   });
 
-  it("in Simple mode, chips for only what its look around found missing, in order: AI, apps, skills, phone, Cloud", () => {
-    expect(introChips(fresh)).toEqual(["ai", "apps", "phone", "cloud"]);
-    expect(introChips({ ...fresh, aiReady: true, importFound: true })).toEqual(["apps", "import", "phone", "cloud"]);
-    expect(introChips({ ...fresh, aiReady: true, appsConnected: true, phonePaired: true })).toEqual(["cloud"]);
-    expect(introChips({ ...fresh, aiReady: true, remote: true })).toEqual(["apps", "phone"]);
-    expect(introChips({ ...fresh, aiReady: true, onCloud: true, importFound: false })).toEqual(["apps", "phone"]);
-    expect(INTRO_CHIPS).toBe(3);
-  });
 
-  it("never offers a bot (the sidebar's + adds one), nor nags a person who is set up or a Team Cloud member", () => {
-    expect(introChips(fresh)).not.toContain("bots");
-    expect(introChips({ ...fresh, aiReady: true, ownBots: 3, importFound: true })).toEqual([]);
-    expect(introChips({ ...fresh, ownBots: 3 })).toEqual(["ai"]);
-    expect(introChips({ ...fresh, team: true })).toEqual([]);
-  });
 });
 
 describe("the first run's Chief step", () => {

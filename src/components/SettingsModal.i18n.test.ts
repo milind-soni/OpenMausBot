@@ -17,7 +17,6 @@ beforeAll(() => {
 });
 
 // Analytics (mocked below) boots PostHog on import, which wants a real browser.
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
 vi.mock("@/lib/analytics", () => ({
   analyticsEnabled: () => false,
   setAnalyticsEnabled: () => {},
@@ -34,8 +33,7 @@ afterEach(() => {
 
 describe("Settings in another language", () => {
   const NAV = ["settings.page.bots", "settings.page.desktops", "settings.page.spending", "settings.page.data", "settings.page.account",
-    "settings.page.browser", "settings.section.general", "settings.section.appearance", "settings.section.phoneDevices",
-    "settings.advancedMode.title"] as const;
+    "settings.page.browser", "settings.section.general", "settings.section.appearance", "settings.section.phoneDevices"] as const;
 
   it("renders in the language the picker selected, and re-renders in the next one", async () => {
     for (const locale of ["pt-br", "ja"] as const) {

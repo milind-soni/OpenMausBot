@@ -10,7 +10,6 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { announceNewBot, reportsToFor, startingTemplate, type BotDefaultsAnswer } from "@/lib/new-bot";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useTeamPeople } from "@/state/team-people";
@@ -72,7 +71,7 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
   const [chosenOwner, setChosenOwner] = useState<string | null>(null);
   const ownerOrAdmin = useOwnerOrAdmin();
   const showThreads = useShowThreads();
-  const sections = useAdvancedMode() ? SECTIONS : SECTIONS.filter((section) => section !== "Model");
+  const sections = SECTIONS;
   const [everyone, setEveryone] = useState(false);
   const choosesVisibility = !team && !defaultsMode && typeof window !== "undefined" && !window.ogb && ownerOrAdmin === true;
   const dialog = useRef<HTMLDivElement>(null);

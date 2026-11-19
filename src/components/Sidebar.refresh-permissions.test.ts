@@ -15,10 +15,6 @@ vi.mock("./SidebarThreadRow", async (original) => ({
   },
 }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
-vi.mock("@/lib/interface-mode", async (original) => ({
-  ...await original<typeof import("@/lib/interface-mode")>(),
-  useAdvancedMode: () => true,
-}));
 
 const { initialState } = await import("@/state/store");
 const { BotThreadList, botRowProps } = await import("./Sidebar");

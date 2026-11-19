@@ -34,18 +34,26 @@ export function pageMessage(message: Message): Message | Record<string, unknown>
 }
 
 /** A conversation's messages one page at a time (newest first when `before` is absent), and the page around one message. */
-export function messagePages(store: Pick<Store, "activePath" | "messagesFor" | "messagesTail" | "messagesBefore" | "activeLeaf">) {
+export function messagePages(store: Pick<Store, "activePath" | "activePathIndex" | "messagesFor" | "messagesTail" | "messagesBefore" | "activeLeaf">) {
   function chatPage(threadId: string, limit: number | undefined, before?: string, around?: string) {
-    const path = store.activePath(threadId);
+    const { messages: path, positions, leafId: activeLeafId } = store.activePathIndex(threadId);
     const anchor = before ?? around;
-    const index = anchor === undefined ? path.length : path.findIndex(m => m.id === anchor);
-    if (index < 0) return null;
-    const visible = (before ? path.slice(0, index) : path).filter(m => inChatHistory(m) || m.id === around);
+    const index = anchor === undefined ? path.length : positions.get(anchor);
+    if (index === undefined) return null;
+    if (!around) {
+      const messages: Array<ReturnType<typeof pageMessage>> = [];
+      for (let i = index - 1; i >= 0; i--) {
+        const message = path[i]!;
+        if (!inChatHistory(message)) continue;
+        if (messages.length === limit) return { messages: messages.reverse(), hasMore: true, activeLeafId };
+        messages.push(pageMessage(message));
+      }
+      return { messages: messages.reverse(), hasMore: false, activeLeafId };
+    }
+    const visible = path.filter(m => inChatHistory(m) || m.id === around);
     const size = limit ?? visible.length;
-    const start = around
-      ? Math.max(0, Math.min(visible.length - size, visible.findIndex(m => m.id === around) - Math.floor(size / 2)))
-      : Math.max(0, visible.length - size);
-    return { messages: visible.slice(start, start + size).map(pageMessage), hasMore: start > 0, activeLeafId: store.activeLeaf(threadId) };
+    const start = Math.max(0, Math.min(visible.length - size, visible.findIndex(m => m.id === around) - Math.floor(size / 2)));
+    return { messages: visible.slice(start, start + size).map(pageMessage), hasMore: start > 0, activeLeafId };
   }
   function messagePage(threadId: string, limit: number | undefined, chat = false, preview = false) {
     if (preview && limit === 0) {

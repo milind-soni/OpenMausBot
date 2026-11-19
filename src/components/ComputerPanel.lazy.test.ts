@@ -25,7 +25,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
     },
   }),
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 // The owner: starting a cloud computer early is an Admin's shortcut.
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("./CloudScreenPreview", () => ({
@@ -156,15 +155,6 @@ describe("Computer panel on Cloud computer", () => {
     expect(fixture.posts).toEqual([]);
   });
 
-  it("in Simple mode too: opening it creates nothing, and starting it now is the person's button", async () => {
-    fixture.advanced = false;
-    await open(makeBot({ computer: "cloud" }));
-    expect(text()).toContain("Scout gets its own cloud desktop from Boat the first time a task needs one. The first start takes about a minute.");
-    expect(fixture.posts).toEqual([]);
-    flushSync(() => button("Start it now")!.click());
-    await settle();
-    expect(fixture.posts.filter((path) => !path.endsWith("/screenshot"))).toEqual(["/api/bots/scout/computer/provision"]);
-  });
 
   it("a conversation moved to a sleeping cloud computer: no spinner or 'using it' while the bot only chats, and no polling once it stops", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });

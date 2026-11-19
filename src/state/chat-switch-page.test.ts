@@ -50,7 +50,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it("asks for the newest 80 messages when switching to a bot's chat", async () => {
+it("asks for the newest 80 raw messages after toggling back to V1", async () => {
+  flushSync(() => dispatch({ type: "chatView", v2: false }));
   flushSync(() => dispatch({ type: "switchTask", botId: "B", threadId: "B-other" }));
   await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-other?messages=80", expect.objectContaining({ method: "POST" })));
 });
@@ -61,7 +62,6 @@ it("still asks for the whole chat when a jump needs it", async () => {
 });
 
 it("reuses the current thread and requests a compact cold V2 switch", async () => {
-  flushSync(() => dispatch({ type: "chatView", v2: true }));
   flushSync(() => dispatch({ type: "switchTask", botId: "B", threadId: "B-old" }));
   await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-old?messages=0", expect.anything()));
   flushSync(() => dispatch({ type: "switchTask", botId: "B", threadId: "B-other" }));

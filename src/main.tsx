@@ -11,7 +11,6 @@ import { applyChatWidth, readChatWidth } from "./lib/chat-width";
 import { applyFont, readFont } from "./lib/fonts";
 import { applySoftwareRendering } from "./lib/software-rendering";
 import { loadTheme, startTheme } from "./lib/theme/runtime";
-import { settleInterfaceMode } from "./lib/new-look";
 import { BrowserSignInPage } from "./pair/BrowserSignInPage";
 import { PairPage, TeamLeftPage } from "./pair/PairPage";
 import { TEAM_LEFT_REFUSAL } from "../shared/cloud-hints";
@@ -21,8 +20,6 @@ import { endedBeforeReload, forgetEndedSession } from "./lib/session-ended";
 import { signInGateShown } from "./lib/sign-in-gate";
 import "./styles.css";
 
-// Before first paint; settleInterfaceMode must run before applySkin writes omb-skin.
-settleInterfaceMode();
 applySkinChoice(readSkinChoice());
 applyFont(readFont());
 applySoftwareRendering();

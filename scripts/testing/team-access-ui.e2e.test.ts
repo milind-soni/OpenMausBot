@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
-import { ENABLE_ADVANCED_UI, UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
@@ -34,7 +34,6 @@ const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBin
       return result;
     };
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", info.ui, ...args]) as Promise<any>;
-    await ui("eval", "--js", ENABLE_ADVANCED_UI);
     const click = (name: string) => ui("click", "--name", name);
     // The browser harness does not assign refs to native <summary> nodes.
     const toggleTeams = () => ui("eval", "--js", "document.querySelector('[data-bot-settings-section=permissions] summary').click()");

@@ -5,13 +5,10 @@ import { placeInitials } from "@/lib/places";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { productName } from "@/lib/brand";
-import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
-import { SIMPLE_ONLY } from "@/lib/simple-only";
 import { useStore } from "@/state/store";
 import { InitialsAvatar } from "../Avatar";
 import { PlaceMark } from "../PlacesRail";
 import { profileInitials } from "../SidebarProfileMenu";
-import { Switch, SettingsTag } from "../SettingsPrimitives";
 import { accountLine, useAccountSummary, useYou } from "./account-summary";
 import { usePhonePlaceState } from "./phone-status";
 import type { SettingsPlace } from "./settings-context";
@@ -132,8 +129,6 @@ export interface NavProps {
   onKey: (entry: KeyEntry) => void;
   onClose: () => void;
   narrow: boolean;
-  /** the footer's Advanced mode switch */
-  onAdvanced?: (on: boolean) => void;
 }
 
 export function SettingsSearchField({ query, onQuery, onClose, onFirst }: { query: string; onQuery: (query: string) => void; onClose: () => void; onFirst: () => void }) {
@@ -176,7 +171,7 @@ function moveFocus(event: ReactKeyboardEvent<HTMLElement>) {
   items[next]?.focus();
 }
 
-export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, onKey, onQuery, onOpen, onHit, onClose, narrow, onAdvanced = setAdvancedMode }: NavProps) {
+export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, onKey, onQuery, onOpen, onHit, onClose, narrow }: NavProps) {
   const summary = useAccountSummary();
   const { profile } = useYou();
   // Until main shares the account with a Cloud's page, its email is the one the place knows you by.
@@ -224,19 +219,7 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
           );
         })}
       </div>
-      {!SIMPLE_ONLY && <AdvancedModeFooter narrow={narrow} onChange={onAdvanced} />}
     </nav>
-  );
-}
-
-function AdvancedModeFooter({ narrow, onChange }: { narrow: boolean; onChange: (on: boolean) => void }) {
-  const advanced = useAdvancedMode();
-  return (
-    <div data-settings-block="advanced-mode" title={t("settings.advancedMode.tooltip")}
-      className={cn("flex h-12 shrink-0 items-center justify-between gap-3 shadow-[inset_0_0.5px_0_var(--settings-edge)]", narrow ? "px-4" : "px-5")}>
-      <span id="settings-advanced-mode" className="text-[13px] leading-5 text-ink">{t("settings.advancedMode.title")}</span>
-      <Switch checked={advanced} aria-labelledby="settings-advanced-mode" data-settings-advanced-switch="" onClick={() => onChange(!advanced)} />
-    </div>
   );
 }
 
@@ -293,16 +276,15 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
   const where = searchWhere(hit, place, ctx);
   const full = searchLocation(hit, place, ctx);
   const Icon = entry.jump ? null : pageById(entry.page).icon;
-  const tag = hit.advanced && !ctx.advanced;
   // The title gets the whole width (up to two lines); the second line is "owner › page", where the owner gives way
-  // first so the page name always shows, and the Advanced tag follows it. The full path is the row's tooltip.
+  // first so the page name always shows. The full path is the row's tooltip.
   return (
     <button type="button" data-settings-hit={entry.id} onClick={() => onHit(hit)} title={full ? `${label} · ${full}` : label}
       className="flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
       <span className="flex h-5 w-6 shrink-0 items-center justify-center text-ink-secondary">{Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" />}</span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span data-settings-hit-title="" className="line-clamp-2 text-[13px] leading-5 text-ink [overflow-wrap:anywhere]">{highlight(label, query)}</span>
-        {(where || tag) && (
+        {where && (
           <span data-settings-hit-location="" className="flex min-w-0 items-center gap-1.5 text-[12px] leading-4 text-ink-secondary">
             {where && (
               <span className="flex min-w-0 flex-[0_1_auto] overflow-hidden whitespace-nowrap">
@@ -311,7 +293,6 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
                 {where.page && <span className="min-w-0 shrink overflow-hidden text-ellipsis">{` › ${where.page}`}</span>}
               </span>
             )}
-            {tag && <span className="flex flex-none"><SettingsTag>{t("settings.simple.advanced")}</SettingsTag></span>}
           </span>
         )}
       </span>
@@ -360,4 +341,3 @@ export function searchLocation(hit: SearchHit, place: SettingsPlace, ctx: Settin
   if (entry.id.startsWith("page:") && (entry.page === "overview" || entry.page === "account" || entry.page === "app")) return "";
   return parts.join(" › ");
 }
-

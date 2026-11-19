@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { InstanceInfo, ModelSelection } from "@/state/store";
 import { choiceIsSelected, modelChoices, withTypedModels } from "./model-choices";
-import { simpleModelMenu } from "./simple-model-menu";
 
 vi.hoisted(() => {
   vi.stubGlobal("window", {});
@@ -44,10 +43,6 @@ describe("OpenCode models typed by hand", () => {
 
   it("offers a provider/model id typed in the search box, saved as typed and labelled typed by hand", () => {
     expect(added(withTypedModels([opencode], onPickle, ` ${typed} `))).toEqual([{ id: `typed::${typed}`, label: `${typed} · typed by hand` }]);
-    const menu = simpleModelMenu({ instances: [opencode], listed: withTypedModels([opencode], onPickle, typed), selection: onPickle,
-      bot: { name: "Pepper", selection: onPickle }, query: typed, expanded: new Set(), probing: new Set(), loading: false });
-    expect(menu.search).toBe(true);
-    expect(menu.groups[0]!.body).toMatchObject({ kind: "models", rows: [{ option: { id: `typed::${typed}` }, label: `${typed} · typed by hand` }] });
   });
 
   it("keeps a typed selection listed and named, and adds nothing the catalog has or that is not an id", () => {

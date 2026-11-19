@@ -36,7 +36,6 @@ vi.mock("./DesktopCapabilities", async () => {
   return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }), windowFramed: () => false };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
@@ -208,6 +207,7 @@ describe("Simple-mode sidebar layout", () => {
   it.each([false, true])("uses a 280px default and the shared saved width (advanced: %s)", (advanced) => {
     fixture.advanced = advanced;
     expect(render().root.props.style!["--sidebar-width"]).toBe("280px");
+    expect(render().root.props.style!["--sidebar-min"]).toBe("280px");
     fixture.storage.set(SIMPLE_SIDEBAR_WIDTH_KEY, "300");
     fixture.values = [];
     expect(render().root.props.style!["--sidebar-width"]).toBe("300px");
@@ -225,22 +225,43 @@ describe("Simple-mode sidebar layout", () => {
     expect(listedBots(tree)).toEqual(["atlas", "bea", "dodo"]);
     expect(headers(tree)).toEqual([]);
     expect(tree.filter((node) => node.type === SidebarRailSeparator)).toHaveLength(2);
-    expect(tree.some((node) => node.type === SidebarSearchButton)).toBe(false);
+    expect(tree.some((node) => node.type === SidebarSearchButton)).toBe(true);
     expect(edge(tree)?.avatars, "the rail keeps its edge, to drag it open again").toBe(true);
     expect(edge(tree)?.avatarsWidth).toBe(92);
     expect(tree.some((node) => node.props["data-sidebar-top-buttons"] !== undefined)).toBe(false);
   });
 
-  it("puts round search and the same + menu at the top of the rail, and dragging its edge out opens it again", () => {
+  it("separates the chief from the first bot section in the rail", () => {
+    fixture.state = { ...fixture.state, bots: [bot("chief", { chiefOfStaff: true }), bot("atlas")] };
     setSidebarDensity("icons");
-    const top = () => render().tree.find((node) => node.props["data-sidebar-rail-top"] !== undefined)!;
-    const plus = () => nodes(top().props.children).find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
+    const { tree } = render();
+    const chief = tree.findIndex((node) => (node.props.bot as Bot | undefined)?.id === "chief");
+    const line = tree.findIndex((node) => node.type === SidebarRailSeparator);
+    const firstBot = tree.findIndex((node) => (node.props.bot as Bot | undefined)?.id === "atlas");
+    expect(chief).toBeGreaterThanOrEqual(0);
+    expect(line).toBeGreaterThan(chief);
+    expect(firstBot).toBeGreaterThan(line);
+  });
+
+  it("can expand a rail that was automatically collapsed beside a panel", () => {
+    const toggle = () => render(true).tree.find((node) => node.props["data-sidebar-density-toggle"])!;
+    expect(toggle().props["aria-expanded"]).toBe(false);
+    (toggle().props.onClick as () => void)();
+    expect(toggle().props["aria-expanded"]).toBe(true);
+    (toggle().props.onClick as () => void)();
+    expect(toggle().props["aria-expanded"]).toBe(false);
+  });
+
+  it("puts round search and the same + menu at the foot of the rail, and dragging its edge out opens it again", () => {
+    setSidebarDensity("icons");
+    const footer = () => render().tree.find((node) => node.type === SimpleRailFooter)!;
+    const plus = () => nodes(footer().props.children).find((node) => node.type === "button" && node.props["aria-label"] === "New or share")!;
     expect(plus().props.className).toEqual(expect.stringContaining("size-9"));
     (plus().props.onClick as () => void)();
-    const menu = nodes(top().props.children).find((node) => /\bmin-w-\[200px\]/.test(node.props.className ?? ""))!;
-    expect(menu.props.className).toEqual(expect.stringContaining("left-full top-0"));
+    const menu = nodes(footer().props.children).find((node) => /\bmin-w-\[200px\]/.test(node.props.className ?? ""))!;
+    expect(menu.props.className).toEqual(expect.stringContaining("bottom-0 left-full"));
     expect(menu.props.className).toEqual(expect.stringContaining("rounded-[var(--radius-menu)]"));
-    const item = (label: string) => nodes(top().props.children).find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
+    const item = (label: string) => nodes(footer().props.children).find((node) => node.type === "button" && nodes(node.props.children).concat(node).some((part) => Children.toArray(part.props.children).includes(label)));
     expect(item("Add department"), "Add department is offered in both modes").toBeDefined();
     expect(item("Import…")).toBeDefined();
     expect(item("New chat")).toBeDefined();
@@ -272,7 +293,7 @@ describe("Simple-mode sidebar layout", () => {
     expect(fixture.dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "newBot" }]);
   });
 
-  const railSearch = (tree: ReactElement<Props>[]) => tree.find((node) => node.type === "button" && node.props["aria-label"] === "Search bots and messages")!.props.onClick as () => void;
+  const railSearch = (tree: ReactElement<Props>[]) => SidebarSearchButton({ corner: Boolean(tree.find((node) => node.type === SidebarSearchButton)!.props.corner) }).props.onClick as () => void;
 
   it("opens the search modal from the rail without expanding the sidebar", () => {
     setSidebarDensity("icons");

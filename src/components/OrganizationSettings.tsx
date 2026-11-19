@@ -31,9 +31,7 @@ export function connectionMessage(connection: Pick<ManagedDesktopState, "message
 }
 
 /** Security: only the trusted desktop bridge can enroll this computer or hold its token. */
-/** `simple`: Simple mode shows the section only once the person has an organization sign-in; signed out, it draws an
- * empty card, which hides the whole section (search still finds it, tagged Advanced). */
-export function OrganizationSettings({ simple = false }: { simple?: boolean } = {}) {
+export function OrganizationSettings() {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.organization;
   const [connection, setConnection] = useState<ManagedDesktopState | null>(null);
   const [address, setAddress] = useState("");
@@ -103,7 +101,6 @@ export function OrganizationSettings({ simple = false }: { simple?: boolean } = 
   const date = typeof expiry === "number" && Number.isFinite(expiry) ? new Date(expiry) : null;
   const dateLabel = date && Number.isFinite(date.getTime())
     ? new Intl.DateTimeFormat(activeLocale(), { dateStyle: "medium", timeStyle: "short" }).format(date) : null;
-  if (connection?.status === "signed-out" && simple) return <div data-settings-rows="" hidden />;
   if (connection?.status === "signed-out") {
     // One row: sign in with a work email; the long notes behind Learn more, the custom address behind a fold.
     return <SettingsRows>

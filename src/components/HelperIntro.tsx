@@ -1,11 +1,8 @@
 import { X } from "lucide-react";
-
 import { t } from "@/lib/i18n";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import type { LocaleKey } from "@/locales";
 import { useStore, type Message } from "@/state/store";
 import { HelperSetup } from "./HelperSetup";
-import { SimpleHelperIntro } from "./SimpleHelperIntro";
 
 export const HELPER_ASK_KEYS: readonly LocaleKey[] = [
   "helperIntro.ask.overview", "helperIntro.ask.inbox", "helperIntro.ask.routine", "helperIntro.ask.howto",
@@ -17,18 +14,9 @@ interface IntroProps {
   message: Message;
   /** The person wrote after it, or dismissed it: its asks and setup go. */
   answered: boolean;
-  /** Its follow-up after the look around (helperFollowup), drawn under it in Simple mode. */
-  followup?: Message;
 }
 
-/** MausBot's first message: Simple mode's few short bubbles and follow-up, or Advanced mode's one bubble with asks. */
-export function HelperIntro(props: IntroProps) {
-  return useAdvancedMode() ? <AdvancedHelperIntro {...props} /> : <SimpleHelperIntro {...props} />;
-}
-
-/** Advanced mode's intro, in the viewer's language. Its asks go once one is tapped, it is dismissed, or the person writes
- * anything after it. */
-function AdvancedHelperIntro({ botId, threadId, message, answered }: IntroProps) {
+export function HelperIntro({ botId, threadId, message, answered }: IntroProps) {
   const { state, dispatch } = useStore();
   const bot = state.bots.find((candidate) => candidate.id === botId);
   const name = bot?.name ?? "MausBot";

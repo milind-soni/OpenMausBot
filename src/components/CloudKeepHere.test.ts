@@ -8,7 +8,6 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
   useState: (initial: unknown) => { const index = f.index++; if (!(index in f.values)) f.values[index] = initial; return [f.values[index], (next: unknown) => { f.values[index] = next; }]; },
   useEffect: (effect: EffectCallback) => { f.effects.push(effect); },
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => f.advanced }));
 import { CloudKeepHere } from "./CloudKeepHere";
 
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; disabled?: boolean; checked?: boolean; "aria-label"?: string }>;
@@ -38,12 +37,6 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
-it("is shown in Simple mode too, to someone with a Cloud", async () => {
-  f.advanced = false;
-  await ready(before);
-  expect(bridge.keepHere).toHaveBeenCalledOnce();
-  expect(toggle()?.props.checked).toBe(false);
-});
 
 it("is never shown without a Cloud of one's own the move applies to, nor by a desktop that has no such switch, nor off the desktop", async () => {
   await ready({ shown: false, on: false, moved: false, coming: false });
@@ -55,17 +48,6 @@ it("is never shown without a Cloud of one's own the move applies to, nor by a de
   expect(render(undefined).html).toBe("");
 });
 
-it("in Advanced mode, before the move: one switch and one plain line; turning it on keeps this computer's bots here at once", async () => {
-  await ready(before);
-  const { html } = render();
-  expect(html).toContain("Keep this computer&#x27;s bots on this computer");
-  expect(html).toContain("stay here instead of moving to My Cloud");
-  expect(toggle()!.props.checked).toBe(false);
-  toggle()!.props.onClick!();
-  await flush();
-  expect(bridge.setKeepHere).toHaveBeenCalledExactlyOnceWith(true);
-  expect(render().html).not.toContain("Bring them back");
-});
 
 it("after the move, turning it on first says what happens; only Bring them back brings this computer's bots home, and then it can't be turned back while they come", async () => {
   await ready(moved);

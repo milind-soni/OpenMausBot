@@ -42,27 +42,13 @@ describe("computer panel view persistence", () => {
 
 describe("computer panel view availability", () => {
   it("drops the Android tab once its device disconnects", () => {
-    expect(resolveComputerPanelView("android", { advanced: true, androidConnected: true })).toBe("android");
-    expect(resolveComputerPanelView("android", { advanced: true, androidConnected: false })).toBe("computer");
+    expect(resolveComputerPanelView("android", true)).toBe("android");
+    expect(resolveComputerPanelView("android", false)).toBe("computer");
   });
 
-  it("drops the tabs the current mode does not render", () => {
-    expect(resolveComputerPanelView("routines", { advanced: false, androidConnected: false })).toBe("computer");
-    expect(resolveComputerPanelView("files", { advanced: true, androidConnected: true })).toBe("computer");
-  });
-
-  it("shows Simple the Android tab, after Computer, only while a device is connected", () => {
-    expect(computerPanelTabs({ advanced: false, androidConnected: true })).toEqual(["computer", "android", "browser", "data", "files"]);
-    expect(computerPanelTabs({ advanced: false, androidConnected: false })).toEqual(["computer", "browser", "data", "files"]);
-    expect(resolveComputerPanelView("android", { advanced: false, androidConnected: true })).toBe("android");
-    expect(resolveComputerPanelView("android", { advanced: false, androidConnected: false })).toBe("computer");
-  });
-
-  it("keeps a view whose trigger is on the row", () => {
-    for (const view of ["computer", "browser", "data"] as const) {
-      expect(resolveComputerPanelView(view, { advanced: true, androidConnected: true })).toBe(view);
-      expect(resolveComputerPanelView(view, { advanced: false, androidConnected: false })).toBe(view);
-    }
-    expect(resolveComputerPanelView("files", { advanced: false, androidConnected: false })).toBe("files");
+  it("keeps the same tabs, with Android added only while a device is connected", () => {
+    expect(computerPanelTabs(false)).toEqual(["computer", "routines", "browser", "data"]);
+    expect(computerPanelTabs(true)).toEqual(["computer", "routines", "android", "browser", "data"]);
+    expect(resolveComputerPanelView("routines", false)).toBe("routines");
   });
 });

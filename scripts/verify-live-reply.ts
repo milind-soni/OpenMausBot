@@ -261,7 +261,7 @@ for (const engine of values.engines!.split(",")) {
     const bots = (await api(handle, "GET", "/api/bots")).bots as Array<{ id: string; name: string; threadId: string }>;
     const pepper = bots.find((bot) => bot.id === handle.botId)!;
     const other = bots.find((bot) => bot.id !== handle.botId)!;
-    await evaluate(handle, "localStorage.setItem('omb-advanced-mode', 'true'); location.reload(); 'reloaded'");
+    await evaluate(handle, "location.reload(); 'reloaded'");
     await pause(4_000);
     await ui(handle, "flag", "--set", "features.showToolCalls=true");
     const before = await CONSOLE_ERRORS(handle);

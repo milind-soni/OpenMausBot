@@ -1,11 +1,10 @@
 import { Component, type ReactNode } from "react";
 
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { plainBotBubble } from "./chat-bubble";
 
 function FallbackBubble({ text }: { text: string }) {
-  const simple = !useAdvancedMode();
-  return <div data-chat-bubble={simple ? "simple" : ""} className={plainBotBubble(simple)}>{text}</div>;
+
+  return <div data-chat-bubble={""} className={plainBotBubble}>{text}</div>;
 }
 
 export class MessageBoundary extends Component<{ children: ReactNode; fallbackText: string }, { failed: boolean }> {

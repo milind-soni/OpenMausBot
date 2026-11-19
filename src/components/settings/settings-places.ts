@@ -2,7 +2,7 @@
 // shared/settings-places.ts is this list written out (scripts/gen-settings-places.ts); settings-places.test.ts fails
 // when the two differ.
 import type { SettingsPlace } from "../../../shared/settings-places.ts";
-import { ADVANCED_PAGES, fullContext, pageById, SETTINGS_INDEX, SETTINGS_PAGES, type SettingsContext, type SettingsIndexEntry, type SettingsPage } from "./settings-index.ts";
+import { fullContext, pageById, SETTINGS_INDEX, SETTINGS_PAGES, type SettingsContext, type SettingsIndexEntry, type SettingsPage } from "./settings-index.ts";
 
 const HOW_TO_OPEN = "Settings opens from the menu under the person's name at the bottom of the sidebar (or Cmd+, on a Mac, Ctrl+, elsewhere). Its first entry is named after the place (This computer, My Cloud, or the server's name).";
 
@@ -53,7 +53,7 @@ export function buildSettingsPlaces(labels: Readonly<Record<string, string>>): S
     const only = onlyOn(page.when);
     places.push({
       id: `page:${page.id}`, path: pagePath(page), words: page.synonyms,
-      ...(ADVANCED_PAGES.includes(page.id) ? { advanced: true as const } : {}), ...(only ? { only } : {}),
+      ...(only ? { only } : {}),
     });
   }
   for (const entry of SETTINGS_INDEX) {
@@ -65,16 +65,13 @@ export function buildSettingsPlaces(labels: Readonly<Record<string, string>>): S
     const own = label(entry.labelKey);
     const section = entry.sectionKey && ![own, label(page.labelKey)].includes(label(entry.sectionKey)) ? label(entry.sectionKey) : null;
     const path = [pagePath(page), ...(section ? [section] : []), ...(own !== label(page.labelKey) ? [own] : [])].join(ARROW);
-    const advanced = Boolean(entry.advanced) || ADVANCED_PAGES.includes(entry.page);
-    const simple = entry.simple ? [pagePath(pageById(entry.simple.page)), own].join(ARROW) : undefined;
     const only = onlyOn((ctx) => page.when(ctx) && (entry.when?.(ctx) ?? true));
     places.push({
       id: entry.id, path, words: [...new Set([...(entry.topFor ?? []), ...(entry.synonyms ?? [])])],
-      ...(advanced ? { advanced: true as const } : {}), ...(simple ? { simplePath: simple } : {}), ...(only ? { only } : {}),
+      ...(only ? { only } : {}),
     });
   }
   places.push(
-    { id: "advanced-mode", path: `Settings${ARROW}${label("settings.advancedMode.title")} (the switch at the bottom of the list of pages)`, words: ["advanced", "simple", "advanced mode", "simple mode", "more settings"] },
     { id: "sidebar", path: "the sidebar", words: ["sidebar", "order", "pin", "group", "archive"] },
   );
   return places;
@@ -85,14 +82,11 @@ export function settingsPlacesFile(labels: Readonly<Record<string, string>>): st
   return [
     "// Written by scripts/gen-settings-places.ts from Settings' own index and the English catalog; edit those, then run it.",
     "",
-    "/** A real place in Settings, as the person reads it in English. `advanced`: only Advanced mode shows it; `simplePath`:",
-    " * where Simple mode shows it instead. `only`: the one kind of place or app it shows on. */",
+    "/** A real place in Settings, as the person reads it in English. */",
     "export interface SettingsPlace {",
     "  id: string;",
     "  path: string;",
     "  words: string[];",
-    "  advanced?: true;",
-    "  simplePath?: string;",
     "  only?: string;",
     "}",
     "",

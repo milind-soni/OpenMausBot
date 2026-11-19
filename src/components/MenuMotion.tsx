@@ -6,7 +6,7 @@ export const MENU_MOTION_MS = 200;
 function reducedMotion(): boolean {
   if (typeof document === "undefined") return false;
   if (document.documentElement.dataset.reducedMotion === "true") return true;
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true;
 }
 
 export interface MenuMotion {

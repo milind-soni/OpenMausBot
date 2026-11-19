@@ -1,7 +1,6 @@
 import { useMemo, useState, type JSX } from "react";
 import { Bug, Copy, Cpu, Download, Gauge, LayoutTemplate, ListChecks, MessagesSquare, Monitor, MoreHorizontal, RotateCcw, Search, Share, SquarePen, UserPlus, UserRound, Users } from "lucide-react";
 import { currentTaskBot, openBotThread, useStore, visibleMessages, type Bot } from "@/state/store";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { requestChatFind, useChatFindOpen } from "@/lib/chat-find";
 import { usageSummary } from "@/lib/chat-usage-summary";
@@ -15,7 +14,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { useContextAction } from "./ContextWarning";
-import { ELEVATED_CONTROL, ELEVATED_HOVER, ELEVATED_OPEN } from "./elevated";
+import { ELEVATED_OPEN } from "./elevated";
 import { ShortcutHint } from "./ShortcutHint";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import { orderedThreadList } from "./SidebarThreadRow";
@@ -34,7 +33,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const messages = useMemo(() => visibleMessages(bot), [bot]);
   const { state, dispatch } = useStore();
-  const advanced = useAdvancedMode();
+
   const showThreads = useShowThreads();
   const findOpen = useChatFindOpen(bot.threadId);
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
@@ -152,7 +151,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       icon: <Gauge size={16} />,
       separatorBefore: true,
       trailing: <span title={usage.detail} data-testid="usage-chip" className="tabular-nums text-[12px] text-ink-secondary">{usage.short}</span>,
-      onSelect: () => advanced ? openBotSettings(dispatch, "usage") : dispatch({ type: "toggleAppSettings", open: true, section: "usage" }),
+      onSelect: () => openBotSettings(dispatch, "usage"),
     } satisfies SidebarMenuItem] : []),
     ...(remoteClient ? [] : [{
       key: "activity",
@@ -167,7 +166,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
       icon: <Bug size={16} />,
       active: state.inspectorOpen,
       // Simple mode keeps Activity and Inspector together, as the panel's menu draws them.
-      separatorBefore: advanced,
+      separatorBefore: true,
       onSelect: () => dispatch({ type: "toggleInspector" }),
     } satisfies SidebarMenuItem]),
   ];
@@ -176,7 +175,7 @@ export function useChatMoreItems(profile: Bot, phoneHeader = false): { items: Si
 
 function RoundChatMoreMenu({ bot, phoneHeader }: { bot: Bot; phoneHeader: boolean }) {
   const { items, on } = useChatMoreItems(bot, phoneHeader);
-  const advanced = useAdvancedMode();
+
   return (
     <SidebarPopoverMenu
       items={items}
@@ -188,7 +187,7 @@ function RoundChatMoreMenu({ bot, phoneHeader }: { bot: Bot; phoneHeader: boolea
           data-testid="chat-more"
           className={cn(
             "flex size-8 items-center justify-center rounded-full",
-            advanced ? "bg-raised/50 transition-colors hover:bg-raised" : cn(ELEVATED_CONTROL, ELEVATED_HOVER, open && ELEVATED_OPEN),
+            "bg-raised/50 transition-colors hover:bg-raised",
             "max-md:size-9 max-md:border max-md:border-hairline max-md:bg-card",
             open || on ? "text-accent" : "text-ink",
           )}

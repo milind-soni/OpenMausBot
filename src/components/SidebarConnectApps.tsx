@@ -2,14 +2,13 @@ import { Puzzle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 
 import { loadAppCards } from "./bot-settings/useBotApps";
 import { preloadConnectedApps } from "@/lib/connected-apps";
 import type { ToolkitCard } from "./ServiceIcon";
 import { ELEVATED_CONTROL, ELEVATED_HOVER } from "./elevated";
-import { SIMPLE_TOP_BUTTON } from "./SidebarSimpleTop";
+import { SIMPLE_RAIL_BUTTON } from "./SidebarSimpleTop";
 
 export type AppFace = Pick<ToolkitCard, "slug" | "label" | "logo" | "domain">;
 
@@ -60,11 +59,11 @@ function AppFaceIcon({ face, className }: { face: AppFace; className?: string })
 /** The outer logos fan out while the pill is hovered. */
 const FAN = ["motion-safe:group-hover/apps:-translate-x-[3px] motion-safe:group-hover/apps:-rotate-[8deg]", "", "motion-safe:group-hover/apps:translate-x-[3px] motion-safe:group-hover/apps:rotate-[8deg]"];
 
-/** `circle` is the collapsed rail's round button. */
+/** `circle` is the collapsed rail's icon-only button. */
 export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
   const { state, dispatch } = useStore();
   const faces = useSidebarAppFaces();
-  const label = t("sidebar.nav.apps");
+  const label = "Apps";
   return (
     <button
       type="button"
@@ -74,10 +73,10 @@ export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
       aria-label={circle ? label : undefined}
       title={circle ? label : undefined}
       onClick={() => dispatch({ type: "togglePlugins", open: true })}
-      className={circle ? SIMPLE_TOP_BUTTON : cn("group/apps flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full pl-4 pr-3 text-[14px] font-medium leading-5 text-ink", ELEVATED_CONTROL, ELEVATED_HOVER)}
+      className={circle ? SIMPLE_RAIL_BUTTON : cn("group/apps flex h-9 flex-1 items-center justify-center gap-1.5 rounded-full px-2.5 text-[14px] font-medium leading-5 text-ink", ELEVATED_CONTROL, ELEVATED_HOVER)}
     >
       {circle ? <Puzzle size={18} strokeWidth={1.5} aria-hidden="true" /> : <>
-        <span className="min-w-0 truncate">{label}</span>
+        <span className="whitespace-nowrap">{label}</span>
         {/* The logos rest grey and apart, with no tile, so the sidebar's loudest colour is never an ad; hover brings the tiles and colour back. */}
         <span aria-hidden="true" data-app-faces="" className="flex shrink-0 items-center gap-1 opacity-60 grayscale motion-safe:transition-[filter,opacity] group-hover/apps:opacity-100 group-hover/apps:grayscale-0 group-hover/apps:invert-0 group-hover/apps:mix-blend-normal">
           {faces.map((face, index) => <AppFaceIcon key={face.slug} face={face}

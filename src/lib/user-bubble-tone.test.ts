@@ -45,12 +45,9 @@ describe("user bubble tone", () => {
     }
   });
 
-  it.each(MAUS_COLOR_NAMES)("gives %s a flat fill whose ink reads at 4.5:1, for the Simple bubble and the composer's round button", (color) => {
+  it.each(MAUS_COLOR_NAMES)("gives %s a flat fill whose ink reads at 4.5:1", (color) => {
     const tone = userBubbleTone(color);
     expect(contrastRatio(tone.ink, tone.background)).toBeGreaterThanOrEqual(4.5);
-    const flat = userBubbleStyle(color, { flat: true }) as Record<string, unknown>;
-    expect(flat.backgroundColor).toBe(tone.background);
-    expect(flat.backgroundImage).toBe("none");
     expect((userBubbleStyle(color) as Record<string, unknown>).backgroundImage).toBe(tone.gradient);
   });
 

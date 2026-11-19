@@ -3,7 +3,7 @@ import { EMPTY_ONBOARDING, type OnboardingStatus } from "@/lib/onboarding";
 import { withTourReset } from "@/lib/guided-tour";
 import { DESKTOP_NOTICES } from "../../electron/desktop-prefs.mjs";
 import { ANNOUNCEMENT_NOTICE, BOAT_OFFER_NOTICE, CLOUD_INTRO, CLOUD_NOTICE, CLOUD_TRIAL_NOTICE, dismissNotice, dismissNotices, FOLLOWERS, GROK_MOVE_NOTICE, introShown, introStage, launchNotice, localDay, markLaunchNotice, MODELGO_OFFER_NOTICE, MUST_ACT,
-  nextNotice, noticeSeen, NOTICES, OLD_PRO_DISMISSALS, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, SIMPLE_MODE_NOTICE, STAR_NOTICE, TEAMS_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE, type NoticeFacts,
+  nextNotice, noticeSeen, NOTICES, OLD_PRO_DISMISSALS, PHONE_UPDATE_NOTICE, phoneUpdateHint, PRODUCT_HUNT_NOTICE, STAR_NOTICE, TEAMS_NOTICE, TWO_PLACES_NOTICE, UPDATES_CONSENT_NOTICE, usedBefore, WHATS_NEW_NOTICE, type NoticeFacts,
   type NoticeId } from "./notices";
 
 let storage: Map<string, string>, session: Map<string, string>;
@@ -16,64 +16,30 @@ afterEach(() => vi.unstubAllGlobals());
 
 const record = (hintsSeen: string[] = []): OnboardingStatus => ({ ...EMPTY_ONBOARDING, completedAt: "2026-09-01", version: 1, hintsSeen });
 const facts = (intro: boolean | null, trial: boolean | null, cloud: boolean | null, star: boolean | null, launch: boolean | null = false, popup: boolean | null = false,
-  consent: boolean | null = false, simple: boolean | null = false, boat: boolean | null = false, two: boolean | null = false, grok: boolean | null = false, modelgo: boolean | null = false,
+  consent: boolean | null = false, boat: boolean | null = false, two: boolean | null = false, grok: boolean | null = false, modelgo: boolean | null = false,
   phone: boolean | null = false, announcement: boolean | null = false, teams: boolean | null = false): NoticeFacts =>
-  ({ [TEAMS_NOTICE]: teams, [GROK_MOVE_NOTICE]: grok, [PHONE_UPDATE_NOTICE]: phone, [SIMPLE_MODE_NOTICE]: simple, [WHATS_NEW_NOTICE]: popup, [UPDATES_CONSENT_NOTICE]: consent, [TWO_PLACES_NOTICE]: two, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud,
+  ({ [TEAMS_NOTICE]: teams, [GROK_MOVE_NOTICE]: grok, [PHONE_UPDATE_NOTICE]: phone, [WHATS_NEW_NOTICE]: popup, [UPDATES_CONSENT_NOTICE]: consent, [TWO_PLACES_NOTICE]: two, [PRODUCT_HUNT_NOTICE]: launch, [CLOUD_INTRO]: intro, [CLOUD_TRIAL_NOTICE]: trial, [CLOUD_NOTICE]: cloud,
     [MODELGO_OFFER_NOTICE]: modelgo, [BOAT_OFFER_NOTICE]: boat, [ANNOUNCEMENT_NOTICE]: announcement, [STAR_NOTICE]: star });
 const none = () => false;
 const DAY = 86_400_000, NOON = new Date(2026, 9, 9, 12).getTime();
 
 it("the Move from Grok Bot popup goes ahead of everything, and holds the queue while it waits", () => {
-  const all = (grok: boolean | null) => facts(true, true, true, true, true, true, true, true, true, true, grok);
+  const all = (grok: boolean | null) => facts(true, true, true, true, true, true, true, true, true, grok);
   expect(nextNotice(all(true), none)).toBe(GROK_MOVE_NOTICE);
   expect(nextNotice(all(null), none)).toBeNull();
-  expect(nextNotice(all(false), none)).toBe(SIMPLE_MODE_NOTICE);
+  expect(nextNotice(all(false), none)).toBe(WHATS_NEW_NOTICE);
   expect(nextNotice(all(true), none, WHATS_NEW_NOTICE), "not in a launch another notice took").toBe(WHATS_NEW_NOTICE);
   expect(nextNotice(all(true), none, GROK_MOVE_NOTICE), "a reload of the launch it took").toBe(GROK_MOVE_NOTICE);
   expect(GROK_MOVE_NOTICE).toBe("grok-move-2026-11");
 });
 
-it("is one queue: the Simple mode popup first, then What's new, the product-updates question, the launch card, the card after the update, the trial's notice, the My Cloud card, Boat's credit offer, the star", () => {
-  expect(nextNotice(facts(true, true, true, true, true, true, true, true), none)).toBe(SIMPLE_MODE_NOTICE);
-  expect(nextNotice(facts(true, true, true, true, true, true, true, null), none), "nothing shows while the Simple mode popup waits").toBeNull();
-  expect(nextNotice(facts(true, true, true, true, true, true, true, true), id => id === SIMPLE_MODE_NOTICE)).toBe(WHATS_NEW_NOTICE);
-  expect(NOTICES).toEqual([TEAMS_NOTICE, GROK_MOVE_NOTICE, PHONE_UPDATE_NOTICE, SIMPLE_MODE_NOTICE, WHATS_NEW_NOTICE, UPDATES_CONSENT_NOTICE, TWO_PLACES_NOTICE, PRODUCT_HUNT_NOTICE, CLOUD_INTRO, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE, MODELGO_OFFER_NOTICE, BOAT_OFFER_NOTICE, ANNOUNCEMENT_NOTICE, STAR_NOTICE]);
-  expect(nextNotice(facts(true, true, true, true, true, false, false, false, false, true), none), "bots in two places come before any promotion").toBe(TWO_PLACES_NOTICE);
-  expect(nextNotice(facts(true, true, true, true, true, false, true, false, false, true), none), "after the product-updates question").toBe(UPDATES_CONSENT_NOTICE);
-  expect(nextNotice(facts(true, true, true, true, true, false, false, false, false, null), none), "nothing lower shows while main hasn't answered").toBeNull();
-  expect(nextNotice(facts(true, true, true, true, true, true, true), none)).toBe(WHATS_NEW_NOTICE);
-  expect(nextNotice(facts(true, true, true, true, true, true, true), id => id === WHATS_NEW_NOTICE)).toBe(UPDATES_CONSENT_NOTICE);
-  expect(nextNotice(facts(true, true, true, true, true, null, true), none)).toBeNull();
-  expect(nextNotice(facts(true, true, true, true, true, false, null), none)).toBeNull();
-  expect(WHATS_NEW_NOTICE).toBe("whats-new-2026-11");
-  expect(nextNotice(facts(true, true, true, true, true, true), none)).toBe(WHATS_NEW_NOTICE);
-  expect(nextNotice(facts(true, true, true, true, true, null), none)).toBeNull();
-  expect(nextNotice(facts(true, true, true, true, true, true), id => id === WHATS_NEW_NOTICE)).toBe(PRODUCT_HUNT_NOTICE);
-  expect(nextNotice(facts(true, true, true, true, true), none)).toBe(PRODUCT_HUNT_NOTICE);
-  expect(nextNotice(facts(true, true, true, true, null), none)).toBeNull();
-  expect(nextNotice(facts(true, true, true, true, true), id => id === PRODUCT_HUNT_NOTICE)).toBe(CLOUD_INTRO);
-  expect(CLOUD_INTRO).toBe("cloud-trial-intro-v1");
-  expect(nextNotice(facts(true, true, true, true), none)).toBe(CLOUD_INTRO);
-  expect(nextNotice(facts(false, true, true, true), none)).toBe(CLOUD_TRIAL_NOTICE);
-  expect(nextNotice(facts(false, false, true, true), none)).toBe(CLOUD_NOTICE);
-  expect(nextNotice(facts(false, false, false, true), none)).toBe(STAR_NOTICE);
-  const boat = (intro: boolean, trial: boolean, cloud: boolean, offer: boolean | null) => facts(intro, trial, cloud, true, false, false, false, false, offer);
-  expect(nextNotice(boat(false, false, false, true), none)).toBe(BOAT_OFFER_NOTICE);
-  expect(nextNotice(boat(false, true, false, true), none), "a trial's notice goes first").toBe(CLOUD_TRIAL_NOTICE);
-  expect(nextNotice(boat(false, false, true, true), none), "so does the account's card").toBe(CLOUD_NOTICE);
-  expect(nextNotice(boat(false, false, false, null), none), "the star waits for it").toBeNull();
-  expect(nextNotice(boat(false, false, false, true), id => id === BOAT_OFFER_NOTICE)).toBe(STAR_NOTICE);
-  expect(nextNotice(facts(true, true, true, true), id => id === CLOUD_INTRO || id === STAR_NOTICE)).toBe(CLOUD_TRIAL_NOTICE);
-  expect(nextNotice(facts(true, true, true, true), () => true)).toBeNull();
-  expect(nextNotice(facts(false, false, false, false), none)).toBeNull();
-});
 
 it("Boat's credit offer and the Grok Bot move are ones the desktop keeps for its every page, as What's new is", () => {
   expect(DESKTOP_NOTICES).toEqual([WHATS_NEW_NOTICE, BOAT_OFFER_NOTICE, GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, TEAMS_NOTICE]);
 });
 
 it("the Teams What's new goes ahead of every notice, holds the queue while it waits, and the rest keep their order after it", () => {
-  const all = (teams: boolean | null) => facts(true, true, true, true, true, true, true, true, true, true, true, true, true, true, teams);
+  const all = (teams: boolean | null) => facts(true, true, true, true, true, true, true, true, true, true, true, true, true, teams);
   expect(TEAMS_NOTICE).toBe("teams-2026-11b");
   expect(nextNotice(all(true), none)).toBe(TEAMS_NOTICE);
   expect(nextNotice(all(null), none), "nothing shows while it waits").toBeNull();
@@ -85,15 +51,15 @@ it("the Teams What's new goes ahead of every notice, holds the queue while it wa
 });
 
 it("one notice a launch: What's new goes first and Boat's credit offer waits for a later launch; only the product-updates question may follow", () => {
-  const both = facts(false, false, false, true, false, true, false, false, true);
+  const both = facts(false, false, false, true, false, true, false, true);
   expect(nextNotice(both, none)).toBe(WHATS_NEW_NOTICE);
   expect(NOTICES.indexOf(WHATS_NEW_NOTICE), "What's new comes before the Boat card").toBeLessThan(NOTICES.indexOf(BOAT_OFFER_NOTICE));
   expect(nextNotice(both, id => id === WHATS_NEW_NOTICE, WHATS_NEW_NOTICE), "What's new closed: nothing else this launch").toBeNull();
-  expect(nextNotice(facts(false, false, false, true, false, true, true, false, true), id => id === WHATS_NEW_NOTICE, WHATS_NEW_NOTICE), "but the question may follow")
+  expect(nextNotice(facts(false, false, false, true, false, true, true, true), id => id === WHATS_NEW_NOTICE, WHATS_NEW_NOTICE), "but the question may follow")
     .toBe(UPDATES_CONSENT_NOTICE);
   expect(nextNotice(both, none, WHATS_NEW_NOTICE), "a reload while it is up shows it again").toBe(WHATS_NEW_NOTICE);
   expect(nextNotice(both, id => id === WHATS_NEW_NOTICE), "the next launch").toBe(BOAT_OFFER_NOTICE);
-  expect(nextNotice(facts(false, null, false, true, false, false, false, false, true), none, BOAT_OFFER_NOTICE), "a notice this launch didn't take never holds it back")
+  expect(nextNotice(facts(false, null, false, true, false, false, false, true), none, BOAT_OFFER_NOTICE), "a notice this launch didn't take never holds it back")
     .toBe(BOAT_OFFER_NOTICE);
   expect(nextNotice(facts(false, true, false, true), none, BOAT_OFFER_NOTICE), "a trial's notice waits for the next launch too").toBeNull();
 });
@@ -189,7 +155,7 @@ it("someone has used the app before when a conversation from before this launch 
 
 it("ModelGo's card follows update consent and the account's notices, and goes before every other promotion after them", () => {
   const modelgo = ({ consent = false, trial = false, cloud = false, offer = true, boat = true }: { consent?: boolean | null; trial?: boolean | null; cloud?: boolean | null; offer?: boolean | null; boat?: boolean | null }) =>
-    facts(false, trial, cloud, true, false, false, consent, false, boat, false, false, offer);
+    facts(false, trial, cloud, true, false, false, consent, boat, false, false, offer);
   expect(nextNotice(modelgo({}), none)).toBe(MODELGO_OFFER_NOTICE);
   expect(nextNotice(modelgo({ consent: true }), none), "the product-updates question goes first").toBe(UPDATES_CONSENT_NOTICE);
   expect(nextNotice(modelgo({ consent: null }), none), "and holds it while main hasn't answered").toBeNull();
@@ -201,12 +167,12 @@ it("ModelGo's card follows update consent and the account's notices, and goes be
 });
 
 it("Update MausBot on your phone goes right after the Grok Bot popup, ahead of every promotion, and holds the sponsor's card", () => {
-  const all = (phone: boolean | null, grok: boolean | null = false) => facts(true, true, true, true, true, true, true, true, true, true, grok, true, phone);
+  const all = (phone: boolean | null, grok: boolean | null = false) => facts(true, true, true, true, true, true, true, true, true, grok, true, phone);
   expect(nextNotice(all(true), none)).toBe(PHONE_UPDATE_NOTICE);
   expect(nextNotice(all(true, true), none), "the Grok Bot popup still goes first").toBe(GROK_MOVE_NOTICE);
   expect(nextNotice(all(null), none), "nothing lower while it is unknown").toBeNull();
-  expect(nextNotice(all(false), none)).toBe(SIMPLE_MODE_NOTICE);
-  const sponsor = facts(false, false, false, true, false, false, false, false, true, false, false, true, true);
+  expect(nextNotice(all(false), none)).toBe(WHATS_NEW_NOTICE);
+  const sponsor = facts(false, false, false, true, false, false, false, true, false, false, true, true);
   expect(nextNotice(sponsor, none), "ahead of ModelGo, Boat and the star").toBe(PHONE_UPDATE_NOTICE);
   expect(nextNotice(sponsor, none, WHATS_NEW_NOTICE, true), "left for a later launch, it still holds the sponsor's card back").toBeNull();
   expect(nextNotice(sponsor, none, PHONE_UPDATE_NOTICE, true), "closed in its own launch: the card follows").toBe(MODELGO_OFFER_NOTICE);
@@ -226,7 +192,7 @@ it("ModelGo's card follows the launch's notice in the same launch once it is clo
   expect([...FOLLOWERS]).toEqual([UPDATES_CONSENT_NOTICE, MODELGO_OFFER_NOTICE, ANNOUNCEMENT_NOTICE]);
   expect([...MUST_ACT]).toEqual([GROK_MOVE_NOTICE, PHONE_UPDATE_NOTICE, CLOUD_TRIAL_NOTICE, CLOUD_NOTICE]);
   const due = ({ popup = true, consent = false, trial = false, cloud = false, grok = false, intro = false, two = false }: Partial<Record<"popup" | "trial" | "cloud" | "grok" | "intro" | "two", boolean | null>> & { consent?: boolean | null }) =>
-    facts(intro, trial, cloud, true, false, popup, consent, false, true, two, grok, true);
+    facts(intro, trial, cloud, true, false, popup, consent, true, two, grok, true);
   const popupSeen = (id: NoticeId) => id === WHATS_NEW_NOTICE;
   expect(nextNotice(due({}), none), "What's new goes first").toBe(WHATS_NEW_NOTICE);
   expect(nextNotice(due({}), none, WHATS_NEW_NOTICE), "a reload while it is up").toBe(WHATS_NEW_NOTICE);
@@ -242,7 +208,7 @@ it("ModelGo's card follows the launch's notice in the same launch once it is clo
   expect(nextNotice(due({ popup: false, trial: true }), none, CLOUD_TRIAL_NOTICE), "while it is up").toBe(CLOUD_TRIAL_NOTICE);
   expect(nextNotice(due({ popup: false, trial: true }), none, CLOUD_TRIAL_NOTICE, true), "closed, its facts unchanged: the card follows").toBe(MODELGO_OFFER_NOTICE);
   expect(nextNotice(due({ popup: false, grok: true }), none, GROK_MOVE_NOTICE, true), "after the move popup too").toBe(MODELGO_OFFER_NOTICE);
-  const star = facts(false, false, false, true, false, false, false, false, false, false, false, true);
+  const star = facts(false, false, false, true, false, false, false, false, false, false, true);
   expect(nextNotice(star, none, STAR_NOTICE), "a card still up keeps the corner").toBe(STAR_NOTICE);
   expect(nextNotice(star, id => id === STAR_NOTICE, STAR_NOTICE, true), "then the card").toBe(MODELGO_OFFER_NOTICE);
   expect(nextNotice(due({ popup: false, trial: true }), none, MODELGO_OFFER_NOTICE), "a notice due later never takes the card's own launch from it").toBe(MODELGO_OFFER_NOTICE);
@@ -254,7 +220,7 @@ it("ModelGo's card follows the launch's notice in the same launch once it is clo
 it("a card from the announcements file comes after every notice someone must act on and every built-in offer, before the star", () => {
   const remote = ({ consent = false, trial = false, cloud = false, modelgo = false, boat = false, card = true, popup = false, grok = false, phone = false }: { consent?: boolean | null;
     trial?: boolean | null; cloud?: boolean | null; modelgo?: boolean | null; boat?: boolean | null; card?: boolean | null; popup?: boolean | null; grok?: boolean | null; phone?: boolean | null }) =>
-    facts(false, trial, cloud, true, false, popup, consent, false, boat, false, grok, modelgo, phone, card);
+    facts(false, trial, cloud, true, false, popup, consent, boat, false, grok, modelgo, phone, card);
   expect(nextNotice(remote({}), none)).toBe(ANNOUNCEMENT_NOTICE);
   for (const [first, id] of [[{ phone: true }, PHONE_UPDATE_NOTICE], [{ consent: true }, UPDATES_CONSENT_NOTICE], [{ trial: true }, CLOUD_TRIAL_NOTICE], [{ cloud: true }, CLOUD_NOTICE],
     [{ modelgo: true }, MODELGO_OFFER_NOTICE], [{ boat: true }, BOAT_OFFER_NOTICE]] as const) expect(nextNotice(remote(first), none), id).toBe(id);
@@ -267,7 +233,7 @@ it("a card from the announcements file comes after every notice someone must act
 it("a card from the announcements file follows the launch's notice in the same launch, after the question and the sponsor's card, never ahead of a notice to act on", () => {
   const remote = (extra: Partial<Record<"popup" | "consent" | "modelgo" | "boat" | "trial" | "cloud" | "grok" | "phone" | "card", boolean | null>> = {}) => {
     const { popup = true, consent = false, modelgo = false, boat = false, trial = false, cloud = false, grok = false, phone = false, card = true } = extra;
-    return facts(false, trial, cloud, true, false, popup, consent, false, boat, false, grok, modelgo, phone, card);
+    return facts(false, trial, cloud, true, false, popup, consent, boat, false, grok, modelgo, phone, card);
   };
   const popupSeen = (id: NoticeId) => id === WHATS_NEW_NOTICE;
   expect(nextNotice(remote(), none), "What's new goes first").toBe(WHATS_NEW_NOTICE);

@@ -28,7 +28,6 @@ vi.mock("react", async (original) => {
 });
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 // Thread trees are an Advanced surface: Simple mode lists bots only.
-vi.mock("@/lib/interface-mode", async (original) => ({ ...await original<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => true }));
 vi.mock("@/lib/thread-preferences", async (original) => ({ ...await original<typeof import("@/lib/thread-preferences")>(),
   useShowThreads: () => true,
 }));

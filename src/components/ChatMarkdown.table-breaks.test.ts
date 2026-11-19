@@ -78,7 +78,7 @@ it.each([
     const content = host.querySelector("td .whitespace-pre-wrap")!.cloneNode(true) as HTMLElement;
     for (const br of content.querySelectorAll("br")) br.replaceWith(document.createTextNode("\n"));
     expect(content.textContent).toBe(copied);
-    const button = host.querySelector<HTMLButtonElement>('button[aria-label="Copy table"]');
+    const button = host.querySelector<HTMLButtonElement>('button[aria-label="Copy results as CSV"]');
     expect(button).not.toBeNull();
     await act(async () => button!.click());
     expect(writeText).toHaveBeenCalledWith(`Result\r\n"${copied}"`);

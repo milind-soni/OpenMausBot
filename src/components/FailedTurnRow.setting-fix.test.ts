@@ -4,7 +4,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo, Message } from "@/state/store";
 import { failedTurnTool } from "../../shared/failed-turn";
-import { SPEND_LIMIT_REFUSAL } from "../../shared/setting-fixes";
 import { setLocale } from "@/lib/i18n";
 
 const fixture = vi.hoisted(() => {
@@ -25,14 +24,12 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useCaptionChrome: () => ({}),
 }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
-vi.mock("@/lib/interface-mode", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => fixture.advanced }));
 vi.mock("@/lib/use-media-query", async (importOriginal) => ({ ...await importOriginal<typeof import("@/lib/use-media-query")>(), useMediaQuery: () => fixture.phone }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { FailedTurnRow } = await import("./ChatView");
 
 const CREDITS = "Your OpenRouter account is out of credits. Add credits with OpenRouter, then run it again.";
-const SPEND = `${SPEND_LIMIT_REFUSAL} of $5.00 — an admin can raise it under Settings → Spending`;
 const show = (tool: NonNullable<Message["tool"]>, room = false) =>
   renderToStaticMarkup(createElement(FailedTurnRow, { tool, engine: undefined, onRetry: vi.fn(), botId: "scout", threadId: room ? undefined : "t-scout" }));
 const buttons = (html: string) => (html.match(/<button[^>]*>[\s\S]*?<\/button>/g) ?? []).map((button) => button.replace(/<[^>]+>/g, ""));
@@ -59,17 +56,6 @@ describe("a failed turn one setting fixes", () => {
     expect(show(failedTurnTool(CREDITS))).not.toContain("data-failed-turn-fix");
   });
 
-  it("opens Spending for an admin in Advanced mode, and says the way in plain words to anyone else", () => {
-    expect(buttons(show(failedTurnTool(SPEND)))).toEqual(["Open Spending"]);
-    fixture.advanced = false;
-    const simple = show(failedTurnTool(SPEND));
-    expect(buttons(simple)).toEqual([]);
-    expect(simple).toContain("Turn on Advanced mode at the bottom of Settings, then raise the spend limit in Settings → Spending.");
-    fixture.admin = false;
-    const member = show(failedTurnTool(SPEND));
-    expect(buttons(member)).toEqual([]);
-    expect(member).toContain("Ask the owner to raise the spend limit.");
-  });
 
   it("adds nothing to a failure no setting fixes, or for a bot it does not know", () => {
     expect(show(failedTurnTool("the process running this turn's AI ended — the turn was stopped"))).not.toContain("data-failed-turn-fix");

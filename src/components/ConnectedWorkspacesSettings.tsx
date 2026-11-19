@@ -2,7 +2,6 @@ import { t } from "@/lib/i18n";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Laptop, Loader2, Plus } from "lucide-react";
 import { SETTINGS_INPUT, SettingRow, SettingsField, SettingsFoldRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { ComputerSharingSettings } from "./ComputerSharingSettings";
 import { ServerList, type OwnServerSharing } from "./ServerList";
 import { useStore } from "@/state/store";
@@ -13,7 +12,7 @@ type SavedWorkspaces = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>
 
 /** Your computers (the places list, with its label), then Environments on this computer as a section of its own. */
 export function ConnectedWorkspacesSettings({ label, description }: { label?: string; description?: string } = {}) {
-  const advanced = useAdvancedMode();
+
   const [newOpen, setNewOpen] = useState(false);
   const bridge = window.ogb?.environments;
   // Security: the desktop bridge alone is not enough; never offer access the server refuses.
@@ -96,7 +95,7 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
           onSwitch={(id) => void perform(async () => { await bridge.switch(id); return true; })} onForget={(id) => void perform(() => bridge.forget(id))} onComputerAccess={setComputerId} />}
       {saved && error && <p role="alert" className="px-4 text-[12px] leading-4 text-danger">{error}</p>}
     </SettingsGroup>
-    {advanced && saved?.packaged && (
+    {saved?.packaged && (
       <SettingsGroup label={t("connectedWorkspaces.localTitle")} description={t("connectedWorkspaces.localSubtitle")} block="environments">
         <SettingsRows icons>
           {locals.map((entry) => {

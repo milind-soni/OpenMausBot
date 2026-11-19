@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { readAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { ANCHOR_EFFECTS, currentStep, stepNumber, TOUR_STEPS, withTourFinished, type TourEffect, type TourStep } from "@/lib/guided-tour";
 import { t } from "@/lib/i18n";
 import type { MausState } from "@/lib/mascot";
@@ -43,7 +42,7 @@ function press(anchor: string): boolean {
 export function GuidedTour() {
   const { state, dispatch } = useStore();
   const record = state.config?.onboarding;
-  const step = currentStep(record, useAdvancedMode());
+  const step = currentStep(record);
   const saving = useRef(false);
   const pending = useRef<Promise<unknown>>(Promise.resolve());
   const latestRecord = useRef(record);
@@ -83,7 +82,7 @@ export function GuidedTour() {
           dispatch({ type: "togglePlugins", open: false });
           return;
         case "openAutomations":
-          if (!press("nav-automations") && readAdvancedMode()) dispatch({ type: "showRoutines" });
+          if (!press("nav-automations")) dispatch({ type: "showRoutines" });
           return;
         case "backToChat":
           dispatch({ type: "showChat" });

@@ -88,7 +88,7 @@ export function useSidebarDensity(): SidebarDensity {
 }
 
 /** The narrowest the open sidebar gets. */
-export const SIDEBAR_MIN_WIDTH = 240;
+export const SIDEBAR_MIN_WIDTH = 280;
 
 export function clampSidebarWidth(width: number, viewportWidth: number, max = 480): number {
   return Math.max(SIDEBAR_MIN_WIDTH, Math.min(max, viewportWidth - 320, Math.round(width)));

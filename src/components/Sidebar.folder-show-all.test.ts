@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import { initialState, type Bot } from "@/state/store";
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
-vi.mock("@/lib/interface-mode", async (original) => ({ ...await original<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => true }));
 
 const { BotThreadList, botRowProps } = await import("./Sidebar");
 

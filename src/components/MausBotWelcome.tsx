@@ -2,11 +2,9 @@ import { useEffect, useRef, useState, type DragEvent } from "react";
 import { invitedToTeam, teamWelcomeShownThisLaunch, useTeamWelcomeRecord, type TeamWelcomeRecord } from "@/lib/team-welcome";
 import { createPortal } from "react-dom";
 import { BookOpen, Crown, Pencil, Sparkles, Wand2 } from "lucide-react";
-
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { emailGateDone } from "@/lib/analytics";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { DEFAULT_BOT_NAME, myDefaultBot, setWelcomingBot, useViewerEmail } from "@/lib/default-bot";
 import { landInSidebar } from "@/lib/mausbot-landing";
 import { firstReplyPending } from "@/lib/corner-popup";
@@ -99,7 +97,7 @@ const LINES = [[Sparkles, "mausbotWelcome.line.helper"], [BookOpen, "mausbotWelc
 export function MausBotWelcomeCard({ bot, onClose }: { bot: Bot; onClose: () => void }) {
   const { state, dispatch } = useStore();
   const lines = state.config?.team ? LINES.filter(([, key]) => key !== "mausbotWelcome.line.powers") : LINES;
-  const advanced = useAdvancedMode();
+
   const reduced = usePrefersReducedMotion();
   const [draft, setDraft] = useState<WelcomeDraft>(() => draftOf(bot));
   const [editing, setEditing] = useState(false);
@@ -152,7 +150,7 @@ export function MausBotWelcomeCard({ bot, onClose }: { bot: Bot; onClose: () => 
   };
 
   return (
-    <div ref={overlayRef} className={cn("fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-6 pb-6 pt-[min(6vh,48px)]", advanced ? "bg-black/55" : "ui-scrim", leaving && "pointer-events-none")} data-mausbot-welcome="">
+    <div ref={overlayRef} className={cn("fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-6 pb-6 pt-[min(6vh,48px)]", "bg-black/55", leaving && "pointer-events-none")} data-mausbot-welcome="">
       <div
         ref={dialogRef}
         role="dialog"
@@ -165,7 +163,7 @@ export function MausBotWelcomeCard({ bot, onClose }: { bot: Bot; onClose: () => 
           event.preventDefault();
           if (editing && panelRef.current?.contains(event.target as Node)) { setEditing(false); pictureRef.current?.focus(); } else dismiss();
         }}
-        className={cn("animate-pop-in w-full max-w-[460px] rounded-2xl px-6 pb-5 pt-5", advanced ? "border border-hairline/50 bg-panel shadow-2xl" : "ui-modal border-0")}
+        className={cn("animate-pop-in w-full max-w-[460px] rounded-2xl px-6 pb-5 pt-5", "border border-hairline/50 bg-panel shadow-2xl")}
       >
         <div className="flex flex-col items-center text-center">
           <button
@@ -188,7 +186,7 @@ export function MausBotWelcomeCard({ bot, onClose }: { bot: Bot; onClose: () => 
               <Pencil size={13} />
             </span>
           </button>
-          <h2 id="mausbot-welcome-title" className={cn("mt-3 text-ink", advanced ? "text-[20px] font-semibold" : "text-[17px] font-medium leading-6 tracking-[-0.008em]")}>{t("mausbotWelcome.title", { name })}</h2>
+          <h2 id="mausbot-welcome-title" className={cn("mt-3 text-ink", "text-[20px] font-semibold")}>{t("mausbotWelcome.title", { name })}</h2>
           <ul className="mt-3 space-y-1.5 text-left text-[14px] leading-snug text-ink-secondary">
             {lines.map(([Icon, key]) => (
               <li key={key} className="flex items-start gap-2.5"><Icon size={15} className="mt-0.5 shrink-0 text-ink-tertiary" aria-hidden="true" />{t(key)}</li>
@@ -212,13 +210,13 @@ export function MausBotWelcomeCard({ bot, onClose }: { bot: Bot; onClose: () => 
           </div>
         </div>
 
-        <div className={cn("mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:items-center", advanced ? "sm:justify-between" : "sm:justify-end")}>
+        <div className={cn("mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:items-center", "sm:justify-between")}>
           <button type="button" data-mausbot-welcome-later="" onClick={() => choose(false)} title={t("mausbotWelcome.notNowHint", { name })}
-            className={advanced ? "rounded-full px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink" : "ui-button ui-button-pill"}>
+            className={"rounded-full px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink"}>
             {t("mausbotWelcome.notNow")}
           </button>
           <button type="button" data-mausbot-welcome-add="" onClick={() => choose(true)}
-            className={advanced ? "rounded-full bg-accent px-5 py-2.5 text-[14px] font-medium text-accent-ink hover:brightness-110" : "ui-button ui-button-pill ui-button-primary"}>
+            className={"rounded-full bg-accent px-5 py-2.5 text-[14px] font-medium text-accent-ink hover:brightness-110"}>
             {t("mausbotWelcome.add", { name })}
           </button>
         </div>

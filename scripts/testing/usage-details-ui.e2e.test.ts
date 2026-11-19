@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
-import { ENABLE_ADVANCED_UI, agentBrowser, sessionEnv, UI_TOOLS_DIR, type UiHandle } from "./control-omb-ui.ts";
+import { agentBrowser, sessionEnv, UI_TOOLS_DIR, type UiHandle } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const enabled = process.env.OMB_UI_E2E === "1" || Boolean(resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env }));
@@ -29,7 +29,6 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
     if (!info) throw new Error(`UI launcher exited: ${stderr}`);
     const handle = info;
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", handle.ui, ...args]) as Promise<Record<string, any>>;
-    await ui("eval", "--js", ENABLE_ADVANCED_UI);
     await ui("type", "--name", "Message Pepper", "--text", "Check the fixture usage");
     await ui("press", "--keys", "Enter");
     const settled = await ui("wait-settle", "--timeout", "60");

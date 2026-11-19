@@ -23,7 +23,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
     },
   }),
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("./CloudScreenPreview", () => ({ CloudScreenPreview: () => null }));
 vi.mock("./AndroidDevicePanel", () => ({ AndroidDevicePanel: () => null, useAndroidUsbDevices: () => ({ devices: [] }) }));
@@ -87,7 +86,7 @@ const runFrames = () => {
 const activeTab = () => document.querySelector<HTMLElement>('[data-testid="computer-tabs"] [role="tab"][aria-selected="true"]');
 const tabByLabel = (label: string) =>
   [...document.querySelectorAll<HTMLElement>('[data-testid="computer-tabs"] [role="tab"]')].find((candidate) => candidate.textContent?.trim() === label)!;
-const panelClose = () => document.querySelector<HTMLElement>("[data-computer-panel-close]");
+const panelClose = () => document.querySelector<HTMLElement>("[data-side-panel-close]");
 const panelGear = () => document.querySelector<HTMLElement>(`[title=${JSON.stringify(t("computer.botSettings"))}]`)!;
 const chatButton = () => {
   const button = document.createElement("button");
@@ -158,6 +157,15 @@ describe("computer panel entry focus", () => {
     expect(frames).toHaveLength(1);
     runFrames();
     expect(document.activeElement).toBe(activeTab());
+  });
+
+  it("restores the last tab when a browser bot's panel reopens", async () => {
+    const bot = makeBot({ computer: "browser", browser: true });
+    await open(bot);
+    flushSync(() => tabByLabel("Routines").click());
+    root!.unmount();
+    await open(bot);
+    expect(activeTab()?.textContent?.trim()).toBe("Routines");
   });
 
   it("takes the entry focus once per open, not on every mount", async () => {

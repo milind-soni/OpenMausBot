@@ -204,12 +204,11 @@ export function quoteSurface(inset: string, background: string): string {
   return mixSrgb(inset, background, 0.7);
 }
 
-/** `flat`: Simple mode's one even fill, the tone's background with no gradient over it. */
-export function userBubbleStyle(color: MausColor, { flat = false }: { flat?: boolean } = {}): CSSProperties {
+export function userBubbleStyle(color: MausColor): CSSProperties {
   const tone = userBubbleTone(color);
   return {
     backgroundColor: tone.background,
-    backgroundImage: flat ? "none" : tone.gradient,
+    backgroundImage: tone.gradient,
     "--color-bubble-user": tone.background,
     "--color-bubble-user-ink": tone.ink,
     "--color-ink": tone.ink,

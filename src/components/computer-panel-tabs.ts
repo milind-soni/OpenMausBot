@@ -1,5 +1,5 @@
 import { useEffect, type KeyboardEvent, type WheelEvent } from "react";
-import { CalendarClock, Database, FolderOpen, Globe, Monitor, Smartphone, type LucideIcon } from "lucide-react";
+import { CalendarClock, Database, Globe, Monitor, Smartphone, type LucideIcon } from "lucide-react";
 import { readComputerPanelView, writeComputerPanelView, type ComputerPanelView } from "@/lib/computer-panel-view";
 import type { AndroidUsbDevicesStatus } from "./AndroidDevicePanel";
 import type { LocaleKey } from "@/locales";
@@ -10,7 +10,6 @@ export const PANEL_TABS: Record<ComputerPanelView, { Icon: LucideIcon; label: Lo
   android: { Icon: Smartphone, label: "computer.tab.android" },
   browser: { Icon: Globe, label: "computer.tab.browser", tour: "computer-browser" },
   data: { Icon: Database, label: "computer.tab.data", tour: "computer-data" },
-  files: { Icon: FolderOpen, label: "computer.tab.files" },
 };
 
 export const TAB_PANEL_FOCUS = "outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60";

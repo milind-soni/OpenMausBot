@@ -31,7 +31,7 @@ vi.mock("react", async (original) => ({
   useEffect: () => {},
 }));
 // This hook fixture does not emulate React's render-time state retries.
-vi.mock("./MenuMotion", () => ({ useMenuMotion: (open: boolean) => ({ shown: open, closing: false, className: "" }) }));
+vi.mock("./MenuMotion", async (original) => ({ ...await original<typeof import("./MenuMotion")>(), useMenuMotion: (open: boolean) => ({ shown: open, closing: false, className: "" }) }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   useStore: () => ({
@@ -43,7 +43,6 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 
 // These cases cover the full picker; Simple mode has its own file.
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
 
 const { ModelPicker } = await import("./ModelPicker");
 const { LOCAL_PROBE_TIMEOUT_MS, offersLocalModels, probeLocalModels } = await import("./local-model-probe");

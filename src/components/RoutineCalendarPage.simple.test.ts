@@ -28,7 +28,6 @@ vi.mock("react", async (original) => ({
     }];
   },
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, api: fixture.api, useStore: () => ({ state: fixture.state ?? original.initialState, dispatch: fixture.dispatch }) };
@@ -275,22 +274,12 @@ describe("routine drawer", () => {
 });
 
 describe("routine editor", () => {
-  const editor = (routineToEdit?: Routine) => markup(createElement(EventEditor, {
+  const editor = (routineToEdit?: Routine, plain = true) => markup(createElement(EventEditor, {
     seed: { kind: "routine", at: Date.now() + 3_600_000, durationMinutes: 30, botIds: [bot.id], routine: routineToEdit },
-    bots: [bot], onClose: vi.fn(), onSavedCall: vi.fn(),
+    bots: [bot], plain, onClose: vi.fn(), onSavedCall: vi.fn(),
   }));
   const hidden = ['<select aria-label="Repeat"', "Routine safety limit", "Runs the whole job on the bot&#x27;s cloud desktop", "Add attachment", "Post results to", "Routine type"];
 
-  it("keeps Simple mode to the basics with everything else behind More options", () => {
-    const html = editor();
-    for (const text of ["New routine", 'placeholder="What should happen?"', "Who does it", "When", "Once", "Every day", "Weekdays", "Every week", "More options"]) {
-      expect(html, text).toContain(text);
-    }
-    expect(html).toContain('aria-expanded="false"');
-    for (const text of hidden) expect(html, text).not.toContain(text);
-    expect(html).toMatch(/>Save<\/button>/);
-    expect(html).not.toMatch(/routine<\/button>/i);
-  });
 
   it("marks the routine's repeat choice", () => {
     expect(editor(routine)).toMatch(/aria-pressed="true"[^>]*>Every day</);
@@ -382,13 +371,13 @@ describe("routine editor", () => {
     fixture.advanced = true;
     const { resultsThreadId: _chosen, ...unchosen } = routine;
     const destination = (html: string) => html.slice(html.indexOf("Post results to")).match(/^[\s\S]*?<\/select>/)![0];
-    expect(destination(editor(unchosen))).toContain('<option value="new" selected="">The bot&#x27;s main thread</option>');
-    expect(destination(editor(routine))).toContain('<option value="brief-thread" selected="">Morning briefs</option>');
+    expect(destination(editor(unchosen, false))).toContain('<option value="new" selected="">The bot&#x27;s main thread</option>');
+    expect(destination(editor(routine, false))).toContain('<option value="brief-thread" selected="">Morning briefs</option>');
   });
 
   it("leaves the Advanced editor as it was", () => {
     fixture.advanced = true;
-    const html = editor();
+    const html = editor(undefined, false);
     for (const text of ['placeholder="Add title"', '<select aria-label="Repeat"', "Assign a bot", "Runs the whole job on the bot&#x27;s cloud desktop", "Post results to", "Routine type", "New event"]) {
       expect(html, text).toContain(text);
     }
@@ -408,7 +397,7 @@ describe("a new routine's audience on a team's Cloud", () => {
     fixture.values = [];
     fixture.api.mockClear();
     const props = { seed: { kind: "routine" as const, at: Date.now() + 3_600_000, durationMinutes: 30, botIds: [onScreen.id], name: "Salary check", description: "Check the bands" },
-      bots: [onScreen, other], onClose: vi.fn(), onSavedCall: vi.fn() };
+      bots: [onScreen, other], plain: true, onClose: vi.fn(), onSavedCall: vi.fn() };
     const tree = () => capture(() => EventEditor(props));
     const line = () => tree().find(named("RoutineAudience"))!.props as { value: unknown; bot?: Bot; team?: { name: string } };
     const saved = () => {

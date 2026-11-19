@@ -57,10 +57,8 @@ where they belong instead of adding new places.
   A bot gets on with the work; a change that needs undoing gets **Undo**.
 - **Bots set themselves up.** A new bot asks its questions in chat
   (`/setup`). Don't add form fields for things the bot can learn by asking.
-- **Simple mode comes first.** It is the default for new installs. Design the
-  Simple version, then decide what Advanced adds (see [section 13](#13-simple-and-advanced-mode)).
 - **Don't hide everyday features.** A thing most people use must be reachable
-  in two clicks from the chat in Simple mode.
+  in two clicks from the chat.
 
 ## 3. Colour
 
@@ -290,21 +288,6 @@ Before a UI change is done, it handles each of these:
   Arabic or Hebrew text, no avatar.
 - **Narrow window, touch screen, light and dark skins.**
 
-## 13. Simple and Advanced mode
-
-`useAdvancedMode()` from `src/lib/interface-mode.ts` tells you which mode is
-on. Simple is the default for new installs.
-
-- **Simple mode shows what a person needs to talk to bots and get work done.**
-  Tokens, usage, inspectors, raw logs and developer tools belong in Advanced.
-- **Advanced adds; it doesn't rearrange.** The same thing sits in the same
-  place in both modes. Advanced may show more rows or more detail.
-  One exception: where Advanced already shows something in place (a bot's
-  threads as a tree under its row), Simple may offer a shortcut to the same
-  thing there instead of a second copy of it: a menu that opens on a click
-  of a small chevron, never on hover.
-- **Switching modes never loses data.**
-
 ## 14. Accessibility
 
 - **Keyboard focus.** Buttons and search fields keep their resting appearance
@@ -347,8 +330,7 @@ on. Simple is the default for new installs.
 
 - [ ] It follows sections 1–14, or the PR changes this file and says why.
 - [ ] Only tokens, the radius scale, the type table and existing components.
-- [ ] Checked in **Midnight and Daylight**, in **Simple mode** (and Advanced
-      if you touched it), at 1440×900 and at a narrow width.
+- [ ] Checked in **Midnight and Daylight**, at the supported window widths, at 1440×900 and at a narrow width.
 - [ ] Every state in [section 12](#12-states) handled.
 - [ ] Works with the keyboard alone; focus is visible throughout.
 - [ ] New strings go through `t()`; `pnpm i18n:check` passes.

@@ -285,7 +285,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const passkeyWall = passkeyWallAt(nav.url);
   return <div ref={panel} className={maximized
     ? "fixed inset-0 z-50 flex flex-col overflow-hidden bg-card text-ink"
-    : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card text-ink"} data-browser-transport={stream ? "stream" : "live"}>
+    : "flex min-h-0 flex-1 flex-col overflow-hidden border-t border-hairline/40 bg-app text-ink"} data-browser-transport={stream ? "stream" : "live"}>
     <ChromeRow
       ref={address}
       botName={bot.name}
@@ -334,7 +334,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     {error && <div role="alert" className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline/30 px-3 py-2 text-[12px] text-danger"><span>{error}</span>{!connected && <button className="shrink-0 underline" onClick={reconnect}>{t("browser.panel.reconnect")}</button>}</div>}
     {takeStatus === "stale" && <div role="status" className="shrink-0 border-b border-hairline/30 px-3 py-1.5 text-[12px] text-accent-text">{t("browser.control.stale", { name: bot.name })}</div>}
     {passkeyWall && passkeyDismissed !== nav.url && <PasskeyNotice wall={passkeyWall} botName={bot.name} onDismiss={() => setPasskeyDismissed(nav.url)} />}
-    <div className="relative flex min-h-0 flex-1 flex-col bg-inset/40">
+    <div className="relative flex min-h-0 flex-1 flex-col bg-app">
       {shown ? (
         <StreamSurface
           key={`${attempt}:${stream ? "stream" : "live"}:${bot.browserProfile ?? ""}`}
@@ -396,7 +396,7 @@ export function BrowserPanel({ bot, signIn, page }: { bot: Bot; signIn?: Browser
   };
   if (bot.browser === false) return <div className="p-5 text-[13px] text-ink-secondary">{t("browser.panel.enableBot")}</div>;
   if (engine?.kind === "engine" && !installing && !engine.installError) return <LiveBrowser key={bot.id} bot={bot} signIn={signIn} page={page} />;
-  return <div className="flex min-h-0 flex-1 flex-col items-start justify-center gap-3 rounded-xl bg-card p-5">
+  return <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-5 py-10 text-center">
     <div className="text-[15px] font-medium text-ink">{engine?.kind === "engine" ? t("browser.panel.installIncomplete") : t("browser.panel.engineNotInstalled")}</div>
     <p className="text-[13px] leading-relaxed text-ink-secondary">{engine?.kind === "engine" ? t("browser.panel.installIncompleteHelp") : engine?.installable && admin !== false ? t("browser.panel.engineNotInstalledHelp", { name: bot.name }) : browserUnavailableReason(state.config)}</p>
     {engine?.installable || engine?.kind === "engine" ? <button type="button" onClick={() => void install()} disabled={installing || admin !== true} className="rounded-lg bg-accent px-3 py-1.5 text-[13px] font-medium text-accent-ink disabled:opacity-60">{installing ? t("browser.panel.installing") : engine?.kind === "engine" ? t("browser.panel.retryInstall") : t("browser.panel.installEngine")}</button> : null}

@@ -24,7 +24,7 @@ describe("the Apps faces", () => {
 
   it("draws a 36px pill with a 14px medium label and three overlapping 16px logos whose outer two fan out on hover", () => {
     const html = renderToStaticMarkup(createElement(SidebarConnectApps));
-    expect(html).toMatch(/class="group\/apps flex h-9 min-w-0 flex-1 items-center justify-center gap-1\.5 rounded-full pl-4 pr-3 text-\[14px\] font-medium leading-5 text-ink /);
+    expect(html).toMatch(/class="group\/apps flex h-9 flex-1 items-center justify-center gap-1\.5 rounded-full px-2\.5 text-\[14px\] font-medium leading-5 text-ink /);
     const faces = [...html.matchAll(/data-app-face="[^"]+" class="([^"]*)"/g)].map(([, classes]) => classes!);
     expect(faces).toHaveLength(3);
     for (const face of faces) expect(face).toContain("size-[18px] shrink-0 items-center justify-center overflow-hidden rounded-md p-px");
@@ -34,9 +34,9 @@ describe("the Apps faces", () => {
     expect(faces[2]).toContain("motion-safe:group-hover/apps:translate-x-[3px] motion-safe:group-hover/apps:rotate-[8deg]");
   });
 
-  it("is a round 36px puzzle button on the collapsed rail, named for screen readers", () => {
+  it("is a rounded 36px puzzle button on the collapsed rail, named for screen readers", () => {
     const html = renderToStaticMarkup(createElement(SidebarConnectApps, { circle: true }));
-    expect(html).toMatch(/data-tour="nav-apps"[^>]*aria-label="Apps" title="Apps" class="[^"]*\bsize-9\b[^"]*\brounded-full\b/);
+    expect(html).toMatch(/data-tour="nav-apps"[^>]*aria-label="Apps" title="Apps" class="[^"]*\bsize-9\b[^"]*\brounded-xl\b/);
     expect(html).toContain("lucide-puzzle");
     expect(html).not.toContain("data-app-face");
   });

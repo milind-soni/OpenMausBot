@@ -23,10 +23,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: "darwin" }, localComputer: { available: true } }, ready: true }),
   useCaptionChrome: () => ({}),
 }));
-vi.mock("@/lib/interface-mode", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/lib/interface-mode")>(),
-  useAdvancedMode: () => fixture.advanced,
-}));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.ownerOrAdmin }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
@@ -68,10 +64,8 @@ describe("J11: a failed place's row", () => {
     expect(show(passing).buttons).toHaveLength(0);
   });
 
-  it("leads a person's pin back to the grid's choice in Simple, and to the composer's in Advanced", () => {
+  it("offers to clear a conversation’s pinned place", () => {
     const pinned = stored({ state: "cc-no-start", params: { bot: "Scout" }, source: "pin" });
-    expect(show(pinned).buttons[0]).toContain("Use Cloud desktop");
-    fixture.advanced = true;
     expect(show(pinned).buttons[0]).toContain("Clear this conversation&#x27;s place");
   });
 
@@ -85,7 +79,7 @@ describe("J11: a failed place's row", () => {
   it("reads the Boat sign-up as My Cloud's on a desktop with a paid plan", () => {
     const needsKey: PlaceRow = { state: "cc-needs-key", params: { bot: "Scout" }, source: "works-on" };
     expect(show(stored(needsKey)).html).toContain("Bots here can get their own cloud desktops from Boat, a paid service.");
-    const seat = { server: "mac", plan: true, role: "admin", mode: "simple" } as const;
+    const seat = { server: "mac", plan: true, role: "admin" } as const;
     expect(placeRowViewFor(needsKey, seat)).toMatchObject({
       state: "cc-on-my-cloud", line: "Cloud desktops from your plan work for Cloud bots for now.", action: { id: "open-my-cloud" },
     });

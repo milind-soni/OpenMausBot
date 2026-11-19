@@ -15,7 +15,6 @@ vi.mock("@/state/store", async (importOriginal) => {
     useStore: () => ({ state: { ...original.initialState, settingsOpen: true }, dispatch: fixture.dispatch, flushBotPatches: () => Promise.resolve(null) }),
   };
 });
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, readAdvancedMode: () => true, setAdvancedMode: vi.fn() }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => false }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),

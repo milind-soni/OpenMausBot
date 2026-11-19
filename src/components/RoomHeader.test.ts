@@ -1,9 +1,7 @@
 // @vitest-environment happy-dom
 import { createElement } from "react";
-import { flushSync } from "react-dom";
-import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState, Bot, Group } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({ advanced: false, state: null as Partial<AppState> | null, dispatch: vi.fn(), chrome: undefined as unknown }));
@@ -11,7 +9,6 @@ vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: { ...original.initialState, ...fixture.state }, dispatch: fixture.dispatch }) };
 });
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, readAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => {
   const original = await importOriginal<typeof import("./DesktopCapabilities")>();
   return {
@@ -23,9 +20,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => {
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 
 const { GroupView } = await import("./GroupView");
-const { RoomHeader } = await import("./RoomHeader");
-const { captionChrome } = await import("./DesktopCapabilities");
-const { closeRoomPanel, useRoomPanel } = await import("@/lib/room-panel");
 
 const NAMES = ["Desk Manager", "Vendor Bench", "Job Board Sourcer", "Paperwork", "Phone Screener", "Matcher", "Interview Coordinator", "Submission Writer", "Timesheets"];
 const bots: Bot[] = NAMES.map((name, index) => ({
@@ -66,34 +60,13 @@ const shown = (markup: string) => Object.entries(CONTROLS).filter(([, mark]) => 
 const BULLETIN = "Desk HQ: the recruiting desk&#x27;s room.";
 
 beforeEach(() => {
-  fixture.advanced = false;
   fixture.state = { bots };
   fixture.chrome = undefined;
   fixture.dispatch.mockReset();
 });
-afterEach(() => closeRoomPanel());
 
-describe("the room header in Simple mode", () => {
-  it("shows only the room's name and up to three faces with +N", () => {
-    const markup = view(room());
-    const head = header(markup);
-    expect(shown(head)).toEqual(["members"]);
-    expect(head).toContain("data-room-name=");
-    expect(head).toContain('aria-label="Open settings for Desk HQ"');
-    expect(head).toContain("The recruiting desk");
-    expect(head.match(/data-held|title="(?:Desk Manager|Vendor Bench|Job Board Sourcer|Paperwork|Phone Screener|Matcher|Interview Coordinator|Submission Writer|Timesheets)"/g)).toHaveLength(3);
-    expect(head).toContain(">+6</span>");
-    expect(markup).not.toContain(BULLETIN);
-  });
-
-  it("draws no +N while every member has a face", () => {
-    const head = header(view(room({ memberIds: ["bot-0", "bot-1", "bot-2"] })));
-    expect(head.match(/title="(?:Desk Manager|Vendor Bench|Job Board Sourcer)"/g)).toHaveLength(3);
-    expect(head).not.toMatch(/>\+\d/);
-  });
-
-  it("keeps every control and the instructions line in Advanced mode", () => {
-    fixture.advanced = true;
+describe("the room header", () => {
+  it("keeps every control and the instructions line", () => {
     const markup = view(room());
     expect(shown(header(markup))).toEqual(Object.keys(CONTROLS));
     expect(header(markup)).not.toContain("data-room-name");
@@ -118,53 +91,5 @@ describe("the room header in Simple mode", () => {
     const markup = view(room({ setupCompletedAt: null, setupSkippedAt: null }));
     expect(shown(header(markup))).toEqual(["find", "export", "usage", "members"]);
     expect(header(markup)).not.toContain("data-room-name");
-  });
-});
-
-describe("the Simple header's buttons", () => {
-  let host: HTMLDivElement;
-  let root: Root;
-  const opened = { id: null as string | null };
-  function Probe() {
-    opened.id = useRoomPanel();
-    return null;
-  }
-  const onOpenMembers = vi.fn();
-  const draw = () => flushSync(() => root.render([
-    createElement(RoomHeader, {
-      key: "header", group: room(), members: bots, simple: true, setupPending: false, remoteClient: false, findOpen: false,
-      onToggleFind: vi.fn(), onToggleFolder: vi.fn(), onOpenMembers, membersTriggerRef: { current: null },
-    }),
-    createElement(Probe, { key: "probe" }),
-  ]));
-  beforeEach(() => {
-    host = document.createElement("div");
-    document.body.append(host);
-    root = createRoot(host);
-  });
-  afterEach(() => {
-    flushSync(() => root.unmount());
-    host.remove();
-  });
-
-  it("opens the Room panel from the room's name, and Manage members from the faces", () => {
-    draw();
-    flushSync(() => host.querySelector<HTMLButtonElement>("[data-room-name]")!.click());
-    expect(opened.id).toBe("desk");
-    flushSync(() => host.querySelector<HTMLButtonElement>("[data-room-faces]")!.click());
-    expect(onOpenMembers).toHaveBeenCalledTimes(1);
-  });
-
-  it("cuts both buttons out of the window's drag region", () => {
-    fixture.chrome = captionChrome("mac-inset");
-    // Read off the markup: happy-dom's CSSStyleDeclaration drops the Electron-only property.
-    const markup = renderToStaticMarkup(createElement(RoomHeader, {
-      group: room(), members: bots, simple: true, setupPending: false, remoteClient: false, findOpen: false,
-      onToggleFind: vi.fn(), onToggleFolder: vi.fn(), onOpenMembers, membersTriggerRef: { current: null },
-    }));
-    expect(markup).toMatch(/^<div data-window-drag="" style="-webkit-app-region:drag"/);
-    const buttons = markup.match(/<button[^>]*>/g)!;
-    expect(buttons).toHaveLength(2);
-    for (const button of buttons) expect(button).toContain('style="-webkit-app-region:no-drag"');
   });
 });

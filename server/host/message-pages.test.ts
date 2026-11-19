@@ -57,7 +57,9 @@ describe("pageMessage", () => {
 
 it("paginates chat rows across ordinary tool calls and keeps coordination", () => {
   const rows = [step("", { id: "a", kind: "text" }), step(""), step("", { id: "b", roomRequest: { id: "q", phase: "result" } })];
-  const pages = messagePages({ activePath: () => rows, activeLeaf: () => "b", messagesFor: vi.fn(), messagesBefore: vi.fn(), messagesTail: vi.fn() });
+  const pages = messagePages({ activePath: vi.fn(), activePathIndex: () => ({
+    messages: rows, positions: new Map(rows.map((row, index) => [row.id, index])), leafId: "b",
+  }), activeLeaf: () => "b", messagesFor: vi.fn(), messagesBefore: vi.fn(), messagesTail: vi.fn() });
   expect(pages.messagePage("t", 1, true)).toMatchObject({ messages: [{ id: "b" }], hasMore: true });
   expect(pages.messagePageBefore("t", "b", 1, true)).toMatchObject({ messages: [{ id: "a" }], hasMore: false });
 });
@@ -65,7 +67,36 @@ it("paginates chat rows across ordinary tool calls and keeps coordination", () =
 it("returns just the latest text preview for a metadata list", () => {
   const text = step("", { id: "said", kind: "text", text: "Saved", parentId: null });
   const tool = step("output", { parentId: text.id });
-  const pages = messagePages({ activePath: vi.fn(), activeLeaf: vi.fn(), messagesFor: vi.fn(), messagesBefore: vi.fn(),
+  const pages = messagePages({ activePath: vi.fn(), activePathIndex: vi.fn(), activeLeaf: vi.fn(), messagesFor: vi.fn(), messagesBefore: vi.fn(),
     messagesTail: () => ({ messages: [text, tool], activeLeafId: tool.id, hasMore: false }) });
   expect(pages.messagePage("t", 0, false, true)).toEqual({ messages: [], previewText: "Saved", activeLeafId: tool.id });
+});
+
+it("stops scanning a long active branch after finding a page and one more visible row", () => {
+  const read = vi.fn();
+  const rows = Array.from({ length: 10_000 }, (_, i) => ({
+    ...step("", { id: String(i), kind: i % 2 === 0 ? "text" : "activity" }),
+    get kind(): Message["kind"] {
+      read(i);
+      return i % 2 === 0 ? "text" : "activity";
+    },
+  }));
+  const pages = messagePages({
+    activePath: vi.fn(), activeLeaf: vi.fn(), messagesFor: vi.fn(), messagesBefore: vi.fn(), messagesTail: vi.fn(),
+    activePathIndex: () => ({ messages: rows, positions: new Map([["8000", 8000]]), leafId: "9999" }),
+  });
+  expect(pages.messagePageBefore("t", "8000", 2, true)).toMatchObject({
+    messages: [{ id: "7996" }, { id: "7998" }], hasMore: true, activeLeafId: "9999",
+  });
+  expect(read.mock.calls.every(([index]) => index >= 7994 && index < 8000)).toBe(true);
+});
+
+it("keeps terminal failures while filtering ordinary tool calls", () => {
+  const failure = step("", { id: "failure", tool: { name: "error: Sign in again", ok: false } });
+  const rows = [failure, step("")];
+  const pages = messagePages({
+    activePath: vi.fn(), activeLeaf: vi.fn(), messagesFor: vi.fn(), messagesBefore: vi.fn(), messagesTail: vi.fn(),
+    activePathIndex: () => ({ messages: rows, positions: new Map(), leafId: "m1" }),
+  });
+  expect(pages.messagePage("t", 1, true)).toMatchObject({ messages: [failure], hasMore: false });
 });

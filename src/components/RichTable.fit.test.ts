@@ -8,12 +8,10 @@ import { flushSync } from "react-dom";
 import { describe, expect, it, vi } from "vitest";
 import { RichTable } from "./RichTable";
 import { ChatMarkdown } from "./ChatMarkdown";
-import { ReplyBlocks } from "./ReplyBlocks";
 import { CHAR_PX, COLUMN_MAX_CHARS, COLUMN_MIN_CHARS, columnMinimums, fitsColumns } from "@/lib/table-fit";
 import { formattedReplyWidth } from "@/lib/formatted-reply";
 
 // Simple mode draws its own plain table; this pins the Advanced table's fitting.
-vi.mock("@/lib/interface-mode", async (original) => ({ ...(await original<typeof import("@/lib/interface-mode")>()), useAdvancedMode: () => true, readAdvancedMode: () => true }));
 
 const header = ["App", "Stars", "License", "Target user", "Strength", "Weakness", "Verdict"];
 const row = ["OpenHands (ex-OpenDevin)", "~85k", "MIT", "Developers who want an autonomous coder",
@@ -102,16 +100,4 @@ describe("a table in a reply", () => {
     expect(css).toMatch(/\.chat-wide \.chat-md > :not\(\.chat-table\) \{\s*max-width: var\(--chat-prose-max\);\s*min-width: 100%;/);
   });
 
-  it("lets Simple mode's prose widen the bubble only to the reading width, then fill the width its tables gave it", () => {
-    const doc = parse(renderToStaticMarkup(createElement(ReplyBlocks, {
-      blocks: [{ kind: "prose", text: "Before" }, { kind: "table", text: markdown }, { kind: "prose", text: "After" }],
-      citation: { messageId: "m1", ownerType: "bot", ownerId: "b1", threadId: "t1" },
-      render: (text: string) => text,
-    })));
-    expect(doc.querySelector("[data-reply-bubble]")!.className).toContain("w-fit");
-    const prose = [...doc.querySelectorAll("[data-reply-prose]")];
-    expect(prose).toHaveLength(2);
-    for (const block of prose) expect(block.className).toBe("min-w-full max-w-[var(--chat-bubble-max)]");
-    expect(doc.querySelector("[data-reply-table]")!.className).toBe("min-w-0");
-  });
 });

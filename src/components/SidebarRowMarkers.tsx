@@ -11,6 +11,10 @@ export function rowSurface(selected: boolean): string {
 /** The conversation the chat window has open: the same plain fill as a selected row. */
 export const rowSelectedSurface = "bg-raised";
 
+export function sidebarRowTone(selected: boolean): string {
+  return selected ? rowSelectedSurface : "hover:bg-raised/50";
+}
+
 export type RowActivity = "working" | "failed" | "teammate" | "queued";
 
 const ACTIVITY = {

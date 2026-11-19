@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { quietRow } from "@/components/chat-bubble";
 import { roomActivityVisible } from "./room-activity";
 import type { Message } from "@/state/store";
 
@@ -32,16 +31,6 @@ describe("roomActivityVisible", () => {
     expect(roomActivityVisible(chip({ tool: { name: "error: engine missing" } }), false)).toBe(true);
   });
 
-  it("shows the same activity a 1:1 chat shows when tool calls are off", () => {
-    const rows = [
-      chip({}),
-      chip({ tool: { name: "Ran a command", ok: false } }),
-      chip({ tool: { name: "error: engine missing" } }),
-      chip({ tool: { name: "stopped: Stopped", ok: true } }),
-      chip({ tool: { name: "Messaged @Ada" }, comm: { groupId: "g1", withBotId: "ada", withName: "Ada", withColor: "teal" } }),
-    ];
-    for (const row of rows) expect(roomActivityVisible(row, false), row.tool?.name).toBe(!quietRow(row, false));
-  });
 
   it("always shows an opened-thread chip, the only trace a bot started a thread", () => {
     const opened = chip({

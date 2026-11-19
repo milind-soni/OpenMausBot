@@ -6,8 +6,6 @@ export const TEAMS_NOTICE = "teams-2026-11b";
 /** The What's new popup's campaign: each person sees it once. A new id shows it once more. */
 export const WHATS_NEW_NOTICE = "whats-new-2026-11";
 export const UPDATES_CONSENT_NOTICE = "updates-consent";
-/** The Simple mode popup, once per browser (simple-mode-prompt.ts keeps whether it was closed). */
-export const SIMPLE_MODE_NOTICE = "simple-mode-prompt";
 export const CLOUD_INTRO = "cloud-trial-intro-v1";
 export const CLOUD_TRIAL_NOTICE = "cloud-trial-notice";
 export const CLOUD_NOTICE = "cloud-notice";
@@ -38,7 +36,6 @@ export const NOTICES = [
   TEAMS_NOTICE,
   GROK_MOVE_NOTICE,
   PHONE_UPDATE_NOTICE,
-  SIMPLE_MODE_NOTICE,
   WHATS_NEW_NOTICE,
   UPDATES_CONSENT_NOTICE,
   TWO_PLACES_NOTICE,

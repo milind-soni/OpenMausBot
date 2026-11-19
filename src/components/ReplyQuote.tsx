@@ -12,29 +12,32 @@ export function ReplyQuote({
   onJump,
   onClear,
   compact = false,
+  inverse = false,
 }: {
   message: Message;
   fallbackName?: string;
   onJump?: () => void;
   onClear?: () => void;
   compact?: boolean;
+  inverse?: boolean;
 }) {
   const name = replyAuthor(message, fallbackName);
   const body = (
     <>
       <Reply size={compact ? 14 : 15} strokeWidth={1.5} aria-hidden="true" className="shrink-0 rtl:-scale-x-100" />
       <span className="sr-only">{t("chat.reply.replyingTo", { name })}: </span>
-      <span aria-hidden="true" className="shrink-0 font-medium text-ink">{name}</span>
+      <span aria-hidden="true" className={cn("shrink-0 font-medium", !inverse && "text-ink")}>{name}</span>
       <span dir="auto" className="min-w-0 flex-1 truncate">{replySnippet(peerLine(message)?.body ?? message.text ?? "")}</span>
     </>
   );
   return (
     <div data-reply-quote className={cn(
-      "flex min-w-0 items-center gap-2 rounded-2xl bg-ink/[0.06] text-ink-secondary",
+      "flex min-w-0 items-center gap-2 rounded-2xl",
+      inverse ? "bg-app/15 text-app" : "bg-ink/[0.06] text-ink-secondary",
       compact ? "py-1 ps-2.5 pe-2 text-[13px] leading-5" : "py-1.5 ps-3 pe-1.5 text-[13px] leading-5",
     )}>
       {onJump ? (
-        <button type="button" onClick={onJump} className="flex min-w-0 flex-1 items-center gap-2 rounded-xl text-start hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus" title={t("chat.reply.jump")}>
+        <button type="button" onClick={onJump} className={cn("flex min-w-0 flex-1 items-center gap-2 rounded-xl text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus", !inverse && "hover:text-ink")} title={t("chat.reply.jump")}>
           {body}
         </button>
       ) : (

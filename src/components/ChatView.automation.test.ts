@@ -76,7 +76,6 @@ afterAll(() => {
 
 describe("an automation's line in the chat", () => {
   it("lets Advanced mode hide routine updates and open the bot's run history", async () => {
-    localStorage.setItem("omb-advanced-mode", "1");
     try {
       await draw(transcript([
         { id: "routine", parentId: "m2", role: "bot", kind: "text", text: "No new calls.", at: at(3), automation: line("run-1") },
@@ -107,7 +106,6 @@ describe("an automation's line in the chat", () => {
       flushSync(() => document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="' + t("chat.automation.showInChat") + '"]')!.click());
       expect(document.querySelector('[data-mid="routine"]')?.textContent).toContain("No new calls.");
     } finally {
-      localStorage.removeItem("omb-advanced-mode");
       localStorage.removeItem("omb-advanced-chat-automation");
       localStorage.removeItem("omb-advanced-chat-tools");
     }

@@ -1242,39 +1242,10 @@
 .chat-md :is(strong, b) {
   font-weight: 600;
 }
-[data-chat-bubble="simple"] :is(.chat-md, .chat-text),
-[data-chat-bubble="simple"].chat-text {
-  line-height: 22px;
-}
-[data-chat-bubble="simple"] .chat-md > * + * {
-  margin-top: 10px;
-}
 /* No lone last word in a bubble or a reply's paragraphs. */
-[data-chat-bubble="simple"],
 .chat-md :is(p, li, blockquote) {
   text-wrap: pretty;
 }
-[data-chat-bubble="simple"] .chat-md > * + .md-heading {
-  margin-top: 18px;
-}
-[data-chat-bubble="simple"] .chat-md > .md-heading:first-child {
-  margin-top: 0;
-}
-/* A short line keeps the tight chat bubble; a structured reply gets room to breathe. */
-[data-chat-bubble="simple"]:has(> .chat-md > :is(.md-heading, ul, ol, blockquote), > .chat-md pre),
-[data-reply-bubble] {
-  padding: 12px 16px;
-}
-/* A table inside a reply is drawn in lines on the bubble, not as another grey box: a hairline edge, a faint header. */
-[data-reply-bubble] [data-table-card] {
-  width: 100%;
-  border-radius: 12px;
-  background: transparent;
-  /* An outline, not a border or inset shadow, so the header's fill can't paint over the top edge. */
-  outline: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
-  outline-offset: -1px;
-}
-/* A code block in a reply is drawn the same way, so the reply's inset blocks speak one language. */
 /* The resting grey logos blend into the pill, so a favicon's own white disc or box drops out and only its mark is
    left (Google's G read as ©): multiply on light skins, invert + screen on dark. In base, so hover utilities win. */
 @layer base {
@@ -1284,29 +1255,6 @@
   }
 }
 
-[data-reply-bubble] .chat-code-block {
-  background: color-mix(in srgb, var(--color-card), var(--color-ink) 3%);
-  outline: 1px solid color-mix(in srgb, var(--color-ink) 10%, transparent);
-  outline-offset: -1px;
-}
-[data-reply-bubble] [data-table-card] thead {
-  background: color-mix(in srgb, var(--color-card), var(--color-ink) 4%);
-}
-:root[data-skin="daylight"] [data-reply-bubble] [data-table-card] thead {
-  background: color-mix(in srgb, var(--color-card), var(--color-ink) 3%);
-}
-/* A section that opens right after a table keeps the space a heading gets elsewhere in the reply. */
-[data-reply-bubble] > [data-reply-table] + * .chat-md > .md-heading:first-child {
-  margin-top: 6px;
-}
-/* A card under its own bot's bubble (and a bubble under its card) sits 12px below it, not the 16px between senders. */
-[data-simple-rows] > [data-tuck] > :first-child {
-  margin-top: -4px;
-}
-/* Arabic and Hebrew script needs the taller line the rest of the app gives it. */
-[data-chat-bubble="simple"] .chat-md [dir="rtl"] {
-  line-height: 1.75;
-}
 
 .chat-code-actions > button:focus-visible {
   outline: 2px solid var(--color-focus);
@@ -2391,9 +2339,6 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   color: var(--color-ink);
   animation: sheen-letters var(--sheen-period) linear var(--sheen-delay) infinite;
 }
-/* Simple mode's typing row is quieter: the sheen runs from tertiary ink up to secondary. */
-.turn-phrase-quiet .thinking-shimmer { color: var(--color-ink-tertiary); }
-.turn-phrase-quiet .thinking-sheen > span::before { color: var(--color-ink-secondary); }
 /* rotating presence phrase: the new phrase fades in where the old one was;
    only one is ever drawn */
 @keyframes turn-phrase-in {
@@ -3549,9 +3494,6 @@ button:disabled.bg-danger {
 .user-bubble-colored {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.16);
 }
-[data-chat-bubble="simple"].user-bubble-colored {
-  box-shadow: inset 0 0.5px 0 rgb(255 255 255 / 0.16);
-}
 .user-bubble-colored .mention-highlight {
   color: var(--color-ink);
   background: color-mix(in srgb, var(--mention-color) 22%, var(--color-inset));
@@ -3675,38 +3617,75 @@ button:disabled.bg-danger {
   to { opacity: 1; transform: translateX(0); }
 }
 
-.command-palette {
-  max-height: 85dvh;
+.fading-dialog {
   opacity: 0;
   transition: opacity 200ms ease, display 200ms allow-discrete, overlay 200ms allow-discrete;
 }
 
-.command-palette::backdrop {
-  background: rgb(0 0 0 / 50%);
+.fading-dialog::backdrop {
   opacity: 0;
   transition: opacity 200ms ease, display 200ms allow-discrete, overlay 200ms allow-discrete;
 }
 
-.command-palette[open],
-.command-palette[open]::backdrop {
+.fading-dialog[open],
+.fading-dialog[open]::backdrop {
   opacity: 1;
 }
 
 @starting-style {
-  .command-palette[open],
-  .command-palette[open]::backdrop {
+  .fading-dialog[open],
+  .fading-dialog[open]::backdrop {
     opacity: 0;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .command-palette,
-  .command-palette::backdrop {
+  .fading-dialog,
+  .fading-dialog::backdrop {
     transition: none;
   }
 }
 
-:root[data-reduced-motion="true"] .command-palette,
-:root[data-reduced-motion="true"] .command-palette::backdrop {
+:root[data-reduced-motion="true"] .fading-dialog,
+:root[data-reduced-motion="true"] .fading-dialog::backdrop {
   transition: none;
 }
+
+[data-modal-motion] > *,
+[data-overlay-fade] {
+  opacity: 1;
+  transition: opacity 200ms ease;
+}
+
+[data-modal-motion="out"] > *,
+[data-overlay-fade="out"] {
+  opacity: 0;
+  pointer-events: none;
+}
+
+[data-side-panel-motion] {
+  width: var(--side-panel-width);
+  transition: width 200ms ease, opacity 200ms ease;
+}
+
+[data-side-panel-motion]:has([data-side-panel-resize]:active) {
+  transition: none;
+}
+
+[data-side-panel-motion="out"] {
+  width: 0;
+  opacity: 0;
+}
+
+@starting-style {
+  [data-modal-motion="in"] > *,
+  [data-overlay-fade="in"] { opacity: 0; }
+
+  [data-side-panel-motion="in"] { width: 0; opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-modal-motion] > *, [data-overlay-fade], [data-side-panel-motion] { transition: none; }
+}
+
+:root[data-reduced-motion="true"] :is([data-modal-motion] > *, [data-overlay-fade], [data-side-panel-motion], [data-look="sidebar"], [data-sidebar-drawer-scrim]) { transition: none; }

@@ -2,7 +2,7 @@
 // posthog-js loads on demand: a static import would put ~240 kB into the startup bundle.
 import type { CaptureResult, PostHog } from "posthog-js";
 import { appVersion } from "@/lib/app-links";
-import { readAdvancedMode } from "@/lib/interface-mode";
+
 
 const TOKEN = "phc_m2hP39w8y2gLPvHgDvSXAu6xcZ3agjf4ruL56rGcMZEe";
 
@@ -149,7 +149,7 @@ function claimActiveDay(day: string): boolean {
 
 function sendAppActive() {
   if (!client || !analyticsEnabled() || globalThis.document?.visibilityState !== "visible") return;
-  if (claimActiveDay(localDay())) client.capture("app_active", { platform: pagePlatform(), mode: readAdvancedMode() ? "advanced" : "simple" });
+  if (claimActiveDay(localDay())) client.capture("app_active", { platform: pagePlatform() });
 }
 
 function watchActiveDays() {

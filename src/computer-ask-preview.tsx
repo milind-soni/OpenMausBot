@@ -8,7 +8,6 @@ import type { ComputerAskCard } from "../shared/computer-ask";
 import { ChatView } from "@/components/ChatView";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { WindowsLocalControl } from "@/components/WindowsLocalControl";
-import { setAdvancedMode } from "@/lib/interface-mode";
 import { applySkinChoice, SKIN_IDS, type SkinId } from "@/lib/skins";
 import { initialState, StoreContext, type AppState, type Bot, type Message } from "@/state/store";
 import "./styles.css";
@@ -16,7 +15,6 @@ import "./styles.css";
 const params = new URLSearchParams(location.search);
 const view = params.get("view") ?? "asking";
 const skin = params.get("skin") ?? "midnight";
-setAdvancedMode(false);
 applySkinChoice(SKIN_IDS.includes(skin as SkinId) ? (skin as SkinId) : "midnight");
 
 const AT = Date.now() - 6 * 60_000;

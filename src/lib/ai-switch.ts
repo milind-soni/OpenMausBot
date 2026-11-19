@@ -1,6 +1,5 @@
-// "Switch AI" on the first-reply rescue, as one scoped intent: { bot, thread, turn } and the picker it opens (the bot
-// panel's in Simple mode, the chat header's in Advanced). Only that picker takes it. While it holds the intent it opens
-// even though the turn runs, and nothing happens to the turn until the person picks another AI: then that exact turn
+// The chat header can open its picker while the first reply is still pending.
+// Once the person picks another AI, that exact turn
 // is stopped, and once the chat has gone idle the new AI is set (wherever the person is by then). The same message is
 // sent again on it only while the row is still on screen, the message is still the conversation's last word from the
 // person, no other turn has run since, and a resend would carry all of it; otherwise Retry stays theirs to press.
@@ -22,7 +21,6 @@ export interface AiSwitchIntent {
   turnId: string;
   /** The person's message the turn answers: what is sent again on the new AI. */
   requestMessageId?: string;
-  place: "panel" | "header";
 }
 
 type SetModel = Extract<Action, { type: "setModel" }>;
@@ -110,8 +108,7 @@ export function useAiSwitch(input: {
 }): { bot: Bot; dispatch: (action: Action) => void } {
   const { bot, threadId, contained, dispatch, setOpen } = input;
   const current = useSyncExternalStore(subscribe, () => intent, () => null);
-  const mine = current && current.botId === bot.id && current.threadId === threadId
-    && current.place === (contained ? "panel" : "header") ? current : null;
+  const mine = !contained && current && current.botId === bot.id && current.threadId === threadId ? current : null;
   useEffect(() => {
     if (!mine || mine.opened) return;
     mine.opened = true;

@@ -8,12 +8,10 @@ import { Check, Copy, Download, Eye, LoaderCircle, RotateCcw, WrapText, X } from
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { remarkMentions, sameMentionPerson, type MentionPeer, type MentionPerson } from "@/lib/mentions";
 import { createMarkdownRenderCache } from "@/lib/markdown-render-cache";
 import { closedFence, openFence, splitMarkdownBlocks } from "@/lib/markdown-stream-blocks";
 import { StreamingReplyContext } from "@/state/live-reply";
-
 import { parseFenceInfo } from "../lib/code-block";
 import { markdownImageName, markdownImageOpenUrl } from "../lib/markdown-image";
 import { repairMarkdownTables } from "../lib/markdown-tables";
@@ -28,7 +26,7 @@ import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, rema
 import { MarkdownImagePreview, MessageFolderFiles, OutsideWorkspaceFile, saveFailureText, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, ThreadRefsContext, threadLinkFromProps, type ThreadRefsValue } from "./ThreadRefs";
 import { MarkdownTable } from "./MarkdownTable";
-import { CodeBlock, CodePlate, codeHash } from "./CodeBlock";
+import { CodeBlock, codeHash } from "./CodeBlock";
 export { CodeBlock, HIGHLIGHT_CACHE_MAX, HIGHLIGHT_CACHE_MAX_CHARS, HIGHLIGHT_MAX_CHARS, type CodeBlockProps } from "./CodeBlock";
 import { FilePreviewButton } from "./FilePreviewButton";
 import { SaveIconButton, useHtmlPreview } from "./HtmlFilePreview";
@@ -210,7 +208,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
   const [error, setError] = useState<string | null>(null);
   const [showSource, setShowSource] = useState(false);
   const { state: copied, copy } = useCopyFeedback(code);
-  const simple = !useAdvancedMode();
+
 
   useEffect(() => {
     if (typeof MutationObserver === "undefined" || typeof document === "undefined") return;
@@ -269,20 +267,10 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
     )}
     {markup && <div className="overflow-x-auto p-3 [&_svg]:!max-w-full" dangerouslySetInnerHTML={markup} />}
     {(showSource || !svg || error) && (
-      <pre className={cn("overflow-x-auto text-[13px]", simple ? "px-3 py-2 leading-5 text-ink-secondary" : "p-3 leading-relaxed text-ink")}>{code}</pre>
+      <pre className={cn("overflow-x-auto text-[13px]", "p-3 leading-relaxed text-ink")}>{code}</pre>
     )}
   </>;
-  if (simple) {
-    return (
-      <div ref={frame} dir="ltr" className="group/code relative my-2.5 overflow-hidden rounded-xl bg-ink/[0.04]">
-        <CodePlate copied={copied} onCopy={copy} copyLabel={t("code.copySource")} items={[
-          { key: "source", label: t(showSource ? "code.hideSource" : "code.showSource"), icon: <WrapText size={14} aria-hidden="true" />, active: showSource, onSelect: () => setShowSource((shown) => !shown) },
-          { key: "about", label: t("code.mermaid"), disabled: true, separatorBefore: true, onSelect: () => {} },
-        ]} />
-        {diagram}
-      </div>
-    );
-  }
+
   return (
     <div ref={frame} dir="ltr" className="my-2 overflow-hidden rounded-lg border border-hairline/40 bg-inset">
       <div className="flex items-center justify-between gap-2 border-b border-hairline/30 bg-raised/30 px-3 py-1.5 text-xs">

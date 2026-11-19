@@ -1,3 +1,4 @@
+import { ModalPresence } from "./ModalPresence";
 // Security: checkout never runs in the app; main opens the provider's checkout page in the default browser and the app
 // follows its own session, never the return. The emailed code's attempt, the token and the checkout page stay in main.
 import { useEffect, useState, type ReactNode } from "react";
@@ -95,7 +96,7 @@ const HELD: ReadonlySet<CloudAddView["kind"]> = new Set(["sign-in", "signing-in"
 export function CloudAddSheet({ kind, staging, onClose, children }: { kind: CloudAddView["kind"]; staging: boolean; onClose: () => void; children: ReactNode }) {
   return <div className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4 sm:p-6" onMouseDown={event => event.target === event.currentTarget && !HELD.has(kind) && onClose()}>
     <div role="dialog" aria-modal="true" aria-labelledby="cloud-add-title" data-cloud-add-dialog tabIndex={-1}
-      className={cn(SHEET, "group/sheet animate-pop-in relative max-h-full w-full overflow-y-auto overscroll-contain outline-none", WIDTH[kind] ?? "max-w-[540px]")}>
+      className={cn(SHEET, "group/sheet relative max-h-full w-full overflow-y-auto overscroll-contain outline-none", WIDTH[kind] ?? "max-w-[540px]")}>
       <button type="button" onClick={onClose} aria-label={t("cloudAdd.close")} className={cn(CLOSE, ON_NIGHT, "absolute end-4 top-4 z-10")}><X size={16} /></button>
       {staging && <StagingMark className="absolute end-14 top-[22px] z-10 group-has-[[data-night-card]]/sheet:bg-app" />}
       {children}
@@ -265,12 +266,12 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     window.addEventListener("blur", stop);
     return () => window.removeEventListener("blur", stop);
   }, [counting]);
-  if (!open || !view || !request || !bridge || view.kind === "settings") return null;
+  if (!open || !view || !request || !bridge || view.kind === "settings") return <ModalPresence open={false}>{null}</ModalPresence>;
   if (view.kind === "has-cloud" && account?.status === "connected" && account.clouds && window.ogb?.cloudAdd
     && (account.addCloud?.canAdd !== false || (account.adding && !account.adding.done))) {
-    return <CloudAddSheet kind={extraWide ? "offer" : "has-cloud"} staging={account.staging === true} onClose={close}>
+    return <ModalPresence open><CloudAddSheet kind={extraWide ? "offer" : "has-cloud"} staging={account.staging === true} onClose={close}>
       <AddCloudFlow onClose={close} onFirstCloud={() => {}} onWide={setExtraWide} source={request.source} />
-    </CloudAddSheet>;
+    </CloudAddSheet></ModalPresence>;
   }
 
   const offerShown = offer ?? null;
@@ -380,5 +381,5 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   const ui: CloudAddUi = { chosen, current: currentTier(account), offerShown, now: now(), busy, openFailed, email: form.email, code: form.code, profileEmail, look: shownLook,
     counting: typeof auto === "number" ? auto : null, copied: note === "copied", payFailed: note === "pay-failed",
     interest: note === "interest-sent" ? "sent" : note === "interest-failed" ? "failed" : null };
-  return <CloudAddSheet kind={view.kind} staging={account?.staging === true} onClose={close}><CloudAddPanel view={view} ui={ui} actions={actions} /></CloudAddSheet>;
+  return <ModalPresence open><CloudAddSheet kind={view.kind} staging={account?.staging === true} onClose={close}><CloudAddPanel view={view} ui={ui} actions={actions} /></CloudAddSheet></ModalPresence>;
 }

@@ -2,7 +2,7 @@
 // The desktop app's performance baseline, on isolated fixtures only: a temporary HOME and data folder per server, the
 // fake engine, and a headless Chrome with its own profile. Prints one JSON object, so a change can show before/after.
 //   node --experimental-strip-types scripts/bench-desktop.ts [--only bundle,server,start,screens,idle,stream,big,routines]
-//     [--chrome PATH] [--idle-seconds 30] [--bots 150] [--threads 300] [--messages 2000] [--advanced] [--out FILE] [--keep]
+//     [--chrome PATH] [--idle-seconds 30] [--bots 150] [--threads 300] [--messages 2000] [--out FILE] [--keep]
 //     [--screenshots DIR]
 // bundle: the production build's first-load JavaScript and which libraries it pulls in eagerly.
 // server: fixture server spawn to /api/health, from source and as the packaged bundle with its compile cache; timer
@@ -40,7 +40,6 @@ const { values } = parseArgs({
     bots: { type: "string", default: "150" },
     threads: { type: "string", default: "300" },
     messages: { type: "string", default: "2000" },
-    advanced: { type: "boolean", default: false },
     out: { type: "string" },
     keep: { type: "boolean", default: false },
     screenshots: { type: "string" },
@@ -49,7 +48,7 @@ const { values } = parseArgs({
 const only = new Set((values.only ?? PHASES.join(",")).split(",").map((phase) => phase.trim()).filter(Boolean));
 for (const phase of only) if (!(PHASES as readonly string[]).includes(phase)) throw new Error(`unknown phase ${phase}; phases: ${PHASES.join(", ")}`);
 const IDLE_MS = Number(values["idle-seconds"]) * 1000;
-const STORAGE = { "omb-analytics-opt-out": "1", "omb-email-gate": "skipped", "omb-simple-mode-prompt": "1", "grok-move-2026-11": "1", "teams-2026-11b": "1", "modelgo-offer-2026-11": "1", "omb-advanced-mode": values.advanced ? "1" : "0" };
+const STORAGE = { "omb-analytics-opt-out": "1", "omb-email-gate": "skipped", "grok-move-2026-11": "1", "teams-2026-11b": "1", "modelgo-offer-2026-11": "1" };
 const log = (line: string) => process.stderr.write(`bench-desktop: ${line}\n`);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const round = (value: number, digits = 1) => Math.round(value * 10 ** digits) / 10 ** digits;
@@ -500,7 +499,7 @@ async function main() {
   let commit = "unknown";
   try { commit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim(); } catch { /* not a checkout */ }
   const chromePath = values.chrome ?? installedChrome() ?? "";
-  result.meta = { commit, date: new Date().toISOString(), node: process.version, platform: `${process.platform}-${process.arch}`, cpu: cpus()[0]?.model, cores: cpus().length, memoryGb: round(totalmem() / 2 ** 30), chrome: chromePath, mode: values.advanced ? "advanced" : "simple", idleSeconds: IDLE_MS / 1000 };
+  result.meta = { commit, date: new Date().toISOString(), node: process.version, platform: `${process.platform}-${process.arch}`, cpu: cpus()[0]?.model, cores: cpus().length, memoryGb: round(totalmem() / 2 ** 30), chrome: chromePath, idleSeconds: IDLE_MS / 1000 };
   const needsUi = ["start", "screens", "idle", "stream", "big"].some((phase) => only.has(phase));
   const dist = join(work, "dist");
   const profileDist = join(work, "dist-profile");

@@ -11,10 +11,10 @@ const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const ARROW = " → ";
 
 describe("places", () => {
-  it("name a place by its path, with when only Advanced mode or one kind of place shows it", () => {
+  it("name a place by its path, with any restriction on where it appears", () => {
     expect(placePath("keys")).toBe("Settings → AI → Other services");
-    expect(placePath("language")).toBe("Settings → General → Language (in Simple mode it is at Settings → This app → Language)");
-    expect(placePath("send-key")).toBe("Settings → General → Send messages with (shown in Advanced mode only; app_settings set appearance.advanced true turns it on)");
+    expect(placePath("language")).toBe("Settings → General → Language");
+    expect(placePath("send-key")).toBe("Settings → General → Send messages with");
     expect(placePath("wifi")).toMatch(/\(only in the desktop app, on this computer's own page\)$/);
   });
 
@@ -33,7 +33,7 @@ describe("places", () => {
 });
 
 /** Every path a place's own path starts with, after "Settings → ", longest first. */
-const REAL = [...new Set((SETTINGS_PLACES as readonly SettingsPlace[]).flatMap(({ path, simplePath }) => [path, simplePath ?? ""]).flatMap((path) => {
+const REAL = [...new Set((SETTINGS_PLACES as readonly SettingsPlace[]).map(({ path }) => path).flatMap((path) => {
   if (!path.startsWith(`Settings${ARROW}`)) return [];
   const parts = path.slice(`Settings${ARROW}`.length).replace(/ \(.*\)$/, "").split(ARROW);
   return parts.map((_, index) => parts.slice(0, index + 1).join(ARROW));

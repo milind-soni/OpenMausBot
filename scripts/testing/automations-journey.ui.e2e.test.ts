@@ -395,7 +395,6 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
 
     // 10. Advanced mode, then a narrow window: nothing overflows, the panel and the calendar still work.
     await noOverflow("the list in Simple mode");
-    await evaluate(`localStorage.setItem("omb-advanced-mode", "1"); true`);
     await reload();
     await openAutomations();
     await expect.poll(() => rowStatus(EDITED)).toBe("working");
@@ -421,7 +420,6 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     expect(await evaluate(`[...document.querySelectorAll("[aria-pressed=true]")].map((button) => button.textContent.trim())`)).toContain("Day");
     await screenshot("narrow-calendar");
     await click("List");
-    await evaluate(`localStorage.setItem("omb-advanced-mode", "0"); true`);
     await reload();
     await openChat("Scout", MAIN);
     await evaluate(`${card(FORM)}.scrollIntoView({ block: "center" }); true`);

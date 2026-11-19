@@ -42,7 +42,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: "other" }, localComputer: { available: false } }, ready: true }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 // A renderer preference, not what these tests are about; the fixture stands in for the stored value.
 vi.mock("@/lib/run-card-preferences", () => ({ useShowRunCard: () => fixture.showRunCard }));
 // The thread controls read live model lists; they are not what this file tests.
@@ -90,13 +89,6 @@ const render = (messages: Message[]) => renderToStaticMarkup(createElement(ChatV
 const draft = (): string => fixture.appendComposerDraft.mock.calls[0]![1] as string;
 
 describe("The run card in the chat pane", () => {
-  it("stays out of Simple mode's chat, whose steps live in the Activity panel", () => {
-    saveable();
-    fixture.advanced = false;
-    const markup = render(run);
-    expect(markup).not.toContain(CARD);
-    expect(fixture.verify).toBeNull();
-  });
 
   it("renders a sent citation as a badge and keeps raw metadata out of edit actions", () => {
     const citation = citationAttachment(

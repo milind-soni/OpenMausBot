@@ -6,11 +6,6 @@ import { setLocale } from "../lib/i18n";
 import { ChatMarkdown } from "./ChatMarkdown";
 
 // These are Advanced mode's per-block header controls; Simple mode's plate is tested in ChatMarkdown.test.ts.
-vi.mock("@/lib/interface-mode", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/lib/interface-mode")>(),
-  useAdvancedMode: () => true,
-  readAdvancedMode: () => true,
-}));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

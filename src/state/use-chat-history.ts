@@ -18,19 +18,33 @@ export function useChatHistory(bot: Bot) {
   const [pending, setPending] = useState(false);
   const request = useRef<AbortController | null>(null);
   const threadId = bot.threadId;
-  const read = useCallback(async (before?: string) => {
+  const read = useCallback(async (before?: string, through?: string) => {
     if (request.current) return;
     const controller = new AbortController();
     request.current = controller;
     setPending(true);
     try {
-      const suffix = before ? "&before=" + encodeURIComponent(before) : "";
-      const result = await api<Page>(`/api/threads/${threadId}/messages?view=chat&limit=${MESSAGE_PAGE_SIZE}${suffix}`, { signal: controller.signal });
-      if (!controller.signal.aborted) setLoaded(previous => {
+      const pages: Message[][] = [];
+      let cursor = before;
+      let result: Page;
+      let found = false;
+      do {
+        const suffix = cursor ? "&before=" + encodeURIComponent(cursor) : "";
+        result = await api<Page>(`/api/threads/${threadId}/messages?view=chat&limit=${MESSAGE_PAGE_SIZE}${suffix}`, { signal: controller.signal });
+        if (controller.signal.aborted) return;
+        pages.push(result.messages);
+        found = Boolean(through && result.messages.some(message => message.id === through));
+        const next = result.messages[0]?.id;
+        if (!next || next === cursor) break;
+        cursor = next;
+      } while (through && !found && result.hasMore);
+      const incoming = pages.reverse().flat();
+      setLoaded(previous => {
         const current = previous?.generation === generation && previous.threadId === threadId ? previous.page : seed;
-        const messages = before ? [...result.messages, ...(current?.messages ?? [])] : result.messages;
+        const messages = before ? [...incoming, ...(current?.messages ?? [])] : incoming;
         return { generation, threadId, page: { ...result, messages } };
       });
+      if (found && through) dispatch({ type: "focusMessage", threadId, messageId: through });
     } catch (error) {
       if (!controller.signal.aborted) dispatch({ type: "error", message: String(error) });
     } finally {
@@ -38,7 +52,8 @@ export function useChatHistory(bot: Bot) {
     }
   }, [threadId, dispatch, generation, seed]);
   useEffect(() => {
-    if (!seed) void read();
+    if (seed) setPending(false);
+    else void read();
     return () => { request.current?.abort(); request.current = null; };
   }, [read, seed]);
   const raw = useMemo(() => bot.activeLeafId && !bot.messages.some(m => m.id === bot.activeLeafId)
@@ -52,5 +67,9 @@ export function useChatHistory(bot: Bot) {
     return [...merged.values()].sort((a, b) => a.at - b.at);
   }, [raw, page, bot.busy, bot.chatPatches, focusId]);
   const load = useCallback(() => void read(page?.messages[0]?.id), [read, page]);
-  return { history, pending, load, hasMore: page?.hasMore ?? false };
+  const jumpTo = useCallback((messageId: string, loaded: boolean) => {
+    if (loaded) dispatch({ type: "focusMessage", threadId, messageId });
+    else if (page?.hasMore) void read(page.messages[0]?.id, messageId);
+  }, [dispatch, threadId, page, read]);
+  return { history, pending, load, jumpTo, hasMore: page?.hasMore ?? false };
 }

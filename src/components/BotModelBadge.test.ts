@@ -6,10 +6,6 @@ import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
 const fixture = vi.hoisted(() => ({ state: {} as Partial<AppState>, advanced: true }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => false }));
-vi.mock("@/lib/interface-mode", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/lib/interface-mode")>(),
-  useAdvancedMode: () => fixture.advanced,
-}));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 vi.mock("react-dom", () => ({ createPortal: (node: ReactNode) => node }));
 vi.mock("@/state/store", async (importOriginal) => {
@@ -78,21 +74,13 @@ describe("sidebar bot row", () => {
 
   // Every density puts the badge on the avatar's bottom-left: the status dots own the bottom-right, and a mark at the
   // row's end sat under the hover actions (+, new folder, …) without lining up with them.
-  it.each<[SidebarDensity, string]>([["comfortable", "absolute -bottom-0.5 -left-0.5"], ["icons", "absolute -bottom-0.5 -left-0.5"]])(
+  it.each<[SidebarDensity, string]>([["comfortable", "ms-auto"], ["icons", "absolute -bottom-0.5 -left-0.5"]])(
     "shows the model once in a %s row", (density, placement) => {
       const found = badges(render(bot("claude", "opus"), density));
       expect(found).toHaveLength(1);
       expect(found[0]).toContain('aria-label="Model: Opus 4.1 (Claude)"');
       expect(found[0]).toContain(placement);
     });
-
-  // Simple mode shows the mark too (the owner's ask, 2026-10-22): a person sees which provider each bot runs on at a glance.
-  it.each<SidebarDensity>(["comfortable", "icons"])("shows the model once in a Simple mode %s row", (density) => {
-    fixture.advanced = false;
-    const found = badges(render(bot("claude", "opus"), density));
-    expect(found).toHaveLength(1);
-    expect(found[0]).toContain('aria-label="Model: Opus 4.1 (Claude)"');
-  });
 
   it("shows no badge while the bot's engine is missing", () => {
     expect(render(bot("gone", "opus"), "comfortable")).not.toContain('data-testid="model-badge"');

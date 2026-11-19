@@ -137,29 +137,3 @@ describe("local thread visibility", () => {
     expect(preference.useShowThreadsChoice()).toBe(true);
   });
 });
-
-describe("threads in Simple mode", () => {
-  it.each([
-    [true, true, true],
-    [true, false, false],
-    [false, true, false],
-    [false, false, false],
-  ])("shows threads only when chosen and in Advanced mode (chosen %s, advanced %s → %s)", async (chosen, advanced, shown) => {
-    vi.doMock("./interface-mode", () => ({ useAdvancedMode: () => advanced }));
-    const preference = await import("./thread-preferences");
-    local.setItem(preference.SHOW_THREADS_KEY, chosen ? "1" : "0");
-    expect(preference.useShowThreads()).toBe(shown);
-    vi.doUnmock("./interface-mode");
-  });
-
-  it("leaves the stored choice alone, so Advanced mode gets the person's threads back", async () => {
-    vi.doMock("./interface-mode", () => ({ useAdvancedMode: () => false }));
-    const preference = await import("./thread-preferences");
-    local.setItem(preference.SHOW_THREADS_KEY, "1");
-    local.setItem.mockClear();
-    expect(preference.useShowThreads()).toBe(false);
-    expect(preference.useShowThreadsChoice()).toBe(true);
-    expect(local.setItem).not.toHaveBeenCalled();
-    vi.doUnmock("./interface-mode");
-  });
-});

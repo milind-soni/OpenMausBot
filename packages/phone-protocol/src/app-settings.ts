@@ -55,7 +55,6 @@ const pinnedPage = z.object({ name: z.string().trim().min(1).max(40), url: z.str
  * the matching setter. */
 export const WINDOW_PREFS = {
   "appearance.skin": z.enum([...SKIN_IDS, "system"]),
-  "appearance.advanced": z.boolean(),
   "appearance.font": z.enum(FONT_IDS),
   "appearance.chatWidth": z.enum(CHAT_WIDTH_IDS),
   "general.sendKey": z.enum(SEND_KEYS),

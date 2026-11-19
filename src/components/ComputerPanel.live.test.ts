@@ -20,7 +20,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
     },
   }),
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, setAdvancedMode: () => {} }));
 vi.mock("./CloudScreenPreview", () => ({
   CloudScreenPreview: ({ src }: { src: string | null }) => createElement("img", { "data-preview": "", src: src ?? "" }),
 }));

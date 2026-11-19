@@ -41,9 +41,6 @@ import { TwoPlacesCard } from "./TwoPlacesCard";
 import { BOAT_OFFER_NOTICE, CLOUD_INTRO, GROK_MOVE_NOTICE, launchNotice, localDay, MODELGO_OFFER_NOTICE, PRODUCT_HUNT_NOTICE, PRODUCT_HUNT_UNTIL, PRODUCT_HUNT_URL, STAR_NOTICE, TEAMS_NOTICE, WHATS_NEW_NOTICE } from "@/lib/notices";
 import { BOAT_OFFER, boatClaimMailto } from "@/lib/boat-offer";
 import { track } from "@/lib/analytics";
-import { ADVANCED_MODE_KEY, setAdvancedMode } from "@/lib/interface-mode";
-import { SIMPLE_MODE_PROMPT_KEY } from "@/lib/simple-mode-prompt";
-import { ADVANCED_BACK_KEY } from "@/lib/new-look";
 import { api } from "@/state/store";
 import { forgetAnnouncementCards, seenKey } from "@/lib/announcements";
 import { CLOUD_WELCOME_DONE } from "../../shared/cloud-hints";
@@ -138,7 +135,7 @@ const press = (label: string) => {
 const FIRST_REPLY = [{ tasks: [{ threadId: "first", usage: { turns: 1 } }] }];
 let session: Map<string, string>;
 const returning = () => { f.state.bots = [{ tasks: [{ threadId: "t", createdAt: 1, usage: { turns: 2 } }] }]; };
-const launchCardsSeen = () => { desk.saved = { seen: [WHATS_NEW_NOTICE] }; storage.set(TEAMS_NOTICE, "1"); storage.set(MODELGO_OFFER_NOTICE, "1"); storage.set(GROK_MOVE_NOTICE, "1"); storage.set(PRODUCT_HUNT_NOTICE, "1"); storage.set(SIMPLE_MODE_PROMPT_KEY, "1"); storage.set(BOAT_OFFER_NOTICE, "1"); };
+const launchCardsSeen = () => { desk.saved = { seen: [WHATS_NEW_NOTICE] }; storage.set(TEAMS_NOTICE, "1"); storage.set(MODELGO_OFFER_NOTICE, "1"); storage.set(GROK_MOVE_NOTICE, "1"); storage.set(PRODUCT_HUNT_NOTICE, "1");  storage.set(BOAT_OFFER_NOTICE, "1"); };
 const hints = () => f.state.config.onboarding.hintsSeen as string[];
 
 beforeEach(() => {
@@ -555,8 +552,7 @@ describe("Boat's credit offer", () => {
 
   it("closed on This computer's page, it stays closed on My Cloud's page in the same desktop; a desktop that never showed it shows it there", async () => {
     fresh(); await launch(); press("Not now"); await flush();
-    storage.clear(); storage.set(PRODUCT_HUNT_NOTICE, "1"); storage.set(SIMPLE_MODE_PROMPT_KEY, "1");
-    snapshot = { status: "none" }; viewer = { hosted: false, canSave: true, cloudHome: true }; f.state.config.cloudHome = true;
+    storage.clear(); storage.set(PRODUCT_HUNT_NOTICE, "1");     snapshot = { status: "none" }; viewer = { hosted: false, canSave: true, cloudHome: true }; f.state.config.cloudHome = true;
     f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"]; showWindow(MY_CLOUD);
     expect(await launch()).not.toContain(html(TITLE));
     desk = desktopMachine(); desk.saved = { seen: [WHATS_NEW_NOTICE] };
@@ -1008,15 +1004,15 @@ describe("the Move from Grok Bot popup", () => {
   });
 
   it("goes first in the queue, one a launch: What's new, then the rest, wait for later launches", async () => {
-    returning(); desk.saved = null; storage.delete(SIMPLE_MODE_PROMPT_KEY); storage.delete(BOAT_OFFER_NOTICE); storage.delete(STAR_NOTICE);
+    returning(); desk.saved = null;  storage.delete(BOAT_OFFER_NOTICE); storage.delete(STAR_NOTICE);
     const first = await launch();
     expect(first).toContain(TITLE);
-    for (const other of ["data-simple-mode-prompt", WHATS_NEW, STAR]) expect(first).not.toContain(other);
+    for (const other of [WHATS_NEW, STAR]) expect(first).not.toContain(other);
     press("Not now"); await flush();
     expect(render(), "nothing else after it in this launch").toBe("");
     expect(await launch(), "a reload is the same launch").toBe("");
     const second = await relaunch();
-    expect(second).toContain("data-simple-mode-prompt"); expect(second).not.toContain(TITLE);
+    expect(second).not.toContain(TITLE);
     expect(launchNotice()).not.toBe(GROK_MOVE_NOTICE);
   });
 
@@ -1108,142 +1104,7 @@ describe("the Move from Grok Bot popup", () => {
   });
 });
 
-describe("the Simple mode popup after the update", () => {
-  const TITLE = "Try the new Simple mode", ON = "You&#x27;re on Simple mode", POPUP = "Meet the new MausBot Cloud";
-  let modal: boolean;
-  const prompts = () => vi.mocked(track).mock.calls.filter(([event]) => event === "simple_mode_prompt").map(([, props]) => props);
 
-  beforeEach(() => {
-    modal = false;
-    vi.stubGlobal("document", { activeElement: null, body: null, documentElement: { dataset: {} }, getElementById: () => null, querySelector: () => null,
-      querySelectorAll: () => modal ? [{ closest: () => null, checkVisibility: () => true }] : [] });
-    setAdvancedMode(true);
-    storage.delete(SIMPLE_MODE_PROMPT_KEY);
-  });
-
-  it("shows once in each browser, claims the launch, and never comes back once it is closed", async () => {
-    const html = await launch();
-    expect(html).toContain(TITLE);
-    for (const part of ['role="dialog"', 'aria-modal="true"', 'role="switch"', 'aria-checked="false"', "Switch any time in Settings → Advanced mode."]) expect(html).toContain(part);
-    expect(prompts()).toEqual([{ action: "shown", mode: "advanced" }]);
-    expect(launchDialogShown()).toBe("notices");
-    expect(await settle(), "shown is counted once").toContain(TITLE);
-    expect(prompts()).toHaveLength(1);
-    press("Done"); await flush();
-    expect(render(), "nothing else in this launch after it").toBe("");
-    expect(storage.get(SIMPLE_MODE_PROMPT_KEY)).toBe("1");
-    expect(prompts()).toEqual([{ action: "shown", mode: "advanced" }, { action: "closed", mode: "advanced" }]);
-    session.clear();
-    expect(await launch()).not.toContain(TITLE);
-    expect(prompts()).toHaveLength(2);
-  });
-
-  it("changes the mode live from the popup, both ways, while its words stay", async () => {
-    await launch();
-    press("Simple mode"); await flush();
-    expect(storage.get(ADVANCED_MODE_KEY)).toBe("0");
-    const on = render();
-    expect(on).toContain('aria-checked="true"'); expect(on).toContain(TITLE);
-    press("Simple mode"); await flush();
-    expect(storage.get(ADVANCED_MODE_KEY)).toBe("1");
-    expect(render()).toContain('aria-checked="false"');
-    expect(prompts().slice(1)).toEqual([{ action: "toggled", mode: "simple" }, { action: "toggled", mode: "advanced" }]);
-    expect(storage.has(SIMPLE_MODE_PROMPT_KEY), "flipping never closes it").toBe(false);
-  });
-
-  it("tells someone already on Simple mode so, with the switch on", async () => {
-    setAdvancedMode(false);
-    const html = await launch();
-    expect(html).toContain(ON); expect(html).toContain('aria-checked="true"');
-    expect(prompts()).toEqual([{ action: "shown", mode: "simple" }]);
-  });
-
-  it("asks on the Cloud's own page and in a plain browser too, not only on this computer's", async () => {
-    snapshot = { status: "none" }; viewer = { hosted: false, canSave: true, cloudHome: true }; f.state.config.cloudHome = true;
-    f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), "cloud-setup-hidden"]; showWindow(MY_CLOUD);
-    expect(await launch()).toContain(TITLE);
-    vi.stubGlobal("window", { addEventListener: vi.fn(), removeEventListener: vi.fn() });
-    viewer = { hosted: true, canSave: true }; f.state.config.cloudHome = false;
-    expect(await launch()).toContain(TITLE);
-  });
-
-  it("waits during the welcome, the tour, Settings, the quiet first chat, another dialog or a call, and skips the launch its welcome finished in", async () => {
-    const waits: Array<() => void> = [
-      () => { f.state.welcomeOpen = true; }, () => { f.state.tourOpen = true; }, () => { f.state.appSettingsOpen = true; }, () => { modal = true; },
-      () => { f.state.liveCall = { status: "live" }; }, () => { f.state.config.onboarding.completedAt = undefined; },
-      () => { f.state.config.onboarding.hintsSeen = [...withTourFinished(undefined), MET_CHIEF_HINT]; f.state.bots = [{ tasks: [{ threadId: "first", usage: { turns: 0 } }] }]; },
-    ];
-    for (const wait of waits) {
-      const saved = structuredClone(f.state); wait();
-      expect(await launch(), wait.toString()).not.toContain(TITLE);
-      f.state = saved; modal = false;
-    }
-    expect(prompts()).toEqual([]);
-    markWelcomeFinished();
-    expect(await launch(), "the launch the welcome finished in").not.toContain(TITLE);
-    session.clear();
-    expect(await launch()).toContain(TITLE);
-    expect(storage.has(SIMPLE_MODE_PROMPT_KEY)).toBe(false);
-  });
-
-  it("is one popup at a time: it comes before What's new, which waits for a later launch", async () => {
-    desk.saved = null; storage.delete(WHATS_NEW_NOTICE);
-    const first = await launch();
-    expect(first).toContain(TITLE); expect(first).not.toContain(POPUP);
-    press("Done"); await flush();
-    expect(render()).toBe("");
-    session.clear();
-    const later = await launch();
-    expect(later).toContain(POPUP); expect(later).not.toContain(TITLE);
-  });
-});
-
-describe("the word that Advanced mode is back, in the Simple mode popup's place", () => {
-  const TITLE = "Advanced mode is back", BODY = "Turn it off any time in Settings → Advanced mode.";
-  const events = () => vi.mocked(track).mock.calls.filter(([event]) => event === "advanced_back_notice").map(([, props]) => props);
-
-  beforeEach(() => {
-    vi.stubGlobal("document", { activeElement: null, body: null, documentElement: { dataset: {} }, getElementById: () => null, querySelector: () => null,
-      querySelectorAll: () => [] });
-    // main.tsx's settleInterfaceMode put this browser back on Advanced mode.
-    setAdvancedMode(true);
-    storage.set(ADVANCED_BACK_KEY, "due");
-  });
-
-  it("shows once, with no switch, even where the Simple mode popup was never closed, and neither comes back", async () => {
-    storage.delete(SIMPLE_MODE_PROMPT_KEY);
-    const html = await launch();
-    expect(html).toContain(TITLE); expect(html).toContain(BODY);
-    for (const gone of ['role="switch"', "data-simple-mode-prompt", "Try the new Simple mode"]) expect(html).not.toContain(gone);
-    expect(events()).toEqual([{ action: "shown" }]);
-    press("Done"); await flush();
-    expect(render(), "nothing else in this launch after it").toBe("");
-    expect(storage.get(ADVANCED_BACK_KEY)).toBe("seen");
-    expect(storage.get(SIMPLE_MODE_PROMPT_KEY)).toBe("1");
-    expect(events()).toEqual([{ action: "shown" }, { action: "closed" }]);
-    session.clear();
-    const later = await launch();
-    expect(later).not.toContain(TITLE); expect(later).not.toContain("data-simple-mode-prompt");
-  });
-
-  it("never says so once the person has switched to Simple before it showed", async () => {
-    storage.set(SIMPLE_MODE_PROMPT_KEY, "1");
-    setAdvancedMode(false);
-    expect(await launch()).not.toContain(TITLE);
-    expect(events()).toEqual([]);
-    expect(storage.get(ADVANCED_BACK_KEY)).toBe("due");
-  });
-
-  it("never shows where nothing was put back", async () => {
-    storage.set(SIMPLE_MODE_PROMPT_KEY, "1");
-    for (const back of ["seen", undefined]) {
-      if (back) storage.set(ADVANCED_BACK_KEY, back); else storage.delete(ADVANCED_BACK_KEY);
-      session.clear();
-      expect(await launch(), String(back)).not.toContain(TITLE);
-    }
-    expect(events()).toEqual([]);
-  });
-});
 
 describe("bots in two places", () => {
   const GARAGE = { key: "server:https://garage.example.test", name: "Garage server", kind: "server" as const };

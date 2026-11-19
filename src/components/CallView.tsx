@@ -5,7 +5,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AudioLines, Check, ChevronDown, Loader2, Phone, PhoneOff, X } from "lucide-react";
 
 import { useShowThreads } from "@/lib/thread-preferences";
-import { openBot, useStore, visibleMessages, type Bot } from "@/state/store";
+import { openBot, useStore, visibleMessages, type Bot, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "./MenuMotion";
 import { currentCall, deferCallCleanup, endCall, startCall, useOnCall } from "@/lib/call";
@@ -121,6 +121,7 @@ export function CallTargetButton({
   const cloudHome = state.config?.cloudHome === true;
   const [helpOpen, setHelpOpen] = useState(false);
   const [voiceSetupOpen, setVoiceSetupOpen] = useState(false);
+  const voiceSetupMotion = useMenuMotion(voiceSetupOpen);
   const [voiceSetupBotId, setVoiceSetupBotId] = useState(setupBotId);
   if (voiceSetupRequired && setupBotId !== voiceSetupBotId) setVoiceSetupBotId(setupBotId);
   const shownSetupBotId = voiceSetupRequired ? setupBotId : voiceSetupBotId;
@@ -380,8 +381,9 @@ export function CallTargetButton({
         </div>
       )}
 
-      {voiceSetupOpen && setupBot && (
+      {voiceSetupMotion.shown && setupBot && (
         <VoiceSetupDialog
+          open={voiceSetupOpen}
           bot={setupBot}
           callName={targetName}
           ready={supported && voiceReady}
@@ -454,19 +456,19 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
   );
 }
 
-export function CallOverlay({ bot }: { bot: Bot }) {
+export function CallOverlay({ bot, transcript }: { bot: Bot; transcript?: Message[] }) {
   const active = useOnCall() === bot.id;
   const media = useLiveMedia();
   const onLiveCall = media.botId === bot.id && isLiveCallRunning(media.phase);
   if (!active || onLiveCall) return null;
   return (
     <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-6 bg-app/95 backdrop-blur-sm">
-      <Call key="turns" bot={bot} />
+      <Call key="turns" bot={bot} transcript={transcript} />
     </div>
   );
 }
 
-function Call({ bot }: { bot: Bot }) {
+function Call({ bot, transcript }: { bot: Bot; transcript?: Message[] }) {
   const { state, dispatch } = useStore();
   // One bridge for the whole call: a voice change mid-call must not stop or hear through another.
   const [bridge] = useState(() => speechBridge(state.config));
@@ -479,7 +481,7 @@ function Call({ bot }: { bot: Bot }) {
     setNote(t("call.turns.pushToTalkFailed"));
   });
 
-  const messages = visibleMessages(bot);
+  const messages = transcript ?? visibleMessages(bot);
   const approval = pendingApprovals(messages)[0];
   const question = messages.find(
     (message) =>

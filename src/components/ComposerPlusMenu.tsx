@@ -1,14 +1,9 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { AudioLines, Check, GraduationCap, ListChecks, Paperclip, Phone, Plus, Target, X } from "lucide-react";
+import { AudioLines, Check, GraduationCap, ListChecks, Paperclip, Phone, Plus, Target } from "lucide-react";
 import { approvalModeFor } from "../../shared/approval-mode";
 import {
-  approvalModeOptions,
-  approvalModeOptionsFor,
-  approvalModeSelectionRequiresLocalDesktop,
-  shownApprovalMode,
-  simpleApprovalName,
+  approvalModeOptions, approvalModeOptionsFor, approvalModeSelectionRequiresLocalDesktop, shownApprovalMode,
 } from "@/lib/approval-mode-options";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { CALL_MODES, effectiveCallMode, useCallMode } from "@/lib/call-mode";
 import { callCapabilityHelp } from "@/lib/call-capability";
 import { listensHere, missingListenKey, speechBridge } from "@/lib/speech";
@@ -25,25 +20,8 @@ import { nextMenuIndex, SidebarPopoverMenu, type SidebarMenuItem } from "./Sideb
 import type { ApprovalChoice } from "./thread-approval";
 import { SIMPLE_CONTROL } from "./composer-simple";
 
-/** Finish together: the room (or, `solo`, the one bot) keeps working until the goal is done. The chip turns accent while it is on.
- * `compact` is Simple mode's chip, shown only while the mode is on: its name and a × that turns it off. */
-export function GoalToggle({ on, onToggle, solo = false, compact = false }: { on: boolean; onToggle: () => void; solo?: boolean; compact?: boolean }) {
-  if (compact) {
-    const off = t(solo ? "composer.goal.offSolo" : "composer.goal.off");
-    return (
-      <button
-        type="button"
-        data-goal-chip
-        aria-label={off}
-        title={off}
-        onClick={onToggle}
-        className="flex h-7 items-center gap-1 whitespace-nowrap rounded-full border border-accent/35 bg-accent/10 px-2.5 text-[13px] text-accent transition-colors hover:bg-accent/15"
-      >
-        {t(solo ? "composer.goal.soloAria" : "composer.goal.aria")}
-        <X size={12} aria-hidden="true" />
-      </button>
-    );
-  }
+/** Finish together: the room (or, `solo`, the one bot) keeps working until the goal is done. The chip turns accent while it is on. */
+export function GoalToggle({ on, onToggle, solo = false }: { on: boolean; onToggle: () => void; solo?: boolean }) {
   return (
     <button
       type="button"
@@ -53,7 +31,7 @@ export function GoalToggle({ on, onToggle, solo = false, compact = false }: { on
       onClick={onToggle}
       className={cn(
         "flex items-center gap-1.5 whitespace-nowrap rounded-full border text-[13px] transition-colors",
-        compact ? "h-7 px-2.5" : "h-8 px-3",
+        "h-8 px-3",
         on
           ? "border-accent/35 bg-accent/10 text-accent"
           : "border-hairline/20 bg-transparent text-ink-secondary hover:bg-raised hover:text-ink",
@@ -67,17 +45,16 @@ export function GoalToggle({ on, onToggle, solo = false, compact = false }: { on
 
 const check = <Check size={15} className="shrink-0 text-accent" aria-hidden="true" />;
 
-/** The thread's approval level, the same choices the Advanced composer's shield offers: the level shown and its menu.
- * Simple mode names the levels as the bot panel does. */
-function approvalMenu(choice: ApprovalChoice, simple: boolean) {
+/** The current approval level and its choices. */
+function approvalMenu(choice: ApprovalChoice) {
   const trusted = choice.trustedModesAvailable ?? true;
   const mode = shownApprovalMode(choice.driverKind, approvalModeFor({ approvalMode: choice.approvalMode, autoApprove: choice.autoApprove }));
   const all = approvalModeOptions();
   const shown = approvalModeOptionsFor(choice.driverKind).find((option) => option.mode === mode)
     ?? all.find((option) => option.mode === mode)
     ?? all[0];
-  const name = (option: typeof shown) => simple ? simpleApprovalName(option.mode, choice.driverKind) : option.label;
-  const current = simple ? { ...shown, label: name(shown), chip: name(shown) } : shown;
+  const name = (option: typeof shown) => option.label;
+  const current = shown;
   const localOnly = approvalModeSelectionRequiresLocalDesktop(mode, trusted);
   return {
     current,
@@ -107,8 +84,8 @@ function approvalMenu(choice: ApprovalChoice, simple: boolean) {
   };
 }
 
-function approvalItem(name: string, choice: ApprovalChoice, simple: boolean): SidebarMenuItem {
-  const { current, note, items } = approvalMenu(choice, simple);
+function approvalItem(name: string, choice: ApprovalChoice): SidebarMenuItem {
+  const { current, note, items } = approvalMenu(choice);
   const CurrentIcon = current.Icon;
   return {
     key: "approval",
@@ -135,31 +112,6 @@ export function TeachTaskButton({ onClick }: { onClick: () => void }) {
     >
       <GraduationCap size={16} strokeWidth={1.75} absoluteStrokeWidth />
     </button>
-  );
-}
-
-export function ApprovalChip({ choice, quiet = false }: { choice: ApprovalChoice; quiet?: boolean }) {
-  const { current, note, items } = approvalMenu(choice, !useAdvancedMode());
-  const CurrentIcon = current.Icon;
-  return (
-    <SidebarPopoverMenu
-      items={items}
-      ariaLabel={t("approvalMode.triggerAria", { mode: current.label, provider: choice.providerName })}
-      triggerClassName="flex shrink-0 rounded-full"
-      triggerTitle={note ? `${current.label} · ${note}` : current.label}
-      renderTrigger={({ open }) => (
-        <span
-          data-approval-chip={current.mode}
-          className={cn(
-            "flex h-7 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-[13px] transition-colors",
-            open ? "bg-ink/[0.11] text-ink" : quiet ? "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink" : "bg-ink/[0.06] text-ink-secondary hover:bg-ink/[0.11] hover:text-ink",
-          )}
-        >
-          <CurrentIcon size={14} aria-hidden="true" />
-          {current.chip}
-        </span>
-      )}
-    />
   );
 }
 
@@ -192,7 +144,7 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
   // As the call button, which hides while Live is the mode and its line is held on another device.
   const lineHeldElsewhere = callMode === "live" && liveLineHeldElsewhere(media, state.liveCall);
   const calling = callBotId !== undefined && (onCall === callBotId || isLiveCallRunning(media.phase) || lineHeldElsewhere);
-  const simple = !useAdvancedMode();
+
   const items: SidebarMenuItem[] = [
     { key: "attach", label: t("composer.attachFiles"), icon: <Paperclip size={16} />, onSelect: onAttach },
     ...(goal ? [{
@@ -205,7 +157,7 @@ export function ComposerPlusMenu({ onAttach, goal, teach, approval, callBotId, e
     } satisfies SidebarMenuItem] : []),
     ...(teach ? [{ key: "teach", label: t("composer.teachTask"), icon: <GraduationCap size={16} />, onSelect: teach } satisfies SidebarMenuItem] : []),
     ...extraItems,
-    ...(approval ? [approvalItem(approval.name, approval.choice, simple)] : []),
+    ...(approval ? [approvalItem(approval.name, approval.choice)] : []),
     ...(callBotId === undefined ? [] : CALL_MODES.map((entry, index): SidebarMenuItem => {
       const unavailable = entry.id === "turns" ? turnsHelp : null;
       return {

@@ -132,10 +132,6 @@ describe("a long step's quiet part", () => {
     expect(host.querySelector("[data-turn-quiet]")?.textContent).toBe("last output 1 min ago");
   });
 
-  it("says it in Simple mode too, after the one phrase", () => {
-    render({ simple: true, phrases: ["Running scrape.py"], phase: "step", quiet: { kind: "network" } });
-    expect(line()).toBe("Running scrape.py · waiting on the network");
-  });
 });
 
 describe("the Now card", () => {
@@ -178,7 +174,7 @@ describe("the Now card", () => {
     field.remove();
   });
 
-  it("is a plain line with nothing to show, in Simple mode a button as well, and folds when the turn ends", () => {
+  it("is a plain line with nothing to show, and folds when the turn ends", () => {
     render({ label: "Working", since: Date.now(), phrases: ["Thinking"], phase: "think" });
     expect(toggle()).toBeNull();
     open({ simple: true });

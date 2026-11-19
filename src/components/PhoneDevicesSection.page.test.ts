@@ -29,7 +29,7 @@ const routes = (on: Partial<Record<"wifi" | "relay" | "tailscale" | "https", boo
 const phone = { id: "p1", name: "Ada's iPhone", createdAt: 1, lastSeenAt: Date.now() - 60_000, cloudDesktopAccess: false, routes: "any" as const };
 const state = (overrides: Partial<CompanionState> = {}): CompanionState => ({ enabled: false, keepAwake: false, port: 8810, devices: [], pairing: null, routes: routes(), notices: [], ...overrides });
 const c = () => ({ busy: false, act: vi.fn(), useLocal: vi.fn(), start: vi.fn(), cancel: vi.fn() }) as unknown as PhoneSetupController;
-const page = (simple = false) => renderToStaticMarkup(createElement(PhoneDevicesSection, { simple })).replaceAll("&#x27;", "'");
+const page = () => renderToStaticMarkup(createElement(PhoneDevicesSection)).replaceAll("&#x27;", "'");
 
 beforeEach(() => {
   f.bridge = {};
@@ -39,7 +39,7 @@ beforeEach(() => {
 
 describe("Phone & devices", () => {
   it("with nothing paired and no way in on, shows one task: pair, with where to get the app in plain words and the ways in folded into one row", () => {
-    const html = page(true);
+    const html = page();
     // One untitled card: the row says "Your phone" and what to do, and the code (with "scan this code") is only in the dialog.
     expect(html).toMatch(/Your phone[\s\S]*?Install MausBot on your phone from the App Store or Google Play, then pair it here\./);
     expect(html).not.toContain("<h3");
@@ -56,28 +56,20 @@ describe("Phone & devices", () => {
     expect(html, "no store code to scan: the pairing code is the only one").not.toMatch(/<svg[^>]*qr|Scan with your phone's camera/i);
   });
 
-  it("is the same page in Advanced: nothing paired and no way on reads as the same one closed row", () => {
-    const html = page(false);
-    const simple = page(true);
-    expect(simple).toContain("data-reach-fold");
-    expect(html).toContain("data-reach-fold");
-    expect(html).not.toContain('data-route-row="wifi"');
-  });
-
-  it("in Advanced, with a way on, shows the ways in and keeps More ways in folded", () => {
+  it("shows the ways in and keeps More ways in folded", () => {
     f.state = state({ routes: routes({ wifi: true }) });
-    const html = page(false);
+    const html = page();
     expect(html).toMatch(/data-route-row="wifi"[\s\S]*?data-route-row="relay"[\s\S]*?Keep this computer awake[\s\S]*?More ways in/);
     expect(html).toMatch(/data-settings-disclosure="more-ways"[\s\S]*?aria-expanded="false"/);
   });
 
   it("shows each route on since its date as a switch, and lists paired phones with Pair a phone beside the list", () => {
     f.state = state({ routes: routes({ wifi: true, tailscale: true }) });
-    let html = page(true);
+    let html = page();
     expect(html).toMatch(/Same Wi-Fi[\s\S]*?data-route-row="wifi"[\s\S]*?aria-checked="true"[\s\S]*?On · waiting for a paired device/);
     expect(html).toMatch(/data-settings-disclosure="more-ways"[\s\S]*?aria-expanded="true"[\s\S]*?More ways in/);
     f.state = state({ enabled: true, routes: routes({ wifi: true }), devices: [phone] });
-    html = page(true);
+    html = page();
     expect(html).toContain("Ada's iPhone");
     expect(html).toMatch(/Paired[\s\S]*?>Pair a phone<[\s\S]*?Ada's iPhone/);
     expect(html, "a switch that is on needs no line saying so").not.toContain("On · since");
@@ -86,17 +78,15 @@ describe("Phone & devices", () => {
 });
 
 describe("Your other computers", () => {
-  it("shows in Simple mode with nothing on, outside More ways in, and in Advanced the same", () => {
-    for (const simple of [true, false]) {
-      const html = page(simple);
-      expect(html, String(simple)).toMatch(/data-settings-block="computers"[\s\S]*?Your other computers[\s\S]*?Needs Tailscale on both\.[\s\S]*?data-route-row="tailscale-computers"[\s\S]*?role="switch"/);
-      expect(html, String(simple)).not.toContain("More ways in");
-    }
+  it("shows outside More ways in when no route is on", () => {
+    const html = page();
+    expect(html).toMatch(/data-settings-block="computers"[\s\S]*?Your other computers[\s\S]*?Needs Tailscale on both\.[\s\S]*?data-route-row="tailscale-computers"[\s\S]*?role="switch"/);
+    expect(html).not.toContain("More ways in");
   });
 
   it("stays its own row once Tailscale is on, after the ways a phone reaches this computer", () => {
     f.state = state({ routes: routes({ tailscale: true }) });
-    const html = page(true);
+    const html = page();
     expect(html).toMatch(/data-settings-block="reach"[\s\S]*?data-route-row="tailscale"[\s\S]*?data-settings-block="computers"[\s\S]*?data-route-row="tailscale-computers"/);
     expect(html.match(/data-route-row="tailscale-computers"/g)).toHaveLength(1);
   });
@@ -107,11 +97,11 @@ describe("Keep this computer awake", () => {
 
   it("can be turned on when Your other computers is the only way in that is on", () => {
     f.state = state({ routes: { ...routes({ tailscale: true }), tailscale: { on: true, since: NOV_7, name: "mac.tail1.ts.net", computers: true } } });
-    const row = awake(page(true));
+    const row = awake(page());
     expect(row).not.toContain("data-settings-inert");
     expect(row).not.toContain('disabled=""');
     f.state = state();
-    expect(page(true)).not.toContain("Keep this computer awake");
+    expect(page()).not.toContain("Keep this computer awake");
   });
 });
 
@@ -126,7 +116,7 @@ describe("the HTTPS address row", () => {
     f.account = { available: true, status: "ready" };
     for (const enabled of [false, true]) {
       f.state = state({ enabled, routes: routes({ wifi: true, tailscale: true }) });
-      const html = page(false);
+      const html = page();
       expect(html).toMatch(/data-settings-disclosure="more-ways"[\s\S]*?aria-expanded="true"[\s\S]*?data-route-row="tailscale"/);
       expect(html).not.toContain('data-route-row="https"');
       expect(html).not.toContain("HTTPS address");
@@ -138,7 +128,7 @@ describe("the HTTPS address row", () => {
     f.bridge = current;
     f.account = held;
     f.state = state({ routes: routes({ wifi: true, tailscale: true }) });
-    expect(page(false)).toMatch(/HTTPS address[\s\S]*?data-route-row="https"[\s\S]*?>Set up</);
+    expect(page()).toMatch(/HTTPS address[\s\S]*?data-route-row="https"[\s\S]*?>Set up</);
   });
 
   it("stays while the route is on, and on a build before the encrypted connection", () => {
@@ -147,7 +137,7 @@ describe("the HTTPS address row", () => {
     expect(showHttpsAddressRow({ routes: routes() }, null, null)).toBe(true);
     f.bridge = current;
     f.state = state({ routes: routes({ https: true }), endpoints: [{ url: held.endpoint, kind: "hosted", priority: 0 }] });
-    const html = page(true);
+    const html = page();
     expect(html).toMatch(/HTTPS address[\s\S]*?data-route-row="https"[\s\S]*?>Turn off</);
     expect(html).toContain("On · c-0123456789abcdef0123456789abcdef.mausbot.si");
   });

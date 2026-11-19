@@ -1,3 +1,4 @@
+import { useMenuMotion } from "./MenuMotion";
 import { useEffect, useId, useRef, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { CheckCircle2, ChevronRight, Loader2, Phone, X } from "lucide-react";
@@ -17,6 +18,7 @@ const VOICE_PICKER = "[data-voice-picker]:not([disabled])";
 const FIRST_FIELD = "input:not([disabled]), select:not([disabled])";
 
 export function VoiceSetupDialog({
+  open = true,
   bot,
   callName,
   ready,
@@ -24,6 +26,7 @@ export function VoiceSetupDialog({
   onStartCall,
   returnFocusRef,
 }: {
+  open?: boolean;
   bot: Bot;
   callName: string;
   ready: boolean;
@@ -31,6 +34,7 @@ export function VoiceSetupDialog({
   onStartCall: () => void;
   returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
+  const motion = useMenuMotion(open);
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const { patch } = useBotSettingsDerived(bot);
@@ -42,6 +46,7 @@ export function VoiceSetupDialog({
   const close = () => onCloseRef.current();
 
   useEffect(() => {
+    if (!open) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const dialog = dialogRef.current;
     const focusable = () =>
@@ -85,7 +90,7 @@ export function VoiceSetupDialog({
       window.removeEventListener("keydown", onKeyDown);
       (returnFocusRef?.current ?? previousFocus)?.focus();
     };
-  }, [returnFocusRef]);
+  }, [open, returnFocusRef]);
 
   const openAllSettings = () => {
     close();
@@ -93,8 +98,11 @@ export function VoiceSetupDialog({
     openBotSettings(dispatch, "voice");
   };
 
+  if (!motion.shown) return null;
   return createPortal(
     <div
+      {...motion.exitProps}
+      data-overlay-fade={motion.closing ? "out" : "in"}
       className="glass-popup-frame"
       style={glassPopupFrameStyle()}
       onMouseDown={(event) => event.target === event.currentTarget && close()}
@@ -109,7 +117,7 @@ export function VoiceSetupDialog({
         aria-describedby={subtitleId}
         tabIndex={-1}
         data-voice-setup-dialog={bot.id}
-        className="glass-surface animate-pop-in relative flex max-h-full w-[min(560px,100%)] flex-col overflow-hidden rounded-2xl outline-none"
+        className="glass-surface relative flex max-h-full w-[min(560px,100%)] flex-col overflow-hidden rounded-2xl outline-none"
       >
         <header className="flex items-start justify-between gap-4 px-6 pb-4 pt-6 sm:px-7">
           <div className="flex min-w-0 items-center gap-3.5">

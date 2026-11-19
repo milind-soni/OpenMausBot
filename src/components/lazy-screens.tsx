@@ -75,7 +75,6 @@ export const LocalVmWorkspace = lazyScreen("LocalVmWorkspace", async () => (awai
 export const NewBotDialog = lazyScreen("NewBotDialog", async () => (await import("./NewBotDialog")).NewBotDialog);
 export const PluginsPanel = lazyScreen("PluginsPanel", async () => (await import("./PluginsPanel")).PluginsPanel);
 export const RemoteAgentSettingsPanel = lazyScreen("RemoteAgentSettingsPanel", async () => (await import("./RemoteAgentSettingsPanel")).RemoteAgentSettingsPanel);
-export const RoomPanel = lazyScreen("RoomPanel", async () => (await import("./room-panel/RoomPanel")).RoomPanel);
 export const RemoteDesktopPanel = lazyScreen("RemoteDesktopPanel", async () => (await import("./remote-desktop-panel")).RemoteDesktopPanel);
 export const TriggersPage = lazyScreen("TriggersPage", async () => (await import("./TriggersPage")).TriggersPage);
 export const SettingsModal = lazyScreen("SettingsModal", async () => (await import("./SettingsModal")).SettingsModal);
@@ -96,7 +95,7 @@ export const TeamFilesPage = lazyScreen("TeamFilesPage", async () => (await impo
 // Most opened first: a Cloud page fetches these in this order.
 const SCREENS = [
   SettingsModal, BotSettingsDialog, PluginsPanel, ComputerPanel, TriggersPage, ActivityPanel, FilesView, InspectorPanel, KeyboardShortcutsModal,
-  LocalVmWorkspace, NewBotDialog, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, TeamMapPage, PublishedAppsPage,
+  LocalVmWorkspace, NewBotDialog, RemoteAgentSettingsPanel, RemoteDesktopPanel, TeamMapPage, PublishedAppsPage,
 ];
 
 if (typeof location !== "undefined" && new URLSearchParams(location.search).has("desktop-settings")) {

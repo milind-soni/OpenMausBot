@@ -16,7 +16,6 @@ vi.mock("@/state/store", async (importOriginal) => ({
     refreshInstances: vi.fn(),
   }),
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, setAdvancedMode: vi.fn() }));
 vi.mock("@/lib/analytics", () => ({ analyticsEnabled: () => false, setAnalyticsEnabled: vi.fn() }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => null }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { host: {} } }) }));
@@ -29,7 +28,6 @@ for (const [path, name] of [
 ] as const) vi.doMock(path, async (importOriginal) => ({ ...await importOriginal<Record<string, unknown>>(), [name]: () => null }));
 
 const { SettingsModal } = await import("./SettingsModal");
-const { setAdvancedMode } = await import("@/lib/interface-mode");
 let host: HTMLDivElement;
 let root: Root;
 const scrolled = fixture.scrolled;
@@ -63,7 +61,7 @@ const type = (value: string) => {
   flushSync(() => search().dispatchEvent(new Event("input", { bubbles: true })));
 };
 
-describe("Settings search in Simple mode", () => {
+describe("Settings search", () => {
   it("opens with the search field focused, and / or ⌘F come back to it from anywhere in Settings", () => {
     expect(document.activeElement).toBe(search());
     flushSync(() => dialog().focus());
@@ -75,19 +73,17 @@ describe("Settings search in Simple mode", () => {
     type("notifications");
     const first = document.querySelector<HTMLButtonElement>("[data-settings-hit]")!;
     expect(first.getAttribute("data-settings-hit")).toBe("notifications");
-    // Simple keeps notifications on This app (This browser in a tab), not on General.
     expect(first.textContent, "a browser tab is This browser").toContain("This browser");
-    expect(first.textContent).not.toContain("General");
+    expect(first.textContent).toContain("General");
     type("phone");
     expect(document.querySelector("[data-settings-hit]")!.textContent).toContain("Phone & devices");
   });
 
-  it("tags an Advanced row from Simple; choosing it turns Advanced mode on and lands on the row", () => {
+  it("opens a settings row directly from search", () => {
     type("parallel threads");
     const hit = document.querySelector<HTMLButtonElement>('[data-settings-hit="parallel"]')!;
-    expect(hit.textContent).toContain("Advanced");
+    expect(hit.textContent).toContain("Parallel");
     flushSync(() => hit.click());
-    expect(vi.mocked(setAdvancedMode)).toHaveBeenCalledWith(true);
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "bots", anchor: "parallel" });
   });
 

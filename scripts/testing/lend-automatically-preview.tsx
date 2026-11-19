@@ -3,9 +3,7 @@ import App from "../../src/App";
 import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
 import { CLOUD_SETUP_HIDDEN, CLOUD_WELCOME_DONE } from "../../src/lib/cloud-setup";
 import { withTourFinished } from "../../src/lib/guided-tour";
-import { setAdvancedMode } from "../../src/lib/interface-mode";
 import { GROK_MOVE_NOTICE, MODELGO_OFFER_NOTICE, TEAMS_NOTICE } from "../../src/lib/notices";
-import { markSimpleModePromptSeen } from "../../src/lib/simple-mode-prompt";
 import { applySkin, type SkinId } from "../../src/lib/skins";
 import "../../src/styles.css";
 
@@ -17,11 +15,9 @@ const params = new URLSearchParams(location.search);
 const page = params.get("page") === "local" ? "local" : "cloud";
 setAnalyticsEnabled(false);
 setEmailGateDone("skipped");
-markSimpleModePromptSeen();
 localStorage.setItem(GROK_MOVE_NOTICE, "1");
 localStorage.setItem(TEAMS_NOTICE, "1");
 localStorage.setItem(MODELGO_OFFER_NOTICE, "1");
-setAdvancedMode(true);
 applySkin((params.get("skin") ?? "midnight") as SkinId);
 
 const ORIGIN = "https://omb-u-fixture.fly.dev";

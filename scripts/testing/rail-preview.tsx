@@ -5,17 +5,15 @@ import type { PlaceLook } from "../../electron/place-look.mjs";
 import App from "../../src/App";
 import { ChromeRail } from "../../src/components/ChromeRail";
 import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
-import { setAdvancedMode } from "../../src/lib/interface-mode";
 import { NOTICES } from "../../src/lib/notices";
 import { setSidebarDensity, SIMPLE_SIDEBAR_WIDTH_KEY } from "../../src/lib/sidebar-preferences";
 import { GROK_MOVE_NOTICE, TEAMS_NOTICE } from "../../src/lib/notices";
-import { markSimpleModePromptSeen } from "../../src/lib/simple-mode-prompt";
 import { applySkin, type SkinId } from "../../src/lib/skins";
 import "../../src/styles.css";
 
 // Served only by scripts/verify-cloud-rail.ts: the real app, as a Cloud's page in the desktop window sees it, with the
 // desktop bridge a hosted Cloud's page gets (its rail and add-a-Cloud sheet answered here). ?skin= picks the skin,
-// ?mode=simple Simple mode, ?sheet=add|server|cloud|name|connect opens ＋'s sheet there (?adding=setting_up: a Cloud
+// ?sheet=add|server|cloud|name|connect opens ＋'s sheet there (?adding=setting_up: a Cloud
 // being bought; connect: a signed-in server's), ?places=many the list past eight (?more opens it), ?places=servers the
 // person's own servers that signed in. ?look=<colour>|none is the place's colour (its tint), ?member a team's Cloud
 // its member is on, ?settings=look Settings → Appearance at the place's colour, ?menu=<id> that circle's own menu (a
@@ -35,14 +33,12 @@ import "../../src/styles.css";
 const params = new URLSearchParams(location.search);
 setAnalyticsEnabled(false);
 setEmailGateDone("skipped");
-markSimpleModePromptSeen();
 localStorage.setItem(GROK_MOVE_NOTICE, "1");
 localStorage.setItem(TEAMS_NOTICE, "1");
 try {
   for (const notice of NOTICES) localStorage.setItem(notice, "1");
   localStorage.removeItem(SIMPLE_SIDEBAR_WIDTH_KEY);
 } catch {}
-setAdvancedMode(params.get("mode") !== "simple");
 setSidebarDensity(params.get("density") === "icons" ? "icons" : "comfortable");
 applySkin((params.get("skin") ?? "midnight") as SkinId);
 
@@ -245,8 +241,7 @@ if (params.has("railpage")) {
   const openedSettings = () => new Promise<void>((resolve) => { const tick = () => { if (openSettings) { openSettings(); resolve(); } else setTimeout(tick, 100); }; tick(); });
   const settings = params.get("settings");
   if (settings) {
-    // Simple mode's General page has the sidebar's rows and the rail's switch; Advanced keeps them in Appearance.
-    void openedSettings().then(() => (params.get("mode") === "simple" || settings === "general" ? undefined : click('[data-settings-section="appearance"]')))
+    void openedSettings().then(() => (settings === "general" ? undefined : click('[data-settings-section="appearance"]')))
       .then(() => new Promise<void>((resolve) => setTimeout(resolve, 300)))
       .then(() => {
         if (settings === "general") return document.querySelector("[data-settings-block='appearance']")?.scrollIntoView({ block: "start" });

@@ -94,7 +94,6 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     const buttons = (card: string) => evaluate(`[...document.querySelectorAll('${card} button')].map((one) => one.getAttribute("aria-label") ?? one.textContent.trim())`) as Promise<string[]>;
     mkdirSync(evidenceDir, { recursive: true });
     await viewport(1280, 860);
-    await evaluate(`localStorage.setItem("omb-advanced-mode", "1"); window.dispatchEvent(new StorageEvent("storage", { key: "omb-advanced-mode" })); true`);
     await until(() => evaluate(`Boolean(document.querySelector('[data-sidebar-nav="published-apps"]'))`), "the Tools section's Published apps entry");
 
     // Nothing published yet: the page already says what the plan includes.

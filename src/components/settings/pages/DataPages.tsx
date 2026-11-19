@@ -44,7 +44,7 @@ export function DataPage() {
     <SettingsGroup label={t("settings.data.storage")} block="storage">
       <SettingsRows><AttachmentStorageSettings /></SettingsRows>
     </SettingsGroup>
-    {ctx.advanced && <ThreadCleanupSettings />}
+    {<ThreadCleanupSettings />}
     {!ctx.desktop && ctx.admin && <ActivitySection />}
   </>;
 }

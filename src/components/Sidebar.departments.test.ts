@@ -36,7 +36,6 @@ vi.mock("./DesktopCapabilities", async () => {
   return { useDesktopCapabilities: () => ({ capabilities: initialDesktopCapabilities() }), windowFramed: () => false };
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.advanced }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
@@ -442,46 +441,6 @@ describe("a department's menu in Simple", () => {
     (render().find((node) => node.type === TeamMenuItems)!.props as unknown as Parameters<typeof TeamMenuItems>[0]).onRename();
     expect(render().some((node) => node.type === TeamDialog)).toBe(false);
     expect(header("Work").naming?.value).toBe("Work");
-  });
-});
-
-describe("a bot's menu in Simple", () => {
-  type MenuProps = Parameters<typeof BotContextMenu>[0];
-  const menuProps = (botId: string, extra: Partial<MenuProps> = {}): MenuProps => ({
-    menu: { botId, x: 0, y: 0 }, onClose: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn(), onMoveToSection: vi.fn(),
-    onNewFolder: vi.fn(), onNewTaskFolder: vi.fn(), onNewSection: vi.fn(), ...extra,
-  });
-  const open = (props: MenuProps) => {
-    fixture.index = 0;
-    const tree = nodes(BotContextMenu(props));
-    const move = tree.find((node) => node.props["data-bot-menu-move"] !== undefined)!;
-    (move.props.onClick as (event: { detail: number }) => void)({ detail: 1 });
-    fixture.index = 0;
-    const flyout = nodes(BotContextMenu(props)).find((node) => node.props["data-bot-menu-flyout"] === "move")!;
-    return nodes(flyout.props.children).filter((node) => node.props.role === "menuitem");
-  };
-  const label = (node: ReactElement<Props>) => nodes(node.props.children).length
-    ? Children.toArray(node.props.children).filter((part) => typeof part === "string").join("") : String(node.props.children);
-
-  it("moves it to a department, a new one or out of one, from Move to department", () => {
-    fixture.state = { ...fixture.state, sections: ["Work", "Home"] };
-    const props = menuProps("dodo");
-    const items = open(props);
-    expect(items.map(label)).toEqual(["Work", "Home", "New department…", "Remove from department"]);
-    expect(items[0]!.props.disabled).toBe(true);
-    (items[1]!.props.onClick as () => void)();
-    (items[3]!.props.onClick as () => void)();
-    expect(actions()).toEqual([
-      { type: "updateBot", botId: "dodo", patch: { section: "Home" } },
-      { type: "updateBot", botId: "dodo", patch: { section: "" } },
-    ]);
-    (items[2]!.props.onClick as () => void)();
-    expect(props.onNewSection).toHaveBeenCalledWith("dodo");
-  });
-
-  it("offers only New department… to a bot in none, when there are no departments yet", () => {
-    fixture.state = { ...fixture.state, sections: [], bots: [bot("atlas"), bot("bea")] };
-    expect(open(menuProps("atlas")).map(label)).toEqual(["New department…"]);
   });
 });
 

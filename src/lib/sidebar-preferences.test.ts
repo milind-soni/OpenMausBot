@@ -62,9 +62,9 @@ describe("sidebar width preference", () => {
   it("keeps the chat usable and rejects invalid saved widths", () => {
     expect(clampSidebarWidth(500, 900)).toBe(480);
     expect(clampSidebarWidth(500, 768)).toBe(448);
-    expect(clampSidebarWidth(100, 900)).toBe(240);
+    expect(clampSidebarWidth(100, 900)).toBe(280);
     expect(loadSidebarWidth({ getItem: () => "360" })).toBe(360);
-    for (const raw of ["NaN", "9999", "-1", "320.5"]) {
+    for (const raw of ["NaN", "9999", "-1", "270", "320.5"]) {
       expect(loadSidebarWidth({ getItem: () => raw })).toBeNull();
     }
   });

@@ -102,7 +102,6 @@ export interface PlaceFacts {
   /** The built-in browser is switched on for this installation and bot. */
   browserOn: boolean;
   role: "admin" | "user";
-  mode?: "simple" | "advanced";
   /** The cloud computer as last seen; unknown reads as not made yet. */
   computer?: "none" | "starting" | "waking" | "on" | "asleep";
   /** Auto uses a team's shared cloud computer by this name. */
@@ -395,10 +394,7 @@ function templateParams(params: PlaceParams, locale: string): Record<string, str
 export interface PlaceContext {
   server?: ServerKind;
   role: "admin" | "user";
-  mode?: "simple" | "advanced";
   source?: PlaceSource;
-  /** Simple mode words a pin's way back as "Use {place}", the grid's own label. */
-  worksOnLabel?: string;
   translate?: PlaceTranslate;
   locale?: string;
 }
@@ -413,19 +409,12 @@ export function placeViewOf(state: PlaceState, params: PlaceParams, context: Pla
   // A failed row never offers what only the panel can do on the spot.
   if (context.source && (action === "start" || action === "wake" || action === "watch")) action = null;
   if (context.source === "auto-pin") line = `${line} ${translate("place.backOnAuto")}`;
-  // Simple mode leaves Local VM setup to Advanced.
-  if (action === "open-vm-settings" && context.mode === "simple") action = null;
   if (action && context.role === "user" && ADMIN_SHORTCUT.has(action)) action = null;
   if (action && context.role === "user" && ADMIN_ONLY.has(action)) {
     action = null;
     line = `${line} ${translate("place.askAdmin")}`;
   }
-  // Simple mode has no composer chip, so a pin's way back is the grid's
-  // choice, by the grid's own name for it.
-  const label = !action ? null
-    : action === "clear-pin" && context.mode === "simple" && context.worksOnLabel
-      ? translate("place.action.usePlace", { place: context.worksOnLabel })
-      : translate(ACTION_KEY[action], values);
+  const label = action ? translate(ACTION_KEY[action], values) : null;
   return {
     state,
     params,
@@ -438,7 +427,7 @@ export function placeViewOf(state: PlaceState, params: PlaceParams, context: Pla
 /** The view of a place from its facts. */
 export function placeView(facts: PlaceFacts, options: { translate?: PlaceTranslate; locale?: string } = {}): PlaceView {
   const { state, params } = placeState(facts);
-  return placeViewOf(state, params, { server: facts.server, role: facts.role, mode: facts.mode, ...options });
+  return placeViewOf(state, params, { server: facts.server, role: facts.role, ...options });
 }
 
 /** A stored failed-turn row, worded for this reader. */

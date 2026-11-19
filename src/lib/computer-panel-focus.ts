@@ -50,7 +50,7 @@ function entryTab(root: HTMLElement | null): HTMLElement | null {
 /** The first thing a keyboard user should reach: the active tab, or the close
  * button when the panel has no tab row. */
 export function focusComputerPanelEntry(root: HTMLElement | null): void {
-  (entryTab(root) ?? root?.querySelector<HTMLElement>("[data-computer-panel-close]"))?.focus();
+  (entryTab(root) ?? root?.querySelector<HTMLElement>("[data-side-panel-close]"))?.focus();
 }
 
 /** A panel's side of the hand-off: the one-shot intent is taken on the first

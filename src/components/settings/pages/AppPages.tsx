@@ -55,27 +55,20 @@ export function AppPage() {
       </SettingsGroup>
     )}
     {/* Simple keeps language and notifications here, since General is an Advanced page. */}
-    {!ctx.advanced && (
-      <SettingsGroup label={t("settings.app.languageNotifications")} block="typing">
-        <SettingsRows selectWidth={208}>
-          <LanguageRow simple />
-          <NotificationRows simple />
-        </SettingsRows>
-      </SettingsGroup>
-    )}
+
     {/* Your computers is Advanced: in Simple the rail switches places, and the page stays one window tall. */}
-    {ctx.desktop && ctx.advanced && (window.ogb?.environments
+    {ctx.desktop && (window.ogb?.environments
       ? <ConnectedWorkspacesSettings label={t("settings.app.computers")} description={t("settings.app.computersLine")} />
       : !ctx.client && <PlacesFromHere />)}
-    {ctx.desktop && ctx.advanced && <RemoteComputerSection hideWhenUnavailable legacyOnly />}
+    {ctx.desktop && <RemoteComputerSection hideWhenUnavailable legacyOnly />}
     <SettingsGroup label={t("sidebar.menu.helpShort")} block="help">
       <SettingsRows>
         <SettingsLinkRow title={t("sidebar.menu.help")} external onClick={() => void openExternalLink(HELP_CENTER_URL)} />
         {/* Simple keeps the Help card short: feedback, shortcuts and the tour are in the outer menu's Help too. */}
-        {ctx.advanced && <SettingsLinkRow title={t("sidebar.menu.feedback")} external onClick={() => void openExternalLink(FEEDBACK_URL)} />}
-        {ctx.advanced && <SettingsLinkRow title={t("sidebar.menu.shortcuts")} onClick={() => { dispatch({ type: "toggleAppSettings", open: false }); dispatch({ type: "toggleShortcuts", open: true }); }} />}
-        {ctx.advanced && !ctx.client && <ReplayTourRow />}
-        {desk && ctx.advanced && (window.ogb?.exportDiagnostics ? <DiagnosticsRow simple /> : <InertRow title={t("settings.app.diagnostics")}
+        {<SettingsLinkRow title={t("sidebar.menu.feedback")} external onClick={() => void openExternalLink(FEEDBACK_URL)} />}
+        {<SettingsLinkRow title={t("sidebar.menu.shortcuts")} onClick={() => { dispatch({ type: "toggleAppSettings", open: false }); dispatch({ type: "toggleShortcuts", open: true }); }} />}
+        {!ctx.client && <ReplayTourRow />}
+        {desk && (window.ogb?.exportDiagnostics ? <DiagnosticsRow simple /> : <InertRow title={t("settings.app.diagnostics")}
           control={<button type="button" className="ui-button" tabIndex={-1}>{t("settings.diagnostics.export")}</button>} />)}
         <div data-settings-block="about" className="contents">
           <SettingsLinkRow title={t("settings.app.about", { app: productName() })} onClick={() => setAbout(true)} />
@@ -168,21 +161,21 @@ export function AppearancePage() {
     <SettingsGroup label={t("settings.appearance.chat")} block="chat">
       <SettingsRows>
         {!ctx.client && <ToolCallsRow />}
-        {ctx.advanced && <RunCardRow />}
-        {ctx.advanced && <ChatWidthRow />}
-        {ctx.advanced && <FontRow />}
+        {<RunCardRow />}
+        {<ChatWidthRow />}
+        {<FontRow />}
       </SettingsRows>
     </SettingsGroup>
     {/* Simple keeps the Look card and Tool calls; the window's layout is Advanced. */}
-    {ctx.advanced && <SettingsGroup label={t("settings.appearance.layout")} block="appearance">
+    {<SettingsGroup label={t("settings.appearance.layout")} block="appearance">
       <SettingsRows>
         <ChromeRailRow />
         <WindowFrameRow />
-        {ctx.advanced && <ShowThreadsRow />}
-        {ctx.advanced && <PinnedCirclesRow />}
-        {ctx.advanced && <UniversalPinsRow />}
+        {<ShowThreadsRow />}
+        {<PinnedCirclesRow />}
+        {<UniversalPinsRow />}
       </SettingsRows>
     </SettingsGroup>}
-    {ctx.advanced && <PinnedPanelsSettings />}
+    {<PinnedPanelsSettings />}
   </>;
 }

@@ -8,7 +8,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import { waitForExit } from "../../server/testing/cleanup.ts";
 import { runControlOmb } from "../control-omb.ts";
-import { ENABLE_ADVANCED_UI, UI_TOOLS_DIR } from "./control-omb-ui.ts";
+import { UI_TOOLS_DIR } from "./control-omb-ui.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const binary = resolveAgentBrowserBinary({ dataDir: UI_TOOLS_DIR, env: process.env });
@@ -37,7 +37,6 @@ describe("full backup Settings in the real renderer", () => {
       try { info = JSON.parse(stdout); return Boolean(info.ui); } catch { return false; }
     }, { timeout: LAUNCH_TIMEOUT_MS, interval: 250 }).toBe(true);
     const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", info.ui, ...args]) as Promise<Record<string, any>>;
-    await ui("eval", "--js", ENABLE_ADVANCED_UI);
     const evaluate = async (js: string) => (await ui("eval", "--js", js)).result;
     const click = (name: string) => ui("click", "--name", name).catch((error: Error) => {
       throw new Error(`Click ${name}: ${error.message}`, { cause: error });

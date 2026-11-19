@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const api = vi.fn();
 vi.mock("@/state/api", () => ({ api: (...args: unknown[]) => api(...args) }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true }));
 const { ToolActivity } = await import("./ToolActivity");
 
 const source = { threadId: "th1", messageId: "m1" };

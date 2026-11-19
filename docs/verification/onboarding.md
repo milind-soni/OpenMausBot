@@ -6,9 +6,7 @@ signs one in, with "Other ways to connect · Set up later" under it), then
 "Introducing your Chief of Staff" over an empty app (Create Chief of Staff, and
 Choose an existing bot where the person has bots). The Chief step shows only
 for a MausBot not yet introduced where no other bot is the Chief. It lands in
-the Chief's chat, where MausBot's three lines, its follow-up (written once by
-the server, `POST /api/bots/:id/helper-followup`) and chips offer only what is
-still missing. The app tour starts only from Settings → Replay app tour.
+the Chief's chat, where MausBot introduces itself and offers setup actions. The app tour starts only from Settings → Replay app tour.
 
 Launch the isolated full-app fixture following [Chat UI](chat-ui.md):
 
@@ -47,7 +45,7 @@ Stop the launcher with Ctrl-C; it owns and removes only its disposable home.
 The rules behind it run offline:
 
 ```sh
-pnpm exec vitest run src/components/onboarding/WelcomeFlow.test.ts src/components/onboarding/ChiefIntro.test.ts src/components/onboarding/ConnectAi.test.ts src/components/HelperIntro.test.ts src/lib/default-bot.test.ts server/routes/helper-followup.test.ts electron/system-name.test.mjs src/components/CardHint.test.ts
+pnpm exec vitest run src/components/onboarding/WelcomeFlow.test.ts src/components/onboarding/ChiefIntro.test.ts src/components/onboarding/ConnectAi.test.ts src/lib/default-bot.test.ts electron/system-name.test.mjs
 ```
 
 They cover when the Chief step shows, its 300 ms input guard, the Cloud Pro
@@ -145,7 +143,7 @@ one button: in Settings → Import & export, and offered by MausBot's first mess
 Desktop app only.
 
 ```sh
-pnpm exec vitest run server/setup-import.test.ts server/imported-skills.test.ts server/toml-lite.test.ts server/routes/setup-import.test.ts server/setup-import.e2e.test.ts src/components/ImportSettings.test.ts src/components/HelperIntro.test.ts src/lib/setup-import.test.ts
+pnpm exec vitest run server/setup-import.test.ts server/imported-skills.test.ts server/toml-lite.test.ts server/routes/setup-import.test.ts server/setup-import.e2e.test.ts src/components/ImportSettings.test.ts src/lib/setup-import.test.ts
 ```
 
 Every test builds its own temporary home; none reads the real `~/.claude`,
@@ -168,7 +166,7 @@ window itself.
 ## Two screens, then the chat (Oct 27 2026)
 
 ```sh
-pnpm exec vitest run src/lib/onboarding.test.ts src/lib/welcome-draft.test.ts src/lib/default-bot.test.ts src/lib/corner-popup.test.ts src/components/onboarding src/components/HelperIntro.test.ts src/components/AppNotices.test.ts src/components/MausBotWelcome.gate.test.ts
+pnpm exec vitest run src/lib/onboarding.test.ts src/lib/welcome-draft.test.ts src/lib/default-bot.test.ts src/lib/corner-popup.test.ts src/components/onboarding src/components/AppNotices.test.ts src/components/MausBotWelcome.gate.test.ts
 ```
 
 - `src/components/onboarding/WelcomeFlow.test.ts` renders the flow in

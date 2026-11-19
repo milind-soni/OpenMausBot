@@ -8,7 +8,7 @@ import { isArchived, orderedSidebarThreads, orderedThreadList, threadRecency, th
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { endedOnFailure } from "@/lib/mascot";
-import { rowSelectedSurface } from "./SidebarRowMarkers";
+import { sidebarRowTone } from "./SidebarRowMarkers";
 
 export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>, archivedApprovals = false): Array<Task & { queued: boolean }> {
   const tasks = bot.tasks ?? [{
@@ -89,7 +89,6 @@ export function isOpenThread(entry: AttentionThread, open: OpenThread | undefine
 }
 
 /** The row of the conversation the chat window has open: the plain fill a selected sidebar row has. */
-export const openThreadRow = rowSelectedSurface;
 
 export function attentionOwnerName(entry: AttentionThread): string {
   return entry.kind === "bot" ? entry.botName : entry.groupName;
@@ -192,7 +191,7 @@ export function AttentionThreadRows({ entries, onJump, inset = false, unreadDot 
       return <button key={`${entry.kind}-${entry.kind === "bot" ? entry.botId : entry.groupId}-${entry.task.threadId}`} type="button" aria-label={label} title={label}
         aria-current={open ? "page" : undefined} data-open-thread={open || undefined}
         onClick={() => onJump(entry)}
-        className={cn("flex w-full items-center gap-2.5 text-left text-[13px] text-ink hover:bg-menu-hover", inset ? "rounded-md px-2 py-1.5" : "px-3.5 py-2", open && openThreadRow)}>
+        className={cn("flex w-full items-center gap-2.5 text-left text-[13px] text-ink transition-colors duration-150", inset ? "rounded-[8px] px-2 py-2" : "px-3.5 py-2", sidebarRowTone(open))}>
         <Icon size={inset ? 16 : 15} aria-hidden="true" className={cn("shrink-0", colorClass)} />
         <span className="min-w-0 flex-1">
           <span className={cn("block truncate", unread && "font-medium text-ink")}>{entry.task.title}</span>

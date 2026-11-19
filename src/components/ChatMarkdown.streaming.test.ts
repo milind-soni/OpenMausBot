@@ -16,11 +16,6 @@ vi.mock("react-markdown", async (importOriginal) => {
     },
   };
 });
-vi.mock("@/lib/interface-mode", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/lib/interface-mode")>(),
-  useAdvancedMode: () => true,
-  readAdvancedMode: () => true,
-}));
 
 const { ChatMarkdown, clearChatMarkdownCache } = await import("./ChatMarkdown");
 

@@ -4,6 +4,7 @@ import type { Message } from "./store.ts";
 export interface ThreadState {
   messages: Message[];
   activeLeafId: string | null;
+  pathIndex?: { leafId: string | null; messages: Message[]; positions: Map<string, number> };
 }
 
 /** A conversation nobody read or wrote for this long gives its parsed transcript back; the next read reloads it from messages.db. */
@@ -76,6 +77,7 @@ export class ThreadCache {
   grew(threadId: string, added: Message, removed?: Message): void {
     const entry = this.entries.get(threadId);
     if (!entry) return;
+    entry.state.pathIndex = undefined;
     const change = approxBytes(added) - (removed ? approxBytes(removed) : 0);
     entry.bytes += change;
     this.bytes += change;

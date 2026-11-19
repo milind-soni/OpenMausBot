@@ -20,7 +20,6 @@ import { yourComputerAsk } from "@/lib/your-computer";
 import { computerAskWords } from "@/lib/computer-ask";
 import { mcpRequestActionLabel } from "@/lib/mcp-request-label";
 import { TriggerCard } from "./TriggerCard";
-import { CardHint } from "./CardHint";
 
 interface ToolLabels {
   [tool: string]: LocaleKey;
@@ -528,7 +527,7 @@ export function ApprovalCard({
         answeredBelow={Boolean(card.requestId && card.tool && !card.dismissed)}
       />
     );
-    return waiting && card.requestId && card.tool ? <div className="flex w-full flex-col gap-1">{row}<CloudGuestApprovalNote /><CardHint id="spot.approval" /></div> : row;
+    return waiting && card.requestId && card.tool ? <div className="flex w-full flex-col gap-1">{row}<CloudGuestApprovalNote /></div> : row;
   }
 
   return (

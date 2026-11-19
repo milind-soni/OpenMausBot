@@ -23,7 +23,6 @@ vi.mock("@/state/store", async (importOriginal) => ({
   }),
   api: (...args: unknown[]) => fixture.api(...args),
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("./Avatar", () => ({ BotAvatar: () => null }));
 

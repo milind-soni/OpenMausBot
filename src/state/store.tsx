@@ -112,7 +112,7 @@ export type ConnectorCardData = import("../../shared/connector-card").ConnectorC
 
 export type SecretRequestCardData = Omit<import("../../shared/wire").SecretRequestCardData, "phoneOperationId" | "vm">;
 
-export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "template" | "sender" | "setupSuggestion" | "settingsCard" | "helperIntro" | "helperFollowup" | "setupOffer" | "savedSteps" | "setupChoices" | "setupChoicesPending" | "setupChoicesUpdating" | "setupRequest" | "relay" | "inbox" | "sentDirectly" | "doneWhen" | "bugReport" | "engineCompaction" | "stoppedBy"> {
+export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "template" | "sender" | "setupSuggestion" | "settingsCard" | "helperIntro" | "setupOffer" | "savedSteps" | "setupChoices" | "setupChoicesPending" | "setupChoicesUpdating" | "setupRequest" | "relay" | "inbox" | "sentDirectly" | "doneWhen" | "bugReport" | "engineCompaction" | "stoppedBy"> {
   id: string;
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "burst" | "digest" | "compaction" | "call" | "widget" | "app";
@@ -907,7 +907,7 @@ export function reducer(state: AppState, action: Action): AppState {
         bots: action.bots.map((sent) => {
           let bot = sent.messages ? sent : { ...sent, messages: [] };
           const previous = state.bots.find((candidate) => candidate.id === bot.id);
-          if (bot.needsHistory && previous?.threadId === bot.threadId) bot = { ...bot, messages: previous.messages, hasMore: previous.hasMore };
+          if (bot.needsHistory && previous?.threadId === bot.threadId && (!state.chatV2 || bot.busy)) bot = { ...bot, messages: previous.messages, hasMore: previous.hasMore };
           return keepBotNavigation(previous, previous ? { ...bot, tasks: mergeTaskStamps(previous.tasks, bot.tasks) } : bot,
             action.preserveNavigation === true && navigatedSince(previous, action.navigationSince, state.transcriptGeneration), action.taskIdsAtStart);
         }),
@@ -924,7 +924,9 @@ export function reducer(state: AppState, action: Action): AppState {
         hydrated: true as const,
         backgroundThreadEvents: {},
         loadingOlder: {},
-        transcriptGeneration: {},
+        transcriptGeneration: Object.fromEntries(
+          [...action.bots, ...action.groups].map(({ threadId }) => [threadId, (state.transcriptGeneration[threadId] ?? 0) + 1]),
+        ),
         modelVariantSessions: {},
       };
       const held = [...hydrated.bots, ...hydrated.groups].find((owner) => owner.threadId === state.unreadDivider?.threadId);
@@ -1840,6 +1842,7 @@ export function dataSheetFromResponse(body: unknown, botId: string): DataSheet {
 }
 
 export const initialState: AppState = {
+  chatV2: true,
   modelVariantSessions: {},
   backgroundThreadEvents: {},
   loadingOlder: {},
@@ -2096,6 +2099,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const selectedBot = state.bots.find(bot => bot.id === state.selectedId);
   const selectedOwner = selectedBot ?? state.groups.find(group => group.id === state.selectedId);
   const rawThread = selectedOwner?.needsHistory && !(selectedBot && state.chatV2 && !selectedBot.busy) ? selectedOwner.threadId : undefined;
+  const rawGeneration = rawThread ? state.transcriptGeneration[rawThread] : undefined;
   useEffect(() => {
     if (!rawThread) return;
     const controller = new AbortController();
@@ -2105,7 +2109,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       `/api/threads/${rawThread}/messages?limit=${MESSAGE_PAGE_SIZE}`, { signal: controller.signal },
     ).then(page => { if (!controller.signal.aborted) rawDispatch({ type: "historyReady", threadId: rawThread, held, leaf, ...page }); }));
     return () => controller.abort();
-  }, [rawThread, rawDispatch, state.hydrated]);
+  }, [rawThread, rawDispatch, rawGeneration]);
   const showThreads = useShowThreads();
   const showThreadsRef = useRef(showThreads);
   showThreadsRef.current = showThreads;

@@ -6,10 +6,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { BotEditorStore, type Message, type useStore } from "@/state/store";
-import { setAdvancedMode } from "@/lib/interface-mode";
 import { addPointedChip, forgetPointedChips, setPointedNote, takePointedChips, usePointedChips } from "@/lib/pointed-chips";
 import { setWebPanels } from "@/lib/web-panel-preferences";
-import { MAX_WEB_PANELS } from "@/lib/web-panels";
 import type { AppPayload } from "../../../shared/app";
 import type { PublishedPageCard } from "../../../shared/published-page";
 import { botHtmlDocument } from "../../../shared/app-frame/document";
@@ -219,30 +217,9 @@ describe("a bot's page in the chat", () => {
     expect(overlay()).toBeNull();
   });
 
-  it("pins the page to the sidebar and unpins it, only in Advanced mode, where pinned panels show", async () => {
-    setWebPanels([]);
-    setAdvancedMode(false);
-    await render(row(payload()));
-    expect(card().querySelector("[data-page-pin]")).toBeNull();
-
-    act(() => setAdvancedMode(true));
-    await click("Pin to sidebar", card());
-    expect(JSON.parse(localStorage.getItem("omb-web-panels")!)).toEqual([
-      { id: "panel-1", name: "Pricing", page: { botId: "pepper", threadId: "t1", messageId: "a1" } },
-    ]);
-    expect(button("Unpin", card()).getAttribute("aria-pressed")).toBe("true");
-    await click("Unpin", card());
-    expect(JSON.parse(localStorage.getItem("omb-web-panels")!)).toEqual([]);
-
-    act(() => setWebPanels(Array.from({ length: MAX_WEB_PANELS }, (_, i) => ({ id: `p${i}`, name: `P${i}`, url: `https://p${i}.example/` }))));
-    expect(button("Pin to sidebar", card()).disabled).toBe(true);
-    expect(card().querySelector("[data-page-pin-full]")?.textContent).toContain(`maximum of ${MAX_WEB_PANELS} pages`);
-    act(() => { setWebPanels([]); setAdvancedMode(false); });
-  });
 
   it("keeps a page another window pinned a moment ago when this one pins", async () => {
     setWebPanels([]);
-    setAdvancedMode(true);
     await render(row(payload()));
     // Another window's write whose storage event hasn't arrived yet.
     localStorage.setItem("omb-web-panels", JSON.stringify([{ id: "panel-9", name: "Other", url: "https://other.example/" }]));
@@ -252,7 +229,7 @@ describe("a bot's page in the chat", () => {
     localStorage.setItem("omb-web-panels", "[]");
     await click("Unpin", card());
     expect(localStorage.getItem("omb-web-panels")).toBe("[]");
-    act(() => { setWebPanels([]); setAdvancedMode(false); });
+    act(() => { setWebPanels([]);  });
   });
 
   it("gives an MCP app none of a page's tools", async () => {

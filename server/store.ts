@@ -1109,6 +1109,17 @@ export class Store {
     return this.thread(threadId).activeLeafId;
   }
 
+  activePathIndex(threadId: string): NonNullable<ThreadState["pathIndex"]> {
+    const t = this.thread(threadId);
+    if (t.pathIndex?.leafId === t.activeLeafId) return t.pathIndex;
+    const messages = this.activePath(threadId);
+    return t.pathIndex = {
+      leafId: t.activeLeafId,
+      messages,
+      positions: new Map(messages.map((message, index) => [message.id, index])),
+    };
+  }
+
   activePath(threadId: string): Message[] {
     const t = this.thread(threadId);
     const byId = new Map(t.messages.map((m) => [m.id, m]));

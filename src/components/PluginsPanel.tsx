@@ -271,7 +271,7 @@ export function PluginsPanel() {
     const controls = focusable();
     (controls.find((element) => element.matches("input")) ?? controls[0] ?? dialog)?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
-      if (disconnectingRef.current) return;
+      if (event.defaultPrevented || disconnectingRef.current || dialog?.closest?.("[inert]")) return;
       if (event.key === "Escape") {
         event.preventDefault();
         dispatch({ type: "togglePlugins", open: false });
@@ -472,7 +472,7 @@ export function PluginsPanel() {
         aria-modal="true"
         aria-labelledby="plugins-title"
         tabIndex={-1}
-        className="glass-surface glass-popup animate-pop-in relative flex max-w-[780px] flex-col overflow-hidden rounded-2xl"
+        className="glass-surface glass-popup relative flex max-w-[780px] flex-col overflow-hidden rounded-2xl"
       >
         <header className="flex flex-col gap-4 px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
           <div>
@@ -942,7 +942,7 @@ export function PluginsPanel() {
                 {index > 0 && ", "}
                 <button
                   type="button"
-                  onClick={() => { close(); openBotSettings(dispatch, "access", { botId: candidate.id, page: "apps" }); }}
+                  onClick={() => { close(); openBotSettings(dispatch, "access", { botId: candidate.id }); }}
                   className="font-medium text-ink underline underline-offset-2 hover:text-accent-text"
                 >
                   {candidate.name}

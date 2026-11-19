@@ -8,7 +8,6 @@ vi.mock("@/state/thread-navigation", async importOriginal => ({
   ...await importOriginal<typeof import("@/state/thread-navigation")>(), openBot: fixture.openBot,
 }));
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: {} }) }));
 vi.mock("react", async importOriginal => {
@@ -131,10 +130,6 @@ describe("bot draft dialog", () => {
     for (const section of ["Identity", "Soul", "Skills", "Memory", "Routines", "Access", "Model", "Permissions", "Voice &amp; alerts"]) {
       expect(result.html).toContain(section);
     }
-    fixture.advanced = false;
-    const simple = render().html;
-    expect(simple, "Simple mode picks no model: new bots use the default").not.toContain(">Model<");
-    expect(simple).toContain(">Permissions<");
     fixture.effects[0]();
     expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/bot-defaults");
     expect(fixture.dispatch).not.toHaveBeenCalled();

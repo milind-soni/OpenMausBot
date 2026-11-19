@@ -23,7 +23,6 @@ const { setTeamChats } = await import("@/state/team-chats");
 const { savedTeamSide, setTeamSide, teamSide, teamSideView } = await import("@/state/team-side");
 const { botShowsUnread } = await import("@/lib/bot-unread");
 const { forgetShownConversations, TeamAudienceLabel, TeamSideSwitch } = await import("./TeamSideSwitch");
-const { BotConversations, forgetConversationLines } = await import("./bot-panel/Conversations");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -68,7 +67,6 @@ afterEach(() => {
   act(() => root.unmount());
   host.remove();
   setTeamChats(null);
-  forgetConversationLines();
   vi.unstubAllGlobals();
 });
 
@@ -346,30 +344,5 @@ describe("each side's rows carry only that side's marks", () => {
     const me = rows([privateUnread, MINE], "me")[0]!;
     expect(botShowsUnread(me)).toBe(true);
     expect(me.busy).toBe(true);
-  });
-});
-
-describe("a bot's own list of conversations", () => {
-  const SECOND = task("ada-second", "Supplier call", { private: true });
-  const REPORT = task("report", "Weekly numbers", {});
-  const listed = (shown: Bot, state: AppState = acme()) => {
-    draw(state, createElement(BotConversations, { bot: shown }));
-    return [...host.querySelectorAll("[data-conversation]")].map((row) => row.getAttribute("data-conversation")).sort();
-  };
-
-  it("lists the person's private chats beside a private chat, with New conversation", () => {
-    expect(listed(bot({ threadId: "ada-own", tasks: [MAIN, OWN, SECOND, REPORT] }))).toEqual(["ada-own", "ada-second"]);
-    expect(host.querySelector("[data-conversations-new]")).not.toBeNull();
-  });
-
-  it("lists the shared conversations beside a shared chat, no private one, and offers no new conversation there", () => {
-    expect(listed(bot({ threadId: "scout-main", tasks: [MAIN, OWN, SECOND, REPORT] }))).toEqual(["report", "scout-main"]);
-    expect(host.querySelector("[data-conversations-new]"), "a new conversation is always private, so it is offered under Just me").toBeNull();
-  });
-
-  it("lists every conversation as before off a team", () => {
-    setTeamChats(null);
-    expect(listed(bot({ threadId: "scout-main", tasks: [task("scout-main", "First"), task("second", "Second")] }), initialState)).toEqual(["scout-main", "second"]);
-    expect(host.querySelector("[data-conversations-new]")).not.toBeNull();
   });
 });

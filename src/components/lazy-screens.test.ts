@@ -155,7 +155,7 @@ describe("preloadScreens", () => {
   it("a page on this machine fetches nothing ahead: each screen loads when it opens", () => {
     vi.useFakeTimers();
     const preloads = stubPreloads();
-    expect(preloads.length).toBe(24);
+    expect(preloads.length).toBe(23);
     for (const host of ["127.0.0.1", "localhost", "[::1]"]) preloadScreens(host);
     vi.runAllTimers();
     for (const preload of preloads) expect(preload).not.toHaveBeenCalled();

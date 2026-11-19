@@ -34,10 +34,8 @@ export function useChatActivity(): ChatActivity {
   return useMemo(() => ({ routines, tools, toggleRoutines, toggleTools }), [routines, tools]);
 }
 
-/** The messages the chat draws: everything outside Advanced mode; there, without what the person hid. Anything that
- * still needs the person (a pending approval, a waiting or failed run) always stays. */
-export function chatActivityMessages(messages: Message[], advanced: boolean, activity: ChatActivity, pinnedMessageId?: string): Message[] {
-  if (!advanced || (activity.routines && activity.tools)) return messages;
+export function chatActivityMessages(messages: Message[], activity: ChatActivity, pinnedMessageId?: string): Message[] {
+  if ((activity.routines && activity.tools)) return messages;
   return messages.filter((message) => {
     if (message.role !== "bot" || message.id === pinnedMessageId) return true;
     const approval = message.kind === "options" && message.card?.requestId && message.card.tool ? message.card : undefined;

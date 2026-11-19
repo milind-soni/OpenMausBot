@@ -12,7 +12,6 @@ import { WidgetMessage } from "./widget/WidgetMessage";
 
 export function richRowKind(message: Message): Message["kind"] {
   // MausBot's follow-up is text the model reads, drawn under its intro's card row (OptionsCardRow).
-  if (message.helperFollowup) return "options";
   if (message.setupSuggestion || message.settingsCard || (message.kind === "goal.run" && message.goalRun) || (message.kind === "burst" && message.burst)) return "widget";
   if (message.kind === "widget" && !message.widget) return "text";
   if (message.kind === "app" && !message.app) return "text";

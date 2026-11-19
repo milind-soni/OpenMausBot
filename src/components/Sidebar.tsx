@@ -6,7 +6,7 @@ import { setAttentionPinned, useAttentionPinned } from "./inbox/attention-pinned
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { createPortal } from "react-dom";
-import { Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderInput, FolderPlus, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Phone, Plus, Search, SquarePen, TextQuote, Trash2, Users, X } from "lucide-react";
+import { Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderInput, FolderPlus, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, PanelLeft, Pencil, Phone, Plus, SquarePen, TextQuote, Trash2, Users, X } from "lucide-react";
 import { sidebarState } from "./sidebar-state"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { api, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { approvalModeFor } from "../../shared/approval-mode";
@@ -32,7 +32,6 @@ import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { ImportDialog, ShareDepartmentDialog, TeamLibraryPanel } from "./lazy-screens";
-import { openCommandPalette } from "./CommandPalette";
 import { TeamSettingsDialog } from "./TeamSettingsDialog";
 import { TeamDialog } from "./TeamDialog";
 import { RenameTitle } from "./RenameTitle";
@@ -43,7 +42,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
 import { HelperThreadGroup, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow, useRevealedThreadRow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
-import { setSidebarDensity, useSidebarDensity, usePinnedCircles, useSidebarShowAllThreads, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
+import { SIDEBAR_MIN_WIDTH, setSidebarDensity, useSidebarDensity, usePinnedCircles, useSidebarShowAllThreads, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
 import {
   ATTENTION_SECTION_ID,
   BOT_CHATS_SECTION_ID,
@@ -80,7 +79,7 @@ import { TeamMenuItems } from "./SidebarTeamMenu";
 import { MENU_ITEM, MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
 export { TeamMenuItems };
 import { SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
-import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BUTTON, SidebarSearchButton } from "./SidebarSimpleTop";
+import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_RAIL_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BUTTON, SidebarSearchButton } from "./SidebarSimpleTop";
 import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -89,7 +88,7 @@ import { attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, cr
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
-import { AvatarActivityDot, AvatarCornerDot, RowDot, RowStatusText, rowSelectedSurface, rowSurface } from "./SidebarRowMarkers";
+import { AvatarActivityDot, AvatarCornerDot, RowDot, RowStatusText, sidebarRowTone, rowSurface } from "./SidebarRowMarkers";
 
 
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
@@ -181,7 +180,7 @@ export const GroupListItem = memo(function GroupListItem({
         "relative flex w-full items-center rounded-md text-left", SIMPLE_ROW_FOCUS,
         railTile ? "h-[54px] justify-center"
           : cn("gap-2 rounded-[8px] py-2 pr-2 group-hover:pr-9 group-focus-within:pr-9 max-md:pr-9 touch:pr-9 md:h-[54px] md:py-0", !group.dm && hasThreadList ? "pl-6" : "pl-2"),
-        selected && !expanded ? rowSelectedSurface : "hover:bg-raised/50",
+        sidebarRowTone(selected && !expanded),
       )}
       title={density === "icons" ? group.name : undefined}
       aria-label={density === "icons" ? group.name : undefined}
@@ -702,7 +701,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
     "flex w-full items-center rounded-xl text-left transition-colors duration-150", SIMPLE_ROW_FOCUS,
     iconOnly ? "h-[54px] justify-center" : cn("gap-2 rounded-[8px] py-2 pe-2 md:h-[54px] md:py-0", canExpand ? "ps-6" : "ps-2"),
     !iconOnly && "max-md:rounded-2xl max-md:py-2.5",
-    selected ? rowSelectedSurface : "hover:bg-raised/50",
+    sidebarRowTone(selected),
     !iconOnly && rowSurface(selected),
   );
   const { waiting, working, failed, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued, visible);
@@ -922,20 +921,27 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const plusMotion = useMenuMotion(plusOpen);
   const attentionPinned = useAttentionPinned();
   const [newChatOpen, setNewChatOpen] = useState(false);
+  const newChatMotion = useMenuMotion(newChatOpen);
   const [newRoom, setNewRoom] = useState(false);
   const [newFolderBotId, setNewFolderBotId] = useState<string | null>(null);
   const [newTaskFolderBotId, setNewTaskFolderBotId] = useState<string | null>(null);
   const newTaskFolderBot = state.bots.find((bot) => bot.id === newTaskFolderBotId);
   const [teamLibraryOpen, setTeamLibraryOpen] = useState(false);
+  const teamLibraryMotion = useMenuMotion(teamLibraryOpen);
   const [importUrl, setImportUrl] = useState<string | null>(null);
   const [archivedBotsOpen, setArchivedBotsOpen] = useState(false);
+  const archivedBotsMotion = useMenuMotion(archivedBotsOpen);
   const [teamFeedback, setTeamFeedback] = useState<{
     error: boolean;
     text: string;
     restoreBot?: { id: string; name: string };
   } | null>(null);
   const storedDensity = useSidebarDensity();
-  const density = collapseToIcons ? "icons" : storedDensity;
+  const [expandBesidePanel, setExpandBesidePanel] = useState(false);
+  useEffect(() => {
+    if (!collapseToIcons) setExpandBesidePanel(false);
+  }, [collapseToIcons]);
+  const density = phone ? "comfortable" : collapseToIcons && !expandBesidePanel ? "icons" : storedDensity;
   const rail = density === "icons";
   const simpleDesk = !rail && !phone;
   const sidePanelOpen = state.computerOpen || state.inspectorOpen;
@@ -946,23 +952,15 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const [pinnedCircleThreadsCollapsed, setPinnedCircleThreadsCollapsed] = useState(true);
 
   const toggleCollapsed = () => {
-    setSidebarDensity(density === "icons" ? "comfortable" : "icons");
+    setExpandBesidePanel(collapseToIcons && rail);
+    setSidebarDensity(rail ? "comfortable" : "icons");
   };
   useEffect(() => {
-    if (collapseToIcons || phone) return;
+    if (phone) return;
     const onKey = (event: KeyboardEvent) => { if (isSidebarToggle(event)) { event.preventDefault(); toggleCollapsed(); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [collapseToIcons, phone, density]);
-
-  useEffect(() => {
-    if (!open || confirm || deletingRoom) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", closeOnEscape);
-    return () => document.removeEventListener("keydown", closeOnEscape);
-  }, [open, onClose, confirm, deletingRoom]);
+  }, [collapseToIcons, phone, rail]);
 
   const plusMenuRef = useRef<HTMLDivElement>(null);
   usePopoverDismiss(plusOpen, plusMenuRef, () => setPlusOpen(false));
@@ -1067,13 +1065,30 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const pendingBotUndo = teamFeedback?.restoreBot;
   const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, onMenu: setMenu, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
   const plusItem = cn(MENU_ITEM, "text-ink hover:bg-menu-hover"), plusBot = state.activeView === "chat" ? state.bots.find((candidate) => candidate.id === state.selectedId) : undefined, newBotHere = useNewBotHereLabel();
+  const restoreToggleFocus = useRef(false);
+  const sidebarToggleLabel = t(rail ? "sidebar.expand" : "sidebar.collapse");
+  const sidebarToggle = (
+    <button type="button" data-sidebar-density-toggle aria-label={sidebarToggleLabel} title={sidebarToggleLabel}
+      aria-expanded={!rail} className={SIMPLE_RAIL_BUTTON}
+      ref={(button) => {
+        if (!button || !restoreToggleFocus.current) return;
+        restoreToggleFocus.current = false;
+        button.focus({ preventScroll: true });
+      }}
+      onClick={() => {
+        restoreToggleFocus.current = true;
+        toggleCollapsed();
+      }}>
+      <PanelLeft size={18} strokeWidth={1.5} aria-hidden="true" />
+    </button>
+  );
   const plusControl = (
     <div ref={plusMenuRef} className="contents">
     <button
       ref={importReturnRef}
       onClick={() => setPlusOpen((o) => !o)}
       aria-label={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
-      className={phone ? PHONE_TOP_BUTTON : corner ? SIMPLE_CORNER_BUTTON : SIMPLE_TOP_BUTTON}
+      className={rail ? SIMPLE_RAIL_BUTTON : phone ? PHONE_TOP_BUTTON : corner ? SIMPLE_CORNER_BUTTON : SIMPLE_TOP_BUTTON}
       title={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
     >
       <Plus size={corner ? 18 : 20} strokeWidth={phone ? 2 : 1.5} />
@@ -1082,7 +1097,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       <>
         <div role="menu" aria-label={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")} onKeyDown={navigateThreadMenu} className={cn(
           "absolute z-40 w-max min-w-[200px] overflow-hidden", MENU_SHEET,
-          rail ? "left-full top-0 ml-4" : "top-full right-0 mt-1.5 max-w-[calc(100vw_-_48px)] md:max-w-[calc(min(var(--sidebar-width),var(--sidebar-max))_-_48px)]",
+          rail ? "bottom-0 left-full ml-4" : "top-full right-0 mt-1.5 max-w-[calc(100vw_-_48px)] md:max-w-[calc(min(var(--sidebar-width),var(--sidebar-max))_-_48px)]",
           plusMotion.className,
         )} {...plusMotion.exitProps}>
           <button
@@ -1139,6 +1154,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
     <aside
       ref={sidebarRef} data-look="sidebar" data-sidebar-root={!phone || open ? "" : undefined}
       tabIndex={-1}
+      inert={phone && !open}
       aria-label={t("sidebar.aria")}
       data-native-view-overlay
       data-sidebar
@@ -1146,16 +1162,15 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         // The phone's list covers the whole screen: choosing the bot that is already open has to dismiss it too.
         if (phone && open && event.target instanceof Element && !(event.target instanceof HTMLInputElement) && event.target.closest("[data-sidebar-bot-row], [data-sidebar-hero]")) onClose();
       }}
-      style={{ "--sidebar-width": `${sizing.width}px`, "--sidebar-max": sidePanelOpen ? "280px" : "calc(100vw - 320px)" } as CSSProperties}
+      style={{ "--sidebar-min": `${SIDEBAR_MIN_WIDTH}px`, "--sidebar-width": `${sizing.width}px`, "--sidebar-max": sidePanelOpen ? "280px" : "calc(100vw - 320px)" } as CSSProperties}
       className={cn(
         "relative flex h-full shrink-0 flex-col border-r-[0.5px] border-edge bg-panel max-md:[--scroll-fade-surface:var(--color-app)]",
-        sizing.resizing && !sizing.snapping ? "transition-none" : "transition-[width] duration-200 motion-reduce:transition-none",
-        rail ? "w-[92px]" : "w-[280px] md:w-[var(--sidebar-width)]",
-        "md:max-w-[var(--sidebar-max)]",
+        sizing.resizing && !sizing.snapping ? "transition-none" : "transition-[width,max-width] duration-200 motion-reduce:transition-none",
+        rail ? "w-[92px]" : "w-[280px] md:w-[max(var(--sidebar-min),min(var(--sidebar-width),var(--sidebar-max)))]",
         // max-md: rather than an md: cancel: Tailwind v4 emits the native `translate`, and any value but `none` makes
         // this a containing block for its `fixed` descendants.
         "max-md:absolute max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-full max-md:bg-app",
-        "max-md:transition-transform max-md:duration-200",
+        "max-md:transition-[translate] max-md:duration-200 motion-reduce:max-md:transition-none",
         open ? "max-md:translate-x-0" : "max-md:-translate-x-full",
       )}
     >
@@ -1176,12 +1191,6 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           // beside the page or not.
           <div aria-hidden="true" data-traffic-light-space className={density === "icons" ? "h-5 w-full" : "w-[72px] shrink-0 md:w-[calc(72px_-_var(--rail-beside,0px))]"} />
         ) : null}{!phone && !framed && <ChromeRailToggle icons={density === "icons"} style={windowNoDragStyle} />}
-        {rail && <div data-sidebar-rail-top className="flex flex-col items-center gap-2 pt-1" style={windowNoDragStyle}>
-          <button type="button" onClick={openCommandPalette} aria-haspopup="dialog" aria-label={t("sidebar.searchAria")} title={t("sidebar.searchAria")} className={SIMPLE_TOP_BUTTON}>
-            <Search size={18} strokeWidth={1.5} aria-hidden="true" />
-          </button>
-          <div className="relative flex">{plusControl}</div>
-        </div>}
         {density !== "icons" && (simpleDesk ? <div data-sidebar-top-slot className="min-w-0 flex-1" /> : (
           <div data-sidebar-top-slot className={cn("@container/sidebar-top flex min-w-0 flex-1 items-center", "justify-end")}>
             <div data-sidebar-top-switcher className="flex min-w-0 items-center">
@@ -1194,6 +1203,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           className={cn("relative flex shrink-0 items-center", corner ? "pointer-events-auto" : simpleDesk ? "gap-2" : "gap-1 pl-0.5")}
           style={windowNoDragStyle}
         >
+          {!phone && sidebarToggle}
           {!phone && <SidebarSearchButton corner={corner} />}
           {plusControl}
         </div>}
@@ -1255,7 +1265,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           {unsectionedChief && (phone ? (
             <PhoneHero bot={unsectionedChief} selected={botRow(unsectionedChief).selected} onOpen={() => openBotRow(dispatch, unsectionedChief, showThreads, botRow(unsectionedChief).selected)} onMenu={setMenu} />
           ) : (
-            <div className="mb-1.5">
+            <div className={rail ? undefined : "mb-1.5"}>
               <BotListItem {...botRow(unsectionedChief)} />
             </div>
           ))}
@@ -1299,7 +1309,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                   simpleDesk ? "gap-0.5" : "gap-1",
                 )}
               >
-                {rail && index > 0 && <SidebarRailSeparator />}
+                {rail && (index > 0 || unsectionedChief) && <SidebarRailSeparator />}
                 {layout.dropLine(id, "before")}
                 {density !== "icons" && !headless && (
                   <SidebarSectionHeader
@@ -1381,7 +1391,11 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       {rail ? <SimpleRailFooter
         owner={cloudOwner}
         archived={archivedEntry}
-      /> : phone ? <SidebarPhoneBar onInboxOpened={onClose} /> : <SidebarFooter owner={cloudOwner} archived={archivedEntry} />}
+      >
+        {sidebarToggle}
+        <SidebarSearchButton rail />
+        <div className="relative flex">{plusControl}</div>
+      </SimpleRailFooter> : phone ? <SidebarPhoneBar onInboxOpened={onClose} /> : <SidebarFooter owner={cloudOwner} archived={archivedEntry} />}
       </GlassBar>
       </GlassScrollFrame>
 
@@ -1482,8 +1496,9 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         />
       {newRoom && <NewRoomPanel onClose={() => setNewRoom(false)} />}
       {/* Portaled: below md the sidebar's translate makes it the containing block for fixed children. */}
-      {newChatOpen && createPortal(
+      {newChatMotion.shown && createPortal(
         <SidebarNewChatPanel
+          open={newChatOpen}
           anchor={sidebarRef.current}
           style={windowNoDragStyle}
           onClose={() => setNewChatOpen(false)}
@@ -1492,15 +1507,17 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         />,
         document.body,
       )}
-      {!remoteClient && archivedBotsOpen && (
+      {!remoteClient && archivedBotsMotion.shown && (
         <ArchivedBotsPanel
+          open={archivedBotsOpen}
           bots={archivedBots}
           onClose={() => setArchivedBotsOpen(false)}
           onRestored={(message) => setTeamFeedback({ error: false, text: message })}
         />
       )}
-      {!remoteClient && teamLibraryOpen && (
+      {!remoteClient && teamLibraryMotion.shown && (
         <TeamLibraryPanel
+          open={teamLibraryOpen}
           returnFocusRef={importReturnRef}
           onClose={() => setTeamLibraryOpen(false)}
           onImported={(result) => {

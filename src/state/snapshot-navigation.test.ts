@@ -3,6 +3,12 @@ import { createElement, type Dispatch } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { RETRY_LEAD } from "../../shared/failed-turn";
+import { ChatV2 } from "@/components/chat-v2/ChatV2";
+import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
+import { endCall } from "@/lib/call";
+import { clearReplyDraft } from "@/lib/drafts";
+import { initialDesktopCapabilities } from "@/lib/desktop";
 import { StoreProvider, useStore, type Action, type AppState, type Bot, type Group, type Message } from "./store";
 
 class FixtureEventSource {
@@ -38,7 +44,8 @@ let state!: AppState;
 let dispatch!: Dispatch<Action>;
 function Probe() {
   ({ state, dispatch } = useStore());
-  return null;
+  const active = state.bots.find(bot => bot.id === state.selectedId);
+  return state.chatV2 && active ? createElement(ChatV2, { key: active.threadId, profile: active, onClose: () => {} }) : null;
 }
 let root: Root;
 let container: HTMLDivElement;
@@ -48,6 +55,9 @@ let reconnectHistory: ReturnType<typeof deferred> | undefined;
 let newTaskResponse: ReturnType<typeof deferred> | undefined;
 let snapshots: number;
 let sends: unknown[];
+let chatPage: Message[];
+let chatReads: number;
+let retries: unknown[];
 const shown = () => state.bots[0]!;
 const resync = async () => {
   FixtureEventSource.current.send({ kind: "hello", resumed: false, cursor: "fixture:0" });
@@ -65,9 +75,16 @@ const switchBot = async (threadId: string) => {
   await vi.waitFor(() => expect(shown().messages[0]?.id).toBe(`fresh-${threadId}`));
 };
 
-beforeEach(async () => {
+async function mount(v2: boolean, speech?: Partial<Window["ogb"]>, fixture?: {
+  pages: Record<string, { messages: Message[]; hasMore: boolean }>;
+  setupRequests?: unknown[];
+  quote?: { message: Message; onActivePath: boolean };
+}) {
   snapshots = 0;
   sends = [];
+  retries = [];
+  chatReads = 0;
+  chatPage = [line("a")];
   snapshot = deferred();
   switchResponse = undefined;
   newTaskResponse = undefined;
@@ -78,21 +95,44 @@ beforeEach(async () => {
     removeItem: (key: string) => { stored.delete(key); }, clear: () => stored.clear(),
   });
   vi.stubGlobal("EventSource", FixtureEventSource);
+  if (speech) vi.stubGlobal("ogb", speech);
   vi.stubGlobal("fetch", async (path: string, init?: RequestInit) => {
     if (path.startsWith("/api/bots?")) {
       snapshots++;
-      return snapshots === 1 ? json({ bots: [bot("a")], groups: [room("a")] }) : snapshot.promise;
+      const initial = fixture ? { ...bot("a"), activeLeafId: fixture.pages[""]?.messages.at(-1)?.id, messages: [] } : bot("a");
+      return snapshots === 1 ? json({ bots: [initial], groups: [room("a")] }) : snapshot.promise;
     }
     const task = path.match(/^\/api\/bots\/bot\/tasks\/([ab])/);
     if (task) return switchResponse?.promise ?? json({ bot: bot(task[1]!, `fresh-${task[1]}`) });
     if (path === "/api/bots/bot/tasks" || path === "/api/groups/room/tasks") return newTaskResponse?.promise ?? json({});
     if (path.startsWith("/api/groups/room/tasks/room-b")) return json({ group: room("b", "fresh-room-b") });
     if (path === "/api/bots/bot/messages" || path === "/api/groups/room/messages") sends.push(JSON.parse(String(init?.body)));
+    if (path === "/api/bots/bot/setup-request" && init?.method === "POST" && fixture?.setupRequests) {
+      const body = JSON.parse(String(init.body));
+      fixture.setupRequests.push(body);
+      return json({ message: { ...line("setup-choice"), text: body.text, parentId: "greeting", setupRequest: true } });
+    }
+    if (path.startsWith("/api/threads/a/messages?view=quote&around=")) {
+      return fixture?.quote ? json(fixture.quote) : new Response(null, { status: 404 });
+    }
+    if (path.startsWith("/api/threads/a/messages?view=chat&limit=200")) {
+      const cursor = new URL(path, "http://localhost").searchParams.get("before") ?? "";
+      if (fixture?.pages[cursor]) return json(fixture.pages[cursor]);
+      chatReads++;
+      return json({ messages: chatPage, hasMore: false, activeLeafId: chatPage.at(-1)?.id });
+    }
+    if (path === "/api/bots/bot/messages/a/edit") retries.push(JSON.parse(String(init?.body)));
     if (path === "/api/threads/a/messages?limit=200") {
       if (snapshots === 1) return json({ messages: [line("a")], activeLeafId: "a", hasMore: false });
       return reconnectHistory?.promise ?? new Promise<Response>(() => {});
     }
-    if (path === "/api/instances") return json({ instances: [] });
+    if (path === "/api/config" && speech) return json({ tts: { configured: true, ready: true } });
+    if (path === "/api/instances") return json({ instances: fixture?.setupRequests
+      ? [{
+          instanceId: "fake", displayName: "Fixture", driverKind: "claude",
+          capabilities: { agentsMcp: true }, snapshot: { state: "available" },
+          models: { default: "fixture", options: [{ id: "fixture", label: "Fixture" }] },
+        }] : [] });
     if (path.startsWith("/api/routines?since=")) return json({ routines: [], runs: [] });
     if (path === "/api/webhooks") return json({ webhooks: [], attempts: [] });
     return json({});
@@ -100,20 +140,24 @@ beforeEach(async () => {
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
-  flushSync(() => root.render(createElement(StoreProvider, null, createElement(Probe))));
+  const app = createElement(StoreProvider, null, createElement(Probe));
+  flushSync(() => root.render(speech ? createElement(DesktopCapabilitiesProvider, null, app) : app));
+  if (!v2) flushSync(() => dispatch({ type: "chatView", v2: false }));
   FixtureEventSource.current.send({ kind: "hello", resumed: false, cursor: "fixture:0" });
   await vi.waitFor(() => {
     expect(state.hydrated).toBe(true);
-    expect(shown().needsHistory).toBe(false);
+    if (!v2) expect(shown().needsHistory).toBe(false);
   });
-});
+}
 afterEach(() => {
-  flushSync(() => root.unmount());
+  flushSync(() => { endCall(); root.unmount(); });
   container.remove();
+  clearReplyDraft("a");
   vi.unstubAllGlobals();
 });
 
 describe("navigation while a reconnect snapshot is in flight", () => {
+  beforeEach(() => mount(false));
   it.each(["bot", "group"])("keeps a new %s task entry without restoring tasks omitted by the server", async owner => {
     await resync();
     newTaskResponse = deferred();
@@ -201,5 +245,123 @@ describe("navigation while a reconnect snapshot is in flight", () => {
     reconnectHistory.resolve(json({ messages: [line("snapshot")], activeLeafId: "snapshot", hasMore: false }));
     await vi.waitFor(() => expect(shown().messages.map(message => message.id)).toEqual(["snapshot"]));
     expect(state.groups[0]?.messages.map(message => message.id)).toEqual(["fresh-room-b"]);
+  });
+});
+
+describe("the default Chat V2", () => {
+  it("reloads the open conversation after a reconnect with the same active leaf", async () => {
+    await mount(true);
+    await vi.waitFor(() => expect(container.querySelector('[data-mid="a"]')?.textContent).toContain("a"));
+    expect(chatReads).toBe(1);
+    await resync();
+    chatPage = [{ ...line("a"), text: "Changed while offline" }];
+    const incoming = { ...bot("a"), messages: [] };
+    snapshot.resolve(json({ bots: [incoming], groups: [room("a")], sections: ["resynced"] }));
+    await vi.waitFor(() => expect(container.querySelector('[data-mid="a"]')?.textContent).toContain("Changed while offline"));
+    expect(chatReads).toBe(2);
+  });
+
+  it("keeps the failed turn visible after the bot goes idle and retries the original request", async () => {
+    await mount(true);
+    await vi.waitFor(() => expect(container.querySelector('[data-mid="a"]')).not.toBeNull());
+    const automaticRetry = { ...line("auto-retry"), parentId: "a", text: `${RETRY_LEAD}OpenMausBot, automatically]` };
+    const failed: Message = {
+      id: "failure", parentId: automaticRetry.id, at: 2, role: "bot", kind: "activity",
+      tool: { name: "error: Engine unavailable", ok: false },
+    };
+    FixtureEventSource.current.send({ kind: "bot", bot: { ...bot("a"), busy: true } });
+    FixtureEventSource.current.send({ kind: "message", threadId: "a", message: automaticRetry });
+    FixtureEventSource.current.send({ kind: "message", threadId: "a", message: failed });
+    FixtureEventSource.current.send({ kind: "bot", bot: { ...bot("a"), busy: false } });
+    await vi.waitFor(() => expect(container.querySelector('[data-mid="failure"]')?.textContent).toContain("Engine unavailable"));
+    const retry = [...container.querySelectorAll("button")].find(button => button.textContent?.trim() === "Retry");
+    expect(retry).toBeDefined();
+    retry!.click();
+    await vi.waitFor(() => expect(retries).toEqual([expect.objectContaining({ text: "a", threadId: "a" })]));
+  });
+
+  it("starts listening from the default chat's call button, sends speech and can hang up", async () => {
+    const speechStart = vi.fn(async () => {});
+    let transcript: Parameters<NonNullable<Window["ogb"]>["onSpeechTranscript"]>[0] | undefined;
+    await mount(true, {
+      platform: "darwin",
+      getCapabilities: async () => initialDesktopCapabilities(),
+      speechStart,
+      speechStop: vi.fn(async () => {}),
+      onSpeechTranscript: handler => { transcript = handler; return () => { transcript = undefined; }; },
+      onSpeechEnd: () => () => {},
+    });
+    const call = () => container.querySelector<HTMLButtonElement>('[data-chat-v2] button[aria-label="Call Fixture"]');
+    await vi.waitFor(() => expect(call()).not.toBeNull());
+    flushSync(() => call()!.click());
+    const overlay = () => container.querySelector("[data-chat-v2] .backdrop-blur-sm");
+    expect(overlay()?.textContent).toContain("Listening");
+    expect(speechStart).toHaveBeenCalledWith(expect.objectContaining({ endpointMs: 1700 }));
+    flushSync(() => transcript?.({ text: "Spoken request", partial: false }));
+    await vi.waitFor(() => expect(sends).toEqual([expect.objectContaining({ text: "Spoken request", threadId: "a" })]));
+    flushSync(() => overlay()!.querySelector<HTMLButtonElement>('[aria-label="Hang up"]')!.click());
+    expect(overlay()).toBeNull();
+  });
+
+  it("renders a blank bot's setup card and submits its selected choice", async () => {
+    const greeting: Message = {
+      ...line("greeting"), role: "bot", text: "What would you like me to do?",
+      setupOffer: true, setupChoices: ["Summarize my inbox"],
+    };
+    const setupRequests: unknown[] = [];
+    await mount(true, undefined, { pages: { "": { messages: [greeting], hasMore: false } }, setupRequests });
+    const choice = () => container.querySelector<HTMLButtonElement>('[data-setup-card="greeting"] [data-ask-choice]');
+    await vi.waitFor(() => expect(choice()?.textContent).toContain("Summarize my inbox"));
+    flushSync(() => choice()!.click());
+    await vi.waitFor(() => expect(setupRequests).toEqual([{ threadId: "a", text: "Summarize my inbox" }]));
+    await vi.waitFor(() => expect(container.querySelector('[data-setup-answer]')?.textContent).toContain("Summarize my inbox"));
+  });
+
+  it.each([false, true])("shows the sent reply quote and jumps to its original (older page: %s)", async older => {
+    const original: Message = { ...line("original"), role: "bot", text: "Original **answer**" };
+    const reply: Message = { ...line("reply"), at: 3, parentId: original.id, replyToId: original.id, text: "My reply" };
+    const middle = { ...line("middle"), at: 2, parentId: original.id };
+    await mount(true, undefined, { pages: {
+      "": { messages: older ? [reply] : [original, reply], hasMore: older },
+      reply: { messages: [middle], hasMore: true },
+      middle: { messages: [original], hasMore: false },
+    }, quote: { message: original, onActivePath: true } });
+    const jump = () => [...container.querySelectorAll<HTMLButtonElement>('[data-mid="reply"] button')]
+      .find(button => button.title === "Jump to original message" || button.textContent === "Jump to original message");
+    const quote = () => container.querySelector('[data-mid="reply"] [data-reply-quote]');
+    await vi.waitFor(() => expect(quote()?.textContent).toContain("Original answer"));
+    expect(jump()).toBeDefined();
+    flushSync(() => jump()!.click());
+    await vi.waitFor(() => expect(state.focusMessage).toMatchObject({ threadId: "a", messageId: "original", consumed: true }));
+    expect(quote()?.textContent).toContain("Original answer");
+  });
+
+  it("opens the quoted message from another branch without changing the active transcript", async () => {
+    const original: Message = { ...line("abandoned"), role: "bot", text: "Answer on the earlier branch" };
+    const reply: Message = { ...line("reply"), at: 3, replyToId: original.id, text: "Current reply" };
+    await mount(true, undefined, { pages: { "": { messages: [reply], hasMore: false } },
+      quote: { message: original, onActivePath: false } });
+
+    const quote = () => container.querySelector<HTMLButtonElement>('[data-mid="reply"] [data-reply-quote] button');
+    await vi.waitFor(() => expect(quote()?.textContent).toContain("Answer on the earlier branch"));
+    flushSync(() => quote()!.click());
+
+    const originalDialog = container.querySelector<HTMLDialogElement>("dialog[open]");
+    expect(originalDialog?.textContent).toContain("Answer on the earlier branch");
+    expect(shown().activeLeafId).toBe("reply");
+    expect(container.querySelector('[data-mid="abandoned"]')).toBeNull();
+    expect(state.focusMessage).toBeFalsy();
+  });
+
+  it("restores a reply to a paged message after switching away and back", async () => {
+    await mount(true);
+    const reply = () => container.querySelector<HTMLButtonElement>('[data-mid="a"] button[aria-label="Reply"]');
+    await vi.waitFor(() => expect(reply()).not.toBeNull());
+    flushSync(() => reply()!.click());
+    const clear = () => container.querySelector('button[aria-label="Cancel reply"]');
+    expect(clear()).not.toBeNull();
+    flushSync(() => dispatch({ type: "select", id: "room" }));
+    flushSync(() => dispatch({ type: "select", id: "bot" }));
+    await vi.waitFor(() => expect(clear()).not.toBeNull());
   });
 });

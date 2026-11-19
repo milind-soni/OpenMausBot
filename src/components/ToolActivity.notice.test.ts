@@ -3,7 +3,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mode = vi.hoisted(() => ({ advanced: false }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => mode.advanced }));
 
 const { ToolActivity } = await import("./ToolActivity");
 const { setLocale } = await import("@/lib/i18n");

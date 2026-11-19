@@ -1,7 +1,6 @@
 import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Search, X } from "lucide-react";
-
+import { ChevronDown, Search } from "lucide-react";
 import { useStore, type Bot, type BotSettingsSection } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "./DesktopCapabilities";
@@ -24,17 +23,14 @@ import { HistorySection } from "./bot-settings/HistorySection";
 import { UsageSection } from "./bot-settings/UsageSection";
 import { VisibilitySection } from "./bot-settings/VisibilitySection";
 import { t } from "@/lib/i18n";
-import { useAdvancedMode } from "@/lib/interface-mode";
-import { BotPanel } from "./bot-panel/PanelShell";
-import { LibraryTab } from "./bot-panel/LibraryTab";
-import type { SimplePageId } from "./bot-panel/page-registry";
-import { BOT_PANEL_ID, sidePanelCls } from "./bot-panel/side-panel";
+import { LibraryTab, type LibraryPage } from "./bot-panel/LibraryTab";
+import { RightSidePanel, RightSidePanelHeader } from "./RightSidePanel";
 import { HistoryRollbackDialog, useBotHistory, useBotOverview } from "./bot-settings/useBotOverview";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { ShareBotButton, useTeamName } from "./bot-access/ShareBotButton";
 
 /** Where the Library's memory, skills and folder rows lead in Advanced settings. */
-const LIBRARY_LINKS: Partial<Record<SimplePageId, BotSettingsSection>> = { memory: "memory", skills: "skills", folder: "access" };
+const LIBRARY_LINKS: Record<LibraryPage, BotSettingsSection> = { memory: "memory", skills: "skills", folder: "access" };
 
 export function BotSettingsDialog({ bot, overlay = false }: {
   bot: Bot;
@@ -48,9 +44,8 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   const [query, setQuery] = useState("");
   const collapsed = !state.botSettingsExpandAccordion;
   const q = query.trim().toLowerCase();
-  const advanced = useAdvancedMode();
-  const simpleView = !advanced;
-  const linkedSection = !collapsed && !state.botSettingsExpandRemembered ? section : null;
+
+
   const slackUrl = useSlackManagementUrl(bot.id);
   const ownerOrAdmin = useOwnerOrAdmin();
   const teamName = useTeamName();
@@ -63,10 +58,10 @@ export function BotSettingsDialog({ bot, overlay = false }: {
   const visibleSections = sections.filter((entry) => sectionMatches(entry, q, appNames));
 
   const { overview, overviewError, prompt, promptError } = useBotOverview(bot, {
-    overview: section === "overview" && !simpleView,
-    prompt: section === "overview" && !simpleView,
+    overview: section === "overview",
+    prompt: section === "overview",
   });
-  const history = useBotHistory(bot, section === "history" && !simpleView);
+  const history = useBotHistory(bot, section === "history");
 
   useEffect(() => {
     if (collapsed) return;
@@ -169,40 +164,23 @@ export function BotSettingsDialog({ bot, overlay = false }: {
 
   return (
     <>
-      <aside
+      <RightSidePanel
         ref={dialogRef}
-        id={simpleView ? BOT_PANEL_ID : undefined}
         role="dialog"
         aria-labelledby="bot-settings-title"
         tabIndex={-1}
-        className={sidePanelCls(overlay, simpleView)}
+        className={cn("[--color-card:var(--color-app)] animate-sheet-in md:animate-panel-in absolute inset-0 z-40 min-w-0 outline-none md:w-[min(420px,42vw)]", overlay ? "md:inset-y-0 md:left-auto md:right-0 md:shadow-2xl" : "md:static md:z-auto")}
       >
-        {simpleView ? (
-          <BotPanel
-            bot={bot}
-            derived={derived}
-            linkedSection={linkedSection}
-            onClose={() => dispatch({ type: "toggleSettings", open: false })}
-          />
-        ) : <>
-        <div {...dragProps} className="flex shrink-0 items-center justify-between px-4 py-3">
-          <span id="bot-settings-title" className="truncate text-[15px] font-semibold text-ink">
+        <RightSidePanelHeader {...dragProps} className="mb-3" label={t("botSettings.simple.close")} onClose={() => dispatch({ type: "toggleSettings", open: false })}>
+          <span id="bot-settings-title" className="flex h-[34px] min-w-0 flex-1 items-center truncate ps-1 text-[14px] font-medium text-ink">
             {bot.name}
           </span>
           <span className="flex shrink-0 items-center gap-1">
             <ShareBotButton bot={bot} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink" />
-            <button
-              type="button"
-              onClick={() => dispatch({ type: "toggleSettings", open: false })}
-              aria-label={t("botSettings.simple.close")}
-              className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
-            >
-              <X size={18} className="pointer-events-none" />
-            </button>
           </span>
-        </div>
+        </RightSidePanelHeader>
 
-        <div className="mx-4 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-transparent bg-control/70 px-2.5 py-2">
+        <div className="mx-4 mb-2 flex shrink-0 items-center gap-2 rounded-lg border border-hairline/50 bg-transparent px-2.5 py-2">
           <Search size={14} className="shrink-0 text-ink-secondary" />
           <input
             value={query}
@@ -238,7 +216,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
               <div
                 key={id}
                 data-bot-settings-section={id}
-                className="border-b border-hairline/30"
+                className="mx-1.5 mb-0.5"
                 hidden={!matched}
               >
                 <button
@@ -252,8 +230,8 @@ export function BotSettingsDialog({ bot, overlay = false }: {
                   }}
                   aria-expanded={open}
                   className={cn(
-                    "flex w-full shrink-0 items-center gap-2.5 px-4 py-2.5 text-left text-[14px]",
-                    open ? "bg-control/60 text-ink" : "text-ink-secondary hover:bg-control/40 hover:text-ink",
+                    "flex w-full shrink-0 items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-left text-[14px]",
+                    open ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
                   )}
                 >
                   <Icon size={15} className="shrink-0" />
@@ -278,8 +256,7 @@ export function BotSettingsDialog({ bot, overlay = false }: {
             );
           })}
         </div>
-        </>}
-      </aside>
+      </RightSidePanel>
       <HistoryRollbackDialog history={history} returnFocusRef={dialogRef} />
     </>
   );

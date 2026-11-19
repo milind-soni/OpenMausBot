@@ -9,7 +9,6 @@ const fixture = vi.hoisted(() => ({ dispatch: (() => {}) as (...args: unknown[])
   refreshInstances: (() => Promise.resolve()) as () => Promise<void>, refreshModels: ((_id: string) => Promise.resolve()) as (id: string) => Promise<void> }));
 const api = vi.hoisted(() => vi.fn());
 vi.mock("@/state/api", () => ({ api, ApiError: Error }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 // The store's refresh callbacks keep one identity across renders, as the real store's do.
 const refresh = { instances: () => fixture.refreshInstances(), models: (id: string) => fixture.refreshModels(id) };
@@ -71,13 +70,13 @@ afterEach(() => {
 describe("the header model chip and Switch AI", () => {
   it("stays shut while the bot works, until Switch AI asks for it", () => {
     expect(trigger().disabled).toBe(true);
-    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "header" }));
+    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1" }));
     expect(trigger().disabled).toBe(false);
     expect(document.querySelector("[data-model-picker-content]")).not.toBeNull();
   });
 
   it("stops that turn, not the store's model, when another AI is picked", () => {
-    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "header" }));
+    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1" }));
     // Codex sits on the rail as its sign-in family, OpenAI.
     act(() => buttonNamed("OpenAI")!.click());
     act(() => buttonNamed("GPT-5.6")!.click());
@@ -85,26 +84,6 @@ describe("the header model chip and Switch AI", () => {
     expect(vi.mocked(fixture.dispatch).mock.calls.filter(([action]) => (action as { type: string }).type === "setModel")).toEqual([]);
   });
 
-  it("opens the bot panel's picker for Switch AI in Simple mode, where the panel's own Thinking row is the only effort control", () => {
-    fixture.advanced = false;
-    fixture.instances = [{ ...opencode, capabilities: { effortLevels: ["low", "high"] } }, codex];
-    act(() => root.render(createElement(ModelPicker, { bot: busyBot, threadId: "thread-1", contained: true })));
-    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "panel" }));
-    expect(document.querySelector("[data-model-picker-content]")).not.toBeNull();
-    expect(document.querySelector("[data-simple-effort]")).toBeNull();
-  });
-
-  it("shows no thinking-level buttons in the chat's menu while the turn runs: the server refuses them until it ends", () => {
-    fixture.advanced = false;
-    fixture.instances = [{ ...opencode, capabilities: { effortLevels: ["low", "high"] } }, codex];
-    const show = (bot: Bot) => act(() => root.render(createElement(ModelPicker, { bot, threadId: "thread-1" })));
-    show(busyBot);
-    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "header" }));
-    expect(document.querySelector("[data-model-picker-content]")).not.toBeNull();
-    expect(document.querySelector("[data-simple-effort]")).toBeNull();
-    show({ ...busyBot, busy: false });
-    expect(document.querySelector("[data-simple-effort]")).not.toBeNull();
-  });
 
   it("asks before a thread-only switch when the thread, not the bot, is on Custom permissions", () => {
     const bot = { ...busyBot, busy: false, approvalMode: "ask",
@@ -120,10 +99,6 @@ describe("the header model chip and Switch AI", () => {
     expect(setModels()).toEqual([[expect.objectContaining({ threadId: "thread-1", resetApprovalToAsk: true })]]);
   });
 
-  it("ignores an intent for another place", () => {
-    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "panel" }));
-    expect(trigger().disabled).toBe(true);
-  });
 });
 
 describe("a picker that opens before its engine has listed its models", () => {
@@ -143,7 +118,7 @@ describe("a picker that opens before its engine has listed its models", () => {
   };
 
   it.each([
-    ["Switch AI", () => act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "header" }))],
+    ["Switch AI", () => act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1" }))],
     ["the model chip", () => {
       act(() => root.render(createElement(ModelPicker, { bot: { ...onClaude, busy: false }, threadId: "thread-1" })));
       act(() => trigger().click());
@@ -166,7 +141,7 @@ describe("a picker that opens before its engine has listed its models", () => {
     fixture.instances = [claude([]), codex];
     readList([]);
     act(() => root.render(createElement(ModelPicker, { bot: onClaude, threadId: "thread-1" })));
-    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "header" }));
+    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1" }));
     await act(async () => arrive());
     expect(text()).toContain("No local models found");
     expect(text()).not.toContain("Loading Claude models");
@@ -180,7 +155,7 @@ describe("a picker that opens before its engine has listed its models", () => {
     act(() => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
     act(() => root.render(createElement(ModelPicker, { bot: onClaude, threadId: "thread-1" })));
-    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1", place: "header" }));
+    act(() => requestAiSwitch({ botId: "maus", threadId: "thread-1", turnId: "turn-1" }));
     expect(text()).toContain("Claude Sonnet 5");
     expect(text()).not.toContain("GPT-5.6");
   });

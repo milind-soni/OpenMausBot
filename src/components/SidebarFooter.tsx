@@ -32,7 +32,7 @@ export function SidebarFooter({ owner = null, archived }: { owner?: string | nul
   // The move's words open the account menu just below them, where the move's row is.
   const openAccount = () => footer.current?.querySelector("[data-sidebar-account]")?.closest("button")?.click();
   return (
-    <div ref={footer} data-sidebar-footer="simple" className="px-4 pb-4 pt-2">
+    <div ref={footer} data-sidebar-footer="simple" className="px-3 pb-4 pt-2">
       <CloudRoomCard />
       <CloudUsageCard />
       <SidebarPlaceStatus place={place} className="mb-2 px-1" />

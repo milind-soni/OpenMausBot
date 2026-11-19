@@ -73,7 +73,7 @@ describe("a drag of the sidebar's edge", () => {
     expect(document.body.style.cursor, "the whole page shows the resize cursor").toBe("col-resize");
     expect(document.body.style.userSelect).toBe("none");
     await pointer("pointermove", 260);
-    expect(width()).toBe("260px");
+    expect(width()).toBe("280px");
     await pointer("pointermove", 100);
     expect(seen).toEqual([true]);
     expect(width(), "back to the width it had").toBe("320px");
@@ -127,15 +127,15 @@ describe("a drag of the sidebar's edge", () => {
 
 describe("the sidebar's edge from the keyboard", () => {
   it("steps narrower to the open sidebar's narrowest, then to the avatars, and the right arrow opens it again", async () => {
-    localStorage.setItem(SIMPLE_SIDEBAR_WIDTH_KEY, "256");
+    localStorage.setItem(SIMPLE_SIDEBAR_WIDTH_KEY, "296");
     await mount();
     await key("ArrowLeft");
-    expect(width()).toBe("240px");
+    expect(width()).toBe("280px");
     expect(seen).toEqual([]);
     await key("ArrowLeft");
     expect(seen).toEqual([true]);
     await key("ArrowRight");
     expect(seen).toEqual([true, false]);
-    expect(width()).toBe("240px");
+    expect(width()).toBe("280px");
   });
 });

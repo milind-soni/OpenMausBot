@@ -5,10 +5,6 @@ import { initialState, type AppState, type Bot, type Group } from "@/state/store
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 
 const fixture = vi.hoisted(() => ({ advanced: false, showThreads: true, admin: true as boolean | null, state: {} as Partial<AppState>, dispatch: vi.fn() }));
-vi.mock("@/lib/interface-mode", async (original) => ({
-  ...await original<typeof import("@/lib/interface-mode")>(),
-  useAdvancedMode: () => fixture.advanced,
-}));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => fixture.showThreads }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.admin }));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
@@ -262,17 +258,6 @@ describe("bot-first sidebar", () => {
     expect(markup).toContain('<span class="sr-only">Unread</span>');
   });
 
-  it("draws no engine mark for a bot with no AI yet or in a group chat, and a faded one in Advanced mode", () => {
-    fixture.showThreads = false;
-    fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };
-    const candidate = { ...bot, tasks: [], projects: [] };
-    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", { ...candidate, modelSelection: { instanceId: "none", model: "m" } })))).not.toContain("data-provider-mark");
-    const group: Group = { id: "room", threadId: "room-thread", name: "Launch", memberIds: [bot.id], messages: [], defaultResponder: { kind: "mentions" }, bulletin: "", unread: false, createdAt: 1 };
-    expect(renderToStaticMarkup(createElement(GroupListItem, { group, density: "comfortable", onMenu: vi.fn() }))).not.toContain("data-provider-mark");
-    fixture.advanced = true;
-    const advanced = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
-    expect(advanced).toMatch(/data-testid="model-badge"[^>]*><span data-provider-mark="brand" class="[^"]*\bopacity-60\b/);
-  });
 
   it("keeps a Simple row to its name, preview and one faded engine mark, naming role, Chief and engine in its tooltip", () => {
     fixture.showThreads = false;
@@ -401,76 +386,6 @@ describe("bot-first sidebar", () => {
     expect(disabled).toContain("Delete all threads…");
     expect(disabled).toContain("Edit Profile");
     expect(disabled).toContain("Move to department");
-  });
-
-  it("gives the Simple bot menu New thread, View threads and Set as main thread", () => {
-    let tree: ReactNode;
-    function Capture() {
-      tree = BotContextMenu({
-        menu: { botId: bot.id, x: 0, y: 0 }, onClose: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn(), onMoveToSection: vi.fn(), onNewFolder: vi.fn(), onNewTaskFolder: vi.fn(),
-      });
-      return tree;
-    }
-    const items = () => {
-      const found: ReactElement<ElementProps>[] = [];
-      const walk = (node: ReactNode) => {
-        for (const child of Children.toArray(node)) {
-          if (!isValidElement<ElementProps>(child)) continue;
-          if (child.props.role === "menuitem") found.push(child);
-          walk(child.props.children);
-        }
-      };
-      walk(tree);
-      return found;
-    };
-    const named = (label: string) => items().find((item) => Children.toArray(item.props.children).includes(label));
-    fixture.state = { ...fixture.state, bots: [{ ...bot, mainThreadId: "idle-history" }], selectedId: bot.id };
-    renderToStaticMarkup(createElement(Capture));
-
-    named("New thread")!.props.onClick!({} as MouseEvent);
-    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "newTask", botId: bot.id }]]);
-
-    fixture.dispatch.mockClear();
-    named("View threads")!.props.onClick!({} as MouseEvent);
-    expect(fixture.dispatch.mock.calls).toEqual([
-      [{ type: "select", id: bot.id }],
-      [{ type: "toggleSettings", open: true, section: "history", botId: bot.id }],
-    ]);
-
-    fixture.dispatch.mockClear();
-    const setMain = named("Set as main thread")!;
-    expect(setMain.props.disabled).toBeFalsy();
-    setMain.props.onClick!({} as MouseEvent);
-    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateBot", botId: bot.id, patch: { mainThreadChoice: "last-selected" } }]]);
-
-    // Not offered until the person is known to be the owner or an admin.
-    for (const admin of [null, false]) {
-      fixture.admin = admin;
-      renderToStaticMarkup(createElement(Capture));
-      expect(named("Set as main thread")).toBeUndefined();
-    }
-    fixture.admin = true;
-
-    // Already main: offered but off. Another bot's open thread, or a routine run, is never offered.
-    fixture.state = { ...fixture.state, bots: [{ ...bot, mainThreadId: "last-selected" }] };
-    renderToStaticMarkup(createElement(Capture));
-    expect(named("Set as main thread")!.props.disabled).toBe(true);
-    fixture.state = { ...fixture.state, selectedId: "other-bot" };
-    renderToStaticMarkup(createElement(Capture));
-    expect(named("Set as main thread")).toBeUndefined();
-    expect(named("New thread")).toBeDefined();
-    fixture.state = { ...fixture.state, selectedId: bot.id, bots: [{ ...bot, threadId: "run", tasks: [...bot.tasks!, { threadId: "run", title: "Run", createdAt: 9, routineRunId: "r" }] }] };
-    renderToStaticMarkup(createElement(Capture));
-    expect(named("Set as main thread")).toBeUndefined();
-    // A Team Cloud private thread can't be the main thread either (the host refuses it).
-    fixture.state = { ...fixture.state, selectedId: bot.id, bots: [{ ...bot, threadId: "mine", tasks: [...bot.tasks!, { threadId: "mine", title: "Mine", createdAt: 9, private: true }] }] };
-    renderToStaticMarkup(createElement(Capture));
-    expect(named("Set as main thread")).toBeUndefined();
-    // A view-only teammate can look at the threads but not start one.
-    fixture.state = { ...fixture.state, bots: [{ ...bot, yourAccess: "view" }] };
-    renderToStaticMarkup(createElement(Capture));
-    expect(named("New thread")).toBeUndefined();
-    expect(named("View threads")).toBeDefined();
   });
 
   it("Edit profile opens the panel without naming a section", () => {

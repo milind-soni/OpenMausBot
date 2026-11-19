@@ -9,7 +9,6 @@ import { openThread } from "@/state/thread-navigation";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
 import { localizedCard } from "@/lib/widget-text";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import {
   PHONE_PAIRING_ACTION, widgetActions, widgetFields, widgetInitialValues, widgetScope, widgetString, type WidgetField, type WidgetNode, type WidgetOther, type WidgetPayload,
   type WidgetSettled, type WidgetValues,
@@ -39,13 +38,13 @@ function isEmpty(field: WidgetField, values: WidgetValues, other: WidgetOther): 
 
 /** `viewOnly`: shown in a room, where a press would speak for everyone; links and thread jumps still open. */
 export function WidgetMessage({ botId, threadId, message, viewOnly }: { botId: string; threadId?: string; message: Message; viewOnly?: boolean }) {
-  const simple = !useAdvancedMode();
+
   const serverCard = (message as { serverCard?: true }).serverCard === true;
   const locale = activeLocale();
   const payload = useMemo(() => (message.widget?.root ? localizedCard(message.widget, serverCard, locale) : message.widget), [message.widget, serverCard, locale]);
   if (!payload?.root || typeof payload.root !== "object" || typeof payload.root.type !== "string") {
     return message.text
-      ? <div data-chat-bubble={simple ? "simple" : ""} className={plainBotBubble(simple)}>{message.text}</div>
+      ? <div data-chat-bubble={""} className={plainBotBubble}>{message.text}</div>
       : null;
   }
   // Replacing a widget renumbers node ids, so a new revision remounts the card.

@@ -35,7 +35,7 @@ export function ownsDefaultBot(bot: BotRecord | null | undefined, email: string 
 }
 
 /** The English intro: who MausBot is, what it does here, and that it is looking around (its follow-up comes after, from
- * helper-followup.ts). Clients that know `helperIntro` say it in the viewer's own language. */
+ * Its presentation is localized by the client. */
 export function helperIntroMessage(bot: Pick<BotRecord, "name" | "chiefOfStaff">, team?: string | null): Omit<Message, "id" | "at"> {
   const title = bot.chiefOfStaff ? `Hey! I'm ${bot.name}. I'm new here.` : `Hi! I'm ${bot.name}, your helper for everything here.`;
   const subtitle = [

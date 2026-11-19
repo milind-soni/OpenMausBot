@@ -101,38 +101,6 @@ export function setupSteps(input: { aiReady: boolean; ownBots: number; onCloud: 
   ];
 }
 
-export type IntroChip = "ai" | "apps" | "import" | "phone" | "cloud";
-
-export interface IntroFacts {
-  aiReady: boolean;
-  ownBots: number;
-  onCloud: boolean;
-  team: boolean;
-  remote: boolean;
-  /** Known to have a connected app or a paired phone; unknown counts as not yet. */
-  appsConnected?: boolean;
-  phonePaired?: boolean;
-  /** This computer has skills or MCP servers from another AI tool to bring in. */
-  importFound?: boolean;
-}
-
-/** At most this many chips under MausBot's look around: a step done or tapped leaves, and the next takes its place. */
-export const INTRO_CHIPS = 3;
-
-/** The chips under MausBot's look around (Simple mode), in order, before the cap: what is still missing, and on a place
- * with bots of the person's own only an AI. Adding a bot lives on the sidebar's +. */
-export function introChips(input: IntroFacts): IntroChip[] {
-  if (input.team) return [];
-  const fresh = input.ownBots === 0;
-  return [
-    ...(input.aiReady ? [] : ["ai" as const]),
-    ...(fresh && !input.appsConnected ? ["apps" as const] : []),
-    ...(fresh && input.importFound ? ["import" as const] : []),
-    ...(fresh && !input.phonePaired ? ["phone" as const] : []),
-    ...(fresh && !input.onCloud && !input.remote ? ["cloud" as const] : []),
-  ];
-}
-
 let welcoming: string | null = null;
 const welcomingListeners = new Set<() => void>();
 

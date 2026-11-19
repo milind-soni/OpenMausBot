@@ -75,7 +75,6 @@ const FILES = [
   "src/components/keys/KeyPanels.tsx",
   "src/components/keys/KeyRow.tsx",
   "src/components/keys/KeysPage.tsx",
-  "src/components/settings/AdvancedSection.tsx",
   "src/components/settings/DesktopKinds.tsx",
   "src/components/settings/SettingsDialog.tsx",
   "src/components/settings/SettingsNav.tsx",

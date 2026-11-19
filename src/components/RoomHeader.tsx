@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { ChevronRight, Pause, Plus, Search } from "lucide-react";
+import { Pause, Plus, Search } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { roomContextWarnings } from "@/lib/context-warning";
@@ -7,7 +7,6 @@ import { effectiveDefaultResponder, jevRoomRoutingOn } from "@/lib/group-routing
 import { t } from "@/lib/i18n";
 import { normalizeState } from "@/lib/mascot";
 import { effectivePlace, placeLabelKey } from "@/lib/place";
-import { openRoomPanel } from "@/lib/room-panel";
 import { chosenResponder, responderChoice, responderTitle } from "@/lib/room-responder";
 import { busyPlaceOf, roomSpeakerIds } from "@/lib/room-threads";
 import { formatTokens } from "@/lib/usage";
@@ -124,12 +123,9 @@ function memberMauses(group: Group, members: Bot[], placeOf: (entry: RoomQueueEn
   });
 }
 
-const SIMPLE_FACES = 3;
-
 export function RoomHeader({
   group,
   members,
-  simple,
   setupPending,
   remoteClient,
   findOpen,
@@ -140,7 +136,6 @@ export function RoomHeader({
 }: {
   group: Group;
   members: Bot[];
-  simple: boolean;
   setupPending: boolean;
   remoteClient: boolean;
   findOpen: boolean;
@@ -163,54 +158,6 @@ export function RoomHeader({
   const membersLabel = members.length === 1
     ? t("room.members.ariaOne")
     : t("room.members.ariaMany", { count: members.length });
-  if (simple) {
-    const more = members.length - SIMPLE_FACES;
-    return (
-      <div {...headerDragProps} className="@container/roomhead px-5 py-3 pl-11 md:pl-5">
-        <div data-roomhead-row className="flex items-center justify-between gap-3">
-          <div data-roomhead-identity className="flex min-w-0 flex-col items-start" style={headerNoDragStyle}>
-            <button
-              type="button"
-              data-room-name
-              onClick={(event) => openRoomPanel(group.id, event.currentTarget)}
-              title={t("room.panel.open")}
-              aria-label={t("room.panel.openAria", { name: group.name })}
-              aria-haspopup="dialog"
-              style={headerNoDragStyle}
-              className="group -mx-2 flex min-w-0 max-w-[calc(100%+1rem)] items-center gap-1 rounded-lg px-2 py-0.5 hover:bg-raised/60 focus-visible:bg-raised/60"
-            >
-              <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
-              <ChevronRight size={14} aria-hidden="true" className="-ml-1 w-0 shrink-0 text-ink-secondary opacity-0 transition-[width,margin,opacity] duration-150 group-hover:ml-0 group-hover:w-3.5 group-hover:opacity-100" />
-            </button>
-            {group.description && <p className="max-w-full truncate text-[12px] leading-4 text-ink-secondary">{group.description}</p>}
-          </div>
-          <div data-roomhead-controls className="flex shrink-0 items-center gap-1.5">
-            <ThreadPresenceFaces threadId={group.threadId} />
-            {pinned}
-            <button
-              ref={membersTriggerRef}
-              type="button"
-              data-room-faces
-              onClick={onOpenMembers}
-              title={t("room.members.manage")}
-              aria-label={membersLabel}
-              style={headerNoDragStyle}
-              className="flex items-center rounded-full py-0.5 pl-1 pr-1.5 hover:bg-raised/60"
-            >
-              <span className="flex items-center -space-x-1.5">
-                {faces.slice(0, SIMPLE_FACES)}
-                {more > 0 && (
-                  <span className="relative flex h-6 min-w-6 items-center justify-center rounded-full border border-app bg-raised px-1 text-[11px] font-medium tabular-nums text-ink-secondary">
-                    +{more}
-                  </span>
-                )}
-              </span>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
   return (
       <div
         {...headerDragProps}

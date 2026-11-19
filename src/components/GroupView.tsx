@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { formattedReplyWidth, isFormattedReply, splitReplyBlocks } from "@/lib/formatted-reply";
+import { formattedReplyWidth, isFormattedReply } from "@/lib/formatted-reply";
 import { activeLocale, intlLocale, t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useReactor } from "@/lib/cloud-guest";
@@ -32,9 +32,6 @@ import { botTextShowsSpeaker, laterTextOwns, runShowsSpeaker } from "@/lib/room-
 import { defaultResponderName, groupResponseHint, jevRoomRoutingOn } from "@/lib/group-routing";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { FailedTurnRow, MessageBoundary } from "./ChatView";
-import { SIMPLE_BOT_BUBBLE, SIMPLE_BUBBLE_MAX, SIMPLE_BUBBLE_TEXT, SIMPLE_USER_BUBBLE } from "./chat-bubble";
-import { ReplyBlocks } from "./ReplyBlocks";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "./MessageActions";
 import { ReactAction, ReactionChips, useCanReact } from "./Reactions";
 import { ClusterLabel } from "./RoomClusterLabel";
@@ -65,7 +62,6 @@ import { AttachmentGallery, MessageAttachmentGallery, replyAttachmentGroup } fro
 import { VoiceNoteBubble, type VoiceNoteAttachment } from "./VoiceNoteBubble";
 import { OptionCard } from "./OptionCard";
 import { GroupCallOverlay } from "./GroupCallView";
-
 import { ApprovalCard } from "./ApprovalCard";
 import { isQuestionCard, QuestionCard } from "./QuestionCard";
 import { ManageMembersPanel } from "./ManageMembersPanel";
@@ -101,7 +97,6 @@ import { RoomWorkingFolder } from "./RoomWorkingFolder";
 import { RoomBulletin } from "./RoomBulletin";
 import { RoomHeader } from "./RoomHeader";
 import { useChatFindRequests, useChatFindShortcut } from "@/lib/chat-find";
-import { simpleRoomHeader } from "@/lib/room-panel";
 
 export function RoomToolChip({ message, roomId, threadId, live = false }: { message: Message; roomId?: string; threadId?: string; live?: boolean }) {
   const { state, dispatch } = useStore();
@@ -171,7 +166,7 @@ function RoomTextMessage({
   const focusedSearch = focus?.messageId === m.id && Boolean(focus.matchText) && focus.threadId === group.threadId;
   const collapsible = user && !expanded && (display.length > USER_COLLAPSE_CHARS || display.split("\n").length > USER_COLLAPSE_LINES);
   useEffect(() => { if (focusedSearch && collapsible) setExpanded(true); }, [focusedSearch, collapsible, focus?.nonce]);
-  const simple = !useAdvancedMode();
+
   const speakerBot = members.find((member) => member.id === m.from?.botId);
   const botText = rawText; const teammates = useTeammates(); const peers = useMemo(() => [...members, ...teammates.peers], [members, teammates]);
   const pin = roomPin(group, m, dispatch);
@@ -190,8 +185,7 @@ function RoomTextMessage({
     pin,
   });
   const replyGroup = useMemo(() => !user && !isLiveReply(m) && botText.trim() ? replyAttachmentGroup(botText, m.attachments) : null, [user, m, botText]);
-  const blocks = useMemo(() => simple && !user && !viewRaw && botText.trim() ? splitReplyBlocks(botText) : null, [simple, user, viewRaw, botText]);
-  const tabled = Boolean(blocks?.some((block) => block.kind === "table"));
+
   const botActions = !user && (
     <MessageActions side="bot" forceOpen={viewRaw || speaking} menu={[...botMenu, ...forkAction]} contextItems={replyAndCopy(() => onReply(m), botText)}>
       <ReplyAction onReply={() => onReply(m)} />
@@ -212,18 +206,18 @@ function RoomTextMessage({
           </MessageActions>
         )}
         <div
-          data-chat-bubble={simple ? "simple" : ""} data-look={user ? "user-bubble" : "bot-bubble"}
+          data-chat-bubble="" data-look={user ? "user-bubble" : "bot-bubble"}
           className={cn(
-            tabled ? "w-full" : "w-fit",
-            simple ? cn(!tabled && SIMPLE_BUBBLE_MAX, SIMPLE_BUBBLE_TEXT) : "max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl text-[15px] leading-relaxed",
+            "w-fit",
+            "max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl text-[15px] leading-relaxed",
             !user && emerging && !streamedReply(m.id) && "turn-answer",
-            tabled || (!user && !m.text?.trim() && !m.replyToId && m.attachments?.length)
+            (!user && !m.text?.trim() && !m.replyToId && m.attachments?.length)
               ? "text-ink"
-              : !simple && !user && isFormattedReply(m.text ?? "")
+              : !user && isFormattedReply(m.text ?? "")
                 ? cn(formattedReplyWidth(m.text ?? ""), "px-1 text-ink")
                 : user
-                  ? cn("chat-text whitespace-pre-wrap [overflow-wrap:anywhere] text-ink", simple ? SIMPLE_USER_BUBBLE : "bg-bubble-user px-4 py-2.5")
-                  : simple ? SIMPLE_BOT_BUBBLE : "bg-card px-4 py-2.5 text-ink",
+                  ? cn("chat-text whitespace-pre-wrap [overflow-wrap:anywhere] text-ink", "bg-bubble-user px-4 py-2.5")
+                  : "bg-card px-4 py-2.5 text-ink",
           )}
           title={new Date(m.at).toLocaleString(intlLocale())}
         >
@@ -288,9 +282,6 @@ function RoomTextMessage({
               {!botText.trim() && <MessageAttachmentGallery text={botText} attachments={m.attachments} message={{ threadId: group.threadId, messageId: m.id }} className={m.text ? undefined : "mb-0"} eager={eager} />}
               {viewRaw && botText ? (
                 <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><RawMarkdownView text={botText} /></div>
-              ) : tabled && blocks ? (
-                <ReplyBlocks blocks={blocks} tray={botActions} citation={{ messageId: m.id, ownerType: "group", ownerId: group.id, threadId: group.threadId }}
-                  render={(block) => <ChatMarkdown text={block} mentionPeers={peers} everyone={!group.dm} mentionPerson={{ profileName: state.config?.profile?.name }} message={{ threadId: group.threadId, messageId: m.id }} delivered={replyGroup?.delivered} originals={replyGroup?.originals} />} />
               ) : botText ? (
                 <div data-citation-source={m.id} data-citation-owner-type="group" data-citation-owner={group.id} data-citation-thread={group.threadId}><ChatMarkdown text={botText} mentionPeers={peers} everyone={!group.dm} mentionPerson={{ profileName: state.config?.profile?.name }} message={{ threadId: group.threadId, messageId: m.id }} delivered={replyGroup?.delivered} originals={replyGroup?.originals} /></div>
               ) : null}
@@ -298,7 +289,7 @@ function RoomTextMessage({
             </MessageBoundary>
           )}
         </div>
-        {!tabled && botActions}
+        {botActions}
         <span className="self-end pb-1 text-[11px] tabular-nums text-ink-tertiary opacity-0 transition-opacity group-hover:opacity-100">
           {formatTime(m.at)}
         </span>
@@ -908,8 +899,8 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
   const threadSpeakerId = roomThreadSpeakerId(group, group.threadId);
   const threadSpeaker = threadSpeakerId ? members.find((b) => b.id === threadSpeakerId) : undefined;
   const setupPending = !remoteClient && roomNeedsSetup(group);
-  const advancedMode = useAdvancedMode();
-  const simpleHeader = simpleRoomHeader({ advanced: advancedMode, remoteClient, group, setupPending });
+
+
 
   const lastGroupMessage = group.messages.at(-1);
   const toolInFlight = lastGroupMessage?.kind === "activity" && lastGroupMessage.tool?.ok === undefined;
@@ -1001,11 +992,10 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
       )}
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
       {/* z-[25]: above the room set-up card (z-20), below the GroupCallOverlay (z-30). */}
-      <GlassBar edge="top" fade={!advancedMode && !remoteClient} className="z-[25]">
+      <GlassBar edge="top" className="z-[25]">
       <RoomHeader
         group={group}
         members={members}
-        simple={simpleHeader}
         setupPending={setupPending}
         remoteClient={remoteClient}
         findOpen={findOpen}
@@ -1037,7 +1027,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
 
       {!setupPending && !group.dm && <RoomHoldsBanner group={group} members={members} />}
 
-      {!setupPending && !simpleHeader && <RoomBulletin group={group} remoteClient={remoteClient} />}
+      {!setupPending && <RoomBulletin group={group} remoteClient={remoteClient} />}
 
       {!setupPending && folderOpen && !group.dm && (
         <div className="w-full px-5">

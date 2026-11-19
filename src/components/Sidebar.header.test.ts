@@ -20,7 +20,6 @@ vi.mock("@/lib/sidebar-preferences", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/sidebar-preferences")>(),
   useSidebarDensity: () => fixture.density,
 }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/lib/chrome-rail", () => ({ useChromeRail: () => fixture.rail, setChromeRailHidden: () => {} }));
 vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   ...await importOriginal<typeof import("./DesktopCapabilities")>(),
@@ -54,25 +53,23 @@ afterEach(() => {
 });
 
 describe("sidebar header", () => {
-  const collapse = /aria-label="(Collapse sidebar to avatars|Expand sidebar)"|data-sidebar-edge-toggle/;
-
-  it.each(["comfortable", "icons"] as const)("keeps the Inbox and add, and no button collapses or expands it, at %s density in Advanced mode", (density) => {
+  it.each(["comfortable", "icons"] as const)("keeps Inbox, add and the sidebar toggle at %s density in Advanced mode", (density) => {
     fixture.density = density;
     const html = render();
     expect(html).toContain('aria-label="Inbox"');
     expect(html).not.toContain('aria-label="Active Threads"');
     expect(html).toContain('aria-label="New or share"');
-    expect(html).not.toMatch(collapse);
+    expect(html).toContain(`aria-label="${density === "icons" ? "Expand sidebar" : "Collapse sidebar"}"`);
   });
 
-  it.each(["comfortable", "icons"] as const)("keeps the Inbox and add, no activity menu and no collapse button in Simple mode at %s density: its edge is dragged instead", (density) => {
+  it.each(["comfortable", "icons"] as const)("keeps Inbox, add and the sidebar toggle in Simple mode at %s density", (density) => {
     fixture.advanced = false;
     fixture.density = density;
     const html = render();
     expect(html).toContain('aria-label="Inbox"');
     expect(html).not.toContain('aria-label="Active Threads"');
     expect(html).toContain('aria-label="New or share"');
-    expect(html).not.toMatch(collapse);
+    expect(html).toContain(`aria-label="${density === "icons" ? "Expand sidebar" : "Collapse sidebar"}"`);
     expect(html, "the edge that is dragged, open or as avatars, so the avatars are never a dead end").toMatch(/role="separator" aria-label="Resize sidebar"/);
   });
 });
@@ -102,7 +99,7 @@ describe("sidebar top row", () => {
   });
 
 
-  it.each(["mac-inset", "win-caption"] as const)("in Simple mode on %s keeps only the top corner: plain search and + at its right end, no drag region, no server pill, nothing on the edge", (windowChrome) => {
+  it.each(["mac-inset", "win-caption"] as const)("in Simple mode on %s keeps only the top corner: collapse, search and + at its right end, no drag region, no server pill, nothing on the edge", (windowChrome) => {
     fixture.advanced = false;
     fixture.windowChrome = windowChrome;
     desktop();
@@ -116,7 +113,8 @@ describe("sidebar top row", () => {
     expect(lights).toBe(-1);
     expect(buttons).toBeGreaterThan(slot);
     expect(classesOf(row, "data-sidebar-top-buttons")).toEqual(expect.arrayContaining(["shrink-0", "pointer-events-auto"]));
-    expect(row.slice(buttons).match(/<button/g)).toHaveLength(2);
+    expect(row.slice(buttons).match(/<button/g)).toHaveLength(3);
+    expect(row.indexOf("data-sidebar-density-toggle")).toBeLessThan(row.indexOf("data-sidebar-search-toggle"));
     expect(row).toMatch(/data-sidebar-search-toggle="true" aria-label="Search bots and messages" aria-haspopup="dialog" title="Search bots and messages" class="[^"]*\bsize-\[26px\][^"]*\brounded-lg\b[^"]*\btext-ink-secondary\b/);
     expect(row, "no round box round either").not.toContain("bg-composer");
     expect(html).toMatch(/aria-label="New or share" class="[^"]*\bsize-\[26px\][^"]*\brounded-lg\b/);
@@ -160,39 +158,6 @@ describe("sidebar top row", () => {
     expect(buttons).toBeGreaterThan(slot);
   });
 
-  it("collapses Simple mode to a rail: round search and + on top (the frame's top bar holds the lights), nothing on the edge, and Apps and the account at the foot", () => {
-    fixture.advanced = false;
-    fixture.density = "icons";
-    fixture.windowChrome = "mac-inset";
-    desktop();
-    const html = render();
-    const top = html.slice(html.indexOf("data-sidebar-top-row"), html.indexOf("data-sidebar-rail-footer"));
-    expect(top).not.toContain("data-traffic-light-space");
-    expect(top).not.toContain("data-sidebar-top-buttons");
-    expect(top).not.toContain("data-workspace-switcher");
-    expect(top.indexOf('aria-label="Search bots and messages"')).toBeLessThan(top.indexOf('aria-label="New or share"'));
-    expect(top).toMatch(/data-sidebar-rail-top="true" class="flex flex-col items-center gap-2 pt-1"/);
-    expect(top).toMatch(/aria-label="New or share" class="[^"]*\bsize-9\b[^"]*\brounded-full\b/);
-    const foot = html.slice(html.indexOf("data-sidebar-rail-footer"));
-    const at = (marker: string) => {
-      const index = foot.indexOf(marker);
-      expect(index, marker).toBeGreaterThan(-1);
-      return index;
-    };
-    expect(html).not.toContain("data-sidebar-edge-toggle");
-    expect(foot).not.toContain('aria-label="Search bots and messages"');
-    const positions = [
-      at('data-sidebar-nav="apps"'),
-      at("data-sidebar-account"),
-    ];
-    expect(positions).toEqual([...positions].sort((a, b) => a - b));
-    expect(foot).toMatch(/data-tour="nav-apps" data-sidebar-nav="apps"[^>]*aria-label="Apps"[^>]*class="[^"]*\bsize-9\b[^"]*"><svg[^>]*lucide-puzzle/);
-    expect(foot).not.toContain("data-workspace-switcher");
-    expect(foot).not.toContain('data-sidebar-nav="automations"');
-    expect(foot).not.toContain('data-sidebar-nav="team-map"');
-    expect(html).not.toContain("Switch server:");
-    expect(html.match(/aria-label="New or share"/g)).toHaveLength(1);
-  });
 
 });
 
@@ -241,11 +206,11 @@ describe("the button that hides and shows the window's rail of places", () => {
     fixture.density = "icons";
     const column = render();
     expect(column.indexOf("data-rail-toggle")).toBeGreaterThan(-1);
-    expect(column.indexOf("data-rail-toggle")).toBeLessThan(column.indexOf("data-sidebar-rail-top"));
+    expect(column.indexOf("data-rail-toggle")).toBeLessThan(column.indexOf("data-sidebar-rail-footer"));
     expect(toggle(column)).toMatch(/class="[^"]*\bsize-9\b[^"]*\brounded-full\b/);
     fixture.advanced = false;
     const rail = render();
-    expect(rail.indexOf("data-rail-toggle")).toBeLessThan(rail.indexOf("data-sidebar-rail-top"));
+    expect(rail.indexOf("data-rail-toggle")).toBeLessThan(rail.indexOf("data-sidebar-rail-footer"));
     expect(toggle(rail)).toMatch(/class="[^"]*\bsize-9\b[^"]*\brounded-full\b/);
   });
 
@@ -259,7 +224,7 @@ describe("the button that hides and shows the window's rail of places", () => {
 
 describe("sidebar head and foot", () => {
   it.each(["comfortable", "icons"] as const)(
-    "puts the top row and search in the head, the places in the foot, and the fading list between at %s density",
+    "places search in the appropriate bar at %s density",
     (density) => {
       fixture.density = density;
       const html = render();
@@ -276,7 +241,8 @@ describe("sidebar head and foot", () => {
       const apps = at('data-sidebar-nav="apps"');
       expect(head).toBeLessThan(topRow);
       expect(topRow).toBeLessThan(search);
-      expect(search).toBeLessThan(list);
+      if (density === "icons") expect(foot).toBeLessThan(search);
+      else expect(search).toBeLessThan(list);
       expect(list).toBeLessThan(foot);
       expect(foot).toBeLessThan(apps);
       expect(html).not.toContain('data-sidebar-nav="automations"');
@@ -284,23 +250,4 @@ describe("sidebar head and foot", () => {
       expect(at("data-glass-frame")).toBeLessThan(head);
     },
   );
-});
-
-describe("sidebar foot in Simple mode", () => {
-  it.each([false, true])("puts the account avatar, Inbox and Apps in the foot (advanced: %s)", (advanced) => {
-    fixture.advanced = advanced;
-    const html = render();
-    const foot = html.slice(html.indexOf('data-glass-bar="bottom"'));
-    expect(foot).toContain('data-sidebar-footer="simple"');
-    expect(html).not.toContain('data-sidebar-nav="automations"');
-    expect(html).not.toContain('data-sidebar-nav="team-map"');
-    expect(html.match(/data-sidebar-nav="apps"/g)).toHaveLength(1);
-    expect(foot.indexOf("data-sidebar-account")).toBeGreaterThan(-1);
-    expect(html.match(/data-sidebar-inbox=/g)).toHaveLength(1);
-    expect(foot.indexOf("data-sidebar-account")).toBeLessThan(foot.indexOf("data-sidebar-inbox"));
-    expect(foot.indexOf("data-sidebar-inbox")).toBeLessThan(foot.indexOf('data-sidebar-nav="apps"'));
-    expect(foot).toMatch(/data-tour="nav-apps" data-sidebar-nav="apps"[^>]*>(<[^>]*>)*Apps</);
-    expect(foot.match(/data-app-face="/g)).toHaveLength(3);
-  });
-
 });

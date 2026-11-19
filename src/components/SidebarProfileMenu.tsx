@@ -28,7 +28,6 @@ import {
   UsersRound,
   Zap,
 } from "lucide-react";
-
 import { accountMenuItems, AccountsSheet, useAccounts } from "./AccountMenu";
 import { accountLine, useAccountSummary } from "./settings/account-summary";
 import { usePhonePlaceState, type PhonePlaceState } from "./settings/phone-status";
@@ -42,7 +41,6 @@ import { usageBridge } from "./CloudUsageMeter";
 import { useCloudPlanSnapshot } from "./CloudTrialNotice";
 import type { WorkspacePlace } from "./DesktopWorkspaceSwitcher";
 import { railShown, usePlaces } from "@/lib/places";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { useAutomationsNeedYou } from "./use-automations-need-you";
 import { useCloudFilesReady } from "@/lib/cloud-files";
 import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
@@ -540,7 +538,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const { state, dispatch } = useStore();
   const simple = account !== undefined;
   const [menuOpen, setMenuOpen] = useState(false);
-  const advancedMode = useAdvancedMode();
+
   const automationsNeedYou = useAutomationsNeedYou();
   const planSnapshot = useCloudPlanSnapshot(usageBridge(state.config?.cloudHome === true) ?? (window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudPlan));
   const cloudUsage = cloudUsageSummary(planSnapshot);
@@ -602,7 +600,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
       ? { key: "switch-place", label: t("sidebar.menu.switchPlace"), icon: <ArrowLeftRight size={16} />, chevron: true, onSelect: account.place.openMenu } : null,
     accounts: accountMenuItems(accounts),
     // Simple's own places to go, at every width: the phone's round avatar has them too.
-    ...(account || (circle && !advancedMode) ? { simple: {
+    ...(account ? { simple: {
       tools: toolMenuItems({
         activeView: state.activeView,
         automationsNeedYou: account?.automationsNeedYou ?? automationsNeedYou,
@@ -635,7 +633,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const noteworthy = update && updateNoteworthy(update.phase, update.pending) && !updateHasButton(update.phase);
   const needsYou = account?.automationsNeedYou === true;
   const initials = profileInitials(profile);
-  const nameless = simple && initials === "?" ? <UserRound size={18} strokeWidth={1.75} aria-hidden /> : undefined;
+  const nameless = simple && !rail && initials === "?" ? <UserRound size={18} strokeWidth={1.75} aria-hidden /> : undefined;
   const label = accountLabel(name, { automationsNeedYou: needsYou, update: simple && noteworthy && update ? update.label : null, move: move.kind, announcements: news.unread });
   const dot = accountDot({ automationsNeedYou: needsYou, update: noteworthy ? (update.phase === "error" ? "failed" : "news") : null, move: move.kind, announcements: news.unread });
   // Advanced's full row has its own update badge: its avatar's dot is the move's and the announcements' alone.
@@ -656,9 +654,9 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
           <span
             ref={triggerRef}
             data-sidebar-account=""
-            className="relative flex size-9 items-center justify-center rounded-full"
+            className={cn("relative flex items-center justify-center rounded-full", rail ? "size-11" : "size-9")}
           >
-            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={36} fallback={nameless} fontSize={14} className={cn(ELEVATED_CONTROL, ELEVATED_TINT, open && ELEVATED_OPEN)} />
+            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={rail ? 44 : 36} fallback={nameless} fontSize={rail ? 16 : 14} className={cn(ELEVATED_CONTROL, ELEVATED_TINT, open && ELEVATED_OPEN)} />
             {dot && <span aria-hidden data-account-dot={dot} className={cn("absolute -right-0.5 -top-0.5 size-2.5 rounded-full ring-2 ring-panel", DOT_COLOR[dot])} />}
           </span>
         ) : iconOnly ? (
@@ -666,12 +664,12 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             ref={triggerRef}
             className={cn(
               "relative flex items-center justify-center rounded-xl transition-colors",
-              rail ? "size-10" : "size-[46px]",
+              "size-[46px]",
               circle && "size-10 rounded-full border border-hairline bg-card",
               open ? "bg-raised" : "hover:bg-raised/50",
             )}
           >
-            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={rail ? 30 : circle ? 26 : 28} />
+            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={circle ? 26 : 28} />
             {dot && <span aria-hidden data-account-dot={dot} className={cn("absolute end-1 top-1 size-2.5 rounded-full ring-2 ring-app", DOT_COLOR[dot])} />}
           </span>
         ) : (

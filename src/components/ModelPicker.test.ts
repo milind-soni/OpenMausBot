@@ -24,7 +24,6 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 
 // These cases cover the full picker; Simple mode has its own file.
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
 
 const { EffortRow, ModelPicker, ModelVariantRow } = await import("./ModelPicker");
 const { ClaudeAccountSelect, ModelEngineRail } = await import("./ModelPickerFull");

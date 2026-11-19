@@ -1,3 +1,4 @@
+import { useMenuMotion } from "./MenuMotion";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Keyboard, Search, X } from "lucide-react";
 
@@ -39,6 +40,7 @@ function ShortcutRow({ item, isMac }: { item: ShortcutItem; isMac: boolean }) {
 }
 
 export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModalProps) {
+  const motion = useMenuMotion(open);
   const [query, setQuery] = useState("");
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -47,15 +49,15 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
 
   useLayoutEffect(() => {
     const dialog = dialogRef.current;
-    if (!open || !dialog) return;
+    if (!dialog) return;
+    if (!open) { dialog.close(); return; }
     setQuery("");
     dialog.showModal();
     inputRef.current?.focus();
-    // Close before unmount so the browser restores focus to the opener.
-    return () => dialog.close();
+
   }, [open]);
 
-  if (!open) return null;
+  if (!motion.shown) return null;
 
   const groups = filterShortcutGroups(shortcutGroupsFor(sendKey), query, isMac);
 
@@ -63,7 +65,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
     <dialog
       ref={dialogRef}
       aria-labelledby="shortcuts-dialog-title"
-      className="m-auto w-[min(500px,calc(100%-32px))] max-h-[85vh] overflow-hidden rounded-2xl border border-hairline/50 bg-panel p-0 text-ink shadow-2xl backdrop:bg-black/60 backdrop:backdrop-blur-xs"
+      className="fading-dialog m-auto w-[min(500px,calc(100%-32px))] max-h-[85vh] overflow-hidden rounded-2xl border border-hairline/50 bg-panel p-0 text-ink shadow-2xl backdrop:bg-black/60 backdrop:backdrop-blur-xs"
       onCancel={(event) => { event.preventDefault(); onClose(); }}
       onKeyDown={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}

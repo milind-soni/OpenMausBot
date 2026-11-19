@@ -13,7 +13,6 @@ const fixture = vi.hoisted(() => {
   return { config: {} as FeatureFlagConfig & { cloudHome?: boolean }, view };
 });
 // These cover the Advanced panel; ComputerPanel.simple.test.ts covers Simple.
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   useStore: () => ({
@@ -67,9 +66,9 @@ describe("Browser panel installation access", () => {
 describe("Computer panel on a narrow screen", () => {
   it("covers the window below md instead of docking a 400px column", () => {
     const markup = render({});
-    const aside = /<aside class="([^"]*)"/.exec(markup)!;
+    const aside = /<aside[^>]*data-computer-panel[^>]*class="([^"]*)"/.exec(markup)!;
     expect(aside[1].split(" ")).toEqual(expect.arrayContaining(["max-md:absolute", "max-md:inset-0", "max-md:z-40", "max-md:w-full!"]));
-    const separator = /<div role="separator"[^>]*class="([^"]*)"/.exec(markup)!;
+    const separator = /<div[^>]*role="separator"[^>]*class="([^"]*)"/.exec(markup)!;
     expect(separator[1].split(" ")).toContain("max-md:hidden");
   });
 });

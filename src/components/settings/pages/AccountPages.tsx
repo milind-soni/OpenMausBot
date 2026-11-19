@@ -15,7 +15,6 @@ import { SettingRow, SettingsGroup, SettingsLinkRow, SettingsRows } from "../../
 import { UpdatesConsentRow } from "../../UpdatesConsent";
 import { useAccountSummary, useYou } from "../account-summary";
 import { useSettingsShell } from "../settings-shell";
-import { SpentRow } from "../plan-parts";
 import { profileLabel } from "../../SidebarProfileMenu";
 
 export function AccountPage() {
@@ -40,7 +39,7 @@ export function AccountPage() {
           : <SettingsLinkRow title={t("settings.account.nameRow")} badge={<PlaceBadge place={place} size={14} />} value={profileLabel(profile)} onClick={() => go("bots", "about-you")} data={{ "data-account-name-row": "" }} />}
       </SettingsRows>
     </SettingsGroup>
-    {bridge && <CloudAccountSettings part="account" advanced={ctx.advanced} linkRequest={state.appSettingsCloudLink} avatar={<YouAvatar size={32} />}
+    {bridge && <CloudAccountSettings part="account" linkRequest={state.appSettingsCloudLink} avatar={<YouAvatar size={32} />}
       onSignIn={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })} />}
     {elsewhere && (
       <SettingsGroup label={t("settings.account.mausbot", { app: productName() })} block="mausbot-account">
@@ -69,9 +68,9 @@ export function AccountPage() {
     )}
     {ctx.organization ? (
       <SettingsGroup label={t("settings.section.organization")} block="organization">
-        <OrganizationSettings simple={!ctx.advanced} />
+        <OrganizationSettings />
       </SettingsGroup>
-    ) : elsewhere && ctx.advanced && (
+    ) : elsewhere && (
       // The organization sign-in is This computer's: it stays in place on a Cloud's page, inert, with the way there.
       <SettingsGroup label={t("settings.section.organization")} block="organization">
         <SettingsRows><InertRow title={t("settings.account.orgSignIn")} control={<button type="button" className="ui-button" tabIndex={-1}>{t("settings.account.signIn")}</button>} /></SettingsRows>
@@ -86,7 +85,7 @@ export function AccountPage() {
 }
 
 export function PlanPage() {
-  const { ctx, place } = useSettingsShell();
+  const { ctx } = useSettingsShell();
   const { state, dispatch } = useStore();
   const { usage, upgrade, dialog } = useCloudUsageSettings();
   if (!ctx.desktop) {
@@ -101,10 +100,10 @@ export function PlanPage() {
     );
   }
   return <>
-    <CloudAccountSettings part="plan" advanced={ctx.advanced} cloudHome={ctx.cloud} teamHome={state.config?.team} linkRequest={state.appSettingsCloudLink}
+    <CloudAccountSettings part="plan" cloudHome={ctx.cloud} teamHome={state.config?.team} linkRequest={state.appSettingsCloudLink}
       usage={usage} upgrade={upgrade}
       // A Cloud's own cost stays off its paid plan's card (§1.3: it must never read as a second bill).
-      extra={!ctx.advanced && !ctx.client && !(ctx.team && !ctx.admin) && (place.kind === "computer" || place.kind === "server") ? <SpentRow place={place.name} /> : undefined}
+
       onAddCloud={() => dispatch({ type: "openCloudAdd", source: "app_settings" })}
       onSignIn={() => dispatch({ type: "openCloudAdd", source: "app_settings", signIn: true })} />
     <PlacesTogetherSwitch />

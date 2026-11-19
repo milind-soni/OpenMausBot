@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import { activityStepLabel, formatProgressSize, liveActivityLabel, liveActivityPhrases, phraseAt, phraseHoldMs, turnNowPhrases } from "./live-activity";
-import { friendlyNowPhrases } from "./friendly-activity";
 import type { Message } from "@/state/store";
 
 const activity = (name: string, extra: Partial<NonNullable<Message["tool"]>> = {}): Message => ({
@@ -131,7 +130,6 @@ describe("turnNowPhrases: what the status line says is happening now", () => {
   it("says what the server just said about the turn, in its first sentence, until the engine reports", () => {
     const waiting = activity("notice: Waiting for memory on this Cloud. Running now: 1. Ahead of this one: 0.", { ok: true });
     expect(turnNowPhrases(null, waiting)?.phrases).toEqual(["Waiting for memory on this Cloud."]);
-    expect(friendlyNowPhrases(null, waiting).phrases).toEqual(["Waiting for memory on this Cloud."]);
     expect(turnNowPhrases(null, activity("notice: 在等待。运行中：1。", { ok: true }))?.phrases).toEqual(["在等待。"]);
     expect(turnNowPhrases({ activity: "thinking" }, waiting)?.phrases[0]).toBe("Thinking");
   });

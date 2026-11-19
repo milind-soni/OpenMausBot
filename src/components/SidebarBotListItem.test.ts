@@ -8,10 +8,6 @@ vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({}),
 }));
 // Advanced mode's rows: Simple mode keeps one conversation per bot, so its rows have no thread controls.
-vi.mock("@/lib/interface-mode", async (original) => ({
-  ...await original<typeof import("@/lib/interface-mode")>(),
-  useAdvancedMode: () => true,
-}));
 
 import { ConfirmDialogCard } from "./ConfirmDialog";
 import { BotDeleteMenuItem } from "./BotMenuDelete";

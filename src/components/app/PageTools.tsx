@@ -7,7 +7,6 @@ import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { serverErrorText } from "@/lib/server-error";
 import { addPointedChip, usePointedChips } from "@/lib/pointed-chips";
 import { latestWebPanels, setWebPanels, useWebPanels } from "@/lib/web-panel-preferences";
@@ -188,10 +187,10 @@ export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefin
 
 /** Pin to sidebar: the page joins the sidebar's pinned panels, which show in Advanced mode, so the button does too. */
 export function usePagePin(page: PinnedChatPage, title: string) {
-  const advanced = useAdvancedMode();
+
   const panels = useWebPanels();
   const pinned = Boolean(findPinnedPage(panels, page));
-  return { show: advanced, pinned, full: !pinned && panels.length >= MAX_WEB_PANELS, toggle: () => {
+  return { show: true, pinned, full: !pinned && panels.length >= MAX_WEB_PANELS, toggle: () => {
     // Base the edit on the stored list, not this render's: another window may have pinned or unpinned since.
     const latest = latestWebPanels();
     if (Boolean(findPinnedPage(latest, page)) === pinned) setWebPanels(togglePinnedPage(latest, page, title));

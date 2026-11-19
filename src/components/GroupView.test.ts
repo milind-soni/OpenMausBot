@@ -2,17 +2,15 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
-import { StoreProvider, type Group, type Message } from "@/state/store";
+import { StoreProvider, type Message } from "@/state/store";
 
-const mode = vi.hoisted(() => ({ advanced: false }));
-vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => mode.advanced, setAdvancedMode: vi.fn() }));
 // Replaced whole: its context default reads window.ogb at import time.
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false } } }),
   useCaptionChrome: () => ({}),
 }));
 
-import { GroupView, RoomToolChip } from "./GroupView";
+import { RoomToolChip } from "./GroupView";
 
 const chip = (patch: Partial<Message> = {}): Message => ({
   id: "chip",
@@ -62,33 +60,5 @@ describe("RoomToolChip", () => {
     expect(markup).toContain("Sent to Eli");
     expect(markup).toContain('aria-label="Eli"');
     expect(markup).not.toContain("<button");
-  });
-});
-
-describe("room header", () => {
-  const room: Group = {
-    id: "room", threadId: "room-thread", name: "Launch planning", memberIds: [],
-    defaultResponder: { kind: "member", botId: "atlas" }, bulletin: "", unread: false,
-    createdAt: 1, setupCompletedAt: 1, messages: [],
-  };
-
-  it("wraps into a name line and a control line when the column is narrow in Advanced mode", () => {
-    vi.stubGlobal("window", { ogb: undefined });
-    mode.advanced = true;
-    let markup: string;
-    try {
-      markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(GroupView, { group: room })));
-    } finally {
-      vi.unstubAllGlobals();
-      mode.advanced = false;
-    }
-    expect(markup).toContain("@container/roomhead");
-    const row = /data-roomhead-row="[^"]*" class="([^"]*)"/.exec(markup)!;
-    expect(row[1].split(" ")).toContain("@max-3xl/roomhead:flex-wrap");
-    const identity = /data-roomhead-identity="[^"]*" class="([^"]*)"/.exec(markup)!;
-    expect(identity[1].split(" ")).toEqual(expect.arrayContaining(["min-w-0", "@max-3xl/roomhead:basis-full"]));
-    const controls = /data-roomhead-controls="[^"]*" class="([^"]*)"/.exec(markup)!;
-    expect(controls[1].split(" ")).toEqual(expect.arrayContaining(["@max-3xl/roomhead:ml-auto", "@max-3xl/roomhead:flex-wrap"]));
-    expect(markup).toContain("Launch planning");
   });
 });

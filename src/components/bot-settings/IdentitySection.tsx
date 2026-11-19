@@ -109,7 +109,7 @@ export function IdentitySection({
       </div>}
 
       <DefaultBotHideRow bot={bot} />
-      {instructionsOpen && <BotInstructionsDialog bot={bot} inline={draft} onClose={() => setInstructionsOpen(false)} />}
+      <BotInstructionsDialog open={instructionsOpen} bot={bot} inline={draft} onClose={() => setInstructionsOpen(false)} />
     </div>
   );
 }

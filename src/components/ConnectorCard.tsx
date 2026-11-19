@@ -11,7 +11,6 @@ import { accountAliasTaken, requiresAccountAlias } from "@/lib/connector-status"
 import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { cn } from "@/lib/cn";
 import { askPrimary, ASK_QUIET_BUTTON, AskCard, AskSettledLine } from "./AskCard";
-import { CardHint } from "./CardHint";
 import { ConnectorAlsoUseful } from "./ConnectorAlsoUseful";
 
 const STATUS_CHECK_MS = 4_000;
@@ -207,7 +206,6 @@ export function ConnectorCard({ botId, color, threadId, message }: { botId: stri
         </>
       }
     >
-      <CardHint id="spot.connector" />
       <p className="text-[12px] text-ink-tertiary">{t(isMcp ? "connectors.card.mcpSignInHint" : "connectors.card.signInHint")}</p>
       {refusal && <p role="status" className="mt-1.5 text-[12px] text-ink-secondary">{refusal}</p>}
       {labelNeeded ? (

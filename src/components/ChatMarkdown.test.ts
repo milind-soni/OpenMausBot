@@ -33,12 +33,6 @@ import * as AttachmentPreview from "./AttachmentPreview";
 import { messageReferencesFile } from "../../server/message-file";
 
 // Most of this file pins Advanced mode's chrome; the Simple code block has its own tests below.
-const mode = vi.hoisted(() => ({ advanced: true }));
-vi.mock("@/lib/interface-mode", async (importOriginal) => ({
-  ...await importOriginal<typeof import("@/lib/interface-mode")>(),
-  useAdvancedMode: () => mode.advanced,
-  readAdvancedMode: () => mode.advanced,
-}));
 
 vi.mock("react", async (importOriginal) => {
   const react = await importOriginal<typeof React>();
@@ -1483,34 +1477,6 @@ it("renders mermaid strictly and serves repeat views from cache", async () => {
   }
 });
 
-describe("Simple mode's code block", () => {
-  const simple = (render: () => string) => {
-    mode.advanced = false;
-    try { return render(); } finally { mode.advanced = true; }
-  };
-
-  it("drops the header bar for a quiet surface, with Copy and a ⋯ menu on a hover plate", () => {
-    const html = simple(() => renderToStaticMarkup(createElement(CodeBlock, { code: "const a = 1;", lang: "js" })));
-    expect(html).toMatch(/class="chat-code-block group\/code relative my-2\.5 overflow-hidden rounded-xl bg-ink\/\[0\.04\]"/);
-    expect(html).not.toContain("border-hairline");
-    expect(html).not.toContain('aria-label="Wrap long lines"');
-    const plate = html.match(/<div data-code-plate="[^"]*" class="([^"]*)"/)?.[1] ?? "";
-    expect(plate.split(" ")).toEqual(expect.arrayContaining(["opacity-0", "group-hover/code:opacity-100", "focus-within:opacity-100", "touch:opacity-100"]));
-    expect(html).toContain('aria-label="Copy code"');
-    expect(html).toContain('aria-label="More"');
-    // A finger-sized target on touch screens, and a ring on the menu's button for the keyboard.
-    expect(html.match(/<button[^>]*aria-label="Copy code"[^>]*>/)?.[0]).toContain("touch:size-11");
-    expect(html.match(/<button[^>]*aria-label="More"[^>]*>/)?.[0]).toContain("focus-visible:ring-2");
-    expect(html).toMatch(/<pre class="[^"]*leading-5 px-3 py-2 text-ink-secondary/);
-  });
-
-  it("gives a diagram the same plate instead of its header", () => {
-    const html = simple(() => renderToStaticMarkup(createElement(ChatMarkdown, { text: "```mermaid\ngraph TD; A-->B\n```" })));
-    expect(html).toContain("data-code-plate");
-    expect(html).toContain('aria-label="Copy diagram source"');
-    expect(html).not.toContain('title="Mermaid diagram"');
-  });
-});
 
 describe("a code block far from the screen", () => {
   it("stays plain until it comes near the screen, then is coloured", async () => {

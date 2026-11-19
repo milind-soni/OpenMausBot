@@ -33,7 +33,6 @@ import { cancelSteeredMessage, holdSteeredQueue, queuedSteerSender, queuedSteere
 import { routeRunOwners, type Actor, type RouteRunOwners } from "../host/run-owner.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
-import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
 import { noteTypedSend } from "../typed-sends.ts";
 import { engineSessionOutdated, startFresh } from "../fresh-start.ts";
@@ -136,7 +135,6 @@ export interface BotMessageRouteDeps {
   /** A Team Cloud: the person's reply to a line in their own inbox goes back where that line came from, with no turn
    * here; null for any other message. */
   /** On a team: the name of whoever connects its AI; empty until they have opened the team. */
-  teamAiOwnerName?(): string;
   inboxReply?(auth: RequestAuth, threadId: string, replyToId: string, text: string, line: { sendId?: string; sender?: ResolvedSender }): { status: number; message?: Message; error?: string } | null;
   /** A typed line that answers a bot's question card; null sends it as usual. */
   typedCardAnswer?(auth: RequestAuth, threadId: string, text: string, target: Message | undefined, line: { sendId?: string; sender?: ResolvedSender }): Promise<{ status: number; message?: Message; error?: string } | null>;
@@ -455,21 +453,6 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       return json(res, 200, { ok: true, queued: true, threadId: bot.threadId });
     }
 
-    m = path.match(/^\/api\/bots\/([\w-]+)\/helper-followup$/);
-    if (m && method === "POST") {
-      const bot = store.bot(m[1]!);
-      if (!bot?.defaultBot || bot.hidden) return json(res, 404, { ...userError("serverError.setup.mausbotMissing") });
-      if (!mayFollowUp(bot, auth)) return json(res, 403, { ...userError("serverError.setup.mausbotOwnerOnly") });
-      const parsed = helperFollowupBody.safeParse(await readBody(req));
-      if (!parsed.success) return json(res, 400, { error: "body must be { ai, apps?, threadId? }" });
-      const threadId = parsed.data.threadId ?? bot.threadId;
-      if (store.botByThread(threadId)?.id !== bot.id) return json(res, 404, { error: "no such conversation" });
-      const connects = auth.scopes.includes("admin") ? undefined : deps.teamAiOwnerName?.();
-      const next = helperFollowup(store.messagesFor(threadId), () => followupFacts(bot, parsed.data, store.bots, routines?.listRoutines() ?? [], connects));
-      if (!next) return json(res, 409, { ...userError("serverError.setup.noIntroToFollowUp") });
-      if ("existing" in next) return json(res, 200, { message: next.existing });
-      return json(res, 201, { message: store.appendMessage(threadId, next.append) });
-    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/compact$/);
     if (m && method === "POST") {
       const body = await readBody(req);

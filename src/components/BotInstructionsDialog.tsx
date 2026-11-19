@@ -1,3 +1,4 @@
+import { useMenuMotion } from "./MenuMotion";
 import { useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { BookOpen, X } from "lucide-react";
@@ -7,7 +8,8 @@ import { normalizeState } from "@/lib/mascot";
 import type { Bot } from "@/state/store";
 import { t } from "@/lib/i18n";
 
-export function BotInstructionsDialog({ bot, onClose, inline = false }: { bot: Bot; onClose: () => void; inline?: boolean }) {
+export function BotInstructionsDialog({ bot, onClose, inline = false, open = true }: { bot: Bot; onClose: () => void; inline?: boolean; open?: boolean }) {
+  const motion = useMenuMotion(open);
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -15,10 +17,12 @@ export function BotInstructionsDialog({ bot, onClose, inline = false }: { bot: B
   const close = useCallback(() => onCloseRef.current(), []);
 
   useEffect(() => {
+    if (!open) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialogRef.current?.focus();
 
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
       if (event.key === "Escape") {
         event.preventDefault();
         close();
@@ -49,10 +53,13 @@ export function BotInstructionsDialog({ bot, onClose, inline = false }: { bot: B
       window.removeEventListener("keydown", onKeyDown);
       previousFocus?.focus();
     };
-  }, [close]);
+  }, [close, open]);
 
+  if (!motion.shown) return null;
   const content = (
     <div
+      {...motion.exitProps}
+      data-overlay-fade={motion.closing ? "out" : "in"}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 backdrop-blur-[2px] sm:p-6"
       onMouseDown={(event) => event.target === event.currentTarget && close()}
     >
@@ -62,7 +69,7 @@ export function BotInstructionsDialog({ bot, onClose, inline = false }: { bot: B
         aria-modal="true"
         aria-labelledby="bot-instructions-title"
         tabIndex={-1}
-        className="animate-pop-in flex max-h-[min(760px,calc(100dvh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
+        className="flex max-h-[min(760px,calc(100dvh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
       >
         <header className="flex items-start justify-between gap-4 border-b border-hairline/40 px-6 pb-4 pt-6 sm:px-8 sm:pt-7">
           <div className="flex min-w-0 items-center gap-3">

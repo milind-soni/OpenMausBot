@@ -5,10 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setPinnedCircleOrder } from "@/lib/sidebar-preferences";
 import { initialState, type Bot } from "@/state/store";
 
-vi.mock("@/lib/interface-mode", async (original) => ({
-  ...await original<typeof import("@/lib/interface-mode")>(),
-  useAdvancedMode: () => false,
-}));
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
 import { BotListItem, botRowProps } from "./Sidebar";

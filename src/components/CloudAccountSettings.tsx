@@ -174,11 +174,11 @@ export function TeamPeopleCard({ team, admin, owner = false }: { team: { id: str
 
 /** One MausBot account, shown as two pages: `account` (who is signed in, sign in and out) and `plan` (the plan, its Cloud
  * and cancelling it). */
-export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamHome, onAddCloud, onSignIn, part = "plan", advanced = true, usage = null, upgrade, extra, avatar }: {
+export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamHome, onAddCloud, onSignIn, part = "plan", usage = null, upgrade, extra, avatar }: {
   /** the person's picture, for the account card's leading slot */
   avatar?: ReactNode;
   linkRequest?: number; cloudHome?: boolean; teamHome?: { name: string; cloudPage?: string }; onAddCloud?: () => void; onSignIn?: () => void;
-  part?: "account" | "plan" | "sign-out"; advanced?: boolean;
+  part?: "account" | "plan" | "sign-out";
   /** Plan & billing's This week, from the plan bridge */
   usage?: CloudUsage | null; upgrade?: UpgradeUi;
   /** a row for the Plan card (Simple's What this place cost) */
@@ -281,7 +281,7 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
           {signed && <SettingRow title={account.account?.email ?? t("settings.account.signedIn")} leading={avatar ?? blank} subtitle={message ? <p role="status">{message}</p> : t("settings.account.signedIn")}>
             {view.kind === "reauth"
               ? <button type="button" disabled={busy} className="ui-button" onClick={() => void perform(() => bridge.signInAgain())}>{t("cloudAccount.signInAgain")}</button>
-              : advanced && <button type="button" disabled={busy} className="settings-quiet cursor-pointer" onClick={() => void perform(() => bridge.refresh())}>{t("organization.refresh")}</button>}
+              : <button type="button" disabled={busy} className="settings-quiet cursor-pointer" onClick={() => void perform(() => bridge.refresh())}>{t("organization.refresh")}</button>}
           </SettingRow>}
           {signed && <div data-settings-block="sign-out" className="contents"><SettingRow title={t("settings.account.signOut", { app: productName() })} leading={blank}>
             <button type="button" disabled={busy} data-danger="" className="settings-quiet cursor-pointer" onClick={() => setConfirm("sign-out")}>{t("settings.account.signOutShort")}</button>

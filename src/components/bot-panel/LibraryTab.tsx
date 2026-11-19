@@ -10,7 +10,7 @@ import { AttachedFileChip } from "../AttachmentPreview";
 import { recentChangedFiles, sharedFileReferences } from "../ComputerFilesPane";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { skillSwitchOn, useManagedSkills } from "../bot-settings/SkillsSection";
-import type { SimplePageId } from "./page-registry";
+export type LibraryPage = "memory" | "skills" | "folder";
 import { Card, CardLabel, NavRow } from "./rows";
 import { panelMemoryNotes } from "./memory-notes";
 import { useMemoryDoc } from "./use-memory-doc";
@@ -49,7 +49,7 @@ export function libraryItems(bot: Bot, messages: readonly Message[] = visibleMes
 
 const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1);
 
-export function LibraryTab({ bot, onOpen }: { bot: Bot; onOpen: (page: SimplePageId) => void }) {
+export function LibraryTab({ bot, onOpen }: { bot: Bot; onOpen: (page: LibraryPage) => void }) {
   const { dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
   const openPage = usePageOpener();

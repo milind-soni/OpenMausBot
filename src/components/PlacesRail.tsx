@@ -17,7 +17,6 @@ import { cn } from "@/lib/cn";
 import { cloudColor, cloudColorFill } from "@/lib/cloud-look";
 import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/relative-time";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { useBesideFramed } from "@/lib/chrome-rail";
 import { computerName, editLocal, makeHome, placeInitials, recolorPlace, removeLocal, removePlace, usePlaces, type RailPlace } from "@/lib/places";
 import { AccountsSheet, switchNote } from "./AccountMenu";
@@ -390,7 +389,7 @@ export const markingClicked = (places: RailPlace[], clicked: string | null): Rai
  * window while open. Without it, a rail drawn on a page from a list main gave that page: wide windows only. */
 export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   const state = usePlaces();
-  const calm = !useAdvancedMode();
+
   const { capabilities } = useDesktopCapabilities();
   const besideFramed = useBesideFramed();
   const [more, setMore] = useState(false);
@@ -461,7 +460,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   };
   return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail data-look="rail" style={drag}
     className={cn("relative w-9 shrink-0 flex-col items-center", chrome ? "flex h-full" : "hidden md:flex",
-      framed ? "bg-frame [--rail-surface:var(--color-frame)]" : cn("border-r bg-panel [--rail-surface:var(--color-panel)]", calm ? "border-r-[0.5px] border-edge" : "border-hairline/50"))}>
+      framed ? "bg-frame [--rail-surface:var(--color-frame)]" : cn("border-r bg-panel [--rail-surface:var(--color-panel)]", "border-hairline/50"))}>
     <div aria-hidden="true" className={cn(above, "shrink-0")} />
     {/* As wide as the rail, so nothing round a tile is cut off at the sides: a list that scrolls clips its overflow. */}
     <ul className="flex min-h-0 w-full flex-col items-center gap-2 overflow-y-auto py-1" style={noDrag}>

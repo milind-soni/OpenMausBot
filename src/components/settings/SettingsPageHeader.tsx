@@ -59,8 +59,8 @@ export function SettingsPageHeader({ page, ctx, place, narrow, missing }: {
 }) {
   // A browser has no updates of its own, so its This app intro leaves them out.
   const intro = page.id !== "app" ? INTRO[page.id]
-    : !ctx.desktop ? ctx.advanced ? "settings.app.introBrowserAdvanced" : "settings.app.introBrowser"
-    : ctx.advanced ? INTRO.app : "settings.app.introSimple";
+    : !ctx.desktop ? "settings.app.introBrowserAdvanced"
+    : INTRO.app;
   const title = page.id === "account" ? t("settings.page.account") : pageLabel(page, place, ctx.desktop);
   return (
     // No fill and not sticky: on a glass skin any opaque fill reads as a white block over the sheet.

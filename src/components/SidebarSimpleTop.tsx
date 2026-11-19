@@ -21,7 +21,7 @@ export const PHONE_TOP_BUTTON = "flex size-10 shrink-0 items-center justify-cent
 
 export const SIMPLE_RAIL_BUTTON = "flex size-9 shrink-0 items-center justify-center rounded-xl text-ink-secondary hover:bg-raised/60 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
-export function SidebarSearchButton({ corner = false }: { corner?: boolean }) {
+export function SidebarSearchButton({ corner = false, rail = false }: { corner?: boolean; rail?: boolean }) {
   return (
     <button
       type="button"
@@ -30,7 +30,7 @@ export function SidebarSearchButton({ corner = false }: { corner?: boolean }) {
       aria-label={t("sidebar.searchAria")}
       aria-haspopup="dialog"
       title={t("sidebar.searchAria")}
-      className={corner ? SIMPLE_CORNER_BUTTON : SIMPLE_TOP_BUTTON}
+      className={rail ? SIMPLE_RAIL_BUTTON : corner ? SIMPLE_CORNER_BUTTON : SIMPLE_TOP_BUTTON}
     >
       <Search size={corner ? 17 : 18} strokeWidth={1.5} aria-hidden="true" />
     </button>

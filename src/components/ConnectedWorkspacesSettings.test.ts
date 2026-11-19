@@ -12,7 +12,6 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 const config = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: config.value }, dispatch: () => {} }) }));
 // This computer's environments are an Advanced section.
-vi.mock("@/lib/interface-mode", async original => ({ ...await original<typeof import("@/lib/interface-mode")>(), useAdvancedMode: () => true }));
 import { ConnectedWorkspacesSettings } from "./ConnectedWorkspacesSettings";
 
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void; "aria-label"?: string;

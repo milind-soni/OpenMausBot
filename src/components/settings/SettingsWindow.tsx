@@ -6,7 +6,6 @@ import { t } from "@/lib/i18n";
 import { glassPopupFrameStyle, glassPopupTopInset, GLASS_POPUP_GUTTER } from "@/lib/glass-popup";
 import { scrollWithin } from "@/lib/scroll-within";
 import { useMediaQuery } from "@/lib/use-media-query";
-import { setAdvancedMode } from "@/lib/interface-mode";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { useIsTopLayer } from "../Layer";
 import { LicenseExpiryBanner } from "../LicenseExpiryBanner";
@@ -73,8 +72,6 @@ export function SettingsWindow() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [anchor, target.page]);
-  // A link, a notice or a search result that asks for what only Advanced mode shows turns Advanced on and lands there.
-  useEffect(() => { if (target.advanced) setAdvancedMode(true); }, [target.advanced]);
   useEffect(() => window.ogb?.onOpenAppSettings?.(() => setQuery("")), []);
   useEffect(markOpened, []);
 
@@ -95,22 +92,18 @@ export function SettingsWindow() {
     if (hit.elsewhere) { computer.open?.(); return; }
     setNarrowPage(true);
     setAnchor(hit.entry.anchor ?? null);
-    openSettingsSearchHit(hit, ctx, dispatch);
-  };
-  /** Turning Advanced off on a page Simple doesn't show lands on the place's Overview; anywhere else it stays put. */
-  const setAdvanced = (on: boolean) => {
-    if (!on && !pageById(target.page).when({ ...ctx, advanced: false })) dispatch({ type: "toggleAppSettings", open: true, section: "overview" });
-    setAdvancedMode(on);
+    openSettingsSearchHit(hit, dispatch);
   };
 
   useEffect(() => {
-    const previousFocus = keyboardFocusTarget();
     const dialog = dialogRef.current;
+    if (!dialog || dialog.closest("[inert]")) return;
+    const previousFocus = keyboardFocusTarget();
     const search = dialog?.querySelector<HTMLInputElement>("[data-settings-search]");
     if (search?.checkVisibility()) search.focus({ preventScroll: true });
     else dialog?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (!isTop() || !dialog) return;
+      if (!isTop() || dialog.closest("[inert]")) return;
       if (event.defaultPrevented || [...dialog.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]')].some((child) => child.getClientRects().length)) return;
       const field = dialog.querySelector<HTMLInputElement>("[data-settings-search]");
       const typing = document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement
@@ -153,8 +146,8 @@ export function SettingsWindow() {
         <div className="glass-popup-frame" data-solid-popup data-settings-sheet data-settings-look="simple" style={{ ...glassPopupFrameStyle(), ["--settings-narrow-top" as string]: `${glassPopupTopInset() === GLASS_POPUP_GUTTER ? 12 : glassPopupTopInset()}px` }} onMouseDown={(event) => event.target === event.currentTarget && close()}>
           <div aria-hidden="true" className="glass-scrim pointer-events-none absolute inset-0" />
           <div ref={dialogRef} role="dialog" data-look="settings" aria-modal="true" aria-labelledby="app-settings-title" tabIndex={-1} style={{ outline: "none" }}
-            data-settings-page-open={target.page} data-settings-advanced={ctx.advanced ? "" : undefined}
-            className="glass-surface glass-popup animate-pop-in relative flex flex-col overflow-hidden text-ink">
+            data-settings-page-open={target.page}
+            className="glass-surface glass-popup relative flex flex-col overflow-hidden text-ink">
             <span id="app-settings-title" className="sr-only">{t("settings.title")}</span>
             {narrow && (
               <div className="flex shrink-0 flex-col">
@@ -178,7 +171,7 @@ export function SettingsWindow() {
             <div className="flex min-h-0 flex-1">
               {(!narrow || showList) && (
                 <SettingsNav ctx={ctx} place={place} pages={pages} current={narrow ? null : target.page} query={query} hits={hits} narrow={narrow}
-                  onQuery={setQuery} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} onAdvanced={setAdvanced} />
+                  onQuery={setQuery} onOpen={(next) => go(next)} onHit={openHit} keyHits={keyHits} onKey={openKey} onClose={close} />
               )}
               {(!narrow || !showList) && (
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">

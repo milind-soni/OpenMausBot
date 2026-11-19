@@ -6,7 +6,6 @@ import { phraseAt, phraseHoldMs } from "@/lib/live-activity";
 import { quietText, silenceText } from "@/lib/now-steps";
 import { silentSince } from "@/state/turn-status";
 import { t } from "@/lib/i18n";
-import { formatElapsed } from "@/lib/working-time";
 import type { StepQuiet } from "../../shared/turn-progress";
 
 const FADE_MS = 320;
@@ -84,8 +83,7 @@ function SilencePart({ threadId }: { threadId: string }) {
 /** The turn's live status line: "Working · 1m 12s · Running scrape.py · busy, no output yet". The lead word and the
  * timer stay for the whole turn; `phrases` say what is happening now and rotate through their alternates; `size` is how
  * much of the file is written; `quiet` is how a long step is doing. With nothing to say the line is the lead and the timer
- * alone. The part that is live shimmers. `simple` draws Simple mode's quiet line instead: the avatar and one phrase for
- * what is happening now. With a `card`, the line is a button that unfolds it underneath. */
+ * alone. The part that is live shimmers. */
 export function TurnPresence({
   avatar,
   visible,
@@ -96,8 +94,6 @@ export function TurnPresence({
   answering = false,
   since = null,
   size,
-  simple = false,
-  detail,
   hover,
   quiet,
   threadId,
@@ -114,9 +110,6 @@ export function TurnPresence({
   answering?: boolean;
   since?: number | null;
   size?: string;
-  simple?: boolean;
-  /** Simple mode: Advanced's wording for what is happening now, kept in the row's tooltip with the timer and size. */
-  detail?: string;
   /** The whole command, query or address behind the phrase. */
   hover?: string;
   quiet?: StepQuiet;
@@ -176,18 +169,7 @@ export function TurnPresence({
   const now = phrases && phrases.length > 0 ? phrases : null;
   const { current, previous } = useRotatingPhrase(now ?? NOTHING, phase ?? now?.[0] ?? "", seed, mounted && showWorking && now !== null);
   if (!mounted) return null;
-  const status = showWorking && simple ? (
-    <span id={statusId} className="flex min-w-0 items-baseline gap-x-1.5 text-[14px] leading-[22px] text-ink-tertiary" data-turn-status>
-      <span className="turn-phrase turn-phrase-quiet relative grid min-w-0" title={hover} data-turn-now={now ? "" : undefined}>
-        {now ? (
-          <ShimmerPhrase key={`in:${current}`} text={label ? `${label} · ${current}` : current} className={cn("truncate", previous !== null && "turn-phrase-in")} />
-        ) : (
-          <span>{label ?? t("chat.typing")}</span>
-        )}
-      </span>
-      {now && quiet && <QuietPart quiet={quiet} />}
-    </span>
-  ) : showWorking ? (
+  const status = showWorking ? (
     <span id={statusId} className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1 leading-none" data-turn-status>
       {now ? <span className="text-[13px] text-ink-secondary">{lead}</span> : <ShimmerPhrase text={lead} className="text-[13px]" />}
       {since !== null && (
@@ -222,9 +204,8 @@ export function TurnPresence({
   return (
     <div ref={root} className={cn("turn-presence flex min-w-0 max-w-full flex-col items-start", className)}>
       <div
-        title={simple && showWorking ? [lead, since !== null ? formatElapsed(Date.now() - since) : null, detail ?? (now ? current : null), size].filter(Boolean).join(" · ") : undefined}
         className={cn(
-          simple ? "flex h-9 min-w-0 max-w-full items-center gap-2 ps-2" : "flex min-w-0 max-w-full items-center gap-2",
+          "flex min-w-0 max-w-full items-center gap-2",
           presencePhase === "think" && "turn-mascot-in",
           presencePhase === "out" && "turn-mascot-out",
         )}

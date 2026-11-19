@@ -9,29 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import {
-  CheckCircle2,
-  ChevronRight,
-  CircleAlert,
-  Clock3,
-  Cloud,
-  ExternalLink,
-  FileText,
-  Laptop,
-  Loader2,
-  Paperclip,
-  Pause,
-  Play,
-  Repeat2,
-  Search,
-  Target,
-  Trash2,
-  UserRoundPlus,
-  UsersRound,
-  Video,
-  X,
-  XCircle,
+  CheckCircle2, ChevronRight, CircleAlert, Clock3, Cloud, ExternalLink, FileText, Laptop, Loader2, Paperclip, Pause, Play, Repeat2, Search, Target, Trash2, UserRoundPlus, UsersRound, Video, X, XCircle,
 } from "lucide-react";
-
 import { BotAvatar } from "@/components/Avatar";
 import { useBotEditor } from "./bot-settings/BotEditorContext";
 import { pathForFile } from "@/components/ComposerAttachments";
@@ -39,7 +18,6 @@ import { ResultsDestination, resultsOfPlace, RoutineAudience } from "@/component
 import { CronScheduleFields, CronSchedulePreview } from "@/components/routines/CronScheduleFields";
 import { cronChoiceFor, cronDraftFor, cronEditorValue, isCronChoice, type CronChoice } from "@/components/routines/cron-editor";
 import { partlyDone, routineRunLabel, routineRunsOn, routineRunText, routineRunTime, routineScheduleState } from "@/lib/routine-display";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { intlLocale, t } from "@/lib/i18n";
 import { intakeFilesWithNotice } from "@/lib/attach-notice";
@@ -550,7 +528,7 @@ export function EventEditor({
     && !cron?.error,
   );
   const canSwitchKind = !routinesOnly && !existingRoutine && !existingCall && !lockedBotId;
-  const advanced = useAdvancedMode() && !plain;
+  const advanced = !plain;
   const [moreOpen, setMoreOpen] = useState(() => !(["none", "daily", "weekdays", "weekly"] as RecurrenceChoice[]).includes(recurrence)
     || routineTarget === "room-goal"
     || attachments.length > 0
@@ -1304,7 +1282,7 @@ export function EventDetails({
   onOpenRun?: (run: RoutineRun) => void;
 }) {
   const { state, dispatch } = useStore();
-  const advanced = useAdvancedMode();
+
   const showThreads = useShowThreads();
   const [working, setWorking] = useState(false);
   const runNowPending = useRef(false);
@@ -1468,7 +1446,7 @@ export function EventDetails({
         )}
         {!isCall && !isRoomGoal && <DrawerField label={t("routines.results.label")}><div className="text-[13px] text-ink">{resultsTitle}</div></DrawerField>}
         {attachments.length > 0 && <DrawerField label={t("routines.drawer.attachments")}><AttachmentChips attachments={attachments} />{call && <div className="mt-1.5 text-[11px] leading-relaxed text-ink-secondary">{t(call.botIds.length > 1 ? "routines.drawer.callSharedHelp" : "routines.drawer.callKeptHelp")}</div>}</DrawerField>}
-        {advanced && !isCall && <DrawerField label={t("routines.drawer.runLimit")}><div className="text-[13px] text-ink">{safetyLimit == null ? t("routines.drawer.noTimeLimit", { duration: durationLabel(isRoomGoal ? ROUTINE_GOAL_RUN_LIMIT_MINUTES : ROUTINE_RUN_LIMIT_MINUTES) }) : t("routines.drawer.stopsAfter", { duration: durationLabel(safetyLimit) })}</div></DrawerField>}
+        {!isCall && <DrawerField label={t("routines.drawer.runLimit")}><div className="text-[13px] text-ink">{safetyLimit == null ? t("routines.drawer.noTimeLimit", { duration: durationLabel(isRoomGoal ? ROUTINE_GOAL_RUN_LIMIT_MINUTES : ROUTINE_RUN_LIMIT_MINUTES) }) : t("routines.drawer.stopsAfter", { duration: durationLabel(safetyLimit) })}</div></DrawerField>}
         {!isCall && (
           <DrawerField label={t("routines.logs")} action={routine && <button type="button" onClick={() => { dispatch({ type: "showRoutines", section: "logs", routineId: routine.id, botId: routine.botId }); onClose(); }} className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-accent-text hover:bg-raised"><FileText size={11} />{t("routines.drawer.allRuns")}</button>}>
             {recentRuns.length === 0

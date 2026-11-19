@@ -63,8 +63,7 @@ const holdConfigWrite = () => evaluate(`(() => {
 await evaluate("fetch('/api/config', {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({profile:{name:'Onboarding fixture'}})}).then(r => r.ok)");
 // The standard fixture has MausBot met already (no first-launch card); a new install's has met nobody yet.
 await evaluate("fetch('/api/bots').then(r => r.json()).then(data => Promise.all(data.bots.filter(bot => bot.defaultBot).map(bot => fetch('/api/bots/' + bot.id, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({welcomed:false})}).then(r => r.ok)))).then(oks => oks.length > 0 && oks.every(Boolean))");
-// A new install opens in Simple mode; this page's own writes after the clear would otherwise read as an earlier run.
-await evaluate("localStorage.clear(); sessionStorage.clear(); localStorage.setItem('omb-advanced-mode', '0'); setTimeout(() => { location.search = '?onboarding=1'; }, 0); true");
+await evaluate("localStorage.clear(); sessionStorage.clear(); setTimeout(() => { location.search = '?onboarding=1'; }, 0); true");
 await textVisible("Meet OpenMausBot");
 await evaluate("document.documentElement.dataset.reducedMotion = 'true'; true");
 await screenshot("welcome");

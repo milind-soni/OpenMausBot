@@ -109,7 +109,6 @@ async function until<T>(probe: () => Promise<T> | T, what: string, timeoutMs = 3
     mkdirSync(evidenceDir, { recursive: true });
     await viewport(1280, 860);
     // Advanced mode keeps the Tools section in the sidebar; Simple mode has the same entry in the account menu.
-    await evaluate(`localStorage.setItem("omb-advanced-mode", "1"); window.dispatchEvent(new StorageEvent("storage", { key: "omb-advanced-mode" })); true`);
 
     // Nothing published yet: the page says what it is and how to get the first app.
     await until(() => evaluate(`Boolean(document.querySelector('[data-sidebar-nav="published-apps"]'))`), "the Tools section's Published apps entry");

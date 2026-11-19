@@ -10,7 +10,6 @@ import type { SearchHit } from "@/lib/search-hit";
 import { landOnSearchHit } from "@/lib/focus-message";
 import { imeComposing } from "@/lib/send-key";
 import { localizedRelativeTime } from "@/lib/relative-time";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { BotAvatar } from "./Avatar";
 import { botPreview } from "./sidebar-preview";
 import { openSettingsSearchHit } from "./settings/settings-search-navigation";
@@ -24,7 +23,7 @@ type Entry = { id: string; icon: ReactNode; title: ReactNode; detail?: string; r
 export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
-  const advanced = useAdvancedMode();
+
   const settingsContext = useSettingsContext();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -102,7 +101,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
       heading: t("palette.bots"),
       entries: matchingBots.map((bot) => ({
         id: `bot:${bot.id}`, icon: avatar(bot), title: bot.name,
-        detail: botPreview(bot, visibleMessages(bot), state.instances, advanced) || bot.title,
+        detail: botPreview(bot, visibleMessages(bot), state.instances, true) || bot.title,
         run: () => openBot(dispatch, bot, showThreads),
       })),
     },
@@ -134,7 +133,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
         }] : []),
         ...settings.map((hit): Entry => ({
           id: `setting:${hit.entry.id}`, icon: <Settings size={20} />, title: t(hit.entry.labelKey),
-          run: () => openSettingsSearchHit(hit, settingsContext, dispatch),
+          run: () => openSettingsSearchHit(hit, dispatch),
         })),
       ],
     },
@@ -173,7 +172,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
       data-look="dialog"
       role="dialog"
       aria-label={t("palette.label")}
-      className="command-palette ui-modal fixed m-auto w-[calc(100%-2rem)] max-w-[640px] overflow-hidden rounded-2xl border border-hairline/50 bg-menu text-ink"
+      className="fading-dialog ui-modal fixed m-auto max-h-[85dvh] backdrop:bg-black/50 w-[calc(100%-2rem)] max-w-[640px] overflow-hidden rounded-2xl border border-hairline/50 bg-menu text-ink"
       onCancel={(event) => { event.preventDefault(); setOpen(false); }}
       onClick={(event) => { if (event.target === event.currentTarget) setOpen(false); }}
       onKeyDown={(event) => {

@@ -20,7 +20,7 @@ const bot = (busy: boolean, messages: Message[] = [asked]): Bot => ({
   modelSelection: { instanceId: "opencodeGo", model: "free" }, messages,
   tasks: [{ threadId: "thread-1", title: "Chat", createdAt: 1, busy }],
 } as unknown as Bot);
-const intent = { botId: "bot-1", threadId: "thread-1", turnId: "turn-1", requestMessageId: "ask-1", place: "header" as const };
+const intent = { botId: "bot-1", threadId: "thread-1", turnId: "turn-1", requestMessageId: "ask-1" };
 const toClaude: Action = { type: "setModel", botId: "bot-1", threadId: "thread-1", selection: { instanceId: "claude", model: "opus" } };
 const resend = (text = "Plan my week"): Action => ({ type: "editMessage", botId: "bot-1", threadId: "thread-1", messageId: "ask-1", text });
 const frame = (type: string, turnId: string) => ({ type, turnId, threadId: "thread-1" }) as RuntimeEvent;
@@ -244,7 +244,7 @@ describe("Switch AI", () => {
 
   it("keeps a pick already made when Switch AI is pressed again", async () => {
     await pickClaude();
-    act(() => requestAiSwitch({ ...intent, place: "panel" }));
+    act(() => requestAiSwitch(intent));
     show(createElement(Row), createElement(Keeper, { bot: bot(false) }));
     await settle();
     expect(store.mock.calls).toEqual([[switched()], [resend()]]);

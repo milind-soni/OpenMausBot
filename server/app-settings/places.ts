@@ -7,13 +7,12 @@ const byId = new Map(PLACES.map((place) => [place.id, place]));
 
 function described(place: SettingsPlace): string {
   const notes = [
-    ...(place.advanced ? [place.simplePath ? `in Simple mode it is at ${place.simplePath}` : "shown in Advanced mode only; app_settings set appearance.advanced true turns it on"] : []),
     ...(place.only ? [`only in ${place.only}`] : []),
   ];
   return notes.length ? `${place.path} (${notes.join("; ")})` : place.path;
 }
 
-/** The place's path, with when only Advanced mode or one kind of place shows it. */
+/** The place's path, with any restriction on where it appears. */
 export const placePath = (id: SettingsPlaceId): string => described(byId.get(id)!);
 
 /** The places whose words, path or id match `query`, best first. */

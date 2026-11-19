@@ -1,3 +1,5 @@
+import { useMenuMotion } from "@/components/MenuMotion";
+import { ModalPresence } from "@/components/ModalPresence";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ChevronLeft, Loader2, Menu } from "lucide-react";
 import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/store";
@@ -27,10 +29,8 @@ import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQue
 import { preloadConnectedApps } from "@/lib/connected-apps";
 import {
   ActivityPanel, AnnouncementsPage, BotSettingsDialog, CloudAddDialog, ComputerPanel, FilesView, InspectorPanel, KeyboardShortcutsModal, LocalVmWorkspace,
-  PluginsPanel, preloadScreens, PublishedAppsPage, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, SettingsModal, TeamFilesPage, TeamMapPage, TriggersPage,
+  PluginsPanel, preloadScreens, PublishedAppsPage, RemoteAgentSettingsPanel, RemoteDesktopPanel, SettingsModal, TeamFilesPage, TeamMapPage, TriggersPage,
 } from "@/components/lazy-screens";
-import { useAdvancedMode } from "@/lib/interface-mode";
-import { useRoomPanelShown } from "@/lib/room-panel";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
 import { useNotificationFeed } from "@/lib/notification-preferences";
@@ -101,6 +101,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   useInboxLoader(`${inboxVersion(state.bots) ?? ""}|${needsYou}`);
   useEffect(() => { refreshPublishedApps(); }, []);
   const inboxReady = useInboxReady();
+  const shortcutsMotion = useMenuMotion(state.shortcutsOpen);
+  const settingsMotion = useMenuMotion(state.appSettingsOpen);
+  const appsMotion = useMenuMotion(state.pluginsOpen);
+  const computerMotion = useMenuMotion(state.computerOpen);
   const inboxShown = useInboxPanel().open && inboxReady;
   // A Switch AI pick lands once its stopped turn's chat is idle, wherever the person is by then.
   useAiSwitchKeeper({ bots: state.bots, dispatch });
@@ -175,12 +179,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     view: state.activeView, pluginsOpen: state.pluginsOpen, settingsOpen: state.settingsOpen });
   const closeDrawer = useCallback(() => { hideDrawer(); menuButtonRef.current?.focus(); }, [hideDrawer]);
   const notificationFeed = useNotificationFeed() && !remoteClient;
-  const advanced = useAdvancedMode();
-  const roomPanelOpen = useRoomPanelShown({ group, state, simple: !advanced && !remoteClient });
-  const sidePanelOpen = (Boolean(bot) && (state.settingsOpen || state.computerOpen || state.inspectorOpen || state.activityOpen)) || Boolean(state.forkPanel) || roomPanelOpen || (notificationFeed && state.notificationsOpen) || inboxShown;
+
+  const sidePanelOpen = (Boolean(bot) && (state.settingsOpen || state.computerOpen || state.inspectorOpen || state.activityOpen)) || Boolean(state.forkPanel) || (notificationFeed && state.notificationsOpen) || inboxShown;
   const collapseSidebar = sidePanelOpen && !sidebarAndPanelFit;
-  const calendarFocus = state.activeView === "routines" && state.routinesFocus.view === "calendar";
-  const notificationTray = notificationFeed && !calendarFocus;
 
   const noEngines =
     state.connected &&
@@ -304,8 +305,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     state.computerOpen ||
     state.inspectorOpen ||
     state.activityOpen ||
-    state.appSettingsOpen ||
-    state.pluginsOpen;
+    settingsMotion.shown ||
+    appsMotion.shown ||
+    shortcutsMotion.shown;
 
   useEffect(() => {
     return window.ogb?.onOpenAppSettings?.(section => dispatch(section === "phone" ? phonePairingSettingsAction() : (section === "cloud-add" || section === "cloud-add-howto") && window.ogb?.cloudAccount && !remoteClient
@@ -341,7 +343,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
 
   const framed = windowFramed(capabilities);
   const strips = <>
-    <UpdateBanner sidebarIndicator={framed || (!calendarFocus && (sidebarInline || drawerOpen))} />
+    <UpdateBanner sidebarIndicator={framed || sidebarInline || drawerOpen} />
     <CloudAsleepStrip />
     <LiveConnectionStrip connected={state.connected} hydrated={state.hydrated === true} />
     <CloudSendStrip cloudHome={state.config?.cloudHome === true} />
@@ -351,12 +353,12 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   </>;
   return (
     <div data-look="app" className={cn("flex h-full flex-col", framed && "bg-frame")} onClickCapture={drawerOpen ? noteDrawerAction : undefined} onKeyDownCapture={drawerOpen ? noteDrawerAction : undefined}>
-      <WindowFrameBar notifications={notificationTray} />
+      <WindowFrameBar notifications={notificationFeed} />
       <BotLimitPopup />
       <ConversationShareDialogs />
       {!framed && strips}
       <div className="relative flex min-h-0 flex-1">
-      {!calendarFocus && <button
+      <button
         type="button"
         ref={menuButtonRef}
         aria-label={t("app.openBotList")}
@@ -366,15 +368,15 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       >
         <Menu size={18} className="max-md:hidden" />
         <ChevronLeft size={20} aria-hidden="true" className="hidden max-md:block" />
-      </button>}
-      {drawerOpen && !calendarFocus && (
+      </button>
+
         <div
           aria-hidden
-          onMouseDown={(e) => e.target === e.currentTarget && hideDrawer()}
-          className="absolute inset-0 z-30 bg-black/50 md:hidden"
+          data-sidebar-drawer-scrim=""
+          onMouseDown={hideDrawer}
+          className={cn("absolute inset-0 z-30 bg-black/50 transition-opacity duration-200 motion-reduce:transition-none md:hidden", !drawerOpen && "pointer-events-none opacity-0")}
         />
-      )}
-      {!calendarFocus && <PlacesRail />}
+      <PlacesRail />
       <NewLocalFromMenu />
       {/* A framed window shows the app, its sidebar and the chat or page, in a rounded card under the top bar and beside
           the window's rail: its top corners and its bottom-left corner are round, and it runs to the window's right and
@@ -383,11 +385,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         className={framed ? "relative flex min-w-0 flex-1 flex-col overflow-hidden rounded-t-[12px] rounded-bl-[12px] bg-app" : "contents"}>
       {framed && strips}
       <div className={framed ? "relative flex min-h-0 flex-1" : "contents"}>
-      {!calendarFocus && <Sidebar
+      <Sidebar
         collapseToIcons={collapseSidebar}
         open={drawerOpen}
         onClose={closeDrawer}
-      />}
+      />
       {state.activeView === "team-map" ? (
         <TeamMapPage />
       ) : state.activeView === "files" ? (
@@ -444,37 +446,35 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
           : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} overlay={(state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit} />
       )}
-      {state.computerOpen && bot && (
+      {bot && (
         remoteClient ? (
-          <RemoteDesktopPanel key={`computer:${bot.id}`} bot={bot} />
+          computerMotion.shown && <RemoteDesktopPanel key={`computer:${bot.id}`} bot={bot} closing={computerMotion.closing} />
         ) : (
-          <ComputerPanel
+          computerMotion.shown && <ComputerPanel
             key={`computer:${bot.id}`}
             bot={bot}
+            closing={computerMotion.closing}
             onOpenVmWorkspace={openLocalVmWorkspace}
           />
         )
       )}
       <AppPreviewPanel />
       {state.forkPanel && sidebarInline && <ForkPanel />}
-      {!state.forkPanel && roomPanelOpen && group && (
-        <RoomPanel key={`room:${group.id}`} group={group} overlay={notificationFeed && state.notificationsOpen && !twoSidePanelsFit} />
-      )}
       {!remoteClient && !state.forkPanel && state.inspectorOpen && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
       {!remoteClient && state.activityOpen && bot && <ActivityPanel key={`activity:${bot.id}`} bot={bot} />}
-      {inboxShown && <InboxPanel />}
-      {notificationTray && state.notificationsOpen && <NotificationsPanel />}
-      {notificationTray && !framed && <NotificationRail />}
+      <InboxPanel open={inboxShown} />
+      {notificationFeed && state.notificationsOpen && <NotificationsPanel />}
+      {notificationFeed && !framed && <NotificationRail />}
       </div>
       </div>
-      {state.appSettingsOpen && <SettingsModal />}
+      {settingsMotion.shown && <SettingsModal open={state.appSettingsOpen} />}
       {cloudAddOpened.current && <CloudAddDialog />}
       <CloudHowTo />
       <CloudSetup viewer={viewer} welcomeShown={welcomeOnScreen} />
       <WelcomeKeeper viewer={viewer} />
-      {state.pluginsOpen && (team && viewer?.canSave === false ? <MemberApps /> : <PluginsPanel />)}
+      <ModalPresence open={state.pluginsOpen}>{team && viewer?.canSave === false ? <MemberApps /> : <PluginsPanel />}</ModalPresence>
       <AppGrantNotice />
-      {state.shortcutsOpen && (
+      {shortcutsMotion.shown && (
         <KeyboardShortcutsModal
           open={state.shortcutsOpen}
           onClose={() => dispatch({ type: "toggleShortcuts", open: false })}
@@ -482,12 +482,12 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       )}
       <CommandPalette onOpenChange={setPaletteOpen} />
       {/* Blink resolves -webkit-app-region in DOM order, so this no-drag twin after the headers cuts the drawer button back out. */}
-      {!calendarFocus && <span
+      <span
         aria-hidden
         data-drawer-button-no-drag
         style={captionChrome.noDragStyle}
         className="pointer-events-none absolute left-3 top-3 size-[30px] md:hidden"
-      />}
+      />
       </div>
       {/* Last child on purpose: Blink resolves -webkit-app-region in DOM order, so no-drag buttons must follow every drag region. */}
       <WindowCaptionButtons

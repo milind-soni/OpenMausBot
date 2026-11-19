@@ -1,3 +1,4 @@
+import { useMenuMotion } from "./MenuMotion";
 import { track } from "@/lib/analytics";
 import { t } from "@/lib/i18n";
 import { addTemplate } from "@/lib/template-add";
@@ -38,14 +39,17 @@ function TeamGlyph() {
 /** Templates: one gallery of ready-made bots, the organization's library and the community teams. Import and Share
  * live elsewhere ("+" → Import…, a department's Share). */
 export function TeamLibraryPanel({
+  open = true,
   onClose,
   onImported,
   returnFocusRef,
 }: {
+  open?: boolean;
   onClose: () => void;
   onImported: (result: TeamImportResult) => void;
   returnFocusRef: React.RefObject<HTMLButtonElement | null>;
 }) {
+  const motion = useMenuMotion(open);
   const { dispatch } = useStore();
   const dialogRef = useRef<HTMLDivElement>(null);
   const [catalog, setCatalog] = useState<TeamCatalog | null>(null);
@@ -76,8 +80,8 @@ export function TeamLibraryPanel({
   }, []);
 
   useEffect(() => {
-    void loadCatalog();
-  }, [loadCatalog]);
+    if (open) void loadCatalog();
+  }, [open, loadCatalog]);
 
   const loadOrgLibrary = useCallback(async () => {
     try {
@@ -89,15 +93,17 @@ export function TeamLibraryPanel({
   }, []);
 
   useEffect(() => {
-    void loadOrgLibrary();
-  }, [loadOrgLibrary]);
+    if (open) void loadOrgLibrary();
+  }, [open, loadOrgLibrary]);
 
   useEffect(() => {
+    if (!open) return;
     dialogRef.current?.focus();
     return () => returnFocusRef.current?.focus();
-  }, [returnFocusRef]);
+  }, [open, returnFocusRef]);
 
   useEffect(() => {
+    if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (nestedDialog) return;
       if (event.key === "Escape" && !importing) {
@@ -127,7 +133,7 @@ export function TeamLibraryPanel({
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [importing, onClose, pending, nestedDialog]);
+  }, [open, importing, onClose, pending, nestedDialog]);
 
   const loadLibraryTeam = async (entry: TeamCatalogEntry) => {
     setBusySlug(entry.slug);
@@ -220,9 +226,12 @@ export function TeamLibraryPanel({
   const visibleTeams = (catalog?.teams ?? []).filter((entry) => !normalizedSearch || catalogMatches(entry, normalizedSearch));
   const primary = "flex shrink-0 items-center justify-center gap-2 rounded-full bg-accent px-5 py-2.5 text-[14px] font-medium text-accent-ink hover:bg-accent/90 disabled:opacity-60";
 
+  if (!motion.shown) return null;
   return createPortal(
     // Dim only: a full-window backdrop blur is redrawn every frame without a GPU and keeps the page laggy while it is open.
     <div
+      {...motion.exitProps}
+      data-overlay-fade={motion.closing ? "out" : "in"}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4 sm:p-6"
       onMouseDown={(event) => event.target === event.currentTarget && !importing && onClose()}
     >
@@ -232,7 +241,7 @@ export function TeamLibraryPanel({
         aria-modal="true"
         aria-labelledby="team-library-title"
         tabIndex={-1}
-        className="animate-pop-in flex h-[min(780px,calc(100dvh-2rem))] w-full max-w-[1040px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
+        className="flex h-[min(780px,calc(100dvh-2rem))] w-full max-w-[1040px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
       >
         <header className="flex items-start justify-between gap-4 px-6 pb-3 pt-6 sm:px-8 sm:pt-7">
           <div className="min-w-0">

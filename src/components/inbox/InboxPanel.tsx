@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useMenuMotion } from "../MenuMotion";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, Inbox, Maximize2, Minimize2, Search, X } from "lucide-react";
+import { Check, Inbox, Search } from "lucide-react";
 import type { InboxRow } from "../../../shared/inbox";
 import { cn } from "@/lib/cn";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { t } from "@/lib/i18n";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
-import { closeInbox, markAllInboxRead, readInboxLine, readInboxRow, useInboxMarkingAll, useInboxPanel, useInboxView, widenInbox } from "@/state/inbox";
+import { closeInbox, markAllInboxRead, readInboxLine, readInboxRow, useInboxMarkingAll, useInboxPanel, useInboxView } from "@/state/inbox";
 import { useStore } from "@/state/store";
 import { InboxActive, inboxAttentionEntries, inboxOpenThread, readNewsThreads, unreadConversations } from "./InboxActive";
 import { attentionJumpAction, attentionUnpinAction } from "../SidebarBotActivity";
@@ -17,30 +17,30 @@ import { PinnedThreads, pinnedThreadRows } from "./PinnedThreads";
 import { matchesSearch, nextAfter } from "./inbox-answer";
 import { listedRows, rowsIn, waitingCount } from "./inbox-view";
 import { useInboxActions } from "./use-inbox-actions";
-import { roundButtonCls } from "../bot-panel/rows";
+import { RightSidePanel, RightSidePanelHeader, useRightSidePanelEscape } from "../RightSidePanel";
 
 
-export function InboxPanel() {
+export function InboxPanel({ open: shown = true }: { open?: boolean }) {
+  const motion = useMenuMotion(shown);
   const view = useInboxView();
   const { state, dispatch } = useStore();
   const panel = useInboxPanel();
   const markingAll = useInboxMarkingAll();
   const phone = useMediaQuery(PHONE_LAYOUT);
-  const simple = !useAdvancedMode();
+
   const { run, openInChat } = useInboxActions(view);
   const [now, setNow] = useState(() => Date.now());
   const [query, setQuery] = useState("");
   const [showDone, setShowDone] = useState(false);
   useEffect(() => {
+    if (!shown) return;
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);
-  }, []);
-  const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (event.key !== "Escape" || event.defaultPrevented) return;
-    event.preventDefault();
+  }, [shown]);
+  useRightSidePanelEscape("inbox", shown && panel.open, () => {
     if (panel.reading) readInboxLine(null);
     else closeInbox();
-  };
+  });
   const reading = panel.reading ? view?.rows.find((row) => row.id === panel.reading) : undefined;
   /** An ask waits for an answer here and a message waits for a reply, so those open in the panel; finished work opens
    * the conversation it came from, at the message it is about. */
@@ -79,7 +79,7 @@ export function InboxPanel() {
   const openThread = inboxOpenThread(state);
   const body = (
     <>
-      <div className="flex h-[50px] shrink-0 items-start gap-2.5 px-[13px] pt-[13px]">
+      <RightSidePanelHeader label={t("inbox.action.closePanel")} onClose={closeInbox}>
         <div data-inbox-tab-chip className="flex h-[34px] min-w-0 flex-1 items-center gap-2 ps-1 text-[14px]">
           <Inbox size={16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
           <span className="min-w-0 truncate font-medium text-ink">{t("inbox.panel.title")}</span>
@@ -91,16 +91,7 @@ export function InboxPanel() {
             {t("inbox.markAllRead")}
           </button>
         )}
-        {!phone && (
-          <button type="button" onClick={() => widenInbox(!panel.wide)} aria-pressed={Boolean(panel.wide)} aria-label={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")}
-            title={t(panel.wide ? "inbox.action.narrow" : "inbox.action.widen")} className={roundButtonCls}>
-            {panel.wide ? <Minimize2 size={15} aria-hidden="true" /> : <Maximize2 size={15} aria-hidden="true" />}
-          </button>
-        )}
-        <button type="button" onClick={closeInbox} aria-label={t("inbox.action.closePanel")} title={t("inbox.action.closePanel")} className={roundButtonCls}>
-          <X size={16} aria-hidden="true" />
-        </button>
-      </div>
+      </RightSidePanelHeader>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {reading && view ? (
           <InboxReading view={view} row={reading} now={now} position={at >= 0 ? { index: at, count: rows.length } : null} onStep={step} />
@@ -147,11 +138,12 @@ export function InboxPanel() {
       </div>
     </>
   );
+  if (!motion.shown) return null;
   if (phone) {
     return createPortal(
-      <div className="fixed inset-0 z-50 flex flex-col justify-end bg-black/40" onMouseDown={(event) => { if (event.target === event.currentTarget) closeInbox(); }}>
-        <section role="dialog" aria-modal="true" aria-label={t("inbox.panel.title")} data-inbox-panel="sheet" onKeyDown={onKeyDown}
-          className="animate-pop-in motion-reduce:animate-none flex max-h-[85dvh] min-h-[50dvh] flex-col overflow-hidden rounded-t-2xl border-t border-hairline/50 bg-panel pb-[env(safe-area-inset-bottom)]">
+      <div {...motion.exitProps} data-overlay-fade={motion.closing ? "out" : "in"} className="fixed inset-0 z-50 flex flex-col justify-end bg-black/40" onMouseDown={(event) => { if (event.target === event.currentTarget) closeInbox(); }}>
+        <section role="dialog" aria-modal="true" aria-label={t("inbox.panel.title")} data-inbox-panel="sheet" data-right-side-panel="inbox"
+          className="flex max-h-[85dvh] min-h-[50dvh] flex-col overflow-hidden rounded-t-2xl border-t border-hairline/50 bg-panel pb-[env(safe-area-inset-bottom)]">
           {body}
         </section>
       </div>,
@@ -159,11 +151,10 @@ export function InboxPanel() {
     );
   }
   return (
-    <aside aria-label={t("inbox.panel.title")} data-inbox-panel="side" data-look="inbox" data-wide={panel.wide ? "" : undefined} onKeyDown={onKeyDown}
-      className={cn("animate-panel-in motion-reduce:animate-none flex h-full max-w-full shrink-0 flex-col max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30",
-        simple ? "border-l-[0.5px] border-ink/[0.06] bg-app" : "border-l border-hairline/40 bg-panel",
-        panel.wide ? "w-[min(640px,60vw)]" : simple ? "w-[320px]" : "w-[380px]")}>
+    <RightSidePanel {...motion.exitProps} data-side-panel-motion={motion.closing ? "out" : "in"} aria-label={t("inbox.panel.title")} data-inbox-panel="side" data-right-side-panel="inbox" data-look="inbox"
+      className={cn("max-md:absolute max-md:inset-y-0 max-md:right-0 max-md:z-30",
+        "[--side-panel-width:380px]")}>
       {body}
-    </aside>
+    </RightSidePanel>
   );
 }

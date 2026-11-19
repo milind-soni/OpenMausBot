@@ -20,7 +20,7 @@ function panel(html: string): HTMLElement {
 const tabRow = (selected: string) =>
   `<div role="tablist">${["computer", "data"].map((view) => `<button role="tab" aria-selected="${String(view === selected)}" id="tab-${view}">${view}</button>`).join("")}</div>`;
 
-const close = () => '<button data-computer-panel-close id="close">Close</button>';
+const close = () => '<button data-side-panel-close id="close">Close</button>';
 
 const focusedId = () => document.activeElement?.id || document.activeElement?.tagName;
 

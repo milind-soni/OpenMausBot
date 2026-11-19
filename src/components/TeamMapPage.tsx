@@ -1,3 +1,4 @@
+import { useHeldMenuMotion } from "./MenuMotion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ArrowRight, BookOpen, Box, Loader2, Monitor, Plus, Save, Users, UsersRound, X } from "lucide-react";
@@ -276,6 +277,7 @@ export function TeamMapPage() {
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [contextEditor, setContextEditor] = useState<{ section: string; label: string } | null>(null);
   const [memoryEditor, setMemoryEditor] = useState<{ section: string; label: string } | null>(null);
+  const memoryMotion = useHeldMenuMotion(memoryEditor);
   const [teamEditor, setTeamEditor] = useState<{ section?: string; rename?: boolean } | null>(null);
   const [deletingTeam, setDeletingTeam] = useState<string | null>(null);
   const [computersOpen, setComputersOpen] = useState(false);
@@ -419,7 +421,7 @@ export function TeamMapPage() {
         />
       )}
       {teamEditor && <TeamDialog {...teamEditor} onClose={() => setTeamEditor(null)} />}
-      {memoryEditor && <TeamMemoryDialog key={memoryEditor.section} {...memoryEditor} onClose={() => setMemoryEditor(null)} />}
+      {memoryMotion.shown && memoryMotion.value && <TeamMemoryDialog open={memoryEditor !== null} key={memoryMotion.value.section} {...memoryMotion.value} onClose={() => setMemoryEditor(null)} />}
       <ConfirmDialog open={pendingMove !== null} tone="neutral" title={t("canvas.moveConfirmTitle", { name: pendingMove?.bot.name ?? t("canvas.bot"), team: pendingMove?.destination || t("settings.section.general") })}
         body={t("canvas.moveConfirmBody")}
         confirmLabel={t("canvas.moveConfirm") } onCancel={cancelMove} onConfirm={() => {

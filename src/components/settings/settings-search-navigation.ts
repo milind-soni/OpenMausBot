@@ -1,8 +1,7 @@
-import { setAdvancedMode } from "@/lib/interface-mode";
 import type { Action } from "@/state/store";
-import { needsAdvanced, type SearchHit, type SettingsContext } from "./settings-index";
+import { type SearchHit } from "./settings-index";
 
-export function openSettingsSearchHit(hit: SearchHit, ctx: SettingsContext, dispatch: (action: Action) => void) {
+export function openSettingsSearchHit(hit: SearchHit, dispatch: (action: Action) => void) {
   const { entry } = hit;
   if (entry.jump) {
     dispatch({ type: "toggleAppSettings", open: false });
@@ -14,6 +13,5 @@ export function openSettingsSearchHit(hit: SearchHit, ctx: SettingsContext, disp
     }
     return;
   }
-  if (hit.advanced || needsAdvanced(entry, ctx)) setAdvancedMode(true);
   dispatch({ type: "toggleAppSettings", open: true, section: entry.page, anchor: entry.anchor });
 }

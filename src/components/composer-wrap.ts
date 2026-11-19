@@ -1,22 +1,7 @@
 import { useLayoutEffect, useState, type RefObject } from "react";
 
-/** Simple: anything that grows the pill past its one 44px row (a second line, a reply strip) rounds its corners in. */
-export function useTallPill(shellRef: RefObject<HTMLDivElement | null>, on: boolean): boolean {
-  const [tall, setTall] = useState(false);
-  useLayoutEffect(() => {
-    const shell = shellRef.current;
-    if (!on || !shell || typeof ResizeObserver === "undefined") return;
-    const measure = () => setTall(shell.getBoundingClientRect().height > 44.5);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(shell);
-    return () => observer.disconnect();
-  }, [shellRef, on]);
-  return tall;
-}
-
 /**
- * Advanced: a message past one line takes the composer's full width above the buttons instead of wrapping in the gap
+ * A message past one line takes the composer's full width above the buttons instead of wrapping in the gap
  * between them. `wrapAt` is the length at which the one-row field wrapped; the field goes back beside the buttons
  * only below it, so wider text on its own line cannot flip back and forth.
  */

@@ -16,6 +16,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: f.state, dispatch: f.dispatch }) }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+vi.mock("./ModalPresence", () => ({ ModalPresence: ({ open, children }: { open: boolean; children: ReactNode }) => open ? children : null }));
 vi.mock("./cloud-buy/NightCard", () => ({ NightCard: ({ children }: { children: ReactNode }) => createElement("div", { "data-night-card": "" }, children) }));
 vi.mock("./cloud-buy/AddCloudFlow", () => ({ AddCloudFlow: ({ source }: { source?: string }) => createElement("div", { "data-add-cloud-flow": source ?? "" }) }));
 import { CloudAddDialog, CloudAddPanel, CloudAddSheet, type CloudAddActions, type CloudAddUi } from "./CloudAddDialog";

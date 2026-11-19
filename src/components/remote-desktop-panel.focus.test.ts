@@ -61,7 +61,7 @@ const runFrames = () => {
   frames = [];
   for (const frame of pending) frame.run(0);
 };
-const panelClose = () => document.querySelector<HTMLElement>("[data-computer-panel-close]")!;
+const panelClose = () => document.querySelector<HTMLElement>("[data-side-panel-close]")!;
 
 beforeAll(() => {
   vi.stubGlobal("ogb", undefined);

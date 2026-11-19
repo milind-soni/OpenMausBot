@@ -2,7 +2,6 @@
 // never cuts off the first.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, PhoneOff, X } from "lucide-react";
-
 import { currentCall, deferCallCleanup, endCall, useOnCall } from "@/lib/call";
 import { routeSpokenGroupMessage } from "@/lib/group-call";
 import { track } from "@/lib/analytics";
@@ -15,7 +14,6 @@ import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
 import { CallTargetButton, type CallButtonPlacement } from "./CallView";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { CALL_ENDPOINT_MS, speechBridge } from "@/lib/speech";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
@@ -48,8 +46,8 @@ export function GroupCallButton({ group, members, placement, fill, ink }: { grou
 
 /** The room header's call button: in Simple mode the room calls from its composer instead. */
 export function RoomHeaderCallButton({ group, members }: { group: Group; members: Bot[] }) {
-  const advanced = useAdvancedMode();
-  return advanced ? <GroupCallButton group={group} members={members} /> : null;
+
+  return <GroupCallButton group={group} members={members} />;
 }
 
 export function GroupCallOverlay({ group, members }: { group: Group; members: Bot[] }) {

@@ -70,7 +70,7 @@ describe("a settings card in chat", () => {
     expect(chat.textContent).not.toContain(TEXT);
     const page = document.createElement("div");
     const pageRoot = createRoot(page);
-    flushSync(() => pageRoot.render(createElement("div", { "data-settings-look": "simple" }, createElement(PhoneDevicesSection, { simple: true }))));
+    flushSync(() => pageRoot.render(createElement("div", { "data-settings-look": "simple" }, createElement(PhoneDevicesSection))));
     expect(rowOf(page)!.textContent).toBe(inChat.textContent);
     expect(inChat.textContent).toContain("Your other computers");
     expect(inChat.textContent).toContain("Needs Tailscale on both.");

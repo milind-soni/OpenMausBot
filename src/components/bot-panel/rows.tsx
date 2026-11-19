@@ -1,8 +1,6 @@
 import type { ReactNode, Ref } from "react";
 import { Check, ChevronLeft, ChevronRight, Trash2, type LucideIcon } from "lucide-react";
-
 import { cn } from "@/lib/cn";
-import { useAdvancedMode } from "@/lib/interface-mode";
 import { MAUS_COLORS, type MausColor } from "@/lib/mascot";
 import { ELEVATED_CONTROL, ELEVATED_HOVER } from "../elevated";
 import { Switch } from "../SettingsPrimitives";
@@ -41,7 +39,7 @@ export function LabelAction({ children, onClick, ...rest }: { children: ReactNod
 }
 
 export function Card({ label, action, anchor, children }: { label?: ReactNode; action?: ReactNode; anchor?: string; children: ReactNode }) {
-  const advanced = useAdvancedMode();
+
   return (
     <section data-panel-card={anchor}>
       {label ? <CardLabel action={action}>{label}</CardLabel> : <div className="h-3.5" />}
@@ -49,7 +47,7 @@ export function Card({ label, action, anchor, children }: { label?: ReactNode; a
         data-panel-card-surface=""
         className={cn(
           "divide-y divide-ink/[0.05] overflow-hidden max-md:rounded-[16px] max-md:border-hairline max-md:bg-card",
-          advanced ? "rounded-[12px] border border-ink/[0.04] bg-ink/[0.03]" : "rounded-[12px] bg-composer ring-1 ring-inset ring-ink/[0.06] max-md:border max-md:ring-0",
+          "rounded-[12px] border border-ink/[0.04] bg-ink/[0.03]",
         )}
       >
         {children}

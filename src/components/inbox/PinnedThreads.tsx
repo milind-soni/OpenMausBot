@@ -1,3 +1,4 @@
+import { sidebarRowTone } from "../SidebarRowMarkers";
 // The conversations each bot and room has pinned, gathered at the top of the Inbox so the person reaches them
 // without leaving it: the last-activity label and open-row mark the finished list uses, plus an unpin button that
 // dispatches the official action. Nothing here is stored; `task.pinned` is upstream's own field.
@@ -6,7 +7,7 @@ import type { Bot, Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import {
-  attentionOwnerName, attentionRowStatus, crossBotPinnedThreads, isOpenThread, openThreadRow,
+  attentionOwnerName, attentionRowStatus, crossBotPinnedThreads, isOpenThread,
   type AttentionThread, type OpenThread,
 } from "../SidebarBotActivity";
 import { formatUpdatedAt, threadRecency, threadUpdatedLabel } from "../SidebarThreadRow";
@@ -50,13 +51,13 @@ export function PinnedThreads({ bots, groups, queued, now, current, onOpen, onUn
             <button type="button" aria-label={label} title={label} data-pinned-row
               aria-current={open ? "page" : undefined} data-open-thread={open || undefined}
               onClick={() => onOpen(row)}
-              className={cn("flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] text-ink hover:bg-menu-hover", open && openThreadRow)}>
+              className={cn("flex min-w-0 flex-1 items-center gap-2.5 rounded-[8px] px-2 py-2 text-left text-[14px] text-ink transition-colors duration-150", sidebarRowTone(open))}>
               {active
                 ? <Icon size={16} aria-hidden="true" className={cn("shrink-0", colorClass)} />
                 : <Pin size={16} aria-hidden="true" className="shrink-0 text-ink-tertiary" />}
               <span className="min-w-0 flex-1">
                 <span className="block truncate" data-pinned-title>{row.task.title}</span>
-                <span className="block truncate text-[11px] text-ink-secondary">
+                <span className="block truncate text-[13px] text-ink-secondary">
                   {meta}{when && <> · <time data-pinned-when dateTime={new Date(at).toISOString()} title={formatUpdatedAt(at)}>{when}</time></>}
                 </span>
               </span>

@@ -585,7 +585,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
         <summary className="cursor-pointer">{t("hostedMcp.access")}</summary>
         <p className="mt-2 leading-relaxed">{t(app.notice)}</p>
         <p className="mt-2 leading-relaxed">{t("hostedMcp.accessHint")}</p>
-        <div className="mt-2 flex flex-wrap gap-2">{(store.bots ?? []).filter((bot) => !bot.hidden).map((bot) => <button key={bot.id} type="button" onClick={() => { dispatch({ type: "togglePlugins", open: false }); openBotSettings(dispatch, "access", { botId: bot.id, page: "mcp" }); }} className="rounded-lg bg-control px-2.5 py-1.5 text-ink hover:bg-raised-hover">{t("hostedMcp.botSettings", { name: bot.name })}</button>)}</div>
+        <div className="mt-2 flex flex-wrap gap-2">{(store.bots ?? []).filter((bot) => !bot.hidden).map((bot) => <button key={bot.id} type="button" onClick={() => { dispatch({ type: "togglePlugins", open: false }); openBotSettings(dispatch, "access", { botId: bot.id }); }} className="rounded-lg bg-control px-2.5 py-1.5 text-ink hover:bg-raised-hover">{t("hostedMcp.botSettings", { name: bot.name })}</button>)}</div>
       </details>
       </div>
     </div>;
@@ -761,7 +761,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
                     <details className="mt-2">
                       <summary className="cursor-pointer font-medium text-ink">{t("hostedMcp.access")}</summary>
                       <p className="mt-2">{t("hostedMcp.accessHint")}</p>
-                      <div className="mt-2 flex flex-wrap gap-2">{(store.bots ?? []).filter((bot) => !bot.hidden).map((bot) => <button key={bot.id} type="button" onClick={() => { dispatch({ type: "togglePlugins", open: false }); openBotSettings(dispatch, "access", { botId: bot.id, page: "mcp" }); }} className="rounded-lg bg-control px-2.5 py-1.5 text-ink hover:bg-raised-hover">{t("hostedMcp.botSettings", { name: bot.name })}</button>)}</div>
+                      <div className="mt-2 flex flex-wrap gap-2">{(store.bots ?? []).filter((bot) => !bot.hidden).map((bot) => <button key={bot.id} type="button" onClick={() => { dispatch({ type: "togglePlugins", open: false }); openBotSettings(dispatch, "access", { botId: bot.id }); }} className="rounded-lg bg-control px-2.5 py-1.5 text-ink hover:bg-raised-hover">{t("hostedMcp.botSettings", { name: bot.name })}</button>)}</div>
                     </details>
                   </div>}
                   <McpAppsSwitch<McpServerListing> server={server} disabled={busy !== null || signingIn !== null} onSaved={(next) => { loadGeneration.current += 1; listed(next); }} />{renderSignIn(server)}

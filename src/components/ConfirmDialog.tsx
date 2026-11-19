@@ -1,3 +1,4 @@
+import { useHeldMenuMotion } from "./MenuMotion";
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle } from "lucide-react";
@@ -35,6 +36,7 @@ export interface ConfirmDialogProps {
  */
 export function ConfirmDialog(props: ConfirmDialogProps) {
   const { open, onCancel, returnFocusRef } = props;
+  const motion = useHeldMenuMotion(open ? props : null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const cancelAction = useRef(onCancel);
@@ -45,6 +47,7 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
     const keyboardOpener = keyboardFocusTarget();
     cancelRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === "Escape") {
         event.preventDefault();
         cancelAction.current();
@@ -79,14 +82,16 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
     else cancelRef.current?.focus();
   }, [open, props.pending]);
 
-  if (!open) return null;
+  if (!motion.shown || !motion.value) return null;
 
   return createPortal(
     <div
       className={`fixed inset-0 ${props.layer ?? "z-50"} flex items-center justify-center bg-black/55 p-6`}
-      onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
+      {...motion.exitProps}
+      data-overlay-fade={motion.closing ? "out" : "in"}
+      onMouseDown={(event) => open && event.target === event.currentTarget && onCancel()}
     >
-      <ConfirmDialogCard ref={dialogRef} cancelRef={cancelRef} {...props} />
+      <ConfirmDialogCard ref={dialogRef} cancelRef={cancelRef} {...motion.value} />
     </div>,
     document.body,
   );
