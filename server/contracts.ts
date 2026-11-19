@@ -290,6 +290,9 @@ export interface ProviderAdapter {
     /** A resumeCursor turn runs in that exact native session, or fails, or starts a new one from recoveryText (session.started says
      * `rebuilt`), never a blank one. */
     strictResume?: boolean;
+    /** The engine compacts its own session as it nears its window and reports it (`context.compacted`), so OpenMausBot
+     * leaves that session alone and folds only one its engine left uncompacted. */
+    nativeCompaction?: boolean;
     /** sendTurn can register the harness's hook helper with the engine (integrations.hooks). */
     hooks?: boolean;
     /** "confined": sendTurn honours `guestConfined`; absent, a guest turn is refused. */

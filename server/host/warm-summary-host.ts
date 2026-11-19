@@ -21,9 +21,16 @@ import type { Message, Store } from "../store.ts";
 import type { WaitRecord } from "../waits.ts";
 import { createWarmSummary, WARM_SUMMARY_MIN_TOKENS, WARM_SUMMARY_RETRY_MS, type WarmSummaryOutcome, type WarmSummaryPlan, type WarmSummaryTarget } from "../warm-summary.ts";
 
-/** Claude Code summarizes at the start of a turn once its context passes about 0.81 of its window (162k of 200k measured
- * on a Team trial): from 0.8 the next turn would summarize anyway, so the warm summary starts almost at once. */
-export const NATIVE_SOON_FRACTION = 0.8;
+/** Claude Code 2.1.321 summarizes about this far below its compaction window: near 167k with `--autocompact 200000`
+ * (162k was measured on a Team trial), and before 74k with 100000. */
+export const NATIVE_COMPACT_HEADROOM = 33_000;
+/** Within this of that point the next turn would summarize anyway: 160k at the default. */
+export const NATIVE_SOON_MARGIN = 7_000;
+/** Within this of that point an ordinary turn of tool work can end past it (one whole-file read adds about 22k): 140k at
+ * the default. */
+export const NATIVE_AHEAD_MARGIN = 27_000;
+/** The line Claude Code's own PreCompact hook puts in the chat; a turn waiting for a summary shows the same one. */
+export const COMPACTION_STARTED_LINE = "context compaction started (auto)";
 /** Kept word for word after a summary: the person's last two messages and everything since. */
 export const KEPT_EXCHANGES = 2;
 /** OpenMausBot's fold runs while idle once a conversation is this close to where the next turn would fold it. */
@@ -98,7 +105,7 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
   const { store } = deps;
   const now = deps.now ?? Date.now;
 
-  const native = async (target: WarmSummaryTarget, control: { signal: AbortSignal; awaited(): boolean }): Promise<WarmSummaryOutcome> => {
+  const native = async (target: WarmSummaryTarget, control: { signal: AbortSignal; awaited(): boolean }, askedByPerson = false): Promise<WarmSummaryOutcome> => {
     const { threadId, botId, instanceId } = target;
     const compact = deps.instance(instanceId)?.adapter.cacheKeepWarm?.compact;
     const session = store.taskByThread(botId, threadId)?.resumeCursors[instanceId];
@@ -113,8 +120,9 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
     const { state, exchanges } = keptAfterSummary(sinceFreshStart(store.activePath(threadId)), result.session, task.handedMessages?.[instanceId]);
     store.setResumeCursor(botId, instanceId, result.session, threadId);
     store.setHandedMessages(botId, threadId, instanceId, state);
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(deps.language?.(threadId), "server.warmSummary.summarized"), ok: true } });
-    deps.log?.(`warm summary ${threadId}: moved to its summarized session, keeping ${exchanges} exchange(s) word for word`);
+    store.appendMessage(threadId, askedByPerson ? { role: "bot", kind: "compaction", engineCompaction: true }
+      : { role: "bot", kind: "activity", tool: { name: serverLine(deps.language?.(threadId), "server.warmSummary.summarized"), ok: true } });
+    deps.log?.(`${askedByPerson ? "compact now" : "warm summary"} ${threadId}: moved to its summarized session, keeping ${exchanges} exchange(s) word for word`);
     return { ok: true };
   };
 
@@ -129,7 +137,8 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
       if (!instance.adapter.cacheKeepWarm?.compact) return { way: "harness", soon: false };
       const at = deps.nativeCompactAt(target.instanceId);
       if (at === undefined || contextTokens === undefined || contextTokens < Math.min(WARM_SUMMARY_MIN_TOKENS, at / 2)) return null;
-      return { way: "native", soon: contextTokens >= at * NATIVE_SOON_FRACTION };
+      const point = at - NATIVE_COMPACT_HEADROOM;
+      return { way: "native", soon: contextTokens >= point - NATIVE_SOON_MARGIN, ahead: contextTokens >= point - NATIVE_AHEAD_MARGIN };
     },
     hold: ({ botId, threadId }) => {
       if (deps.busy(botId, threadId)) return { reason: "the bot is busy", retry: true };
@@ -158,11 +167,20 @@ export function createWarmSummaryHost(deps: WarmSummaryHostDeps) {
         return await deps.fold(target, control.signal) ? { ok: true } : { ok: false, reason: "the conversation does not need a summary yet" };
       }, { signal: control.signal, urgent: control.awaited, onWait: () => { waited = true; } });
     },
+    waiting: ({ threadId }) => { store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: COMPACTION_STARTED_LINE, ok: true } }); },
     log: deps.log,
   });
 
   return {
     ...warm,
+    /** The person asked for a summary now: the engine's own compaction of the conversation's session, where the engine has
+     * one to run outside a turn. False leaves the conversation as it was. */
+    async compactNow(target: WarmSummaryTarget, signal: AbortSignal): Promise<boolean> {
+      warm.forget(target.threadId);
+      const outcome = await native(target, { signal, awaited: () => true }, true);
+      if (!outcome.ok) deps.log?.(`compact now ${target.threadId}: not by the engine (${outcome.reason})`);
+      return outcome.ok;
+    },
     /** The person has the conversation in front of them (opened it, or is active in the app with it open). */
     sawThread(threadId: string): void {
       warm.seen(threadId);

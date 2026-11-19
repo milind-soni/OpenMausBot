@@ -503,6 +503,7 @@ const PENDING: Readonly<Record<string, ReadonlyArray<readonly [file: string, sni
   ],
   "restarts, stops and context": [
     ["server/index.ts", "context compaction started ( … )"],
+    ["server/host/warm-summary-host.ts", "context compaction started (auto)"],
     ["server/index.ts", "context compacted — re-sent the last  …  digest …"],
     ["server/index.ts", "generated image could not be attached —  …"],
     ["server/index.ts", "invalid image"],

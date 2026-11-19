@@ -27,6 +27,7 @@
 //   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (as stream-script.ts)
 //   FAKE_CODEX_PATCH_BYTES  each turn first writes web/index.html by apply_patch, streamed as two
 //     item/fileChange/patchUpdated notifications (codex-cli 0.160.1's schema) of half and all this many bytes
+//   FAKE_CODEX_COMPACTION  "1": each turn first compacts its context, as codex-cli 0.160.1 reports it (a contextCompaction item)
 //   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
 //   FAKE_CODEX_SHELL_ENVIRONMENT_POLICY  JSON config/read reports, every field present and null unless set (codex-cli 0.160)
 //   FAKE_CODEX_APPROVAL_REQUEST  JSON {method, params} override in approval mode
@@ -386,6 +387,10 @@ const dump = () => {
 };
 
 const finishTurn = () => {
+  if (process.env.FAKE_CODEX_COMPACTION === "1") {
+    notify("item/started", { item: { id: "c1", type: "contextCompaction" } });
+    notify("item/completed", { item: { id: "c1", type: "contextCompaction" } });
+  }
   const patchBytes = Number(process.env.FAKE_CODEX_PATCH_BYTES);
   if (patchBytes > 0) {
     const change = (bytes: number) => [{ path: `${process.cwd()}/web/index.html`, kind: { type: "add" }, diff: "+".repeat(bytes) }];
