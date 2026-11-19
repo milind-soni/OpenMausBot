@@ -2,6 +2,7 @@
 // of kind "widget". Node names and props follow ChatKit's widget components.
 // Model input is normalised here once; every renderer reads canonical trees only.
 import type { JsonValue } from "./json.ts";
+import { childNodes, nodeTypeProblem } from "./widget-input.ts";
 import { readWidgetText } from "./widget-text.ts";
 import { buttonStyle } from "./widget-button-style.ts";
 
@@ -138,22 +139,6 @@ function fail(path: string, message: string): never {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-/** The children a node names: a list, one node, or the object a model wraps the list in. */
-function childNodes(raw: Record<string, unknown>): unknown[] {
-  const children = raw.children;
-  if (children === undefined || children === null) return [];
-  if (Array.isArray(children)) return children;
-  if (!isRecord(children)) return [children];
-  if (typeof children.type === "string") return [children];
-  const keys = Object.keys(children);
-  if (keys.length === 1) {
-    const only = children[keys[0]!];
-    if (Array.isArray(only)) return only;
-    if (isRecord(only)) return [only];
-  }
-  return [children];
 }
 
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
@@ -526,11 +511,7 @@ function normalize(input: unknown, path: string, depth: number, slot: "root" | "
   if (!isRecord(input)) return fail(path, "must be an object with a type");
   let raw = input;
   let type = typeOf(raw);
-  if (!Object.hasOwn(SPECS, type)) {
-    return fail(path, raw.type === undefined
-      ? `has no type; use one of ${WIDGET_NODE_TYPES.join(", ")}`
-      : `unknown type ${JSON.stringify(raw.type)}; use one of ${WIDGET_NODE_TYPES.join(", ")}`);
-  }
+  if (!Object.hasOwn(SPECS, type)) return fail(path, nodeTypeProblem(raw, WIDGET_NODE_TYPES.join(", ")));
   if (slot === "items" && type !== "ListViewItem") [raw, type] = [{ type: "ListViewItem", children: [raw] }, "ListViewItem"];
   if (slot === "cells" && type !== "Table.Cell") [raw, type] = [{ type: "Table.Cell", children: [raw] }, "Table.Cell"];
   if (slot === "rows" && type !== "Table.Row") return fail(path, "a Table takes Table.Row children");
