@@ -2,10 +2,12 @@ import { useEffect, useId, useRef, useState } from "react";
 import { FolderOpen, Loader2, Trash2 } from "lucide-react";
 
 import type { TeamTemplate, TemplateDetails } from "../../shared/share-card";
+import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { relativeTime } from "@/lib/memory";
 import { addImport, addedLine, folderFiles, previewImport, removeTeamTemplate, teamTemplates, type ImportSource } from "@/lib/template-share";
 import { useStore } from "@/state/store";
+import { SETTINGS_INPUT } from "./SettingsPrimitives";
 import { TemplateDetailsBody, TemplateModal, useTeamTemplatesOwner } from "./TemplateCard";
 
 /** "From Acme's templates": each one's name, kind, who added it and when; opening one previews it, and its owner or an
@@ -128,7 +130,7 @@ export function ImportDialog({ initialUrl, onClose, onAdded }: { initialUrl?: st
           <label htmlFor={fieldId} className="text-[13px] font-medium text-ink">{t("templateImport.linkLabel")}</label>
           <div className="mt-1.5 flex gap-2">
             <input id={fieldId} dir="auto" autoFocus value={url} onChange={(event) => setUrl(event.target.value)} inputMode="url" spellCheck={false}
-              className="h-8 min-w-0 flex-1 rounded-lg border border-hairline bg-inset px-2.5 text-[13px] text-ink focus:border-focus focus:outline-none" />
+              className={cn(SETTINGS_INPUT, "min-w-0 flex-1")} />
             <button type="submit" className="ui-button ui-button-md" disabled={!url.trim() || busy !== null}>
               {busy === "preview" && spinner}{t("templateImport.open")}
             </button>

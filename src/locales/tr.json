@@ -1356,7 +1356,7 @@
   "sidebar.servers": "Sunucular",
   "sidebar.switchServer": "Sunucu değiştir: {name}",
   "sidebar.switchServerError": "Sunucu listesi açılamadı. Sunucu menüsünü deneyin.",
-  "sidebar.newBot": "Yeni Bot",
+  "sidebar.newBot": "Yeni bot",
   "sidebar.newChat.title": "Yeni sohbet",
   "sidebar.newChat.to": "Kime:",
   "sidebar.newChat.placeholder": "Şununla sohbet başlat…",

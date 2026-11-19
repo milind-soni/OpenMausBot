@@ -592,6 +592,7 @@ describe("resolveRequestAuth", () => {
     ["POST", "/api/instances/claude-work/auth/sign-out"],
     ["GET", "/api/usage?from=2026-09-01&to=2026-09-30"],
     ["GET", "/api/usage.csv?from=2026-09-01&to=2026-09-30"],
+    ["GET", "/api/usage/insights?from=2026-09-01&to=2026-09-30"],
     ["POST", "/api/keys/test"],
     ["GET", "/api/fleet"],
     ["POST", "/api/fleet/workspaces"],

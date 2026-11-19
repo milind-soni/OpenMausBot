@@ -67,6 +67,7 @@ const FILES = [
   "src/components/ThreadCleanupSettings.tsx",
   "src/components/ThreadConcurrencySettings.tsx",
   "src/components/UsageSection.tsx",
+  "src/components/usage/UsageInsights.tsx",
   "src/components/VaultSettings.tsx",
   "src/components/VpsComputersCard.tsx",
   "src/components/WindowFrameBar.tsx",
