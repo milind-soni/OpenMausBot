@@ -48,7 +48,7 @@ import {
 import { appendNative } from "./native.ts";
 import { allowsTool, parseToolScope } from "../../shared/tool-scope.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
-import { piTurnArgs } from "./pi-session.ts";
+import { piSessionDir, piTurnArgs } from "./pi-session.ts";
 import { noticeFailure } from "../chat-notices.ts";
 
 import { decodePiFrame, PiRpcChunks, piLineReader, piNativeLogMessage, readPiPromptImages } from "./pi-rpc.ts";
@@ -451,6 +451,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       // Written on every turn: the extension also carries ask_user.
       const mcpServers = buildMcpServers(turn);
       const askUser = toolScope === undefined || allowsTool(toolScope, { kind: "native", name: ASK_USER_TOOL });
+      const childArgs = [...piTurnArgs(), "-e", SPAWNED_PROXIES.piMcpExtension];
       const mcpTempDir = mkdtempSync(join(tmpdir(), "omb-pi-mcp-"));
       const scopeReadyPath = toolScope !== undefined ? join(mcpTempDir, "scope-ready.json") : undefined;
       try {
@@ -462,7 +463,6 @@ export const PiDriver: ProviderDriver<PiConfig> = {
         } catch {}
         throw err;
       }
-      const childArgs = [...piTurnArgs(), "-e", SPAWNED_PROXIES.piMcpExtension];
 
       // spawnCli can throw synchronously, before settle() could remove the credential file.
       const child = (() => {
@@ -470,6 +470,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           return spawnCli(config.cli, childArgs, {
             stdio: ["pipe", "pipe", "pipe"],
             cwd: turn.cwd,
+            box: { rw: [piSessionDir()] },
             env: piEnvironment({
               ...process.env,
               ...input.environment,
