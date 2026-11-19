@@ -6,24 +6,14 @@
 // keep its history (core Session.fork copies its messages, not its jobs or queued notices), then the original is deleted.
 // The thread's next turn loads the fork. An OpenCode without session/fork and session/delete is left as it is.
 
-type Request = (method: string, params: unknown, timeoutMs?: number) => Promise<any>;
+import { TURN_UPDATES, type AcpBackgroundWork } from "./background-work.ts";
 
 const WAIT_MS = 10_000;
 /** A woken turn's retry notice and the step after it are session_info_updates with this key (packages/cli/src/acp);
  * compaction and titles use others. */
 const STEP_META = "opencode/retry";
-const TURN_UPDATES = new Set(["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan"]);
 
-export interface OpenCodeBackgroundWork {
-  /** Whether a session/update that arrives while no turn of ours runs is OpenCode working on its own. */
-  wakes(update: Record<string, any> | undefined): boolean;
-  /** The session a turn resumes: its stored cursor, or with none the live session once it was forked, after any forks. */
-  resumeCursor(cursor: unknown, live: string | null): string | null;
-  /** Ends the session's background jobs and any turn they woke, keeping its history in a fork. Never throws. */
-  end(session: { sessionId: string | null; cwd: string; initResult: any }, request: Request): Promise<void>;
-}
-
-export function openCodeBackgroundWork(): OpenCodeBackgroundWork {
+export function openCodeBackgroundWork(): AcpBackgroundWork {
   const forkedTo = new Map<string, string>();
   return {
     wakes: (update) => {

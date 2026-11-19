@@ -30,7 +30,8 @@
 //       STOP_ME in it waits for session/cancel; FAKE_ACP_WAKE_MS (300) later that shell's finish wakes a turn no prompt
 //       asked for, one step every FAKE_ACP_STEP_MS (50), each appended to FAKE_ACP_WOKEN_FILE, until session/close or
 //       session/delete interrupts it; only session/delete ends the job. session/fork answers <id>-fork; a closed or
-//       deleted session refuses session/prompt until loaded. Advertises close, delete and, unless FAKE_ACP_NO_FORK=1, fork)
+//       deleted session refuses session/prompt until loaded. Advertises close, delete and, unless FAKE_ACP_NO_FORK=1, fork; FAKE_ACP_CLOSE_ENDS_JOBS=1: session/close
+//       ends the job too, as grok 1.0.89's does)
 //   FAKE_ACP_GROK_NATIVE_MCP  _x.ai/mcp/list reports these comma-separated native servers after the session's accepted ones
 //   FAKE_ACP_MCP_TRANSPORTS  remote MCP transports advertised in initialize, e.g. "http,sse"
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
@@ -93,6 +94,9 @@
 //     {outcome:"steered"}, or {outcome:"promptRequired"} with no prompt running (FAKE_ACP_STEER_FAIL=rpc: a JSON-RPC error).
 //   FAKE_ACP_MODE=devin-steer  Devin's second `session/prompt`: initialize reports agentCapabilities._meta["cognition.ai/midTurnPrompts"];
 //     a prompt during a running one joins it, and both end together with the same usage and _meta["cognition.ai/userMessageId"].
+//   FAKE_ACP_MODE=grok-steer  Grok's second `session/prompt` with `[ui] follow_up_behavior = "steer"` in GROK_HOME/config.toml: a prompt
+//     during a running one is injected into it and answers {stopReason:"cancelled", _meta:{completionKind:"removedFromQueue"}}
+//     at once; the running prompt then ends with end_turn and every steer it took.
 //   FAKE_ACP_STEERING=off  the two steer modes above report no steering capability.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
@@ -767,6 +771,12 @@ let gatedRuns = 0;
  * answered with the first one, with the same usage and run id, as Devin does. opencode-steer: only `_session/steering` joins it. */
 function gatedPrompt(msg: any) {
   const text = (Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join("");
+  if (gatedTurn && mode === "grok-steer") {
+    recordMethod("session/prompt.steer");
+    gatedTurn.steers.push(text);
+    result(msg.id, { stopReason: "cancelled", _meta: { completionKind: "removedFromQueue" } });
+    return;
+  }
   if (gatedTurn && mode === "devin-steer") {
     recordMethod("session/prompt.steer");
     gatedTurn.steers.push(text);
@@ -980,6 +990,11 @@ function handle(msg: any) {
     }
     case "session/close":
       endWokenStep(msg.params?.sessionId);
+      if (process.env.FAKE_ACP_CLOSE_ENDS_JOBS === "1") {
+        const job = backgroundJobs.get(String(msg.params?.sessionId))?.job;
+        if (job) clearTimeout(job);
+        backgroundJobs.delete(String(msg.params?.sessionId));
+      }
       if (mode === "background-wake") detachedSessions.add(String(msg.params?.sessionId));
       if (process.env.FAKE_ACP_SESSION_CLOSE === "error") out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "close failed" } });
       else if (process.env.FAKE_ACP_SESSION_CLOSE_MS) setTimeout(() => result(msg.id, {}), Number(process.env.FAKE_ACP_SESSION_CLOSE_MS));
@@ -1167,7 +1182,7 @@ function handle(msg: any) {
         hermesPrompt(msg);
         return;
       }
-      if (mode === "opencode-steer" || mode === "devin-steer") {
+      if (mode === "opencode-steer" || mode === "devin-steer" || mode === "grok-steer") {
         gatedPrompt(msg);
         return;
       }

@@ -20,7 +20,7 @@ import { AcpBrowserAuth, acpBrowserAuthInstanceSurface, type AcpBrowserSignInSpe
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { boxAudienceKey, describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../../engine-stop.ts";
-import { runAcpOneShot } from "./background-text.ts"; import type { OpenCodeBackgroundWork } from "./opencode-background.ts";
+import { runAcpOneShot } from "./background-text.ts"; import type { AcpBackgroundWork } from "./background-work.ts";
 import { acpCapabilities } from "./capabilities.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
@@ -156,7 +156,7 @@ export interface AcpSupport extends AcpDriverHooks {
    * confirms it; an approval change never respawns the process. */
   sessionScopedApproval?: boolean;
   /** False when this engine cannot run memory upkeep's one-shot text call cleanly; oneShotFolder holds a one-shot's folder. */
-  backgroundText?: false; oneShotFolder?(): Promise<string>; /** Work the agent goes on with after its turn: ended at Stop and when it wakes a turn between ours. */ backgroundWork?: OpenCodeBackgroundWork;
+  backgroundText?: false; oneShotFolder?(): Promise<string>; /** Work the agent goes on with after its turn: ended at Stop and when it wakes a turn between ours. */ backgroundWork?: AcpBackgroundWork;
   /** Mutate the child env in place. `instanceEnvironment` tells a key put there on purpose from one
    *  riding along in the server's own env. */
   transformEnv?(
@@ -1131,6 +1131,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             open: () => state.promptSent && !state.settled && !state.stopped && !session.closing,
             commands: () => session.commands,
             initializeResult: () => session.initResult,
+            env,
             prompt: (text) => request("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, undefined, undefined, promptIdleTimeoutMs()),
             extension: (method, text) => request(method, { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, STEER_REQUEST_TIMEOUT_MS),
           }),
@@ -1214,7 +1215,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             let runtimeAcceptsImages = await handshake();
             let init = session.initResult;
 
-            await backgroundEnds.get(threadId); const cursor = turn.sessionReset ? null : support.backgroundWork ? support.backgroundWork.resumeCursor(turn.resumeCursor, session.sessionId) : typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+            await backgroundEnds.get(threadId); const cursor = turn.sessionReset ? null : support.backgroundWork ? support.backgroundWork.resumeCursor(turn.resumeCursor, session.sessionId, session) : typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
             let promptTurn = turn;
             let rebuiltFromReplay = false;
             for (;;) {
@@ -1435,9 +1436,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 );
               }
             }
-            const answers = [result, ...(current.steering?.replies ?? [])];
+            const folded = support.steer && "folded" in support.steer ? support.steer.folded : undefined;
+            const answers = [result, ...(current.steering?.replies ?? []).filter((reply) => !folded?.(reply))];
             if (current.steering?.failure !== undefined && !state.stopped) throw current.steering.failure;
-            const runOf = (answer: unknown) => support.steer && "run" in support.steer ? support.steer.run(answer) : undefined;
+            const runOf = (answer: unknown) => support.steer && "run" in support.steer ? support.steer.run?.(answer) : undefined;
             for (const [index, answer] of answers.entries()) {
               const run = runOf(answer);
               if (run !== undefined && answers.slice(index + 1).some((later) => runOf(later) === run)) continue;
