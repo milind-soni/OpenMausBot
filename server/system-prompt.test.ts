@@ -494,7 +494,7 @@ describe("longCommandsPrompt", () => {
       const text = longCommandsPrompt(kind);
       expect(text).toContain("pass `timeout` in milliseconds, up to 86400000, which is 1440 minutes, unless a lower limit is set here");
       expect(text).toContain("Never wait inside a command for CI, a deploy or any other job to finish (no sleep loops or polls): check once");
-      expect(text).toContain("tell the person what you made, with links. Only on a turn the person started in their own chat, set wait_until or a one-time trigger to check back and end your turn");
+      expect(text).toContain("tell the person what you made, with links. Only on a turn the person started in their own chat, set check_back (a time) or wait_until (a condition) and end your turn");
       expect(text).toContain("When the person writes while you work, answer them first.");
       expect(text).not.toContain("vm_exec");
     }

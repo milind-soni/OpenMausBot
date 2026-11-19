@@ -230,6 +230,7 @@ describe("CI outputs", () => {
       "server/cloud-team-bitwarden.e2e.test.ts",
       "server/cloud-team-box-audience.e2e.test.ts",
       "server/cloud-team-browser.e2e.test.ts",
+      "server/cloud-team-check-backs.e2e.test.ts",
       "server/cloud-team-connections.e2e.test.ts",
       "server/cloud-team-conversation-share.e2e.test.ts",
       "server/cloud-team-engine-homes.e2e.test.ts",
