@@ -25,9 +25,20 @@ export interface TeamMapQueuedHandoff {
   groupId?: string;
 }
 
+/** A bot running its turn straight in a room's own thread (not a lane of its own), so there is no `TaskRecord` for
+ * it to show up through the main task loop below. */
+export interface TeamMapRoomBusy {
+  botId: string;
+  threadId: string;
+  title: string;
+  groupId: string;
+  startedAt?: number;
+}
+
 export interface TeamMapSessionsDeps {
   bots: readonly TeamMapBotInput[];
   queued: readonly TeamMapQueuedHandoff[];
+  roomBusy: readonly TeamMapRoomBusy[];
   lastOutputAt(threadId: string): number | undefined;
   groupIdOf(threadId: string): string | undefined;
   visibleGroup(groupId: string): boolean;
@@ -68,6 +79,20 @@ export function teamMapSessions(deps: TeamMapSessionsDeps): TeamMapSessionsSnaps
         ...(typeof usd === "number" ? { usd, usdEstimated: deps.onPlan(selection.instanceId) } : {}),
       });
     }
+  }
+  for (const busy of deps.roomBusy) {
+    if (sessions.some((session) => session.threadId === busy.threadId)) continue;
+    const bot = deps.bots.find((candidate) => candidate.id === busy.botId);
+    if (!bot) continue;
+    const lastOutputAt = deps.lastOutputAt(busy.threadId);
+    const state = stateFor("working", lastOutputAt !== undefined && now - lastOutputAt > stuckAfterMs);
+    if (!state) continue;
+    sessions.push({
+      botId: busy.botId, threadId: busy.threadId, title: busy.title, state, startedAt: busy.startedAt ?? now, groupId: busy.groupId,
+      ...(bot.modelSelection.model ? { model: bot.modelSelection.model } : {}),
+      ...(bot.modelSelection.effort ? { effort: bot.modelSelection.effort } : {}),
+      ...(lastOutputAt !== undefined ? { lastOutputAt } : {}),
+    });
   }
   for (const edge of deps.queued) {
     if (sessions.some((session) => session.threadId === edge.threadId)) continue;

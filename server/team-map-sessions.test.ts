@@ -7,7 +7,7 @@ const SELECTION: ModelSelection = { instanceId: "inst-1", model: "claude-opus-5-
 
 function deps(overrides: Partial<TeamMapSessionsDeps> & { bots: readonly TeamMapBotInput[] }): TeamMapSessionsDeps {
   return {
-    queued: [], lastOutputAt: () => undefined, groupIdOf: () => undefined, visibleGroup: () => true,
+    queued: [], roomBusy: [], lastOutputAt: () => undefined, groupIdOf: () => undefined, visibleGroup: () => true,
     createdAt: () => undefined, onPlan: () => false, doneLast24h: 0, now: NOW, ...overrides,
   };
 }
@@ -89,6 +89,29 @@ describe("teamMapSessions", () => {
     const snapshot = teamMapSessions(deps({ bots, queued: [{ targetBotId: "bot-2", threadId: "t2" }] }));
     expect(snapshot.sessions).toHaveLength(1);
     expect(snapshot.sessions[0]?.state).toBe("running");
+  });
+
+  it("shows a card for a bot running straight in a room's own thread, with no task of its own", () => {
+    const bots: TeamMapBotInput[] = [{ id: "bot-1", modelSelection: SELECTION, tasks: [] }];
+    const snapshot = teamMapSessions(deps({
+      bots, roomBusy: [{ botId: "bot-1", threadId: "room-thread", title: "Engineering Room", groupId: "room-1", startedAt: NOW - 2_000 }],
+      lastOutputAt: (threadId) => (threadId === "room-thread" ? NOW - 500 : undefined),
+    }));
+    expect(snapshot.sessions).toEqual([{
+      botId: "bot-1", threadId: "room-thread", title: "Engineering Room", state: "running", startedAt: NOW - 2_000,
+      groupId: "room-1", model: "claude-opus-5-5", effort: "high", lastOutputAt: NOW - 500,
+    }]);
+  });
+
+  it("skips a room-busy entry whose thread already has a session from the bot's own tasks", () => {
+    const bots: TeamMapBotInput[] = [{ id: "bot-1", modelSelection: SELECTION, tasks: [
+      { threadId: "room-thread", title: "Already there", busy: true, activity: "working" },
+    ] }];
+    const snapshot = teamMapSessions(deps({
+      bots, roomBusy: [{ botId: "bot-1", threadId: "room-thread", title: "Engineering Room", groupId: "room-1" }],
+    }));
+    expect(snapshot.sessions).toHaveLength(1);
+    expect(snapshot.sessions[0]).toMatchObject({ title: "Already there" });
   });
 
   it("passes doneLast24h through untouched", () => {

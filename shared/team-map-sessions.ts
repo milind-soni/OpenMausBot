@@ -34,7 +34,7 @@ export interface TeamMapSession {
 /** Live session data added to `GET /api/team-map`. */
 export interface TeamMapSessionsSnapshot {
   sessions: TeamMapSession[];
-  /** Turns that finished in the last 24 hours, across the bots this viewer can see. */
+  /** Turns (not helper or other non-turn ledger rows) that finished in the last 24 hours, on threads this viewer can see. */
   doneLast24h: number;
   /** A running turn with no output for this many ms counts as stuck. */
   stuckAfterMs: number;

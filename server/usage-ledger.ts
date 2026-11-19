@@ -87,6 +87,11 @@ const MAX_RANGE_DAYS = 366;
 const DAY_MS = 24 * 60 * 60_000;
 const writeQueues = new Map<string, Promise<void>>();
 
+/** Parsed rows per data dir + month, so a 3s poll over a large ledger doesn't re-read and re-parse the month file every time. */
+const MONTH_CACHE_TTL_MS = 15_000;
+const monthCache = new Map<string, { at: number; rows: UsageRow[] }>();
+const monthCacheKey = (dataDir: string, key: string): string => `${dataDir}\u0000${key}`;
+
 const clean = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
 const finiteOrNull = (value: unknown): number | null =>
@@ -143,6 +148,7 @@ export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: 
 async function write(dataDir: string, record: UsageRow): Promise<void> {
   await mkdir(join(dataDir, DIR), { recursive: true, mode: 0o700 });
   await appendFile(usageFileFor(dataDir, new Date(record.at)), JSON.stringify(record) + "\n", { mode: 0o600 });
+  monthCache.delete(monthCacheKey(dataDir, monthKey(new Date(record.at))));
 }
 
 export async function flushUsageLedger(dataDir: string): Promise<void> {
@@ -172,29 +178,51 @@ export function monthsBetween(from: Date, to: Date): string[] {
   return keys;
 }
 
-export function readUsage(dataDir: string, range: { from: Date; to: Date }): UsageRow[] {
+function readMonthFile(dataDir: string, key: string): UsageRow[] {
   const rows: UsageRow[] = [];
-  const from = range.from.getTime();
-  const to = range.to.getTime();
-  for (const key of monthsBetween(range.from, range.to)) {
-    let text: string;
+  let text: string;
+  try {
+    text = readFileSync(join(dataDir, DIR, `${key}.jsonl`), "utf8");
+  } catch {
+    return rows;
+  }
+  for (const line of text.split("\n")) {
+    if (!line) continue;
     try {
-      text = readFileSync(join(dataDir, DIR, `${key}.jsonl`), "utf8");
+      const value: unknown = JSON.parse(line);
+      if (isUsageRow(value)) rows.push(value);
     } catch {
-      continue;
-    }
-    for (const line of text.split("\n")) {
-      if (!line) continue;
-      try {
-        const value: unknown = JSON.parse(line);
-        if (!isUsageRow(value)) continue;
-        const at = Date.parse(value.at);
-        if (at >= from && at <= to) rows.push(value);
-      } catch {
-      }
     }
   }
   return rows;
+}
+
+function rowsInRange(rows: readonly UsageRow[], from: number, to: number): UsageRow[] {
+  return rows.filter((value) => { const at = Date.parse(value.at); return at >= from && at <= to; });
+}
+
+export function readUsage(dataDir: string, range: { from: Date; to: Date }): UsageRow[] {
+  const rows: UsageRow[] = [];
+  for (const key of monthsBetween(range.from, range.to)) rows.push(...readMonthFile(dataDir, key));
+  return rowsInRange(rows, range.from.getTime(), range.to.getTime());
+}
+
+/**
+ * Same rows as `readUsage`, but a month's parsed rows are kept for `MONTH_CACHE_TTL_MS` (and dropped as soon as a
+ * row lands for that month), so a caller that re-reads the same range every few seconds — such as the team map
+ * poll — doesn't re-read and re-parse the whole month file each time. Only use this for a repeated poll; a one-off
+ * read should call `readUsage` so it never risks a stale answer.
+ */
+export function readUsageCached(dataDir: string, range: { from: Date; to: Date }): UsageRow[] {
+  const rows: UsageRow[] = [];
+  for (const key of monthsBetween(range.from, range.to)) {
+    const cacheKey = monthCacheKey(dataDir, key);
+    const cached = monthCache.get(cacheKey);
+    const monthRows = cached && Date.now() - cached.at < MONTH_CACHE_TTL_MS ? cached.rows : readMonthFile(dataDir, key);
+    if (!cached || monthRows !== cached.rows) monthCache.set(cacheKey, { at: Date.now(), rows: monthRows });
+    rows.push(...monthRows);
+  }
+  return rowsInRange(rows, range.from.getTime(), range.to.getTime());
 }
 
 export function parseUsageRange(from: string | null | undefined, to: string | null | undefined, now = new Date()): { from: Date; to: Date } | null {
