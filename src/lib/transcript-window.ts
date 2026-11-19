@@ -19,6 +19,14 @@ export function tailWindowStart(total: number, size: number = TRANSCRIPT_WINDOW_
   return Math.max(0, total - size);
 }
 
+/** The newest rows a switch draws in its first frame; the rest of the window follows once that frame is on screen. */
+export const FIRST_FRAME_ROWS = 20;
+
+/** The first row a switch draws, when the window holds more than the first frame does. */
+export function firstFrameRow<T extends { id: string }>(visible: readonly T[]): string | undefined {
+  return visible.length > FIRST_FRAME_ROWS ? visible[visible.length - FIRST_FRAME_ROWS]!.id : undefined;
+}
+
 export function followWindowStart(messages: readonly { role?: string }[], start: number): number {
   const tail = tailWindowStart(messages.length);
   const oldest = Math.max(start, tail - TRANSCRIPT_WINDOW_SIZE);

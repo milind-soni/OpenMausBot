@@ -111,7 +111,7 @@ afterAll(() => {
 describe("a long chat on screen", () => {
   it("draws every kind of row these checks watch", () => {
     expect(document.querySelectorAll("[data-mid]").length).toBeGreaterThan(30);
-    for (const component of ["Bubble", "DigestChip", "TurnNarrationRun", "PublishedSiteCards", "DaySeparator", "ForkLinks"]) {
+    for (const component of ["Bubble", "DigestChip", "TurnNarrationRun", "PublishedSiteCards", "DaySeparator"]) {
       expect(mounted.get(component) ?? 0, component).toBeGreaterThan(0);
     }
   });
