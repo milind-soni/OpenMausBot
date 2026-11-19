@@ -53,7 +53,7 @@ export interface ConversationCompactionDeps {
   directContext(bot: BotRecord, threadId: string, messages: Message[]): ContextMessage[];
   latestCompaction(messages: readonly Message[]): ({ id: string; firstKeptId?: string } & Record<string, unknown>) | undefined;
   /** Where the engine compacts by itself, in tokens, when OpenMausBot set that point. */
-  nativeCompactTokens(instance: CompactionInstance): number | undefined;
+  nativeCompactTokens(instance: CompactionInstance, model: string): number | undefined;
   /** False for an engine whose own compaction is switched off in its environment. */
   engineCompactionOn(instance: CompactionInstance): boolean;
   /** The engine's own compaction of this conversation's session, asked for by the person; false when it has none to offer now. */
@@ -97,7 +97,7 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
     }
     const engineCompacts = instance.adapter.capabilities.nativeCompaction === true && deps.engineCompactionOn(instance);
     if (!manual && !foldDue({ engineCompacts, configuredCompactAt: settings?.compactAt, contextTokens: measurement?.tokens, estimatedBytes: bytes,
-      window, nativeCompactAt: deps.nativeCompactTokens(instance), floor, idleFraction: idle ? deps.idleFraction : 1 })) return;
+      window, nativeCompactAt: deps.nativeCompactTokens(instance, model), floor, idleFraction: idle ? deps.idleFraction : 1 })) return;
     const fold = manual ? { folded: history, firstKeptId: "" } : foldPoint(history);
     if (!fold) return;
     const foldedThroughId = manual

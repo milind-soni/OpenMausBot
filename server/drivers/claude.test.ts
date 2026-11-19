@@ -1720,6 +1720,20 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("200000");
   });
 
+  it("compacts a Claude Opus 5.5 (1M) CLI session at 1M", async () => {
+    await create();
+    await instance.snapshot();
+    const dump = join(scratch, "compact-1m.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-compact-1m", text: "hi", model: "claude-opus-5-5[1m]" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--model") + 1]).toBe("claude-opus-5-5[1m]");
+    expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("1000000");
+  });
+
   it("clamps a configured compaction window into the range the CLI accepts", () => {
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "50000" })).toBe("100000");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "9000000" })).toBe("1000000");
@@ -1728,6 +1742,16 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(autoCompactWindow({})).toBe("200000");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "auto" })).toBe("auto");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "off" })).toBe(null);
+  });
+
+  it("compacts at 1M by default only for the Claude Opus 5.5 (1M) pick", () => {
+    expect(autoCompactWindow({}, "claude-opus-5-5[1m]")).toBe("1000000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "nonsense" }, "claude-opus-5-5[1m]")).toBe("1000000");
+    expect(autoCompactWindow({}, "claude-opus-5-5")).toBe("200000");
+    expect(autoCompactWindow({}, "claude-sonnet-4-6[1m]")).toBe("200000");
+    expect(autoCompactWindow({}, null)).toBe("200000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "300000" }, "claude-opus-5-5[1m]")).toBe("300000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "off" }, "claude-opus-5-5[1m]")).toBe(null);
   });
 
   it("passes no compaction window when it is turned off", async () => {

@@ -5199,7 +5199,7 @@ cacheKeepWarmStatus = (threadId) => cacheKeepWarm.status(threadId);
 // Warm summaries (server/host/warm-summary-host.ts): a long conversation is summarized while it is idle, not at its next turn.
 const warmSummaries = createWarmSummaryHost({ store, instance: (id) => registry.get(id), queued: hasQueuedSteeredMessages, coordinator, waits: () => botWaits, routines: () => routines,
   enabled: () => cfg.context?.autoCompact !== false && process.env.OMB_WARM_SUMMARY !== "0" && spendState(cfg, DATA_DIR)?.exceeded !== true, memoryShort: () => engineMemory.headroom() < 0.3,
-  nativeCompactAt: (id) => { const instance = registry.get(id), at = instance ? nativeCompactTokens(instance) : undefined; return at && Number.isFinite(at) ? at : undefined; },
+  nativeCompactAt: ({ botId, threadId, instanceId }) => { const instance = registry.get(instanceId), measured = store.taskByThread(botId, threadId)?.lastContextModel, at = instance ? nativeCompactTokens(instance, measured?.startsWith(`${instanceId}:`) ? measured.slice(instanceId.length + 1) : botForThread(botId, threadId)?.modelSelection.model) : undefined; return at && Number.isFinite(at) ? at : undefined; },
   busy: (botId, threadId) => threadBusy(botId, threadId) || botHasActiveTurn(botId), keepWarmUntil: (threadId) => cacheKeepWarm.status(threadId)?.until, book: bookForkUsage, log: (line) => console.info(line), language: threadLanguage,
   fold: async ({ botId, threadId, instanceId }, idle) => { const bot = store.projectBotForTask(botId, threadId), model = store.taskByThread(botId, threadId)?.lastContextModel, instance = registry.get(instanceId), before = latestCompaction(store.activePath(threadId))?.id;
     if (bot && instance && model?.startsWith(`${instanceId}:`)) await compactConversation({ bot, threadId, generation: `idle:${randomUUID()}`, instance, model: model.slice(instanceId.length + 1), excludedIds: new Set(), manual: false, idle });
@@ -6980,7 +6980,7 @@ const { lineLabels, personPrompt, routineRunNote } = createLineLabels({ sharedCh
 
 const compactConversation = createConversationCompaction({
   store, context: () => cfg.context, directContext, latestCompaction,
-  nativeCompactTokens: (instance) => nativeCompactTokens(instance),
+  nativeCompactTokens: (instance, model) => nativeCompactTokens(instance, model),
   engineCompactionOn: (instance) => instance.driverKind !== "claudeAgent" || !claudeCompactionDisabled({ ...process.env, ...cfg.instances?.[instance.instanceId]?.environment }),
   engineCompact: (target, signal) => warmSummaries.compactNow(target, signal),
   generateText: (botId, instance) => sideJobs.text("compaction", botId, { instance: instance as NonNullable<ReturnType<typeof registry.get>> })?.generateText,
@@ -6996,7 +6996,7 @@ const handoffs = new Handoffs({
     .filter((m) => m.role === "bot" && m.kind === "text" && !m.from && m.turnId === turnId).map((m) => m.id),
 });
 const roomSessions = createRoomSessions({ settings: () => cfg.context, messagesFor: (threadId) => store.messagesFor(threadId) });
-const nativeCompactTokens = (instance: { driverKind: string; instanceId: string }) => instance.driverKind === "claudeAgent" ? Number(autoCompactWindow({ ...process.env, ...cfg.instances?.[instance.instanceId]?.environment })) : undefined;
+const nativeCompactTokens = (instance: { driverKind: string; instanceId: string }, model: string | null | undefined) => instance.driverKind === "claudeAgent" ? Number(autoCompactWindow({ ...process.env, ...cfg.instances?.[instance.instanceId]?.environment }, model)) : undefined;
 
 const loopingEngine = (threadId: string, bot = store.botByThread(threadId)) => bot ? runningTurnInstance(botForThread(bot.id, threadId), threadId)?.adapter : undefined;
 const canSteerThread = (threadId: string) => {
@@ -10206,7 +10206,7 @@ async function runClaimedGroupMemberTurn(
     const roomToolScope = toolScopeForTurn(readyBot.id), roomUserMcp = claudeUserMcpEnabled(cfg) && !managedPolicy.restrictsMcp();
     const roomSession = roomSessions.dispatch({
       threadId, botId: readyBot.id, claimId: internalGeneration, instance, guestConfined: roomGuestConfined, reset: Boolean(roomReset), hooks: Boolean(integrations.hooks),
-      context: () => ({ ...roomMemberContexts.forThread(threadId)?.[readyBot.id], compactAt: nativeCompactTokens(instance) }),
+      context: () => ({ ...roomMemberContexts.forThread(threadId)?.[readyBot.id], compactAt: nativeCompactTokens(instance, readyBot.modelSelection.model) }),
       config: [roomSystem.stable, cwd, readyBot.modelSelection, turnApprovalMode, roomToolScope, roomUserMcp, integrations],
       window: roomWindow, tail: roomTail, wrap: (body) => withTurnClock(clock, withRecalled(roomRecalled, roomPick + attachmentsForBox(body, cwd) + roomShareNote.text + devsReports.note(threadId, Boolean(integrations.agents)))),
     });
