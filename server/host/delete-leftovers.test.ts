@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createDeleteLeftovers, engineSessionFolders, instanceEnvironment, plainlyUnder, removeMemoryLayer, removeUnder, type DeleteLeftoversDeps } from "./delete-leftovers.ts";
 
@@ -261,6 +261,21 @@ describe("a deleted bot", () => {
     expect(mine.filter(existsSync)).toEqual([]);
     expect(others.filter((path) => !existsSync(path))).toEqual([]);
     expect(forgotten.sort()).toEqual([...layers].sort());
+  });
+
+  it("leaves its checkpoints in place until no git is running on them, then takes them", async () => {
+    let quiet = () => {};
+    const asked: string[] = [];
+    const { dataDir, bots, deleteBot } = fixture({ checkpointsQuiet: (botId) => { asked.push(botId); return new Promise<void>((done) => { quiet = done; }); } });
+    bots.push({ id: "scout", tasks: [{ threadId: "t1" }] });
+    const checkpoint = put(join(dataDir, "checkpoints", "scout", "0123456789abcdef", ".git", "HEAD"));
+    const uploaded = put(join(dataDir, "box-uploads", "scout", "t1", upload(1)));
+    deleteBot("scout");
+    await Promise.resolve();
+    expect(asked).toEqual(["scout"]);
+    expect([existsSync(checkpoint), existsSync(uploaded)]).toEqual([true, false]);
+    quiet();
+    await vi.waitFor(() => expect(existsSync(checkpoint)).toBe(false));
   });
 
   it("never follows a link out of the data folder", () => {

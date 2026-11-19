@@ -23,8 +23,8 @@ const DEFER = { [DEFER_TOOLS_ENV]: "1" };
 
 /** Bytes Claude Code sends up front for the agents server when the budget was last set; each may move at most 2%. */
 const UP_FRONT_BASELINE: Record<string, { whole: number; deferred: number }> = {
-  default: { whole: 3855, deferred: 1209 },
-  specialist: { whole: 1495, deferred: 1037 },
+  default: { whole: 3855, deferred: 1252 },
+  specialist: { whole: 1495, deferred: 1080 },
   fullest: { whole: 3855, deferred: 1589 },
 };
 

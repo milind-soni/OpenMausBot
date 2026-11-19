@@ -212,13 +212,11 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
       const bot = store.createBot({ ...profile.patch, soul: settings.soul, section, modelSelection: selection,
         toolScope: settings.toolScope ?? undefined, color: settings.color ?? look?.color, mascotBody: settings.mascotBody ?? look?.mascotBody,
         ...(deps.team && creator ? { createdBy: creator } : {}), ...(reportsTo ? { reportsTo } : {}),
-        ...(created?.ok ? { visibility: created.visibility } : {}) }, kept.id ? { ...kept, seedMessages: false } : {});
-      const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
-      try {
+        ...(created?.ok ? { visibility: created.visibility } : {}) }, { ...(kept.id ? { ...kept, seedMessages: false } : {}), settle: (made) => {
         const { chiefOfStaff: _chief, managedSections: _managed, toolScope: _toolScope, ...ordinary } = settings;
-        store.patchBot(bot.id, {
+        store.patchBot(made.id, {
           // Store creation completed the workspace defaults (effort included): the rest of the template must not undo them.
-          ...ordinary, name: bot.name, section, modelSelection: bot.modelSelection,
+          ...ordinary, name: made.name, section, modelSelection: made.modelSelection,
           mascotExpression: ordinary.mascotExpression ?? undefined,
           avatarUrl: ordinary.avatarUrl || undefined,
           // Auto with Approve for me stays Auto: This computer with it needs the warning only the bot's Settings shows.
@@ -228,6 +226,9 @@ export function createBotCreateRoutes(deps: BotCreateRouteDeps): RouteHandler {
           voiceNoteEveryReply: ordinary.voiceNoteEveryReply ?? undefined,
           autoApprove: ordinary.approvalMode === "auto",
         });
+      } });
+      const createdRoutines: Array<{ id: string; enabled: boolean }> = [];
+      try {
         const presetSkills = new Set(preset?.preset.skills ?? []);
         const presetNotes = new Set(Object.keys(preset?.preset.seed?.memory ?? {}));
         for (const [file, text] of Object.entries(template.memory)) {

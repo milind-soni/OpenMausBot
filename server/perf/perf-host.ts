@@ -11,6 +11,7 @@ import { duration, limitHolds, perfHealth, perfLines, turnLine, type PerfHealth 
 import { createProcessHealth, type ProcessHealthRecorder } from "./process-health.ts";
 import type { ProcessRow } from "./process-buckets.ts";
 import { createProcessSampler, linuxProcessList, LINUX_SAMPLE_MS, nodeUtilization, OTHER_SAMPLE_MS, psProcessList, type ProcessSampler } from "./process-sampler.ts";
+import { createSetupClock, type SetupClock, type SetupMs } from "./setup-steps.ts";
 import type { FailoverWhy } from "./turn-record.ts";
 import { createTurnTimings, type Refusal, type SlowNote, type TurnTimings } from "./turn-timings.ts";
 
@@ -120,6 +121,9 @@ export function createPerfHost(deps: PerfHostDeps) {
     noteHeld: (threadId: string, why: "plan-limit" | "memory") => guarded("held", () => timings.noteHeld(threadId, why), undefined),
     noteFailover: (threadId: string, why: FailoverWhy) => guarded("failover", () => timings.noteFailover(threadId, why), undefined),
     noteNotStarted: (threadId: string, turnId: string | null, refusal?: Refusal) => guarded("refused", () => timings.noteNotStarted(threadId, turnId, refusal), undefined),
+    /** Times one direct turn's setup; its laps go to `noteSetup` just before the engine is asked. */
+    setupClock: (): SetupClock => createSetupClock(),
+    noteSetup: (threadId: string, ms: SetupMs) => guarded("setup", () => timings.noteSetup(threadId, ms), undefined),
     /** Logs a usage-limit hold that started or ended since the last check; the sampler runs it after each sample. */
     checkHolds: watchHolds,
     health: (): PerfHealth | null => guarded("health", () => perfHealth(sources()), null),

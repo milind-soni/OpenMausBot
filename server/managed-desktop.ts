@@ -149,6 +149,7 @@ export class ManagedDesktopProviders {
           },
           adapter: {
             ...instance.adapter,
+            prestart: undefined, // every start goes through the check below
             sendTurn: async input => {
               if (!active()) throw new Error(unavailable());
               if (!input.model || !provider.models.includes(input.model)) throw new Error("This model is not enabled by your Company administrator.");
