@@ -66,13 +66,16 @@ const gradientFor = (color: MausColor): [string, string, string] => {
   return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
 };
 
+const roomGradients = new Map<MausColor, [string, string, string]>();
+
+/** One array per colour, so a memoised mascot drawn with it does not draw again. */
 export function roomAvatarGradient(color: MausColor): [string, string, string] {
-  const fill = `var(--identity-${color})`;
-  return [
-    `color-mix(in srgb, ${fill} 82%, #ffffff)`,
-    fill,
-    `color-mix(in srgb, ${fill} 82%, #000000)`,
-  ];
+  let gradient = roomGradients.get(color);
+  if (!gradient) {
+    const fill = `var(--identity-${color})`;
+    roomGradients.set(color, (gradient = [`color-mix(in srgb, ${fill} 82%, #ffffff)`, fill, `color-mix(in srgb, ${fill} 82%, #000000)`]));
+  }
+  return gradient;
 }
 
 export type MausAvatarHandle = CursorAvatarHandle;

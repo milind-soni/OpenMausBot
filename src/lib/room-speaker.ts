@@ -1,8 +1,9 @@
 import type { ActivityTranscriptItem } from "./activity-runs";
 import { localDay } from "./transcript-derivations";
+import { isLiveReply } from "@/state/live-reply";
 
-function isBotText(message: { role: string; kind: string; text?: string; attachments?: readonly unknown[]; from?: { botId: string } }): message is { role: "bot"; kind: "text"; text?: string; attachments?: readonly unknown[]; from: { botId: string }; at: number } {
-  return message.role === "bot" && message.kind === "text" && Boolean(message.from?.botId) && Boolean(message.text?.trim() || message.attachments?.length);
+function isBotText(message: { id: string; role: string; kind: string; text?: string; attachments?: readonly unknown[]; from?: { botId: string } }): message is { id: string; role: "bot"; kind: "text"; text?: string; attachments?: readonly unknown[]; from: { botId: string }; at: number } {
+  return message.role === "bot" && message.kind === "text" && Boolean(message.from?.botId) && Boolean(message.text?.trim() || message.attachments?.length || isLiveReply(message));
 }
 
 function laterTextOwns(items: readonly ActivityTranscriptItem[], index: number, botId: string, at: number): boolean {

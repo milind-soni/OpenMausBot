@@ -65,7 +65,7 @@ import { roomNeedsSetup, setupResponderMode, type RoomResponderMode } from "@/li
 import { useComposerDockPad } from "@/lib/composer-dock";
 import { GlassBar, GlassScrollFrame } from "./GlassScrollFrame";
 import { awaitedMemberId, showWorkingDots } from "@/lib/turn-tail";
-import { turnNowPhrases } from "@/lib/live-activity"; import { useTurnLive } from "@/state/turn-status"; import { isLiveReply, StreamingReplyContext, useLiveTranscript } from "@/state/live-reply";
+import { turnNowPhrases } from "@/lib/live-activity"; import { useTurnLive } from "@/state/turn-status"; import { isLiveReply, roomLiveSpeaker, StreamingReplyContext, useLiveRow, useLiveTranscriptLayout } from "@/state/live-reply";
 import { useTranscriptViewport } from "@/hooks/use-transcript-viewport"; import { staysInView } from "../../shared/person-wait";
 import { useUnreadDivider } from "@/hooks/use-unread-divider";
 import { unreadMessageIds } from "@/lib/unread-divider";
@@ -114,6 +114,12 @@ export const RoomToolChip = memo(function RoomToolChip({ message, roomId, thread
   );
 });
 
+/** A text message's speaker; one still streaming names whom it @-mentions as its words arrive. */
+function TextSpeakerLabel({ threadId, message, bot, members, transcript, teammates, locale }: { threadId: string; message: Message; bot?: Bot; members: Bot[]; transcript: Message[]; teammates: Parameters<typeof roomAddressees>[3]; locale: string }) {
+  const m = useLiveRow(threadId, message);
+  return m.from ? <ClusterLabel bot={bot} name={m.from.name} color={m.from.color} to={roomAddressees(m, members, transcript, teammates)} locale={locale} /> : null;
+}
+
 export const Transcript = memo(function Transcript({
   group,
   members,
@@ -140,7 +146,8 @@ export const Transcript = memo(function Transcript({
   const showThreads = useShowThreads();
   const showToolCalls = showToolCallsEnabled(config);
   const canReact = useCanReact(group.threadId); const teammatePeers = useTeammates().peers;
-  const memberOf = (id?: string) => members.find((b) => b.id === id); const messages = useLiveTranscript(group.threadId, saved, transcript, members, roomThreadSpeakerId(group, group.threadId));
+  const memberOf = (id?: string) => members.find((b) => b.id === id), speakingNow = roomThreadSpeakerId(group, group.threadId);
+  const messages = useLiveTranscriptLayout(group.threadId, saved, transcript, useMemo(() => roomLiveSpeaker(members, speakingNow), [members, speakingNow]));
   const folds = useMemo(() => roomTurnFolds(messages), [messages, locale]);
   const items = useMemo(() => groupActivityRuns(messages.filter(message =>
     !folds.hiddenIds.has(message.id) &&
@@ -208,7 +215,7 @@ export const Transcript = memo(function Transcript({
               )}
               {divider}
               {first.from && cluster && (
-                <ClusterLabel bot={memberOf(first.from.botId)} name={first.from.name} color={first.from.color} />
+                <ClusterLabel bot={memberOf(first.from.botId)} name={first.from.name} color={first.from.color} locale={locale} />
               )}
               <ActivityRun messages={item.messages} forceOpen={item.messages.some((step) => step.id === focusedId)}>
                 {item.messages.map((step) => (
@@ -279,7 +286,7 @@ export const Transcript = memo(function Transcript({
             <CompactionChip message={m} />
           ) : m.kind === "digest" ? (
             showToolCalls ? <DigestChip message={m} /> : null
-          ) : (m.kind === "app" || m.kind === "widget") && m.from ? <RoomRichRow message={m} from={m.from} threadId={group.threadId} /> : m.template ? <TemplateChatCard message={m} /> : m.publishedPage ? <PublishedPageCard message={m} /> : m.kind === "text" && (m.text || m.attachments?.length) ? (
+          ) : (m.kind === "app" || m.kind === "widget") && m.from ? <RoomRichRow message={m} from={m.from} threadId={group.threadId} /> : m.template ? <TemplateChatCard message={m} /> : m.publishedPage ? <PublishedPageCard message={m} /> : m.kind === "text" && (m.text || m.attachments?.length || isLiveReply(m)) ? (
             !user && isPureLeakedSystemHarnessMessage(m.text) && !m.attachments?.length ? null : (
               textRow(m, m.id === emergingId, m.id === newestMessageId || m.id === newestUserMessageId)
             )
@@ -294,11 +301,10 @@ export const Transcript = memo(function Transcript({
               </div>
             )}
             {divider}
-            {m.from && (
-              (m.kind === "text" && botTextShowsSpeaker(items, i))
-              || (!user && m.kind !== "text" && newCluster && !(m.kind === "activity" && m.comm) && !laterTextOwns(items, i, m.from.botId, m.at))
-            ) && (
-              <ClusterLabel bot={memberOf(m.from.botId)} name={m.from.name} color={m.from.color} to={m.kind === "text" ? roomAddressees(m, members, transcript, teammatePeers) : undefined} />
+            {m.from && m.kind === "text" && botTextShowsSpeaker(items, i) ? (
+              <TextSpeakerLabel threadId={group.threadId} message={m} bot={memberOf(m.from.botId)} members={members} transcript={transcript} teammates={teammatePeers} locale={locale} />
+            ) : m.from && !user && m.kind !== "text" && newCluster && !(m.kind === "activity" && m.comm) && !laterTextOwns(items, i, m.from.botId, m.at) && (
+              <ClusterLabel bot={memberOf(m.from.botId)} name={m.from.name} color={m.from.color} locale={locale} />
             )}
             {fold && (
               <TurnNarrationRun
