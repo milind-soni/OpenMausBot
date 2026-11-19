@@ -17,8 +17,11 @@ const SOON_AFTER_REFUSAL_MS = 5_000;
 
 type Driver = EngineLimit["driver"];
 
-/** The drivers whose plan usage gives a limit to show and to route around. */
-const REPORTED_DRIVERS: ReadonlySet<string> = new Set(["claude", "codex", "grok", "opencode"]);
+/** The drivers whose plan usage gives a limit to show. */
+const REPORTED_DRIVERS: ReadonlySet<string> = new Set(["claude", "codex", "grok", "opencode", "antigravity"]);
+/** The drivers whose usage is the whole engine's, so a window at its limit holds the engine and its turns go to another
+ * AI. Antigravity's leading windows are Gemini's alone, and its other models draw on allowances of their own. */
+const ENGINE_WIDE_DRIVERS: ReadonlySet<string> = new Set(["claude", "codex", "grok", "opencode"]);
 
 function windowLine(name: LimitWindowName, window: PlanWindow): { window: LimitWindowName; used: number; resetsAt: number | null } | null {
   if (!window.available || window.usedPercent === null) return null;
@@ -38,7 +41,7 @@ export function engineLimitFromUsage(row: PlanProviderRow): EngineLimit | null {
   if (full.length) {
     const latest = full.reduce((left, right) => (right.resetsAt ?? 0) > (left.resetsAt ?? 0) ? right : left);
     // Claude goes on past a full window on its paid extra usage while that has room; its own refusal still holds it.
-    return { ...base, window: latest.window, usedPercent: 100, resetsAt: full.some((line) => line.resetsAt === null) ? null : latest.resetsAt, blocked: !claudeHasExtraUsageRoom(row) };
+    return { ...base, window: latest.window, usedPercent: 100, resetsAt: full.some((line) => line.resetsAt === null) ? null : latest.resetsAt, blocked: ENGINE_WIDE_DRIVERS.has(row.driver) && !claudeHasExtraUsageRoom(row) };
   }
   const fullest = [...windows].sort((left, right) => right.used - left.used || (left.resetsAt ?? Infinity) - (right.resetsAt ?? Infinity))[0]!;
   return { ...base, window: fullest.window, usedPercent: fullest.used, resetsAt: fullest.resetsAt, blocked: false };
@@ -59,7 +62,7 @@ function holdGone(row: PlanProviderRow, limit: EngineLimit, held: number | undef
   return windows.every((line) => line === null || (line.resetsAt !== null && Math.abs(line.resetsAt - held) > SAME_RESET_MS));
 }
 
-const PRODUCT_NAMES: Record<string, string> = { claudeAgent: "Claude", codex: "Codex", grokAgent: "Grok", opencodeGo: "OpenCode" };
+const PRODUCT_NAMES: Record<string, string> = { claudeAgent: "Claude", codex: "Codex", grokAgent: "Grok", opencodeGo: "OpenCode", antigravityAgent: "Antigravity" };
 
 /** "Claude", "Codex", or the name the person gave that engine. */
 export function engineLabel(engine: string, instance?: { displayName?: string; driverKind: string }): string {
@@ -68,7 +71,7 @@ export function engineLabel(engine: string, instance?: { displayName?: string; d
 
 /** A line for the turn's text when its engine is nearly out of usage, so the bot can set up its own continuation. */
 export function nearLimitNote(limit: EngineLimit | undefined, name: string, timeZone: string): string {
-  if (!limit || limit.usedPercent === null || limit.usedPercent < NEAR_LIMIT_PERCENT) return "";
+  if (!limit || !ENGINE_WIDE_DRIVERS.has(limit.driver) || limit.usedPercent === null || limit.usedPercent < NEAR_LIMIT_PERCENT) return "";
   let resets = "";
   if (limit.resetsAt !== null) {
     try { resets = `; it resets ${new Date(limit.resetsAt).toLocaleString("en-US", { weekday: "short", hour: "numeric", minute: "2-digit", timeZone })} (${timeZone})`; }
@@ -265,8 +268,7 @@ export class LimitResetClock {
 
   async refresh(force: boolean): Promise<void> {
     if (this.loading) return this.loading;
-    // An engine whose usage holds nothing here (engineLimitFromUsage) is not asked for it.
-    const accounts = this.options.accounts().filter((account) => REPORTED_DRIVERS.has(account.driver));
+    const accounts = this.options.accounts();
     this.loading = (async () => {
       try {
         if (!accounts.length) { this.checkedAt = this.now(); this.failures = 0; return; }
