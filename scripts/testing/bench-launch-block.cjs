@@ -20,7 +20,45 @@ if (!globalThis[LOADED]) {
     const host = options.path ? null : String(options.host ?? "localhost").toLowerCase();
     if (host === null || LOCAL.has(host)) return connect.apply(this, args);
     note(`blocked ${host}:${options.port}`);
-    process.nextTick(() => this.destroy(new Error(`bench-launch: no connection to ${host} from a measured launch`)));
+    const refuse = () => this.destroy(new Error(`bench-launch: no connection to ${host} from a measured launch`));
+    const stallMs = Number(process.env.OMB_BENCH_EGRESS_STALL_MS) || 0;
+    if (stallMs) setTimeout(refuse, stallMs); else process.nextTick(refuse);
     return this;
   };
+  // The CPU a server has used when it says it listens: a start's cost that a busy machine does not stretch.
+  const cpuOut = process.env.OMB_BENCH_CPU_OUT;
+  if (cpuOut) {
+    const write = process.stdout.write;
+    process.stdout.write = function (chunk, ...rest) {
+      if (String(chunk).includes("openmausbot server on ")) {
+        const used = process.cpuUsage();
+        try { fs.writeFileSync(cpuOut, String((used.user + used.system) / 1000)); } catch {}
+        process.stdout.write = write;
+      }
+      return write.call(this, chunk, ...rest);
+    };
+  }
+  // The server child's own V8 profile, from its first line to its "listening" line (scripts/bench-launch.mjs --server-prof).
+  const profDir = process.env.OMB_BENCH_SERVER_PROF;
+  if (profDir && process.type === "utility") {
+    const { Session } = require("node:inspector");
+    const session = new Session();
+    session.connect();
+    session.post("Profiler.enable");
+    session.post("Profiler.setSamplingInterval", { interval: 250 });
+    session.post("Profiler.start");
+    const write = process.stdout.write;
+    let done = false;
+    process.stdout.write = function (chunk, ...rest) {
+      if (!done && String(chunk).includes("openmausbot server on ")) {
+        done = true;
+        const stop = () => session.post("Profiler.stop", (error, result) => {
+          if (!error) try { fs.mkdirSync(profDir, { recursive: true }); fs.writeFileSync(`${profDir}/server-${process.pid}.cpuprofile`, JSON.stringify(result.profile)); } catch {}
+        });
+        const tailMs = Number(process.env.OMB_BENCH_SERVER_PROF_TAIL_MS) || 0;
+        if (tailMs) setTimeout(stop, tailMs); else stop();
+      }
+      return write.call(this, chunk, ...rest);
+    };
+  }
 }
