@@ -6,23 +6,41 @@ import { object } from "./openai-chat-protocol.ts";
 /** nginx's "413 Request Entity Too Large" page, Express's "request entity too large", "Payload Too Large", and
  * OpenAI's "Request too large for <model>". */
 const TOO_LARGE = /\b(?:request entity|payload|request) too large\b/i;
+/** OpenAI's context_length_exceeded, and llama.cpp server's exceed_context_size_error (seen on b12532, streamed or not). */
+const CONTEXT_REFUSALS: ReadonlySet<unknown> = new Set(["context_length_exceeded", "exceed_context_size_error"]);
+
+const WINDOW_FILLED_BY_RESEND = 0.8;
+
+function bodyError(body: string): Record<string, unknown> | undefined {
+  try {
+    return object(object(JSON.parse(body))?.error);
+  } catch {
+    return undefined;
+  }
+}
 
 export function refusesRequestSize(status: number, body: string): boolean {
   if (status === 413 || TOO_LARGE.test(body)) return true;
   if (status !== 400) return false;
-  try {
-    const error = object(object(JSON.parse(body))?.error);
-    return error?.code === "context_length_exceeded" || error?.type === "context_length_exceeded";
-  } catch {
-    return false;
-  }
+  const error = bodyError(body);
+  return error?.code === "context_length_exceeded" || CONTEXT_REFUSALS.has(error?.type);
+}
+
+/** The share of a refused request that fits the window its provider counted (llama.cpp's n_ctx of n_prompt_tokens). */
+export function shareThatFits(body: string): number | undefined {
+  const error = bodyError(body);
+  const window = error?.n_ctx, prompt = error?.n_prompt_tokens;
+  if (typeof window !== "number" || typeof prompt !== "number" || window <= 0 || prompt <= window) return undefined;
+  return window / prompt * WINDOW_FILLED_BY_RESEND;
 }
 
 export class RequestTooLargeError extends Error {
   readonly bytes: number;
-  constructor(message: string, bytes: number) {
+  readonly fits: number | undefined;
+  constructor(message: string, bytes: number, fits?: number) {
     super(message);
     this.bytes = bytes;
+    this.fits = fits;
   }
 }
 
@@ -64,17 +82,19 @@ function shortenedToolOutput(message: OpenAIChatMessage): OpenAIChatMessage {
   return { ...message, content: typeof envelope?.result === "string" ? JSON.stringify({ ...envelope, result: shorten(envelope.result) }) : shorten(content) };
 }
 
-/** Aims at half of `refusedBytes`; null when nothing but the system prompt and `request` could shrink. */
+/** Aims at `fits` of `refusedBytes`, half when the provider did not say; null when nothing but the system prompt and
+ * `request` could shrink. */
 export function smallerResend(
   messages: readonly OpenAIChatMessage[],
   request: OpenAIChatMessage,
   refusedBytes: number,
+  fits = 0.5,
 ): { messages: OpenAIChatMessage[]; before: RequestSize; after: RequestSize } | null {
   const requestAt = messages.indexOf(request);
   if (requestAt < 0) throw new Error("the turn's request is not among the messages to resend");
   const before = requestSize(messages);
   const overhead = Math.max(0, refusedBytes - before.bytes);
-  const target = Math.floor(refusedBytes / 2) - overhead;
+  const target = Math.floor(refusedBytes * fits) - overhead;
   const out: Array<OpenAIChatMessage | null> = [...messages];
   const sizes = out.map(bytesOf);
   let total = sizes.reduce((sum, size) => sum + size, 0);

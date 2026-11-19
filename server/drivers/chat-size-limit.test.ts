@@ -8,13 +8,14 @@ import type { SendTurnInput } from "../contracts.ts";
 import { recordEvents } from "../testing/events.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
-import { IMAGE_OMITTED, refusesRequestSize, smallerResend, TOOL_OUTPUT_SHORTENED } from "./chat-size-limit.ts";
+import { IMAGE_OMITTED, refusesRequestSize, shareThatFits, smallerResend, TOOL_OUTPUT_SHORTENED } from "./chat-size-limit.ts";
 import type { OpenAIChatMessage } from "./openai-chat.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
 const NGINX_413 = "<html>\r\n<head><title>413 Request Entity Too Large</title></head>\r\n<body>\r\n<center><h1>413 Request Entity Too Large</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n";
 const CONTEXT_CODE = '{"error":{"code":"context_length_exceeded","message":"This model\'s maximum context length is 262142 tokens. Your messages resulted in 555619 tokens."}}';
 const CONTEXT_TYPE = '{"error":{"type":"context_length_exceeded","message":"prompt is too long: 300000 tokens > 262144 maximum"}}';
+const LLAMA_CPP = '{"error":{"code":400,"message":"request (98312 tokens) exceeds the available context size (98304 tokens), try increasing it","type":"exceed_context_size_error","n_prompt_tokens":98312,"n_ctx":98304}}';
 const SIZE_REFUSALS = [
   { name: "HTTP 413", status: 413, body: NGINX_413 },
   { name: "HTTP 400 error.code", status: 400, body: CONTEXT_CODE },
@@ -33,6 +34,7 @@ describe("refusesRequestSize", () => {
     [429, '{"error":{"message":"Request too large for gpt-4o in organization org-fixture on tokens per min (TPM): Limit 30000, Requested 45000."}}'],
     [400, CONTEXT_CODE],
     [400, CONTEXT_TYPE],
+    [400, LLAMA_CPP],
   ])("reads HTTP %i %j as a size refusal", (status, body) => {
     expect(refusesRequestSize(status, body)).toBe(true);
   });
@@ -46,6 +48,8 @@ describe("refusesRequestSize", () => {
     [400, '{"error":[{"code":"context_length_exceeded"}]}'],
     [400, '{"error":{"code":"context_length_exceeded_extra"}}'],
     [400, '{"error":{"type":"context_length_exceeded_extra"}}'],
+    [400, '{"error":{"message":"exceed_context_size_error"}}'],
+    [500, LLAMA_CPP],
     [400, "null"],
     [400, "[]"],
     [400, '{"error":'],
@@ -59,6 +63,23 @@ describe("refusesRequestSize", () => {
     [502, NGINX_413.replaceAll("413 Request Entity Too Large", "502 Bad Gateway")],
   ])("leaves HTTP %i %j alone", (status, body) => {
     expect(refusesRequestSize(status, body)).toBe(false);
+  });
+});
+
+describe("shareThatFits", () => {
+  it("keeps what fits the window llama.cpp counted, with room left for the reply", () => {
+    expect(shareThatFits(LLAMA_CPP)).toBeCloseTo(0.8, 3);
+    expect(shareThatFits('{"error":{"type":"exceed_context_size_error","n_prompt_tokens":400,"n_ctx":100}}')).toBeCloseTo(0.2);
+  });
+
+  it.each([
+    CONTEXT_CODE, CONTEXT_TYPE, NGINX_413, "",
+    '{"error":{"type":"exceed_context_size_error","n_prompt_tokens":100,"n_ctx":100}}',
+    '{"error":{"type":"exceed_context_size_error","n_prompt_tokens":"98312","n_ctx":"98304"}}',
+    '{"error":{"type":"exceed_context_size_error","n_prompt_tokens":98312,"n_ctx":0}}',
+    '{"n_prompt_tokens":98312,"n_ctx":98304}',
+  ])("says nothing about %j", (body) => {
+    expect(shareThatFits(body)).toBeUndefined();
   });
 });
 
@@ -108,6 +129,15 @@ describe("smallerResend", () => {
     expect(tool.result.startsWith("output only ")).toBe(true);
     expect(tool.result.endsWith(TOOL_OUTPUT_SHORTENED)).toBe(true);
     expect(resend.after.bytes).toBeLessThanOrEqual(refused / 2);
+  });
+
+  it("drops only as much as the provider's own count asks for", () => {
+    const { request, messages, refused } = turn(history(10, 4_000));
+    const halved = smallerResend(messages, request, refused)!;
+    const counted = smallerResend(messages, request, refused, 0.8)!;
+    expect(counted.after.bytes).toBeLessThanOrEqual(refused * 0.8);
+    expect(counted.after.bytes).toBeGreaterThan(halved.after.bytes);
+    expect(counted.after.messages).toBeGreaterThan(halved.after.messages);
   });
 
   it("offers nothing to resend when only the system prompt and the request are left", () => {
@@ -207,6 +237,51 @@ describe("an OpenAI-compatible provider that refuses large requests", () => {
     expect(logged).toEqual([expect.stringContaining(`refused a ${refused!.bytes}-byte request`)]);
     expect(logged[0]).toContain(`→ ${resent!.bytes} bytes, 22 → `);
     expect(logged[0]).not.toMatch(/earlier \d|Summarize|Fixture system/);
+  });
+
+  const tokens = (bytes: number) => Math.ceil(bytes / 4);
+  const llamaCpp = (window: (firstTokens: number) => number) => {
+    let n_ctx: number | undefined;
+    return (bytes: number) => {
+      n_ctx ??= window(tokens(bytes));
+      return tokens(bytes) > n_ctx ? { status: 400, body: JSON.stringify({ error: { code: 400,
+        message: `request (${tokens(bytes)} tokens) exceeds the available context size (${n_ctx} tokens), try increasing it`,
+        type: "exceed_context_size_error", n_prompt_tokens: tokens(bytes), n_ctx } }) } : null;
+    };
+  };
+
+  it("resends a request llama.cpp counts a few tokens over its window with most of the history kept", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = await provider(llamaCpp((first) => first - 2));
+    const done = await f.run({ system: "Fixture system prompt.", transcript: transcript(20, 3_000) });
+    expect(done).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(2);
+    const [refused, resent] = f.requests;
+    expect(resent!.bytes).toBeLessThanOrEqual(refused!.bytes * 0.8);
+    expect(resent!.bytes).toBeGreaterThan(refused!.bytes * 0.6);
+    expect(resent!.messages.length).toBeGreaterThan(refused!.messages.length / 2);
+    expect(resent!.messages.at(-1)).toEqual(refused!.messages.at(-1));
+    expect(f.retries()).toEqual([expect.objectContaining({ attempt: 1, delayMs: 0, reason: "request_too_large" })]);
+    expect(f.errors()).toEqual([]);
+  });
+
+  it("resends a request llama.cpp counts at three times its window small enough to fit, where half would not", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = await provider(llamaCpp((first) => Math.floor(first / 3)));
+    const done = await f.run({ system: "Fixture system prompt.", transcript: transcript(20, 3_000) });
+    expect(done).toMatchObject({ ok: true });
+    expect(f.requests).toHaveLength(2);
+    expect(tokens(f.requests[1]!.bytes)).toBeLessThanOrEqual(Math.floor(tokens(f.requests[0]!.bytes) / 3));
+    expect(f.errors()).toEqual([]);
+  });
+
+  it("fails with one plain message when not even the newest message fits llama.cpp's window", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const f = await provider(llamaCpp(() => 100));
+    const done = await f.run({ system: "Fixture system prompt.", transcript: transcript(20, 3_000) });
+    expect(done).toMatchObject({ ok: false });
+    expect(f.requests).toHaveLength(2);
+    expect(f.errors()).toEqual([requestTooLargeMessage("Fixture Flash")]);
   });
 
   it.each(SIZE_REFUSALS)("$name fails with one plain message when the smaller resend is still too large", async (refusal) => {

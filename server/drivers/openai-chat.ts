@@ -30,7 +30,7 @@ import { classifyError, computeBackoff, interruptibleDelay, RETRY_MAX_ATTEMPTS }
 import { plainFailure } from "./engine-errors.ts";
 import { noticeFailure } from "../chat-notices.ts";
 import { toolFailureMessage } from "./tool-failure.ts";
-import { refusesRequestSize, RequestTooLargeError, sizeChange, smallerResend } from "./chat-size-limit.ts";
+import { refusesRequestSize, RequestTooLargeError, shareThatFits, sizeChange, smallerResend } from "./chat-size-limit.ts";
 import { requestTooLargeMessage } from "../../shared/request-too-large.ts";
 import { toolSchemaProfileFor } from "../tool-schema-profile.ts";
 import { classifyContinuable, writeTurnHandoff } from "../turn-continuation.ts";
@@ -300,7 +300,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const refused = tools.length ? routeRefusal(route, status, body) : null;
         if (refused) return new ModelRouteRefused(refused, message);
         if (rejectsKey(status, body)) noteKeyRejected(options.apiUrl, options.apiKey);
-        if (refusesRequestSize(status, body)) return new RequestTooLargeError(message, Buffer.byteLength(payload));
+        if (refusesRequestSize(status, body)) return new RequestTooLargeError(message, Buffer.byteLength(payload), shareThatFits(body));
         if (rejectsToolsParameter(status, body)) return new UnsupportedChatToolsError(message);
         const refusal = refusedToolCall(status, body);
         if (refusal) return new RejectedToolCallError(message, refusal);
@@ -697,7 +697,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               }
               // A provider refuses an oversized request before running anything, so one smaller copy may go again.
               if (error instanceof RequestTooLargeError && !abort.signal.aborted) {
-                const resend = resized ? null : smallerResend(messages, request, error.bytes);
+                const resend = resized ? null : smallerResend(messages, request, error.bytes, error.fits);
                 native("out", { refused: "request_too_large", bytes: error.bytes, ...(resend ? { before: resend.before, after: resend.after } : {}) });
                 console.warn(`${options.driverKind}: ${model} refused a ${error.bytes}-byte request as too large; ${resend ? `resending smaller (${sizeChange(resend.before, resend.after)})` : "not resending"}`);
                 if (!resend) throw new ChatProtocolError(requestTooLargeMessage(options.models().options.find((option) => option.id === model)?.label ?? model));
