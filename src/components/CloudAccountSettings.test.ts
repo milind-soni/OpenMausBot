@@ -198,6 +198,26 @@ it("a saved sign-in that can't be read right now says the app tries again by its
   expect(html).toContain("This computer couldn&#x27;t open its saved Cloud sign-in. Unlock your keychain, and the app tries again by itself.");
   none(html, ["could not be read or cleared", "sign out again", "Sign out of MausBot Cloud, then"]);
 });
+it("a saved sign-in this computer can't read or remove: one button clears it and starts the sign-in, whatever the platform", async () => {
+  for (const [platform, onSignIn] of [["win32", undefined], ["darwin", vi.fn()]] as const) {
+    f.values = []; f.platform = platform;
+    bridge.resetSaved = vi.fn().mockResolvedValue({ status: "signed-out" }); vi.mocked(bridge.begin).mockClear();
+    await ready({ status: "unavailable", message: "restore-failed", reset: true });
+    const html = render({ onSignIn }).html;
+    expect(html).toContain("This computer can&#x27;t read or remove its saved MausBot Cloud sign-in. Clear it to sign in again.");
+    none(html, ["tries again by itself", "nothing you need to do"]);
+    render({ onSignIn }).nodes.find(node => node.type === "button" && node.props.children === "Clear and sign in again")!.props.onClick!(); await flush();
+    expect(bridge.resetSaved).toHaveBeenCalledOnce();
+    if (onSignIn) { expect(onSignIn).toHaveBeenCalledOnce(); expect(bridge.begin).not.toHaveBeenCalled(); }
+    else expect(bridge.begin).toHaveBeenCalledOnce();
+  }
+});
+it("a saved sign-in that couldn't be removed, and one kept for this run only, each say so", async () => {
+  await ready({ status: "signed-out", message: "reset-kept" });
+  expect(render().html).toContain("The saved sign-in couldn&#x27;t be removed from this computer, but you can sign in now.");
+  push({ ...free, unsaved: true });
+  expect(render().html).toContain("Signed in for now. This computer couldn&#x27;t save the sign-in");
+});
 it("a sign-out that could not clear the saved sign-in still asks for it", async () => {
   await ready({ status: "unavailable", message: "signout-storage-failed" });
   const html = render().html;

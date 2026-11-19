@@ -1,4 +1,5 @@
 import type { CloudAccountState, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
+import type { CloudSignInBlocked } from "../../electron/cloud-signin.mjs";
 import type { CloudCredit, CloudOffer, CloudOfferPlan, CloudPlanAllowances, CloudSetupStep, CloudTrial, CloudTrialState } from "../../electron/cloud-home.mjs";
 import { planTeam, teamPlan } from "../../electron/cloud-team-plan.mjs";
 import { activeLocale, t } from "@/lib/i18n";
@@ -272,7 +273,13 @@ export function cloudIntroView(offer: CloudOffer | null | undefined): { badge: s
 export const CHECKOUT_WAIT_MS = 30 * 60_000;
 
 /** The in-app sign-in's step, kept by the sheet: where it is and what the Admin last said, never a code or token. */
-export type CloudSignInProblem = "invalid-email" | "rate-limited" | "failed" | "wrong-code" | "expired" | "signup-closed" | "device-limit" | "sso" | "two-factor" | "browser";
+export type CloudSignInProblem = "invalid-email" | "rate-limited" | "failed" | "wrong-code" | "expired" | "signup-closed" | "device-limit" | "sso" | "two-factor" | "browser"
+  | "saved" | "saved-wait" | "connecting" | "busy" | "signed-in";
+/** A sign-in that couldn't start, as the sheet says it: a saved sign-in this computer can't read (`saved` once clearing it is
+ * offered, `saved-wait` while the app still tries to read it), one in the browser (`connecting`), or a moment's wait. */
+export function blockedProblem(result: CloudSignInBlocked): CloudSignInProblem {
+  return result.reason === "saved" ? (result.reset ? "saved" : "saved-wait") : result.reason;
+}
 export type CloudSignInPhase =
   | { step: "email"; intent: boolean; problem: CloudSignInProblem | null }
   | { step: "code"; intent: boolean; email: string; resendAt: number; problem: CloudSignInProblem | null; triesLeft: number | null; signupOpen?: boolean }
