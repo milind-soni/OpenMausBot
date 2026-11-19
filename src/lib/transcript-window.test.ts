@@ -1,13 +1,20 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  TRANSCRIPT_WINDOW_MAX,
   TRANSCRIPT_WINDOW_SIZE,
+  capWindowEnd,
   expandWindowStart,
   focusWindowRange,
   followWindowStart,
   resolveTranscriptWindow,
+  restoreWindow,
   tailWindowStart,
+  windowAfterPrepend,
+  windowEarlier,
+  windowLater,
   withRestingCard,
+  type TranscriptWindowBounds,
 } from "./transcript-window";
 
 const thread = (total: number): number[] => Array.from({ length: total }, (_, i) => i);
@@ -185,5 +192,59 @@ describe("withRestingCard", () => {
   it("adds nothing when no card rests on the person", () => {
     expect(withRestingCard(rows, range.visible, range.startIndex, () => false)).toBe(range.visible);
     expect(withRestingCard(rows, range.visible, range.startIndex)).toBe(range.visible);
+  });
+});
+
+describe("a two-sided window", () => {
+  const drawn = (total: number, window: TranscriptWindowBounds) => resolveTranscriptWindow(thread(total), window.start, TRANSCRIPT_WINDOW_SIZE, window.end);
+
+  it("draws at most the cap however many steps up the reader takes, then as many back down", () => {
+    const total = 3_000;
+    let window: TranscriptWindowBounds = { start: tailWindowStart(total), end: null };
+    const seen = new Set<number>();
+    for (let step = 0; step < 30; step++) {
+      window = windowEarlier(window, total);
+      const shown = drawn(total, window);
+      expect(shown.visible.length).toBeLessThanOrEqual(TRANSCRIPT_WINDOW_MAX);
+      expect(shown.hiddenCount + shown.visible.length + shown.laterCount).toBe(total);
+      for (const row of shown.visible) seen.add(row);
+    }
+    expect(window).toEqual({ start: 0, end: TRANSCRIPT_WINDOW_MAX });
+    expect(seen.size, "every row was drawn on the way up").toBe(total);
+
+    for (let step = 0; step < 30; step++) {
+      window = windowLater(window, total);
+      expect(drawn(total, window).visible.length).toBeLessThanOrEqual(TRANSCRIPT_WINDOW_MAX);
+    }
+    expect(window).toEqual({ start: total - TRANSCRIPT_WINDOW_MAX, end: null });
+  });
+
+  it("keeps the rows it had on each step, so the row under the reader stays drawn", () => {
+    const total = 1_000;
+    const up = windowEarlier({ start: 500, end: 740 }, total);
+    expect(up).toEqual({ start: 380, end: 620 });
+    const down = windowLater({ start: 380, end: 620 }, total);
+    expect(down).toEqual({ start: 500, end: 740 });
+  });
+
+  it("caps only a window over the cap, and marks an end at the newest row as null", () => {
+    expect(capWindowEnd({ start: 100, end: null }, 300)).toEqual({ start: 100, end: null });
+    expect(capWindowEnd({ start: 0, end: null }, 300)).toEqual({ start: 0, end: TRANSCRIPT_WINDOW_MAX });
+    expect(capWindowEnd({ start: 200, end: 300 }, 300)).toEqual({ start: 200, end: null });
+  });
+
+  it("moves over an older page put in front: one step of it at the top, the same rows anywhere else", () => {
+    expect(windowAfterPrepend({ start: 0, end: null }, 200, 400)).toEqual({ start: 80, end: 320 });
+    expect(windowAfterPrepend({ start: 0, end: null }, 50, 100)).toEqual({ start: 0, end: null });
+    expect(windowAfterPrepend({ start: 40, end: 200 }, 200, 600)).toEqual({ start: 240, end: 400 });
+  });
+
+  it("puts a remembered row back inside a capped window", () => {
+    const window = restoreWindow(3_000, 1_000, 0);
+    expect(window.start).toBeLessThanOrEqual(1_000);
+    expect(window.end).not.toBeNull();
+    expect(window.end! - window.start).toBeLessThanOrEqual(TRANSCRIPT_WINDOW_MAX);
+    expect(window.end).toBeGreaterThan(1_000);
+    expect(restoreWindow(300, 250, 200)).toEqual({ start: 180, end: null });
   });
 });
