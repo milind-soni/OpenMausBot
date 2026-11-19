@@ -15,12 +15,16 @@ Application updates are paused during the alpha. To install a newer build, quit 
 ## Set up your workspace
 
 1. Select **Get started** and save your display name. Email is optional.
-2. Review the AI engines Studio detects. Follow the setup instructions for your engine and select **Recheck engines**. The status cards show installation, sign-in, and any subscription information the engine makes available.
+2. Review the AI engines Studio detects. Follow the setup instructions for your engine and select **Recheck**. Each card shows installation, sign-in, and any subscription information the engine makes available.
 3. Choose how you want to use Studio. Pick Development, Design, Research, Finance, or describe a custom goal.
-4. Review and edit your suggested Buddies. You can change their names, roles, responsibilities, and models, and add or remove people before approving the workspace.
+4. Review and edit your suggested Buddies. You can change their names, roles, responsibilities, and models, and add or remove Buddies before approving the workspace.
 5. Start the guided tour or go straight to your new workspace. To reopen it, select **Restart Studio tour** in **Settings → System**.
 
-![Team review showing the suggested Buddies, roles, and models](docs/screenshots/alpha-team-review.png)
+| Personal details | AI engines |
+| --- | --- |
+| ![Personal details step with display name and optional email](docs/screenshots/alpha-personal-details.png) | ![AI engines step showing install, sign-in, and plan status for each engine](docs/screenshots/alpha-ai-engines.png) |
+| **Purpose** | **Your team** |
+| ![Purpose step with Development, Design, Research, Finance, and Custom options](docs/screenshots/alpha-purpose.png) | ![Team review showing the suggested Buddies, roles, and models](docs/screenshots/alpha-team-review.png) |
 
 You can explore Studio without an engine. Assign a model and connect its engine before asking a Buddy to run a task.
 

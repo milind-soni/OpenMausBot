@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { ProjectMentionText } from "./ProjectMentionText";
 import { Switch } from "./Switch";
 import { UsageRings } from "./UsageRings";
+import { relativeTime, zoneLabel } from "@/lib/scheduleLabels";
 import type { Schedule, ScheduleRepeat } from "../../server/schedule-types";
 
 const panel = "rounded-2xl border border-hairline/50 bg-card p-4";
@@ -24,6 +25,12 @@ function cadence(repeat: ScheduleRepeat) {
 function dateTime(at: string, timeZone: string) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short", timeZone }).format(new Date(at));
 }
+
+const statusStyles = {
+  Active: "border-success/40 bg-success/10 text-success",
+  Paused: "border-warning/40 bg-warning/10 text-warning",
+  Off: "border-hairline/60 bg-raised text-ink-secondary",
+};
 
 const outcomes = { queued: "Queued", missed: "Missed", failed: "Failed", sent: "Sent" };
 
@@ -122,10 +129,15 @@ export function SchedulesScreen() {
               </div>
               {schedules.map((schedule) => {
                 const path = `/api/schedules/${schedule.id}`;
-                const next = !schedule.enabled ? "Off" : paused ? "Paused" : schedule.nextRunAt ? dateTime(schedule.nextRunAt, schedule.timezone) : "No upcoming run";
+                const status = !schedule.enabled ? "Off" : paused ? "Paused" : "Active";
+                const next = status !== "Active" ? "Not scheduled" : schedule.nextRunAt ? dateTime(schedule.nextRunAt, schedule.timezone) : "No upcoming run";
+                const nextHint = status === "Active" && schedule.nextRunAt ? relativeTime(schedule.nextRunAt) : status === "Paused" ? "Resume schedules to run" : status === "Off" ? "Turn on to run" : "";
                 return <article key={schedule.id} className={panel}>
                   <div className="flex flex-wrap items-start justify-between gap-3">
-                    <p className="min-w-0 flex-1 break-words text-sm text-ink"><ProjectMentionText text={schedule.prompt} /></p>
+                    <div className="min-w-0 flex-1">
+                      <span className={cn("mb-2 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium", statusStyles[status])}>{status}</span>
+                      <p className="break-words text-sm text-ink"><ProjectMentionText text={schedule.prompt} /></p>
+                    </div>
                     <div className="flex shrink-0 items-center gap-1">
                       <button type="button" disabled={pending} title="Run now" aria-label="Run schedule now" className={iconButton} onClick={() => void act(`${path}/run-now`, "POST")}><Play size={15} /></button>
                       <button type="button" disabled={schedule.origin === "auto-resume" || pending} title="Edit" aria-label="Edit schedule" className={iconButton} onClick={() => dispatch({ type: "openSchedule", schedule })}><Pencil size={15} /></button>
@@ -133,10 +145,10 @@ export function SchedulesScreen() {
                       {schedule.origin !== "auto-resume" && <Switch size="sm" label={`Schedule for ${name ?? type}`} disabled={pending} checked={schedule.enabled} onChange={(enabled) => void act(path, "PATCH", { enabled })} />}
                     </div>
                   </div>
-                  <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+                  <dl className="mt-3 grid gap-3 rounded-xl bg-raised/50 p-3 text-xs sm:grid-cols-3">
                     <div><dt className="text-ink-secondary">Cadence</dt><dd className="mt-1 text-ink">{cadence(schedule.repeat)}</dd></div>
-                    <div><dt className="text-ink-secondary">Time zone</dt><dd className="mt-1 break-words text-ink">{schedule.timezone}</dd></div>
-                    <div><dt className="text-ink-secondary">Next run</dt><dd className="mt-1 text-ink">{next}</dd></div>
+                    <div><dt className="text-ink-secondary">Time zone</dt><dd className="mt-1 break-words text-ink" title={schedule.timezone}>{zoneLabel(schedule.timezone)}</dd></div>
+                    <div><dt className="text-ink-secondary">Next run</dt><dd className="mt-1 text-ink">{next}{nextHint && <span className="block text-ink-secondary">{nextHint}</span>}</dd></div>
                   </dl>
                   {schedule.origin === "auto-resume" && <p className="mt-2 text-xs text-ink-secondary">Automatic retry</p>}
                   {schedule.origin === "bot" && <p className="mt-2 text-xs text-ink-secondary">Created by {state.bots.find((buddy) => buddy.id === schedule.createdBy)?.name ?? "a Buddy"}</p>}

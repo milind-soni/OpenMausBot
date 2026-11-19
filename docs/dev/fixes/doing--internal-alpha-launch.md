@@ -46,4 +46,6 @@ Execution checklist for [the detailed implementation plan](../plans/implementati
 
 - Baseline on Node 24.19.0: 548 of 550 tests passed. Two schedule retry tests depended on elapsed timestamps in the simulated Codex account response. The fixture now generates a current window; all 556 tests in 71 files passed after the fix.
 - The package version is 0.1.16. The installer target is macOS arm64. Windows packaging remains available for a separate Windows verification pass.
+- Schedules (2026-11-19): each schedule shows an Active, Paused or Off pill, a readable time zone such as `London (GMT)` and a relative next run. Execution code is unchanged. `src/lib/scheduleLabels.test.ts` covers the labels. Suite: 559 tests in 73 files pass, build passes.
+- README now uses Z's wireframe-matched screenshots for all five onboarding steps (resized to 1600 px).
 - Studio Preview verified the redesigned welcome and team review at 1440 × 900. The README includes both images. The earlier pass verified profile and engine setup at 390 × 844 and an edited proposal surviving reload before approval.
