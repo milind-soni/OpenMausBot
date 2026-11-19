@@ -227,10 +227,10 @@ describe("a two-sided window", () => {
 
   it("keeps the rows it had on each step, so the row under the reader stays drawn", () => {
     const total = 1_000;
-    expect(TRANSCRIPT_WINDOW_STEP).toBe(30);
+    expect(TRANSCRIPT_WINDOW_STEP).toBe(20);
     const up = windowEarlier({ start: 500, end: 740 }, total);
-    expect(up).toEqual({ start: 470, end: 710 });
-    const down = windowLater({ start: 470, end: 710 }, total);
+    expect(up).toEqual({ start: 480, end: 720 });
+    const down = windowLater({ start: 480, end: 720 }, total);
     expect(down).toEqual({ start: 500, end: 740 });
   });
 
@@ -241,7 +241,7 @@ describe("a two-sided window", () => {
   });
 
   it("moves over an older page put in front: one step of it at the top, the same rows anywhere else", () => {
-    expect(windowAfterPrepend({ start: 0, end: null }, 200, 400)).toEqual({ start: 170, end: null });
+    expect(windowAfterPrepend({ start: 0, end: null }, 200, 400)).toEqual({ start: 200 - TRANSCRIPT_WINDOW_STEP, end: null });
     expect(windowAfterPrepend({ start: 0, end: null }, 50, 100)).toEqual({ start: 50 - TRANSCRIPT_WINDOW_STEP, end: null });
     expect(windowAfterPrepend({ start: 40, end: 200 }, 200, 600)).toEqual({ start: 240, end: 400 });
   });
