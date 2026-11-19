@@ -15,8 +15,8 @@ When a Buddy types or presses keys in Studio Preview, the preview takes OS keybo
 
 ## 1. Fix
 
-- [~] **Remove the `webContents.focus()` calls from Buddy fill and press actions** — `electron/preview-browser.mjs:178`, `electron/preview-browser.mjs:198`. `Emulation.setFocusEmulationEnabled` (`electron/preview-browser.mjs:121`) already makes the page behave as focused, and CDP `Input.*` delivers input without OS focus.
-- [~] **Regression test: Buddy actions never call `focus()` on the preview webContents** — `electron/preview-browser.test.mjs`.
+- [?] **Remove the `webContents.focus()` calls from Buddy fill and press actions** — `electron/preview-browser.mjs:178`, `electron/preview-browser.mjs:198`. `Emulation.setFocusEmulationEnabled` (`electron/preview-browser.mjs:121`) already makes the page behave as focused, and CDP `Input.*` delivers input without OS focus.
+- [?] **Regression test: Buddy actions never call `focus()` on the preview webContents** — `electron/preview-browser.test.mjs`.
 
 ## 2. Verification
 
