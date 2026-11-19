@@ -66,13 +66,14 @@ const linuxTrees = new WeakMap<ChildProcess, Map<number, string>>();
 const PS_ROW = /^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+?)\s*$/;
 
 /** macOS has no /proc: `ps` gives the same pid, parent, state and start time (`lstart`, the identity that survives PID reuse). */
-function psProcesses(pid?: number): Map<number, LinuxProcess> {
+function psProcesses(pids?: readonly number[]): Map<number, LinuxProcess> {
   const rows = new Map<number, LinuxProcess>();
+  if (pids?.length === 0) return rows;
   let out: string;
   try {
-    out = execFileSync("/bin/ps", [...(pid ? ["-p", String(pid)] : ["-A"]), "-o", "pid=,ppid=,stat=,lstart="], { encoding: "utf8", timeout: 2_000, windowsHide: true, env: { ...process.env, LC_ALL: "C" } });
+    out = execFileSync("/bin/ps", [...(pids ? ["-p", pids.join(",")] : ["-A"]), "-o", "pid=,ppid=,stat=,lstart="], { encoding: "utf8", timeout: 2_000, windowsHide: true, env: { ...process.env, LC_ALL: "C" } });
   } catch (error) {
-    if (pid && (error as { status?: number }).status === 1) return rows;
+    if (pids && (error as { status?: number }).status === 1) return rows;
     throw error;
   }
   for (const line of out.split(/\r?\n/)) {
@@ -82,8 +83,15 @@ function psProcesses(pid?: number): Map<number, LinuxProcess> {
   return rows;
 }
 
+/** Reads the tracked pids: on macOS one `ps` for them all, not one per pid on each pass of a stop loop. */
+function treeReader(pids: readonly number[]): (pid: number) => LinuxProcess | null {
+  if (process.platform !== "darwin") return (pid) => linuxProcess(pid);
+  const rows = psProcesses(pids);
+  return (pid) => rows.get(pid) ?? null;
+}
+
 function linuxProcess(pid: number, file = `/proc/${pid}/stat`): LinuxProcess | null {
-  if (process.platform === "darwin") return psProcesses(pid).get(pid) ?? null;
+  if (process.platform === "darwin") return psProcesses([pid]).get(pid) ?? null;
   let stat: string;
   try {
     stat = readFileSync(file, "utf8");
@@ -192,10 +200,12 @@ function addDescendantsFromEveryProcess(tree: Map<number, string>): void {
 }
 
 function linuxDescendantsStopped(child: ChildProcess): boolean {
-  for (const [pid, start] of linuxTrees.get(child) ?? []) {
-    if (pid === child.pid) continue;
+  const tree = [...linuxTrees.get(child) ?? []].filter(([pid]) => pid !== child.pid);
+  let read: (pid: number) => LinuxProcess | null;
+  try { read = treeReader(tree.map(([pid]) => pid)); } catch { return false; }
+  for (const [pid, start] of tree) {
     try {
-      const current = linuxProcess(pid);
+      const current = read(pid);
       if (current?.start === start && current.state !== "Z" && current.state !== "X") return false;
     } catch { return false; }
   }
@@ -231,10 +241,12 @@ function linuxRootIdentityMatches(child: ChildProcess): boolean | undefined {
 }
 
 function signalLinuxDescendants(child: ChildProcess, value: NodeJS.Signals): void {
-  for (const [pid, start] of [...(linuxTrees.get(child) ?? [])].reverse()) {
-    if (pid === child.pid || pid <= 1 || pid === process.pid) continue;
+  const tree = [...(linuxTrees.get(child) ?? [])].reverse().filter(([pid]) => pid !== child.pid && pid > 1 && pid !== process.pid);
+  let read: (pid: number) => LinuxProcess | null;
+  try { read = treeReader(tree.map(([pid]) => pid)); } catch { return; }
+  for (const [pid, start] of tree) {
     try {
-      const current = linuxProcess(pid);
+      const current = read(pid);
       if (current?.start === start && current.state !== "Z" && current.state !== "X") process.kill(pid, value);
     } catch {}
   }
@@ -405,7 +417,8 @@ export function spawnCli(
   if (process.platform !== "win32" && owner === "bot") {
     rememberEngineSession(child);
     engineMemory.track(child);
-    engineOwners.track(child, child.pid ? linuxTrees.get(child)?.get(child.pid) ?? null : null);
+    // The perf sampler's rows carry a start tick only on Linux: elsewhere the engine is recorded without one, as before.
+    engineOwners.track(child, child.pid && process.platform === "linux" ? linuxTrees.get(child)?.get(child.pid) ?? null : null);
   }
 
   // On Windows a stdin write between taskkill and pipe close errors asynchronously; unlistened, that crashes the harness.
