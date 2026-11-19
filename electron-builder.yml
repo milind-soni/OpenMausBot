@@ -57,6 +57,23 @@ mac:
 dmg:
   sign: true
   artifactName: GererBuildStudio-${version}.dmg
+  title: Gerer Build Studio ${version}
+  # Studio-blue installer window; source in build/dmg/background.html.
+  background: build/background.png
+  backgroundColor: "#0a101c"
+  icon: build/icon.icns
+  iconSize: 112
+  iconTextSize: 13
+  window:
+    width: 660
+    height: 420
+  contents:
+    - x: 165
+      y: 215
+    - x: 495
+      y: 215
+      type: link
+      path: /Applications
 
 win:
   target:

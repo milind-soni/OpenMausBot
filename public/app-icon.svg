@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
   <title id="title">Gerer Build Studio</title>
-  <desc id="desc">A mint Gerer Buddy, its scalloped body slightly turned, looking up and to the left from a dark rounded tile.</desc>
+  <desc id="desc">A Studio-blue Gerer Buddy, its scalloped body slightly turned, looking up and to the left from a dark rounded tile.</desc>
 
   <defs>
     <!-- macOS icon grid: an 824 tile inset 100 from the canvas, room for the shadow. -->
@@ -9,21 +9,21 @@
     </clipPath>
 
     <linearGradient id="tile" x1="0.2" y1="0" x2="0.8" y2="1">
-      <stop offset="0" stop-color="#1D2422" />
-      <stop offset="0.55" stop-color="#121715" />
-      <stop offset="1" stop-color="#090B0A" />
+      <stop offset="0" stop-color="#18243A" />
+      <stop offset="0.55" stop-color="#0E1626" />
+      <stop offset="1" stop-color="#070B13" />
     </linearGradient>
 
     <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#00C9A8" stop-opacity="0.42" />
-      <stop offset="0.6" stop-color="#00C9A8" stop-opacity="0.1" />
-      <stop offset="1" stop-color="#00C9A8" stop-opacity="0" />
+      <stop offset="0" stop-color="#1084FE" stop-opacity="0.48" />
+      <stop offset="0.6" stop-color="#1084FE" stop-opacity="0.12" />
+      <stop offset="1" stop-color="#1084FE" stop-opacity="0" />
     </radialGradient>
 
     <linearGradient id="body" x1="0.15" y1="0.1" x2="0.85" y2="0.95">
-      <stop offset="0" stop-color="#5BF0D3" />
-      <stop offset="0.45" stop-color="#00C9A8" />
-      <stop offset="1" stop-color="#00977E" />
+      <stop offset="0" stop-color="#7DBEFF" />
+      <stop offset="0.45" stop-color="#1084FE" />
+      <stop offset="1" stop-color="#0757C2" />
     </linearGradient>
 
     <radialGradient id="shine" cx="0.36" cy="0.3" r="0.7">
@@ -35,7 +35,7 @@
       <feDropShadow dx="0" dy="14" stdDeviation="18" flood-color="#000" flood-opacity="0.35" />
     </filter>
     <filter id="buddy-shadow" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="22" stdDeviation="26" flood-color="#00140F" flood-opacity="0.55" />
+      <feDropShadow dx="0" dy="22" stdDeviation="26" flood-color="#000A1A" flood-opacity="0.55" />
     </filter>
   </defs>
 

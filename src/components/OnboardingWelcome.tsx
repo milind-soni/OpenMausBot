@@ -76,7 +76,7 @@ export function OnboardingWelcome({ heading, reducedMotion, onStart }: {
             <span className="gbs-welcome-buddy-halo" style={{ "--buddy-glow": "rgba(0, 201, 168, 0.26)" } as CSSProperties} />
             <MausAvatar
               size={68}
-              color="mint"
+              color="blue"
               state="curious"
               gaze={{ x: 0.35, y: 0.25 }}
               animated={animated}
@@ -89,7 +89,7 @@ export function OnboardingWelcome({ heading, reducedMotion, onStart }: {
         <div className="gbs-welcome-hero relative z-10 flex max-w-[680px] flex-col items-center text-center">
           {/* Compact emblem on smaller screens where the floating corner Buddies move below */}
           <div className="mb-5 flex items-center justify-center lg:hidden" aria-hidden="true">
-            <MausAvatar size={54} color="mint" state="curious" animated={animated} trackPointer={animated} />
+            <MausAvatar size={54} color="blue" state="curious" animated={animated} trackPointer={animated} />
           </div>
 
           {/* The title is centred on its own; the version pill hangs beside it without shifting it. */}

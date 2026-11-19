@@ -1,0 +1,35 @@
+<!doctype html>
+<!-- Source for build/background.png (660×420) and background@2x.png. Icons are placed by Finder at (165,215) and (495,215). -->
+<html><head><meta charset="utf-8"><style>
+  html,body{margin:0;width:660px;height:420px;overflow:hidden}
+  body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Inter",sans-serif;color:#fff;
+    background:
+      radial-gradient(420px 260px at 50% 58%, rgba(16,132,254,.30), transparent 70%),
+      radial-gradient(300px 200px at 12% 0%, rgba(125,190,255,.12), transparent 70%),
+      linear-gradient(180deg,#0f1828 0%,#0a101c 60%,#070b13 100%);position:relative}
+  .grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:30px 30px;mask-image:radial-gradient(ellipse at 50% 55%,#000 30%,transparent 75%)}
+  header{position:absolute;top:34px;left:0;right:0;text-align:center}
+  .title{display:inline-block;position:relative;font-size:26px;font-weight:700;letter-spacing:-.03em;
+    background:linear-gradient(180deg,#fff 20%,#cfd9e8);-webkit-background-clip:text;color:transparent}
+  .pill{position:absolute;left:100%;top:50%;transform:translateY(-50%);margin-left:10px;white-space:nowrap;
+    font-size:10px;font-weight:600;letter-spacing:.04em;color:#7dbeff;border:1px solid rgba(16,132,254,.45);
+    background:rgba(16,132,254,.14);border-radius:999px;padding:2px 8px}
+  .sub{margin-top:8px;font-size:12.5px;color:rgba(214,224,240,.62)}
+  .slot{position:absolute;top:151px;width:128px;height:128px;border-radius:30px;
+    background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07)}
+  .arrow{position:absolute;top:197px;left:262px;width:136px;height:36px}
+  footer{position:absolute;bottom:26px;left:0;right:0;text-align:center;font-size:11.5px;color:rgba(214,224,240,.5)}
+  footer b{color:#7dbeff;font-weight:600}
+</style></head><body>
+  <div class="grid"></div>
+  <header><span class="title">Gérer Build Studio<span class="pill">v0.1 Alpha</span></span>
+    <div class="sub">Your desktop hub of AI Buddies</div></header>
+  <div class="slot" style="left:101px"></div>
+  <div class="slot" style="left:431px"></div>
+  <svg class="arrow" viewBox="0 0 136 36" fill="none">
+    <defs><linearGradient id="a" gradientUnits="userSpaceOnUse" x1="6" y1="18" x2="118" y2="18"><stop offset="0" stop-color="#1084fe" stop-opacity=".15"/><stop offset="1" stop-color="#4aa3ff"/></linearGradient></defs>
+    <path d="M6 18 H118" stroke="url(#a)" stroke-width="3" stroke-linecap="round" stroke-dasharray="2 9"/>
+    <path d="M112 8 L126 18 L112 28" stroke="#4aa3ff" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <footer>Drag <b>Gerer Build Studio</b> into <b>Applications</b> to install</footer>
+</body></html>
