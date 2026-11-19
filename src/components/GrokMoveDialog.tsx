@@ -5,7 +5,7 @@ import { track } from "@/lib/analytics";
 import { openExternalLink } from "@/lib/app-links";
 import { cn } from "@/lib/cn";
 import { useCopyFeedback } from "@/lib/copy-text";
-import { foundExports, grokConnector, grokErrorText, lookForGrokBot, MAUSBOT_GROK_TEMPLATE_URL, NOTHING_FOUND, previewGrokMove, runGrokMove, type GrokConnector, type GrokHistory, type GrokLook, type GrokPreview, type GrokReport } from "@/lib/grok-move";
+import { foundExports, grokConnector, grokErrorText, lookForGrokBot, MAUSBOT_GROK_TEMPLATE_URL, NOTHING_FOUND, previewGrokMove, runGrokMove, type GrokAsset, type GrokBrought, type GrokConnector, type GrokHistory, type GrokLook, type GrokPreview, type GrokReport, type GrokWaiting } from "@/lib/grok-move";
 import { t } from "@/lib/i18n";
 import { localSetupImport } from "@/lib/setup-import";
 import { api, useStore } from "@/state/store";
@@ -16,14 +16,19 @@ import { GrokLink, grokReachLine } from "./GrokConnector";
 const PRIMARY = "ui-button ui-button-primary min-h-9 px-4 text-[14px]";
 const SECONDARY = "ui-button min-h-9 px-4 text-[14px]";
 const LINE = "text-[13px] leading-relaxed text-ink-secondary";
+const NONE_WAITING: GrokWaiting = { pages: [], files: 0 };
 
 /** A Bot as one heading and a count per kind; a kind it has none of is left out. */
-export function BotCounts({ heading, skills, routines, memories, notes, skillsOff, history }: {
+export function BotCounts({ heading, skills, routines, memories, notes, skillsOff, history, waiting = NONE_WAITING, brought }: {
   heading: string; skills: number; routines: number; memories: number; notes: number; skillsOff: readonly string[]; history?: GrokHistory;
+  waiting?: GrokWaiting;
+  brought?: GrokBrought;
 }) {
+  const came = brought && "pages" in brought ? brought : null;
   const rows = [
     [t("grokMove.count.skills"), skills], [t("grokMove.count.routines"), routines], [t("grokMove.count.memories"), memories], [t("grokMove.count.notes"), notes],
     [t("grokMove.count.messages"), history && "messages" in history ? history.messages : 0],
+    [t("grokMove.count.pages"), came ? came.pages : waiting.pages.length], [t("grokMove.count.files"), came ? came.files : waiting.files],
   ] as const;
   return (
     <section data-grok-move-bot className="flex flex-col gap-1.5">
@@ -38,8 +43,15 @@ export function BotCounts({ heading, skills, routines, memories, notes, skillsOf
       </dl>
       {skillsOff.length > 0 && <p className={LINE}>{t("grokMove.skillsOff", { names: skillsOff.join(", ") })}</p>}
       {history && "reason" in history && <p className={LINE}>{t(`grokMove.history.${history.reason}` as LocaleKey)}</p>}
+      {waiting.pages.length > 0 && <p data-grok-move-pages className={LINE}>{t("grokMove.pagesNamed", { names: waiting.pages.join(", ") })}</p>}
+      {brought && <BroughtLines brought={brought} />}
     </section>
   );
+}
+
+function BroughtLines({ brought }: { brought: GrokBrought }) {
+  if ("reason" in brought) return <p role="alert" className={LINE}>{t("grokMove.brought.failed")}</p>;
+  return brought.skipped.length > 0 && <p role="alert" className={LINE}>{t("grokMove.brought.skipped", { names: brought.skipped.join(", ") })}</p>;
 }
 
 export function GrokMoveLines({ paused, history = null, files = null, apps, moved, unreadable, failed = [] }: { paused: string | null; history?: string | null; files?: string | null; apps: number; moved: readonly string[]; unreadable: readonly string[]; failed?: readonly string[] }) {
@@ -172,14 +184,21 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
   const onStart = !preview && !report;
   const [connector, setConnector] = useState(NO_CONNECTOR);
   const [arrivedFiles, setArrivedFiles] = useState<GrokLook["files"]>([]);
+  const [assets, setAssets] = useState<GrokAsset[]>([]);
   const [connecting, setConnecting] = useState(false);
   const [connectFailed, setConnectFailed] = useState(false);
   const lastSeq = useRef(0);
   /** The last arrival in the preview, when its Bots came through the link: a finished import lets go of it. */
   const viaLinkThrough = useRef(0);
   const arrived = useMemo(() => foundExports(arrivedFiles).bots, [arrivedFiles]);
+  const arrivedNames = useMemo(() => {
+    const names = arrived.map((bot) => bot.name);
+    for (const { bot } of assets) if (!names.some((name) => name.toLowerCase() === bot.toLowerCase())) names.push(bot);
+    return names;
+  }, [arrived, assets]);
   const takeConnector = useCallback((next: GrokConnector) => {
     setConnector({ available: next.available, ...(next.connectorUrl ? { connectorUrl: next.connectorUrl, reach: next.reach } : {}) });
+    setAssets(next.connectorUrl ? next.assets : []);
     if (!next.connectorUrl) {
       lastSeq.current = 0;
       setArrivedFiles([]);
@@ -210,7 +229,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
       const bots = read();
       viaLinkThrough.current = fromLink ? lastSeq.current : 0;
       const servers = await api<{ servers?: Array<{ name: string }> }>("/api/mcp/servers").then((answer) => answer.servers ?? [], () => []);
-      setPreview(previewGrokMove(bots, { bots: state.bots, servers: new Set(servers.map((server) => server.name)), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone }));
+      setPreview(previewGrokMove(bots, { bots: state.bots, servers: new Set(servers.map((server) => server.name)), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, assets }));
       setError("");
     } catch (cause) {
       setError(grokErrorText(cause));
@@ -251,6 +270,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
       setArrivedFiles((files) => files.filter((file) => Number(file.name) > through));
       void grokConnector("POST", 0, through).catch(() => {});
     }
+    setAssets([]);
     setReport(done);
     setPreview(null);
     setImporting(false);
@@ -262,6 +282,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
     refresh();
   };
 
+  const anyBrought = report ? [...report.bots, ...report.moved].some(({ brought }) => brought && "pages" in brought && brought.pages + brought.files > 0) : false;
   const panel = (
       <div ref={root} tabIndex={-1} {...(inline ? {} : { role: "dialog", "aria-modal": true, "aria-labelledby": "grok-move-title" })} data-grok-move={report ? "report" : preview ? "preview" : "start"}
         onKeyDown={(event) => {
@@ -286,29 +307,37 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
           {report ? (
             <>
               {report.bots.map((bot) => <BotCounts key={bot.name} heading={t("grokMove.isHere", { name: bot.name })} {...bot} />)}
+              {report.moved.flatMap(({ name, brought }) => !brought ? [] : [
+                "pages" in brought && <p key={name} className={LINE}>{t("grokMove.movedBrought", { name, pages: brought.pages, files: brought.files })}</p>,
+                <BroughtLines key={`${name} lines`} brought={brought} />,
+              ])}
               {report.moved.flatMap(({ name, history }) => !history ? [] : [
                 <p key={name} className={LINE}>{"messages" in history ? t("grokMove.movedChat", { name, count: history.messages })
                   : t("grokMove.movedNoChat", { name, why: t(`grokMove.history.${history.reason}` as LocaleKey) })}</p>,
               ])}
-              <GrokMoveLines paused={report.bots.some((bot) => bot.routines > 0) ? t("grokMove.pausedReport") : null} files={t("grokMove.filesStay")} apps={report.bots.reduce((total, bot) => total + bot.apps, 0)}
-                moved={report.moved.flatMap(({ name, history }) => history ? [] : [name])} unreadable={report.unreadable} failed={report.failed} />
+              <GrokMoveLines paused={report.bots.some((bot) => bot.routines > 0) ? t("grokMove.pausedReport") : null} files={anyBrought ? t("grokMove.broughtWhere") : local ? t("grokMove.filesViaLink") : t("grokMove.filesStay")} apps={report.bots.reduce((total, bot) => total + bot.apps, 0)}
+                moved={report.moved.flatMap(({ name, history, brought }) => history || brought ? [] : [name])} unreadable={report.unreadable} failed={report.failed} />
             </>
           ) : preview ? (
             <>
               {preview.plans.map((plan) => (
                 <BotCounts key={plan.packageId} heading={plan.addedAs} skills={plan.skills.length} routines={plan.routines} memories={plan.memories} notes={plan.notes}
-                  skillsOff={plan.skills.filter((skill) => !skill.on).map((skill) => skill.name)} />
+                  skillsOff={plan.skills.filter((skill) => !skill.on).map((skill) => skill.name)} {...(local ? { waiting: plan } : {})} />
               ))}
               <GrokMoveLines history={local ? t("grokMove.historyPreview") : null} paused={preview.plans.some((plan) => plan.routines > 0) ? t("grokMove.pausedPreview") : null}
                 apps={preview.plans.reduce((total, plan) => total + plan.apps, 0)}
                 moved={local ? [] : preview.moved.map(({ name }) => name)} unreadable={preview.unreadable} />
               {local && preview.moved.length > 0 && <p className={LINE}>{t("grokMove.alreadyHereChats", { names: preview.moved.map(({ name }) => name).join(", ") })}</p>}
+              {local && preview.moved.filter((moved) => moved.pages.length || moved.files).map((moved) => (
+                <p key={moved.name} data-grok-move-waiting className={LINE}>{t("grokMove.movedWaiting", { name: moved.name, pages: moved.pages.length, files: moved.files })}</p>
+              ))}
+              {preview.noSetup.length > 0 && <p data-grok-move-no-setup className={LINE}>{t("grokMove.noSetup", { names: preview.noSetup.join(", ") })}</p>}
             </>
           ) : (
             <BringBack local={local} look={look} found={found} reply={reply} error={error} onReply={setReply}
               onFile={(file) => readFile.current(file)} onFound={() => void show(() => found.bots)}
               connect={local && connector.available && (
-                <ConnectGrokBot url={connector.connectorUrl} reach={connector.reach} names={arrived.map((bot) => bot.name)} error={connectFailed} busy={connecting}
+                <ConnectGrokBot url={connector.connectorUrl} reach={connector.reach} names={arrivedNames} error={connectFailed} busy={connecting}
                   onConnect={() => void connect()} onUse={() => void show(() => arrived, true)} />
               )} />
           )}

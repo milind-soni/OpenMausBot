@@ -266,6 +266,87 @@ describe("Move from Grok Bot", () => {
     vi.useRealTimers();
   });
 
+  it("names the pages and counts the files that arrived for each Bot, brings them over with the Bot, and says where they are", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    vi.stubGlobal("ogb", { remoteClient: { active: false } });
+    const waiting = [{ seq: 2, kind: "page", bot: "Job Search", name: "Applications", bytes: 900 }, { seq: 3, kind: "page", bot: "job search", name: "Offers", bytes: 700 },
+      { seq: 4, kind: "file", bot: "Job Search", name: "cv/resume.md", bytes: 40 }, { seq: 5, kind: "file", bot: "Scout", name: "leads.csv", bytes: 12 }];
+    let brought: unknown = { pages: 2, files: 1, skipped: [] };
+    let held = waiting;
+    const asked: unknown[] = [];
+    f.api.mockImplementation(async (path: string, init?: { method?: string; body?: string }) => {
+      if (path.startsWith("/api/setup-import/grok/connector")) {
+        const after = Number(new URL(path, "http://x").searchParams.get("after") ?? 0);
+        return { available: true, link: { url: "https://broker.test/mcp/move/abc", reach: "connected" }, arrived: after < 1 && held.length ? [{ seq: 1, at: 5, text: EXPORT }] : [], assets: held };
+      }
+      if (path === "/api/setup-import/grok/assets") {
+        asked.push(JSON.parse(init!.body!));
+        held = held.filter((asset) => asset.bot === "Scout");
+        return brought;
+      }
+      return path.startsWith("/api/teams/import")
+        ? { bots: [{ id: "b1", name: "Job Search", threadId: "t1" }], routines: [], connections: [] }
+        : path === "/api/mcp/servers" ? { servers: [] } : {};
+    });
+    await open();
+    expect(shown()).toContain("Arrived from Grok Bot: Job Search, Scout");
+    expect(shown()).not.toMatch(/Applications|resume/);
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-grok-move-use-arrived]")!.click());
+    await tick();
+    expect(counts()).toMatchObject({ Pages: 2, Files: 1 });
+    expect(host.querySelector("[data-grok-move-pages]")!.textContent).toBe("Pages: Applications, Offers");
+    expect(host.querySelector("[data-grok-move-no-setup]")!.textContent).toBe("Pages or files arrived for Scout, but not the setup. Ask the MausBot bot in Grok Bot to send the setup too, then they come over.");
+    await importIt();
+    expect(asked).toEqual([{ botId: "b1", grokName: "Job Search" }]);
+    expect(counts()).toMatchObject({ Pages: 2, Files: 1 });
+    expect(shown()).toContain("Pages open in each bot's “Pages from Grok Bot” chat. Files are in its folder, under from-grok.");
+    expect(shown()).not.toContain(FILES_STAY);
+
+    await act(async () => button("Move another Bot")!.click());
+    expect(host.querySelector("[data-grok-move-arrived]")).toBeNull();
+    await act(async () => { vi.advanceTimersByTime(3_000); });
+    await tick();
+    expect(shown()).toContain("Arrived from Grok Bot: Scout");
+    vi.useRealTimers();
+  });
+
+  it("says which pages and files could not be brought, or that none could, and without any says how they would come", async () => {
+    vi.stubGlobal("ogb", { remoteClient: { active: false } });
+    let brought: unknown = { pages: 1, files: 0, skipped: ["Offers", "cv/huge.bin"] };
+    let assets = [{ seq: 2, kind: "page", bot: "Job Search", name: "Applications", bytes: 900 }];
+    f.api.mockImplementation(async (path: string) => {
+      if (path.startsWith("/api/setup-import/grok/connector")) return { available: true, link: { url: "https://broker.test/mcp/move/abc", reach: "connected" }, arrived: [], assets };
+      if (path === "/api/setup-import/grok/assets") {
+        if (brought instanceof Error) throw brought;
+        return brought;
+      }
+      return path.startsWith("/api/teams/import")
+        ? { bots: [{ id: "b1", name: "Job Search", threadId: "t1" }], routines: [], connections: [] }
+        : path === "/api/mcp/servers" ? { servers: [] } : {};
+    });
+    await open();
+    await paste(EXPORT);
+    await importIt();
+    expect(shown()).toContain("Couldn't be brought over: Offers, cv/huge.bin");
+
+    brought = new Error("offline");
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await open();
+    await paste(EXPORT);
+    await importIt();
+    expect(shown()).toContain("Its pages and files couldn't be brought over. They are still waiting: choose Import again.");
+
+    assets = [];
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await open();
+    await paste(EXPORT);
+    await importIt();
+    expect(counts()).not.toHaveProperty("Pages");
+    expect(shown()).toContain("Pages and files come over through the link: ask the MausBot bot in Grok Bot to send them, then choose Import again.");
+  });
+
   it("leaves the link up when the dialog closes", async () => {
     vi.stubGlobal("ogb", { remoteClient: { active: false } });
     const calls: string[] = [];

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ requests: [] as Array<[string, string | undefined, unknown]>, failImport: "", failSkill: "", history: {} as unknown }));
+const fixture = vi.hoisted(() => ({ requests: [] as Array<[string, string | undefined, unknown]>, failImport: "", failSkill: "", history: {} as unknown, assets: {} as unknown }));
 
 vi.mock("@/state/store", () => ({
   api: vi.fn(async (path: string, init: { method?: string; body?: string }) => {
@@ -15,12 +15,16 @@ vi.mock("@/state/store", () => ({
       if (fixture.history instanceof Error) throw fixture.history;
       return fixture.history;
     }
+    if (path === "/api/setup-import/grok/assets") {
+      if (fixture.assets instanceof Error) throw fixture.assets;
+      return fixture.assets;
+    }
     return {};
   }),
 }));
 
 import { GROK_EXPORT_FORMAT, parseGrokExport } from "../../shared/grok-import";
-import { foundExports, previewGrokMove, runGrokMove, type GrokPreviewFacts } from "./grok-move";
+import { foundExports, previewGrokMove, runGrokMove, type GrokAsset, type GrokPreviewFacts } from "./grok-move";
 
 const bots = (...list: unknown[]) => parseGrokExport(JSON.stringify({ format: GROK_EXPORT_FORMAT, bots: list }));
 const facts = (over: Partial<GrokPreviewFacts> = {}): GrokPreviewFacts => ({ bots: [], servers: new Set(), timeZone: "UTC", ...over });
@@ -38,6 +42,7 @@ beforeEach(() => {
   fixture.failImport = "";
   fixture.failSkill = "";
   fixture.history = {};
+  fixture.assets = {};
 });
 
 describe("the preview", () => {
@@ -61,7 +66,7 @@ describe("the preview", () => {
     const first = previewGrokMove(bots(DESK), facts()).plans[0]!;
     const again = previewGrokMove(bots(DESK), facts({ bots: [{ id: "here-Desk", name: "Desk", installedPackage: { id: first.packageId, name: "Desk" } as never }] }));
     expect(again.plans).toEqual([]);
-    expect(again.moved).toEqual([{ name: "Desk", botId: "here-Desk" }]);
+    expect(again.moved).toEqual([{ name: "Desk", botId: "here-Desk", pages: [], files: 0 }]);
     expect(previewGrokMove(bots(DESK), facts({ bots: [{ id: "other", name: "Desk" }] })).plans[0]!.addedAs).toBe("Desk 2");
   });
 
@@ -128,6 +133,52 @@ describe("each Bot's chat", () => {
     fixture.failImport = "Desk";
     await runGrokMove(previewGrokMove(bots(DESK), facts()), vi.fn(), true);
     expect(fixture.requests.map(([path]) => path)).not.toContain("/api/setup-import/grok/history");
+  });
+});
+
+describe("each Bot's pages and files, sent through the link", () => {
+  const ASSETS = "/api/setup-import/grok/assets";
+  const page = (bot: string, name: string): GrokAsset => ({ kind: "page", bot, name });
+  const file = (bot: string, name: string): GrokAsset => ({ kind: "file", bot, name });
+  const asked = () => fixture.requests.filter(([path]) => path === ASSETS);
+
+  it("the preview names each Bot's pages and counts its files, for a new Bot, one moved before, and one whose setup was let go", () => {
+    const first = previewGrokMove(bots(DESK), facts()).plans[0]!;
+    const assets = [page("desk", "Sales"), page("Desk", "Visits"), file("Desk", "a.txt"), page("Scout", "Leads"), file("Nobody", "b.txt"), file("nobody", "c.txt")];
+    const fresh = previewGrokMove(bots(DESK), facts({ assets }));
+    expect(fresh.plans[0]).toMatchObject({ name: "Desk", pages: ["Sales", "Visits"], files: 1 });
+    expect(fresh.noSetup).toEqual(["Scout", "Nobody"]);
+
+    const here = [{ id: "here-Desk", name: "Desk", installedPackage: { id: first.packageId, name: "Desk" } as never }, { id: "here-Scout", name: "scout", installedPackage: { id: "scout-1", name: "Scout" } as never }, { id: "plain", name: "Nobody" }];
+    const later = previewGrokMove([], facts({ bots: here, assets }));
+    expect(later.moved).toEqual([{ name: "desk", botId: "here-Desk", pages: ["Sales", "Visits"], files: 1 }, { name: "Scout", botId: "here-Scout", pages: ["Leads"], files: 0 }]);
+    expect(later.noSetup).toEqual(["Nobody"]);
+    expect(previewGrokMove(bots(DESK), facts({ bots: here, assets })).moved[0]).toEqual({ name: "Desk", botId: "here-Desk", pages: ["Sales", "Visits"], files: 1 });
+  });
+
+  it("come over on the desktop app for a Bot that has some waiting, new or moved before, and are counted with what was left", async () => {
+    fixture.assets = { pages: 2, files: 1, skipped: ["big.bin"] };
+    const report = await runGrokMove(previewGrokMove(bots(DESK, { name: "Quiet", instructions: "Chat." }), facts({ assets: [page("Desk", "Sales"), file("Desk", "a.txt")] })), vi.fn(), true);
+    expect(asked()).toEqual([[ASSETS, "POST", { botId: "id-Desk", grokName: "Desk" }]]);
+    expect(report.bots.map((bot) => bot.brought)).toEqual([{ pages: 2, files: 1, skipped: ["big.bin"] }, undefined]);
+
+    fixture.requests.length = 0;
+    const moved = await runGrokMove(previewGrokMove([], facts({ bots: [{ id: "here-Desk", name: "Desk", installedPackage: { id: "desk-1", name: "Desk" } as never }], assets: [page("Desk", "Sales")] })), vi.fn(), true);
+    expect(asked()).toEqual([[ASSETS, "POST", { botId: "here-Desk", grokName: "Desk" }]]);
+    expect(moved.moved).toEqual([{ name: "Desk", history: { reason: "failed" }, brought: { pages: 2, files: 1, skipped: ["big.bin"] } }]);
+  });
+
+  it("a request that got no usable answer is named as failed, and nothing is asked off the desktop app or for a Bot that wasn't added", async () => {
+    const waiting = facts({ assets: [page("Desk", "Sales")] });
+    for (const answer of [new Error("offline"), {}, { pages: "2", files: 1 }]) {
+      fixture.assets = answer;
+      expect((await runGrokMove(previewGrokMove(bots(DESK), waiting), vi.fn(), true)).bots[0]!.brought).toEqual({ reason: "failed" });
+    }
+    fixture.requests.length = 0;
+    expect((await runGrokMove(previewGrokMove(bots(DESK), waiting), vi.fn())).bots[0]).not.toHaveProperty("brought");
+    fixture.failImport = "Desk";
+    await runGrokMove(previewGrokMove(bots(DESK), waiting), vi.fn(), true);
+    expect(asked()).toEqual([]);
   });
 });
 
