@@ -660,6 +660,15 @@ function judge(command: Command, source: string, pass: Pass, mode: Mode, depth: 
     return null;
   }
   if (program === "format") return args.some((arg) => /^[A-Za-z]:\\?$/.test(arg)) ? FORMAT_DISK : null;
+  // Windows Storage module: Format-Volume formats whatever volume it is given, also one piped in; Clear-Disk erases
+  // a disk's data only with -RemoveData, and refuses a disk holding data partitions without it.
+  if (program === "format-volume") return FORMAT_DISK;
+  if (program === "clear-disk") {
+    return args.some((arg) => {
+      const name = arg.split(":")[0].toLowerCase();
+      return name.length >= "-removed".length && "-removedata".startsWith(name);
+    }) ? FORMAT_DISK : null;
+  }
   return null;
 }
 
