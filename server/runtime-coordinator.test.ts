@@ -822,6 +822,8 @@ describe("RuntimeCoordinator: the run adapter", () => {
     expect(w.host.parks).toHaveLength(0);
     expect(w.coordinator.node(node.id)).toMatchObject({ status: "completed", result: "Imported all 8 guides.\nNEEDS INPUT: 无" });
     expect(w.host.runs.filter(run => run.node.id === node.id)).toHaveLength(1);
+    expect(w.host.reports).toHaveLength(1);
+    expect(w.host.reports[0]).toMatchObject({ child: { id: node.id, status: "completed" } });
   });
 
   it("resumes the requester with a teammate's NEEDS INPUT question while its other teammate still works", async () => {

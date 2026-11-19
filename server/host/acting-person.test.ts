@@ -220,6 +220,7 @@ describe("what work in one person's private chat hands back", () => {
     expect(asked).toEqual({ ok: true, text: "NEEDS INPUT: Helper has a question for Ada, in Helper's chat with Ada.", cards: { question: "Helper has a question for Ada, in Helper's chat with Ada.", ids: ["c1"] }, privateQuestion: true });
     expect(privateHandBack({ ok: true, text: "Found two.\nNEEDS INPUT: Forward it to Ben?" }, place(null)), "only she can answer it").toMatchObject({ privateQuestion: true });
     expect(privateHandBack({ ok: true, text: "Found two.\nNEEDS INPUT: 无" }, place(null)), "a line that asks nothing").toEqual({ ok: true, text: "Done. The result is in Helper's chat with Ada." });
+    expect(privateHandBack({ ok: true, text: "Found two.\nNEEDS INPUT: Which account?\nDefault: staging" }, place(null)), "a question with a default").toMatchObject({ text: "NEEDS INPUT: Helper has a question for Ada, in Helper's chat with Ada.", privateQuestion: true });
   });
 
   it("hands everything back into her own private chat, and anything from a chat others read already", () => {
