@@ -105,6 +105,9 @@ function pointAt(row: HTMLElement, offset: number): { node: Node; offset: number
   return { node: row, offset: row.childNodes.length };
 }
 
+/** A selection's text without the line breaks its rows' hover-only parts add or take away. */
+const words = (text: string) => text.replace(/\s+/g, "");
+
 /**
  * Puts a set-aside selection back once both of its rows are drawn again. "waiting" while one is not; "dropped" when the
  * rows no longer hold the same text, so a selection is never put back over other words.
@@ -118,7 +121,7 @@ export function restoreSelection(list: Element, aside: SetAsideSelection): "wait
   if (!selection) return "dropped";
   const anchor = pointAt(anchorRow, aside.anchor.offset), focus = pointAt(focusRow, aside.focus.offset);
   selection.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
-  if (selection.toString() === aside.text) return "restored";
+  if (words(selection.toString()) === words(aside.text)) return "restored";
   selection.removeAllRanges();
   return "dropped";
 }

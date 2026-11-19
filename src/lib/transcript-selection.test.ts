@@ -106,6 +106,18 @@ describe("a text selection in a windowed transcript", () => {
     expect(selected().startsWith("Reply m100")).toBe(true);
   });
 
+  it("puts a selection back when only the blank lines between its rows changed", () => {
+    draw({ start: 100, end: 110 });
+    document.getSelection()!.setBaseAndExtent(row("m101").querySelector("b")!.firstChild!, 0, row("m103").querySelector("b")!.firstChild!, 4);
+    const text = selected();
+    const aside = setSelectionAside(list)!;
+    draw({ start: 0, end: 10 });
+    draw({ start: 100, end: 110 });
+    row("m102").append("\n\n");
+    expect(restoreSelection(list, aside)).toBe("restored");
+    expect(selected().replace(/\s+/g, "")).toBe(text.replace(/\s+/g, ""));
+  });
+
   it("drops a set-aside selection whose rows no longer hold its text", () => {
     draw({ start: 100, end: 110 });
     document.getSelection()!.setBaseAndExtent(row("m101").querySelector("b")!.firstChild!, 0, row("m103").querySelector("b")!.firstChild!, 4);
