@@ -535,6 +535,23 @@ describe("plan usage fetcher", () => {
     ]);
   });
 
+  it("skips the usage reading for a Claude instance that runs only on an API key", async () => {
+    const accounts = planAccountsFromInstances({
+      claude: { driver: "claudeAgent" },
+      claudeApi: { driver: "claudeAgent", displayName: "Claude (API key)", access: "api", config: { requireApiKey: true } },
+    });
+    expect(accounts.find((entry) => entry.id === "claudeApi")?.noUsage).toBe(true);
+    expect(accounts.find((entry) => entry.id === "claude")?.noUsage).toBeUndefined();
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({ five_hour: { utilization: 17 }, seven_day: { utilization: 17 } }));
+    const report = await fetchPlanUsage(accounts.filter((entry) => entry.id === "claudeApi"), {
+      fetch: fetchImpl,
+      now: () => NOW,
+      credentials: { read: async () => ({ token: SECRET, accountId: null, expired: false }) },
+    });
+    expect(report.providers).toEqual([]);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
 /** An OpenCode instance becomes an account under the driver the panel knows. */
   it("lists an OpenCode instance under the key its environment carries", () => {
     expect(planAccountsFromInstances({

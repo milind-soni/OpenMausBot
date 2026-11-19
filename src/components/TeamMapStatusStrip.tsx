@@ -25,10 +25,23 @@ function countLabel(state: TeamMapSessionState, count: number): string {
   }
 }
 
-function primaryUsage(provider: PlanProvider): number | null {
-  if (provider.weekly.available && provider.weekly.usedPercent != null) return provider.weekly.usedPercent;
-  if (provider.fiveHour.available && provider.fiveHour.usedPercent != null) return provider.fiveHour.usedPercent;
+/** The weekly window when the plan has one, else the 5-hour one, named so a bare percentage never stands alone. */
+function primaryUsage(provider: PlanProvider): { used: number; window: string } | null {
+  if (provider.weekly.available && provider.weekly.usedPercent != null) return { used: provider.weekly.usedPercent, window: t("planUsage.weekly") };
+  if (provider.fiveHour.available && provider.fiveHour.usedPercent != null) return { used: provider.fiveHour.usedPercent, window: t("planUsage.fiveHour") };
   return null;
+}
+
+function percent(value: number): number {
+  return Math.round(Math.min(100, Math.max(0, value)));
+}
+
+/** Hover text with every window the plan reports, e.g. "Claude · 5-hour: 17% used · Weekly: 17% used". */
+function usageTitle(provider: PlanProvider): string {
+  const parts = [providerLabel(provider)];
+  if (provider.fiveHour.available && provider.fiveHour.usedPercent != null) parts.push(`${t("planUsage.fiveHour")}: ${t("planUsage.used", { used: percent(provider.fiveHour.usedPercent) })}`);
+  if (provider.weekly.available && provider.weekly.usedPercent != null) parts.push(`${t("planUsage.weekly")}: ${t("planUsage.used", { used: percent(provider.weekly.usedPercent) })}`);
+  return parts.join(" · ");
 }
 
 /** The Live layer's top strip: session-state counts, a compact per-provider usage readout, a department filter and the Live toggle. */
@@ -52,8 +65,8 @@ export function TeamMapStatusStrip({
   const { report } = usePlanUsage();
   const counts = teamMapSessionCounts(sessions);
   const usageProviders = (report?.providers ?? []).flatMap((provider) => {
-    const used = provider.ok ? primaryUsage(provider) : null;
-    return used === null ? [] : [{ provider, used: Math.round(Math.min(100, Math.max(0, used))) }];
+    const usage = provider.ok ? primaryUsage(provider) : null;
+    return usage === null ? [] : [{ provider, used: percent(usage.used), window: usage.window }];
   });
   return (
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-hairline/40 bg-panel px-6 py-2.5">
@@ -67,13 +80,14 @@ export function TeamMapStatusStrip({
         {doneLast24h > 0 && <span className="text-[12px] text-ink-secondary">{t("canvas.strip.doneCount", { count: doneLast24h })}</span>}
         {usageProviders.length > 0 && (
           <div className="flex min-w-0 flex-wrap items-center gap-3 border-l border-hairline/40 pl-3">
-            {usageProviders.map(({ provider, used }) => (
-              <span key={provider.id} className="flex items-center gap-1.5 text-[11px] text-ink-secondary">
+            {usageProviders.map(({ provider, used, window }) => (
+              <span key={provider.id} title={usageTitle(provider)} className="flex items-center gap-1.5 text-[11px] text-ink-secondary">
                 <span className="max-w-[88px] truncate">{providerLabel(provider)}</span>
-                <span className="h-1.5 w-10 overflow-hidden rounded-full bg-inset" role="meter" aria-label={providerLabel(provider)} aria-valuemin={0} aria-valuemax={100} aria-valuenow={used}>
+                <span className="h-1.5 w-10 overflow-hidden rounded-full bg-inset" role="meter" aria-label={`${providerLabel(provider)}, ${window}`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={used}>
                   <span className={cn("block h-full rounded-full", usageTone(used))} style={{ width: `${used}%` }} />
                 </span>
                 <span className="tabular-nums">{used}%</span>
+                <span className="text-ink-secondary/70">{window}</span>
               </span>
             ))}
           </div>

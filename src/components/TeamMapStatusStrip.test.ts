@@ -48,7 +48,21 @@ describe("team map status strip", () => {
     }] };
     const html = render([]);
     expect(html).toContain("30%");
+    expect(html).toContain(">5-hour<");
     expect(html).toContain('role="meter"');
+  });
+
+  it("names the window it shows, preferring the weekly one, and lists both on hover", () => {
+    fixture.report = { fetchedAt: "now", providers: [{
+      id: "claude", name: "Claude", driver: "claude", plan: null, ok: true, error: null,
+      fiveHour: { available: true, remainingPercent: 84, usedPercent: 16, resetsAt: null },
+      weekly: { available: true, remainingPercent: 83, usedPercent: 17, resetsAt: null }, extra: [],
+    }] };
+    const html = render([]);
+    expect(html).toContain("17%");
+    expect(html).toContain(">Weekly<");
+    expect(html).toContain('title="Claude · 5-hour: 16% used · Weekly: 17% used"');
+    expect(html).toContain('aria-label="Claude, Weekly"');
   });
 
   it("omits a provider's bar when it has reported no usable window", () => {

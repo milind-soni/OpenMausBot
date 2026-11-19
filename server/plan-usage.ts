@@ -159,7 +159,8 @@ export function planAccountsFromInstances(instances: InstanceConfigMap): PlanAcc
       environment: { ...entry.environment },
       ...(configDir ? { configDir } : {}),
       // Reading ~/.codex/auth.json for a ChatGPT-plan provider would report (and hold it on) another account's limit.
-      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && config?.usageMeter === false) ? { noUsage: true as const } : {}),
+      // A Claude instance that only runs on an API key has no plan quota; reading the CLI login would repeat the subscription's.
+      ...(config?.authMode === "chatgpt-plan" || (driver === "claude" && (config?.usageMeter === false || config?.requireApiKey === true)) ? { noUsage: true as const } : {}),
     });
   }
   return accounts;
