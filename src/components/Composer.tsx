@@ -1,7 +1,7 @@
 import { ScheduleSheet } from "./ScheduleSheet";
 import { track } from "@/lib/analytics";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { ArrowUp, Clock, File, Folder, Mic, Paperclip, Square, X } from "lucide-react";
+import { ArrowUp, Clock, Mic, Paperclip, Square, X } from "lucide-react";
 import { api, useStore, visibleMessages, type Attachment, type Bot, type Group } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { MausAvatar } from "./Avatar";
@@ -14,6 +14,7 @@ import { AppIcon } from "./AppsScreen";
 import { encodeProjectPath, pathMentionAt } from "@/lib/pathMentions";
 import { useProjects } from "@/state/projects";
 import { ProjectSuggestionList } from "./ProjectSuggestionList";
+import { ProjectFileIcon } from "./ProjectFileIcon";
 import { StagedAttachmentsTray } from "./AttachmentViewer";
 import { readFileAsAttachment } from "@/lib/attachments";
 import { messageTooLargeReason } from "@/lib/messageSize";
@@ -119,7 +120,7 @@ export function Composer({
   const pathCandidates = !pathActive ? [] : !pathProject
     ? pathChoices.slice(0, 6).map((project) => ({ kind: "project" as const, label: project.name, value: project.mention }))
     : [
-        ...(pathDirectory && !pathQuery && pathResult?.key === pathKey ? [{ kind: "file" as const, label: "Use this folder", value: pathDirectory }] : []),
+        ...(pathDirectory && !pathQuery && pathResult?.key === pathKey ? [{ kind: "current-directory" as const, label: "Use this folder", value: pathDirectory }] : []),
         ...(pathResult?.key === pathKey ? pathResult.entries.slice(0, 7).map((entry) => ({
           kind: entry.directory ? "directory" as const : "file" as const,
           label: entry.name,
@@ -550,10 +551,23 @@ export function Composer({
         {pathActive && mentionKind === "path" && (
           <div role="listbox" aria-label="Project files and folders" className="absolute bottom-full left-2 z-20 mb-2 w-80 max-w-[calc(100%-1rem)] overflow-hidden rounded-xl border border-hairline/40 bg-raised shadow-lg">
             <p className="px-3 py-2 text-xs text-ink-secondary">{pathProject ? pathProject.name : pathChoices.length ? "Choose a project" : "Register a project to reference its files."}</p>
-            {pathCandidates.map((candidate, index) => {
-              const Icon = candidate.kind === "file" && candidate.label !== "Use this folder" ? File : Folder;
-              return <button key={`${candidate.kind}:${candidate.value}`} type="button" role="option" aria-selected={index === highlight} onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setHighlight(index)} onClick={() => pickPath(candidate)} className={cn("flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-ink", index === highlight && "bg-raised-hover")}><Icon size={15} /><span className="truncate">{candidate.label}</span></button>;
-            })}
+            {pathCandidates.map((candidate, index) => (
+              <button
+                key={`${candidate.kind}:${candidate.value}`}
+                type="button"
+                role="option"
+                aria-selected={index === highlight}
+                onMouseDown={(event) => event.preventDefault()}
+                onMouseEnter={() => setHighlight(index)}
+                onClick={() => pickPath(candidate)}
+                className={cn("flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-ink", index === highlight && "bg-raised-hover")}
+              >
+                {candidate.kind === "file"
+                  ? <ProjectFileIcon name={candidate.label} />
+                  : <ProjectFileIcon kind="folder" open={candidate.kind === "current-directory"} />}
+                <span className="truncate">{candidate.label}</span>
+              </button>
+            ))}
             {pathProject && pathResult?.key === pathKey && !pathCandidates.length && <p className="px-3 pb-2 text-xs text-ink-secondary">No matching files or folders.</p>}
           </div>
         )}

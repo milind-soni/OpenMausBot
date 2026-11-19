@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, FileCode2, FileImage, FileText, Folder, FolderOpen, RefreshCw, Search, X } from "lucide-react";
+import { ChevronRight, FolderOpen, RefreshCw, Search, X } from "lucide-react";
+import { ProjectFileIcon } from "./ProjectFileIcon";
 import { buildFileTree, visibleTreeRows } from "@/lib/fileTree";
 import { cn } from "@/lib/cn";
 import type { PreviewFileKind, PreviewFileSource } from "@/lib/mobilePreviewUrl";
@@ -66,21 +67,6 @@ export function usePreviewAutoRefreshWatcher(
       }).catch(() => {});
     };
   }, [clientId, enabled, source]);
-}
-
-function fileKindIcon(kind: PreviewFileKind) {
-  switch (kind) {
-    case "image":
-      return <FileImage className="h-3.5 w-3.5 shrink-0 text-emerald-400" />;
-    case "pdf":
-      return <FileText className="h-3.5 w-3.5 shrink-0 text-rose-400" />;
-    case "markdown":
-      return <FileText className="h-3.5 w-3.5 shrink-0 text-violet-400" />;
-    case "text":
-      return <FileText className="h-3.5 w-3.5 shrink-0 text-ink-secondary" />;
-    default:
-      return <FileCode2 className="h-3.5 w-3.5 shrink-0 text-amber-400" />;
-  }
 }
 
 function formatSize(bytes: number): string {
@@ -361,14 +347,14 @@ export function PreviewFilePicker({
                     {node.type === "folder" ? (
                       <>
                         <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-ink-secondary transition-transform", isOpen && "rotate-90")} />
-                        {isOpen ? <FolderOpen className="h-3.5 w-3.5 shrink-0 text-accent" /> : <Folder className="h-3.5 w-3.5 shrink-0 text-accent/80" />}
+                        <ProjectFileIcon kind="folder" open={isOpen} />
                         <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
                         <span className="shrink-0 text-[10.5px] tabular-nums text-ink-secondary">{node.fileCount}</span>
                       </>
                     ) : (
                       <>
                         <span className="w-3.5 shrink-0" aria-hidden="true" />
-                        {fileKindIcon(node.file.kind)}
+                        <ProjectFileIcon kind={node.file.kind} />
                         <span className="min-w-0 flex-1 truncate">{node.name}</span>
                         <span className="shrink-0 text-[10.5px] tabular-nums text-ink-secondary opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
                           {formatSize(node.file.size)}
