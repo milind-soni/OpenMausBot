@@ -4,7 +4,6 @@ import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { AlertTriangle, ChevronLeft, ChevronRight, LayoutTemplate, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
-import { PanoramicWorkspace } from "./PanoramicWorkspace";
 import { collectLocalBotAsks } from "@/lib/autofabric-bridge";
 import { WorkingDots } from "@/components/WorkingIndicator";
 import { ChatBusyContext, CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction } from "@/components/MessageActions";
@@ -979,19 +978,16 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
   const resultsThreadId = routineExecution?.resultsThreadId ?? routineExecution?.sourceThreadId;
   const canOpenResults = useStoreSelector((s) => Boolean(resultsThreadId) && [...s.bots, ...s.groups].some((owner) => owner.threadId === resultsThreadId || owner.tasks?.some((task) => task.threadId === resultsThreadId)));
 
-  const [panoramicOpen, setPanoramicOpen] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "1") {
         e.preventDefault();
-        setPanoramicOpen((prev) => !prev);
-      } else if (e.key === "Escape" && panoramicOpen && !e.defaultPrevented) {
-        setPanoramicOpen(false);
+        dispatch({ type: "showCockpit" });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [panoramicOpen]);
+  }, [dispatch]);
 
   const localAsksCount = useMemo(() => collectLocalBotAsks(bots).length, [bots]);
 
@@ -1107,19 +1103,14 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
           {/* Panoramic Workspace Toggle Button */}
           <button
             type="button"
-            onClick={() => setPanoramicOpen((open) => !open)}
-            className={cn(
-              "flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium transition",
-              panoramicOpen
-                ? "border-accent/50 bg-accent/15 text-accent"
-                : cn("border-hairline/40 bg-raised/60 text-ink-secondary hover:bg-raised hover:text-ink", ELEVATED_FLOAT, ELEVATED_HOVER),
-            )}
-            title="切换多项目与多 Agent 全景统御工作台 (Ctrl+1 / ⌘+1)"
-            aria-label="切换全景统御工作台"
+            onClick={() => dispatch({ type: "showCockpit" })}
+            className={cn("flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium transition border-hairline/40 bg-raised/60 text-ink-secondary hover:bg-raised hover:text-ink", ELEVATED_FLOAT, ELEVATED_HOVER)}
+            title="打开自动工厂总控台 (三域15项目大盘 & 待我处理) (Ctrl+1 / ⌘+1)"
+            aria-label="打开自动工厂总控台"
           >
-            <LayoutTemplate size={14} className={panoramicOpen ? "text-accent" : "text-ink-secondary"} />
-            <span className="@max-xl/chathead:hidden">{panoramicOpen ? "返回对话" : "工厂总控"}</span>
-            {!panoramicOpen && localAsksCount > 0 && (
+            <LayoutTemplate size={14} className="text-ink-secondary" />
+            <span className="@max-xl/chathead:hidden">工厂总控</span>
+            {localAsksCount > 0 && (
               <span className="rounded-full bg-warning/15 px-1.5 py-0.2 text-[10px] font-semibold tabular-nums text-warning">
                 {localAsksCount}
               </span>
@@ -1165,11 +1156,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
 
       </GlassBar>
 
-      {panoramicOpen && (
-        <div className="absolute inset-0 z-[26] flex flex-col bg-app">
-          <PanoramicWorkspace onOpenChat={() => setPanoramicOpen(false)} />
-        </div>
-      )}
+
 
       <div
         ref={scrollRef}

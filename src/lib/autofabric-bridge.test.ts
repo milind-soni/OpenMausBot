@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_AUTOFABRIC_ENDPOINT,
+  FALLBACK_AUTOFABRIC_OVERVIEW,
   collectLocalBotAsks,
   formatCasError,
   formatHoldCountdown,
@@ -493,5 +494,68 @@ describe("endpoint helpers and protocol whitelist", () => {
     const validResult = writeAutofabricEndpoint("https://valid-endpoint.internal:8080/path///");
     expect(validResult).toBe("https://valid-endpoint.internal:8080/path");
     expect(readAutofabricEndpoint()).toBe("https://valid-endpoint.internal:8080/path");
+  });
+});
+
+describe("FALLBACK_AUTOFABRIC_OVERVIEW", () => {
+  it("provides complete 15-project matrix across the three domains", () => {
+    const repos = FALLBACK_AUTOFABRIC_OVERVIEW.portfolio_matrix;
+    expect(repos).toHaveLength(15);
+
+    const infraRepos = repos.filter((r) => inferFactoryDomain(r.repo_full_name) === "infra");
+    const fulfillRepos = repos.filter((r) => inferFactoryDomain(r.repo_full_name) === "fulfill");
+    const appRepos = repos.filter((r) => inferFactoryDomain(r.repo_full_name) === "app");
+
+    expect(infraRepos).toHaveLength(5);
+    expect(fulfillRepos).toHaveLength(5);
+    expect(appRepos).toHaveLength(5);
+
+    expect(infraRepos.map((r) => r.repo_full_name)).toEqual([
+      "infra/aer-runtime",
+      "infra/relayon",
+      "infra/autofabric",
+      "infra/invari",
+      "infra/aer-compiler",
+    ]);
+
+    expect(fulfillRepos.map((r) => r.repo_full_name)).toEqual([
+      "fulfill/sheerid",
+      "fulfill/chromium-profile-matrix",
+      "fulfill/verisig",
+      "fulfill/kirox",
+      "fulfill/getotp",
+    ]);
+
+    expect(appRepos.map((r) => r.repo_full_name)).toEqual([
+      "app/gptibo",
+      "app/citeprime",
+      "app/fetchinbox",
+      "app/openmausbot",
+      "app/citeprime-web",
+    ]);
+  });
+
+  it("contains high-fidelity board decisions and steward cards", () => {
+    expect(FALLBACK_AUTOFABRIC_OVERVIEW.board_decisions).toHaveLength(3);
+    const decisionIds = FALLBACK_AUTOFABRIC_OVERVIEW.board_decisions.map((d) => d.decision_id);
+    expect(decisionIds).toContain("dec-citeprime-t4");
+    expect(decisionIds).toContain("dec-sheerid-bypass");
+    expect(decisionIds).toContain("dec-aer-contract");
+
+    expect(FALLBACK_AUTOFABRIC_OVERVIEW.steward_cards).toHaveLength(2);
+    const stewardIds = FALLBACK_AUTOFABRIC_OVERVIEW.steward_cards.map((c) => c.card_id);
+    expect(stewardIds).toContain("sc-sheerid-strike2");
+    expect(stewardIds).toContain("sc-citeprime-mut");
+  });
+
+  it("includes gold certified AER scoreboard and dual-core CLI telemetry", () => {
+    expect(FALLBACK_AUTOFABRIC_OVERVIEW.aer_scoreboard.certification_badge).toBe("AER-GOLD-CERTIFIED");
+    expect(FALLBACK_AUTOFABRIC_OVERVIEW.aer_scoreboard.pass_to_pass_count).toBe(571);
+    expect(FALLBACK_AUTOFABRIC_OVERVIEW.aer_scoreboard.fail_to_pass_count).toBe(42);
+
+    expect(FALLBACK_AUTOFABRIC_OVERVIEW.cli_telemetry).toHaveLength(2);
+    const cliNames = FALLBACK_AUTOFABRIC_OVERVIEW.cli_telemetry.map((c) => c.name);
+    expect(cliNames).toContain("Claude Code (Anthropic)");
+    expect(cliNames).toContain("Codex CLI (OpenAI)");
   });
 });

@@ -98,6 +98,17 @@ export function PanoramicWorkspace({ onOpenChat, defaultTab = "inbox" }: Panoram
   }, [telemetry.endpoint]);
 
   useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !e.defaultPrevented) {
+        if (onOpenChat) onOpenChat();
+        else dispatch({ type: "showChat" });
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onOpenChat, dispatch]);
+
+  useEffect(() => {
     const timer = window.setInterval(() => {
       setNowTick(Math.floor(Date.now() / 1000));
     }, 30_000);
@@ -269,7 +280,7 @@ export function PanoramicWorkspace({ onOpenChat, defaultTab = "inbox" }: Panoram
 
           <button
             type="button"
-            onClick={() => onOpenChat?.()}
+            onClick={() => (onOpenChat ? onOpenChat() : dispatch({ type: "showChat" }))}
             className="flex items-center gap-1.5 rounded-full border border-hairline/70 bg-card px-3 py-1 text-[12px] font-medium text-ink transition hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70"
             title="返回当前对话视图 (Esc)"
           >

@@ -1,7 +1,7 @@
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { createPortal } from "react-dom";
-import { Archive, Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderInput, FolderPlus, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Phone, Pin, Plus, Search, SquarePen, TextQuote, Trash2, Users, X } from "lucide-react";
+import { Archive, Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderInput, FolderPlus, Layers, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Phone, Pin, Plus, Search, SquarePen, TextQuote, Trash2, Users, X } from "lucide-react";
 import { sidebarState } from "./sidebar-state"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { api, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { approvalModeFor } from "../../shared/approval-mode";
@@ -98,6 +98,71 @@ import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
 import { useLiveMedia } from "@/lib/live-call-media";
 import { LiveCallPill, liveBadgeFor } from "./LiveCallPill";
 import { ShortcutHint } from "./ShortcutHint";
+
+function SidebarCockpitRow({ icons, large, onOpened }: { icons: boolean; large: boolean; onOpened?: () => void }) {
+  const dispatch = useStoreDispatch();
+  const active = useStoreSelector((s) => s.activeView === "cockpit");
+  const open = () => {
+    dispatch({ type: "showCockpit" });
+    onOpened?.();
+  };
+  if (icons) {
+    return (
+      <button
+        type="button"
+        data-sidebar-cockpit=""
+        aria-label="自动工厂总控 (三域15项目)"
+        title="自动工厂总控 (三域15项目)"
+        aria-current={active ? "page" : undefined}
+        onClick={open}
+        className={cn(
+          "relative mx-auto mb-1 flex size-[46px] shrink-0 items-center justify-center rounded-xl text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+          active && "bg-raised text-accent font-semibold",
+        )}
+      >
+        <Layers size={20} strokeWidth={1.75} aria-hidden="true" />
+      </button>
+    );
+  }
+  return (
+    <div className="px-3 pb-1">
+      <button
+        type="button"
+        data-sidebar-cockpit=""
+        aria-label="自动工厂总控 (三域15项目)"
+        title="自动工厂总控 (三域15项目)"
+        aria-current={active ? "page" : undefined}
+        onClick={open}
+        className={cn(
+          "flex w-full min-w-0 items-center gap-2.5 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-raised/60 focus-visible:ring-2 focus-visible:ring-accent/60 transition-colors",
+          active && "bg-raised/80 text-ink font-semibold",
+        )}
+      >
+        <span
+          className={cn(
+            "relative grid shrink-0 place-items-center rounded-full transition-colors",
+            active ? "bg-accent/15 text-accent" : "bg-raised text-ink-secondary",
+            large ? "size-9" : "size-8",
+          )}
+        >
+          <Layers size={large ? 18 : 16} strokeWidth={1.75} aria-hidden="true" />
+        </span>
+        <span
+          className={cn(
+            "min-w-0 flex-1 truncate text-ink",
+            large ? "text-[14px] font-medium leading-5" : "text-[14px] font-semibold leading-5",
+          )}
+        >
+          自动工厂总控
+        </span>
+        <span className="shrink-0 rounded-full border border-hairline/60 bg-card px-1.5 py-0.5 text-[10px] font-medium text-ink-tertiary">
+          三域15项目
+        </span>
+      </button>
+    </div>
+  );
+}
+
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { myDefaultBot, useViewerEmail, useWelcomingBot } from "@/lib/default-bot";
@@ -1318,6 +1383,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         </div>
       </div>}
       {!q && <TeamSideSwitch compact={density === "icons"} listOnly={phone} />}{!q && <SidebarInboxRow icons={density === "icons"} large={!advanced} running={attentionHasRunningWork(attention)} onOpened={phone ? onClose : undefined} />}
+      {!q && <SidebarCockpitRow icons={density === "icons"} large={!advanced} onOpened={phone ? onClose : undefined} />}
       {universalPins && pinnedBots.length > 0 && !simpleDesk && (
         <div
           data-sidebar-universal-pins=""
