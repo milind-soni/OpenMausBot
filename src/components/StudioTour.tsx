@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, X } from "lucide-react";
+import { ArrowRight, Sparkles, X } from "lucide-react";
 import { useStore, type Action } from "@/state/store";
 import { tourEvent, tourKey } from "@/lib/workspaceOnboarding";
+import { cn } from "@/lib/cn";
 
 const tour = [
   { title: "Buddies and chats", copy: "Open a Buddy to give it a prompt. Use Buddy settings to change its role or model." },
@@ -26,11 +27,13 @@ export function StudioTour({ firstRun }: { firstRun: boolean }) {
     } catch {}
     return firstRun ? -1 : -2;
   });
+
   useEffect(() => {
     const open = () => setPosition(-1);
     window.addEventListener(tourEvent, open);
     return () => window.removeEventListener(tourEvent, open);
   }, []);
+
   useEffect(() => {
     if (position === -2 && !firstRun) return;
     try { localStorage.setItem(tourKey, String(position)); } catch {}
@@ -45,13 +48,22 @@ export function StudioTour({ firstRun }: { firstRun: boolean }) {
     }
     setPosition(index);
   };
+
   const finish = () => {
     try { localStorage.setItem(tourKey, "-2"); } catch {}
     setPosition(-2);
   };
-  const readyBuddy = state.bots.find((buddy) => !buddy.hidden && state.instances.some((engine) =>
-    engine.instanceId === buddy.modelSelection.instanceId && engine.snapshot.state === "available" && engine.snapshot.authenticated !== false,
-  ));
+
+  const readyBuddy = state.bots.find((buddy) =>
+    !buddy.hidden &&
+    state.instances.some(
+      (engine) =>
+        engine.instanceId === buddy.modelSelection.instanceId &&
+        engine.snapshot.state === "available" &&
+        engine.snapshot.authenticated !== false,
+    ),
+  );
+
   const startWorking = () => {
     if (readyBuddy) dispatch({ type: "select", id: readyBuddy.id });
     else dispatch({ type: "toggleAppSettings", open: true, tab: "models" });
@@ -60,24 +72,89 @@ export function StudioTour({ firstRun }: { firstRun: boolean }) {
 
   if (position === -2) return null;
   const step = tour[position];
+
   return (
-    <aside aria-label="Studio tour" className="fixed inset-x-3 bottom-3 z-40 max-w-[390px] rounded-xl border border-hairline/60 bg-panel p-4 shadow-2xl sm:inset-x-auto sm:right-6 sm:bottom-6">
+    <aside
+      aria-label="Studio tour"
+      className="fixed inset-x-3 bottom-3 z-40 max-w-[396px] rounded-2xl border border-white/[0.1] bg-panel/95 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.65)] backdrop-blur-xl sm:inset-x-auto sm:right-6 sm:bottom-6"
+    >
       <div className="flex items-start justify-between gap-3">
-        <div aria-live="polite">
-          {step && <p className="text-xs text-ink-secondary">{position + 1} of {tour.length}</p>}
-          <h2 className="font-semibold text-ink">{step?.title ?? "Take a quick tour of Studio"}</h2>
-          <p className="mt-1 text-sm text-ink-secondary">{step?.copy ?? "Explore the tools you’ll use to work with your Buddies."}</p>
+        <div aria-live="polite" className="min-w-0">
+          {step ? (
+            <div className="mb-2 flex items-center gap-2">
+              <span className="text-[11px] font-semibold tracking-wide text-accent-border">
+                {position + 1} / {tour.length}
+              </span>
+              <div className="flex flex-1 items-center gap-1" aria-hidden="true">
+                {tour.map((item, idx) => (
+                  <span
+                    key={item.title}
+                    className={cn(
+                      "h-1 flex-1 rounded-full transition-colors",
+                      idx <= position ? "bg-accent" : "bg-white/[0.12]",
+                    )}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="mb-1.5 inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/12 px-2.5 py-0.5 text-[11px] font-semibold text-accent-border">
+              <Sparkles size={11} aria-hidden="true" />
+              Quick tour
+            </div>
+          )}
+          <h2 className="text-[15px] font-semibold text-ink">{step?.title ?? "Explore your new workspace"}</h2>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-ink-secondary">
+            {step?.copy ?? "Take a short walk through Buddies, rooms, Preview, tasks, and schedules."}
+          </p>
         </div>
-        <button type="button" aria-label="Dismiss tour" className="rounded p-1.5 text-ink-secondary hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent" onClick={finish}><X size={16} /></button>
+        <button
+          type="button"
+          aria-label="Dismiss tour"
+          className="cursor-pointer rounded-full p-1.5 text-ink-secondary transition-colors hover:bg-white/[0.08] hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          onClick={finish}
+        >
+          <X size={15} aria-hidden="true" />
+        </button>
       </div>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {position > 0 && <button className="rounded-lg bg-card px-3 py-2 text-sm text-ink" onClick={() => navigate(position - 1)}>Back</button>}
-        {position < tour.length - 1 ? (
-          <button className="inline-flex items-center gap-2 rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white" onClick={() => navigate(position + 1)}>{position === -1 ? "Start tour" : "Next"} <ArrowRight size={14} /></button>
-        ) : (
-          <button className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-white" onClick={startWorking}>{readyBuddy ? "Open Buddy chat" : "Set up an AI model"}</button>
+
+      <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
+        {position === -1 && (
+          <button
+            type="button"
+            className="cursor-pointer rounded-full px-3.5 py-2 text-[13px] font-medium text-ink-secondary transition-colors hover:bg-white/[0.06] hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            onClick={finish}
+          >
+            Skip for now
+          </button>
         )}
-        {position === -1 && <button className="rounded-lg px-3 py-2 text-sm text-ink-secondary hover:text-ink" onClick={finish}>Skip for now</button>}
+        {position > 0 && (
+          <button
+            type="button"
+            className="cursor-pointer rounded-full px-3.5 py-2 text-[13px] font-medium text-ink-secondary transition-colors hover:bg-white/[0.06] hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            onClick={() => navigate(position - 1)}
+          >
+            Back
+          </button>
+        )}
+        {position < tour.length - 1 ? (
+          <button
+            type="button"
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-[13px] font-semibold text-white transition-all hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            onClick={() => navigate(position + 1)}
+          >
+            {position === -1 ? "Start tour" : "Next"}
+            <ArrowRight size={14} aria-hidden="true" />
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="inline-flex cursor-pointer items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-[13px] font-semibold text-white transition-all hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            onClick={startWorking}
+          >
+            {readyBuddy ? "Open Buddy chat" : "Set up an AI model"}
+          </button>
+        )}
       </div>
     </aside>
   );

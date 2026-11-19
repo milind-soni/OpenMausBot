@@ -1,75 +1,124 @@
-.alpha-welcome {
-  background:
-    radial-gradient(ellipse at 50% 80%, #10151e 0%, transparent 62%),
-    var(--color-app);
-}
+/* Welcome hero stage — full-canvas dark Studio aesthetic with four animated
+   Buddies positioned around an unobstructed center composition. */
 
-.alpha-welcome-shell {
-  box-shadow: 0 28px 96px #0009;
-}
-
-.alpha-welcome-title {
-  font-size: clamp(2.35rem, 4.2vw, 3.85rem);
-  letter-spacing: -0.065em;
-  line-height: 1;
-  max-width: 7.5em;
-}
-
-.alpha-welcome-art {
+.gbs-welcome {
   isolation: isolate;
-  background:
-    radial-gradient(ellipse at 65% 28%, #1c2f50 0%, transparent 68%),
-    radial-gradient(ellipse at 25% 78%, #242047 0%, transparent 67%),
-    #101117;
+  background-color: var(--color-app);
+  background-image:
+    radial-gradient(ellipse 68% 54% at 50% 44%, rgba(16, 132, 254, 0.11) 0%, transparent 66%),
+    radial-gradient(ellipse 42% 38% at 14% 82%, rgba(231, 133, 49, 0.08) 0%, transparent 68%),
+    radial-gradient(ellipse 42% 38% at 86% 20%, rgba(55, 127, 230, 0.09) 0%, transparent 68%),
+    radial-gradient(ellipse 40% 34% at 86% 84%, rgba(128, 87, 200, 0.08) 0%, transparent 68%);
 }
 
-.alpha-welcome-art::before {
-  position: absolute;
-  z-index: -1;
+/* Subtle architectural dot grid fading smoothly away from the stage center */
+.gbs-welcome::before {
+  position: fixed;
   inset: 0;
+  z-index: -1;
   content: "";
-  background-image: radial-gradient(circle, #7b94c0 1px, transparent 1px);
-  background-size: 21px 21px;
-  mask-image: radial-gradient(ellipse, #000 10%, transparent 80%);
-  opacity: 0.36;
+  background-image: radial-gradient(circle, rgba(252, 252, 252, 0.11) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse 68% 64% at 50% 50%, #000 18%, transparent 82%);
+  opacity: 0.45;
   pointer-events: none;
 }
 
-.alpha-activity {
-  --activity-color: #f6a65d;
-  position: relative;
-  background: #151923f5;
-  border-color: #788dba38;
-  box-shadow: 0 12px 32px #02061366, inset 0 1px #e3ecff0d;
+.gbs-welcome-title {
+  font-size: clamp(2.35rem, 5.2vw, 3.9rem);
+  letter-spacing: -0.045em;
+  line-height: 1.04;
+  background: linear-gradient(180deg, #ffffff 15%, #cfd9e8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
-.alpha-activity--design { --activity-color: #6ab5ff; }
-.alpha-activity--research { --activity-color: #b59aff; }
-
-.alpha-activity-avatar {
-  background: color-mix(in srgb, var(--activity-color), transparent 85%);
+.gbs-welcome-cta {
+  box-shadow:
+    0 10px 34px rgba(16, 132, 254, 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
 }
 
-.alpha-activity-icon {
-  color: var(--activity-color);
+.gbs-welcome-cta:hover {
+  box-shadow:
+    0 14px 40px rgba(16, 132, 254, 0.44),
+    inset 0 1px 0 rgba(255, 255, 255, 0.3);
 }
 
-@media (min-width: 768px) {
-  .alpha-activity--build { margin-right: 45px; }
-  .alpha-activity--design { margin-left: 44px; }
-  .alpha-activity--research { margin-right: 24px; margin-left: 14px; }
+.gbs-welcome-card {
+  background: rgba(18, 19, 24, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  box-shadow:
+    0 18px 46px rgba(0, 0, 0, 0.56),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(16px);
 }
 
+.gbs-welcome-buddy-halo {
+  position: absolute;
+  inset: -14px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, var(--buddy-glow, rgba(16, 132, 254, 0.28)) 0%, transparent 70%);
+  pointer-events: none;
+  z-index: -1;
+}
+
+/* Smooth GPU-composited entrance & ambient float, opted in only when motion is allowed */
 @media (prefers-reduced-motion: no-preference) {
-  .alpha-activity {
-    animation: alpha-card-in 500ms cubic-bezier(0.2, 0.75, 0.35, 1) both;
+  .gbs-welcome[data-motion="on"] .gbs-welcome-hero {
+    animation: gbs-hero-in 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  .alpha-activity--design { animation-delay: 70ms; }
-  .alpha-activity--research { animation-delay: 140ms; }
+  .gbs-welcome[data-motion="on"] .gbs-float-item {
+    animation:
+      gbs-node-in 620ms cubic-bezier(0.22, 1, 0.36, 1) var(--enter-delay, 0ms) both,
+      gbs-ambient-float var(--float-duration, 6.2s) cubic-bezier(0.37, 0, 0.63, 1) var(--float-delay, 0ms) infinite;
+  }
+
+  .gbs-welcome[data-motion="on"] .gbs-live-dot {
+    animation: gbs-dot-pulse 2.4s ease-in-out infinite;
+  }
 }
 
-@keyframes alpha-card-in {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes gbs-hero-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 14px, 0);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes gbs-node-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes gbs-ambient-float {
+  0%, 100% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -8px, 0);
+  }
+}
+
+@keyframes gbs-dot-pulse {
+  0%, 100% {
+    opacity: 0.45;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
 }
