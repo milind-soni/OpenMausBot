@@ -155,22 +155,25 @@ function unwrapLinkedImages() {
 // directions falls back to LTR. JS regexes cannot match Bidi_Class, so these are the blocks Unicode reserves for
 // right-to-left letters.
 const RTL_LETTER = /[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF\u{10800}-\u{10FFF}\u{1E800}-\u{1EFFF}]/u;
-/** A bare address is Latin whatever language the sentence around it is in, so its letters are not counted. */
-const ADDRESS = /(?:[a-z][a-z0-9+.-]*:\/\/|www\.)\S+/giu;
+const ADDRESS = /(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF()]+/giu;
+const TECHNICAL = /[\d._/\\@=]|^-|\p{Ll}\p{Lu}/u;
 
-/** The script with more letters decides; the first letter only breaks a tie. An Arabic answer often opens on a name
- * ("Chrome 158 \u0647\u0648 \u0627\u0644\u0625\u0635\u062F\u0627\u0631 \u0627\u0644\u0623\u062D\u062F\u062B", "**Node.js** \u0628\u064A\u0626\u0629 \u062A\u0634\u063A\u064A\u0644"), and the first letter alone laid that whole paragraph or
- * list out left-to-right: the Arabic words, numbers and Latin names in it reordered, and its bullets went left (#6541). */
 export function textDirection(value: string): "rtl" | "ltr" {
+  const text = value.replace(ADDRESS, " ");
   let rtl = 0, ltr = 0, first: "rtl" | "ltr" | null = null;
-  for (const [letter] of value.replace(ADDRESS, " ").matchAll(/\p{Letter}/gu)) {
-    const direction = RTL_LETTER.test(letter) ? "rtl" : "ltr";
+  for (const word of text.split(/\s+/)) {
+    const direction = RTL_LETTER.test(word) ? "rtl"
+      : /\p{Letter}/u.test(word) && !TECHNICAL.test(word) ? "ltr"
+      : null;
+    if (!direction) continue;
     first ??= direction;
     if (direction === "rtl") rtl += 1;
     else ltr += 1;
   }
   if (rtl !== ltr) return rtl > ltr ? "rtl" : "ltr";
-  return first ?? "ltr";
+  if (first) return first;
+  const strong = /\p{Letter}/u.exec(text);
+  return strong && RTL_LETTER.test(strong[0]) ? "rtl" : "ltr";
 }
 
 interface HastNode {
