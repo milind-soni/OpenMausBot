@@ -11,6 +11,7 @@ import { processHealthLines, trimmedProcessHealth, type ProcessHealth } from "./
 import type { ProcessReport } from "./process-sampler.ts";
 import { SETUP_STEPS, slowestSetupSteps, type SetupStats } from "./setup-steps.ts";
 import { RING_CAP, type LiveTurnView, type WindowStats } from "./turn-timings.ts";
+import { launchHealth, launchLines, type LaunchSources } from "./launch-report.ts";
 import type { TurnTiming } from "./turn-record.ts";
 
 /** The health report's `perf` field is at most this many bytes of JSON; parts are dropped, least useful first, to fit. */
@@ -34,6 +35,8 @@ export interface PerfSources {
   processes?: ProcessHealth | null;
   /** Each bot's processes, threads, memory and CPU, the most memory first (bot-footprint.ts); null where not sampled. */
   bots?: BotFootprintReport | null;
+  /** The desktop app's own starts (launch-timings.ts); null where no app starts this server. */
+  launches?: LaunchSources | null;
 }
 
 /** Engines refusing work, or within 10 points of their limit: driver kind, window, use and reset time only. */
@@ -62,6 +65,7 @@ export function perfHealth(sources: PerfSources) {
     stalls: sources.stalls ?? null,
     processes: sources.processes ?? null,
     bots: sources.bots ?? null,
+    launches: launchHealth(sources.launches),
   };
   const size = () => JSON.stringify(body).length;
   if (size() > PERF_HEALTH_MAX_BYTES) { body.h1.setup = setupOf(hour.setup, 2); body.h24.setup = setupOf(day.setup, 2); }
@@ -70,6 +74,7 @@ export function perfHealth(sources: PerfSources) {
   if (size() > PERF_HEALTH_MAX_BYTES) body.h24.tools = body.h24.tools.slice(0, 4);
   if (size() > PERF_HEALTH_MAX_BYTES) body.live = body.live.slice(0, 2);
   if (size() > PERF_HEALTH_MAX_BYTES && body.processes) body.processes = trimmedProcessHealth(body.processes);
+  if (size() > PERF_HEALTH_MAX_BYTES) body.launches = null;
   if (size() > PERF_HEALTH_MAX_BYTES) body.process = null;
   if (size() > PERF_HEALTH_MAX_BYTES) body.stalls = null;
   if (size() > PERF_HEALTH_MAX_BYTES) body.processes = null;
@@ -149,6 +154,7 @@ export function perfLines(sources: PerfSources, recent: readonly TurnTiming[], r
   if (sources.stalls) lines.push(...stallLines(sources.stalls));
   if (sources.processes) lines.push(...processHealthLines(sources.processes));
   if (sources.bots) lines.push(...botFootprintLines(sources.bots));
+  lines.push(...launchLines(sources.launches));
   lines.push(recentTitle);
   lines.push(...(recent.length ? recent.map((turn) => `  ${turnLine(turn)}`) : ["  (none)"]));
   return lines;

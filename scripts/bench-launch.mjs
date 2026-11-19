@@ -4,12 +4,16 @@
 // seeded workspace, and one reused profile. Prints one JSON object, so a change can show before/after.
 //   pnpm build && pnpm build:server
 //   node scripts/bench-launch.mjs --root /tmp/openmausbot-bench-launch.XXXXXX [--app CHECKOUT] [--runs 7] [--cold]
-//     [--seed 30,60,300] [--label NAME] [--out FILE] [--no-asar] [--dev]
+//     [--seed 30,60,300] [--label NAME] [--out FILE] [--no-asar] [--dev] [--server-prof DIR [--server-prof-tail MS]] [--quiet-ms 1500]
 // --app: the checkout whose electron/, dist/ and dist-server/ are measured (this one by default), so two checkouts run
 //   under the same bench. --cold: the page cache, its code cache and the server's compile cache are emptied before each
 //   launch (what the first launch after an update does); otherwise one primed profile is reused. --dev: what
 //   `pnpm dev:desktop` starts instead: electron/ from loose files, unpackaged, its page from a Vite dev server already
 //   running in front of a source server (both started here, on the bench's own ports and folders).
+// --server-prof: the server child of each launch writes a V8 CPU profile into DIR, up to its "listening" line or
+//   --server-prof-tail ms past it; those launches are slower for it.
+// --quiet-ms: how long the page must stay free of long tasks after the chat is drawn before the app is quit; 4000 or
+//   more lets the app write its own launch record (launch-timings.json in the data folder) first.
 // Not measured: a signed app's signature and keychain checks (a mock keychain stands in), the real engines' probes
 // (the fixture's sealed PATH hides them), the computer-control and browser helpers (not staged), any network call
 // (all refused and counted in `egress`).
@@ -27,7 +31,7 @@ const ROOT = join(HERE, "..");
 const require = createRequire(import.meta.url);
 const { values } = parseArgs({ options: {
   root: { type: "string" }, app: { type: "string", default: ROOT }, runs: { type: "string", default: "7" }, cold: { type: "boolean", default: false },
-  seed: { type: "string", default: "30,60,300" }, label: { type: "string", default: "launch" }, out: { type: "string" }, "no-asar": { type: "boolean", default: false }, dev: { type: "boolean", default: false },
+  seed: { type: "string", default: "30,60,300" }, label: { type: "string", default: "launch" }, out: { type: "string" }, "no-asar": { type: "boolean", default: false }, dev: { type: "boolean", default: false }, "server-prof": { type: "string" }, "quiet-ms": { type: "string", default: "1500" }, "server-prof-tail": { type: "string", default: "0" },
 } });
 const log = (line) => process.stderr.write(`bench-launch: ${line}\n`);
 if (!values.root || !values.root.includes("openmausbot-bench-")) throw new Error("--root must be a folder made for this bench (its name holds openmausbot-bench-)");
@@ -97,7 +101,7 @@ const DEV_PAGE_PORT = BENCH_PORTS[0] - 3600;
 const fixtureEnv = () => ({
   PATH: dirname(process.execPath), HOME: paths.home, CFFIXED_USER_HOME: paths.home, TMPDIR: paths.tmp, LANG: process.env.LANG ?? "en_US.UTF-8",
   OMB_DATA_DIR: paths.data, OMB_WEBHOOK_PORT: String(BENCH_PORTS[0] + 1), OMB_TEST_SEALED_PATH: "1", OMB_DISABLE_ANNOUNCEMENTS: "1", FAKE_CLAUDE_MODE: "happy",
-  OMB_BENCH_EGRESS_LOG: paths.egress,
+  OMB_BENCH_EGRESS_LOG: paths.egress, ...(values["server-prof"] ? { OMB_BENCH_SERVER_PROF: resolve(values["server-prof"]), OMB_BENCH_SERVER_PROF_TAIL_MS: values["server-prof-tail"] } : {}),
 });
 const answers = (url) => new Promise((done) => { const request = httpGet(url, (response) => { response.resume(); done(response.statusCode < 500); }); request.on("error", () => done(false)); request.setTimeout(2000, () => request.destroy()); });
 const devChildren = [];
@@ -120,7 +124,7 @@ function launch(name, { prime = false, screenshot = false } = {}) {
   const out = join(paths.results, `${values.label}-${name}.json`);
   rmSync(out, { force: true });
   const config = {
-    root, resources: staged.resources, blocker: staged.blocker, out, timeoutMs: 60_000, quietMs: 1500, dev: values.dev,
+    root, resources: staged.resources, blocker: staged.blocker, out, timeoutMs: 60_000, quietMs: Number(values["quiet-ms"]), dev: values.dev,
     target: { rows: Math.min(10, Number(values.seed.split(",")[0])), lastMessageId: seeded.bigLastMessageId },
     ...(prime ? { prime: { storage: STORAGE, botId: seeded.bigBotId } } : {}),
     ...(screenshot ? { screenshot: join(paths.results, `${values.label}-${name}.png`) } : {}),
