@@ -195,6 +195,29 @@ test("sign out of the active account: gone from this device and ended at the Adm
   assert.ok(!JSON.stringify(w.activeFile).includes(tokenOf("b")));
 });
 
+test("a sign-in kept in memory only (its file couldn't be written): a switch keeps it waiting, and signing out of it ends it", async (t) => {
+  const w = await world(t);
+  w.activeFile = w.grant("b");
+  await w.boot();
+  await w.addByCode("a");
+  assert.equal(w.signedInAs(), "acct-a");
+  // As the client keeps it after Clear and sign in again, when the new sign-in couldn't be saved: nothing of it on disk.
+  w.activeFile = null; w.client.memorySignIn = () => w.grant("a");
+  assert.deepEqual(await w.ring.switchTo("acct-b"), { outcome: "switched" });
+  assert.equal(w.signedInAs(), "acct-b");
+  assert.deepEqual(ids(w), ["acct-a"], "the one kept in memory now waits here, not lost");
+  assert.equal(w.savedFile.accounts.find((entry) => entry.account.id === "acct-a")?.token, tokenOf("a"));
+
+  const out = await world(t);
+  out.activeFile = out.grant("b");
+  await out.boot();
+  await out.addByCode("a");
+  out.activeFile = null; out.client.memorySignIn = () => out.grant("a");
+  assert.deepEqual(await out.ring.signOut("acct-a"), { outcome: "signed-out" });
+  assert.equal(out.signedInAs(), "acct-b");
+  assert.deepEqual(out.revoked, [tokenOf("a")], "its token ends at the Admin, never left orphaned");
+});
+
 test("sign out of the last account: signed out, with nothing left on this device", async (t) => {
   const w = await world(t);
   w.activeFile = w.grant("a");

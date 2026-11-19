@@ -379,6 +379,8 @@ export interface CloudAccountClient {
   reload(): Promise<CloudAccountState>;
   /** Ends a sign-in that waits on this device, at the Admin. */
   revokeSaved(record: unknown): Promise<void>;
+  /** For cloud-accounts.mjs only, never a page: the active sign-in when it is kept in memory only, as its file would hold it. */
+  memorySignIn(): unknown;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {

@@ -609,15 +609,38 @@ test("a locked keychain never removes the saved Cloud sign-in: it is read again,
   assert.deepEqual(await f.client.begin(), { status: "unavailable", message: "restore-failed" });
   assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "saved" }, "no clearing offered yet");
   assert.deepEqual(await f.client.resetSaved(), { status: "unavailable", message: "restore-failed" }, "nothing is cleared before it is offered");
-  for (const delay of [30_000, 60_000, 60_000]) { f.tick(); await until(() => f.timer); assert.equal(f.delay, delay); }
+  // Read again at 0:15, 0:45, 1:45 and 2:45: three failed reads by 0:45, but clearing also waits for two minutes.
+  const offered = [];
+  for (const delay of [30_000, 60_000, 60_000, 60_000]) { f.now += f.delay; f.tick(); await until(() => f.timer); assert.equal(f.delay, delay); offered.push(f.client.state().reset === true); }
+  assert.deepEqual(offered, [false, false, false, true], "offered at the read at 2:45, not the third read at 0:45");
   assert.ok((await stat(file)).isFile(), "a locked sign-in is never removed");
   assert.deepEqual(f.states.filter(state => state.message === "restore-failed").map(state => state.reset ?? false), [false, true],
-    "said once, then once more when clearing it is offered (the third read), not on every try");
+    "said once, then once more when clearing it is offered, not on every try");
   assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "saved", reset: true });
   assert.equal(f.requests.length, 0);
   lock.locked = false; f.tick();
   await until(() => f.client.state().status === "connected");
   assert.equal(f.client.state().account.email, "person@example.test");
+});
+
+test("Clear pressed while a read of the saved sign-in is under way: a read that opens it keeps it, and signs in", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "omb-cloud-clear-race-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "cloud-account.bin"), lock = { locked: true };
+  let gate = null;
+  const decrypt = async value => { await gate; return { shouldReEncrypt: false, result: Buffer.from(value).map(byte => byte ^ 0x55).toString() }; };
+  const f = await fixture(t, { store: electron43Store(file, lock, decrypt) });
+  await electron43Store(file).write(savedSignIn(f));
+  await f.client.start();
+  while (!f.client.state().reset) { f.now += f.delay; f.tick(); await until(() => f.timer); }
+  // The keychain is unlocked, and the next read is decrypting as the person presses Clear.
+  let release; gate = new Promise(resolve => { release = resolve; });
+  lock.locked = false; f.now += f.delay; f.tick();
+  const clearing = f.client.resetSaved();
+  release();
+  assert.equal((await clearing).status, "connected");
+  assert.ok((await stat(file)).isFile(), "the saved sign-in that opened is kept");
+  assert.ok(!f.requests.some(row => row.method === "DELETE"), "and never revoked");
 });
 
 test("a decrypt answer in a shape this app does not know is never taken for an unreadable sign-in", async t => {

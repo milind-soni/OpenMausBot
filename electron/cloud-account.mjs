@@ -479,7 +479,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (!current(stamp)) return state();
       if (removed) { cleanupNeeded = false; failures = 0; stuckSince = null; return publish({ status: "signed-out", message: "restore-removed" }); }
     }
-    failures++; stuckSince ??= now(); const offer = resetOffered({ platform, failures, since: stuckSince, now: now() });
+    failures++; stuckSince ??= now(); const offer = resetOffered({ failures, since: stuckSince, now: now() });
     if (value.message !== "restore-failed" || (offer && !value.reset)) publish({ status: "unavailable", message: "restore-failed", ...(offer ? { reset: true } : {}) });
     schedule(start, retryDelay(failures));
     return state();
@@ -529,6 +529,8 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
      * this run. One that still can't be removed stays on disk; this run's next sign-in is kept in memory if it can't be saved. */
     async resetSaved() {
       if (closed || grant || issued || clearing || !cleanupNeeded || !value.reset) return state();
+      // A read under way may yet open it: then it is kept and signed in, never cleared under that read.
+      if (restoring && reading) { await reading.catch(() => {}); if (grant) return refresh(); if (closed || issued || clearing || !cleanupNeeded) return state(); }
       const stamp = reset(), ended = cleanup; resetUsed = true;
       const [removed] = await Promise.all([store.write(null).then(() => true, () => false), ended ? revoke(ended).catch(() => {}) : null]);
       if (!current(stamp)) return state();
@@ -967,6 +969,8 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
     },
     /** Ends a sign-in that waits on this device, at the Admin. */
     revokeSaved: revoke,
+    /** For cloud-accounts.mjs only, never a page: the active sign-in when it is kept in memory only, as its file would hold it. */
+    memorySignIn: () => (unsaved && grant ? structuredClone(grant) : null),
     close() { closed = true; reset(); },
   };
 }

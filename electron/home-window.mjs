@@ -12,7 +12,10 @@ import { cloudHomeConnectUrl, cloudSetupOf, cloudUnreachableCause, cloudUnreacha
 import { cloudMachine, cloudState, myCloudOf, otherOwnClouds, ownCloud } from "./cloud-list.mjs";
 import { asleepAnswer, BACKGROUND_HEADERS, openSleepingCloud, SIGNED_IN_MS } from "./cloud-power.mjs";
 import nativeText from "./native-text.cjs";
+import { createPairWait, nameNotFound } from "./home-pairing.mjs";
 import { awayIn, parseJournal, sameCloud } from "./one-home.mjs";
+
+export { nameNotFound, NETWORK_HINT_MS, PAIR_LIMIT_MS, PAIR_RETRY_MS } from "./home-pairing.mjs";
 
 export const HOME_SCREEN_PATH = "/home";
 /** The look at an awake My Cloud before the window moves there: under 3 s, so the offline screen shows within 3 s. */
@@ -21,9 +24,6 @@ export const LOOK_MS = 2_500;
  * offline screen, with Try again: never an endless spinner. */
 export const OPEN_MS = 30_000;
 export const RETRY_MS = Object.freeze([2_000, 4_000, 8_000, 15_000, 30_000]);
-/** After a code whose page didn't load from here, or one the Admin refused, the next is asked for only after PAIR_RETRY_MS (or
- * the Admin's own Retry-After): every look, session read and focus once asked the Admin for a code about every second. */
-export const PAIR_RETRY_MS = Object.freeze([15_000, 30_000, 60_000, 120_000, 300_000]);
 /** A brand-new Cloud's name can be missing for minutes after the Admin says it is ready: a resolver that was asked while
  * it was set up keeps that "no such name" (RFC 2308 negative caching; Chromium's own host cache does too). For a Cloud
  * ready within FRESH_MS, a name not found keeps the setup screen up and the window tries again on NAME_RETRY_MS, with
@@ -31,9 +31,6 @@ export const PAIR_RETRY_MS = Object.freeze([15_000, 30_000, 60_000, 120_000, 300
 export const FRESH_MS = 15 * 60_000;
 export const NAME_WAIT_MS = 10 * 60_000;
 export const NAME_RETRY_MS = Object.freeze([5_000, 10_000, 20_000, 40_000, 60_000]);
-/** Chromium's net errors for a name it could not find (net/base/net_error_list.h): NAME_NOT_RESOLVED,
- * NAME_RESOLUTION_FAILED and the DNS range. */
-export const nameNotFound = (code) => code === -105 || code === -137 || (code <= -800 && code > -900);
 /** A new version of My Cloud's page waits for this long without typing before the window reloads it. */
 export const QUIET_MS = 30_000;
 export const VERSION_EVERY_MS = 60_000;
@@ -67,7 +64,6 @@ const DEFAULT_TIMERS = {
 };
 
 const originOf = (url) => { try { return new URL(url).origin; } catch { return null; } };
-const originHost = (origin) => { try { return new URL(origin).host || null; } catch { return null; } };
 
 /** The Cloud this computer moved to, at the address the verified session gives My Cloud now when My Cloud is that Cloud by
  * its id or by an address it had before it moved to another provider, for the journal's own account; as kept otherwise. */
@@ -251,14 +247,8 @@ export function createHomeWindow(deps) {
     now = Date.now, timers = DEFAULT_TIMERS, hosts = () => null, readyStore = null, ownMove = () => null, log = () => {}, t = nativeText.englishText.t } = deps;
   let home = { kind: "computer" }, screen = null, status = null, opens = 0, retry = null, tries = 0, loaded = null, newer = false, repairing = null;
   let recovering = null;
-  /** Pairing held for `origin` until `until` (PAIR_RETRY_MS); `network`: its page didn't load from this computer. */
-  let pairHold = null;
-  function holdPairing(origin, { error = null, network = false } = {}) {
-    const tries = pairHold?.origin === origin ? pairHold.tries + 1 : 1;
-    const asked = error?.status === 429 && Number.isFinite(error.retryAfter) ? Math.min(error.retryAfter, 3600) * 1000 : 0;
-    pairHold = { origin, tries, network: network || (pairHold?.origin === origin && pairHold.network), until: now() + Math.max(PAIR_RETRY_MS[Math.min(tries, PAIR_RETRY_MS.length) - 1], asked) };
-  }
-  const pairingHeld = (origin) => pairHold?.origin === origin && now() < pairHold.until;
+  /** The next sign-in code's wait, and since when My Cloud's page failed to connect from here (home-pairing.mjs). */
+  const waits = createPairWait({ now });
   /** The profile (clean-workspace.mjs) the person opened from the rail while My Cloud is home, until they pick a place. */
   let profileShown = null;
   /** My Cloud asked for before the move made it home (`{ open }`), until its page loads or the person goes elsewhere;
@@ -364,17 +354,21 @@ export function createHomeWindow(deps) {
   }
 
   /** The place didn't answer: this computer's screen says so, with the Admin's reason for My Cloud, and looks again by itself.
-   * `unreached`: My Cloud's address, which this computer couldn't connect to while the Admin knows of nothing wrong. */
-  function offline(token, unreached = null) {
+   * `unreached`: My Cloud's address, named once its page has failed to connect from here for a while (home-pairing.mjs) while
+   * the Admin knows of nothing wrong. `held`: the origin whose next code waits: the screen looks again when that wait ends,
+   * and says when for the Admin's own 429. */
+  function offline(token, unreached = null, held = null) {
     if (!wanted(token)) return;
     const cause = otherPlace(opening) ? null : cloudUnreachableCause(state(), cloudOrigin());
-    const host = !cause && unreached && !otherPlace(opening) ? originHost(unreached) : null;
-    toScreen({ screen: "offline", ...(cause ? { reason: cloudUnreachableText(state(), cloudOrigin()), cause } : host ? { cause: "network", host } : {}) });
-    later();
+    const host = !cause && unreached && !otherPlace(opening) ? waits.unreachedHost(unreached) : null;
+    const until = held ? waits.until(held) : null, retryAt = held && waits.limited(held) ? until : null;
+    toScreen({ screen: "offline", ...(cause ? { reason: cloudUnreachableText(state(), cloudOrigin()), cause } : host ? { cause: "network", host } : {}), ...(retryAt ? { retryAt } : {}) });
+    const hint = unreached && !host ? waits.hintIn(unreached) : null;
+    later(RETRY_MS, undefined, Math.min(until === null ? Infinity : Math.max(0, until - now()), hint ?? Infinity));
   }
-  function later(delays = RETRY_MS, count = () => tries++) {
+  function later(delays = RETRY_MS, count = () => tries++, atMost = Infinity) {
     clearRetry();
-    const ms = delays[Math.min(count(), delays.length - 1)];
+    const ms = Math.min(delays[Math.min(count(), delays.length - 1)], atMost);
     retry = timers.set(() => { retry = null; if (screen) void show(); }, ms);
   }
   /** Whether the window's own resolver finds `origin`'s name now, its host cache bypassed. */
@@ -426,7 +420,8 @@ export function createHomeWindow(deps) {
         signal: AbortSignal.timeout(LOOK_MS), headers: { accept: "application/json", ...BACKGROUND_HEADERS } });
       await response.body?.cancel?.().catch(() => {});
       if (asleepAnswer(response)) return "asleep";
-      return response.type === "opaqueredirect" || response.status < 500 ? "yes" : "no";
+      // A 5xx is an answer: this computer reached it, and something there is failing (a restart, an update).
+      return response.type === "opaqueredirect" || response.status < 500 ? "yes" : "failing";
     } catch { return "no"; }
   }
   /** The window's own session there: `{ expiresAt }` (null when the server names no end), or null when it has none. */
@@ -506,7 +501,8 @@ export function createHomeWindow(deps) {
       if (!asleep) {
         if (naming) await forgetNames();
         const look = await answers(origin);
-        if (look === "no") return unreachable(place, token);
+        waits.looked(origin, look);
+        if (look === "no" || look === "failing") return unreachable(place, token);
         if (look === "asleep" && otherPlace(place)) return offline(token);
         if (look === "asleep") { power.hold(); asleep = true; if (wanted(token)) say("waking"); }
       }
@@ -517,16 +513,16 @@ export function createHomeWindow(deps) {
       if (!wanted(token)) return;
       let grant = null;
       if (!signedIn) {
-        if (pairingHeld(origin)) return signInNeeded() ? toScreen({ screen: "signin" }) : offline(token, place.kind === "cloud" && pairHold.network ? origin : null);
+        if (waits.held(origin)) return signInNeeded() ? toScreen({ screen: "signin" }) : offline(token, null, origin);
         try { grant = await pair(place); } catch (error) {
           if (error?.gone && wanted(token)) return gone(place);
-          holdPairing(origin, { error });
+          waits.hold(origin, { error });
           log(`home: no sign-in code for ${otherPlace(place) ? place.name : "My Cloud"} (${error?.message ?? error})`);
         }
         if (!wanted(token)) return;
         if (!grant) {
           if (signInNeeded()) return toScreen({ screen: "signin" });
-          return offline(token);
+          return offline(token, null, origin);
         }
       }
       // My Cloud opened before the move made it home is a saved server the window shows, as the Server menu opens one.
@@ -743,8 +739,9 @@ export function createHomeWindow(deps) {
     current: () => home,
     /** The place the window was last sent to: My Cloud, or a team's or another own Cloud (`{ kind: "team" | "own", id, name, origin }`). */
     shown: () => shown,
-    /** The person asked again (the screen's timer, back online, or the window focused). */
-    retry: () => show(),
+    /** The screen asked again (as it opens, back online, or the window focused); `pressed`: the person pressed Try again, which
+     * no wait holds except the Admin's own 429. */
+    retry: ({ pressed = false } = {}) => { if (pressed) waits.pressed(); return show(); },
     /** The screen's one button: this device's MausBot Cloud sign-in, again. A sign-in already open in the browser opens
      * again; one with an account My Cloud isn't (`other`) ends first, so the browser can sign in another; one that is still
      * good only looks again. */
@@ -778,6 +775,7 @@ export function createHomeWindow(deps) {
       profileShown = null;
       clearRetry(); clearRenewal();
       asked = null; naming = null; shown = null; opening = null; screen = null; status = null;
+      waits.clear();
       away = away || !shows(localOrigin());
     },
     /** A response the window got (Electron's webRequest): a 401 from the place's API means its session ended. */
@@ -792,6 +790,9 @@ export function createHomeWindow(deps) {
     /** The main frame went somewhere: the place's own sign-in page means its session ended; any other page of it is
      * the version the window now shows. */
     navigated(url) {
+      // A page of the place, or of My Cloud asked for before it is home, loaded: the waits for its next code start again.
+      const page = /^https?:/.test(url) ? originOf(url) : null;
+      if (page && (page === placeOrigin() || page === readyCloudOrigin(state()))) waits.loaded(page);
       // Only a page that loaded counts: an error page (chrome-error:) is the load that failed().
       if (asked && /^https?:/.test(url)) {
         const at = originOf(url);
@@ -802,7 +803,6 @@ export function createHomeWindow(deps) {
       if (otherPlace(shown) && ![shown.origin, localOrigin()].includes(originOf(url))) { shown = null; clearRenewal(); }
       const origin = placeOrigin();
       if (!origin || originOf(url) !== origin) return;
-      if (pairHold?.origin === origin) pairHold = null;
       const at = new URL(url);
       if (at.pathname === "/pair" && !/[#&]code=/.test(at.hash)) { void repair(); return; }
       newer = false; loaded = null;
@@ -822,7 +822,7 @@ export function createHomeWindow(deps) {
       }
       if (!at || (at !== place && (home.kind !== "computer" || at !== mine))) return false;
       if (at !== place) asked ??= { open: null };
-      holdPairing(at, { network: true });
+      waits.hold(at, { page: true }); waits.failedLoad(at, code);
       const token = ++opens;
       void unreachable(otherPlace(shown) && at === place ? shown : { kind: "cloud", origin: at }, token, nameNotFound(code));
       return true;
@@ -860,7 +860,7 @@ export function installHomeWindowIpc({ ipcMain, homeWindow, cloudPage }) {
   };
   const screenPage = (event) => homeWindow.screenPage(event);
   ipcMain.handle("home:state", from("home:state", screenPage, () => homeWindow.view()));
-  ipcMain.handle("home:retry", from("home:retry", screenPage, () => homeWindow.retry().then(() => homeWindow.view())));
+  ipcMain.handle("home:retry", from("home:retry", screenPage, (pressed) => homeWindow.retry({ pressed: pressed === true }).then(() => homeWindow.view())));
   ipcMain.handle("home:remove", from("home:remove", screenPage, () => homeWindow.remove()));
   ipcMain.handle("home:sign-in", from("home:sign-in", (event) => screenPage(event) || cloudPage(event) === "cloud" || (homeWindow.homePage(event) && homeWindow.shown()?.kind === "own"), () => homeWindow.signIn()));
   ipcMain.handle("home:repair", from("home:repair", (event) => homeWindow.homePage(event), () => homeWindow.repair()));
