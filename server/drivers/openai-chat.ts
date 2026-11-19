@@ -21,7 +21,7 @@ import { assertImageTransport, chatImageBudget, chatToolImages, chatUserContent,
 import { promptHalves, volatileContextNote, withContextNote } from "./prompt-split.ts";
 import { createChatToolApproval, refusal } from "./chat-tool-approval.ts";
 import { ChatProtocolError, ChatReasoningDetails, ChatToolCalls, object, replayableToolCalls, toolArguments, type ChatToolCall } from "./openai-chat-protocol.ts";
-import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
+import { completionError, httpErrorDetail, refusedToolCall, refusedToolCallFailure, rejectsReasoningReplay, rejectsToolsParameter, RejectedToolCallError, sseData, StreamTruncatedError, UnsupportedChatToolsError, UnsupportedReasoningReplayError, type ProviderBody } from "./openai-chat-refusals.ts";
 import { ChatRepeatGuard } from "./chat-repeat-guard.ts";
 import { TextCallHoldback, textToolCalls } from "./chat-text-tool-calls.ts";
 import { createModelRoutes, ModelRouteRefused, noRouteLeft, readResponsesStream, responsesRequest, routeRefusal, selectedReasoningEffort, type ModelRoute, type ResponseItem } from "./openai-responses.ts";
@@ -373,17 +373,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      // llama.cpp before b7200 (seen on b6500) refuses a streamed request with HTTP 200 and an SSE `error:` event holding the bare error.
-      const streamedFailure = (data: string): Error => {
-        let error: Record<string, unknown> | undefined;
-        try { error = object(JSON.parse(data)); } catch { error = undefined; }
-        return typeof error?.code === "number" ? failure(error.code, JSON.stringify({ error }))
-          : new ChatProtocolError(`provider returned a streaming error: ${data.slice(0, 200)}`);
-      };
       const consumeDataLine = (line: string, atEof = false): boolean => {
-        if (line.startsWith("error:")) throw streamedFailure(line.slice("error:".length).trim());
-        if (!line.startsWith("data:")) return false;
-        const data = line.slice(5).trim();
+        const data = sseData(line, failure);
+        if (data === undefined) return false;
         if (data === "[DONE]") return true;
         let chunk: CompletionJson;
         try {
