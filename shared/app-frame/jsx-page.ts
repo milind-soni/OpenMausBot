@@ -269,6 +269,14 @@ export function jsxPageHtml(input: { title: string; source: string }): string {
   return shell({ title: input.title, head: "", boot: `(${JSX_RUNTIME_SOURCE})(${env});` });
 }
 
+export function jsxFolderPageHtml(input: { title: string; file: string }): string {
+  const env = `{ doc: document, win: window, load: function (name) { return import(name); }, title: ${scriptJson(input.title)}, source: source }`;
+  const unread = `document.getElementById("mausbot-root").textContent = ${scriptJson(`This page's file, ${input.file}, couldn't be read.`)};`;
+  const boot = `fetch(${scriptJson(input.file)}).then(function (answer) { if (!answer.ok) throw new Error(String(answer.status)); return answer.text(); })`
+    + `.then(function (source) { (${JSX_RUNTIME_SOURCE})(${env}); }, function () { ${unread} });`;
+  return shell({ title: input.title, head: "", boot });
+}
+
 /** Code inside a script element: a `<` that would start `</script` or `<!--` is escaped, which reads the same in JS. */
 export function scriptSafe(code: string): string {
   return code.replace(/<\/(script)/gi, "<\\/$1").replace(/<!--/g, "<\\!--");
