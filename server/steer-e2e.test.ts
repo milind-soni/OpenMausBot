@@ -1049,9 +1049,15 @@ posixOnly("mid-turn steering e2e", () => {
     const imagePath = join(attachments, "123e4567-e89b-42d3-a456-426614174008.png");
     writeFileSync(imagePath, "codex png");
     const imageText = `see this\n\n<attached-image path="${imagePath}" name="codex.png" />`;
-    const queued = await api("POST", `/api/bots/${created.id}/messages`, { text: imageText });
+    const sendId = "codex_image_steer_retry_123456";
+    const queued = await api("POST", `/api/bots/${created.id}/messages`, { text: imageText, followUp: "steer", sendId });
     expect(queued.status).toBe(202);
-    expect(queued.body).toMatchObject({ ok: true, queued: true });
+    expect(queued.body).toMatchObject({ ok: true, queued: true, blockedBy: "images" });
+    expect(queued.body.steered).toBeUndefined();
+    const retried = await api("POST", `/api/bots/${created.id}/messages`, { text: imageText, followUp: "steer", sendId });
+    expect(retried.status).toBe(202);
+    expect(retried.body).toMatchObject({ ok: true, queued: true, queueId: queued.body.queueId, blockedBy: "images" });
+    expect(retried.body.steered).toBeUndefined();
 
     const still = await api("POST", `/api/bots/${created.id}/queue/${queued.body.queueId}/steer`, {
       threadId: created.threadId,

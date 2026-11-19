@@ -7155,7 +7155,7 @@ async function acceptDirectSend(
           if (queued.text !== text || queued.replyToId !== replyTo?.id) {
             throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
           }
-          return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: queued.reason, why: waitWords.queued(threadId, queued.reason) };
+          return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: queued.reason, why: waitWords.queued(threadId, queued.reason), ...(queued.blockedBy === "images" ? { blockedBy: "images" as const } : {}) };
         }
       }
 
@@ -7239,7 +7239,7 @@ async function acceptDirectSend(
         }
         const queued = queueSteeredMessage(current.id, threadId, text, {
           replyToId: replyTo?.id,
-          sendId,
+          sendId, ...(busyAdmission.action === "queue" && busyAdmission.blockedBy === "images" ? { blockedBy: "images" as const } : {}),
           dataContext, fromApp: app?.fromApp, mentions,
           prompt: queuedPrompt,
           sender,
@@ -7250,7 +7250,7 @@ async function acceptDirectSend(
         });
         if (personsOwn && !chose) personFirst.wait(threadId, {});
         if (chose === "restart") await restartForPerson(botId, threadId, trigger);
-        return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+        return { ok: true as const, queued: true as const, queueId: queued.id, threadId, ...(busyAdmission.action === "queue" && busyAdmission.blockedBy === "images" ? { blockedBy: "images" as const } : {}) };
       }
       return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions);
     },
