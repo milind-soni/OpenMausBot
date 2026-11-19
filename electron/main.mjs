@@ -2785,7 +2785,6 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
-  bootHeadStart.start(); // read while the splash is made; the splash then draws in its own process as the server starts
   await evictStartupCacheOnce({
     userData: app.getPath("userData"),
     currentVersion: app.getVersion(),
@@ -2812,6 +2811,7 @@ app.whenReady().then(async () => {
     onShow: (win) => desktopTray?.windowShown(win),
     onFinished: () => { startupScreen = null; }, onReveal: via => launchAnalytics.stage("window_shown", { reason: via }),
   });
+  bootHeadStart.start(); // the splash draws in its own process while the folder is leased and the server starts
   if (desktopShutdownStarted) return;
   session.defaultSession.on("will-download", (_event, item) => {
     if (mediaDownloads.claim(item)) return;
