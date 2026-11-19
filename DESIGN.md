@@ -307,9 +307,9 @@ on. Simple is the default for new installs.
 
 ## 14. Accessibility
 
-- **Keep keyboard focus visible.** Buttons and menu rows show keyboard focus
-  with a background fill. Other controls use the global `:focus-visible`
-  outline or, for text fields, a border in `--color-focus`.
+- **Keyboard focus.** Buttons and search fields keep their resting appearance
+  in the app themes. Buttons use the system highlight in forced-colors mode.
+  Other fields can use a border in `--color-focus`.
 - **Everything works from the keyboard.** Menus move with the arrows, Home and
   End, type-ahead, Enter and Escape (`src/components/model-menu-keys.ts`,
   `src/lib/menu-keys.ts`). Tab never lands on something hidden.

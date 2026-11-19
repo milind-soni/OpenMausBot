@@ -2045,8 +2045,6 @@ body {
 :is(button, summary, input:is([type="button"], [type="submit"], [type="reset"], [type="image"]), [role="button"], [role="tab"], [role="switch"], [role^="menuitem"]) {
   &:focus-visible {
     outline: none;
-    background-color: color-mix(in srgb, var(--color-card), var(--color-ink) 20%);
-    color: var(--color-ink);
   }
 
   &[class*="focus:ring-"]:focus,
@@ -2071,7 +2069,7 @@ body {
 /* Text fields already sit in a bordered card (the composer pill especially).
    Chromium treats a pointer click as :focus-visible on inputs, so the
    global ring above becomes a sharp blue rectangle inside the rounded
-   chrome. Buttons show focus with a background fill. Checkboxes, radios,
+   chrome. Checkboxes, radios,
    sliders, colour wells and file pickers are not text fields: they have no
    border to repaint, so they keep the ring, or a keyboard user tabbing onto
    one sees nothing. */
@@ -2085,7 +2083,7 @@ body {
    carries as well as over a faint per-file `focus:border-*`. --color-focus
    clears 3:1 on every field surface (pnpm check:contrast). A borderless
    field has no border to paint and is left as it was: a find bar's rounded
-   wrapper takes `focus-within:border-focus`, and Simple mode's composer pill
+   wrapper keeps its resting style. Simple mode's composer pill
    shows focus as a stronger hairline (`focus-within:ring-ink/[0.22]`), not
    in the focus colour.
    A field reporting an error (aria-invalid) keeps its danger border, so the

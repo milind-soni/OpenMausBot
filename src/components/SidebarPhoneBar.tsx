@@ -70,7 +70,7 @@ export function SidebarPhoneBar({ query, onQuery }: { query: string; onQuery: (q
             </span>
           )}
         />
-        <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-hairline bg-card pl-3.5 pr-1.5 text-ink-secondary focus-within:border-focus">
+        <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-hairline bg-card pl-3.5 pr-1.5 text-ink-secondary">
           <Search size={17} aria-hidden="true" className="shrink-0" />
           <input
             value={query}

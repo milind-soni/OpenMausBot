@@ -138,7 +138,7 @@ export interface NavProps {
 
 export function SettingsSearchField({ query, onQuery, onClose, onFirst }: { query: string; onQuery: (query: string) => void; onClose: () => void; onFirst: () => void }) {
   return (
-    <div className="flex h-8 shrink-0 items-center gap-2 rounded-lg border-[0.5px] border-(--settings-edge) px-2 focus-within:border-ink/25">
+    <div className="flex h-8 shrink-0 items-center gap-2 rounded-lg border-[0.5px] border-(--settings-edge) px-2">
       <Search size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
       <input
         data-settings-search
