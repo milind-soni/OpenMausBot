@@ -323,9 +323,13 @@ export function TeamMapPage() {
 
   // `background`: the 3-second poll, which never wakes a Cloud home that went to sleep.
   // Only the newest request writes: an older reply that lands late never overwrites a newer snapshot.
+  // A poll tick skips while a request is still out, so a reply slower than the interval is never superseded.
   const latestRefresh = useRef(0);
+  const pendingRefreshes = useRef(0);
   const refresh = useCallback(async (background = false) => {
+    if (background && pendingRefreshes.current > 0) return;
     const request = ++latestRefresh.current;
+    pendingRefreshes.current += 1;
     try {
       const next = await api("/api/team-map", background ? { background } : undefined);
       if (request !== latestRefresh.current) return;
@@ -334,6 +338,8 @@ export function TeamMapPage() {
     } catch (requestError) {
       if (request !== latestRefresh.current) return;
       setRefreshError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      pendingRefreshes.current -= 1;
     }
   }, []);
 
