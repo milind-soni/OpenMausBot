@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Check, Hand, KeyRound, Loader2, LockKeyhole, LogIn, RefreshCw, X } from "lucide-react";
 
 import type { ComputerHelpRef } from "../../shared/wire";
-import { browserMatesOf } from "../../shared/logins";
+import { browserMatesOf } from "../../shared/browser-mates";
 import { signInOutcome } from "../../shared/sign-in-request";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";

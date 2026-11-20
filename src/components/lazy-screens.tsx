@@ -82,6 +82,13 @@ export const SettingsModal = lazyScreen("SettingsModal", async () => (await impo
 export const TeamMapPage = lazyScreen("TeamMapPage", async () => (await import("./TeamMapPage")).TeamMapPage);
 export const PublishedAppsPage = lazyScreen("PublishedAppsPage", async () => (await import("./published-apps/PublishedAppsPage")).PublishedAppsPage);
 export const AnnouncementsPage = lazyScreen("AnnouncementsPage", async () => (await import("./announcements/AnnouncementsPage")).AnnouncementsPage);
+export const InboxPanel = lazyScreen("InboxPanel", async () => (await import("./inbox/InboxPanel")).InboxPanel);
+export const TeamDialog = lazyScreen("TeamDialog", async () => (await import("./TeamDialog")).TeamDialog);
+export const TeamSettingsDialog = lazyScreen("TeamSettingsDialog", async () => (await import("./TeamSettingsDialog")).TeamSettingsDialog);
+export const VoiceSetupDialog = lazyScreen("VoiceSetupDialog", async () => (await import("./VoiceSetupDialog")).VoiceSetupDialog);
+export const TraceDialog = lazyScreen("TraceDialog", async () => (await import("./usage/TraceView")).TraceDialog);
+export const ShareBotDialog = lazyScreen("ShareBotDialog", async () => (await import("./bot-access/ShareBotDialog")).ShareBotDialog);
+export const CommandAllowlistDialog = lazyScreen("CommandAllowlistDialog", async () => (await import("./CommandAllowlistDialog")).CommandAllowlistDialog);
 
 // Rarely opened, so never fetched ahead. The team library is what brings the YAML parser in.
 export const CloudAddDialog = lazyScreen("CloudAddDialog", async () => (await import("./CloudAddDialog")).CloudAddDialog);
@@ -96,7 +103,8 @@ export const TeamFilesPage = lazyScreen("TeamFilesPage", async () => (await impo
 // Most opened first: a Cloud page fetches these in this order.
 const SCREENS = [
   SettingsModal, BotSettingsDialog, PluginsPanel, ComputerPanel, TriggersPage, ActivityPanel, FilesView, InspectorPanel, KeyboardShortcutsModal,
-  LocalVmWorkspace, NewBotDialog, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, TeamMapPage, PublishedAppsPage,
+  LocalVmWorkspace, NewBotDialog, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, TeamMapPage, PublishedAppsPage, InboxPanel,
+  TeamSettingsDialog, TeamDialog, VoiceSetupDialog, TraceDialog, ShareBotDialog, CommandAllowlistDialog,
 ];
 
 if (typeof location !== "undefined" && new URLSearchParams(location.search).has("desktop-settings")) {
