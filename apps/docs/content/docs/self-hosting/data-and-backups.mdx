@@ -6,18 +6,25 @@ icon: DatabaseBackup
 
 MausBot keeps its application state in its data folder, including configuration, transcripts, message attachments, device pairing state, and the SQLite message store. Where that folder is:
 
-- The desktop app and an npm install: `~/.openmausbot` (`OMB_DATA_DIR` names another). Once this computer's bots have moved to My Cloud, the desktop's own workspaces each have a folder under `~/.openmausbot-profiles/` instead (This Mac's or This PC's is `default`).
-- The Docker image: `/data/.openmausbot` inside the container, on its `data` volume (`deploy_data` by default).
-- A server set up with the installer: `/opt/openmausbot/data/.openmausbot` on the server.
+- The desktop app and an npm install: `~/.openmausbot` (`OMB_DATA_DIR` names another). In the desktop app, workspaces you add are in `~/.openmausbot-profiles/` (`<that folder>-profiles` with `OMB_DATA_DIR`); once this computer's bots have moved to My Cloud, This Mac's (or This PC's) is there too, as `default`, and `~/.openmausbot` keeps the copy from before the move.
+- The Docker image: `/data/.openmausbot` inside the container, on its `data` volume (named `deploy_data` with path B's `deploy/docker-compose.yml`, `openmausbot_data` with the repository's root `compose.yaml`).
+- A server set up with the installer: `/opt/openmausbot/data/.openmausbot` on the server, a folder rather than a volume.
 
 ## Move from the desktop app
 
 To bring your computer's bots and chats to a server you run, use the desktop
 app: connect the server with **＋ → Connect to a server**, then choose
-**Make … my home** (with the server's name) in that server's menu on the rail, or under
-**Settings → Phone & devices → Always-on home**. It moves this computer's bots,
-chats, memory and routines to the server, and this computer then works for it.
-It is offered only for a server where nobody but you signs in.
+**Make … my home** (with the server's name) in that server's menu on the rail,
+or under **Settings → Phone & devices → Always-on home → Add a Mac mini or other
+always-on computer** (on this computer's own page). It moves this computer's
+bots, chats, memory and routines to the server, and this computer then works
+for it. Bots' Data tables do not move.
+
+The move is one-way: this computer's own server stops for good, there is no
+button to move back, and the copy here is kept, frozen. It is offered only for
+a server where nobody but you signs in, where this app is signed in as its
+owner, and that runs a version new enough to take the move; and not while, or
+after, this computer's bots move to My Cloud.
 
 To copy instead of moving, or for a server with no desktop app nearby, use
 export and import below.
