@@ -307,15 +307,18 @@ describe("Simple-mode sidebar layout", () => {
     expect(open.className).not.toContain("w-[92px]");
   });
 
-  it("puts the pinned pages in Simple's tiles after the bots, and shows the tiles for pages alone", () => {
-    fixture.storage.set("omb-web-panels", JSON.stringify([{ id: "board", name: "Fleet board", url: "http://127.0.0.1:7841/" }]));
+  it("keeps Simple's tiles to bots, even with pages pinned: a bot's pages are in its bot panel's Library tab", () => {
+    fixture.storage.set("omb-web-panels", JSON.stringify([
+      { id: "board", name: "Fleet board", url: "http://127.0.0.1:7841/" },
+      { id: "report", name: "Weekly report", page: { botId: "atlas", threadId: "atlas-thread", messageId: "m" } },
+    ]));
     fixture.state = { ...fixture.state, activeView: "web-panel", webPanelId: "board" };
-    const grid = () => render().tree.find((node) => node.type === SidebarTileGrid)?.props as Parameters<typeof SidebarTileGrid>[0] | undefined;
-    expect(grid()).toMatchObject({ primary: null, pinned: [], openPage: "board", dispatch: fixture.dispatch });
-    expect(grid()!.pages!.map((page) => page.name)).toEqual(["Fleet board"]);
+    expect(render().tree.some((node) => node.type === SidebarTileGrid)).toBe(false);
     fixture.values = [];
-    fixture.advanced = true;
-    expect(grid()).toBeUndefined();
+    fixture.state = { ...fixture.state, bots: [bot("chief", { chiefOfStaff: true, pinned: true }), bot("atlas", { pinned: true }), bot("bea")] };
+    const grid = render().tree.find((node) => node.type === SidebarTileGrid)!.props as Record<string, unknown>;
+    expect(Object.keys(grid).sort()).toEqual(["corner", "pinned", "primary", "row"]);
+    expect([(grid.primary as Bot).id, ...(grid.pinned as Bot[]).map((candidate) => candidate.id)]).toEqual(["chief", "atlas"]);
     fixture.storage.delete("omb-web-panels");
   });
 

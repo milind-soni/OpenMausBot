@@ -12,8 +12,7 @@ vi.mock("@/lib/interface-mode", async (original) => ({
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
 
 import { BotListItem, botRowProps } from "./Sidebar";
-import { pageFaviconUrl, SidebarBotTile, SidebarPageTile, SidebarTileGrid } from "./SidebarTiles";
-import type { WebPanel } from "@/lib/web-panels";
+import { SidebarBotTile, SidebarTileGrid } from "./SidebarTiles";
 
 const bot = (extra: Partial<Bot> = {}): Bot => ({
   id: "mausbot", threadId: "t", name: "MausBot", title: "", description: "", notifications: true, color: "chrome",
@@ -152,49 +151,5 @@ describe("the tile grid", () => {
     const across = (room: number) => Math.floor((room + gap) / (tile + gap));
     expect(across(width - gutters)).toBe(columns);
     expect(across(width - gutters - 8)).toBe(columns);
-  });
-});
-
-describe("a pinned page's tile", () => {
-  const site: WebPanel = { id: "board", name: "Fleet board", url: "http://127.0.0.1:7841/dash?tab=1" };
-  const chatPage: WebPanel = { id: "report", name: "Weekly report", page: { botId: "mausbot", threadId: "t", messageId: "m" } };
-  const draw = (panel: WebPanel, open = false) => renderToStaticMarkup(createElement(SidebarPageTile, { panel, open, dispatch }));
-
-  it("is a bot tile's size, with its mark on a 60px card plate where the avatar is, over the same 12px caption", () => {
-    const html = draw(site);
-    expect(html).toMatch(/<button type="button" data-sidebar-tile="page" data-sidebar-page="board" title="Fleet board" class="[^"]*\bh-\[92px\] w-\[95px\][^"]*\brounded-xl\b/);
-    expect(html).toMatch(/<span aria-hidden="true" class="flex size-\[60px\] shrink-0 items-center justify-center rounded-xl bg-card text-ink-secondary">/);
-    expect(html).toMatch(/class="mt-1\.5 w-full min-w-0 truncate text-center text-\[12px\] leading-4 text-ink">Fleet board</);
-    expect(html).not.toContain("aria-current");
-  });
-
-  it("shows a site's own favicon at 24px, asked of that site with no referrer, and a bot's page the page icon", () => {
-    expect(pageFaviconUrl(site)).toBe("http://127.0.0.1:7841/favicon.ico");
-    expect(draw(site)).toMatch(/<img src="http:\/\/127\.0\.0\.1:7841\/favicon\.ico" alt="" width="24" height="24" referrerPolicy="no-referrer" class="size-6"\/>/);
-    expect(pageFaviconUrl(chatPage)).toBeNull();
-    const page = draw(chatPage);
-    expect(page).not.toContain("<img");
-    expect(page).toMatch(/<svg[^>]*width="24" height="24"[^>]*class="lucide lucide-app-window/);
-  });
-
-  it("opens its page on a click and is marked current while that page is on screen", () => {
-    expect(draw(site, true)).toContain('aria-current="page"');
-    expect(draw(site, true)).toContain("[--tile:var(--color-raised)]");
-    let tree: ReactNode;
-    function Capture() { tree = SidebarPageTile({ panel: site, open: false, dispatch }); return tree; }
-    renderToStaticMarkup(createElement(Capture));
-    (find(tree, "data-sidebar-page")!.props.onClick as () => void)();
-    expect(dispatch).toHaveBeenCalledWith({ type: "showWebPanel", id: "board" });
-  });
-
-  it("follows the bots in the grid, and fills a grid of pages alone", () => {
-    const main = bot({ chiefOfStaff: true });
-    const row = (candidate: Bot) => botRowProps({ ...initialState, bots: [main], selectedId: "", activeView: "chat" }, dispatch, candidate, { density: "comfortable", query: "", onMenu });
-    const order = (html: string) => [...html.matchAll(/data-sidebar-tile="([^"]+)"/g)].map(([, kind]) => kind);
-    const html = renderToStaticMarkup(createElement(SidebarTileGrid, { primary: main, pinned: [], row, pages: [site, chatPage], openPage: "report", dispatch }));
-    expect(order(html)).toEqual(["primary", "page", "page"]);
-    expect(html.indexOf('data-sidebar-page="board"')).toBeLessThan(html.indexOf('data-sidebar-page="report"'));
-    expect(html).toMatch(/data-sidebar-page="report"[^>]*aria-current="page"/);
-    expect(order(renderToStaticMarkup(createElement(SidebarTileGrid, { primary: null, pinned: [], row, pages: [site], dispatch })))).toEqual(["page"]);
   });
 });

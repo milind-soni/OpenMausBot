@@ -122,7 +122,7 @@ are never tracked. Titles of 17px and up keep `tracking-[-0.01em]`.
 | Names in lists (bots in the sidebar 14 / 20px) | 13 / 18px | 500 | `ink` |
 | Sidebar group labels ("Bots", "Tools", a department) | 13 / 18px | 415 | `ink-secondary` |
 | Sidebar places (the rows under "Tools") | 14 / 20px | 415 | `ink` |
-| Pinned bot and page captions | 12 / 16px | 415 | `ink` |
+| Pinned bot captions | 12 / 16px | 415 | `ink` |
 | Speaker names in transcripts (people and bots) | 13px | 600 | bot colour, else `ink-secondary` |
 | Meta, hints, menu group labels | 12 / 16px | 415 (menu group labels 500) | `ink-tertiary` |
 | Timestamps | 12 / 16px | 500 | `ink-tertiary` or `ink-secondary` |
@@ -164,9 +164,7 @@ element's job and never a pixel value:
 - **No in-between values** (`rounded-[10px]`, `rounded-[14px]`). Pick the step
   for the element's job.
 - **A nested shape is smaller than its container.** A card (12) in a dialog
-  (14) is right; a 12px card inside a 12px menu is not. A pinned page's 60px
-  plate (12) is the exception: it stands where a bot's avatar stands in its
-  tile and shares no corner with it.
+  (14) is right; a 12px card inside a 12px menu is not.
 
 ## 6. Space and layout
 
@@ -184,8 +182,8 @@ element's job and never a pixel value:
   variant.
 - **Sidebar rows:** Simple's rows have 8px padding and a 10px gap after the
   36px avatar; every row hovers at `bg-ink/[0.06]`. The sidebar is 280px wide
-  in both modes; pinned bots and, in Simple, pinned pages are 95 × 92px tiles
-  with a 60px avatar or plate.
+  in both modes; pinned bots are 95 × 92px tiles with a 60px avatar. Pinned
+  pages never join them: a bot's pages are in its bot panel's Library tab.
 - **The sidebar stays open beside a side panel** while the chat keeps 440px:
   from 1040px with a 320px panel (Simple's bot panel, a room, Simple's inbox,
   Notifications), from 1280px with a wider one. Narrower, it folds to its
@@ -211,8 +209,7 @@ element's job and never a pixel value:
   menus included. The only exceptions are a glyph on a filled control (the
   send arrow) and deliberately heavy marks (a check, a filled badge).
 - **Icons are bare.** Don't put them in tinted squares or circles. A bot's
-  avatar is the only mark that gets a plate, and a pinned page's tile, which
-  stands beside bots' avatars, puts its 24px icon on a 60px `bg-card` plate.
+  avatar is the only mark that gets a plate.
 - **Decorative icons get `aria-hidden="true"`.** An icon-only button needs an
   `aria-label`, and a `title` when its meaning isn't obvious.
 - **One icon, one meaning.** If an icon already means something in the app,
