@@ -5753,7 +5753,6 @@
   "activity.dates": "Tarihler",
   "settings.threadCleanup.retention.plain": "Uzun zaman önce bitmiş konuşmaların olay günlüklerini sil. Konuşmalar kalır.",
   "settings.threadCleanup.cap.plain": "Her konuşmanın olay günlüğünü küçük tut. Konuşmalar kalır.",
-  "settings.import.grokLine": "Bir botu becerileri, rutinleri, anıları ve uygulamalarıyla getir.",
   "settings.import.choose": "Seç…",
   "settings.experimental.skillAuthoringShort": "Bir doğrulama çalışmasını beceri olarak kaydet veya bir bottan oluşturmasını iste. Her değişiklik sohbette Geri al ile görünür.",
   "settings.experimental.newBrowserShort": "Botların tarayıcıları {app} uygulamasının kendi tarayıcı sürücüsünü kullanır: daha net sayfalar, yüklemeler, indirmeler ve açılır pencereler.",
