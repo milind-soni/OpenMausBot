@@ -3005,6 +3005,8 @@
   "attach.openOriginalAria": "Abrir o original de {name}",
   "attach.openOriginal": "Abrir o original",
   "attach.close": "Fechar a prévia da imagem",
+  "attach.besideAria": "{name} ao lado do chat",
+  "attach.besideClose": "Fechar a prévia",
   "attach.previous": "Imagem anterior",
   "attach.next": "Próxima imagem",
   "attach.retryAria": "Tentar carregar {name} novamente",
