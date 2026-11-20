@@ -3190,6 +3190,8 @@
   "attach.openOriginalAria": "Open original {name}",
   "attach.openOriginal": "Open original",
   "attach.close": "Close image preview",
+  "attach.besideAria": "{name} beside the chat",
+  "attach.besideClose": "Close preview",
   "attach.previous": "Previous image",
   "attach.next": "Next image",
   "attach.retryAria": "Retry loading {name}",
