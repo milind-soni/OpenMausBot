@@ -3187,7 +3187,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "config": forgetSharedSession();
           rawDispatch({
             type: "configStatus",
-            config: configStatusFromFrame(frame as unknown as ConfigStatusFrame),
+            config: configStatusFromFrame(frame as unknown as ConfigStatusFrame, store.getState().config),
           });
           {
             const instances = partByKey.get("instances");
