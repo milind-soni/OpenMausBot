@@ -64,7 +64,7 @@ export const SETTINGS_PLACES = [
   {"id":"vault","path":"Settings → Vault","words":["password","passwords","login","logins","secrets","1password","2fa","totp"]},
   {"id":"spending","path":"Settings → Spending","words":["spending","cost","costs","tokens","money","usage"]},
   {"id":"grok-move","path":"Settings → Import & export → Bring things in → Move from Grok Bot","words":["grok","grok bot","move from","import","bring","another app"]},
-  {"id":"ai-apps","path":"Settings → Import & export → Bring things in → From your AI apps","words":["import","bring","skills","mcp","claude code","codex","cursor","gemini"]},
+  {"id":"ai-apps","path":"Settings → Import & export → Bring things in → From your AI apps","words":["import","bring","skills","mcp","claude code","codex","cursor","gemini","hermes","openclaw"]},
   {"id":"backup-import","path":"Settings → Import & export → Bring things in → Import backup","words":["restore","import","bring","backup","backups","bring back"]},
   {"id":"bring-in","path":"Settings → Import & export → Bring things in","words":["import","move from","bring"]},
   {"id":"backup-export","path":"Settings → Import & export → Take things out → Export full backup","words":["backup","backups","export","full backup","download"]},

@@ -975,6 +975,27 @@ describe("ACP turns (fake CLI)", () => {
     expect(lastTurn().at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "empty_turn" });
   });
 
+  it("names a turn that streams reasoning past its last tool, then ends without a reply", async () => {
+    const { report, send, lastTurn } = await reportingThread("ended-after-tools");
+    report(
+      { sessionUpdate: "tool_call", toolCallId: "call-eat-1", title: "Ran a thing", status: "completed" },
+      { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "still deliberating" } },
+    );
+    await send("turn 1", false);
+    expect(lastTurn().at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "ended_after_tools" });
+  });
+
+  it("keeps that name when a finished tool's update repeats after its reasoning", async () => {
+    const { report, send, lastTurn } = await reportingThread("ended-after-tools-repeat");
+    report(
+      { sessionUpdate: "tool_call", toolCallId: "call-eat-2", title: "Ran a thing", status: "completed" },
+      { sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "still deliberating" } },
+      { sessionUpdate: "tool_call", toolCallId: "call-eat-2", title: "Ran a thing", status: "completed" },
+    );
+    await send("turn 1", false);
+    expect(lastTurn().at(-1)).toMatchObject({ type: "turn.completed", ok: false, stopReason: "ended_after_tools" });
+  });
+
   it("fails clearly when an image-capable adapter meets an older ACP runtime", async () => {
     const imagePath = join(scratch, "tiny.png");
     writeFileSync(imagePath, "not-read-before-capability-check");

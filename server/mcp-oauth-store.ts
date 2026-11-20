@@ -17,7 +17,9 @@ const recordSchema = z.object({
   state: z.enum(["needs-sign-in", "signed-in"]),
   issuer: z.string().optional(),
   clientId: z.string().optional(),
-  /** The secret stays in config.json; it is never kept here. */
+  /** Only a secret the server issued at dynamic registration. A configured app's secret stays in config.json and is
+   * never kept here. */
+  clientSecret: z.string().optional(),
   tokenAuth: z.enum(["client_secret_post", "client_secret_basic"]).optional(),
   redirectUri: z.string().optional(),
   tokenEndpoint: z.string().optional(),
