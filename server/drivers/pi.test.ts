@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -325,6 +325,30 @@ describe("PiDriver catalog (fake CLI)", () => {
         ["update", "--models", "--no-approve"],
         ["--mode", "rpc", "--no-session"],
       ]);
+    } finally {
+      await instance.dispose();
+    }
+  });
+
+  it("probes the model list with a Pi login the person makes after the instance started", async () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-pi-later-login-"));
+    const dump = join(home, "launches.jsonl");
+    const instance = await PiDriver.create({
+      instanceId: "pi-later-login",
+      displayName: undefined,
+      environment: { HOME: home, FAKE_PI_DUMP: dump },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+      writeFileSync(join(home, ".pi", "agent", "auth.json"), '{"openai":{"type":"api_key","key":"sk-later"}}');
+      writeFileSync(dump, "");
+      await instance.refreshModels?.();
+      const rows = readFileSync(dump, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { agentDir?: string | null });
+      const own = rows.at(-1)!.agentDir!;
+      expect(own.startsWith(join(DATA_DIR, "providers", "pi-own"))).toBe(true);
+      expect(statSync(join(own, "auth.json"), { bigint: true }).ino).toBe(statSync(join(home, ".pi", "agent", "auth.json"), { bigint: true }).ino);
     } finally {
       await instance.dispose();
     }
@@ -1242,7 +1266,7 @@ describe("PiDriver turns (fake CLI)", () => {
     const own = [...agentDirs][0]!;
     expect(own.startsWith(join(DATA_DIR, "providers", "pi-own"))).toBe(true);
     expect(readdirSync(own).filter((name) => !name.startsWith(".")).sort()).toEqual(["auth.json", "models.json", "settings.json"]);
-    expect(realpathSync(join(own, "auth.json"))).toBe(realpathSync(join(person, "auth.json")));
+    expect(statSync(join(own, "auth.json"), { bigint: true }).ino).toBe(statSync(join(person, "auth.json"), { bigint: true }).ino);
     expect(JSON.parse(readFileSync(join(own, "settings.json"), "utf8"))).toEqual({ defaultProvider: "openai", defaultModel: "gpt-4o" });
     const written = JSON.parse(readFileSync(join(own, "models.json"), "utf8")) as {
       providers: { mine: unknown; omlx: { baseUrl: string; models: Array<{ id: string }> } };

@@ -15,8 +15,8 @@ import { engineHomes } from "../engine-homes/engine-homes.ts";
 
 /** settings.json entries that choose a model and how Pi reaches it (pi-coding-agent 1.6.0 SettingsManager). Never its
  * packages, extensions, skills or prompts. */
-const SETTINGS_KEPT = ["defaultProvider", "defaultModel", "defaultThinkingLevel", "transport", "retry", "httpIdleTimeoutMs",
-  "websocketConnectTimeoutMs", "shellPath"] as const;
+const SETTINGS_KEPT = ["defaultProvider", "defaultModel", "defaultThinkingLevel", "transport", "retry", "httpProxy",
+  "httpIdleTimeoutMs", "websocketConnectTimeoutMs", "shellPath"] as const;
 
 const noted = new Set<string>();
 function note(path: string, message: string): void {

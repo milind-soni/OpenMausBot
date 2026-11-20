@@ -347,10 +347,12 @@ export const PiDriver: ProviderDriver<PiConfig> = {
 
   async create(input: DriverCreateInput<PiConfig>): Promise<ProviderInstance> {
     const { instanceId, config } = input;
-    const catalogEnv = piEnvironment(withOwnPiAgentDir({ ...process.env, ...input.environment }, instanceId));
+    // Made again on every read, so a login or provider the person adds later reaches the model list.
+    const catalogEnvironment = () => piEnvironment(withOwnPiAgentDir({ ...process.env, ...input.environment }, instanceId));
     let models = EMPTY;
     const readModels = async () => {
       let base = models, listed = false;
+      const catalogEnv = catalogEnvironment();
       try {
         const resolved = await fetchPiModels(config.cli, catalogEnv, instanceEnvNames(input.environment, catalogEnv));
         if (resolved.options.length) [base, listed] = [resolved, true];
@@ -364,6 +366,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
       try { if (!listed) unconfirmedModelCatalog(models); writeStartupModelCache(instanceId, models); } catch {}
     };
     const refreshModels = async () => {
+      const catalogEnv = catalogEnvironment();
       await updatePiModelCatalog(config.cli, catalogEnv, instanceEnvNames(input.environment, catalogEnv));
       await readModels();
     };

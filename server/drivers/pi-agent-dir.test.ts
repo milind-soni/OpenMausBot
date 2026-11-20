@@ -1,4 +1,4 @@
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -7,6 +7,12 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { ensurePiInjectModel } from "./pi.ts";
 import { ownPiAgentDir, piAgentDir, readPiDefaultModel, withOwnPiAgentDir } from "./pi-agent-dir.ts";
 import { encodeInjectId } from "./local-inject.ts";
+
+/** The same file or folder: a link on most systems, a hard link where Windows refuses a file link. */
+const same = (a: string, b: string) => {
+  const [x, y] = [statSync(a, { bigint: true }), statSync(b, { bigint: true })];
+  return x.ino === y.ino && x.dev === y.dev;
+};
 
 describe("MausBot's own Pi agent folder", () => {
   let root: string, home: string, dataDir: string, person: string;
@@ -37,8 +43,8 @@ describe("MausBot's own Pi agent folder", () => {
     const own = ownPiAgentDir(env(), "pi-1", dataDir, false)!;
     expect(own.startsWith(join(dataDir, "providers", "pi-own"))).toBe(true);
     expect(readdirSync(own).filter((name) => !name.startsWith(".")).sort()).toEqual(["auth.json", "bin", "models.json", "settings.json"]);
-    expect(realpathSync(join(own, "auth.json"))).toBe(realpathSync(join(person, "auth.json")));
-    expect(realpathSync(join(own, "bin"))).toBe(realpathSync(join(person, "bin")));
+    expect(same(join(own, "auth.json"), join(person, "auth.json"))).toBe(true);
+    expect(same(join(own, "bin"), join(person, "bin"))).toBe(true);
     expect(lstatSync(join(own, "models.json")).isSymbolicLink()).toBe(false);
     expect(JSON.parse(readFileSync(join(own, "settings.json"), "utf8"))).toEqual({ defaultProvider: "anthropic", defaultModel: "claude-x", transport: "sse" });
     expect(readPiDefaultModel({ ...env(), PI_CODING_AGENT_DIR: own })).toBe("anthropic/claude-x");
@@ -61,7 +67,7 @@ describe("MausBot's own Pi agent folder", () => {
     writeFileSync(join(named, "auth.json"), "{}");
     writeFileSync(join(named, "AGENTS.md"), "Work instructions\n");
     const own = ownPiAgentDir({ ...env(), PI_CODING_AGENT_DIR: named }, "pi-1", dataDir, false)!;
-    expect(realpathSync(join(own, "auth.json"))).toBe(realpathSync(join(named, "auth.json")));
+    expect(same(join(own, "auth.json"), join(named, "auth.json"))).toBe(true);
     expect(existsSync(join(own, "AGENTS.md"))).toBe(false);
   });
 
@@ -88,7 +94,7 @@ describe("MausBot's own Pi agent folder", () => {
     mkdirSync(person, { recursive: true });
     writeFileSync(join(person, "auth.json"), '{"openai":{"type":"api_key"}}');
     ownPiAgentDir(env(), "pi-1", dataDir, false);
-    expect(realpathSync(join(own, "auth.json"))).toBe(realpathSync(join(person, "auth.json")));
+    expect(same(join(own, "auth.json"), join(person, "auth.json"))).toBe(true);
   });
 
   it.skipIf(process.platform === "win32")("drops a link to a login the person removed, so Pi never writes through it", () => {
@@ -100,6 +106,6 @@ describe("MausBot's own Pi agent folder", () => {
     writeFileSync(join(person, "auth.json"), "{}");
     symlinkSync(join(root, "elsewhere.json"), join(own, "auth.json"));
     ownPiAgentDir(env(), "pi-1", dataDir, false);
-    expect(realpathSync(join(own, "auth.json"))).toBe(realpathSync(join(person, "auth.json")));
+    expect(same(join(own, "auth.json"), join(person, "auth.json"))).toBe(true);
   });
 });
