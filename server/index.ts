@@ -101,6 +101,7 @@ import { removeRetiredAppFiles } from "./retired-apps.ts"; import { createEmailR
 import { createPhones } from "./host/phones.ts";
 import { NOT_THE_OWNER } from "./phones/owner.ts";
 import { PHONE_INTERNAL_MCP_PATH } from "./phones/rpc.ts";
+import { createWebPush } from "./web-push.ts";
 import { isLongPollPath, phoneKey } from "./routes/phones.ts"; import { createPhoneActivityRoutes, createPhonePushRoutes } from "./routes/phone-push.ts"; import { PhoneActivity } from "./phone-activity.ts"; import { PhonePush, PhonePushAccessSource, phonePushEnabled } from "./phone-push.ts"; import { DEFAULT_COMPANION_CONTROL_PLANE_URL } from "../electron/companion-account-service.mjs"; import { TUNNEL_CREDENTIALS_FILE } from "./tunnel.ts";
 import { createDataRoutes } from "./data/routes.ts";
 import { DataSheetRegistry } from "./data/sheet.ts";
@@ -198,7 +199,7 @@ import { assertWithinBudget, noteSpend, spendAlertText, spendState, takeSpendAle
 import { fleetAvailable, fleetSocketPath } from "./fleet-client.ts";
 import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSION } from "./hosted-contract.ts";
 import { cliProbeEnvironment, testCliBinary } from "./cli-probe.ts";
-import { buildMentionNotification, buildNoticeNotification, buildNotification, buildSpendNotification, type Notification, unaskedBotThread } from "./notify.ts";
+import { buildMentionNotification, buildNoticeNotification, buildNotification, buildSpendNotification, type Notification, summarize, unaskedBotThread } from "./notify.ts";
 import {
   isModelVariant,
   TurnNotStartedError, TurnAuthenticationRefusedError, TurnUsageLimitRefusedError,
@@ -4697,6 +4698,7 @@ const SSE_HEARTBEAT_MS =
   Number.isFinite(configuredSseHeartbeatMs) && configuredSseHeartbeatMs > 0
     ? configuredSseHeartbeatMs
     : 15_000;
+const webPush = createWebPush(DATA_DIR, (id) => sessions.isLive(id));
 let lastSeq = 0;
 const replayBuffer = new ReplayBuffer();
 
@@ -6684,7 +6686,18 @@ bus.subscribe((event: RuntimeEvent) => {
       landParkedFiles();
       if (completedTurnId) {
         const terminal = store.markTerminalAssistantMessage(event.threadId, completedTurnId);
-        if (terminal) store.patchMessage(event.threadId, terminal.id, { turnSucceeded: event.ok });
+        if (terminal) {
+          const firstCompletion = terminal.turnSucceeded === undefined;
+          store.patchMessage(event.threadId, terminal.id, { turnSucceeded: event.ok });
+          const author = bot ?? (speaker && store.bot(speaker.botId));
+          if (author && author.notifications !== false && firstCompletion && event.ok && !stopped && (!internal || reviewAnswer) && !quietTurnThreads.has(event.threadId)) {
+            const notice: Notification = { kind: "done", botId: author.id, botName: author.name, threadId: event.threadId,
+              title: group ? serverLine(threadLanguage(event.threadId), "server.notify.inRoom", { bot: author.name, room: group.name }) : author.name,
+              body: summarize(terminal.text ?? ""), ...(group ? { groupId: group.id } : {}) };
+            void webPush.offer(notice, terminal.id, (id) => pushReaches(`session:${id}`, { kind: "notify", notification: notice }, lastSeq, {}))
+              .catch(() => console.warn("Could not load or save web push registrations"));
+          }
+        }
         if (bot && event.ok) store.suggestTaskLink(bot.id, event.threadId, store.activePath(event.threadId)
           .filter((message) => message.role === "bot" && message.kind === "text" && message.turnId === completedTurnId)
           .map((message) => message.text ?? "").join("\n"));
@@ -12427,7 +12440,7 @@ const liveCalls = new LiveCallController({
   },
   log: (line) => console.log(line),
 });
-sessions.onSessionRevoked((sessionId) => liveCalls.sessionRevoked(sessionId)); sessions.onSessionRevoked((sessionId) => { phonePush.forget(`session:${sessionId}`); phoneActivity.forget(`session:${sessionId}`); }); ROUTES.push(createPhonePushRoutes({ push: phonePush, live: (auth) => auth.kind === "loopback" || sessions.isLive(auth.session.id) }), createPhoneActivityRoutes({ push: phonePush, activity: phoneActivity, live: (auth) => auth.kind === "loopback" || sessions.isLive(auth.session.id) }));
+sessions.onSessionRevoked((sessionId) => liveCalls.sessionRevoked(sessionId)); sessions.onSessionRevoked((sessionId) => { phonePush.forget(`session:${sessionId}`); phoneActivity.forget(`session:${sessionId}`); }); ROUTES.push(webPush.route, createPhonePushRoutes({ push: phonePush, live: (auth) => auth.kind === "loopback" || sessions.isLive(auth.session.id) }), createPhoneActivityRoutes({ push: phonePush, activity: phoneActivity, live: (auth) => auth.kind === "loopback" || sessions.isLive(auth.session.id) }));
 ROUTES.push(createDataRoutes({
   bot: (id) => store.bot(id),
   engine: dataEngine,

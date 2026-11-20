@@ -1937,6 +1937,7 @@
   "settings.notificationSounds.subtitle": "Play this computer's alert sound when an agent finishes or needs you. Turn it off to keep the banners but lose the chime (handy on a call, where the agent is already talking to you).",
   "settings.notificationSounds.play": "Notification sounds",
   "settings.deviceNotifications.title": "Notifications on this device",
+  "settings.deviceNotifications.push": "Get a system notification for each final bot reply, even when the app is closed.",
   "settings.deviceNotifications.subtitle": "Show a notification here when a bot finishes, while this app is open. Approvals, questions and warnings always show.",
   "settings.deviceNotifications.blocked": "Notifications are blocked for this site. Allow them in your browser's site settings.",
   "settings.deviceNotifications.show": "Notify me when a bot finishes",

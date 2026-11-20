@@ -1,3 +1,5 @@
+import { syncWebPush, usesWebPush } from "./lib/web-push";
+import { finishedNotificationsEnabled } from "./lib/notification-preferences";
 import { ImageCacheScope } from "./components/CachedChatImage";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -62,6 +64,9 @@ async function chooseRoot(): Promise<React.ReactNode> {
     return home ? <SignedOutAtHome bridge={home} fallback={pair} /> : pair;
   }
   forgetEndedSession();
+  if (session.kind === "session" && usesWebPush() && Notification.permission === "granted") {
+    void syncWebPush(finishedNotificationsEnabled()).catch(() => {});
+  }
   if (session.kind === "session") rememberTeamSignIn(session.teamSignIn);
   if (session.kind === "loopback" && session.trust === "service") {
     signInGateShown("service_trust");

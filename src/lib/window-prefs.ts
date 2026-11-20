@@ -1,3 +1,4 @@
+import { syncWebPush } from "./web-push";
 // The window's own preferences, as the server's app_settings tool reaches them: a `window-pref` frame is applied with
 // the preference's setter, and every setter reports the current values back so a bot can read them. Some live behind the
 // desktop app's bridge; where that bridge is absent they read as undefined, which the server takes as "not here".
@@ -74,7 +75,7 @@ const PREFS: { [I in WindowPrefId]: Pref<I> } = {
   "general.finishedNotifications": {
     read: () => finishedNotificationsEnabled(),
     // As the row does: turning it on asks the system for permission first.
-    write: async (on) => { if (!on) return setFinishedNotifications(false); if ((await requestNotificationPermission()) === "granted") setFinishedNotifications(true); },
+    write: async (on) => { if (on && (await requestNotificationPermission()) !== "granted") return; await syncWebPush(on); setFinishedNotifications(on); },
   },
   "general.notificationFeed": { read: () => notificationFeedEnabled(), write: (on) => setNotificationFeed(on) },
   "general.analytics": { read: () => analyticsEnabled(), write: (on) => setAnalyticsEnabled(on) },

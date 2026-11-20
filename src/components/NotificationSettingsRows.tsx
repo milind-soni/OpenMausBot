@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
+import { hasWebPush, onWebPushChange, syncWebPush, usesWebPush } from "@/lib/web-push";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { t } from "@/lib/i18n";
 import {
+  finishedNotificationsEnabled,
   setFinishedNotifications,
   setNotificationFeed,
   setNotificationSounds,
@@ -38,25 +40,40 @@ export function DeviceNotificationsRow({ simple = false }: { simple?: boolean })
       document.removeEventListener("visibilitychange", refresh);
     };
   }, []);
+  const registered = useSyncExternalStore(onWebPushChange, hasWebPush, () => false);
+  const active = enabled && (!usesWebPush() || registered);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
   if (typeof Notification === "undefined") return null;
 
   const blocked = permission === "denied";
   const toggle = async () => {
-    if (permission === "granted") return setFinishedNotifications(!enabled);
-    const next = await requestNotificationPermission();
-    if (!next) return;
-    setPermission(next);
-    if (next === "granted") setFinishedNotifications(true);
+    setBusy(true);
+    setError("");
+    try {
+      const next = await requestNotificationPermission();
+      if (!next) return;
+      setPermission(next);
+      if (next !== "granted") return;
+      const on = permission !== "granted" || !active;
+      await syncWebPush(on);
+      setFinishedNotifications(on);
+    } catch (cause) {
+      setError(String(cause));
+      setFinishedNotifications(false);
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <SettingRow
       title={t("settings.deviceNotifications.title")}
-      subtitle={t(blocked ? "settings.deviceNotifications.blocked" : simple ? "settings.simple.deviceNotifications" : "settings.deviceNotifications.subtitle")}
+      subtitle={error || t(blocked ? "settings.deviceNotifications.blocked" : usesWebPush() ? "settings.deviceNotifications.push" : simple ? "settings.simple.deviceNotifications" : "settings.deviceNotifications.subtitle")}
     >
       <Switch
-        checked={permission === "granted" && enabled}
-        disabled={blocked}
+        checked={permission === "granted" && active}
+        disabled={blocked || busy}
         aria-label={t("settings.deviceNotifications.show")}
         onClick={() => void toggle()}
       />
@@ -71,7 +88,10 @@ export function NotificationSoundsRow({ simple = false }: { simple?: boolean }) 
       <Switch
         checked={enabled}
         aria-label={t("settings.notificationSounds.play")}
-        onClick={() => setNotificationSounds(!enabled)}
+        onClick={() => {
+          setNotificationSounds(!enabled);
+          if (usesWebPush() && Notification.permission === "granted" && finishedNotificationsEnabled()) void syncWebPush(true).catch(() => {});
+        }}
       />
     </SettingRow>
   );
