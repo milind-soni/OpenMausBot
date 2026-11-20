@@ -12,7 +12,7 @@ export type LazyScreen<P> = (((props: P) => ReactNode) | MemoExoticComponent<(pr
 
 export function lazyScreen<Props>(
   name: string,
-  load: () => Promise<(props: Props) => ReactNode>,
+  load: () => Promise<((props: Props) => ReactNode) | MemoExoticComponent<(props: Props) => ReactNode>>,
 ): LazyScreen<NonNullable<Props>> {
   type P = NonNullable<Props>;
   let ready: ComponentType<P> | undefined;

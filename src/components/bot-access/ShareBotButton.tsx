@@ -3,10 +3,9 @@ import { createPortal } from "react-dom";
 import { Share } from "lucide-react";
 
 import { t } from "@/lib/i18n";
-import { type Bot } from "@/state/store";
+import { type Bot } from "@/state/store"; import { sameFields, useStoreSelector } from "@/state/store-select";
 import { saveAccess } from "./access";
 import { ShareBotDialog, type AccessChange } from "./ShareBotDialog";
-import { sameFields, useStoreSelector } from "@/state/store-select";
 
 const TOAST_MS = 6_000;
 
