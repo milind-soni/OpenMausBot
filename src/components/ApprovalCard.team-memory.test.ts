@@ -31,3 +31,12 @@ it("keeps Undo for an admin", () => {
   fixture.admin = true;
   expect(render()).toContain(">Undo<");
 });
+
+it("says the bot removed the entry when its notice is a removal", () => {
+  fixture.admin = true;
+  const removed: Message = { ...saved, card: { ...saved.card!, title: "Forgotten for the team",
+    teamMemoryRequest: { ...saved.card!.teamMemoryRequest!, forget: true } } };
+  const html = renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Luna" }, message: removed, threadId: "thread-1" }));
+  expect(html).toContain("Luna removed from department memory: Person: Ada Lovelace");
+  expect(html).toContain(">Undo<");
+});

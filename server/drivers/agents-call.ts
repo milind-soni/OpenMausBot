@@ -14,6 +14,7 @@ import { catalogProfileFromEnv, fullInputSchema, SHARED_COMPUTER_TOOL_NAMES } fr
 import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
+import { TEAM_MEMORY_TOOL, teamMemoryRequest } from "./agents-team-memory-tool.ts";
 import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
 import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
@@ -127,7 +128,7 @@ function forgetText(passage: string, r: Json): string {
   const notes = list(r.forgotten);
   const aboutMe = list(r.aboutMe);
   if (!notes.length && !aboutMe.length) {
-    return `Nothing saved mentions ${JSON.stringify(passage)}: not in your notes, not in About me. Try other words for it once; if nothing matches, tell the person it was not saved.`;
+    return `Nothing saved mentions ${JSON.stringify(passage)}: not in your notes, not in About me. Try other words for it once; if nothing matches, tell the person it was not saved. Team memory is not in your notes: remove a team entry with propose_team_memory action=forget.`;
   }
   const facts = [...new Set([...notes, ...aboutMe])];
   const shown = facts.slice(0, FORGOTTEN_SHOWN).map((fact) => JSON.stringify(fact)).join(", ");
@@ -774,23 +775,10 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     if (r.error || r.ok !== true) return { text: String(r.error ?? "The log line was not confirmed."), isError: true };
     return { text: `Logged to ${String(r.file)}: ${String(r.line)}` };
   }
-  if (name === "propose_team_memory") {
-    const kind = String(args.kind ?? "").trim();
-    const entryName = String(args.name ?? "").trim();
-    const detail = String(args.detail ?? "").trim();
-    if (!kind || !entryName || !detail) return { text: "propose_team_memory needs kind, name, and detail.", isError: true };
-    const r = await api("/api/internal/team-memory", {
-      method: "POST", body: JSON.stringify({
-        fromBotId: BOT_ID,
-        fromThreadId: THREAD_ID,
-        kind,
-        key: typeof args.key === "string" ? args.key : undefined,
-        name: entryName,
-        detail,
-        aliases: Array.isArray(args.aliases) ? args.aliases.filter((alias) => typeof alias === "string") : undefined,
-      }),
-    });
-    return confirmationResult(r, `the team memory entry for ${entryName}`, "entry");
+  if (name === TEAM_MEMORY_TOOL) {
+    const request = teamMemoryRequest(args, BOT_ID, THREAD_ID);
+    if ("error" in request) return { text: request.error, isError: true };
+    return confirmationResult(await api("/api/internal/team-memory", { method: "POST", body: JSON.stringify(request.body) }), request.subject, "entry");
   }
   if (member === "session_search") {
     const q = String(args.query ?? "").trim();

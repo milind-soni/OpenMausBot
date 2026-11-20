@@ -163,6 +163,43 @@ describe("undoAccept", () => {
   });
 });
 
+describe("findAccepted, undoRemove", () => {
+  const accepted = (input: Parameters<TeamMemory["propose"]>[1], section = "") => {
+    const { entry } = memory.propose(section, input, source);
+    memory.resolve(section, entry.id, "accept");
+    return memory.list(section).find((candidate) => candidate.id === entry.id)!;
+  };
+
+  it("finds an accepted entry by its key, else by kind and name, never a pending one or another team's", () => {
+    const colour = accepted({ kind: "decision", name: "Tapa colour", detail: "Amber", key: "tapa/colour" });
+    expect(memory.findAccepted("", { key: "tapa/colour" })?.id).toBe(colour.id);
+    expect(memory.findAccepted("", { key: "wrong/key", kind: "decision", name: "  tapa COLOUR " })?.id).toBe(colour.id);
+    expect(memory.findAccepted("", { kind: "term", name: "Tapa colour" })).toBeUndefined();
+    memory.propose("", { kind: "term", name: "Pending", detail: "not reviewed" }, source);
+    expect(memory.findAccepted("", { kind: "term", name: "Pending" })).toBeUndefined();
+    expect(memory.findAccepted("Other team", { key: "tapa/colour" })).toBeUndefined();
+  });
+
+  it("brings a removed entry back exactly as it was, once", () => {
+    const entry = accepted({ kind: "term", name: "OKR", detail: "The quarter's goals." });
+    memory.remove("", entry.id, entry.revision);
+    const removed = memory.list("", true).find((candidate) => candidate.id === entry.id)!;
+    expect(removed.status).toBe("deleted");
+    expect(memory.undoRemove("", entry.id, removed.revision!)).toBe(true);
+    expect(memory.list("")).toEqual([entry]);
+    expect(memory.undoRemove("", entry.id, removed.revision!)).toBe(false);
+  });
+
+  it("does not bring an entry back over a newer one with its key", () => {
+    const entry = accepted({ kind: "term", name: "OKR", detail: "first" });
+    memory.remove("", entry.id, entry.revision);
+    const removed = memory.list("", true).find((candidate) => candidate.id === entry.id)!;
+    accepted({ kind: "term", name: "OKR", detail: "second" });
+    expect(memory.undoRemove("", entry.id, removed.revision!)).toBe(false);
+    expect(memory.list("").map((candidate) => candidate.detail)).toEqual(["second"]);
+  });
+});
+
 describe("resolve, update, remove", () => {
   it("rejects edits that collide with another accepted fact", () => {
     const a = memory.propose("", { kind: "term", name: "Alex", detail: "term" }, source);

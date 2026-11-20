@@ -700,11 +700,12 @@ const TOOL_DEFINITIONS = [
   {
     name: "propose_team_memory",
     description:
-      "Save a shared fact or decision for your team. It applies immediately, with an Undo for the person; on a pending result end this turn and do not claim it is remembered.",
+      "Save a shared fact or decision for your team, or forget a wrong one. It applies immediately, with an Undo for the person; on a pending result end this turn and do not claim it is done.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
+        action: { type: "string", enum: ["save", "forget"], description: "Default save. forget removes the accepted entry with this key, or this kind and name; detail says why." },
         kind: { type: "string", enum: ["person", "place", "decision", "term"], description: "What kind of entry this is." },
         name: { type: "string", maxLength: 120, description: "Short title or name." },
         detail: { type: "string", maxLength: 600, description: "The fact, decision or result, with its context and brief rationale." },

@@ -220,7 +220,8 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
     return { line: t("approval.applied.teamSetup", { name, title }), canUndo: Boolean(setup.undo) };
   }
   if (card.teamMemoryRequest) {
-    return { line: t("approval.applied.teamMemory", { name, title: card.subtitle.split(" — ")[0] ?? "" }), canUndo: Boolean(card.teamMemoryRequest.revision) };
+    const line = card.teamMemoryRequest.forget ? "approval.applied.teamMemoryForgotten" : "approval.applied.teamMemory";
+    return { line: t(line, { name, title: card.subtitle.split(" — ")[0] ?? "" }), canUndo: Boolean(card.teamMemoryRequest.revision) };
   }
   return undefined;
 }

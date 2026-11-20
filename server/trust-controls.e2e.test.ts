@@ -692,6 +692,36 @@ it("puts a bot's fact into every teammate's prompt at once, and Undo takes it ba
   expect((await api("POST", `/api/threads/${b.threadId}/undo`, { requestId: proposed.body.requestId })).body).toMatchObject({ alreadyUndone: true });
 });
 
+it("lets a bot forget a team fact it can write, takes it out of every prompt at once, and Undo brings it back", async () => {
+  const b = await bot("Team forget");
+  const token = await mint(b.id, b.threadId, "agents");
+  const name = "Wrong drive";
+  const detail = "FORGET_PLACE_3K: saved in the wrong team";
+  const saved = await api("POST", "/api/internal/team-memory", { fromBotId: b.id, fromThreadId: b.threadId, kind: "place", name, detail }, token);
+  expect(saved.body).toMatchObject({ status: "applied", state: "applied" });
+  const prompt = async () => JSON.stringify((await api("GET", `/api/bots/${b.id}/system-prompt`)).body);
+  const forget = (body: object) => api("POST", "/api/internal/team-memory", { fromBotId: b.id, fromThreadId: b.threadId, action: "forget", ...body }, token);
+
+  const missing = await forget({ key: "place:no such drive" });
+  expect(missing.status).toBe(404);
+  expect(missing.body.error).toContain("so nothing was removed");
+  const forgotten = await forget({ kind: "place", name, detail: "Saved in the wrong team." });
+  expect(forgotten.status, JSON.stringify(forgotten.body)).toBe(201);
+  expect(forgotten.body).toMatchObject({ status: "applied", state: "applied" });
+  expect(await prompt()).not.toContain(detail);
+  expect((await api("GET", "/api/team-memory?section=")).body.entries.some((entry: any) => entry.name === name)).toBe(false);
+  expect((await cards(b.threadId)).find((row: any) => row.card?.requestId === forgotten.body.requestId).card)
+    .toMatchObject({ title: "Forgotten for the team", answered: "allow", autoApplied: true, options: [], teamMemoryRequest: { forget: true } });
+  expect((await api("POST", `/api/threads/${b.threadId}/undo`, { requestId: forgotten.body.requestId }, member)).status).toBe(403);
+  expect((await api("POST", `/api/threads/${b.threadId}/undo`, { requestId: forgotten.body.requestId })).body).toMatchObject({ ok: true, undone: true });
+  expect(await prompt()).toContain(detail);
+
+  await api("PATCH", `/api/bots/${b.id}`, { visibility: "admins" });
+  expect((await forget({ kind: "place", name })).status).toBe(403);
+  await api("PATCH", `/api/bots/${b.id}`, { visibility: null });
+  expect(await prompt()).toContain(detail);
+});
+
 it("settles only the source task after approval or Stop, leaving the selected sibling unchanged", async () => {
   for (const stop of [true, false]) {
     const b = await bot("Task activity " + stop);

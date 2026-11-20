@@ -1088,6 +1088,7 @@
   "approval.applied.waitExpired": "{name} parou de aguardar {title}",
   "approval.applied.waitCancelled": "A espera de {name} por {title} foi cancelada",
   "approval.applied.teamMemory": "{name} salvou na memória da equipe: {title}",
+  "approval.applied.teamMemoryForgotten": "{name} removeu da memória da equipe: {title}",
   "approval.applied.field.name": "nome",
   "approval.applied.field.title": "título",
   "approval.applied.field.description": "descrição",

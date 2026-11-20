@@ -2092,11 +2092,19 @@
     },
     {
       "name": "propose_team_memory",
-      "description": "Save a shared fact or decision for your team. It applies immediately, with an Undo for the person; on a pending result end this turn and do not claim it is remembered.",
+      "description": "Save a shared fact or decision for your team, or forget a wrong one. It applies immediately, with an Undo for the person; on a pending result end this turn and do not claim it is done.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "save",
+              "forget"
+            ],
+            "description": "Default save. forget removes the accepted entry with this key, or this kind and name; detail says why."
+          },
           "kind": {
             "type": "string",
             "enum": [

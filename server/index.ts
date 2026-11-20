@@ -9110,7 +9110,7 @@ const validateModelProposal = (selection: ModelSelection, current?: BotRecord): 
 };
 const ownThreads = createOwnThreads({ store, registry, node: (id) => coordinator.node(id), current: turnSelection, proposalRefusal: validateModelProposal, givesWay: modelGivesWay, modelName }); const burst = createBurstHost({ dataDir: DATA_DIR, cloudHome: Boolean(CLOUD_HOME), tier: () => cloudPlanTier.tier(), maxParallel: () => cfg.burst?.maxParallel, hasRoom: () => engineMemory.laneHasRoom(), store, language: (threadId) => threadLanguage(threadId), startTurn: (botId, text, opts) => startTurn(botId, text, opts), stop: (botId, threadId, cause) => { void interruptDirectThread(botId, threadId, cause).catch(() => {}); }, threadBusy, opened: (threadId, parent) => threadStarters.set(threadId, openerFrom(parent)), origin: (run) => withPerson({ kind: "user", request: quoteInNote(run.task, 400) }, threadPersonKey(run.threadId)), approval: (bot, selection) => ownThreads.approvalFor(bot, selection), defaultModel: (bot, threadId) => burstDefaultModel({ own: store.taskByThread(bot.id, threadId)?.modelSelection ?? bot.modelSelection, catalog: (id) => registry.get(id)?.models, refused: (id) => quickFallback.refused(id), usable: (selection) => ownThreads.refusal(selection, bot) === null }), modelName, route: (notification) => teamMessages.route(notification, { routine: true }), announce: (notification) => { broadcast({ kind: "notify", notification: logNotification(notification) }); } });
 const teamMemory = new TeamMemory(join(DATA_DIR, "team-memory.json"));
-const teamMemoryRequests = createTeamMemoryRequests({ teamMemory, store, sectionKey: sectionContextKey, decide: (row) => appendDecision(DATA_DIR, row) });
+const teamMemoryRequests = createTeamMemoryRequests({ teamMemory, store, sectionKey: sectionContextKey, language: (threadId) => threadLanguage(threadId), decide: (row) => appendDecision(DATA_DIR, row) });
 const outsideWrites = createOutsideWrites({ store, notify, language: (threadId) => threadLanguage(threadId), decide: (row) => appendDecision(DATA_DIR, row),
   writeMemory: (botId, threadId, change) => { const written = botMemoryUpdate(teamHost.layer(botId, threadId), change, { source: memorySourceLabel({ room: store.groupByThread(threadId), task: store.taskByThread(teamHost.baseBotId(botId), threadId), threadId }), aboutMe: null, prefer: null }); return written.ok ? null : written.error; } });
 const outboundRequests = new OutboundRequestService();
@@ -13244,14 +13244,16 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const parsed = z.object({
           fromBotId: z.string().min(1).max(128),
           fromThreadId: z.string().min(1).max(128),
-          kind: z.string(),
+          action: z.enum(["save", "forget"]).optional(),
+          kind: z.string().optional(),
           key: z.string().max(240).optional(),
-          name: z.string(),
-          detail: z.string(),
+          name: z.string().optional(),
+          detail: z.string().optional(),
           aliases: z.array(z.string()).optional(),
         }).strict().safeParse(await readInternalBody());
-        if (!parsed.success) return json(res, 400, { error: "invalid team memory proposal" });
         const body = parsed.data;
+        const saved = body && body.kind !== undefined && body.name !== undefined && body.detail !== undefined ? { kind: body.kind, name: body.name, detail: body.detail } : null;
+        if (!body || (body.action !== "forget" && !saved)) return json(res, 400, { error: "invalid team memory proposal" });
         const from = store.bot(body.fromBotId);
         if (!from) return json(res, 403, { error: "unknown sender" });
         const owner = connectorThread(from.id, body.fromThreadId);
@@ -13259,11 +13261,15 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (!sameAudience(from.visibility, undefined) || (owner.group && !roomFeedsBot(owner.group, from)) || teamHost.privateTo(body.fromThreadId)) {
           return json(res, 403, { error: "restricted conversations cannot publish section-wide memory; ask an admin to add it. A preference of the person's own goes in their About me with memory_update action=prefer." });
         }
-        if (!(TEAM_MEMORY_KINDS as readonly string[]).includes(body.kind)) {
+        if (body.action === "forget") {
+          const forgotten = teamMemoryRequests.forget(from, body.fromThreadId, Boolean(owner.group), { key: body.key, kind: body.kind, name: body.name }, body.detail ?? "", appliesDirectly(from.id, body.fromThreadId));
+          return json(res, forgotten.status, forgotten.body);
+        }
+        if (!saved || !(TEAM_MEMORY_KINDS as readonly string[]).includes(saved.kind)) {
           return json(res, 400, { error: `kind must be one of ${TEAM_MEMORY_KINDS.join(", ")}` });
         }
         try {
-          const input = { key: body.key, kind: body.kind as TeamMemoryKind, name: body.name, detail: body.detail, aliases: body.aliases };
+          const input = { key: body.key, kind: saved.kind as TeamMemoryKind, name: saved.name, detail: saved.detail, aliases: body.aliases };
           const submitted = teamMemoryRequests.submit(from, body.fromThreadId, Boolean(owner.group), input, appliesDirectly(from.id, body.fromThreadId));
           return json(res, submitted.status, submitted.body);
         } catch (error) {

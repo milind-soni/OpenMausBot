@@ -411,7 +411,9 @@ describe("memory_update", () => {
     expect(profile.aboutMe).toBe("I live in Pune.");
     expect(isForgotten("The person likes short answers")).toBe(true);
 
-    expect((await callTool("memory_update", { action: "forget", old_text: "short answers" }, ctx)).text).toMatch(/^Nothing saved mentions "short answers": not in your notes, not in About me\./);
+    const nothing = (await callTool("memory_update", { action: "forget", old_text: "short answers" }, ctx)).text;
+    expect(nothing).toMatch(/^Nothing saved mentions "short answers": not in your notes, not in About me\./);
+    expect(nothing).toContain("remove a team entry with propose_team_memory action=forget.");
     expect(await callTool("memory_update", { action: "forget", old_text: "ab" }, ctx)).toMatchObject({ isError: true });
     expect(await callTool("memory_update", { action: "forget" }, ctx)).toMatchObject({ isError: true });
 
@@ -499,6 +501,48 @@ describe("propose_team_memory", () => {
     expect(result.isError).not.toBe(true);
     expect(result.text).toContain("Applied the team memory entry for OKR.");
     expect(result.text).not.toContain("confirmation card");
+  });
+
+  it("sends a removal by key or by kind and name, and takes remove or delete for forget", async () => {
+    const calls: any[] = [];
+    const client = {
+      api: async (_path: string, init?: RequestInit) => {
+        calls.push(JSON.parse(String(init?.body)));
+        return { status: "applied", state: "applied", requestId: "forget-fixture", summary: "Term: OKR — The quarter's goals." };
+      },
+      apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+    };
+    const byName = await callTool("propose_team_memory", { action: "forget", kind: "term", name: " OKR ", detail: "Saved in the wrong team." }, context({ client }));
+    expect(byName.isError).not.toBe(true);
+    expect(byName.text).toContain("Applied the removal of the team memory entry for OKR.");
+    await callTool("propose_team_memory", { action: "Remove", key: "term:okr" }, context({ client }));
+    await callTool("propose_team_memory", { action: "delete", kind: "term", name: "OKR", detail: "" }, context({ client }));
+    expect(calls).toEqual([
+      { fromBotId: "bot-voice", fromThreadId: "thread-voice", action: "forget", kind: "term", name: "OKR", detail: "Saved in the wrong team." },
+      { fromBotId: "bot-voice", fromThreadId: "thread-voice", action: "forget", key: "term:okr" },
+      { fromBotId: "bot-voice", fromThreadId: "thread-voice", action: "forget", kind: "term", name: "OKR" },
+    ]);
+  });
+
+  it("refuses a removal that names no entry, or an unknown action, with an example to copy", async () => {
+    const client = { api: async () => { throw new Error("must not be sent"); }, apiResponse: async () => ({ ok: true, status: 200, body: {} }) };
+    const unnamed = await callTool("propose_team_memory", { action: "forget", kind: "term" }, context({ client }));
+    expect(unnamed).toEqual({ isError: true, text: "propose_team_memory action=forget needs the entry's key, or its kind and name (session_search scope=team shows them), for example {\"action\":\"forget\",\"kind\":\"term\",\"name\":\"OKR\",\"detail\":\"Saved in the wrong team.\"}." });
+    const unknown = await callTool("propose_team_memory", { action: "archive", kind: "term", name: "OKR", detail: "x" }, context({ client }));
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toContain("propose_team_memory action is save or forget, for example {\"action\":\"forget\"");
+  });
+
+  it("passes on why nothing was removed, and never claims it was", async () => {
+    const result = await callTool("propose_team_memory", { action: "forget", key: "term:kpi" }, context({
+      client: {
+        api: async () => ({ error: "No accepted team memory entry has the key \"term:kpi\", so nothing was removed." }),
+        apiResponse: async () => ({ ok: true, status: 200, body: {} }),
+      },
+    }));
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("did not complete successfully. No accepted team memory entry has the key \"term:kpi\"");
+    expect(result.text).toContain("Do not claim it was applied.");
   });
 });
 

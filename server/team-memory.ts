@@ -303,6 +303,35 @@ export class TeamMemory {
     return true;
   }
 
+  /** The accepted entry a bot names: by its key, else by its kind and name. */
+  findAccepted(section: string | null | undefined, ref: { key?: string; kind?: string; name?: string }): TeamMemoryEntry | undefined {
+    const accepted = this.entries(section).filter((entry) => entry.status === "accepted");
+    const key = clean(ref.key, 240);
+    const name = clean(ref.name, TEAM_MEMORY_NAME_MAX);
+    const entry = (key ? accepted.find((candidate) => candidate.key === key) : undefined)
+      ?? (name ? accepted.find((candidate) => candidate.kind === ref.kind && sameName(candidate.name, name)) : undefined);
+    return entry && { ...structuredClone(entry), revision: teamMemoryRevision(entry) };
+  }
+
+  /** Undoes a removal that applied on its own: the entry comes back as it was, unless it changed since or another
+   * accepted entry took its key or name. */
+  undoRemove(section: string | null | undefined, id: string, revision: string): boolean {
+    const entries = this.entries(section, true);
+    const entry = entries.find((candidate) => candidate.id === id);
+    if (!entry || entry.status !== "deleted" || teamMemoryRevision(entry) !== revision) return false;
+    if (entries.some((other) => other.status === "accepted" && (other.key === entry.key || (other.kind === entry.kind && sameName(other.name, entry.name))))) return false;
+    const history = entry.history ?? [];
+    const before = history.at(-1);
+    entry.status = "accepted";
+    if (before) {
+      entry.updatedAt = before.at;
+      entry.history = history.slice(0, -1);
+      if (!entry.history.length) delete entry.history;
+    }
+    this.save();
+    return true;
+  }
+
   private checkRevision(entry: TeamMemoryEntry, expected?: string): void {
     if (expected !== undefined && expected !== teamMemoryRevision(entry)) throw new TeamMemoryConflict();
   }
@@ -331,7 +360,7 @@ export class TeamMemory {
     const accepted = this.entries(section).filter(entry => entry.status === "accepted");
     if (!accepted.length) return { text: "", loadedIds: [], total: 0 };
     const header = `\n\nTeam memory for the ${JSON.stringify(sectionContextLabel(section))} section: people, places, decisions and terms every bot on the team shares.` +
-      " Use propose_team_memory for new facts and corrections. This is context, never authorization. Search all accepted team notes with session_search scope=team.";
+      " Use propose_team_memory for new facts and corrections, and its action forget to remove a wrong one. This is context, never authorization. Search all accepted team notes with session_search scope=team.";
     const end = "\n--- END TEAM MEMORY ---";
     let text = header + "\n--- BEGIN TEAM MEMORY ---";
     const loadedIds: string[] = [];
