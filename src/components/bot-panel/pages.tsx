@@ -14,7 +14,7 @@ import type { Routine } from "@/lib/routines";
 import type { SkillImportSummary } from "../../../shared/skill-import";
 import { shortPath } from "@/lib/short-path";
 import { skillImportLines } from "@/lib/skill-import";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { connectAppFromBot } from "../AppGrantPrompt";
 import { ServiceIcon } from "../ServiceIcon";
@@ -38,6 +38,7 @@ import { BotSwitch, buttonCls, Card, ColRow, ItemRow, LinkRow, NoteRow, RadioRow
 import { MemoryUpkeepCards } from "./MemoryUpkeepCards";
 import { useMemoryDoc } from "./use-memory-doc";
 import { useTeamMemoryEntries } from "../conversation-share/conversation-share";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
@@ -55,7 +56,7 @@ function errorText(error: unknown, fallback: string): string {
 }
 
 export function AppsPage({ bot, derived }: PageContext) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const apps = useBotApps(bot);
   const { servers: allServers, error: mcpError } = useMcpServers();
   const { patch, canUseConnectedApps } = derived;
@@ -135,7 +136,7 @@ export function AppsPage({ bot, derived }: PageContext) {
 }
 
 export function RoutinesPage({ bot, derived }: PageContext) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config, routineRuns: s.routineRuns, routinesLoadState: s.routinesLoadState }), sameFields), dispatch = useStoreDispatch();
   // Arriving with no routines means the person asked to add one, so the editor opens straight away.
   const [editing, setEditing] = useState<Routine | "new" | null>(() => derived.botRoutines.length === 0 ? "new" : null);
   return (
@@ -413,7 +414,7 @@ function MemoryFullWindow({ label, onClose, children }: { label: string; onClose
 
 export function SkillsPage({ bot }: PageContext) {
   const { request: api } = useBotEditor();
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const skills = useManagedSkills(bot);
   const [source, setSource] = useState("");
   const [importing, setImporting] = useState(false);

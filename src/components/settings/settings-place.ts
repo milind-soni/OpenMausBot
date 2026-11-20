@@ -1,6 +1,6 @@
 import { pageIsThisComputer } from "@/lib/companion-bridge";
 import { t } from "@/lib/i18n";
-import { useStore } from "@/state/store";
+import { useStoreSelector } from "@/state/store-select";
 import { useWindowPlace, windowPlaceName } from "../WindowPlaceTitle";
 
 export type PlaceKind = "computer" | "cloud" | "team" | "server";
@@ -15,14 +15,14 @@ export interface SettingsPlace {
 
 /** The place on screen as Settings names it: the same name as the rail and the title bar, This computer by default. */
 export function useSettingsPlace(): SettingsPlace {
-  const { state } = useStore();
+  const config = useStoreSelector((state) => state.config);
   const place = useWindowPlace();
-  const team = state.config?.team?.name;
+  const team = config?.team?.name;
   if (pageIsThisComputer()) {
     const name = place ? windowPlaceName(place, undefined) : t("rail.thisComputer");
     return { name, kind: "computer", color: place?.color ?? null, named: Boolean(place?.profileName) };
   }
-  if (state.config?.cloudHome) {
+  if (config?.cloudHome) {
     const name = place ? windowPlaceName(place, team) : team || t("cloudSetup.myCloud");
     return { name, kind: team ? "team" : "cloud", color: place?.color ?? null, named: true };
   }

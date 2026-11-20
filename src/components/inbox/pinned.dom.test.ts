@@ -20,7 +20,7 @@ let root: Root;
 const onOpen = vi.fn();
 const onUnpin = vi.fn();
 const mount = (bots: Bot[], groups: Group[] = [], current?: { kind: "bot"; botId: string; threadId: string }) => act(async () => {
-  root.render(createElement(PinnedThreads, { bots, groups, queued: {}, now: NOW, current, onOpen, onUnpin }));
+  root.render(createElement(PinnedThreads, { rows: pinnedThreadRows(bots, groups, {}), now: NOW, current, onOpen, onUnpin }));
 });
 const rowTitles = () => [...document.querySelectorAll<HTMLElement>("[data-pinned-row]")].map((row) => row.querySelector("[data-pinned-title]")?.textContent);
 

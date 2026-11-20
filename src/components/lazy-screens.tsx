@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { memo, useEffect, useState, type ComponentType, type MemoExoticComponent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { t } from "@/lib/i18n";
 
@@ -6,7 +6,7 @@ import { t } from "@/lib/i18n";
 // up to 300 ms) and rethrows a failed import on every render. Chromium keeps a failed import() in its module map and
 // rejects every later import of it without refetching.
 
-export type LazyScreen<P> = ((props: P) => ReactNode) & {
+export type LazyScreen<P> = (((props: P) => ReactNode) | MemoExoticComponent<(props: P) => ReactNode>) & {
   preload: () => Promise<ComponentType<P>>;
 };
 
@@ -45,6 +45,11 @@ export function lazyScreen<Props>(
   return Object.assign(Screen, { preload });
 }
 
+/** For a screen drawn only from its props and its own store selections: App drawing again passes it by. */
+function pureScreen<Props>(screen: LazyScreen<Props>): LazyScreen<Props> {
+  return Object.assign(memo(screen), { preload: screen.preload });
+}
+
 function ScreenUnavailable() {
   return createPortal(
     <div
@@ -66,7 +71,7 @@ function ScreenUnavailable() {
 }
 
 export const ActivityPanel = lazyScreen("ActivityPanel", async () => (await import("./ActivityPanel")).ActivityPanel);
-export const BotSettingsDialog = lazyScreen("BotSettingsDialog", async () => (await import("./BotSettingsDialog")).BotSettingsDialog);
+export const BotSettingsDialog = pureScreen(lazyScreen("BotSettingsDialog", async () => (await import("./BotSettingsDialog")).BotSettingsDialog));
 export const ComputerPanel = lazyScreen("ComputerPanel", async () => (await import("./ComputerPanel")).ComputerPanel);
 export const FilesView = lazyScreen("FilesView", async () => (await import("./FilesView")).FilesView);
 export const InspectorPanel = lazyScreen("InspectorPanel", async () => (await import("./InspectorPanel")).InspectorPanel);
@@ -77,8 +82,8 @@ export const PluginsPanel = lazyScreen("PluginsPanel", async () => (await import
 export const RemoteAgentSettingsPanel = lazyScreen("RemoteAgentSettingsPanel", async () => (await import("./RemoteAgentSettingsPanel")).RemoteAgentSettingsPanel);
 export const RoomPanel = lazyScreen("RoomPanel", async () => (await import("./room-panel/RoomPanel")).RoomPanel);
 export const RemoteDesktopPanel = lazyScreen("RemoteDesktopPanel", async () => (await import("./remote-desktop-panel")).RemoteDesktopPanel);
-export const TriggersPage = lazyScreen("TriggersPage", async () => (await import("./TriggersPage")).TriggersPage);
-export const SettingsModal = lazyScreen("SettingsModal", async () => (await import("./SettingsModal")).SettingsModal);
+export const TriggersPage = pureScreen(lazyScreen("TriggersPage", async () => (await import("./TriggersPage")).TriggersPage));
+export const SettingsModal = pureScreen(lazyScreen("SettingsModal", async () => (await import("./SettingsModal")).SettingsModal));
 export const TeamMapPage = lazyScreen("TeamMapPage", async () => (await import("./TeamMapPage")).TeamMapPage);
 export const PublishedAppsPage = lazyScreen("PublishedAppsPage", async () => (await import("./published-apps/PublishedAppsPage")).PublishedAppsPage);
 export const AnnouncementsPage = lazyScreen("AnnouncementsPage", async () => (await import("./announcements/AnnouncementsPage")).AnnouncementsPage);

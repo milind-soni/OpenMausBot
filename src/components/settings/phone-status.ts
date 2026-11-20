@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { api, useStore } from "@/state/store";
+import { api } from "@/state/store";
+import { useStoreSelector } from "@/state/store-select";
 import { companionBridge } from "@/lib/companion-bridge";
 import { readMembership } from "@/lib/membership";
 import { isOwnerOrAdmin } from "@/lib/session";
@@ -35,11 +36,10 @@ function serverPhoneState(): Promise<PhonePlaceState> {
 
 /** Phones paired with the place on screen, as the outer menu and the nav say it in a few words. */
 export function usePhonePlaceState(enabled = true): PhonePlaceState {
-  const { state } = useStore();
+  const policy = useStoreSelector((state) => state.config?.managedPolicy);
   const here = companionBridge() !== null && window.ogb?.remoteClient?.active !== true;
   const local = useSidebarPhoneStatus();
   const [server, setServer] = useState<PhonePlaceState>({ kind: "checking" });
-  const policy = state.config?.managedPolicy;
   useEffect(() => {
     if (here || !enabled) return;
     let alive = true;

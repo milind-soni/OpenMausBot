@@ -6,7 +6,7 @@ import { Crown } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { threadApprovalModes, useStore, type Bot } from "@/state/store";
+import { threadApprovalModes, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
 import { effectiveOutboundPolicy, type OutboundPolicy } from "../../../shared/outbound";
 import { ApprovalModeSelector } from "../ApprovalModeSelector";
@@ -17,6 +17,7 @@ import { ManagedTeamsSettings } from "./ManagedTeamsSettings";
 import { ProposalStatus } from "./ProposalStatus";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 import { useBotEditor } from "./BotEditorContext";
+import { sameItems, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export type PermissionsPart = "chief" | "approval" | "outbound";
 
@@ -31,7 +32,7 @@ export function PermissionsSection({
 }) {
   const { patch, engine, canCoordinate, approvalMode, trustedModesAvailable, sectionName, currentChief } = derived;
   const team = useTeamPeople();
-  const { state, dispatch } = useStore();
+  const teams = useStoreSelector((s) => ["", ...(s.sections ?? []), ...[...s.bots, ...s.groups].map(member => member.section?.trim() || "")], sameItems), dispatch = useStoreDispatch();
   const ownerOrAdmin = useOwnerOrAdmin();
   const { draft } = useBotEditor();
   const displaySectionName = sectionName === "General" ? t("botAccess.teams.general") : sectionName;
@@ -102,7 +103,7 @@ export function PermissionsSection({
         {bot.chiefOfStaff && <ManagedTeamsSettings
           key={bot.id + JSON.stringify(bot.managedSections ?? [])}
           name={bot.name} ownTeam={bot.section?.trim() || ""}
-          teams={["", ...(state.sections ?? []), ...[...state.bots, ...state.groups].map(member => member.section?.trim() || "")]}
+          teams={teams}
           allowed={bot.managedSections ?? []}
           onSave={managedSections => patch({ managedSections, acknowledgePeerScope: true })}
         />}

@@ -15,6 +15,7 @@ const fixture = vi.hoisted(() => ({
   capabilities: { host: { homeDir: undefined } as { homeDir: undefined; platform?: string }, localComputer: { available: false, reasonCode: "unsupported" } },
   apps: { phase: "loading", apps: [], connectedSlugs: [] } as import("./useBotApps").BotApps,
 }));
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: { ...original.initialState, config: fixture.config ?? original.initialState.config, instances: fixture.instances as typeof original.initialState.instances }, dispatch: fixture.dispatch }) };
