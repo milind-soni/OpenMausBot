@@ -4,7 +4,7 @@ import { t } from "@/lib/i18n";
 export const refusedAsOutsideWorkspace = (error: unknown): boolean => (error as { code?: unknown } | null)?.code === "outside_workspace";
 
 export function OutsideWorkspacePreview({ filePath }: { filePath: string }) {
-  const absolute = REVEALABLE_PATH.test(filePath) || filePath.startsWith("\\\\");
+  const absolute = REVEALABLE_PATH.test(filePath) || /^(?:\\\\|\/\/)/.test(filePath);
   const revealable = Boolean(revealBridge()) && REVEALABLE_PATH.test(filePath);
   return (
     <div className="p-8 text-center text-sm">
