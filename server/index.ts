@@ -8469,8 +8469,9 @@ async function beginTurn(
       if (e instanceof PlaceUnavailableError) clearFailedAutoPin(bot.id, threadId, e.place);
       let message = e instanceof Error ? e.message : String(e);
       const current = store.projectBotForTask(bot.id, threadId), takeoverScope = e instanceof TurnUsageLimitRefusedError ? e.scope : e instanceof TurnAuthenticationRefusedError ? "signed-out" as const : undefined;
-      const backups = takeoverScope && current && quotaSwitchEnabled() ? limitTakeover.backups(bot.id, current.modelSelection, takeoverScope, approvalModeFor(current))
-        : current ? startupBackups(current, cfg.automaticRecovery) : [];
+      const weighed = takeoverScope && current && quotaSwitchEnabled() ? limitTakeover.weighBackups(bot.id, current.modelSelection, takeoverScope, approvalModeFor(current)) : null;
+      if (weighed && takeoverScope && current) limitTakeover.passedOver(current, current.modelSelection, takeoverScope, weighed.skipped);
+      const backups = weighed ? weighed.backups : current ? startupBackups(current, cfg.automaticRecovery) : [];
       const nextIndex = backups.findIndex((candidate, index) => index >= (opts?.automaticRecoveryIndex ?? 0) &&
         registry.get(candidate.instanceId)?.enabled && (e instanceof TurnUsageLimitRefusedError ? (candidate.instanceId === instanceId ? e.scope !== "engine" : limitBackupAllowed(instance, registry.get(candidate.instanceId)!, instanceConfigs(cfg)[candidate.instanceId]))
           : !(e instanceof TurnAuthenticationRefusedError) || candidate.instanceId !== instanceId) &&

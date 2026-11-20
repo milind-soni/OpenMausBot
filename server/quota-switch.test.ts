@@ -9,6 +9,7 @@ import { PROBE_TIMEOUT_MS } from "./engine-install.ts";
 import { closeMessageDb } from "./message-db.ts";
 import { createQuotaSwitch, NOT_NOW, quotaSwitchEnabled, type QuotaRequest, type QuotaSwitch, type QuotaSwitchDeps, type QuotaSwitchEngine } from "./quota-switch.ts";
 import { Store, type BotRecord, type Message } from "./store.ts";
+import type { SkippedBackup } from "./host/limit-takeover.ts";
 import { toolFailureMessage } from "./drivers/tool-failure.ts";
 
 const QUOTA = "You've hit your weekly limit · resets Oct 12 at 2:30pm (Asia/Calcutta)";
@@ -177,16 +178,19 @@ describe("quota switch", () => {
     let told: Array<{ botId: string; from: ModelSelection; facts: unknown }>;
     let moves: Array<{ threadId: string; from: ModelSelection; to: ModelSelection; resetsAt?: number }>;
     let backups: ModelSelection[];
+    let passed: SkippedBackup[];
     let flags: { limit?: "engine" | "model" | "credits"; limitResetsAt?: number } | undefined;
     const CODEX = { instanceId: "codex", model: "codex-default" }, CURSOR = { instanceId: "cursor", model: "cursor-default" };
     beforeEach(() => {
       told = [];
       moves = [];
       backups = [CODEX, CURSOR];
+      passed = [];
       flags = undefined;
       deps.turnStops = { failureCause: () => cause, read: () => (flags ? { flags } : undefined) };
       deps.takeover = {
-        backups: () => backups, tell: (who, from, facts) => { told.push({ botId: who.id, from, facts }); return null; },
+        weighBackups: () => ({ backups, skipped: [] }), passedOver: (_bot, _from, _scope, left) => { passed.push(...left); },
+        tell: (who, from, facts) => { told.push({ botId: who.id, from, facts }); return null; },
         moved: (_botId, threadId, from, to, resetsAt) => { moves.push({ threadId, from, to, ...(resetsAt ? { resetsAt } : {}) }); },
       };
       quota = createQuotaSwitch(deps);
@@ -246,25 +250,37 @@ describe("quota switch", () => {
       expect(told[0]!.facts).toEqual({ scope: "credits", backup: { instanceId: "claude", model: "claude-plan" } });
     });
 
-    it.each<[string, () => void]>([
-      ["one that cannot run a turn now", () => { engines[1] = engine("codex", "codex", "Codex", { snapshot: async () => ({ state: "unavailable", reason: "signed out" }) }); }],
-      ["one the model-switch gate refuses", () => { gate.mockImplementationOnce(() => ({ ok: false, error: "the bot is working" })); }],
-      ["one that does not support this AI's tools", () => { engines[0] = engine("claude", "claudeAgent", "Claude", { adapter: { capabilities: caps({ agentsMcp: true }) } }); engines[2] = engine("cursor", "cursorAgent", "Cursor", { adapter: { capabilities: caps({ agentsMcp: true }) } }); }],
-    ])("skips %s and carries on with the next", async (_name, arrange) => {
+    it.each<[string, () => void, Omit<SkippedBackup, "selection">]>([
+      ["one that cannot run a turn now", () => { engines[1] = engine("codex", "codex", "Codex", { snapshot: async () => ({ state: "unavailable", reason: "signed out" }) }); }, { why: "not-ready" }],
+      ["one the model-switch gate refuses", () => { gate.mockImplementationOnce(() => ({ ok: false, error: "the bot is working" })); }, { why: "switch-refused", detail: "the bot is working" }],
+      ["one that does not support this AI's tools", () => { engines[0] = engine("claude", "claudeAgent", "Claude", { adapter: { capabilities: caps({ agentsMcp: true }) } }); engines[2] = engine("cursor", "cursorAgent", "Cursor", { adapter: { capabilities: caps({ agentsMcp: true }) } }); }, { why: "missing-capability" }],
+    ])("skips %s, says why, and carries on with the next", async (_name, arrange, why) => {
       arrange();
       await limited({ messageId: said("hi") });
       expect(thread().modelSelection).toEqual(CURSOR);
       expect(resend).toHaveBeenCalledTimes(1);
       expect(told[0]!.facts).toMatchObject({ backup: CURSOR });
+      expect(passed).toEqual([{ selection: CODEX, ...why }]);
     });
 
-    it("skips an AI that does not say how it is in time", async () => {
+    it("skips an AI that does not say how it is in time, and says so", async () => {
       engines[1] = silent("codex", "Codex");
       const going = limited({ messageId: said("hi") });
       await vi.waitFor(() => expect(timers.filter((timer) => !timer.cancelled).map((timer) => timer.ms)).toEqual([PROBE_TIMEOUT_MS]));
       timers.find((timer) => !timer.cancelled)!.fire();
       await going;
       expect(thread().modelSelection).toEqual(CURSOR);
+      expect(passed).toEqual([{ selection: CODEX, why: "probe-timed-out" }]);
+    });
+
+    it("says why a backup was left out even when nothing is sent again", async () => {
+      const left: SkippedBackup = { selection: CODEX, why: "same-plan" };
+      deps.takeover = { ...deps.takeover!, weighBackups: () => ({ backups: [CURSOR], skipped: [left] }) };
+      quota = createQuotaSwitch(deps);
+      await ranOut(begin(bot.threadId, { messageId: said("hi") }), QUOTA, true);
+      expect(resend).not.toHaveBeenCalled();
+      expect(passed).toEqual([left]);
+      expect(told[0]!.facts).toMatchObject({ backup: CURSOR });
     });
 
     it("never moves to an AI known to be at its own limit, until a turn on it works again", async () => {
@@ -353,7 +369,7 @@ describe("quota switch", () => {
       beforeEach(() => {
         scopes = [];
         deps.takeover = {
-          backups: (_botId, _from, scope) => { scopes.push(scope); return backups; },
+          weighBackups: (_botId, _from, scope) => { scopes.push(scope); return { backups, skipped: [] }; }, passedOver: () => {},
           tell: (who, from, facts) => { told.push({ botId: who.id, from, facts }); return told.length === 1 ? NOTICE : null; },
           moved: (_botId, threadId, from, to, resetsAt, scope) => { moves.push({ threadId, from, to, ...(resetsAt ? { resetsAt } : {}), ...(scope ? { scope } : {}) } as never); },
         };
