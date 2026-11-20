@@ -1,4 +1,5 @@
 import { readTranscriptPosition } from "@/lib/transcript-follow";
+import { latestWebPanels } from "@/lib/web-panel-preferences";
 import { placeUnreadDivider } from "@/lib/unread-divider";
 import { api } from "./api";
 import { visibleMessages } from "./snapshot-navigation";
@@ -50,9 +51,14 @@ export function trimmedHeld<T extends HeldOwner>(owner: T, keepFromId?: string):
   return from > 0 ? { ...owner, messages: owner.messages.slice(from), hasMore: true } : owner;
 }
 
-/** The conversation the chat draws: the selected room or bot, or the first bot when the selection names neither. */
-const shownThread = (state: AppState, threadId: string) => state.activeView === "chat" &&
-  (state.groups.find((group) => group.id === state.selectedId) ?? state.bots.find((bot) => bot.id === state.selectedId) ?? state.bots[0])?.threadId === threadId;
+/** The selected room or bot, or the first bot when the selection names neither: what the chat and its panels show. */
+export const selectedOwner = (state: Pick<AppState, "bots" | "groups" | "selectedId">) =>
+  state.groups.find((group) => group.id === state.selectedId) ?? state.bots.find((bot) => bot.id === state.selectedId) ?? state.bots[0];
+
+/** A conversation on screen: the one the chat draws, or the chat a pinned page in the web panel comes from. */
+const shownThread = (state: AppState, threadId: string) =>
+  (state.activeView === "chat" && selectedOwner(state)?.threadId === threadId) ||
+  (state.activeView === "web-panel" && latestWebPanels().find((panel) => panel.id === state.webPanelId)?.page?.threadId === threadId);
 
 export function reduceTrimHeldMessages(state: AppState, { threadId, keepFromId }: TrimHeldMessages): AppState {
   if (shownThread(state, threadId)) return state;
@@ -72,27 +78,31 @@ export function reduceTrimHeldMessages(state: AppState, { threadId, keepFromId }
 export const HELD_IN_BACKGROUND = HELD_FOR_PLACE + HELD_AFTER_LEAVING;
 
 /** After a row lands in a conversation nobody has on screen: past `HELD_IN_BACKGROUND` rows it is trimmed as when the
- * reader left it, keeping the row the reader was at. */
+ * reader left it, keeping the row the reader was at; when its pinned message or branch lies further back than that
+ * keeps, it holds what a fresh snapshot would, its newest page. */
 export function capHeldInBackground(state: AppState, action: Action): AppState {
   if (action.type !== "messageAdded") return state;
   const owner = [...state.bots, ...state.groups].find((candidate) => candidate.threadId === action.threadId);
   if (!owner || owner.messages.length <= HELD_IN_BACKGROUND || shownThread(state, action.threadId)) return state;
   const place = readTranscriptPosition(`${owner.id}:${owner.threadId}`);
-  return reduceTrimHeldMessages(state, { type: "trimHeldMessages", threadId: action.threadId, keepFromId: place?.atEnd ? undefined : place?.rowId });
+  const trimmed = reduceTrimHeldMessages(state, { type: "trimHeldMessages", threadId: action.threadId, keepFromId: place?.atEnd ? undefined : place?.rowId });
+  const page = <T extends HeldOwner>(held: T): T => held.threadId === action.threadId && held.messages.length > HELD_IN_BACKGROUND
+    ? { ...held, messages: held.messages.slice(-MESSAGE_PAGE_SIZE), hasMore: true } : held;
+  return { ...trimmed, bots: trimmed.bots.map(page), groups: trimmed.groups.map(page) };
 }
 
 /** Holds fewer rows than one page while the server has more: a snapshot's tail, or a conversation switched to. */
 export const shortHeld = <T extends { messages: Message[]; hasMore?: boolean }>(owner: T | undefined): owner is T =>
   Boolean(owner?.hasMore) && owner!.messages.length < MESSAGE_PAGE_SIZE;
 
-/** Opening a conversation held as a short tail asks for the page before it at once, through the older-rows path. */
-export function loadShortHeldOnOpen(state: AppState, ownerId: string, inFlight: Set<string>,
-  dispatch: (action: Action) => void, showError: (error: unknown) => void): void {
-  const owner = [...state.bots, ...state.groups].find((candidate) => candidate.id === ownerId);
-  if (!shortHeld(owner) || state.loadingOlder[owner.threadId]) return;
-  const load = { type: "loadOlderMessages", threadId: owner.threadId } as const;
-  dispatch(load);
-  loadOlderPage(load, state, inFlight, dispatch, showError);
+/** A row from before a short tail, landing in a conversation nobody has on screen (a frame queued while the snapshot was
+ * read): appended, it would read as the newest row. The page before the tail brings it in order when the tail opens. */
+export function olderThanHeld(state: AppState, action: Action): boolean {
+  if (action.type !== "messageAdded") return false;
+  const owner = [...state.bots, ...state.groups].find((candidate) => candidate.threadId === action.threadId);
+  const first = owner?.messages[0];
+  return shortHeld(owner) && first !== undefined && action.message.at < first.at && !shownThread(state, action.threadId) &&
+    !owner.messages.some((message) => message.id === action.message.id);
 }
 
 export function loadOlderPage(action: LoadOlderMessages, current: AppState, inFlight: Set<string>,

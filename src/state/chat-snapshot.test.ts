@@ -52,14 +52,14 @@ describe("reading the first snapshot", () => {
     expect(old).toHaveBeenCalledTimes(1);
   });
 
-  it("applies a tail whose conversation is gone, and fails the snapshot when its page cannot be read", async () => {
-    const failing = (error: Error) => vi.fn(async (path: string) => {
-      if (path.startsWith("/api/bots?")) return { bots: [tailOf("a")], groups: [] };
-      throw error;
-    });
-    const gone = failing(new ApiError("no such conversation", 404));
-    expect((await readChatSnapshot(() => ({ selectedId: "a" }), undefined, gone as never)).bots[0]!.messages).toHaveLength(SNAPSHOT_TAIL);
-    await expect(readChatSnapshot(() => ({ selectedId: "a" }), undefined, failing(new ApiError("unavailable", 503)) as never)).rejects.toThrow("unavailable");
+  it("applies the tail when the page cannot be read, to be paged back once the snapshot lands", async () => {
+    for (const error of [new ApiError("no such conversation", 404), new ApiError("unavailable", 503), new TypeError("offline")]) {
+      const failing = vi.fn(async (path: string) => {
+        if (path.startsWith("/api/bots?")) return { bots: [tailOf("a")], groups: [] };
+        throw error;
+      });
+      expect((await readChatSnapshot(() => ({ selectedId: "a" }), undefined, failing as never)).bots[0]!.messages).toHaveLength(SNAPSHOT_TAIL);
+    }
   });
 });
 

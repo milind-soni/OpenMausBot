@@ -1,7 +1,8 @@
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError, retryRequest, snapshotArrays } from "./api";
-import { capHeldInBackground, loadOlderPage, loadShortHeldOnOpen, MESSAGE_PAGE_SIZE, reduceOlderMessages, reduceTrimHeldMessages } from "./message-history";
+import { capHeldInBackground, loadOlderPage, MESSAGE_PAGE_SIZE, olderThanHeld, reduceOlderMessages, reduceTrimHeldMessages } from "./message-history";
 import { readChatSnapshot } from "./chat-snapshot";
+import { followHeldTails, noteAppPagePatch } from "./held-tails";
 export { MESSAGE_PAGE_SIZE } from "./message-history";
 import { addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
 import { use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -856,7 +857,7 @@ function dismissOnboardingCard(state: AppState, botId: string): AppState {
 
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
 
-export function reducer(state: AppState, action: Action): AppState { return capHeldInBackground(reduceApp(state, action), action); }
+export function reducer(state: AppState, action: Action): AppState { return olderThanHeld(state, action) ? state : capHeldInBackground(reduceApp(state, action), action); }
 function reduceApp(state: AppState, action: Action): AppState {
   const [newChatState, newChatOnly] = reduceNewChat(state, action); if (newChatOnly) return newChatState; state = newChatState;
   if (action.type === "optimisticMessageRemoved") state = removeForkOptimistic(state, action);
@@ -2253,7 +2254,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (previousOpened !== opened && cur.notice?.threadId && opened && cur.notice.threadId !== opened) rawDispatch({ type: "notice", notice: null });
       switch (action.type) {
         case "loadOlderMessages": {
-          loadOlderPage(action, stateRef.current, olderPagesInFlight, rawDispatch, showError);
+          loadOlderPage(action, store.getState(), olderPagesInFlight, rawDispatch, showError);
           break;
         }
         case "notice":
@@ -2576,7 +2577,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           } else if (group?.tasks?.find((task) => task.threadId === group.threadId)?.unread ?? group?.unread) {
             api(`/api/groups/${id}/read`, { method: "POST" }).catch(() => {});
           }
-          loadShortHeldOnOpen(store.getState(), id, olderPagesInFlight, rawDispatch, showError);
           break;
         }
         case "createGroup":
@@ -2845,6 +2845,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     return wrapped;
   }, [botPatchQueue]);
+  useEffect(() => followHeldTails(store, dispatch), [store, dispatch]);
 
   const launched = useRef(false);
   useEffect(() => {
@@ -3081,6 +3082,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "message.patch":
           rawDispatch({ type: "messagePatched", threadId: frame.threadId, message: frame.message as Message });
           rawDispatch({ type: "forkPanelMessage", threadId: frame.threadId, message: frame.message as Message, patch: true });
+          noteAppPagePatch(frame.threadId, frame.message as Message);
           break;
         case "thread":
           rawDispatch({ type: "threadActive", threadId: frame.threadId, activeLeafId: frame.activeLeafId });

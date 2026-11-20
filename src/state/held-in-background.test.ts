@@ -1,8 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { lastLine } from "@/components/sidebar-preview";
 import { botUnreadCount } from "@/lib/bot-unread";
 import { forgetTranscriptPositions, rememberTranscriptPosition } from "@/lib/transcript-follow";
-import { HELD_AFTER_LEAVING, HELD_IN_BACKGROUND, loadShortHeldOnOpen } from "./message-history";
+import { setWebPanels } from "@/lib/web-panel-preferences";
+import { createAppStore } from "./app-store";
+import { followHeldTails, noteSnapshotTails } from "./held-tails";
+import { HELD_AFTER_LEAVING, HELD_IN_BACKGROUND } from "./message-history";
 import { visibleMessages } from "./snapshot-navigation";
 import { initialState, reducer, type Action, type AppState, type Bot, type Message } from "./store";
 
@@ -46,6 +49,14 @@ describe("a conversation nobody has on screen, as its rows keep landing", () => 
     }
   });
 
+  it("never trims a conversation whose pinned page the web panel shows", () => {
+    setWebPanels([{ id: "panel-1", name: "Sales", page: { botId: "worker", threadId: "work", messageId: "w3" } }]);
+    let state: AppState = { ...initialState, bots: [worker(HELD_IN_BACKGROUND), reader], selectedId: "reader", activeView: "web-panel", webPanelId: "panel-1" };
+    state = land(state, HELD_IN_BACKGROUND);
+    expect(held(state).messages).toHaveLength(HELD_IN_BACKGROUND + 1);
+    setWebPanels([]);
+  });
+
   it("keeps the row the reader left it at", () => {
     const place = `w${HELD_IN_BACKGROUND - 450}`;
     rememberTranscriptPosition("worker:work", { atEnd: false, rowId: place, offsetWithinRow: 0 });
@@ -69,26 +80,62 @@ describe("a conversation nobody has on screen, as its rows keep landing", () => 
   });
 });
 
-describe("opening a conversation held as a short tail", () => {
-  const tailed = (count: number, hasMore: boolean) => ({ ...worker(count), hasMore });
-  const open = (bot: Bot, loadingOlder: Record<string, true> = {}) => {
-    const dispatched: Action[] = [];
-    const inFlight = new Set<string>();
-    vi.stubGlobal("fetch", () => new Promise(() => {}));
-    loadShortHeldOnOpen({ ...initialState, bots: [bot], loadingOlder }, bot.id, inFlight, (action) => dispatched.push(action), () => {});
-    vi.unstubAllGlobals();
-    return { dispatched, inFlight };
-  };
+describe("a conversation the snapshot sent as a short tail", () => {
+  const tailed = (count: number, hasMore = true) => ({ ...worker(count), hasMore });
+  /** A store holding `state`, the tails the snapshot sent, and what the follower asks for. */
+  async function follow(state: AppState, tails: Bot[]) {
+    const store = createAppStore<AppState, Action, never>(reducer, state, () => () => {});
+    const asked: Action[] = [];
+    noteSnapshotTails(tails);
+    const stop = followHeldTails(store, (action) => asked.push(action));
+    await Promise.resolve();
+    return { store, asked, stop, settle: () => Promise.resolve() };
+  }
 
-  it("asks for the page before its tail through the older-rows path", () => {
-    const { dispatched, inFlight } = open(tailed(20, true));
-    expect(dispatched).toEqual([{ type: "loadOlderMessages", threadId: "work" }]);
-    expect([...inFlight]).toEqual(["work"]);
+  it("asks for the page before its tail however it becomes selected", async () => {
+    for (const select of [{ type: "select", id: "worker" }, { type: "toggleComputer", botId: "worker", open: true }, { type: "toggleSettings", botId: "worker", open: true }] as Action[]) {
+      const bot = tailed(20);
+      const { store, asked, stop, settle } = await follow({ ...initialState, bots: [reader, bot], selectedId: "reader", activeView: "team-map" }, [bot]);
+      expect(asked).toEqual([]);
+      store.dispatch(select);
+      await settle();
+      expect(asked, select.type).toEqual([{ type: "loadOlderMessages", threadId: "work" }]);
+      store.dispatch({ type: "select", id: "reader" });
+      store.dispatch(select);
+      await settle();
+      expect(asked, "once").toHaveLength(1);
+      stop();
+    }
   });
 
-  it("asks nothing of a whole page, a whole short conversation, or a page already on its way", () => {
-    expect(open(tailed(200, true)).dispatched).toEqual([]);
-    expect(open(tailed(20, false)).dispatched).toEqual([]);
-    expect(open(tailed(20, true), { work: true }).dispatched).toEqual([]);
+  it("asks for it when the selection falls to it because the selected bot is gone", async () => {
+    const bot = tailed(20);
+    const { asked, stop } = await follow({ ...initialState, bots: [bot, reader], selectedId: "gone", activeView: "chat" }, [bot]);
+    expect(asked).toEqual([{ type: "loadOlderMessages", threadId: "work" }]);
+    stop();
+  });
+
+  it("asks for it when another client moves its branch, not when a new row lands", async () => {
+    const bot = tailed(20);
+    const { store, asked, stop, settle } = await follow({ ...initialState, bots: [reader, bot], selectedId: "reader", activeView: "chat" }, [bot]);
+    store.dispatch({ type: "messageAdded", threadId: "work", message: row(20, held(store.getState()).activeLeafId ?? null) });
+    await settle();
+    expect(asked).toEqual([]);
+    store.dispatch({ type: "threadActive", threadId: "work", activeLeafId: "elsewhere" });
+    await settle();
+    expect(asked).toEqual([{ type: "loadOlderMessages", threadId: "work" }]);
+    stop();
+  });
+
+  it("leaves alone a whole page, a whole short conversation, and a conversation switched to since", async () => {
+    for (const bot of [tailed(200), tailed(20, false)]) {
+      const { asked, stop } = await follow({ ...initialState, bots: [bot, reader], selectedId: "worker", activeView: "chat" }, [bot]);
+      expect(asked).toEqual([]);
+      stop();
+    }
+    const switched = { ...tailed(20), messages: worker(20).messages.map((message) => ({ ...message, id: `other-${message.id}` })) };
+    const { asked, stop } = await follow({ ...initialState, bots: [switched, reader], selectedId: "worker", activeView: "chat" }, [tailed(20)]);
+    expect(asked).toEqual([]);
+    stop();
   });
 });
