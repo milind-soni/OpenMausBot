@@ -32,7 +32,7 @@ export function parseNetworkLocation(value: unknown): NetworkLocation | null {
   return { source: "ip", provider: "DB-IP", city, region, country, district, postalCode, networkCenter };
 }
 
-export const LOCATION_FAILURES = ["permission-denied", "position-unavailable", "position-timed-out", "page-hidden"] as const;
+export const LOCATION_FAILURES = ["permission-denied", "position-interrupted", "position-unavailable", "position-timed-out", "page-hidden"] as const;
 export type LocationFailure = typeof LOCATION_FAILURES[number];
 export type LocationResult = DeviceLocation | NetworkLocation | LocationFailure | null;
 

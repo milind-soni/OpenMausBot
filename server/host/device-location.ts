@@ -87,6 +87,7 @@ export async function resolveDeviceAddress(
 export function locationFailureMessage(reason: LocationFailure | null): string {
   switch (reason) {
     case "permission-denied": return "The device denied location access. Check its location permissions.";
+    case "position-interrupted": return "The location request ended before a fix or permission decision was confirmed.";
     case "position-timed-out": return "The device did not obtain a location fix in time. Try again.";
     case "page-hidden": return "The page that sent this request was not active in the foreground. Switch back to it and try again.";
     case "position-unavailable": return "The device could not obtain a location fix.";

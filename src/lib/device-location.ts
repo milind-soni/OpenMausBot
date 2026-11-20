@@ -75,6 +75,15 @@ export async function deviceLocation(): Promise<DeviceLocation> {
   }
 }
 
+async function canUseIpFallback(): Promise<boolean> {
+  if (window.ogb?.currentLocation) return true;
+  try {
+    return (await navigator.permissions?.query({ name: "geolocation" }))?.state === "granted";
+  } catch {
+    return false;
+  }
+}
+
 async function ipLocation(timeout: number) {
   const key = import.meta.env?.VITE_OMB_DBIP_PUBLIC_KEY?.trim() || "free";
   try {
@@ -111,14 +120,15 @@ export function listenForDeviceLocation(source: EventSource, id: string): void {
       } catch (error) {
         const code = (error as GeolocationPositionError | undefined)?.code;
         failure = LOCATION_FAILURES.find(reason => reason === error) ??
-          (code === 1 ? "permission-denied" : code === 3 ? "position-timed-out" : "position-unavailable");
+          (window.ogb?.currentLocation ? "position-interrupted" :
+            code === 1 ? "permission-denied" : code === 3 ? "position-timed-out" : "position-unavailable");
       }
     }
     const active = () => document.visibilityState === "visible" && document.hasFocus();
-    const remaining = DEVICE_LOCATION_TIMEOUT - (Date.now() - started) - 1_000;
     let networkLocation = null;
-    if (!position && (failure === "position-unavailable" || failure === "position-timed-out") && active() && remaining > 0) {
-      networkLocation = await ipLocation(Math.min(remaining, 4_000));
+    if ((failure === "position-unavailable" || failure === "position-timed-out") && active() && await canUseIpFallback()) {
+      const remaining = DEVICE_LOCATION_TIMEOUT - (Date.now() - started) - 1_000;
+      if (active() && remaining > 0) networkLocation = await ipLocation(Math.min(remaining, 4_000));
     }
     if (Date.now() - started >= DEVICE_LOCATION_TIMEOUT) return;
     if (!active()) {

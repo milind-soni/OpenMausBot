@@ -8,7 +8,7 @@ export const isDeviceLocationTool = (method: string, path: string): boolean =>
 export function createDeviceLocationRoutes(locations: DeviceLocations, sessionLive: (id: string) => boolean): RouteHandler {
   return async ({ method, path, req, res, auth, json, readBody }) => {
     if (method !== "POST" || path !== DEVICE_LOCATION_PATH) return PASS;
-    const body = await readBody(req, 1024);
+    const body = await readBody(req, 4096);
     if (auth.kind === "session" && !sessionLive(auth.session.id)) return json(res, 401, { error: "Session ended." });
     const received = locations.reply(auth, req.headers[DEVICE_LOCATION_HEADER], body);
     return json(res, received ? 200 : 404, { ok: received });

@@ -184,9 +184,9 @@ it.each(["position-unavailable", "position-timed-out"])("falls back to the clien
   expect(JSON.stringify(body)).not.toContain("203.0.113.123");
 });
 
-it("does not look up the network IP when the user denied location permission", async () => {
+it.each(["permission-denied", "position-interrupted"])("skips IP lookup after the native result %s", async failure => {
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
-  vi.stubGlobal("ogb", { currentLocation: async () => "permission-denied" });
+  vi.stubGlobal("ogb", { currentLocation: async () => failure });
   const send = vi.fn().mockResolvedValue(null);
   vi.stubGlobal("fetch", send);
   const stream = new EventTarget();
@@ -194,4 +194,28 @@ it("does not look up the network IP when the user denied location permission", a
   stream.dispatchEvent(new MessageEvent("device-location", { data: "1".repeat(36) }));
   await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
   expect(send.mock.calls[0][0]).toBe("/api/device-location");
+});
+
+it.each(["prompt", "denied", "granted"] as const)("checks browser authorization (%s) before an IP lookup after both watches expire", async state => {
+  vi.useFakeTimers();
+  try {
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.stubGlobal("navigator", {
+      geolocation: { watchPosition: vi.fn().mockReturnValue(17), clearWatch: vi.fn() },
+      permissions: { query: vi.fn().mockResolvedValue({ state }) },
+    });
+    const send = vi.fn().mockImplementation(async (url: string) =>
+      url.startsWith("https:") ? Response.json({ city: "Example City" }) : null);
+    vi.stubGlobal("fetch", send);
+    const stream = new EventTarget();
+    listenForDeviceLocation(stream as EventSource, "tab");
+    stream.dispatchEvent(new MessageEvent("device-location", { data: "1".repeat(36) }));
+
+    await vi.advanceTimersByTimeAsync(23_000);
+    expect(send.mock.calls.map(([url]) => url)).toEqual(state === "granted"
+      ? ["https://api.db-ip.com/v2/free/self", "/api/device-location"]
+      : ["/api/device-location"]);
+  } finally {
+    vi.useRealTimers();
+  }
 });

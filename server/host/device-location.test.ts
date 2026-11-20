@@ -1,3 +1,7 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { PassThrough } from "node:stream";
+import { readBody } from "../harness/http.ts";
+import { createDeviceLocationRoutes } from "../routes/device-location.ts";
 import { describe, expect, it, vi } from "vitest";
 import type { RequestAuth } from "../request-auth.ts";
 import { asksForCurrentLocation, currentLocationNote, DeviceLocations, locationClientKey, resolveDeviceAddress } from "./device-location.ts";
@@ -97,4 +101,26 @@ it("uses IP only for a failed device fix and labels it as the network exit", asy
       expect(currentLocationNote(result)).toContain("network exit");
     }
   }
+});
+
+it("accepts a valid network location whose multibyte labels exceed 1 KiB", async () => {
+  const locations = new DeviceLocations();
+  const write = vi.fn();
+  const result = locations.request(locationClientKey(local, tab)!, write, new AbortController().signal);
+  const request = write.mock.calls[0][0].split("\n")[1].slice(6);
+  const networkLocation = { city: "市".repeat(100), region: "省".repeat(100), country: "国".repeat(100), district: "区".repeat(100) };
+  const body = Buffer.from(JSON.stringify({ request, failure: "position-unavailable", networkLocation }));
+  expect(body.length).toBeGreaterThan(1024);
+  const stream = new PassThrough();
+  const req = Object.assign(stream, { headers: { "x-openmausbot-location-client": tab } }) as unknown as IncomingMessage;
+  const res = {} as ServerResponse;
+  const json = vi.fn();
+  const url = new URL("http://localhost/api/device-location");
+  const handling = createDeviceLocationRoutes(locations, () => true)({
+    req, res, json, readBody, url, path: url.pathname, method: "POST", auth: local,
+  });
+  stream.end(body);
+  await handling;
+  expect(json).toHaveBeenCalledWith(res, 200, { ok: true });
+  await expect(result).resolves.toMatchObject({ ...networkLocation, source: "ip" });
 });

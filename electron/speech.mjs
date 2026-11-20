@@ -52,9 +52,10 @@ export async function currentMacLocation() {
     const { stdout } = await promisify(execFile)(BIN, ["--location"], { timeout: 32_000, maxBuffer: 4096 });
     return JSON.parse(stdout);
   } catch (error) {
-    if (error.killed || error.stdout?.includes('"location-timed-out"')) return "position-timed-out";
+    if (error.stdout?.includes('"location-timed-out"')) return "position-timed-out";
     if (error.stdout?.includes('"location-denied"')) return "permission-denied";
-    return "position-unavailable";
+    if (error.stdout?.includes('"location-unavailable"')) return "position-unavailable";
+    return "position-interrupted";
   }
 }
 
