@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import { changedRoutineRefusalText } from "../cloud-lending.ts";
 import { addServerLinePacks } from "../server-lines.ts";
 import type { RoutineRunStatus } from "../../shared/routines.ts";
-import ptBr from "../../src/locales/pt-br.json" with { type: "json" };
 import { createRefusedLending } from "./refused-lending.ts";
 
 function fixture(over: { device?: "PC" | "Mac" | "computer" | null; status?: (id: string) => RoutineRunStatus | undefined; language?: string } = {}) {
@@ -66,9 +65,10 @@ describe("a routine's run refused the lent computer (server/host/refused-lending
   });
 
   it("reads in the language of the chat it reports to", () => {
-    addServerLinePacks({ "pt-br": ptBr });
-    const { refused } = fixture({ language: "pt-br" });
+    // A pack of its own: the catalogs themselves are the locale tests' to read (scripts/ci-scope.test.ts).
+    addServerLinePacks({ xx: { "server.runs.lentComputerUnconfirmed": "{name} · {device}" } });
+    const { refused } = fixture({ language: "xx" });
     refused.refused("t", "run_1", "Plano da manhã");
-    expect(refused.take("t")).toBe("\"Plano da manhã\" não pode usar seu PC porque não está confirmada como sua: ela foi alterada ou criada pela última vez fora das suas próprias conversas. Abra a rotina e salve para que ela volte a ser sua.");
+    expect(refused.take("t")).toBe("Plano da manhã · PC");
   });
 });
