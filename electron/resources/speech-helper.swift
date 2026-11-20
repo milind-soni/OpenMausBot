@@ -40,6 +40,7 @@ final class OneShotLocation: NSObject, CLLocationManagerDelegate {
   private var requested = false
   private let geocoder = CLGeocoder()
   private var resolving = false
+  private var bestFix: CLLocation?
 
   func run() {
     manager.delegate = self
@@ -55,20 +56,31 @@ final class OneShotLocation: NSObject, CLLocationManagerDelegate {
     case .authorizedAlways, .authorizedWhenInUse:
       guard !requested else { return }
       requested = true
-      manager.requestLocation()
+      manager.startUpdatingLocation()
+      DispatchQueue.main.asyncAfter(deadline: .now() + 12) { [self] in
+        guard !resolving else { return }
+        guard let bestFix else { fail("location-timed-out") }
+        resolve(bestFix)
+      }
     case .notDetermined: break
     default: fail("location-denied")
     }
   }
 
   func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-    guard let location = locations.last,
-      CLLocationCoordinate2DIsValid(location.coordinate),
-      location.horizontalAccuracy >= 0,
-      abs(location.timestamp.timeIntervalSinceNow) <= 60
-    else { fail("location-unavailable") }
     guard !resolving else { return }
+    let now = Date()
+    for location in locations where CLLocationCoordinate2DIsValid(location.coordinate) &&
+      location.horizontalAccuracy >= 0 && location.horizontalAccuracy <= 100_000 &&
+      abs(location.timestamp.timeIntervalSince(now)) <= 30 {
+      if bestFix.map({ location.horizontalAccuracy <= $0.horizontalAccuracy }) ?? true { bestFix = location }
+    }
+    if let bestFix, bestFix.horizontalAccuracy <= 50 { resolve(bestFix) }
+  }
+
+  private func resolve(_ location: CLLocation) {
     resolving = true
+    manager.stopUpdatingLocation()
     let fix: [String: Any] = [
       "latitude": location.coordinate.latitude,
       "longitude": location.coordinate.longitude,
@@ -96,7 +108,15 @@ final class OneShotLocation: NSObject, CLLocationManagerDelegate {
   }
 
   func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-    fail("location-unavailable")
+    guard !resolving else { return }
+    switch (error as? CLError)?.code {
+    case .locationUnknown, .network:
+      return
+    case .denied:
+      fail("location-denied")
+    default:
+      fail("location-unavailable")
+    }
   }
 }
 

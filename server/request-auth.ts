@@ -733,3 +733,5 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
   }
   return deny(403, "forbidden: cross-origin request");
 }
+
+export const isInternalApiPath = (path: string): boolean => path.startsWith("/api/internal/");

@@ -4,6 +4,7 @@ import test from "node:test";
 import vm from "node:vm";
 
 import { cloudPlanSnapshot } from "./cloud-account.mjs";
+import { installDeviceLocationIpc } from "./device-location-ipc.mjs";
 import { installCloudPlanIpc } from "./cloud-plan-ipc.mjs";
 import { cloudPageSenderAllowed, myCloudOrigin } from "./cloud-home.mjs";
 import { otherOwnClouds } from "./cloud-list.mjs";
@@ -520,7 +521,7 @@ function pageIpc(overrides = {}) {
     activeEnvironment: environments.activeEnvironment, rendererOrigin: () => LOCAL, desktopRemoteAccess: false,
     mainWindow: { isDestroyed: () => false, webContents: cloudContents },
     environmentsState: { environments: [{ id: "cloud", name: "My Cloud", origin: CLOUD }], activeId: "cloud" },
-    cloudAccount: { homeTarget: () => ({ origin: CLOUD }), state: () => account, isOwnCloud: (origin) => origin === CLOUD }, cloudPlanSnapshot, installCloudPlanIpc, myCloudOrigin, rememberedHome: null,
+    cloudAccount: { homeTarget: () => ({ origin: CLOUD }), state: () => account, isOwnCloud: (origin) => origin === CLOUD }, cloudPlanSnapshot, installCloudPlanIpc, installDeviceLocationIpc, myCloudOrigin, rememberedHome: null, currentMacLocation: async () => null,
     cloudTrialNotices: () => ({ due: () => null, seen: (...args) => { calls.push(["notice-seen", ...args]); } }),
     ensureCloudAccount: () => ({ openDashboard: async () => { calls.push(["dashboard"]); return account; }, state: () => account,
       upgradePreview: async (...args) => { calls.push(["upgrade-preview", ...args]); return { outcome: "failed" }; },
@@ -541,11 +542,8 @@ test("location requires the focused, unlocked workspace throughout the native re
   let focused = true;
   let locked = false;
   const fixes = [];
-  const ipc = pageIpc({
-    process: { platform: "darwin" },
-    powerMonitor: { getSystemIdleState: () => locked ? "locked" : "active" },
-    currentMacLocation: () => new Promise(resolve => fixes.push(resolve)),
-  });
+  const ipc = pageIpc({ process: { platform: "darwin" }, powerMonitor: { getSystemIdleState: () => locked ? "locked" : "active" },
+    currentMacLocation: () => new Promise(resolve => fixes.push(resolve)) });
   ipc.context.mainWindow.isFocused = () => focused;
   const current = ipc.handlers.get("location:current");
   const event = { sender: ipc.cloudContents, senderFrame: ipc.cloudFrame };

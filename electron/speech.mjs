@@ -48,8 +48,14 @@ function ensureBuilt() {
 
 export async function currentMacLocation() {
   ensureBuilt();
-  const { stdout } = await promisify(execFile)(BIN, ["--location"], { timeout: 35_000, maxBuffer: 4096 });
-  return JSON.parse(stdout);
+  try {
+    const { stdout } = await promisify(execFile)(BIN, ["--location"], { timeout: 32_000, maxBuffer: 4096 });
+    return JSON.parse(stdout);
+  } catch (error) {
+    if (error.killed || error.stdout?.includes('"location-timed-out"')) return "position-timed-out";
+    if (error.stdout?.includes('"location-denied"')) return "permission-denied";
+    return "position-unavailable";
+  }
 }
 
 const RELEASE_MODIFIERS = ["control", "option", "shift", "command"];

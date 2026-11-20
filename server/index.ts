@@ -191,7 +191,7 @@ import { createTraceRecorder } from "./usage-trace/recorder.ts";
 import { GroupUsageReader } from "./group-thread-usage.ts";
 import { ledgerCost } from "./model-prices.ts";
 import type { PriceList } from "./prices.ts";
-import type { RequestAuth } from "./request-auth.ts";
+import { isInternalApiPath, type RequestAuth } from "./request-auth.ts";
 import { adminAuditPlan, type AuditPlan } from "./admin-audit-plan.ts"; import { departmentGrants, type DepartmentGrant } from "./department-grants.ts";
 import { onKeyRejectionChange } from "./key-rejections.ts";
 import { assertWithinBudget, noteSpend, spendAlertText, spendState, takeSpendAlert } from "./spend.ts"; import { personWaiting, personWaitingInRoom, type ThreadStanding } from "./usage-caps.ts"; import { createUsageCapGate, USAGE_CAP_CODE } from "./host/usage-cap-gate.ts"; import { createUsageCapRoutes } from "./routes/usage-caps.ts";
@@ -456,7 +456,7 @@ import { chromeLauncher } from "./browser/chrome/launcher.ts";
 import { botThreadLimitText, botThreadsHost, maxConcurrentBotThreads, maxConcurrentChildThreads } from "./bot-thread-limits.ts"; import { createBrowserSeats } from "./host/browser-seats.ts"; import { createBrowserHost } from "./host/browser.ts"; import { createCloudPlanTier } from "./host/cloud-plan-tier.ts";
 import { createScreenFrameSource, rememberTurnFrame, type ScreenCapture } from "./screen-frame-source.ts";
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
-import { asSchedule, RoutineRequestService } from "./routine-requests.ts"; import { ownerSpokeOnly } from "./cloud-routine-level.ts"; import { routineRunCard, routineRunFallbackText } from "./routine-run-card.ts";
+import { asSchedule, RoutineRequestService } from "./routine-requests.ts"; import { ownerSpokeOnly } from "./cloud-routine-level.ts"; import { createRoutineRunSource } from "./host/routine-run-source.ts";
 import { activeRoutinesContext } from "./active-routines-context.ts";
 import { createRefusedHandoffs } from "./host/refused-handoffs.ts"; import { automationContextText, createAutomationReports, newestAutomationLines, routineRunNeedsReview, waitingCardText } from "./automation-reports.ts"; import { createAutomationDestinations } from "./automation-destinations.ts"; import { createTeamRoutines } from "./host/team-routines.ts"; import { botOwner } from "../shared/bot-owner.ts"; import { forgetMember } from "./bot-owners.ts"; import { createProactive } from "./host/proactive.ts"; import { createFirstHourHooks, startFirstHour, welcomeDonePatch } from "./host/first-hour-host.ts"; import { greetingMessage } from "./host/first-hour.ts"; import { READ_AND_DRAFT_PARTS, READ_AND_DRAFT_REFUSAL, READ_AND_DRAFT_TOOLS, recordsAnswer } from "./read-and-draft.ts"; import { createPresenceRoutes } from "./routes/presence.ts"; import { needsYouNow } from "./today.ts"; import { createTeamPresenceHost } from "./host/team-presence-host.ts";
 import { engineLabel, LimitResetClock, nearLimitNote } from "./limit-resets.ts"; import { loadPlanUsage, planAccountsFromInstances } from "./plan-usage.ts"; import { LimitFailovers, limitBackupAllowed } from "./limit-failover.ts"; import { createLimitResetRoutes } from "./routes/limit-resets.ts";
@@ -608,8 +608,8 @@ import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
 import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts"; import { createInternalModelRoutes } from "./routes/internal-models.ts"; import { createOwnThreads } from "./host/own-threads.ts"; import { burstDefaultModel, burstProposalRefusal, createBurstHost } from "./host/burst-host.ts"; import { expandBurstTurnText } from "./burst/command.ts"; import { createBurstProposalRoutes, createBurstRoutes } from "./routes/burst.ts";
 import { createRoomHoldRoutes } from "./routes/room-holds.ts";
 import { checkedGroupResponder, createGroupRoutes } from "./routes/groups.ts";
-import { asksForCurrentLocation, currentLocationNote, DeviceLocations, locationClientKey, locationFailureMessage, resolveDeviceAddress } from "./host/device-location.ts";
-import { DEVICE_LOCATION_HEADER, DEVICE_LOCATION_PATH } from "../shared/device-location.ts";
+import { asksForCurrentLocation, createDeviceLocationHost, locationClientKey, locationFailureMessage } from "./host/device-location.ts";
+import { createDeviceLocationRoutes, isDeviceLocationTool } from "./routes/device-location.ts";
 import { createChannelRoutes } from "./routes/channels.ts";
 import { createTaskRoutes } from "./routes/tasks.ts";
 import { createTeamRoutes } from "./routes/teams.ts";
@@ -3539,6 +3539,7 @@ function activeGroupSpeaker(groupId: string): { botId: string; name: string; col
   return undefined;
 }
 
+const { routineSourceOwner, routineSourceThread, syncRoutineRunToSource } = createRoutineRunSource({ store, canManage, speaksFor: run => automationReports.speaksFor(run), threadLanguage });
 const goalTurns = createGoalTurns({ retireProviderTurn });
 const goalCards = createGoalCards({ store, routines: () => routines, notify, routineSourceOwner, routineSourceThread });
 const oneOnOneGoals = createOneOnOneGoals({
@@ -4613,49 +4614,9 @@ interface SseClient {
 }
 const { streams: sseClients, ...teamPresence } = createTeamPresenceHost<SseClient>({ people: teamOwners.people, broadcast, audienceOf: (threadId) => teamHost.audienceOf(threadId), sharedWithOne: (threadId) => conversationShares.readers(threadId) !== null, store: () => store, visibleTo }); type StreamView = Pick<SseClient, "admin" | "person" | "viewer" | "seen" | "ask">; const phonePush = new PhonePush({ dataDir: DATA_DIR, access: () => phonePushAccess.current(), enabled: () => phonePushEnabled(cfg), live: (key) => [...sseClients].some((client) => client.pushKey === key), room: (notification) => { const group = (notification.groupId ? store.group(notification.groupId) : undefined) ?? store.groupByThread(notification.threadId); return group && !group.dm ? { id: group.id, name: group.name } : undefined; } }); const phoneActivity = new PhoneActivity({ dataDir: DATA_DIR, push: phonePush, hasOpenAsk: (botId) => openCardRows().some((row) => row.fromBotId === botId || store.botByThread(row.threadId)?.id === botId), bot: (botId) => { const bot = store.bot(botId); const working = bot ? store.tasks(botId).find((task) => threadBusy(botId, task.threadId)) : undefined; return bot ? { name: bot.name, busy: Boolean(working), threadId: working?.threadId ?? bot.threadId } : undefined; }, botOfThread: (threadId) => store.botByThread(threadId)?.id });
 
-const deviceLocations = new DeviceLocations();
+const { deviceLocations, locationPrefetches, locationConnection, readCurrentDeviceLocation, locateForExplicitQuestion, bindLocationClient } = createDeviceLocationHost(sseClients, id => sessions.isLive(id));
 
-const locationPrefetches = new Map<string, AbortController>();
-
-function locationConnection(threadId: string, sendId: string | undefined) {
-  const key = sendId ? deviceLocations.clientFor(threadId, sendId) : undefined;
-  return key ? [...sseClients].find(client => client.locationClient === key && !client.backpressured &&
-    (!client.sessionId || sessions.isLive(client.sessionId))) : undefined;
-}
-
-async function readCurrentDeviceLocation(connection: SseClient, signal: AbortSignal) {
-  if (!connection.locationClient || connection.res.closed) return null;
-  const closed = new AbortController();
-  const abort = () => closed.abort();
-  connection.res.once("close", abort);
-  try {
-    const requestSignal = AbortSignal.any([signal, closed.signal]);
-    const fix = await deviceLocations.request(connection.locationClient, frame => connection.res.write(frame), requestSignal);
-    if (requestSignal.aborted) return null;
-    if (!fix || typeof fix === "string") return fix;
-    const location = await resolveDeviceAddress(fix, requestSignal);
-    return requestSignal.aborted ? null : location;
-  } finally {
-    connection.res.off("close", abort);
-  }
-}
-
-async function locateForExplicitQuestion(threadId: string, sendId: string | undefined, generation: string) {
-  const connection = locationConnection(threadId, sendId);
-  if (!connection) return currentLocationNote(null);
-  const controller = new AbortController();
-  locationPrefetches.set(generation, controller);
-  try {
-    return currentLocationNote(await readCurrentDeviceLocation(connection, controller.signal));
-  } finally {
-    locationPrefetches.delete(generation);
-  }
-}
-
-function bindLocationClient(req: IncomingMessage, auth: RequestAuth, threadId: string, sendId: string) {
-  const key = locationClientKey(auth, req.headers[DEVICE_LOCATION_HEADER]);
-  if (key) deviceLocations.bind(key, threadId, sendId);
-}
+ROUTES.push(createDeviceLocationRoutes(deviceLocations, id => sessions.isLive(id)));
 
 let audienceChangedAt = 0;
 function audienceChanged(): void {
@@ -8657,82 +8618,10 @@ async function beginTurn(
   return userMessage;
 }
 
-function routineSourceOwner(run: Pick<RoutineRun, "botId" | "sourceThreadId" | "resultsThreadId">) {
-  if (run.resultsThreadId) {
-    const bot = store.bot(run.botId);
-    const task = bot && store.taskByThread(bot.id, run.resultsThreadId);
-    return bot && !bot.hidden && task && !task.routineRunId
-      ? { bot, group: undefined, threadId: task.threadId }
-      : null;
-  }
-  const threadId = run.sourceThreadId?.trim();
-  if (!threadId) return null;
-  // Validate before messagesFor(): Store lazily opens transcript storage, so an orphan id would recreate a deleted conversation.
-  const bot = store.bot(run.botId);
-  if (!bot) return null;
-  // Stamped from the confirmed request, never calendar input; recheck authority, since either bot may have moved since.
-  const sourceBot = store.botByThread(threadId);
-  if (sourceBot && !sourceBot.hidden && !store.taskByThread(sourceBot.id, threadId)?.routineRunId &&
-    (sourceBot.id === bot.id || canManage(sourceBot, bot))) {
-    return { bot: sourceBot, group: undefined, threadId };
-  }
-  const group = store.groupByThread(threadId);
-  return group?.memberIds.includes(bot.id) ? { bot, group, threadId } : null;
-}
-
 function mainThreadTasks(botId: string) { const tasks = store.tasks(botId), own = store.bot(botId)?.defaultBot?.person ? [...tasks].sort((a, b) => a.createdAt - b.createdAt)[0]?.threadId : undefined; return CLOUD_TEAM ? tasks.filter((task) => (teamHost.audienceOf(task.threadId) === "team" && !conversationShares.fromSlack(task.threadId)) || task.threadId === own) : CLOUD_HOME ? tasks.filter((task) => !cloudGuestOpened(task.threadId) && !personalSlackMessages?.channelThread(task.threadId)) : tasks; }
 function botMainThread(botId: string): string | undefined {
   const tasks = mainThreadTasks(botId).filter(task => !task.openedBy && !task.botApi && !task.outside);
   return mainThread(tasks, store.bot(botId)?.threadId, store.bot(botId)?.mainThreadChoice);
-}
-
-function routineSourceThread(run: RoutineRun): string | null {
-  return routineSourceOwner(run)?.threadId ?? null;
-}
-
-function syncRoutineRunToSource(run: RoutineRun): string | null {
-  const source = routineSourceOwner(run);
-  if (!source) {
-    const execution = run.threadId ? store.taskByThread(run.botId, run.threadId) : null;
-    if (execution?.routineRunId === run.id) {
-      store.patchTask(run.botId, execution.threadId, {
-        routineRunId: undefined,
-        ...(routineRunNeedsReview(run) ? { unread: true } : {}),
-      });
-    }
-    return null;
-  }
-  const sourceThreadId = source.threadId;
-  const existing = store.messagesFor(sourceThreadId).find((message) => message.kind === "routine.run" && message.routineRun?.runId === run.id);
-  // A bot's run speaks in its own lines; a room goal, a run that began before those existed, and one with no chat of its bot to speak in that works elsewhere keep a card.
-  const card = existing || run.target === "room-goal" || (run.threadId !== sourceThreadId && !automationReports.speaksFor(run)) ? routineRunCard(run) : null;
-  const statusChanged = card !== null && existing?.routineRun?.status !== run.status;
-  if (existing && card) {
-    store.patchMessage(sourceThreadId, existing.id, { text: routineRunFallbackText(card, threadLanguage(sourceThreadId)), routineRun: card });
-  } else if (card) {
-    const message: Omit<Message, "id" | "at"> = { role: "bot", kind: "routine.run", text: routineRunFallbackText(card, threadLanguage(sourceThreadId)), routineRun: card };
-    if (source.group) {
-      message.from = { botId: source.bot.id, name: source.bot.name, color: source.bot.color };
-    }
-    store.appendMessage(sourceThreadId, message);
-  }
-
-  // Mark only the fresh execution: on its first running update, before dispatch adds any transcript.
-  if (run.target === "bot" && run.threadId && run.threadId !== sourceThreadId) {
-    const execution = store.taskByThread(run.botId, run.threadId);
-    const freshExecution = execution && run.status === "running" && (run.sameConversation ? execution.routineRunId !== run.id /* takes the conversation over */ : !execution.routineRunId && store.messagesFor(run.threadId).length === 0);
-    if (execution && freshExecution) {
-      store.patchTask(run.botId, run.threadId, { routineRunId: run.id, unread: false });
-    } else if (execution?.routineRunId === run.id && execution.unread) {
-      store.patchTask(run.botId, run.threadId, { unread: false });
-    }
-  }
-
-  if (statusChanged && (source.group ? ["waiting", "completed", "failed", "missed"].includes(run.status) : routineRunNeedsReview(run))) {
-    if (source.group) store.markGroupThreadUnread(source.group.id, sourceThreadId, true);
-    else store.patchTask(source.bot.id, sourceThreadId, { unread: true });
-  }
-  return sourceThreadId;
 }
 
 async function interruptRoutineGroupGoal(
@@ -12728,7 +12617,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     // A member reaches a restricted bot, its threads, rooms, routines and files exactly as an id that does not exist.
     const viewer = viewerFor(auth), visible = visibleTo(viewer);
-    const internalCapability: InternalCapability | null = path.startsWith("/api/internal/") ?
+    const internalPath = isInternalApiPath(path);
+    const internalCapability: InternalCapability | null = internalPath ?
       authorizedInternalCapability(req.headers.authorization) ?? lateToolResults.endedTurnCapability(req.headers.authorization) : null;
     const subject = visible.everything ? null : pathSubject(path);
     const hidden = subject && !subjectVisible(subject, visible) ? notFoundFor(subject) :
@@ -12908,7 +12798,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       });
       return json(res, 201, { token });
     }
-    if (path.startsWith("/api/internal/")) {
+    if (internalPath) {
       if (!internalCapability) {
         return json(res, 401, { error: "unauthorized" });
       }
@@ -12968,7 +12858,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
       };
       const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await lentMcp.route({ method, path, req, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS || await internalToolRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders }) !== PASS || await waitRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, ...waitTurnChecks(internalCapability, internalSender) }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await devsReports.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || (computerAsks && await computerAsks.internal({ method, path, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS) || await cloudComputerResets.internal({ method, path, res, json, sender: internalSender, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await meetingsHost.internal({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, active: () => internalCapabilityIsActive(internalCapability) }) !== PASS || await imageTools.internal({ method, path, res, json, readBody: readInternalBody, folders: botFolders, threadId: internalCapability.threadId, requireActive: requireActiveInternalCapability, personTurn: turnOrigin(internalCapability).kind === "user" || (Boolean(roomRun(internalCapability.generation)?.requestMessageId) && guestDrivenTurns.get(internalCapability.threadId) !== internalCapability.generation) }) !== PASS || await share.tool({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), actsForAdmin: teamConnections.actsForAdmin(internalCapability.threadId, internalCapability.generation), githubPerson: teamConnections.turnPerson(internalCapability.threadId, internalCapability.generation), actingName: CLOUD_TEAM ? teamHost.personName(actingPeople.requester(internalCapability.threadId, internalCapability.generation)) : undefined, personMessage: turnOrigin(internalCapability).kind === "user" ? store.messagesFor(internalCapability.threadId).find((line) => line.role === "user" && line.id === (directRequestOwners.get(internalCapability.threadId)?.messageId ?? roomRun(internalCapability.generation)?.requestMessageId))?.text ?? null : null, post: (text, template) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return source ? store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, template, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id : null; } }) !== PASS) return; const callSignal = turnCallSignals.signal(internalCapability, res); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: callSignal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle, bot: internalSender })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
-      if (method === "POST" && path === "/api/internal/device-location") {
+      if (isDeviceLocationTool(method, path)) {
         await readInternalBody();
         const { threadId, generation } = internalCapability;
         const direct = directRequestOwners.get(threadId);
@@ -14673,13 +14563,6 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return calendarCalls!.remove(calendarCallMatch[1])
         ? json(res, 200, { ok: true })
         : json(res, 404, { error: "no such scheduled call" });
-    }
-
-    if (method === "POST" && path === DEVICE_LOCATION_PATH) {
-      const body = await readBody(req, 1024);
-      if (auth.kind === "session" && !sessions.isLive(auth.session.id)) return json(res, 401, { error: "Session ended." });
-      const received = deviceLocations.reply(auth, req.headers[DEVICE_LOCATION_HEADER], body);
-      return json(res, received ? 200 : 404, { ok: received });
     }
 
     if (method === "GET" && path === "/api/events") {

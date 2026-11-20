@@ -349,9 +349,9 @@ const __APP_VERSION__: string;
         frame(serial: string): Promise<{ serial: string; dataUrl: string }>;
         input(serial: string, payload: AndroidDeviceInput): Promise<void>;
       };
+      currentLocation?(): Promise<NonNullable<import("../../shared/device-location").LocationResult>>;
       /** Start native dictation. Call mode supplies endpointMs so silence
        * finalizes a turn; composer dictation omits it and remains manual. */
-      currentLocation?(): Promise<import("../../shared/device-location").DeviceLocation>;
       speechStart(options?: { endpointMs?: number }): Promise<void>;
       speechStop(): Promise<void>;
       /** Finish capture and emit the recognizer's final transcript. */

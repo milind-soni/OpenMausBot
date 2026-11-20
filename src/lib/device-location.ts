@@ -1,7 +1,7 @@
 import { randomUuid } from "./random-uuid";
 import {
   DEVICE_LOCATION_EVENT, DEVICE_LOCATION_HEADER, DEVICE_LOCATION_PATH, DEVICE_LOCATION_TIMEOUT,
-  type DeviceLocation, type LocationFailure,
+  isUsableDeviceFix, LOCATION_FAILURES, type DeviceLocation, type LocationFailure,
 } from "../../shared/device-location";
 
 let clientId: string | undefined;
@@ -13,12 +13,18 @@ export function locationClientId(): string | undefined {
 }
 
 export async function deviceLocation(): Promise<DeviceLocation> {
-  if (window.ogb?.currentLocation) return window.ogb.currentLocation();
+  if (window.ogb?.currentLocation) {
+    const fix = await window.ogb.currentLocation();
+    if (typeof fix === "string") throw fix;
+    return fix;
+  }
 
   const locate = (enableHighAccuracy: boolean, timeout: number) => new Promise<DeviceLocation>((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(({ coords, timestamp }) => {
       const { latitude, longitude, accuracy } = coords;
-      resolve({ latitude, longitude, accuracy, timestamp });
+      const fix = { latitude, longitude, accuracy, timestamp };
+      if (isUsableDeviceFix(fix)) resolve(fix);
+      else reject({ code: 2 });
     }, reject, { enableHighAccuracy, maximumAge: 0, timeout });
   });
   try {
@@ -42,7 +48,8 @@ export function listenForDeviceLocation(source: EventSource, id: string): void {
         position = await deviceLocation();
       } catch (error) {
         const code = (error as GeolocationPositionError | undefined)?.code;
-        failure = code === 1 ? "permission-denied" : code === 3 ? "position-timed-out" : "position-unavailable";
+        failure = LOCATION_FAILURES.find(reason => reason === error) ??
+          (code === 1 ? "permission-denied" : code === 3 ? "position-timed-out" : "position-unavailable");
       }
     }
     if (Date.now() - started >= DEVICE_LOCATION_TIMEOUT) return;

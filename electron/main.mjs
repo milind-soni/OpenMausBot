@@ -9,6 +9,7 @@ import { buildErrorPage, desktopViewerErrorPage, showBootFailure } from "./error
 import { startCua, stopCua, registerCuaIpc, requestComputerUse, setCuaStateListener, grantLocalComputer } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
 import { currentMacLocation, finishSpeech, speechBusy, startSpeech, stopSpeech } from "./speech.mjs";
+import { installDeviceLocationIpc } from "./device-location-ipc.mjs";
 import { installTalk, isTalkPanel } from "./talk-main.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { linuxDisablesGpu, SOFTWARE_RENDERING_ARG } from "./linux-gpu.mjs";
@@ -2534,7 +2535,6 @@ ipcMain.handle("company-backups:restore", localWorkspaceOnly("company-backups:re
     return await response.json();
   } finally { companyRestoreCommitting = false; }
 }));
-
 function myCloud() {
   return myCloudOrigin({ account: cloudAccount, remembered: rememberedHome, remoteAccess: desktopRemoteAccess });
 }
@@ -2544,15 +2544,7 @@ const cloudPageAsking = (event) => {
   if (cloudPageSenderAllowed(event, { contents, homeOrigin: myCloud(), activeOrigin: activeEnvironment(environmentsState)?.origin })) return "cloud";
   return null;
 };
-ipcMain.handle("location:current", async event => {
-  const canLocate = () => process.platform === "darwin" && cloudPageAsking(event) &&
-    mainWindow?.isFocused() && powerMonitor.getSystemIdleState(1) !== "locked";
-  const unavailable = "Location is only available in the active Mac workspace";
-  if (!canLocate()) throw new Error(unavailable);
-  const location = await currentMacLocation();
-  if (!canLocate()) throw new Error(unavailable);
-  return location;
-});
+installDeviceLocationIpc({ ipcMain, canLocate: event => process.platform === "darwin" && cloudPageAsking(event) && mainWindow?.isFocused() && powerMonitor.getSystemIdleState(1) !== "locked", currentLocation: currentMacLocation });
 const cloudPageSender = (channel, handler) => (event) => {
   const asking = cloudPageAsking(event);
   if (!asking) throw new Error(`${channel} is only available in this app's window`);
@@ -2575,7 +2567,6 @@ ipcMain.on("update:offered", event => {
   try { event.returnValue = updaterPageOffered(event) === true; } catch { event.returnValue = false; }
 });
 installCloudPlanIpc({ ipcMain, pageSender: cloudPageSender, account: () => cloudAccount, client: () => ensureCloudAccount(), notices: () => cloudTrialNotices(), homePage: event => homeWindow.homePage(event), otherCloud: ownCloudPage });
-
 const savedWorkspace = id => {
   const env = environmentsState.environments.find(entry => entry.id === id);
   if (!env) throw new Error("This server is no longer connected");

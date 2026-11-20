@@ -126,7 +126,7 @@ export function railProviders(instances: InstanceInfo[], selectedInstance: Insta
   return { subscription: subscription.map(entry), api: api.map(entry), custom: custom.map(entry) };
 }
 
-const RAIL_LABEL = "pb-0.5 text-center text-[11px] leading-[14px] text-ink-tertiary";
+const RAIL_LABEL = "max-w-full break-words pb-0.5 text-center text-[11px] leading-[14px] text-ink-tertiary";
 
 export function ModelEngineRail({ instances, selectedInstance, claudeInstance, openaiInstance, onSelect, onAddApiKeys }: {
   instances: InstanceInfo[];
@@ -165,7 +165,7 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
     );
   };
   return (
-    <div className="flex w-14 shrink-0 flex-col gap-1 overflow-y-auto border-r-[0.5px] border-ink/10 p-2">
+    <div className="flex w-max min-w-16 max-w-24 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r-[0.5px] border-ink/10 p-2">
       {subscription.length > 0 && <div className={cn(RAIL_LABEL, "pt-0.5")}>{t("model.rail.cloud")}</div>}
       {subscription.map(railButton)}
       {(api.length > 0 || onAddApiKeys) && <div className={cn(RAIL_LABEL, subscription.length > 0 ? "pt-2" : "pt-0.5")}>{t("model.rail.apiKeys")}</div>}

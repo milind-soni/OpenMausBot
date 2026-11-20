@@ -74,3 +74,29 @@ it("tries the standard accuracy provider when the high accuracy fix times out", 
     enableHighAccuracy: false, maximumAge: 0, timeout: 8_000,
   });
 });
+
+
+it("retries when high accuracy returns an unusable fix through the success callback", async () => {
+  const getCurrentPosition = vi.fn()
+    .mockImplementationOnce(success => success({ coords: location, timestamp: Date.now() - 90_000 }))
+    .mockImplementationOnce(success => success({ coords: location, timestamp: location.timestamp }));
+  vi.stubGlobal("navigator", { geolocation: { getCurrentPosition } });
+  await expect(deviceLocation()).resolves.toEqual(location);
+  expect(getCurrentPosition).toHaveBeenCalledTimes(2);
+  expect(getCurrentPosition.mock.calls[1][2]).toMatchObject({ enableHighAccuracy: false, maximumAge: 0 });
+});
+
+it("preserves the native location failure instead of treating every Mac error as no fix", async () => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  vi.stubGlobal("ogb", { currentLocation: vi.fn().mockResolvedValue("position-timed-out") });
+  const send = vi.fn().mockResolvedValue(null);
+  vi.stubGlobal("fetch", send);
+  const stream = new EventTarget();
+  listenForDeviceLocation(stream as EventSource, "tab");
+  stream.dispatchEvent(new MessageEvent("device-location", { data: "1".repeat(36) }));
+  await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+  expect(JSON.parse(send.mock.calls[0][1].body)).toMatchObject({
+    position: null,
+    failure: "position-timed-out",
+  });
+});

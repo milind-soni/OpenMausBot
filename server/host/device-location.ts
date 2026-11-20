@@ -1,6 +1,7 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import {
-  DEVICE_LOCATION_EVENT, DEVICE_LOCATION_TIMEOUT, cleanLocationAddress, parseDeviceLocation, LOCATION_FAILURES, type DeviceLocation, type LocationFailure, type LocationResult,
+  DEVICE_LOCATION_HEADER, DEVICE_LOCATION_EVENT, DEVICE_LOCATION_TIMEOUT, cleanLocationAddress, parseDeviceLocation, LOCATION_FAILURES, type DeviceLocation, type LocationFailure, type LocationResult,
 } from "../../shared/device-location.ts";
 import type { RequestAuth } from "../request-auth.ts";
 
@@ -96,4 +97,54 @@ export function currentLocationNote(location: LocationResult): string {
     return `\n\n[Device location: unavailable for this request. ${locationFailureMessage(location)} Relay this explanation. Do not infer it from a time zone, the server location, or the chat.]`;
   }
   return `\n\n[Current device location data: ${JSON.stringify(location)}. Answer from this reading. An address is a map match, not confirmation of a building or venue. Qualify it using the location accuracy. If no address is available, state that and give the coordinates. Do not send these coordinates to web search or infer a place from the time zone.]`;
+}
+
+export function createDeviceLocationHost(
+  clients: Iterable<{ locationClient?: string; backpressured: boolean; sessionId?: string; res: ServerResponse }>,
+  sessionLive: (id: string) => boolean,
+) {
+  const deviceLocations = new DeviceLocations();
+
+  const locationPrefetches = new Map<string, AbortController>();
+
+  function locationConnection(threadId: string, sendId: string | undefined) {
+    const key = sendId ? deviceLocations.clientFor(threadId, sendId) : undefined;
+    return key ? [...clients].find(client => client.locationClient === key && !client.backpressured &&
+      (!client.sessionId || sessionLive(client.sessionId))) : undefined;
+  }
+
+  async function readCurrentDeviceLocation(connection: NonNullable<ReturnType<typeof locationConnection>>, signal: AbortSignal) {
+    if (!connection.locationClient || connection.res.closed) return null;
+    const closed = new AbortController();
+    const abort = () => closed.abort();
+    connection.res.once("close", abort);
+    try {
+      const requestSignal = AbortSignal.any([signal, closed.signal]);
+      const fix = await deviceLocations.request(connection.locationClient, frame => connection.res.write(frame), requestSignal);
+      if (requestSignal.aborted) return null;
+      if (!fix || typeof fix === "string") return fix;
+      const location = await resolveDeviceAddress(fix, requestSignal);
+      return requestSignal.aborted ? null : location;
+    } finally {
+      connection.res.off("close", abort);
+    }
+  }
+
+  async function locateForExplicitQuestion(threadId: string, sendId: string | undefined, generation: string) {
+    const connection = locationConnection(threadId, sendId);
+    if (!connection) return currentLocationNote(null);
+    const controller = new AbortController();
+    locationPrefetches.set(generation, controller);
+    try {
+      return currentLocationNote(await readCurrentDeviceLocation(connection, controller.signal));
+    } finally {
+      locationPrefetches.delete(generation);
+    }
+  }
+
+  function bindLocationClient(req: IncomingMessage, auth: RequestAuth, threadId: string, sendId: string) {
+    const key = locationClientKey(auth, req.headers[DEVICE_LOCATION_HEADER]);
+    if (key) deviceLocations.bind(key, threadId, sendId);
+  }
+  return { deviceLocations, locationPrefetches, locationConnection, readCurrentDeviceLocation, locateForExplicitQuestion, bindLocationClient };
 }

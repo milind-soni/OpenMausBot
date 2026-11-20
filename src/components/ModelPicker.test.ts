@@ -83,7 +83,8 @@ describe("EffortRow", () => {
     }
     const markup = renderToStaticMarkup(createElement(EffortRow, { bot: bot(), compact: true }));
     expect(markup).toContain('aria-label="Reasoning effort"');
-    expect(markup).not.toContain("<button");
+    expect(markup.match(/<button[^>]*aria-haspopup="menu"/g)).toHaveLength(1);
+    expect(markup).toContain('<select hidden=""');
     expect([...markup.matchAll(/<option[^>]*>([^<]+)</g)].map((match) => match[1])).toEqual(["Default", "None", "Low", "High"]);
   });
   it("can apply effort to the pinned thread and bot default together", () => {
@@ -372,7 +373,7 @@ describe("Claude provider and account selection", () => {
       expect(markup).toContain('aria-label="OpenAI" aria-pressed="false"');
       expect(markup).not.toContain('aria-label="Personal"');
       expect(markup).not.toContain('aria-label="Work"');
-      expect(markup).toContain("w-14");
+      expect(markup).toContain("min-w-16 max-w-24");
     }
   });
 
