@@ -50,10 +50,10 @@ function isSameFile(left, right) {
 }
 
 // Paths come from model-rendered markdown, so they are untrusted.
-async function resolveSource(rawPath, { home, fsp, platform }) {
+async function resolveSource(rawPath, { home, dataDir, fsp, platform }) {
   const target = normalizeSourcePath(rawPath);
   const root = await canonicalPath(
-    path.join(home, ".openmausbot"),
+    dataDir ?? path.join(home, ".openmausbot"),
     fsp,
     "Only files created by your bots can be saved",
   );
@@ -69,12 +69,12 @@ async function resolveSource(rawPath, { home, fsp, platform }) {
   return { filePath, stats };
 }
 
-export async function resolveSavablePath(rawPath, { home, fsp = fs.promises, platform = process.platform } = {}) {
-  return (await resolveSource(rawPath, { home, fsp, platform })).filePath;
+export async function resolveSavablePath(rawPath, { home, dataDir, fsp = fs.promises, platform = process.platform } = {}) {
+  return (await resolveSource(rawPath, { home, dataDir, fsp, platform })).filePath;
 }
 
-async function openSavableFile(rawPath, { home, fsp, platform }) {
-  const source = await resolveSource(rawPath, { home, fsp, platform });
+async function openSavableFile(rawPath, { home, dataDir, fsp, platform }) {
+  const source = await resolveSource(rawPath, { home, dataDir, fsp, platform });
   const noFollow = platform === "win32" ? 0 : fs.constants.O_NOFOLLOW ?? 0;
   const handle = await fsp.open(source.filePath, fs.constants.O_RDONLY | noFollow);
   try {
@@ -92,10 +92,10 @@ async function openSavableFile(rawPath, { home, fsp, platform }) {
 
 export async function withSavableFile(
   rawPath,
-  { home, fsp = fs.promises, platform = process.platform } = {},
+  { home, dataDir, fsp = fs.promises, platform = process.platform } = {},
   operation,
 ) {
-  const { handle, filePath } = await openSavableFile(rawPath, { home, fsp, platform });
+  const { handle, filePath } = await openSavableFile(rawPath, { home, dataDir, fsp, platform });
   try {
     return await operation({
       filePath,
