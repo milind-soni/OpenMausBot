@@ -1,8 +1,10 @@
-import type { ProviderAdapter } from "./contracts.ts";
+import type { InstanceConfig, ProviderAdapter } from "./contracts.ts";
+import { limitBackupAllowed } from "./limit-failover.ts";
 import { supportsWorkspaceFiles } from "./workspace.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 
 type Engine = { driverKind: string; capabilities: ProviderAdapter["capabilities"] };
+type LimitEngine = { instanceId: string; driverKind: string };
 type Backup = Pick<ModelSelection, "instanceId" | "model">;
 
 /** The backups a bot's turn tries, in order, when its AI provably never started it: the bot's own list, which needs no
@@ -30,4 +32,21 @@ export function recoveryCapabilityError(from: Engine, to: Engine): string | unde
   if (tools.some(key => from.capabilities[key] === true && to.capabilities[key] !== true)) {
     return "The backup does not support all of this AI's tools and attachments.";
   }
+}
+
+const sameBackup = (one: Backup, other: Backup) => one.instanceId === other.instanceId && one.model === other.model;
+
+/** An AI this turn already went to, and why it refused the turn at its start, when it did: a usage limit's scope, or a
+ * sign-out. */
+export type RecoveryAttempt = Backup & { driverKind: string; why?: "engine" | "model" | "credits" | "signed-out" };
+
+export function untriedBackups<T extends Backup>(backups: readonly T[], current: Backup, tried: readonly Backup[] = []): T[] {
+  return backups.filter((backup) => !sameBackup(backup, current) && !tried.some((one) => sameBackup(one, backup)));
+}
+
+/** Whether `to` may take the turn after every refusal on the way: a signed-out AI or one at its usage limit offers none of
+ * its models, and a limit still rules out another sign-in of that plan. */
+export function refusalsAllow(attempts: readonly RecoveryAttempt[], to: LimitEngine, toConfig?: Pick<InstanceConfig, "environment" | "access">): boolean {
+  return attempts.every((attempt) => attempt.instanceId === to.instanceId ? attempt.why !== "engine" && attempt.why !== "signed-out"
+    : attempt.why === undefined || attempt.why === "signed-out" || limitBackupAllowed(attempt, to, toConfig));
 }

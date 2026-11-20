@@ -18,7 +18,7 @@ const CATALOG_PROBE_FOLDER = ["", "providers", "opencode", "discovery"].join(sep
 const turnCalls = (path: string) => jsonLines(path).filter((call) => !String(call.cwd ?? "").endsWith(CATALOG_PROBE_FOLDER));
 
 async function withRecoveryFixture(
-  options: { enabled?: boolean; method?: string; error?: unknown; afterOutput?: boolean; backupFails?: boolean; gated?: boolean; scripted?: boolean; codexBackup?: boolean },
+  options: { enabled?: boolean; method?: string; error?: unknown; afterOutput?: boolean; backupFails?: boolean; gated?: boolean; scripted?: boolean; codexBackup?: boolean; claudes?: Record<string, Record<string, string>>; missingCli?: string },
   check: (fixture: {
     api: (method: string, path: string, body?: unknown, expectedStatus?: number) => Promise<any>;
     control: (...args: string[]) => Promise<any>;
@@ -79,6 +79,12 @@ async function withRecoveryFixture(
       ...config.instances.claude.environment,
       FAKE_CLAUDE_PROMPTS: backupFile, FAKE_CLAUDE_TOOL_CALLS: "[]",
       FAKE_CLAUDE_MODE: options.backupFails ? "not-logged-in" : "happy",
+    };
+    for (const [id, environment] of Object.entries(options.claudes ?? {})) config.instances[id] = {
+      ...config.instances.claude, displayName: `${id} fixture`, environment: { ...config.instances.claude.environment, ...environment },
+    };
+    if (options.missingCli) config.instances[options.missingCli] = {
+      ...config.instances.claude, displayName: "Missing CLI fixture", config: { ...config.instances.claude.config, cli: join(dataDir, "no-such-claude") },
     };
     config.automaticRecovery = { enabled: options.enabled !== false, backup };
     writeFileSync(configPath, JSON.stringify(config));
@@ -379,6 +385,97 @@ it.each(["workspace", "bot"])("uses the configured %s backup when Claude refuses
     expect(after.tasks.find((task: any) => task.threadId === sibling.threadId).modelSelection).toEqual(backup);
     expect(after.tasks.find((task: any) => task.threadId === threadId))
       .toMatchObject({ modelSelection: healthy, approvalMode: "ask", busy: false });
+  });
+}, 90_000);
+
+it("passes over each backup that also refused the turn and carries on with the next one", async () => {
+  await withRecoveryFixture({ backupFails: true, codexBackup: true, claudes: { claude2: {} } }, async ({ api, control, backupPrompts, evidence }) => {
+    const healthy = { instanceId: "codex", model: "gpt-fake-default" };
+    const { bot } = await control("new-bot", "--name", "Two signed out");
+    const threadId = bot.activeTaskId;
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: backup, updateBotDefault: true, approvalMode: "ask" });
+    await api("PATCH", `/api/bots/${bot.id}`, { fallback: [{ ...backup, instanceId: "claude2" }, healthy] });
+    const text = "SKIP_TWO_SIGNED_OUT_5D";
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", text);
+    const wait = await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30");
+    const { messages } = await api("GET", `/api/threads/${threadId}/messages?limit=100`);
+    const after = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id);
+    evidence.push({ wait, messages, after });
+    expect(wait.status).toBe("settled");
+    expect(backupPrompts()).toHaveLength(2);
+    expect(messages.filter((message: any) => message.role === "user" && message.text === text)).toHaveLength(1);
+    expect(messages.filter((message: any) => message.tool?.name?.startsWith("recovery:"))).toHaveLength(2);
+    expect(messages.some((message: any) => message.tool?.ok === false)).toBe(false);
+    expect(messages.findLast((message: any) => message.role === "bot" && message.kind === "text"))
+      .toMatchObject({ text: "done from fake codex", turnSucceeded: true });
+    expect(after.modelSelection).toEqual(backup);
+    expect(after.tasks.find((task: any) => task.threadId === threadId)).toMatchObject({ modelSelection: healthy, busy: false });
+  });
+}, 90_000);
+
+it("never moves a turn refused at a usage limit to another sign-in of that plan, even after a later backup is signed out", async () => {
+  await withRecoveryFixture({ codexBackup: true, claudes: {
+    claude: { FAKE_CLAUDE_MODE: "usage-limit" },
+    claudeApi: { FAKE_CLAUDE_MODE: "not-logged-in", ANTHROPIC_API_KEY: "sk-fixture" },
+    claudeWork: {},
+  } }, async ({ api, control, evidence }) => {
+    const healthy = { instanceId: "codex", model: "gpt-fake-default" };
+    const { bot } = await control("new-bot", "--name", "Limited plan");
+    const threadId = bot.activeTaskId;
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: backup, updateBotDefault: true, approvalMode: "ask" });
+    await api("PATCH", `/api/bots/${bot.id}`, { fallback: [{ ...backup, instanceId: "claudeApi" }, { ...backup, instanceId: "claudeWork" }, healthy] });
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "NO_ACCOUNT_ROTATION_8K");
+    const wait = await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30");
+    const { messages } = await api("GET", `/api/threads/${threadId}/messages?limit=100`);
+    const after = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id);
+    evidence.push({ wait, messages, after });
+    expect(wait.status).toBe("settled");
+    const recoveries = messages.filter((message: any) => message.tool?.name?.startsWith("recovery:")).map((message: any) => message.tool.name);
+    expect(recoveries).toHaveLength(2);
+    expect(recoveries[0]).toContain("claudeApi fixture");
+    expect(recoveries.join("\n")).not.toContain("claudeWork");
+    expect(messages.findLast((message: any) => message.role === "bot" && message.kind === "text"))
+      .toMatchObject({ text: "done from fake codex", turnSucceeded: true });
+    expect(after.tasks.find((task: any) => task.threadId === threadId)).toMatchObject({ modelSelection: healthy, busy: false });
+  });
+}, 90_000);
+
+it("moves past a backup that cannot run instead of trying it again and again", async () => {
+  await withRecoveryFixture({ missingCli: "missing" }, async ({ api, control, calls, backupPrompts, evidence }) => {
+    const { bot } = await control("new-bot", "--name", "Backup without its CLI");
+    const threadId = bot.activeTaskId;
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: primary, updateBotDefault: true });
+    await api("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "missing", model: backup.model }, backup] });
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "SKIP_THE_MISSING_CLI_2M");
+    const wait = await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30");
+    const { messages } = await api("GET", `/api/threads/${threadId}/messages?limit=100`);
+    evidence.push({ wait, messages, calls: calls() });
+    expect(wait.status).toBe("settled");
+    expect(calls().filter((call) => call.method === "initialize.error").length).toBeLessThanOrEqual(2);
+    expect(backupPrompts()).toHaveLength(1);
+    const recoveries = messages.filter((message: any) => message.tool?.name?.startsWith("recovery:")).map((message: any) => message.tool.name);
+    expect(recoveries).toHaveLength(1);
+    expect(recoveries[0]).not.toContain("Missing CLI");
+    expect(messages.findLast((message: any) => message.role === "bot" && message.kind === "text"))
+      .toMatchObject({ text: "hello from fake claude", turnSucceeded: true });
+  });
+}, 90_000);
+
+it("moves past a backup whose model is no longer offered to the next one in order", async () => {
+  await withRecoveryFixture({}, async ({ api, control, backupPrompts, evidence }) => {
+    const { bot } = await control("new-bot", "--name", "Stale backup model");
+    const threadId = bot.activeTaskId;
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: primary, updateBotDefault: true });
+    await api("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "claude", model: "claude-retired-1" }, backup] });
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "SKIP_THE_STALE_MODEL_6P");
+    const wait = await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30");
+    const { messages } = await api("GET", `/api/threads/${threadId}/messages?limit=100`);
+    const after = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id);
+    evidence.push({ wait, messages, after });
+    expect(wait.status).toBe("settled");
+    expect(backupPrompts()).toHaveLength(1);
+    expect(messages.some((message: any) => message.tool?.ok === false)).toBe(false);
+    expect(after.tasks.find((task: any) => task.threadId === threadId)).toMatchObject({ modelSelection: backup, busy: false });
   });
 }, 90_000);
 

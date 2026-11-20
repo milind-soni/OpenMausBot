@@ -81,8 +81,10 @@ describe("peer limit resend", () => {
     expect(startTurn).toHaveBeenCalledTimes(1);
     const [, text, opts] = startTurn.mock.calls[0];
     expect(text).toBe("Check the build");
-    // Still the sender's line, never the person's: the same provenance, only marked as the one resend.
-    expect(opts).toEqual({ ...peerOpts, threadId: "t1", userMessage: ask, editedMessageId: undefined, peerLimitResent: true });
+    // Still the sender's line, never the person's: the same provenance.
+    expect(opts).toEqual({ ...peerOpts, threadId: "t1", userMessage: ask, editedMessageId: undefined, peerLimitResent: true, automaticRecoveryTried: [
+      { instanceId: "claude", model: "opus", driverKind: "claude", why: "engine" }, { instanceId: "codex", model: "gpt", driverKind: "codex" },
+    ] });
     expect(opts.peerAsk).toBe(peerOpts.peerAsk);
     expect(opts.origin).toBe(peerOpts.origin);
     expect(settle).not.toHaveBeenCalled();
@@ -124,6 +126,22 @@ describe("peer limit resend", () => {
       expect(resend.resend("t1")).toBe(false);
       expect(startTurn).not.toHaveBeenCalled();
     }
+  });
+
+  it("never resends to another sign-in of a plan whose limit already refused this turn before it started", async () => {
+    const engine = (instanceId: string, driverKind: string) => ({ instanceId, driverKind, displayName: driverKind, enabled: true, adapter: { capabilities: {} } });
+    const { resend, startTurn, settle, failed } = fixture([ask, failure], {
+      registry: { get: (id: string) => engine(id, id === "claude" ? "claude" : "claudeAgent") },
+      takeover: () => ({ weighBackups: () => ({ backups: [{ instanceId: "claudeWork", model: "opus" }], skipped: [] }), passedOver: () => {}, carriedOn: () => [] }),
+    } as never);
+    const opts = { ...peerOpts, automaticRecoveryTried: [{ instanceId: "claudeHome", model: "opus", driverKind: "claudeAgent", why: "engine" as const }] };
+    resend.track({ generation: "gen-1", botId: "helper", threadId: "t1", text: "x", opts, userMessage: ask });
+    resend.ended(failed, "gen-1", false);
+    resend.hold("gen-1", { ok: false, text: "limit" });
+    expect(resend.resend("t1")).toBe(true);
+    await flush();
+    expect(startTurn).not.toHaveBeenCalled();
+    expect(settle).toHaveBeenCalledWith("gen-1", { ok: false, text: "limit" });
   });
 
   it("reports the held failure as before when no backup can take it or a newer turn took the thread", async () => {

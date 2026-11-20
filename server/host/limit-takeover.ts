@@ -269,13 +269,14 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     signedIn(selection.instanceId);
   };
 
-  function heldAtStart(bot: ThreadBot, selection: ModelSelection, recovering = false, chosen?: readonly ModelSelection[]): { scope: TakeoverScope; resetsAt?: number } | null {
+  function heldAtStart(bot: ThreadBot, selection: ModelSelection, recovering: boolean | ((scope: LimitScope) => boolean) = false,
+    chosen?: readonly ModelSelection[], counts: (backup: ModelSelection) => boolean = () => true): { scope: TakeoverScope; resetsAt?: number } | null {
     const engineUntil = deps.blockedUntil(selection.instanceId, selection.model);
     const model = engineUntil === null ? modelHeld(selection) : null;
     const scope: TakeoverScope | null = engineUntil !== null ? "engine" : model ? model.scope : signedOutHeld(selection.instanceId) ? "signed-out" : null;
     if (!scope) return null;
-    const carries = (deps.enabled?.() ?? true) && backups(bot.id, selection, scope, approvalModeFor(bot), chosen).length > 0;
-    if (!carries && !(recovering && scope !== "signed-out")) return null;
+    const carries = (deps.enabled?.() ?? true) && backups(bot.id, selection, scope, approvalModeFor(bot), chosen).some(counts);
+    if (!carries && !(scope !== "signed-out" && (typeof recovering === "function" ? recovering(scope) : recovering))) return null;
     const resetsAt = scope === "engine" ? deps.resetAt?.(selection.instanceId, selection.model) ?? undefined : model?.resetsAt;
     return { scope, ...(resetsAt && resetsAt > now() ? { resetsAt } : {}) };
   }

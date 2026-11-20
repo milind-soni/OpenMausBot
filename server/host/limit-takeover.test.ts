@@ -210,6 +210,12 @@ describe("a model's own limit", () => {
     const chosen = takeover({ chosen: () => [on("codex", "gpt-6")] });
     chosen.instance.noteRuntimeEvent("kai", opus, error("model", NOW + 2 * HOUR));
     expect(chosen.instance.heldAtStart(KAI, opus), "a backup chosen: it carries on as before").toMatchObject({ scope: "model" });
+    const notCodex = (backup: ModelSelection) => backup.instanceId !== "codex";
+    expect(chosen.instance.heldAtStart(KAI, opus, false, undefined, notCodex), "the same AI's default can still carry on").toMatchObject({ scope: "model" });
+    expect(chosen.instance.heldAtStart(KAI, opus, false, undefined, () => false), "no backup the caller counts: its own model is tried").toBeNull();
+    expect(chosen.instance.heldAtStart(KAI, opus, (scope) => scope === "model", undefined, () => false),
+      "Automatic recovery still has a backup for this kind of limit: the turn goes there").toMatchObject({ scope: "model" });
+    expect(chosen.instance.heldAtStart(KAI, opus, (scope) => scope === "engine", undefined, () => false)).toBeNull();
   });
 
   it("holds that model alone until the reset it named, at most six hours, an hour when it named none, and not once it works", () => {

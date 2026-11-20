@@ -1,5 +1,5 @@
 import { approvalModeFor } from "../../shared/approval-mode.ts";
-import { recoveryCapabilityError } from "../automatic-recovery.ts";
+import { type RecoveryAttempt, recoveryCapabilityError, refusalsAllow, untriedBackups } from "../automatic-recovery.ts";
 import type { InstanceConfigMap } from "../contracts.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
 import type { hostedModelPolicy } from "../hosted-models.ts";
@@ -24,6 +24,8 @@ export interface PeerTurnOpts<Outcome> {
   compactOnly?: boolean;
   /** This bot-to-bot turn is already the one resend on the backup AI. */
   peerLimitResent?: boolean;
+  /** The AIs this turn already went to before it started, and why each refused. */
+  automaticRecoveryTried?: RecoveryAttempt[];
 }
 
 /** A bot-to-bot turn (a relayed ask or a teammate's assignment) that may go to the bot's backup AI once. */
@@ -183,13 +185,14 @@ export function createPeerLimitResend<Opts extends PeerTurnOpts<Outcome>, Outcom
         || (turn.latestUser && store.activePath(threadId).findLast(m => m.role === "user" && m.kind === "text")?.id !== turn.latestUser)
         // A file the turn made lands after its end was judged: anything it left by now still means no resend.
         || !nothingRan(store.activePath(threadId), turn.since, turn.turnId, turn.stopError)) return giveUp();
-      const from = current.modelSelection, instance = registry.get(from.instanceId);
+      const from = current.modelSelection, instance = registry.get(from.instanceId), tried = turn.opts.automaticRecoveryTried ?? [];
       const { backups, skipped } = deps.takeover().weighBackups(turn.botId, from, turn.scope, approvalModeFor(current));
       deps.takeover().passedOver(current, from, turn.scope, skipped);
-      const backup = backups.find(candidate => {
+      const backup = untriedBackups(backups, from, tried).find(candidate => {
         const target = registry.get(candidate.instanceId);
         return target?.enabled && (candidate.instanceId !== from.instanceId || candidate.model !== from.model)
-          && (candidate.instanceId === from.instanceId ? turn.scope !== "engine" : !instance || limitBackupAllowed(instance, target, deps.providerConfigs()[candidate.instanceId]));
+          && (candidate.instanceId === from.instanceId ? turn.scope !== "engine" : !instance || limitBackupAllowed(instance, target, deps.providerConfigs()[candidate.instanceId]))
+          && refusalsAllow(tried, target, deps.providerConfigs()[candidate.instanceId]);
       });
       if (!backup) return giveUp();
       const checked = deps.checkedTaskModelSwitch(current, backup, false, false, true);
@@ -208,7 +211,8 @@ export function createPeerLimitResend<Opts extends PeerTurnOpts<Outcome>, Outcom
       }
       for (const tool of deps.takeover().carriedOn(current, threadId, from, checked.selection, { scope: turn.scope })) store.appendMessage(threadId, { role: "bot", kind: "activity", tool });
       deps.release(turn.generation);
-      void deps.startTurn(turn.botId, turn.text, { ...turn.opts, threadId, userMessage: turn.userMessage, editedMessageId: undefined, peerLimitResent: true }).catch(error => {
+      const went: RecoveryAttempt[] = [...tried, ...(instance ? [{ ...from, driverKind: instance.driverKind, why: turn.scope }] : []), { ...backup, driverKind: target!.driverKind }];
+      void deps.startTurn(turn.botId, turn.text, { ...turn.opts, threadId, userMessage: turn.userMessage, editedMessageId: undefined, peerLimitResent: true, automaticRecoveryTried: went }).catch(error => {
         const detail = error instanceof Error ? error.message : String(error), why = `Could not resend this to the backup AI: ${detail}`;
         (turn.opts.coordination?.settle ?? turn.opts.onSettled)?.({ ok: false, text: turn.held ? `${turn.held.text} ${why}` : why } as Outcome);
         if (store.taskByThread(turn.botId, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: deps.failedLine(threadId, detail), ok: false } });

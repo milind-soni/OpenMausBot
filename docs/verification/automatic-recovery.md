@@ -25,7 +25,11 @@ and drivers without the startup-proof contract do not. Credential-card
 continuations are excluded. This is not recovery from an accepted prompt that
 has gone silent: even without output, the engine might have performed actions.
 Other authentication failures, quota, invalid-model, safety and approval
-failures do not qualify. Neither do a failed backup, Stop, or newer queued input.
+failures do not qualify. Neither do Stop or newer queued input. A backup that
+also fails before its prompt moves the turn on to the next backup it has not
+gone to yet, in the same order; each backup is tried at most once per turn, and
+with none left the turn fails. A usage limit or sign-out met on the way still
+rules out what it ruled out for the rest of that turn.
 
 Existing approval, organisation-model and spend-limit gates run again. An
 engine switch requiring a new Full/Custom grant is refused, not downgraded or

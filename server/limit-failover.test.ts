@@ -123,4 +123,21 @@ describe("LimitFailovers", () => {
     f.failovers.record({ botId: "scout", threadId: "t", from: to, to: { instanceId: "grok", model: "grok-5" }, resetsAt: NOW + 2 * HOUR, at: NOW });
     expect(f.failovers.list()).toEqual([expect.objectContaining({ from, to: { instanceId: "grok", model: "grok-5" } })]);
   });
+
+  it("a thread that moved on from the backup for another reason still goes back from where it is now", () => {
+    const f = fixture({ current: { instanceId: "grok", model: "grok-5" } });
+    f.failovers.record({ botId: "scout", threadId: "t", from, to, resetsAt: NOW + HOUR, at: NOW });
+    f.failovers.retarget("t", { instanceId: "other", model: "m" }, { instanceId: "codex", model: "gpt-6" });
+    f.failovers.retarget("t", to, { instanceId: "grok", model: "grok-5" });
+    expect(f.failovers.list()).toEqual([{ botId: "scout", threadId: "t", from, to: { instanceId: "grok", model: "grok-5" }, resetsAt: NOW + HOUR, at: NOW }]);
+    f.at(NOW + 2 * HOUR);
+    expect(f.failovers.restore("scout", "t")).toBe(true);
+  });
+
+  it("a second failover keeps what the first engine waits for, not what held the backup", () => {
+    const f = fixture({ current: { instanceId: "grok", model: "grok-5" } });
+    f.failovers.record({ botId: "scout", threadId: "t", from, to, resetsAt: null, at: NOW, why: "signed-out" });
+    f.failovers.record({ botId: "scout", threadId: "t", from: to, to: { instanceId: "grok", model: "grok-5" }, resetsAt: NOW + 2 * HOUR, at: NOW + 1 });
+    expect(f.failovers.list()).toEqual([{ botId: "scout", threadId: "t", from, to: { instanceId: "grok", model: "grok-5" }, resetsAt: null, at: NOW, why: "signed-out" }]);
+  });
 });

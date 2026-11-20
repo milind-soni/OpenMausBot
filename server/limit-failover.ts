@@ -110,11 +110,18 @@ export class LimitFailovers {
   /** A thread moved to `to` because `from`'s usage limit refused it, or `from` was signed out. */
   record(failover: LimitFailover): void {
     const earlier = this.rows.find((row) => row.threadId === failover.threadId);
-    // A second failover keeps the engine the conversation started on, so it still goes back there.
-    const from = earlier && sameModelSelection(earlier.to, failover.from) ? earlier.from : failover.from;
     // A reset already past when the limit refused names no time: the engine's own hold decides when it goes back.
     const resetsAt = failover.resetsAt !== null && failover.resetsAt > failover.at ? failover.resetsAt : null;
-    this.rows = [...this.rows.filter((row) => row.threadId !== failover.threadId), { ...failover, from, resetsAt }].slice(-500);
+    // A second failover keeps the engine the conversation started on, so it still goes back there.
+    const row = earlier && sameModelSelection(earlier.to, failover.from) ? { ...earlier, to: failover.to } : { ...failover, resetsAt };
+    this.rows = [...this.rows.filter((one) => one.threadId !== failover.threadId), row].slice(-500);
+    this.save();
+  }
+
+  retarget(threadId: string, from: ModelSelection, to: ModelSelection): void {
+    const row = this.rows.find((one) => one.threadId === threadId);
+    if (!row || !sameModelSelection(row.to, from)) return;
+    this.rows = this.rows.map((one) => one === row ? { ...row, to } : one);
     this.save();
   }
 
