@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -325,6 +325,30 @@ describe("PiDriver catalog (fake CLI)", () => {
         ["update", "--models", "--no-approve"],
         ["--mode", "rpc", "--no-session"],
       ]);
+    } finally {
+      await instance.dispose();
+    }
+  });
+
+  it("probes the model list with a Pi login the person makes after the instance started", async () => {
+    const home = mkdtempSync(join(tmpdir(), "omb-pi-later-login-"));
+    const dump = join(home, "launches.jsonl");
+    const instance = await PiDriver.create({
+      instanceId: "pi-later-login",
+      displayName: undefined,
+      environment: { HOME: home, FAKE_PI_DUMP: dump },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      mkdirSync(join(home, ".pi", "agent"), { recursive: true });
+      writeFileSync(join(home, ".pi", "agent", "auth.json"), '{"openai":{"type":"api_key","key":"sk-later"}}');
+      writeFileSync(dump, "");
+      await instance.refreshModels?.();
+      const rows = readFileSync(dump, "utf8").trim().split("\n").map((line) => JSON.parse(line) as { agentDir?: string | null });
+      const own = rows.at(-1)!.agentDir!;
+      expect(own.startsWith(join(DATA_DIR, "providers", "pi-own"))).toBe(true);
+      expect(statSync(join(own, "auth.json"), { bigint: true }).ino).toBe(statSync(join(home, ".pi", "agent", "auth.json"), { bigint: true }).ino);
     } finally {
       await instance.dispose();
     }
@@ -1206,9 +1230,22 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(done).toMatchObject({ ok: true, stopReason: "cancelled" });
   });
 
-  it("writes models.json and set_model for a host::model inject pick", async () => {
+  it("writes models.json and set_model for a host::model inject pick, in MausBot's own Pi folder", async () => {
     const home = mkdtempSync(join(tmpdir(), "omb-pi-turn-inject-"));
     const dump = join(home, "dump.jsonl");
+    // The person's own Pi setup: what a bot's turn must not load, and the login and providers it needs.
+    const person = join(home, ".pi", "agent");
+    mkdirSync(join(person, "extensions"), { recursive: true });
+    mkdirSync(join(person, "skills", "mine"), { recursive: true });
+    writeFileSync(join(person, "AGENTS.md"), "My own instructions\n");
+    writeFileSync(join(person, "SYSTEM.md"), "My own system prompt\n");
+    writeFileSync(join(person, "mcp.json"), '{"mcpServers":{"mine":{"command":"mine"}}}');
+    writeFileSync(join(person, "extensions", "edit.ts"), "export default () => {};\n");
+    writeFileSync(join(person, "skills", "mine", "SKILL.md"), "---\nname: mine\n---\n");
+    writeFileSync(join(person, "settings.json"), JSON.stringify({ defaultProvider: "openai", defaultModel: "gpt-4o", packages: ["npm:mine"], extensions: ["./x.ts"], skills: ["./s"] }));
+    writeFileSync(join(person, "auth.json"), '{"openai":{"type":"api_key","key":"sk-person"}}');
+    const personModels = '{"providers":{"mine":{"baseUrl":"http://127.0.0.1:9/v1","models":[{"id":"m"}]}}}';
+    writeFileSync(join(person, "models.json"), personModels);
     await create(undefined, { HOME: home, FAKE_PI_DUMP: dump });
     const { turnId } = await instance.adapter.sendTurn({
       threadId: "t-inject",
@@ -1224,11 +1261,21 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(dumps.some((row) => row.setModel?.provider === "omlx" && row.setModel?.modelId === "MiniMax-M3-4bit")).toBe(
       true,
     );
-    const written = JSON.parse(readFileSync(join(home, ".pi", "agent", "models.json"), "utf8")) as {
-      providers: { omlx: { baseUrl: string; models: Array<{ id: string }> } };
+    const agentDirs = new Set(dumps.map((row) => (row as { agentDir?: string | null }).agentDir).filter((dir) => dir !== undefined));
+    expect(agentDirs.size).toBe(1);
+    const own = [...agentDirs][0]!;
+    expect(own.startsWith(join(DATA_DIR, "providers", "pi-own"))).toBe(true);
+    expect(readdirSync(own).filter((name) => !name.startsWith(".")).sort()).toEqual(["auth.json", "models.json", "settings.json"]);
+    expect(statSync(join(own, "auth.json"), { bigint: true }).ino).toBe(statSync(join(person, "auth.json"), { bigint: true }).ino);
+    expect(JSON.parse(readFileSync(join(own, "settings.json"), "utf8"))).toEqual({ defaultProvider: "openai", defaultModel: "gpt-4o" });
+    const written = JSON.parse(readFileSync(join(own, "models.json"), "utf8")) as {
+      providers: { mine: unknown; omlx: { baseUrl: string; models: Array<{ id: string }> } };
     };
+    expect(written.providers.mine).toBeDefined();
     expect(written.providers.omlx.baseUrl).toBe("http://127.0.0.1:8080/v1");
     expect(written.providers.omlx.models.some((m) => m.id === "MiniMax-M3-4bit")).toBe(true);
+    // MausBot's local model stays out of the person's own file.
+    expect(readFileSync(join(person, "models.json"), "utf8")).toBe(personModels);
   });
 });
 
