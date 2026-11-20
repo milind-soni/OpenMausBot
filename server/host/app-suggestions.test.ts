@@ -162,6 +162,18 @@ describe("a bot searching the catalog", () => {
     expect(text).toContain('toolkits: ["<slug>"]');
   });
 
+  it("reads the connections now for what a bot is told, and lets the Apps page's suggestions share a read", async () => {
+    const asked: boolean[] = [];
+    const suggestions = createAppSuggestions({
+      dataDir, store: { bots, bot: () => null, onChange: () => () => {} } as never, configured: () => true, catalog: async () => ({ cards: CARDS }),
+      services: async (live) => { asked.push(live === true); return services; },
+      offerable: () => true, pickAvailable: () => false, decider: { choose } as never,
+    });
+    await suggestions.suggest({ limit: 3 });
+    await suggestions.find({ query: "mail", bot: { id: "b1" } as never, refusal: () => null });
+    expect(asked).toEqual([false, true]);
+  });
+
   it("remembers the top apps it didn't have, so they lead the suggestions", async () => {
     const suggestions = finder();
     await suggestions.find({ query: "spreadsheets", bot: bot(), refusal: () => null });

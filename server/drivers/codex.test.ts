@@ -2226,6 +2226,20 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(types.indexOf("turn.progress")).toBeGreaterThan(types.indexOf("item.started"));
   });
 
+  it("reports Codex's own compaction of the session once, and as no tool", async () => {
+    process.env.FAKE_CODEX_COMPACTION = "1";
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-compaction", text: "carry on" });
+      await recorder.until((e) => e.type === "turn.completed");
+    } finally {
+      delete process.env.FAKE_CODEX_COMPACTION;
+    }
+    expect(recorder.events.filter((e) => e.type === "context.compacted")).toHaveLength(1);
+    expect(recorder.events.some((e) => "itemId" in e && e.itemId === "c1")).toBe(false);
+    expect(instance.adapter.capabilities.nativeCompaction).toBe(true);
+  });
+
   it("streams a running command's output to the bus, and names its app-server while the turn runs", async () => {
     const gate = join(scratch, "command-done");
     Object.assign(process.env, { FAKE_CODEX_COMMAND: "/bin/zsh -lc 'pnpm test'", FAKE_CODEX_COMMAND_OUTPUT: JSON.stringify(["RUN v3\n", " ✓ a.test.ts\n"]), FAKE_CODEX_COMMAND_GATE: gate });

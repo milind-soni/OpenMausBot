@@ -1,7 +1,8 @@
-import { Fragment } from "react";
+import { Fragment, memo } from "react";
 
 import { BotAvatar } from "./Avatar";
 import { cn } from "@/lib/cn";
+import { sameDrawnBots } from "@/lib/drawn-bots";
 import { MAUS_COLOR_NAMES, normalizeState, type MausColor } from "@/lib/mascot";
 import type { RoomAddressee } from "@/lib/room-addressees";
 import type { Bot } from "@/state/store";
@@ -20,7 +21,25 @@ function Name({ name, color }: { name: string; color?: string }) {
   );
 }
 
-export function ClusterLabel({ bot, name, color, to = [] }: { bot?: Bot; name: string; color: string; to?: readonly RoomAddressee[] }) {
+interface ClusterLabelProps {
+  bot?: Bot;
+  name: string;
+  color: string;
+  to?: readonly RoomAddressee[];
+  /** Drawn again in a new language. */
+  locale?: string;
+}
+
+const sameAddressees = (a: readonly RoomAddressee[] = [], b: readonly RoomAddressee[] = []) =>
+  a.length === b.length && a.every((one, i) => one.key === b[i]!.key && one.name === b[i]!.name && one.color === b[i]!.color);
+
+/** Drawn again only when what it shows changes: a bot's status, words or turn leave it as it is. */
+function sameLabel(a: ClusterLabelProps, b: ClusterLabelProps): boolean {
+  return a.name === b.name && a.color === b.color && a.locale === b.locale && sameAddressees(a.to, b.to)
+    && (a.bot === b.bot || (a.bot !== undefined && b.bot !== undefined && sameDrawnBots([a.bot], [b.bot])));
+}
+
+export const ClusterLabel = memo(function ClusterLabel({ bot, name, color, to = [] }: ClusterLabelProps) {
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 pl-0.5">
       <BotAvatar
@@ -46,4 +65,4 @@ export function ClusterLabel({ bot, name, color, to = [] }: { bot?: Bot; name: s
       )}
     </div>
   );
-}
+}, sameLabel);

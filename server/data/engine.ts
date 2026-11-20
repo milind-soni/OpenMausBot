@@ -49,6 +49,10 @@ export interface DataEngineOptions {
   env?: NodeJS.ProcessEnv;
   idleMs?: number;
   binding?: Binding;
+  /** Tests: the wait before a status read's answer is confirmed by loading the binding. */
+  confirmInstalledMs?: number;
+  /** Tests: the look for the binding's files. */
+  filesFound?: (directory: string | null) => boolean;
 }
 
 /** Null means the server's own node_modules. */
@@ -68,6 +72,21 @@ export function nativeRequire(directory: string | null = duckdbDirectory()): Nod
 
 function loadBinding(directory: string | null): Binding {
   return nativeRequire(directory)("@duckdb/node-api") as Binding;
+}
+
+/** A status read asks before anything needs the binding; this long after, the binding is loaded to confirm the answer. */
+export const CONFIRM_INSTALLED_MS = 5_000;
+
+/** Whether this platform's binding files are where the loader would look, found without loading them. */
+export function bindingFilesFound(directory: string | null): boolean {
+  try {
+    const bindings = createRequire(nativeRequire(directory).resolve("@duckdb/node-api")).resolve("@duckdb/node-bindings");
+    const from = createRequire(bindings);
+    const native = `@duckdb/node-bindings-${process.platform}-${process.arch}`;
+    return [native, `${native}-musl`].some((name) => { try { from.resolve(`${name}/duckdb.node`); return true; } catch { return false; } });
+  } catch {
+    return false;
+  }
 }
 
 /** DuckDB's defaults assume it owns the machine (80 % of RAM, every core), and a native OOM takes the server down. A
@@ -713,6 +732,10 @@ FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY bin ORDER BY bin`
 class Engine implements DataEngine {
   private readonly databases = new Map<string, BotDb>();
   private loaded: { binding: Binding } | { reason: string } | null = null;
+  private confirming: ReturnType<typeof setTimeout> | null = null;
+  private readonly installedListeners = new Set<() => void>();
+  private readonly confirmInstalledMs: number;
+  private readonly filesFound: (directory: string | null) => boolean;
   readonly env: NodeJS.ProcessEnv;
   readonly dataDir: string;
   readonly idleMs: number;
@@ -722,6 +745,8 @@ class Engine implements DataEngine {
     this.env = options.env ?? process.env;
     this.dataDir = options.dataDir ?? DATA_DIR;
     this.idleMs = options.idleMs ?? IDLE_CLOSE_MS;
+    this.confirmInstalledMs = options.confirmInstalledMs ?? CONFIRM_INSTALLED_MS;
+    this.filesFound = options.filesFound ?? bindingFilesFound;
     this.folder = options.botFolder ?? defaultBotFolder;
     if (options.binding) this.loaded = { binding: options.binding };
   }
@@ -751,6 +776,20 @@ class Engine implements DataEngine {
   unavailable(): string | null {
     const loaded = this.load();
     return "reason" in loaded ? loaded.reason : null;
+  }
+
+  installed(): boolean {
+    if (this.loaded) return "binding" in this.loaded;
+    const found = this.filesFound(duckdbDirectory(this.env));
+    if (!this.confirming) {
+      this.confirming = setTimeout(() => { if ((this.unavailable() === null) !== found) for (const listener of this.installedListeners) listener(); }, this.confirmInstalledMs);
+      this.confirming.unref?.();
+    }
+    return found;
+  }
+
+  onInstalledChange(listener: () => void): void {
+    this.installedListeners.add(listener);
   }
 
   async forBot(botId: string): Promise<BotDatabase> {

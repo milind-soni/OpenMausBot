@@ -107,6 +107,43 @@ describe("loading the binding", () => {
     expect(error.error.message).toBe(reason);
   });
 
+  it("answers a status read from the binding's files, loading nothing, then confirms by loading", async () => {
+    const loadedFrom = (dir: string) => Object.keys(createRequire(import.meta.url).cache).filter((file) => file.startsWith(realpathSync(dir)));
+    const fresh = join(root, "duckdb-status");
+    cpSync(outOfTree, fresh, { recursive: true });
+    const changed = vi.fn();
+    const e = engine({ env: { ...process.env, OMB_DUCKDB_DIR: fresh }, confirmInstalledMs: 0 });
+    e.onInstalledChange(changed);
+    expect(e.installed()).toBe(true);
+    expect(loadedFrom(fresh)).toEqual([]);
+    await vi.waitFor(() => expect(loadedFrom(fresh).some((file) => file.endsWith("duckdb.node"))).toBe(true));
+    expect(e.installed()).toBe(true);
+    expect(changed).not.toHaveBeenCalled();
+    expect(engine({ env: { ...process.env, OMB_DUCKDB_DIR: join(root, "no-binding-here") } }).installed()).toBe(false);
+  });
+
+  it("tells its listeners when files that looked right do not load", async () => {
+    const broken = join(root, "duckdb-broken");
+    cpSync(outOfTree, broken, { recursive: true });
+    writeFileSync(join(broken, "node_modules", "@duckdb", `node-bindings-${process.platform}-${process.arch}`, "duckdb.node"), "not a library");
+    const changed = vi.fn();
+    const e = engine({ env: { ...process.env, OMB_DUCKDB_DIR: broken }, confirmInstalledMs: 0 });
+    e.onInstalledChange(changed);
+    expect(e.installed()).toBe(true);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    expect(e.installed()).toBe(false);
+    expect(e.unavailable()).toContain(broken);
+  });
+
+  it("tells its listeners when a binding whose files were not found loads after all", async () => {
+    const changed = vi.fn();
+    const e = engine({ confirmInstalledMs: 0, filesFound: () => false });
+    e.onInstalledChange(changed);
+    expect(e.installed()).toBe(false);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    expect(e.installed()).toBe(true);
+  });
+
   it("ships a default engine that loads nothing until asked", () => {
     expect(typeof dataEngine.forBot).toBe("function");
     expect(dataEngine.unavailable()).toBeNull();

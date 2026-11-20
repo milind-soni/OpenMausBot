@@ -2008,7 +2008,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           get strictResume() {
             return cliVersionChecked && cliVersion !== null && claudeCliSupports(cliVersion, "--system-prompt-snapshot");
           },
-          localComputerMcp: true,
+          localComputerMcp: true, nativeCompaction: true,
           hooks: true, askTool: { kind: "mcp", server: "ogb", name: "ask_user" },
         },
         sendTurn: (turn) => authRecovery.send(turn, sendTurn),

@@ -37239,7 +37239,22 @@
       "canvas.strip.pauseHint": "55edb7f8154abc62f305c7e292d1b35c71d32b2700f3e2d76de83018dae813c3",
       "canvas.strip.resumeHint": "ac7fe76a17f5e715a03960bcc4b2c9aec3fc6d250a1c5c4e18e937d2b5d87038",
       "canvas.strip.allDepartments": "625ff126402642a8d84918bc3d87dea91ebfcb7721a50bff72c18302d88069ac",
-      "canvas.strip.filterDepartment": "e701997101d85ad7ad37bba3a1b5729d2d2348fc4ba5429ac496355224c4ba3e"
+      "canvas.strip.filterDepartment": "e701997101d85ad7ad37bba3a1b5729d2d2348fc4ba5429ac496355224c4ba3e",
+      "cloudBuy.signIn.saved": "46e50c2850e5e0a21d8fdd41faf543971021cb1ab440f7e381853309148e2cf6",
+      "cloudBuy.signIn.reset": "590fe42083db7414ac15a1235b8b9f0e06dcff4cc9aeed6a0ec62889f99bd3f6",
+      "cloudBuy.signIn.savedWait": "94f654c1427db9bbb1af5568bc4d4d66f7f1dfaf39cece2e5145f011b2ea19fc",
+      "cloudBuy.signIn.connecting": "d1e13649d1beb48a855497d398b09ec966b88dbf36172370325ef9594ec8c23a",
+      "cloudBuy.signIn.cancelBrowser": "f014f4b19c08fdfff272f049840c17c7572728af85d9e420f98f517b52e4e083",
+      "cloudBuy.signIn.busy": "921e57ca5c227919c8f3999cd40556e2ba071aaefdc86464b4ef00e8f8e12c17",
+      "cloudBuy.signIn.signedIn": "a26b31e3757db5a7e29a2814a32cf109b563fca1a8f7f5380e9a0f635dbcfe34",
+      "cloudAccount.savedStuck": "5efbddc0309e897b7087a02f66746c693393b24cad3dac3768c44bd3ecdeda72",
+      "cloudAccount.savedStuckKeychain": "249c72d715f2ad1758046fbf0cd6e05974494ad9fc2608b74e6a0cbf5b8a9369",
+      "cloudAccount.savedStuckKeyring": "f6d3b9e6e946fcc98ce0b64183ae840c5a8a964bf4f5e2c0056a7be48d993e30",
+      "cloudAccount.resetSaved": "276fa85bc75786d143b74c11cbbb9abe1b7908f48011c1d799114024e09c903b",
+      "cloudAccount.resetKept": "9243efedc1e40bb499acadf970053efa1b7e3a9fc90e3662b3efdd67b89bf453",
+      "cloudAccount.unsaved": "69f16bd2ad4856e040d928ce9482507b14e26f66c500287859c8634ef6117149",
+      "homeScreen.offlineNetwork": "f628e51f2e014252ca9826b7828fb417ad2895267a42716fb41e7140615154c8",
+      "homeScreen.offlineWait": "7de832bcc189e9fa19b386a0a67d938840772d5500985c835fa1db1afee4d49f"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

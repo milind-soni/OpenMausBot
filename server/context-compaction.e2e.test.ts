@@ -71,7 +71,49 @@ async function setup(hang: boolean, fakeEnv: NodeJS.ProcessEnv) {
   } finally { if (!ready) await session.close(); }
 }
 
+/** Account environment is a persisted config setting, not writable through the public config patch: this changes only
+ * the stopped fixture's own config. With DISABLE_COMPACT, Claude Code has no compaction and a summary is OpenMausBot's fold. */
+const claudeEnvironment = (f: Awaited<ReturnType<typeof setup>>, values: Record<string, string>) => f.restart(() => {
+  const path = join(f.session.info.dataDir, "config.json");
+  const config = JSON.parse(readFileSync(path, "utf8"));
+  Object.assign(config.instances.claude.environment, values);
+  writeFileSync(path, JSON.stringify(config));
+});
+
+it("Compact now runs Claude Code's own compaction and keeps the conversation on a session of that engine", () => fixture(async f => {
+  await f.send("OLDER_REQUEST use port 9000");
+  await f.send("CORRECTION use port 9001 instead");
+  await f.send("LATEST and name the service ledger");
+  const before = await f.messages();
+  const oldSession = f.task().resumeCursors.claude;
+  const turnsBefore = f.turns().length;
+  await f.compact();
+  await f.idle();
+  const after = await f.messages();
+  expect(after.at(-1)).toMatchObject({ kind: "compaction", engineCompaction: true });
+  expect(after.at(-1).compaction).toBeUndefined();
+  expect(after.filter(m => m.kind === "compaction")).toHaveLength(1);
+  expect(after.slice(0, before.length).map(m => m.id)).toEqual(before.map(m => m.id));
+  expect(f.turns()).toHaveLength(turnsBefore);
+  const summarized = f.task().resumeCursors.claude;
+  expect(summarized).not.toBe(oldSession);
+  expect(summarized).toMatch(/^fork-/);
+  await f.compact();
+  await f.idle();
+  expect((await f.messages()).filter(m => m.kind === "compaction")).toHaveLength(1);
+  expect(f.task().resumeCursors.claude).toBe(summarized);
+  expect(f.task().appliedCompactionId).toBeUndefined();
+  await f.send("What port did we settle on?");
+  const prompt = String(f.turns().at(-1).prompt.message.content);
+  expect(prompt).not.toContain("Earlier conversation summary");
+  expect(prompt).toContain("CORRECTION use port 9001 instead");
+  expect(prompt).toContain("LATEST and name the service ledger");
+  expect(prompt).not.toContain("OLDER_REQUEST");
+  expect(f.task().resumeCursors.claude).toBe(summarized);
+}), 90_000);
+
 it("compacts durably, keeps corrections and starts a fresh native session without deleting any chats", () => fixture(async f => {
+  await claudeEnvironment(f, { DISABLE_COMPACT: "1" });
   await f.send("OLDER_REQUEST use port 9000");
   await f.send("CORRECTION use port 9001 instead; cancel the earlier request");
   const before = await f.messages();
@@ -133,6 +175,7 @@ it("automatically folds old exchanges while keeping the two latest and the incom
 }), 70_000);
 
 it("Stop cancels a stalled summary without writing a late record or starting an agent", () => fixture(async f => {
+  await claudeEnvironment(f, { DISABLE_COMPACT: "1" });
   await f.send("Keep this original chat intact");
   const before = await f.messages();
   const previousRequest = before.findLast(message => message.role === "user");
@@ -160,16 +203,7 @@ it.each([
   { native: "off", tokens: 190_000, compactions: 0 },
   { native: "auto", tokens: 190_000, compactions: 0 },
 ])("respects the selected account's native compaction setting ($native)", ({ native, tokens, compactions }) => fixture(async f => {
-  if (native !== undefined) {
-    // Account environment is a persisted config setting, not writable through
-    // the public config patch. Change only this stopped fixture's own config.
-    await f.restart(() => {
-      const path = join(f.session.info.dataDir, "config.json");
-      const config = JSON.parse(readFileSync(path, "utf8"));
-      config.instances.claude.environment.OMB_CLAUDE_AUTOCOMPACT = native;
-      writeFileSync(path, JSON.stringify(config));
-    });
-  }
+  if (native !== undefined) await claudeEnvironment(f, { OMB_CLAUDE_AUTOCOMPACT: native });
   await f.api(`/api/bots/${f.bot.id}/tasks/${f.thread}`, {
     modelSelection: { instanceId: "claude", model: "claude-sonnet-4-6[1m]" },
   }, "PATCH");
@@ -184,4 +218,23 @@ it.each([
     expect((await f.messages()).filter(m => m.kind === "compaction")).toHaveLength(2);
     expect(f.turns().at(-1).resumed).toBe(false);
   }
+}, false, { FAKE_CLAUDE_CONTEXT_TOKENS: String(tokens) }), 90_000);
+
+it.each([
+  { name: "leaves a session Claude Code will compact itself", tokens: 165_000, engineOff: false, compactions: 0 },
+  { name: "folds a session that Claude Code left uncompacted near its limit", tokens: 191_000, engineOff: false, compactions: 1 },
+  { name: "folds at 80% when Claude Code's own compaction is switched off", tokens: 165_000, engineOff: true, compactions: 1 },
+])("on a 200k model, $name", ({ tokens, engineOff, compactions }) => fixture(async f => {
+  if (engineOff) await claudeEnvironment(f, { DISABLE_AUTO_COMPACT: "1" });
+  await f.api(`/api/bots/${f.bot.id}/tasks/${f.thread}`, {
+    modelSelection: { instanceId: "claude", model: "claude-sonnet-4-6" },
+  }, "PATCH");
+  for (const text of ["FIRST historical request", "SECOND keep recent", "THIRD correction"]) await f.send(text);
+  const session = f.task().resumeCursors.claude;
+  expect(typeof session).toBe("string");
+  await f.send("INCOMING follow-up");
+  expect(f.task().usage.context).toMatchObject({ tokens, window: 200_000 });
+  expect((await f.messages()).filter(m => m.kind === "compaction")).toHaveLength(compactions);
+  expect(f.task().resumeCursors.claude === session).toBe(compactions === 0);
+  expect(String(f.turns().at(-1).prompt.message.content).includes("Earlier conversation summary")).toBe(compactions === 1);
 }, false, { FAKE_CLAUDE_CONTEXT_TOKENS: String(tokens) }), 90_000);

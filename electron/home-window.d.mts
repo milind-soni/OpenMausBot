@@ -6,7 +6,9 @@ export type HomeView = { name?: string } & (
   | { screen: "opening" | "waking" | "moving" }
   /** The Admin is setting it up (or a brand-new one's name isn't found yet, at `checking`): the step it reports. */
   | { screen: "setup"; step?: import("./cloud-home.mjs").CloudSetupStep; slow?: true }
-  | { screen: "offline"; reason?: string; cause?: "host" | "no_answer" }
+  /** `network`: My Cloud's page has failed to connect from this computer to its address (`host`) for about a minute while the
+   * Admin knows of nothing wrong. `retryAt`: the Admin asked this app to wait (429), and it tries again by itself then. */
+  | { screen: "offline"; reason?: string; cause?: "host" | "no_answer" | "network"; host?: string; retryAt?: number }
   | { screen: "signin"; other?: true }
   /** `member`: a team's User, who can't subscribe or pay for it and is sent to its owner. */
   | { screen: "plan"; machine: "stopped" | "payment-problem" | "failed"; member?: true }
@@ -20,8 +22,9 @@ export interface HomeBridge {
   /** This computer's screen only. */
   state(): Promise<HomeView>;
   onState(callback: (view: HomeView) => void): () => void;
-  /** This computer's screen only: look again now. */
-  retry(): Promise<HomeView>;
+  /** This computer's screen only: look again now. `pressed`: the person pressed Try again, which no wait for the next
+   * sign-in code holds except the Admin's own 429. */
+  retry(pressed?: boolean): Promise<HomeView>;
   /** This computer's screen only, once the person said yes there: the Cloud it shows leaves their list (absent: an older app). */
   remove?(): Promise<import("./cloud-account.mjs").CloudRemoveOutcome>;
   /** This device's MausBot Cloud sign-in, again; on My Cloud's page only from the person's click. */
@@ -62,6 +65,10 @@ export declare const TEAM_RENEW_RETRY_MS: number;
 export declare const FRESH_MS: number;
 export declare const NAME_WAIT_MS: number;
 export declare const NAME_RETRY_MS: readonly number[];
+export declare const PAIR_RETRY_MS: readonly number[];
+export declare const PAIR_LIMIT_MS: number;
+export declare const PAIR_FLOOR_MS: number;
+export declare const NETWORK_HINT_MS: number;
 export function nameNotFound(code: number): boolean;
 export function createReadyClock(input?: { store?: { read(): unknown; write(value: unknown): void } | null; now?(): number }): { seen(state: unknown): void; fresh(origin: string | null): boolean };
 export function splashText(status: "opening" | "waking", name?: string | null, t?: (key: string, params?: Record<string, string | number>) => string): string;
@@ -93,7 +100,7 @@ export interface HomeWindow {
   placeOrigin(): string | null;
   current(): Home;
   shown(): HomePlace | null;
-  retry(): Promise<unknown>;
+  retry(input?: { pressed?: boolean }): Promise<unknown>;
   signIn(): Promise<void>;
   repair(): Promise<void>;
   changed(): Promise<void>;

@@ -83,7 +83,7 @@ vi.mock("@/state/store", () => ({ useStore: () => store }));
 vi.mock("@/lib/focus-message", () => ({ useFocusMessage: () => {} }));
 
 import { useTranscriptViewport } from "./use-transcript-viewport";
-import { TRANSCRIPT_WINDOW_MAX } from "@/lib/transcript-window";
+import { TRANSCRIPT_WINDOW_MAX, TRANSCRIPT_WINDOW_STEP } from "@/lib/transcript-window";
 import { forgetTranscriptPositions } from "@/lib/transcript-follow";
 import { noteLiveReplyEvent, resetLiveReplies } from "@/state/live-reply";
 import type { RuntimeEvent } from "../../shared/runtime-events";
@@ -276,7 +276,7 @@ describe("transcript viewport", () => {
     expect(view.current.hiddenCount).toBe(180);
 
     view.act(() => view.current.showEarlier());
-    expect(view.current.hiddenCount).toBe(60);
+    expect(view.current.hiddenCount).toBe(180 - TRANSCRIPT_WINDOW_STEP);
 
     view.rerender({ threadId: "other", messages: [{ id: "ask", role: "user" }, ...rows(299, 1_001)] });
     expect(view.current.transcriptKey).toBe("bot:other");
@@ -374,7 +374,7 @@ describe("transcript viewport", () => {
 
   it("slides back to the latest window when the reader returns to the bottom", () => {
     const view = mount({ messages: rows(300) });
-    view.act(() => view.current.showEarlier());
+    while (view.current.windowedMessages.length < TRANSCRIPT_WINDOW_MAX) view.act(() => view.current.showEarlier());
     view.act(() => {
       scroller.scrollTop = 1_000;
       view.current.scrollHandlers.onScroll();
@@ -454,8 +454,8 @@ describe("transcript viewport", () => {
     const view = mount({ messages: rows(300) });
     scroller.scrollTop = 1_000;
     view.act(() => view.current.showEarlier());
-    expect(view.current.windowedMessages[0]?.id).toBe("m60");
-    expect(scroller.scrollTop).toBe(1_000 + 120 * ROW);
+    expect(view.current.windowedMessages[0]?.id).toBe(`m${180 - TRANSCRIPT_WINDOW_STEP}`);
+    expect(scroller.scrollTop).toBe(1_000 + TRANSCRIPT_WINDOW_STEP * ROW);
     expect(view.current.following).toBe(false);
   });
 
@@ -473,7 +473,7 @@ describe("transcript viewport", () => {
     store.state.loadingOlder = {};
     view.rerender({ messages: [...rows(50, 50), ...rows(50, 100)] });
     expect(view.current.olderPending).toBe(false);
-    expect(scroller.scrollTop).toBe(300 + 50 * ROW);
+    expect(scroller.scrollTop).toBe(300 + TRANSCRIPT_WINDOW_STEP * ROW);
   });
 
   it("drops a height capture taken in the thread the reader left", () => {
@@ -507,7 +507,7 @@ describe("transcript viewport", () => {
     expect(view.current.following).toBe(false);
 
     view.act(() => view.current.showLater());
-    expect(view.current.laterCount).toBe(60);
+    expect(view.current.laterCount).toBe(180 - TRANSCRIPT_WINDOW_STEP);
   });
 
   it("pages on past a search result as the reader scrolls down, and follows only from the newest row", () => {
@@ -519,9 +519,9 @@ describe("transcript viewport", () => {
     });
     expect(view.current.following).toBe(false);
     expect(view.current.windowedMessages[0]?.id).toBe("m0");
-    expect(view.current.laterCount).toBe(60);
+    expect(view.current.laterCount).toBe(180 - TRANSCRIPT_WINDOW_STEP);
     view.rerender({ messages: rows(301) });
-    expect(view.current.laterCount).toBe(61);
+    expect(view.current.laterCount).toBe(181 - TRANSCRIPT_WINDOW_STEP);
     expect(view.current.showJumpToLatest || view.current.following).toBe(false);
   });
 
@@ -566,10 +566,10 @@ describe("transcript viewport", () => {
     const view = mount({ messages: rows(300) });
     expect(view.current.hiddenCount).toBe(180);
     view.act(() => view.current.scrollHandlers.onWheel({ deltaY: -40 } as never));
-    expect(view.current.hiddenCount).toBe(60);
+    expect(view.current.hiddenCount).toBe(180 - TRANSCRIPT_WINDOW_STEP);
     view.act(() => view.current.scrollHandlers.onTouchStart({ touches: [{ clientY: 100 }] } as never));
     view.act(() => view.current.scrollHandlers.onTouchMove({ touches: [{ clientY: 200 }] } as never));
-    expect(view.current.hiddenCount).toBe(0);
+    expect(view.current.hiddenCount).toBe(180 - 2 * TRANSCRIPT_WINDOW_STEP);
   });
 
   it("loads an older page on an upward scroll when the whole thread so far is too short to scroll (#4365)", () => {
@@ -639,7 +639,7 @@ describe("transcript viewport", () => {
       view.current.scrollHandlers.onScroll();
     });
 
-    expect(view.current.hiddenCount).toBe(60);
+    expect(view.current.hiddenCount).toBe(180 - TRANSCRIPT_WINDOW_STEP);
   });
 
   it("automatically loads older messages from server when at top of window and hasMore is true", () => {
@@ -674,7 +674,7 @@ describe("a long conversation read from its end to its start and back", () => {
     const view = mount({ messages: rows(3_000) });
     view.act(() => view.current.scrollHandlers.onWheel({ deltaY: -40 } as never));
     let steps = 0;
-    while (view.current.hiddenCount > 0 && steps++ < 100) {
+    while (view.current.hiddenCount > 0 && steps++ < 200) {
       scrollTo(view, 400);
       const reading = readAt(view, 200);
       expect(view.current.windowedMessages.length).toBeLessThanOrEqual(TRANSCRIPT_WINDOW_MAX);
@@ -686,7 +686,7 @@ describe("a long conversation read from its end to its start and back", () => {
     expect(view.current.following).toBe(false);
 
     steps = 0;
-    while (view.current.laterCount > 0 && steps++ < 100) {
+    while (view.current.laterCount > 0 && steps++ < 200) {
       scrollTo(view, scroller.bottom - 800);
       const reading = readAt(view, scroller.bottom - 100);
       expect(view.current.windowedMessages.length).toBeLessThanOrEqual(TRANSCRIPT_WINDOW_MAX);
@@ -705,11 +705,11 @@ describe("a long conversation read from its end to its start and back", () => {
     view.act(() => view.current.scrollHandlers.onWheel({ deltaY: -40 } as never));
     for (let page = 13; page >= 0; page--) {
       while (view.current.hiddenCount > 0) {
-        scrollTo(view, 400);
+        scrollTo(view, 900);
         scrollTo(view, 100);
       }
       dispatched = [];
-      scrollTo(view, 400);
+      scrollTo(view, 900);
       scrollTo(view, 100);
       expect(dispatched).toEqual([{ type: "loadOlderMessages", threadId: "thread" }]);
       const reading = topId(view);

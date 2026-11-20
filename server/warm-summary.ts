@@ -16,8 +16,10 @@
 export const WARM_SUMMARY_MIN_TOKENS = 100_000;
 /** Idle this long after a turn: long enough that a quick reply is not raced, well inside a 5-minute API-key cache. */
 export const WARM_SUMMARY_IDLE_MS = 3 * 60_000;
-/** When the next turn would summarize at its start anyway: start almost at once. */
+/** When the next turn may summarize part-way through: start almost at once, after the pause of a quick reply. */
 export const WARM_SUMMARY_SOON_MS = 10_000;
+/** When the next turn would summarize at its start anyway: start as soon as the turn before has settled. */
+export const WARM_SUMMARY_NOW_MS = 1_000;
 /** A busy bot, or a routine about to run: look again this much later. */
 export const WARM_SUMMARY_RETRY_MS = 2 * 60_000;
 /** A subscription's prompt cache lives an hour from the last request: after this the summary would write it all again. */
@@ -32,10 +34,13 @@ export interface WarmSummaryTarget {
 }
 
 /** `native`: the engine's own compaction (Claude Code's /compact on a fork); `harness`: OpenMausBot's fold, for engines
- * whose context it rebuilds. `soon`: the next turn would summarize at its start anyway. */
+ * whose context it rebuilds. `soon`: the next turn would summarize at its start anyway, so the summary starts at once and a
+ * turn that begins meanwhile waits for it. `ahead`: an ordinary turn could reach that point, so the summary starts after
+ * the pause of a quick reply, and a turn that begins meanwhile is not held up by it. */
 export interface WarmSummaryPlan {
   way: "native" | "harness";
   soon: boolean;
+  ahead?: boolean;
 }
 
 export type WarmSummaryOutcome = { ok: true } | { ok: false; reason: string; retry?: boolean };
@@ -53,6 +58,8 @@ export interface WarmSummaryDeps {
   /** Writes and applies the summary. `awaited()`: a turn is waiting for it, so the turn's own setup is no reason to drop it.
    * `stale()`: why it is no longer worth writing now (the cache went cold, or a hold), for a run that had to wait. */
   run(target: WarmSummaryTarget, plan: WarmSummaryPlan, control: { signal: AbortSignal; awaited(): boolean; stale(): { reason: string; retry: boolean } | null }): Promise<WarmSummaryOutcome>;
+  /** A turn began waiting for the summary being written. */
+  waiting?(target: WarmSummaryTarget): void;
   log?(line: string): void;
 }
 
@@ -80,10 +87,18 @@ export interface WarmSummaryState {
 
 export function createWarmSummary(deps: WarmSummaryDeps) {
   const scale = deps.timeScale && deps.timeScale > 0 && deps.timeScale <= 1 ? deps.timeScale : 1;
-  const [idleMs, soonMs, retryMs, giveUpMs] = [WARM_SUMMARY_IDLE_MS, WARM_SUMMARY_SOON_MS, WARM_SUMMARY_RETRY_MS, WARM_SUMMARY_GIVE_UP_MS]
+  const [idleMs, soonMs, nowMs, retryMs, giveUpMs] = [WARM_SUMMARY_IDLE_MS, WARM_SUMMARY_SOON_MS, WARM_SUMMARY_NOW_MS, WARM_SUMMARY_RETRY_MS, WARM_SUMMARY_GIVE_UP_MS]
     .map((ms) => Math.max(1, Math.round(ms * scale)));
   const pending = new Map<string, Pending>();
   const last = new Map<string, { at: number; outcome: string }>();
+  /** Conversations whose summary written ahead was dropped for a turn: their person answers within the minute it takes,
+   * so the next one waits for the idle time rather than spend a second summary call the same way. */
+  const overtaken = new Set<string>();
+  const overtake = (p: Pending) => {
+    if (!p.plan.ahead || p.plan.soon) return;
+    overtaken.add(p.target.threadId);
+    if (overtaken.size > 500) overtaken.delete(overtaken.values().next().value!);
+  };
   let disposed = false;
 
   const note = (threadId: string, outcome: string) => {
@@ -132,7 +147,7 @@ export function createWarmSummary(deps: WarmSummaryDeps) {
       }
       if (p.run === run) p.run = null;
       if (pending.get(p.target.threadId) !== p) return;
-      if (outcome.ok) return drop(p, "summarized");
+      if (outcome.ok) { overtaken.delete(p.target.threadId); return drop(p, "summarized"); }
       if (outcome.retry && !controller.signal.aborted && deps.now() + retryMs - p.turnEndedAt < giveUpMs) {
         note(p.target.threadId, `waiting: ${outcome.reason}`);
         return schedule(p, retryMs);
@@ -151,10 +166,11 @@ export function createWarmSummary(deps: WarmSummaryDeps) {
       if (existing) drop(existing);
       if (!turn.ok) return;
       const plan = deps.plan(target, turn.contextTokens);
+      if (!plan?.ahead) overtaken.delete(target.threadId);
       if (!plan) return;
       const p: Pending = { target, plan, turnEndedAt: deps.now(), dueAt: null, timer: null, run: null };
       pending.set(target.threadId, p);
-      schedule(p, plan.soon ? soonMs : idleMs);
+      schedule(p, plan.soon ? nowMs : plan.ahead && !overtaken.has(target.threadId) ? soonMs : idleMs);
     },
 
     /** A turn began on this conversation: what the summary would cover is no longer the whole of it. */
@@ -163,6 +179,7 @@ export function createWarmSummary(deps: WarmSummaryDeps) {
       if (!p) return;
       if (p.run && !p.run.awaited) {
         deps.log?.(`warm summary ${threadId}: a turn started while it was being written`);
+        overtake(p);
         p.run.controller.abort();
       }
       if (!p.run) drop(p);
@@ -180,11 +197,13 @@ export function createWarmSummary(deps: WarmSummaryDeps) {
       const run = p.run;
       if (!p.plan.soon) {
         deps.log?.(`warm summary ${threadId}: a turn that does not need it starts now`);
+        overtake(p);
         run.controller.abort();
         return "abandoned";
       }
       deps.log?.(`warm summary ${threadId}: a turn waits for it`);
       run.awaited = true;
+      deps.waiting?.(p.target);
       const deadline = deps.now() + WARM_SUMMARY_TURN_WAIT_MS;
       let settled = false;
       void run.done.then(() => { settled = true; });
@@ -205,6 +224,7 @@ export function createWarmSummary(deps: WarmSummaryDeps) {
     },
 
     forget(threadId: string): void {
+      overtaken.delete(threadId);
       const p = pending.get(threadId);
       if (!p) return;
       p.run?.controller.abort();

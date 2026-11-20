@@ -1039,8 +1039,8 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
                   emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_image", data: img.data, fromTool: true });
                 }
               }
-            } else if (item.type === "reasoning") {
-              emit({ ...base(threadId, turnId), type: "item.updated", itemType: "reasoning", tokens: null });
+            } else if (item.type === "reasoning" || item.type === "contextCompaction") {
+              emit(item.type === "reasoning" ? { ...base(threadId, turnId), type: "item.updated", itemType: "reasoning", tokens: null } : { ...base(threadId, turnId), type: "context.compacted" });
             }
             break;
           }
@@ -1553,7 +1553,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         images: true,
         nativeImageInput: true,
         effortLevels: ["low", "medium", "high", "xhigh", "max"],
-        strictResume: true,
+        strictResume: true, nativeCompaction: true,
       },
       sendTurn,
       interruptTurn: async (threadId) => {

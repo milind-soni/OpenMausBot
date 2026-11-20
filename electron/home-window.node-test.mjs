@@ -430,6 +430,12 @@ test("the window's IPC: the screen reads and retries, My Cloud's page renews its
   await handlers.get("home:repair")(page);
   w.url = `${LOCAL}${HOME_SCREEN_PATH}`;
   assert.deepEqual(handlers.get("home:state")(page), { screen: "opening" });
+  // Only Try again's press, as the preload says it, is a press: never any other value a page sends.
+  const asked = [], retry = w.home.retry;
+  w.home.retry = (input) => { asked.push(input?.pressed ?? false); return retry(input); };
+  for (const pressed of [true, "true", 1, undefined]) { w.url = `${LOCAL}${HOME_SCREEN_PATH}`; await handlers.get("home:retry")(page, pressed); }
+  assert.deepEqual(asked, [true, false, false, false]);
+  w.home.retry = retry; w.url = `${LOCAL}${HOME_SCREEN_PATH}`;
   assert.throws(() => handlers.get("home:repair")(page), /only available/);
   w.state = { status: "signed-out" };
   await handlers.get("home:sign-in")(page);
@@ -489,6 +495,9 @@ test("My Cloud's own page, once it is home, gets this app's chat links, diagnost
   assert.equal(local.bridge.home.updating, false);
   await local.bridge.home.retry(); await local.bridge.home.state(); await local.bridge.home.signIn();
   assert.deepEqual(local.invoked.map(([channel]) => channel), ["home:retry", "home:state", "home:sign-in"]);
+  // Try again's press is said as such; the screen's own looks never are.
+  await local.bridge.home.retry(true); await local.bridge.home.retry("true");
+  assert.deepEqual(local.invoked.filter(([channel]) => channel === "home:retry").map(([, pressed]) => pressed), [false, true, false]);
 });
 
 test("only the verified Cloud, open as this window's active server, counts as the Cloud page", () => {

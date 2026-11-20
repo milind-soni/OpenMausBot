@@ -31,6 +31,8 @@ export async function fixture(t, options = {}) {
       return send(f.disk.status, f.disk.body);
     }
     if (req.url === "/api/cloud/desktop/services/x" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.x.status, f.x.body);
+    // My Cloud's pairing, only when a test sets an answer (`headers`: e.g. a 429's Retry-After).
+    if (f.pairing && req.url === "/api/cloud/desktop/pairing" && req.method === "POST") { res.writeHead(f.pairing.status, { "content-type": "application/json", ...f.pairing.headers }); return res.end(JSON.stringify(f.pairing.body)); }
     if (/^\/api\/cloud\/desktop\/teams\/[^/]+\/pairing$/.test(req.url) && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.teamPairing.status, f.teamPairing.body);
     if (req.url === "/api/cloud/desktop/services/pages" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.pages.status, f.pages.body);
     if (req.url === "/api/cloud/desktop/moved" && req.method === "POST" && req.headers.authorization === `Bearer ${accessToken}`) return send(f.moved.status, f.moved.body);

@@ -1,5 +1,38 @@
 # Conversation context compaction
 
+## Who compacts
+
+An engine that keeps its own session and compacts it (Claude Code, Codex:
+`nativeCompaction` in the driver's capabilities) is left to do so. OpenMausBot
+does not summarize such a conversation before a turn, does not replace its
+session, and shows the engine's compaction as a note in the chat when the
+engine reports it (Claude Code's `compact_boundary`, Codex's
+`contextCompaction` item). **Compact now** asks the engine first: for Claude
+Code that is its own `/compact` on a fork of the session, as for a warm
+summary below, and the conversation moves to that fork.
+
+OpenMausBot's own fold (below) is what compacts in every other case:
+
+- an engine with no compaction of its own that OpenMausBot is told of (the API
+  models, Pi, Muse Code, ACP agents);
+- a session its engine left uncompacted: the last measured prompt is within
+  10,000 tokens or 5% (whichever is closer) of the model's window, or of
+  `OMB_CLAUDE_AUTOCOMPACT` when that is lower (190,000 by default). Claude Code
+  compacts about 33,000 tokens below that point and Codex at 90% of its
+  window, so a healthy session never reads this high;
+- Claude Code with `DISABLE_AUTO_COMPACT` or `DISABLE_COMPACT` in the
+  account's environment: the fold runs at the thresholds under Bounds;
+- `context.compactAt` set in config.json: the fold runs there for every
+  engine, as it did before engines were left to compact themselves;
+- Compact now when the engine cannot run its own (no session open or parked,
+  a Claude Code too old to fork, Codex).
+
+```sh
+pnpm exec vitest run server/host/conversation-compaction.test.ts server/context-compaction.e2e.test.ts
+```
+
+## OpenMausBot's fold
+
 Long direct conversations can summarize older exchanges before the next turn.
 The full transcript, its branches and attachments are retained. The new session
 gets a bounded summary plus recent exchanges; later turns resume that session.
@@ -35,12 +68,20 @@ the idle gap after the turn before, while the prompt cache is still warm, so
 the next turn starts small.
 
 - **When:** a direct conversation (not a room or a routine's run) whose turn
-  ended with 100k tokens or more of context gets one about 3 minutes later. A
-  conversation at 80% or more of where Claude Code summarizes by itself
-  (`OMB_CLAUDE_AUTOCOMPACT`, 200,000 by default) gets one about 10 seconds
-  later, because its next turn would summarize anyway. For other engines,
-  OpenMausBot's own fold runs while idle once the conversation is at 85% of
-  the threshold its next turn would fold at.
+  ended with 100k tokens or more of context gets one about 3 minutes later.
+  Claude Code summarizes by itself about 33,000 tokens below
+  `OMB_CLAUDE_AUTOCOMPACT` (200,000 by default, so near 167k). A conversation
+  within 27,000 tokens of that point (140k) gets its summary about 10 seconds
+  after the turn, since one more turn of tool work can reach that point; a
+  message sent meanwhile is not held up and the summary is dropped, and
+  after one dropped that way the conversation goes back to the 3 minutes
+  until a summary is written. Within
+  7,000 tokens of it (160k) it starts one second after the turn, because the next turn
+  would summarize anyway; a message sent meanwhile shows "context compaction
+  started (auto)" and its turn starts when the summary is written (at most 3
+  minutes, then the turn goes on without it). For an engine
+  OpenMausBot folds for, the fold runs while idle once the conversation is at
+  85% of the threshold its next turn would fold at.
 - **Claude Code:** `/compact` with instructions to keep the person's latest
   requests and every open question (open question cards are named), on a
   fork of the session (`--resume <session> --fork-session`) launched with
@@ -373,11 +414,13 @@ those at the top level. A URL inside a command is left as the command ran.
 `context` settings in config.json are optional. `autoCompact: false` disables
 automatic folding, `compactAt` is a fraction below 1 or a token count, and
 `rebuildBytes` controls replay size (default 24,000 bytes). Context-only settings
-do not reload provider processes. The default threshold is 80% of the known
+do not reload provider processes. For an engine that does not compact itself
+the default threshold is 80% of the known
 model window; a real latest-prompt measurement wins over a transcript estimate,
 except an ACP agent's own reading, which is shown and does not time compaction.
 Summed input tokens across tool rounds are never treated as context size.
-For Claude, the threshold and post-compaction regrowth floor also leave 10%
+For Claude with a `compactAt` set or its own compaction switched off, the
+threshold and post-compaction regrowth floor also leave 10%
 headroom below the selected account's numeric native-compaction setting.
 That account's setting takes precedence over the inherited launch environment.
 Native `auto`/`off` settings supply no known numeric bound; other engines keep
