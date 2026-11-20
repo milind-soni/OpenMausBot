@@ -53,7 +53,7 @@ class FakeAudio implements GeminiAudio {
   close() { this.closed = true; }
 }
 
-function harness({ denied = false, held = false } = {}) {
+function harness({ denied = false, held = false, session = SESSION } = {}) {
   const sockets: FakeSocket[] = [];
   const audios: FakeAudio[] = [];
   const start = elevenLabsSessionStarter({
@@ -64,7 +64,7 @@ function harness({ denied = false, held = false } = {}) {
     onConnect: vi.fn(), onDisconnect: vi.fn(), onModeChange: vi.fn(), onUserTranscript: vi.fn(), onAgentResponseDelta: vi.fn(), onError: vi.fn(),
   };
   const delegate = vi.fn(async (_params: Record<string, unknown>, _context: { callId: string }) => "On it.");
-  const options: FishSessionOptions<LiveElevenLabsSession> = { sessionToken: SESSION, clientTools: { [FISH_DELEGATE_TOOL]: delegate }, clientToolTimeoutMs: 12_000, callbacks };
+  const options: FishSessionOptions<LiveElevenLabsSession> = { sessionToken: session, clientTools: { [FISH_DELEGATE_TOOL]: delegate }, clientToolTimeoutMs: 12_000, callbacks };
   const starting = start(options);
   const socket = () => sockets.at(-1)!;
   const connect = async () => {
@@ -79,6 +79,13 @@ const AUDIO = btoa(String.fromCharCode(1, 0, 2, 0));
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("an ElevenLabs Live session", () => {
+  // Spec: the bot's own voice goes in the conversation's override; without one the agent keeps its voice.
+  it("sends the bot's voice with the instructions when the session has one", () => {
+    const t = harness({ session: { ...SESSION, voice_id: "Kysvuk17R9MDAP9l089v" } });
+    t.socket().open();
+    expect(t.socket().sent[0]).toMatchObject({ conversation_config_override: { agent: { prompt: { prompt: SESSION.instructions } }, tts: { voice_id: "Kysvuk17R9MDAP9l089v" } } });
+  });
+
   it("opens the signed URL, sends the call's instructions first, and joins once ElevenLabs and the microphone are ready", async () => {
     const t = harness();
     expect(t.socket().url).toBe(SESSION.signed_url);

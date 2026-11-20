@@ -3,7 +3,7 @@ import { DEEPSEEK_RECORDING_MAX_MS } from "../../shared/deepseek-voice";
 import type { ConfigStatus } from "@/state/store";
 import { cacheDesktopCapabilities, initialDesktopCapabilities } from "./desktop";
 import { createEndpointer, fishSpeech } from "./fish-speech";
-import { CALL_ENDPOINT_MS, fishListeningReady, listensHere, missingListenKey, recordsClips, speechBridge } from "./speech";
+import { CALL_ENDPOINT_MS, fishListeningReady, listensHere, missingListenKey, recordsClips, scribeChosen, speechBridge } from "./speech";
 
 const withDictation = (dictation: DesktopCapabilities["dictation"]): DesktopCapabilities =>
   ({ ...initialDesktopCapabilities(), dictation });
@@ -97,6 +97,33 @@ describe("listening readiness", () => {
   it("needs no key for the Mac's own recognizer, and nothing where dictation is unavailable", () => {
     expect(listensHere(withDictation(APPLE), null)).toBe(true);
     expect(listensHere(withDictation({ available: false, engine: "none", onDevice: false }), savedFish)).toBe(false);
+  });
+});
+
+describe("hearing through ElevenLabs Scribe by choice", () => {
+  const chosen = { tts: { hearWith: "elevenlabs" }, savedKeys: { ttsKey: { configured: true } } } as unknown as ConfigStatus;
+
+  it("records in the page on the Mac too, over DeepSeek, once the person picks ElevenLabs with their own key", () => {
+    const ogb = { speechStart: vi.fn() };
+    vi.stubGlobal("window", { ogb });
+    cacheDesktopCapabilities(withDictation(APPLE));
+    const deepseekToo = { ...chosen, tts: { provider: "deepseek", hearWith: "elevenlabs" } } as unknown as ConfigStatus;
+    expect(speechBridge(chosen)).toBe(fishSpeech);
+    expect(speechBridge(deepseekToo)).toBe(fishSpeech);
+    expect(scribeChosen(deepseekToo)).toBe(true);
+    expect(listensHere(withDictation(APPLE), deepseekToo)).toBe(true);
+    expect(missingListenKey(withDictation(APPLE), deepseekToo)).toBeNull();
+  });
+
+  it("changes nothing without the choice, or with only the plan's included voice", () => {
+    const ogb = { speechStart: vi.fn() };
+    vi.stubGlobal("window", { ogb });
+    cacheDesktopCapabilities(withDictation(APPLE));
+    const notChosen = { savedKeys: { ttsKey: { configured: true } } } as unknown as ConfigStatus;
+    const included = { ...chosen, tts: { hearWith: "elevenlabs", included: true } } as unknown as ConfigStatus;
+    expect(speechBridge(notChosen)).toBe(ogb);
+    expect(speechBridge(included)).toBe(ogb);
+    expect(scribeChosen(included)).toBe(false);
   });
 });
 

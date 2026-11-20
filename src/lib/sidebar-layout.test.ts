@@ -123,7 +123,7 @@ describe("sidebar virtual sections", () => {
     expect(partitionSidebarBots([mine, theirs], { viewerEmail: null }).sectionedBots).toEqual([]);
     expect(partitionSidebarBots([mine, theirs], { viewerEmail: null, searching: true }).sectionedBots).toEqual([mine]);
     const plain = { id: "plain", sidebarHidden: true, section: "C Suite" };
-    expect(partitionSidebarBots([plain], { viewerEmail: null, searching: true }).sectionedBots).toEqual([]);
+    expect(partitionSidebarBots([plain], { viewerEmail: null }).sectionedBots).toEqual([plain]);
     const hiddenMaus = { id: "maus", chiefOfStaff: true, sidebarHidden: true, defaultBot: {} };
     const sharedChief = { id: "shared", chiefOfStaff: true };
     const found = partitionSidebarBots([hiddenMaus, sharedChief], { viewerEmail: null, searching: true });

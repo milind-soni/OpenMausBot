@@ -40,13 +40,26 @@ export function summaryPrompt(history: readonly ReplayEntry[]): string {
   ].join("\n\n");
 }
 
-/** Timeout aborts the helper; Stop aborts the whole operation rather than commit a late summary. */
-export async function draftSummary(history: readonly ReplayEntry[], options: {
+interface SummaryOptions {
   generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string>;
   signal: AbortSignal;
   timeoutMs?: number;
-}): Promise<string> {
+  /** Told true when the summary starts and false once it is written, failed or stopped. */
+  onSummarizing?: (active: boolean) => void;
+}
+
+/** Timeout aborts the helper; Stop aborts the whole operation rather than commit a late summary. */
+export async function draftSummary(history: readonly ReplayEntry[], options: SummaryOptions): Promise<string> {
   options.signal.throwIfAborted();
+  options.onSummarizing?.(true);
+  try {
+    return await summarize(history, options);
+  } finally {
+    options.onSummarizing?.(false);
+  }
+}
+
+async function summarize(history: readonly ReplayEntry[], options: SummaryOptions): Promise<string> {
   const fallback = deterministicSummary(history);
   if (!options.generateText) return fallback;
   const timeout = AbortSignal.timeout(options.timeoutMs ?? 20_000);

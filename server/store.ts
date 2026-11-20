@@ -1199,7 +1199,7 @@ export class Store {
     return pruned;
   }
 
-  branchMessage(threadId: string, sourceId: string, text: string, sendId?: string, sender?: Message["sender"], dataContext?: Message["dataContext"]): Message | null {
+  branchMessage(threadId: string, sourceId: string, text: string, sendId?: string, sender?: Message["sender"], dataContext?: Message["dataContext"], from?: Pick<Message, "via" | "apiAsOwner">): Message | null {
     const t = this.thread(threadId);
     const source = t.messages.find((m) => m.id === sourceId);
     if (!source) return null;
@@ -1214,7 +1214,7 @@ export class Store {
       ...(source.reaction && source.text === text ? { reaction: source.reaction } : {}),
       ...(sendId ? { sendId } : {}),
       ...(sender ? { sender } : {}),
-      ...(dataContext ? { dataContext } : {}),
+      ...(dataContext ? { dataContext } : {}), ...from,
     };
     t.messages.push(full); this.threads.grew(threadId, full);
     t.activeLeafId = full.id;
@@ -1333,7 +1333,7 @@ export class Store {
     return bot;
   }
 
-  applyTeamSetup(request: TeamSetupRequest): TeamSetupResult {
+  applyTeamSetup(request: TeamSetupRequest, newBotApproval?: Exclude<ApprovalMode, "custom">): TeamSetupResult {
     const chief = this.own(request.botId);
     if (!chief) throw new Error("The requesting Chief no longer exists");
     if (chief.lastTeamSetupReceipt?.requestId === request.requestId) return chief.lastTeamSetupReceipt.result;
@@ -1352,7 +1352,7 @@ export class Store {
         next = { id: operation.botId, threadId: operation.threadId, name: operation.fields.name,
           title: "", description: "", soul: "", notifications: true, color: rotationColor(nextBots.length), unread: false,
           resumeCursors: {}, createdAt, ...operation.fields, modelSelection,
-          autoApprove: false,
+          ...(newBotApproval ? { approvalMode: newBotApproval } : {}), autoApprove: newBotApproval === "auto",
           ...sharedAsMaker(chief),
           // A Chief's new specialist reports to the Chief's own person.
           ...(botOwner(chief) ? { createdBy: botOwner(chief)! } : {}),

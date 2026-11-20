@@ -1,6 +1,28 @@
 import { describe, expect, it } from "vitest";
 
-import { clampAppend, commentaryChunks, formatCallDuration, FULL_ANSWER_IN_CHAT, joinFragments, LiveTranscript, liveCallRowText, SpokenLines } from "./live-call.ts";
+import { botCallVoice, clampAppend, commentaryChunks, formatCallDuration, FULL_ANSWER_IN_CHAT, geminiLiveVoice, isBotLiveVoice, joinFragments, LIVE_VOICE_OPTIONS, LiveTranscript, liveCallRowText, SpokenLines } from "./live-call.ts";
+
+describe("Live call voices", () => {
+  it.each(["nuri", "juni", "flitz", "brise", "sillage", "nira", "harema", "shida", "noeul"])("offers %s as a bot's OpenAI voice without using it for Gemini", (voice) => {
+    expect(LIVE_VOICE_OPTIONS.filter((option) => option.id === voice)).toHaveLength(1);
+    expect(isBotLiveVoice(voice)).toBe(true);
+    expect(botCallVoice(voice, "marin", false)).toBe(voice);
+    expect(botCallVoice(voice, "Charon", true)).toBe("Charon");
+    expect(geminiLiveVoice(voice)).toBe("Puck");
+  });
+
+  it("keeps existing provider voices and app defaults", () => {
+    expect(LIVE_VOICE_OPTIONS[0]).toEqual({ id: "marin", label: "Marin (default)" });
+    expect(botCallVoice("cedar", "marin", false)).toBe("cedar");
+    expect(botCallVoice("Kore", "Charon", true)).toBe("Kore");
+    expect(botCallVoice("Kore", "marin", false)).toBe("marin");
+    for (const voice of [undefined, "", "unknown", "Nuri", " nuri "]) {
+      expect(isBotLiveVoice(voice)).toBe(false);
+      expect(botCallVoice(voice, "marin", false)).toBe("marin");
+      expect(botCallVoice(voice, undefined, false)).toBeUndefined();
+    }
+  });
+});
 
 describe("SpokenLines", () => {
   it("keeps each stretch of the voice's speech as one line, stamped when it began", () => {

@@ -8,13 +8,15 @@ import { progressKey, type TurnProgressActivity, type TurnProgressFields } from 
 
 export type LiveStatus =
   | ({ activity: TurnProgressActivity } & Omit<TurnProgressFields, "type" | "activity">)
-  | { activity: "thinking" | "reply"; itemId?: undefined };
+  | { activity: "thinking" | "reply" | "summarizing"; itemId?: undefined };
 
 export interface TurnLive {
   turnId?: string;
   /** The newest turn this thread showed has completed, failed or stopped. */
   ended: boolean;
   status: LiveStatus | null;
+  /** A summary started after this turn had ended (the Compact button); its end puts the ended state back. */
+  reopened?: true;
 }
 
 const UNKNOWN: TurnLive = { ended: false, status: null };
@@ -70,6 +72,12 @@ export function noteTurnEvent(event: RuntimeEvent): void {
     case "item.completed":
     case "request.opened":
       return put(threadId, { ...live, status: null });
+    case "context.summarizing": {
+      if (event.active) return put(threadId, { ...live, ended: false, status: { activity: "summarizing" }, ...(live.ended ? { reopened: true as const } : {}) });
+      const { reopened, ...rest } = live;
+      const stillSummarizing = rest.status?.activity === "summarizing";
+      return put(threadId, { ...rest, ended: rest.ended || (!!reopened && stillSummarizing), status: stillSummarizing ? null : rest.status });
+    }
     default:
       if (live !== current) put(threadId, live);
   }

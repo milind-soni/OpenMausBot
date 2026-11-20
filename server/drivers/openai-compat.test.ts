@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordEvents } from "../testing/events.ts";
 import { buildTurnContext, replaysNatively } from "../turn-context.ts";
@@ -155,6 +159,42 @@ describe("OpenAICompatDriver", () => {
     await vi.waitFor(() => expect(inst.models.options.map((option) => option.id)).toEqual(["gemini-2.5-pro", "gemini-2.5-flash"]));
     expect(fetchMock).toHaveBeenCalledWith("https://generativelanguage.googleapis.com/v1beta/openai/models", expect.anything());
     await inst.dispose();
+  });
+
+  it("sends an attached video to Gemini as the clip itself, and to no other server", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-gemini-video-"));
+    const clip = join(dir, "clip.mp4");
+    writeFileSync(clip, Buffer.from("00000018667479706d703432", "hex"));
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return Response.json({ data: [{ id: "models/gemini-2.5-flash" }] });
+      bodies.push(String(init?.body));
+      return new Response('data: {"choices":[{"index":0,"delta":{"content":"seen"},"finish_reason":"stop"}]}\n\n', { headers: { "content-type": "text/event-stream" } });
+    }));
+    const gemini = await OpenAICompatDriver.create({
+      instanceId: "gemini-video", displayName: "Google Gemini", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://generativelanguage.googleapis.com/v1beta/openai", key: "gemini-fixture" }),
+      environment: {},
+    });
+    const proxy = await OpenAICompatDriver.create({
+      instanceId: "proxy-video", displayName: "Proxy", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://llm.example.com/v1", key: "sk-fixture" }), environment: {},
+    });
+    try {
+      expect(gemini.adapter.capabilities.nativeVideoBytes).toBeGreaterThan(0);
+      expect(proxy.adapter.capabilities.nativeVideoBytes).toBeUndefined();
+      const recorder = recordEvents(gemini.adapter);
+      await gemini.adapter.sendTurn({ threadId: "video", text: "What happens in this clip?", model: "gemini-2.5-flash",
+        videos: [{ path: clip, mime: "video/mp4", bytes: 12 }] });
+      await recorder.until((event) => event.type === "turn.completed");
+      recorder.stop();
+      const content = JSON.parse(bodies[0]!).messages.at(-1).content;
+      expect(content).toContainEqual({ type: "image_url", image_url: { url: `data:video/mp4;base64,${readFileSync(clip).toString("base64")}` } });
+    } finally {
+      await gemini.dispose();
+      await proxy.dispose();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("keeps other servers' model IDs as they list them", async () => {

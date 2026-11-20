@@ -145,6 +145,14 @@ describe("configuration boundaries", () => {
     expect(() => parseConfigPatch({ tts: { fishModel: "s1" } })).toThrow("fishModel");
   });
 
+  it("keeps how the person is heard and the language they speak, and refuses anything else", () => {
+    expect(parseConfigPatch({ tts: { hearWith: "elevenlabs", hearLanguage: " ES " } }).tts).toEqual({ hearWith: "elevenlabs", hearLanguage: "es" });
+    expect(parseConfigPatch({ tts: { hearWith: "device", hearLanguage: "" } }).tts).toEqual({ hearWith: "device", hearLanguage: "" });
+    expect(parseStoredConfig({ tts: { key: "el-own" } }).tts).toEqual({ key: "el-own" });
+    expect(() => parseConfigPatch({ tts: { hearWith: "fish" } })).toThrow("hearWith");
+    expect(() => parseConfigPatch({ tts: { hearLanguage: "english" } })).toThrow("hearLanguage");
+  });
+
   it("defaults to what each host holds, and a saved number wins except over a plan's limit", () => {
     const GB = 1024 ** 3;
     const desktop = (gb: number) => ({ memoryGate: false, totalBytes: gb * GB, oneThreadPerBot: false });

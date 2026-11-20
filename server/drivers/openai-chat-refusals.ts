@@ -104,3 +104,16 @@ export function completionError(json: ProviderBody, label: string): ChatProtocol
   const refusal = toolCallRefusal(json.error);
   return refusal ? new RejectedToolCallError(text, refusal) : new ChatProtocolError(text);
 }
+
+/** The data of an SSE `data:` line, or undefined for any other line. llama.cpp before b7200 (seen on b6500) refuses a
+ * streamed request with HTTP 200 and an `error:` event holding the bare error: that throws what `failure` makes of it. */
+export function sseData(line: string, failure: (status: number, body: string) => Error): string | undefined {
+  if (line.startsWith("error:")) {
+    const event = line.slice("error:".length).trim();
+    let error: Record<string, unknown> | undefined;
+    try { error = object(JSON.parse(event)); } catch { error = undefined; }
+    throw typeof error?.code === "number" ? failure(error.code, JSON.stringify({ error }))
+      : new ChatProtocolError(`provider returned a streaming error: ${event.slice(0, 200)}`);
+  }
+  return line.startsWith("data:") ? line.slice("data:".length).trim() : undefined;
+}
