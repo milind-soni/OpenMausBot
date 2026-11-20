@@ -68,7 +68,7 @@ export function keepBotNavigation(previous: Bot | undefined, incoming: Bot, pres
     awaitingThreadSnapshot: previous.awaitingThreadSnapshot,
     messages: sameOpenHandoff ? reconcileTranscript(previous.messages, incoming.messages) : previous.messages,
     hasMore: sameOpenHandoff ? Boolean(previous.hasMore || incoming.hasMore) : previous.hasMore,
-    activeLeafId: sameOpenHandoff ? incoming.activeLeafId ?? previous.activeLeafId : previous.activeLeafId,
+    activeLeafId: sameOpenHandoff ? (incoming.activeLeafId === undefined ? previous.activeLeafId : incoming.activeLeafId) : previous.activeLeafId,
     pinnedMessageId: previous.pinnedMessageId,
   };
 }

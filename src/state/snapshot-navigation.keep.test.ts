@@ -53,6 +53,24 @@ describe("a reconnect snapshot must not replace a hand-off the person is reading
     expect(kept.messages.map(message => message.id)).toEqual(["work"]);
   });
 
+  it("clears the open branch when the same hand-off snapshot sets activeLeafId to null", () => {
+    const previous = fixture("work", true);
+    previous.activeLeafId = "work";
+    const incoming = fixture("work", true);
+    incoming.activeLeafId = null;
+    incoming.messages = [line("work"), line("tail")];
+    const kept = keepBotNavigation(previous, incoming, false);
+    expect(kept.activeLeafId).toBeNull();
+    expect(kept.messages.map(message => message.id)).toEqual(["work", "tail"]);
+  });
+
+  it("keeps the open branch when the same hand-off snapshot omits activeLeafId", () => {
+    const previous = fixture("work", true);
+    previous.activeLeafId = "work";
+    const kept = keepBotNavigation(previous, fixture("work", true), false);
+    expect(kept.activeLeafId).toBe("work");
+  });
+
   it("follows the server when that hand-off no longer exists", () => {
     const incoming = fixture("main");
     incoming.tasks = [{ threadId: "main", title: "Main", createdAt: 1 }];
