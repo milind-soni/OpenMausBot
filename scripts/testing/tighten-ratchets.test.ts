@@ -37,6 +37,8 @@ describe("tighten-ratchets", () => {
 
   it("counts useStore() calls but not its definition, and lowers or drops a file's number, never raising one", () => {
     expect(storeReadsIn("export function useStore() {}\nconst a = useStore();\nconst b = useStore().state;\nuseStoreRef();")).toBe(2);
+    expect(storeReadsIn("// useStore() in a comment\n/* and useStore() here */\nconst url = \"https://x\"; const a = useStore();")).toBe(1);
+    expect(storeReadsIn("import { useStore as readStore } from \"./store\";\nconst a = readStore();\nconst b = readStore().state;")).toBe(2);
     const reads = `const READS: Record<string, number> = {
   "src/a.tsx": 3,
   "src/b.tsx": 2,

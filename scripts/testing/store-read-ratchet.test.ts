@@ -199,7 +199,7 @@ const READS: Record<string, number> = {
   "src/hooks/use-usage-snapshot.ts": 1,
   "src/lib/app-load.ts": 1,
   "src/lib/connect-ai-events.ts": 1,
-  "src/state/store-ref.ts": 2,
+  "src/state/store-ref.ts": 1,
   "src/state/store-select.ts": 1,
 };
 

@@ -51,9 +51,12 @@ export function tightenRoutes(text, timesOf) {
   return { text: text.slice(0, open) + lines.join("\n") + text.slice(close), changes };
 }
 
-/** How many times a source file calls useStore(), its definition aside. */
+/** How many times a source file calls useStore(), under its own name or one it is imported as, its definition and
+ * comments aside. */
 export function storeReadsIn(source) {
-  return source.match(/(?<!function )\buseStore\(\)/g)?.length ?? 0;
+  const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
+  const names = ["useStore", ...[...code.matchAll(/\buseStore as (\w+)/g)].map((match) => match[1])];
+  return names.reduce((sum, name) => sum + (code.match(new RegExp(`(?<!function )\\b${name}\\(\\)`, "g"))?.length ?? 0), 0);
 }
 
 /** Each file keeps the lower of its number and its calls now; a file gone or with none left leaves the list. */
