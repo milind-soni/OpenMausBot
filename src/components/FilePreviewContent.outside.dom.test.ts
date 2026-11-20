@@ -3,7 +3,8 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { MessageAttachmentGallery } from "./AttachmentGallery";
+import { collectMessageFiles } from "./AttachmentGallery";
+import { AttachedFileChip } from "./AttachmentPreview";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { FilePreviewContent } from "./HtmlFilePreview";
 
@@ -57,6 +58,7 @@ describe("a previewed file outside the chat's folders", () => {
       await show(kind, extension, outside);
       expect(buttons()).toEqual(["Show in folder"]);
       expect(host.textContent).not.toContain("Find this file at this path");
+      expect(host.querySelector("code")?.textContent).toBe(`${onDisk}${extension}`);
       await act(async () => host.querySelector("button")!.click());
       expect(revealInFolder).toHaveBeenCalledWith(`${onDisk}${extension}`);
     });
@@ -99,8 +101,9 @@ describe("a linked file outside the chat's folders, opened from the chat", () =>
     expect(opened.revealed).toEqual([`${onDisk}.csv`]);
   });
 
-  it("shows a file:// link from the files under a reply in its folder by its real path", async () => {
-    const opened = await openFrom(createElement(MessageAttachmentGallery, { text: `Report: [Q3](file://${linked}.md)`, message }), "Preview: Q3 report.md");
+  it("shows a file:// link listed as a file chip, as the Library lists a message's links, in its folder by its real path", async () => {
+    const [file] = collectMessageFiles(`Report: [Q3](file://${linked}.md)`);
+    const opened = await openFrom(createElement(AttachedFileChip, { file: file!, linked: true, message }), "Preview: Q3 report.md");
     expect(opened.asked).toBe(`file://${linked}.md`);
     expect(opened.revealed).toEqual([`${onDisk}.md`]);
   });

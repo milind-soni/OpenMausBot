@@ -448,7 +448,7 @@ export function OutsideWorkspaceFile({ filePath, standalone = false }: { filePat
         type="button"
         onClick={() => void show()}
         title={filePath}
-        className={`${standalone ? "min-h-8 " : ""}inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent`}
+        className={`${standalone ? "min-h-8 touch:min-h-10 " : ""}inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent`}
       >
         <FolderOpen size={12} className="shrink-0" aria-hidden="true" />
         {t("attach.showInFolder")}
