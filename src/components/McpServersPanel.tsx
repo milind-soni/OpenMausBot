@@ -122,7 +122,6 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | McpMessage | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [notice, setNotice] = useState<(McpMessage & { stateKey?: LocaleKey }) | null>(null);
   const [probe, setProbe] = useState<Record<string, ProbeResult>>({});
   const [signingIn, setSigningIn] = useState<string | null>(null);
@@ -139,6 +138,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
   /** A failed card action belongs to that card alone: the cards share one instance, and `error` shows on every one. */
   const [cardFailure, setCardFailure] = useState<{ id: HostedMcpAppId; message: string } | null>(null);
   const [keys, setKeys] = useState<Partial<Record<HostedMcpAppId, string>>>({});
+  const [loadError, setLoadError] = useState<string | null>(null);
   const loadGeneration = useRef(0);
   const mounted = useRef(true);
   const hostedOf = (server: McpServerListing) => isRemoteMcpListing(server) ? hostedMcpApp(server) : undefined;
