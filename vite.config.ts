@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { ClientRequest, IncomingMessage } from "node:http";
+import { isIPv4 } from "node:net";
 import { fileURLToPath } from "node:url";
 import { loadEnv, type Connect, type Plugin, type ProxyOptions, type ServerOptions } from "vite";
 import { configDefaults, defineConfig } from "vitest/config";
@@ -8,6 +8,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { DurationSequencer } from "./scripts/testing/duration-sequencer.ts";
 import { hostE2eOnly, portableE2eFiles } from "./scripts/testing/host-e2e.ts";
 import { hostTimeout } from "./server/testing/host-timeout.ts";
+import { networkPeer } from "./server/request-auth.ts";
 
 // The About dialog's version, inlined at build time: the preload bridge is
 // absent in dev.
@@ -47,7 +48,15 @@ const include = [
 
 function backendProxy(mode: string, port: number, env: Record<string, string>): ProxyOptions {
   if (mode !== "railway") {
-    return { target: `http://127.0.0.1:${env.OMB_PORT || process.env.OGB_PORT || 8799}` };
+    return {
+      target: `http://127.0.0.1:${env.OMB_PORT || process.env.OGB_PORT || 8799}`,
+      bypass(request) {
+        const address = request.socket.remoteAddress;
+        if (address && networkPeer(request)) {
+          request.headers["x-forwarded-for"] = address;
+        }
+      },
+    };
   }
   const target = URL.parse(env.OMB_RAILWAY_ORIGIN ?? "");
   if (!target || target.protocol !== "https:" || target.href !== `${target.origin}/`) {
@@ -56,16 +65,13 @@ function backendProxy(mode: string, port: number, env: Record<string, string>): 
   return {
     target: target.origin,
     changeOrigin: true,
-    configure(server) {
-      // Keep the production same-origin check effective for requests from any other page.
-      const forwardLocalOrigin = (outgoing: ClientRequest, request: IncomingMessage) => {
-        const host = `127.0.0.1:${port}`;
-        if (request.headers.host === host && request.headers.origin === `http://${host}`) {
-          outgoing.setHeader("origin", target.origin);
-        }
-      };
-      server.on("proxyReq", forwardLocalOrigin);
-      server.on("proxyReqWs", forwardLocalOrigin);
+    bypass(request) {
+      const host = request.headers.host;
+      if (request.headers.origin !== `http://${host}`) return;
+      const address = request.socket.localAddress;
+      if (host === `127.0.0.1:${port}` || (address && isIPv4(address) && host === `${address}:${port}`)) {
+        request.headers.origin = target.origin;
+      }
     },
   };
 }
@@ -75,9 +81,7 @@ function devServer(mode: string): ServerOptions {
   const port = Number(env.OMB_UI_PORT) || (mode === "railway" ? 5200 : 5199);
   const proxy = backendProxy(mode, port, env);
   return {
-    // IPv4 explicitly — a bare ::1 bind makes localhost a coin-flip for
-    // clients that resolve IPv4 first
-    host: "127.0.0.1",
+    host: "0.0.0.0",
     port,
     strictPort: mode === "railway",
     // packager output lands inside the repo — its HTML files must never

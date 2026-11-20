@@ -10,7 +10,7 @@ function Shell({ phone }: { phone: boolean }) {
   return createElement("textarea");
 }
 
-it("follows the visible keyboard area and restores the shell on blur or keyboard dismissal", () => {
+it("follows the visible keyboard area and restores the shell after keyboard dismissal", () => {
   const viewport = Object.assign(new EventTarget(), { height: 800, offsetTop: 0, scale: 1 });
   vi.stubGlobal("visualViewport", viewport);
   vi.stubGlobal("innerHeight", 800);
@@ -33,14 +33,19 @@ it("follows the visible keyboard area and restores the shell on blur or keyboard
     expect(host.style.getPropertyValue("--phone-top")).toBe("90px");
     expect(host.hasAttribute("data-phone-keyboard")).toBe(true);
     resize(800, 0);
-    expect(host.style.getPropertyValue("--phone-height")).toBe("");
+    expect(host.style.getPropertyValue("--phone-height")).toBe("800px");
     expect(host.hasAttribute("data-phone-keyboard")).toBe(false);
     resize(430, 70);
     input.blur();
+    viewport.offsetTop = 75;
+    viewport.dispatchEvent(new Event("scroll"));
     update(0);
-    expect(host.style.getPropertyValue("--phone-top")).toBe("");
+    expect(host.style.getPropertyValue("--phone-top")).toBe("75px");
+    expect(host.style.getPropertyValue("--phone-height")).toBe("430px");
+    expect(host.hasAttribute("data-phone-keyboard")).toBe(true);
+    resize(800, 0);
+    expect(host.style.getPropertyValue("--phone-top")).toBe("0px");
     expect(host.hasAttribute("data-phone-keyboard")).toBe(false);
-    input.focus();
     viewport.scale = 2;
     resize(360, 40);
     expect(host.style.getPropertyValue("--phone-height")).toBe("");

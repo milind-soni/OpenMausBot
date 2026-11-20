@@ -694,10 +694,13 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const visible = useVisibleMessages(bot);
   const last = lastNonReceipt(visible);
   const highlight = selected && !props.phoneHome;
+  const phoneRow = props.phoneHome && !iconOnly;
+  const previewSize = phoneRow ? "text-[14px] leading-5" : "text-[13px] leading-[18px]";
   const rowClass = cn(
     "flex w-full items-center rounded-xl text-left transition-colors duration-150", SIMPLE_ROW_FOCUS,
     iconOnly ? "h-[54px] justify-center" : cn("gap-2 rounded-[8px] py-2 pe-2 md:h-[54px] md:py-0", "ps-2"),
     !iconOnly && "max-md:rounded-2xl max-md:py-2.5",
+    phoneRow && "max-md:gap-2.5 max-md:py-3",
     sidebarRowTone(highlight),
     !iconOnly && rowSurface(highlight),
   );
@@ -711,7 +714,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         <BotAvatar
           bot={bot}
           state={stateForBot(bot)}
-          size={iconOnly ? 36 : 42}
+          size={iconOnly ? 36 : phoneRow ? 46 : 42}
           animated={avatarHovered}
         />
         {/* Bottom-left, clear of the status dots on the right and of the row's hover actions. */}
@@ -746,7 +749,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       </span>
       <div className={cn("min-w-0 flex-1", iconOnly && "hidden")}>
         <div className={cn("flex items-baseline justify-between gap-2", !iconOnly && "pe-7 group-hover:pe-[3.25rem] group-focus-within:pe-[3.25rem] touch:pe-[3.25rem] max-md:touch:pe-7")}>
-          <span className="flex min-w-0 grow items-center gap-1.5 truncate text-ink text-[14px] font-medium leading-5">
+          <span className={cn("flex min-w-0 grow items-center gap-1.5 truncate text-ink", phoneRow ? "text-[15px]" : "text-[14px]", "font-medium leading-5")}>
             <RenameTitle
               key={iconOnly ? "icons" : "expanded"}
               value={bot.name}
@@ -763,7 +766,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
               }}
               onEditingChange={setRenaming}
               className="truncate"
-              inputClassName="w-full rounded bg-inset px-1 py-0.5 text-[14px] font-medium"
+              inputClassName="w-full rounded bg-inset px-1 py-0.5 text-inherit font-medium"
             />
             {onLiveCall && !iconOnly && !renaming && (
               <Phone className="size-3 shrink-0 text-success" role="img" aria-label={t("call.live.badge")} data-testid="live-call-badge">
@@ -781,12 +784,12 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         </div>
         <div className="flex items-center justify-between gap-2">
           {deleting ? (
-            <span role="status" className="flex min-w-0 items-center gap-1.5 truncate text-[13px] leading-[18px] text-ink-secondary">
+            <span role="status" className={cn("flex min-w-0 items-center gap-1.5 truncate text-ink-secondary", previewSize)}>
               <Loader2 size={12} className="shrink-0 animate-spin" />
               {t("sidebar.bot.deletingRow")}
             </span>
           ) : (
-            <span className={cn("flex min-w-0 items-center gap-1.5 truncate text-[13px] leading-[18px]", waiting ? "text-warning" : "text-ink-secondary")}>
+            <span className={cn("flex min-w-0 items-center gap-1.5 truncate", previewSize, waiting ? "text-warning" : "text-ink-secondary")}>
               {working ? (
                 <SidebarWorkingStep bot={bot} last={last} />
               ) : (

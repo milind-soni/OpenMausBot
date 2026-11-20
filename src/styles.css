@@ -1320,6 +1320,15 @@ body,
   padding-bottom: 0;
 }
 
+@media (display-mode: browser) {
+  #root[data-phone-viewport]:has([data-tour="composer"]) {
+    padding-bottom: 0;
+  }
+}
+
+#root[data-phone-viewport]:not([data-phone-keyboard]) :is([data-sidebar-phone-bar], [data-composer-footer]) {
+  padding-bottom: max(0px, calc(0.75rem - env(safe-area-inset-bottom, 0px)));
+}
 
 /* ────────────────────────────────────────────────────────────────────────
    FONTS

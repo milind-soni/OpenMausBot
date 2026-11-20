@@ -699,7 +699,7 @@ export function Composer({
   );
 
   return (
-    <div className="pointer-events-none relative px-5 pb-3 max-md:px-3 [[data-phone-keyboard]_&]:pb-0">
+    <div data-composer-footer className="pointer-events-none relative px-5 pb-3 max-md:px-3 [[data-phone-keyboard]_&]:pb-0">
       {speechError && (
         <div className="pointer-events-auto mb-2 w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
           {speechError}
@@ -788,7 +788,7 @@ export function Composer({
             data-composer-backdrop
             className={cn("pointer-events-none absolute -left-5 -right-5 bg-app", "-bottom-3 top-1/2")}
           />
-        <div ref={shellRef} data-tour="composer" data-look="composer" className={cn("@container/composer relative z-[1]", singleRow ? "flex min-w-0 items-center gap-2 pb-1" : cn("rounded-2xl px-2 py-1.5", ELEVATED_FLOAT))}>
+        <div ref={shellRef} data-tour="composer" data-look="composer" className={cn("@container/composer relative z-[1]", singleRow ? "flex min-w-0 items-center gap-2 pb-1 [[data-phone-keyboard]_&]:pb-0" : cn("rounded-2xl px-2 py-1.5", ELEVATED_FLOAT))}>
         {singleRow && toolsMenu}
         <div className={singleRow ? cn("min-w-0 flex-1 rounded-[26px] px-3 py-1.5 [--composer-reply-gap:6px]", ELEVATED_FLOAT) : "contents"}>
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
