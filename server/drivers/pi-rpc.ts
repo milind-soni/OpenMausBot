@@ -128,3 +128,18 @@ export function readPiPromptImages(turn: SendTurnInput): PiPromptImage[] {
     mimeType: image.mime,
   }));
 }
+
+/** Native logs go into bug reports: keep the RPC shape and size, never image bytes. */
+export function piNativeLogMessage(message: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(message.images)) return message;
+  return {
+    ...message,
+    images: message.images.map((image) => {
+      if (!image || typeof image !== "object") return image;
+      const value = image as Record<string, unknown>;
+      return typeof value.data === "string"
+        ? { ...value, data: `[image data: ${value.data.length} base64 chars]` }
+        : value;
+    }),
+  };
+}

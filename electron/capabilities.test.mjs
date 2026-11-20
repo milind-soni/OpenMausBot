@@ -7,6 +7,7 @@ const {
   linuxLocalControlSupport,
   linuxSession,
   localComputerReady,
+  macDriverUnsupported,
   nativeDesktopActions,
 } = require("./capabilities.cjs");
 const readyConnection = (mode = "embedded") => ({
@@ -359,6 +360,25 @@ describe("desktop capabilities", () => {
       support: "unsupported",
       session: "wayland",
       compositor: "gnome-mutter",
+    });
+  });
+});
+
+describe("Mac driver support", () => {
+  it("names macOS 12 and older as too old for the driver, before it is loaded", () => {
+    const tooOld = { reasonCode: "macos-version-unsupported", reason: "Local desktop control needs macOS 13 Ventura or later." };
+    expect(macDriverUnsupported("darwin", "21.6.0")).toEqual(tooOld);
+    expect(macDriverUnsupported("darwin", "20.6.0")).toEqual(tooOld);
+    expect(macDriverUnsupported("darwin", "22.1.0")).toBeNull();
+    expect(macDriverUnsupported("darwin", "25.0.0")).toBeNull();
+    expect(macDriverUnsupported("win32", "10.0.19045")).toBeNull();
+    expect(macDriverUnsupported("darwin", "")).toBeNull();
+  });
+
+  it("keeps the too-old code for the page", () => {
+    const localConnection = { mode: "unavailable", ...macDriverUnsupported("darwin", "21.6.0") };
+    expect(desktopCapabilities({ platform: "darwin", localConnection }).localComputer).toMatchObject({
+      available: false, reasonCode: "macos-version-unsupported", message: "Local desktop control needs macOS 13 Ventura or later.",
     });
   });
 });

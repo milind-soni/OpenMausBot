@@ -1,11 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CALL_MODE_KEY, CALL_MODES, callModeHint, effectiveCallMode, liveDisclosure, liveKeyFormKey, parseCallMode } from "./call-mode";
+import { cacheDesktopCapabilities, initialDesktopCapabilities } from "./desktop";
 import { t } from "./i18n";
 import { localeChoices, locales } from "@/locales";
+import type { ConfigStatus } from "@/state/store";
 
 describe("call mode", () => {
   afterEach(() => {
+    cacheDesktopCapabilities(initialDesktopCapabilities());
     vi.unstubAllGlobals();
     vi.resetModules();
   });
@@ -21,6 +24,16 @@ describe("call mode", () => {
     const live = callModeHint("live");
     expect(live).toContain("A Live call sends your voice to OpenAI, along with the chat's recent messages, the bot's answers and the details of any approval it asks for. The OpenAI key stays on your computer.");
     expect(callModeHint("turns")).toBe("You talk, then the bot answers in its own voice. Listening stays on this computer.");
+  });
+
+  it("says the voice leaves this computer in Take turns once the person picked ElevenLabs to hear them", () => {
+    const chosen = { tts: { hearWith: "elevenlabs" }, savedKeys: { ttsKey: { configured: true } } } as unknown as ConfigStatus;
+    const dictation = { available: true, engine: "apple-speech", onDevice: true } as const;
+    cacheDesktopCapabilities({ ...initialDesktopCapabilities(), dictation });
+    expect(callModeHint("turns", { config: chosen })).toBe("You talk, then the bot answers in its own voice. ElevenLabs turns what you say into text, so your voice goes there.");
+    expect(callModeHint("turns", { config: { tts: {} } as unknown as ConfigStatus })).toBe(t("call.mode.turnsHint"));
+    cacheDesktopCapabilities({ ...initialDesktopCapabilities(), dictation: { ...dictation, available: false } });
+    expect(callModeHint("turns", { config: chosen })).toBe(t("call.mode.turnsHint"));
   });
 
   it("says the OpenAI key stays on the Cloud when the chat is on the person's Cloud", () => {

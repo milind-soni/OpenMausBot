@@ -27,6 +27,7 @@ interface QueueEntry {
     sendId?: string;
     dataContext?: Message["dataContext"];
     reason?: SteerQueueReason;
+    blockedBy?: "images";
     /** Queued by a bot running unattended: the drained turn inherits it (a queue is a delay, not a person at the keyboard). */
     unattended?: boolean;
     peerAsk?: Message["peerAsk"];
@@ -109,7 +110,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number; mentions?: string[]; aheadOfOthers?: string } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; blockedBy?: "images"; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number; mentions?: string[]; aheadOfOthers?: string } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -122,6 +123,7 @@ export function queueSteeredMessage(
     sendId: options.sendId,
     dataContext: options.dataContext,
     reason: options.reason,
+    ...(options.blockedBy ? { blockedBy: options.blockedBy } : {}),
     unattended: options.unattended,
     peerAsk: options.peerAsk,
     ...(options.origin ? { origin: options.origin } : {}),
@@ -267,11 +269,11 @@ export function queuedSteeredMessage(
   botId: string,
   threadId: string,
   sendId: string,
-): { id: string; text: string; replyToId?: string; reason?: SteerQueueReason } | null {
+): { id: string; text: string; replyToId?: string; reason?: SteerQueueReason; blockedBy?: "images" } | null {
   const entry = queues.get(threadId);
   if (!entry || entry.botId !== botId) return null;
   const item = entry.items.find((candidate) => candidate.sendId === sendId);
-  return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId, ...(item.reason ? { reason: item.reason } : {}) } : null;
+  return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId, ...(item.reason ? { reason: item.reason } : {}), ...(item.blockedBy ? { blockedBy: item.blockedBy } : {}) } : null;
 }
 
 /** Whose waiting line this is, or null when nothing waits under that id. */

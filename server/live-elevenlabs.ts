@@ -12,9 +12,16 @@ const REQUEST_TIMEOUT_MS = 20_000;
 /** A signed URL is good for about 15 minutes; the client connects at once. */
 const CONNECT_WITHIN_MS = 60_000;
 const AGENT_ID = /^[\w-]{1,128}$/;
+/** An ElevenLabs voice id: the voice a bot speaks with in chat, which its Live calls use too. Any other saved voice is not one. */
+const VOICE_ID = /^[A-Za-z0-9]{20}$/;
 /** The agent's audio both ways: 16 kHz 16-bit PCM, as the client sends and plays it. */
 const AUDIO_FORMAT = "pcm_16000";
 const UNEXPECTED = "ElevenLabs returned an unexpected answer. Try the call again.";
+/** Without the prompt override ElevenLabs refuses the prompt each conversation sends, and without the voice override a bot's
+ * own voice. With auth on, a conversation needs a signed URL, which only the harness can get with the key: knowing the agent
+ * id is not enough to spend the person's credits. Sent whole on every change, so an update that replaces these settings
+ * instead of merging them keeps all three. */
+const AGENT_PLATFORM_SETTINGS = { overrides: { conversation_config_override: { agent: { prompt: { prompt: true } }, tts: { voice_id: true } } }, auth: { enable_auth: true } };
 /** What ElevenLabs sends the client. A list replaces ElevenLabs' defaults, so it names every event the client reads, with
  * `client_tool_call` so `delegate` reaches the client. */
 const CLIENT_EVENTS = [
@@ -35,11 +42,11 @@ export function usableElevenLabsAgent(live: LiveConfig | undefined, key: string)
   return AGENT_ID.test(id) && key.trim() !== "" && live?.elevenlabsAgentFor === fishKeyPrint(key) ? id : null;
 }
 
-async function elevenLabsRequest(fetchImpl: typeof fetch, key: string, url: string, body?: unknown): Promise<Record<string, unknown>> {
+async function elevenLabsRequest(fetchImpl: typeof fetch, key: string, url: string, body?: unknown, method: "GET" | "POST" | "PATCH" = body === undefined ? "GET" : "POST"): Promise<Record<string, unknown>> {
   let response: Response;
   try {
     response = await fetchImpl(url, {
-      method: body === undefined ? "GET" : "POST",
+      method,
       headers: { "xi-api-key": key.trim(), ...(body === undefined ? {} : { "content-type": "application/json" }) },
       redirect: "error",
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -81,9 +88,7 @@ export async function setUpElevenLabsAgent(key: string, endpoint: LiveEndpoint, 
         tts: { agent_output_audio_format: AUDIO_FORMAT },
         conversation: { client_events: CLIENT_EVENTS, max_duration_seconds: CALL_AT_MOST_SECONDS },
       },
-      // Without the override ElevenLabs refuses the prompt each conversation sends. With auth on, a conversation needs a
-      // signed URL, which only the harness can get with the key: knowing the agent id is not enough to spend the person's credits.
-      platform_settings: { overrides: { conversation_config_override: { agent: { prompt: { prompt: true } } } }, auth: { enable_auth: true } },
+      platform_settings: AGENT_PLATFORM_SETTINGS,
     });
     const agentId = typeof agent.agent_id === "string" && AGENT_ID.test(agent.agent_id) ? agent.agent_id : "";
     if (!agentId) throw new LiveSessionError(UNEXPECTED, 502);
@@ -93,6 +98,23 @@ export async function setUpElevenLabsAgent(key: string, endpoint: LiveEndpoint, 
     await fetchImpl(`${endpoint.apiBase}/tools/${encodeURIComponent(toolId)}`, { method: "DELETE", headers: { "xi-api-key": key.trim() }, redirect: "error", signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) })
       .then((response) => response.body?.cancel(), () => undefined).catch(() => undefined);
     throw error;
+  }
+}
+
+/** Agents set up before bots had their own call voice refuse a voice in a conversation; this lets the agent take one. A key that
+ * may not change agents leaves the agent as it is: the call then speaks in the agent's voice. An agent gone from the account
+ * still fails, so the caller sets it up again. */
+async function allowVoiceOverride(fetchImpl: typeof fetch, key: string, apiBase: string, agentId: string): Promise<boolean> {
+  const url = `${apiBase}/agents/${encodeURIComponent(agentId)}`;
+  try {
+    const agent = await elevenLabsRequest(fetchImpl, key, url);
+    const settings = agent.platform_settings as { overrides?: { conversation_config_override?: { tts?: { voice_id?: unknown } } } } | undefined;
+    if (settings?.overrides?.conversation_config_override?.tts?.voice_id === true) return true;
+    await elevenLabsRequest(fetchImpl, key, url, { platform_settings: AGENT_PLATFORM_SETTINGS }, "PATCH");
+    return true;
+  } catch (error) {
+    if ((error as { elevenlabsStatus?: number }).elevenlabsStatus === 404) throw error;
+    return false;
   }
 }
 
@@ -111,7 +133,10 @@ export interface CreateElevenLabsSessionInput {
 export async function createElevenLabsLiveSession(input: CreateElevenLabsSessionInput): Promise<LiveElevenLabsSession> {
   const key = input.key.trim();
   if (!key) throw new LiveSessionError("Add an ElevenLabs API key in Settings → AI → Other services to use Live calls.", 409);
-  const answer = await elevenLabsRequest(input.fetchImpl ?? fetch, key, `${input.endpoint.apiBase}/conversation/get-signed-url?agent_id=${encodeURIComponent(input.endpoint.model)}`);
+  const fetchImpl = input.fetchImpl ?? fetch;
+  const saved = input.bot.voice?.trim() ?? "";
+  const voiceId = VOICE_ID.test(saved) && await allowVoiceOverride(fetchImpl, key, input.endpoint.apiBase, input.endpoint.model) ? saved : "";
+  const answer = await elevenLabsRequest(fetchImpl, key, `${input.endpoint.apiBase}/conversation/get-signed-url?agent_id=${encodeURIComponent(input.endpoint.model)}`);
   const url = typeof answer.signed_url === "string" ? answer.signed_url : "";
   // ElevenLabs answers with a wss URL; only a loopback override may answer with a loopback ws one.
   const loopback = input.endpoint.apiBase.startsWith("http://127.0.0.1:");
@@ -120,6 +145,7 @@ export async function createElevenLabsLiveSession(input: CreateElevenLabsSession
     session_id: `elevenlabs_${randomBytes(12).toString("hex")}`,
     signed_url: url,
     instructions: fishInstructions(input.bot, input.history, { cloudHome: input.cloudHome }),
+    ...(voiceId ? { voice_id: voiceId } : {}),
     expires_at: new Date((input.now ?? Date.now)() + CONNECT_WITHIN_MS).toISOString(),
   };
 }

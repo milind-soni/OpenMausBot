@@ -134,6 +134,14 @@ describe("the Just me / Team switch at the top of a team's sidebar", () => {
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "scout", threadId: "ada-own" });
   });
 
+  it("lands on a regular bot left with a Show switch off, as the sidebar lists it", async () => {
+    setTeamSide("team");
+    sidebar(acme({ selectedId: "room-1", bots: [bot({ sidebarHidden: true }), MINE] }));
+    act(() => option("me")!.click());
+    await settle();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "scout", threadId: "ada-own" });
+  });
+
   it("moves no conversation while another screen is up, and does nothing for the side already chosen", async () => {
     sidebar(acme({ activeView: "routines" as never }));
     act(() => option("me")!.click());

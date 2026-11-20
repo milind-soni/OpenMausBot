@@ -117,6 +117,7 @@ const support: AcpSupport = {
       : {}),
   },
   images: true,
+  mediaLinks: true,
   spawnArgs: () => [],
   selectModel: { configId: "model" },
   modelVariants: true,

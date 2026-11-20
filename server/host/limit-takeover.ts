@@ -59,6 +59,8 @@ export interface LimitTakeoverDeps {
   blockedUntil(instanceId: string, model?: string): number | null;
   /** When this engine's limit resets, when that is known. */
   resetAt?(instanceId: string, model?: string): number | null;
+  /** Only the usage meter holds this engine, with no refusal of its own. */
+  meterOnly?(instanceId: string, model?: string): boolean;
   /** The backups the person chose for this bot, or for every bot. */
   chosen(botId: string): ModelSelection[];
   /** The backups a signed-out AI's turns go to, as for a turn its AI never started: the bot's own list, or the
@@ -188,10 +190,11 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     return engine.models.default === selection.model || engine.models.options.some((model) => model.id === selection.model) ? null : { why: "unknown-model" };
   };
 
-  /** The AIs that may carry on while `from` is limited or signed out, best first: for one model's limit the same AI's own
-   * default model, then the backups the person chose. No other AI is picked for them: with none of those usable the bot
-   * waits for the reset or a sign-in. `approval`: the thread's level, when known. `chosen`: the backups to weigh instead of
-   * the bot's and the installation's. `skipped`: each backup left out, and why. */
+  /** The AIs that may carry on while `from` is limited or signed out, best first: for one model's limit, when the person chose
+   * any backup, the same AI's own default model first, then the backups the person chose. A bot with no backup chosen gets
+   * none, and no other AI is picked for it: with none usable the bot waits for the reset or a sign-in. `approval`: the thread's
+   * level, when known. `chosen`: the backups to weigh instead of the bot's and the installation's. `skipped`: each backup
+   * left out, and why. */
   function weighBackups(botId: string, from: ModelSelection, scope: TakeoverScope = "engine", approval?: ApprovalMode, chosen?: readonly ModelSelection[]): { backups: ModelSelection[]; skipped: SkippedBackup[] } {
     const engines = deps.engines();
     const current = engines.find((engine) => engine.instanceId === from.instanceId);
@@ -210,8 +213,9 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
       if (why) left.push({ selection: pick, ...why });
       else out.push(pick);
     };
-    if (scope === "model" || scope === "credits") add({ instanceId: current.instanceId, model: current.models.default });
-    for (const selection of chosen ?? (scope === "signed-out" ? deps.signedOutChosen?.(botId) ?? deps.chosen(botId) : deps.chosen(botId))) add(selection);
+    const picked = chosen ?? deps.chosen(botId);
+    if ((scope === "model" || scope === "credits") && picked.length) add({ instanceId: current.instanceId, model: current.models.default });
+    for (const selection of chosen ?? (scope === "signed-out" ? deps.signedOutChosen?.(botId) ?? picked : picked)) add(selection);
     return { backups: out, skipped: left };
   }
 
@@ -251,7 +255,8 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
   /** A conversation of `botId` moved from `from` to `to` because `from` was limited or signed out; it goes back once
    * that ends. */
   const moved = (botId: string, threadId: string, from: ModelSelection, to: ModelSelection, resetsAt?: number, scope?: TakeoverScope): void => {
-    deps.record({ botId, threadId, from, to, resetsAt: resetsAt ?? null, at: now(), ...(scope === "signed-out" ? { why: "signed-out" as const } : {}) });
+    deps.record({ botId, threadId, from, to, resetsAt: resetsAt ?? null, at: now(), ...(scope === "signed-out" ? { why: "signed-out" as const } : {}),
+      ...(scope === "engine" && deps.meterOnly?.(from.instanceId, from.model) ? { meter: true as const } : {}) });
   };
 
   /** A turn on `selection` worked for this bot: its engine's next limit is a new stretch, and it is plainly signed in. */

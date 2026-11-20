@@ -116,6 +116,15 @@ describe("reads", () => {
     expect(JSON.parse(String(got.body.text))).toMatchObject({ id: "rooms.turnTimeoutMinutes", value: "30", allowed: "1 to 1440 minutes", change: "set applies at once, with Undo on the card" });
   });
 
+  it("names the per-bot connected apps switch as the bot panel does, so find reaches it by those words", async () => {
+    const { host, turn } = fixture();
+    const found = JSON.parse(String((await host.handle({ action: "find", query: "connected apps" }, turn)).body.text)) as Array<{ id: string }>;
+    expect(found.map((hit) => hit.id)).toContain("bots.settings");
+    const got = JSON.parse(String((await host.handle({ action: "get", id: "bots.settings" }, turn)).body.text)) as { help: string };
+    expect(got.help).toContain("connected apps");
+    expect(got.help).not.toContain("Composio apps");
+  });
+
   it("names real places only: find falls back to where a thing is, places lists them all", async () => {
     const { host, turn } = fixture();
     const owner = await host.handle({ action: "get", id: "phone.pairing" }, turn);
