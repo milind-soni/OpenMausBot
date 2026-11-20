@@ -36,6 +36,32 @@ function nextColumn(items: Element[], columns: number): number {
   return column;
 }
 
+/** Keeps the measurements current and the focused tile known while the window is on. */
+function watchGrid(grid: HTMLElement, scroller: HTMLElement, measure: () => void, onFocus: (slug: string | null) => void, ownCount: () => number) {
+  const resizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+  resizes?.observe(grid);
+  resizes?.observe(scroller);
+  const mutations = new MutationObserver(measure);
+  mutations.observe(grid, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
+  const ownTile = (target: EventTarget | null) => {
+    const children = Array.from(grid.children);
+    const own = children.slice(children.length - ownCount());
+    return own.find((child) => target instanceof Node && child.contains(target))?.getAttribute("data-app-tile") ?? null;
+  };
+  const onFocusIn = (event: FocusEvent) => onFocus(ownTile(event.target));
+  const onFocusOut = (event: FocusEvent) => {
+    if (event.relatedTarget !== null && ownTile(event.relatedTarget) === null) onFocus(null);
+  };
+  grid.addEventListener("focusin", onFocusIn);
+  grid.addEventListener("focusout", onFocusOut);
+  return () => {
+    resizes?.disconnect();
+    mutations.disconnect();
+    grid.removeEventListener("focusin", onFocusIn);
+    grid.removeEventListener("focusout", onFocusOut);
+  };
+}
+
 /**
  * Mounts only the grid rows of `cards` near the view, as the last items of the grid at `gridRef`, scrolled by
  * `scrollRef`. Columns, row gap and the place the first card lands are read from the laid-out grid, and full-width
@@ -67,6 +93,8 @@ export function useAppTileWindow<Card extends { slug: string }>(cards: readonly 
     gap: layout.gap,
     scrollMargin: layout.margin,
     initialRect: { width: 0, height: scrollRef.current?.offsetHeight ?? 0 },
+    // The virtualizer scrolls to this offset when it takes the scroller, and the list can turn on part way down.
+    initialOffset: () => scrollRef.current?.scrollTop ?? 0,
     rangeExtractor: (range) => {
       const shown = new Set(defaultRangeExtractor(range));
       for (const slug of [focused.current, keep]) {
@@ -116,40 +144,27 @@ export function useAppTileWindow<Card extends { slug: string }>(cards: readonly 
     for (const [row, height] of heights) if (height > 0) virtualizer.resizeItem(row, height);
   };
 
+  const watched = useRef<{ grid: HTMLElement; scroller: HTMLElement; stop: () => void } | null>(null);
   useLayoutEffect(() => {
     placed.current = pass;
     wasEnabled.current = enabled;
-    measure.current();
-  });
-
-  useLayoutEffect(() => {
     const grid = gridRef.current;
     const scroller = scrollRef.current;
-    if (!enabled || !grid || !scroller) return;
-    const run = () => measure.current();
-    const resizes = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(run);
-    resizes?.observe(grid);
-    resizes?.observe(scroller);
-    const mutations = new MutationObserver(run);
-    mutations.observe(grid, { childList: true, subtree: true, attributes: true, attributeFilter: ["class"] });
-    const ownTile = (target: EventTarget | null) => {
-      const children = Array.from(grid.children);
-      const own = children.slice(children.length - placed.current.length);
-      return own.find((child) => target instanceof Node && child.contains(target))?.getAttribute("data-app-tile") ?? null;
-    };
-    const onFocusIn = (event: FocusEvent) => { focused.current = ownTile(event.target); };
-    const onFocusOut = (event: FocusEvent) => {
-      if (event.relatedTarget !== null && ownTile(event.relatedTarget) === null) focused.current = null;
-    };
-    grid.addEventListener("focusin", onFocusIn);
-    grid.addEventListener("focusout", onFocusOut);
-    return () => {
-      resizes?.disconnect();
-      mutations.disconnect();
-      grid.removeEventListener("focusin", onFocusIn);
-      grid.removeEventListener("focusout", onFocusOut);
-    };
-  }, [enabled]);
+    const watch = enabled && grid && scroller ? { grid, scroller } : null;
+    if (watched.current && (watched.current.grid !== watch?.grid || watched.current.scroller !== watch?.scroller)) {
+      watched.current.stop();
+      watched.current = null;
+    }
+    if (watch && !watched.current) {
+      const stop = watchGrid(watch.grid, watch.scroller, () => measure.current(), (slug) => { focused.current = slug; }, () => placed.current.length);
+      watched.current = { ...watch, stop };
+    }
+    measure.current();
+  });
+  useLayoutEffect(() => () => {
+    watched.current?.stop();
+    watched.current = null;
+  }, []);
 
   const render = (renderCard: (card: Card) => ReactNode): ReactNode[] => {
     if (!enabled) {

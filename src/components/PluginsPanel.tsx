@@ -461,7 +461,7 @@ export function PluginsPanel() {
     disconnect: setDisconnecting,
     openBotApps: (botId) => { close(); openBotSettings(dispatch, "access", { botId, page: "apps" }); },
   });
-  const tileWindow = useAppTileWindow(allShown, allShown.length > APPS_PREVIEW_COUNT, aliasSlug);
+  const tileWindow = useAppTileWindow(allShown, filter !== "mcp" && allShown.length > APPS_PREVIEW_COUNT, aliasSlug);
   const pickCategory = (next: string | null) => {
     setCategory(next);
     setTab("marketplace");

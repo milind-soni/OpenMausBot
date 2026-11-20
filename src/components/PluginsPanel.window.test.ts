@@ -88,10 +88,13 @@ const source = { getState: () => fixture.state, subscribe: () => () => {}, dispa
 let host: HTMLDivElement;
 let root: Root;
 const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-const open = async () => {
-  root = createRoot(host);
+const draw = async () => {
   await act(async () => root.render(createElement(StoreSourceContext, { value: source }, createElement(PluginsPanel))));
   await flush();
+};
+const open = async () => {
+  root = createRoot(host);
+  await draw();
 };
 const scroller = () => host.querySelector<HTMLElement>(".overflow-y-auto")!;
 const list = () => host.querySelector<HTMLElement>('[data-apps-section="apps-grid-title"] .grid')!;
@@ -177,6 +180,20 @@ describe("a long app list", () => {
     expect(listHeight()).toBe(APPS * TILE);
   });
 
+  it("keeps the scroll where it is and mounts the rows in view when Show all opens the list part way down", async () => {
+    await open();
+    const writes: number[] = [];
+    let top = 30 * TILE;
+    Object.defineProperty(scroller(), "scrollTop", { configurable: true, get: () => top, set: (value: number) => { writes.push(value); top = value; } });
+    scroller().scrollTo = ((options: ScrollToOptions) => { writes.push(options.top ?? top); top = options.top ?? top; }) as HTMLElement["scrollTo"];
+    await showAll();
+    expect(writes.filter((value) => value !== 30 * TILE)).toEqual([]);
+    expect(listed()).toContain("app30");
+    expect(listed()).toContain("app40");
+    expect(listed()).not.toContain("app0");
+    expect(listHeight()).toBe(APPS * TILE);
+  });
+
   it("finds an app far down the list by search", async () => {
     await open();
     await type("Map 999");
@@ -224,9 +241,14 @@ describe("keyboard focus in a long app list", () => {
     expect(tiles[position + 1]?.getAttribute("data-app-tile")).toBe(`app${index + 1}`);
   });
 
-  it("keeps the focused tile mounted while the list scrolls far away", async () => {
+  it("keeps the focused tile mounted while the list scrolls far away, after the list was taken off the page and back", async () => {
     await open();
     await showAll();
+    fixture.state = { ...fixture.state, pluginsSurface: "mcp" };
+    await draw();
+    expect(host.querySelector('[data-apps-section="apps-grid-title"]')).toBeNull();
+    fixture.state = { ...fixture.state, pluginsSurface: "apps" };
+    await draw();
     const control = list().querySelector<HTMLButtonElement>('[data-app-tile="app2"] button')!;
     act(() => control.focus());
     await scrollTo(700 * TILE);
