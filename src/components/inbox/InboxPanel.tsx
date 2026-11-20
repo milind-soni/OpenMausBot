@@ -9,6 +9,7 @@ import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { closeInbox, markAllInboxRead, readInboxLine, readInboxRow, useInboxMarkingAll, useInboxPanel, useInboxView, widenInbox } from "@/state/inbox";
 import { sameJson } from "@/state/same-json";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useActiveLocale } from "@/lib/use-active-locale";
 import { InboxActive, inboxAttentionEntries, inboxOpenThread, readNewsThreads, unreadConversations } from "./InboxActive";
 import { attentionJumpAction, attentionUnpinAction } from "../SidebarBotActivity";
 import { InboxReading } from "./InboxReading";
@@ -24,6 +25,7 @@ import { roundButtonCls } from "../bot-panel/rows";
 export const InboxPanel = memo(function InboxPanel() {
   const view = useInboxView();
   const dispatch = useStoreDispatch();
+  useActiveLocale();
   const panel = useInboxPanel();
   const markingAll = useInboxMarkingAll();
   const phone = useMediaQuery(PHONE_LAYOUT);

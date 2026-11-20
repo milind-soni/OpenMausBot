@@ -5,7 +5,7 @@ import { CalendarSidebar } from "@/components/routines/CalendarSidebar";
 import type { CalendarCall } from "@/lib/calendar-calls";
 import { cn } from "@/lib/cn";
 import { botInDepartment } from "@/lib/department-filter";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import { addDays, calendarRangeLabel, projectCalls, projectedRoutineItems, scheduleAt, startOfDay, startOfWeek } from "@/lib/routine-calendar";
 import { resetMarkers, useEngineLimits, type ResetMarker } from "@/lib/limit-resets";
 import { automationsFrom, automationStatus } from "@/lib/automations";
@@ -154,7 +154,7 @@ export function AutomationsCalendar({ botFilter, department = "all", selectedAut
         {error && <button type="button" onClick={() => setError("")} className="w-full text-left text-[12px] text-danger">{error}</button>}
       </div>
       <div className="relative flex min-h-0 flex-1">
-        {!liveSelected && <div className="hidden shrink-0 @min-[1040px]/routines:block"><CalendarSidebar bots={visibleBots} anchor={anchor} onSelectDate={selectDate} /></div>}
+        {!liveSelected && <div className="hidden shrink-0 @min-[1040px]/routines:block"><CalendarSidebar bots={visibleBots} anchor={anchor} onSelectDate={selectDate} locale={activeLocale()} /></div>}
         <CalendarGrid anchor={rangeStart} days={days} items={items} bots={bots} groups={groups} selectedId={selectedId}
           onOpen={openItem}
           onCreate={(seed) => { setSelected(null); setQuick(seed); }}

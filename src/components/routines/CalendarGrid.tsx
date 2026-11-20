@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent,
 
 import { useStableCallback } from "@/hooks/use-stable-callback";
 import { cn } from "@/lib/cn";
-import { intlLocale, t } from "@/lib/i18n";
+import { activeLocale, intlLocale, t } from "@/lib/i18n";
 import type { ResetMarker } from "@/lib/limit-resets";
 import { addDays, CALENDAR_SLOT_MINUTES, formatGmtOffset, packCalendarCollisions, slotAt, startOfDay } from "@/lib/routine-calendar";
 import { dayName, niceDate, niceTime } from "@/lib/schedule-label";
@@ -135,7 +135,7 @@ export function CalendarGrid({
               {selected && <div className="pointer-events-none absolute inset-x-1 z-10 rounded-md border border-accent/70 bg-accent/20" style={{ top: ((new Date(selected.start).getHours() * 60 + new Date(selected.start).getMinutes()) / 60) * HOUR_HEIGHT, height: Math.max(16, ((selected.end - selected.start) / 3_600_000) * HOUR_HEIGHT) }} />}
               {preview && <div className="pointer-events-none absolute inset-x-1 z-20 rounded-md border border-accent/80 bg-accent/25 shadow-sm" style={{ top: ((new Date(preview.at).getHours() * 60 + new Date(preview.at).getMinutes()) / 60) * HOUR_HEIGHT, height: HOUR_HEIGHT / 2 }}><div className="px-2 py-1 text-[10px] font-medium text-accent">{niceTime(preview.at)}</div></div>}
               {markers.filter((marker) => startOfDay(marker.at) === start).map((marker) => <LimitResetMarker key={marker.engine} marker={marker} hourHeight={HOUR_HEIGHT} onDrop={onDropOnReset && ((drop) => onDropOnReset(drop, marker))} />)}
-              {dayItems.map((item) => <CalendarEventCard key={item.id} item={item} bots={bots} groups={groups} compact={days === 7} layout={collisionLayouts.get(item.id) ?? ONE_COLUMN} selected={item.id === selectedId} onOpen={openItem} onResize={resizeItem} />)}
+              {dayItems.map((item) => <CalendarEventCard key={item.id} item={item} bots={bots} groups={groups} compact={days === 7} layout={collisionLayouts.get(item.id) ?? ONE_COLUMN} selected={item.id === selectedId} onOpen={openItem} onResize={resizeItem} locale={activeLocale()} />)}
             </div>
           );
         })}

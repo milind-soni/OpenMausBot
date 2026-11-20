@@ -1,4 +1,5 @@
-import { memo, useEffect, useState, type ComponentType, type MemoExoticComponent, type ReactNode } from "react";
+import { createElement, memo, useEffect, useState, type ComponentType, type MemoExoticComponent, type ReactNode } from "react";
+import { useActiveLocale } from "@/lib/use-active-locale";
 import { createPortal } from "react-dom";
 import { t } from "@/lib/i18n";
 
@@ -45,9 +46,14 @@ export function lazyScreen<Props>(
   return Object.assign(Screen, { preload });
 }
 
-/** For a screen drawn only from its props and its own store selections: App drawing again passes it by. */
+/** For a screen drawn only from its props, its own store selections and the page's language: App drawing again passes
+ * it by. */
 function pureScreen<Props>(screen: LazyScreen<Props>): LazyScreen<Props> {
-  return Object.assign(memo(screen), { preload: screen.preload });
+  function PureScreen(props: Props) {
+    useActiveLocale();
+    return createElement(screen as ComponentType<Props & object>, props as Props & object);
+  }
+  return Object.assign(memo(PureScreen), { preload: screen.preload }) as LazyScreen<Props>;
 }
 
 function ScreenUnavailable() {

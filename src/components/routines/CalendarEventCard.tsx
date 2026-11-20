@@ -49,6 +49,8 @@ export const CalendarEventCard = memo(function CalendarEventCard({
   selected?: boolean;
   onOpen: (item: CalendarEventItem) => void;
   onResize: (item: CalendarEventItem, minutes: number) => void;
+  /** Drawn again in a new language. */
+  locale?: string;
 }) {
   const isCall = item.kind === "call";
   const routine = item.kind === "routine" ? item.routine : null;

@@ -11,6 +11,8 @@ export interface CalendarSidebarProps {
   bots: readonly BotApartFromTurns[];
   anchor: number;
   onSelectDate: (at: number) => void;
+  /** Drawn again in a new language. */
+  locale?: string;
 }
 
 export const CalendarSidebar = memo(function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarProps) {

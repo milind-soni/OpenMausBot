@@ -5,6 +5,7 @@ import { BotAvatar } from "./Avatar";
 import { api, openBot } from "@/state/store";
 import { useBotsApartFromTurns, useGroupsApartFromTurns, type BotApartFromTurns, type GroupApartFromTurns } from "@/state/apart-from-turns";
 import { useStoreRef } from "@/state/store-ref";
+import { useActiveLocale } from "@/lib/use-active-locale";
 import { rankByName } from "@/lib/palette-rank";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { cn } from "@/lib/cn";
@@ -25,6 +26,7 @@ export function openCommandPalette() {
 
 export const CommandPalette = memo(function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean) => void }) {
   const store = useStoreRef(), dispatch = store.dispatch, allBots = useBotsApartFromTurns(), groups = useGroupsApartFromTurns();
+  useActiveLocale();
   const showThreads = useShowThreads();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
