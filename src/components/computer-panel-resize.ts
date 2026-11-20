@@ -1,24 +1,37 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 const PANEL_WIDTH_KEY = "omb-computer-panel-width";
 export const PANEL_MIN_WIDTH = 360;
+/** The widest the panel gets when there is no chat beside it to measure. */
 export const PANEL_MAX_WIDTH = 960;
+/** The chat beside the panel never gets narrower than this. */
+export const CHAT_MIN_WIDTH = 360;
 const PANEL_DEFAULT_WIDTH = 400;
 const PANEL_RESIZE_STEP = 40;
 
 function readPanelWidth(): number {
   try {
     const stored = Number(localStorage.getItem(PANEL_WIDTH_KEY));
-    if (Number.isFinite(stored) && stored >= PANEL_MIN_WIDTH && stored <= PANEL_MAX_WIDTH) return stored;
+    if (Number.isFinite(stored) && stored >= PANEL_MIN_WIDTH) return stored;
   } catch {
   }
   return PANEL_DEFAULT_WIDTH;
 }
 
+/** The panel and the chat beside it share the room in the window's row, so the
+ * panel can take everything but the chat's minimum width. */
+function measureMaxWidth(panel: HTMLElement, chat: HTMLElement | null): number {
+  if (!chat) return PANEL_MAX_WIDTH;
+  return Math.max(PANEL_MIN_WIDTH, panel.offsetWidth + chat.offsetWidth - CHAT_MIN_WIDTH);
+}
+
 /** The computer panel's drag edge: a pointer drag or the arrow keys resize the
- * panel, and the width is remembered across opens. */
+ * panel up to the room the chat leaves, and the width is remembered across opens. */
 export function useComputerPanelResize() {
-  const [panelWidth, setPanelWidth] = useState(readPanelWidth);
+  const [chosenWidth, setChosenWidth] = useState(readPanelWidth);
+  const [maxWidth, setMaxWidth] = useState(PANEL_MAX_WIDTH);
+  const panelWidth = Math.min(chosenWidth, maxWidth);
+  const clamp = (width: number) => Math.min(maxWidth, Math.max(PANEL_MIN_WIDTH, width));
   const resizeFrom = useRef<{ x: number; width: number } | null>(null);
   const persistPanelWidth = (width: number) => {
     try {
@@ -32,32 +45,46 @@ export function useComputerPanelResize() {
   };
   const onResizeMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!resizeFrom.current) return;
-    const next = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, resizeFrom.current.width + (resizeFrom.current.x - event.clientX)));
-    setPanelWidth(next);
+    setChosenWidth(clamp(resizeFrom.current.width + (resizeFrom.current.x - event.clientX)));
   };
   const onResizeEnd = (event: PointerEvent<HTMLDivElement>) => {
     if (!resizeFrom.current) return;
     resizeFrom.current = null;
     event.currentTarget.releasePointerCapture(event.pointerId);
-    persistPanelWidth(panelWidth);
+    persistPanelWidth(chosenWidth);
   };
   const onResizeBy = (delta: number) => {
-    setPanelWidth((current) => {
-      const next = Math.min(PANEL_MAX_WIDTH, Math.max(PANEL_MIN_WIDTH, current + delta));
-      persistPanelWidth(next);
-      return next;
-    });
+    const next = clamp(panelWidth + delta);
+    setChosenWidth(next);
+    persistPanelWidth(next);
   };
   const separatorRef = useRef<HTMLDivElement>(null);
   const [separatorWidth, setSeparatorWidth] = useState<number | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const panel = separatorRef.current?.closest("aside");
-    if (!panel) return;
-    const read = () => setSeparatorWidth(panel.offsetWidth);
+    const row = panel?.parentElement;
+    if (!panel || !row) return;
+    let chat: HTMLElement | null = null;
+    const read = () => {
+      const current = row.querySelector<HTMLElement>(":scope > main");
+      if (current !== chat) {
+        if (chat) resizes.unobserve(chat);
+        if (current) resizes.observe(current);
+        chat = current;
+      }
+      setSeparatorWidth(panel.offsetWidth);
+      if (panel.offsetWidth > 0) setMaxWidth(measureMaxWidth(panel, chat));
+    };
+    const resizes = new ResizeObserver(read);
+    resizes.observe(panel);
+    // A view change swaps the chat <main> beside the panel for a new element.
+    const swaps = new MutationObserver(read);
+    swaps.observe(row, { childList: true });
     read();
-    const observer = new ResizeObserver(read);
-    observer.observe(panel);
-    return () => observer.disconnect();
+    return () => {
+      resizes.disconnect();
+      swaps.disconnect();
+    };
   }, []);
   const onSeparatorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.ctrlKey || event.metaKey || event.altKey) return;
@@ -66,5 +93,5 @@ export function useComputerPanelResize() {
     event.preventDefault();
     onResizeBy(widen);
   };
-  return { panelWidth, separatorRef, separatorWidth, onSeparatorKeyDown, onResizeStart, onResizeMove, onResizeEnd };
+  return { panelWidth, maxWidth, separatorRef, separatorWidth, onSeparatorKeyDown, onResizeStart, onResizeMove, onResizeEnd };
 }

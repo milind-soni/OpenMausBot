@@ -3,7 +3,7 @@
 import { allowedServerOrigin } from "./server-address.mjs";
 
 export const RECONNECT = Object.freeze({ baseMs: 2_000, capMs: 300_000, healthyMs: 60_000, cantReachAfterMs: 120_000, timeoutMs: 15_000, refocusMs: 5_000 });
-const INSTALLS = new Set(["npx", "global", "docker", "source"]);
+const INSTALLS = new Set(["npx", "global", "docker", "source", "podman-service"]);
 
 /** Equal jitter: half of the doubled wait for sure, the other half at random, never past the cap. */
 export function reconnectDelay(attempt, random = Math.random, { baseMs, capMs } = RECONNECT) {

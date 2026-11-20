@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import { browserMatesOf, loginHeldBackFor } from "../shared/logins.ts";
 import { BotLogins, cardLoginPlace, cardSignInElsewhere, observeSignInPage } from "./bot-logins.ts";
-import { VaultStore } from "./vault-store.ts";
+import { TEAM_READER, VaultStore } from "./vault-store.ts";
 import type { OnePasswordLogins } from "./onepassword.ts";
 import { FakeLoginPage, LOGIN_FORM } from "./testing/fake-login-page.ts";
 
@@ -127,8 +127,11 @@ describe("the secrets a bot may use", () => {
     const store = new VaultStore({ dataDir: mkdtempSync(join(tmpdir(), "omb-bot-logins-")) });
     store.saveSecret({ name: "Stripe key", value: "sk_fake-saved", source: "card", bots: ["notes"], refOnly: true });
     const logins = new BotLogins(store, provider as unknown as OnePasswordLogins, () => [], (value) => held.push(value));
-    expect(logins.secretNamesFor("notes")).toEqual([{ name: "Stripe key", refOnly: true }, { name: "Deploy key" }, { name: "Deploy key user" }]);
-    expect(logins.secretNamesFor("payroll")).toEqual([{ name: "Deploy key" }, { name: "Deploy key user" }, { name: "Payroll token" }]);
+    store.saveSecret({ name: "Ada's key", value: "sk_fake-ada-own", source: "card", bots: ["notes"], person: "p_ada0000000000000000000" });
+    expect(logins.secretNamesFor("notes", TEAM_READER)).toEqual([{ name: "Stripe key", refOnly: true }, { name: "Deploy key" }, { name: "Deploy key user" }]);
+    expect(logins.secretNamesFor("notes", { person: "p_ben0000000000000000000", team: true }), "never another member's own").toEqual([{ name: "Stripe key", refOnly: true }, { name: "Deploy key" }, { name: "Deploy key user" }]);
+    expect(logins.secretNamesFor("notes", { person: "p_ada0000000000000000000", team: true }).map((one) => one.name)).toContain("Ada's key");
+    expect(logins.secretNamesFor("payroll", TEAM_READER)).toEqual([{ name: "Deploy key" }, { name: "Deploy key user" }, { name: "Payroll token" }]);
     expect(logins.sitesFor("notes")).toEqual([{ site: "example.com", hosts: ["example.com"], exactHost: false, username: "u" }]);
     expect(await logins.linkedSecret("payroll token", "notes")).toBeNull();
     expect(reads).toEqual([]);
@@ -137,5 +140,10 @@ describe("the secrets a bot may use", () => {
     expect(deploy!.id).toMatch(/^linked-[0-9a-f]{32}$/u);
     expect(reads).toEqual(["fake:1/user"]);
     expect(held).toEqual(["value-of-fake:1-user"]);
+    expect(logins.secretsPrompt("payroll", TEAM_READER), "a manager with no references").not.toContain("://");
+    const onePassword = { ...provider, id: "1password", resolve: () => null };
+    expect(new BotLogins(store, onePassword as unknown as OnePasswordLogins).secretsPrompt("payroll", TEAM_READER), "a bot that may use the manager's secrets").toContain("op://vault/item/field");
+    const none = new BotLogins(store, { ...onePassword, items: () => [] } as unknown as OnePasswordLogins);
+    expect(none.secretsPrompt("notes", TEAM_READER), "nothing from the manager for this bot").not.toContain("op://");
   });
 });

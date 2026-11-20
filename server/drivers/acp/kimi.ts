@@ -1,5 +1,5 @@
-// Kimi Code: Moonshot's `kimi acp` on the Kimi Code subscription login
-// (~/.kimi-code/credentials), not a Moonshot API key. Verified on kimi-code 0.29.1.
+// Kimi Code 2.5.3 ignores the global -m option when opening an ACP session;
+// its model config option selects both subscription and configured API providers.
 import { mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -8,18 +8,10 @@ import type { ModelCatalog } from "../../contracts.ts";
 import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, LOCAL_HOSTS, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
+import { ENGINE_MODEL_ID } from "../../model-manifest/schema.ts";
 
-const STATIC_KIMI_MODELS: ModelCatalog = {
-  default: "kimi-code/k3",
-  options: [
-    { id: "kimi-code/k3", label: "Kimi K3" },
-    { id: "kimi-code/k3-256k", label: "Kimi K3 256K" },
-    { id: "kimi-code/kimi-for-coding", label: "Kimi for Coding" },
-    { id: "kimi-code/kimi-for-coding-highspeed", label: "Kimi for Coding Highspeed" },
-  ],
-};
-
-const SLUG = /^[a-z0-9][a-z0-9._:/-]*$/i;
+const SLUG = ENGINE_MODEL_ID.kimi;
 const LOCAL_PROVIDER_PREFIXES = LOCAL_HOSTS.map((host) => `${host.id}/`);
 
 function isLocalInjectAlias(slug: string): boolean {
@@ -500,14 +492,15 @@ function stripKimiModelEnv(env: Record<string, string | undefined>): void {
 }
 
 function readKimiModelCatalog(env: Record<string, string | undefined>): ModelCatalog {
+  const fixed = currentEngineCatalog("kimi");
   const dataRoot = kimiDataRoot(env);
   let text = "";
   try {
     text = readFileSync(join(dataRoot, "config.toml"), "utf8");
   } catch {
-    return STATIC_KIMI_MODELS;
+    return fixed;
   }
-  const options = STATIC_KIMI_MODELS.options.map((o) => ({ ...o }));
+  const options = fixed.options.map((o) => ({ ...o }));
   const seen = new Set(options.map((o) => o.id));
   let current: { slug: string; name?: string } | null = null;
   const flush = () => {
@@ -540,14 +533,14 @@ function readKimiModelCatalog(env: Record<string, string | undefined>): ModelCat
     if (current && (key === "name" || key === "label") && value) current.name = value;
   }
   flush();
-  return { default: STATIC_KIMI_MODELS.default, options };
+  return { default: fixed.default, options };
 }
 
 const support: AcpSupport = {
   driverKind: "kimiAgent",
   displayName: "Kimi",
   // The CLI's own catalog aliases (~/.kimi-code/config.toml; `kimi provider list` reports the same four).
-  models: STATIC_KIMI_MODELS,
+  get models() { return currentEngineCatalog("kimi"); },
   resolveModels: (env) => mergeLocalInject(readKimiModelCatalog(env), env),
   defaultCli: "kimi",
   nativeSource: "kimi.acp",
@@ -567,6 +560,7 @@ const support: AcpSupport = {
 
   // -m is a global commander option and must precede `acp` (0.29.1).
   resolveTurnModel: (model, env) => (model ? ensureKimiInjectAlias(model, env) : model),
+  selectModel: { configId: "model" },
   spawnArgs: (_config, turn) => {
     const model = turn.model;
     return [...(model ? ["-m", model] : []), "acp"];

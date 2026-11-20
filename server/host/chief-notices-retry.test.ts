@@ -2,9 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import { TRIAL_CREDIT_REFUSED } from "../../shared/trial-credit.ts";
 import "../server-line-packs.ts";
+import { engineFailureMessage } from "../drivers/engine-errors.ts";
 import { AUTO_RETRY_LEAD, RETRY_BLOCKED } from "../incidents.ts";
 import type { RoutineFailureFacts } from "../routine-recovery.ts";
-import { createChiefNotices, MEMORY_RETRY_MS, MEMORY_RETRY_TEXT, type ChiefNoticeDeps } from "./chief-notices.ts";
+import { createChiefNotices, MEMORY_RETRY_MS, MEMORY_RETRY_TEXT, ROOM_RETRY_TEXT, SERVER_MEMORY_RETRY_TEXT, type ChiefNoticeDeps } from "./chief-notices.ts";
 
 function fixture(over: Partial<ChiefNoticeDeps> = {}) {
   const bots = [
@@ -69,6 +70,8 @@ describe("why a Chief's retry of a teammate's thread is refused", () => {
 const CRASH = "claude exited 3 before result: fake-claude: simulated crash before result";
 const DENIED = "One or more tool operations failed or were denied. See the tool results; the final response is not an execution receipt.";
 const RETRIED = "OpenMausBot already retried this run once by itself; the failure above is how that retry ended.";
+/** OpenCode 2.2.5's session/prompt answer for a model it has no SDK package for, as acpRpcError words it. */
+const NO_ROUTE = "Internal error: Unsupported package for chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017: unknown (session/prompt, service: session, provider.no-route)";
 
 describe("OpenMausBot's one automatic retry of a teammate's failed thread", () => {
   it("runs the thread once more before its Chief hears, then tells the Chief how that retry ended, and never retries the retry", () => {
@@ -104,6 +107,8 @@ describe("OpenMausBot's one automatic retry of a teammate's failed thread", () =
     ["a signed-out AI", { detail: "Not logged in · Please run /login" }],
     ["a used-up trial credit", { detail: TRIAL_CREDIT_REFUSED.used_up, facts: { setup: true, trialCredit: "used_up" } }],
     ["a turn cap", { detail: "Stopped after 40 tool calls without a final answer" }],
+    ["a model its engine has no route to", { detail: engineFailureMessage("OpenCode", NO_ROUTE)!, facts: { stopReason: "rpc_error" } }],
+    ["a model its engine has no route to, in the engine's words", { detail: NO_ROUTE, facts: { stopReason: "rpc_error" } }],
   ])("never retries a run ended by %s: the Chief hears at once", (_what, failure) => {
     const f = fixture();
     f.notices.reportIncident({ kind: "failed", bot: f.ada as never, threadId: "ada-job", ...failure });
@@ -206,6 +211,17 @@ describe("a run stopped to free memory", () => {
     expect(busy.continued).toEqual([]);
   });
 
+  it("on a self-hosted server, starts a teammate's run again by itself too, saying it was this server, and asks no Chief", () => {
+    const f = roomFixture({ selfHosted: () => true });
+    f.store.appendMessage("ada-job", { role: "user", kind: "text", text: "Reconcile the September invoices." });
+    f.notices.reportIncident({ kind: "failed", bot: f.ada as never, threadId: "ada-job", detail: STOPPED });
+    expect(f.turnsOf("ada")).toEqual([]);
+    f.settle();
+    expect(f.continued).toEqual([{ botId: "ada", threadId: "ada-job", text: SERVER_MEMORY_RETRY_TEXT }]);
+    expect(f.startTurn).not.toHaveBeenCalled();
+    expect(f.turnsOf("chief")).toEqual([]);
+  });
+
   it("leaves a teammate's run to the Chief's own retry, and any other failure to the person", () => {
     const teammate = roomFixture();
     teammate.notices.reportIncident({ kind: "failed", bot: teammate.ada as never, threadId: "ada-job", detail: STOPPED });
@@ -254,5 +270,64 @@ describe("a problem in a conversation that runs confined", () => {
     const f = fixture({ confined: () => false });
     f.notices.reportIncident({ kind: "stalled", bot: f.ada as never, threadId: "ada-job", detail: "no activity" });
     expect(f.turnsOf("chief")).toHaveLength(1);
+  });
+});
+
+describe("a run the server had no room to start", () => {
+  const NO_ROOM = "There is no room to start another program (EAGAIN), so this task could not run. Nothing was sent to the AI. It starts again by itself when there is room.";
+
+  function shortFixture(over: Partial<ChiefNoticeDeps> = {}) {
+    const waiting: Array<{ run: () => void; ms: number }> = [];
+    const continued: Array<{ botId: string; threadId: string; text: string }> = [];
+    const told: unknown[] = [];
+    const f = fixture({
+      later: (run, ms) => { waiting.push({ run, ms }); },
+      continueRequest: async (botId, threadId, text) => { continued.push({ botId, threadId, text }); },
+      notify: (notification) => { told.push(notification); },
+      ...over,
+    });
+    return { ...f, waiting, continued, told, settle: () => { for (const { run } of waiting.splice(0)) run(); } };
+  }
+
+  it("starts again by itself once, half a minute on, and no Chief's turn is started about it, though the teammate has one", () => {
+    const f = shortFixture();
+    f.store.appendMessage("ada-job", { role: "user", kind: "text", text: "Reconcile the September invoices." });
+    f.notices.reportIncident({ kind: "failed", bot: f.ada as never, threadId: "ada-job", detail: NO_ROOM });
+    expect(f.startTurn).not.toHaveBeenCalled();
+    expect(f.told).toEqual([]);
+    expect(f.waiting.map(({ ms }) => ms)).toEqual([MEMORY_RETRY_MS]);
+    f.settle();
+    expect(f.continued).toEqual([{ botId: "ada", threadId: "ada-job", text: ROOM_RETRY_TEXT }]);
+    // That start finds no room either: the person hears, once, and still no Chief is asked and nothing starts again.
+    f.notices.reportIncident({ kind: "failed", bot: f.ada as never, threadId: "ada-job", detail: NO_ROOM });
+    f.settle();
+    expect(f.continued).toHaveLength(1);
+    expect(f.told).toHaveLength(1);
+    expect(f.startTurn).not.toHaveBeenCalled();
+    expect(f.turnsOf("chief")).toEqual([]);
+  });
+
+  it("does the same for a turn that could not start at all, and for Node's own words for the refusal", () => {
+    const f = shortFixture();
+    f.store.appendMessage("ada-job", { role: "user", kind: "text", text: "Reconcile the September invoices." });
+    f.notices.reportIncident({ kind: "could-not-start", bot: f.ada as never, threadId: "ada-job", detail: "spawn failed: spawn /usr/local/bin/claude EAGAIN" });
+    f.settle();
+    expect(f.continued).toEqual([{ botId: "ada", threadId: "ada-job", text: ROOM_RETRY_TEXT }]);
+    expect(f.startTurn).not.toHaveBeenCalled();
+  });
+
+  it("only tells the person where nothing can start it again, and leaves every other failure as it was", () => {
+    const told: unknown[] = [];
+    const bare = fixture({ notify: (notification) => { told.push(notification); } });
+    bare.notices.reportIncident({ kind: "failed", bot: bare.ada as never, threadId: "ada-job", detail: NO_ROOM });
+    expect(told).toHaveLength(1);
+    expect(bare.startTurn).not.toHaveBeenCalled();
+    // A crash still gets the teammate's one retry and then its Chief.
+    const crash = shortFixture();
+    crash.store.appendMessage("ada-job", { role: "user", kind: "text", text: "Reconcile the September invoices." });
+    crash.notices.reportIncident({ kind: "failed", bot: crash.ada as never, threadId: "ada-job", detail: CRASH });
+    expect(crash.turnsOf("ada")).toHaveLength(1);
+    expect(crash.turnsOf("ada")[0]!.text.startsWith(AUTO_RETRY_LEAD)).toBe(true);
+    expect(crash.continued).toEqual([]);
   });
 });

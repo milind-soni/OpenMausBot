@@ -26,6 +26,7 @@ export class EngineHomes {
   #setup: (EngineHomesSetup & { serverHome: string }) | null = null;
   #migration: MigrationResult | null = null;
   readonly #thread = new AsyncLocalStorage<string>();
+  readonly #bot = new AsyncLocalStorage<string | undefined>();
 
   start(setup: EngineHomesSetup): void {
     this.#setup = { ...setup, serverHome: setup.serverHome ?? homedir() };
@@ -40,9 +41,19 @@ export class EngineHomes {
     return this.#setup !== null;
   }
 
-  /** Runs `start` with what it spawns counted as this conversation's. */
-  within<T>(threadId: string, start: () => T): T {
-    return this.#setup ? this.#thread.run(threadId, start) : start();
+  /** Runs `start` with what it spawns counted as this conversation's (and its bot's, when the caller names it). */
+  within<T>(threadId: string, start: () => T, botId?: string): T {
+    return this.#setup ? this.#thread.run(threadId, () => this.#bot.run(botId, start)) : start();
+  }
+
+  /** The conversation the caller runs in, on a Team Cloud; undefined elsewhere. */
+  thread(): string | undefined {
+    return this.#setup ? this.#thread.getStore() : undefined;
+  }
+
+  /** The bot whose turn the caller runs in, on a Team Cloud, when its adapter was told. */
+  bot(): string | undefined {
+    return this.#setup ? this.#bot.getStore() : undefined;
   }
 
   /** The audience key of the conversation the caller runs in, so engines never share a process across audiences. */
@@ -102,7 +113,8 @@ export function withEngineHomes(instance: ProviderInstance, homes: EngineHomes =
   const warm = adapter.cacheKeepWarm;
   (instance as { adapter: ProviderInstance["adapter"] }).adapter = {
     ...adapter,
-    sendTurn: (input) => homes.within(input.threadId, () => adapter.sendTurn(input)),
+    sendTurn: (input) => homes.within(input.threadId, () => adapter.sendTurn(input), input.botId),
+    ...(adapter.prestart ? { prestart: { ...adapter.prestart, start: (input) => homes.within(input.threadId, () => adapter.prestart!.start(input), input.botId) } } : {}),
     ...(warm ? { cacheKeepWarm: {
       ...warm,
       ping: (threadId, options) => homes.within(threadId, () => warm.ping(threadId, options)),

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ConnectorScopes } from "../../shared/connector-scopes.ts";
 import type { AppConfig } from "../config.ts";
 import { RoutineManager } from "../routines.ts";
 import { Store } from "../store.ts";
@@ -16,7 +17,7 @@ afterEach(() => {
 
 type Services = Record<string, { connected: boolean; accounts?: Array<{ id: string; status: string }> }>;
 
-function setup(options: { team?: boolean; driver?: string; configured?: () => boolean; cloud?: boolean; services?: Services } = {}) {
+function setup(options: { team?: boolean; driver?: string; configured?: () => boolean; cloud?: boolean; services?: Services; connectedServices?: () => Promise<Services> } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "omb-proactive-"));
   dirs.push(dir);
   const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
@@ -33,7 +34,7 @@ function setup(options: { team?: boolean; driver?: string; configured?: () => bo
   let routines: RoutineManager | null = null;
   const make = () => createProactive({
     store, cfg: {} as AppConfig, dataDir: dir, team: options.team ?? false, routines: () => routines,
-    composio: { configured: options.configured ?? (() => true), connectedServices: async () => options.services ?? { gmail: { connected: true }, googlecalendar: { connected: true } }, relayMcp: relay },
+    composio: { configured: options.configured ?? (() => true), connectedServices: options.connectedServices ?? (async () => options.services ?? { gmail: { connected: true }, googlecalendar: { connected: true } }), relayMcp: relay },
     registry: { get: () => ({ driverKind: options.driver ?? "claudeAgent", adapter: {} as never }) },
     mainThread: (botId) => store.bot(botId)?.threadId, threadBusy: () => false, notify: () => {}, engineName: () => "Claude", needsYou: () => [],
     hostTimeZone: () => "UTC", decide: () => {}, stale: () => false, release: () => {}, owned: () => {},
@@ -107,6 +108,63 @@ describe("the watch's checks", () => {
     expect(gmail.length).toBeGreaterThan(0);
     expect(new Set(gmail)).toEqual(new Set(["ca_newest"]));
     expect(s.reads.flatMap((slug, index) => (slug.startsWith("GOOGLECALENDAR_") ? [s.accounts[index]] : []))).not.toContain("ca_cal");
+  });
+
+  it("read only an account the bot's limit allows, and name it even for an app with one account", async () => {
+    const s = setup({ services: {
+      gmail: { connected: true, accounts: [{ id: "ca_newest", status: "ACTIVE" }, { id: "ca_expired", status: "EXPIRED" }, { id: "ca_older", status: "ACTIVE" }] },
+      googlecalendar: { connected: true, accounts: [{ id: "ca_cal", status: "ACTIVE" }] },
+    } });
+    const limited: ConnectorScopes = { apps: { gmail: "read", googlecalendar: "read" }, accounts: { gmail: ["ca_expired", "ca_older"], googlecalendar: ["ca_cal"] } };
+    s.store.patchBot(s.chief.id, { connectorScopes: limited });
+    await s.proactive.checks.check(s.proactive.ensureWatch()!, { manual: true });
+    const gmail = s.reads.flatMap((slug, index) => (slug.startsWith("GMAIL_") ? [s.accounts[index]] : []));
+    expect(gmail.length).toBeGreaterThan(0);
+    expect(new Set(gmail)).toEqual(new Set(["ca_older"]));
+    const calendar = s.reads.flatMap((slug, index) => (slug.startsWith("GOOGLECALENDAR_") ? [s.accounts[index]] : []));
+    expect(calendar.length).toBeGreaterThan(0);
+    expect(new Set(calendar)).toEqual(new Set(["ca_cal"]));
+  });
+
+  it("never read as another account when none of the allowed accounts is active", async () => {
+    const s = setup({ services: { gmail: { connected: true, accounts: [{ id: "ca_newest", status: "ACTIVE" }, { id: "ca_older", status: "ACTIVE" }] }, googlecalendar: { connected: false } } });
+    const limited: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["ca_gone"] } };
+    s.store.patchBot(s.chief.id, { connectorScopes: limited });
+    await s.proactive.checks.check(s.proactive.ensureWatch()!, { manual: true });
+    const gmail = s.reads.flatMap((slug, index) => (slug.startsWith("GMAIL_") ? [s.accounts[index]] : []));
+    expect(gmail.length).toBeGreaterThan(0);
+    expect(new Set(gmail)).toEqual(new Set(["ca_gone"]));
+  });
+
+  it("still name an allowed account when the account lookup fails", async () => {
+    let calls = 0;
+    const s = setup({ connectedServices: async () => {
+      if (calls++) throw new Error("composio down");
+      return { gmail: { connected: true, accounts: [{ id: "ca_newest", status: "ACTIVE" }, { id: "ca_older", status: "ACTIVE" }] }, googlecalendar: { connected: false } };
+    } });
+    const limited: ConnectorScopes = { apps: { gmail: "read" }, accounts: { gmail: ["ca_older"] } };
+    s.store.patchBot(s.chief.id, { connectorScopes: limited });
+    await s.proactive.checks.check(s.proactive.ensureWatch()!, { manual: true });
+    const gmail = s.reads.flatMap((slug, index) => (slug.startsWith("GMAIL_") ? [s.accounts[index]] : []));
+    expect(gmail.length).toBeGreaterThan(0);
+    expect(new Set(gmail)).toEqual(new Set(["ca_older"]));
+  });
+
+  it("ask for the accounts again after a failed lookup instead of keeping its fallback for the session", async () => {
+    let calls = 0;
+    const s = setup({ connectedServices: async () => {
+      if (++calls === 2) throw new Error("composio down");
+      return {
+        gmail: { connected: true, accounts: [{ id: "ca_newest", status: "ACTIVE" }, { id: "ca_older", status: "ACTIVE" }] },
+        googlecalendar: { connected: true, accounts: [{ id: "ca_cal_newest", status: "ACTIVE" }, { id: "ca_cal_older", status: "ACTIVE" }] },
+      };
+    } });
+    const limited: ConnectorScopes = { apps: { gmail: "read", googlecalendar: "read" }, accounts: { gmail: ["ca_older"] } };
+    s.store.patchBot(s.chief.id, { connectorScopes: limited });
+    await s.proactive.checks.check(s.proactive.ensureWatch()!, { manual: true });
+    const named = (prefix: string) => s.reads.flatMap((slug, index) => (slug.startsWith(prefix) ? [s.accounts[index]] : []));
+    expect(new Set(named("GMAIL_"))).toEqual(new Set(["ca_older"]));
+    expect(named("GOOGLECALENDAR_")).toContain("ca_cal_newest");
   });
 
   it("belong to the main agent only: a briefing routine of another bot reads nothing", async () => {

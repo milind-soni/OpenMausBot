@@ -167,10 +167,10 @@ describe("durable accepted follow-ups", () => {
     settle.mockRestore();
   });
 
-  it("never restores a claim whose dispatch may have started", async () => {
+  it("settles failed dispatches before restoring durable follow-ups", async () => {
     const bot = queueSteeredMessage("bot", "thread", "possibly executed");
     const channel = queueChannelMessage("group", "channel", "possibly executed");
-    expect(() => drainSteeredMessages(storeFor("bot", "thread"), () => { throw new Error("lost dispatch"); })).toThrow();
+    expect(() => drainSteeredMessages(storeFor("bot", "thread"), () => { throw new Error("lost dispatch"); })).not.toThrow();
     drainChannelMessages(() => false, () => Promise.reject(new Error("lost channel dispatch")));
     await Promise.resolve();
     journal.closeMessageDb();
@@ -181,8 +181,28 @@ describe("durable accepted follow-ups", () => {
     drainChannelMessages(() => false, run);
     expect(run).not.toHaveBeenCalled();
     expect(journal.chatFollowups()).toEqual([
-      expect.objectContaining({ id: bot.id, status: "dispatching" }),
+      expect.objectContaining({ id: bot.id, status: "interrupted" }),
       expect.objectContaining({ id: channel.id, status: "interrupted" }),
+    ]);
+  });
+
+  it("never restores an unsettled claim whose dispatch may have started", async () => {
+    const bot = queueSteeredMessage("bot", "thread", "possibly executed");
+    const channel = queueChannelMessage("group", "channel", "possibly executed");
+    const stillRunning = () => new Promise<void>(() => {});
+    drainSteeredMessages(storeFor("bot", "thread"), stillRunning);
+    drainChannelMessages(() => false, stillRunning);
+    await Promise.resolve();
+    journal.closeMessageDb();
+    restoreSteeredMessages();
+    restoreChannelMessages();
+    const run = vi.fn();
+    drainSteeredMessages(storeFor("bot", "thread"), run);
+    drainChannelMessages(() => false, run);
+    expect(run).not.toHaveBeenCalled();
+    expect(journal.chatFollowups()).toEqual([
+      expect.objectContaining({ id: bot.id, status: "dispatching" }),
+      expect.objectContaining({ id: channel.id, status: "dispatching" }),
     ]);
   });
 

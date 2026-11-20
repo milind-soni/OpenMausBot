@@ -180,6 +180,7 @@ export async function synthesize(
   voiceId: string,
   key: string,
   model: FishTtsModel = DEFAULT_FISH_MODEL,
+  signal?: AbortSignal,
 ): Promise<Audio> {
   let res: Response;
   try {
@@ -200,7 +201,7 @@ export async function synthesize(
         latency: "normal",
       }),
       redirect: "error",
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(signal ? [signal] : [])]),
     });
   } catch {
     throw new Error("Couldn't reach Fish Audio to generate speech — check your connection.");

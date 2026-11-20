@@ -1,13 +1,14 @@
 // Real server, fake Claude CLI and a loopback Boat whose answers each journey sets; a restartable home lets a test seed an automatic pin.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { freePortBlock } from "./testing/ports.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -16,6 +17,7 @@ const refusal = (status: number, code: string, message: string) =>
   ({ status, body: { ok: false, type: "sandbox.error", status, code, message, error: { code, message, status } } });
 const HOURS = refusal(429, "limit_reached", "Your Pro plan's 50 cloud computer hours for October are used up. They reset on 1 November.");
 const AT_ONCE = refusal(429, "limit_reached", "Your Personal plan includes 1 cloud computer at once. Delete one to start another.");
+const TRIAL_HOURS = refusal(429, "limit_reached", "Your Pro free trial's 20 cloud computer hours are used up. Your full allowance starts with your first payment on 14 Nov.");
 const DOWN = refusal(503, "service_unavailable", "Cloud computers are temporarily unavailable. Try again later.");
 
 describe("a cloud computer that can't start, against the real server", () => {
@@ -61,12 +63,12 @@ describe("a cloud computer that can't start, against the real server", () => {
     async () => (await apiOk("GET", "/api/bots?messages=0")).bots.find((bot: any) => bot.id === botId),
     (bot: any) => bot && !bot.busy, "idle bot");
   const savedTask = (botId: string, threadId: string) =>
-    (JSON.parse(readFileSync(join(data, "bots.json"), "utf8")) as any[])
+    (readRegistry(data).bots as any[])
       .find((bot: any) => bot.id === botId)?.tasks.find((task: any) => task.threadId === threadId);
   const editSavedBot = (botId: string, edit: (bot: any) => void) => {
-    const bots = JSON.parse(readFileSync(join(data, "bots.json"), "utf8")) as any[];
+    const bots = readRegistry(data).bots as any[];
     edit(bots.find((bot: any) => bot.id === botId));
-    writeFileSync(join(data, "bots.json"), JSON.stringify(bots, null, 2));
+    writeRegistry(data, { bots });
   };
   const send = (botId: string, threadId: string, text: string) =>
     apiOk("POST", `/api/bots/${botId}/messages`, { text, threadId });
@@ -168,6 +170,18 @@ describe("a cloud computer that can't start, against the real server", () => {
     expect(boxes).toEqual([]);
   }, 90_000);
 
+  it("J5b: a free trial's hours used up get the plan's card too, from an Admin that sends only its words", async () => {
+    await start();
+    const { bot } = await apiOk("POST", "/api/bots", { name: "Trial Bot" });
+    await apiOk("PATCH", `/api/bots/${bot.id}`, { computer: "cloud" });
+    createAnswer = TRIAL_HOURS;
+    await send(bot.id, bot.threadId, "Open the desktop.");
+    const row = await failedRow(bot.threadId);
+    expect(row.tool.name).toBe("error: The free trial's cloud desktop hours are used up. The full allowance starts with the first payment. See your plan on the Plan page.");
+    expect(row.tool.place).toEqual({ state: "cc-no-hours", params: { bot: "Trial Bot", trial: true }, source: "works-on" });
+    await idle(bot.id);
+  }, 90_000);
+
   it("J6: at once names the bot that holds the plan's cloud computer", async () => {
     await start();
     const { bot: holder } = await apiOk("POST", "/api/bots", { name: "Ada" });
@@ -182,7 +196,7 @@ describe("a cloud computer that can't start, against the real server", () => {
     createAnswer = AT_ONCE;
     await send(bot.id, bot.threadId, "Use your desktop too.");
     const row = await failedRow(bot.threadId);
-    expect(row.tool.name).toBe("error: Your Personal plan includes 1 cloud desktop, and Ada has it. Manage your cloud desktops in Settings → Bot desktops.");
+    expect(row.tool.name).toBe("error: Your Personal plan includes 1 cloud desktop, and Ada has it. Manage your cloud desktops in Settings → Desktops & browser → Desktops.");
     expect(row.tool.place).toEqual({ state: "cc-at-once", params: { bot: "Bo", plan: "Personal", max: 1, holders: ["Ada"] }, source: "works-on" });
   }, 90_000);
 

@@ -39,6 +39,8 @@ export interface RetryOptions {
   attempts?: number;
   delayMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** Which errors are worth another try; Windows file locks by default. */
+  retryable?: (error: unknown) => boolean;
 }
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -46,11 +48,12 @@ const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, 
 export async function retryOnWindowsFileLock<T>(step: () => Promise<T>, options: RetryOptions = {}): Promise<T> {
   const attempts = options.attempts ?? 8;
   const sleep = options.sleep ?? wait;
+  const retryable = options.retryable ?? transientWindowsFileError;
   for (let attempt = 1; ; attempt += 1) {
     try {
       return await step();
     } catch (error) {
-      if (attempt >= attempts || !transientWindowsFileError(error)) throw error;
+      if (attempt >= attempts || !retryable(error)) throw error;
       await sleep(Math.min(2_000, (options.delayMs ?? 250) * 2 ** (attempt - 1)));
     }
   }

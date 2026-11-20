@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ManagedDesktopState, ManagedMessageCode } from "../../electron/managed-desktop.mjs";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { Card } from "./SettingsPrimitives";
+import { Card, LearnMore, SETTINGS_INPUT, SettingRow, SettingsField, SettingsFoldRow, SettingsRows } from "./SettingsPrimitives";
 import { CompanyModels } from "./CompanyModels";
 
 const providerNames: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI", openrouter: "OpenRouter" };
@@ -31,13 +31,17 @@ export function connectionMessage(connection: Pick<ManagedDesktopState, "message
 }
 
 /** Security: only the trusted desktop bridge can enroll this computer or hold its token. */
-export function OrganizationSettings() {
+/** `simple`: Simple mode shows the section only once the person has an organization sign-in; signed out, it draws an
+ * empty card, which hides the whole section (search still finds it, tagged Advanced). */
+export function OrganizationSettings({ simple = false }: { simple?: boolean } = {}) {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.organization;
   const [connection, setConnection] = useState<ManagedDesktopState | null>(null);
   const [address, setAddress] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
+  const [more, setMore] = useState(false);
+  const [custom, setCustom] = useState(false);
   const pending = useRef(false);
   const generation = useRef(0);
   const revision = useRef(0);
@@ -99,32 +103,41 @@ export function OrganizationSettings() {
   const date = typeof expiry === "number" && Number.isFinite(expiry) ? new Date(expiry) : null;
   const dateLabel = date && Number.isFinite(date.getTime())
     ? new Intl.DateTimeFormat(activeLocale(), { dateStyle: "medium", timeStyle: "short" }).format(date) : null;
+  if (connection?.status === "signed-out" && simple) return <div data-settings-rows="" hidden />;
+  if (connection?.status === "signed-out") {
+    // One row: sign in with a work email; the long notes behind Learn more, the custom address behind a fold.
+    return <SettingsRows>
+      <SettingRow title={t("organization.signIn")} subtitle={<>{t("organization.signInShort")}{" "}<LearnMore onClick={() => setMore((open) => !open)} /></>}
+        message={<>
+          {more && <span data-organization-more="" className="block">{t("organization.additive")} {t("organization.privacy")} {t("cloudAccount.separate")}</span>}
+          {connection.message && <span role="status" className="block">{connectionMessage(connection)}</span>}
+          {licenseExpired && <span role="alert" className="block text-ink">{t("organization.licenseExpired")}</span>}
+          {error && <span role="alert" className="block text-danger">{error}</span>}
+        </>}>
+        <button type="button" disabled={busy} className="ui-button" data-organization-sign-in="" onClick={() => void perform(() => bridge.begin({ portalOrigin: DEFAULT_PORTAL_ORIGIN }))}>
+          {busy ? t("organization.working") : t("organization.useWorkSignIn")}
+        </button>
+      </SettingRow>
+      <SettingsFoldRow id="organization-address" title={t("organization.customTitle")} open={custom} onToggle={() => setCustom((open) => !open)}>
+        <form className="flex flex-col gap-2 px-4 py-3" onSubmit={(event) => {
+          event.preventDefault();
+          if (address.trim()) void perform(() => bridge.begin({ portalOrigin: address.trim() }));
+        }}>
+          <SettingsField label={t("organization.address")} hint={t("organization.advancedHelp")}>
+            <input type="url" required value={address} disabled={busy} onChange={(event) => setAddress(event.target.value)}
+              placeholder={DEFAULT_PORTAL_ORIGIN} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} maxLength={2048}
+              className={SETTINGS_INPUT} />
+          </SettingsField>
+          <button type="submit" disabled={busy || !address.trim()} className="ui-button self-end">{t("organization.customSignIn")}</button>
+        </form>
+      </SettingsFoldRow>
+    </SettingsRows>;
+  }
   return <>
-    <p className="text-[13px] leading-relaxed text-ink-secondary">{t("organization.additive")}</p>
-    <Card title={t("settings.section.organization")} subtitle={t("organization.privacy")}>
+    <Card>
       {!connection && <p role="status" className="text-[13px] text-ink-secondary">{error || t("organization.loading")}</p>}
       {connection?.message && <p role="status" className="mb-3 text-[13px] text-ink-secondary">{connectionMessage(connection)}</p>}
       {licenseExpired && <p role="alert" className="mb-3 text-[13px] text-ink">{t("organization.licenseExpired")}</p>}
-      {connection?.status === "signed-out" && <div className="flex flex-col gap-3">
-        <p className="text-[13px] text-ink-secondary">{t("organization.signInHelp")}</p>
-        <button type="button" disabled={busy} onClick={() => void perform(() => bridge.begin({ portalOrigin: DEFAULT_PORTAL_ORIGIN }))}
-          className="w-fit rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-50">{busy ? t("organization.working") : t("organization.signIn")}</button>
-        <details className="text-[12px] text-ink-secondary">
-          <summary className="w-fit cursor-pointer hover:text-ink">{t("organization.advanced")}</summary>
-          <form className="mt-2 flex flex-col gap-2" onSubmit={(event) => {
-            event.preventDefault();
-            if (address.trim()) void perform(() => bridge.begin({ portalOrigin: address.trim() }));
-          }}>
-            <p>{t("organization.advancedHelp")}</p>
-            <label className="flex flex-col gap-1.5">{t("organization.address")}
-              <input type="url" required value={address} disabled={busy} onChange={(event) => setAddress(event.target.value)}
-                placeholder={DEFAULT_PORTAL_ORIGIN} autoCapitalize="none" autoCorrect="off" autoComplete="off" spellCheck={false} maxLength={2048}
-                className="w-full rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink outline-none focus:border-accent/50" />
-            </label>
-            <button type="submit" disabled={busy || !address.trim()} className="ui-button w-fit">{t("organization.customSignIn")}</button>
-          </form>
-        </details>
-      </div>}
       {connection?.status === "connecting" && <div className="flex flex-col items-start gap-3">
         <p role="status" className="text-[13px] text-ink-secondary">{t("organization.browserConsent")}</p>
         {connection.enrollment && <details className="w-full text-[12px] text-ink-secondary">

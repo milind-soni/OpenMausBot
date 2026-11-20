@@ -49,6 +49,12 @@ describe("CI concurrency", () => {
     );
   });
 
+  it("validates the model manifest before anything lands on main", () => {
+    const step = workflow.jobs.static.steps.find((candidate: { name?: string }) => candidate.name === "Validate the model manifest");
+    expect(step.run).toContain("scripts/check-model-manifest.mjs");
+    expect(workflow.on.pull_request).toBeDefined();
+  });
+
   it("runs the full lane every night", () => {
     expect(workflow.on.schedule).toEqual([{ cron: expect.stringMatching(/^\d+ \d+ \* \* \*$/) }]);
   });
@@ -81,6 +87,8 @@ describe("CI concurrency", () => {
     expect(workflow.permissions).toEqual({ contents: "read" });
     expect(workflow.jobs.vitest.strategy.matrix).toBe("${{ fromJSON(needs.static.outputs.vitest_matrix) }}");
     expect(workflow.jobs.vitest["timeout-minutes"]).toBe("${{ matrix.os == 'ubuntu-latest' && 25 || 30 }}");
+    // Ubuntu 26.04 (today's ubuntu-latest) lets bubblewrap box the Cloud e2e fixtures; the Linux shards keep 24.04.
+    expect(workflow.jobs.vitest["runs-on"]).toBe("${{ matrix.os == 'ubuntu-latest' && 'ubuntu-24.04' || matrix.os }}");
   });
 
   it("runs each selected platform's own shards, and its e2e files, from ci-scope's matrix", () => {

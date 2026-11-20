@@ -1,10 +1,12 @@
 // GET and PUT /api/me: a person's own profile on a Team Cloud (people-about.ts): the name and picture they go by and their
-// "About you", read into their own turns only, with the address of their verified sign-in. Anywhere else the server's one
-// profile (Settings → Profile) is the person's, and this answers 404.
+// "About you", read into their own turns only, with the address of their verified sign-in. On a self-hosted server the one
+// profile (Settings → You and your bots → About you) is the owner's, and each signed-in person only chooses the name they go by here. Anywhere
+// else this answers 404.
 import { botAvatarUrlSchema } from "../../shared/bot-avatar.ts";
 import type { CloudTeam } from "../cloud-team.ts";
 import type { MemberProfile, MemberProfilePatch } from "../host/cloud-team-host.ts";
 import { ABOUT_ME_MAX, PERSON_NAME_MAX, type SeedField } from "../people-about.ts";
+import { cleanDisplayName, DISPLAY_NAME_MAX, type PersonNames } from "../host/person-names.ts";
 import { personKey } from "../person-key.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { WELCOME_HINT, type TeamWelcomeStore } from "../team-welcome.ts";
@@ -23,11 +25,27 @@ export interface MeRouteDeps {
   seeded(session: SessionRecord): SeedField[];
   /** After a save: the person's own windows and phones show it. */
   changed(): void;
+  /** On a self-hosted server: the names people chose, and what each is called now (`shownAs`). Null anywhere else. */
+  names?: { store: PersonNames; shownAs(session: SessionRecord): string } | null;
 }
 
 export function createMeRoutes(deps: MeRouteDeps): RouteHandler {
   return async ({ req, res, path, method, auth, json, readBody }) => {
     if (path !== "/api/me" && path !== "/api/me/welcome") return PASS;
+    if (!deps.team && deps.names && path === "/api/me") {
+      const session = deps.session(auth);
+      if (!session) return json(res, 404, { error: "This computer goes by the name in Settings → You and your bots → About you." });
+      const { store, shownAs } = deps.names;
+      if (method === "PUT") {
+        const body = await readBody(req, 8 * 1024);
+        const given = body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>).displayName : undefined;
+        if (typeof given !== "string") return json(res, 400, { error: "send { displayName }: the name you go by here, or \"\" to clear it" });
+        const name = given.trim() ? cleanDisplayName(given) : null;
+        if (given.trim() && !name) return json(res, 400, { error: `Your name is at most ${DISPLAY_NAME_MAX} characters, without control characters` });
+        store.save(session, name);
+      } else if (method !== "GET") return json(res, 405, { error: "method not allowed" });
+      return json(res, 200, { displayName: store.of(session) ?? "", shownAs: shownAs(session) });
+    }
     if (!deps.team) return json(res, 404, { error: "not found" });
     const session = deps.session(auth);
     if (!session) return json(res, 403, { error: "Sign in to this team to have a profile." });

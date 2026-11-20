@@ -77,8 +77,25 @@ export function compileServerToolSchema(schema: Record<string, unknown>): Valida
 export type ServerToolCheck = "full" | "lenient" | "object";
 
 /** A check for every tool a server lists, so one schema this checker cannot compile never costs the server its other tools.
- * Security: no compiler here loads a schema, so an external `$ref` is never fetched; it leaves the check to the server. */
+ * Security: no compiler here loads a schema, so an external `$ref` is never fetched; it leaves the check to the server.
+ * The build compiles a fresh Ajv and its result depends only on the schema, so it is remembered by the schema's JSON text. */
 export function serverToolValidator(schema: Record<string, unknown>): { validate: ValidateFunction; check: ServerToolCheck } {
+  const memoKey = JSON.stringify(schema);
+  const memo = serverToolValidators.get(memoKey);
+  if (memo !== undefined) return memo;
+  const made = buildServerToolValidator(schema);
+  if (serverToolValidators.size >= SERVER_TOOL_VALIDATOR_LIMIT) {
+    const oldest = serverToolValidators.keys().next().value;
+    if (oldest !== undefined) serverToolValidators.delete(oldest);
+  }
+  serverToolValidators.set(memoKey, made);
+  return made;
+}
+
+const SERVER_TOOL_VALIDATOR_LIMIT = 1_024;
+const serverToolValidators = new Map<string, { validate: ValidateFunction; check: ServerToolCheck }>();
+
+function buildServerToolValidator(schema: Record<string, unknown>): { validate: ValidateFunction; check: ServerToolCheck } {
   try { return { validate: compileServerToolSchema(schema), check: "full" }; }
   catch {}
   const lenient = lenientToolValidator(schema);
@@ -89,7 +106,7 @@ export function serverToolValidator(schema: Record<string, unknown>): { validate
  * Code's editor hints. Vendor `x-` extensions too, except the two compileToolSchema checks. */
 const NON_ASSERTIONS = new Set(["example", "discriminator", "externalDocs", "xml", "markdownDescription", "markdownEnumDescriptions", "enumDescriptions"]);
 const CHECKED_EXTENSIONS = new Set(["x-mcp-header", "x-google-enum-descriptions"]);
-const SCHEMA_KEYWORD_MAPS = ["properties", "$defs", "definitions", "dependentSchemas", "patternProperties"];
+const SCHEMA_KEYWORD_MAPS = ["properties", "$defs", "definitions", "dependencies", "dependentSchemas", "patternProperties"];
 
 function localRefsOnly(schema: unknown, depth = 0): boolean {
   if (Array.isArray(schema)) return schema.every((child) => localRefsOnly(child, depth + 1));

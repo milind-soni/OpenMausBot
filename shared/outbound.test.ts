@@ -36,6 +36,9 @@ describe("isOutboundTool", () => {
       // A raw API call can place a call, send a text or buy a number.
       "mcp__telnyx__invoke_api_endpoint",
       "mcp__telnyx-2__invoke_api_endpoint",
+      // Publishing an app puts it on the public web.
+      "mcp__agents__publish_app",
+      "publish_app",
     ]) {
       expect(isOutboundTool(name), name).toBe(true);
     }
@@ -70,6 +73,7 @@ describe("isOutboundTool", () => {
       "mcp__agentphone__list_numbers",
       "mcp__telnyx__list_api_endpoints",
       "mcp__telnyx__get_api_endpoint_schema",
+      "mcp__agents__check_app_hosting",
       "Bash",
       "Read",
       "Edit",
@@ -86,6 +90,9 @@ describe("isReadOnlyTool", () => {
       "mcp__linear__list_comments",
       "mcp__linear__get_issue",
       "GMAIL_SEARCH_MESSAGES",
+      "mcp__agents__check_app_hosting",
+      "_1PASSWORD_GET_ITEM",
+      "_1PASSWORD_LIST_ITEMS",
     ]) expect(isReadOnlyTool(name), name).toBe(true);
 
     for (const name of [
@@ -94,6 +101,7 @@ describe("isReadOnlyTool", () => {
       "mcp__linear__create_comment",
       "mcp__computer__click",
       "Bash",
+      "_1PASSWORD_CREATE_ITEM",
     ]) expect(isReadOnlyTool(name), name).toBe(false);
   });
 });
@@ -137,6 +145,13 @@ describe("trimOutboundPolicy", () => {
 });
 
 describe("connectorCallsIn", () => {
+  it("keeps the account a multi-execute item names", () => {
+    const calls = connectorCallsIn("COMPOSIO_MULTI_EXECUTE_TOOL", {
+      tools: [{ tool_slug: "GMAIL_SEND_EMAIL", arguments: {}, account: " work " }, { tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }],
+    });
+    expect(calls).toEqual([{ slug: "GMAIL_SEND_EMAIL", arguments: {}, account: "work" }, { slug: "GMAIL_FETCH_EMAILS", arguments: {} }]);
+  });
+
   // Composio's session exposes a handful of meta tools; the app tools run
   // inside them. The gate has to see through the wrapper or it sees nothing.
   it("returns a direct app tool as itself", () => {

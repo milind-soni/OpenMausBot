@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { extractReplayImages, extractSteerImages, extractTurnImages } from "./turn-images.ts";
+import { extractReplayImages, extractSteerImages, extractTurnImages, REPLAYED_IMAGE_NOTE } from "./turn-images.ts";
 
 const IDS = [
   "123e4567-e89b-42d3-a456-426614174000",
@@ -224,8 +224,33 @@ describe("turn image admission", () => {
     const result = extractReplayImages(transcript, current, { attachmentsDir: root, maxCount: 3 });
 
     expect(result.images.map((entry) => entry.path)).toEqual([join(root, `${IDS[2]}.png`), join(root, `${IDS[3]}.png`)]);
-    expect(result.transcript.map((entry) => entry.text)).toEqual([transcript[0]!.text, transcript[1]!.text, "older\n\n", "newest\n\n"]);
+    expect(result.transcript.map((entry) => entry.text)).toEqual([
+      transcript[0]!.text, transcript[1]!.text, `older\n\n${REPLAYED_IMAGE_NOTE}`, `newest\n\n${REPLAYED_IMAGE_NOTE}`,
+    ]);
     expect(transcript[3]!.text).toContain("<attached-image");
+  });
+
+  it("marks where a replayed image was sent, so a later text-only turn never looks like it carries a new image", () => {
+    const root = store();
+    const tag = (index: number) => `<attached-image path="${image(root, index)}" name="${index}.png" />`;
+    const transcript = [
+      { role: "user" as const, text: `login fails, see screenshot\n\n${tag(0)}` },
+      { role: "assistant" as const, text: "I see the error." },
+      { role: "user" as const, text: "A" },
+    ];
+
+    const result = extractReplayImages(transcript, [], { attachmentsDir: root });
+
+    expect(result.images.map((entry) => entry.path)).toEqual([join(root, `${IDS[0]}.png`)]);
+    expect(result.transcript[0]!.text).toBe(`login fails, see screenshot\n\n${REPLAYED_IMAGE_NOTE}`);
+    expect(REPLAYED_IMAGE_NOTE).toMatch(/earlier/i);
+    expect(result.transcript[2]!.text).toBe("A");
+  });
+
+  it("keeps a current turn's own images unmarked", () => {
+    const root = store();
+    const result = extractTurnImages(`look\n\n<attached-image path="${image(root, 0)}" name="0.png" />`, { attachmentsDir: root });
+    expect(result.text).toBe("look\n\n");
   });
 
   it("stops at the first replayed message whose images no longer fit", () => {

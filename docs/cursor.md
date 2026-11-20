@@ -114,13 +114,23 @@ as it is. An unanswered card replies `cancelled`. A question that arrives as
 one `session/request_permission` per question (Cursor's fallback) still
 becomes the one-question card it was before.
 
+## Team tools (agents MCP)
+
+OpenMausBot mounts its own coordination and team-setup tools (`coordinate_bots`,
+`create_bot`, `list_team_setup`, `propose_team_setup`, …) on Cursor turns the
+same way as on other ACP engines. The driver:
+
+- passes `--approve-mcps` on every ACP launch so Cursor accepts those
+  session-provided servers without a silent approval gate;
+- sends OpenMausBot's own servers over HTTP (`ownMcpOverHttp`) when the harness
+  is on `127.0.0.1`, matching Cursor's advertised `mcpCapabilities.http`;
+- restarts the CLI process when MCP credentials change between turns.
+
 ## What this driver does not do yet
 
 - The other Cursor ACP extension methods (`cursor/create_plan`,
   todos/tasks/images) are not given a dedicated UI. Unknown JSON-RPC requests
   are rejected with method-not-found so the CLI is not left blocked.
-- MCP servers passed in `session/new` follow Cursor's ACP limitations; prefer
-  project or user `.cursor/mcp.json` where needed.
 - Live smoke (`cursor-agent login`, `cursor-agent models`, one real turn) should be run on
   a machine with the CLI installed and signed in before relying on this in
   production.

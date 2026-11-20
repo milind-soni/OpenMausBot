@@ -484,7 +484,8 @@ it("a process on the Cloud cannot write in the owner's running conversation, and
   // Its notes would be refused, so the teammate's turn is told to put facts in its result instead.
   const delegated = await heldTurn(before, (dump) => JSON.stringify(dump.prompt).includes(INJECTED), "the teammate's turn");
   expect(String(delegated.systemPrompt)).toContain("Notes cannot be saved from this conversation");
-  expect(String(delegated.systemPrompt)).not.toContain("Change MEMORY.md only with memory_update");
+  // The memory rules stay in the cached half whatever a turn's verdict, and this turn's note overrides them.
+  expect(String(delegated.systemPrompt)).toContain("Whatever your memory instructions say, do not call memory_update or memory_log or edit memory files this turn.");
   await stop(bot, receipt.receipts![0]!.threadId!);
 }, 60_000);
 

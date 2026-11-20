@@ -7,7 +7,8 @@ import { createConnection, createServer, type Server } from "node:net";
 
 import type { Desk } from "./jobs.ts";
 import { errorText, type Log } from "./log.ts";
-import { checkJob, type JobReply } from "./protocol.ts";
+import { checkCustomerRunJob } from "./customer-run.ts";
+import { checkJob, type JobReply, type ServerMode } from "./protocol.ts";
 
 const MAX_REQUEST_BYTES = 64 * 1024;
 
@@ -16,7 +17,7 @@ export function localJobId(): string {
 }
 
 /** Answers one JSON line `{type, args}` per connection with the job's reply, as one JSON line. */
-export function serveLocalJobs(socketPath: string, desk: Desk, log: Log): Promise<Server> {
+export function serveLocalJobs(socketPath: string, desk: Desk, log: Log, mode: ServerMode = "operated"): Promise<Server> {
   rmSync(socketPath, { force: true });
   const server = createServer((socket) => {
     let text = "";
@@ -36,7 +37,8 @@ export function serveLocalJobs(socketPath: string, desk: Desk, log: Log): Promis
       let request: unknown;
       try { request = JSON.parse(text.slice(0, end)); } catch { request = null; }
       const fields = typeof request === "object" && request !== null && !Array.isArray(request) ? request as Record<string, unknown> : {};
-      const checked = checkJob({ id: localJobId(), type: fields.type, args: fields.args });
+      const message = { id: localJobId(), type: fields.type, args: fields.args };
+      const checked = mode === "customer-run" ? checkCustomerRunJob(message, "local") : checkJob(message);
       if (!checked.ok) {
         answer({ ok: false, error: { code: checked.code, message: checked.message } });
         return;

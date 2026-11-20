@@ -107,6 +107,17 @@ describe("status: Working, Paused, Needs you", () => {
     expect(automationStatus(automation([run("failed", at(0, 9), { error: "Provider crashed" }), run("completed", at(-1, 9)), run("failed", at(-2, 9))])).state).toBe("working");
   });
 
+  it("does not take a row that only counts skipped occurrences for a failure, or for the latest run", () => {
+    const counted = run("missed", at(0, 9, 5), { error: "Skipped because the previous run of this routine is still running", seenAt: at(0, 9, 5), skipped: { count: 1, firstAt: at(0, 9, 5), lastAt: at(0, 9, 5) } });
+    const withOneFailure = automation([counted, run("failed", at(0, 9), { error: "Provider crashed" }), run("completed", at(-1, 9))]);
+    expect(automationStatus(withOneFailure).state).toBe("working");
+    expect(statusLine(automation([counted, run("completed", at(0, 9, 2))]), NOW)).toBe("On · last ran today 9:02 AM · next: Monday 9:00 AM");
+    expect(statusLine(automation([counted, run("running", at(0, 9, 2))]), NOW)).toContain("running now");
+    // One the owner was told about is a result like any other.
+    const told = { ...counted, seenAt: undefined, skipped: { ...counted.skipped!, told: true as const } };
+    expect(automationStatus(automation([told, run("failed", at(0, 9), { error: "Provider crashed" })])).state).toBe("needs-you");
+  });
+
   it("is Paused when switched off, whatever its runs", () => {
     expect(automationStatus(automation([run("failed", at(0, 9)), run("failed", at(-1, 9))], { enabled: false })).state).toBe("paused");
   });

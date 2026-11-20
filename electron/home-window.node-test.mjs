@@ -62,12 +62,12 @@ test("a frozen copy left on this computer's own page goes back to the server it 
   assert.equal(parked.url, `${garage}/`, "the window is on the server");
   assert.deepEqual(parked.local, [], "this computer's frozen page is never shown");
   assert.deepEqual(parked.calls, ["ensure"], "a window is there to open it in");
-  assert.deepEqual(parked.home.view(), { screen: "opening" }, "no screen of its own while the server opens");
+  assert.deepEqual(parked.home.view(), { screen: "opening", name: "Garage server" }, "while the server opens, the screen names it, never My Cloud");
   // A server forgotten here, or one that doesn't answer: the screen says where the bots are, and looks again by itself.
   const forgotten = world({ journal: null, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
   forgotten.reopenAnswer = false;
   await forgotten.home.show();
-  assert.deepEqual(forgotten.home.view(), { screen: "offline", reason: "Your bots are on Garage server." });
+  assert.deepEqual(forgotten.home.view(), { screen: "offline", name: "Garage server", reason: "Your bots are on Garage server." });
   assert.equal(forgotten.timers.length, 1, "it looks again by itself");
   // The second try lands on the server, and the next show() leaves the window there, never back on the frozen page.
   forgotten.reopenAnswer = true;
@@ -95,18 +95,24 @@ test("a frozen copy left on this computer's own page goes back to the server it 
   const loading = world({ journal: null, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
   await loading.home.show();
   assert.equal(loading.home.failed(`${garage}/chats`, -105), true, "the way back's load failure is answered here");
-  assert.deepEqual(loading.home.view(), { screen: "offline", reason: "Your bots are on Garage server." });
+  assert.deepEqual(loading.home.view(), { screen: "offline", name: "Garage server", reason: "Your bots are on Garage server." });
+  // A team asked for meanwhile (signed out, so it never opened) doesn't lend its name to the server's offline screen.
+  const asked = world({ journal: null, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
+  await asked.home.show({ place: { team: "t-1", name: "Studio", origin: "https://studio.example.test" } });
+  assert.equal(asked.home.failed(`${garage}/chats`, -105), true);
+  assert.deepEqual(asked.home.view(), { screen: "offline", name: "Garage server", reason: "Your bots are on Garage server." });
   // A recovery whose page never commits is bounded: the screen says where the bots are, with a retry, within OPEN_MS.
   const stuck = world({ journal: null, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
   stuck.reopenGate = new Promise(() => {});
   let back = false;
   const waiting = stuck.home.show().then(() => { back = true; });
   for (let i = 0; i < 200 && stuck.timers.length === 0; i++) await tick();
+  assert.deepEqual(stuck.published.at(-1), { screen: "opening", name: "Garage server" }, "the screen is told the server's name while it waits");
   await stuck.later(OPEN_MS);
   await tick();
   assert.equal(back, true, "the deadline hands show() back");
   await waiting;
-  assert.deepEqual(stuck.home.view(), { screen: "offline", reason: "Your bots are on Garage server." }, "the screen says where they are");
+  assert.deepEqual(stuck.home.view(), { screen: "offline", name: "Garage server", reason: "Your bots are on Garage server." }, "the screen says where they are");
   assert.equal(stuck.timers.length, 1, "and looks again by itself");
   // A move still under way is that screen's to say, not this one's.
   const moving = world({ journal: null, marker, state: { status: "signed-out" }, ownMove: { phase: "final", name: "Garage server" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
@@ -424,6 +430,12 @@ test("the window's IPC: the screen reads and retries, My Cloud's page renews its
   await handlers.get("home:repair")(page);
   w.url = `${LOCAL}${HOME_SCREEN_PATH}`;
   assert.deepEqual(handlers.get("home:state")(page), { screen: "opening" });
+  // Only Try again's press, as the preload says it, is a press: never any other value a page sends.
+  const asked = [], retry = w.home.retry;
+  w.home.retry = (input) => { asked.push(input?.pressed ?? false); return retry(input); };
+  for (const pressed of [true, "true", 1, undefined]) { w.url = `${LOCAL}${HOME_SCREEN_PATH}`; await handlers.get("home:retry")(page, pressed); }
+  assert.deepEqual(asked, [true, false, false, false]);
+  w.home.retry = retry; w.url = `${LOCAL}${HOME_SCREEN_PATH}`;
   assert.throws(() => handlers.get("home:repair")(page), /only available/);
   w.state = { status: "signed-out" };
   await handlers.get("home:sign-in")(page);
@@ -483,6 +495,9 @@ test("My Cloud's own page, once it is home, gets this app's chat links, diagnost
   assert.equal(local.bridge.home.updating, false);
   await local.bridge.home.retry(); await local.bridge.home.state(); await local.bridge.home.signIn();
   assert.deepEqual(local.invoked.map(([channel]) => channel), ["home:retry", "home:state", "home:sign-in"]);
+  // Try again's press is said as such; the screen's own looks never are.
+  await local.bridge.home.retry(true); await local.bridge.home.retry("true");
+  assert.deepEqual(local.invoked.filter(([channel]) => channel === "home:retry").map(([, pressed]) => pressed), [false, true, false]);
 });
 
 test("only the verified Cloud, open as this window's active server, counts as the Cloud page", () => {

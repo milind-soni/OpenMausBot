@@ -393,6 +393,12 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       const me = sessionPerson(auth);
       return Boolean(team && me && inbox.markRead(me.key, id));
     },
+    /** The viewer read every line of their inbox; null for someone on a team without one. */
+    markAllRead(auth: RequestAuth): number | null {
+      if (!team && deps.place) return deps.place.markAllRead(auth);
+      const me = sessionPerson(auth);
+      return team && me ? inbox.markAllRead(me.key) : null;
+    },
     /** This person's Needs you lines: the messages in their inbox they have not opened, newest first. */
     needsYou(auth: RequestAuth): NeedsYouItem[] {
       const me = sessionPerson(auth);
@@ -419,7 +425,7 @@ export function createTeamMessages(deps: TeamMessagesDeps) {
       return waiting ? { returned: false, open: { botId: waiting.botId, threadId: waiting.threadId } } : { returned: false };
     },
     /** A notification about to go out: an ask, a failure or a routine's report routed to a person reaches their inbox. */
-    route(notification: Notification, how: { routine?: boolean } = {}): Notification | null {
+    route(notification: Notification, how: { routine?: boolean; summary?: boolean } = {}): Notification | null {
       return !team && deps.place ? deps.place.route(notification, how) : inbox.route(notification, how);
     },
     stop(): void {

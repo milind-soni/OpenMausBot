@@ -1,5 +1,7 @@
 # Edge for one OpenMausBot tenant: automatic HTTPS in front of a server that
-# only listens on loopback. Login is pairing (docs/self-hosting.md "Using it
+# only listens on loopback, reached over the Unix sockets it makes in the
+# `edge` volume (docker-compose.yml). A request on a socket is always a remote
+# one to the server, never a local one. Login is pairing (docs/self-hosting.md "Using it
 # from your computer"): a remote browser without a session sees the pair
 # page, everything else is refused by the server itself, so Caddy adds no
 # password of its own. Caddy forwards the real Host and sets
@@ -12,7 +14,7 @@
 	# own per-hook secrets), so it sits outside any login. The path is passed
 	# through unchanged: the receiver routes on /hooks/<id>.
 	handle /hooks/* {
-		reverse_proxy 127.0.0.1:8800
+		reverse_proxy unix//run/openmausbot/hooks.sock
 	}
 
 	handle {
@@ -22,9 +24,12 @@
 		#   }
 		# and set both variables in .env (hash with `caddy hash-password`,
 		# every `$` doubled for Compose).
-		reverse_proxy 127.0.0.1:8799 {
+		reverse_proxy unix//run/openmausbot/http.sock {
 			# SSE: stream events as they arrive
 			flush_interval -1
+			# Compression is `encode`'s job above; the server would gzip its
+			# JSON on its socket otherwise, as for the phone tunnel.
+			header_up -Accept-Encoding
 		}
 	}
 }

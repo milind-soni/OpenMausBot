@@ -52,8 +52,9 @@ loopback without one. A hosted or shared server with service loopback trust
 session for almost every tool, reads included. To authorize an external MCP
 client:
 
-1. In OpenMausBot, open **Settings → Phone → Set up a phone** and reveal the
-   one-time pairing code.
+1. In OpenMausBot, open **Settings → Phone & devices**, press **Pair** and
+   reveal the one-time pairing code (keep the access at everything for tools
+   that change settings).
 2. Exchange it locally (remove spaces from the displayed code):
 
    ```sh
@@ -74,8 +75,9 @@ client:
    }
    ```
 
-The paired client appears with phones under **Settings → Phone** and can be
-revoked there. Do not share the token or commit it to a repository.
+The paired client appears under **Settings → Phone & devices** and can be
+revoked there (or with `openmausbot devices revoke ID` once you signed the
+terminal in with `openmausbot login`). Do not share the token or commit it to a repository.
 
 ## From the installed desktop app
 

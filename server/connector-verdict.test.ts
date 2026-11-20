@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { ConnectorToolGrant } from "../shared/wire.ts";
 import {
+  APP_SANDBOX_REFUSAL,
+  appSandboxAllowed,
+  appSandboxRule,
   COMPOSIO_MULTI_EXECUTE_TOOL,
   connectorCallFromFrame,
   connectorRefusalText,
@@ -37,6 +40,8 @@ describe("connectorCallFromFrame", () => {
   it("reads a direct per-toolkit call", () => {
     expect(connectorCallFromFrame(toolsCall("GMAIL_SEND_EMAIL", { to: "a@b.c" })))
       .toEqual({ kind: "tools", invoked: "GMAIL_SEND_EMAIL", names: ["GMAIL_SEND_EMAIL"] });
+    expect(connectorCallFromFrame(toolsCall("_1PASSWORD_GET_ITEM", { item_id: "i1" })))
+      .toEqual({ kind: "tools", invoked: "_1PASSWORD_GET_ITEM", names: ["_1PASSWORD_GET_ITEM"] });
   });
 
   it("reads every target from MULTI_EXECUTE, single and batched", () => {
@@ -71,10 +76,46 @@ describe("connectorCallFromFrame", () => {
   });
 });
 
+describe("appSandboxRule", () => {
+  const granted = {};
+  it("opens only a direct call to the apps' sandbox, and only while the turn runs at Full access", () => {
+    let full = true;
+    const level = () => full;
+    for (const name of ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL"]) {
+      const rule = appSandboxRule(toolsCall(name, { code: "print(1)" }), level);
+      expect(rule.direct).toBe(true);
+      expect(rule.open(granted)).toBe(true);
+      expect(rule.refusal).toBe(APP_SANDBOX_REFUSAL);
+    }
+    const direct = appSandboxRule(toolsCall("COMPOSIO_REMOTE_WORKBENCH", {}), level);
+    full = false;
+    expect(direct.open(granted), "asked again at dispatch: the level dropped meanwhile").toBe(false);
+    full = true;
+    const wrapped = appSandboxRule(multiExecute({ tools: [{ tool_slug: "COMPOSIO_REMOTE_WORKBENCH", arguments: {} }] }), level);
+    expect(wrapped.direct).toBe(false);
+    expect(wrapped.open(granted)).toBe(false);
+    expect(wrapped.refusal).not.toBe(APP_SANDBOX_REFUSAL);
+    expect(appSandboxRule(toolsCall("COMPOSIO_SEARCH_TOOLS", {}), level).open(granted)).toBe(false);
+    expect(appSandboxRule({ method: "tools/list" }, level).open(granted)).toBe(false);
+    expect(appSandboxRule(null, level).open(granted)).toBe(false);
+  });
+
+  it("stays shut at Full access for a bot whose scopes limit its apps, and says the read-only setting is why", () => {
+    const rule = appSandboxRule(toolsCall("COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print(1)" }), () => true);
+    expect(rule.open({ connectorScopes: { apps: { gmail: "read" } } })).toBe(false);
+    expect(rule.open({ connectorScopes: { apps: { gmail: "write" } } }), "an app left off is a limit too").toBe(false);
+    expect(rule.open({ connectorScopes: { apps: {} } })).toBe(false);
+    expect(appSandboxAllowed({ connectorScopes: { apps: { gmail: "read" } } })).toBe(false);
+    expect(appSandboxAllowed({})).toBe(true);
+    expect(rule.refusal).toContain("read only");
+  });
+});
+
 describe("serviceSlugFor", () => {
   it("maps a tool name to its service slug", () => {
     expect(serviceSlugFor("GMAIL_SEND_EMAIL")).toBe("gmail");
     expect(serviceSlugFor("SLACK_POST_MESSAGE")).toBe("slack");
+    expect(serviceSlugFor("_1PASSWORD_GET_ITEM")).toBe("_1password");
     expect(serviceSlugFor("GMAIL")).toBeNull();
     expect(serviceSlugFor("_SEND")).toBeNull();
   });
@@ -84,6 +125,7 @@ describe("serviceSlugForCandidates", () => {
   it("prefers the longest known slug across an underscore boundary", () => {
     expect(serviceSlugForCandidates("BLAND_AI_MAKE_CALL", ["bland", "bland_ai"])).toBe("bland_ai");
     expect(serviceSlugForCandidates("GITHUB_CREATE_ISSUE", ["git", "github"])).toBe("github");
+    expect(serviceSlugForCandidates("_1PASSWORD_GET_ITEM", ["_1password", "password"])).toBe("_1password");
   });
 
   it("matches whole slug segments only and reports no match for the caller's fallback", () => {
@@ -134,6 +176,10 @@ describe("evaluateConnectorTools", () => {
     const grants: Record<string, ConnectorToolGrant> = { gmail: { tools: "*" } };
     expect(evaluateConnectorTools(["GMAIL_SEND_EMAIL", "GMAIL_FETCH_EMAILS"], grants).allowed).toBe(true);
     expect(evaluateConnectorTools(["SLACK_POST_MESSAGE"], grants).allowed).toBe(false);
+    const onePassword: Record<string, ConnectorToolGrant> = { _1password: { tools: "*" } };
+    expect(evaluateConnectorTools(["_1PASSWORD_GET_ITEM", "_1PASSWORD_LIST_VAULTS"], onePassword).allowed).toBe(true);
+    expect(evaluateConnectorTools(["_1PASSWORD_GET_ITEM"], { _1password: { tools: ["_1PASSWORD_GET_ITEM"] } }).allowed).toBe(true);
+    expect(evaluateConnectorTools(["_1PASSWORD_DELETE_ITEM"], { _1password: { tools: ["_1PASSWORD_GET_ITEM"] } }).allowed).toBe(false);
   });
 
   it("keeps an underscored service's tools under its own grant", () => {
@@ -179,6 +225,16 @@ describe("refusal text", () => {
     expect(text).toContain("Ask the person");
     expect(text).not.toContain("SLACK_POST_MESSAGE");
     expect(text).not.toContain("GMAIL");
+  });
+
+  it("tells a bot whose batch wraps the apps' sandbox that it runs only at Full access, by a direct call", () => {
+    const text = connectorRefusalText(evaluateConnectorTools(["COMPOSIO_REMOTE_WORKBENCH"], { gmail: { tools: "*" } }).denials);
+    expect(text).toBe(APP_SANDBOX_REFUSAL);
+    expect(text).toContain("Full access");
+    expect(connectorRefusalText([
+      { tool: "COMPOSIO_REMOTE_WORKBENCH", service: "composio", onGrantedService: false },
+      { tool: "NOTION_CREATE_PAGE", service: "notion", onGrantedService: false },
+    ])).not.toContain("sandbox");
   });
 
   it("names every refused tool in a batch", () => {

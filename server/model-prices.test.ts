@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { estimatePriceFor, LIST_PRICES, ledgerCost, listPriceFor } from "./model-prices.ts";
+import { estimatePriceFor, ledgerCost, listPriceFor, listPrices } from "./model-prices.ts";
 import type { PriceList } from "./prices.ts";
 
 const OFFICIAL = [
@@ -13,8 +13,8 @@ const OFFICIAL = [
 
 describe("built-in list prices", () => {
   it("names an official source and the day it was read for every entry, with sane numbers", () => {
-    expect(Object.keys(LIST_PRICES).length).toBeGreaterThan(20);
-    for (const [model, entry] of Object.entries(LIST_PRICES)) {
+    expect(Object.keys(listPrices()).length).toBeGreaterThan(20);
+    for (const [model, entry] of Object.entries(listPrices())) {
       expect(model, "keys are lower-case").toBe(model.toLowerCase());
       expect(entry.asOf).toMatch(/^\d{4}-\d{2}-\d{2}$/);
       expect(OFFICIAL.some((prefix) => entry.source.startsWith(prefix)), `${model}: ${entry.source}`).toBe(true);
@@ -72,6 +72,17 @@ describe("what the ledger books for a settled turn", () => {
     expect(estimatePriceFor({ driverKind: "grok", model: "grok-4.7" }, operator)).toEqual({ inputPerMillion: 3, outputPerMillion: 3 });
     expect(estimatePriceFor({ driverKind: "codex", model: "gpt-5.4" }, operator)?.inputPerMillion).toBe(2.5);
     expect(ledgerCost({ driverKind: "acp", model: "fake-model", input: 1_000_000, output: 0, costUsd: null }, operator)).toEqual({ costUsd: 10, costSource: "estimated" });
+  });
+
+  it("prices a Codex Fast row as its base model", () => {
+    const fast = { ...codex, model: "gpt-5.5+priority", costUsd: null };
+    expect(ledgerCost(fast, null)).toEqual(ledgerCost({ ...codex, costUsd: null }, null));
+    const operator: PriceList = { "codex/gpt-5.5": { inputPerMillion: 1, outputPerMillion: 2 }, default: { inputPerMillion: 10, outputPerMillion: 10 } };
+    expect(ledgerCost(fast, operator).costUsd).toBeCloseTo(1 * 1 + 0.1 * 2, 9);
+    expect(estimatePriceFor({ driverKind: "codex", model: "gpt-5.5+priority" }, { "codex/gpt-5.5+priority": { inputPerMillion: 7, outputPerMillion: 7 } })?.inputPerMillion).toBe(7);
+    expect(estimatePriceFor({ driverKind: "acp", model: "gpt-5.5+priority" }, null)).toBeNull();
+    // A provider-qualified custom model keeps its `+`: it is not a Fast row, so another model's price must not apply.
+    expect(estimatePriceFor({ driverKind: "codex", model: "local::foo+priority" }, { "codex/local::foo": { inputPerMillion: 9, outputPerMillion: 9 } })).toBeNull();
   });
 
   it("books an unpriced model as unpriced, not as free", () => {

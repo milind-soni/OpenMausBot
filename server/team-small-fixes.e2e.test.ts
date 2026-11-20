@@ -45,7 +45,7 @@ const turns = (): Turn[] => existsSync(`${planPath()}.evidence.jsonl`)
   ? readFileSync(`${planPath()}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line) as Turn) : [];
 const plan = (value: Record<string, unknown>) => writeFileSync(planPath(), JSON.stringify(value));
 const create = async (body: Record<string, unknown>) => {
-  const created = await team.as(ada, "POST", "/api/bots", body);
+  const created = await team.as(ada, "POST", "/api/bots", { visibility: "everyone", ...body });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   return created.body.bot as Bot;
 };

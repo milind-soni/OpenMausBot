@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { cn } from "@/lib/cn";
+import { avatarMarks, type AvatarKind } from "@/lib/avatar-marks";
 import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotFaceInk, type BotAvatarCrop, type MascotFaceColor } from "../../shared/bot-avatar";
@@ -65,13 +66,16 @@ const gradientFor = (color: MausColor): [string, string, string] => {
   return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
 };
 
+const roomGradients = new Map<MausColor, [string, string, string]>();
+
+/** One array per colour, so a memoised mascot drawn with it does not draw again. */
 export function roomAvatarGradient(color: MausColor): [string, string, string] {
-  const fill = `var(--identity-${color})`;
-  return [
-    `color-mix(in srgb, ${fill} 82%, #ffffff)`,
-    fill,
-    `color-mix(in srgb, ${fill} 82%, #000000)`,
-  ];
+  let gradient = roomGradients.get(color);
+  if (!gradient) {
+    const fill = `var(--identity-${color})`;
+    roomGradients.set(color, (gradient = [`color-mix(in srgb, ${fill} 82%, #ffffff)`, fill, `color-mix(in srgb, ${fill} 82%, #000000)`]));
+  }
+  return gradient;
 }
 
 export type MausAvatarHandle = CursorAvatarHandle;
@@ -97,10 +101,12 @@ export type MausAvatarProps = {
   bodyId?: BotBodyId;
   gradient?: [string, string, string];
   faceColor?: MascotFaceColor | null;
+  /** Whose face this is; a decorative mascot has none. */
+  kind?: AvatarKind;
 };
 
 function MausAvatarComponent(props: MausAvatarProps, ref: React.Ref<MausAvatarHandle>) {
-  const { bodyId, color, size, state, motion, motionKey, gaze, trackPointer, animated, label } = props;
+  const { bodyId, color, size, state, motion, motionKey, gaze, trackPointer, animated, label, kind } = props;
   if (isCarvedBody(bodyId)) {
     return (
       <CarvedAvatar
@@ -116,6 +122,7 @@ function MausAvatarComponent(props: MausAvatarProps, ref: React.Ref<MausAvatarHa
         trackPointer={trackPointer}
         animated={animated}
         label={label}
+        kind={kind}
       />
     );
   }
@@ -144,6 +151,7 @@ function GradientAvatarComponent(
     bodyId,
     gradient,
     faceColor,
+    kind,
   }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
@@ -184,6 +192,7 @@ function GradientAvatarComponent(
 
   return (
     <span
+      {...avatarMarks(kind, "mascot")}
       className="inline-flex shrink-0"
       onPointerMove={trackPointer && animated ? onPointerMove : undefined}
       onPointerLeave={trackPointer && animated ? onPointerLeave : undefined}
@@ -268,6 +277,7 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
         gradient={readable ? roomAvatarGradient(bot.color) : undefined}
         size={size}
         label={label ?? bot.name}
+        kind="bot"
       />
     );
   }
@@ -279,6 +289,7 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
   const origin = `${focusX * 100}% ${focusY * 100}%`;
   return (
     <span
+      {...avatarMarks("bot", "picture")}
       className="relative block shrink-0 overflow-hidden bg-raised"
       style={{ width: size, height: size, borderRadius: radius }}
     >
@@ -321,10 +332,11 @@ export function InitialsAvatar({
   // A picture that is gone (a restored backup carries the address, not the file) falls back to the initials.
   const [failed, setFailed] = useState<string | null>(null);
   if (avatarUrl && failed !== avatarUrl) {
-    return <img src={avatarUrl} alt="" onError={() => setFailed(avatarUrl)} className={cn("shrink-0 rounded-full object-cover", className)} style={{ width: size, height: size }} />;
+    return <img {...avatarMarks("person", "picture")} src={avatarUrl} alt="" onError={() => setFailed(avatarUrl)} className={cn("shrink-0 rounded-full object-cover", className)} style={{ width: size, height: size }} />;
   }
   return (
     <div
+      {...avatarMarks("person", "initials")}
       className={cn("flex shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary font-medium", className)}
       style={{ width: size, height: size, fontSize: fontSize ?? size * 0.38 }}
     >

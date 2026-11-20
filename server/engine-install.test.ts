@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -64,6 +64,7 @@ function useFakeNpm() {
     ctx.binDir = join(ctx.scratch, "fake-path");
     ctx.base = join(ctx.scratch, "data");
     mkdirSync(ctx.binDir);
+    if (process.platform !== "win32") symlinkSync(process.execPath, join(ctx.binDir, "node"));
     writeFakeNpm(ctx.binDir);
     originalPath = process.env.PATH;
     process.env.PATH = ctx.binDir;

@@ -66,6 +66,15 @@ describe("workspace credential migration", () => {
     });
   });
 
+  it("moves a custom endpoint's key to the store and leaves its address, model and protocol in the file", () => {
+    const result = migrateWorkspaceCredentials({
+      decider: { provider: "custom", customKey: "gw-secret", customBaseUrl: "https://gw.example.com/v1", customModel: "m-1", customApi: "decisions" },
+    }, {});
+    expect(result.credentials).toEqual({ customDeciderKey: "gw-secret" });
+    expect(result.config.decider).toEqual({ provider: "custom", customBaseUrl: "https://gw.example.com/v1", customModel: "m-1", customApi: "decisions" });
+    expect(workspaceCredentialEnv(result.credentials)).toEqual({ OMB_CUSTOM_DECIDER_KEY: "gw-secret" });
+  });
+
   it("is idempotent: a second boot over migrated output changes nothing", () => {
     const first = migrateWorkspaceCredentials(
       { xai: { key: "xai-secret" }, tts: { key: "tts-secret", voice: "narrator" } },
@@ -170,6 +179,7 @@ const AI_PROVIDER_KEYS = [
   ["cerebras", "cerebrasApiKey", "CEREBRAS_API_KEY"],
   ["groq", "groqApiKey", "OMB_GROQ_API_KEY"],
   ["greenference", "greenferenceApiKey", "OMB_GREENFERENCE_API_KEY"],
+  ["modelgo", "modelgoApiKey", "OMB_MODELGO_API_KEY"],
   ["meta", "metaApiKey", "OMB_META_API_KEY"],
   ["deepseek", "deepseekApiKey", "OMB_DEEPSEEK_API_KEY"],
   ["openaiCompat", "openaiCompatApiKey", "OPENAI_COMPAT_API_KEY"],

@@ -127,7 +127,7 @@ it("reports each run into the main chat as the bot's own line, writes nothing fo
     expect(each.resultsThreadId).toBe(s.main);
     expect(saved.tasks.find((task: any) => task.threadId === each.threadId)).toMatchObject({ routineRunId: each.id, unread: false });
   }
-  expect(saved.tasks.find((task: any) => task.threadId === s.main).unread).toBe(true);
+  expect(saved.tasks.find((task: any) => task.threadId === s.main).unread, "a report that needs nothing from the person leaves the chat out of To review").toBe(false);
   const done = s.notified().filter((notification) => notification.kind === "done");
   expect(done).toEqual([expect.objectContaining({ threadId: s.main, body: "Inbox watch: Acme replied: they need the invoice by Friday." })]);
   for (const key of ["first", "second", "third"]) expect(s.toldOnlyReplyLeaves(key)).toBe(true);
@@ -237,6 +237,21 @@ it("asks the person in the main chat when a run needs them, and their answer the
   await s.cli("send", "--bot", s.bot.id, "--task", s.main, "--text", "Yes, send it.");
   await s.cli("wait", "--bot", s.bot.id, "--task", s.main, "--timeout", "20");
   expect((await s.messages(s.main)).findLast((message) => message.role === "bot" && message.kind === "text")?.text).toBe("Sent.");
+}, 120_000);
+
+it("puts the main chat under To review when a run ends on a question, even one past the 2,000 characters a run stores", async () => {
+  const s = await server();
+  const long = "Read the Acme thread and the invoice. ".repeat(80).trim();
+  s.script([{ key: "long", match: [s.header("Acme replies")], reply: `${long}\nNEEDS INPUT: Should I send the reply?` }]);
+  const id = await s.runNow(await s.routine("Acme replies"));
+  await s.settled(id);
+  await s.reported(id, "posted");
+  const done = await s.run(id);
+  expect(long.length).toBeGreaterThan(2_000);
+  expect(done.output).toContain("Should I send the reply?");
+  const saved = await s.savedBot();
+  expect(saved.tasks.find((task: any) => task.threadId === s.main).unread, "a run that asks the person puts the chat under To review").toBe(true);
+  expect(saved.tasks.find((task: any) => task.threadId === done.threadId)).toMatchObject({ routineRunId: id, unread: false });
 }, 120_000);
 
 it("takes a 👍 on a run's question in the chat as the answer, with that report in hand", async () => {
@@ -368,7 +383,11 @@ it("does not take a person's failed turn in a run's conversation for the run's o
 
 it("says in the main chat, once per run of failures, that an automation could not finish", async () => {
   const s = await server();
-  s.script([{ key: "run", match: [s.header("Inbox watch")], reply: "never", fail: true, repeat: true }]);
+  // The automatic second start does not repeat the routine's header; it fails the same way, so both runs end on one error.
+  s.script([
+    { key: "run", match: [s.header("Inbox watch")], reply: "never", fail: true, repeat: true },
+    { key: "retry", match: ["this run's first start"], reply: "never", fail: true, repeat: true },
+  ]);
   const routineId = await s.routine("Inbox watch");
   const first = await s.runNow(routineId);
   await s.settled(first, "failed");
@@ -378,6 +397,7 @@ it("says in the main chat, once per run of failures, that an automation could no
   })]);
   const second = await s.runNow(routineId);
   await s.settled(second, "failed");
+  expect((await s.run(first)).error).toContain("Scripted addressed agent failure");
   expect((await s.run(second)).error).toBe((await s.run(first)).error);
   expect(await s.lines()).toHaveLength(1);
 }, 120_000);
@@ -392,11 +412,12 @@ it("tells the main chat about a run missed while the computer was off, which has
     const main = bot.activeTaskId as string;
     const { routine } = await api("POST", "/api/routines", {
       name: "Inbox watch", prompt: "Do the Inbox watch check.", botId: bot.id,
-      schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
+      schedule: { type: "interval", everyMinutes: 1_440, anchorAt: Date.now() + 3_600_000 },
     });
     await restartable.stop();
     const file = join(restartable.dataDir, "routines.json");
     const saved = JSON.parse(readFileSync(file, "utf8"));
+    // Its one occurrence is more than 12 hours old, so nothing runs late in its place.
     saved.routines.find((each: any) => each.id === routine.id).nextRunAt = Date.now() - 13 * 3_600_000;
     writeFileSync(file, JSON.stringify(saved));
     await restartable.start();
@@ -428,6 +449,11 @@ it("brings the files a run sent with attach_file into its report", async () => {
   expect(await s.lines()).toEqual([expect.objectContaining({
     text: "Today's brief is attached.", attachments: [expect.objectContaining({ kind: "file", name: "brief.pdf" })],
   })]);
+  const inRun = await s.messages((await s.run(id)).threadId);
+  const reply = inRun.findLast((message) => message.role === "bot" && message.turnTerminal);
+  const sentLine = inRun.find((message) => message.attachments?.some((file: any) => file.name === "brief.pdf"));
+  expect(sentLine).toMatchObject({ sentInTurn: reply.turnId });
+  expect(sentLine).not.toHaveProperty("turnId");
 }, 120_000);
 
 it("leaves the images a run's tools returned in the run, and reports the files it sent", async () => {

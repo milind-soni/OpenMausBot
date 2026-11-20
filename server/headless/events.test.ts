@@ -73,13 +73,41 @@ describe("events against a server", () => {
     if (end) res.end();
   };
 
+  it.each([
+    { flags: ["--thread", "t1", "--screens"], expected: ["t1"] },
+    { flags: ["--job", "t1", "--screens"], expected: ["t1", "child"] },
+    { flags: ["--thread", "t1"], expected: [] },
+  ])("keeps requested screen frames within the selected conversations: $flags", async ({ flags, expected }) => {
+    asked.length = 0;
+    answer = (req, res) => {
+      if (req.url?.startsWith("/api/threads/t1/job")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        return res.end(JSON.stringify({ threadId: "t1", since: 1_000, state: "running", nodes: [{ threadId: "child" }] }));
+      }
+      stream(res, [
+        'data: {"kind":"hello","resumed":false}\n\n',
+        ...["t1", "child", "other"].map((threadId) => `data: ${JSON.stringify({ kind: "screen", botId: "lead", threadId, surface: "computer", png: "AAAA" })}\n\n`),
+        'data: {"kind":"message","threadId":"t1","text":"finished fixture"}\n\n',
+      ], false);
+    };
+    const { io, out } = capture();
+    const controller = new AbortController();
+    const code = await runHeadless(["events", ...flags], {
+      env: { OPENMAUSBOT_URL: origin }, signal: controller.signal,
+      io: { ...io, out: (line) => { io.out(line); if (JSON.parse(line).kind === "message") controller.abort(); } },
+    });
+    expect(code).toBe(130);
+    expect(out.map((line) => JSON.parse(line)).filter((frame) => frame.kind === "screen").map((frame) => frame.threadId)).toEqual(expected);
+    expect(asked).toContain(`/api/events?screens=${flags.includes("--screens") ? "on" : "off"}`);
+  });
+
   it("ends with the refusal when the stream is refused (an expired token), instead of asking again forever", async () => {
     asked.length = 0;
     answer = (_req, res) => { res.writeHead(401, { "content-type": "application/json" }); res.end(JSON.stringify({ error: "unauthorized: this session has expired or was revoked" })); };
     const { io, out } = capture();
     const code = await runHeadless(["events", "--json"], { io, env: { OPENMAUSBOT_URL: origin, OPENMAUSBOT_TOKEN: "omb_sess_expired" } });
-    expect(code).toBe(5);
-    expect(JSON.parse(out.join("\n"))).toMatchObject({ ok: false, exitCode: 5, error: "this server needs a credential and did not accept the one given" });
+    expect(code).toBe(4);
+    expect(JSON.parse(out.join("\n"))).toMatchObject({ ok: false, exitCode: 4, error: "this server did not accept the token given" });
     expect(asked).toHaveLength(1);
   });
 

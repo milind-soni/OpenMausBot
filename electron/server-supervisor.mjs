@@ -1,4 +1,6 @@
-// Owns one child, including while its health probe is pending; recovery retries the established port.
+// Owns one child, including while its health probe is pending; recovery retries the established port. `keepTrying()`:
+// the computer is an always-on home, so a spent budget, or a start that had to stop (`abort`), waits `longRetryMs` and
+// starts over instead of giving up; a child that is still owned then is waited out, never given a sibling.
 export function createServerSupervisor({
   restart,
   stop,
@@ -8,6 +10,8 @@ export function createServerSupervisor({
   log = () => {},
   retryDelaysMs = [1_000, 2_000, 4_000],
   stableUptimeMs = 60_000,
+  keepTrying = () => false,
+  longRetryMs = 5 * 60_000,
   now = () => performance.now(),
 }) {
   let current = null;
@@ -27,17 +31,24 @@ export function createServerSupervisor({
     return true;
   }
 
-  function schedule() {
+  function schedule(long = false) {
     if (stopped || paused) return;
-    if (attempts === retryDelaysMs.length) {
+    let delay;
+    if (!long && attempts < retryDelaysMs.length) {
+      delay = retryDelaysMs[attempts++];
+      log(`server recovery attempt ${attempts}/${retryDelaysMs.length} in ${delay}ms`);
+    } else if (keepTrying()) {
+      attempts = 0;
+      delay = longRetryMs;
+      log(`server recovery: always-on home, trying again in ${delay}ms`);
+    } else {
       onExhausted();
       return;
     }
-    const delay = retryDelaysMs[attempts++];
-    log(`server recovery attempt ${attempts}/${retryDelaysMs.length} in ${delay}ms`);
     timer = setTimeout(async () => {
       timer = null;
       if (paused) return;
+      if (long && current !== null) { schedule(true); return; }
       let result;
       try {
         result = await restart();
@@ -48,8 +59,10 @@ export function createServerSupervisor({
       }
       if (stopped || paused) return;
       if (result?.proc && ready(result.proc)) return;
-      if (result?.abort) onExhausted();
-      else schedule();
+      if (result?.abort) {
+        if (keepTrying()) schedule(true);
+        else onExhausted();
+      } else schedule();
     }, delay);
     timer.unref?.();
   }
@@ -67,6 +80,25 @@ export function createServerSupervisor({
       onUnavailable();
       if (wasReady) schedule();
     });
+  }
+
+  /** A first start that never got ready (every port taken after a power cut, say), on an always-on home: `start()`, true
+   * once it is ready, again after each long wait while `keepTrying()`; not while an earlier child is still owned. */
+  function startLater(start) {
+    if (stopped || paused || timer || readySince !== null || !keepTrying()) return false;
+    log(`server start: always-on home, trying again in ${longRetryMs}ms`);
+    timer = setTimeout(async () => {
+      timer = null;
+      if (stopped || paused || readySince !== null) return;
+      if (current === null) {
+        let started = false;
+        try { started = await start(); } catch (error) { log(`server start failed: ${error?.message ?? error}`); }
+        if (started || stopped || paused) return;
+      }
+      startLater(start);
+    }, longRetryMs);
+    timer.unref?.();
+    return true;
   }
 
   // Pause drops any queued retry and holds recovery until resume(); exits and onUnavailable still publish.
@@ -94,5 +126,5 @@ export function createServerSupervisor({
     return shutdownPromise;
   }
 
-  return { watch, ready, isCurrent, pause, resume, shutdown };
+  return { watch, ready, isCurrent, pause, resume, shutdown, startLater };
 }

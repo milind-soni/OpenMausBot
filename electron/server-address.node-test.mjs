@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { allowedServerOrigin, isPrivateHost, pairingPageUrl, parseServerInput, readPairingCode, serverTransport } from "./server-address.mjs";
+import { allowedServerOrigin, isPrivateHost, pairingPageUrl, parseServerInput, plainHttpServerOrigins, readPairingCode, serverTransport, vouchForPlainHttpServers } from "./server-address.mjs";
 
 const CODE = "ABCD-EFGH-JKLM";
 
@@ -36,6 +36,9 @@ test("a bare address tries https first, then http only when the host is private"
   assert.deepEqual(parseServerInput("maus.example.com").candidates, ["https://maus.example.com"]);
   assert.deepEqual(parseServerInput(" https://maus.example.com/ ").candidates, ["https://maus.example.com"]);
   assert.deepEqual(parseServerInput("hetzner-1:8799").candidates, ["https://hetzner-1:8799", "http://hetzner-1:8799"]);
+  // A tailnet name alone also tries the port a computer sharing itself on the tailnet listens on.
+  assert.deepEqual(parseServerInput("macmini.tail1234.ts.net").candidates, ["https://macmini.tail1234.ts.net", "http://macmini.tail1234.ts.net", "http://macmini.tail1234.ts.net:8799"]);
+  assert.deepEqual(parseServerInput("macmini.tail1234.ts.net:18799").candidates, ["https://macmini.tail1234.ts.net:18799", "http://macmini.tail1234.ts.net:18799"]);
 });
 
 test("an address and a code typed apart make one pairing", () => {
@@ -84,6 +87,46 @@ test("anything that is not a server address is refused", () => {
 test("each transport is named for the line under a saved server", () => {
   assert.equal(serverTransport("https://maus.example.com"), "https");
   assert.equal(serverTransport("https://box.tail1234.ts.net"), "tailscale");
+  // Inside WireGuard: encrypted although the scheme is http.
+  assert.equal(serverTransport("http://box.tail1234.ts.net:8799"), "tailscale");
+  // A bare 100.64/10 address may be carrier NAT or another VPN.
+  assert.equal(serverTransport("http://100.101.102.103:8799"), "private-http");
   assert.equal(serverTransport("http://192.168.1.20:8799"), "private-http");
   assert.equal(serverTransport("http://127.0.0.1:8799"), "loopback");
+});
+
+test("only saved servers at a private-network http address are vouched for, so Live calls there get the microphone", () => {
+  const environments = [
+    { id: "a", kind: "remote", origin: "http://192.168.1.20:8799" },
+    { id: "b", kind: "remote", origin: "http://box.tail1234.ts.net:8799" },
+    { id: "c", kind: "remote", origin: "https://maus.example.com" },
+    { id: "d", kind: "remote", origin: "http://127.0.0.1:8799" },
+    { id: "e", kind: "remote", origin: "http://localhost:3000" },
+    { id: "f", kind: "remote", origin: "http://203.0.113.9:8799" },
+    { id: "g", kind: "remote", origin: "http://maus.example.com" },
+    { id: "h", kind: "local", dataDir: "/tmp/work" },
+    { id: "i", kind: "remote", origin: "http://192.168.1.20:8799" },
+    // Chromium splits the switch on commas, so this would also vouch for the public http://example.com.
+    { id: "j", kind: "remote", origin: "http://example.com,.local" },
+  ];
+  assert.deepEqual(plainHttpServerOrigins(environments), ["http://192.168.1.20:8799", "http://box.tail1234.ts.net:8799"]);
+  assert.deepEqual(plainHttpServerOrigins([]), []);
+  assert.deepEqual(plainHttpServerOrigins(undefined), []);
+});
+
+test("vouching keeps an origin already on the command line and adds nothing when no server needs it", () => {
+  const commandLine = (given) => {
+    const switches = new Map(given ? [["unsafely-treat-insecure-origin-as-secure", given]] : []);
+    return { switches, getSwitchValue: (name) => switches.get(name) ?? "", appendSwitch: (name, value) => switches.set(name, value) };
+  };
+  const servers = [{ id: "a", kind: "remote", origin: "http://192.168.1.20:8799" }];
+  const fresh = commandLine();
+  vouchForPlainHttpServers(fresh, servers);
+  assert.equal(fresh.switches.get("unsafely-treat-insecure-origin-as-secure"), "http://192.168.1.20:8799");
+  const given = commandLine("http://dev.lan:3000");
+  vouchForPlainHttpServers(given, servers);
+  assert.equal(given.switches.get("unsafely-treat-insecure-origin-as-secure"), "http://dev.lan:3000,http://192.168.1.20:8799");
+  const none = commandLine();
+  vouchForPlainHttpServers(none, [{ id: "c", kind: "remote", origin: "https://maus.example.com" }]);
+  assert.equal(none.switches.size, 0);
 });

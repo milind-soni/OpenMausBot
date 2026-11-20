@@ -2,7 +2,9 @@ export type LentMcpServer =
   | { name: string; command: string; args: string[]; env: Record<string, string> }
   | { name: string; url: string; type: "http" | "sse"; headers: Record<string, string> };
 export const LENT_MCP_ACTIONS: ReadonlySet<"mcp_tools" | "mcp_call">;
+export const CALLER_META: "openmausbot/caller";
 export function validLentMcpServer(server: unknown): server is LentMcpServer;
+export function validLentMcpJob(operation: { action?: unknown; server?: unknown; caller?: unknown }): boolean;
 export function isLoopbackAddress(url: string): boolean;
 export function lentMcpRefusal(grant: { cloud?: unknown; terminal?: boolean }, server: LentMcpServer): string | null;
 export function ownEnvironmentIds(dataDirs: ReadonlyArray<string | null | undefined>): string[];
@@ -16,6 +18,6 @@ export function createLentMcp(options?: {
   /** The ports a URL server is refused on: this computer's own. */
   ports?: () => Promise<number[]>;
 }): {
-  call(operation: { action: "mcp_tools" | "mcp_call"; server: LentMcpServer; tool_name?: string; arguments?: Record<string, unknown> }, signal: AbortSignal): Promise<unknown>;
+  call(operation: { action: "mcp_tools" | "mcp_call"; server: LentMcpServer; tool_name?: string; arguments?: Record<string, unknown>; caller?: { botId: string; threadId: string } }, signal: AbortSignal): Promise<unknown>;
   close(): Promise<void>;
 };

@@ -1,7 +1,7 @@
 // One tool-free ACP exchange for memory upkeep: a fresh process and session, no MCP servers, an empty
 // folder. It fails closed: any agent request, or any tool call it reports, ends the call.
 import type { TextGenerationOptions, TextGenerationUsage } from "../../contracts.ts";
-import type { killCliTree, spawnCli } from "../../procs.ts";
+import type { BoxSpawnOptions, killCliTree, spawnCli } from "../../procs.ts";
 
 export const BACKGROUND_TEXT_TIMEOUT_MS = 120_000;
 export const BACKGROUND_TEXT_MAX_CHARS = 200_000;
@@ -11,6 +11,9 @@ export interface AcpOneShotInput {
   displayName: string;
   spawn: typeof spawnCli;
   kill: typeof killCliTree;
+  /** Security: while the bot box is on, the engine runs in it, as a bot's turn does, so nothing it loads from a HOME a
+   * bot can write runs outside the box. */
+  box?: BoxSpawnOptions["box"];
   command: string;
   argv: string[];
   env: Record<string, string | undefined>;
@@ -34,7 +37,7 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
   const name = input.displayName;
   if (signal?.aborted) return Promise.reject(new Error(`${name} background call aborted`));
   return new Promise<string>((resolve, reject) => {
-    const child = input.spawn(input.command, input.argv, { cwd: input.cwd, env: input.env, stdio: ["pipe", "pipe", "pipe"], botWork: true });
+    const child = input.spawn(input.command, input.argv, { cwd: input.cwd, env: input.env, stdio: ["pipe", "pipe", "pipe"], botWork: true, ...(input.box ? { box: input.box } : {}) });
     let settled = false;
     let buffer = "";
     let received = 0;

@@ -25,7 +25,10 @@ export function parseTemporal(text: string): Date | string {
   const m = NAIVE.exec(text);
   if (m) {
     const millis = m[7] ? Number(m[7].padEnd(3, "0").slice(0, 3)) : 0;
-    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4] ?? 0), Number(m[5] ?? 0), Number(m[6] ?? 0), millis);
+    const date = new Date(0);
+    date.setFullYear(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    date.setHours(Number(m[4] ?? 0), Number(m[5] ?? 0), Number(m[6] ?? 0), millis);
+    return date;
   }
   const zoned = new Date(text.replace(" ", "T"));
   return Number.isNaN(zoned.getTime()) ? text : zoned;

@@ -93,4 +93,13 @@ describe("McpCallTimeoutSettings", () => {
     expect(input().value).toBe("10");
     expect(host.querySelector('[role="alert"]')).toBeNull();
   });
+
+  it("names the range message as the field's description when the value is out of range", () => {
+    render();
+    type("0");
+    blur();
+    const alert = host.querySelector('[role="alert"]')!;
+    expect(input().getAttribute("aria-invalid")).toBe("true");
+    expect(input().getAttribute("aria-describedby")).toBe(alert.id);
+  });
 });

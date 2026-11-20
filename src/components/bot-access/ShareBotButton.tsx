@@ -16,8 +16,11 @@ export function useTeamName(): string | null {
   return typeof team?.name === "string" && team.name ? team.name : null;
 }
 
-/** A bot's Share button on a team: opens who has access. `headerMenu` holds what else the button offers there. */
-export function ShareBotButton({ bot, className, headerMenu, iconSize = 16 }: { bot: Bot; className: string; headerMenu?: ReactNode; iconSize?: number }) {
+/** A bot's Share button on a team: opens who has access. `headerMenu` holds what else the button offers there, and
+ * `leading` what sits before the button and opens the same dialog. */
+export function ShareBotButton({ bot, className, headerMenu, iconSize = 16, leading }: {
+  bot: Bot; className: string; headerMenu?: ReactNode; iconSize?: number; leading?: (open: () => void) => ReactNode;
+}) {
   const teamName = useTeamName();
   const [open, setOpen] = useState(false);
   const [change, setChange] = useState<AccessChange | null>(null);
@@ -25,6 +28,7 @@ export function ShareBotButton({ bot, className, headerMenu, iconSize = 16 }: { 
   if (!teamName) return null;
   return (
     <>
+      {leading?.(() => setOpen(true))}
       <button type="button" data-panel-share data-share-bot-button aria-label={t("botAccess.share")} title={t("botAccess.share")}
         aria-haspopup="dialog" onClick={() => setOpen(true)} className={className}>
         <Share size={iconSize} aria-hidden="true" className="pointer-events-none" />
@@ -37,7 +41,7 @@ export function ShareBotButton({ bot, className, headerMenu, iconSize = 16 }: { 
 }
 
 /** "Bob can now chat · Undo", for a few seconds; Undo puts the sharing back as it was. */
-export function UndoToast({ text, onUndo, onDone }: { text: string; onUndo: () => Promise<unknown>; onDone: () => void }) {
+export function UndoToast({ text, onUndo, onDone, actionLabel = t("common.undo") }: { text: string; onUndo: () => Promise<unknown>; onDone: () => void; actionLabel?: string }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
     const timer = window.setTimeout(onDone, TOAST_MS);
@@ -48,7 +52,7 @@ export function UndoToast({ text, onUndo, onDone }: { text: string; onUndo: () =
       <span className="min-w-0 flex-1">{failed ? t("botAccess.undoFailed") : text}</span>
       {!failed && (
         <button type="button" onClick={() => void onUndo().then(onDone, () => setFailed(true))} className="shrink-0 rounded-md px-1.5 py-0.5 font-medium text-accent hover:bg-raised">
-          {t("common.undo")}
+          {actionLabel}
         </button>
       )}
     </div>,

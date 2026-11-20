@@ -6,9 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { augmentedPath } from "../env-path.ts";
 import { MESSAGE_FILE_MAX_BYTES } from "../message-file.ts";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, chatToolNotices, directServers, mountChatTools, trimmedToolsNotice, type ChatToolSession } from "./chat-mcp-tools.ts";
+import { ChatMcpClient, ChatToolSessionError, SAVED_RESULTS_FOLDER, SAVED_RESULTS_KEPT, agentsStartupMs, chatMcpEnvironment, chatToolNotices, directServers, joinLateChatTools, mcpStartupMs, mountChatTools, trimmedToolsNotice, type ChatToolDefinition, type ChatToolSession } from "./chat-mcp-tools.ts";
 import { EXECUTOR_LIKE_TOOLS } from "../testing/executor-like-tools.ts";
 import type { ToolScope } from "../../shared/tool-scope.ts";
+import type { SendTurnInput } from "../contracts.ts";
 import { catalogServer, CUA_DRIVER_WINDOWS_TOOLS, syntheticToolNames } from "../testing/cua-driver-tools.ts";
 import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
@@ -40,13 +41,26 @@ const sessions: ChatToolSession[] = [];
 const controllers: AbortController[] = [];
 const schema = { type: "object", properties: { value: { type: "string" } }, required: ["value"], additionalProperties: false };
 
+describe("configured MCP environment", () => {
+  it("keeps an npm cache that works and preserves an explicit override", () => {
+    const cache = mkdtempSync(join(tmpdir(), "omb-npm-cache-"));
+    try {
+      const inherited = { npm_config_cache: cache, PATH: "/bin" };
+      expect(chatMcpEnvironment({}, inherited).npm_config_cache).toBe(cache);
+      expect(chatMcpEnvironment({ npm_config_cache: "/tmp/custom-npm-cache" }, inherited).npm_config_cache).toBe("/tmp/custom-npm-cache");
+    } finally {
+      rmSync(cache, { recursive: true, force: true });
+    }
+  });
+});
+
 function fixture(body = "", toolSchema: Record<string, unknown> = schema) {
   const dir = mkdtempSync(join(tmpdir(), "omb-chat-mcp-"));
   dirs.push(dir);
   const script = join(dir, "fake-mcp.mjs");
   const receipt = join(dir, "receipt.json");
   writeFileSync(script, `#!/usr/bin/env node
-    import { writeFileSync } from "node:fs";
+    import { existsSync, readFileSync, writeFileSync } from "node:fs";
     import { spawn } from "node:child_process";
     const receipt = process.env.RECEIPT;
     const schema = ${JSON.stringify(toolSchema)};
@@ -203,6 +217,24 @@ describe("Chat MCP session", () => {
     expect(calls).toEqual([dropped ? {} : { url: " " }, { url: "https://example.com" }]);
   });
 
+  it.each([
+    ["browser", "Open the address with browser_agent_browser_open first, then call browser_agent_browser_read without url."],
+    ["custom", "input schema"],
+  ] as const)("names the way to read an address when agent_browser_read's url is hidden (%s)", async (mountAs, error) => {
+    // agent-browser's read with its url hidden by slimBrowserToolList (email bug 1a1cb892)
+    const readSchema = { type: "object", properties: { filter: { type: "string" } }, additionalProperties: false };
+    const f = fixture(`if (message.method === "tools/list") { reply(message, {tools:[{name:"agent_browser_read",description:"Read the open page.",inputSchema:schema}]}); continue; }`, readSchema);
+    const session = await mountChatTools(mountAs === "browser" ? { browser: f.server } : { custom: { browser: f.server } }, f.controller.signal, true);
+    sessions.push(session);
+    const name = session.definitions[0]!.function.name;
+    expect(() => session.validate(name, { url: "https://example.com/swagger.json" })).toThrow(error);
+    expect(() => session.validate(name, { filter: 7 })).toThrow("input schema");
+    // a url of the wrong type, or another bad argument, keeps the schema error
+    expect(() => session.validate(name, { url: 7 })).toThrow("input schema");
+    expect(() => session.validate(name, { url: "https://example.com", filter: 7 })).toThrow("input schema");
+    expect(() => session.validate(name, {})).not.toThrow();
+  });
+
   it("shows a model behind Moonshot each schema fitted to its limit, and still checks calls against the full one", async () => {
     const full = wideSchema(110);
     const f = fixture("", full);
@@ -305,30 +337,172 @@ describe("Chat MCP session", () => {
   it.each([
     ["too many tools", `reply(message, {tools:Array.from({length:2001},(_,i)=>({name:"tool"+i,inputSchema:schema}))});`],
     ["invalid RPC", `process.stdout.write('{"result":1}\\n');`],
-  ])("still fails startup for a harness mount and awaits child cleanup for %s", async (_label, response) => {
+  ])("fails startup when the agents server can't start, naming it, and awaits child cleanup for %s", async (_label, response) => {
     const f = fixture(`if (message.method === "tools/list") { ${response} continue; }`);
-    await expect(f.mount(true, true)).rejects.toThrow(/MCP/);
+    await expect(mountChatTools({ agents: f.server } as SendTurnInput["integrations"], f.controller.signal)).rejects.toThrow(/^MCP server "agents" didn't start: MCP/);
     expect(alive(f.read().pid)).toBe(false);
   });
 
-  it("rejects untrusted transport error text without leaking it", async () => {
+  describe("a built-in the turn can go on without", () => {
+    const broken = `if (message.method === "tools/list") { process.stdout.write('{"result":1}\\n'); continue; }`;
+    it.each([
+      ["browser", "browser"],
+      ["email", "email"],
+      ["device", "device"],
+      ["data", "data"],
+    ] as const)("%s is left out and the turn says so, while the others still mount", async (server, key) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const dead = fixture(broken), agents = fixture();
+        const session = await mountChatTools({ [key]: dead.server, agents: agents.server } as SendTurnInput["integrations"], dead.controller.signal, true);
+        sessions.push(session);
+        expect(session.skipped).toEqual([{ server, reason: expect.stringMatching(/MCP/) }]);
+        expect(chatToolNotices(session).join(" ")).toContain(`MCP server "${server}" was skipped for this turn`);
+        expect(session.definitions.map((tool) => tool.function.name)).toEqual(["agents_write"]);
+        expect(alive(dead.read().pid)).toBe(false);
+      } finally { warn.mockRestore(); }
+    });
+  });
+
+  describe("a server the turn must not run without", () => {
+    const broken = `if (message.method === "tools/list") { process.stdout.write('{"result":1}\\n'); continue; }`;
+    it("fails setup, naming it, when a Local VM can't start, and leaves no server running", async () => {
+      const vm = fixture(broken), other = fixture();
+      await expect(mountChatTools({ localComputer: vm.server, data: other.server } as SendTurnInput["integrations"], vm.controller.signal, true))
+        .rejects.toThrow(/^MCP server "computer" didn't start: MCP/);
+      expect(alive(vm.read().pid)).toBe(false);
+      await vi.waitFor(() => expect(alive(other.read().pid)).toBe(false));
+    });
+
+    it.each([
+      ["a Local VM", "computer", (server: Record<string, unknown>) => ({ localComputer: server })],
+      ["the agents server", "agents", (server: Record<string, unknown>) => ({ agents: server })],
+    ] as const)("ends the turn's session when %s fails during a call, instead of going on without it", async (_label, name, integrationsOf) => {
+      const failing = fixture(`if (message.method === "tools/call") { process.exit(3); }`), other = fixture();
+      const session = await mountChatTools({ ...integrationsOf(failing.server), data: other.server } as SendTurnInput["integrations"], failing.controller.signal, true);
+      sessions.push(session);
+      await expect(session.execute(`${name}_write`, { value: "x" }, failing.controller.signal)).rejects.toBeInstanceOf(ChatToolSessionError);
+      expect(() => session.validate("data_write", { value: "y" })).toThrow(ChatToolSessionError);
+      await vi.waitFor(() => expect(alive(other.read().pid)).toBe(false));
+    });
+
+    it("goes on without this desktop's own computer when it fails during a call", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const failing = fixture(`if (message.method === "tools/call") { process.exit(3); }`), other = fixture();
+        const session = await mountChatTools({ localComputer: { ...failing.server, scope: "local-computer" }, data: other.server } as SendTurnInput["integrations"], failing.controller.signal, true);
+        sessions.push(session);
+        await expect(session.execute("computer_write", { value: "x" }, failing.controller.signal)).resolves.toMatchObject({ ok: false });
+        await expect(session.execute("data_write", { value: "y" }, failing.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:y" });
+      } finally { warn.mockRestore(); }
+    });
+  });
+
+  describe("a server that fails during a turn", () => {
+    const warnings = () => vi.spyOn(console, "warn").mockImplementation(() => {});
+    async function pair(body: string, env: Record<string, string> = {}) {
+      const failing = fixture(body), healthy = fixture();
+      const session = await mountChatTools({ custom: { audit: { ...failing.server, env: { ...failing.server.env, ...env } }, other: healthy.server } }, failing.controller.signal);
+      sessions.push(session);
+      return { failing, healthy, session, signal: failing.controller.signal };
+    }
+
+    it("takes only that server, says which and why, masks its stderr, and leaves the other tools working", async () => {
+      const warn = warnings();
+      try {
+        const token = "fixture-configured-value-77";
+        const { failing, session, signal } = await pair(`if (message.method === "tools/call") { process.stderr.write("early line\\nboom with " + process.env.API_TOKEN + " and sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123\\n"); setTimeout(() => process.exit(3), 20); return; }`, { API_TOKEN: token });
+        const result = await session.execute("audit_write", { value: "x" }, signal);
+        expect(result.ok).toBe(false);
+        expect(result.text).toContain("MCP server exited before the session closed.");
+        expect(result.text).toContain("It last said: boom with [redacted]");
+        expect(result.text).toContain('That was the MCP server "audit". It is stopped for the rest of this turn');
+        expect(result.text).not.toContain(token);
+        expect(result.text).not.toContain("abcdefghijklmnopqrstuvwxyz0123");
+        expect(alive(failing.read().pid)).toBe(false);
+
+        await expect(session.execute("other_write", { value: "y" }, signal)).resolves.toMatchObject({ ok: true, text: "recorded:y" });
+        expect(() => session.validate("other_write", { value: "y" })).not.toThrow();
+      } finally { warn.mockRestore(); }
+    });
+
+    it("never runs a call again on a server that stopped, and says why", async () => {
+      const warn = warnings();
+      try {
+        const { failing, session, signal } = await pair(`if (message.method === "tools/call") { process.exit(3); }`);
+        await session.execute("audit_write", { value: "x" }, signal);
+        const again = await session.execute("audit_write", { value: "x" }, signal);
+        expect(again.ok).toBe(false);
+        expect(again.text).toContain('MCP server exited before the session closed. That was the MCP server "audit"');
+        expect(failing.read().calls.filter((call) => call.method === "tools/call")).toHaveLength(1);
+      } finally { warn.mockRestore(); }
+    });
+
+    it("says so on the next call when the server stopped between calls", async () => {
+      const warn = warnings();
+      try {
+        const { session, signal } = await pair(`if (message.method === "tools/list") { reply(message, {tools:[{name:"write",description:"Fixture write",inputSchema:schema}]}); setTimeout(() => process.exit(0), 20); continue; }`);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        const result = await session.execute("audit_write", { value: "x" }, signal);
+        expect(result).toMatchObject({ ok: false, text: expect.stringContaining("MCP server exited before the session closed") });
+      } finally { warn.mockRestore(); }
+    });
+
+    it("still ends the turn's session when the person stops it", async () => {
+      const f = fixture(`if (message.method === "tools/call") { return; }`);
+      const session = await f.mount();
+      const stop = new AbortController();
+      const pending = session.execute("audit_write", { value: "x" }, stop.signal);
+      await vi.waitFor(() => expect(f.read().calls.some((call) => call.method === "tools/call")).toBe(true));
+      stop.abort();
+      await expect(pending).rejects.toBeInstanceOf(ChatToolSessionError);
+      expect(() => session.validate("audit_write", { value: "x" })).toThrow(ChatToolSessionError);
+    });
+  });
+
+  describe("how long a server gets to start", () => {
+    it("is about half a minute on a Cloud home, twenty seconds for the app's own servers on Windows and eight seconds elsewhere", () => {
+      expect(mcpStartupMs({ OMB_CLOUD_ROLE: "home" }, "win32")).toBe(30_000);
+      expect(mcpStartupMs({ OMB_CLOUD_ROLE: "team" }, "linux", false)).toBe(30_000);
+      expect(mcpStartupMs({}, "win32")).toBe(20_000);
+      expect(mcpStartupMs({}, "win32", false)).toBe(8_000);
+      expect(mcpStartupMs({}, "darwin")).toBe(8_000);
+      expect(mcpStartupMs({}, "linux")).toBe(8_000);
+    });
+
+    it("gives the agents server twenty seconds on every desktop and never less than a Cloud home's half minute", () => {
+      expect(agentsStartupMs({}, "darwin")).toBe(20_000);
+      expect(agentsStartupMs({}, "linux")).toBe(20_000);
+      expect(agentsStartupMs({}, "win32")).toBe(20_000);
+      expect(agentsStartupMs({ OMB_CLOUD_ROLE: "home" }, "linux")).toBe(30_000);
+    });
+
+    // tools/list needs a budget that outlasts the child's own start, or the overrun would land in initialize.
+    it.each([["initialize", 150], ["tools/list", 2_500]] as const)("reports an overrun in %s as a startup timeout, not as a request whose outcome is uncertain", async (method, budget) => {
+      const f = fixture(`if (message.method === "${method}") { return; }`);
+      const client = new ChatMcpClient(f.server);
+      await expect(client.tools(f.controller.signal, undefined, budget)).rejects.toThrow(/^MCP startup timed out$/);
+      await client.close();
+    });
+  });
+
+  it("keeps a server that refused a call, without leaking what it said", async () => {
     const f = fixture(`if (message.method === "tools/call") { send({jsonrpc:"2.0",id:message.id,error:{code:-1,message:"secret-fixture-key"}}); continue; }`);
     const session = await f.mount();
-    const result = await session.execute("audit_write", { value: "test" }, f.controller.signal).catch((error: Error) => error);
-    expect(result).toBeInstanceOf(ChatToolSessionError);
-    expect(String(result)).toContain("MCP request failed");
-    expect(String(result)).not.toContain("secret-fixture-key");
-    expect(alive(f.read().pid)).toBe(false);
+    const result = await session.execute("audit_write", { value: "test" }, f.controller.signal);
+    expect(result).toMatchObject({ ok: false, text: 'MCP request failed; inspect the configured integration (method tools/call, JSON-RPC code -1) That was the MCP server "audit".' });
+    expect(result.text).not.toContain("secret-fixture-key");
+    expect(alive(f.read().pid)).toBe(true);
   });
 
   it("rejects malformed tool content instead of accepting an empty successful result", async () => {
     const f = fixture(`if (message.method === "tools/call") { reply(message,{content:[{type:"text",text:42}]}); continue; }`);
     const session = await f.mount();
-    const pending = session.execute("audit_write", {value:"test"}, f.controller.signal);
-    await expect(pending).rejects.toBeInstanceOf(ChatToolSessionError);
-    await expect(pending).rejects.toThrow("invalid content");
-    expect(alive(f.read().pid)).toBe(false);
-    expect(() => session.validate("audit_write", {value:"test"})).toThrow(ChatToolSessionError);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await expect(session.execute("audit_write", {value:"test"}, f.controller.signal)).resolves.toMatchObject({ ok: false, text: expect.stringContaining("invalid content") });
+      expect(alive(f.read().pid)).toBe(false);
+    } finally { warn.mockRestore(); }
   });
 
   it("keeps schema errors recoverable without dispatching or closing the transport", async () => {
@@ -988,16 +1162,35 @@ describe("Chat MCP startup budgets", () => {
     }
   });
 
-  it("still gives a command server 8 seconds", async () => {
+  it("keeps waiting for a slow agents server past the eight seconds other servers get", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      // Lists its tools only once the test says so, like an agents server still loading on a busy older Mac.
+      const f = fixture(`if (message.method === "tools/list") { const wait = setInterval(() => { if (!existsSync(receipt + ".go")) return; clearInterval(wait);
+        reply(message, {tools:[{name:"write",description:"Fixture write",inputSchema:schema}]}); }, 20); continue; }`);
+      const mounting = watch(mountChatTools({ agents: f.server } as SendTurnInput["integrations"], f.controller.signal));
+      const listed = () => { try { return f.read().calls.some((call) => call.method === "tools/list"); } catch { return false; } };
+      await untilReal(listed);
+      await vi.advanceTimersByTimeAsync(17_000);
+      writeFileSync(`${f.receipt}.go`, "");
+      await untilReal(() => mounting.done);
+      expect(mounting.error).toBeUndefined();
+      sessions.push(mounting.value!);
+      expect(mounting.value!.definitions.map((definition) => definition.function.name)).toEqual(["agents_write"]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("still gives a configured command server 8 seconds, on Windows too", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
       const f = fixture(`if (message.method === "tools/list") return;`);
       const mounting = watch(f.mount());
       const listed = () => { try { return f.read().calls.some((call) => call.method === "tools/list"); } catch { return false; } };
       await untilReal(listed);
-      await vi.advanceTimersByTimeAsync(7_900);
+      // The deadline runs on the real clock from the spawn, so a loaded runner has already spent some of it.
+      await vi.advanceTimersByTimeAsync(mcpStartupMs(process.env, process.platform, false) - 3_000);
       expect(mounting.done).toBe(false);
-      await vi.advanceTimersByTimeAsync(200);
+      await vi.advanceTimersByTimeAsync(3_100);
       // stopped at 8 seconds: well short of the 30 a URL server gets
       await settleWithin(1_000, () => mounting.done);
       expect(mounting.error).toBeUndefined();
@@ -1037,13 +1230,13 @@ describe("Chat MCP schema validation", () => {
   it("keeps a bounded frame limit for image-enabled custom servers", async () => {
     const f = fixture('if(message.method === "tools/call") { process.stdout.write("x".repeat(32*1024*1024+1)); continue; }');
     const session = await f.mount(true);
-    await expect(session.execute("audit_write", { value: "large" }, f.controller.signal)).rejects.toThrow(/frame|limit/i);
+    await expect(session.execute("audit_write", { value: "large" }, f.controller.signal)).resolves.toMatchObject({ ok: false, text: expect.stringMatching(/frame|limit/i) });
   });
 
   it("rejects malformed image results without claiming execution success", async () => {
     const f = fixture('if(message.method === "tools/call") { reply(message,{content:[{type:"image",mimeType:"image/png",data:"not-base64"}]}); continue; }');
     const session = await f.mount(true);
-    await expect(session.execute("audit_write", { value: "screenshot" }, f.controller.signal)).rejects.toThrow("Invalid or oversized MCP image");
+    await expect(session.execute("audit_write", { value: "screenshot" }, f.controller.signal)).resolves.toMatchObject({ ok: false, text: expect.stringContaining("Invalid or oversized MCP image") });
   });
   it.each([
     { type: "object", properties: { value: { type: "string", minLength: 2 } }, required: ["value"] },
@@ -1165,7 +1358,7 @@ describe("Chat MCP schema validation", () => {
     const f = fixture(delayed);
     const short = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, 100);
     sessions.push(short);
-    await expect(short.execute("audit_write", { value: "x" }, f.controller.signal)).rejects.toThrow("MCP request timed out");
+    await expect(short.execute("audit_write", { value: "x" }, f.controller.signal)).resolves.toMatchObject({ ok: false, text: expect.stringContaining("MCP request timed out") });
     await expect(f.read().calls.filter((call) => call.method === "tools/call")).toHaveLength(1);
 
     const long = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, 5_000);
@@ -1333,5 +1526,136 @@ describe("Chat MCP tool limit, fairly shared", () => {
       expect(session.merged).toEqual([]);
       expect(session.budget.servers.map((server) => server.name)).toEqual(["work", "home"]);
     } finally { await remote.close(); }
+  });
+});
+
+describe("Chat MCP servers starting in the background", () => {
+  const slowStart = (ms: number) => `if (message.method === "initialize") { setTimeout(() => reply(message, {protocolVersion:"2024-11-05",capabilities:{tools:{}}}), ${ms}); continue; }`;
+  const ask: ChatToolDefinition = { type: "function", function: { name: "ask_user", description: "Ask", parameters: { type: "object" } } };
+  const background = async (integrations: SendTurnInput["integrations"], signal: AbortSignal, toolLimit?: number, onSettled?: (server: string) => void) => {
+    const session = await mountChatTools(integrations, signal, false, undefined, undefined, undefined, undefined, undefined, toolLimit, { background: true, ...(onSettled ? { onSettled } : {}) });
+    sessions.push(session);
+    return session;
+  };
+  const names = (session: ChatToolSession) => session.definitions.map((definition) => definition.function.name);
+  /** A file whose path a catalog server waits on: the test writes it once the server may start. */
+  const gate = () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-chat-mcp-gate-"));
+    dirs.push(dir);
+    return join(dir, "go");
+  };
+  const catalog = (tools: readonly string[], after: readonly string[] = []) => {
+    const { dir, server } = catalogServer(tools, { after });
+    dirs.push(dir);
+    return { server };
+  };
+  /** One gate file per server, written once the session has that server's tools (or failure) in hand. */
+  const settledGates = (...servers: string[]) => {
+    const files = new Map(servers.map((server) => [server, gate()]));
+    return { files: [...files.values()], onSettled: (server: string) => { const file = files.get(server); if (file) writeFileSync(file, ""); } };
+  };
+  /** A server that answers `initialize` only once `file` exists. */
+  const startsAfter = (file: string) => `if (message.method === "initialize") { const since = Date.now();
+      const up = () => existsSync(${JSON.stringify(file)}) || Date.now() - since > 10_000
+        ? reply(message, {protocolVersion:"2024-11-05",capabilities:{tools:{}}}) : setTimeout(up, 10);
+      up(); continue; }`;
+  /** Joins until a server that was still starting has been taken in. */
+  const joined = async (session: ChatToolSession) => {
+    let lines: string[] | undefined;
+    await vi.waitFor(async () => { lines = await joinLateChatTools(session, [ask]); expect(lines).toBeDefined(); }, { timeout: 10_000, interval: 50 });
+    return lines;
+  };
+
+  it("starts the turn once the agents server is up, and lists a slow server's tools when it joins", async () => {
+    const agents = fixture();
+    const slow = fixture(slowStart(1_500));
+    const startedAt = Date.now();
+    const session = await background({ agents: agents.server, custom: { slow: slow.server } }, agents.controller.signal);
+    expect(Date.now() - startedAt).toBeLessThan(1_500);
+    session.definitions.push(ask);
+    expect(names(session)).toEqual(["agents_write", "ask_user"]);
+    expect(await joined(session)).toEqual([]);
+    expect(names(session)).toEqual(["agents_write", "slow_write", "ask_user"]);
+    await expect(session.execute("slow_write", { value: "late" }, agents.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:late" });
+    expect(await session.join()).toBeUndefined();
+  });
+
+  it("says when a server that was still starting is skipped", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const agents = fixture();
+    const late = fixture(`if (message.method === "tools/list") { setTimeout(() => reply(message, {tools:"invalid"}), 800); continue; }`);
+    const session = await background({ agents: agents.server, custom: { late: late.server } }, agents.controller.signal);
+    expect(session.skipped).toEqual([]);
+    expect(await joined(session)).toEqual([expect.stringMatching(/^MCP server "late" was skipped for this turn: .*invalid result/)]);
+    expect(names(session)).toEqual(["agents_write"]);
+    warn.mockRestore();
+  });
+
+  it("keeps a listed tool's name when a server joining later would have taken it", async () => {
+    const configured = fixture();
+    // Up once the session has the configured server's tools, so those are listed from the start; the built-in starts after.
+    const gates = settledGates("Data");
+    const agents = fixture(startsAfter(gates.files[0]!));
+    const go = gate();
+    const builtIn = fixture(startsAfter(go));
+    const session = await background({ agents: agents.server, data: builtIn.server, custom: { Data: configured.server } }, agents.controller.signal, undefined, gates.onSettled);
+    expect(names(session)).toEqual(["agents_write", "data_write"]);
+    writeFileSync(go, "");
+    await joined(session);
+    expect(names(session)).toEqual(["agents_write", "data_write_2", "data_write"]);
+    await session.execute("data_write", { value: "same tool" }, agents.controller.signal);
+    expect(configured.read().calls.some((call) => call.method === "tools/call")).toBe(true);
+    expect(builtIn.read().calls.some((call) => call.method === "tools/call")).toBe(false);
+  });
+
+  it("keeps the tool search's names when a server joining later would have taken them", async () => {
+    const notes = catalog(syntheticToolNames("note", 10));
+    const gates = settledGates("notes");
+    const agents = catalog(["write"], gates.files);
+    // Named like the tool search and offering the tool its call tool is listed as, it joins after the first round.
+    const go = gate();
+    const late = catalog(["call_tool"], [go]);
+    const controller = new AbortController();
+    controllers.push(controller);
+    const session = await background({ agents: agents.server, custom: { notes: notes.server, mcp: late.server } }, controller.signal, 8, gates.onSettled);
+    expect(names(session)).toEqual(["agents_write", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+    writeFileSync(go, "");
+    await joined(session);
+    expect(names(session)).toEqual(["agents_write", "mcp_call_tool_2", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+    await expect(session.execute("mcp_call_tool", { name: "notes_note_1", arguments: {} }, controller.signal)).resolves.toEqual({ ok: true, text: "ran note_1" });
+  });
+
+  it("keeps a searched tool's name when a listed server joins the tool search later", async () => {
+    // "x" is listed and "x_a" searched; then "y" joins and takes the room "x" had, so "x" is searched too, before "x_a",
+    // and its "a_b" reads as "x_a_b", the name the searched "b" of "x_a" already has.
+    const listed = catalog(["a_b", "p_1"]);
+    const searched = catalog(["b", ...syntheticToolNames("c", 5)]);
+    const gates = settledGates("x", "x_a");
+    const agents = catalog(["write"], gates.files);
+    const go = gate();
+    const late = catalog(["write"], [go]);
+    const controller = new AbortController();
+    controllers.push(controller);
+    const session = await background({ agents: agents.server, custom: { x: listed.server, x_a: searched.server, y: late.server } }, controller.signal, 7, gates.onSettled);
+    expect(names(session)).toEqual(["agents_write", "x_a_b", "x_p_1", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+    const call = (name: string) => session.execute("mcp_call_tool", { name, arguments: {} }, controller.signal);
+    await expect(call("x_a_b")).resolves.toEqual({ ok: true, text: "ran b" });
+    writeFileSync(go, "");
+    await joined(session);
+    expect(names(session)).toEqual(["agents_write", "y_write", "mcp_search_tools", "mcp_describe_tool", "mcp_call_tool"]);
+    await expect(call("x_a_b")).resolves.toEqual({ ok: true, text: "ran b" });
+    await expect(call("x_a_b_2")).resolves.toEqual({ ok: true, text: "ran a_b" });
+  });
+
+  it("waits for every server without the agents server, or when not started in the background", async () => {
+    for (const mount of [
+      (f: ReturnType<typeof fixture>) => background({ custom: { slow: f.server } }, f.controller.signal),
+      (f: ReturnType<typeof fixture>) => mountChatTools({ agents: fixture().server, custom: { slow: f.server } }, f.controller.signal).then((session) => { sessions.push(session); return session; }),
+    ]) {
+      const slow = fixture(slowStart(300));
+      const session = await mount(slow);
+      expect(names(session)).toContain("slow_write");
+      expect(await session.join()).toBeUndefined();
+    }
   });
 });

@@ -122,6 +122,31 @@ describe("bot menu bulk reads", () => {
   });
 });
 
+describe("Advanced mode's bot menu", () => {
+  const paused = (all: boolean) => { state = { ...state, config: { ...state.config!, pausedByPerson: { bots: [], departments: [], ...(all ? { all: true as const } : {}) }, heldBots: all ? [bot.id] : [] } }; };
+
+  it("offers Pause bot and Pause every bot while nothing is paused", () => {
+    paused(false); draw();
+    expect(button("Pause bot").disabled).toBe(false);
+    expect(button("Pause every bot")).toBeDefined();
+  });
+
+  it("offers Resume every bot while every bot is paused, as the paused line tells the person", async () => {
+    const fetch = vi.fn(async (_url: unknown, _init?: RequestInit) => new Response(JSON.stringify({ stopped: 0 }), { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch); paused(true); draw();
+    expect(button("Pause bot").disabled).toBe(true);
+    flushSync(() => button("Resume every bot").click());
+    await expect.poll(() => fetch.mock.calls.length).toBe(1);
+    expect(JSON.parse(String(fetch.mock.calls[0]![1]?.body))).toEqual({ kind: "all", paused: false });
+  });
+
+  it("keeps the pause items off a paired desktop's menu", () => {
+    window.ogb = { remoteClient: { active: true } } as typeof window.ogb;
+    paused(true); draw();
+    expect(button("Resume every bot")).toBeUndefined();
+  });
+});
+
 describe("Simple mode's bot menu", () => {
   const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
   const sheet = () => document.querySelector<HTMLElement>('[data-bot-menu][aria-label="Actions for Reviewer"]')!;
@@ -157,6 +182,29 @@ describe("Simple mode's bot menu", () => {
     expect([...flyout()!.querySelectorAll("button")].map((node) => node.textContent)).not.toContain("Delete all conversations…");
   });
 
+  it("pauses every bot from More in one call, and offers Resume every bot while they are paused", async () => {
+    const fetch = vi.fn(async (_url: unknown, _init?: RequestInit) => new Response(JSON.stringify({ stopped: 0 }), { headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetch); draw();
+    flushSync(() => more().click());
+    const labels = () => [...flyout()!.querySelectorAll<HTMLButtonElement>("button")];
+    flushSync(() => labels().find((node) => node.textContent === "Pause every bot")!.click());
+    await wait(20);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(String(fetch.mock.calls[0]![0])).toContain("/api/paused");
+    expect(JSON.parse(String(fetch.mock.calls[0]![1]?.body))).toEqual({ kind: "all", paused: true });
+
+    state = { ...state, config: { ...state.config!, pausedByPerson: { bots: [], departments: [], all: true }, heldBots: [bot.id] } };
+    menu = { botId: bot.id, x: 50, y: 50 };
+    draw();
+    flushSync(() => more().click());
+    expect(labels().map((node) => node.textContent)).toContain("Resume every bot");
+    const own = labels().find((node) => node.textContent?.startsWith("Pause bot"))!;
+    expect(own.disabled).toBe(true);
+    flushSync(() => labels().find((node) => node.textContent === "Resume every bot")!.click());
+    await wait(20);
+    expect(JSON.parse(String(fetch.mock.calls[1]![1]?.body))).toEqual({ kind: "all", paused: false });
+  });
+
   it("opens More only after the pointer rests on it, closes it when a sibling row takes the pointer, and opens it at once on a click", async () => {
     draw();
     const pin = button("Pin");
@@ -169,7 +217,7 @@ describe("Simple mode's bot menu", () => {
     point(more(), 200);
     await wait(320);
     expect(flyout()).not.toBeNull();
-    expect([...flyout()!.querySelectorAll("button")].map((node) => node.textContent)).toEqual(["Edit profile", "Make Chief of Staff", "Duplicate", "Delete all conversations…"]);
+    expect([...flyout()!.querySelectorAll("button")].map((node) => node.textContent)).toEqual(["Edit profile", "Pause bot", "Pause every bot", "Make Chief of Staff", "Duplicate", "Delete all conversations…"]);
     point(pin, 80);
     await wait(20);
     expect(flyout()).toBeNull();

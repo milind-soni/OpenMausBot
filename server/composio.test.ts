@@ -7,6 +7,7 @@ import {
   applyManagedBrokerMessage,
   authorizeService,
   connectedServiceSlugs,
+  serviceSlugsReadSettled,
   verifiedConnectedServiceSlugs,
   connectedServices,
   connectedServicesInventory,
@@ -82,6 +83,8 @@ let brokerCatalogBody: { items: Array<{ slug: string; name: string }> } | null =
 // The project's own auth configs, and those the stub Session was created with: a Session knows only the configs named at creation.
 let customAuthConfigs: Array<Record<string, unknown>> = [];
 let sessionAuthConfigs: Record<string, string> = {};
+// The cap the stub Session echoes: 10 for one made now, 5 for one made before the cap was raised.
+let sessionAccountCap = 10;
 
 beforeAll(async () => {
   api = createServer(async (req, res) => {
@@ -310,12 +313,17 @@ beforeAll(async () => {
           user_id: "openmausbot_existing",
           multi_account: {
             enable: true,
-            max_accounts_per_toolkit: 5,
+            max_accounts_per_toolkit: sessionAccountCap,
             require_explicit_selection: true,
           },
           auth_configs: sessionAuthConfigs,
         },
       }));
+    }
+    if (req.method === "PATCH" && url.pathname === "/api/v3.1/tool_router/session/trs_test" && body?.multi_account) {
+      sessionAccountCap = body.multi_account.max_accounts_per_toolkit;
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ session_id: "trs_test" }));
     }
     if (req.method === "GET" && url.pathname === "/api/v3.1/auth_configs") {
       res.writeHead(200, { "content-type": "application/json" });
@@ -409,6 +417,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  await serviceSlugsReadSettled();
   setManagedBrokerAccess(null);
   delete process.env.OMB_COMPOSIO_API;
   delete process.env.OMB_COMPOSIO_TOOLKITS_API;
@@ -766,7 +775,7 @@ describe.sequential("Composio Sessions", () => {
       },
       multi_account: {
         enable: true,
-        max_accounts_per_toolkit: 5,
+        max_accounts_per_toolkit: 10,
         require_explicit_selection: true,
       },
     });
@@ -794,7 +803,7 @@ describe.sequential("Composio Sessions", () => {
       user_id: "openmausbot_legacy",
       multi_account: {
         enable: true,
-        max_accounts_per_toolkit: 5,
+        max_accounts_per_toolkit: 10,
         require_explicit_selection: true,
       },
     });
@@ -1392,15 +1401,69 @@ describe.sequential("Composio Sessions", () => {
     const cfg: AppConfig = {
       composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
     };
-    connectedAccountsOverride = Array.from({ length: 5 }, (_, index) => ({
+    connectedAccountsOverride = Array.from({ length: 10 }, (_, index) => ({
       id: `ca_pending_${index}`, status: "INITIALIZING", toolkit: { slug: "slack" },
     }));
     const before = calls.length;
     try {
-      await expect(authorizeService(cfg, "slack")).rejects.toThrow(/maximum of 5 accounts/i);
-      await expect(authorizeService(cfg, "slack", "team")).rejects.toThrow(/maximum of 5 accounts/i);
+      await expect(authorizeService(cfg, "slack")).rejects.toThrow(/maximum of 10 accounts/i);
+      await expect(authorizeService(cfg, "slack", "team")).rejects.toThrow(/maximum of 10 accounts/i);
       expect(calls.slice(before).some((call) => call.method === "POST" && call.path.endsWith("/link"))).toBe(false);
     } finally {
+      connectedAccountsOverride = null;
+    }
+  });
+
+  it("still links when the request to raise the old cap cannot reach Composio, and tries again next time", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    sessionAccountCap = 5;
+    connectedAccountsOverride = [{ id: "ca_sub_0", alias: "sub-0", status: "ACTIVE", toolkit: { slug: "slack" } }];
+    const realFetch = globalThis.fetch;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      if (init?.method === "PATCH") throw new TypeError("fetch failed");
+      return realFetch(input, init);
+    });
+    const before = calls.length;
+    try {
+      await expect(authorizeService(cfg, "slack", "sub-1")).resolves.toEqual({ url: "https://connect.composio.dev/link/slack" });
+      expect(calls.slice(before).some((call) => call.method === "POST" && call.path.endsWith("/link"))).toBe(true);
+      expect(fetchSpy.mock.calls.some(([, init]) => init?.method === "PATCH")).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+      sessionAccountCap = 10;
+      connectedAccountsOverride = null;
+    }
+  });
+
+  it("links a sixth account, raising a Session made under the old cap of 5 in place first", async () => {
+    const cfg: AppConfig = {
+      composio: { apiKey: "ak_test", userId: "openmausbot_existing", sessionId: "trs_test" },
+    };
+    sessionAccountCap = 5;
+    connectedAccountsOverride = Array.from({ length: 5 }, (_, index) => ({
+      id: `ca_sub_${index}`, alias: `sub-${index}`, status: "ACTIVE", toolkit: { slug: "slack" },
+    }));
+    const before = calls.length;
+    try {
+      await expect(authorizeService(cfg, "slack", "sub-5")).resolves.toEqual({ url: "https://connect.composio.dev/link/slack" });
+      const since = calls.slice(before).filter((call) => call.method === "PATCH" || call.path.endsWith("/link"));
+      expect(since.map((call) => [call.method, call.path])).toEqual([
+        ["PATCH", "/api/v3.1/tool_router/session/trs_test"],
+        ["POST", "/api/v3.1/tool_router/session/trs_test/link"],
+      ]);
+      expect(since[0]!.body).toEqual({
+        multi_account: { enable: true, max_accounts_per_toolkit: 10, require_explicit_selection: true },
+      });
+      expect(cfg.composio?.sessionId).toBe("trs_test");
+
+      // Raised once: the next sign-in link goes straight through.
+      const again = calls.length;
+      await expect(authorizeService(cfg, "slack", "sub-6")).resolves.toEqual({ url: "https://connect.composio.dev/link/slack" });
+      expect(calls.slice(again).some((call) => call.method === "PATCH")).toBe(false);
+    } finally {
+      sessionAccountCap = 10;
       connectedAccountsOverride = null;
     }
   });

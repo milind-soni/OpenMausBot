@@ -3,14 +3,13 @@ import { type ServerText } from "../shared/server-text.ts";
 // its own engine once that limit has reset or it is signed in again.
 import { readFileSync } from "node:fs";
 
+import { otherSignInOfSameSubscription } from "../shared/limit-backup.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import type { InstanceConfig } from "./contracts.ts";
 import { hostTimeZone } from "./turn-clock.ts";
 
-/** Engines a person signs in to with a subscription whose usage limit refuses turns. */
-const SUBSCRIPTION_DRIVERS = new Set(["claudeAgent", "codex", "grokAgent"]);
 /** An engine instance with one of these keys bills each use instead of drawing on a subscription's limit. */
 const PAY_PER_USE_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY", "XAI_API_KEY"];
 
@@ -21,7 +20,7 @@ type Engine = { instanceId: string; driverKind: string };
  * accounts closed. Another engine, or a pay-per-use key on the same one, is fine. */
 export function limitBackupAllowed(from: Engine, to: Engine, toConfig?: Pick<InstanceConfig, "environment" | "access">): boolean {
   if (to.instanceId === from.instanceId) return false;
-  if (to.driverKind !== from.driverKind || !SUBSCRIPTION_DRIVERS.has(from.driverKind)) return true;
+  if (!otherSignInOfSameSubscription(from, to)) return true;
   return billsEachUse(toConfig);
 }
 
@@ -74,7 +73,7 @@ export interface LimitFailoverDeps {
   file: string;
   now?: () => number;
   /** Until when this engine refuses work; null when it should be working. */
-  blockedUntil: (engine: string) => number | null;
+  blockedUntil: (engine: string, model?: string) => number | null;
   /** This engine refused a turn because it is signed out, and has not been signed in again since. */
   signedOut?: (engine: string) => boolean;
   /** The thread's model now, or null when the thread is gone. */
@@ -126,7 +125,7 @@ export class LimitFailovers {
     const current = this.deps.threadModel(botId, threadId);
     if (!current || !sameModelSelection(current, row.to)) return this.forget(threadId);
     const waitUntil = row.why === "signed-out" ? row.at : row.resetsAt ?? row.at + UNKNOWN_RESET_WAIT_MS;
-    if (waitUntil > now || this.deps.blockedUntil(row.from.instanceId) !== null) return false;
+    if (waitUntil > now || this.deps.blockedUntil(row.from.instanceId, row.from.model) !== null) return false;
     if (row.why === "signed-out" && this.deps.signedOut?.(row.from.instanceId)) return false;
     if (!this.deps.switchBack(row)) return false;
     this.forget(threadId);

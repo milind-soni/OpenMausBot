@@ -4,7 +4,9 @@ import type { SavedKey } from "@/state/config-status";
 import type { KeyProvider } from "@/lib/analytics-allowlist";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
+import { reportModelgoOffer } from "@/lib/modelgo-offer";
 import type { ProviderIconPreset } from "../../../shared/provider-icon";
+import { MODELGO_URL } from "../../../shared/modelgo";
 
 export type KeySectionId = "ai" | "servers" | "voice" | "computers" | "apps" | "helpers";
 
@@ -17,7 +19,7 @@ export const KEY_SECTIONS: ReadonlyArray<{ id: KeySectionId; titleKey: LocaleKey
   { id: "helpers", titleKey: "keys.section.helpers", purposeKey: "keys.section.helpers.purpose" },
 ];
 
-export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "meta" | "treg";
+export type TestableProvider = "anthropic" | "openai" | "openrouter" | "openaiCompat" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "treg";
 
 export type DesktopSlot = Parameters<NonNullable<NonNullable<Window["ogb"]>["setCredential"]>>[0];
 export type DesktopSlotOptions = NonNullable<Parameters<NonNullable<NonNullable<Window["ogb"]>["setCredential"]>>[2]>;
@@ -38,12 +40,14 @@ export interface KeyTarget {
   shape?: RegExp;
   warningKey?: LocaleKey;
   noteKey?: LocaleKey;
+  /** A sponsor's row: the Settings page's own uses of it, for its product event. */
+  settingsEvent?: (action: "get_key" | "add_key") => void;
 }
 
 export type KeyId =
-  | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
-  | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
-  | "jev" | "openrouterHelper" | "workersAi" | "imageOpenai" | "imageGemini" | "imageCustom";
+  | "openai" | "anthropic" | "xai" | "openrouter" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "opencodeGo" | "opencodeProviders"
+  | "ollama" | "lmStudio" | "openaiCompat" | "liveCalls" | "liveKey" | "elevenlabs" | "fishAudio" | "geminiTts" | "box" | "vps" | "onePassword" | "composio" | "treg" | "postiz"
+  | "jev" | "openrouterHelper" | "workersAi" | "customDecider" | "imageOpenai" | "imageGemini" | "imageCustom";
 
 export type KeyMark = { driverKind: string; preset?: ProviderIconPreset } | { icon: LucideIcon };
 
@@ -68,7 +72,7 @@ function flag(saved: SavedKey | undefined): SavedState {
   return { configured: saved?.configured === true, ...(saved?.configured && saved.last4 ? { last4: saved.last4 } : {}) };
 }
 
-type TopLevelKey = "openai" | "openrouter" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "meta" | "deepseek" | "treg";
+type TopLevelKey = "openai" | "openrouter" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "treg";
 
 function providerKey(name: TopLevelKey, rest: Omit<KeyTarget, "patch" | "saved">): KeyTarget {
   return { patch: (value) => ({ [name]: { key: value } }), saved: (config) => flag(config[name]), ...rest };
@@ -104,11 +108,15 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
   { id: "greenference", section: "ai", labelKey: "keys.greenference.label", purposeKey: "keys.purpose.greenference", name: "Greenference", env: ["OMB_GREENFERENCE_API_KEY"],
     words: ["greenference", "green", "open models"], mark: provider("greenference"), kind: "key",
     target: providerKey("greenference", { slot: "greenferenceApiKey", placeholder: "…", placeholderKey: "keys.greenference.placeholder", href: "https://greenference.com/dashboard/tokens", test: "greenference", analytics: "greenference" }) },
+  { id: "modelgo", section: "ai", labelKey: "keys.modelgo.label", purposeKey: "keys.purpose.modelgo", name: "ModelGo", env: ["OMB_MODELGO_API_KEY"],
+    words: ["modelgo", "model go", "one key", "sponsor"], mark: provider("modelgo"), kind: "key",
+    target: providerKey("modelgo", { slot: "modelgoApiKey", placeholder: "…", placeholderKey: "keys.modelgo.placeholder", href: MODELGO_URL, test: "modelgo", analytics: "modelgo", noteKey: "keys.modelgo.note",
+      settingsEvent: (action) => reportModelgoOffer(action, "settings") }) },
   { id: "meta", section: "ai", labelKey: "keys.meta.label", purposeKey: "keys.purpose.meta", name: "Meta", env: ["OMB_META_API_KEY"],
     words: ["meta", "muse", "llama"], mark: provider("meta", "meta"), kind: "key",
     target: providerKey("meta", { slot: "metaApiKey", placeholder: "LLM|…", href: "https://dev.meta.ai/docs/authentication", test: "meta", analytics: "meta", shape: /^LLM\|/ }) },
   { id: "deepseek", section: "ai", labelKey: "keys.deepseek.label", purposeKey: "keys.purpose.deepseek", name: "DeepSeek", env: ["OMB_DEEPSEEK_API_KEY"],
-    words: ["deepseek", "dsh", "harness"], mark: provider("deepseekAgent", "deepseek"), kind: "key",
+    words: ["deepseek", "dsh", "harness", "voice", "speech", "dictation"], mark: provider("deepseekAgent", "deepseek"), kind: "key",
     target: providerKey("deepseek", { slot: "deepseekApiKey", placeholder: "sk-…", href: "https://platform.deepseek.com/api_keys", analytics: "deepseek" }) },
   { id: "opencodeGo", section: "ai", labelKey: "keys.opencode.label", purposeKey: "keys.purpose.opencodeGo", name: "OpenCode", env: ["OPENCODE_API_KEY"],
     words: ["opencode", "zen", "go"], mark: provider("opencodeGo"), kind: "key",
@@ -117,10 +125,12 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
   { id: "opencodeProviders", section: "ai", labelKey: "keys.opencode.otherProviders.title", purposeKey: "keys.purpose.opencodeProviders", name: "OpenCode", env: [],
     words: ["opencode", "venice", "providers", "provider keys"], mark: provider("opencodeGo"), kind: "panel",
     status: (config) => ({ configured: (config.opencodeGo?.providerKeys?.length ?? 0) > 0 }) },
+  { id: "ollama", section: "servers", labelKey: "ollama.title", purposeKey: "keys.purpose.ollama", name: "Ollama", env: [],
+    words: ["ollama", "local", "llama", "ollama pull"], mark: provider("openai-compat", "ollama"), kind: "panel" },
   { id: "lmStudio", section: "servers", labelKey: "lmStudio.title", purposeKey: "keys.purpose.lmStudio", name: "LM Studio", env: [],
     words: ["lm studio", "lmstudio", "llm studio", "local", "bionic"], mark: { icon: Server }, kind: "panel" },
   { id: "openaiCompat", section: "servers", labelKey: "keys.openaiCompat.label", purposeKey: "keys.purpose.openaiCompat", name: "OpenAI-compatible", env: ["OPENAI_COMPAT_API_KEY", "OPENAI_COMPAT_URL"],
-    words: ["openai-compatible", "openai compatible", "ollama", "together", "gemini", "google ai studio", "base url", "server", "endpoint"], mark: { icon: Server }, kind: "key",
+    words: ["openai-compatible", "openai compatible", "together", "gemini", "google ai studio", "base url", "server", "endpoint"], mark: { icon: Server }, kind: "key",
     target: { patch: (value) => ({ openaiCompat: { key: value } }), slot: "openaiCompatApiKey", saved: (config) => flag(config.openaiCompat), placeholder: "…", placeholderKey: "keys.openaiCompat.placeholder",
       href: "https://platform.openai.com/docs/api-reference", test: "openaiCompat", analytics: "openai_compat" } },
   { id: "liveCalls", section: "voice", labelKey: "call.live.key", purposeKey: "keys.purpose.liveCalls", name: "OpenAI", env: [],
@@ -185,6 +195,10 @@ export const KEY_CATALOG: readonly KeyEntry[] = [
     words: ["cloudflare", "workers ai", "clef", "clairic", "decisions", "helper"], mark: { icon: Zap }, kind: "elsewhere",
     opens: "decisionModel", whereKey: "keys.where.decisions",
     status: (config) => flag(config.savedKeys?.workersAiToken ?? { configured: config.helpers?.own.workersAi === true }) },
+  { id: "customDecider", section: "helpers", labelKey: "decider.custom.key.label", purposeKey: "keys.purpose.customDecider", name: "Custom endpoint", env: ["OMB_CUSTOM_DECIDER_KEY"],
+    words: ["custom", "endpoint", "gateway", "system one", "decisions", "helper"], mark: { icon: Zap }, kind: "elsewhere",
+    opens: "decisionModel", whereKey: "keys.where.decisions",
+    status: (config) => flag(config.savedKeys?.customDeciderKey ?? { configured: false }) },
   { id: "imageOpenai", section: "helpers", labelKey: "keys.label.imageOpenai", purposeKey: "keys.purpose.imageOpenai", name: "OpenAI", env: ["OMB_OPENAI_IMAGE_KEY"],
     words: ["openai", "image", "images", "pictures", "avatar", "gpt image"], mark: { icon: Image }, kind: "key",
     target: { patch: (value) => ({ imageGen: { key: value } }), slot: "openaiImageApiKey",
@@ -206,11 +220,32 @@ export function keyEntry(id: KeyId): KeyEntry {
   return entry;
 }
 
-/** With Azure OpenAI chosen for Live calls, the row for their key is about the Azure resource: required, and no OpenAI key. */
+/** With Azure OpenAI, a custom endpoint, Fish Audio, Gemini or ElevenLabs chosen for Live calls, the row for their key is about that service:
+ * required, and no OpenAI key. With Fish Audio, Gemini or ElevenLabs it is that service's key itself, which its voices use too. */
 export function shownKeyEntry(id: KeyId, config: ConfigStatus | null | undefined): KeyEntry {
   const entry = keyEntry(id);
-  if (id !== "liveKey" || config?.live?.provider !== "azure" || !entry.target) return entry;
+  const provider = config?.live?.provider;
+  if (id !== "liveKey" || (provider !== "azure" && provider !== "custom" && provider !== "fish" && provider !== "gemini" && provider !== "elevenlabs") || !entry.target) return entry;
   const { shape: _openAiShape, ...target } = entry.target;
+  if (provider === "fish") {
+    return { ...entry, name: "Fish Audio", labelKey: "keys.label.fishAudio", purposeKey: "keys.purpose.liveKeyFish", target: keyEntry("fishAudio").target };
+  }
+  if (provider === "gemini") {
+    return { ...entry, name: "Gemini", labelKey: "keys.label.geminiTts", purposeKey: "keys.purpose.liveKeyGemini", target: keyEntry("geminiTts").target };
+  }
+  if (provider === "elevenlabs") {
+    // Cloud's included voices cannot place Live calls, so this row asks for the person's own key even then.
+    const voices = keyEntry("elevenlabs").target!;
+    const saved = (config: ConfigStatus): SavedState => {
+      const { included: _included, ...own } = voices.saved(config);
+      return own;
+    };
+    return { ...entry, name: "ElevenLabs", labelKey: "keys.label.elevenlabs", purposeKey: "keys.purpose.liveKeyElevenLabs", target: { ...voices, saved } };
+  }
+  if (provider === "custom") {
+    const { href: _openAiPage, ...own } = target;
+    return { ...entry, name: "Custom endpoint", labelKey: "call.live.customKeyField", purposeKey: "keys.purpose.liveKeyCustom", target: { ...own, placeholder: "…" } };
+  }
   return { ...entry, name: "Azure OpenAI", labelKey: "call.live.azureKeyField", purposeKey: "keys.purpose.liveKeyAzure", target: { ...target, placeholder: "…", href: "https://portal.azure.com" } };
 }
 
@@ -224,10 +259,19 @@ export function savedState(entry: KeyEntry, config: ConfigStatus | null | undefi
   return entry.target?.saved(config) ?? entry.status?.(config) ?? { configured: false };
 }
 
-export function keyMatches(entry: KeyEntry, query: string): boolean {
+/** With Azure, a custom endpoint, Fish Audio, Gemini or ElevenLabs chosen, Live calls do not use the OpenAI key the Live calls row points at, so that row is
+ * hidden. */
+export function keyHidden(id: KeyId, config: ConfigStatus | null | undefined): boolean {
+  const provider = config?.live?.provider;
+  return id === "liveCalls" && (provider === "azure" || provider === "custom" || provider === "fish" || provider === "gemini" || provider === "elevenlabs");
+}
+
+/** With `config`, the row is matched as shown: the Live key row by the provider Live calls use. */
+export function keyMatches(entry: KeyEntry, query: string, config?: ConfigStatus | null): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  return [t(entry.labelKey), t(entry.purposeKey), t(keySection(entry).titleKey), entry.name, ...entry.words].some((part) => part.toLowerCase().includes(q));
+  const shown = config ? shownKeyEntry(entry.id, config) : entry;
+  return [t(shown.labelKey), t(shown.purposeKey), t(keySection(shown).titleKey), shown.name, ...shown.words].some((part) => part.toLowerCase().includes(q));
 }
 
 export function looksLikeOtherKey(entry: KeyEntry, value: string): KeyEntry | null {
@@ -239,7 +283,7 @@ export function looksLikeOtherKey(entry: KeyEntry, value: string): KeyEntry | nu
 
 const INSTANCE_KEYS: Readonly<Record<string, KeyId>> = {
   openai: "openai", claudeApi: "anthropic", xaiApi: "xai", grok: "xai", openrouter: "openrouter", mistral: "mistral", cerebras: "cerebras",
-  groq: "groq", greenference: "greenference", meta: "meta", deepseek: "deepseek", opencodeGo: "opencodeGo", openaiCompat: "openaiCompat",
+  groq: "groq", greenference: "greenference", modelgo: "modelgo", meta: "meta", deepseek: "deepseek", opencodeGo: "opencodeGo", openaiCompat: "openaiCompat",
 };
 
 export function keyForInstance(instanceId: string | undefined): KeyId | undefined {

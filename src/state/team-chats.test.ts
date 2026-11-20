@@ -47,7 +47,7 @@ it("opens the person's inbox, their chat with their Chief where everything for t
 });
 
 it("with none yet, a click makes one through the server's new-conversation route, opens it and keeps it; a second click while it is made makes no second", async () => {
-  setTeamChats({ teamId: "team-gamma", member: false });
+  setTeamChats({ teamId: "team-gamma", member: false, opened: [] });
   const dispatch = vi.fn();
   server.answer = { bot: { id: "scout", threadId: "ben-chat" }, task: { threadId: "ben-chat", private: true } };
   const bot = scout([{ threadId: "ada-chat", private: true, createdAt: 5 }]);
@@ -64,7 +64,7 @@ it("with none yet, a click makes one through the server's new-conversation route
 });
 
 it("a Member's existing conversation opens with no request; a refusal shows as an error; off a team the bot opens as it always has", async () => {
-  setTeamChats(MEMBER);
+  setTeamChats({ ...MEMBER, opened: [] });
   const dispatch = vi.fn();
   openBot(dispatch, scout([{ threadId: "ada-chat", private: true, createdAt: 5 }]), true);
   expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "select", id: "scout" }, { type: "switchTask", botId: "scout", threadId: "ada-chat" }]);
@@ -82,7 +82,7 @@ it("a Member's existing conversation opens with no request; a refusal shows as a
 });
 
 it("opens the main chat of a bot this person can only view, without trying to start a conversation of their own", async () => {
-  setTeamChats(MEMBER);
+  setTeamChats({ ...MEMBER, opened: [] });
   const dispatch = vi.fn();
   const viewOnly = { ...scout([]), yourAccess: "view" };
   expect(openOwnTeamChat(dispatch, viewOnly, () => {})).toBe(false);
@@ -91,4 +91,19 @@ it("opens the main chat of a bot this person can only view, without trying to st
   const opened = vi.fn();
   expect(openOwnTeamChat(dispatch, { ...scout([{ threadId: "bob-own", private: true, createdAt: 5 }]), yourAccess: "view" }, opened)).toBe(true);
   expect(opened).toHaveBeenCalledWith("bob-own");
+});
+
+it("makes nothing before the session has said which conversations are theirs: the click waits, then opens their own chat", async () => {
+  setTeamChats({ teamId: "team-acme", member: false });
+  const dispatch = vi.fn();
+  const bot = scout([{ threadId: "ada-chat", private: true, createdAt: 5 }, { threadId: "ben-chat", private: true, createdAt: 6 }]);
+  openBot(dispatch, bot, false);
+  await settle();
+  expect(server.calls, "an Admin's chat is not known from a member's yet: a second one would be made").toEqual([]);
+  expect(dispatch).not.toHaveBeenCalled();
+  setTeamChats({ teamId: "team-acme", member: false, opened: ["ben-chat"] });
+  expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "switchTask", botId: "scout", threadId: "ben-chat" }]);
+  setTeamChats({ teamId: "team-acme", member: false, opened: ["ben-chat", "later"] });
+  expect(dispatch, "once").toHaveBeenCalledTimes(1);
+  expect(server.calls).toEqual([]);
 });

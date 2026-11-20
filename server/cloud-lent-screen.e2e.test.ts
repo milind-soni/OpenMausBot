@@ -16,6 +16,7 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 import { markLeftBehind } from "./testing/cloud-left-behind.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
 import { freePortBlock } from "./testing/ports.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-0123456789ab.fly.dev";
@@ -157,12 +158,12 @@ it("lets an Auto conversation pinned to the cloud computer use the person's lent
   // Stopped: an earlier Auto turn selected the cloud computer in this conversation (the pin a turn makes on its own), and
   // a guest opened the other one before the Cloud was personal.
   await waitForExit(child, { signal: "SIGTERM" });
-  const bots = JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8"));
-  const record = (bots.bots ?? bots).find((bot: any) => bot.id === created.id);
+  const bots = readRegistry(dataDir).bots;
+  const record = bots.find((bot: any) => bot.id === created.id);
   expect(record.computer).toBeUndefined();
   const task = record.tasks.find((candidate: any) => candidate.threadId === created.threadId);
   Object.assign(task, { surface: "cloud", surfaceSource: "auto" });
-  writeFileSync(join(dataDir, "bots.json"), JSON.stringify(bots), { mode: 0o600 });
+  writeRegistry(dataDir, { bots });
   markLeftBehind(dataDir, { threadIds: [guestThread] });
   await boot();
   await lendPc();

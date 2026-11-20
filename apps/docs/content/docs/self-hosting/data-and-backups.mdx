@@ -11,7 +11,7 @@ MausBot keeps its application state under `~/.openmausbot`, including configurat
 To bring your computer's bots and chats to a server you run, use the desktop
 app: connect the server with **＋ → Connect to a server**, then choose **Copy this
 computer here** on its row (an empty server also offers it on its own page, and
-its **Settings → Backups** has **Import from this computer**; both bring you to
+its **Settings → Import & export** has **Import from this computer**; both bring you to
 that button). There is no file
 and no password to handle: the app uploads the encrypted workspace backup
 directly, continues where a dropped connection left it, backs up what the
@@ -30,7 +30,7 @@ nearby.
 
 ## Export and import in Settings
 
-Open **Settings → Backups → Export full backup**. Choose a password of at least
+Open **Settings → Import & export → Export full backup**. Choose a password of at least
 12 characters and save the encrypted `.ombbackup` file. Keep the password
 separately: there is no password recovery.
 
@@ -117,6 +117,28 @@ sensitive data. For migration without saved credentials, use the Settings export
 and reconnect accounts on the new machine instead.
 
 Restore with the server stopped, preserving the original paths and ownership, then start it again. The [VPS backup instructions](/docs/self-hosting/deploy-vps#back-up) show the app-data archive and stop/start commands.
+
+## The settings file and its dated copies
+
+Every save of `~/.openmausbot/config.json` keeps a copy of the file as it was,
+named `config.json.bak.YYYYMMDD-HHMMSS`, beside it; the last ten are kept. A
+save never replaces a settings file it could not read or understand: it fails
+and says so, so a file that cannot be read is never overwritten by a partial
+one. A save that cannot keep its dated copy fails as well, so the settings file
+is never replaced without a copy of it to go back to.
+
+To go back to an earlier copy, stop the server and run:
+
+```
+openmausbot config backups
+openmausbot config restore latest
+```
+
+The file a restore replaces is kept as a dated copy too, so the restore can be
+undone. A restore only puts back a copy that is a settings file the server can
+read, and never over a file it could not read or keep: nothing is lost to put a
+copy back. These copies hold the saved keys and connections of the settings
+file: they stay on that computer and are not part of a workspace backup.
 
 ## Do not copy secrets casually
 

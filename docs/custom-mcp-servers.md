@@ -92,6 +92,7 @@ so each service bills you directly and OpenMausBot pays for none of it.
 | --- | --- | --- |
 | **AgentMail**, email inboxes | `https://mcp.agentmail.to/mcp` | Browser sign-in |
 | **AgentPhone**, US and Canadian numbers, texts and calls | `https://mcp.agentphone.ai/mcp` | Browser sign-in |
+| **Higgsfield**, AI images and videos | `https://mcp.higgsfield.ai/mcp` | Browser sign-in |
 | **Vapi**, phone calls | `https://mcp.vapi.ai/mcp` | A private API key from the Vapi dashboard |
 | **Telnyx**, numbers in many countries, texts and calls | `https://api.telnyx.com/v2/mcp` | An API key from the Telnyx portal |
 
@@ -106,6 +107,24 @@ whole API through one tool) follow **Sending on your behalf**, the same as
 sending a message. Choose which bots get each card under **Bot access**. To
 have a bot answer new mail, texts or calls, add a webhook for that bot in
 **Automations** and paste its address into the service.
+
+### BubblaV
+
+In Plugins, find **BubblaV** and click **Connect**. The card uses BubblaV's
+official hosted MCP endpoint, `https://www.bubblav.com/mcp`, and opens BubblaV's
+browser sign-in. Sign in (or create a free account), choose the one chatbot
+(website) the connection may reach, and choose **Full access** or **Read
+only**. No API key is needed. After sign-in and tool discovery it enables the
+connection, and **Disconnect** and **Bot access** work as they do for Whop.
+
+A bot that can use BubblaV reads that chatbot's reports, unanswered questions,
+conversations and leads. With **Full access** it can also add and delete
+knowledge and change the chatbot's instructions, widget, forms and webhook
+tools, so choose which bots get it under **Bot access**; **Read only** lists
+and runs only BubblaV's read-only tools. BubblaV saves the sign-in as an API
+key named **MCP Client** under **Settings → API Keys**, where revoking it ends
+the connection. The key lasts one year, then the card asks you to sign in
+again. See [BubblaV's OpenMausBot guide](https://docs.bubblav.com/user-guide/integrations/openmausbot).
 
 ### Servers that ask you to sign in
 
@@ -276,9 +295,22 @@ and out of the tools' own folders outside their skills. A copy whose files
 change afterwards is left out until it is brought in again. A turn whose
 engine already loads the folder a skill came from leaves the copy out, so
 nothing is listed twice: Claude Code with **Also use my Claude Code skills**
-on, and Codex on the person's own `CODEX_HOME`. The copies travel with
-backups and Copy to My Cloud. The step never opens credential, session or
-history files, and it is skipped when there is nothing new.
+on, and Codex on the person's own `CODEX_HOME` (a ChatGPT plan's linked one
+included). The copies travel with backups and Copy to My Cloud. The step never
+opens credential, session or history files, and it is skipped when there is
+nothing new.
+
+Skills an engine loads by itself show in **Bot Settings → Skills** with a
+switch for that bot: for Codex, `$CODEX_HOME/skills`, `~/.agents/skills` and
+`/etc/codex/skills`. Switching one off passes Codex that skill's `SKILL.md`
+path for the bot's turns, so a same-named skill in the turn's own
+`.agents/skills` stays on, and `[[skills.config]]` entries in `config.toml`
+keep applying. A skill brought in from this computer and switched off is kept
+out the same way, from the folder it came from. If the bot's saved switches
+(`<data>/skill-state/<bot id>/native-skills.json`) are there but can't be read,
+every such skill counts as on (skills from this computer switched off for the
+bot stay off), turns run as usual and the server logs it once; the next switch
+writes a good file.
 
 Open a bot’s **Tools → Access → MCP servers** to narrow the enabled global
 servers offered to it. Existing bots keep all enabled global servers until you
@@ -383,6 +415,22 @@ An HTTP 401 tells the bot to send the message again (a sign-in is refreshed
 when a message starts) and, if that fails, to sign in again or check the
 server's header values in Plugins → MCP servers.
 
+### Which bot made a call, on a server that runs on a lent computer
+
+A server saved on a Cloud to run on a computer lent to it is started by that
+computer. Each tool call it gets names the bot and conversation that made it,
+in the call's `_meta`:
+
+```json
+{ "_meta": { "openmausbot/caller": { "botId": "…", "threadId": "…", "verified": false } } }
+```
+
+It is a hint for the server's own logs or per-bot settings, never proof of
+who called: the Cloud says it, the computer passes it on as it is, and
+OpenMausBot never uses it to allow or refuse anything. The Cloud sends it
+only to a desktop app new enough to pass it on, so an older one keeps running
+calls as before; a listing of the server's tools never carries it.
+
 ## What a Claude bot sees, and the "Also use my Claude Code MCP servers" switch
 
 A bot on the Claude engine gets the tools and instructions its owner gave it:
@@ -416,6 +464,20 @@ tool selection keeps working. In `config.json` it is
 removed when the switch goes off; a skill brought in from `~/.claude/skills`
 is left out of a Claude turn while the switch is on, since Claude already has
 the original.
+
+A project can ship skills for any AI agent in `agents/skills`, `.agents/skills`
+or `.claude/skills`. When a bot works in such a folder (or one below it, up to
+the git root; outside a repository, only the working folder itself counts), its
+**Skills** page lists them under **In this project**, and the bot uses them by
+itself, the way Claude Code loads `.claude/skills`. There is no switch. Claude
+Code loads `.claude/skills` and Codex loads `.agents/skills` themselves, and
+those show as the engine's own skills, each with the bot's own switch. A bot's
+prompt lists each project skill with its SKILL.md path and `/name` runs it,
+except one marked `user-invocable: false`, which only the model uses. A
+SKILL.md must be a plain file of a skill's size, and a skill folder linked to a
+place outside the project is skipped. The bot's own, library and brought-in skills keep
+their names, an engine without file tools gets none, and they never travel in a
+bot or team package.
 
 The switch drops the CLI flag `--strict-mcp-config` (Claude Code 1.0.60+)
 while keeping `--setting-sources project` (1.0.122+). The environment variable

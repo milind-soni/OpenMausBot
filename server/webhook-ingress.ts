@@ -1,3 +1,4 @@
+import { rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { z } from "zod";
 
@@ -11,6 +12,8 @@ const serverAddressSchema = z.object({ port: z.number().int().min(1).max(65_535)
 
 export interface WebhookIngress {
   server: Server;
+  /** The same receiver on a Unix socket (OMB_WEBHOOK_SOCKET), for a proxy in another container: the compose files' Caddy. */
+  socketServer?: Server;
   host: string;
   port: number;
   baseUrl: string;
@@ -169,35 +172,56 @@ export function advertisedWebhookBase(raw: string): string {
   return raw.replace(/\/+$/, "");
 }
 
+/** A TCP port on `host`, or a Unix socket's path when `host` is omitted. */
+function listenOn(server: Server, where: number | string, host?: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => reject(error);
+    const listening = () => {
+      server.off("error", onError);
+      resolve();
+    };
+    server.once("error", onError);
+    if (typeof where === "number") server.listen(where, host, listening);
+    else server.listen(where, listening);
+  });
+}
+
 export async function listenWebhookIngress(
   manager: WebhookManager,
-  options: { host?: string; port: number; publicBaseUrl?: string; claimRequest?: () => () => void; door?: IngressDoor },
+  options: { host?: string; port: number; socketPath?: string; publicBaseUrl?: string; claimRequest?: () => () => void; door?: IngressDoor },
 ): Promise<WebhookIngress> {
   const host = options.host ?? "127.0.0.1";
   const advertised = options.publicBaseUrl === undefined ? undefined : advertisedWebhookBase(options.publicBaseUrl);
   const handle = createWebhookIngressHandler(manager, options.claimRequest, options.door);
-  const server = createServer(IDLE_HTTP_SERVER, (req, res) => {
+  const receive = (req: IncomingMessage, res: ServerResponse) => {
     handle(req, res).catch((error: unknown) => {
       console.error("webhooks: receiver failed", error);
       if (res.headersSent) res.destroy();
       else json(res, 500, { error: "Webhook receiver failed" });
     });
-  });
-  await new Promise<void>((resolve, reject) => {
-    const onError = (error: Error) => reject(error);
-    server.once("error", onError);
-    server.listen(options.port, host, () => {
-      server.off("error", onError);
-      resolve();
-    });
-  });
+  };
+  const server = createServer(IDLE_HTTP_SERVER, receive);
+  await listenOn(server, options.port, host);
   const address = serverAddressSchema.safeParse(server.address());
   if (!address.success) {
     server.close();
     throw new Error("Webhook receiver did not get a TCP address");
   }
+  let socketServer: Server | undefined;
+  if (options.socketPath) {
+    // A socket left by a server that stopped without closing it would refuse the listen.
+    if (process.platform !== "win32") rmSync(options.socketPath, { force: true });
+    socketServer = createServer(IDLE_HTTP_SERVER, receive);
+    try {
+      await listenOn(socketServer, options.socketPath);
+    } catch (error) {
+      server.close();
+      throw error;
+    }
+  }
   return {
     server,
+    ...(socketServer ? { socketServer } : {}),
     host,
     port: address.data.port,
     baseUrl: advertised ?? `http://${host}:${address.data.port}`,

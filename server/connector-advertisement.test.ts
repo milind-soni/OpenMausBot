@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  advertisedGrants,
   CONNECTOR_ALLOWED_TOOLS_MAX_BYTES,
   connectorToolAdvertised,
   filterToolsListFrame,
@@ -135,4 +136,35 @@ describe("tools/list frame filtering", () => {
     const nameless = { jsonrpc: "2.0" as const, id: 12, result: { tools: [{ description: "unnamed" }] } };
     expect(filterToolsListFrame(nameless, grants({ gmail: { tools: "*" } }))).toEqual(nameless);
   });
+});
+
+describe("the apps' sandbox", () => {
+  it("is offered to a bot with app grants only while its turn runs at Full access", () => {
+    const gmail = grants({ gmail: { tools: "*" } });
+    expect(advertisedGrants(gmail, false)).toBe(gmail);
+    expect(advertisedGrants(undefined, true)).toBeUndefined();
+    const full = advertisedGrants(gmail, true)!;
+    expect(gmail).toEqual({ gmail: { tools: "*" } });
+    for (const tool of ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL", "GMAIL_SEND_EMAIL"]) {
+      expect(connectorToolAdvertised(tool, full)).toBe(true);
+      expect(connectorToolAdvertised(tool, gmail)).toBe(tool === "GMAIL_SEND_EMAIL");
+    }
+    expect(connectorToolAdvertised("SLACK_POST_MESSAGE", full)).toBe(false);
+  });
+});
+
+it.each(["_1password", "_" + "a".repeat(80)])("round-trips connector grants for %s", (slug) => {
+  const record = grants({ [slug]: { tools: "*" } });
+  expect(parseConnectorAllowedToolsEnv(serializeConnectorAllowedTools(record).env)).toEqual(record);
+});
+it("round-trips and advertises a leading-underscore toolkit's own tool names", () => {
+  const record = grants({ _1password: { tools: ["_1PASSWORD_GET_ITEM", "_1PASSWORD_LIST_VAULTS"] } });
+  expect(parseConnectorAllowedToolsEnv(serializeConnectorAllowedTools(record).env)).toEqual(record);
+  expect(connectorToolAdvertised("_1PASSWORD_GET_ITEM", record)).toBe(true);
+  expect(connectorToolAdvertised("_1PASSWORD_LIST_VAULTS", record)).toBe(true);
+  expect(connectorToolAdvertised("_1PASSWORD_DELETE_ITEM", record)).toBe(false);
+  expect(connectorToolAdvertised("_1PASSWORD_GET_ITEM", grants({ _1password: { tools: "*" } }))).toBe(true);
+});
+it.each(["", "-x", "Bad Slug", "a/b", "__proto__", "Uppercase", "a".repeat(82)])("rejects invalid connector grant slug %s", (slug) => {
+  expect(parseConnectorAllowedToolsEnv(JSON.stringify({ [slug]: { tools: "*" } }))).toBeNull();
 });

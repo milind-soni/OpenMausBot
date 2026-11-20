@@ -7,7 +7,7 @@ import { suggestedLocalName } from "@/lib/places";
 
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./cloud-buy/CloudMascotScene", () => ({ CloudMascotScene: () => null }));
-const { NewLocalFromMenu } = await import("./PlaceAddSheet");
+const { NewLocalFromMenu, RailSheet } = await import("./PlaceAddSheet");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement, root: Root | null = null, ask: (() => void) | null = null;
@@ -40,4 +40,17 @@ it("the Server menu's New workspace on this computer opens the same step on this
   await act(async () => { ask!(); });
   await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
   expect(document.querySelector("[data-place-add-sheet]"), "Escape: no dead end").toBeNull();
+});
+
+it("a parent re-render with a new onClose keeps focus inside the sheet instead of handing it back to the opener", async () => {
+  const opener = document.createElement("button"); document.body.append(opener); opener.focus();
+  const sheet = (onClose: () => void) => createElement(RailSheet, { focusKey: "server", onClose, children: [createElement("button", { key: "a" }, "A"), createElement("button", { key: "b", "data-second": "" }, "B")] });
+  root = createRoot(host);
+  await act(async () => { root!.render(sheet(() => {})); });
+  const second = document.querySelector<HTMLButtonElement>("[data-second]")!;
+  second.focus();
+  await act(async () => { root!.render(sheet(() => {})); });
+  expect(document.activeElement).toBe(second);
+  await act(async () => { root!.render(createElement("div")); });
+  expect(document.activeElement, "closing still returns focus to the opener").toBe(opener);
 });

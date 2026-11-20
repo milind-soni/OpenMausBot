@@ -58,3 +58,41 @@ it("has no inbox off a team", async () => {
   const { call } = setup({ team: false });
   expect(await call("GET", "/api/inbox")).toMatchObject({ status: 404, body: { error: "There is no inbox here.", errorKey: "serverError.inbox.missing" } });
 });
+
+it("reads every unread line at once for the caller alone, leaves an ask waiting on its card, and repeats harmlessly", async () => {
+  const { f, call } = setup();
+  f.bots.find((bot) => bot.id === "reporter")!.tasks.push({ threadId: "rep-shared", title: "Weekly numbers" });
+  f.team.pass("scout", "cleo-private", "Ben", "The launch moved to Friday.");
+  f.team.pass("scout", "ben-private", "Cleo", "Cleo, the draft is ready.");
+  f.store.appendMessage("rep-shared", { role: "bot", kind: "options", text: "Run a command?", card: { title: "Run a command?", subtitle: "rm -rf ./build", options: ["Allow", "Deny"], requestId: "req-1", tool: "Bash", requestType: "permission" } });
+  f.team.route({ kind: "approval", botId: "reporter", botName: "Reporter", threadId: "rep-shared", title: "Reporter needs approval", body: "Run: rm -rf ./build" });
+  const before = (await call("GET", "/api/inbox")).body.rows as Array<{ id: string; tab: string; unread: boolean; card?: unknown }>;
+  expect(before.length).toBeGreaterThanOrEqual(2);
+  expect(before.every((row) => row.unread)).toBe(true);
+  const cleoBefore = (await call("GET", "/api/inbox", session(CLEO.email))).body.rows as Array<{ unread: boolean }>;
+  expect(cleoBefore.some((row) => row.unread)).toBe(true);
+
+  const first = await call("POST", "/api/inbox/read-all");
+  expect(first.status).toBe(200);
+  expect(first.body.rows.map((row: { id: string }) => row.id).sort()).toEqual(before.map((row) => row.id).sort());
+  expect(first.body.rows.every((row: { unread: boolean }) => !row.unread)).toBe(true);
+  expect(first.body.rows.map((row: { id: string; tab: string }) => [row.id, row.tab]).sort()).toEqual(before.map((row) => [row.id, row.tab]).sort());
+  const ask = first.body.rows.find((row: { kind: string }) => row.kind === "ask");
+  expect(ask, "the ask is still listed, on the needs-you tab, with its card unanswered").toMatchObject({ tab: "needs-you", unread: false, card: { requestId: "req-1" } });
+  expect(ask.card.answered).toBeUndefined();
+  expect(f.store.messagesFor("rep-shared").find((message) => message.kind === "options")!.card).not.toHaveProperty("answered");
+
+  expect(await call("POST", "/api/inbox/read-all")).toMatchObject({ status: 200, body: first.body });
+  expect((await call("GET", "/api/inbox/count")).body.count, "only the ask still waits on them").toBe(1);
+  expect(f.team.markAllRead(session(BEN.email))).toBe(0);
+
+  expect((await call("GET", "/api/inbox", session(CLEO.email))).body.rows, "another person's rows stay unread").toEqual(cleoBefore);
+  expect(await call("GET", "/api/inbox/read-all")).toMatchObject({ status: 405 });
+  expect(await call("POST", "/api/inbox/read-all", session("stranger@nowhere.test"))).toMatchObject({ status: 404, body: { errorKey: "serverError.inbox.missing" } });
+  expect(requiredScope("POST", "/api/inbox/read-all")).toBe("client");
+});
+
+it("has no bulk read off a team", async () => {
+  const { call } = setup({ team: false });
+  expect(await call("POST", "/api/inbox/read-all")).toMatchObject({ status: 404, body: { errorKey: "serverError.inbox.missing" } });
+});

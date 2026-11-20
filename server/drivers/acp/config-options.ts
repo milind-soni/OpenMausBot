@@ -40,7 +40,8 @@ function selectValues(value: unknown): SelectValue[] {
 
 export function acpVariantOption(result: unknown): { configId: string; options: ModelVariantOption[]; currentValue?: string } | undefined {
   const option = configOptions(result).find((entry) => entry.type === "select" && nonempty(entry.id)
-    && (entry.id === "effort" || entry.id === "reasoning_effort" || entry.id === "thought_level" || entry.category === "thought_level"));
+    && (entry.id === "effort" || entry.id === "reasoning_effort" || entry.id === "thought_level" || entry.id === "thinking"
+      || entry.category === "thought_level" || entry.category === "thinking"));
   if (!option) return;
   const currentValue = nonempty(option.currentValue);
   return {

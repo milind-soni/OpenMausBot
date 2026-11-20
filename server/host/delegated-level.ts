@@ -43,7 +43,7 @@ export function createDelegatedLevel(deps: DelegatedLevelDeps) {
   /** The level work `from` hands `target` comes down with, or null to keep `own`. */
   function handedDown(from: Hop | undefined, target: BotRecord, own: ApprovalMode) {
     const above = chiefAbove(from);
-    if (!from || !above || deps.handsNoLevel(from.threadId) || deps.handsNoLevel(above.threadId)) return null;
+    if (!from || !above || from.botId === target.id || above.chief.id === target.id || deps.handsNoLevel(from.threadId) || deps.handsNoLevel(above.threadId)) return null;
     const chiefMode = deps.sourceLevel(above.chief.id, above.threadId);
     const level = delegatedApprovalMode({
       senderIsChief: true, senderMode: chiefMode, sameBot: from.botId === target.id || above.chief.id === target.id,

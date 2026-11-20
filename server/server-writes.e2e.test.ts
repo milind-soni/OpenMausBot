@@ -6,6 +6,7 @@ import { afterEach, expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { storedThread } from "./testing/registry.ts";
 
 let fixture: VerificationServer | undefined;
 afterEach(async () => {
@@ -31,7 +32,7 @@ it.each(["SIGKILL", "SIGTERM"] as const)("a turn and a routine run cut by %s kee
   };
   const { bot } = await cli("new-bot", "--name", "Talks");
   const { bot: worker } = await cli("new-bot", "--name", "Works");
-  const task = (id: string, threadId: string) => (json(join(dataDir, "bots.json")) as any[] | null)?.find((row) => row.id === id)?.tasks?.find((row: any) => row.threadId === threadId);
+  const task = (id: string, threadId: string) => storedThread(dataDir, id, threadId);
 
   const { routine } = await api("POST", "/api/routines", { name: "Morning", prompt: "Summarise.", botId: worker.id, enabled: false, schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 } });
   const { run } = await api("POST", `/api/routines/${routine.id}/run`);

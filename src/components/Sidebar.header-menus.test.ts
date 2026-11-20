@@ -33,12 +33,14 @@ vi.mock("./DesktopCapabilities", async () => {
 });
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: original.initialState, dispatch: vi.fn() }) };
 });
 
 import { Sidebar } from "./Sidebar";
+const drawSidebar = (Sidebar as unknown as { type: (props: import("react").ComponentProps<typeof Sidebar>) => import("react").ReactNode }).type;
 import { SidebarNewChatPanel } from "./SidebarNewChatPanel";
 
 type Props = { children?: ReactNode; className?: string; onClick?: () => void; [key: string]: unknown };
@@ -51,7 +53,7 @@ function nodes(value: ReactNode): ReactElement<Props>[] {
 function render() {
   fixture.index = 0;
   fixture.effects = [];
-  return nodes(Sidebar({ open: false, onClose: () => {} }));
+  return nodes(drawSidebar({ open: false, onClose: () => {} }));
 }
 const trigger = (label: string) => render().find((node) => node.type === "button" && node.props["aria-label"] === label)!;
 
@@ -77,7 +79,7 @@ function press(target: unknown) {
 }
 
 const menus = [
-  { name: "New or share", label: "New or share", item: "Create department" },
+  { name: "New or share", label: "New or share", item: "Add department" },
 ];
 const text = (tree: ReactElement<Props>[]) => tree.map((node) => Children.toArray(node.props.children).filter((child) => typeof child === "string").join(" ")).join(" ");
 
@@ -145,6 +147,6 @@ describe("sidebar header menu: New chat", () => {
     vi.stubGlobal("document", { body: {} });
     const tree = render();
     expect(tree.some((node) => node.type === SidebarNewChatPanel)).toBe(true);
-    expect(text(tree)).not.toContain("Create department");
+    expect(text(tree)).not.toContain("Add department");
   });
 });

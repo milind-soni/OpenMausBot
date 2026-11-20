@@ -16,6 +16,8 @@ interface ViewerSession {
   sockets: Set<{ destroy(): void }>;
   /** A Local VM viewer lives only as long as its control lease holds. */
   watch?: ReturnType<typeof setInterval>;
+  /** Whether that lease still holds; any failure answers false. */
+  leaseHolds?: () => Promise<boolean>;
 }
 
 /** Whether `controlLeaseId` still holds `botId`'s computer, asked on behalf of
@@ -209,12 +211,14 @@ export class CompanionViewerRelay {
     if (localVm) {
       const check = this.#checkControl!;
       const lease = controlLeaseId!;
+      const leaseHolds = () => check(deviceId, botId, lease).catch(() => false);
+      session.leaseHolds = leaseHolds;
       let checking = false;
       session.watch = setInterval(() => {
-        if (checking) return;
+        // The server takes each check as the phone's heartbeat for the lease.
+        if (checking || !session.sockets.size) return;
         checking = true;
-        check(deviceId, botId, lease)
-          .catch(() => false)
+        leaseHolds()
           .then((owned) => {
             checking = false;
             if (!owned && this.#isActive(session)) this.#remove(session);
@@ -306,7 +310,23 @@ export class CompanionViewerRelay {
     const resolved = this.#target(req.url, device);
     const headers = websocketHeaders(req);
     if (!resolved || !headers) return socketError(socket, 404, "viewer session not found");
+    const { session } = resolved;
+    if (!session.leaseHolds) return this.#pipe(resolved, socket, head, headers);
 
+    // The lease may have lapsed while no socket was open to check it. Reading meanwhile is what shows a hang-up.
+    const early = [head];
+    const keep = (chunk: Buffer) => early.push(chunk);
+    const hangUp = () => socket.destroy();
+    socket.on("data", keep).once("end", hangUp);
+    void session.leaseHolds().then((owned) => {
+      socket.off("data", keep).off("end", hangUp).pause();
+      if (owned && this.#isActive(session) && !socket.destroyed) return this.#pipe(resolved, socket, Buffer.concat(early), headers);
+      if (!owned && this.#isActive(session)) this.#remove(session);
+      socketError(socket, 404, "viewer session not found");
+    });
+  }
+
+  #pipe(resolved: { session: ViewerSession; target: URL }, socket: Duplex, head: Buffer, headers: Record<string, string>): void {
     const upstream = httpRequest(resolved.target, { method: "GET", headers });
     resolved.session.sockets.add(socket);
     resolved.session.sockets.add(upstream);

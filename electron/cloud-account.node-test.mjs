@@ -123,6 +123,20 @@ test("a connection that fails while the Admin says My Cloud can't be reached say
   await assert.rejects(f.client.pairHome(), { message: "Cloud request failed." });
 });
 
+test("a pairing refused while the Admin says why keeps its status; a 429 keeps its Retry-After and doesn't read the session again", async t => {
+  const f = await fixture(t); await f.connect();
+  const origin = "https://home-7f3k2.fly.dev", since = f.now - 6 * 60_000;
+  f.entitlement = { plan: "pro", tier: "pro", status: "active", expiresAt: f.now + 86_400_000, version: 1 };
+  f.cloud = { state: "ready", origin, pairingAvailable: true, unreachable: { cause: "host", since } };
+  await f.client.refresh();
+  f.pairing = { status: 503, body: { error: "unavailable" } };
+  await assert.rejects(f.client.pairHome(), (error) => error.status === 503 && /hosting provider/.test(error.message));
+  f.pairing = { status: 429, body: { error: "rate_limited" }, headers: { "retry-after": "120" } };
+  const reads = f.requests.filter(row => row.route === "/api/cloud/desktop/session").length;
+  await assert.rejects(f.client.pairHome(), (error) => error.status === 429 && error.retryAfter === 120);
+  assert.equal(f.requests.filter(row => row.route === "/api/cloud/desktop/session").length, reads, "the Admin's limit is not met with another request");
+});
+
 test("a free trial and its AI credit come with a verified session, for display only; an Admin without them changes nothing", async t => {
   const f = await fixture(t); await f.connect();
   const DAY = 86_400_000, endsAt = f.now + 2 * DAY, origin = "https://home-7f3k2.fly.dev";
@@ -521,14 +535,16 @@ test("sign-out durably forgets personal Cloud and revokes only its credential; o
 test("failed durable sign-out blocks reconnect until cleanup succeeds", async t => {
   const f = await fixture(t); await f.connect(); f.failWrite = true;
   assert.equal((await f.client.signOut()).message, "signout-storage-failed");
-  await assert.rejects(f.client.begin(), /Sign out/); assert.equal(f.client.state().entitlement, undefined);
+  const asked = f.requests.length, blocked = await f.client.begin();
+  assert.equal(blocked.status, "unavailable"); assert.equal(blocked.reset, true, "clearing it is offered");
+  assert.equal(f.requests.length, asked, "no sign-in starts"); assert.equal(f.client.state().entitlement, undefined);
   f.failWrite = false; await f.client.signOut(); assert.equal(f.saved, null);
 });
 
 test("startup restoration cannot race a new sign-in, and failed token persistence revokes the issued credential", async t => {
   let resolveRead;
   const f = await fixture(t, { store: { read: () => new Promise(resolve => { resolveRead = resolve; }), write: async () => {} } });
-  const restoring = f.client.start(); await assert.rejects(f.client.begin(), /Sign out/);
+  const restoring = f.client.start(); assert.equal((await f.client.begin()).message, "restoring");
   resolveRead(null); await restoring; assert.deepEqual(f.requests, []);
   const broken = await fixture(t); broken.failWrite = true; await broken.client.begin(); broken.approved = true; broken.tick();
   await until(() => broken.revoked); await until(() => broken.client.state().message === "signout-storage-failed");
@@ -604,13 +620,62 @@ test("a locked keychain never removes the saved Cloud sign-in: it is read again,
   lock.locked = true;
   assert.deepEqual(await f.client.start(), { status: "unavailable", message: "restore-failed" });
   assert.equal(f.delay, 15_000);
-  await assert.rejects(f.client.begin(), /Sign out/);
-  for (const delay of [30_000, 60_000, 60_000]) { f.tick(); await until(() => f.timer); assert.equal(f.delay, delay); }
+  assert.deepEqual(await f.client.begin(), { status: "unavailable", message: "restore-failed" });
+  assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "saved" }, "no clearing offered yet");
+  assert.deepEqual(await f.client.resetSaved(), { status: "unavailable", message: "restore-failed" }, "nothing is cleared before it is offered");
+  // Read again at 0:15, 0:45, 1:45 and 2:45: three failed reads by 0:45, but clearing also waits for two minutes.
+  const offered = [];
+  for (const delay of [30_000, 60_000, 60_000, 60_000]) { f.now += f.delay; f.tick(); await until(() => f.timer); assert.equal(f.delay, delay); offered.push(f.client.state().reset === true); }
+  assert.deepEqual(offered, [false, false, false, true], "offered at the read at 2:45, not the third read at 0:45");
   assert.ok((await stat(file)).isFile(), "a locked sign-in is never removed");
-  assert.equal(f.states.filter(state => state.message === "restore-failed").length, 1, "said once, not on every try");
+  assert.deepEqual(f.states.filter(state => state.message === "restore-failed").map(state => state.reset ?? false), [false, true],
+    "said once, then once more when clearing it is offered, not on every try");
+  assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "saved", reset: true });
+  assert.equal(f.requests.length, 0);
   lock.locked = false; f.tick();
   await until(() => f.client.state().status === "connected");
   assert.equal(f.client.state().account.email, "person@example.test");
+});
+
+test("Clear pressed while a read of the saved sign-in is under way: a read that opens it keeps it, and signs in", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "omb-cloud-clear-race-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "cloud-account.bin"), lock = { locked: true };
+  let gate = null;
+  const decrypt = async value => { await gate; return { shouldReEncrypt: false, result: Buffer.from(value).map(byte => byte ^ 0x55).toString() }; };
+  const f = await fixture(t, { store: electron43Store(file, lock, decrypt) });
+  await electron43Store(file).write(savedSignIn(f));
+  await f.client.start();
+  while (!f.client.state().reset) { f.now += f.delay; f.tick(); await until(() => f.timer); }
+  // The keychain is unlocked, and the next read is decrypting as the person presses Clear.
+  let release; gate = new Promise(resolve => { release = resolve; });
+  lock.locked = false; f.now += f.delay; f.tick();
+  const clearing = f.client.resetSaved();
+  release();
+  assert.equal((await clearing).status, "connected");
+  assert.ok((await stat(file)).isFile(), "the saved sign-in that opened is kept");
+  assert.ok(!f.requests.some(row => row.method === "DELETE"), "and never revoked");
+});
+
+test("Clear pressed while a read never finishes (a keychain prompt nobody answers): it clears after a short wait, and a sign-in can start", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "omb-cloud-clear-hung-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const file = join(directory, "cloud-account.bin"), lock = { locked: true };
+  let hang = null, release = () => {};
+  const decrypt = async value => { if (hang) await hang; return { shouldReEncrypt: false, result: Buffer.from(value).map(byte => byte ^ 0x55).toString() }; };
+  const f = await fixture(t, { store: electron43Store(file, lock, decrypt), readWaitMs: 50 });
+  await electron43Store(file).write(savedSignIn(f));
+  await f.client.start();
+  while (!f.client.state().reset) { f.now += f.delay; f.tick(); await until(() => f.timer); }
+  hang = new Promise(resolve => { release = resolve; }); lock.locked = false; f.now += f.delay; f.tick();
+  const outcome = await Promise.race([f.client.resetSaved(), new Promise(resolve => setTimeout(() => resolve("still waiting"), 5_000))]);
+  assert.notEqual(outcome, "still waiting", "Clear never waits on a read for ever");
+  assert.equal(outcome.status, "signed-out");
+  await assert.rejects(stat(file), { code: "ENOENT" });
+  assert.equal((await f.client.begin()).status, "connecting", "the sign-in it was cleared for can start");
+  // The prompt is answered at last: that late read changes nothing.
+  release(); await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(f.client.state().status, "connecting");
 });
 
 test("a decrypt answer in a shape this app does not know is never taken for an unreadable sign-in", async t => {

@@ -98,6 +98,10 @@ arguments) and stores those, never the token. Waits can be made only from a
 direct chat turn the person started, with the same guest and outside-driven
 checks `create_trigger` runs; rooms, routine runs and peer asks are refused (my
 call).
+Work a bot handed on may make one wait when the person's own request started that
+work (the root's origin is the person's); it waits in the handed-on work's chat, is
+held to one open wait per assignment, and cannot cancel waits. Its follow-up still
+runs with outside provenance, so it cannot make another.
 
 A wait with `then` is a one-off automation the bot wrote, so it is treated like
 one (my call): creating it posts the same kind of visible card a new routine

@@ -21,6 +21,7 @@ import { appLabel } from "./app-event-catalog.ts";
 import { eventBlock, eventPreview, eventPrompt, matchesFilter, mergeEventBlock } from "./app-events.ts";
 import { BrokerError, type AppTriggerBroker, type BrokerEvent, type BrokerInventory, type BrokerTriggerType } from "./app-trigger-broker.ts";
 import { writeFileAtomic } from "./atomic.ts";
+import { instructionsUpdateRefusal } from "./automation-instructions.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRunOn } from "./routines.ts";
 
@@ -59,8 +60,8 @@ export interface AppTriggerManagerOptions {
   connectedApps: () => Promise<ConnectedApps>;
   botState: (botId: string) => "ready" | "busy" | "missing";
   runs: {
-    enqueue(input: { webhookId: string; webhookName: string; prompt: string; botId: string; runOn: RoutineRunOn; deliveryId: string; receivedAt: number; eventSource: "app" }): { id: string };
-    merge(triggerId: string, eventId: string, merge: (prompt: string) => string | null): { id: string } | null;
+    enqueue(input: { webhookId: string; webhookName: string; prompt: string; botId: string; runOn: RoutineRunOn; deliveryId: string; receivedAt: number; eventSource: "app"; sameConversation?: boolean }): { id: string };
+    merge(triggerId: string, eventId: string, sameConversation: boolean, merge: (prompt: string) => string | null): { id: string } | null;
     receipt(triggerId: string, eventId: string): { id: string } | null;
     pending(triggerId: string): number;
     cancelQueued(triggerId: string, message: string): void;
@@ -100,6 +101,7 @@ const storedSchema = z.object({
     z.object({ kind: z.literal("error"), text: z.string(), at: z.number() }),
   ]).optional().catch(undefined),
   sourceThreadId: z.string().optional(),
+  sameConversation: z.boolean().optional().catch(undefined),
   received: z.number().int().nonnegative(),
   filtered: z.number().int().nonnegative(),
   skipped: skippedSchema.optional().catch(undefined),
@@ -142,6 +144,7 @@ export interface AppTriggerInput {
   runOn?: RoutineRunOn;
   enabled?: boolean;
   sourceThreadId?: string;
+  sameConversation?: boolean;
   /** Another server's automation, made here under its own id. */
   id?: string;
 }
@@ -153,6 +156,7 @@ export interface AppTriggerPatch {
   filter?: AppTriggerFilter | null;
   config?: Record<string, unknown>;
   enabled?: boolean;
+  sameConversation?: boolean;
   /** Undo: the config exactly as it was saved, filter already folded in. */
   restoreConfig?: Record<string, unknown>;
 }
@@ -270,18 +274,19 @@ export class AppTriggerManager {
     const account = await this.resolveAccount(app, input.account);
     const filter = cleanFilter(input.filter);
     const config = triggerConfig(type, input.config ?? {}, filter);
-    const duplicate = this.triggers.find((trigger) => trigger.enabled && trigger.botId === input.botId && trigger.event === type.slug &&
-      trigger.accountId === account.id && trigger.prompt === prompt && JSON.stringify(trigger.config) === JSON.stringify(config));
-    if (duplicate) throw new AppTriggerError(`The same automation already exists (${duplicate.id}). Use trigger_info to review it, then change that one instead.`, 409);
     const now = this.now();
     const trigger: StoredTrigger = {
       id: input.id ?? randomUUID(), name, prompt, botId: input.botId, runOn: input.runOn ?? "maus", enabled: input.enabled ?? true,
       app, appName: appLabel(app), event: type.slug, eventName: type.name || type.slug, delivery: type.type === "poll" ? "poll" : "instant",
       accountId: account.id, ...(account.alias ? { accountLabel: account.alias } : {}), config, ...(filter ? { filter } : {}),
       remote: { state: "pending" }, ...(input.sourceThreadId ? { sourceThreadId: input.sourceThreadId } : {}),
+      ...(input.sameConversation ? { sameConversation: true } : {}),
       received: 0, filtered: 0, createdAt: now, updatedAt: now,
     };
     await this.exclusive(async () => {
+      const duplicate = this.triggers.find((trigger) => trigger.enabled && trigger.botId === input.botId && trigger.event === type.slug &&
+        trigger.accountId === account.id && trigger.prompt === prompt && JSON.stringify(trigger.config) === JSON.stringify(config));
+      if (duplicate) throw new AppTriggerError(`The same automation already exists (${duplicate.id}). Use trigger_info to review it, then change that one instead.`, 409);
       try {
         await this.bind(trigger);
         if (!trigger.enabled) await this.applyEnabled(trigger.remote.triggerId);
@@ -303,13 +308,15 @@ export class AppTriggerManager {
   async adopt(record: AppTrigger): Promise<AppTrigger> {
     const config = Object.fromEntries(Object.entries(record.config).filter(([key, value]) => value !== undefined && !(record.app === GMAIL_APP && key === "query")));
     if (this.triggers.some((candidate) => candidate.id === record.id)) {
-      return (await this.update(record.id, { name: record.name, prompt: record.prompt, runOn: record.runOn, filter: record.filter ?? null, config }))!;
+      return (await this.update(record.id, { name: record.name, prompt: record.prompt, runOn: record.runOn, filter: record.filter ?? null, config,
+        sameConversation: record.sameConversation === true }))!;
     }
     return this.create({ id: record.id, botId: record.botId, name: record.name, prompt: record.prompt, app: record.app, event: record.event, account: record.accountId,
-      ...(record.filter ? { filter: record.filter } : {}), config, runOn: record.runOn, enabled: false, ...(record.sourceThreadId ? { sourceThreadId: record.sourceThreadId } : {}) });
+      ...(record.filter ? { filter: record.filter } : {}), config, runOn: record.runOn, enabled: false, ...(record.sourceThreadId ? { sourceThreadId: record.sourceThreadId } : {}),
+      ...(record.sameConversation ? { sameConversation: true } : {}) });
   }
 
-  async update(id: string, patch: AppTriggerPatch): Promise<AppTrigger | null> {
+  async update(id: string, patch: AppTriggerPatch, options: { protectInstructions?: boolean } = {}): Promise<AppTrigger | null> {
     this.assertWritable();
     const trigger = this.triggers.find((candidate) => candidate.id === id);
     if (!trigger) return null;
@@ -327,6 +334,10 @@ export class AppTriggerManager {
       config = triggerConfig(type, Object.fromEntries(Object.entries(base).filter(([, value]) => value !== undefined)), filter);
     }
     await this.exclusive(async () => {
+      if (options.protectInstructions) {
+        const refusal = instructionsUpdateRefusal(trigger.prompt, patch.prompt);
+        if (refusal) throw new AppTriggerError(refusal, 409);
+      }
       const previous = trigger.remote.triggerId;
       const previousConfig = JSON.stringify(trigger.config);
       Object.assign(trigger, {
@@ -339,6 +350,8 @@ export class AppTriggerManager {
       });
       if (filter) trigger.filter = filter;
       else delete trigger.filter;
+      if (patch.sameConversation === true) trigger.sameConversation = true;
+      else if (patch.sameConversation === false) delete trigger.sameConversation;
       if (patch.enabled === false) this.options.runs.cancelQueued(trigger.id, "The automation was paused before this event's run started");
       try {
         if (reconfigure && (!previous || JSON.stringify(config) !== previousConfig)) {
@@ -415,7 +428,7 @@ export class AppTriggerManager {
     const eventId = `test_${randomUUID()}`;
     const run = this.options.runs.enqueue({
       webhookId: trigger.id, webhookName: trigger.name, botId: trigger.botId, runOn: trigger.runOn, deliveryId: eventId, receivedAt: this.now(),
-      eventSource: "app", prompt: eventPrompt(trigger.prompt, eventBlock(trigger, { id: eventId, receivedAt: this.now(), test: true, data })),
+      eventSource: "app", sameConversation: trigger.sameConversation, prompt: eventPrompt(trigger.prompt, eventBlock(trigger, { id: eventId, receivedAt: this.now(), test: true, data })),
     });
     return { via: "here", runId: run.id };
   }
@@ -505,7 +518,7 @@ export class AppTriggerManager {
         continue;
       }
       const block = eventBlock(trigger, { id: event.id, receivedAt: event.receivedAt, test: event.kind === "test", data });
-      const joined = this.options.runs.merge(trigger.id, event.id, (prompt) => mergeEventBlock(prompt, block));
+      const joined = this.options.runs.merge(trigger.id, event.id, trigger.sameConversation === true, (prompt) => mergeEventBlock(prompt, block));
       let runId = joined?.id;
       if (!runId) {
         if (this.options.runs.pending(trigger.id) >= DEFAULT_MAX_PENDING_RUNS) {
@@ -516,6 +529,7 @@ export class AppTriggerManager {
         runId = this.options.runs.enqueue({
           webhookId: trigger.id, webhookName: trigger.name, prompt: eventPrompt(trigger.prompt, block), botId: trigger.botId,
           runOn: trigger.runOn, deliveryId: event.id, receivedAt: event.receivedAt, eventSource: "app",
+          sameConversation: trigger.sameConversation,
         }).id;
       }
       trigger.received += 1;

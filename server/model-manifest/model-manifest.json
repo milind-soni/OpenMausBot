@@ -1,0 +1,519 @@
+{
+  "version": 1,
+  "updatedAt": "2026-11-09T21:02:58Z",
+  "engines": {
+    "claude": {
+      "default": "claude-sonnet-5",
+      "models": [
+        {
+          "id": "claude-fable-5-2",
+          "name": "Claude Fable 5.2",
+          "status": "current",
+          "contextWindow": 1000000,
+          "minCliVersion": "2.1.321"
+        },
+        {
+          "id": "claude-fable-5-1",
+          "name": "Claude Fable 5.1",
+          "status": "current"
+        },
+        {
+          "id": "claude-fable-5",
+          "name": "Claude Fable 5",
+          "status": "current"
+        },
+        {
+          "id": "claude-opus-5-5",
+          "name": "Claude Opus 5.5",
+          "status": "current",
+          "contextWindow": 1000000
+        },
+        {
+          "id": "claude-opus-5",
+          "name": "Claude Opus 5",
+          "status": "current"
+        },
+        {
+          "id": "claude-sonnet-5-5",
+          "name": "Claude Sonnet 5.5",
+          "status": "current",
+          "contextWindow": 1000000
+        },
+        {
+          "id": "claude-sonnet-5",
+          "name": "Claude Sonnet 5",
+          "status": "current"
+        },
+        {
+          "id": "claude-haiku-5-5",
+          "name": "Claude Haiku 5.5",
+          "status": "current",
+          "contextWindow": 1000000
+        },
+        {
+          "id": "claude-haiku-4-5",
+          "name": "Claude Haiku 4.5",
+          "status": "current"
+        }
+      ]
+    },
+    "cursor": {
+      "default": "auto",
+      "models": [
+        {
+          "id": "auto",
+          "name": "Auto",
+          "status": "current"
+        },
+        {
+          "id": "composer-2.5",
+          "name": "Composer 2.5",
+          "status": "current"
+        },
+        {
+          "id": "composer-2.5-fast",
+          "name": "Composer 2.5 Fast",
+          "status": "current"
+        },
+        {
+          "id": "gpt-5.3-codex",
+          "name": "Codex 5.3",
+          "status": "current"
+        },
+        {
+          "id": "claude-sonnet-5-thinking-high",
+          "name": "Claude Sonnet 5 1M Thinking",
+          "status": "current"
+        }
+      ]
+    },
+    "grok": {
+      "default": "grok-4.7",
+      "models": [
+        {
+          "id": "grok-4.7",
+          "name": "Grok 4.7",
+          "status": "current",
+          "contextWindow": 500000
+        },
+        {
+          "id": "grok-4.6",
+          "name": "Grok 4.6",
+          "status": "current"
+        },
+        {
+          "id": "grok-4.5",
+          "name": "Grok 4.5",
+          "status": "current"
+        }
+      ]
+    },
+    "kimi": {
+      "default": "kimi-code/k3",
+      "models": [
+        {
+          "id": "kimi-code/k3",
+          "name": "Kimi K3",
+          "status": "current"
+        },
+        {
+          "id": "kimi-code/k3-256k",
+          "name": "Kimi K3 256K",
+          "status": "current"
+        },
+        {
+          "id": "kimi-code/kimi-for-coding",
+          "name": "Kimi for Coding",
+          "status": "current"
+        },
+        {
+          "id": "kimi-code/kimi-for-coding-highspeed",
+          "name": "Kimi for Coding Highspeed",
+          "status": "current"
+        }
+      ]
+    },
+    "antigravity": {
+      "default": "gemini-3.8-flash",
+      "models": [
+        {
+          "id": "gemini-3.8-flash",
+          "name": "Gemini 3.8 Flash",
+          "status": "current",
+          "aliases": [
+            "gemini-3.8-flash-high",
+            "gemini-3.8-flash-medium",
+            "gemini-3.8-flash-low"
+          ],
+          "variants": [
+            {
+              "id": "low",
+              "label": "Low"
+            },
+            {
+              "id": "medium",
+              "label": "Medium"
+            },
+            {
+              "id": "high",
+              "label": "High"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "prices": {
+    "gpt-6-astra": {
+      "inputPerMillion": 10,
+      "cachedInputPerMillion": 1,
+      "outputPerMillion": 50,
+      "asOf": "2026-09-23",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5.6-sol": {
+      "inputPerMillion": 4,
+      "cachedInputPerMillion": 0.4,
+      "outputPerMillion": 20,
+      "asOf": "2026-09-23",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5.6-terra": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 12,
+      "asOf": "2026-09-23",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5.6-luna": {
+      "inputPerMillion": 0.2,
+      "cachedInputPerMillion": 0.02,
+      "outputPerMillion": 1.2,
+      "asOf": "2026-09-23",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5.5": {
+      "inputPerMillion": 5,
+      "cachedInputPerMillion": 0.5,
+      "outputPerMillion": 30,
+      "asOf": "2026-09-23",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5.4": {
+      "inputPerMillion": 2.5,
+      "cachedInputPerMillion": 0.25,
+      "outputPerMillion": 15,
+      "asOf": "2026-09-23",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5.4-mini": {
+      "inputPerMillion": 0.75,
+      "cachedInputPerMillion": 0.075,
+      "outputPerMillion": 4.5,
+      "asOf": "2026-09-23",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "gpt-5.3-codex": {
+      "inputPerMillion": 1.75,
+      "cachedInputPerMillion": 0.175,
+      "outputPerMillion": 14,
+      "asOf": "2026-09-23",
+      "source": "https://developers.openai.com/api/docs/pricing"
+    },
+    "claude-fable-5-2": {
+      "inputPerMillion": 8,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 40,
+      "asOf": "2026-11-10",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-fable-5-1": {
+      "inputPerMillion": 10,
+      "cachedInputPerMillion": 0.25,
+      "outputPerMillion": 50,
+      "asOf": "2026-09-23",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-fable-5": {
+      "inputPerMillion": 10,
+      "cachedInputPerMillion": 1,
+      "outputPerMillion": 50,
+      "asOf": "2026-09-23",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-opus-5": {
+      "inputPerMillion": 5,
+      "cachedInputPerMillion": 0.5,
+      "outputPerMillion": 25,
+      "asOf": "2026-09-23",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-sonnet-5": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 10,
+      "asOf": "2026-09-23",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-haiku-5-5": {
+      "inputPerMillion": 0.1,
+      "cachedInputPerMillion": 0.01,
+      "outputPerMillion": 0.5,
+      "asOf": "2026-10-27",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-haiku-4-5": {
+      "inputPerMillion": 1,
+      "cachedInputPerMillion": 0.1,
+      "outputPerMillion": 5,
+      "asOf": "2026-09-23",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "claude-haiku-4-5-20251001": {
+      "inputPerMillion": 1,
+      "cachedInputPerMillion": 0.1,
+      "outputPerMillion": 5,
+      "asOf": "2026-09-23",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing"
+    },
+    "grok-4.7": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.5,
+      "outputPerMillion": 6,
+      "asOf": "2026-09-23",
+      "source": "https://docs.x.ai/developers/models"
+    },
+    "grok-4.6": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.5,
+      "outputPerMillion": 6,
+      "asOf": "2026-09-23",
+      "source": "https://docs.x.ai/developers/models"
+    },
+    "grok-4.5": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.3,
+      "outputPerMillion": 6,
+      "asOf": "2026-09-23",
+      "source": "https://docs.x.ai/developers/models"
+    },
+    "gemini-2.5-pro": {
+      "inputPerMillion": 1.25,
+      "cachedInputPerMillion": 0.125,
+      "outputPerMillion": 10,
+      "asOf": "2026-09-23",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
+    },
+    "gemini-2.5-flash": {
+      "inputPerMillion": 0.3,
+      "cachedInputPerMillion": 0.03,
+      "outputPerMillion": 2.5,
+      "asOf": "2026-09-23",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
+    },
+    "gemini-3.1-pro-preview": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 12,
+      "asOf": "2026-09-23",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing"
+    },
+    "gemini-3.8-flash": {
+      "inputPerMillion": 0.75,
+      "cachedInputPerMillion": 0.075,
+      "outputPerMillion": 3.75,
+      "asOf": "2026-09-23",
+      "source": "https://ai.google.dev/gemini-api/docs/pricing",
+      "changes": [
+        {
+          "from": "2027-01-01",
+          "inputPerMillion": 1.5,
+          "cachedInputPerMillion": 0.15,
+          "outputPerMillion": 7.5
+        }
+      ]
+    },
+    "minimax-m3": {
+      "inputPerMillion": 0.3,
+      "cachedInputPerMillion": 0.06,
+      "outputPerMillion": 1.2,
+      "asOf": "2026-09-23",
+      "source": "https://platform.minimax.io/docs/guides/pricing-paygo"
+    },
+    "minimax-m2.7": {
+      "inputPerMillion": 0.3,
+      "cachedInputPerMillion": 0.06,
+      "outputPerMillion": 1.2,
+      "asOf": "2026-09-23",
+      "source": "https://platform.minimax.io/docs/guides/pricing-paygo"
+    },
+    "minimax-m2.7-highspeed": {
+      "inputPerMillion": 0.6,
+      "cachedInputPerMillion": 0.06,
+      "outputPerMillion": 2.4,
+      "asOf": "2026-09-23",
+      "source": "https://platform.minimax.io/docs/guides/pricing-paygo"
+    },
+    "openai/gpt-6-astra": {
+      "inputPerMillion": 10,
+      "cachedInputPerMillion": 1,
+      "outputPerMillion": 50,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "openai/gpt-5.6-sol": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 10,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "openai/gpt-5.6-terra": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 12,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "openai/gpt-5.6-luna": {
+      "inputPerMillion": 0.2,
+      "cachedInputPerMillion": 0.02,
+      "outputPerMillion": 1.2,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "openai/gpt-5.5": {
+      "inputPerMillion": 5,
+      "cachedInputPerMillion": 0.5,
+      "outputPerMillion": 30,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "openai/gpt-5.4": {
+      "inputPerMillion": 2.5,
+      "cachedInputPerMillion": 0.25,
+      "outputPerMillion": 15,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "openai/gpt-5.4-mini": {
+      "inputPerMillion": 0.75,
+      "cachedInputPerMillion": 0.075,
+      "outputPerMillion": 4.5,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "openai/gpt-5.3-codex": {
+      "inputPerMillion": 1.75,
+      "cachedInputPerMillion": 0.175,
+      "outputPerMillion": 14,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "anthropic/claude-fable-5.2": {
+      "inputPerMillion": 8,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 40,
+      "asOf": "2026-11-10",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "anthropic/claude-fable-5.1": {
+      "inputPerMillion": 10,
+      "cachedInputPerMillion": 0.25,
+      "outputPerMillion": 50,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "anthropic/claude-fable-5": {
+      "inputPerMillion": 10,
+      "cachedInputPerMillion": 1,
+      "outputPerMillion": 50,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "anthropic/claude-opus-5": {
+      "inputPerMillion": 5,
+      "cachedInputPerMillion": 0.5,
+      "outputPerMillion": 25,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "anthropic/claude-sonnet-5": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 10,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "anthropic/claude-haiku-4.5": {
+      "inputPerMillion": 1,
+      "cachedInputPerMillion": 0.1,
+      "outputPerMillion": 5,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "x-ai/grok-4.7": {
+      "inputPerMillion": 1.6,
+      "cachedInputPerMillion": 0.4,
+      "outputPerMillion": 4.8,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "x-ai/grok-4.6": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.5,
+      "outputPerMillion": 6,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "x-ai/grok-4.5": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.3,
+      "outputPerMillion": 6,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "google/gemini-2.5-pro": {
+      "inputPerMillion": 1.25,
+      "cachedInputPerMillion": 0.125,
+      "outputPerMillion": 10,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "google/gemini-2.5-flash": {
+      "inputPerMillion": 0.3,
+      "cachedInputPerMillion": 0.03,
+      "outputPerMillion": 2.5,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "google/gemini-3.1-pro-preview": {
+      "inputPerMillion": 2,
+      "cachedInputPerMillion": 0.2,
+      "outputPerMillion": 12,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "google/gemini-3.8-flash": {
+      "inputPerMillion": 0.75,
+      "cachedInputPerMillion": 0.075,
+      "outputPerMillion": 3.75,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "minimax/minimax-m3": {
+      "inputPerMillion": 0.3,
+      "cachedInputPerMillion": 0.06,
+      "outputPerMillion": 1.2,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    },
+    "minimax/minimax-m2.7": {
+      "inputPerMillion": 0.3,
+      "cachedInputPerMillion": 0.06,
+      "outputPerMillion": 1.2,
+      "asOf": "2026-09-23",
+      "source": "https://openrouter.ai/api/v1/models"
+    }
+  }
+}

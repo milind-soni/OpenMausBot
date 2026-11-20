@@ -1,5 +1,10 @@
 # Self-host the full stack with rootless Podman
 
+For the server alone as your user's systemd service, with updates and a way
+back, one command is enough: `install.sh` here
+([Podman (rootless, as a service)](../../docs/self-hosting.md#podman-rootless-as-a-service)).
+The recipe below builds from a checkout and adds Caddy and per-bot desktops.
+
 Run the OpenMausBot server, Caddy, and per-bot Linux desktops with one Podman
 engine. Docker Engine, Docker Desktop, and Docker Compose are not required;
 `podman-compose` provides the Compose commands. The existing
@@ -74,7 +79,7 @@ compose.yaml` prefix for `maus.ps1`.
 In **App Settings -> Local VM**, prepare the managed image, select **Per bot**,
 and set the maximum number of desktops. Give each bot **Local VM** as its computer,
 then create its desktop. The first image preparation needs a large download.
-Each desktop has the existing 4 GiB / 2 CPU limits; allow capacity for the server
+Each desktop gets 4 GiB / 2 CPUs unless `localVm.memoryGb` and `localVm.cpus` say otherwise; allow capacity for the server
 and build as well as all concurrent desktops. See the
 [Local VM guide](../../apps/docs/content/docs/computers/local-vm.mdx).
 

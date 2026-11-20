@@ -13,19 +13,25 @@ export function canWriteIn(state: SessionState | null, threadId: string): boolea
   return state.openedThreads?.includes(threadId) === true;
 }
 
-/** False too for a team bot this person can only view. */
+const writable = new Map<string, boolean>();
+const writableListeners = new Set<() => void>();
+function subscribeWritable(listener: () => void): () => void {
+  writableListeners.add(listener);
+  return () => writableListeners.delete(listener);
+}
+
+/** False too for a team bot this person can only view. Null until known; a conversation opened before shows what was
+ * learned then while it is read again. */
 export function useCanWriteIn(threadId: string, level?: string): boolean | null {
-  const [allowed, setAllowed] = useState<boolean | null>(null);
+  const allowed = useSyncExternalStore(subscribeWritable, () => writable.get(threadId) ?? null, () => null);
   useEffect(() => {
-    let alive = true;
-    setAllowed(null);
     void read().then(async (state) => {
       const known = canWriteIn(state, threadId) ? state : await read(true);
-      if (alive) setAllowed(canWriteIn(known, threadId));
+      const value = canWriteIn(known, threadId);
+      if (writable.get(threadId) === value) return;
+      writable.set(threadId, value);
+      for (const listener of writableListeners) listener();
     });
-    return () => {
-      alive = false;
-    };
   }, [threadId]);
   return level === "view" ? false : allowed;
 }
@@ -51,4 +57,19 @@ export function currentReactor(): string {
 /** Whose reactions in the chat are this viewer's: "user" unless the server keys each person of a shared workspace. */
 export function useReactor(): string {
   return useSyncExternalStore(subscribeReactor, () => reactor, () => "user");
+}
+
+/** True once the server says this device is a guest on someone's My Cloud; false for its owner and everywhere else. */
+export function useCloudGuest(): boolean {
+  const [guest, setGuest] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void read().then((state) => {
+      if (alive) setGuest(state?.kind === "session" && state.cloudGuest === true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+  return guest;
 }

@@ -5,6 +5,7 @@ import {
   stripWorkspaceCredentialEnv,
 } from "./config.ts";
 import { createLineSplitter } from "./mcp-bridge.ts";
+import { mcpCommandEnvironment } from "./mcp-environment.ts";
 import { UI_EXTENSION, withUiExtension } from "./mcp-app-observer.ts";
 import { MAX_REMOTE_MCP_BYTES, McpHttpError, McpRpcError, REMOTE_MCP_STARTUP_MS, RemoteMcpClient } from "./mcp-http.ts";
 import { discoverMcpAuth } from "./mcp-oauth-discovery.ts";
@@ -58,12 +59,11 @@ const MAX_TOOLS = 100;
 export const STDIO_PROBE_TIMEOUT_MS = 8_000;
 export const REMOTE_PROBE_TIMEOUT_MS = REMOTE_MCP_STARTUP_MS;
 
-export function probeEnvironment(server: Pick<StoredStdioMcpServer, "env">): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, PATH: augmentedPath() };
+export function probeEnvironment(server: Pick<StoredStdioMcpServer, "env">, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...source, PATH: augmentedPath() };
   stripWorkspaceCredentialEnv(env);
   for (const key of PROVIDER_CREDENTIAL_ENV) delete env[key];
-  Object.assign(env, server.env);
-  return env;
+  return mcpCommandEnvironment(env, server.env);
 }
 
 function publicProbeError(kind: "spawn" | "timeout" | "protocol" | "closed" | "cancelled"): string {
@@ -75,11 +75,28 @@ function publicProbeError(kind: "spawn" | "timeout" | "protocol" | "closed" | "c
 }
 
 function redactConfiguredValues(value: string, secrets: Record<string, string>): string {
-  let redacted = value;
-  for (const secret of Object.values(secrets)) {
-    if (secret) redacted = redacted.split(secret).join("[redacted]");
+  const ranges: [number, number][] = [];
+  for (const secret of new Set(Object.values(secrets))) {
+    if (!secret) continue;
+    for (let start = value.indexOf(secret); start !== -1; start = value.indexOf(secret, start + 1)) {
+      ranges.push([start, start + secret.length]);
+    }
   }
-  return redacted;
+  ranges.sort((a, b) => a[0] - b[0]);
+  let redacted = "";
+  let cursor = 0;
+  for (let i = 0; i < ranges.length; i++) {
+    const start = ranges[i][0];
+    let end = ranges[i][1];
+    // Search the original metadata, then merge crossing or nested matches:
+    // replacing one value first must not hide the start of another secret.
+    while (i + 1 < ranges.length && ranges[i + 1][0] < end) {
+      end = Math.max(end, ranges[++i][1]);
+    }
+    redacted += value.slice(cursor, start) + "[redacted]";
+    cursor = end;
+  }
+  return redacted + value.slice(cursor);
 }
 
 /** Bounded and redacted: `secrets` are configured values a careless server might echo. */

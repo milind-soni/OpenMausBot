@@ -68,7 +68,7 @@ function resolve(role: string, name: unknown, columns: DataColumn[]): Resolved {
       candidates,
     });
   }
-  return { column, cls: columnClass(column.type), id: quoteIdentifier(column.name) };
+  return { column, cls: columnClass(column.type), id: `src.${quoteIdentifier(column.name)}` };
 }
 
 type Encoding = Record<string, unknown>;
@@ -125,7 +125,7 @@ function binned(x: Resolved, channel: string, bins: number, bars: boolean): Dime
   FROM src
 `,
   };
-  const bin = `least(floor((${v} - ${cte.name}.lo) / ${cte.name}.width), ${bins - 1})`;
+  const bin = `CASE WHEN ${x.id} IS NULL THEN NULL ELSE least(floor((${v} - ${cte.name}.lo) / ${cte.name}.width), ${bins - 1}) END`;
   const start = `${cte.name}.lo + ${bin} * ${cte.name}.width`;
   const end = `${channel}2`;
   return bars
@@ -271,6 +271,41 @@ function checkSpec(spec: OmbChartSpec): void {
   if (spec.stack !== undefined && typeof spec.stack !== "boolean") fail("chart.stack must be true or false");
 }
 
+function topNCtes(xExpr: string, measureExpr: string, n: number): Cte[] {
+  return [
+    {
+      name: "kept",
+      body: `
+  SELECT ${xExpr} AS x
+  FROM src
+  GROUP BY ALL
+  ORDER BY ${measureExpr} DESC NULLS LAST, x
+  LIMIT ${n}
+`,
+    },
+    {
+      name: "other_bucket",
+      // At most n labels are retained, so n + 1 candidates guarantee a free name.
+      // Keep the usual "other" label unless it would merge into a real category.
+      body: `
+  SELECT label
+  FROM (
+    SELECT i, CASE WHEN i = 0 THEN 'other' ELSE 'other (' || CAST(i + 1 AS VARCHAR) || ')' END AS label
+    FROM range(${n + 1}) candidates(i)
+  ) labels
+  WHERE NOT EXISTS (SELECT 1 FROM kept WHERE x = label)
+  ORDER BY i
+  LIMIT 1
+`,
+    },
+  ];
+}
+
+function foldToOther(xExpr: string): string {
+  // NULL retains the existing behavior of joining the folded tail.
+  return `CASE WHEN ${xExpr} IN (SELECT x FROM kept) THEN ${xExpr} ELSE (SELECT label FROM other_bucket) END`;
+}
+
 function planCartesian(spec: OmbChartSpec, x: Resolved, y: Resolved | undefined, color: Resolved | undefined): Plan {
   const bars = spec.type === "bar" || spec.type === "histogram";
   const mark = bars ? "bar" : spec.type;
@@ -285,20 +320,10 @@ function planCartesian(spec: OmbChartSpec, x: Resolved, y: Resolved | undefined,
   let xExpr = dim.expr;
   let reduction = dim.reduction;
   if (x.cls === "categorical" || x.cls === "boolean") {
-    // `IN (subquery)` is NULL for a NULL category, so NULL lands in "other" with the tail.
     const n = spec.limit ?? TOP_N_DEFAULT;
-    ctes.push({
-      name: "kept",
-      body: `
-  SELECT ${xExpr} AS x
-  FROM src
-  GROUP BY ALL
-  ORDER BY ${m.expr} DESC NULLS LAST, x
-  LIMIT ${n}
-`,
-    });
-    xExpr = `CASE WHEN ${xExpr} IN (SELECT x FROM kept) THEN ${xExpr} ELSE 'other' END`;
-    reduction = { method: "topN", note: `top ${n} of ${x.column.name} by ${m.title}, the rest as "other"` };
+    ctes.push(...topNCtes(xExpr, m.expr, n));
+    xExpr = foldToOther(xExpr);
+    reduction = { method: "topN", note: `top ${n} of ${x.column.name} by ${m.title}, the rest grouped separately` };
   }
 
   const selects = [`${xExpr} AS x`];
@@ -381,19 +406,8 @@ function planPie(spec: OmbChartSpec, x: Resolved, y: Resolved | undefined): Plan
   const m = measure(spec, y);
   const n = spec.limit ?? TOP_N_DEFAULT;
   const xExpr = `CAST(${x.id} AS VARCHAR)`;
-  const ctes: Cte[] = [
-    {
-      name: "kept",
-      body: `
-  SELECT ${xExpr} AS x
-  FROM src
-  GROUP BY ALL
-  ORDER BY ${m.expr} DESC NULLS LAST, x
-  LIMIT ${n}
-`,
-    },
-  ];
-  const folded = `CASE WHEN ${xExpr} IN (SELECT x FROM kept) THEN ${xExpr} ELSE 'other' END`;
+  const ctes = topNCtes(xExpr, m.expr, n);
+  const folded = foldToOther(xExpr);
   const orderBy = spec.sort === "y" ? "y" : spec.sort === "-x" ? "x DESC" : spec.sort === "x" ? "x" : "y DESC";
   const body = `SELECT ${folded} AS x,\n       ${m.expr} AS y\nFROM src\nGROUP BY ALL\nORDER BY ${orderBy}`;
   const encoding: Encoding = {
@@ -405,7 +419,7 @@ function planPie(spec: OmbChartSpec, x: Resolved, y: Resolved | undefined): Plan
     { field: "x", type: "nominal", title: x.column.name },
     { field: "y", type: "quantitative", title: m.title, format: money },
   ];
-  return { ctes, body, vegaLite: vegaLiteSpec("arc", encoding, tooltip), reduction: { method: "topN", note: `top ${n} of ${x.column.name} by ${m.title}, the rest as "other"` } };
+  return { ctes, body, vegaLite: vegaLiteSpec("arc", encoding, tooltip), reduction: { method: "topN", note: `top ${n} of ${x.column.name} by ${m.title}, the rest grouped separately` } };
 }
 
 function planScatter(x: Resolved, y: Resolved | undefined, color: Resolved | undefined, size: Resolved | undefined): Plan {
@@ -414,7 +428,9 @@ function planScatter(x: Resolved, y: Resolved | undefined, color: Resolved | und
   const selects = [`${x.id} AS x`, `${y.id} AS y`];
   if (color) selects.push(`${color.id} AS color`);
   if (size) selects.push(`${size.id} AS size`);
-  const body = `SELECT ${selects.join(",\n       ")}\nFROM src USING SAMPLE reservoir(${DATA_LIMITS.chartMaxMarks} ROWS) REPEATABLE (${SAMPLE_SEED})`;
+  const required = [x, y].filter((axis) => axis.cls === "numeric" || axis.cls === "temporal");
+  const source = required.length ? `(SELECT * FROM src WHERE ${required.map((axis) => `${axis.id} IS NOT NULL`).join(" AND ")}) AS src` : "src";
+  const body = `SELECT ${selects.join(",\n       ")}\nFROM ${source} USING SAMPLE reservoir(${DATA_LIMITS.chartMaxMarks} ROWS) REPEATABLE (${SAMPLE_SEED})`;
   const encoding: Encoding = {
     x: { field: "x", type: vegaType(x), title: x.column.name },
     y: { field: "y", type: vegaType(y), title: y.column.name },

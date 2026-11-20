@@ -126,6 +126,20 @@ beforeAll(async () => {
         environment: { FAKE_ACP_MODE: "question" },
         config: { cli: FAKE_ACP, fullAuto: true },
       },
+      // hands one piece of work (not a consultation) to the first teammate list_bots shows, then reviews its result
+      lead: {
+        driver: "grokAgent",
+        displayName: "Lead fixture",
+        environment: { FAKE_ACP_MODE: "delegate-peer" },
+        config: { cli: FAKE_ACP, fullAuto: true },
+      },
+      // every turn stops on the account's usage cap
+      capped: {
+        driver: "claudeAgent",
+        displayName: "Capped fixture",
+        environment: { FAKE_CLAUDE_MODE: "usage-limit" },
+        config: { cli: FAKE_CLAUDE },
+      },
       // consults the first teammate list_bots shows through the real agents proxy, and its resume says it saw the result
       asker: {
         driver: "grokAgent",
@@ -400,6 +414,50 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
     }
   }, 60_000);
 
+  const delegate = async (employeeEngine: string) => {
+    const employee = await createBot("Ink", employeeEngine);
+    const lead = await createBot("Pen", "lead");
+    const stream = await openSse(`${base}/api/events`);
+    expect((await api("POST", `/api/bots/${lead.id}/messages`, { text: "Pen, hand the export to Ink." })).status).toBe(202);
+    const work = () => handoffs().find((node) => node.botId === employee.id);
+    await expect.poll(() => work()?.status, { timeout: 30_000 }).toMatch(/^(completed|failed)$/);
+    await stream.until((candidate) => candidate.kind === "notify" && candidate.notification?.botId === lead.id && candidate.notification?.kind === "done", 30_000);
+    // A unique bot patch is an SSE ordering barrier: once seen, every notification this job raised is in `frames`.
+    expect((await api("PATCH", `/api/bots/${lead.id}`, { name: "Pen observed" })).status).toBe(200);
+    await stream.until((candidate) => candidate.kind === "bot" && candidate.bot?.id === lead.id && candidate.bot?.name === "Pen observed");
+    const notified = stream.frames.filter((candidate) => candidate.kind === "notify").map((candidate) => candidate.notification);
+    stream.close();
+    return { lead, employee, work: work()!, notified };
+  };
+
+  it("tells the person once, from the lead, when work a lead handed an employee is done", async () => {
+    const { lead, employee, work, notified } = await delegate("quick");
+    try {
+      expect(work).toMatchObject({ mode: "work", status: "completed" });
+      expect(notified.filter((notification) => notification?.botId === employee.id), JSON.stringify(notified)).toEqual([]);
+      expect(notified.map((notification) => [notification?.botId, notification?.kind]), JSON.stringify(notified)).toEqual([[lead.id, "done"]]);
+      expect(notified[0]).toMatchObject({ threadId: lead.threadId, title: "Pen finished", body: expect.stringContaining("saw the result") });
+    } finally {
+      await cleanup([], [lead.id, employee.id]);
+    }
+  }, 60_000);
+
+  it("reports an employee stopped by its usage cap to the lead's conversation, and the person still hears of the cap", async () => {
+    const { lead, employee, work, notified } = await delegate("capped");
+    try {
+      expect(work).toMatchObject({ status: "failed" });
+      const leadLines = (await api("GET", `/api/threads/${lead.threadId}/messages`)).body.messages as Array<{ kind: string; text?: string; tool?: { name?: string; ok?: boolean } }>;
+      expect(leadLines.some((line) => line.kind === "activity" && line.tool?.name?.startsWith("Ink — failed") && /usage limit/.test(line.tool.name)), JSON.stringify(leadLines)).toBe(true);
+      expect(leadLines.at(-1)?.kind === "digest" ? leadLines.at(-2)?.text : leadLines.at(-1)?.text).toContain("woke after delegation failure");
+      const fromEmployee = notified.filter((notification) => notification?.botId === employee.id);
+      expect(fromEmployee.map((notification) => notification?.kind), JSON.stringify(notified)).toEqual(["notice"]);
+      expect(fromEmployee[0]?.body).toContain("reached its limit");
+      expect(notified.filter((notification) => notification?.botId === lead.id).map((notification) => notification?.kind), JSON.stringify(notified)).toEqual(["done"]);
+    } finally {
+      await cleanup([], [lead.id, employee.id]);
+    }
+  }, 60_000);
+
   it("does not announce results coming back into a thread a bot opened", async () => {
     const boss = await createBot("Ledger", "quick");
     const asker = await createBot("Stylus", "asker");
@@ -532,7 +590,7 @@ describe("bot-to-bot coordination is recorded, not announced", () => {
   it("still buzzes when a peer's turn stops to ask the person a question", async () => {
     const asker = await createBot("Quill", "quick");
     const peer = await createBot("Sage", "curious", "fake-model");
-    // On "Ask me first" a peer's question is the person's; at Full access its asker answers it instead.
+    // On "Ask for approval" a peer's question is the person's; at Full access its asker answers it instead.
     for (const bot of [asker, peer]) expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
     const stream = await openSse(`${base}/api/events`);
     try {

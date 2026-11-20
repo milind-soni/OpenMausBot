@@ -10,6 +10,11 @@ export const CHAT_NOTICE = {
   "chat.notice.resumingAfterRestart": "Resuming after a restart",
   "chat.notice.cutOffByRestart": "{name} was cut off by a restart; resuming",
   "chat.notice.stalled": "no activity for {minutes} minutes — the turn was stopped",
+  "chat.notice.stalledCommand": "the command `{command}` ran for {minutes} minutes without finishing and looks stuck — the turn was stopped",
+  "chat.notice.unattendedTooLong": "this turn had nobody waiting on it and worked for {minutes} minutes, its limit — the turn was stopped",
+  "chat.notice.unattendedRequests": "this turn had nobody waiting on it and made {count} requests to its AI, its limit — the turn was stopped",
+  "chat.notice.unattendedDenied": "this turn had nobody waiting on it and {count} of its permission requests were denied or went unanswered — the turn was stopped",
+  "chat.notice.engineExited": "the process running this turn's AI ended — the turn was stopped",
   "chat.notice.followupInterrupted":
     "Queued follow-up interrupted by restart or restore — it may have already run. Review the result before sending it again.",
   "chat.notice.usageLimit": "This {provider} account has reached its usage limit{detail}. Wait for it to reset, or switch this bot to another AI.",
@@ -23,6 +28,9 @@ export const CHAT_NOTICE = {
   "chat.notice.part.weeklyOpusLimit": "weekly Opus limit",
   "chat.notice.part.weeklySonnetLimit": "weekly Sonnet limit",
   "chat.notice.part.usageLimit": "usage limit",
+  "chat.notice.part.computerToolsTookTooLong": "they took too long to start",
+  "chat.notice.part.computerToolsHelperStopped": "their helper stopped",
+  "chat.notice.part.computerToolsHelperFailed": "their helper did not answer properly",
   "chat.notice.part.chooseModel": "choose another model for this bot",
   "chat.notice.part.switchAccount": "switch this bot to another AI or Claude account",
   "chat.notice.webhookHome":
@@ -31,6 +39,8 @@ export const CHAT_NOTICE = {
   "chat.notice.acpStopFailed": "{provider} ignored Stop and its process could not be ended",
   "chat.notice.toolCount": "{provider} refused this turn because this model takes at most {limit} tools and this bot offers more, even with its tool lists trimmed, so nothing ran. Turn off some of this bot's apps or MCP servers, or switch the bot to another model.",
   "chat.notice.toolCountUnknown": "{provider} refused this turn because this model takes at most a limited number of tools and this bot offers more, even with its tool lists trimmed, so nothing ran. Turn off some of this bot's apps or MCP servers, or switch the bot to another model.",
+  "chat.notice.modelNoRoute": "{provider} can't use the model {model} here, so choose another model for this bot.",
+  "chat.notice.modelNoRouteUnnamed": "{provider} can't use this bot's model here, so choose another model for this bot.",
   "chat.notice.goalRetry": "{name}'s turn did not settle ({why}) — retrying once.",
   "chat.notice.part.providerFailed": "provider failed",
   "chat.notice.part.dispatchFailed": "dispatch failed",
@@ -79,6 +89,7 @@ export const CHAT_NOTICE = {
   "chat.notice.phone.write.PHONE_SEND_WHATSAPP": "Send whatsapp on {phone}",
   "chat.notice.acpEmpty": "{provider} finished without replying.",
   "chat.notice.acpNoReason": "{provider} stopped without saying why.",
+  "chat.notice.acpNodeTooOld": "{provider} needs Node.js {needed} or newer, but this computer has Node.js {found}. Update Node.js from nodejs.org, then send your message again.",
   "chat.notice.acpMcpAppsFailed": "Connected apps couldn't be set up, so {provider} couldn't start this reply. Try again, or switch this bot to another AI.",
   "chat.notice.acpMcpServerFailed": "The \"{server}\" MCP server couldn't be set up, so {provider} couldn't start this reply. Try again, or switch this bot to another AI.",
   "chat.notice.stop.refusal": "{provider} refused to go on with this request (stop reason: {reason}). Try again, reword the request, or switch this bot to another AI.",
@@ -96,6 +107,7 @@ export const CHAT_NOTICE = {
   "chat.notice.copilotAccountRefused": "GitHub Copilot refused this request for the signed-in account. Check its Copilot plan and premium request allowance, then try again.",
   "chat.notice.commandCodeAccountRefused": "Command Code refused this request for the signed-in account. Check its plan and credits on commandcode.ai, then try again.",
   "chat.notice.kiroAccountRefused": "Kiro refused this request for the signed-in account. Check its Kiro plan and credits, then try again.",
+  "chat.notice.devinAccountRefused": "Devin refused this request for the signed-in account. Check its Devin plan and credits, then try again.",
   "chat.notice.acpQuietUsageLimit": "{name} reached a usage limit{said} and is waiting it out without replying, so this turn was stopped.",
   "chat.notice.acpQuietStuck": "{name} sent nothing for {quiet} with no tool running, no open request to its model and no CPU use, so the turn was stopped as stuck. Send the message again to retry.",
   "chat.notice.acpModelRequestFailed": "{name}'s model request failed: \"{message}\" {name} may retry or stop; no reply for {quiet} so far.",
@@ -132,13 +144,18 @@ export const CHAT_NOTICE = {
   "chat.notice.computerDesktopOnly": "Only the OpenMausBot app on this computer can let a bot use it. Open the app here, or let the bot work in its own browser or on a cloud desktop instead.",
   "chat.notice.computerPermissionsThenRestart": "OpenMausBot can't use this computer yet — make sure OpenMausBot has the permissions it asks for, then restart it",
   "chat.notice.computerNotReadyDetail": "OpenMausBot can't use this computer yet — {reason}",
+  "chat.notice.computerToolsDidNotStart": "The tools for this computer did not start this time ({why}). Send your message again in a moment.",
+  "chat.notice.computerToolsStillNotStarting": "The tools for this computer are still not starting.",
   "chat.notice.computerNotReadyMacPermission": "OpenMausBot can't use this computer yet — {reason}. Relaunch OpenMausBot after granting the missing macOS permission.",
   "chat.notice.computerSystemUnsupported": "bots can't use this computer on this system — choose another place for this bot to work",
   "chat.notice.computerAiUnsupported": "this bot's AI can't use this computer — pick another AI for this bot, or choose another place for it to work",
   "chat.notice.memoryReclaimedBrowser": "Ran out of room, so I closed the browser to keep everything else running.",
   "chat.notice.memoryReclaimedTask": "Ran out of room, so I stopped this task to keep everything else running.",
+  "chat.notice.botMemoryCap":
+    "{bot} used more memory than this computer allows for one bot ({used} MB of {cap} MB) while memory was running short, so I stopped this task to keep the other bots running. Send the message again to start over; if it keeps happening, give this task less to do at once, or give this computer more memory.",
   "chat.notice.memoryReclaimedBrowserDetail": "Ran out of room, so I closed the browser to keep everything else running. ({detail})",
   "chat.notice.memoryReclaimedTaskDetail": "Ran out of room, so I stopped this task to keep everything else running. ({detail})",
+  "chat.notice.outOfProcesses": "There is no room to start another program ({code}), so this task could not run. Nothing was sent to the AI. It starts again by itself when there is room.",
 } as const;
 
 export type ChatNoticeKey = keyof typeof CHAT_NOTICE;
@@ -179,5 +196,6 @@ export function noticeTool<T extends object>(
 }
 
 export function failedNoticeTool(key: ChatNoticeKey, params?: ServerTextParams): FailedTurnTool {
-  return failedTurnTool(chatNotice(key, params), { text: { key, ...(params ? { params } : {}) } });
+  const safe = params && redactParams(params);
+  return failedTurnTool(chatNotice(key, safe), { text: { key, ...(safe ? { params: safe } : {}) } });
 }

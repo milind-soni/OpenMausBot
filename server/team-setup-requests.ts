@@ -9,8 +9,9 @@ import { recordProfileChange, type HistoryActor } from "./profile-versions.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { harnessCapabilityLines, type DriverCapabilities } from "./harness-capabilities.ts";
+import { MAX_MCP_SERVERS, mcpServerNameError } from "./mcp-registry.ts";
 import { redactSecretsInText } from "./redact.ts"; import { chiefLevel } from "./chief-level.ts"; import { defaultBotRefusal } from "./default-bot.ts";
-import type { BotRecord, OptionCardData } from "./store.ts";
+import type { BotRecord, OptionCardData } from "./store.ts"; import { outsideDepartmentReason } from "./peer-roster.ts";
 import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupResult, TeamSetupUndo } from "../shared/team-setup.ts";
 
 const section = (value?: string) => value?.trim() || "";
@@ -18,21 +19,41 @@ const teamName = z.string().trim().min(1).max(60).refine(fitsOnOneLine).refine((
 const FIELD_LABELS: Record<string, string> = { name: "Name", title: "Title", description: "Description", section: "Department", cwd: "Working folder" };
 const modelSelectionText = (selection: ModelSelection) =>
   `${selection.instanceId}/${selection.model}${selection.variant ? ` (variant ${selection.variant})` : " (no variant)"}${selection.effort ? ` (effort ${selection.effort})` : ""}`;
+/** One setup may edit a whole department at once (a model switch, an added rule), but each new bot still needs a close review. */
+const MAX_SETUP_BOTS = 40;
+const MAX_NEW_BOTS = 8;
 const fieldsSchema = z.object({
   chiefOfStaff: z.boolean().optional(),
   name: z.string().optional(), title: z.string().optional(), description: z.string().optional(), soul: z.string().optional(),
+  soulAppend: z.string().trim().min(1).optional(),
   cwd: z.string().optional(),
   section: z.string().trim().max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials").optional(),
   modelSelection: z.object({ instanceId: z.string().trim().min(1), model: z.string().trim().min(1), effort: z.string().optional(), variant: z.string().optional() }).strict().optional(),
+  mcpServers: z.array(z.string()).max(MAX_MCP_SERVERS, `Select at most ${MAX_MCP_SERVERS} MCP servers.`).optional(),
 }).strict();
+/** The card says which execution permission a plan changes when it changes a bot's MCP servers. */
+const touchesMcp = (request: TeamSetupRequest) => request.operations.some((operation) => operation.fields.mcpServers !== undefined);
 const planSchema = z.object({
   reason: z.string().trim().min(1).max(500),
   newTeams: z.array(teamName).max(8).default([]),
   operations: z.array(z.discriminatedUnion("action", [
     z.object({ action: z.literal("create"), key: z.string().trim().min(1).max(80), fields: fieldsSchema }).strict(),
     z.object({ action: z.literal("update"), botId: z.string().min(1).max(128), fields: fieldsSchema }).strict(),
-  ])).min(1).max(24),
+  ])).min(1).max(MAX_SETUP_BOTS, `Review at most ${MAX_SETUP_BOTS} bots in one setup`),
 }).strict();
+
+function takenKeys(path: readonly PropertyKey[]): string {
+  const last = path.at(-1);
+  if (last === "fields") return Object.keys(fieldsSchema.shape).join(", ");
+  if (last === "modelSelection") return "instanceId, model, effort, variant";
+  return path.length ? "action, key (create) or botId (update), fields" : Object.keys(planSchema.shape).join(", ");
+}
+
+function planProblem(error: z.ZodError): string {
+  const issue = error.issues[0];
+  if (issue?.code !== "unrecognized_keys") return issue?.message ?? "Invalid team setup";
+  return `${issue.path.length ? `${issue.path.map(String).join(".")}: ` : ""}${issue.message}. It takes ${takenKeys(issue.path)}.`;
+}
 
 export class TeamSetupError extends Error {
   readonly status: number;
@@ -60,6 +81,7 @@ export function teamSetupRevision(bot: BotRecord, fields?: TeamSetupFields): str
   if (fields.section !== undefined) scope.section = section(bot.section);
   if (fields.modelSelection !== undefined) scope.modelSelection = bot.modelSelection;
   if (fields.chiefOfStaff !== undefined) scope.chiefOfStaff = Boolean(bot.chiefOfStaff);
+  if (fields.mcpServers !== undefined) scope.mcpServers = bot.mcpServers ?? null;
   return createHash("sha256").update(JSON.stringify(scope)).digest("hex");
 }
 
@@ -84,10 +106,14 @@ interface Options {
   autoApply?(botId: string, threadId: string): DirectApply | null;
   driverCapabilities?(instanceId: string): DriverCapabilities | undefined;
   validateChange?(before: BotRecord, fields: TeamSetupFields): void;
+  /** Why this MCP server cannot be given to this bot (unknown, or another bot's own); null when it can. */
+  mcpServerProblem?(name: string, botId: string): string | null;
   maxBots: number;
   ownsThread(botId: string, threadId: string): boolean;
   /** `request` only for a reviewed deletion; Undo of a creation deletes without one. */
   deleteBot(botId: string, revalidate: () => void, request?: TeamSetupRequest): Promise<void>;
+  /** Why deleting this bot would be refused now, as a person's hold reaches it; null when it would not. */
+  deletionRefusal(botId: string): string | null;
 }
 
 type RequestFrom = { botId: string; name: string; color: string };
@@ -115,7 +141,7 @@ export class TeamSetupRequestService {
   }
 
   private fields(input: z.infer<typeof fieldsSchema>, current?: BotRecord): TeamSetupFields {
-    const { section: targetSection, modelSelection, chiefOfStaff, cwd: rawCwd, ...profile } = input;
+    const { section: targetSection, modelSelection, chiefOfStaff, cwd: rawCwd, mcpServers, ...profile } = input;
     const safe = Object.fromEntries(Object.entries(profile).map(([key, value]) => [key, redactSecretsInText(value!)]));
     const parsed = parseBotProfilePatch(safe, true);
     if (!parsed.ok) throw new TeamSetupError(parsed.error);
@@ -133,6 +159,15 @@ export class TeamSetupRequestService {
       const error = this.options.validateModel(selection, current);
       if (error) throw new TeamSetupError(error);
       result.modelSelection = selection;
+    }
+    if (mcpServers !== undefined) {
+      if (!current) throw new TeamSetupError("MCP servers can only be chosen for an existing bot; a new bot starts with the Chief's apps");
+      const names = [...new Set(mcpServers)];
+      for (const name of names) {
+        const problem = mcpServerNameError(name) ?? this.options.mcpServerProblem?.(name, current.id) ?? null;
+        if (problem) throw new TeamSetupError(`MCP server ${JSON.stringify(name)}: ${problem}`);
+      }
+      result.mcpServers = names;
     }
     return result;
   }
@@ -157,7 +192,8 @@ export class TeamSetupRequestService {
         if (target) throw new TeamSetupError("A proposed bot already exists. Review a new proposal.", 409);
         if (!operation.fields.name?.trim() || !operation.fields.title?.trim() || !operation.fields.soul?.trim() || !operation.fields.modelSelection) throw new TeamSetupError("Each new bot needs a name, title, soul instructions, and exact model selection");
       } else {
-        if (!target || target.hidden || !this.options.hasTeamAuthority(chief, target.section)) throw new TeamSetupError("A target bot is outside this Chief's authorized team", 403);
+        if (!target || target.hidden) throw new TeamSetupError("A target bot is outside this Chief's authorized team", 403);
+        if (!this.options.hasTeamAuthority(chief, target.section)) throw new TeamSetupError(outsideDepartmentReason(chief, target), 403);
         if (teamSetupRevision(target, operation.fields) !== operation.expectedRevision) throw new TeamSetupError(`@${target.name} changed. This setup was cancelled; review a new proposal.`, 409);
         const sourceThreadId = immediate && target.id === chief.id ? request.threadId : undefined;
         if (this.options.targetBusy(target.id, sourceThreadId) && (confirming || target.id !== chief.id)) throw new TeamSetupError(`Stop @${target.name}'s work before changing its setup`, 409);
@@ -166,7 +202,7 @@ export class TeamSetupRequestService {
       if (fields.chiefOfStaff !== undefined && !chief.chiefOfStaff) throw new TeamSetupError(`Only the Chief of Staff changes who the Chief is; ${chief.name} doesn't.`, 403);
       if (confirming && target) this.options.validateChange?.(target, fields);
       const destination = fields.section ?? target?.section ?? chief.section;
-      if (!allowed(destination)) throw new TeamSetupError("The destination team is outside this Chief's authorized scope", 403);
+      if (!allowed(destination)) throw new TeamSetupError(outsideDepartmentReason(chief, { section: destination }), 403);
       if (!request.newTeams.includes(section(destination)) && !existingTeams.has(section(destination))) throw new TeamSetupError("The destination team no longer exists", 409);
       const next = { id: operation.botId, name: fields.name ?? target!.name, section: section(destination), chiefOfStaff: fields.chiefOfStaff ?? target?.chiefOfStaff, hidden: false,
         createdBy: target ? target.createdBy : botOwner(chief) ?? undefined, reportsTo: target?.reportsTo };
@@ -183,7 +219,8 @@ export class TeamSetupRequestService {
     }
     if (request.deletion) {
       const target = this.options.store.bot(request.deletion.botId);
-      if (!target || target.hidden || target.id === chief.id || !this.options.hasTeamAuthority(chief, target.section)) throw new TeamSetupError("This deletion target is no longer an authorized teammate", 403);
+      if (!target || target.hidden || target.id === chief.id) throw new TeamSetupError("This deletion target is no longer an authorized teammate", 403);
+      if (!this.options.hasTeamAuthority(chief, target.section)) throw new TeamSetupError(outsideDepartmentReason(chief, target), 403);
       if (target.defaultBot) throw new TeamSetupError(defaultBotRefusal(target.name), 409);
       if (teamSetupRevision(target) !== request.deletion.expectedRevision || this.options.targetBusy(target.id)) throw new TeamSetupError("The deletion target changed or is working. Review a new deletion proposal.", 409);
     }
@@ -191,18 +228,36 @@ export class TeamSetupRequestService {
 
   private prepare(args: SetupArgs) {
     const parsed = planSchema.safeParse(args.plan);
-    if (!parsed.success) throw new TeamSetupError(parsed.error.issues[0]?.message ?? "Invalid team setup");
+    if (!parsed.success) throw new TeamSetupError(planProblem(parsed.error));
     const chief = this.chief(args.botId);
     const combined = new Map<string, typeof parsed.data.operations[number]>();
     for (const operation of parsed.data.operations) {
       const key = operation.action === "create" ? `create:${operation.key}` : `update:${operation.botId}`;
       const previous = combined.get(key);
-      combined.set(key, { ...operation, fields: { ...previous?.fields, ...operation.fields } });
+      if (operation.fields.soul !== undefined && operation.fields.soulAppend !== undefined) throw new TeamSetupError("Use either soul or soulAppend for a bot, not both");
+      // Repeated added rules for one bot all land, in order; any other repeated field keeps its last value.
+      const soulAppend = [previous?.fields.soulAppend, operation.fields.soulAppend].filter(Boolean).join("\n\n") || undefined;
+      combined.set(key, { ...operation, fields: { ...previous?.fields, ...operation.fields, soulAppend } });
     }
-    if (combined.size > 8) throw new TeamSetupError("Review at most eight bots in one setup");
-    const operations: TeamSetupOperation[] = [...combined.values()].map((operation) => {
+    const entries = [...combined.values()];
+    if (entries.filter((operation) => operation.action === "create").length > MAX_NEW_BOTS) throw new TeamSetupError(`Review at most ${MAX_NEW_BOTS} new bots in one setup`);
+    const operations: TeamSetupOperation[] = entries.map((operation) => {
       const target = operation.action === "update" ? this.options.store.bot(operation.botId) : undefined;
-      const fields = this.fields({ ...operation.fields, section: operation.fields.section ?? target?.section ?? chief.section ?? "" }, target ?? undefined);
+      const { soulAppend, ...requested } = operation.fields;
+      if (soulAppend !== undefined) {
+        if (operation.action === "create") throw new TeamSetupError("soulAppend only adds to an existing bot's instructions; give a new bot its full soul");
+        if (requested.soul !== undefined) throw new TeamSetupError("Use either soul or soulAppend for a bot, not both");
+        // A bot this Chief may not change is never read here; validate() refuses it.
+        if (target && !target.hidden && this.options.hasTeamAuthority(chief, target.section)) {
+          // Re-saving runs the whole text through redaction; never let an added rule rewrite what the bot already had.
+          // Check the joined text: an added rule can complete a pattern that starts in the existing instructions.
+          const kept = (target.soul ?? "").trimEnd();
+          const joined = kept ? `${kept}\n\n${soulAppend}` : soulAppend;
+          if (!redactSecretsInText(joined).startsWith(kept)) throw new TeamSetupError(`@${target.name}'s instructions hold credential-like text; change them with a full soul instead`);
+          requested.soul = joined;
+        }
+      }
+      const fields = this.fields({ ...requested, section: requested.section ?? target?.section ?? chief.section ?? "" }, target ?? undefined);
       return { action: operation.action, botId: operation.action === "create" ? newId() : operation.botId,
         ...(operation.action === "create" ? { threadId: newId() } : {}),
         fields,
@@ -276,6 +331,9 @@ export class TeamSetupRequestService {
               this.options.driverCapabilities((value as ModelSelection).instanceId),
             ));
           }
+        } else if (key === "mcpServers") {
+          const list = (names?: string[] | null) => names == null ? "every enabled server" : names.length ? names.join(", ") : "none";
+          lines.push(`MCP servers it can use: ${current ? `${list(current.mcpServers)} → ` : ""}${list(value as string[])}`);
         } else {
           const before = current ? (key === "section" ? current.section || "General" : String(current[key as keyof BotRecord] ?? "")) : undefined;
           const after = key === "section" ? (value as string) || "General" : String(value);
@@ -288,7 +346,7 @@ export class TeamSetupRequestService {
       if (request.operations.some((operation) => operation.action === "create")) {
         lines.push(`New bots stay owner-owned after creation: the same connected apps as @${chief.name}, the workspace's default access level, a private workspace by default, avatar untouched.`);
       }
-      lines.push("Existing execution permissions are unchanged.");
+      lines.push(touchesMcp(request) ? "Other execution permissions are unchanged." : "Existing execution permissions are unchanged.");
     }
     if (!immediate) lines.push("After this decision the Chief continues once with the result.");
     const title = request.deletion ? `Delete @${request.deletion.name}?`
@@ -409,6 +467,8 @@ export class TeamSetupRequestService {
     const ids = Object.keys(revisions);
     if (changed(ids)) return { ...cannot(UNDO_STALE), stale: true };
     if (ids.some((id) => this.options.targetBusy(id))) return cannot("Wait for the bots this setup changed to finish their work, then undo.");
+    const refusal = created.map((id) => this.options.deletionRefusal(id)).find((reason) => reason !== null);
+    if (refusal) return cannot(refusal);
     try {
       for (const id of created) await this.options.deleteBot(id, () => { if (changed([id])) throw new TeamSetupError(UNDO_STALE, 409); });
       const restore = before.filter((entry) => Object.keys(entry.fields).length);

@@ -913,6 +913,21 @@ describe("default fleet", () => {
     expect(instanceConfigs({ instances: { standalone: { driver: "fake" } } })).not.toHaveProperty("groq");
   });
 
+  it("adds ModelGo to product fleets and sends its workspace key only to ModelGo's own host", () => {
+    const cfg: AppConfig = { modelgo: { key: "modelgo-workspace" }, instances: {
+      codex: { driver: "codex" },
+      modelgoCustomHost: { driver: "modelgo", config: { url: "https://another.example.test/v1" } },
+      modelgoSameHost: { driver: "modelgo", config: { url: "https://api.modelgo.ai/v1/" } },
+      modelgoOwn: { driver: "modelgo", environment: { MODELGO_API_KEY: "modelgo-own" } },
+    } };
+    const map = instanceConfigs(cfg);
+    expect(map.modelgo.environment).toEqual({ MODELGO_API_KEY: "modelgo-workspace" });
+    expect(map.codex.environment).toEqual({});
+    expect(map.modelgoCustomHost.environment).toEqual({});
+    expect(map.modelgoSameHost.environment).toEqual({ MODELGO_API_KEY: "modelgo-workspace" });
+    expect(map.modelgoOwn.environment).toEqual({ MODELGO_API_KEY: "modelgo-own" });
+  });
+
   it("preserves an existing compatible account named Groq when adding the built-in provider", () => {
     const map = instanceConfigs({ groq: { key: "workspace-key" }, instances: {
       codex: { driver: "codex" },
@@ -2106,7 +2121,7 @@ describe("changedInstanceIds", () => {
   it("replaces only the engines whose launch config a save changed", () => {
     const saved: AppConfig = { mistral: { key: "m1" }, openaiCompat: { key: "c1", url: "https://compat.example/v1" } };
     expect(reloaded({ mistral: { key: "m1" }, openaiCompat: { key: "c1", url: "https://compat.example/v1" } }, saved)).toEqual([]);
-    expect(reloaded({ mistral: { key: "m2" } }, saved)).toEqual(["mistral"]);
+    expect(reloaded({ mistral: { key: "m2" } }, saved)).toEqual(["mistral", "mistralVibe"]);
     expect(reloaded({ openaiCompat: { key: "c2", url: "https://compat.example/v1" } }, saved)).toEqual(["openaiCompat"]);
     expect(reloaded({ openaiCompat: { key: "c1", url: "https://other.example/v1" } }, saved)).toEqual(["openaiCompat"]);
     expect(reloaded({ anthropic: { key: "a" } }, saved), "Claude (API key) runs on the key too").toEqual(["claude", "claudeApi"]);

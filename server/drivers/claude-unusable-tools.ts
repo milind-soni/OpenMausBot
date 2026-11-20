@@ -1,3 +1,5 @@
+import { disabledNativeSkillNames } from "../native-skill-choices.ts";
+
 // Built-in Claude Code tools that work only in Claude Code's own terminal or app, yet ride every model call of a bot turn at
 // about 4,900 tokens: Workflow runs in the background, which a turn turns off, and needs a person opting in at /workflows;
 // ScheduleWakeup paces a /loop, where a bot has wait_until; ReportFindings draws in a host UI there is none of; ListAgents
@@ -7,4 +9,9 @@ export const BUILT_INS_NO_BOT_CAN_USE = ["Workflow", "ScheduleWakeup", "ReportFi
 
 export function unusableBuiltIns(turn: { isolated: boolean; listsTools: boolean; guest: boolean }): readonly string[] {
   return turn.isolated && !turn.listsTools && !turn.guest ? BUILT_INS_NO_BOT_CAN_USE : [];
+}
+
+/** A deny rule per native skill this bot switched off: Claude Code then refuses that skill both as a tool call and as a typed /name. */
+export function claudeDisabledNativeSkillRules(botId: string | undefined): string[] {
+  return botId ? disabledNativeSkillNames(botId).map((name) => `Skill(${name})`) : [];
 }
