@@ -472,7 +472,8 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
       if (seen.has(key)) continue;
       seen.add(key);
       const trusted = Boolean(message && (file.private || file.linked));
-      result.push({ key, source: originalOf(originals, file.path), kind: trusted && isVideoAttachment(file.path) ? "video" : trusted && isAudioAttachment(file.path) ? "audio" : "file", file });
+      const source = originalOf(originals, file.path) ?? (message && file.linked ? key : undefined);
+      result.push({ key, source, kind: trusted && isVideoAttachment(file.path) ? "video" : trusted && isAudioAttachment(file.path) ? "audio" : "file", file });
     }
     return result;
   }, [images, files, originals, message]);

@@ -3202,7 +3202,7 @@
   "attach.retrySaveAria": "Retry saving {name}",
   "attach.downloading": "Downloading…",
   "attach.downloaded": "Downloaded",
-  "attach.showInFolder": "Show in folder",
+  "attach.showInFolder": "Open containing folder",
   "attach.showInFinder": "Show in Finder",
   "attach.originalMissing": "The original file was moved or deleted",
   "attach.folderEmpty": "This folder has no files to open here",

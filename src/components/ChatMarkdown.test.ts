@@ -948,13 +948,13 @@ describe("ChatMarkdown attachments", () => {
     };
     const revealInFolder = vi.fn(async () => "shown" as const);
 
-    it("offers Show in folder in the local desktop app, without printing the path", () => {
+    it("offers Open containing folder in the local desktop app, without printing the path", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: false } } });
       try {
         const html = render(true);
         expect(html).toContain("This file is outside this chat&#x27;s working folder, so it can&#x27;t be saved from here");
         expect(html).not.toContain("the linked file is outside");
-        expect(html).toContain("Show in folder");
+        expect(html).toContain("Open containing folder");
         expect(html).not.toContain("<code");
       } finally {
         vi.unstubAllGlobals();
@@ -965,7 +965,7 @@ describe("ChatMarkdown attachments", () => {
       vi.stubGlobal("window", { ogb: { revealInFolder, remoteClient: { active: true } } });
       try {
         const html = render(true);
-        expect(html).not.toContain("Show in folder");
+        expect(html).not.toContain("Open containing folder");
         expect(html).toMatch(/<code[^>]*select-all[^>]*>C:\\Users\\Maus\\_draft\\ollama-gen\.js<\/code>/);
       } finally {
         vi.unstubAllGlobals();
@@ -1021,7 +1021,7 @@ describe("ChatMarkdown attachments", () => {
         const root = createRoot(host);
         try {
           await act(async () => root.render(createElement(ChatMarkdown, { text, message: { threadId: "thread-1", messageId: "message-1" } })));
-          const show = [...host.querySelectorAll("button")].find((button) => button.textContent === "Show in folder")!;
+          const show = [...host.querySelectorAll("button")].find((button) => button.textContent === "Open containing folder")!;
           await act(async () => show.click());
           expect(reveal).toHaveBeenCalledWith(folder);
         } finally {
@@ -1038,7 +1038,7 @@ describe("ChatMarkdown attachments", () => {
       try {
         const html = render(false);
         expect(html).toContain("the linked file is outside this conversation&#x27;s workspace");
-        expect(html).not.toContain("Show in folder");
+        expect(html).not.toContain("Open containing folder");
         expect(html).not.toContain(filePath);
       } finally {
         vi.unstubAllGlobals();
