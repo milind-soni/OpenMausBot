@@ -100,7 +100,7 @@ export function TeamsPopup({ action, onStep, onStart, onDone }: {
           <h2 id={TITLE} className="mt-1 text-[19px] font-semibold leading-6 tracking-[-0.012em] text-ink [text-wrap:balance]">{t("teamsNew.title")}</h2>
           <ul className="mt-3 flex flex-col gap-2 text-[14px] leading-5 text-ink">
             {POINTS.map(({ icon: Icon, text }) => <li key={text} className="flex items-start gap-2.5">
-              <span className="mt-px flex size-[18px] shrink-0 items-center justify-center text-ink-secondary"><Icon size={16} strokeWidth={1.75} aria-hidden="true" /></span>
+              <span className="mt-px flex size-[18px] shrink-0 items-center justify-center text-ink-secondary"><Icon size={16} aria-hidden="true" /></span>
               <span className="[text-wrap:pretty]">{t(text)}</span>
             </li>)}
           </ul>

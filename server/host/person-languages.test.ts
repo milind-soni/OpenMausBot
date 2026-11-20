@@ -80,3 +80,15 @@ describe("the language a line for a person is written in", () => {
     expect(languages.forLine("ada")).toBe("de");
   });
 });
+
+describe("the language of a line for the place, such as a new bot's greeting", () => {
+  it("is the language picked in the app when none is set on this server, not this computer's", () => {
+    const { languages } = fixture();
+    expect(languages.forPlace()).toBe(Intl.DateTimeFormat().resolvedOptions().locale);
+    languages.heard("this-computer", "zh");
+    expect(languages.forPlace()).toBe("zh");
+    const set = fixture("ko");
+    set.languages.heard("this-computer", "zh");
+    expect(set.languages.forPlace()).toBe("ko");
+  });
+});

@@ -4,7 +4,7 @@ import { loadOlderPage, MESSAGE_PAGE_SIZE, reduceOlderMessages, reduceTrimHeldMe
 export { MESSAGE_PAGE_SIZE } from "./message-history";
 import { addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
 import { use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { createAppStore } from "./app-store"; import { readOneBot } from "./bot-read"; import { StoreContext, StoreSourceContext } from "./store-context";
+import { createAppStore } from "./app-store"; import { readOneBot } from "./bot-read"; import { sameJson } from "./same-json"; import { forgetSharedSession } from "@/lib/session-reuse"; import { StoreContext, StoreSourceContext } from "./store-context";
 import { flushSync } from "react-dom";
 import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, ResolvedSender, SteerQueueReason, WireBot, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire"; import type { InstanceEndpointInfo } from "../../shared/claude-endpoint";
 import { movesThreadToTop } from "../../shared/wire"; import type { DefaultBotFields } from "../../shared/default-bot";
@@ -30,7 +30,7 @@ import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import { askResetBridge, desktopCapabilitiesNow } from "@/lib/desktop"; import { isBotLimitRefusal, showCreatedPaused, stoppedAtBotLimit } from "@/lib/bot-limit";
-import { sameModelSelection } from "../../shared/thread-model";
+import { followBotModel, sameModelSelection } from "../../shared/thread-model";
 import type { BotBodyId } from "../../shared/bot-body";
 import { StoreRefContext } from "./store-ref-context";
 import type { QuestionRequestCardData } from "../../shared/ask-question";
@@ -555,7 +555,7 @@ export interface AppState {
   connected: boolean;
   hydrated?: true;
   error: string | null;
-  notice: { kind: "thread-gone" | "bot-gone" | "steer-images" | "note"; botName: string | null; text?: string } | null;
+  notice: { kind: "thread-gone" | "bot-gone" | "steer-images" | "note"; botName: string | null; text?: string; threadId?: string } | null;
   revealThread: { threadId: string; nonce: number } | null;
   mascotMotion: {
     botId: string;
@@ -1016,7 +1016,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "instances":
       return { ...state, instances: action.instances };
     case "configStatus":
-      return { ...state, config: action.config };
+      return sameJson(state.config, action.config) ? state : { ...state, config: action.config };
     case "liveCall":
       return { ...state, liveCall: action.call, liveCallVersion: state.liveCallVersion + 1 };
     case "liveCallLookup":
@@ -1344,7 +1344,7 @@ export function reducer(state: AppState, action: Action): AppState {
         return updateBot(picked, action.botId, (bot) => ({ ...bot, tasks: bot.tasks?.map((task) => task.threadId !== action.threadId ? task
           : { ...task, followsBotModel: Boolean(action.updateBotDefault) || sameModelSelection(action.selection, bot.modelSelection) }) }));
       }
-      return reconcileModelVariantSessions(updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection })));
+      return reconcileModelVariantSessions(updateBot(state, action.botId, (b) => ({ ...b, modelSelection: action.selection, tasks: followBotModel(action.selection, b.tasks) })));
     case "updateTask": {
       const patch = taskPatchFields(action.patch);
       return reconcileModelVariantSessions(updateBot(state, action.botId, (bot) => ({
@@ -2095,6 +2095,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const olderPagesInFlight = new Set<string>();
     const newTaskOnce = createNewTaskOnce();
     let creatingBot = false;
+    let noticeTimer: ReturnType<typeof setTimeout> | undefined;
     const showError = (e: unknown) => { if (isBotLimitRefusal(e)) return; if (isNoAiRefusal(e)) wrapped({ type: "notice", notice: { kind: "note", botName: null, text: e.message } }); else rawDispatch({ type: "error", message: e instanceof Error ? e.message : String(e) }); };
     const showSavedState = (owner: SavedOwner) => (error: unknown) => {
       showError(error);
@@ -2246,18 +2247,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (action.type !== "send") return undefined;
         return botBeforeSend ? openOnboardingCard(botBeforeSend) : undefined;
       })();
+      const threadOf = (s: AppState) => { const bot = s.bots.find((b) => b.id === s.selectedId); return s.groups.find((g) => g.id === s.selectedId)?.threadId ?? bot?.switchingTo ?? bot?.threadId; }, previousOpened = threadOf(store.getState());
+      if (action.type === "notice" && action.notice?.threadId !== undefined && action.notice.threadId !== previousOpened) return;
       if (
         action.type !== "cancelQueued" &&
         action.type !== "cancelGroupQueued" &&
         action.type !== "deleteBot"
       ) rawDispatch(action);
+      const cur = store.getState(), opened = threadOf(cur);
+      if (previousOpened !== opened && cur.notice?.threadId && opened && cur.notice.threadId !== opened) rawDispatch({ type: "notice", notice: null });
       switch (action.type) {
         case "loadOlderMessages": {
           loadOlderPage(action, stateRef.current, olderPagesInFlight, rawDispatch, showError);
           break;
         }
         case "notice":
-          if (action.notice) setTimeout(() => rawDispatch({ type: "notice", notice: null }), action.notice.kind === "note" ? 20_000 : 6000);
+          if (noticeTimer !== undefined) clearTimeout(noticeTimer);
+          noticeTimer = action.notice ? setTimeout((shown) => { if (store.getState().notice === shown) rawDispatch({ type: "notice", notice: null }); }, action.notice.kind === "note" ? 20_000 : 6000, action.notice) : undefined;
           break;
         case "createRoutine":
           api("/api/routines", { method: "POST", body: JSON.stringify(action.input) }).catch(showError);
@@ -2312,7 +2318,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   rawDispatch({ type: "consumePendingQueued", threadId: body.threadId, queueId });
                 }
               } else if (body?.queued === true && body.blockedBy === "images") {
-                wrapped({ type: "notice", notice: { kind: "steer-images", botName: null } });
+                wrapped({ type: "notice", notice: { kind: "steer-images", botName: null, threadId: body.threadId } });
               }
               action.onSettled?.();
             })
@@ -2343,7 +2349,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   rawDispatch({ type: "consumePendingQueued", threadId: body.threadId, queueId });
                 }
               } else if (body?.queued === true) {
-                wrapped({ type: "notice", notice: body.blockedBy === "images" ? { kind: "steer-images", botName: null } : { kind: "note", botName: null, text: t("composer.queued.roomSteerHeld") } });
+                wrapped({ type: "notice", notice: body.blockedBy === "images" ? { kind: "steer-images", botName: null, threadId: body.threadId } : { kind: "note", botName: null, text: t("composer.queued.roomSteerHeld"), threadId: body.threadId } });
               }
               action.onSettled?.();
             })
@@ -2374,16 +2380,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                 rawDispatch({ type: "messageAdded", threadId: body.threadId, message: body.message });
                 rawDispatch({ type: "forkPanelMessage", threadId: body.threadId, message: body.message });
               }
-              if (
-                body?.queued &&
-                typeof body.threadId === "string" &&
-                typeof body.queueId === "string"
-              ) {
-                rawDispatch({
-                  type: "optimisticMessageRemoved",
-                  threadId: body.threadId,
-                  sendId,
-                });
+              if (body?.queued && typeof body.threadId === "string" && typeof body.queueId === "string") {
+                rawDispatch({ type: "optimisticMessageRemoved", threadId: body.threadId, sendId });
                 rawDispatch({
                   type: "pendingQueued",
                   threadId: body.threadId,
@@ -2391,6 +2389,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
                   text: action.text,
                   reason: body.reason === "capacity" || body.reason === "group-turn" ? body.reason : undefined,
                 });
+                if (body.blockedBy === "images") wrapped({ type: "notice", notice: { kind: "steer-images", botName: null, threadId: body.threadId } });
               }
             })
             .catch((error) => {
@@ -2886,7 +2885,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         key: "instances",
         request: async () => {
           const answer = await unlessRefused<{ instances: InstanceInfo[] } | null>("/api/instances", async () => snapshotArrays<{ instances: InstanceInfo[] }>(await api("/api/instances"), "instances"), null);
-          return () => { if (answer) rawDispatch({ type: "instances", instances: answer.instances }); };
+          return () => { if (answer && !sameJson(store.getState().instances, answer.instances)) rawDispatch({ type: "instances", instances: answer.instances }); };
         },
       },
       {
@@ -3185,7 +3184,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         case "window-pref": applyWindowPref(frame); break;
         case "theme": applyThemeFrame(frame); break; case "apps-catalog": appCatalogAnnounced(); break;
-        case "config":
+        case "config": forgetSharedSession();
           rawDispatch({
             type: "configStatus",
             config: configStatusFromFrame(frame as unknown as ConfigStatusFrame),
@@ -3202,10 +3201,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     };
     const stopLive = openLiveEvents({
-      onOpen: () => rawDispatch({ type: "connected", value: true }),
-      onError: () => rawDispatch({ type: "connected", value: false }),
+      onOpen: () => { forgetSharedSession(); rawDispatch({ type: "connected", value: true }); },
+      onError: () => { forgetSharedSession(); rawDispatch({ type: "connected", value: false }); },
       onSnapshotRequired: () => {
-        store.flushFrames(); // the old stream's waiting frames go first, so forgetLiveTurns() below has the last word
+        forgetSharedSession(); store.flushFrames(); // the old stream's waiting frames go first, so forgetLiveTurns() below has the last word
         clearTimeout(hydrationFallback);
         publishMissedFrames();
         // Frames buffered before a non-resumable stream belong to an abandoned generation, and so do the turns they named.

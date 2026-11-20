@@ -81,7 +81,7 @@ export function SettingsPage({ bot, derived, onOpen, editingInstructions = false
     value: entry.id,
     label: t(entry.label),
     disabled: entry.id === "turns" && turnsHelp !== null,
-    tooltip: entry.id === "turns" && turnsHelp ? `${turnsHelp.label}. ${turnsHelp.reason}` : entry.id === "live" ? t("call.mode.liveHint") : callModeHint("turns"),
+    tooltip: entry.id === "turns" && turnsHelp ? `${turnsHelp.label}. ${turnsHelp.reason}` : entry.id === "live" ? t("call.mode.liveHint") : callModeHint("turns", { config: state.config }),
   }));
 
   const replyOptions: SegmentOption<ReplyStyle>[] = REPLY_STYLES.map((style) => ({

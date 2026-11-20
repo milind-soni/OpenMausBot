@@ -109,11 +109,21 @@ const LINUX_ENGINE_BROWSERS = ["google-chrome", "google-chrome-stable", "google-
 /** Where Puppeteer and Playwright unpack Chrome inside a cache entry; an entry without one is incomplete. */
 const LINUX_CACHE_EXECUTABLES = ["chrome-linux64/chrome", "chrome-linux/chrome"];
 
+/** Google Chrome's own launchers, for a Linux desktop whose Chrome is not at Google's install path (NixOS puts it on PATH). */
+const LINUX_CHROME_LAUNCHERS = ["google-chrome-stable", "google-chrome"];
+
+function linuxPath(host: ChromeHost): string[] {
+  return (host.enginePath?.() ?? host.env.PATH ?? "").split(":").filter(Boolean);
+}
+
+function linuxChromeOnPath(host: ChromeHost): string | null {
+  return linuxPath(host).flatMap((directory) => LINUX_CHROME_LAUNCHERS.map((name) => posix.join(directory, name))).find((candidate) => host.exists(candidate)) ?? null;
+}
+
 /** A Linux server where agent-browser already finds a browser keeps it rather than downloading another. */
 export function engineFindsLinuxBrowser(host: ChromeHost): boolean {
   const { join } = posix;
-  const onPath = (host.enginePath?.() ?? host.env.PATH ?? "").split(":").filter(Boolean);
-  if (onPath.some((directory) => LINUX_ENGINE_BROWSERS.some((name) => host.exists(join(directory, name))))) return true;
+  if (linuxPath(host).some((directory) => LINUX_ENGINE_BROWSERS.some((name) => host.exists(join(directory, name))))) return true;
   const cached = (directory: string, prefix: string) => host.list(directory)
     .some((name) => name.startsWith(prefix) && LINUX_CACHE_EXECUTABLES.some((executable) => host.exists(join(directory, name, executable))));
   return cached(join(host.env.PUPPETEER_CACHE_DIR || join(host.home, ".cache", "puppeteer"), "chrome"), "linux")
@@ -132,10 +142,11 @@ export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null,
   }
   if (!engine?.managed) return { kind: "legacy", reason: "agent-browser was named, so it picks its own browser" };
   // The Linux desktop app keeps its bundled browser; a Linux server downloads Chrome for Testing like a Mac.
-  const pin = platform === "linux" && env.OMB_RESOURCES_PATH ? null : chromeForTestingPin(platform, host.arch);
-  const installed = installedGoogleChrome(host);
+  const linuxDesktop = platform === "linux" && Boolean(env.OMB_RESOURCES_PATH);
+  const pin = linuxDesktop ? null : chromeForTestingPin(platform, host.arch);
+  const installed = installedGoogleChrome(host) ?? (linuxDesktop ? linuxChromeOnPath(host) : null);
   if (installed && !chromePolicyManaged(host)) return { kind: "chrome", chrome: { path: installed, source: "installed" }, fallback: pin };
-  if (platform === "linux" && env.OMB_RESOURCES_PATH) return installed ? { kind: "legacy", reason: "Google Chrome here is managed by an organization" } : { kind: "legacy", reason: "Google Chrome is not installed", noChrome: true };
+  if (linuxDesktop) return installed ? { kind: "legacy", reason: "Google Chrome here is managed by an organization" } : { kind: "legacy", reason: "Google Chrome is not installed", noChrome: true };
   const own = agentBrowserChrome(host);
   if (own) return { kind: "chrome", chrome: { path: own, source: "agent-browser" }, fallback: null };
   if (pin) {

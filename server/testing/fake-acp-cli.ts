@@ -5,6 +5,8 @@
 //   FAKE_ACP_REJECT_LIVE_LOAD_FILE  while it exists, load/resume of a session live in this process errors
 //     (FAKE_ACP_REJECT_LIVE_LOAD_DSH=1: with dsh 0.2's -32602 "session is already active" instead of -32000)
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
+//   FAKE_ACP_COPY_LIVE_LOAD=1  a session/load of a session still open adds a second copy, and each open copy streams
+//     FAKE_ACP_TEXT_REPLY again, like mistral-vibe 3.1.2; session/close ends every copy
 //   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
 //   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (stream-script.ts)
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt
@@ -30,7 +32,9 @@
 //       STOP_ME in it waits for session/cancel; FAKE_ACP_WAKE_MS (300) later that shell's finish wakes a turn no prompt
 //       asked for, one step every FAKE_ACP_STEP_MS (50), each appended to FAKE_ACP_WOKEN_FILE, until session/close or
 //       session/delete interrupts it; only session/delete ends the job. session/fork answers <id>-fork; a closed or
-//       deleted session refuses session/prompt until loaded. Advertises close, delete and, unless FAKE_ACP_NO_FORK=1, fork)
+//       deleted session refuses session/prompt until loaded. Advertises close (unless FAKE_ACP_NO_CLOSE=1), delete and, unless
+//       FAKE_ACP_NO_FORK=1, fork; FAKE_ACP_CLOSE_ENDS_JOBS=1: session/close ends the job too, as grok 1.0.89's does;
+//       FAKE_ACP_LATE_UPDATE=1: a tool_call_update of the finished prompt arrives 50 ms after its answer)
 //   FAKE_ACP_GROK_NATIVE_MCP  _x.ai/mcp/list reports these comma-separated native servers after the session's accepted ones
 //   FAKE_ACP_MCP_TRANSPORTS  remote MCP transports advertised in initialize, e.g. "http,sse"
 //   FAKE_ACP_PERMISSION_OPTIONS  JSON options override in permission mode
@@ -93,6 +97,9 @@
 //     {outcome:"steered"}, or {outcome:"promptRequired"} with no prompt running (FAKE_ACP_STEER_FAIL=rpc: a JSON-RPC error).
 //   FAKE_ACP_MODE=devin-steer  Devin's second `session/prompt`: initialize reports agentCapabilities._meta["cognition.ai/midTurnPrompts"];
 //     a prompt during a running one joins it, and both end together with the same usage and _meta["cognition.ai/userMessageId"].
+//   FAKE_ACP_MODE=grok-steer  Grok's second `session/prompt` with `[ui] follow_up_behavior = "steer"` in GROK_HOME/config.toml: a prompt
+//     during a running one is injected into it and answers {stopReason:"cancelled", _meta:{completionKind:"removedFromQueue"}}
+//     at once; the running prompt then ends with end_turn and every steer it took.
 //   FAKE_ACP_STEERING=off  the two steer modes above report no steering capability.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
@@ -587,6 +594,7 @@ async function listMcpTools(entry: AnyMcpEntry, handshake: unknown): Promise<str
   });
 }
 let liveSession: string | null = null;
+const openCopies = new Map<string, number>();
 let sessionsOpened = 0;
 let rpcFailure: unknown = null;
 function emitSessionReports(): void {
@@ -767,6 +775,12 @@ let gatedRuns = 0;
  * answered with the first one, with the same usage and run id, as Devin does. opencode-steer: only `_session/steering` joins it. */
 function gatedPrompt(msg: any) {
   const text = (Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join("");
+  if (gatedTurn && mode === "grok-steer") {
+    recordMethod("session/prompt.steer");
+    gatedTurn.steers.push(text);
+    result(msg.id, { stopReason: "cancelled", _meta: { completionKind: "removedFromQueue" } });
+    return;
+  }
   if (gatedTurn && mode === "devin-steer") {
     recordMethod("session/prompt.steer");
     gatedTurn.steers.push(text);
@@ -917,7 +931,8 @@ function handle(msg: any) {
               ...(agentName ? { loadSession: true, sessionCapabilities: { resume: true }, auth: { logout: true } } : {}),
               ...(closesSessions || deletesSessions
                 ? { sessionCapabilities: { ...(closesSessions ? { close: {} } : {}), ...(deletesSessions ? { delete: {} } : {}),
-                  ...(mode === "background-wake" ? { close: {}, ...(process.env.FAKE_ACP_NO_FORK === "1" ? {} : { fork: {} }) } : {}) } }
+                  ...(mode === "background-wake" ? { ...(process.env.FAKE_ACP_NO_CLOSE === "1" ? {} : { close: {} }),
+                    ...(process.env.FAKE_ACP_NO_FORK === "1" ? {} : { fork: {} }) } : {}) } }
                 : {}),
               ...(acceptsImages ? { promptCapabilities: { image: true } } : {}),
               ...(mcpTransports.length ? { mcpCapabilities: { http: mcpTransports.includes("http"), sse: mcpTransports.includes("sse") } } : {}),
@@ -970,6 +985,7 @@ function handle(msg: any) {
       sessionsOpened += 1;
       const firstSession = process.env.FAKE_ACP_SESSION_ID ?? "fake-acp-session";
       liveSession = sessionsOpened === 1 ? firstSession : `${firstSession}-${sessionsOpened}`;
+      openCopies.set(liveSession, 1);
       resultAndConfigUpdates(msg.id, {
         sessionId: liveSession,
         ...(opts ? { configOptions: opts } : {}),
@@ -979,10 +995,20 @@ function handle(msg: any) {
       break;
     }
     case "session/close":
+      // A failed close leaves the session, its woken steps and its jobs exactly as they were.
+      if (process.env.FAKE_ACP_SESSION_CLOSE === "error") {
+        out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "close failed" } });
+        break;
+      }
       endWokenStep(msg.params?.sessionId);
+      openCopies.delete(String(msg.params?.sessionId));
+      if (process.env.FAKE_ACP_CLOSE_ENDS_JOBS === "1") {
+        const job = backgroundJobs.get(String(msg.params?.sessionId))?.job;
+        if (job) clearTimeout(job);
+        backgroundJobs.delete(String(msg.params?.sessionId));
+      }
       if (mode === "background-wake") detachedSessions.add(String(msg.params?.sessionId));
-      if (process.env.FAKE_ACP_SESSION_CLOSE === "error") out({ jsonrpc: "2.0", id: msg.id, error: { code: -32603, message: "close failed" } });
-      else if (process.env.FAKE_ACP_SESSION_CLOSE_MS) setTimeout(() => result(msg.id, {}), Number(process.env.FAKE_ACP_SESSION_CLOSE_MS));
+      if (process.env.FAKE_ACP_SESSION_CLOSE_MS) setTimeout(() => result(msg.id, {}), Number(process.env.FAKE_ACP_SESSION_CLOSE_MS));
       else result(msg.id, {});
       break;
     case "session/delete": {
@@ -1029,6 +1055,8 @@ function handle(msg: any) {
       const mdls = sessionModels();
       liveSession = typeof msg.params?.sessionId === "string" ? msg.params.sessionId : liveSession;
       detachedSessions.delete(String(msg.params?.sessionId));
+      const copies = openCopies.get(String(msg.params?.sessionId)) ?? 0;
+      openCopies.set(String(msg.params?.sessionId), process.env.FAKE_ACP_COPY_LIVE_LOAD === "1" ? copies + 1 : 1);
       resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) }, "session/load", msg.params.sessionId);
       if (mode === "hermes-steer") advertiseHermesCommands(msg.params.sessionId);
       break;
@@ -1167,7 +1195,7 @@ function handle(msg: any) {
         hermesPrompt(msg);
         return;
       }
-      if (mode === "opencode-steer" || mode === "devin-steer") {
+      if (mode === "opencode-steer" || mode === "devin-steer" || mode === "grok-steer") {
         gatedPrompt(msg);
         return;
       }
@@ -1188,7 +1216,9 @@ function handle(msg: any) {
         return;
       }
       if (process.env.FAKE_ACP_TEXT_REPLY !== undefined) {
-        out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params?.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: process.env.FAKE_ACP_TEXT_REPLY } } } });
+        for (let copy = openCopies.get(String(msg.params?.sessionId)) ?? 1; copy > 0; copy -= 1) {
+          out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params?.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: process.env.FAKE_ACP_TEXT_REPLY } } } });
+        }
         result(msg.id, { stopReason: "end_turn", _meta: { inputTokens: 12, outputTokens: 4 } });
         return;
       }
@@ -1357,6 +1387,9 @@ function handle(msg: any) {
           return;
         }
         complete();
+        if (process.env.FAKE_ACP_LATE_UPDATE === "1") {
+          setTimeout(() => update({ sessionUpdate: "tool_call_update", toolCallId: "tc-build", status: "completed" }), 50);
+        }
         return;
       }
       if (mode === "finished-tools") {

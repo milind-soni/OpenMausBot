@@ -169,6 +169,15 @@ export const LIVE_VOICE_OPTIONS: ReadonlyArray<{ id: string; label: string }> = 
   { id: "beacon", label: "Beacon — Filipino, masculine" },
   { id: "bossa", label: "Bossa — Brazilian Portuguese, feminine" },
   { id: "tempo", label: "Tempo — Brazilian Portuguese, masculine" },
+  { id: "nuri", label: "Nuri — German, feminine" },
+  { id: "juni", label: "Juni — German, feminine" },
+  { id: "flitz", label: "Flitz — German, masculine" },
+  { id: "brise", label: "Brise — French, feminine" },
+  { id: "sillage", label: "Sillage — French, masculine" },
+  { id: "nira", label: "Nira — Hindi, feminine" },
+  { id: "harema", label: "Harema — Japanese, feminine" },
+  { id: "shida", label: "Shida — Japanese, masculine" },
+  { id: "noeul", label: "Noeul — Korean, feminine" },
 ];
 
 /** Gemini Live's prebuilt voices (Gemini API docs, "Live API capabilities", voices), with the docs' one-word character.

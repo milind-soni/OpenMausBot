@@ -76,6 +76,8 @@ export interface BotMessageRouteDeps {
     threadId?: string; replyTo?: Message; sendId?: string; sender?: ResolvedSender; trigger?: UsageTrigger; relayed?: boolean;
     dataContext?: DataContext; compactOnly?: boolean; cardContinuation?: boolean; editedMessageId?: string;
   }): Promise<Message>;
+  /** Retry on a line a caller sent through the Bot API, run as that call ran (bot-api-host.ts); null for any other line. */
+  botApiRetry?(botId: string, threadId: string, source: Message, sendId?: string): Promise<Message | null>;
   usageTriggerFor(auth: RequestAuth): UsageTrigger;
   messageSender(auth: RequestAuth): ResolvedSender | undefined;
   cloudGuestSendRefusal(auth: RequestAuth, threadId: string): string | null;
@@ -555,6 +557,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       const rerunInstance = registry.get(rerunSelection.instanceId)!;
       const rerunRefusal = policyModelRefusal(rerunInstance);
       if (rerunRefusal) return json(res, 409, { error: rerunRefusal });
+      // The same words again on a caller's line: the caller's message again, never the person's own.
+      const apiRetry = source.via === "api" && text === source.text?.trim() ? await deps.botApiRetry?.(bot.id, bot.threadId, source, sendId) : null;
+      if (apiRetry) return json(res, 202, { ok: true, message: apiRetry });
       const quoted = source.replyToId ? resolveReplyTarget(bot.threadId, source.replyToId) : undefined;
       const replyTo: ReplyTarget | undefined = quoted && source.reaction && text === source.text ? { ...quoted, reactedWith: source.reaction } : quoted;
       const dataContext = parseDataContext(body.dataContext) ?? (text === source.text ? source.dataContext : undefined);

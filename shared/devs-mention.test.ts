@@ -23,6 +23,16 @@ describe("the @devs tag", () => {
     expect(tagsDevs("@devs it broke", ["Dev"])).toBe(true);
   });
 
+  it("ends where Chinese, Japanese or Korean text starts right after it, with no space", () => {
+    expect(tags("@devs总控坏了")).toEqual(["@devs"]);
+    expect(tags("@Devsボタンが動かない @devs버튼")).toEqual(["@Devs", "@devs"]);
+    expect(tags("@devs 总控坏了")).toEqual(["@devs"]);
+    expect(withoutDevsTags("@devs总控坏了")).toBe("总控坏了");
+    expect(tagsDevs("@devsé")).toBe(false);
+    expect(tagsDevs("@devs总控 坏了", ["devs总控"])).toBe(false);
+    expect(tagsDevs("@devs总控坏了", ["Devs"])).toBe(false);
+  });
+
   it("leaves the person's own words without the tag", () => {
     expect(withoutDevsTags("@devs the send button froze")).toBe("the send button froze");
     expect(withoutDevsTags("@devs: pictures never load, @devs please")).toBe("pictures never load, please");

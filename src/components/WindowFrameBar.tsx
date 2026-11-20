@@ -52,7 +52,7 @@ export function WindowFrameBar({ notifications = false }: { notifications?: bool
           onClick={() => dispatch({ type: "toggleAppSettings", open: true })}
           className={FRAME_BAR_BUTTON}
         >
-          <Settings size={15} strokeWidth={1.75} aria-hidden="true" />
+          <Settings size={15} aria-hidden="true" />
         </button>
       </div>
     </div>

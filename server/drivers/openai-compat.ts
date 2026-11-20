@@ -67,6 +67,9 @@ const OPENAI_MODELS: ModelCatalog = {
   ],
 };
 
+/** Gemini takes a clip inline in the request; a larger one keeps going as sampled frames. */
+const GEMINI_VIDEO_BYTES = 12 * 1024 * 1024;
+
 /** Google's Gemini API, added as an OpenAI-compatible server (Settings → API keys → Other). */
 function isGeminiOrigin(url: string): boolean {
   try {
@@ -402,6 +405,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       selectedReasoning: (model, variant) => Boolean(variant && fact(model)?.thinking?.choices.includes(variant)),
       refreshModels: fetchModels,
       imageInput: (model) => fact(model)?.vision ?? true,
+      ...(gemini ? { videoBytes: GEMINI_VIDEO_BYTES } : {}),
       toolUse: (model) => fact(model)?.tools ?? true,
       ...(ollamaCandidate ? {
         serverUnavailable: async () => {

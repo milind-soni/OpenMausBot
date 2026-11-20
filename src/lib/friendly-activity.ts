@@ -15,6 +15,7 @@ const BY_PHASE: Array<[readonly string[], LocaleKey[]]> = [
   [["chat.activity.screen", "chat.activity.computer", "chat.activity.openPage"], ["chat.friendly.clicking"]],
   [["chat.activity.handoff", "chat.activity.askTeammate", "chat.activity.postRoom", "chat.activity.messagePerson", "chat.activity.rooms", "chat.activity.whosAround"], ["chat.friendly.team"]],
   [["chat.activity.publishPage"], ["chat.activity.publishPage"]],
+  [["chat.activity.summarizing"], ["chat.activity.summarizing"]],
 ];
 
 /** Servers of the app's own tools: their work reads as what it does, never as "Working in …". */
