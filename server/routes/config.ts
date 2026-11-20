@@ -283,12 +283,18 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
             managedBoatOwners(),
           );
           if (!inventory.available) {
-            return json(res, 503, {
-              error: `${inventory.problem ?? "VPS computer inventory is unavailable"}. Keep the current SSH config alias and retry`,
-            });
+            // A host that cannot answer cannot keep the installation on the old alias.
+            // Replacing it is allowed, same as a first save; leftover containers stay on the unreachable host.
+            // Clearing still needs a live inventory so labeled containers are not abandoned silently.
+            if (!nextVpsAlias) {
+              return json(res, 503, {
+                error: `${inventory.problem ?? "VPS computer inventory is unavailable"}. Keep the current SSH config alias and retry`,
+              });
+            }
+          } else {
+            const resourceError = vpsAliasResourceChangeError(inventory.instances.length);
+            if (resourceError) return json(res, 409, { error: resourceError });
           }
-          const resourceError = vpsAliasResourceChangeError(inventory.instances.length);
-          if (resourceError) return json(res, 409, { error: resourceError });
         }
 
         let boatRecovery = changingBoatToken ? boatCreateRecoverySnapshot() : [];
