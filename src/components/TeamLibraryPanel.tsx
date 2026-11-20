@@ -8,7 +8,7 @@ import { COMMUNITY_REPOSITORY_URL, type TemplateDetails } from "../../shared/sha
 import type { Routine } from "@/lib/routines";
 import { openExternalLink } from "@/lib/app-links";
 import { api, useStore, type Bot, type Group } from "@/state/store";
-import { ArrowLeft, Check, ExternalLink, Github, Loader2, Search, Users, X } from "lucide-react";
+import { ArrowLeft, Check, ExternalLink, Github, Loader2, Plus, Search, Users, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { catalogCopy, catalogMatches, type TeamCatalog, type TeamCatalogEntry } from "@/lib/team-catalog";
@@ -357,18 +357,21 @@ export function TeamLibraryPanel({
                           <h3 className="truncate text-[13px] font-medium text-ink">{copy.name}</h3>
                           <p className="mt-0.5 truncate text-[13px] text-ink-secondary">{copy.outcome ?? copy.summary}</p>
                           <p className="mt-1 truncate text-[12px] text-ink-tertiary">
-                            {t("templates.botCount", { count: entry.members })} · {t("templates.playbookCount", { count: entry.skills.length })}
+                            {entry.members === 1 ? t("template.botsOne") : t("template.botsMany", { count: entry.members })}
+                            {entry.skills.length > 0 && ` · ${entry.skills.length === 1 ? t("template.skillsOne") : t("template.skillsMany", { count: entry.skills.length })}`}
                             {entry.requires.apps.length > 0 && ` · ${entry.requires.apps.join(", ")}`}
                             {entry.setupMinutes && ` · ${t("templates.minutes", { count: entry.setupMinutes })}`}
                           </p>
                         </div>
                         <button
+                          type="button"
                           onClick={() => void loadLibraryTeam(entry)}
                           disabled={busySlug !== null}
-                          className="flex min-w-[72px] items-center justify-center gap-1.5 rounded-full bg-raised px-3.5 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-40"
+                          aria-label={busySlug === entry.slug ? undefined : t("orgLibrary.addAria", { name: copy.name })}
+                          className="flex h-8 shrink-0 items-center gap-1 rounded-full bg-raised px-3 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:opacity-40"
                         >
-                          {busySlug === entry.slug && <Loader2 size={13} className="animate-spin" />}
-                          {busySlug === entry.slug ? t("templates.loadingShort") : t("templates.load")}
+                          {busySlug === entry.slug ? <Loader2 size={14} aria-hidden="true" className="animate-spin motion-reduce:animate-none" /> : <Plus size={14} aria-hidden="true" />}
+                          {busySlug === entry.slug ? t("templates.loadingShort") : t("common.add")}
                         </button>
                       </article>
                     );

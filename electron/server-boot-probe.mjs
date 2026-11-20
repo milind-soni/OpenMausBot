@@ -9,14 +9,19 @@ const LISTENING_LINE = "openmausbot server on ";
 export function listeningSignal() {
   let tail = "";
   let heard = false;
+  let announce;
+  const announced = new Promise((resolve) => { announce = resolve; });
   return {
     hear(chunk) {
       if (heard) return;
       const text = tail + chunk;
       tail = text.slice(-LISTENING_LINE.length);
       heard = text.includes(LISTENING_LINE);
+      if (heard) announce();
     },
     heard: () => heard,
+    /** Settles when the line is heard. */
+    announced,
   };
 }
 
@@ -38,6 +43,7 @@ const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  *   isExited?: () => boolean,
  *   isListening?: () => boolean,
  *   listeningGraceMs?: number,
+ *   listened?: Promise<void>,
  *   now?: () => number,
  *   sleep?: (ms: number) => Promise<void>,
  *   fetchImpl?: typeof fetch,
@@ -51,11 +57,14 @@ export async function pollServerIdentity({
   isExited = () => false,
   isListening = () => false,
   listeningGraceMs = 0,
+  listened,
   now = Date.now,
   sleep = defaultSleep,
   fetchImpl = globalThis.fetch,
 }) {
   const startedAt = now();
+  // The child's "listening" line cuts one wait short, so the probe that follows it is not up to an interval late.
+  let wake = listened;
   const deadline = () => startedAt + bootTimeoutMs + (isListening() ? listeningGraceMs : 0);
   for (;;) {
     if (isExited()) return { outcome: "exited" };
@@ -70,7 +79,8 @@ export async function pollServerIdentity({
     } catch {
       const intervalMs =
         now() - startedAt < BOOT_PROBE_FAST_WINDOW_MS ? BOOT_PROBE_FAST_INTERVAL_MS : BOOT_PROBE_INTERVAL_MS;
-      await sleep(Math.min(intervalMs, Math.max(1, deadline() - now())));
+      const wait = sleep(Math.min(intervalMs, Math.max(1, deadline() - now())));
+      await (wake ? Promise.race([wait, wake.then(() => { wake = null; })]) : wait);
       continue;
     }
     const body = await res.json().catch(() => null);

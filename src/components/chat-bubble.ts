@@ -63,7 +63,7 @@ export function quietRow(message: Message, showToolCalls: boolean): boolean {
   if (message.reaction || message.helperFollowup) return true;
   if (message.kind === "digest") return !showToolCalls;
   if (message.kind !== "activity" || showToolCalls) return false;
-  if (message.dataResult || message.comm || message.threadRef || message.relay || isStatusActivity(message)) return false;
+  if (message.dataResult || message.comm || message.threadRef || message.relay || message.checkBack || isStatusActivity(message)) return false;
   return !(message.tool && failedTurnCause(message.tool.name) !== null);
 }
 

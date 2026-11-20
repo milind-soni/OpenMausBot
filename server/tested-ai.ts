@@ -14,7 +14,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { aiSignInKey, rankAis, type AiTestState } from "../shared/ai-ranking.ts";
+import { AI_TEST_REASONS, aiSignInKey, rankAis, type AiTestReason, type AiTestState } from "../shared/ai-ranking.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import type { ModelSelection, ProviderSnapshot } from "./contracts.ts";
 import { readyToRun, signedOut, type DefaultSelectionContext, type SelectableInstance } from "./default-model-selection.ts";
@@ -73,7 +73,7 @@ export function configIdentity(entry: { driver?: unknown; config?: unknown; envi
 }
 
 type Subject = { instanceId: string; snapshot: ProviderSnapshot };
-type Result = { key: string; state: "passed" | "failed" | "untestable"; misses: number; at: number; error?: string; retryAt?: number };
+type Result = { key: string; state: "passed" | "failed" | "untestable"; misses: number; at: number; error?: string; reason?: AiTestReason; retryAt?: number };
 type Follower = { botId: string; selection: ModelSelection };
 type Saved = { results: Record<string, Result>; follower?: Follower };
 
@@ -169,7 +169,7 @@ export function createTestedAi(deps: TestedAiDeps) {
     if (check.ok === false) {
       const misses = (previous?.state === "failed" ? previous.misses : 0) + 1;
       const delay = RETRY_AFTER_MS[misses - 1] ?? SLOW_RETRY_MS;
-      saved.results[instanceId] = { key, state: "failed", misses, at: now(), error: check.error, retryAt: now() + delay };
+      saved.results[instanceId] = { key, state: "failed", misses, at: now(), error: check.error, ...(check.reason ? { reason: check.reason } : {}), retryAt: now() + delay };
       if (background) arm(instanceId, now() + delay);
     } else {
       retries.get(instanceId)?.cancel();
@@ -326,10 +326,11 @@ export function createTestedAi(deps: TestedAiDeps) {
     answered,
     state,
     /** The instance info's fields the welcome reads. */
-    info(instance: Subject): { aiTest?: AiTestState; aiTestError?: string } {
+    info(instance: Subject): { aiTest?: AiTestState; aiTestError?: string; aiTestReason?: AiTestReason } {
       const result = state(instance);
-      const error = result === "failed" ? resultOf(instance)?.error : undefined;
-      return result ? { aiTest: result, ...(error ? { aiTestError: error } : {}) } : {};
+      const failed = result === "failed" ? resultOf(instance) : undefined;
+      const reason = failed?.reason && AI_TEST_REASONS.includes(failed.reason) ? failed.reason : undefined;
+      return result ? { aiTest: result, ...(failed?.error ? { aiTestError: failed.error } : {}), ...(reason ? { aiTestReason: reason } : {}) } : {};
     },
     /** POST /api/instances/:id/check: live, as setup's check always was, sharing only a test already under way. */
     async check(instance: CheckableEngine & { snapshot(): Promise<ProviderSnapshot> }): Promise<EngineCheck> {

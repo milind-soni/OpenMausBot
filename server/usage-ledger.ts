@@ -259,7 +259,7 @@ export function triggerLabel(trigger: UsageTrigger): string {
   }
 }
 
-function groupOf(row: UsageRow, groupBy: UsageGroupBy): { key: string; label: string } {
+export function usageGroupOf(row: UsageRow, groupBy: UsageGroupBy): { key: string; label: string } {
   switch (groupBy) {
     case "bot":
       return { key: `bot:${row.botId}`, label: row.botName || row.botId };
@@ -331,7 +331,7 @@ export function summarizeUsage(
   const splits = new Map<string, Map<string, UsageGroup>>();
   const split = splitBy && splitBy !== groupBy ? splitBy : null;
   for (const row of rows) {
-    const { key, label } = groupOf(row, groupBy);
+    const { key, label } = usageGroupOf(row, groupBy);
     let group = groups.get(key);
     if (!group) {
       group = emptyGroup(key, label);
@@ -345,7 +345,7 @@ export function summarizeUsage(
       inside = new Map();
       splits.set(key, inside);
     }
-    const pieceOf = groupOf(row, split);
+    const pieceOf = usageGroupOf(row, split);
     let piece = inside.get(pieceOf.key);
     if (!piece) {
       piece = emptyGroup(pieceOf.key, pieceOf.label);

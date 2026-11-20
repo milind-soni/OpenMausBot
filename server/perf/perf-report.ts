@@ -9,13 +9,15 @@ import { PHASES, type Phase, type PhaseStats } from "./phases.ts";
 import type { StallsReport, StallStats, Tally } from "./loop-stalls.ts";
 import { processHealthLines, trimmedProcessHealth, type ProcessHealth } from "./process-health.ts";
 import type { ProcessReport } from "./process-sampler.ts";
+import { SETUP_STEPS, slowestSetupSteps, type SetupStats } from "./setup-steps.ts";
 import { RING_CAP, type LiveTurnView, type WindowStats } from "./turn-timings.ts";
+import { launchHealth, launchLines, type LaunchSources } from "./launch-report.ts";
 import type { TurnTiming } from "./turn-record.ts";
 
 /** The health report's `perf` field is at most this many bytes of JSON; parts are dropped, least useful first, to fit. */
 export const PERF_HEALTH_MAX_BYTES = 8 * 1024;
 export const PERF_HEALTH_VERSION = 1;
-const LIVE_SHOWN = 5, TOOLS_SHOWN = 8, HOLDS_SHOWN = 8;
+const LIVE_SHOWN = 5, TOOLS_SHOWN = 8, HOLDS_SHOWN = 8, SETUP_STEPS_SHOWN = 6, TURN_SETUP_STEPS_SHOWN = 3;
 const LIMIT_DRIVERS = new Set(["claude", "codex", "grok", "opencode"]);
 const WINDOWS = new Set(["5-hour", "weekly", "other"]);
 
@@ -33,6 +35,8 @@ export interface PerfSources {
   processes?: ProcessHealth | null;
   /** Each bot's processes, threads, memory and CPU, the most memory first (bot-footprint.ts); null where not sampled. */
   bots?: BotFootprintReport | null;
+  /** The desktop app's own starts (launch-timings.ts); null where no app starts this server. */
+  launches?: LaunchSources | null;
 }
 
 /** Engines refusing work, or within 10 points of their limit: driver kind, window, use and reset time only. */
@@ -46,26 +50,31 @@ export function limitHolds(report: EngineLimitsReport | null | undefined): Limit
 
 const phasesOf = (phases: Partial<Record<Phase, PhaseStats>>) => Object.fromEntries(PHASES.flatMap((phase) => (phases[phase] ? [[phase, phases[phase]]] : [])));
 
+const setupOf = (stats: SetupStats, kept = SETUP_STEPS_SHOWN): SetupStats => Object.fromEntries(slowestSetupSteps(stats, kept));
+
 export function perfHealth(sources: PerfSources) {
   const { hour, day } = sources;
   const body = {
     v: PERF_HEALTH_VERSION,
     slowEdgesMs: [...SLOW_TURN_MS],
-    h1: { turns: hour.turns, failed: hour.failed, partial: hour.partial, slow: hour.slow, phases: phasesOf(hour.phases) },
-    h24: { turns: day.turns, failed: day.failed, slow: day.slow, phases: phasesOf(day.phases), tools: day.tools.slice(0, TOOLS_SHOWN), retries: day.retries, limits: day.limits, failovers: day.failovers },
+    h1: { turns: hour.turns, failed: hour.failed, partial: hour.partial, slow: hour.slow, phases: phasesOf(hour.phases), setup: setupOf(hour.setup) },
+    h24: { turns: day.turns, failed: day.failed, slow: day.slow, phases: phasesOf(day.phases), setup: setupOf(day.setup), tools: day.tools.slice(0, TOOLS_SHOWN), retries: day.retries, limits: day.limits, failovers: day.failovers },
     live: sources.live.slice(0, LIVE_SHOWN),
     holds: limitHolds(sources.limits),
     process: sources.process,
     stalls: sources.stalls ?? null,
     processes: sources.processes ?? null,
     bots: sources.bots ?? null,
+    launches: launchHealth(sources.launches),
   };
   const size = () => JSON.stringify(body).length;
+  if (size() > PERF_HEALTH_MAX_BYTES) { body.h1.setup = setupOf(hour.setup, 2); body.h24.setup = setupOf(day.setup, 2); }
   if (size() > PERF_HEALTH_MAX_BYTES && body.bots) body.bots = { ...body.bots, shown: body.bots.shown.slice(0, 3), ...(body.bots.cap ? { cap: { ...body.bots.cap, events: body.bots.cap.events.slice(-1) } } : {}) };
   if (size() > PERF_HEALTH_MAX_BYTES && body.process) body.process = { ...body.process, buckets: body.process.buckets.slice(0, 6) };
   if (size() > PERF_HEALTH_MAX_BYTES) body.h24.tools = body.h24.tools.slice(0, 4);
   if (size() > PERF_HEALTH_MAX_BYTES) body.live = body.live.slice(0, 2);
   if (size() > PERF_HEALTH_MAX_BYTES && body.processes) body.processes = trimmedProcessHealth(body.processes);
+  if (size() > PERF_HEALTH_MAX_BYTES) body.launches = null;
   if (size() > PERF_HEALTH_MAX_BYTES) body.process = null;
   if (size() > PERF_HEALTH_MAX_BYTES) body.stalls = null;
   if (size() > PERF_HEALTH_MAX_BYTES) body.processes = null;
@@ -95,6 +104,8 @@ export function duration(ms: number): string {
 const iso = (at: number) => new Date(at).toISOString().replace(/\.\d{3}Z$/, "Z");
 const phaseLine = (phases: Partial<Record<Phase, PhaseStats>>) =>
   PHASES.flatMap((phase) => { const stats = phases[phase]; return stats ? [`${phase} p50 ${duration(stats.p50)} p95 ${duration(stats.p95)} max ${duration(stats.max)}`] : []; }).join("; ");
+const setupLine = (stats: SetupStats) =>
+  slowestSetupSteps(stats, SETUP_STEPS.length).map(([step, one]) => `${step} p50 ${duration(one.p50)} p95 ${duration(one.p95)} max ${duration(one.max)}${step === "total" ? "" : ` (${one.n})`}`).join("; ");
 const slowLine = (slow: number[]) => SLOW_TURN_MS.map((edge, index) => `${slow[index] ?? 0} over ${duration(edge)}`).join(", ");
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 const counts = (map: Record<string, number>) => Object.entries(map).sort((a, b) => b[1] - a[1]).map(([key, count]) => `${key} ${count}`).join(", ");
@@ -102,6 +113,9 @@ const counts = (map: Record<string, number>) => Object.entries(map).sort((a, b) 
 export function turnLine(turn: TurnTiming): string {
   const parts = PHASES.filter((phase) => phase !== "total" && turn.ms[phase] !== undefined)
     .map((phase) => `${phase} ${duration(turn.ms[phase]!)}${phase === "queue" && turn.queueWhy ? ` (${turn.queueWhy})` : ""}`);
+  const steps = SETUP_STEPS.flatMap((step) => (step !== "total" && turn.setup?.[step] ? [[step, turn.setup[step]] as const] : []))
+    .sort((left, right) => right[1] - left[1]).slice(0, TURN_SETUP_STEPS_SHOWN).map(([step, ms]) => `${step} ${duration(ms)}`);
+  if (turn.setup?.total !== undefined) parts.push(`setup ${duration(turn.setup.total)}${steps.length ? ` (${steps.join(", ")})` : ""}`);
   const tools = turn.tools.map((tool) => `${tool.kind} ${tool.n}x ${duration(tool.ms)}${tool.errors ? ` ${tool.errors} failed` : ""}${tool.open ? ` ${tool.open} left open` : ""}`);
   const extra = [
     turn.retries ? `retries ${turn.retries} (${(turn.retryWhy ?? []).join(", ")}), backoff ${duration(turn.backoffMs)}` : "",
@@ -118,8 +132,10 @@ export function perfLines(sources: PerfSources, recent: readonly TurnTiming[], r
   const lines = ["## Performance (timings only: no messages, names, files or addresses)"];
   lines.push(`Last hour: ${plural(hour.turns, "turn")}, ${hour.failed} failed${hour.partial ? ` (only the latest ${RING_CAP} kept)` : ""}; slow: ${slowLine(hour.slow)}`);
   if (hour.turns) lines.push(`  ${phaseLine(hour.phases)}`);
+  if (hour.setup.total) lines.push(`  Turn setup, inside queue (turns it took 1ms or more): ${setupLine(hour.setup)}`);
   lines.push(`Last 24 h: ${plural(day.turns, "turn")}, ${day.failed} failed; slow: ${slowLine(day.slow)}`);
   if (day.turns) lines.push(`  ${phaseLine(day.phases)}`);
+  if (day.setup.total) lines.push(`  Turn setup, inside queue (turns it took 1ms or more): ${setupLine(day.setup)}`);
   if (day.tools.length) lines.push(`  Tool kinds by time: ${day.tools.slice(0, TOOLS_SHOWN).map((tool) =>
     `${tool.kind} ${duration(tool.ms)} (${plural(tool.n, "call")}, p95 ${duration(tool.p95)}, max ${duration(tool.max)}${tool.errors ? `, ${tool.errors} failed` : ""}${tool.open ? `, ${tool.open} left open` : ""})`).join("; ")}`);
   if (day.retries.n) lines.push(`  Retries: ${day.retries.n} in ${plural(day.retries.turns, "turn")}, ${duration(day.retries.backoffMs)} of backoff (${counts(day.retries.why)})`);
@@ -138,6 +154,7 @@ export function perfLines(sources: PerfSources, recent: readonly TurnTiming[], r
   if (sources.stalls) lines.push(...stallLines(sources.stalls));
   if (sources.processes) lines.push(...processHealthLines(sources.processes));
   if (sources.bots) lines.push(...botFootprintLines(sources.bots));
+  lines.push(...launchLines(sources.launches));
   lines.push(recentTitle);
   lines.push(...(recent.length ? recent.map((turn) => `  ${turnLine(turn)}`) : ["  (none)"]));
   return lines;

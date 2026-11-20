@@ -30,7 +30,14 @@ const STATUS_KEY = {
 
 const colorOf = (value: string): MausColor => (MAUS_COLOR_NAMES as readonly string[]).includes(value) ? value as MausColor : "cyan";
 
+/** A picture read from a template folder; a bot's own picture is a stored attachment and goes through BotAvatar. */
+const FOLDER_PICTURE = /^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
+
 function Face({ avatar, size }: { avatar: TemplateAvatar; size: number }) {
+  if (avatar.picture && FOLDER_PICTURE.test(avatar.picture)) {
+    return <img data-template-picture src={avatar.picture} alt={t("avatar.alt", { name: avatar.name })} width={size} height={size} draggable={false}
+      className="block max-w-none shrink-0 rounded-full bg-raised object-cover" style={{ width: size, height: size }} />;
+  }
   return <BotAvatar size={size} bot={{ name: avatar.name, color: colorOf(avatar.color), avatarUrl: avatar.picture ?? null,
     ...(avatar.picture ? { avatarCrop: "circle" as const } : {}), mascotBody: avatar.mascotBody ? botBodyId(avatar.mascotBody) : null }} />;
 }

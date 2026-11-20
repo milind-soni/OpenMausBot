@@ -23,9 +23,9 @@
         "title": "New thread",
         "createdAt": 1794819601000,
         "updatedAt": 1794819601000,
+        "lastThreadOrderAt": 1794819601000,
         "resumeCursors": {},
-        "unread": false,
-        "lastThreadOrderAt": 1794819601000
+        "unread": false
       }
     ]
   },
@@ -83,9 +83,9 @@
         "title": "New thread",
         "createdAt": 1794819600000,
         "updatedAt": 1794819600000,
+        "lastThreadOrderAt": 1794819600000,
         "resumeCursors": {},
-        "unread": false,
-        "lastThreadOrderAt": 1794819600000
+        "unread": false
       }
     ]
   }

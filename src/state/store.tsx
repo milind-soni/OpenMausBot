@@ -1,6 +1,6 @@
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError, retryRequest, snapshotArrays } from "./api";
-import { loadOlderPage, MESSAGE_PAGE_SIZE, reduceOlderMessages } from "./message-history";
+import { loadOlderPage, MESSAGE_PAGE_SIZE, reduceOlderMessages, reduceTrimHeldMessages } from "./message-history";
 export { MESSAGE_PAGE_SIZE } from "./message-history";
 import { addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
 import { use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -113,7 +113,7 @@ export type SecretRequestCardData = Omit<import("../../shared/wire").SecretReque
 
 export type ComputerControlState = { held: boolean; helpReason: string | null; help?: import("../../shared/wire").ComputerHelpRef | null };
 
-export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "template" | "sender" | "setupSuggestion" | "settingsCard" | "helperIntro" | "helperFollowup" | "setupOffer" | "savedSteps" | "setupChoices" | "setupChoicesPending" | "setupChoicesUpdating" | "setupRequest" | "relay" | "inbox" | "sentDirectly" | "doneWhen" | "bugReport" | "engineCompaction" | "stoppedBy"> {
+export interface Message extends Pick<import("../../shared/wire").WireMessage, "widget" | "app" | "fromApp" | "pointed" | "routedBy" | "quickModel" | "automation" | "publishedPage" | "template" | "sender" | "setupSuggestion" | "settingsCard" | "helperIntro" | "helperFollowup" | "setupOffer" | "savedSteps" | "setupChoices" | "setupChoicesPending" | "setupChoicesUpdating" | "setupRequest" | "relay" | "inbox" | "sentDirectly" | "doneWhen" | "checkBack" | "handoff" | "bugReport" | "engineCompaction" | "stoppedBy"> {
   id: string;
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "burst" | "digest" | "compaction" | "call" | "widget" | "app";
@@ -214,7 +214,7 @@ export interface ModelSelection {
   variant?: string;
 }
 
-export interface Task extends Pick<WireTask, "private" | "shared" | "sharedWith" | "setupRequest" | "inbox" | "openAsks" | "askedBy"> {
+export interface Task extends Pick<WireTask, "private" | "shared" | "sharedWith" | "setupRequest" | "inbox" | "openAsks" | "askedBy" | "handoff"> {
   waitingForTeammates?: boolean; sharedChat?: true;
   threadId: string;
   origin?: import("../../shared/wire").ForkOrigin;
@@ -434,8 +434,8 @@ export interface InstanceInfo extends InstanceEndpointInfo {
   };
   /** What one tiny test message through this AI showed, for its current sign-in; absent until one is sent. */
   aiTest?: import("../../shared/ai-ranking").AiTestState;
-  /** Why it didn't answer, in plain words, when it said (signed out, a used-up limit…). */
-  aiTestError?: string;
+  /** Why it didn't answer: in plain words when it said (signed out, a used-up limit…), and as a word from a fixed list. */
+  aiTestError?: string; aiTestReason?: import("../../shared/ai-ranking").AiTestReason;
   models: { default: string; options: Array<{ id: string; label: string; custom?: boolean; loaded?: boolean; provider?: string; variants?: ModelVariantOption[]; orgBlocked?: true; needsCliUpdate?: string; local?: import("../../shared/local-model").LocalModelFacts }> };
   capabilities?: {
     computerMcp?: boolean;
@@ -673,8 +673,8 @@ export type Action =
   | { type: "editMessage"; botId: string; messageId: string; text: string; threadId?: string; sendId?: string }
   | { type: "switchBranch"; botId: string; messageId: string; threadId?: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
-  | { type: "loadOlderMessages"; threadId: string }
-  | { type: "olderMessages"; threadId: string; generation: number; messages: Message[]; hasMore: boolean }
+  | { type: "loadOlderMessages"; threadId: string } | { type: "trimHeldMessages"; threadId: string; keepFromId?: string }
+  | { type: "olderMessages"; threadId: string; generation: number; before?: string; messages: Message[]; hasMore: boolean }
   | { type: "answerCard"; botId: string; messageId: string; answer: string; threadId?: string; groupId?: string }
   | { type: "answerCardFailed"; botId: string; messageId: string; answer: string; threadId?: string; groupId?: string }
   | { type: "dismissCard"; botId: string; messageId: string; threadId?: string; groupId?: string }
@@ -909,8 +909,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return state.loadingOlder[action.threadId]
         ? state
         : { ...state, loadingOlder: { ...state.loadingOlder, [action.threadId]: true } };
-    case "olderMessages":
-      return reduceOlderMessages(state, action);
+    case "olderMessages": return reduceOlderMessages(state, action);
+    case "trimHeldMessages": return reduceTrimHeldMessages(state, action);
     case "sectionDeleted":
       return {
         ...state, sections: action.sections,

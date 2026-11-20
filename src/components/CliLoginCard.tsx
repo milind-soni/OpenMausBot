@@ -13,6 +13,9 @@ export function cliLoginShown(requests: readonly CliLoginWire[], now: number): C
   return requests.find((request) => request.expiresAt > now) ?? null;
 }
 
+/** Above Settings and every dialog: a terminal is waiting on this one click. */
+export const CLI_LOGIN_LAYER = "z-[100]";
+
 function useWaitingCliLogins(): [CliLoginWire[], (id: string) => void] {
   const [requests, setRequests] = useState<CliLoginWire[]>([]);
   useEffect(() => {
@@ -57,7 +60,7 @@ export function CliLoginPrompt() {
     }
   };
   const chatOnly = !request.scopes.includes("admin");
-  return <NoticeCard titleId="cli-login-title" notice="cli-login" icon={TerminalSquare} title={t("cliLogin.title")}
+  return <NoticeCard titleId="cli-login-title" notice="cli-login" layer={CLI_LOGIN_LAYER} icon={TerminalSquare} title={t("cliLogin.title")}
     dismissLabel={t("cliLogin.deny")} onDismiss={() => void answer(false)}>
     <p className="mt-1 text-[13px] text-ink-secondary">
       {request.local ? t("cliLogin.bodyHere") : t("cliLogin.bodyElsewhere", { source: request.source })}

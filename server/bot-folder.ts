@@ -23,10 +23,11 @@ export function soulHash(soul: string): string {
   return createHash("sha256").update(soul, "utf8").digest("hex");
 }
 
-/** Private modes: standing instructions can describe a person's work in detail. */
-export function writeSoulMirror(botId: string, soul: string): void {
+/** Private modes: standing instructions can describe a person's work in detail. `durable: false` skips the disk sync for
+ * a mirror of text that is already saved with the bot: a power loss can then leave the file empty, which reads as drift. */
+export function writeSoulMirror(botId: string, soul: string, durable = true): void {
   mkdirSync(botFolder(botId), { recursive: true, mode: 0o700 });
-  writeFileAtomic(soulFile(botId), soul, { mode: 0o600 });
+  writeFileAtomic(soulFile(botId), soul, { mode: 0o600, durable });
 }
 
 export type SoulDrift = { drift: false } | { drift: true; fileText: string };

@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, GripVertical, MoreHorizontal, Share2, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent, type MouseEvent } from "react";
 
 import { cn } from "@/lib/cn";
@@ -21,6 +21,7 @@ export function SidebarSectionHeader({
   onDragEnd,
   onMove,
   onDelete,
+  onShare,
   onContextMenu,
   line = false,
   onMenu,
@@ -40,6 +41,7 @@ export function SidebarSectionHeader({
   onDragEnd?: () => void;
   onMove?: (direction: -1 | 1) => void;
   onDelete?: () => void;
+  onShare?: () => void;
   onContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
   line?: boolean;
   onMenu?: (button: HTMLButtonElement) => void;
@@ -154,6 +156,17 @@ export function SidebarSectionHeader({
           </span>
           {attentionLabel && <span className="sr-only">{attentionLabel}</span>}
         </div>
+      )}
+      {onShare && !naming && (
+        <button
+          type="button"
+          onClick={onShare}
+          aria-label={t("template.shareDepartment", { name })}
+          title={t("template.shareDepartment", { name })}
+          className="flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+        >
+          <Share2 size={13} aria-hidden="true" />
+        </button>
       )}
       {onDelete && !naming && (
         <button

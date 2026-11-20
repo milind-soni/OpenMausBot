@@ -27,7 +27,8 @@ export function homeScreenText(view: HomeView | null, now = Date.now()): { title
   const name = view?.name ?? null;
   const named = (plain: LocaleKey, withName: LocaleKey) => (name ? t(withName, { name }) : t(plain));
   if (view?.screen === "setup") return { title: named("homeScreen.setup", "homeScreen.setupNamed"), body: t(view.slow ? "cloudHome.slow" : "homeScreen.setupBody"), reason: null, action: null, busy: true };
-  if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), reason: view.cause && Object.hasOwn(UNREACHABLE, view.cause) ? t(UNREACHABLE[view.cause]!) : view.reason ?? null, action: "retry", busy: false };
+  if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), action: "retry", busy: false,
+    reason: view.cause === "network" && view.host ? t("homeScreen.offlineNetwork", { host: view.host }) : view.cause && Object.hasOwn(UNREACHABLE, view.cause) ? t(UNREACHABLE[view.cause]!) : view.reason ?? null };
   if (view?.screen === "signin") return { title: named("homeScreen.signIn", "homeScreen.signInNamed"), body: t(view.other ? "homeScreen.signInOther" : "homeScreen.signInEnded"), reason: null, action: "sign-in", busy: false };
   if (view?.screen === "plan" && view.member && view.machine !== "failed") return { title: named("homeScreen.plan", "homeScreen.planNamed"), body: t("cloudHome.stoppedMember"), reason: null, action: null, busy: false };
   if (view?.screen === "plan") return { title: named("homeScreen.plan", "homeScreen.planNamed"), body: t(MACHINE[view.machine] ?? "cloudHome.failed"), reason: null, action: view.machine === "failed" ? null : "manage", busy: false };

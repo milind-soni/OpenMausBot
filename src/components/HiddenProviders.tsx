@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { api, useStore } from "@/state/store";
+import { useShowInstances } from "@/state/use-show-instances";
 import { t } from "@/lib/i18n";
 import { InstanceProviderMark } from "./ProviderIcons";
 import { SettingsMark } from "./SettingsPrimitives";
@@ -21,18 +22,18 @@ export function useHiddenProviders(): HiddenProvider[] {
       .catch(() => {});
     return () => { alive = false; };
   }, [state.instances]);
-  return hidden;
+  return useMemo(() => hidden.filter((entry) => !state.instances.some((instance) => instance.instanceId === entry.instanceId)), [hidden, state.instances]);
 }
 
 function useUnhide() {
-  const { refreshInstances } = useStore();
+  const showInstances = useShowInstances();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const unhide = (instanceId: string) => {
     setBusy(instanceId);
     setError(null);
     api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify({ hidden: false }) })
-      .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
+      .then((answer) => showInstances(answer).catch(() => {}))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(null));
   };

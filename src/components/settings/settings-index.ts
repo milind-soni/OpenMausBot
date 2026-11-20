@@ -49,9 +49,9 @@ const notClient = (ctx: SettingsContext) => !ctx.client;
 const adminPage = (ctx: SettingsContext) => !ctx.client && !(ctx.team && !ctx.admin);
 /** A page Simple mode leaves out: its everyday rows show elsewhere in Simple (Overview, This app, Plan & billing). */
 const advancedOnly = (when: (ctx: SettingsContext) => boolean) => (ctx: SettingsContext) => ctx.advanced && when(ctx);
-/** Simple mode's nine entries: the place (Overview, Phone & devices, AI, Vault, Import & export), Your account
- * (Plan & billing) and This app (Appearance). Advanced adds You and your bots, Desktops & browser, Spending, Data and General. */
-export const ADVANCED_PAGES: readonly SettingsPageId[] = ["bots", "desktops", "usage", "data", "general"];
+/** Simple mode's ten entries: the place (Overview, Phone & devices, AI, Vault, Spending, Import & export), Your account
+ * (Plan & billing) and This app (Appearance). Advanced adds You and your bots, Desktops & browser, Data and General. */
+export const ADVANCED_PAGES: readonly SettingsPageId[] = ["bots", "desktops", "data", "general"];
 
 export const SETTINGS_PAGES: readonly SettingsPage[] = [
   { id: "overview", owner: "place", labelKey: "settings.page.overview", synonyms: ["overview", "place", "status", "version", "domain", "address", "sidebar"], when: () => true },
@@ -65,7 +65,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     synonyms: ["bot desktops", "computer", "desktop", "desktops", "browser", "built-in browser", "proxy", "socks5", "private desktop", "sandbox", "docker", "podman", "container", "vps", "own server", "cloud desktops"] },
   { id: "vault", owner: "place", labelKey: "settings.section.vault", icon: LockKeyhole, when: notClient,
     synonyms: ["vault", "password", "passwords", "login", "logins", "secrets", "1password", "2fa"] },
-  { id: "usage", owner: "place", labelKey: "settings.page.spending", icon: Coins, when: advancedOnly(adminPage),
+  { id: "usage", owner: "place", labelKey: "settings.page.spending", icon: Coins, when: adminPage,
     synonyms: ["spending", "usage", "cost", "costs", "tokens", "money", "runs", "export csv"] },
   { id: "transfer", owner: "place", labelKey: "settings.page.importExport", icon: ArrowLeftRight, when: adminPage,
     synonyms: ["import", "export", "backup", "backups", "restore", "grok", "grok bot", "move from", "bring"] },

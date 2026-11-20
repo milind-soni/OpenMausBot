@@ -58,22 +58,35 @@ export async function createConfiguredBot(
         throw new Error(t("newBot.threadApprovalNotGranted"));
       }
     }
-    for (const [path, text] of Object.entries(template.memory)) {
-      if (preset?.notes.includes(path)) continue;
-      await request(`/api/bots/${bot.id}/memory/file`, {
-        method: "PUT", body: JSON.stringify({ path, text }),
-      });
-    }
-    for (const skill of template.skills) {
-      if (preset?.skills.includes(skill.name)) continue;
-      await request(`/api/bots/${bot.id}/skill-template`, { method: "POST", body: JSON.stringify(skill) });
-    }
-    for (const routine of template.routines) {
-      const result = await request<{ routine: Routine }>("/api/routines", {
-        method: "POST", body: JSON.stringify({ ...routine, botId: bot.id, enabled: false }),
-      });
-      routines.push({ id: result.routine.id, enabled: routine.enabled !== false });
-    }
+    const botId = bot.id;
+    // Memory, skills and routines are separate stores on the server: each kind is written in its own order, the three
+    // side by side. Every request has answered before a failure is reported, so cleanup sees each routine that was made.
+    const setup = await Promise.allSettled([
+      (async () => {
+        for (const [path, text] of Object.entries(template.memory)) {
+          if (preset?.notes.includes(path)) continue;
+          await request(`/api/bots/${botId}/memory/file`, {
+            method: "PUT", body: JSON.stringify({ path, text }),
+          });
+        }
+      })(),
+      (async () => {
+        for (const skill of template.skills) {
+          if (preset?.skills.includes(skill.name)) continue;
+          await request(`/api/bots/${botId}/skill-template`, { method: "POST", body: JSON.stringify(skill) });
+        }
+      })(),
+      (async () => {
+        for (const routine of template.routines) {
+          const result = await request<{ routine: Routine }>("/api/routines", {
+            method: "POST", body: JSON.stringify({ ...routine, botId, enabled: false }),
+          });
+          routines.push({ id: result.routine.id, enabled: routine.enabled !== false });
+        }
+      })(),
+    ]);
+    const failed = setup.find((step) => step.status === "rejected");
+    if (failed) throw failed.reason;
   } catch (error) {
     const cleanup: string[] = [];
     for (const routine of routines) {
@@ -96,9 +109,10 @@ export async function createConfiguredBot(
       warnings.push(t("newBot.warning.chiefOfStaff", { error: error instanceof Error ? error.message : String(error) }));
     }
   }
-  for (const routine of routines.filter(routine => routine.enabled)) {
-    try { await request(`/api/routines/${routine.id}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) }); }
-    catch (error) { warnings.push(t("newBot.warning.routine", { error: error instanceof Error ? error.message : String(error) })); }
+  const switchedOn = await Promise.allSettled(routines.filter(routine => routine.enabled).map(routine =>
+    request(`/api/routines/${routine.id}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) })));
+  for (const outcome of switchedOn) {
+    if (outcome.status === "rejected") warnings.push(t("newBot.warning.routine", { error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason) }));
   }
   return { bot, warnings, ...(response.paused ? { paused: true as const } : {}) };
 }

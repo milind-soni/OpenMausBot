@@ -10,8 +10,9 @@ sent.
   sent.
 - Autocapture, pageviews, surveys and feature flags are off. Events come only from the calls listed on this page, and
   switching analytics back on sends no event of its own.
-- Every event carries `app_version` (for example `0.1.112`) and `surface`: `local` for the desktop app's own window,
-  `server` for a page a server serves (MausBot Cloud, a self-hosted server, or the app in a browser).
+- Every event carries `app_version` (for example `0.1.112`), `surface`: `local` for the desktop app's own window,
+  `server` for a page a server serves (MausBot Cloud, a self-hosted server, or the app in a browser), and `platform`:
+  `desktop` for a page the desktop app shows, `browser` for a page a browser shows.
 - PostHog adds its standard device facts to every event: operating system, browser and its version, device type,
   screen and window size, language and time zone. Like any server, PostHog sees the IP address a request comes from.
 - Events are tied to a random id that PostHog keeps in the page's storage. Nothing ties them to you: the app never sends
@@ -20,7 +21,7 @@ sent.
 ## Turning it off
 
 **Settings → General → Usage analytics.** When it is off, nothing loads and nothing is sent: no events, no daily
-snapshot, and none of the snapshot's requests.
+snapshot, none of the snapshot's requests, and none of the desktop app's launch events.
 
 The desktop app keeps the switch for this computer's page itself, so it holds whichever port the app serves that page on
 (it moves to another when its usual one is taken). It is read before anything loads, and before any email is tied to
@@ -55,6 +56,7 @@ Properties are counts, `true` or `false`, or words from fixed lists in the app's
 | App | The 24 apps Connected apps lists by default: `slack`, `github`, `gmail`, `googlecalendar`, `googlesheets`, `googledocs`, `googledrive`, `notion`, `linear`, `sentry`, `posthog`, `discord`, `twitter`, `reddit`, `zapier`, `hubspot`, `salesforce`, `jira`, `asana`, `trello`, `dropbox`, `airtable`, `figma`, `stripe`. Every other app is `other`. |
 | Starting role | `assistant`, `inbox`, `research`, `coder`, `community`, `ops` |
 | Cloud plan | `starter`, `personal`, `pro`, `max` |
+| Test failure | `signed_out`, `timeout`, `empty` (it answered with nothing), `credits`, `usage_limit`, `rate_limit`, `overloaded`, `server`, `tool_schema`, `tool_count`, `model_no_route`, `refused`, `other` |
 
 An engine is named by the kind of engine it is, never by the account or endpoint it runs on: two Claude accounts both
 report `claude`. A page that may not list the engines (a member's, a Cloud guest's or a paired device's) names the
@@ -111,7 +113,7 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `phone_paired` | true/false | Either count above is more than zero |
 | `members` | count | People signed in to this server with an email, other than you |
 | `cloud_home` | true/false | This server is a MausBot Cloud |
-| `cloud_plan` | `starter`, `personal`, `pro`, `max`, `other`, `none`, `unknown` | The Cloud plan: `none` when free or signed out, `unknown` when the app cannot tell |
+| `cloud_plan` | `starter`, `personal`, `pro`, `max`, `other`, `none`, `unknown` | The Cloud plan: `none` when free or signed out. While the desktop app's sign-in cannot be checked (offline, expired, signing in again), the plan it last checked, else `none`. `unknown` when the app cannot tell; the snapshot waits up to half a minute while the desktop app is still reading its saved sign-in. Left out on a page that has no way to ask: a server that is not your MausBot Cloud, or the desktop app connected to another server |
 | `cloud_trial` | true/false | A Cloud trial is running |
 | `edition` | `oss`, `enterprise` | The edition |
 | `org_managed` | true/false | An organisation manages this desktop |
@@ -128,6 +130,9 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 | `app_opened` | Each time this app page starts with analytics on | `platform`: `desktop`, `browser` |
 | `app_active` | Once a day you use the app: when this app page starts, comes into view or is focused, or when a check every ten minutes finds a new day while the page is in view and focused. At most once per day by your computer's date for each app page, and never while the page is hidden | `platform`: `desktop`, `browser`; `mode`: `simple`, `advanced`, the look this app page is in when it counts the day |
 | `onboarding_step` | A first-run screen is shown | `step`: `meet`, `chief`; `replay`: true/false |
+| `connect_ai` | Connecting an AI takes a step in a first-run flow: the first screen, its Connect an AI dialog, the one MausBot's chat opens, the one on the clean workspace's line, or a new Cloud's welcome. Never from Settings | `step`: `opened` (the flow asked for an AI, or found one already working), `dialog_opened` (the Connect an AI dialog opened), `chosen` (you picked an AI: its button, its setup or its row), `sign_in_started` (a sign-in to it began), `test_started`, `test_ok`, `test_failed` (the tiny test message through it), `later` (Set up later on the first screen, Skip on a Cloud's welcome); `place`: `meet`, `chat`, `home_line`, `cloud_welcome`; `engine`: engine, when one is named; `ai_ready`: true/false, with `opened`; `reason`: why the test failed, a test failure word, with `test_failed`, and with `opened` when the AI found had failed its last test; `seconds`: how long the test took, with `test_ok` and `test_failed` |
+| `app_load` | This app page has its server, its data and its settings, or still waits for one of them half a minute after it started, or shows its error screen. Once per page start | `stage`: `ready`, `slow`, `error`; `seconds`: since the page started, with `ready`; `onboarded`: true/false, the first-run tour was finished, with `ready`; `waiting`: `server`, `data`, `settings`, with `slow` |
+| `sign_in_gate` | The desktop app's own page opens on its sign-in page instead of the app | `reason`: `signed_out`, `session_ended`, `team_left`, `service_trust` |
 | `onboarding_completed` | The first run ends in the chat | `reason`: `completed`; `at`: the screen it ended on; `replay`: true/false |
 | `setup_import_applied` | You bring in the skills and MCP servers found from other AI tools on this computer, in Settings → Import & export | `skills`, `tools`: how many were added. Never their names or where they came from |
 | `onboarding_cloud` | You tap Try Cloud under MausBot's first messages, which opens Add a Cloud | `action`: `start_trial` |
@@ -173,3 +178,29 @@ use their own Boat key, and how many bots run on cloud computers, without sendin
 ElevenLabs, Fish Audio), and for a model provider key whose test passed right after saving. A key nothing checks before
 it is used (OpenCode, OpenAI images, an added OpenAI-compatible server, an xAI key from a chat request) reports
 `unverified`.
+
+## The desktop app's launch
+
+The desktop app itself (not its page) sends one `desktop_launch` event for each stage a launch reaches, so launches
+that never get as far as a page are counted too. Its first stage on a computer that never ran the app is the install
+count.
+
+- It follows the same switch. With the switch off, it sends nothing. While no choice has been made, it sends on the
+  computer's first launch, and on a later launch only when the launch before ran a version whose page keeps a switch
+  turned off in the page's own storage (0.1.113 or later), so that switch holds here too.
+- Each launch makes a random id that is kept nowhere and used for nothing else: it ties one launch's stages together,
+  never two launches, never a page's events, never you. PostHog keeps no person for it.
+- Only the packaged app sends, never a development build.
+
+| Stage | When | Properties besides `stage` |
+| --- | --- | --- |
+| `started` | The app starts | `hidden`: true/false, started at login out of sight |
+| `server_spawned` | The app's own server process started | |
+| `server_ready` | That server answers | `reason`: `relay`, the desktop app connected to another server |
+| `server_failed` | The server did not answer on any port | `reason`: `timeout`, `exited`, `foreign-owner` (another program answers on the port), `stuck-child` |
+| `window_shown` | The window replaced the loading screen | `reason`: `painted` (the app drew its first screen), `crashed`, `timeout` (ten seconds passed first), `shown`, `hidden` (the loading screen was put away in the tray, so the window stays out of sight) |
+| `page_load_failed` | The window could not load the app's own page | |
+| `page_crashed` | The window's page crashed | `reason`: `crashed`, `oom`, `killed`, `abnormal-exit`, `launch-failed`, `integrity-failure` |
+
+Every stage also carries `ms` (milliseconds since the app started), `first_launch` (true/false), `updated` (true/false,
+the first launch of a new version), `app_version`, `platform`: `desktop`, `surface`: `main`, and the operating system.
