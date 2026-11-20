@@ -15,7 +15,6 @@ import { setShowRunCard, showRunCard } from "./run-card-preferences";
 import { readSendKey, setSendKey } from "./send-key";
 import { loadPinnedCircles, loadUniversalPins, setPinnedCircles, setUniversalPins } from "./sidebar-preferences";
 import { applySkinChoice, readSkinChoice } from "./skins";
-import { setShowThreads, showThreads } from "./thread-preferences";
 import { readColorUserBubbles, setColorUserBubbles } from "./user-bubble-preference";
 import { latestWebPanels, setWebPanels } from "./web-panel-preferences";
 import { newWebPanelId, validateWebPanel, type WebPanel } from "./web-panels";
@@ -43,7 +42,6 @@ const PREFS: { [I in WindowPrefId]: Pref<I> } = {
   "general.notificationSounds": { read: () => notificationSoundsEnabled(), write: (on) => setNotificationSounds(on) },
   "appearance.userBubbles": { read: () => readColorUserBubbles(), write: (on) => setColorUserBubbles(on) },
   "appearance.runCard": { read: () => showRunCard(), write: (on) => setShowRunCard(on) },
-  "appearance.showThreads": { read: () => showThreads(), write: (on) => setShowThreads(on) },
   "appearance.pinnedCircles": { read: () => loadPinnedCircles(), write: (on) => setPinnedCircles(on) },
   "appearance.universalPins": { read: () => loadUniversalPins(), write: (on) => setUniversalPins(on) },
   "appearance.pinnedPages": {

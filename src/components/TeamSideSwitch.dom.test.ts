@@ -302,7 +302,7 @@ describe("who can see it, by the message box", () => {
   it("opens a new person's page on Just me, their own chat with the bot on screen made as a click on it makes it", async () => {
     box(acme({ bots: [bot({ tasks: [MAIN] }), MINE] }), { bot: bot({ tasks: [MAIN] }) });
     await settle();
-    expect(fixture.calls).toEqual([["/api/bots/scout/tasks", { method: "POST", body: "{}" }]]);
+    expect(fixture.calls).toEqual([["/api/bots/scout/tasks?main=1", { method: "POST", body: "{}" }]]);
     expect(teamSide(), "Just me until they choose Team").toBe("me");
   });
 

@@ -1,3 +1,4 @@
+import { DatabaseSync } from "node:sqlite";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -250,7 +251,10 @@ describe("a read-and-draft run", () => {
     expect(reached.filter(([tool]) => tool === "GMAIL_SEND_EMAIL" || tool === "SLACK_SEND_MESSAGE")).toEqual([]);
     expect(reached.filter(([tool]) => tool === "GMAIL_CREATE_EMAIL_DRAFT")).toEqual([["GMAIL_CREATE_EMAIL_DRAFT", "ada@example.test"]]);
     const done = (await api("GET", "/api/routines")).runs.find((one: any) => one.id === run.id);
-    const transcript = (await api("GET", `/api/threads/${done.threadId}/messages?limit=200`)).messages as any[];
+    await api("GET", `/api/threads/${done.threadId}/messages?limit=200`, undefined, 404);
+    const db = new DatabaseSync(join(fixture.info.dataDir, "messages.db"), { readOnly: true });
+    const transcript = db.prepare("SELECT json FROM messages WHERE thread_id = ?").all(done.threadId).map(row => JSON.parse(String(row.json)));
+    db.close();
     expect(transcript.some((message) => message.kind === "options" || message.card)).toBe(false);
     const month = new Date().toISOString().slice(0, 7);
     await expect.poll(() => existsSync(join(fixture.info.dataDir, "decisions", `${month}.ndjson`)), { timeout: 5_000 }).toBe(true);

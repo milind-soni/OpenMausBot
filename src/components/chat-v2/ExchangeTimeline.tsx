@@ -27,9 +27,10 @@ export function ExchangeTimeline({ items, botId, focusId, unreadId, render }: {
   let previousDay: number | undefined;
   for (let i = 0; i < items.length; i++) {
     const item = items[i]!;
-    if (item.kind === "message") {
-      const day = localDay(item.message.at);
-      if (day !== previousDay) rows.push(<DaySeparator key={`day:${item.message.id}`} at={item.message.at} today={today} />);
+    const first = item.kind === "message" ? item.message : item.messages[0];
+    if (first) {
+      const day = localDay(first.at);
+      if (day !== previousDay) rows.push(<DaySeparator key={`day:${first.id}`} at={first.at} today={today} />);
       previousDay = day;
     }
     const peer = exchange(item, botId);

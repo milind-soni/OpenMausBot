@@ -2750,7 +2750,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ? botPatchQueue.flush(action.botId)
             : Promise.resolve();
           void ready.then(() => api<{ bot: Bot }>(action.type === "newTask"
-            ? `/api/bots/${action.botId}/tasks`
+            ? `/api/bots/${action.botId}/tasks?main=1`
             : `/api/bots/${action.botId}/tasks/${action.threadId}${action.whole ? "" : `?messages=${warm ? 0 : SWITCH_MESSAGE_COUNT}${compact ? "&view=chat" : ""}`}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId, cwd: action.cwd } : {}) }))
             .then((r) => {
               if (action.type === "newTask") { settle(null); action.onCreated?.(); }

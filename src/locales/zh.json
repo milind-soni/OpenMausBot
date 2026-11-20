@@ -309,6 +309,7 @@
   "server.notify.question": "{who} 有一个问题",
   "server.notify.signIn": "{who} 需要你登录 {site}",
   "server.notify.signInWebsite": "{who} 需要你登录一个网站",
+  "server.notify.brief": "你的简报",
   "server.notify.routineFailed": "{who} 的例行任务失败了",
   "server.notify.routineDeferred": "{who} 的例行任务正在等待",
   "server.notify.turnFailed": "{who} 无法启动",

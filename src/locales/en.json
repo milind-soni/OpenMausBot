@@ -335,6 +335,7 @@
   "server.notify.signInWebsite": "{who} needs you to sign in to a website",
   "server.notify.secret": "{who} needs your {label}",
   "server.notify.connect": "{who} needs you to connect {app}",
+  "server.notify.brief": "Your brief",
   "server.notify.routineFailed": "{who}'s routine failed",
   "server.notify.routineDeferred": "{who}'s routine is waiting",
   "server.notify.turnFailed": "{who} couldn't start",

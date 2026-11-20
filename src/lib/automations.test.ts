@@ -4,7 +4,7 @@ import { setLocale } from "@/lib/i18n";
 import type { Routine, RoutineRun } from "@/lib/routines";
 import type { WebhookTrigger } from "@/lib/webhooks";
 import {
-  automationSentence, automationsFrom, automationStatus, doesPhrase, lastReceived, lastWhen, nextWhen, orderAutomations, plainWhen, runAwaitingAnswer, runLine, sourcePhrase, statusLine,
+  automationRunThread, automationSentence, automationsFrom, automationStatus, doesPhrase, lastReceived, lastWhen, nextWhen, orderAutomations, plainWhen, runAwaitingAnswer, runLine, sourcePhrase, statusLine,
   webhookCalls, type Automation,
 } from "./automations";
 import type { WebhookAttempt } from "@/lib/webhooks";
@@ -259,4 +259,11 @@ describe("order and the grey line", () => {
   it("says a run that found nothing to tell found nothing new, whatever its last words were", () => {
     expect(runLine(run("completed", at(0, 9, 2), { output: "Checked 14 emails.\nNOTHING NEW", report: { state: "quiet" } }), NOW)).toEqual({ when: "Today 9:02 AM", mark: "✓", text: "Nothing new" });
   });
+});
+
+it("opens the report chat for a run whose execution is private", () => {
+  const pending = run("waiting", NOW, { threadId: "background", resultsThreadId: "chat" });
+  expect(automationRunThread([{ threadId: "chat" }], pending)).toBe("chat");
+  expect(automationRunThread([{ threadId: "background" }], pending)).toBe("background");
+  expect(automationRunThread([{ threadId: "another-chat" }], pending)).toBeUndefined();
 });

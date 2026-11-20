@@ -127,7 +127,7 @@ it("remembers at once, learns only what the person said, forgets everywhere, and
     expect(routine.results[0]).toContain("It applied at once");
     expect(routine.results[0]).toContain("weekdays at 9:00 India time");
     expect(routine.results[0]).not.toMatch(/Asia\/(?:Calcutta|Kolkata)/);
-    expect(routine.results[0]).toMatch(/saying the time zone as "India time", never as a zone id; where its results will appear \(here in this chat\); what each run covers; and that the first run is .+ at 9:00 AM India time\.$/);
+    expect(routine.results[0]).toMatch(/saying the time zone as "India time", never as a zone id; where its results will appear \(in this bot’s chat with the person\); what each run covers; and that the first run is .+ at 9:00 AM India time\.$/);
 
     // 7. A tap-to-answer question does not hold the chat: typing something else is simply the next message.
     const asking = await turn(bot, "Book a table for 2 tonight at a good Italian place in Bangalore.", [

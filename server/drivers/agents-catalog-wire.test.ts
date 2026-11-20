@@ -117,7 +117,7 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+images": 60010,
   "skills+shared+voice+x+team+images+hosting": 71107,
   "default+hosting": 59808,
-  "default+tools-off": 53081,
+  "default+tools-off": 54242,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';

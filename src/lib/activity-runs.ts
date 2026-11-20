@@ -12,7 +12,7 @@ export type ActivityTranscriptItem =
 
 export type TranscriptItem =
   | ActivityTranscriptItem
-  | { kind: "turn"; id: string; turnId: string; label: string; messages: Message[] };
+  | { kind: "turn"; id: string; turnId: string; label: string; messages: Message[]; active?: boolean };
 
 export function statusActivity(message: Message): { kind: "recovery" | "notice" | "stopped"; text: string } | null {
   const tool = message.kind === "activity" ? message.tool : undefined;
@@ -173,6 +173,50 @@ export function groupActivityRuns(messages: Message[]): ActivityTranscriptItem[]
 
 export function groupTranscript(messages: Message[]): TranscriptItem[] {
   return group(messages, true);
+}
+
+export function groupChatWork(messages: Message[], busy: boolean): TranscriptItem[] {
+  const items: TranscriptItem[] = [];
+  const foldedTurns = new Set<string>();
+  const terminalByTurn = new Map<string, Message>();
+  const latestRequest = messages.findLast(message => message.role === "user");
+  const latestTurn = messages.findLast(message => message.turnId && (!latestRequest || message.at >= latestRequest.at))?.turnId;
+  const latestReply = new Map<string, Message>();
+  for (const message of messages) {
+    const settledId = message.digest?.turnId ?? (message.turnTerminal ? message.turnId : undefined);
+    if (settledId) {
+      const previous = terminalByTurn.get(settledId);
+      if (!previous?.turnTerminal || message.turnTerminal) terminalByTurn.set(settledId, message);
+    }
+    if (message.turnId && message.role === "bot" && message.kind === "text") latestReply.set(message.turnId, message);
+  }
+  let request: Message | undefined;
+  for (const message of messages) {
+    if (message.reaction || message.kind === "digest") continue;
+    if (message.role === "user") request = message;
+    const terminal = message.turnId ? terminalByTurn.get(message.turnId) : undefined;
+    const active = busy && request === latestRequest && !terminal && message.turnId === latestTurn;
+    const narration = message.turnId && isNarration(message, message.turnId) && !message.attachments?.length &&
+      !message.setupOffer && !message.setupSuggestion && !message.settingsCard && !message.peerAsk && !message.from &&
+      (terminal?.turnTerminal || latestReply.get(message.turnId) !== message);
+    const tool = !message.card && (isToolStep(message) || (message.kind === "activity" && message.tool && message.comm &&
+      !isStatusActivity(message) && failedTurnCause(message.tool.name) === null));
+    if (!tool && !narration) {
+      items.push({ kind: "message", message });
+      continue;
+    }
+    const turnId = message.turnId ?? request?.id ?? "unassigned";
+    let turn = items.at(-1);
+    if (turn?.kind !== "turn" || turn.turnId !== turnId || localDay(turn.messages[0]!.at) !== localDay(message.at)) {
+      const duration = terminal?.digest?.durationMs ?? (terminal?.at ?? message.at) - (request?.at ?? message.at);
+      const id = foldedTurns.has(turnId) ? `work-step:${message.id}` : `work:${turnId}`;
+      foldedTurns.add(turnId);
+      turn = { kind: "turn", id, turnId, active, label: active ? t("chat.activity.working") : workedLabel(duration), messages: [] };
+      items.push(turn);
+    }
+    turn.messages.push(message);
+  }
+  return items;
 }
 
 const MAX_NAMES = 3;

@@ -1,6 +1,8 @@
 // The one place tests learn where a data folder keeps its bots, rooms and their threads.
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import type { Message } from "../store.ts";
 
 /** A bot as persisted, with its threads under `tasks`. */
 export type StoredBot = any;
@@ -46,4 +48,15 @@ export function storedThread(dataDir: string, ownerId: string, threadId: string)
 export function writeRegistry(dataDir: string, registry: Partial<StoredRegistry>): void {
   if (registry.bots !== undefined) writeFileSync(join(dataDir, REGISTRY_FILES.bots), JSON.stringify(registry.bots), { mode: 0o600 });
   if (registry.rooms !== undefined) writeFileSync(join(dataDir, REGISTRY_FILES.rooms), JSON.stringify(registry.rooms), { mode: 0o600 });
+}
+
+/** Reads a fixture's saved rows, including threads the public API keeps private. */
+export function fixtureMessages(dataDir: string, threadId: string): Message[] {
+  const db = new DatabaseSync(join(dataDir, "messages.db"), { readOnly: true });
+  try {
+    return db.prepare("SELECT json FROM messages WHERE thread_id = ? ORDER BY at, rowid").all(threadId)
+      .map(row => JSON.parse(String(row.json)) as Message);
+  } finally {
+    db.close();
+  }
 }

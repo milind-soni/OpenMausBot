@@ -166,6 +166,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
 
   /** An option card is copied whole and answered through its request; any other card the run waits on is named. */
   const writeCopy = (line: Extract<Waiting, { kind: "card" }>, target: { bot: BotRecord; threadId: string }) => {
+    if (copyOf(line.run, target.threadId, line.messageId)) return;
     const original = store.messagesFor(line.threadId).find((message) => message.id === line.messageId);
     const named = original ? waitingCardText(original, deps.threadLanguage?.(target.threadId)) : null;
     if (!original || (!named && !liveCardKind(original.card))) return;
@@ -212,7 +213,8 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     });
     deps.routines()?.noteReport(run.id, { state: "posted", threadId: target.threadId, messageId: posted.id });
     deps.wrote(target.bot, target.threadId);
-    if (line.kind === "failure" || reply.question !== undefined || routineRunNeedsReview(run)) store.patchTask(target.bot.id, target.threadId, { unread: true });
+    const requestedBy = run.triggerSource === "schedule" && run.sourceThreadId ? store.botByThread(run.sourceThreadId) : undefined;
+    if ((requestedBy && requestedBy.id !== target.bot.id) || line.kind === "failure" || reply.question !== undefined || routineRunNeedsReview(run)) store.patchTask(target.bot.id, target.threadId, { unread: true });
     if (line.kind === "reply" && !recovered) deps.notify(reply.question ? "question" : "done", target.bot, target.threadId, `${run.routineName}: ${reply.question ?? reply.text}`);
     return true;
   };

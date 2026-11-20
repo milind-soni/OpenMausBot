@@ -18,6 +18,8 @@ export interface VisibilityHostDeps {
   team: boolean;
   audiencesFor(viewer: Viewer): ThreadAudiences | undefined;
   threadsReferencing(name: string): readonly string[];
+  showBotOpened?: boolean;
+  routineIntervention?(threadId: string, visible: VisibleSet): boolean;
 }
 
 export function createVisibilityHost(deps: VisibilityHostDeps) {
@@ -46,7 +48,8 @@ export function createVisibilityHost(deps: VisibilityHostDeps) {
     const key = viewer.kind === "all" ? (viewer.email === undefined ? "*" : `admin:${viewer.email.trim().toLowerCase()}`) : `member:${viewer.email?.trim().toLowerCase() ?? ""}`;
     let set = visibleSets.get(key);
     if (!set) {
-      set = new VisibleSet(store.bots, store.groups, viewer, threadOwner, deps.audiencesFor(viewer));
+      set = new VisibleSet(store.bots, store.groups, viewer, threadOwner, deps.audiencesFor(viewer),
+        { routineIntervention: deps.routineIntervention, showBotOpened: deps.showBotOpened });
       if (visibleSets.size >= 1_000) visibleSets.clear();
       visibleSets.set(key, set);
     }

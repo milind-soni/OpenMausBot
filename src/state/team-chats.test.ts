@@ -54,7 +54,7 @@ it("with none yet, a click makes one through the server's new-conversation route
   openBot(dispatch, bot, false);
   openBot(dispatch, bot, false);
   await settle();
-  expect(server.calls).toEqual([["/api/bots/scout/tasks", { method: "POST", body: "{}" }]]);
+  expect(server.calls).toEqual([["/api/bots/scout/tasks?main=1", { method: "POST", body: "{}" }]]);
   expect(dispatch.mock.calls.map(([action]) => action)).toEqual([{ type: "taskSwitched", bot: server.answer && (server.answer as { bot: unknown }).bot }, { type: "select", id: "scout" }]);
   expect(stored.size, "nothing kept in this device's storage: the server says whose it is").toBe(0);
   dispatch.mockClear();

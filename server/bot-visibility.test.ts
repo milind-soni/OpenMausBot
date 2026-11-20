@@ -1,4 +1,7 @@
+import { IncomingMessage } from "node:http";
+import { Socket } from "node:net";
 import { describe, expect, it } from "vitest";
+import { hiddenThreadRefusal } from "./host/team-private.ts";
 
 import {
   audienceWithin,
@@ -515,4 +518,52 @@ describe("a Team Cloud's audiences", () => {
     expect(pathSubject("/api/bots/order")).toBeNull();
     expect(pathSubject("/api/bots/order-1/tasks")).toEqual({ kind: "bot", id: "order-1" });
   });
+});
+
+it("opens a routine transcript during manual intervention and still enforces its audience", () => {
+  const bot = { id: "bot", threadId: "chat", tasks: [{ threadId: "chat" }, { threadId: "run", routineRunId: "routine" }] };
+  let waiting = false;
+  const intervention = () => waiting;
+  const owner = new VisibleSet([bot], [], SEES_EVERYTHING, undefined, undefined, { routineIntervention: intervention });
+  expect(owner.thread("run")).toBe(false);
+  waiting = true;
+  expect(owner.thread("run")).toBe(true);
+  const hidden = new VisibleSet([{ ...bot, visibility: { people: ["ada@example.test"] } }], [], BOB, undefined, undefined, { routineIntervention: intervention });
+  expect(hidden.thread("run")).toBe(false);
+  waiting = false;
+  expect(owner.hides("run")).toBe(true);
+});
+
+it("excludes hidden work from the visible bot's activity", () => {
+  const bot = { id: "bot", threadId: "chat", busy: true, activity: "working", tasks: [
+    { threadId: "chat", busy: false, activity: "idle" },
+    { threadId: "run", routineRunId: "routine", busy: true, activity: "working" },
+  ] };
+  const visible = new VisibleSet([bot], [{ id: "room", threadId: "old-room", memberIds: [] }], ADA);
+  expect(visible.thread("old-room")).toBe(true);
+  expect(memberBot(bot, visible)).toMatchObject({ busy: false, activity: "idle", tasks: [bot.tasks[0]] });
+  const idleRun = { ...bot, tasks: [bot.tasks[0]!, { ...bot.tasks[1]!, busy: false, activity: "idle" }] };
+  expect(memberBot(idleRun, visible)).toMatchObject({ busy: true, activity: "working", tasks: [bot.tasks[0]] });
+});
+
+it("lets a runtime use only the hidden conversation bound to its capability", () => {
+  const bot = { id: "bot", threadId: "chat", tasks: [
+    { threadId: "chat" }, { threadId: "background-a", routineRunId: "a" }, { threadId: "background-b", routineRunId: "b" },
+  ] };
+  const visible = new VisibleSet([bot], [], SEES_EVERYTHING);
+  const request = new IncomingMessage(new Socket());
+  const refusal = (threadId: string, own?: string) => hiddenThreadRefusal(request, "/api/internal/example",
+    new URLSearchParams({ threadId }), visible, () => undefined, own);
+  expect(refusal("background-a")).toBe("no such conversation");
+  expect(refusal("background-a", "background-a")).toBeNull();
+  expect(refusal("background-b", "background-a")).toBe("no such conversation");
+});
+
+it("preserves access to handoffs on shared servers while keeping routine execution private", () => {
+  const bot = { id: "bot", threadId: "chat", tasks: [
+    { threadId: "chat" }, { threadId: "handoff", openedBy: {} }, { threadId: "run", routineRunId: "routine" },
+  ] };
+  const visible = new VisibleSet([bot], [], SEES_EVERYTHING, undefined, undefined, { showBotOpened: true });
+  expect(visible.thread("handoff")).toBe(true);
+  expect(visible.thread("run")).toBe(false);
 });

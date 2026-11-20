@@ -30,7 +30,6 @@ import { SavedStepsRow } from "../../SavedStepsRow";
 import { Card, SettingRow, SettingsDisclosureRow, SettingsGroup, SettingsLinkRow, SettingsRows } from "../../SettingsPrimitives";
 import { DesktopKinds } from "../DesktopKinds";
 import { SkillsSection } from "../../SkillsSection";
-import { ThreadConcurrencySettings } from "../../ThreadConcurrencySettings";
 import { usePhonePlaceState } from "../phone-status";
 import { KeysPage } from "../../keys/KeysPage";
 import { BrowserProfilesRow, ExperimentalFeaturesRow, NewBotEffortRow } from "../../AppSettingsRows";
@@ -155,7 +154,6 @@ export function BotsPage() {
       <SettingsRows selectWidth={160}>
         <div data-settings-block="group-turns" className="contents"><RoomTurnTimeoutSettings /></div>
         <div data-settings-block="tool-time" className="contents"><McpCallTimeoutSettings /></div>
-        <ThreadConcurrencySettings />
         <div data-settings-block="keep-warm" className="contents"><CacheKeepWarmSettings /></div>
       </SettingsRows>
     </SettingsGroup>}

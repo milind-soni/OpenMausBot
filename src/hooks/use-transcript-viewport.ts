@@ -182,8 +182,10 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
   const newestId = messages.at(-1)?.id;
   const sentLast = Boolean(newestId?.startsWith("optimistic-"));
   useLayoutEffect(() => {
-    if (sentLast) setBottomFollow(true);
-  }, [newestId, sentLast, setBottomFollow]);
+    if (!sentLast) return;
+    setBottomFollow(true);
+    setTranscriptWindow(window => window.end === null ? window : { key: transcriptKey, start: tailStart, end: null });
+  }, [newestId, sentLast, setBottomFollow, transcriptKey, tailStart]);
 
   // A remembered row is put back before the first paint and held while late layout settles; any move of the reader's
   // own stops that.
@@ -221,7 +223,7 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
     if (!followRef.current) return noteLeftEnd();
     el.scrollTo({ top: el.scrollHeight });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- pinOn is the caller's dependency list
-  }, [transcriptKey, messages.length, ...pinOn]);
+  }, [transcriptKey, messages.length, sentLast ? newestId : null, transcriptWindow.end, ...pinOn]);
 
   // Shift scrollTop by the growth after commit (scroll anchoring is off here); a switch drops the capture.
   const preExpandHeight = useRef<{ key: string; height: number } | null>(null);

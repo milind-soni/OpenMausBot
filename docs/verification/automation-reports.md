@@ -2,10 +2,10 @@
 
 A run of a schedule, a Run now, a startup run, a webhook or an app event still
 works in its own hidden conversation with a fresh session. What it leaves in
-the chat it reports to (the bot's main chat unless the routine chose another):
+the chat it reports to:
 
 - **A result**: its last reply, once, as a normal bot message with a small
-  caption naming the automation and its time, and **See run** for the full run.
+  caption naming the automation and its time.
 - **Nothing**, when its last line is `NOTHING NEW`: no message, no unread dot,
   no notification. The trigger card, Automations and Today say "Nothing new"
   or leave it out.
@@ -19,8 +19,8 @@ the chat it reports to (the bot's main chat unless the routine chose another):
   conversation; both cards then show the same answer.
 - **One line naming a sign-in, connection or credential** the run waits on
   ("I need you to sign in to example.com."), marked "needs you" until that card
-  is settled; **See run** opens it. A sign-in can also be finished from the
-  bot's Computer panel, which shows the same request.
+  is settled. **See run** opens the conversation while the card needs
+  attention. The bot's Computer panel also shows sign-in requests.
 - **One line when a run fails**, once per run of failures, with what to fix.
 
 A file the run linked in its reply opens from the chat it reported to, as it
@@ -31,11 +31,10 @@ Only a run working in a conversation of its own is told that only its last
 reply leaves it (`NOTHING NEW`, `NEEDS INPUT:`). A "when my limit resets"
 continuation works in the person's own chat and is not.
 
-Every run of a webhook or app-event automation reports into one
-"<name> · Results" chat of its own, on every home, so outside events never pile
-into a chat a person works in. On a Cloud home, a routine someone other than the
-owner wrote keeps its own results chat too, so no outside words reach the owner's
-other chats or a lent Mac.
+Local webhook and app-event reports go to the bot’s main chat. On a Cloud
+home, outside events keep a separate results chat. Private routines report in
+the person’s chat with the bot. On a local home, a scheduled routine keeps its
+explicit results chat when it still exists.
 
 ## The concurrency rule
 
@@ -89,9 +88,7 @@ that runs every minute, and the launcher follows five runs:
    launcher waits for that answer, then the run reports what it found.
 5. Run 5 finds nothing; the launcher pauses the automation.
 
-Write in the chat between runs: a report never lands inside your turn. Use
-**See run** on a report for the run's full conversation and **Back to
-results** to return. On Ctrl-C the launcher writes
+Write in the chat between runs: a report never lands inside your turn. On Ctrl-C the launcher writes
 `<logPath>.automation-reports.json` (the chat, the runs with their report
 states, the bots) and removes only its temporary data.
 
@@ -105,5 +102,3 @@ chat 1.8 seconds after it appeared:
 ![Run 4's question, copied into the chat and answerable there](evidence/automation-reports/question-in-chat.png)
 
 ![After five runs: two reports and the answered question; the quiet runs left nothing](evidence/automation-reports/after-five-runs.png)
-
-![See run: the run's own conversation, with Back to results](evidence/automation-reports/see-run.png)

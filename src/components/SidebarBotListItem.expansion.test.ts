@@ -60,15 +60,14 @@ function expectSoleRow(markup: string) {
 beforeEach(() => { fixture.slots = []; fixture.state.revealThread = null; forgetThreadDisclosuresForTests(); });
 
 describe("bot row expansion follows the visible thread tree", () => {
-  it("reveals a conversation in a multi-thread bot's sidebar list", () => {
+  it("keeps a single bot row when a background thread requests focus", () => {
     const candidate = { ...bot, tasks: [...bot.tasks!, { threadId: "older", title: "Older conversation", createdAt: 0 }] };
     expect(render(candidate)).not.toContain('data-sidebar-thread-row=');
     fixture.state.revealThread = { threadId: "older", nonce: 1 };
     render(candidate);
     fixture.effects.forEach(effect => effect());
     const markup = render(candidate);
-    expect(markup).toContain('aria-expanded="true" aria-label="Collapse Atlas threads"');
-    expect(markup).toContain('data-sidebar-thread-row="older"');
+    expectSoleRow(markup);
   });
 
   it.each([

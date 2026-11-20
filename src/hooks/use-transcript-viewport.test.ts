@@ -650,6 +650,13 @@ describe("following a reply and coming back to a conversation", () => {
     expect(scroller.scrollTop).toBe(scroller.bottom);
   });
 
+  it("scrolls to the bottom on a local send even when the message count is unchanged", () => {
+    const view = mount({ messages: rows(60) });
+    readUpTo(view, 300);
+    view.rerender({ messages: [...rows(59), { id: "optimistic-replacement", role: "user" }] });
+    expect(scroller.scrollTop).toBe(scroller.bottom);
+  });
+
   it("does not follow a message someone else sent while the reader is up the page", () => {
     const view = mount({ messages: rows(60) });
     readUpTo(view, 300);

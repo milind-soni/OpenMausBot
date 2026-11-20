@@ -1,7 +1,7 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it } from "vitest";
-import type { TranscriptItem } from "@/lib/activity-runs";
+import { groupChatWork, type TranscriptItem } from "@/lib/activity-runs";
 import { citationAttachment, createCitationTextSelector, serializeCitation } from "@/lib/citations";
 import { canEditTypedMessage } from "@/lib/transcript-derivations";
 import { ExchangeTimeline } from "./ExchangeTimeline";
@@ -66,4 +66,28 @@ it("keeps message actions hidden until interaction when a phone reply has a trac
   }));
   expect(html).toContain('data-testid="message-actions"');
   expect(html).not.toContain('data-shown="true"');
+});
+
+it("keeps one expandable work record through completion and leaves the answer visible", () => {
+  const request = { id: "question", role: "user", kind: "text", at: 1000 } as const;
+  const progress = { id: "progress", role: "bot", kind: "text", turnId: "turn", at: 1500 } as const;
+  const tool = { ...progress, id: "search", kind: "activity", at: 2000, tool: { name: "web_search", ok: true } } as const;
+  const answer = { ...progress, id: "answer", turnTerminal: true, at: 4000 };
+  expect(groupChatWork([request, progress, tool], true)[2]).toMatchObject({ id: "work:turn", active: true });
+  expect(groupChatWork([request, progress, tool, answer], false)).toEqual([
+    { kind: "message", message: request },
+    expect.objectContaining({ id: "work:turn", active: false, messages: [progress, tool], label: "Worked for 3s" }),
+    { kind: "message", message: answer },
+  ]);
+});
+
+it("keeps a question between its surrounding work steps", () => {
+  const before = { id: "before", role: "bot", kind: "activity", turnId: "turn", at: 1000, tool: { name: "search" } } as const;
+  const question = { id: "question", role: "bot", kind: "options", turnId: "turn", at: 2000 } as const;
+  const after = { ...before, id: "after", at: 3000 };
+  expect(groupChatWork([before, question, after], false)).toEqual([
+    expect.objectContaining({ kind: "turn", messages: [before] }),
+    { kind: "message", message: question },
+    expect.objectContaining({ kind: "turn", messages: [after] }),
+  ]);
 });

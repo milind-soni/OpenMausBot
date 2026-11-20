@@ -734,7 +734,7 @@ it("an outside event's runs all report into one conversation of their own, never
   const saved = ((await api("GET", "/api/bots", { token: owner })).body.bots as any[]).find((candidate) => candidate.id === bot.id);
   expect([saved.threadId, saved.mainThreadId]).not.toContain(first.resultsThreadId);
   expect(saved.tasks.find((task: any) => task.threadId === first.resultsThreadId)).toMatchObject({ title: "Shop orders · Results" });
-  for (const run of [first, second]) expect(saved.tasks.find((task: any) => task.threadId === run.threadId)).toMatchObject({ routineRunId: run.id });
+  for (const run of [first, second]) expect(saved.tasks.find((task: any) => task.threadId === run.threadId)).toBeUndefined();
   const reports = ((await api("GET", `/api/threads/${first.resultsThreadId}/messages`, { token: owner })).body.messages as any[]).filter((message) => message.automation);
   expect(reports.map((message) => [message.automation.runId, message.automation.trigger])).toEqual([[first.id, "webhook"], [second.id, "webhook"]]);
   expect(((await api("GET", `/api/threads/${saved.threadId}/messages`, { token: owner })).body.messages as any[]).some((message) => message.automation)).toBe(false);

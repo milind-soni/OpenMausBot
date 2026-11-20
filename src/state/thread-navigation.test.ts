@@ -41,18 +41,9 @@ describe("what a bot's row or tile is marked for", () => {
 describe("a click on a bot's row or tile", () => {
   const work = { threadId: "work", unread: true };
 
-  it("lands on the thread the dot is about, by the switch alone so the thread left behind stays unread", () => {
-    expect(opened(chief([work]), false)).toEqual([{ type: "switchTask", botId: "cos", threadId: "work" }]);
-  });
-
-  it("selects first while threads are shown, as every thread opener does there", () => {
-    expect(opened(chief([work]), true)).toEqual([{ type: "select", id: "cos" }, { type: "switchTask", botId: "cos", threadId: "work" }]);
-  });
-
-  it("lands on a thread a teammate's work is running in, and a second click comes back to the main chat", () => {
-    const running = { threadId: "work", busy: true };
-    expect(opened(chief([running]), false)).toEqual([{ type: "switchTask", botId: "cos", threadId: "work" }]);
-    expect(opened(chief([running], "work"), false, true)).toEqual([{ type: "switchTask", botId: "cos", threadId: "main" }]);
+  it("opens the main chat even when background work is marked", () => {
+    expect(opened(chief([work]), false)).toEqual([{ type: "select", id: "cos" }]);
+    expect(opened(chief([work], "work"), false, true)).toEqual([{ type: "switchTask", botId: "cos", threadId: "main" }]);
   });
 
   it("opens the bot as ever when nothing is marked, or when the main chat itself is what is marked", () => {

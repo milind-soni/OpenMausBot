@@ -61,7 +61,6 @@ export const WINDOW_PREFS = {
   "general.notificationSounds": z.boolean(),
   "appearance.userBubbles": z.boolean(),
   "appearance.runCard": z.boolean(),
-  "appearance.showThreads": z.boolean(),
   "appearance.pinnedCircles": z.boolean(),
   "appearance.universalPins": z.boolean(),
   "appearance.pinnedPages": z.array(pinnedPage).max(6),

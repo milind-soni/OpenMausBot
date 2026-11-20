@@ -44,6 +44,7 @@ const ROUTINE_SCHEDULE_SCHEMA = {
       description: "cron: five fields, e.g. 0 9 L * * = last day of each month, 0 9 * * MON#2 = second Monday. Never a daily date check instead.",
     },
     timeZone: { type: "string", maxLength: 128, description: "Only for cron, and required there: an IANA zone such as Asia/Kolkata." },
+    after_seconds: { type: "integer", minimum: 1, maximum: 31536000, description: "once: delay from scheduling, instead of at." },
     at: { type: "string", description: "once: future RFC3339 with an offset, e.g. 2026-09-01T09:00:00+05:30." },
     time: { type: "string", description: "weekly or daily: local HH:MM." },
     weekdays: { type: "array", items: { type: "string", enum: WEEKDAYS }, description: "weekly: required. interval: optional." },

@@ -32,6 +32,13 @@ it("forks bot and room conversations through the public API and keeps a fork aft
     const forkThreadId = forked.body.task.threadId as string;
     expect(forked.body.task.origin).toEqual({ threadId: sourceThreadId, messageId: anchor.id });
     expect(forked.body.task.unread).toBe(false);
+    const selected = await api("POST", `/api/bots/${bot.id}/tasks/${forkThreadId}?messages=0`);
+    expect(selected.status).toBe(200);
+    expect(selected.body.bot).toMatchObject({ mainThreadId: sourceThreadId, threadId: forkThreadId });
+    const main = await api("POST", `/api/bots/${bot.id}/tasks?main=1`, {});
+    expect(main.status).toBe(200);
+    expect(main.body.task.threadId).toBe(sourceThreadId);
+    expect(main.body.bot.threadId).toBe(sourceThreadId);
     const sourceMessages = await messages(sourceThreadId);
     expect((await messages(forkThreadId)).map((message) => message.id)).toEqual(sourceMessages.slice(0, sourceMessages.findIndex((message) => message.id === anchor.id) + 1).map((message) => message.id));
     expect((await api("GET", `/api/search?q=Plan%20the%20release&threadId=${forkThreadId}`)).body.hits.some((hit: { messageId: string }) => hit.messageId === anchor.id)).toBe(true);

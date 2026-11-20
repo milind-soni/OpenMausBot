@@ -278,7 +278,7 @@ describe("opening a bot on the side the sidebar shows", () => {
     const dispatch = vi.fn();
     openBot(dispatch, scout(), false);
     await settle();
-    expect(server.calls).toEqual([["/api/bots/scout/tasks", { method: "POST", body: "{}" }]]);
+    expect(server.calls).toEqual([["/api/bots/scout/tasks?main=1", { method: "POST", body: "{}" }]]);
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "switchTask" }));
     expect(sideOfThread(scout(), "ada-new"), "and it is Just me from the moment it exists").toBe("me");
   });

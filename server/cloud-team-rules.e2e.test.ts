@@ -72,8 +72,7 @@ async function routineRun(name: string) {
   for (;;) {
     const run = ((await team.as(owner, "GET", "/api/routines")).body.runs as { id: string; status: string; threadId: string }[]).find((candidate) => candidate.id === runId)!;
     if (!["queued", "running", "starting", "waiting", "pending"].includes(run.status)) {
-      const messages = await team.as(owner, "GET", `/api/threads/${run.threadId}/messages?limit=200`);
-      return { status: started.status, words: `${JSON.stringify(run)} ${JSON.stringify(messages.body)}` };
+      return { status: started.status, words: JSON.stringify(run) };
     }
     if (Date.now() > deadline) throw new Error(`routine did not finish: ${JSON.stringify(run)}`);
     await new Promise((resolve) => setTimeout(resolve, 150));

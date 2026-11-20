@@ -1325,6 +1325,7 @@ describe("harness HTTP API", () => {
     managedBoatCreateGate = null;
     managedBoatDeleteGate?.release();
     managedBoatDeleteGate = null;
+    await api("POST", "/api/turns/stop", { all: true });
     const deadline = Date.now() + 15_000;
     let stuck = { bots: [] as string[], groups: [] as string[], computers: [] as string[] };
     while (Date.now() < deadline) {

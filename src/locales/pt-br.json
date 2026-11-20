@@ -313,6 +313,7 @@
   "server.notify.signInWebsite": "{who} precisa que você faça login em um site",
   "server.notify.secret": "{who} precisa que você informe: {label}",
   "server.notify.connect": "{who} precisa que você conecte {app}",
+  "server.notify.brief": "Seu resumo",
   "server.notify.routineFailed": "A rotina de {who} falhou",
   "server.notify.routineDeferred": "A rotina de {who} está em espera",
   "server.notify.turnFailed": "{who} não conseguiu começar",

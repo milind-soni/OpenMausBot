@@ -1,14 +1,14 @@
 // What a person can do to an automation, the same from the page, its panel and the chat card.
 import { useState } from "react";
 
-import type { Automation } from "@/lib/automations";
+import { automationRunThread, type Automation } from "@/lib/automations";
 import { copyText } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import type { RoutineRun } from "@/lib/routines";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { loadWebhookCredentials, removeWebhookCredential, saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-credentials";
 import type { WebhookCredential } from "@/lib/webhooks";
-import { api, openBotThread, useStore } from "@/state/store";
+import { api, openThread, useStore } from "@/state/store";
 
 export function useAutomationActions() {
   const { state, dispatch } = useStore();
@@ -78,9 +78,10 @@ export function useAutomationActions() {
     setTimeout(() => setCopied((current) => (current === webhookId ? null : current)), 1_800);
   });
 
+  const runThread = (run: RoutineRun) => automationRunThread([...state.bots, ...state.groups], run);
   const openRun = (automation: Automation, run: RoutineRun | undefined) => {
-    const bot = state.bots.find((candidate) => candidate.id === automation.botId);
-    if (bot && run?.threadId) openBotThread(dispatch, bot, run.threadId, showThreads);
+    const threadId = run && runThread(run);
+    if (threadId) openThread(dispatch, { botId: automation.botId, threadId }, state, showThreads);
   };
 
   /** Stops a run that waits on the person, for when the question it waits on was settled somewhere else. */
@@ -89,5 +90,5 @@ export function useAutomationActions() {
     if (response.run) dispatch({ type: "routineRunPatched", run: response.run });
   });
 
-  return { busy, error, errorFor, setError, copied, toggle, runNow, remove, copyAddress, openRun, cancelRun };
+  return { busy, error, errorFor, setError, copied, toggle, runNow, remove, copyAddress, runThread, openRun, cancelRun };
 }

@@ -1,13 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { overlayPortal as createPortal } from "@/components/ModalPresence";
-import { Archive, BellDot, CheckCheck, ClipboardCopy, Copy, Crown, FolderOpen, FolderPlus, Loader2, MessagesSquare, Pause, Pencil, Pin, PinOff, Play, SquarePen, Trash2, Users } from "lucide-react";
+import { Archive, BellDot, CheckCheck, ClipboardCopy, Copy, Crown, FolderPlus, Loader2, Pause, Pencil, Pin, PinOff, Play, Trash2, Users } from "lucide-react";
 import { isBotHeld, isEveryBotPaused, isPausedHere, setEveryBotPaused, setPaused } from "@/lib/bot-pause";
 import { api, useStore, openBot, type Bot } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
-import { BotDeleteMenuItem, useDeleteAllThreads } from "./BotMenuDelete";
+import { BotDeleteMenuItem } from "./BotMenuDelete";
 import { DemoteDefaultBotItem, HideDefaultBotItem } from "./DefaultBotControls";
 import { navigateThreadMenu } from "./BotProjects";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -23,12 +23,11 @@ import { useMoveToMyCloud } from "./MoveToMyCloud";
 import { useMoveToTeam } from "./MoveToTeam";
 import type { MenuState } from "./Sidebar";
 import { useMayMoveBots } from "./bot-sections";
-import { openBotSettings } from "./bot-panel/panel-link";
 
 type Flyout = "more" | "move";
 
 export function BotContextMenu({
-  menu, onClose, onArchive, onDelete, onMoveToSection, onNewFolder, onNewTaskFolder,
+  menu, onClose, onArchive, onDelete, onMoveToSection,
 }: {
   menu: MenuState | null;
   onClose: () => void;
@@ -62,7 +61,7 @@ export function BotContextMenu({
   const admin = useOwnerOrAdmin();
   const member = admin === false;
   const mayMove = useMayMoveBots();
-  const clearThreads = useDeleteAllThreads(false), moveToTeam = useMoveToTeam({ blocked: (bot) => (bot.defaultBot ? t("teamMove.blockedDefault", { name: bot.name }) : bot.chiefOfStaff ? t("teamMove.blockedChief") : state.bots.filter((candidate) => !candidate.hidden).length <= 1 ? t("teamMove.blockedLast") : undefined) });
+  const moveToTeam = useMoveToTeam({ blocked: (bot) => (bot.defaultBot ? t("teamMove.blockedDefault", { name: bot.name }) : bot.chiefOfStaff ? t("teamMove.blockedChief") : state.bots.filter((candidate) => !candidate.hidden).length <= 1 ? t("teamMove.blockedLast") : undefined) });
   const moveToCloud = useMoveToMyCloud();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
@@ -141,7 +140,7 @@ export function BotContextMenu({
     sheetOut.style.top = `${place.top}px`;
   });
 
-  if (!motion.shown || !bot || !shown) return <>{clearThreads.dialog}{moveToTeam.dialog}{moveToCloud.dialog}</>;
+  if (!motion.shown || !bot || !shown) return <>{moveToTeam.dialog}{moveToCloud.dialog}</>;
   const deleting = state.deletingBots[bot.id] === true;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
@@ -205,14 +204,7 @@ export function BotContextMenu({
     t(everyBotPaused ? "pause.resumeAll" : "pause.pauseAll"),
     () => { void setEveryBotPaused(!everyBotPaused).catch((error: unknown) => dispatch({ type: "error", message: error instanceof Error ? error.message : String(error) })); });
 
-  const viewThreads = item(<MessagesSquare size={16} className="text-ink-secondary" />, t("sidebar.bot.simple.viewThreads"), () => {
-    openForSettings();
-    openBotSettings(dispatch, "history", { botId: bot.id });
-  });
-
-
-
-  return <>{clearThreads.dialog}{moveToTeam.dialog}{moveToCloud.dialog}{createPortal(
+  return <>{moveToTeam.dialog}{moveToCloud.dialog}{createPortal(
     <div
       ref={menuRef}
       data-bot-menu
@@ -223,14 +215,6 @@ export function BotContextMenu({
       style={{ top: shown.y, left: shown.x }}
       className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-max min-w-[198px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain", MENU_SHEET, motion.className)} {...motion.exitProps}
     >
-      {showThreads && <>
-        {item(<SquarePen size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }))}
-        {admin && item(<FolderOpen size={16} className="shrink-0 text-ink-secondary" />, t("task.folder.new"), () => onNewTaskFolder(bot.id))}
-        {item(<FolderPlus size={16} className="text-ink-secondary" />, t("folder.new"), () => onNewFolder(bot.id))}
-      </>}
-      {viewThreads}
-      {!member && item(<Trash2 size={16} />, t("task.deleteAll"), () => clearThreads.ask(bot.id), { danger: true })}
-      {divider("threads")}
       {team && mayChangeOwner(bot, team) && item(<Users size={16} className="text-ink-secondary" />, ownerMenuLabel(bot, team), () => pickOwnerOf(bot, team, shown))}
       {remoteClient ? [
         mayMove && item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {

@@ -128,3 +128,11 @@
   .v2-scroll { padding-inline:12px; touch-action:pan-y pinch-zoom; }
   html:has([data-chat-v2]) { overscroll-behavior-x:none; }
 }
+
+.v2-work-steps [data-testid="tool-activity"] { border-color:transparent; background:transparent; }
+.v2-work-steps .v2-message:not([data-own]) .v2-body {
+  max-width:100%;
+  padding:0;
+  background:transparent;
+  font-size:14px;
+}

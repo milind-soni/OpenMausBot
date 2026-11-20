@@ -7,11 +7,10 @@ import { setAttentionPinned, useAttentionPinned } from "./inbox/attention-pinned
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { overlayPortal as createPortal } from "@/components/ModalPresence";
-import { Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderInput, FolderPlus, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, PanelLeft, Pencil, Phone, Plus, SquarePen, TextQuote, Trash2, Users, X } from "lucide-react";
+import { Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderInput, FolderPlus, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, PanelLeft, Pencil, Phone, Plus, TextQuote, Trash2, Users, X } from "lucide-react";
 import { sidebarState } from "./sidebar-state"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
-import { api, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
+import { api, formatTime, visibleMessages, currentTaskBot, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { approvalModeFor } from "../../shared/approval-mode";
-import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
 import { SidebarWorkingStep } from "./SidebarWorkingStep"; import { FadeLine } from "./FadeLine";
 import { openBotRow } from "@/state/thread-navigation";
 
@@ -27,7 +26,6 @@ import { copyText } from "@/lib/copy-text";
 import type { LocaleKey } from "@/locales";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { BulkSelectFilters, ThreadListFooter, deleteThreadsInBulk, retitleThreadsInBulk, useBulkSelect } from "./BulkSelectBar";
-import { SidebarBotThreadsPeek } from "./SidebarBotThreadsPeek";
 import { RoomMark, StackedMauses } from "./StackedMauses";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
@@ -77,7 +75,7 @@ import { DesktopWorkspaceSwitcher, endCloudHowTo } from "./DesktopWorkspaceSwitc
 import { useCloudOwner } from "./CloudOwner"; import { OtherPlaceBots, OwnBotHomeMark } from "./OtherPlaceBots"; import { NewBotOtherPlaceItem, useNewBotHereLabel } from "./NewBotPlaceItems";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { TeamMenuItems } from "./SidebarTeamMenu";
-import { MENU_ITEM, MENU_ITEM_SEPARATOR, MENU_SHEET } from "./menu-recipe";
+import { MENU_ITEM, MENU_SHEET } from "./menu-recipe";
 export { TeamMenuItems };
 import { SidebarResizeHandle, useSidebarWidth } from "./SidebarResizeHandle";
 import { PHONE_TOP_BUTTON, SIMPLE_CORNER_BUTTON, SIMPLE_RAIL_BUTTON, SIMPLE_ROW_FOCUS, SIMPLE_TOP_BUTTON, SidebarSearchButton } from "./SidebarSimpleTop";
@@ -85,7 +83,7 @@ import { isSidebarToggle } from "@/lib/keyboard-shortcuts";
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useBotUnread } from "./unread-notice";
-import { attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, runningRoutineRun, SidebarBotActivity, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
+import { attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
@@ -691,10 +689,6 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const remoteClient = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
   const [renaming, setRenaming] = useState(false);
   const iconOnly = density === "icons";
-  const [threadsOpen, setThreadsOpen] = useThreadDisclosure(`bot:${bot.id}`);
-  const canExpand = showThreads && !iconOnly && ((bot.tasks?.filter((task) => !task.routineRunId).length ?? 1) > 1 || Boolean(bot.projects?.length));
-  const expanded = canExpand && threadsOpen;
-  useEffect(() => { if (props.reveal && canExpand) setThreadsOpen(true); }, [props.reveal, canExpand]);
   useEffect(() => { if (iconOnly) setRenaming(false); }, [iconOnly]);
   const tooltip = !iconOnly ? botTooltip(bot, instances) : undefined;
   const visible = useVisibleMessages(bot);
@@ -702,7 +696,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const highlight = selected && !props.phoneHome;
   const rowClass = cn(
     "flex w-full items-center rounded-xl text-left transition-colors duration-150", SIMPLE_ROW_FOCUS,
-    iconOnly ? "h-[54px] justify-center" : cn("gap-2 rounded-[8px] py-2 pe-2 md:h-[54px] md:py-0", canExpand ? "ps-6" : "ps-2"),
+    iconOnly ? "h-[54px] justify-center" : cn("gap-2 rounded-[8px] py-2 pe-2 md:h-[54px] md:py-0", "ps-2"),
     !iconOnly && "max-md:rounded-2xl max-md:py-2.5",
     sidebarRowTone(highlight),
     !iconOnly && rowSurface(highlight),
@@ -834,7 +828,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
             : undefined
         }
         aria-busy={deleting || undefined} aria-keyshortcuts={drag ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
-        aria-current={highlight && !expanded && !renaming ? "page" : undefined}
+        aria-current={highlight && !renaming ? "page" : undefined}
         data-sidebar-bot-row={bot.id} data-look="sidebar-bot"
         title={renaming ? undefined : tooltip}
         onClick={onSelect}
@@ -857,22 +851,13 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       {!renaming && !deleting && !iconOnly && <>
         <button type="button" data-bot-actions={bot.id} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
           className="pointer-events-none absolute end-[3px] top-1.5 flex size-6 items-center justify-center rounded-lg text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70"><MoreHorizontal size={15} /></button>
-      </>}{!renaming && !deleting && !iconOnly && (canExpand ? (
-        <button type="button" aria-expanded={expanded}
-          aria-label={t(expanded ? "task.collapseNamed" : "task.expandNamed", { name: bot.name })}
-          onClick={() => setThreadsOpen(!threadsOpen)}
-          className="absolute start-0.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink">
-          <ChevronRight aria-hidden="true" size={13} className={cn(expanded ? "rotate-90" : "rtl:-scale-x-100")} />
-        </button>
-      ) : <SidebarBotThreadsPeek bot={bot} onScreen={selected} dispatch={dispatch} />)}
+      </>}
       {deleting && iconOnly && (
         <span className="pointer-events-none absolute bottom-1 right-1 rounded-full bg-card p-1 text-ink-secondary">
           <Loader2 size={12} className="animate-spin" />
         </span>
       )}
     </div>
-    {expanded && <BotThreadList {...props} activityLabel={liveActivityLabel(sidebarMessage(last))} />}
-    {!iconOnly && (waiting || unread || bot.tasks?.some(runningRoutineRun)) && <SidebarBotActivity bot={bot} rowThreadId={selected ? bot.threadId : botOpensTo(bot, showThreads)} density={density} pendingQueued={pendingQueued} dispatch={dispatch} waitingOnly runsOnly={expanded} />}
     </>
   );
 });
@@ -1067,7 +1052,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
   const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, phoneHome: phone, onMenu: setMenu, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
-  const plusItem = cn(MENU_ITEM, "text-ink hover:bg-menu-hover"), plusBot = state.activeView === "chat" ? state.bots.find((candidate) => candidate.id === state.selectedId) : undefined, newBotHere = useNewBotHereLabel();
+  const plusItem = cn(MENU_ITEM, "text-ink hover:bg-menu-hover"), newBotHere = useNewBotHereLabel();
   const restoreToggleFocus = useRef(false);
   const sidebarToggleLabel = t(rail ? "sidebar.expand" : "sidebar.collapse");
   const sidebarToggle = (
@@ -1114,7 +1099,6 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             <MessageSquarePlus size={16} className="text-ink-secondary" />
             {t("sidebar.newChat.title")}
           </button>
-          {plusBot && <><button role="menuitem" className={plusItem} onClick={() => { setPlusOpen(false); dispatch({ type: "newTask", botId: plusBot.id }); }}><SquarePen size={16} className="shrink-0 text-ink-secondary" /><span className="min-w-0 truncate" title={plusBot.name}>{t("sidebar.newConversationWith", { name: plusBot.name })}</span></button><div role="separator" className={MENU_ITEM_SEPARATOR} /></>}
           {(teamSettingsAllowed !== false || state.config?.team) && <button
             onClick={() => { setPlusOpen(false); dispatch({ type: "newBot" }); }}
             role="menuitem"

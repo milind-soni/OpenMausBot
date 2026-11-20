@@ -180,8 +180,9 @@ it("a run of the routine the bot made in Bob's chat works and lands in his audie
   expect(run.status).toBe("completed");
   const where = [run.threadId, run.resultsThreadId].filter((id): id is string => Boolean(id));
   expect(where.length).toBeGreaterThan(0);
-  for (const threadId of where) expect((await team.as(bob, "GET", `/api/threads/${threadId}/messages`)).status).toBe(200);
-  expect(JSON.stringify((await team.as(bob, "GET", `/api/threads/${run.threadId}/messages`)).body)).toContain("quince jam");
+  expect(run.resultsThreadId).toBe(bobThread);
+  expect((await team.as(bob, "GET", `/api/threads/${run.threadId}/messages`)).status).toBe(404);
+  expect((await team.as(bob, "GET", `/api/threads/${bobThread}/messages`)).status).toBe(200);
   for (const token of [ben, admin, owner]) {
     const tasks = (await botsOf(token)).find((bot) => bot.id === scout.id)!.tasks.map((task) => task.threadId);
     for (const threadId of where) {
@@ -207,8 +208,7 @@ it("a member's routine for the shared chat lands where everyone reads it, run by
   for (const run of [scheduled!, byAdmin]) {
     for (const token of [ben, admin, owner, bob]) {
       const read = await team.as(token, "GET", `/api/threads/${run.threadId}/messages`);
-      expect(read.status, "its run is the team's to read").toBe(200);
-      expect(JSON.stringify(read.body)).toContain("Post the team digest");
+      expect(read.status).toBe(404);
       expect((await team.as(token, "GET", `/api/threads/${scout.mainThreadId}/messages`)).status).toBe(200);
     }
   }
@@ -218,7 +218,8 @@ it("a member's routine for the shared chat lands where everyone reads it, run by
   justMe = mine.body.routine.id;
   expect(mine.body.routine.resultsThreadId).toBe(bobThread);
   const ran = await runToEnd(bob, justMe);
-  expect((await team.as(bob, "GET", `/api/threads/${ran.threadId}/messages`)).status).toBe(200);
+  expect((await team.as(bob, "GET", `/api/threads/${ran.threadId}/messages`)).status).toBe(404);
+  expect(ran.resultsThreadId).toBe(bobThread);
   for (const token of [ben, admin, owner]) {
     expect((await routinesOf(token)).routines.map((routine) => routine.id)).not.toContain(justMe);
     expect((await team.as(token, "GET", `/api/threads/${ran.threadId}/messages`)).status).toBe(404);
@@ -246,11 +247,11 @@ it("when Bob leaves, his private routines go and the shared ones he wrote are ha
   expect(writers()[tally]).toBe(CLOUD_NOBODY_KEY);
   const run = await runToEnd(owner, standup);
   expect(run.status).toBe("completed");
-  expect((await team.as(owner, "GET", `/api/threads/${run.threadId}/messages`)).status, "its run is the owner's now, not a gone person's").toBe(200);
+  expect((await team.as(owner, "GET", `/api/threads/${run.threadId}/messages`)).status).toBe(404);
   expect((await team.as(owner, "GET", `/api/threads/${run.resultsThreadId}/messages`)).status, "and so is the chat it reports into").toBe(200);
   const tallied = await runToEnd(admin, tally);
   expect(tallied.status).toBe("completed");
-  expect((await team.as(admin, "GET", `/api/threads/${tallied.threadId}/messages`)).status, "nobody's run: the team's").toBe(200);
+  expect((await team.as(admin, "GET", `/api/threads/${tallied.threadId}/messages`)).status).toBe(404);
   // Admin activity says each was handed over, and nothing from a private chat.
   type Entry = { action: string; target?: { kind: string; id?: string; name?: string }; after?: Record<string, unknown> };
   let entries: Entry[] = [];

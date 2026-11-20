@@ -17,15 +17,16 @@ const SELECTED_THREAD_ROUTE = /^\/api\/bots\/([\w-]+)\/(?:messages(?:\/guarded)?
  * checked as a route reads it: one that names such a chat, or leaves out the conversation on a route that then acts on a
  * selected conversation that is someone else's, fails the read with 404. Nothing at all off a Team Cloud. */
 export function hiddenThreadRefusal(req: IncomingMessage, path: string, query: URLSearchParams, visible: VisibleSet,
-  selectedThread: (botId: string) => string | undefined): string | null {
+  selectedThread: (botId: string) => string | undefined, internalThreadId?: string): string | null {
   if (!visible.filtersThreads) return null;
-  if (requestThreadIds(path, query).some((id) => visible.hides(id))) return NO_SUCH_CONVERSATION;
+  const hidden = (id: string) => id === internalThreadId ? visible.hidesAudience(id) : visible.hides(id);
+  if (requestThreadIds(path, query).some(hidden)) return NO_SUCH_CONVERSATION;
   const selectedRoute = SELECTED_THREAD_ROUTE.exec(path);
   onParsedBody(req, (body) => {
-    if (bodyThreadIds(body).some((id) => visible.hides(id))) return { status: 404, error: NO_SUCH_CONVERSATION };
+    if (bodyThreadIds(body).some(hidden)) return { status: 404, error: NO_SUCH_CONVERSATION };
     const named = body && typeof body === "object" && !Array.isArray(body) && (body as { threadId?: unknown }).threadId !== undefined;
     const selected = selectedRoute && !named ? selectedThread(selectedRoute[1]!) : undefined;
-    return selected && visible.hides(selected) ? { status: 404, error: NO_SUCH_CONVERSATION } : null;
+    return selected && hidden(selected) ? { status: 404, error: NO_SUCH_CONVERSATION } : null;
   });
   return null;
 }

@@ -60,6 +60,8 @@ const TITLES: Record<PushKind, ServerLineKey> = {
   question: "server.notify.question",
   "sign-in": "server.notify.signInWebsite",
   done: "server.notify.done",
+  brief: "server.notify.brief",
+  "routine-failed": "server.notify.routineFailed",
 };
 
 /** On only when switched on: OMB_PHONE_PUSH=1 or 0 wins over `features.phonePush` in config.json. */

@@ -13,6 +13,12 @@ import { routineLineText } from "@/lib/activity-text";
 import { partlyDone } from "@/lib/routine-display";
 import type { OptionCardData } from "@/state/store";
 
+export function automationRunThread(owners: readonly { threadId: string; tasks?: readonly { threadId: string }[] }[], run: RoutineRun): string | undefined {
+  const reportThreadId = run.report?.state === "posted" ? run.report.threadId : undefined;
+  return [run.executionThreadId, run.threadId, reportThreadId, run.resultsThreadId, run.sourceThreadId]
+    .find(id => id && owners.some(owner => owner.threadId === id || owner.tasks?.some(task => task.threadId === id)));
+}
+
 export type AutomationKind = "schedule" | "webhook" | "app";
 
 export interface Automation {

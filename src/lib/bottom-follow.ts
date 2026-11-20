@@ -27,6 +27,7 @@ export function useBottomFollowResize(
 
     const observer = new ResizeObserver(onResize);
     observer.observe(transcript);
+    observer.observe(scroller);
     return () => observer.disconnect();
   }, [observeKey, onResize, scrollRef, transcriptRef]);
 }

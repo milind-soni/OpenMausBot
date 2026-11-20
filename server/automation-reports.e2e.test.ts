@@ -1,6 +1,6 @@
 // Automations report into the bot's chat, end to end: the real server and Claude driver, the scripted fake engine
 // answering each turn by what it was sent, and the permission broker reached the way the CLI's proxy reaches it.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,8 +29,8 @@ type ScriptEntry = {
   steps?: Array<{ tool: string; arguments: Record<string, unknown> }>;
 };
 
-async function server(env: NodeJS.ProcessEnv = {}) {
-  fixture = await launchVerificationServer({ ...process.env, ...env }, undefined, undefined, undefined, undefined, { scripted: true });
+async function server(env: NodeJS.ProcessEnv = {}, browser?: Parameters<typeof launchVerificationServer>[3]) {
+  fixture = await launchVerificationServer({ ...process.env, ...env }, undefined, undefined, browser, undefined, { scripted: true });
   const { url, dataDir } = fixture.info;
   const api = async (method: string, path: string, body?: unknown, status?: number) => {
     const response = await fetch(`${url}${path}`, {
@@ -99,7 +99,7 @@ async function brokerOf(s: Awaited<ReturnType<typeof server>>, threadId: string)
   return answers;
 }
 
-it("reports each run into the main chat as the bot's own line, writes nothing for a quiet run, and keeps every run one click away", async () => {
+it("reports each run into the main chat as the bot's own line, writes nothing for a quiet run, and keeps execution private", async () => {
   const s = await server();
   s.script([
     { key: "first", match: [s.header("Inbox watch")], reply: "Checked 14 emails.\nNOTHING NEW" },
@@ -125,16 +125,49 @@ it("reports each run into the main chat as the bot's own line, writes nothing fo
   const saved = await s.savedBot();
   for (const each of all) {
     expect(each.resultsThreadId).toBe(s.main);
-    expect(saved.tasks.find((task: any) => task.threadId === each.threadId)).toMatchObject({ routineRunId: each.id, unread: false });
+    expect(saved.tasks.find((task: any) => task.threadId === each.threadId)).toBeUndefined();
   }
   expect(saved.tasks.find((task: any) => task.threadId === s.main).unread, "a report that needs nothing from the person leaves the chat out of To review").toBe(false);
   const done = s.notified().filter((notification) => notification.kind === "done");
   expect(done).toEqual([expect.objectContaining({ threadId: s.main, body: "Inbox watch: Acme replied: they need the invoice by Friday." })]);
   for (const key of ["first", "second", "third"]) expect(s.toldOnlyReplyLeaves(key)).toBe(true);
-  const transcript = await s.messages(all[1].threadId);
-  expect(transcript.find((message) => message.role === "user")?.text).toContain(s.header("Inbox watch"));
-  expect(transcript.findLast((message) => message.role === "bot" && message.kind === "text")?.text).toBe("Acme replied: they need the invoice by Friday.");
+  await s.api("GET", `/api/threads/${all[1].threadId}/messages`, undefined, 404);
+  await s.api("GET", `/api/search?q=invoice&threadId=${all[1].threadId}`, undefined, 404);
+  expect(events!.frames.some((frame) => frame.kind === "message" && frame.threadId === all[1].threadId)).toBe(false);
 }, 120_000);
+
+it.skipIf(process.platform === "win32")("allows a person to finish a background sign-in and then hides its transcript again", async () => {
+  const tools = mkdtempSync(join(tmpdir(), "omb-report-sign-in-"));
+  try {
+    const binaryPath = join(tools, "agent-browser");
+    writeFileSync(binaryPath, `#!/bin/sh\nif [ "$1" = session ] && [ "$2" = list ]; then printf '{"success":true,"data":{"sessions":[]}}'; fi\nexit 0\n`, { mode: 0o755 });
+    const s = await server({}, { binaryPath, executablePath: join(tools, "chrome") });
+    await s.api("PATCH", "/api/config", { features: { browser: true } });
+    await s.api("PATCH", `/api/bots/${s.bot.id}`, { computer: "browser" });
+    s.script([
+      { key: "sign-in", match: [s.header("Dashboard")], repeat: true, reply: "Waiting for sign-in.",
+        steps: [{ tool: "request_sign_in", arguments: { site: "https://example.com/dashboard" } }] },
+      { key: "resumed", match: ["the person finished signing in"], reply: "Dashboard checked." },
+    ]);
+    const id = await s.runNow(await s.routine("Dashboard"));
+    await expect.poll(async () => {
+      const run = await s.run(id);
+      return run.status === "waiting" ? run.status : run.error ?? run.attention ?? run.status;
+    }, { timeout: 30_000 }).toBe("waiting");
+    const { threadId } = await s.run(id);
+    await expect.poll(async () => (await s.lines()).find(message => message.automation?.needsYou)?.text).toContain("sign in to example.com");
+    const card = (await s.messages(threadId)).find(message => message.kind === "signin");
+    expect(card).toBeDefined();
+    const control = await s.api("GET", `/api/bots/${s.bot.id}/computer/control?threadId=${s.main}`);
+    expect(control.help).toMatchObject({ threadId, messageId: card.id });
+    await s.api("POST", `/api/bots/${s.bot.id}/sign-in-cards/${card.id}/done`, { threadId }, 200);
+    await s.settled(id);
+    await s.api("GET", `/api/threads/${threadId}/messages`, undefined, 404);
+    await expect.poll(async () => (await s.lines()).some(message => message.text === "Dashboard checked.")).toBe(true);
+  } finally {
+    rmSync(tools, { recursive: true, force: true });
+  }
+}, 90_000);
 
 it("opens a file a run linked in its report from the chat it reported to", async () => {
   const s = await server();
@@ -188,8 +221,10 @@ it("holds a report while the person's own turn runs in the main chat, never dela
   expect(s.notified().filter((notification) => notification.kind === "done" && notification.body.startsWith("Inbox watch:"))).toHaveLength(1);
 }, 120_000);
 
-it("copies a question a run waits on into the main chat, and the answer given there carries the run on", async () => {
+it.each(["question", "permission"] as const)("resolves a background %s in the main chat and resumes its run", async (kind) => {
+  const behavior = kind === "question" ? "answer" : "deny";
   const s = await server();
+  await s.api("PATCH", `/api/bots/${s.bot.id}`, { approvalMode: "ask" });
   const gate = join(s.dataDir, "finish-run");
   s.script([{ key: "run", match: [s.header("Inbox watch")], reply: "Used the Work account: two new orders.", gateFile: gate }]);
   const routineId = await s.routine("Inbox watch");
@@ -197,20 +232,18 @@ it("copies a question a run waits on into the main chat, and the answer given th
   await s.settled(id, "running");
   const { threadId } = await s.run(id);
   const answers = await brokerOf(s, threadId);
-  broker!.write(JSON.stringify({ t: "ask", kind: "question", id: "which-account", tool: "ask_user", input: { question: "Which account should I check?" } }) + "\n");
+  broker!.write(JSON.stringify({ t: "ask", kind, id: "which-account", tool: kind === "question" ? "ask_user" : "mcp__composio__COMPOSIO_SEARCH_TOOLS", input: kind === "question" ? { question: "Which account should I check?" } : { command: "echo fixture" } }) + "\n");
   await s.settled(id, "waiting");
   await expect.poll(async () => (await s.messages(s.main)).find((message) => message.kind === "options")?.card?.requestId, { timeout: 20_000 }).toBeTruthy();
   const copy = (await s.messages(s.main)).find((message) => message.kind === "options");
   expect(copy.automation).toMatchObject({ runId: id, needsYou: true, executionThreadId: threadId, name: "Inbox watch" });
-  const original = (await s.messages(threadId)).find((message) => message.card?.requestId === copy.card.requestId);
-  expect(original).toBeTruthy();
-  expect(s.notified().some((notification) => notification.kind === "question" && notification.threadId === s.main)).toBe(true);
+  await s.api("GET", `/api/threads/${threadId}/messages`, undefined, 404);
+  expect(s.notified().some((notification) => notification.kind === (kind === "question" ? "question" : "approval") && notification.threadId === s.main)).toBe(true);
 
-  await s.api("POST", `/api/threads/${s.main}/respond`, { requestId: copy.card.requestId, behavior: "answer", message: "Work" });
-  await expect.poll(() => answers.find((answer) => answer.id === "which-account"), { timeout: 20_000 }).toMatchObject({ t: "answer", behavior: "answer", message: "Work", source: "user" });
+  await s.api("POST", `/api/threads/${s.main}/respond`, { requestId: copy.card.requestId, behavior, message: "Work" });
+  await expect.poll(() => answers.find((answer) => answer.id === "which-account"), { timeout: 20_000 }).toMatchObject({ t: "answer", behavior, source: "user" });
   await s.settled(id, "running");
   await expect.poll(async () => (await s.messages(s.main)).find((message) => message.id === copy.id)?.card?.answered, { timeout: 20_000 }).toBeTruthy();
-  expect((await s.messages(threadId)).find((message) => message.id === original.id)?.card?.answered).toBeTruthy();
   writeFileSync(gate, "done");
   await s.reported(id, "posted");
   expect((await s.lines()).map((line) => [line.kind, line.text ?? line.card?.subtitle])).toEqual([
@@ -251,7 +284,7 @@ it("puts the main chat under To review when a run ends on a question, even one p
   expect(done.output).toContain("Should I send the reply?");
   const saved = await s.savedBot();
   expect(saved.tasks.find((task: any) => task.threadId === s.main).unread, "a run that asks the person puts the chat under To review").toBe(true);
-  expect(saved.tasks.find((task: any) => task.threadId === done.threadId)).toMatchObject({ routineRunId: id, unread: false });
+  expect(saved.tasks.find((task: any) => task.threadId === done.threadId)).toBeUndefined();
 }, 120_000);
 
 it("takes a 👍 on a run's question in the chat as the answer, with that report in hand", async () => {
@@ -270,6 +303,7 @@ it("takes a 👍 on a run's question in the chat as the answer, with that report
 
 it("answers the run itself when the person gives a 👍 to the copy of the question it waits on", async () => {
   const s = await server();
+  await s.api("PATCH", `/api/bots/${s.bot.id}`, { approvalMode: "ask" });
   const gate = join(s.dataDir, "finish-run");
   s.script([{ key: "run", match: [s.header("Inbox watch")], reply: "Checked the Work account: two new orders.", gateFile: gate }]);
   const id = await s.runNow(await s.routine("Inbox watch"));
@@ -308,7 +342,7 @@ it("hands the chat's own session the newest report of each automation, however m
   expect((await s.messages(s.main)).findLast((message) => message.role === "bot" && message.kind === "text")?.text).toBe("Sent.");
 }, 120_000);
 
-it("reports an outside event's run into a chat of its own, not the main chat", async () => {
+it("reports outside events in the main chat and keeps execution private", async () => {
   const s = await server();
   s.script([{ key: "lead", match: ["Draft a follow-up"], reply: "Drafted a follow-up for Ada.", repeat: true }]);
   const { webhook, credential } = await s.api("POST", "/api/webhooks", { name: "Sales form leads", prompt: "Draft a follow-up for the lead.", botId: s.bot.id }, 201);
@@ -319,14 +353,13 @@ it("reports an outside event's run into a chat of its own, not the main chat", a
   await s.reported(runId, "posted");
   const done = await s.run(runId);
   expect(done).toMatchObject({ webhookId: webhook.id, triggerSource: "webhook" });
-  expect(done.resultsThreadId).not.toBe(s.main);
-  expect(await s.lines()).toEqual([]);
+  expect(done.resultsThreadId).toBe(s.main);
+  await s.api("GET", `/api/threads/${done.threadId}/messages`, undefined, 404);
   expect(await s.lines(done.resultsThreadId)).toEqual([expect.objectContaining({ text: "Drafted a follow-up for Ada.", automation: expect.objectContaining({ trigger: "webhook", name: "Sales form leads" }) })]);
   expect(s.toldOnlyReplyLeaves("lead")).toBe(true);
   const saved = await s.savedBot();
   expect(saved.threadId).toBe(s.main);
-  expect(saved.tasks.find((task: any) => task.threadId === done.resultsThreadId)).toMatchObject({ title: "Sales form leads · Results" });
-  expect(saved.tasks.find((task: any) => task.threadId === done.threadId)).toMatchObject({ routineRunId: runId });
+  expect(saved.tasks.find((task: any) => task.threadId === done.threadId)).toBeUndefined();
   const again = await fetch(credential.url, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": "lead-2" }, body: JSON.stringify({ lead: "Bo" }) });
   const { runId: second } = await again.json() as any;
   await s.settled(second);
@@ -357,21 +390,40 @@ it("still reports the person's own failed turn in a chat a run once continued", 
   await expect.poll(filed, { timeout: 20_000 }).toBe(true);
 }, 120_000);
 
-it("does not take a person's failed turn in a run's conversation for the run's own while the run waits on a teammate", async () => {
+it("delivers a timed teammate greeting once in the sender's own chat", async () => {
+  const s = await server();
+  const { bot: maus } = await s.cli("new-bot", "--name", "MausBot");
+  const request = "让 @MausBot 10s 后给我发个消息";
+  const greeting = "嗨，我来给你打个招呼 👋";
+  s.script([{ key: "schedule", match: [request], steps: [{ tool: "trigger", arguments: {
+    action: "create", when: "schedule", for_bot_id: maus.id, name: "问候", instructions: "给用户一句问候。",
+    schedule: { type: "once", after_seconds: 10 },
+  } }], reply: "已安排。" }], { [maus.id]: [{ key: "greeting", match: ["给用户一句问候。"], reply: greeting }] });
+  const sent = Date.now();
+  await s.cli("send", "--bot", s.bot.id, "--task", s.main, "--text", request);
+  await expect.poll(async () => (await s.lines(maus.activeTaskId)).map(m => m.text), { timeout: 45_000 }).toEqual([greeting]);
+  const [run] = (await s.runs()).filter(r => r.botId === maus.id);
+  expect(run.scheduledFor).toBeGreaterThanOrEqual(sent + 10_000);
+  const target = (await s.api("GET", "/api/bots")).bots.find((b: any) => b.id === maus.id);
+  expect(target.tasks.find((t: any) => t.threadId === maus.activeTaskId).unread).toBe(true);
+  expect(run.startedAt).toBeGreaterThanOrEqual(run.scheduledFor);
+  expect(run.report).toMatchObject({ state: "posted", threadId: maus.activeTaskId });
+  expect((await s.messages(s.main)).some(m => m.text?.includes(greeting))).toBe(false);
+  expect(s.notified().filter(n => n.body.includes(greeting)).map(n => n.threadId)).toEqual([maus.activeTaskId]);
+}, 90_000);
+
+it("keeps a delegated run private and returns the final answer to its originating bot", async () => {
   const s = await server();
   const { bot: sam } = await s.cli("new-bot", "--name", "Sam");
   const samGate = join(s.dataDir, "sam-counts");
   s.script([
     { key: "run", match: [s.header("Stock check")], steps: [{ tool: "coordinate_bots", arguments: { bot_ids: [sam.id], message: "Count the boxes in stock." } }], reply: "Asked Sam to count the stock." },
-    { key: "person", match: ["Any news?"], reply: "never", fail: true },
     { key: "resume", match: ["42 boxes"], reply: "We have 42 boxes in stock." },
   ], { [sam.id]: [{ key: "count", match: ["Count the boxes in stock."], reply: "Counted 42 boxes.", gateFile: samGate }] });
   const id = await s.runNow(await s.routine("Stock check"));
   await s.settled(id, "waiting");
   const { threadId } = await s.run(id);
-  await s.cli("send", "--bot", s.bot.id, "--task", threadId, "--text", "Any news?");
-  await s.cli("wait", "--bot", s.bot.id, "--task", threadId, "--timeout", "20");
-  await expect.poll(async () => (await s.messages(threadId)).some((message) => message.kind === "activity" && message.tool?.ok === false), { timeout: 20_000 }).toBe(true);
+  await s.api("POST", `/api/bots/${s.bot.id}/messages`, { threadId, text: "Any news?" }, 404);
   expect(await s.run(id)).toMatchObject({ status: "waiting" });
   expect((await s.run(id)).error).toBeUndefined();
   expect(await s.lines()).toEqual([]);
@@ -449,11 +501,7 @@ it("brings the files a run sent with attach_file into its report", async () => {
   expect(await s.lines()).toEqual([expect.objectContaining({
     text: "Today's brief is attached.", attachments: [expect.objectContaining({ kind: "file", name: "brief.pdf" })],
   })]);
-  const inRun = await s.messages((await s.run(id)).threadId);
-  const reply = inRun.findLast((message) => message.role === "bot" && message.turnTerminal);
-  const sentLine = inRun.find((message) => message.attachments?.some((file: any) => file.name === "brief.pdf"));
-  expect(sentLine).toMatchObject({ sentInTurn: reply.turnId });
-  expect(sentLine).not.toHaveProperty("turnId");
+  await s.api("GET", `/api/threads/${(await s.run(id)).threadId}/messages`, undefined, 404);
 }, 120_000);
 
 it("leaves the images a run's tools returned in the run, and reports the files it sent", async () => {
@@ -480,8 +528,7 @@ it("leaves the images a run's tools returned in the run, and reports the files i
   const run = async () => (await api("GET", "/api/routines")).runs.find((candidate: any) => candidate.id === id);
   await expect.poll(async () => (await run())?.report?.state, { timeout: 30_000 }).toBe("posted");
   const messages = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=200`)).messages as any[];
-  const inRun = (await messages((await run()).threadId)).flatMap((message) => message.attachments ?? []);
-  expect(inRun).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "image", fromTool: true }), expect.objectContaining({ kind: "file", name: "brief.pdf" })]));
+  expect(await api("GET", `/api/threads/${(await run()).threadId}/messages`)).toMatchObject({ error: "no such conversation" });
   const report = (await messages(bot.activeTaskId)).filter((message) => message.automation);
   expect(report).toEqual([expect.objectContaining({ attachments: [expect.objectContaining({ kind: "file", name: "brief.pdf" })] })]);
 }, 120_000);

@@ -34,6 +34,7 @@ export interface TaskRouteDeps {
   cloudHome: boolean;
   /** The desktop app owns this server, so a loopback caller is its owner. */
   desktopManaged: boolean;
+  personalMainThread(botId: string, auth: RequestAuth): string | undefined;
   /** A shared company workspace: Full access comes only from its operator. */
   hostedWorkspace: boolean;
   hostedFullAccessRefusal: string;
@@ -211,6 +212,14 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       }
       if (body.projectId !== undefined && (typeof body.projectId !== "string" || !store.project(bot.id, body.projectId))) {
         return json(res, 400, { error: "projectId must belong to this bot" });
+      }
+      if (url.searchParams.get("main") === "1" && body.title === undefined && body.projectId === undefined && body.approvalMode === undefined && cwd === undefined && body.select !== false) {
+        const mainId = deps.personalMainThread(bot.id, auth);
+        const task = mainId && store.taskByThread(bot.id, mainId);
+        const current = task && (bot.threadId === task.threadId ? bot : store.switchTask(bot.id, task.threadId));
+        if (current && task) {
+          return json(res, 200, { bot: publicBot(current), task: wireTask(task, current.modelSelection) } satisfies TaskResponse);
+        }
       }
       // Who opened it decides who may answer its cards on a shared workspace, and on a team who sees it at all.
       const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, body.select !== false, body.projectId, undefined, body.approvalMode, undefined, cwd,

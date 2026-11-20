@@ -10,10 +10,11 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: false }, host: { packaged: true, platform: "other" }, localComputer: { available: false } }, ready: true }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
-vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => true, useReactor: () => "user" }));
+vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => true, useCloudGuest: () => false, useReactor: () => "user" }));
 vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 
 const { ChatView } = await import("./ChatView");
+const { ChatV2 } = await import("./chat-v2/ChatV2");
 const { BotEditorStore, initialState } = await import("@/state/store");
 const { t } = await import("@/lib/i18n");
 
@@ -38,14 +39,15 @@ const pepper = (messages: Message[]): Bot => ({
 const dispatch = vi.fn();
 let root: Root;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
-async function draw(messages: Message[]) {
+async function draw(messages: Message[], chatV2 = false) {
   const bot = pepper(messages);
   const state: AppState = {
     ...initialState, connected: true, selectedId: "pepper", bots: [bot],
     instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test", snapshot: { state: "available" } } as InstanceInfo],
   };
   const value = { state, dispatch, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
-  flushSync(() => root.render(createElement(BotEditorStore, { value, children: createElement(ChatView, { bot }) })));
+  const chat = chatV2 ? createElement(ChatV2, { profile: bot, onClose: vi.fn() }) : createElement(ChatView, { bot });
+  flushSync(() => root.render(createElement(BotEditorStore, { value, children: chat })));
   await settle();
 }
 const caption = (runId: string) => document.querySelector<HTMLElement>(`[data-automation-caption="${runId}"]`);
@@ -65,6 +67,12 @@ async function regenerateOffers(): Promise<string[]> {
 
 beforeAll(() => {
   vi.stubGlobal("fetch", () => new Promise(() => {}));
+  const saved = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => saved.get(key) ?? null,
+    setItem: (key: string, value: string) => saved.set(key, value),
+    removeItem: (key: string) => saved.delete(key),
+  });
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -123,6 +131,14 @@ describe("an automation's line in the chat", () => {
     flushSync(() => open!.click());
     expect(dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "pepper", threadId: "run-1-thread" });
     expect(caption("m2")).toBeNull();
+  });
+
+  it("labels an automation report in Chat V2 without linking to a hidden execution", async () => {
+    await draw(transcript([{ id: "r1", parentId: "m2", role: "bot", kind: "text", text: "Inbox checked.", at: at(3), automation: line("hidden") }]), true);
+    const label = caption("hidden");
+    expect(label?.textContent).toContain("Inbox brief");
+    expect(label?.querySelector("button")).toBeNull();
+    expect(document.querySelector('[data-mid="r1"]')?.textContent).toContain("Inbox checked.");
   });
 
   it("says when the run needs the person or could not finish, and offers no run it cannot open", async () => {

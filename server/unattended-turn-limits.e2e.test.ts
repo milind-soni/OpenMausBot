@@ -9,6 +9,7 @@ import { afterEach, expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { failedTurnCause } from "../shared/failed-turn.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { fixtureMessages } from "./testing/registry.ts";
 
 const CALLS = 14;
 const SAME_FAILURE = Array.from({ length: CALLS }, () => ({ name: "Bash", input: { command: "git status" }, ok: false, output: "fatal: not a git repository" }));
@@ -28,7 +29,7 @@ async function launch(env: NodeJS.ProcessEnv) {
   scratch = mkdtempSync(join(tmpdir(), "omb-unattended-"));
   const script = join(scratch, "calls.json");
   fixture = await launchVerificationServer({ ...env, FAKE_CLAUDE_TOOL_CALLS_FILE: script, FAKE_CLAUDE_RELEASE: join(scratch, "release") });
-  const { url } = fixture.info;
+  const { url, dataDir } = fixture.info;
   const api = async (method: string, path: string, body?: unknown) => {
     const response = await fetch(url + path, { method, headers: { "content-type": "application/json", origin: url }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     const value = await response.json() as any;
@@ -42,7 +43,7 @@ async function launch(env: NodeJS.ProcessEnv) {
     const { routine } = await api("POST", "/api/routines", { name, prompt: "Tidy the repository.", botId: bot.id, schedule: { type: "cron", expression: "0 3 * * *", timeZone: "Europe/London" } });
     await api("POST", `/api/routines/${routine.id}/run`);
     const run = async () => (await api("GET", "/api/routines")).runs.find((candidate: any) => candidate.routineId === routine.id);
-    const rows = async () => { const row = await run(); return row?.threadId ? (await api("GET", `/api/threads/${row.threadId}/messages?limit=200`)).messages as any[] : []; };
+    const rows = async () => { const row = await run(); return row?.threadId ? fixtureMessages(dataDir, row.threadId) : []; };
     const made = async () => (await rows()).filter((message) => message.kind === "activity" && message.tool?.name === "Bash").length;
     await expect.poll(async () => until(await run(), await made()), { timeout: hostTimeout(60_000), interval: 250 }).toBe(true);
     // A call the engine was about to make would land within its 600 ms cadence.

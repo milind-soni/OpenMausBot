@@ -7,7 +7,6 @@ import { CompanyBackupSettings } from "../../CompanyBackupSettings";
 import { ImportSettings } from "../../ImportSettings";
 import { PeopleSection } from "../../PeopleSection";
 import { SettingsGroup, SettingsRows } from "../../SettingsPrimitives";
-import { ThreadCleanupSettings } from "../../ThreadCleanupSettings";
 import { UsageSection } from "../../UsageSection";
 import { VaultSettings } from "../../VaultSettings";
 import { WorkspaceBackupSettings } from "../../WorkspaceBackupSettings";
@@ -44,7 +43,6 @@ export function DataPage() {
     <SettingsGroup label={t("settings.data.storage")} block="storage">
       <SettingsRows><AttachmentStorageSettings /></SettingsRows>
     </SettingsGroup>
-    {<ThreadCleanupSettings />}
     {!ctx.desktop && ctx.admin && <ActivitySection />}
   </>;
 }

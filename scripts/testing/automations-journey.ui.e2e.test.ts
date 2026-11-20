@@ -16,7 +16,7 @@ import { freePortBlock } from "../../server/testing/ports.ts";
 import { launchRestartableServer, type RestartableServer } from "../../server/testing/restartable-server.ts";
 import { runControlOmb } from "../control-omb.ts";
 import { agentBrowser, ensureUiBrowser, sessionEnv, type UiHandle } from "./control-omb-ui.ts";
-import { mountPreview } from "./preview-fixture.ts";
+import { fixtureApi, mountPreview } from "./preview-fixture.ts";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const SHOTS = process.env.OMB_AUTOMATIONS_JOURNEY_SHOTS || join(ROOT, ".omb-scratch", "automations-journey");
@@ -46,6 +46,39 @@ function plan(bots: Array<{ id: string }>) {
 
 type App = Awaited<ReturnType<typeof openApp>>;
 
+(enabled ? it : it.skip)("opens the bot from one sidebar row without a thread picker", async () => {
+  const server = await launchRestartableServer({ scripted: true, dataDirRoot: SHORT_TMP });
+  let app: App | undefined;
+  try {
+    const bot = (await runControlOmb(["new-bot", "--name", "Scout", "--url", server.url]) as { bot: { id: string } }).bot;
+    app = await openApp(server, { shots: SHOTS, bots: { Scout: bot.id } });
+    const page = app;
+    await expect.poll(() => page.evaluate(`(() => { const row = document.querySelector('[data-sidebar-bot-row="${bot.id}"]'); row?.click(); return Boolean(row); })()`), { timeout: 20_000 }).toBe(true);
+    await expect.poll(() => page.evaluate(`document.querySelector('[data-sidebar-bot-row="${bot.id}"]')?.getAttribute("aria-current")`)).toBe("page");
+    expect(await page.evaluate('document.querySelectorAll("[data-sidebar-thread-row]").length')).toBe(0);
+    writeFileSync(server.planPath, JSON.stringify({ [bot.id]: { script: [
+      { key: "report", match: ["Summarize the fixture inbox."], reply: "The fixture inbox has three messages." },
+    ] } }));
+    const api = fixtureApi(server.url, { headers: { origin: server.url } });
+    const { routine } = await api("POST", "/api/routines", {
+      name: "Inbox report", botId: bot.id, prompt: "Summarize the fixture inbox.", enabled: false,
+      schedule: { type: "interval", everyMinutes: 60, anchorAt: Date.now() + 3_600_000 },
+    });
+    await api("POST", `/api/routines/${routine.id}/run`);
+    await expect.poll(() => page.text("main"), { timeout: 20_000 }).toContain("The fixture inbox has three messages.");
+    await expect.poll(() => page.text("[data-automation-caption]")).toContain("Inbox report");
+    expect(await page.evaluate('Boolean(document.querySelector("[data-automation-caption] button"))')).toBe(false);
+    await page.noOverflow("bot chat");
+    await page.screenshot("single-bot-chat");
+  } catch (error) {
+    await app?.screenshot("single-bot-chat-failure").catch(() => {});
+    throw error;
+  } finally {
+    await app?.close();
+    await server.close();
+  }
+}, 90_000);
+
 (enabled ? it : it.skip)("explains an old automation notification and keeps it cleared after restart", async () => {
   const server = await launchRestartableServer({ scripted: true, dataDirRoot: SHORT_TMP });
   let app: App | undefined;
@@ -56,7 +89,7 @@ type App = Awaited<ReturnType<typeof openApp>>;
       return response.json();
     };
     const bot = (await api("GET", "/api/bots?messages=0")).bots[0];
-    const setReply = (fail: boolean) => writeFileSync(server.planPath, JSON.stringify({ [bot.id]: { script: [{ key: "check", match: ["Check notification history."], repeat: true, steps: [], ...(fail ? { failWith: "Provider disconnected." } : { reply: "Nothing new." }) }] } }));
+    const setReply = (fail: boolean) => writeFileSync(server.planPath, JSON.stringify({ [bot.id]: { script: [{ key: "check", match: [""], repeat: true, steps: [], ...(fail ? { failWith: "Provider disconnected." } : { reply: "Nothing new." }) }] } }));
     const { routine } = await api("POST", "/api/routines", { name: "Keep an eye on my day", prompt: "Check notification history.", botId: bot.id, schedule: { type: "interval", everyMinutes: 1440, anchorAt: Date.now() + 86_400_000 } });
     let failedId = "";
     for (let index = 0; index < 7; index++) {
@@ -102,8 +135,16 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
   const handle: UiHandle = { url: server.url, previewUrl: preview.previewUrl, session: `omb-journey-${server.port}`, binary: tools.binary, home: server.dataDir, botId: Object.values(options.bots)[0]!, logPath: server.logPath, chrome: tools.chrome };
   const browserEnv = sessionEnv(handle);
   const browser = (...args: string[]) => agentBrowser(tools.binary, browserEnv, args, 120_000);
-  await browser("set", "viewport", "1280", "800");
-  await browser("open", preview.previewUrl);
+  try {
+    await browser("set", "viewport", "1280", "800");
+    await browser("open");
+    await browser("eval", `setTimeout(() => location.assign(${JSON.stringify(preview.previewUrl)}), 50); true`);
+    await browser("wait", "[data-sidebar]");
+  } catch (error) {
+    await browser("close").catch(() => {});
+    await preview.close();
+    throw error;
+  }
   const handlePath = join(server.dataDir, "ui.json");
   writeFileSync(handlePath, JSON.stringify(handle));
   const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", handlePath, ...args]) as Promise<Record<string, any>>;
@@ -133,22 +174,19 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
   const card = (sentence: string) => `[...document.querySelectorAll("[data-trigger-card]")].find((item) => item.innerText.includes(${JSON.stringify(sentence)}))`;
   const cardText = (sentence: string) => evaluate(`${card(sentence)}?.innerText ?? ""`) as Promise<string>;
   const clickCard = (sentence: string, label: string) => evaluate(`(() => { const button = [...(${card(sentence)}?.querySelectorAll("button") ?? [])].find((candidate) => candidate.textContent.trim() === ${JSON.stringify(label)}); button?.click(); return Boolean(button); })()`);
-  const reload = async () => { await evaluate("location.reload(); true"); await expect.poll(() => evaluate("Boolean(document.querySelector('nav'))"), { timeout: 30_000 }).toBe(true); };
+  const reload = async () => { await evaluate("location.reload(); true"); await expect.poll(() => evaluate("Boolean(document.querySelector('[data-sidebar]'))"), { timeout: 30_000 }).toBe(true); };
   const openAutomations = async () => {
     // A narrow window keeps the sidebar behind its menu button.
     await evaluate(`document.querySelector('button[aria-label="Open bot list"]')?.click(); true`);
-    await expect.poll(() => evaluate(`(() => { const entry = [...document.querySelectorAll("nav button")].find((button) => button.textContent.trim() === "Automations"); entry?.click(); return Boolean(entry); })()`)).toBe(true);
+    await evaluate(`document.querySelector("[data-sidebar-account]")?.closest("button")?.click(); true`);
+    await expect.poll(() => evaluate(`(() => { const entry = [...document.querySelectorAll('[role="menuitem"], nav button')].find((button) => button.textContent.trim() === "Automations"); entry?.click(); return Boolean(entry); })()`)).toBe(true);
     await expect.poll(() => text("main h1"), { timeout: 15_000 }).toBe("Automations");
   };
-  /** Opens a bot's chat; with `thread`, that conversation, as a person would from the bot's thread list. */
-  const openChat = async (bot: string, thread?: string) => {
+  const openChat = async (bot: string, expectedMessage?: string) => {
     const id = options.bots[bot];
     await expect.poll(() => evaluate(`(() => { const row = document.querySelector('[data-sidebar-bot-row="${id}"]'); row?.click(); return Boolean(row); })()`), { timeout: 15_000 }).toBe(true);
     await expect.poll(() => evaluate("document.querySelector('textarea')?.getAttribute('placeholder') ?? ''"), { timeout: 15_000 }).toBe(`Message ${bot}`);
-    if (!thread || (await text()).includes(thread)) return;
-    await evaluate(`document.querySelector('button[aria-label="Expand ${bot} threads"]')?.click(); true`);
-    await expect.poll(() => evaluate(`(() => { const botRow = document.querySelector('[data-sidebar-bot-row="${id}"]'); const row = [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === ${JSON.stringify(thread)} && (botRow.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING)); row?.click(); return Boolean(row); })()`)).toBe(true);
-    await expect.poll(() => text(), { timeout: 15_000 }).toContain(thread);
+    if (expectedMessage) await expect.poll(() => text(), { timeout: 15_000 }).toContain(expectedMessage);
   };
   const say = async (bot: string, message: string, thread?: string) => { await openChat(bot, thread); await ui("type", "--name", `Message ${bot}`, "--text", message); await ui("press", "--keys", "Enter"); };
   const noOverflow = async (where: string) => expect(await evaluate("document.scrollingElement.scrollWidth - window.innerWidth"), `horizontal overflow on ${where}`).toBeLessThanOrEqual(1);
@@ -172,7 +210,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
       return value;
     };
     const starter = (await api("GET", "/api/bots?messages=0")).bots[0];
-    await api("PATCH", `/api/bots/${starter.id}/profile`, { name: "Hazel" });
+    await api("PATCH", `/api/bots/${starter.id}/profile`, { name: "Hazel", welcomed: true });
     const newBot = async (name: string) => ((await runControlOmb(["new-bot", "--name", name, "--url", live.url])) as { bot: { id: string } }).bot.id;
     const scout = await newBot("Scout");
     const ledger = await newBot("Ledger");
@@ -192,11 +230,11 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     await select("Who should do it?", "Scout");
     await screenshot("new-box");
     await click("Set it up");
-    await expect.poll(() => cardText(SCHEDULE), { timeout: 30_000 }).toContain("Next: today 9:00 AM");
-    expect(await cardText(SCHEDULE)).toMatch(/^Set up: Every day at 9 AM, Scout sends you a summary of your inbox\nNext: (today|tomorrow) 9:00 AM/);
+    await expect.poll(() => cardText(SCHEDULE), { timeout: 30_000 })
+      .toMatch(/^Set up: Every day at 9 AM, Scout sends you a summary of your inbox\nFirst run (today|tomorrow) 9:00 AM/);
     await screenshot("chat-card");
     await openAutomations();
-    await expect.poll(() => rowText(SCHEDULE)).toMatch(/Working · hasn't run yet · next: (today|tomorrow) 9:00 AM/);
+    await expect.poll(() => rowText(SCHEDULE)).toMatch(/First run (today|tomorrow) 9:00 AM/);
     await screenshot("list-one");
 
     // 2. From chat: "whenever our form sends a lead" → the card → Copy address → a real call with the right secret runs
@@ -218,7 +256,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     const wrong = await fetch(address.replace(/whsec_[\w-]+$/, "whsec_not-the-secret"), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     expect(wrong.status).toBe(401);
     await openAutomations();
-    await expect.poll(() => rowText(FORM)).toMatch(/Working · last ran today/);
+    await expect.poll(() => rowText(FORM)).toMatch(/On · last ran today/);
     await openRow(FORM);
     await expect.poll(panel).toMatch(/recent runs/i);
     await evaluate(`document.querySelector('aside[aria-label="Automation"] details summary').click(); true`);
@@ -241,7 +279,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
       expect(await flip(sentence)).toBe("true");
       await expect.poll(() => switchState(sentence)).toBe("false");
       await expect.poll(() => rowStatus(sentence)).toBe("paused");
-      expect(await rowText(sentence)).toMatch(/^.+\nPaused · /);
+      expect(await rowText(sentence)).toMatch(/\nPaused · /);
       expect(await rowText(sentence)).not.toContain("next:");
       if (sentence === SCHEDULE) await screenshot("list-switched-off");
       await reload();
@@ -249,7 +287,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
       expect(await rowStatus(sentence)).toBe("paused");
       expect(await flip(sentence)).toBe("false");
       await expect.poll(() => rowStatus(sentence)).toBe("working");
-      if (sentence === SCHEDULE) expect(await rowText(sentence)).toMatch(/Working · hasn't run yet · next: (today|tomorrow) 9:00 AM/);
+      if (sentence === SCHEDULE) expect(await rowText(sentence)).toMatch(/First run (today|tomorrow) 9:00 AM/);
       await reload();
       await openAutomations();
       expect(await rowStatus(sentence)).toBe("working");
@@ -261,16 +299,16 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
 
     await openRow(SCHEDULE);
     await clickIn('aside[aria-label="Automation"]', "Pause");
-    await expect.poll(panel).toMatch(/^.+\nPaused\n/);
+    await expect.poll(panel).toMatch(/\nPaused\n/);
     await expect.poll(() => rowText(SCHEDULE)).toMatch(/Paused · /);
     await screenshot("panel-paused");
     await reload();
     await openAutomations();
     await openRow(SCHEDULE);
-    expect(await panel()).toMatch(/^.+\nPaused\n/);
+    expect(await panel()).toMatch(/\nPaused\n/);
     await clickIn('aside[aria-label="Automation"]', "Resume");
-    await expect.poll(panel).toMatch(/^.+\nWorking\n/);
-    await expect.poll(() => rowText(SCHEDULE)).toMatch(/next: (today|tomorrow) 9:00 AM/);
+    await expect.poll(panel).toMatch(/\nOn\n/);
+    await expect.poll(() => rowText(SCHEDULE)).toMatch(/First run (today|tomorrow) 9:00 AM/);
     await click("Close");
 
     await openChat("Scout", MAIN);
@@ -281,7 +319,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     await openChat("Scout", MAIN);
     await expect.poll(() => cardText(SCHEDULE)).toMatch(/\nPaused\nResume/);
     expect(await clickCard(SCHEDULE, "Resume")).toBe(true);
-    await expect.poll(() => cardText(SCHEDULE)).toMatch(/\nNext: (today|tomorrow) 9:00 AM\nPause/);
+    await expect.poll(() => cardText(SCHEDULE)).toMatch(/\nFirst run (today|tomorrow) 9:00 AM\nPause/);
     expect(await clickCard(FORM, "Pause")).toBe(true);
     await expect.poll(() => cardText(FORM)).toMatch(/\nPaused\nResume/);
     expect(await clickCard(FORM, "Resume")).toBe(true);
@@ -292,7 +330,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     await openRow(SCHEDULE);
     await clickIn('aside[aria-label="Automation"]', "Run now");
     await expect.poll(panel, { timeout: 30_000 }).toMatch(/Today [^\n]*\n✓\nInbox: 3 new emails, nothing urgent\./);
-    await expect.poll(() => rowText(SCHEDULE)).toMatch(/Working · last ran today [^·]+ · next: /);
+    await expect.poll(() => rowText(SCHEDULE)).toMatch(/On · last ran today [^·]+ · next: /);
     await screenshot("run-now");
     await clickIn('aside[aria-label="Automation"]', "Edit");
     await expect.poll(() => text("[role=dialog]")).toContain("Edit automation");
@@ -319,7 +357,7 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     // 6. A run that fails because the bot is signed out puts it first under Needs you, with the one button that fixes it,
     // and its future days on the calendar say so too.
     await say("Scout", "every day at 5pm, check the sales inbox", MAIN);
-    await expect.poll(() => cardText(FAILING), { timeout: 30_000 }).toContain("Next:");
+    await expect.poll(() => cardText(FAILING), { timeout: 30_000 }).toContain("First run");
     await openAutomations();
     await openRow(FAILING);
     await clickIn('aside[aria-label="Automation"]', "Run now");
@@ -355,19 +393,13 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
 
     // 8. Deleting a bot takes its automations with it: off the list, off the calendar, and nothing of it runs.
     await say("Ledger", "every morning, summarize my inbox");
-    await expect.poll(() => cardText("Every day at 9 AM, Ledger sends you a summary of your inbox"), { timeout: 30_000 }).toContain("Next:");
+    await expect.poll(() => cardText("Every day at 9 AM, Ledger sends you a summary of your inbox"), { timeout: 30_000 }).toContain("First run");
     await say("Ledger", "whenever our form sends a lead, draft a follow-up");
     await expect.poll(() => cardText("When your sales form sends something, Ledger drafts a follow-up for the lead"), { timeout: 30_000 }).toContain("Hasn't run yet");
     await openAutomations();
     await expect.poll(() => evaluate(`[...document.querySelectorAll("[data-automation]")].filter((item) => item.innerText.includes("Ledger")).length`)).toBe(2);
     await screenshot("ledger-automations");
-    await openChat("Ledger");
-    await evaluate(`document.querySelector('button[aria-label="Actions for Ledger"]').click(); true`);
-    await expect.poll(() => text("[role=menu]")).toContain("Delete");
-    await clickIn("[role=menu]", "Delete");
-    await expect.poll(() => text("[role=alertdialog], [role=dialog]")).toContain("automations");
-    await screenshot("delete-bot-confirm");
-    await clickIn("[role=alertdialog], [role=dialog]", "Delete");
+    await api("DELETE", `/api/bots/${ledger}`);
     await expect.poll(() => evaluate(`[...document.querySelectorAll("[data-sidebar-bot-row]")].some((item) => item.innerText.startsWith("Ledger"))`), { timeout: 30_000 }).toBe(false);
     await openAutomations();
     expect(await evaluate(`[...document.querySelectorAll("[data-automation]")].filter((item) => item.innerText.includes("Ledger")).length`)).toBe(0);
@@ -382,14 +414,14 @@ async function openApp(server: { url: string; port: number; dataDir: string; log
     // 9. Restart the server mid-way: everything is still there, in the same state, and a schedule still runs on time.
     const dueAt = Date.now() + 45_000;
     await api("POST", "/api/routines", { name: "Lead count", prompt: "Count the new leads.", botId: scout, schedule: { type: "interval", everyMinutes: 60, anchorAt: dueAt } });
-    await expect.poll(() => rowText("Scout counts the new leads")).toContain("next: today");
+    await expect.poll(() => rowText("Scout counts the new leads")).toMatch(/First run (today|tomorrow)/);
     const before = await evaluate(`[...document.querySelectorAll("[data-automation]")].map((item) => item.dataset.automationStatus + " " + item.innerText.split("\\n")[0])`);
     await live.stop();
     await live.start();
     await reload();
     await openAutomations();
     await expect.poll(() => evaluate(`[...document.querySelectorAll("[data-automation]")].map((item) => item.dataset.automationStatus + " " + item.innerText.split("\\n")[0])`), { timeout: 30_000 }).toEqual(before);
-    await expect.poll(() => rowText("Scout counts the new leads"), { timeout: 90_000, interval: 2_000 }).toMatch(/Working · last ran today [^·]+ · next: today/);
+    await expect.poll(() => rowText("Scout counts the new leads"), { timeout: 90_000, interval: 2_000 }).toMatch(/On · last ran today [^·]+ · next: (today|tomorrow)/);
     await screenshot("after-restart");
     expect((await state()).runs.filter((run) => run.botId === ledger)).toEqual([]);
 
@@ -528,13 +560,13 @@ await import(${JSON.stringify(pathToFileURL(join(ROOT, "server", "testing", "fak
     const state = async () => ({ ...(await api("GET", "/api/routines")), ...(await api("GET", "/api/webhooks")) }) as { routines: any[]; runs: any[]; webhooks: any[] };
 
     app = await openApp({ url: cloud.url, port: cloud.port, dataDir: cloud.dataDir, logPath: cloud.logPath }, { shots, bots: { Scout: scout, Ledger: ledger }, proxyHeaders: cloud.owner });
-    const { evaluate, click, screenshot, text, clickIn, rowText, rowStatus, flip, switchState, panel, cardText, clickCard, openAutomations, openChat, say } = app;
+    const { evaluate, click, screenshot, text, clickIn, rowText, rowStatus, flip, switchState, panel, cardText, clickCard, openAutomations, say } = app;
 
-    await expect.poll(() => evaluate(`(() => { const skip = [...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Skip setup"); skip?.click(); return Boolean(skip); })()`), { timeout: 30_000 }).toBe(true);
+    await evaluate(`[...document.querySelectorAll("button")].find((button) => button.textContent.trim() === "Skip setup")?.click(); true`);
 
     // The owner sets up a schedule and a webhook from chat; the address to paste is the Cloud's public one.
     await say("Scout", "every morning, summarize my inbox");
-    await expect.poll(() => cardText(SCHEDULE), { timeout: 30_000 }).toContain("Next:");
+    await expect.poll(() => cardText(SCHEDULE), { timeout: 30_000 }).toContain("First run");
     await say("Scout", "whenever our form sends a lead, draft a follow-up");
     await expect.poll(() => cardText(FORM), { timeout: 30_000 }).toContain("Hasn't run yet");
     await evaluate("window.__copied = []; navigator.clipboard.writeText = async (value) => { window.__copied.push(value); }; true");
@@ -550,7 +582,7 @@ await import(${JSON.stringify(pathToFileURL(join(ROOT, "server", "testing", "fak
     await expect.poll(async () => (await state()).routines.some((routine) => routine.name === "Hourly orders"), { timeout: 30_000 }).toBe(true);
     expect((await fetch(local.replace(/whsec_[\w-]+$/, "whsec_wrong"), { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(401);
     await openAutomations();
-    await expect.poll(() => rowText(FORM), { timeout: 30_000 }).toMatch(/Working · last ran today/);
+    await expect.poll(() => rowText(FORM), { timeout: 30_000 }).toMatch(/On · last ran today/);
     await evaluate(`${"[...document.querySelectorAll('[data-automation]')]"}.find((item) => item.innerText.includes(${JSON.stringify(FORM)})).querySelector("button").click(); true`);
     await expect.poll(panel).toContain("Copy address");
     expect(await panel()).not.toContain("Keep OpenMausBot open");
@@ -591,7 +623,7 @@ await import(${JSON.stringify(pathToFileURL(join(ROOT, "server", "testing", "fak
     await evaluate(`[...document.querySelectorAll('[data-automation]')].find((item) => item.innerText.includes(${JSON.stringify(hourly)})).querySelector("button").click(); true`);
     await clickIn('aside[aria-label="Automation"]', "Run now");
     await expect.poll(async () => (await state()).runs.find((run) => run.routineName === "Hourly orders")?.status, { timeout: 30_000 }).toBe("waiting");
-    const ordersThread = (await state()).runs.find((run) => run.routineName === "Hourly orders").threadId;
+    const ordersThread = (await state()).runs.find((run) => run.routineName === "Hourly orders").resultsThreadId;
     await expect.poll(async () => (await api("GET", `/api/threads/${ordersThread}/messages`)).messages.find((message: any) => message.card?.held)?.card.held, { timeout: 30_000 }).toBe(OUTSIDE_WHY);
     await expect.poll(panel).toContain("Needs you");
     await clickIn('aside[aria-label="Automation"]', "Answer");
@@ -605,12 +637,7 @@ await import(${JSON.stringify(pathToFileURL(join(ROOT, "server", "testing", "fak
     await api("POST", "/api/routines", { name: "Ledger close", prompt: "Close the books.", botId: ledger, schedule: { type: "daily", time: "18:00", weekdays: [1, 2, 3, 4, 5] } });
     await openAutomations();
     await expect.poll(() => evaluate(`[...document.querySelectorAll("[data-automation]")].filter((item) => item.innerText.includes("Ledger")).length`)).toBe(2);
-    await openChat("Ledger");
-    await evaluate(`document.querySelector('button[aria-label="Actions for Ledger"]').click(); true`);
-    await expect.poll(() => text("[role=menu]")).toContain("Delete");
-    await clickIn("[role=menu]", "Delete");
-    await expect.poll(() => text("[role=alertdialog]")).toContain("automations");
-    await clickIn("[role=alertdialog]", "Delete");
+    await api("DELETE", `/api/bots/${ledger}`);
     await expect.poll(async () => (await api("GET", "/api/bots?messages=0")).bots.some((bot: any) => bot.id === ledger), { timeout: 30_000 }).toBe(false);
     await openAutomations();
     expect(await evaluate(`[...document.querySelectorAll("[data-automation]")].filter((item) => item.innerText.includes("Ledger")).length`)).toBe(0);

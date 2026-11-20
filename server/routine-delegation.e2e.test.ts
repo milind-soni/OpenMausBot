@@ -1,4 +1,4 @@
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -121,16 +121,14 @@ describe("routine delegation through the isolated harness", () => {
     await dump(work.threadId);
     finish(work.threadId);
     await expect.poll(async () => (await runState(run.id))?.status, { timeout: 20_000 }).toBe("completed");
-    const transcript = await messages(run.threadId);
-    expect(transcript.some((message) => message.tool?.name === "Routine peer replied" && message.from?.botId === peer.id)).toBe(true);
-    expect(transcript.some((message) => message.tool?.name?.startsWith("Resumed with Routine peer results"))).toBe(true);
+    expect((await raw("GET", `/api/threads/${run.threadId}/messages`)).status).toBe(404);
     const finished = await runState(run.id);
     expect(finished.output).toContain(SETTLED);
     expect(finished.output).toContain(REPORT_FROM_PEER);
     expect((await dump(run.threadId)).systemPrompt).toContain("Execute this routine now:");
     expect(peerWork(run.threadId)).toMatchObject({ status: "completed" });
     expect(rows().find((node) => node.id === work.parentId)?.status).toBe("completed");
-    evidence.push({ waitedForBusyPeer: true, resumedRoutine: run.id, threadId: run.threadId, transcript });
+    evidence.push({ waitedForBusyPeer: true, resumedRoutine: run.id, threadId: run.threadId, report: finished.output });
   }, 60_000);
 
   it.each([
@@ -153,14 +151,10 @@ describe("routine delegation through the isolated harness", () => {
       await dump(task.threadId);
     }
     finish(work.threadId);
-    await expect.poll(async () => (await messages(run.threadId)).some(
-      (message) => message.tool?.name === "Routine peer replied" && message.from?.botId === peer.id,
-    ), { timeout: 15_000 }).toBe(true);
     await expect.poll(() => peerWork(run.threadId)?.status, { timeout: 15_000 }).toBe("completed");
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     expect((await runState(run.id)).status).toBe("waiting");
     expect(rows().find((node) => node.id === work.parentId)?.status).toBe("resume");
-    expect((await messages(run.threadId)).some((message) => message.tool?.name?.startsWith("Resumed with"))).toBe(false);
 
     if (resume === "raise") await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: capacity + 1 } });
     else {
@@ -169,38 +163,37 @@ describe("routine delegation through the isolated harness", () => {
     }
     await expect.poll(async () => (await runState(run.id))?.status, { timeout: 15_000 }).toBe("completed");
     expect((await runState(run.id)).output).toContain(SETTLED);
-    expect((await messages(run.threadId)).some((message) => message.tool?.name?.startsWith("Resumed with Routine peer results"))).toBe(true);
+    expect((await runState(run.id)).output).toContain(REPORT_FROM_PEER);
     const bot = await botState(source.id);
     expect(occupiedThreads.map(threadId => bot.tasks.find((task: any) => task.threadId === threadId).busy))
       .toEqual(resume === "raise" ? [true] : [false, true, true]);
-    evidence.push({ resumeWaitedForSlot: true, capacity, resume, runId: run.id, transcript: await messages(run.threadId) });
+    evidence.push({ resumeWaitedForSlot: true, capacity, resume, runId: run.id, report: (await runState(run.id)).output });
   }, 60_000);
 
-  it("coordinates a new user request on a completed routine's thread without changing its recorded result", async () => {
+  it("coordinates a new user request in the main chat without changing a completed routine's recorded result", async () => {
     const run = await start();
     finish(run.threadId);
     await expect.poll(async () => (await runState(run.id))?.status, { timeout: 15_000 }).toBe("completed");
     const finished = await runState(run.id);
-    await expect.poll(async () => (await botState(source.id)).tasks.find((task: any) => task.threadId === run.threadId)?.busy).toBe(false);
-    unlinkSync(file(run.threadId, "gate"));
-    unlinkSync(file(run.threadId, "json"));
-    await api("POST", `/api/bots/${source.id}/messages`, { threadId: run.threadId, text: "A new request: ask the peer for a fresh report." });
+    const chat = source.activeTaskId;
+    expect((await raw("POST", `/api/bots/${source.id}/messages`, { threadId: run.threadId, text: "Continue hidden work." })).status).toBe(404);
+    await api("POST", `/api/bots/${source.id}/messages`, { threadId: chat, text: "A new request: ask the peer for a fresh report." });
     const coordinated = await api("POST", "/api/internal/coordinate-bots", {
       botIds: [peer.id], message: "Produce a fresh fixture report.",
-    }, await token(run.threadId));
+    }, await token(chat));
     expect(coordinated.receipts).toHaveLength(1);
     const requestId = coordinated.receipts[0].requestId;
     const handoff = () => rows().find((node) => node.id === requestId)!;
-    finish(run.threadId);
+    finish(chat);
     await dump(handoff().threadId);
     finish(handoff().threadId);
-    await expect.poll(async () => (await messages(run.threadId)).some(
+    await expect.poll(async () => (await messages(chat)).some(
       (message) => message.from?.botId === peer.id && message.roomRequest?.id === requestId && message.roomRequest.phase === "result",
     ), { timeout: 20_000 }).toBe(true);
-    await control(["wait", "--bot", source.id, "--task", run.threadId]);
+    await control(["wait", "--bot", source.id, "--task", chat]);
     expect(handoff().status).toBe("completed");
     expect(await runState(run.id)).toMatchObject({ status: "completed", finishedAt: finished.finishedAt, output: finished.output });
-    evidence.push({ reusedCompletedExecution: true, transcript: await messages(run.threadId) });
+    evidence.push({ keptCompletedExecutionPrivate: true, transcript: await messages(chat) });
   }, 45_000);
 
   it("keeps a failed routine's queued hand-off on the runtime through a provider reload without reviving the run", async () => {
@@ -222,15 +215,11 @@ describe("routine delegation through the isolated harness", () => {
     await dump(work.threadId);
     finish(work.threadId);
     await expect.poll(() => peerWork(run.threadId)?.status, { timeout: 20_000 }).toBe("completed");
-    await expect.poll(async () => (await messages(run.threadId)).some(
-      (message) => message.tool?.name === "Routine peer replied" && message.from?.botId === peer.id,
-    ), { timeout: 15_000 }).toBe(true);
     finish(run.threadId);
     await expect.poll(() => rows().find((node) => node.id === work.parentId)?.status, { timeout: 20_000 }).toBe("completed");
-    await control(["wait", "--bot", source.id, "--task", run.threadId]);
     expect(await runState(run.id)).toMatchObject({ status: "failed", finishedAt: failed.finishedAt, error: failed.error });
     expect((await api("GET", "/api/routines")).routines.find((routine: any) => routine.id === run.routineId).failureStreak).toBe(1);
-    evidence.push({ providerReloadKeptRuntimeHandoff: true, runId: run.id, transcript: await messages(run.threadId) });
+    evidence.push({ providerReloadKeptRuntimeHandoff: true, runId: run.id, report: (await runState(run.id)).output });
   }, 60_000);
 
   it("does not revive a cancelled routine: its running peer stops with it, and later user work never resumes it", async () => {
@@ -246,17 +235,17 @@ describe("routine delegation through the isolated harness", () => {
     // Stop means stop: the peer mid-turn ends with the cancelled run, its engine turn included.
     await expect.poll(() => peerWork(run.threadId)?.status, { timeout: 10_000 }).toBe("cancelled");
     await expect.poll(async () => Boolean((await botState(peer.id)).busy), { timeout: 15_000 }).toBe(false);
-    unlinkSync(file(run.threadId, "gate"));
-    unlinkSync(file(run.threadId, "json"));
-    await api("POST", `/api/bots/${source.id}/messages`, { threadId: run.threadId, text: "A new independent request after cancellation." });
-    await dump(run.threadId);
+    const chat = source.activeTaskId;
+    expect((await raw("POST", `/api/bots/${source.id}/messages`, { threadId: run.threadId, text: "Continue cancelled work." })).status).toBe(404);
+    await api("POST", `/api/bots/${source.id}/messages`, { threadId: chat, text: "A new independent request after cancellation." });
+    await dump(chat);
     // Past the moment the peer would have answered, during the later user work.
     finish(work.threadId);
-    finish(run.threadId);
-    await control(["wait", "--bot", source.id, "--task", run.threadId]);
+    finish(chat);
+    await control(["wait", "--bot", source.id, "--task", chat]);
     await new Promise((resolve) => setTimeout(resolve, 2_000));
     expect(peerWork(run.threadId)?.status).toBe("cancelled");
-    const transcript = await messages(run.threadId);
+    const transcript = await messages(chat);
     expect(transcript.some((message) => message.tool?.name === "Routine peer replied")).toBe(false);
     expect(transcript.some((message) => message.text?.includes(REPORT_FROM_PEER))).toBe(false);
     expect(transcript.some((message) => message.text?.includes(SETTLED))).toBe(false);

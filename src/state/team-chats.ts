@@ -77,7 +77,7 @@ export function openOwnTeamChat(dispatch: (action: Action) => void, bot: BotLike
   if (bot.yourAccess === "view") return false;
   if (making.has(bot.id)) return true;
   making.add(bot.id);
-  void api<{ bot?: Bot; task?: { threadId?: string } }>(`/api/bots/${bot.id}/tasks`, { method: "POST", body: "{}" })
+  void api<{ bot?: Bot; task?: { threadId?: string } }>(`/api/bots/${bot.id}/tasks?main=1`, { method: "POST", body: "{}" })
     .then((response) => {
       if (typeof response?.task?.threadId === "string") rememberOwnChat(team.teamId, response.task.threadId);
       if (!response?.bot) return;

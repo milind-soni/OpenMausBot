@@ -14,7 +14,6 @@ import { LearnedSkillsSettings } from "./ShareLearnedSkillsSettings";
 import { effortLabel } from "./ModelPicker";
 import { EFFORT_LEVELS, isEffortLevel } from "../../shared/wire";
 import { setColorUserBubbles, useColorUserBubbles } from "@/lib/user-bubble-preference";
-import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { setPinnedCircles, setUniversalPins, usePinnedCircles, useUniversalPins } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
@@ -270,19 +269,6 @@ export function ColorUserBubblesRow({ simple = false }: { simple?: boolean }) {
         checked={enabled}
         aria-label={t("settings.userBubbles.aria")}
         onClick={() => setColorUserBubbles(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
-export function ShowThreadsRow() {
-  const enabled = useShowThreadsChoice();
-  return (
-    <SettingRow title={t("settings.threadDisplay.title")} subtitle={t("settings.threadDisplay.short")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.threadDisplay.show")}
-        onClick={() => setShowThreads(!enabled)}
       />
     </SettingRow>
   );

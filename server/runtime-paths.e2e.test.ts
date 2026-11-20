@@ -10,6 +10,7 @@ import { ENVELOPE_MARK } from "./runtime/envelope.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { hostTimeout } from "./testing/host-timeout.ts";
+import { fixtureMessages, storedThread } from "./testing/registry.ts";
 import { ownTurnText } from "./testing/room-handoff-agent.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -69,6 +70,7 @@ async function scenario(test: (f: any) => Promise<void>) {
     const turn = (key: string) => turns().find((candidate) => candidate.planKey === key);
     const own = (record: any): string => ownTurnText(record?.prompt);
     const told = (record: any): string => `${record?.system ?? ""}\n${JSON.stringify(record?.prompt ?? "")}`;
+    const savedMessages = (threadId: string) => fixtureMessages(dataDir, threadId);
     const messages = async (threadId: string): Promise<any[]> => (await api("GET", `/api/threads/${threadId}/messages?limit=300`)).body.messages ?? [];
     const bot = async (botId: string) => (await api("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === botId);
     const runState = async (runId: string) => (await api("GET", "/api/routines")).body.runs.find((run: any) => run.id === runId);
@@ -111,7 +113,7 @@ async function scenario(test: (f: any) => Promise<void>) {
       }, { timeout: 30_000 }).toBe(true);
     };
     try {
-      await test({ api, owner, peer, dataDir, script, say, rows, raw, roots, children, turns, turn, own, told, messages, bot, runState, startRoutine,
+      await test({ api, owner, peer, dataDir, script, say, rows, raw, roots, children, turns, turn, own, told, messages, savedMessages, bot, runState, startRoutine,
         tokenOf, gate, open, ready, awaitReady, settle, restart });
     } catch (error) {
       const names: Record<string, string> = { [owner.id]: "Owner", [peer.id]: "Peer" };
@@ -167,8 +169,8 @@ it("R1 a routine run coordinates a teammate, waits, and completes through a rout
   await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("completed");
   expect(f.children()).toHaveLength(1);
   expect(f.children()[0]).toMatchObject({ status: "completed", mode: "work", reply: "resume", botId: f.peer.id, text: brief });
-  expect((await f.messages(run.threadId)).filter((message: any) => message.tool?.name === "Peer replied")).toHaveLength(1);
-  expect((await f.messages(run.threadId)).find((message: any) => message.tool?.name === "Sent to Peer")?.tool?.output).toBe("nightly check");
+  expect(f.savedMessages(run.threadId).filter((message: any) => message.tool?.name === "Peer replied")).toHaveLength(1);
+  expect(f.savedMessages(run.threadId).find((message: any) => message.tool?.name === "Sent to Peer")?.tool?.output).toBe("nightly check");
 }), hostTimeout(120_000));
 
 it("R3 a consultation reaches a teammate without waiting and resumes the asker with the answer", () => scenario(async (f) => {
@@ -224,7 +226,8 @@ it("R4 a one-way notice opens a notify child in a new thread and never resumes t
   expect(receipt.threadId).toEqual(expect.any(String));
   expect(receipt.threadId).not.toBe(f.peer.activeTaskId);
   const peerTasks = (await f.bot(f.peer.id)).tasks;
-  expect(peerTasks.find((task: any) => task.threadId === receipt.threadId)?.title).toBe(notice);
+  expect(peerTasks.find((task: any) => task.threadId === receipt.threadId)).toBeUndefined();
+  expect(storedThread(f.dataDir, f.peer.id, receipt.threadId)?.title).toBe(notice);
   await expect.poll(() => f.children().length, { timeout: 15_000 }).toBe(1);
   expect(f.children()[0]).toMatchObject({ id: receipt.requestId, mode: "notify", reply: "none", threadId: receipt.threadId, text: expect.stringContaining(notice) });
 

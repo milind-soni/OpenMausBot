@@ -183,7 +183,7 @@ describe("registering a phone", () => {
       { platform: "apns", token: FCM },
       { platform: "fcm", token: "short" },
       { platform: "fcm", token: FCM, environment: "sandbox" },
-      { platform: "apns", token: APNS, kinds: ["routine-failed"] },
+      { platform: "apns", token: APNS, kinds: ["unknown"] },
       { platform: "apns", token: APNS, pairing: "no spaces allowed" },
       { platform: "apns", token: APNS, pushToken: APNS },
       { platform: "webpush", token: FCM },
@@ -211,13 +211,13 @@ describe("offering a notify frame", () => {
 
   it("wakes the phone for approvals, questions, sign-ins and finished replies only, as the phone chose", async () => {
     const { push, relay } = harness();
-    await push.register(PHONE, { platform: "apns", token: APNS, kinds: ["question", "sign-in", "done"] });
-    for (const [seq, kind] of ["approval", "question", "sign-in", "done", "mention", "routine-failed", "spend", "secret"].entries()) {
+    await push.register(PHONE, { platform: "apns", token: APNS, kinds: ["question", "sign-in", "done", "brief", "routine-failed"] });
+    for (const [seq, kind] of ["approval", "question", "sign-in", "done", "brief", "mention", "routine-failed", "spend", "secret"].entries()) {
       push.offer({ notification: notification({ kind, threadId: `th_${kind}` }), seq }, everyone);
     }
     await push.flush();
     expect(relay.sends().map((call) => (call.body.notification as { kind: string; title: string }).title)).toEqual([
-      "Scout has a question", "Scout needs you to sign in to a website", "Scout finished",
+      "Scout has a question", "Scout needs you to sign in to a website", "Scout finished", "Your brief", "Scout's routine failed",
     ]);
   });
 

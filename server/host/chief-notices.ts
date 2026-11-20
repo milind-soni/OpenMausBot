@@ -209,8 +209,10 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       tool: { name: input.chip, ok: false },
       threadRef: { botId: bot.id, threadId, title: task?.title ?? (group ? group.name : `${bot.name}'s conversation`) },
     });
+    const direct = !group && !task?.openedBy && !task?.routineRunId;
+    if (direct) tellThePerson();
     const peerAsk = { botId: bot.id, name: bot.name, unattended: true,
-      incident: { threadId, ...(input.alreadyNotified ? { notified: true } : {}) } };
+      incident: { threadId, ...(input.alreadyNotified || direct ? { notified: true } : {}) } };
     const decision = admit("incident", {}, {
       threadBusy: deps.threadBusy(chief.id, notices.threadId),
       atCapacity: deps.botAtThreadCapacity(chief.id),

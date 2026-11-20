@@ -62,7 +62,7 @@ function normalizeScheduleInput(args: Json): NormalizedSchedule {
   if (!jsonRecord(raw)) return { error: `The schedule must be a JSON object. ${SUPPORTED_SCHEDULES}` };
   const type = typeof raw.type === "string" ? raw.type.trim().toLowerCase() : "";
   const fields = type === "once"
-    ? ["type", "at"]
+    ? ["type", "at", "after_seconds"]
     : type === "weekly" || type === "daily"
       ? ["type", "time", "weekdays"]
       : type === "interval"
@@ -89,6 +89,13 @@ function normalizeScheduleInput(args: Json): NormalizedSchedule {
   }
   if (type === "limit_reset") return limitResetSchedule(raw.engine, raw.repeat);
   if (type === "once") {
+    if (raw.after_seconds != null) {
+      const seconds = raw.after_seconds;
+      if (raw.at != null || typeof seconds !== "number" || !Number.isSafeInteger(seconds) || seconds < 1 || seconds > 31_536_000) {
+        return { error: "Use either at or after_seconds (1 to 31536000 whole seconds)." };
+      }
+      return { schedule: { type: "once", at: new Date(Date.now() + seconds * 1000).toISOString() } };
+    }
     if (typeof raw.at !== "string" || !raw.at.trim()) {
       return { error: `A once schedule needs "at": a future RFC3339 date-time with an explicit offset, for example 2026-09-01T09:00:00+05:30.` };
     }
@@ -339,25 +346,25 @@ function addressText(r: Json): string {
 }
 
 /** What the bot should say about a schedule it just set: what it assumed, with the time zone and the next run in words. */
-function closingWords(r: Json, action: string): string {
+function closingWords(r: Json, action: string, forBot: boolean): string {
   const zone = typeof r.timeZone === "string" ? r.timeZone : "";
   const plain = zone ? plainTimeZone(zone) : "";
   const next = typeof r.nextRunAt === "number" && zone ? `${plainWhen(r.nextRunAt, zone)} ${plain}` : "";
   if (next && action === "create") {
-    return `In a sentence or two of plain words, tell the person what you set up and what you assumed: when it runs, saying the time zone as "${plain}", never as a zone id; where its results will appear (here in this chat); what each run covers; and that the first run is ${next}.`;
+    return `In a sentence or two of plain words, tell the person what you set up and what you assumed: when it runs, saying the time zone as "${plain}", never as a zone id; where its results will appear (${forBot ? "in the selected bot’s chat with the person" : "in this bot’s chat with the person"}); what each run covers; and that the first run is ${next}.`;
   }
   if (next && (action === "update" || action === "resume")) return `Tell the person in one plain sentence what changed, saying the time zone as "${plain}", and that the next run is ${next}.`;
   return "Tell the person in one sentence what will happen.";
 }
 
-function appliedText(r: Json, done: string, action: string): ToolCallResult {
+function appliedText(r: Json, done: string, action: string, forBot: boolean): ToolCallResult {
   const summary = typeof r.summary === "string" && r.summary.trim() ? `\n\n${r.summary.trim()}` : "";
   const detail = typeof r.detail === "string" && r.detail.trim() ? `\n\n${r.detail.trim()}` : "";
   const id = typeof r.resultId === "string" ? r.resultId : jsonRecord(r.result) && typeof r.result.resultId === "string" ? r.result.resultId : "";
   const attention = r.settlementPending && typeof r.message === "string" ? `\n\nNeeds attention: ${r.message}`
     : jsonRecord(r.result) && typeof r.result.message === "string" ? `\n\nNeeds attention: ${r.result.message}` : "";
   return {
-    text: `${done}${id ? ` (trigger id ${id})` : ""}. It applied at once; the person sees it right here in the chat, with Pause, Edit and Undo.${summary}${detail}${attention}${addressText(r)}\n\nDo not ask for confirmation. ${closingWords(r, action)}`,
+    text: `${done}${id ? ` (trigger id ${id})` : ""}. It applied at once; the person sees it right here in the chat, with Pause, Edit and Undo.${summary}${detail}${attention}${addressText(r)}\n\nDo not ask for confirmation. ${closingWords(r, action, forBot)}`,
   };
 }
 
@@ -370,7 +377,7 @@ async function request(body: Json, context: ToolCallContext, done: string): Prom
     const error = typeof r.error === "string" ? r.error : `HTTP ${status}`;
     return { text: `The trigger change did not apply: ${error}\n\nDo not claim it was applied. Fix what the error says, or tell the person plainly what is missing.`, isError: true };
   }
-  return appliedText(r, done, String(body.action ?? ""));
+  return appliedText(r, done, String(body.action ?? ""), Boolean(body.forBotId));
 }
 
 /** Everything a trigger call may carry beyond the fields it sets. */

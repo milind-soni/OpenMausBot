@@ -36,7 +36,7 @@ export const PUSH_TITLE_MAX = 200;
 
 /** The kinds a closed app is woken for: a bot waits on the person (approval, question, sign-in), or a reply is ready.
  * Everything else reaches the phone only while it is connected. */
-export const PUSH_KINDS = ["approval", "question", "sign-in", "done"] as const;
+export const PUSH_KINDS = ["approval", "question", "sign-in", "done", "brief", "routine-failed"] as const;
 export type PushKind = (typeof PUSH_KINDS)[number];
 
 /** `PUT /api/push/device`, from the phone. */

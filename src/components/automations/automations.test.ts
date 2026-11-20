@@ -60,7 +60,7 @@ beforeEach(() => {
   fixture.dispatch.mockReset();
   fixture.api.mockReset();
   fixture.api.mockResolvedValue({});
-  fixture.state = { hydrated: true, bots: [botA, botB], selectedId: "", routines: [], webhooks: [webhook], routineRuns: [], webhookAttempts: [], routinesLoadState: "ready", webhookIngress: { available: true, baseUrl: "http://127.0.0.1:8800" } };
+  fixture.state = { hydrated: true, bots: [botA, botB], groups: [], selectedId: "", routines: [], webhooks: [webhook], routineRuns: [], webhookAttempts: [], routinesLoadState: "ready", webhookIngress: { available: true, baseUrl: "http://127.0.0.1:8800" } };
 });
 afterEach(() => { root?.unmount(); root = null; document.body.innerHTML = ""; });
 
@@ -509,6 +509,7 @@ describe("a run that waits on the person", () => {
   });
 
   it("opens and cancels the same waiting run when a newer run was cancelled", async () => {
+    fixture.state.bots = [{ ...botA, tasks: [{ threadId: "exec-1" }] }, botB];
     const newer = { ...run("cancelled"), id: "run-2", threadId: "exec-2", scheduledFor: now - 30_000, startedAt: now - 30_000, createdAt: now - 30_000, finishedAt: now };
     const [automation] = automationsFrom({ routines: [routine] as never, webhooks: [], runs: [newer, run("waiting")] as never });
     const container = mount(createElement(AutomationPanel, { automation: automation!, sentence: "s", onClose: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() }));
