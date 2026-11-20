@@ -16,14 +16,26 @@ const deepseekSpeech: SpeechBridge = {
 /** DeepSeek voice also hears through DeepSeek, on every computer that can listen at all. */
 const deepseekHears = (config: ConfigStatus | null | undefined) => config?.tts?.provider === "deepseek";
 
+/** The person's own ElevenLabs key is saved (not the plan's included voice). */
+export function ownElevenLabsKey(config: ConfigStatus | null | undefined): boolean {
+  const eleven = savedState(keyEntry("elevenlabs"), config);
+  return eleven.configured && !eleven.included;
+}
+
+/** The person chose to be heard through their own ElevenLabs key (Scribe), on every computer, the Mac included. */
+export const scribeChosen = (config: ConfigStatus | null | undefined) =>
+  config?.tts?.hearWith === "elevenlabs" && ownElevenLabsKey(config);
+
 function serverHears(capabilities: DesktopCapabilities, config: ConfigStatus | null | undefined): boolean {
-  return capabilities.dictation.engine === "fish-audio" || (capabilities.dictation.available && deepseekHears(config));
+  return capabilities.dictation.engine === "fish-audio"
+    || (capabilities.dictation.available && (deepseekHears(config) || scribeChosen(config)));
 }
 
 /** The speech bridge this computer listens through: the page's own recorder (heard by the harness through DeepSeek,
  * Fish Audio or ElevenLabs), or the desktop app's helper. */
 export function speechBridge(config: ConfigStatus | null | undefined): SpeechBridge | Window["ogb"] {
   const capabilities = desktopCapabilitiesNow();
+  if (capabilities.dictation.available && scribeChosen(config)) return fishSpeech;
   if (capabilities.dictation.available && deepseekHears(config)) return deepseekSpeech;
   return capabilities.dictation.engine === "fish-audio" ? fishSpeech : globalThis.window?.ogb;
 }
@@ -40,10 +52,10 @@ export function stopListening(): void {
 /** A key the server listens with: DeepSeek while it is the voice; otherwise Fish Audio, or the person's own
  * ElevenLabs key (not the plan's included voice). */
 export function fishListeningReady(config: ConfigStatus | null | undefined): boolean {
+  if (scribeChosen(config)) return true;
   if (deepseekHears(config)) return savedState(keyEntry("deepseek"), config).configured;
   if (savedState(keyEntry("fishAudio"), config).configured) return true;
-  const eleven = savedState(keyEntry("elevenlabs"), config);
-  return eleven.configured && !eleven.included;
+  return ownElevenLabsKey(config);
 }
 
 /** The key this computer still needs before the server can hear it, if any. */

@@ -185,6 +185,16 @@ from it), and cannot mint a relay token (the control plane holds the signing
 key). A phone treats only the authenticated GoAway(3) inside the session as
 "removed", so a forged 4001 cannot make it forget the server.
 
+**Browser pages.** The relay refuses every WebSocket upgrade that carries an
+`Origin` header, so a web page cannot dial it, unless the relay's operator
+lists that page's exact `https://` origin in `RELAY_PHONE_ORIGINS`
+(comma-separated, at most 8, no wildcards, paths or `http://`; a bad value
+stops the relay at start). A listed origin may open only `/v1/phone`, never
+`/v1/host` or `/v1/host/data`, and it gets no further than any other phone:
+the page still needs the pairing credential and the end-to-end handshake.
+Unset, which is the default, browsers stay refused. It is for the phone web
+app over the relay, which is not built yet.
+
 **Pairing proves the owner.** The QR carries a 256-bit, single-use pairing
 credential that only the owner can mint: `openmausbot pair --phone` on the
 machine (the owner, or on a shared server the per-launch owner token `serve`
