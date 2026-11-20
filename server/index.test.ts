@@ -3570,6 +3570,9 @@ describe("harness HTTP API", () => {
       }
     };
     type ComputerDump = { mcpConfig: { mcpServers: { computer?: { args?: string[] } } } };
+    const loggedEvent = async (threadId: string, type: string) =>
+      ((await api("GET", `/api/threads/${threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
+        .find((entry) => entry.kind === "runtime" && entry.data.type === type)?.data;
     const promptsOnBoat = () => boatRouteCalls.filter(call => call.method === "POST" && call.path === `/sandboxes/${managedBoatCreateId}/prompt`).length;
     let promptBaseline = 0;
     const promptedOnTeamComputer = async (count: number, botId: string) => {
@@ -3637,17 +3640,16 @@ describe("harness HTTP API", () => {
       expect(siblingMessages.some((message) => (message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"))).toBe(true);
       const stoppedChip = siblingMessages.find((message) => (message.tool?.name ?? "").startsWith("Stopped waiting for the computer after "));
       expect(stoppedChip?.tool?.ok).toBe(true);
-      const siblingEvents = ((await api("GET", `/api/threads/${sibling.threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
-        .filter((entry) => entry.kind === "runtime").map((entry) => entry.data);
-      expect(siblingEvents.find((event) => event.type === "turn.wait_started")).toMatchObject({
+      await expect.poll(() => loggedEvent(sibling.threadId, "turn.wait_ended"), { timeout: 5_000 }).toMatchObject({
+        holder: { name: "Direct shared" },
+        outcome: "stopped",
+        waitedMs: expect.any(Number),
+      });
+      expect(await loggedEvent(sibling.threadId, "turn.wait_started")).toMatchObject({
         holder: { name: "Direct shared" },
         resource: expect.stringMatching(/^computer:/),
       });
-      expect(siblingEvents.find((event) => event.type === "turn.wait_ended")).toMatchObject({
-        holder: { name: "Direct shared" },
-        outcome: "stopped",
-      });
-      expect(siblingEvents.find((event) => event.type === "turn.wait_ended").waitedMs).toBeGreaterThanOrEqual(0);
+      expect((await loggedEvent(sibling.threadId, "turn.wait_ended")).waitedMs).toBeGreaterThanOrEqual(0);
       expect(claudePrompts().length - promptBaseline, "the sibling ran from the start").toBe(2);
       expect((await api("POST", `/api/bots/${botIds[0]}/tasks/${firstThread}`, {})).status).toBe(200);
       for (const action of ["sleep", "provision"]) {
@@ -3673,13 +3675,11 @@ describe("harness HTTP API", () => {
         (group: { id: string }) => group.id === roomId,
       ).messages;
       expect(roomMessages.some((message) => (message.tool?.name ?? "").startsWith("Waiting for its turn on this computer"))).toBe(true);
-      const roomEvents = ((await api("GET", `/api/threads/${room.threadId}/events`)).body.entries as Array<{ kind: string; data: any }>)
-        .filter((entry) => entry.kind === "runtime").map((entry) => entry.data);
-      expect(roomEvents.find((event) => event.type === "turn.wait_started")).toMatchObject({
-        resource: expect.stringMatching(/^computer:/),
-      });
-      expect(roomEvents.find((event) => event.type === "turn.wait_ended")).toMatchObject({
+      await expect.poll(() => loggedEvent(room.threadId, "turn.wait_ended"), { timeout: 5_000 }).toMatchObject({
         outcome: "acquired",
+      });
+      expect(await loggedEvent(room.threadId, "turn.wait_started")).toMatchObject({
+        resource: expect.stringMatching(/^computer:/),
       });
       expect(promptsOnBoat()).toBe(0);
       expect((await api("POST", `/api/team-computers/${requestId}/sleep`, {})).status).toBe(409);
