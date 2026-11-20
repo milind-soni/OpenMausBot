@@ -124,7 +124,7 @@ export interface SessionModelPick {
 /** The model this turn asks the live session for, before the setter runs: a legacy id the driver maps
  * onto the session's catalog, or the driver's fallback for a model the session no longer offers. */
 export function pickSessionModel(
-  support: Pick<AcpSupport, "displayName" | "normalizeSessionSelection" | "fallbackModel" | "sessionModelEnv">,
+  support: Pick<AcpSupport, "displayName" | "normalizeSessionSelection" | "fallbackModel" | "sessionModelEnv" | "sessionModelOnly">,
   input: {
     configId: string;
     session: Pick<AcpSession, "sessionConfigResult" | "launchModel" | "fallbackNotice">;
@@ -147,7 +147,7 @@ export function pickSessionModel(
     variant = turn.variant;
   }
   const wanted = turn.model;
-  const accountModels = support.sessionModelEnv && !session.launchModel && offered.length ? new Set(offered) : null;
+  const accountModels = support.sessionModelEnv && !support.sessionModelOnly && !session.launchModel && offered.length ? new Set(offered) : null;
   // A pooled process missing a catalog model predates the catalog: fail and respawn, never run another (the catalog holds picker ids; `wanted` may be the resolved wire id, so check both).
   const staleProcess = Boolean(support.fallbackModel && wanted && !input.launchedThisTurn && offered.length
     && !offered.includes(wanted) && catalog.options.some((option) => option.id === wanted || option.id === requested.model));

@@ -3195,6 +3195,7 @@ describe("ACP turns (fake CLI)", () => {
         config: { cli: FAKE_CLI, fullAuto: false },
       });
       recorder = recordEvents(instance.adapter);
+      const afterCatalog = existsSync(countFile) ? launches() : 0;
       const integration = (token: string) => ({
         command: process.execPath,
         args: [FAKE_CLI],
@@ -3223,7 +3224,7 @@ describe("ACP turns (fake CLI)", () => {
         integrations: { agents: integration("token-two") },
       });
       expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === third.turnId)).toMatchObject({ ok: true });
-      expect(launches()).toBe(expectedLaunches);
+      expect(launches() - afterCatalog).toBe(expectedLaunches);
       const calls = readFileSync(appendFile, "utf8").trim().split("\n").map((line) => JSON.parse(line).method);
       expect(calls.filter((m) => m === "initialize")).toHaveLength(expectedLaunches);
       expect(calls.filter((m) => m === "session/new")).toHaveLength(1);

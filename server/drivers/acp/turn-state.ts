@@ -22,6 +22,7 @@ export interface AcpTurn {
   controlsHost: boolean;
   state: {
     settled: boolean; promptSent: boolean; text: string; textMessageId: string | null; producedItem: boolean; repliedText: boolean; startupActivity: boolean; stopped: boolean;
+    backgroundWoke?: boolean;
     usagePeak: number | null;
     usageLast: number | null;
     usageCompacted: boolean;
@@ -53,6 +54,7 @@ export interface AcpSession {
    *  and bearer tokens rotate every turn, so a change re-establishes the session on the same child. */
   sessionKey: string | null;
   sessionId: string | null;
+  loadingSessionId?: string;
   sessionConfigResult: any;
   initResult: any;
   authenticated: boolean;

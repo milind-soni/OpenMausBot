@@ -10,7 +10,6 @@ import { hostedWorkspaceConfigured } from "../../enterprise.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { applyStandaloneSpawnEnv } from "../../engine-install.ts";
 import { OPENCODE_STANDALONE } from "./opencode-release.ts";
-import { openCodeBackgroundWork } from "./opencode-background.ts";
 import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
 import { offeredModels } from "./config-options.ts";
 import type { AcpRequestSteer } from "./steer.ts";
@@ -695,7 +694,7 @@ const support = (
     oneShotFolder: discoveryDirectory,
     shareProcess: true,
     steer: OPENCODE_STEER,
-    backgroundWork: openCodeBackgroundWork(),
+    backgroundWork: {},
     credentialEnv: ["OPENCODE_API_KEY", ...OPENCODE_PROVIDER_ENV],
     selectModel: { configId: "model" },
     fallbackModel: (sessionConfig, catalogDefault) => {

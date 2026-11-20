@@ -20,7 +20,7 @@ import { AcpBrowserAuth, acpBrowserAuthInstanceSurface, type AcpBrowserSignInSpe
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { boxAudienceKey, describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../../engine-stop.ts";
-import { runAcpOneShot } from "./background-text.ts"; import type { OpenCodeBackgroundWork } from "./opencode-background.ts";
+import { runAcpOneShot } from "./background-text.ts"; import { acpBackgroundWork } from "./background.ts";
 import { acpCapabilities } from "./capabilities.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
@@ -150,13 +150,17 @@ export interface AcpSupport extends AcpDriverHooks {
    * it. The runtime takes any id unchecked, so it is set only for a model this account offered. Not
    * part of the spawn contract. */
   sessionModelEnv?: string;
+  /** A session offers only the model its process launched with, so that model is part of the spawn contract. */
+  sessionModelOnly?: boolean;
   /** Spawn-contract state outside the env that a running process never re-reads (OpenCode's auth.json). */
   spawnFingerprint?(env: Record<string, string | undefined>, config: AcpConfig): string;
   /** The approval mode is applied per turn by configureSession, which must throw unless the runtime
    * confirms it; an approval change never respawns the process. */
   sessionScopedApproval?: boolean;
   /** False when this engine cannot run memory upkeep's one-shot text call cleanly; oneShotFolder holds a one-shot's folder. */
-  backgroundText?: false; oneShotFolder?(): Promise<string>; /** Work the agent goes on with after its turn: ended at Stop and when it wakes a turn between ours. */ backgroundWork?: OpenCodeBackgroundWork;
+  backgroundText?: false; oneShotFolder?(): Promise<string>;
+  /** Work the agent goes on with after its turn: ended at Stop and when it wakes a turn between ours. */
+  backgroundWork?: { timeoutMs?: number };
   /** Mutate the child env in place. `instanceEnvironment` tells a key put there on purpose from one
    *  riding along in the server's own env. */
   transformEnv?(
@@ -339,6 +343,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
     async create(input: DriverCreateInput<AcpConfig>): Promise<ProviderInstance> {
       const { instanceId, config } = input;
+      const backgroundWork = support.backgroundWork && acpBackgroundWork([DRIVER_KIND, instanceId], support.backgroundWork.timeoutMs);
       const childEnv = (activeConfig = config) => {
         const env: Record<string, string | undefined> = {
           ...process.env,
@@ -406,8 +411,16 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       };
       const sessionIdle = sessionIdlePolicy("ACP");
 
-      const backgroundEnds = new Map<string, Promise<void>>(), endBackground = (threadId: string, session: AcpSession) => support.backgroundWork && !backgroundEnds.has(threadId) && session.child.exitCode === null
-        && backgroundEnds.set(threadId, support.backgroundWork.end(session, (m, p, t) => session.host.request(null, m, p, t)).finally(() => backgroundEnds.delete(threadId)));
+      const backgroundEnds = new Map<string, Promise<void>>();
+      const endBackground = (threadId: string, session: AcpSession) => {
+        if (!backgroundWork || session.child.exitCode !== null) return;
+        const pending = backgroundEnds.get(threadId);
+        if (pending) return pending;
+        const ended = backgroundWork.end(threadId, session, (method, params, timeoutMs) => session.host.request(null, method, params, timeoutMs));
+        const cleanup = ended.finally(() => backgroundEnds.delete(threadId));
+        backgroundEnds.set(threadId, cleanup);
+        return cleanup;
+      };
       const closeSession = (threadId: string, why: string) => {
         const session = sessions.get(threadId);
         if (!session || session.closing) return;
@@ -816,7 +829,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           if (current && ["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan"].includes(p.update?.sessionUpdate)) {
             current.state.startupActivity = true; if (current.state.promptSent) current.acknowledge();
           }
-          if (!current || !current.state.promptSent) return void (!current && support.backgroundWork?.wakes(p.update) && endBackground(threadId, session));
+          if (!current || !current.state.promptSent) {
+            if (backgroundWork?.wakes(p.update) && (!current || (session.sessionId && p.sessionId === session.sessionId && p.sessionId !== session.loadingSessionId))) {
+              if (current) current.state.backgroundWoke = true;
+              endBackground(threadId, session);
+            }
+            return;
+          }
           const u = filterUpdate ? filterUpdate(p.update ?? {}) : p.update ?? {};
           if (!u || (u.sessionUpdate === "agent_message_chunk" && typeof u.content?.text === "string" && current.steering?.swallow(u.content.text))) return;
           const finished = u.status === "completed" || u.status === "failed";
@@ -924,7 +943,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         acp.inbound = {
           request: (msg) => {
             const current = session.current;
-            if (!current) refuse(msg, send);
+            if (!current || (backgroundWork && !current.state.promptSent)) refuse(msg, send);
             else handleServerRequest(msg, current);
           },
           notification: handleNotification,
@@ -1020,7 +1039,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           return { turnId };
         }
 
+        const cleanup = backgroundEnds.get(threadId);
+        if (cleanup) await cleanup;
         requireRunning();
+        if (active.has(threadId)) throw new Error("a turn is already running on this thread");
         const spawnArgs = support.spawnArgs(turnConfig, cliTurn);
         const spawnEnv = launch.env ?? env;
       // The child env is part of the spawn contract, hashed so secrets never sit in the key.
@@ -1030,9 +1052,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const processContract = [launch.command, launch.args ?? [], spawnArgs,
           support.sessionScopedApproval ? null : turnConfig.fullAuto === true, envFingerprint,
           support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null, launch.ro ?? [], boxAudienceKey(cwd)];
-        const contractKey = JSON.stringify([...processContract, cwd, turn.toolScope ?? null, inheritedScopeFingerprint]);
         const launchModel = support.sessionModelEnv && cliTurn.model && /^[\w.:/-]{1,200}$/u.test(cliTurn.model)
           && catalog.accountModels?.has(cliTurn.model) ? cliTurn.model : undefined;
+        const contractKey = JSON.stringify([...processContract, cwd, turn.toolScope ?? null, inheritedScopeFingerprint,
+          support.sessionModelOnly ? cliTurn.model ?? null : null]);
         const launchEnv = support.sessionModelEnv && launchModel
           ? { ...spawnEnv, [support.sessionModelEnv]: launchModel }
           : spawnEnv;
@@ -1128,7 +1151,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           flushAssistantText,
           receiveModelVariants,
           steering: support.steer && turnSteering(support.steer, {
-            open: () => state.promptSent && !state.settled && !state.stopped && !session.closing,
+            open: () => state.promptSent && !state.settled && !state.stopped && !session.closing && session.child.stdin.writable,
             commands: () => session.commands,
             initializeResult: () => session.initResult,
             prompt: (text) => request("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, undefined, undefined, promptIdleTimeoutMs()),
@@ -1214,7 +1237,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             let runtimeAcceptsImages = await handshake();
             let init = session.initResult;
 
-            await backgroundEnds.get(threadId); const cursor = turn.sessionReset ? null : support.backgroundWork ? support.backgroundWork.resumeCursor(turn.resumeCursor, session.sessionId) : typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
+            await backgroundEnds.get(threadId);
+            const cursor = turn.sessionReset ? null : backgroundWork
+              ? backgroundWork.resumeCursor(threadId, turn.resumeCursor, session.sessionId)
+              : typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
             let promptTurn = turn;
             let rebuiltFromReplay = false;
             for (;;) {
@@ -1226,6 +1252,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 ? support.toolScopeSessionParams!(turn, init, mcpServers.length > 0, { config: turnConfig, env, cwd }) : {};
               let loaded = false;
               if (cursor) {
+                session.loadingSessionId = cursor;
                 try {
                   await request(
                     support.resumeMethod === "resume" ? "session/resume" : "session/load",
@@ -1248,6 +1275,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   const missingSession = acpMissingSession(error, cursor);
                   if (classification === "invalid_credentials" || classification === "inactive_subscription"
                       || ((error as any)?.code === -32602 && !missingSession)) throw error;
+                } finally {
+                  session.loadingSessionId = undefined;
                 }
               }
               if (loaded) break;
@@ -1397,6 +1426,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               throw new Error(`${support.displayName} changed variant before the prompt`);
             } const promptOutcome = await support.promptOutcome?.(instanceId, sessionId);
             if (state.settled || state.stopped || session.closing) throw new Error("turn stopped");
+            if (state.backgroundWoke) {
+              await backgroundEnds.get(threadId);
+              throw new Error(`${support.displayName} resumed background work during setup. Send the message again to continue.`);
+            }
             state.promptSent = true;
             if (!support.promptUnreachedModel) acknowledge();
             const promptIdleMs = promptIdleTimeoutMs();
@@ -1437,7 +1470,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             const answers = [result, ...(current.steering?.replies ?? [])];
             if (current.steering?.failure !== undefined && !state.stopped) throw current.steering.failure;
-            const runOf = (answer: unknown) => support.steer && "run" in support.steer ? support.steer.run(answer) : undefined;
+            const runOf = (answer: unknown) => support.steer && "run" in support.steer ? support.steer.run?.(answer) : undefined;
             for (const [index, answer] of answers.entries()) {
               const run = runOf(answer);
               if (run !== undefined && answers.slice(index + 1).some((later) => runOf(later) === run)) continue;

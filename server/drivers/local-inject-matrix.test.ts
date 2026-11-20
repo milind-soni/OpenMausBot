@@ -609,13 +609,13 @@ describe("Pi writer × hosts", () => {
 });
 
 describe("Cloud vs Local catalog access", () => {
-  it("Qwen, Hermes, and pi advertise access=custom", () => {
-    expect(QwenAgentDriver.metadata.access).toBe("custom");
+  it("Hermes and pi advertise access=custom", () => {
     expect(HermesAgentDriver.metadata.access).toBe("custom");
     expect(PiDriver.metadata.access).toBe("custom");
   });
 
-  it("Kimi and Droid stay Cloud (subscription catalog + Custom)", () => {
+  it("Kimi, Droid, and Qwen stay Cloud (subscription catalog + Custom)", () => {
+    expect(QwenAgentDriver.metadata.access).toBe("subscription");
     expect(KimiAgentDriver.metadata.access ?? "subscription").toBe("subscription");
     expect(DroidAgentDriver.metadata.access ?? "subscription").toBe("subscription");
   });

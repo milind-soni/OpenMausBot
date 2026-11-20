@@ -55,6 +55,9 @@
 //     with FAKE_ACP_MODELS_REFRESH_FROM a running process refreshes its own list after FAKE_ACP_SELF_REFRESH_MS (default 300)
 //   FAKE_ACP_MODELS_LOCK  path: as OpenCode 1.19.4, a `models` or `acp` process without OPENCODE_DISABLE_MODELS_FETCH=1
 //     starts a catalog fetch under this lock and, ended early, leaves it; `models --refresh` fails while it is held
+//   FAKE_ACP_MODELS_LIST=qwen  Qwen Code 1.0.0-preview.2: `--list-models` prints `MODEL` then `<LABEL> (<id>)` lines,
+//     and a session offers only QWEN_MODEL when set
+//   FAKE_ACP_MODELS_LIST=none  a CLI with no model list command: `models` and `--list-models` exit 1
 //   FAKE_ACP_MODELS_LIST=auto-only  Cursor CLI 2026.10.22: `models` lists only `auto`
 //   FAKE_ACP_VERBOSE_FAIL_ONCE  marker path: the first `models --verbose` fails, like a new OpenCode home's first run
 //   FAKE_ACP_MODEL_STICKS  set_config_option succeeds but keeps the old model
@@ -94,6 +97,8 @@
 //   FAKE_ACP_MODE=devin-steer  Devin's second `session/prompt`: initialize reports agentCapabilities._meta["cognition.ai/midTurnPrompts"];
 //     a prompt during a running one joins it, and both end together with the same usage and _meta["cognition.ai/userMessageId"].
 //   FAKE_ACP_STEERING=off  the two steer modes above report no steering capability.
+//   FAKE_ACP_MODE=qwen-steer  Qwen Code 1.0.0-preview.2's second `session/prompt`: a prompt during a running one joins it and is
+//     never answered. Pair with FAKE_ACP_AGENT_NAME and FAKE_ACP_AGENT_VERSION, which Qwen's steer gate reads.
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -177,6 +182,7 @@ if (process.env.FAKE_ACP_MODELS_LIST === "v2" && process.env.FAKE_ACP_MODELS_REF
     models.splice(0, models.length, ...listedModels(upstream));
   }, Number(process.env.FAKE_ACP_SELF_REFRESH_MS ?? 300)).unref();
 }
+if (process.env.FAKE_ACP_MODELS_LIST === "qwen" && process.env.QWEN_MODEL) models.splice(0, models.length, process.env.QWEN_MODEL);
 const defaultModelEnv = process.env.AGY_ACP_DEFAULT_MODEL;
 if (models.length && defaultModelEnv && !models.includes(defaultModelEnv)) models.push(defaultModelEnv);
 let currentModel: string | null = models.length && defaultModelEnv ? defaultModelEnv : models[0] ?? null;
@@ -299,6 +305,7 @@ const dumpEnv = Object.fromEntries(
     "OPENCODE_PERMISSION",
     "OPENCODE_DISABLE_AUTOUPDATE",
     "OPENCODE_DISABLE_CLAUDE_CODE_PROMPT",
+    "QWEN_ENABLE_AGENT_SESSIONS",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
     "ANTHROPIC_API_KEY",
@@ -331,6 +338,7 @@ const dumpEnv = Object.fromEntries(
     "AGY_ACP_FORCE_FILE_STORAGE",
     "ANTIGRAVITY_HARNESS_PATH",
     "AGY_ACP_DEFAULT_MODEL",
+    "QWEN_MODEL",
     "OPENCODE_DISABLE_PROJECT_CONFIG",
     "GEMINI_API_KEY",
     "MISTRAL_API_KEY",
@@ -417,6 +425,14 @@ if (argv[0] === "models" || argv.includes("--list-models")) {
       process.exit(1);
     }
     process.exit(0);
+  }
+  if (process.env.FAKE_ACP_MODELS_LIST === "qwen") {
+    console.log(["MODEL", ...models.map((id) => `${id.toUpperCase()} (${id})`), ""].join("\n"));
+    process.exit(0);
+  }
+  if (process.env.FAKE_ACP_MODELS_LIST === "none") {
+    console.error(`Unknown argument: ${argv[0]}`);
+    process.exit(1);
   }
   if (process.env.FAKE_ACP_MODELS_LIST === "auto-only") {
     console.log(["Available models", "", "auto - Auto (default)"].join("\n"));
@@ -767,10 +783,10 @@ let gatedRuns = 0;
  * answered with the first one, with the same usage and run id, as Devin does. opencode-steer: only `_session/steering` joins it. */
 function gatedPrompt(msg: any) {
   const text = (Array.isArray(msg.params?.prompt) ? msg.params.prompt : []).map((block: any) => block?.text ?? "").join("");
-  if (gatedTurn && mode === "devin-steer") {
+  if (gatedTurn && (mode === "devin-steer" || mode === "qwen-steer")) {
     recordMethod("session/prompt.steer");
     gatedTurn.steers.push(text);
-    gatedTurn.pending.push(msg.id);
+    if (mode === "devin-steer") gatedTurn.pending.push(msg.id);
     return;
   }
   const turn = { run: `run-${++gatedRuns}`, steers: [] as string[], pending: [msg.id] as unknown[] };
@@ -1167,7 +1183,7 @@ function handle(msg: any) {
         hermesPrompt(msg);
         return;
       }
-      if (mode === "opencode-steer" || mode === "devin-steer") {
+      if (mode === "opencode-steer" || mode === "devin-steer" || mode === "qwen-steer") {
         gatedPrompt(msg);
         return;
       }
@@ -1346,7 +1362,9 @@ function handle(msg: any) {
           let step = 0;
           entry.step = setInterval(() => {
             step += 1;
-            update({ sessionUpdate: "session_info_update", _meta: { "opencode/retry": null } });
+            if (process.env.FAKE_ACP_AGENT_NAME !== "qwen-code") {
+              update({ sessionUpdate: "session_info_update", _meta: { "opencode/retry": null } });
+            }
             update({ sessionUpdate: "agent_message_chunk", content: { text: `WOKEN step ${step}` } });
             update({ sessionUpdate: "tool_call", toolCallId: `tc-woken-${step}`, status: "completed", kind: "execute", title: "make test", rawOutput: { output: "WOKEN ok" } });
             if (process.env.FAKE_ACP_WOKEN_FILE) appendFileSync(process.env.FAKE_ACP_WOKEN_FILE, `${sessionId} ${step}\n`);
