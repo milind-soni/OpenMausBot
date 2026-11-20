@@ -74,10 +74,20 @@ export function signInBlock({ closed, restoring, issued, grant, cleanupNeeded, c
   return connecting ? "connecting" : null;
 }
 
-/** A saved sign-in that can't be read is never removed by itself (a keychain may only be locked): clearing it is offered
- * after RESET_AFTER_TRIES reads or RESET_AFTER_MS, and at once on Windows, which has no keychain to unlock. */
+/** A saved sign-in that can't be read is never removed by itself (a keychain or keyring may only be locked or not up yet, a
+ * file only held for a moment): clearing it is offered only after RESET_AFTER_TRIES failed reads AND RESET_AFTER_MS, on every
+ * platform. A key that can never open it (Windows after a reinstall) is removed by itself already, so this is the rare rest. */
 export const RESET_AFTER_TRIES = 3, RESET_AFTER_MS = 2 * 60_000;
-export const resetOffered = ({ platform, failures, since, now }) => platform === "win32" || failures >= RESET_AFTER_TRIES || now - since >= RESET_AFTER_MS;
+export const resetOffered = ({ failures, since, now }) => failures >= RESET_AFTER_TRIES && now - since >= RESET_AFTER_MS;
+
+/** How long Clear waits for a read of the saved sign-in already under way (an unanswered keychain prompt, a keyring that
+ * hangs) before it clears anyway. */
+export const READ_WAIT_MS = 5_000;
+/** Resolves once `promise` settles, or after `ms`, whichever is first; never rejects. */
+export const settledWithin = (promise, ms) => new Promise((done) => {
+  const timer = setTimeout(done, ms); timer.unref?.();
+  Promise.resolve(promise).then(done, done).finally(() => clearTimeout(timer));
+});
 
 /** A request to the Admin that failed, for the log: its status (and whether the answer was the Admin's own), or the network
  * error's code (a certificate, a name not found, a timeout). Never an address, an email or a token. */
