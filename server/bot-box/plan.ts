@@ -156,6 +156,17 @@ export function uploadsConversation(cwd: string, dataDir: string, turn?: { botId
   return cwd === join(dataDir, "workspaces", turn.botId) ? { botId: turn.botId, threadId: turn.threadId } : null;
 }
 
+/** The conversation whose uploads a box for `request` sees: its conversation folder's, or for a turn in its bot's own
+ * folder, that turn's (`request.conversationFolder`, of the same bot). Null for any other box. */
+export function boxUploadsConversation(request: BoxRequest, dataDir: string): { botId: string; threadId: string } | null {
+  const cwd = request.cwd ? resolve(request.cwd) : null;
+  if (!cwd) return null;
+  const ids = taskWorkspaceIds(cwd, dataDir);
+  if (ids) return ids;
+  const turn = request.conversationFolder ? taskWorkspaceIds(resolve(request.conversationFolder), dataDir) : null;
+  return turn && turn.botId === request.botId ? uploadsConversation(cwd, dataDir, turn) : null;
+}
+
 /** The server-owned folder holding a conversation's uploads for its boxes (server/box-attachments.ts), bound read-only. */
 export function boxUploadsDir(dataDir: string, botId: string, threadId: string): string {
   return join(dataDir, "box-uploads", botId, threadId);
@@ -291,8 +302,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   // The person's uploads for this conversation, after every read-write line: readable, but never writable or swappable.
   // A turn in its bot's own folder sees only its own conversation's: a process there is never shared with another
   // conversation (procs.ts sharedBoxScope), so this holds for one started for several of them too.
-  const turnIds = !ids && cwd && request.conversationFolder ? taskWorkspaceIds(resolve(request.conversationFolder), dataDir) : null;
-  const uploadsOf = ids ?? (turnIds && turnIds.botId === botId ? uploadsConversation(cwd!, dataDir, turnIds) : null);
+  const uploadsOf = boxUploadsConversation(request, dataDir);
   if (uploadsOf) {
     const shown = scoped ? [...scoped.rw, ...scoped.ro].filter((id) => ID.test(id)).map((id) => boxUploadsDir(dataDir, threads!, id))
       : [threads ? join(dataDir, "box-uploads", threads) : boxUploadsDir(dataDir, uploadsOf.botId, uploadsOf.threadId)];
