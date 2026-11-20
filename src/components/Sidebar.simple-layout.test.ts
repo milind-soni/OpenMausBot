@@ -262,13 +262,13 @@ describe("Simple-mode sidebar layout", () => {
     expect(listedBots(render().tree)).toHaveLength(3);
   });
 
-  it("opens at 280px in Simple and 320px in Advanced, each remembering its own resized width", () => {
+  it("opens at 280px in Simple and in Advanced, each remembering its own resized width", () => {
     const width = () => render().root.props.style!["--sidebar-width"];
     expect(width()).toBe("280px");
     expect(render().root.props.className).toContain("w-[280px]");
     fixture.values = [];
     fixture.advanced = true;
-    expect(width()).toBe("320px");
+    expect(width()).toBe("280px");
     fixture.storage.set(SIDEBAR_WIDTH_KEY, "360");
     fixture.storage.set(SIMPLE_SIDEBAR_WIDTH_KEY, "300");
     fixture.values = [];

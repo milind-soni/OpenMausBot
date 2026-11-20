@@ -209,37 +209,57 @@ function stuckStore({ unreadable, fails }) {
     write: async value => { seen.writes.push(value === null ? "remove" : "save"); if (fails(value)) throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }); },
   } };
 }
-const later = { pending: null };
-const timers = { setTimer: callback => { later.pending = callback; return 1; }, clearTimer: () => { later.pending = null; } };
+const later = { pending: null, delay: 0 };
+const timers = { setTimer: (callback, delay) => { later.pending = callback; later.delay = delay; return 1; }, clearTimer: () => { later.pending = null; } };
+/** The saved sign-in is read again when its timer falls due, until clearing it is offered: the times those reads came at. */
+async function readUntilOffered(f) {
+  const at = [];
+  while (!f.client.state().reset) {
+    assert.ok(later.pending && at.length < 10); f.now += later.delay; at.push(f.now);
+    const read = later.pending; later.pending = null; read(); await until(() => later.pending);
+  }
+  return at;
+}
 
 test("Windows: a saved sign-in that can be neither read nor removed never locks the person out", async t => {
   const { seen, store } = stuckStore({ unreadable: true, fails: () => true });
   const f = await fixture(t, { store, platform: "win32", ...timers });
-  // Windows has no keychain to unlock: clearing it is offered at once, and nothing is removed by itself.
+  const start = f.now;
+  // Nothing is removed by itself, and clearing isn't offered at once: a file held for a moment at launch (an antivirus scan)
+  // would read on the next try.
+  assert.deepEqual(f.client.state(), { status: "unavailable", message: "restore-failed" });
+  assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "saved" });
+  assert.ok(later.pending, "it is read again meanwhile");
+  // Three failed reads by 0:45, and two minutes: offered at the read at 2:45.
+  assert.deepEqual((await readUntilOffered(f)).map(at => (at - start) / 1000), [15, 45, 105, 165]);
   assert.deepEqual(f.client.state(), { status: "unavailable", message: "restore-failed", reset: true });
   assert.deepEqual(await f.client.emailStart("person@example.test"), { outcome: "blocked", reason: "saved", reset: true });
   assert.equal(f.requests.length, 0, "no code is asked for while it blocks");
-  assert.ok(later.pending, "it is read again meanwhile");
   assert.deepEqual(await f.client.resetSaved(), { status: "signed-out", message: "reset-kept" });
   assert.equal(later.pending, null, "nothing reads it again this run");
   assert.equal((await f.client.emailStart("person@example.test")).outcome, "sent");
   const verified = await f.client.emailVerify(CODE);
   assert.equal(verified.outcome, "signed-in"); assert.equal(verified.state.status, "connected"); assert.equal(verified.state.unsaved, true);
+  assert.equal(f.client.memorySignIn()?.token, accessToken, "the account switcher can take it from memory");
   assert.ok(!f.requests.some(row => row.method === "DELETE"), "kept for this run, not revoked");
   assert.equal((await f.client.refresh()).status, "connected", "a sign-in kept in memory is never written again");
-  assert.equal(seen.reads, 1);
+  assert.equal(seen.reads, 5);
   assert.deepEqual(await f.client.signOut(), { status: "signed-out" }, "signing out of it needs nothing on disk");
+  assert.equal(f.client.memorySignIn(), null);
 });
 
 test("a system store that can't encrypt: the person clears the saved sign-in and signs in for this run", async t => {
   const { seen, store } = stuckStore({ unreadable: false, fails: value => value !== null });
   const f = await fixture(t, { store, platform: "win32", ...timers });
+  assert.equal(f.client.state().reset, undefined);
+  await readUntilOffered(f);
   assert.equal(f.client.state().reset, true);
   assert.deepEqual(await f.client.resetSaved(), { status: "signed-out" }, "removed");
   await f.client.emailStart("person@example.test");
   const verified = await f.client.emailVerify(CODE);
   assert.equal(verified.outcome, "signed-in"); assert.equal(verified.state.unsaved, true);
   assert.deepEqual(seen.writes, ["remove", "save"]);
+  assert.equal(seen.reads, 5);
 });
 
 test("a sign-in under way in the browser: the email code says so, and cancelling it lets the code go", async t => {
