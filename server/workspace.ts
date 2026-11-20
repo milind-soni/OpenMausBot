@@ -405,7 +405,7 @@ export function updateMemory(botId: string, update: MemoryUpdate, opts: MemoryUp
 function makeRoom(text: string, today: string, keep: string | undefined): { text: string; moved: string[] } {
   if (!memoryOverBudget(text)) return { text, moved: [] };
   const all = text.split("\n");
-  const kept = keep?.split("\n")[0];
+  const kept = keep?.split("\n")[0]?.replace(/\r$/, "");
   const group = (e: MemoryEntryLine) => (e.struck ? 0 : isExpired(e, today) ? 1 : 2);
   const order = parseMemoryEntries(text)
     .filter((e) => e.raw !== kept && (group(e) < 2 || !alwaysCore(e.body)))

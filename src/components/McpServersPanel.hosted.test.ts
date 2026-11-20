@@ -322,6 +322,25 @@ describe("the Agentcard tile", () => {
   });
 });
 
+describe("hosted MCP list availability", () => {
+  it("shows one list error and restores app cards after retry", async () => {
+    fixture.api.mockRejectedValueOnce(new Error("no route: GET /api/mcp/servers"));
+    await mount();
+    const alerts = [...host.querySelectorAll('[role="alert"]')];
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.textContent).toContain("Couldn't load MCP apps");
+    expect(alerts[0]!.textContent).toContain("no route: GET /api/mcp/servers");
+    expect(host.querySelector("[data-app-tile]")).toBeNull();
+    const retry = [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Retry");
+    expect(retry).toBeDefined();
+    await act(async () => retry!.click());
+    await settle();
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(host.querySelectorAll("[data-app-tile]")).toHaveLength(HOSTED_MCP_APPS.length);
+    expect(fixture.api.mock.calls.filter(([path]) => path === "/api/mcp/servers")).toHaveLength(2);
+  });
+});
+
 describe("hiding a hosted card", () => {
   it("keeps it mounted and loads the servers once for every card", async () => {
     const [kept, ...others] = HOSTED_MCP_APPS;
