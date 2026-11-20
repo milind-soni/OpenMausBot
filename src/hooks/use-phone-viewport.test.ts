@@ -31,19 +31,26 @@ it("follows the visible keyboard area and restores the shell on blur or keyboard
     resize(450, 90);
     expect(host.style.getPropertyValue("--phone-height")).toBe("450px");
     expect(host.style.getPropertyValue("--phone-top")).toBe("90px");
+    expect(host.hasAttribute("data-phone-keyboard")).toBe(true);
     resize(800, 0);
     expect(host.style.getPropertyValue("--phone-height")).toBe("");
+    expect(host.hasAttribute("data-phone-keyboard")).toBe(false);
     resize(430, 70);
     input.blur();
     update(0);
     expect(host.style.getPropertyValue("--phone-top")).toBe("");
-    expect(host.style.getPropertyValue("--phone-bottom-inset")).toBe("");
+    expect(host.hasAttribute("data-phone-keyboard")).toBe(false);
     input.focus();
     viewport.scale = 2;
     resize(360, 40);
     expect(host.style.getPropertyValue("--phone-height")).toBe("");
+    expect(host.hasAttribute("data-phone-keyboard")).toBe(false);
+    viewport.scale = 1;
+    resize(360, 40);
+    expect(host.hasAttribute("data-phone-keyboard")).toBe(true);
     flushSync(() => root.render(createElement(Shell, { phone: false })));
     expect(host.hasAttribute("data-phone-viewport")).toBe(false);
+    expect(host.hasAttribute("data-phone-keyboard")).toBe(false);
   } finally {
     flushSync(() => root.unmount());
     host.remove();

@@ -1306,7 +1306,10 @@ body,
   height: 100%;
   height: var(--phone-height, 100dvh);
   overflow: clip;
-  padding-bottom: var(--phone-bottom-inset, env(safe-area-inset-bottom, 0px));
+}
+
+#root[data-phone-keyboard] {
+  padding-bottom: 0;
 }
 
 

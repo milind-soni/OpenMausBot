@@ -698,7 +698,7 @@ export function Composer({
   );
 
   return (
-    <div className={cn("pointer-events-none relative px-5 max-md:px-3", "pb-3")}>
+    <div className="pointer-events-none relative px-5 pb-3 max-md:px-3 [[data-phone-keyboard]_&]:pb-0">
       {speechError && (
         <div className="pointer-events-auto mb-2 w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
           {speechError}

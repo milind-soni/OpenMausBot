@@ -19,12 +19,12 @@ export function usePhoneViewport(enabled: boolean) {
       if (focused && viewport && reduced && !zoomed) {
         root.style.setProperty("--phone-height", `${viewport.height}px`);
         root.style.setProperty("--phone-top", `${Math.max(0, viewport.offsetTop)}px`);
-        root.style.setProperty("--phone-bottom-inset", "0px");
+        root.dataset.phoneKeyboard = "";
         adjusted = true;
       } else {
         root.style.removeProperty("--phone-height");
         root.style.removeProperty("--phone-top");
-        root.style.removeProperty("--phone-bottom-inset");
+        delete root.dataset.phoneKeyboard;
         if (!zoomed && (adjusted || (editing && !focused)) && window.scrollY) {
           window.scrollTo(0, 0);
         }
@@ -54,7 +54,7 @@ export function usePhoneViewport(enabled: boolean) {
       delete root.dataset.phoneViewport;
       root.style.removeProperty("--phone-height");
       root.style.removeProperty("--phone-top");
-      root.style.removeProperty("--phone-bottom-inset");
+      delete root.dataset.phoneKeyboard;
     };
   }, [enabled]);
 }
