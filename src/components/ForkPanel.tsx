@@ -1,3 +1,4 @@
+import { useHeldMenuMotion } from "./MenuMotion";
 import { X } from "lucide-react";
 import { currentTaskBot, useStore } from "@/state/store";
 import { t } from "@/lib/i18n";
@@ -6,8 +7,9 @@ import { GroupView } from "./GroupView";
 
 export function ForkPanel() {
   const { state, dispatch } = useStore();
-  const panel = state.forkPanel;
-  if (!panel) return null;
+  const motion = useHeldMenuMotion(state.forkPanel);
+  const panel = motion.value;
+  if (!motion.shown || !panel) return null;
   const bot = panel.kind === "bot" ? state.bots.find((candidate) => candidate.id === panel.ownerId) : undefined;
   const group = panel.kind === "group" ? state.groups.find((candidate) => candidate.id === panel.ownerId) : undefined;
   const botTask = bot?.tasks?.find((candidate) => candidate.threadId === panel.threadId);
@@ -19,7 +21,7 @@ export function ForkPanel() {
     turnStartedAt: null, pinnedCwd: groupTask.pinnedCwd, pinnedMessageId: groupTask.pinnedMessageId } : null;
 
   return (
-    <aside aria-label={t("chat.forkPanel")} className="relative flex h-full w-[min(48vw,640px)] min-w-[360px] flex-col border-l border-hairline bg-app">
+    <aside data-drawer-motion={motion.closing ? "out" : "in"} {...motion.exitProps} aria-label={t("chat.forkPanel")} className="[--drawer-width:clamp(360px,48vw,640px)] relative flex h-full w-[min(48vw,640px)] min-w-[360px] flex-col border-l border-hairline bg-app">
       <div className="flex items-center justify-between border-b border-hairline px-4 py-2 text-sm font-medium text-ink">
         <span className="truncate">{task?.title ?? t("chat.forkPanel")}</span>
         <button type="button" aria-label={t("chat.closeForkPanel")} className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"

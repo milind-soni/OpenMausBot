@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Plus, Trash2, X } from "lucide-react";
 import { api, BotEditorStore, useStore, type Bot } from "@/state/store";
@@ -356,13 +357,13 @@ function DraftRoutines({ draft }: { draft: BotCreationDraft }) {
       <label className="flex items-center gap-1.5 text-[12px] text-ink-secondary"><input type="checkbox" checked={routine.enabled} onChange={event => draft.setRoutineEnabled(routine.id, event.target.checked)} />{t("newBot.enabled")}</label>
       <button type="button" aria-label={t("newBot.removeRoutine", { name: routine.name })} onClick={() => draft.removeRoutine(routine.id)} className="rounded p-1.5 hover:bg-control"><Trash2 size={15} /></button>
     </div>)}
-    {editing && <RoutineEditor routine={editing === "new" ? undefined : editing} bots={[draft.bot]} lockedBotId={draft.id} onClose={() => setEditing(null)} />}
+    <OverlayPresence>{editing && <RoutineEditor routine={editing === "new" ? undefined : editing} bots={[draft.bot]} lockedBotId={draft.id} onClose={() => setEditing(null)} />}</OverlayPresence>
   </div>;
 }
 
 export function DefaultBotSettings({ simple = false }: { simple?: boolean }) {
   const [open, setOpen] = useState(false);
-  const dialogs = open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />;
+  const dialogs = <OverlayPresence>{open && <NewBotDialog defaultsMode onClose={() => setOpen(false)} />}</OverlayPresence>;
   if (simple) return <>
     <SettingsLinkRow title={t("newBot.defaults")} subtitle={t("settings.newBot.defaultsLine")} onClick={() => setOpen(true)} data={{ "data-new-bot-defaults": "" }} />
     {dialogs}

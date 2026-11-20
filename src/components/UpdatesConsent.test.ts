@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { UpdatesConsentState } from "../../electron/updates-consent.mjs";
 import { setLocale } from "@/lib/i18n";
 import { UpdatesConsentRow } from "./UpdatesConsent";
+
+useReducedMotionForTests();
 
 const base: UpdatesConsentState = { available: true, due: false, status: null, signedIn: false, email: null, version: "2026-10-23" };
 let current: UpdatesConsentState;

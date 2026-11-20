@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Group } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
 import { setCallMode } from "@/lib/call-mode";
-import { BOT_BUTTON, botButtonTone } from "@/lib/bot-button";
 
 const fixture = vi.hoisted(() => ({
   admin: true,
@@ -61,15 +60,6 @@ const click = (element: Element | null) => {
   if (!element) throw new Error("nothing to click");
   flushSync(() => (element as HTMLElement).click());
 };
-/** The bot's own button: its bubble's fill and ink, with the darker hover and press steps. */
-function expectBotButton(button: HTMLElement | null, color: Bot["color"]) {
-  const tone = botButtonTone(color);
-  expect(button?.className.split(" ")).toContain(BOT_BUTTON);
-  expect(button?.style.getPropertyValue("--bot-button")).toBe(tone.fill);
-  expect(button?.style.getPropertyValue("--bot-button-ink")).toBe(tone.ink);
-  expect(button?.style.getPropertyValue("--bot-button-hover")).toBe(tone.hover);
-  expect(button?.style.getPropertyValue("--bot-button-pressed")).toBe(tone.pressed);
-}
 const sendButton = () => container.querySelector<HTMLButtonElement>('button[aria-label="Send message"]');
 
 
@@ -110,21 +100,22 @@ describe("the composer after Set me up", () => {
 });
 
 describe("the composer", () => {
-  it("keeps the paperclip, the approval shield and the split call button, with no +", () => {
+  it("groups attachments and approvals under + and keeps the split call button", () => {
     render({ bot });
-    expect(plus()).toBeNull();
+    click(plus());
     expect(container.querySelector('[data-tour="composer"]')!.className.split(" ")).toEqual(expect.arrayContaining(["rounded-2xl", "bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)"]));
-    expect(container.querySelector('button[aria-label="Attach a file"]')).not.toBeNull();
-    expect(container.querySelector('[aria-haspopup="menu"][aria-label$="for Claude"]')).not.toBeNull();
+    expect(document.querySelector('[data-menu-key="attach"]')).not.toBeNull();
+    expect(document.querySelector('[data-menu-key="approval"]')).not.toBeNull();
     expect(fixture.call).toMatchObject({ placement: "composer" });
     expect(fixture.call?.fill).toBeUndefined();
     expect(container.querySelector("[data-composer-backdrop]")!.className.split(" ")).toContain("top-1/2");
   });
 
-  it("offers Teach a task as its own button, which starts a /learn draft ahead of anything typed", () => {
+  it("offers Teach a task in the tools menu, which starts a /learn draft ahead of anything typed", () => {
     restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "how I file expenses", attachments: [] });
     render({ bot });
-    const teach = container.querySelector<HTMLButtonElement>('button[aria-label="Teach a task"]');
+    click(plus());
+    const teach = document.querySelector<HTMLButtonElement>('[data-menu-key="teach"]');
     expect(teach).not.toBeNull();
     click(teach);
     expect(container.querySelector("textarea")!.value).toBe("/learn how I file expenses");
@@ -133,31 +124,32 @@ describe("the composer", () => {
   it("leaves Teach a task out when skill authoring is off", () => {
     fixture.config = { features: { skillAuthoring: false } };
     render({ bot });
-    expect(container.querySelector('button[aria-label="Teach a task"]')).toBeNull();
+    click(plus());
+    expect(document.querySelector('[data-menu-key="teach"]')).toBeNull();
   });
 
   it("leaves Teach a task out when the bot's engine can't run agents", () => {
     fixture.agentsMcp = false;
     render({ bot });
-    expect(container.querySelector('button[aria-label="Teach a task"]')).toBeNull();
+    click(plus());
+    expect(document.querySelector('[data-menu-key="teach"]')).toBeNull();
   });
 
-  it("sends with the bot's own button too, and keeps the accent in a room", () => {
+  it("uses the same send colors for bot and room conversations", () => {
     restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "hello", attachments: [] });
     render({ bot: { ...bot, color: "teal" } });
     const send = sendButton()!;
     expect(send.className.split(" ")).toContain("size-8");
-    expectBotButton(send, "teal");
-    expect(send.className).not.toMatch(/\bbg-accent\b|text-white/);
+    expect(send.className).toContain("bg-composer-action text-composer-action-ink");
     restoreComposerDraft(`group:${room.id}:${room.threadId}`, { text: "hello room", attachments: [] });
     render({ group: room, members: [bot, peer] });
-    expect(sendButton()!.className.split(" ")).not.toContain(BOT_BUTTON);
-    expect(sendButton()!.style.backgroundColor).toBe("var(--color-accent)");
+    expect(sendButton()!.className).toContain("bg-composer-action text-composer-action-ink");
   });
 
-  it("keeps the room's Goal chip and its header call button", () => {
+  it("keeps the room's Goal menu entry and its header call button", () => {
     render({ group: room, members: [bot, peer] });
-    expect(container.querySelector('[aria-label="Finish together"]')?.getAttribute("aria-pressed")).toBe("false");
+    click(plus());
+    expect(document.querySelector('[data-menu-key="goal"]')?.textContent).toContain("Finish together");
     expect(fixture.groupCall).toBeNull();
   });
 
@@ -222,12 +214,12 @@ describe("the composer", () => {
   });
 });
 
-it.each([false, true])("keeps Call for a shared viewer without Stop permission (waiting for teammates: %s)", waiting => {
+it.each([false, true])("hides Call while a shared viewer has a follow-up to send (waiting for teammates: %s)", waiting => {
   fixture.admin = false;
   fixture.config = { team: true };
   const shared: Bot = { ...bot, tasks: [{ threadId: bot.threadId, title: "Shared", createdAt: 1, busy: !waiting, waitingForTeammates: waiting, askedBy: { id: "other-person", name: "Other person" } }] };
   restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "Follow-up from another viewer", attachments: [] });
   render({ bot: shared });
   expect(container.querySelector('[aria-label="Stop this turn"]')).toBeNull();
-  expect(fixture.call).toMatchObject({ bot: { id: "atlas" }, placement: "composer" });
+  expect(fixture.call).toBeNull();
 });

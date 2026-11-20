@@ -385,7 +385,7 @@ export async function openMessageFile(
   href: string,
   roots: readonly string[],
   maxBytes = MESSAGE_FILE_MAX_BYTES,
-): Promise<OpenedMessageFile> {
+): Promise<OpenedMessageFile & { version: string }> {
   const requested = referencedPath(href);
   const canonicalRoots = (await Promise.all(roots.map(async (root) => {
     try {
@@ -436,6 +436,7 @@ export async function openMessageFile(
 
       return {
         handle,
+        version: JSON.stringify([canonicalAfter, opened.dev, opened.ino, opened.size, opened.mtimeMs, opened.ctimeMs]),
         bytes: opened.size,
         name: basename(canonicalAfter),
         mime: mimeFor(canonicalAfter),
@@ -460,7 +461,7 @@ export async function openFileSavedSince(
   href: string,
   options: { since: number; refuse: readonly string[] },
   maxBytes = MESSAGE_FILE_MAX_BYTES,
-): Promise<OpenedMessageFile> {
+): Promise<OpenedMessageFile & { version: string }> {
   const requested = referencedPath(href, false, false);
   if (!isAbsolute(requested) || requested.startsWith("\\\\") || requested.startsWith("//")) throw outsideWorkspace();
   let canonical: string;
@@ -511,7 +512,7 @@ export async function openMessageFolderEntry(
   entry: string,
   roots: readonly string[],
   maxBytes = MESSAGE_FILE_MAX_BYTES,
-): Promise<OpenedMessageFile> {
+): Promise<OpenedMessageFile & { version: string }> {
   const folder = await readMessageFolder(href, roots);
   if (!folder.entries.some((listed) => listed.name === entry)) {
     throw statusError(404, "the linked file is unavailable");

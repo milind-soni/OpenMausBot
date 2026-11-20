@@ -5,7 +5,7 @@ import type { InboxView } from "../../../shared/inbox";
 import { t } from "@/lib/i18n";
 import { useStore, type AppState } from "@/state/store";
 import { useTeamPeople } from "@/state/team-people";
-import { AttentionThreadRows, attentionJumpAction, crossBotAttentionThreads, type AttentionThread, type OpenThread } from "../SidebarBotActivity";
+import { AttentionThreadRows, crossBotAttentionThreads, type AttentionThread, type OpenThread } from "../SidebarBotActivity";
 import { NeedsYouLine } from "../TeamOwner";
 import { setAttentionPinned, useAttentionPinned } from "./attention-pinned";
 import { closeInbox } from "@/state/inbox";
@@ -57,12 +57,13 @@ export function unreadConversations(entries: readonly AttentionThread[], view?: 
   return entries.filter((entry) => entry.task.unread === true && !lined.has(entry.task.threadId)).length;
 }
 
-export function InboxActive({ view, current, exclude }: {
+export function InboxActive({ view, current, exclude, onJump }: {
   view: InboxView | null; current?: OpenThread;
+  onJump(entry: AttentionThread): void;
   /** Conversations the pinned section at the top already shows: these lists leave them out so none appears twice. */
   exclude?: ReadonlySet<string>;
 }) {
-  const { state, dispatch } = useStore();
+  const { state } = useStore();
   const team = useTeamPeople();
   const pinned = useAttentionPinned();
   const entries = inboxAttentionEntries(state, view).filter((entry) => !exclude?.has(entry.task.threadId));
@@ -83,7 +84,7 @@ export function InboxActive({ view, current, exclude }: {
               {pinned ? <PinOff size={14} aria-hidden="true" /> : <Pin size={14} aria-hidden="true" />}
             </button>
           </div>
-          <AttentionThreadRows inset entries={entries} unreadDot current={current} onJump={(entry) => dispatch(attentionJumpAction(entry))} />
+          <AttentionThreadRows inset entries={entries} unreadDot current={current} onJump={onJump} />
         </section>
       )}
     </>

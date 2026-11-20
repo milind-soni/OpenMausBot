@@ -159,8 +159,7 @@ get the skills in their turn's index, task folder links and `/name`, that a
 Claude turn with "Also use my Claude Code skills" on sees a Claude Code skill
 once, and that a bot can switch one off for itself. The rows, working, failed
 and with their result, are covered in Settings by
-`src/components/ImportSettings.test.ts`; the chip by
-`src/components/HelperIntro.test.ts`. Not covered here: the packaged Electron
+`src/components/ImportSettings.test.ts`. Not covered here: the packaged Electron
 window itself.
 
 ## Two screens, then the chat (Oct 27 2026)
@@ -182,9 +181,6 @@ pnpm exec vitest run src/lib/onboarding.test.ts src/lib/welcome-draft.test.ts sr
   animation frames.
 - `src/components/onboarding/ConnectAi.test.ts` covers the recommended sign-in,
   Other ways and the failed check.
-- `src/components/HelperIntro.test.ts` covers MausBot's first messages: the
-  three bubbles, the look around, chips for only what is missing, and the
-  staged arrival.
 - `src/lib/corner-popup.test.ts` and `src/components/AppNotices.test.ts` keep
   every corner notice out of the first conversation until a reply;
   `src/components/onboarding/FirstConversationTour.test.ts` keeps its

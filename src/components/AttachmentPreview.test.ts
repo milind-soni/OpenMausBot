@@ -26,14 +26,16 @@ import {
   safeDownloadFilename,
   saveFailureText,
   useLocalFileSave,
-  wrappedImageIndex,
+  nextImageIndex,
 } from "./AttachmentPreview";
 
 describe("attachment image navigation", () => {
-  it("wraps previous and next navigation", () => {
-    expect(wrappedImageIndex(0, -1, 3)).toBe(2);
-    expect(wrappedImageIndex(2, 1, 3)).toBe(0);
-    expect(wrappedImageIndex(0, 1, 0)).toBe(0);
+  it("stops previous and next navigation at the ends", () => {
+    expect(nextImageIndex(0, 1, 3)).toBe(1);
+    expect(nextImageIndex(2, -1, 3)).toBe(1);
+    expect(nextImageIndex(0, -1, 3)).toBe(0);
+    expect(nextImageIndex(2, 1, 3)).toBe(2);
+    expect(nextImageIndex(0, 1, 0)).toBe(0);
   });
 
   it("maps preview keys only when the action is available", () => {
@@ -333,12 +335,12 @@ it("sizes AI thumbnails by their source orientation and crops uploaded photos to
 describe("full-screen image actions", () => {
   const image = { src: "/api/files/shot.png", name: "shot.png", downloadUrl: "/api/files/shot.png" };
 
-  async function openPreview() {
+  async function openPreview(images = [image]) {
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
     const onClose = vi.fn();
-    await act(async () => { root.render(createElement(AttachmentPreviewDialog, { image, onClose })); });
+    await act(async () => { root.render(createElement(AttachmentPreviewDialog, { image, images, onClose })); });
     const dialog = document.querySelector('[role="dialog"]')!;
     expect(dialog.className).toContain("fixed inset-0");
     const button = () => document.querySelector<HTMLButtonElement>('button[title="Copy image"], button[title="Image copied"]');
@@ -347,6 +349,32 @@ describe("full-screen image actions", () => {
     });
     return { button, dialog, onClose, openMenu, close: async () => { await act(() => root.unmount()); container.remove(); } };
   }
+
+  it("tracks the finger before release, rebounds on a short drag and advances on a long drag", async () => {
+    const next = { ...image, src: "/next.png", name: "next.png" };
+    const { dialog, close } = await openPreview([image, next]);
+    const track = dialog.querySelector<HTMLElement>("[style*=translateX]")!;
+    const touch = (type: string, x: number) => act(() => {
+      const point = { clientX: x, clientY: 10 };
+      dialog.dispatchEvent(Object.assign(new Event(type, { bubbles: true }), {
+        touches: type === "touchend" ? [] : [point], changedTouches: [point],
+      }));
+    });
+    try {
+      await touch("touchstart", 120);
+      await touch("touchmove", 94);
+      expect(track.style.transform).toContain("-26px");
+      await touch("touchend", 94);
+      expect(track.style.transform).toContain("0% + 0px");
+      await touch("touchstart", 120);
+      await touch("touchmove", 40);
+      expect(track.style.transform).toContain("-80px");
+      await touch("touchend", 40);
+      expect(track.style.transform).toContain("-100% + 0px");
+    } finally {
+      await close();
+    }
+  });
 
   it("copies the shown image as a PNG and says so", async () => {
     const write = vi.fn(async (items: { items: Record<string, Promise<Blob>> }[]) => {

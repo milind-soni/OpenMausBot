@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 
@@ -203,7 +204,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   // A code for another computer is typed there, so the phone-only parts (QR, phone notes) stay out.
   const secretNote = offer && !forComputer ? phoneSecretNote(offer) : null;
   const sameWifiOnly = !forComputer && sameWifiOnlyLink(offer?.url ?? null);
-  const offerPanel = pairingCodes && offer ? (
+  const offerPanel = <OverlayPresence>{pairingCodes && offer ? (
     <Layer modal>
       <div role="dialog" aria-modal="true" aria-label={dialogTitle} data-settings-look="simple" data-pair-dialog="code"
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onMouseDown={(event) => event.target === event.currentTarget && setOffer(null)}>
@@ -259,7 +260,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
         </div>
       </div>
     </Layer>
-  ) : null;
+  ) : null}</OverlayPresence>;
   const scopeName = (device: PairedDevice) => t(device.scopes.includes("admin") ? "remote.serverPairing.scope.admin" : "remote.serverPairing.scope.client");
   const pairButton = (
     <button type="button" data-phone-pairing-action={reveal ? "" : undefined} data-settings-drop="" onClick={() => void create()} disabled={busy || !pairingCodes}

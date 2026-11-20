@@ -1,6 +1,6 @@
 import { useMenuMotion } from "../MenuMotion";
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { Check, Inbox, Search } from "lucide-react";
 import type { InboxRow } from "../../../shared/inbox";
 import { cn } from "@/lib/cn";
@@ -9,7 +9,7 @@ import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { closeInbox, markAllInboxRead, readInboxLine, readInboxRow, useInboxMarkingAll, useInboxPanel, useInboxView } from "@/state/inbox";
 import { useStore } from "@/state/store";
 import { InboxActive, inboxAttentionEntries, inboxOpenThread, readNewsThreads, unreadConversations } from "./InboxActive";
-import { attentionJumpAction, attentionUnpinAction } from "../SidebarBotActivity";
+import { attentionJumpAction, attentionUnpinAction, type AttentionThread } from "../SidebarBotActivity";
 import { InboxReading } from "./InboxReading";
 import { InboxRowItem } from "./InboxRow";
 import { FinishedThreads } from "./FinishedThreads";
@@ -76,6 +76,10 @@ export function InboxPanel({ open: shown = true }: { open?: boolean }) {
   };
   const pinnedThreads = new Set(pinnedThreadRows(state.bots, state.groups, state.pendingQueued).map((row) => row.task.threadId));
   const count = waitingCount(view) + unreadConversations(inboxAttentionEntries(state, view), view);
+  const jumpToThread = (row: AttentionThread) => {
+    dispatch(attentionJumpAction(row));
+    if (phone) closeInbox();
+  };
   const openThread = inboxOpenThread(state);
   const body = (
     <>
@@ -99,7 +103,7 @@ export function InboxPanel({ open: shown = true }: { open?: boolean }) {
           <>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {/* The conversations each bot and room pinned, at the top of the list. */}
-              {!query.trim() && <PinnedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} onUnpin={(row) => dispatch(attentionUnpinAction(row))} />}
+              {!query.trim() && <PinnedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} now={now} current={openThread} onOpen={jumpToThread} onUnpin={(row) => dispatch(attentionUnpinAction(row))} />}
               {listed.length > 0 && <label className="mx-[13px] my-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12]">
                 <Search size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
                 <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("inbox.search")} aria-label={t("inbox.search")}
@@ -118,9 +122,9 @@ export function InboxPanel({ open: shown = true }: { open?: boolean }) {
                     )
                   : rows.map((row) => <InboxRowItem key={row.id} row={row} now={now} onOpen={open} onAction={run} />)}
               </div>
-              {!query.trim() && <InboxActive view={view} current={openThread} exclude={pinnedThreads} />}
+              {!query.trim() && <InboxActive onJump={jumpToThread} view={view} current={openThread} exclude={pinnedThreads} />}
               {/* The finished, already-read conversations. */}
-              {!query.trim() && <FinishedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} readThreads={readNewsThreads(view)} exclude={pinnedThreads} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} />}
+              {!query.trim() && <FinishedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} readThreads={readNewsThreads(view)} exclude={pinnedThreads} now={now} current={openThread} onOpen={jumpToThread} />}
               {done.length > 0 && (
                 <section data-inbox-done className="px-1.5 pb-1.5">
                   <button type="button" data-inbox-done-toggle aria-expanded={showDone} onClick={() => setShowDone(!showDone)}

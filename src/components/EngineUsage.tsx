@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type SyntheticEvent } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";

@@ -111,6 +111,8 @@
 @media (pointer: fine) { .table-plate .table-action { width: 24px; height: 24px; min-width: 24px; min-height: 24px; } }
 
 @theme {
+  --color-composer-action: #1c1c1c;
+  --color-composer-action-ink: #fff;
   --animate-panel-in: panel-in 0.24s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-sheet-in: sheet-in 0.26s cubic-bezier(0.22, 1, 0.36, 1);
   --animate-workspace-in: workspace-in 0.18s cubic-bezier(0.22, 1, 0.36, 1);
@@ -1296,6 +1298,17 @@ body,
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
     env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
 }
+
+#root[data-phone-viewport] {
+  position: fixed;
+  inset-inline: 0;
+  top: var(--phone-top, 0px);
+  height: 100%;
+  height: var(--phone-height, 100dvh);
+  overflow: clip;
+  padding-bottom: var(--phone-bottom-inset, env(safe-area-inset-bottom, 0px));
+}
+
 
 /* ────────────────────────────────────────────────────────────────────────
    FONTS
@@ -3690,3 +3703,60 @@ button:disabled.bg-danger {
 }
 
 :root[data-reduced-motion="true"] :is([data-modal-motion] > *, [data-overlay-fade], [data-side-panel-motion], [data-look="sidebar"], [data-sidebar-drawer-scrim]) { transition: none; }
+
+[data-phone-model-sheet] {
+  height: var(--sheet-height, auto);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion="true"]) [data-phone-model-sheet] {
+    transition: height 200ms ease, translate 200ms ease, opacity 200ms ease;
+  }
+  :root:not([data-reduced-motion="true"]) [data-phone-model-sheet]::backdrop {
+    transition: opacity 200ms ease;
+  }
+  :root:not([data-reduced-motion="true"]) [data-phone-model-sheet="closing"] {
+    translate: 0 100%;
+    opacity: 0;
+  }
+  :root:not([data-reduced-motion="true"]) [data-phone-model-sheet="closing"]::backdrop {
+    opacity: 0;
+  }
+  :root:not([data-reduced-motion="true"]) [data-phone-model-list] {
+    animation: phone-model-list-in 180ms ease-out;
+  }
+  @starting-style {
+    :root:not([data-reduced-motion="true"]) [data-phone-model-sheet][open] {
+      translate: 0 100%;
+      opacity: 0;
+    }
+    :root:not([data-reduced-motion="true"]) [data-phone-model-sheet][open]::backdrop {
+      opacity: 0;
+    }
+  }
+}
+
+@keyframes phone-model-list-in {
+  from { opacity: 0; translate: 0 4px; }
+  to { opacity: 1; translate: 0 0; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion="true"]) [data-drawer-motion] {
+    transition: translate 200ms ease-out, opacity 200ms ease;
+  }
+  [data-drawer-motion="out"] { translate: 100% 0; opacity: 0; }
+  @starting-style {
+    [data-drawer-motion="in"] { translate: 100% 0; opacity: 0; }
+  }
+}
+
+@media (min-width: 48rem) and (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion="true"]) [data-drawer-motion] {
+    transition: margin-right 200ms ease-out, opacity 200ms ease;
+  }
+  [data-drawer-motion="out"] { margin-right: calc(-1 * var(--drawer-width)); translate: none; }
+  @starting-style {
+    [data-drawer-motion="in"] { margin-right: calc(-1 * var(--drawer-width)); translate: none; }
+  }
+}

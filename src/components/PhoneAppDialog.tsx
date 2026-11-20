@@ -1,5 +1,6 @@
+import { useMenuMotion } from "./MenuMotion";
 import { useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 
 import { t } from "@/lib/i18n";
 
@@ -25,10 +26,12 @@ export function PhoneAppDialog({ open, onClose, connect = [] }: { open: boolean;
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
+  const motion = useMenuMotion(open);
+  if (!motion.shown) return null;
 
   const overlay = (
     <div
+      {...motion.exitProps} data-overlay-fade={motion.closing ? "out" : "in"}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
       onMouseDown={(event) => event.target === event.currentTarget && onClose()}
     >

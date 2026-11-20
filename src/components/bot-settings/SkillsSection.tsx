@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { BookOpen, Trash2 } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { skillImportLines } from "@/lib/skill-import";
@@ -535,7 +536,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
 
       <OrgSkillsCard bot={bot} onAdded={() => void refresh()} />
 
-      {reviewing && (
+      <OverlayPresence>{reviewing && (
         <SkillReviewDialog
           skill={reviewing.skill}
           text={reviewing.text}
@@ -544,9 +545,9 @@ export function SkillsSection({ bot }: { bot: Bot }) {
           onCancel={() => setReviewing(null)}
           onEnable={() => void enableReviewed()}
         />
-      )}
+      )}</OverlayPresence>
 
-      {viewing && (
+      <OverlayPresence>{viewing && (
         <div
           ref={skillDialogRef}
           tabIndex={-1}
@@ -575,7 +576,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
             </pre>
           </div>
         </div>
-      )}
+      )}</OverlayPresence>
     </div>
   );
 }

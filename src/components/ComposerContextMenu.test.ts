@@ -61,6 +61,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+async function expectClosed() {
+  expect(panel()?.closest("[inert][aria-hidden=true]")).toBeTruthy();
+  await vi.waitFor(() => expect(panel()).toBeNull());
+}
+
 describe("the composer's context button", () => {
   it("names how full the chat is and opens a panel with the share used and both actions", async () => {
     breakdown = counted;
@@ -76,7 +81,7 @@ describe("the composer's context button", () => {
       .toEqual([["Compact context", false], ["Start fresh", false]]);
     expect(requests().map(([path]) => path)).toEqual(["/api/bots/b1/context"]);
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
-    expect(panel()).toBeNull();
+    await expectClosed();
   });
 
   it("compacts through the chat's own route and stays open; starting fresh closes it", async () => {
@@ -87,7 +92,7 @@ describe("the composer's context button", () => {
     expect(panel()).not.toBeNull();
     await press(panel()!.querySelector<HTMLButtonElement>("[data-context-fresh]")!);
     expect(posted().at(-1)).toEqual(["/api/bots/b1/start-fresh", { threadId: "t1" }]);
-    expect(panel()).toBeNull();
+    await expectClosed();
   });
 
   it("offers neither action while the bot works, and no stale reading once the chat was summarized", async () => {
@@ -108,7 +113,7 @@ describe("the composer's context button", () => {
     expect(document.activeElement).toBe(panel());
     expect(panel()!.tabIndex).toBe(-1);
     await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })); });
-    expect(panel()).toBeNull();
+    await expectClosed();
     expect(document.activeElement).toBe(trigger());
   });
 

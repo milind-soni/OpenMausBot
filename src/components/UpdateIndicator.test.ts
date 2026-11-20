@@ -1,11 +1,15 @@
 // @vitest-environment happy-dom
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+
 import type { UpdaterState } from "@/lib/updater";
 import { UpdateIndicator, updateIndicatorLabel, updateIndicatorShown } from "./UpdateIndicator";
 import { updateHasButton } from "./SidebarProfileMenu";
+
+useReducedMotionForTests();
 
 const NOTES = "- **Faster start.** Opens at once. (#1)\n- **Rooms keep actions.** Same as chats. (#2)\n- **Mentions say who they reach.** (#3)";
 

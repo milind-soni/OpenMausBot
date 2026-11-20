@@ -2,7 +2,7 @@
 // app's own copy: an original that moved or is gone says so. Only the desktop app on the computer that holds the file
 // offers it; a phone, the web or a window connected to another computer gets no menu.
 import { useEffect, useRef, useState, type MouseEvent } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { FolderOpen } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";

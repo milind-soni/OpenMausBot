@@ -1,5 +1,5 @@
 import { useMemo, useRef, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { AudioLines, Check, Minus, X } from "lucide-react";
 
 import { formatCallDuration } from "../../shared/live-call";

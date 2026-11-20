@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { RightSidePanel, RightSidePanelHeader, useRightSidePanelEscape } from "./RightSidePanel";
 import { boatCapableEngine } from "@/lib/remote-desktop";
 import { useEffect, useRef, useState } from "react";
@@ -376,14 +377,14 @@ export function RemoteDesktopPanel({ bot, closing = false }: { bot: Bot; closing
         </div>
       </div>
       )}
-      {creatingRoutine && (
+      <OverlayPresence>{creatingRoutine && (
         <RoutineEditor
           bots={[bot]}
           lockedBotId={bot.id}
           defaultRunOn={cloudRoutineReady ? "cloud" : "maus"}
           onClose={() => setCreatingRoutine(false)}
         />
-      )}
+      )}</OverlayPresence>
     </RightSidePanel>
   );
 }

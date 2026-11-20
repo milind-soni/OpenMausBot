@@ -1,3 +1,4 @@
+import { CachedChatImage } from "./CachedChatImage";
 import { useEffect, useRef, useState } from "react";
 import { ClipboardPaste, File as FileIcon, LoaderCircle, MessageSquareText, X } from "lucide-react";
 import { cn } from "@/lib/cn";
@@ -181,7 +182,7 @@ export function ComposerAttachments({
                   className="relative block size-full overflow-hidden rounded-[inherit] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/50 disabled:cursor-default"
                   aria-label={t("attach.previewAria", { name: a.name })}
                 >
-                  <img
+                  <CachedChatImage
                     src={attachmentImageUrl(a.path) ?? a.previewUrl}
                     alt={a.name}
                     loading="eager"

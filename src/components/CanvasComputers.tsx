@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { ArrowUpRight, Box, ExternalLink, Loader2, Monitor, Plus, RefreshCw, X } from "lucide-react";
 import { api, useStore } from "@/state/store";
 import type { TeamComputer } from "../../shared/team-computer";

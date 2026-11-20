@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 // ＋ at the end of the rail: one sheet of choices. A new workspace on this computer (named here, then main opens it), a new
 // organization on the Team plan the person pays for (when they run one), buy a Cloud (the buying sheet: another Cloud right
 // here, or the first one on this computer's own sheet), or connect to a server of the person's own.
@@ -270,7 +271,7 @@ export function PlaceAddSheet({ choices, places = [], connect = null, onClose, o
         {account && <Choice kind="account" icon={<UserRound size={19} />} title={t("accounts.add")} sub={t("rail.accountSub")} onClick={() => onAccount!()} />}
       </div>
     </div>}
-    {view === "local" && <NewLocalWorkspace places={places} onBack={several ? () => setView("choose") : null} onDone={onClose} />}
+    <OverlayPresence>{view === "local" && <NewLocalWorkspace places={places} onBack={several ? () => setView("choose") : null} onDone={onClose} />}</OverlayPresence>
     {view === "server" && <OwnServerLink onBack={several && !connect ? () => setView("choose") : null} onConnected={onClose} connect={connect} />}
     {view === "cloud" && <AddCloudFlow onClose={onClose} onFirstCloud={firstCloud} onWide={setWide} onBack={several ? () => setView("choose") : null} />}
     {view === "organization" && <NewOrganization onClose={onClose} onBack={several ? () => setView("choose") : null} />}

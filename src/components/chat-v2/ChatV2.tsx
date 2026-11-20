@@ -37,6 +37,7 @@ import { AttachmentGallery, collectMessageFiles, isImageOnlyMarkdown, MessageAtt
 import { VoiceNoteBubble } from "../VoiceNoteBubble";
 import { ScreenFrame } from "../ScreenFrame";
 import { optionsCardRow } from "../OptionsCardRow";
+import { DataResultChip } from "../DataResultChip";
 import { RichMessageRow, richRowKind } from "../RichMessageRow";
 import { ToolActivity } from "../ToolActivity";
 import { SignInRequestCard } from "../SignInRequestCard";
@@ -116,6 +117,7 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
   }, [showTrace]);
   const [raw, setRaw] = useState(false);
   const props = { botId, botName, color, threadId, message: m };
+  if (m.dataResult) return <DataResultChip message={m} />;
   switch (richRowKind(m)) {
     case "options": return optionsCardRow({ ...props, botColor: color, transcript });
     case "app": case "widget": return <RichMessageRow {...props} />;
@@ -241,7 +243,7 @@ export function ChatV2({ profile, phoneLayout = false, onClose }: { profile: Bot
     <CallOverlay bot={bot} transcript={history} />
     <div className="v2-floating">
       <div className="v2-model"><ModelPicker bot={bot} threadId={bot.threadId} iconOnly={phoneLayout} /></div>
-      <button className="v2-identity" onMouseEnter={() => setBotButtonHovered(true)} onMouseLeave={() => setBotButtonHovered(false)} aria-expanded={computerOpen} title={t("chat.botScreen")} onClick={event => {
+      <button data-tour="computer" className="v2-identity" onMouseEnter={() => setBotButtonHovered(true)} onMouseLeave={() => setBotButtonHovered(false)} aria-expanded={computerOpen} title={t("chat.botScreen")} onClick={event => {
         const keyboard = event.detail === 0;
         if (!computerOpen) {
           const composer = event.currentTarget.closest("[data-chat-v2]")
@@ -258,7 +260,7 @@ export function ChatV2({ profile, phoneLayout = false, onClose }: { profile: Bot
       {findOpen && <ChatFindBar threadId={bot.threadId} inForkPanel={false} onClose={() => setFindOpen(false)} />}
       <ChatErrorBanner message={error} onDismiss={() => dispatch({ type: "error", message: null })} />
     </div>}
-    <div className="v2-scroll" data-fade-bottom={viewport.showJumpToLatest || viewport.laterCount > 0 || undefined} ref={viewport.scrollRef} {...viewport.scrollHandlers}>
+    <div className="v2-scroll" ref={viewport.scrollRef} {...viewport.scrollHandlers}>
       <div ref={viewport.transcriptRef} className="v2-paper chat-column" role="log" aria-label={t("chat.conversationWith", { name: bot.name })}>
         {viewport.hasEarlier && <div ref={viewport.topSentinelRef} aria-hidden="true" className="h-px w-full" />}
         {(viewport.olderPending || bot.switchingTo || (bot.awaitingThreadSnapshot && !messages.length)) && (

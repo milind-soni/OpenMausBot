@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 // Adapted from pingdotgg/t3code@00cdceb1 apps/web/src/browser/ServerBrowserSurface.tsx, MIT License, Copyright (c)
 // 2026 T3 Tools Inc. (full text in third_party/t3-code/LICENSE); modified: OpenMausBot's UI, the panel picks the
 // transport (the v2 stream, or the v1 view as a fallback), page input goes through the panel's control rules so the
@@ -695,7 +696,7 @@ export function StreamSurface(props: {
             }}
           />
         ) : null}
-        {fileChooser && you ? (
+        <OverlayPresence>{fileChooser && you ? (
           <div className="absolute inset-x-3 top-3 z-20 mx-auto flex max-w-sm flex-col gap-2 rounded-xl border border-hairline/60 bg-card p-3 text-ink shadow-xl" role="dialog" aria-label={t("browser.page.chooseFilesLabel")}>
             <p className="flex items-center gap-2 text-[13px]"><FileUp size={14} aria-hidden="true" />{t(fileChooser.multiple ? "browser.page.asksFiles" : "browser.page.asksFile")}</p>
             <input
@@ -715,8 +716,8 @@ export function StreamSurface(props: {
               <button type="button" className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-accent-ink" onClick={() => fileInputRef.current?.click()}>{t(fileChooser.multiple ? "browser.page.chooseFiles" : "browser.page.chooseFile")}</button>
             </div>
           </div>
-        ) : null}
-        {control?.dialog && control.controller !== "another-viewer" ? (
+        ) : null}</OverlayPresence>
+        <OverlayPresence>{control?.dialog && control.controller !== "another-viewer" ? (
           <div className="absolute inset-x-3 top-3 z-20 mx-auto flex max-w-sm flex-col gap-2 rounded-xl border border-hairline/60 bg-card p-3 text-ink shadow-xl" role="dialog" aria-label={t("browser.dialog.label")}>
             <p className="break-words text-[13px]">{control.dialog.message}</p>
             {you ? (
@@ -729,8 +730,8 @@ export function StreamSurface(props: {
               </>
             ) : <p className="text-[12px] text-ink-secondary">{t("browser.dialog.takeControl")}</p>}
           </div>
-        ) : null}
-        {authPrompt && you ? (
+        ) : null}</OverlayPresence>
+        <OverlayPresence>{authPrompt && you ? (
           <AuthPrompt
             origin={authPrompt.origin}
             realm={authPrompt.realm}
@@ -740,7 +741,7 @@ export function StreamSurface(props: {
               setAuthPrompt(null);
             }}
           />
-        ) : null}
+        ) : null}</OverlayPresence>
         {notices.length ? (
           <div className="absolute inset-x-3 bottom-3 z-20 flex flex-col items-center gap-2" role="status">
             {notices.map((notice) => (

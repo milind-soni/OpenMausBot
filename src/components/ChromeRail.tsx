@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect } from "react";
 import { effectiveLanguage, useLanguageChoice, usePageLanguage } from "@/lib/language-preference";
 import { wearSkin } from "@/lib/skins";
@@ -13,5 +14,5 @@ export function ChromeRail() {
   // The page beside the rail chose its skin: the rail wears the same one.
   useEffect(() => window.ogb?.rail?.onSkin?.(wearSkin), []);
   const accounts = useAccountsSheet();
-  return <DesktopCapabilitiesProvider><div data-chrome-rail className="h-full"><PlacesRail chrome /></div>{accounts.open && <AccountsSheet onClose={accounts.close} />}</DesktopCapabilitiesProvider>;
+  return <DesktopCapabilitiesProvider><div data-chrome-rail className="h-full"><PlacesRail chrome /></div><OverlayPresence>{accounts.open && <AccountsSheet onClose={accounts.close} />}</OverlayPresence></DesktopCapabilitiesProvider>;
 }

@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { ArrowLeft, CalendarDays, Check, Columns3, Hash, ListFilter, Search, ToggleLeft, Type } from "lucide-react";
 import type { DataColumn } from "../../../shared/data-surface";
@@ -44,7 +45,7 @@ export function DataFilter({ columns, value, onChange }: { columns: DataColumn[]
       <ListFilter size={14} aria-hidden="true" /><span>{t("data.filter.button")}</span>
       {active && <span className="max-w-40 truncate text-[11px]">· {selected}</span>}
     </button>
-    {open && <div id={id} role="dialog" aria-label={t("data.grid.filter")} data-testid="data-filter-popover" onKeyDown={onKeyDown}
+    <OverlayPresence>{open && <div id={id} role="dialog" aria-label={t("data.grid.filter")} data-testid="data-filter-popover" onKeyDown={onKeyDown}
       className="absolute left-0 top-full z-40 mt-1 flex max-h-[min(20rem,calc(100cqh-5.5rem))] w-64 max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-hairline/60 bg-menu text-ink shadow-xl">
       {choosing ? <>
         <label className="flex shrink-0 items-center gap-2 border-b border-hairline/40 px-3 py-2 text-ink-secondary">
@@ -78,6 +79,6 @@ export function DataFilter({ columns, value, onChange }: { columns: DataColumn[]
           <button type="button" disabled={!value.text && value.column === undefined} className="mt-2 rounded-md px-1 py-1 text-xs text-ink-secondary hover:text-ink disabled:opacity-40" onClick={() => { onChange({ text: "" }); setChoosing(true); setSearch(""); }}>{t("data.filter.clear")}</button>
         </div>
       </>}
-    </div>}
+    </div>}</OverlayPresence>
   </div>;
 }

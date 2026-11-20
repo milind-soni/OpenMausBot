@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 // LocalComputerAutoWarning remembers its bot, so a bot switch while it is up never applies the choice to the new bot.
 import { useTeamPeople } from "@/state/team-people";
 import { useState } from "react";
@@ -137,11 +138,11 @@ export function PermissionsSection({
         >{t("commandAllowlist.manage")}</button>}
       </div>}
 
-      {commandAllowlistTarget && <CommandAllowlistDialog
+      <OverlayPresence>{commandAllowlistTarget && <CommandAllowlistDialog
         key={`command-allowlist:${commandAllowlistTarget.botId}`}
         {...commandAllowlistTarget}
         onClose={() => setCommandAllowlistTarget(null)}
-      />}
+      />}</OverlayPresence>
       {!draft && shows("outbound") && <OutboundControl bot={bot} onChange={(outbound) => patch({ outbound })} />}
       <LocalComputerAutoWarning
         open={localAutoWarning !== null}

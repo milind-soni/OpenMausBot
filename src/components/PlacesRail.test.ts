@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { RailPlace, RailState } from "../../electron/cloud-rail.mjs";
 import { setLocale } from "@/lib/i18n";
 import { placeInitials, refreshPlaces } from "@/lib/places";
+
+useReducedMotionForTests();
 
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("./cloud-buy/CloudMascotScene", () => ({ CloudMascotScene: () => null }));

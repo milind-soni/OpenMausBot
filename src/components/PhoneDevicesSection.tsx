@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { t } from "@/lib/i18n";
 import { SettingsSkeletonCard } from "./settings/SettingsStates";
@@ -453,7 +454,7 @@ export function PhoneDevicesSection({ profileEmail = "", focusRequest = 0, place
     <div className="flex flex-col gap-6 focus:outline-none" ref={pairingFlow} tabIndex={-1} data-phone-pairing="computer">
       {top}
       <RouteNotices c={c} notices={state.notices ?? []} />
-      {pairing && <PairDeviceDialog c={c} state={state} placeName={placeName} onClose={() => setPairing(false)} secureAddress={pairing === "https"} />}
+      <OverlayPresence>{pairing && <PairDeviceDialog c={c} state={state} placeName={placeName} onClose={() => setPairing(false)} secureAddress={pairing === "https"} />}</OverlayPresence>
 
       {pairedCount === 0 && !state.pairing ? (
         <SettingsGroup block="pair">

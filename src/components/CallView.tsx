@@ -265,7 +265,7 @@ export function CallTargetButton({
           active
             ? "bg-danger text-white hover:brightness-110"
             : inverse
-              ? "bg-ink text-app hover:opacity-90 max-md:size-9"
+              ? "bg-composer-action text-composer-action-ink hover:opacity-90 max-md:size-9"
             : fill
               ? "hover:brightness-110"
             : placement === "panel"

@@ -21,7 +21,7 @@ type Lens = "run" | "events" | "raw";
  * Disk persistence can lag behind live delivery, even for equal-time events.
  * Native expansion resets on a loaded snapshot: its positional keys are not identities.
  */
-export function InspectorPanel({ bot }: { bot: Bot }) {
+export function InspectorPanel({ bot, closing = false }: { bot: Bot; closing?: boolean }) {
   const { dispatch } = useStore();
   const { dragProps } = useCaptionChrome();
   const threadId = bot.threadId;
@@ -164,7 +164,7 @@ export function InspectorPanel({ bot }: { bot: Bot }) {
   const total = lens === "raw" ? (page?.total.native ?? 0) : (page?.total.runtime ?? 0);
 
   return (
-    <aside aria-label={t("inspector.title")} className="animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel md:static md:z-auto md:w-[min(460px,45vw)] md:shrink-0">
+    <aside data-drawer-motion={closing ? "out" : "in"} inert={closing} aria-hidden={closing || undefined} aria-label={t("inspector.title")} className="[--drawer-width:min(460px,45vw)] absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel md:static md:z-auto md:w-[min(460px,45vw)] md:shrink-0">
       <div {...dragProps} className="flex items-center justify-between px-4 py-3">
         <span className="flex items-center gap-2 text-[15px] font-semibold text-ink">
           <Bug size={16} className="text-ink-secondary" /> {t("inspector.title")}

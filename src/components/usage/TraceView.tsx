@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { Loader2, X } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { listenLiveFrames } from "@/lib/live-events";

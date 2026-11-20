@@ -1,3 +1,4 @@
+import { CachedChatImage } from "./CachedChatImage";
 // Security: model text never turns an arbitrary local path into a browser request; transcript paths resolve through
 // attachmentImageUrl.
 import {
@@ -37,7 +38,7 @@ import { ImageLoading } from "./ImageLoading"; import { openLinkedFolder } from 
 import { conversationImages, registerPreviewThumbnail } from "./AttachmentPreviewNavigation";
 export { AttachmentPreviewDialog } from "./ImagePreviewDialog";
 export { canonicalDownloadFilename, contentDispositionFilename, safeDownloadFilename } from "@/lib/download-filename";
-export { previewKeyAction, wrappedImageIndex, type PreviewKeyAction } from "./AttachmentPreviewNavigation";
+export { previewKeyAction, nextImageIndex, type PreviewKeyAction } from "./AttachmentPreviewNavigation";
 
 export interface PreviewImage {
   src: string;
@@ -430,7 +431,7 @@ export function AttachmentThumbnail({
           aria-label={t("attach.previewImageAria", { name: image.name })}
           title={t("attach.previewAria", { name: image.name })}
         >
-          <img
+          <CachedChatImage
             key={`${image.src}:${attempt}`}
             src={image.src}
             alt={image.name}

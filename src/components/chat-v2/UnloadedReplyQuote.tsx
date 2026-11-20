@@ -36,7 +36,7 @@ export function UnloadedReplyQuote({ threadId, messageId, botName, inverse, canJ
       } else dialog.current?.showModal();
     }} />
     <dialog ref={dialog} aria-label={t("chat.citation.quoted")}
-      className="m-auto max-h-[80dvh] w-[min(36rem,calc(100%-2rem))] overflow-auto rounded-2xl bg-panel p-5 text-ink shadow-xl backdrop:bg-black/50">
+      className="fading-dialog m-auto max-h-[80dvh] w-[min(36rem,calc(100%-2rem))] overflow-auto rounded-2xl bg-panel p-5 text-ink shadow-xl backdrop:bg-black/50">
       <div className="mb-3 flex items-center justify-between gap-4">
         <strong>{name}</strong>
         <form method="dialog"><button className="rounded-md px-2 py-1 hover:bg-raised">{t("common.close")}</button></form>

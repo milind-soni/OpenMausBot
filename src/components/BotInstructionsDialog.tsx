@@ -1,6 +1,6 @@
 import { useMenuMotion } from "./MenuMotion";
 import { useCallback, useEffect, useRef } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { BookOpen, X } from "lucide-react";
 
 import { BotAvatar } from "./Avatar";

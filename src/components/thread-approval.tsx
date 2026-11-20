@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useState, type ComponentProps, type ReactNode } from "react";
 
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -43,7 +44,7 @@ export function useThreadApproval(bot: Bot | undefined): { choice: ApprovalChoic
   } : undefined;
   const dialogs = (
     <>
-      {allowlist && <CommandAllowlistDialog key={`${allowlist.botId}:${allowlist.threadId}`} {...allowlist} onClose={() => setAllowlist(null)} />}
+      <OverlayPresence>{allowlist && <CommandAllowlistDialog key={`${allowlist.botId}:${allowlist.threadId}`} {...allowlist} onClose={() => setAllowlist(null)} />}</OverlayPresence>
       <LocalComputerAutoWarning
         open={warning !== null}
         onCancel={() => setWarning(null)}

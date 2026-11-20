@@ -1,6 +1,6 @@
 // Another bot's long request reads as one line in the chat. It opens in place, and its back-and-forth with this bot opens beside the chat.
 import { createContext, use, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { ChevronRight, MessagesSquare, X } from "lucide-react";
 import { BotAvatar } from "./Avatar";
 import { useModalDialog } from "@/hooks/use-modal-dialog";

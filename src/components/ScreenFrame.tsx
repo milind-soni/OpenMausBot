@@ -1,3 +1,4 @@
+import { CachedChatImage } from "./CachedChatImage";
 import { useState } from "react";
 import { ZoomIn } from "lucide-react";
 
@@ -27,7 +28,7 @@ export function ScreenFrame({ threadId, message }: { threadId: string; message: 
         aria-label={t("attach.previewAria", { name: image.name })}
         className="group/image relative w-fit max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] overflow-hidden rounded-2xl border border-hairline/40 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
-        <img
+        <CachedChatImage
           src={image.src}
           alt={image.name}
           className="block max-w-full transition duration-200 group-hover/image:scale-[1.015]"

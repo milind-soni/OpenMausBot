@@ -1,7 +1,7 @@
 // The searchable voice list for Fish Audio and ElevenLabs. The list floats in a portal so the settings panel's scroll
 // area never clips it, and the focus stays in the search box while the arrow keys walk the rows.
 import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { Check, ChevronDown, Loader2, Search } from "lucide-react";
 
 import { t } from "@/lib/i18n";

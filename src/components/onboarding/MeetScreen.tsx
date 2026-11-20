@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUp, Check, Plus } from "lucide-react";
 import { BotAvatar, MausAvatar } from "@/components/Avatar";
@@ -149,7 +150,7 @@ export function MeetScreen({ hosted, onNext }: { hosted: boolean; onNext: () => 
         )}
         {signingIn && failure && <p role="alert" className="mt-2 text-[13px] leading-[18px] text-danger">{failure}</p>}
       </div>
-      {dialog && <ConnectAiDialog hosted={hosted} tested={tested} onChoose={setChosen} onClose={() => setDialog(false)} />}
+      <OverlayPresence>{dialog && <ConnectAiDialog hosted={hosted} tested={tested} onChoose={setChosen} onClose={() => setDialog(false)} />}</OverlayPresence>
     </div>
     </ConnectAiPlaceContext.Provider>
   );

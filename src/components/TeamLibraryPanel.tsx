@@ -11,7 +11,7 @@ import { openExternalLink } from "@/lib/app-links";
 import { api, useStore, type Bot, type Group } from "@/state/store";
 import { ArrowLeft, Check, ExternalLink, Github, Loader2, Search, Users, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { catalogCopy, catalogMatches, type TeamCatalog, type TeamCatalogEntry } from "@/lib/team-catalog";
 
 import { ReadyBotGallery } from "./ReadyBotGallery";

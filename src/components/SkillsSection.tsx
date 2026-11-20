@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 // Security: local browse only, with no registry and no network fetch, so an import is exactly the bytes pasted here.
 import { Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -370,7 +371,7 @@ export function SkillsSection() {
         </form>
       </Card>
 
-      {viewing && <Layer modal><SkillSourceDialog viewing={viewing} error={error} working={Boolean(working)} onClose={() => { if (!working) setViewing(null); }} onEnable={() => void toggle(viewing.skill, true)} /></Layer>}
+      <OverlayPresence>{viewing && <Layer modal><SkillSourceDialog viewing={viewing} error={error} working={Boolean(working)} onClose={() => { if (!working) setViewing(null); }} onEnable={() => void toggle(viewing.skill, true)} /></Layer>}</OverlayPresence>
     </div>
   );
 }

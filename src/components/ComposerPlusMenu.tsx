@@ -18,7 +18,6 @@ import { liveLineHeldElsewhere } from "./LiveCallBar";
 import { useMenuMotion } from "./MenuMotion";
 import { nextMenuIndex, SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
 import type { ApprovalChoice } from "./thread-approval";
-import { SIMPLE_CONTROL } from "./composer-simple";
 
 /** Finish together: the room (or, `solo`, the one bot) keeps working until the goal is done. The chip turns accent while it is on. */
 export function GoalToggle({ on, onToggle, solo = false }: { on: boolean; onToggle: () => void; solo?: boolean }) {
@@ -148,9 +147,9 @@ export function ComposerPlusMenu({ onAttach, onChoosePhoto, onTakePhoto, goal, t
   const calling = callBotId !== undefined && (onCall === callBotId || isLiveCallRunning(media.phase) || lineHeldElsewhere);
 
   const items: SidebarMenuItem[] = [
-    { key: "attach", label: t("composer.attachFiles"), icon: <Paperclip size={16} />, onSelect: onAttach },
-    ...(onChoosePhoto ? [{ key: "choose-photo", label: t("settings.profile.avatar.choose"), icon: <Image size={16} />, onSelect: onChoosePhoto }] : []),
     ...(onTakePhoto ? [{ key: "take-photo", label: t("composer.takePhoto"), icon: <Camera size={16} />, onSelect: onTakePhoto }] : []),
+    ...(onChoosePhoto ? [{ key: "choose-photo", label: t("settings.profile.avatar.choose"), icon: <Image size={16} />, onSelect: onChoosePhoto }] : []),
+    { key: "attach", label: t("composer.attachFiles"), icon: <Paperclip size={16} />, onSelect: onAttach },
     ...(goal ? [{
       key: "goal",
       label: t(goal.solo ? "composer.goal.soloAria" : "composer.goal.aria"),
@@ -178,43 +177,33 @@ export function ComposerPlusMenu({ onAttach, onChoosePhoto, onTakePhoto, goal, t
       };
     })),
   ];
-  const trigger = (open: boolean) => circle ? (
-    <span
-      data-composer-plus
-      className={cn(
-        "flex size-9 items-center justify-center rounded-full border border-edge bg-panel text-ink transition-colors",
-        open ? "bg-raised" : "hover:bg-raised",
-      )}
-    >
+  const trigger = (
+    <span data-composer-plus className={cn("flex items-center justify-center text-ink", circle ? "size-9" : "size-7")}>
       <Plus size={18} aria-hidden="true" />
-    </span>
-  ) : (
-    <span data-composer-plus className={cn("flex items-center justify-center transition-colors", SIMPLE_CONTROL, open && "bg-ink/[0.09] text-ink")}>
-      <Plus size={20} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" />
     </span>
   );
   if (!circle && items.length === 1) {
     return (
-      <button type="button" onClick={onAttach} aria-label={t("composer.attachFiles")} title={t("composer.attachFiles")} className="flex shrink-0 rounded-full">
-        {trigger(false)}
+      <button type="button" onClick={onAttach} aria-label={t("composer.attachFiles")} title={t("composer.attachFiles")} className="flex shrink-0 bg-transparent">
+        {trigger}
       </button>
     );
   }
-  if (!circle) return <ComposerMenu items={items} renderTrigger={trigger} />;
+  if (!circle) return <ComposerMenu items={items} trigger={trigger} />;
   return (
     <SidebarPopoverMenu
       items={items}
       ariaLabel={t("common.add")}
       triggerTitle={t("common.add")}
-      triggerClassName="flex shrink-0 rounded-full"
-      renderTrigger={({ open }) => trigger(open)}
+      triggerClassName="flex shrink-0 bg-transparent"
+      renderTrigger={() => trigger}
     />
   );
 }
 
 /** The composer's own + menu: a short list just above the +, in the app's large menu style. Escape or a click
  * elsewhere closes it and hands focus back to the +. */
-function ComposerMenu({ items, renderTrigger }: { items: SidebarMenuItem[]; renderTrigger: (open: boolean) => ReactNode }) {
+function ComposerMenu({ items, trigger }: { items: SidebarMenuItem[]; trigger: ReactNode }) {
   const [open, setOpen] = useState(false);
   const motion = useMenuMotion(open);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -263,9 +252,9 @@ function ComposerMenu({ items, renderTrigger }: { items: SidebarMenuItem[]; rend
           // A keyboard press lands on the first row, as every menu here does.
           if (opening && event.detail === 0) requestAnimationFrame(() => rows()[0]?.focus());
         }}
-        className="flex shrink-0 rounded-full"
+        className="flex shrink-0 bg-transparent"
       >
-        {renderTrigger(open)}
+        {trigger}
       </button>
       {motion.shown && (
         <div

@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 // The rail at the window's left edge once a person has two places or more: one tile per Cloud, team's Cloud or server,
 // the place on screen marked, ⋯ for the rest past eight, ＋ last. A Cloud's tile has a small cloud at its corner, a server of
 // the person's own a server and a workspace of this computer's own with a name of its own a laptop, so each reads at a
@@ -485,9 +486,9 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     {menu && <div ref={menuRef} style={noDrag}>
       <PlaceMenu key={menu.place.id} place={state.places.find((entry) => entry.id === menu.place.id) ?? menu.place} top={menu.top} onClose={() => setMenu(null)} />
     </div>}
-    {adding && <PlaceAddSheet choices={state.add} places={state.places} onClose={() => setAdding(false)} onAccount={() => { setAdding(false); setAccounts({ adding: "", note: null }); }} />}
-    {accounts && <AccountsSheet adding={accounts.adding} note={accounts.note} onClose={() => setAccounts(null)} />}
-    {connecting !== null && <PlaceAddSheet choices={state.add} connect={{ name: connecting }} onClose={() => setConnecting(null)} />}
+    <OverlayPresence>{adding && <PlaceAddSheet choices={state.add} places={state.places} onClose={() => setAdding(false)} onAccount={() => { setAdding(false); setAccounts({ adding: "", note: null }); }} />}</OverlayPresence>
+    <OverlayPresence>{accounts && <AccountsSheet adding={accounts.adding} note={accounts.note} onClose={() => setAccounts(null)} />}</OverlayPresence>
+    <OverlayPresence>{connecting !== null && <PlaceAddSheet choices={state.add} connect={{ name: connecting }} onClose={() => setConnecting(null)} />}</OverlayPresence>
     {veil && <div role="status" data-rail-veil style={drag} className="absolute inset-y-0 left-full z-40 flex w-[calc(100vw-2.25rem)] flex-col items-center justify-center gap-3 bg-panel text-[13px] text-ink-secondary">
       <PlaceMark place={veil} size={40} />
       <span>{state.switching?.id === veil.id && state.switching.waking ? t("homeScreen.waking") : t("homeScreen.openingNamed", { name: veil.kind === "computer" ? computerName(veil) : veil.name })}</span>

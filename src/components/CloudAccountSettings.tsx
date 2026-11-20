@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { CloudAccountState, CloudPlanBridge, CloudPlanSnapshot } from "../../electron/cloud-account.mjs";
 import type { CloudCredit, CloudMachine, CloudTrial } from "../../electron/cloud-home.mjs";
@@ -291,7 +292,7 @@ export function CloudAccountSettings({ linkRequest = 0, cloudHome = false, teamH
           <button type="button" data-cloud-other-email disabled={busy} className="cursor-pointer text-accent-text hover:underline" onClick={() => (window.ogb?.accounts ? setAddingEmail(true) : setConfirm("other-email"))}>{t(window.ogb?.accounts ? "cloudAccount.addOtherEmail" : "cloudAccount.useOtherEmail")}</button></p>}
         {errorLine}
       </SettingsGroup>
-      {addingEmail && <AccountsSheet adding="" onClose={() => setAddingEmail(false)} />}
+      <OverlayPresence>{addingEmail && <AccountsSheet adding="" onClose={() => setAddingEmail(false)} />}</OverlayPresence>
       {confirm && <SignOutConfirm here={t("rail.thisComputer")} cloud={confirm === "sign-out" && view.kind === "paid" ? t("cloudSetup.myCloud") : null}
         onConfirm={() => perform(() => bridge.signOut())} onClose={() => setConfirm(false)} />}
     </>;

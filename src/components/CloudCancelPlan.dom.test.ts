@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { createElement, type ReactElement } from "react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -11,6 +12,8 @@ vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capab
 vi.mock("@/state/store", async original => ({ ...await original<typeof import("@/state/store")>(), useStore: () => ({ state: { bots: [], config: {} }, dispatch: vi.fn() }) }));
 import { CLOUD_CALL_URL, CloudCancelPlan, type CloudRenewalActions } from "./CloudCancelPlan";
 import { CloudAccountSettings, CloudPlanOnCloud } from "./CloudAccountSettings";
+
+useReducedMotionForTests();
 
 const NOW = Date.UTC(2026, 9, 28, 12), DAY = 86_400_000, END = NOW + 5 * DAY;
 const day = (value: number) => new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(value));

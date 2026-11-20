@@ -1,5 +1,6 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { X } from "lucide-react";
 
 import type { CloudCancelAnswer, CloudCancelSurvey, CloudRenewalResult } from "../../electron/cloud-account.mjs";
@@ -67,7 +68,7 @@ export function CloudCancelPlan({ renewal, actions, onChanged }: { renewal: Clou
       </div>
       : <button type="button" data-cloud-cancel="renewing" className="ui-button self-start" onClick={() => { setNote(null); setOpened(renewal); }}>
         {t(renewal.trial ? "cloudCancel.cancelTrial" : "cloudCancel.cancelPlan")}</button>}
-    {opened && <CloudCancelSheet renewal={opened} actions={actions} onClose={changed => { setOpened(null); if (changed) onChanged?.(); }} />}
+    <OverlayPresence>{opened && <CloudCancelSheet renewal={opened} actions={actions} onClose={changed => { setOpened(null); if (changed) onChanged?.(); }} />}</OverlayPresence>
   </>;
 }
 

@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { TAB_BUTTON, TAB_GROUP } from "@/components/tab-styles";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Zap } from "lucide-react";
@@ -157,14 +158,14 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
         )}
       </div>
 
-      {newText !== null && (
+      <OverlayPresence>{newText !== null && (
         <NewAutomation initialText={newText} onClose={() => setNewText(null)} onSetUpYourself={(kind, botId) => { setNewText(null); setEditing({ kind, botId }); }} />
-      )}
-      {editing?.kind === "schedule" && (editRoutine || !editing.id) && <RoutineEditor routine={editRoutine} bots={schedulableBots(visibleBots, team, editRoutine?.botId)} initialBotId={editing.botId} plain onClose={() => setEditing(null)} />}
-      {editing?.kind === "webhook" && (editWebhook || !editing.id) && (
+      )}</OverlayPresence>
+      <OverlayPresence>{editing?.kind === "schedule" && (editRoutine || !editing.id) && <RoutineEditor routine={editRoutine} bots={schedulableBots(visibleBots, team, editRoutine?.botId)} initialBotId={editing.botId} plain onClose={() => setEditing(null)} />}</OverlayPresence>
+      <OverlayPresence>{editing?.kind === "webhook" && (editWebhook || !editing.id) && (
         <WebhookEditor webhook={editWebhook} bots={visibleBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onCredential={(credential, id) => { saveWebhookCredential(webhookCredentialStore(), id, credential); setOpenId(id); }} />
-      )}
-      {editing?.kind === "app" && (editApp || !editing.id) && <AppEventEditor trigger={editApp} bots={visibleBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onSaved={(trigger) => setOpenId(trigger.id)} />}
+      )}</OverlayPresence>
+      <OverlayPresence>{editing?.kind === "app" && (editApp || !editing.id) && <AppEventEditor trigger={editApp} bots={visibleBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onSaved={(trigger) => setOpenId(trigger.id)} />}</OverlayPresence>
     </ToolPage>
   );
 }

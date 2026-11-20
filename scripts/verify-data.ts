@@ -62,6 +62,8 @@ try {
   await waitForExit(fixture.child, { signal: "SIGTERM" });
   await startServer();
   await api("PATCH", "/api/config", { language: "en" });
+  const { bots: starters } = await api("GET", "/api/bots");
+  for (const starter of starters) await api("PATCH", `/api/bots/${starter.id}`, { welcomed: true });
   const { bot } = await runControlOmb(["new-bot", "--name", "Data review", "--url", url]) as { bot: { id: string; activeTaskId: string } };
   const minted = await api("POST", "/api/testing/internal-capability", { botId: bot.id, threadId: bot.activeTaskId, kind: "data" }, { "x-openmausbot-test-capability": capabilityKey });
   const mcp = async (method: string, params?: unknown) =>
@@ -123,9 +125,10 @@ try {
 
   preview = await mountPreview(fixture, { entry: "/scripts/testing/threads-preview.tsx", route: "/__data.html", title: "Isolated OMB Data", logLevel: "warn" });
   const { binary, chrome } = await ensureUiBrowser(process.env, (line) => console.error(`Data fixture: ${line}`));
-  // The private HOME isolates sessions; one letter fits macOS's socket-path limit.
-  handle = { url, previewUrl: preview.previewUrl, binary, chrome, home: dataDir, session: "d", botId: bot.id, logPath };
-  await agentBrowser(binary, sessionEnv(handle), ["open", preview.previewUrl], 120_000);
+  // Windows agent-browser sessions share a local transport across fixture homes.
+  handle = { url, previewUrl: preview.previewUrl, binary, chrome, home: dataDir, session: process.platform === "win32" ? `data-${process.pid}` : "d", botId: bot.id, logPath };
+  await agentBrowser(binary, sessionEnv(handle), ["open"], 120_000);
+  await agentBrowser(binary, sessionEnv(handle), ["eval", `setTimeout(() => location.assign(${JSON.stringify(preview.previewUrl)}), 0); true`]);
   const handlePath = join(dataDir, "ui.json");
   writeFileSync(handlePath, JSON.stringify(handle, null, 2) + "\n", { mode: 0o600 });
   const ui = (verb: string, ...args: string[]) => runControlOmb(["ui", verb, "--ui", handlePath, ...args]) as Promise<Record<string, any>>;
@@ -164,16 +167,10 @@ try {
       assert.equal(await evaluate("window.__resizeSql.textContent"), query, "Resizing must preserve the SQL draft");
     } finally { await evaluate("window.fetch = window.__resizeFetch; true"); }
   };
-  const chooseHistory = async (name: string) => {
-    await click("History");
-    const bounds = await evaluate("(() => { const menu = document.querySelector('[data-testid=data-history] [role=menu]').getBoundingClientRect(); const panel = document.querySelector('[data-testid=data-result]').getBoundingClientRect(); return { top: menu.top, bottom: menu.bottom, left: menu.left, right: menu.right, panelTop: panel.top, panelBottom: panel.bottom, panelLeft: panel.left, panelRight: panel.right }; })()");
-    assert(bounds.top >= bounds.panelTop - 1 && bounds.bottom <= bounds.panelBottom + 1 && bounds.left >= bounds.panelLeft - 1 && bounds.right <= bounds.panelRight + 1, `History menu should remain visible within the workspace: ${JSON.stringify(bounds)}`);
-    await evaluate(`[...document.querySelectorAll('[data-testid=data-history] [role=menuitemradio]')].find(element => element.textContent.trim() === ${JSON.stringify(name)}).click(); true`);
-  };
   const active = "document.querySelectorAll('[data-testid^=data-card-], [data-testid=data-source-view]')";
   const gridCount = "document.querySelector('.data-grid')?.getAttribute('data-row-count')";
   const gridRows = "document.querySelectorAll('.data-grid .ag-row[row-index]')";
-  const visibleChart = "[...document.querySelectorAll('[data-testid=data-chart] .vega-embed canvas, [data-testid=data-chart] .vega-embed svg')].find(element => element.checkVisibility({ visibilityProperty: true }))";
+  const visibleChart = "[...document.querySelectorAll('[data-testid=data-panel] [data-testid=data-chart] .vega-embed canvas, [data-testid=data-panel] [data-testid=data-chart] .vega-embed svg')].find(element => element.checkVisibility({ visibilityProperty: true }))";
   const layout = () => evaluate(`(() => {
     const rect = (element) => { if (!element) return null; const { top, bottom, left, width, height } = element.getBoundingClientRect(); return { top, bottom, left, width, height }; };
     const panel = document.querySelector('[data-testid=data-panel]');
@@ -181,9 +178,9 @@ try {
     const sql = document.querySelector('[data-testid=sql-editor]');
     const sqlStyle = getComputedStyle(document.querySelector('[role=textbox][aria-label=SQL]'));
     const sqlContentHeight = sql.clientHeight - parseFloat(sqlStyle.paddingTop) - parseFloat(sqlStyle.paddingBottom);
-    return { panel: rect(panel), sql: rect(sql), sqlContentHeight, sqlLineHeight: parseFloat(sqlStyle.lineHeight), dock: rect(document.querySelector('[data-testid=data-query]')), splitter: rect(splitter), limits: { min: Number(splitter.getAttribute('aria-valuemin')), max: Number(splitter.getAttribute('aria-valuemax')), value: Number(splitter.getAttribute('aria-valuenow')) }, result: rect(document.querySelector('[data-testid=data-result]')), grid: rect(document.querySelector('.data-grid')), viewport: { width: innerWidth, height: innerHeight }, fullscreen: document.fullscreenElement === panel };
+    return { panel: rect(panel), sidebar: rect(panel.closest('aside')), sql: rect(sql), sqlContentHeight, sqlLineHeight: parseFloat(sqlStyle.lineHeight), dock: rect(document.querySelector('[data-testid=data-query]')), splitter: rect(splitter), limits: { min: Number(splitter.getAttribute('aria-valuemin')), max: Number(splitter.getAttribute('aria-valuemax')), value: Number(splitter.getAttribute('aria-valuenow')) }, result: rect(document.querySelector('[data-testid=data-result]')), grid: rect(document.querySelector('.data-grid')), viewport: { width: innerWidth, height: innerHeight } };
   })()`);
-  const measureChart = () => evaluate(`(() => { const box = document.querySelector('[data-testid=data-chart]').getBoundingClientRect(); const result = document.querySelector('[data-testid=data-result]').getBoundingClientRect(); const chart = (${visibleChart}).getBoundingClientRect(); return { width: chart.width, height: chart.height, availableWidth: box.width, availableHeight: box.height, top: chart.top, bottom: chart.bottom, visibleTop: result.top, visibleBottom: document.querySelector('[data-testid=data-result-footer]').getBoundingClientRect().top }; })()`);
+  const measureChart = () => evaluate(`(() => { const box = document.querySelector('[data-testid=data-panel] [data-testid=data-chart]').getBoundingClientRect(); const result = document.querySelector('[data-testid=data-result]').getBoundingClientRect(); const chart = (${visibleChart}).getBoundingClientRect(); return { width: chart.width, height: chart.height, availableWidth: box.width, availableHeight: box.height, top: chart.top, bottom: chart.bottom, visibleTop: result.top, visibleBottom: document.querySelector('[data-testid=data-result-footer]').getBoundingClientRect().top }; })()`);
   const assertDockedLayout = (measurement: Awaited<ReturnType<typeof layout>>) => {
     assert(measurement.result.bottom <= measurement.dock.top + 1, "Result should sit above the SQL dock");
     assert(Math.abs(measurement.result.bottom - measurement.splitter.top) <= 1 && Math.abs(measurement.splitter.bottom - measurement.dock.top) <= 1, "Splitter should separate the result from SQL");
@@ -205,20 +202,20 @@ try {
       return { text: footer.innerText, top, bottom, dockTop: document.querySelector('[data-testid=data-query]').getBoundingClientRect().top, splitterHeight: document.querySelector('[data-testid=data-query-resize]').getBoundingClientRect().height, labels: controls.map(element => element.getAttribute('aria-label') || element.textContent.trim()), controlsFit: controls.every(element => { const r = element.getBoundingClientRect(); return r.left >= panel.left && r.right <= panel.right && r.top >= top && r.bottom <= bottom; }), scrollWidth: footer.scrollWidth, width: footer.clientWidth };
     })()`);
     assert.match(footer.text, count, "Result footer should show its row and column counts");
-    for (const label of ["Export", "History", "Enter fullscreen", ...(chart ? ["Chart", "Table"] : [])]) assert(footer.labels.includes(label), `${label} should share the counts footer`);
+    for (const label of ["Export", ...(chart ? ["Chart", "Table"] : [])]) assert(footer.labels.includes(label), `${label} should share the counts footer`);
     assert(Math.abs(footer.bottom + footer.splitterHeight - footer.dockTop) <= 2, "Result footer should sit immediately above the SQL splitter");
     assert(footer.controlsFit && footer.scrollWidth <= footer.width + 1, "Counts and footer controls should fit inside the panel");
     return footer;
   };
   const receipt = `[data-data-result="${daily.id}"]`;
   const recordedSql = sheet.cards.find((card) => card.id === daily.id)?.sql;
-  const openReceipt = () => evaluate(`[...document.querySelectorAll('${receipt} button')].find(element => element.textContent.includes('Open in Data')).click(); true`);
+  const openReceipt = (id = daily.id) => evaluate(`[...document.querySelectorAll('[data-data-result=${JSON.stringify(id)}] button')].find(element => element.textContent.includes('Open in Data')).click(); true`);
   const toggleReceiptSql = () => evaluate(`document.querySelector('${receipt} button[aria-expanded]').click(); true`);
   const receiptSelected = `document.querySelector('[data-tour=computer-data]')?.getAttribute('aria-selected') === 'true' && ${active}.length === 1 && ${active}[0].getAttribute('data-card-id') === ${JSON.stringify(daily.id)}`;
-  await until(async () => await evaluate("!!document.querySelector('textarea[aria-label=\"Message Data review\"]')"), "Seeded conversation did not mount");
+  await until(async () => await evaluate("!!document.querySelector('textarea[aria-label=\"Message Data review\"]')"), "Seeded conversation did not mount", 120_000);
   console.log(JSON.stringify({ ok: true, ui: handlePath, ...fixture.info, pid: server?.pid, previewUrl: preview.previewUrl, botId: bot.id, rows: 100_000, cards: 20, serverChecks: "load, describe, SQL, charts, paging, filter, sort, export, restart" }, null, 2));
   if (check) {
-    if (await evaluate("!!document.querySelector('[data-tour=computer-data]')")) await click("Close computer panel");
+    if (await evaluate("!!document.querySelector('[data-tour=computer-data]')")) await clickTab("computer");
     await until(async () => await evaluate("!document.querySelector('[data-tour=computer-data]')"), "Computer panel did not close");
     await until(async () => await evaluate(`!!document.querySelector('${receipt} button')`), "Older chart's inline receipt did not render");
     await toggleReceiptSql();
@@ -231,18 +228,19 @@ try {
     await ui("wait-settle", "--timeout", "30");
     assert.equal(await evaluate(receiptSelected), true, "First receipt lost its Data selection after configuration settled");
     await clickTab("computer-browser");
-    await click("Close computer panel");
+    await clickTab("computer");
     await until(async () => await evaluate("!document.querySelector('[data-tour=computer-data]')"), "Computer panel did not close after Browser selection");
-    await click("Bot's computer");
+    await clickTab("computer");
     await ui("wait-settle", "--timeout", "30");
     assert.equal(await evaluate("document.querySelector('[data-tour=computer-browser]')?.getAttribute('aria-selected') === 'true' && !document.querySelector('[data-testid=data-panel]')"), true, "Consumed receipt replaced Browser when reopening the panel");
     await openReceipt();
     await until(async () => await evaluate(receiptSelected), "Clicking the receipt again did not mount its Data result");
     await ui("wait-settle", "--timeout", "30");
     assert.equal(await evaluate(receiptSelected), true, "Clicking the receipt again did not reopen its Data result");
-    await chooseHistory("Latest result");
+    await clickTab("computer-browser");
+    await clickTab("computer-data");
   } else {
-    if (!await evaluate("!!document.querySelector('[data-tour=computer-data]')")) await click("Bot's computer");
+    if (!await evaluate("!!document.querySelector('[data-tour=computer-data]')")) await clickTab("computer");
     await clickTab("computer-data");
   }
 
@@ -263,24 +261,13 @@ try {
     const initialRows = await evaluate(`${gridRows}.length`);
     assert(initialRows > 0 && initialRows < 100, `Expected bounded rows, received ${initialRows}`);
     await ui("screenshot", "--out", logPath + ".data-grid.png");
-    await click("Enter fullscreen");
-    await until(async () => await evaluate("document.fullscreenElement === document.querySelector('[data-testid=data-panel]')"), "Data workspace did not enter native fullscreen");
-    const fullscreenLayout = await layout();
-    assert(fullscreenLayout.panel.width >= fullscreenLayout.viewport.width - 4 && fullscreenLayout.panel.height >= fullscreenLayout.viewport.height - 4, "Fullscreen workspace should fill the viewport");
-    assert(fullscreenLayout.panel.width > normalLayout.panel.width + 100, "Fullscreen should expand the result workspace");
-    assertDockedLayout(fullscreenLayout);
-    assert.equal(await evaluate(gridCount), "100000");
-    await ui("screenshot", "--out", logPath + ".data-fullscreen.png");
-    await click("Exit fullscreen");
-    await until(async () => await evaluate("document.fullscreenElement === null"), "Data workspace did not exit native fullscreen");
-    await until(async () => Math.abs((await layout()).panel.width - normalLayout.panel.width) < 2, "Exiting fullscreen did not restore the panel width");
     assert.equal(await evaluate("document.querySelector('[role=textbox][aria-label=SQL]').textContent"), latest.sql ?? sheet.cards.find((card) => card.id === latest.id)?.sql);
     await evaluate("(() => { const grid = document.querySelector('.data-grid .ag-grid-viewport'); grid.scrollTop = grid.scrollHeight; return true; })()");
     await until(async () => await evaluate("document.querySelector('.data-grid .ag-row[row-index=\"99999\"] .ag-cell[col-id=order_id]')?.textContent === '100000'"), "Scrolling did not fetch the final row");
     const finalRows = await evaluate(`${gridRows}.length`);
     assert(finalRows > 0 && finalRows < 100, `Expected bounded rows at the end, received ${finalRows}`);
-    await chooseHistory("Daily revenue");
-    await until(async () => await evaluate(`!!${visibleChart} && ${active}.length === 1`), "History chart did not render alone");
+    await openReceipt();
+    await until(async () => await evaluate(`!!${visibleChart} && ${active}.length === 1`), "Requested chart did not render alone");
     await click("Table");
     await until(async () => await evaluate("!!document.querySelector('[data-testid=data-card-chart] .data-grid .ag-root')"), "Chart table toggle did not mount the grid");
     await click("Chart");
@@ -293,18 +280,12 @@ try {
     const chartFooter = await assertFooter(/28 rows\s*·\s*2 columns/, true);
     assert.equal(await evaluate(`${active}[0].querySelector('header, h1, h2, h3') === null`), true, "Chart should not display a title header");
     await ui("screenshot", "--out", logPath + ".data-chart.png");
-    await click("Enter fullscreen");
-    await until(async () => await evaluate("document.fullscreenElement === document.querySelector('[data-testid=data-panel]')") && (await measureChart()).width > chartLayout.width + 100, "Chart did not resize for native fullscreen");
-    const chartFullscreen = await measureChart();
-    assert(chartFullscreen.top >= chartFullscreen.visibleTop && chartFullscreen.bottom <= chartFullscreen.visibleBottom + 1 && chartFullscreen.height >= chartLayout.height, "Fullscreen chart should fit the larger result area");
-    await ui("screenshot", "--out", logPath + ".data-chart-fullscreen.png");
-    await click("Exit fullscreen");
-    await until(async () => await evaluate("document.fullscreenElement === null") && Math.abs((await measureChart()).width - chartLayout.width) < 2, "Chart did not resize back after fullscreen");
     assert.equal(await evaluate("document.querySelector('[role=textbox][aria-label=SQL]')?.checkVisibility()"), true, "Chart SQL should remain visible");
     assert.equal(await evaluate("document.querySelector('[role=textbox][aria-label=SQL]').textContent"), sheet.cards.find((card) => card.id === daily.id)?.sql);
     assert.equal(await evaluate("document.querySelectorAll('[data-testid=sources-strip] button, [data-testid=sources-strip] svg').length"), 0, "Table references should be plain text");
     assert.deepEqual(await evaluate("[...document.querySelectorAll('[data-testid=sources-strip] li')].map(row => row.textContent)"), ["events3 rows", "orders100,000 rows", "regional_totals4 rows"]);
-    await chooseHistory("Latest result");
+    await clickTab("computer-browser");
+    await clickTab("computer-data");
     await until(async () => await evaluate(`${gridCount} === '100000'`), "Latest result did not restore the 100k table");
     // A new result arrives over the real event stream and replaces the viewer.
     await api("POST", DATA_ROUTES.run(bot.id), { sql: "SELECT count(*) AS order_count FROM orders", title: "Live order count" });
@@ -393,8 +374,8 @@ try {
       const edited = (await api("GET", DATA_ROUTES.sheet(bot.id))).sheet as DataSheet;
       assert.equal(edited.cards.length, beforeEdits.cards.length, "Live typing created extra history cards");
       assert.deepEqual(edited.cards.filter((card) => card.id === countCard.id).map(({ kind, title, rowCount, sql, status }) => ({ kind, title, rowCount, sql, status })), [{ kind: "table", title: "Live order count", rowCount: 9, sql: newestSql, status: "ready" }]);
-      await chooseHistory("Daily revenue");
-      await until(async () => await evaluate(`!!${visibleChart}`), "History chart did not load before editing");
+      await openReceipt();
+      await until(async () => await evaluate(`!!${visibleChart}`), "Requested chart did not load before editing");
       const sqlTopBefore = await evaluate(`(() => {
         window.__previousDataChart = ${visibleChart};
         window.__previousChartBytes = window.__previousDataChart.tagName === 'CANVAS' ? window.__previousDataChart.toDataURL() : window.__previousDataChart.outerHTML;
@@ -467,7 +448,7 @@ try {
         return Math.abs(next.limits.value - (maximum ? next.limits.max : next.limits.min)) <= 1;
       }, `Pointer drag did not clamp SQL to its ${maximum ? "maximum" : "minimum"}`);
     };
-    await chooseHistory("All 100,000 orders");
+    await openReceipt(latest.id);
     await until(async () => await evaluate(`${gridCount} === '100000' && ${gridRows}.length > 0`), "Large table did not load for splitter checks");
     await preserveQuery(async () => {
       const originalHeight = await resizeValue();
@@ -485,7 +466,7 @@ try {
       await keyResize("ArrowUp");
       assert.equal(await resizeValue(), maximum, "Keyboard resizing must respect the maximum");
       await recordResize("table-max");
-      await chooseHistory("All 100,000 orders");
+      await openReceipt(latest.id);
       await clampDock(false);
       const minimum = await resizeValue();
       await keyResize("ArrowDown");
@@ -495,14 +476,14 @@ try {
       await browser("set", "viewport", "1280", "460");
       await until(async () => {
         const current = await layout();
-        return current.panel.width >= 350 && current.panel.width <= 361 && current.panel.height < 400;
+        return current.sidebar.width >= 350 && current.sidebar.width <= 361 && current.panel.width <= current.sidebar.width && current.panel.height < 400;
       }, "Narrow/short Data panel did not settle");
       await clampDock(true);
       await recordResize("table-narrow-short");
       await assertFooter(/100,000 rows\s*·\s*8 columns/);
-      await chooseHistory("All 100,000 orders");
+      await openReceipt(latest.id);
     });
-    await chooseHistory("Daily revenue");
+    await openReceipt();
     await until(async () => await evaluate(`!!${visibleChart}`), "Chart did not load for splitter checks");
     await preserveQuery(async () => {
       await clampDock(false);
@@ -510,28 +491,18 @@ try {
       await clampDock(true);
       await recordResize("chart-narrow-max", true);
       await assertFooter(/2 rows\s*·\s*2 columns/, true);
-      await chooseHistory("Daily revenue");
-      await click("Enter fullscreen");
-      await until(async () => await evaluate("document.fullscreenElement === document.querySelector('[data-testid=data-panel]')"), "Resizable SQL workspace did not enter fullscreen");
-      await clampDock(true);
-      await recordResize("chart-fullscreen-max", true);
-      await clampDock(false);
-      await recordResize("chart-fullscreen-min", true);
-      await click("Exit fullscreen");
-      await until(async () => await evaluate("document.fullscreenElement === null"), "Resizable SQL workspace did not exit fullscreen");
-      await recordResize("chart-restored", true);
     });
     assert.deepEqual(((await api("GET", DATA_ROUTES.sheet(bot.id))).sheet as DataSheet).cards, beforeResizeCards, "Resizing should not change stored queries or results");
     resizing.queryRequests = 0;
     await browser("set", "viewport", String(normalLayout.viewport.width), String(normalLayout.viewport.height));
+    await clickTab("computer-browser");
+    await clickTab("computer-data");
     const wideSql = `SELECT i+1 AS "order.id", 9007199254740993::BIGINT+i AS "big id", i%2=0 AS "is active?", CASE WHEN i%2=0 THEN NULL ELSE 'present' END AS "nullable value", CASE WHEN i=99999 THEN 'Final typed row' ELSE '東京' END AS "label []", ${Array.from({ length: 115 }, (_, i) => `i+${i} AS "metric.${String(i).padStart(2, "0")}"`).join(", ")} FROM range(100000) AS generated(i)`;
     await api("POST", DATA_ROUTES.run(bot.id), { sql: wideSql, title: "Wide typed values" });
     const wideCard = ((await api("GET", DATA_ROUTES.sheet(bot.id))).sheet as DataSheet).cards.find((card) => card.title === "Wide typed values")!;
     const widePage = await api("POST", DATA_ROUTES.page(bot.id), { cardId: wideCard.id, offset: 0, limit: 2 });
     assert.equal(widePage.columns.length, 120);
     assert.deepEqual(widePage.rows[0].slice(1, 5), ["9007199254740993", true, null, "東京"]);
-    await until(async () => await evaluate("[...document.querySelectorAll('[data-testid=data-history] [role=menuitemradio]')].some(element => element.textContent === 'Wide typed values')"), "Wide result did not enter History");
-    await chooseHistory("Wide typed values");
     const cell = (row: number, column: string) => `document.querySelector(${JSON.stringify(`.data-grid .ag-row[row-index="${row}"] .ag-cell[col-id="${column}"]`)})`;
     await until(async () => await evaluate(`${cell(0, "order.id")}?.textContent === '1'`), "Wide grid did not load its first page");
     assert.equal(await evaluate("document.querySelector('.data-grid button[aria-label=\"Copy rows\"]') === null"), true, "Grid should not add a top copy button");
@@ -598,13 +569,16 @@ try {
       await until(async () => await evaluate("document.querySelector('.data-grid [role=alert]')?.textContent.includes('Fixture page unavailable') === true"), "Page failure did not show a recoverable error");
       await setFilter("");
       await until(async () => await evaluate(`${gridCount} === '100000' && ${cell(0, "order.id")}?.textContent === '1' && !document.querySelector('.data-grid [role=alert]')`), "Changing filter did not recover from the failed page");
-      await click("Enter fullscreen");
-      await until(async () => await evaluate(`document.fullscreenElement !== null && !!${cell(0, "label []")}`), "Fullscreen did not reveal typed columns");
-      assert.equal(await evaluate(`${cell(0, "big id")}.textContent`), "9007199254740993", "BIGINT display lost precision");
-      assert.equal(await evaluate(`${cell(0, "is active?")}.textContent`), "true");
-      assert.equal(await evaluate(`${cell(1, "is active?")}.textContent`), "false");
-      assert.equal(await evaluate(`${cell(0, "nullable value")}.textContent`), "null");
-      assert.equal(await evaluate(`${cell(0, "label []")}.textContent`), "東京");
+      const scrollGrid = async (left: number) => evaluate(`document.querySelector('.data-grid .ag-body-horizontal-scroll-viewport').scrollLeft = ${left}; true`);
+      for (const [row, column, value] of [[0, "big id", "9007199254740993"], [0, "is active?", "true"], [1, "is active?", "false"], [0, "nullable value", "null"], [0, "label []", "東京"]] as const) {
+        for (let offset = 0; offset <= 1600 && !await evaluate(`!!${cell(row, column)}`); offset += 200) {
+          await scrollGrid(offset);
+          await ui("wait-settle", "--timeout", "30");
+        }
+        assert.equal(await evaluate(`${cell(row, column)}?.textContent`), value);
+      }
+      await scrollGrid(0);
+      await until(async () => await evaluate(`!!${cell(0, "order.id")}`), "First column did not return");
       await browser("click", '.data-grid .ag-row[row-index="0"] .ag-cell[col-id="order.id"]');
       await ui("press", "--keys", "Control+c");
       await until(async () => await evaluate("typeof window.__gridCopied === 'string'"), "Keyboard copy did not write selected rows");
@@ -616,8 +590,6 @@ try {
       await until(async () => await evaluate("window.__gridCopied.startsWith('| order.id | big id |')"), "Export did not copy visible rows as Markdown");
       const markdown = await evaluate("window.__gridCopied") as string;
       assert(markdown.includes("9007199254740993") && markdown.split("\n").length > 3 && markdown.split("\n").length < 103, "Markdown copy should preserve values and contain only a bounded visible page");
-      await click("Exit fullscreen");
-      await until(async () => await evaluate("document.fullscreenElement === null"), "Typed-value check did not exit fullscreen");
       const columnsBefore = await evaluate("document.querySelectorAll('.data-grid .ag-header-cell').length");
       assert(columnsBefore > 0 && columnsBefore < 20, "Wide grid should virtualize columns");
       await evaluate("(() => { const viewport = document.querySelector('.data-grid .ag-body-horizontal-scroll-viewport'); viewport.scrollLeft = viewport.scrollWidth; return true; })()");
@@ -646,6 +618,10 @@ try {
         res.end(JSON.stringify({ data: [{ id: "data-chat-fixture" }] }));
         return;
       }
+      if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
+        res.writeHead(404).end();
+        return;
+      }
       try {
         let raw = "";
         for await (const chunk of req) raw += chunk;
@@ -653,14 +629,19 @@ try {
           messages: Array<{ role: string; content?: unknown }>;
           tools?: Array<{ function: { name: string } }>;
         };
-        chatRequests++;
         const userIndex = request.messages.findLastIndex((message) => message.role === "user");
         const content = request.messages[userIndex]?.content;
         const prompt = typeof content === "string" ? content : JSON.stringify(content);
+        if (!request.tools?.length && prompt.startsWith("Name the conversation that begins with the message below.")) {
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: "Data review" }, finish_reason: "stop" }] }));
+          return;
+        }
+        chatRequests++;
         const envelope = /<data-context>(.*?)<\/data-context>/.exec(prompt);
         assert(envelope, "Composer did not deliver the selected Data result to the provider");
         const context = JSON.parse(envelope[1]) as { cardId: string; draftSql?: string };
-        assert.equal(context.cardId, latest.id, "Chat must target the viewed History result, not the newest result");
+        assert.equal(context.cardId, latest.id, "Chat must target the viewed result, not the newest result");
         const repair = prompt.includes("Fix the unfinished SQL");
         assert.equal(context.draftSql, repair ? brokenDraft : undefined);
         const nextSql = repair
@@ -707,8 +688,8 @@ try {
       await api("PATCH", `/api/bots/${bot.id}`, { toolScope: { allow: ["mcp:data:data_describe", "mcp:data:data_show"] } });
       await browser("set", "viewport", "1600", "1000");
       await clickTab("computer-data");
-      await until(async () => await evaluate("!!document.querySelector('[data-testid=data-panel] [data-testid=data-history]')"), "Data view did not reopen after configuring the fixture provider");
-      await chooseHistory("All 100,000 orders");
+      await until(async () => await evaluate("!!document.querySelector('[data-testid=data-panel]')"), "Data view did not reopen after configuring the fixture provider");
+      await openReceipt(latest.id);
       await typeSql(manualSql);
       await until(async () => await evaluate(`${gridCount} === '8'`), "Manual query did not settle before chat");
       const cardsBefore = (await api("GET", DATA_ROUTES.sheet(bot.id))).sheet.cards.length;
@@ -752,7 +733,7 @@ try {
     const evidence = logPath + ".data.json";
     const screenshot = logPath + ".data.png";
     await ui("screenshot", "--out", screenshot);
-    writeFileSync(evidence, JSON.stringify({ ok: true, rows: 100_000, historyCards: 20, initialDomRows: initialRows, finalDomRows: finalRows, activeResults: 1, restart: true, inlineReceipt: true, recordedSqlReceipt: true, closedPanelReceipt: true, consumedReceipt: true, history: true, chartTableToggle: true, layout: { normal: normalLayout, fullscreen: fullscreenLayout, chart: chartLayout, chartFullscreen, tableFooter, chartFooter, restored: true, chartEditSqlTop: chartEditLayout, validationEditSqlBounds: validationEditLayout }, resizing, agGrid, liveResult: true, liveSql: { invalidPreservesResult: true, keystrokeUpdates: true, newestWins: true, chartPreserved: true, chartRemainsVisible: true, expectedHttp400: expectedSqlErrors }, console: consoleOutput, screenshots: [logPath + ".data-recorded-sql.png", logPath + ".data-grid.png", logPath + ".data-fullscreen.png", logPath + ".data-chart.png", logPath + ".data-chart-fullscreen.png", logPath + ".data-live-sql.png", ...resizeScreenshots, logPath + ".data-ag-grid.png", screenshot], logPath }, null, 2) + "\n");
+    writeFileSync(evidence, JSON.stringify({ ok: true, rows: 100_000, historyCards: 20, initialDomRows: initialRows, finalDomRows: finalRows, activeResults: 1, restart: true, inlineReceipt: true, recordedSqlReceipt: true, closedPanelReceipt: true, consumedReceipt: true, chartTableToggle: true, layout: { normal: normalLayout, chart: chartLayout, tableFooter, chartFooter, restored: true, chartEditSqlTop: chartEditLayout, validationEditSqlBounds: validationEditLayout }, resizing, agGrid, liveResult: true, liveSql: { invalidPreservesResult: true, keystrokeUpdates: true, newestWins: true, chartPreserved: true, chartRemainsVisible: true, expectedHttp400: expectedSqlErrors }, console: consoleOutput, screenshots: [logPath + ".data-recorded-sql.png", logPath + ".data-grid.png", logPath + ".data-chart.png", logPath + ".data-live-sql.png", ...resizeScreenshots, logPath + ".data-ag-grid.png", screenshot], logPath }, null, 2) + "\n");
     console.log(JSON.stringify({ ok: true, evidence, screenshot }));
   }
 } catch (error) {

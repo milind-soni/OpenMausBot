@@ -92,9 +92,12 @@ import { WebPanelPage } from "@/components/WebPanelPage";
 import { AppPreviewPanel } from "@/components/published-apps/AppPreviewPanel";
 import { refreshPublishedApps } from "@/lib/own-published-apps";
 
+import { usePhoneViewport } from "@/hooks/use-phone-viewport";
+
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
   const { chatV2, phoneLayout } = state;
+  usePhoneViewport(Boolean(phoneLayout));
   const setChatV2 = (v2: boolean) => dispatch({ type: "chatView", v2 });
   useTeamChats(state.config);
   const needsYou = needsYouVersion(state.bots, state.groups, state.notifications);
@@ -106,6 +109,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const settingsMotion = useMenuMotion(state.appSettingsOpen);
   const appsMotion = useMenuMotion(state.pluginsOpen);
   const botSettingsMotion = useMenuMotion(state.settingsOpen);
+  const remoteClient = window.ogb?.remoteClient?.active === true;
+  const inspectorMotion = useMenuMotion(!remoteClient && !state.forkPanel && state.inspectorOpen);
+  const activityMotion = useMenuMotion(!remoteClient && state.activityOpen);
   const computerMotion = useMenuMotion(state.computerOpen);
   const inboxShown = useInboxPanel().open && inboxReady;
   // A Switch AI pick lands once its stopped turn's chat is idle, wherever the person is by then.
@@ -116,7 +122,6 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const unreadCount =
     state.bots.filter((bot) => !bot.hidden).reduce((sum, bot) => sum + botUnreadCount(bot), 0) +
     state.groups.filter((group) => group.unread).length;
-  const remoteClient = window.ogb?.remoteClient?.active === true;
   const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);
   const sidebarAndPanelFit = useMediaQuery(SIDEBAR_AND_PANEL_FIT, true);
   const sidebarInline = useMediaQuery(SIDEBAR_INLINE, false);
@@ -196,6 +201,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const closeDrawer = useCallback(() => { hideDrawer(); menuButtonRef.current?.focus(); }, [hideDrawer]);
   const notificationFeed = useNotificationFeed() && !remoteClient;
 
+  const notificationsMotion = useMenuMotion(notificationFeed && state.notificationsOpen);
   const sidePanelOpen = (Boolean(bot) && (state.settingsOpen || state.computerOpen || state.inspectorOpen || state.activityOpen)) || Boolean(state.forkPanel) || (notificationFeed && state.notificationsOpen) || inboxShown;
   const collapseSidebar = sidePanelOpen && !sidebarAndPanelFit;
 
@@ -380,7 +386,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         aria-label={t("app.openBotList")}
         aria-expanded={drawerOpen}
         onClick={openDrawer}
-        className="absolute start-2 top-2.5 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink max-md:flex max-md:size-9 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-edge max-md:bg-composer max-md:p-0 max-md:text-ink md:hidden"
+        className="absolute start-2 top-2.5 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink max-md:flex max-md:size-11 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-edge max-md:bg-composer max-md:p-0 max-md:text-ink md:hidden"
       >
         <Menu size={18} className="max-md:hidden" />
         <ChevronLeft size={20} aria-hidden="true" className="hidden max-md:block rtl:-scale-x-100" />
@@ -479,9 +485,9 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         </main>
       )}
       {/* Sibling panels need distinct keys: two keyed `bot.id` collide in React's keyed reconciliation. */}
-      {bot && (remoteClient ? state.settingsOpen : botSettingsMotion.shown) && (
+      {bot && botSettingsMotion.shown && (
         remoteClient
-          ? <RemoteAgentSettingsPanel bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
+          ? <RemoteAgentSettingsPanel closing={botSettingsMotion.closing} bot={bot} overlay={state.computerOpen && !twoSidePanelsFit} />
           : <BotSettingsDialog key={`settings:${bot.id}`} bot={bot} closing={botSettingsMotion.closing} overlay={(state.inspectorOpen || state.computerOpen || (notificationFeed && state.notificationsOpen)) && !twoSidePanelsFit} />
       )}
       {bot && (
@@ -497,11 +503,11 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         )
       )}
       <AppPreviewPanel />
-      {state.forkPanel && sidebarInline && <ForkPanel />}
-      {!remoteClient && !state.forkPanel && state.inspectorOpen && bot && <InspectorPanel key={bot.threadId} bot={bot} />}
-      {!remoteClient && state.activityOpen && bot && <ActivityPanel key={`activity:${bot.id}`} bot={bot} />}
+      {sidebarInline && <ForkPanel />}
+      {inspectorMotion.shown && bot && <InspectorPanel closing={inspectorMotion.closing} key={bot.threadId} bot={bot} />}
+      {activityMotion.shown && bot && <ActivityPanel closing={activityMotion.closing} key={`activity:${bot.id}`} bot={bot} />}
       <InboxPanel open={inboxShown} />
-      {notificationFeed && state.notificationsOpen && <NotificationsPanel />}
+      {notificationsMotion.shown && <NotificationsPanel closing={notificationsMotion.closing} />}
       {notificationFeed && !framed && <NotificationRail />}
       </div>
       </div>

@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useRef, useState } from "react";
 import { Gauge, RotateCcw, Shrink } from "lucide-react";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
@@ -217,12 +218,12 @@ export function ComposerContextMenu({ bot, group, members, className }: { bot?: 
         className={cn("flex shrink-0 items-center justify-center rounded-full", className, fullest && TONE_INK[fullest.tone], open && "bg-ink/[0.09] text-ink")}>
         {fullest?.percent === undefined ? <Gauge size={16} /> : <ContextRing percent={fullest.percent} />}
       </button>
-      {open && (
+      <OverlayPresence>{open && (
         <div ref={panel} role="dialog" tabIndex={-1} aria-label={t("contextMenu.title")} data-context-panel
           className={cn("animate-pop-in absolute bottom-full end-0 z-50 mb-2 max-h-[min(28rem,calc(100dvh-8rem))] w-72 max-w-[calc(100vw-1.5rem)] overflow-y-auto overscroll-contain outline-none", MENU_SHEET)}>
           {group ? <RoomContext group={group} members={members ?? []} detailed={true} /> : bot && <ChatContext bot={bot} reading={fullest ?? null} breakdown={breakdown} detailed={true} onDone={close} />}
         </div>
-      )}
+      )}</OverlayPresence>
     </span>
   );
 }

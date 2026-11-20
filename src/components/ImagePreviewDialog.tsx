@@ -1,11 +1,12 @@
+import { CachedChatImage } from "./CachedChatImage";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { ChevronLeft, ChevronRight, Download, ImageOff, LoaderCircle, RotateCcw, X } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { canonicalDownloadFilename } from "@/lib/download-filename";
 import { t } from "@/lib/i18n";
 import type { PreviewImage } from "./AttachmentPreview";
-import { previewKeyAction, usePreviewSwipe, wrappedImageIndex } from "./AttachmentPreviewNavigation";
+import { previewKeyAction, usePreviewSwipe, nextImageIndex } from "./AttachmentPreviewNavigation";
 import { CopyImageButton } from "./CopyImageButton";
 import { useDismissMotion, useHeldMenuMotion } from "./MenuMotion";
 import { MENU_ITEM, MENU_SHEET } from "./menu-recipe";
@@ -27,7 +28,7 @@ export function AttachmentPreviewDialog({
   const dialogRef = useRef<HTMLDivElement>(null);
   const motion = useDismissMotion(onClose);
   const [loadedSources, setLoadedSources] = useState<Set<string>>(() => new Set());
-  const [failedSource, setFailedSource] = useState<string | null>(null);
+  const [failedSources, setFailedSources] = useState<Set<string>>(() => new Set());
   const [attempt, setAttempt] = useState(0);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -48,10 +49,9 @@ export function AttachmentPreviewDialog({
     cancelPress();
     if (menuRef.current?.contains(document.activeElement)) dialogRef.current?.focus();
     setMenu(null);
-    setIndex((value) => wrappedImageIndex(value, step, items.length));
-    setFailedSource(null);
+    setIndex((value) => nextImageIndex(value, step, items.length));
   }, [items.length, cancelPress]);
-  const swipeHandlers = usePreviewSwipe(items.length, navigate);
+  const { offset, handlers } = usePreviewSwipe(index, items.length, navigate);
 
   useEffect(() => {
     if (!motion.open) return;
@@ -109,9 +109,13 @@ export function AttachmentPreviewDialog({
   if (!motion.shown) return null;
 
   const loaded = loadedSources.has(current.src);
-  const failed = failedSource === current.src;
+  const failed = failedSources.has(current.src);
   const retry = () => {
-    setFailedSource(null);
+    setFailedSources((sources) => {
+      const next = new Set(sources);
+      next.delete(current.src);
+      return next;
+    });
     setLoadedSources((sources) => {
       const next = new Set(sources);
       next.delete(current.src);
@@ -130,7 +134,7 @@ export function AttachmentPreviewDialog({
       aria-label={t("attach.previewAria", { name: current.name })}
       tabIndex={-1}
       className="fixed inset-0 z-[70] flex touch-pan-y touch-pinch-zoom items-center justify-center overflow-hidden bg-black outline-none"
-      {...swipeHandlers}
+      {...handlers}
       onClick={event => {
         if (menu && !menuRef.current?.contains(event.target as Node)) {
           if (menuRef.current?.contains(document.activeElement)) dialogRef.current?.focus();
@@ -151,67 +155,81 @@ export function AttachmentPreviewDialog({
         className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-10 flex size-10 items-center justify-center rounded-full bg-black/55 text-white/80 hover:text-white">
         <X size={20} />
       </button>
-      {!loaded && !failed && (
-        <div className="absolute inset-0 flex animate-pulse items-center justify-center bg-white/[0.055]" role="status">
-          <span className="flex items-center gap-2 text-[13px] text-white/55">
-            <LoaderCircle size={17} className="animate-spin" /> {t("attach.imageLoading")}
-          </span>
-        </div>
-      )}
-      {failed ? (
-        <div className="flex flex-col items-center gap-3 text-white/60" role="alert">
-          <ImageOff size={34} />
-          <span className="text-[13px]">{t("attach.imageFailed")}</span>
-          <button
-            type="button"
-            onClick={retry}
-            className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/10 px-3 py-1.5 text-[12px] text-white hover:bg-white/15"
-          >
-            <RotateCcw size={13} /> {t("chat.retry")}
-          </button>
-        </div>
-      ) : (
-        <img
-          key={`${current.src}:${attempt}`}
-          src={current.src}
-          alt={current.name}
-          draggable={false}
-          onPointerDown={event => {
-            if (event.pointerType !== "touch") return;
-            cancelPress();
-            if (!event.isPrimary) return;
-            const { clientX: x, clientY: y } = event;
-            press.current = { x, y, timer: setTimeout(() => setMenu({ x, y }), 500) };
-          }}
-          onPointerMove={event => {
-            const start = press.current;
-            if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) cancelPress();
-          }}
-          onPointerUp={cancelPress}
-          onPointerCancel={cancelPress}
-          onLoad={() => setLoadedSources((sources) => new Set(sources).add(current.src))}
-          onError={() => setFailedSource(current.src)}
-          className={cn(
-            "block max-h-full max-w-full select-none object-contain [-webkit-touch-callout:none]",
-            loaded ? "motion-safe:animate-fade-in" : "opacity-0",
-          )}
-        />
-      )}
+      <div className={cn("pointer-events-none absolute inset-0", offset === null && "motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out")}
+        style={{ transform: `translateX(calc(${-100 * index}% + ${offset ?? 0}px))` }}>
+        {items.slice(Math.max(0, index - 1), index + 2).map((item, offset) => {
+          const position = Math.max(0, index - 1) + offset;
+          const active = position === index;
+          return (
+            <div key={position} inert={!active} aria-hidden={!active} className="absolute inset-y-0 flex w-full items-center justify-center"
+              style={{ left: `${position * 100}%` }}>
+              {active && !loaded && !failed && (
+                <div className="absolute inset-0 flex animate-pulse items-center justify-center bg-white/[0.055]" role="status">
+                  <span className="flex items-center gap-2 text-[13px] text-white/55">
+                    <LoaderCircle size={17} className="animate-spin" /> {t("attach.imageLoading")}
+                  </span>
+                </div>
+              )}
+              {active && failed ? (
+                <div className="pointer-events-auto flex flex-col items-center gap-3 text-white/60" role="alert">
+                  <ImageOff size={34} />
+                  <span className="text-[13px]">{t("attach.imageFailed")}</span>
+                  <button
+                    type="button"
+                    onClick={retry}
+                    className="flex items-center gap-1.5 rounded-lg border border-white/15 bg-white/10 px-3 py-1.5 text-[12px] text-white hover:bg-white/15"
+                  >
+                    <RotateCcw size={13} /> {t("chat.retry")}
+                  </button>
+                </div>
+              ) : (
+                <CachedChatImage
+                  key={attempt}
+                  src={item.src}
+                  alt={active ? item.name : ""}
+                  draggable={false}
+                  onPointerDown={event => {
+                    if (event.pointerType !== "touch") return;
+                    cancelPress();
+                    if (!event.isPrimary) return;
+                    const { clientX: x, clientY: y } = event;
+                    press.current = { x, y, timer: setTimeout(() => setMenu({ x, y }), 500) };
+                  }}
+                  onPointerMove={event => {
+                    const start = press.current;
+                    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) cancelPress();
+                  }}
+                  onPointerUp={cancelPress}
+                  onPointerCancel={cancelPress}
+                  onLoad={() => setLoadedSources((sources) => sources.has(item.src) ? sources : new Set(sources).add(item.src))}
+                  onError={() => setFailedSources((sources) => sources.has(item.src) ? sources : new Set(sources).add(item.src))}
+                  className={cn(
+                    "pointer-events-auto block max-h-full max-w-full select-none object-contain [-webkit-touch-callout:none]",
+                    active && !loaded && "opacity-0",
+                  )}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
       {items.length > 1 && (
         <>
           <button
             type="button"
+            disabled={index === 0}
             onClick={() => navigate(-1)}
             aria-label={t("attach.previous")}
-            className="absolute left-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm hover:bg-black/75 hover:text-white sm:left-4"
+            className="absolute left-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm disabled:invisible hover:bg-black/75 hover:text-white sm:left-4"
           >
             <ChevronLeft size={21} />
           </button>
           <button
             type="button"
+            disabled={index === items.length - 1}
             onClick={() => navigate(1)}
             aria-label={t("attach.next")}
-            className="absolute right-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm hover:bg-black/75 hover:text-white sm:right-4"
+            className="absolute right-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm disabled:invisible hover:bg-black/75 hover:text-white sm:right-4"
           >
             <ChevronRight size={21} />
           </button>

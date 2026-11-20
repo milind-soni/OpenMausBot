@@ -2,7 +2,7 @@ import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type SetStateAction } from "react";
-import { Mic, Paperclip, Square, X } from "lucide-react";
+import { Mic, Square, X } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -40,8 +40,6 @@ import { PointedChips } from "./app/PointedChips"; import { SetupRequestChip, se
 import { takePointedChips } from "@/lib/pointed-chips";
 import { openPageFor } from "@/lib/open-page";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
-import { PlaceChip } from "./PlaceChip";
-import { ApprovalModeSelector } from "./ApprovalModeSelector";
 import {
   appendPastedText,
   clipboardFilesToAttach,
@@ -63,10 +61,9 @@ import {
   type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRouteForComposer } from "@/lib/group-routing";
-import { composerPlaceholder, sendLabels, slotColors } from "./composer-simple"; import { ComposerSendButton } from "./ComposerSendButton"; import { ComposerContextMenu } from "./ComposerContextMenu";
+import { composerPlaceholder, sendLabels } from "./composer-simple"; import { ComposerSendButton } from "./ComposerSendButton"; import { ComposerContextMenu } from "./ComposerContextMenu";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
-import { GoalToggle, TeachTaskButton } from "./ComposerPlusMenu";
 import { PhonePlus } from "./PhonePlus";
 import { useThreadApproval } from "./thread-approval";
 import { useStackedField } from "./composer-wrap";
@@ -503,10 +500,10 @@ export function Composer({
     event.currentTarget.value = "";
   };
   const hasContent = Boolean(effectiveText.trim()) || attachments.length > 0;
+  const showSend = hasContent && !locked;
   const mayAct = useMayAct(), mayStop = !sharedChat || mayAct(profile?.tasks?.find((task) => task.threadId === threadId)?.askedBy);
 
 
-  const slot = slotColors(bot?.color, Boolean(group));
   // A one-to-one bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. Rooms keep their own queue.
   const followUpFor = (alternate: boolean) => resolveFollowUp({ running: busy && !group && Boolean(bot), alternate, preferred: followUpDefault, canSteer }) ?? undefined;
   const steersNow = group ? canSteer : followUpFor(false) === "steer";
@@ -682,6 +679,24 @@ export function Composer({
   };
   const goal = !group?.dm ? { on: effectiveChannelMode === "goal", onToggle: toggleGoal, solo: !group } : undefined;
 
+  const toolsMenu = !locked && (
+    <PhonePlus
+      onAttach={() => fileInput.current?.click()}
+      onChoosePhoto={singleRow ? () => photoInput.current?.click() : undefined}
+      onTakePhoto={singleRow ? () => cameraInput.current?.click() : undefined}
+      goal={goal}
+      teach={canLearn ? teachTask : undefined}
+      approval={approvalChoice && modeBot && { name: modeBot.name, choice: approvalChoice }}
+      callBotId={bot && !group ? bot.id : undefined}
+      place={modeBot && !remoteClient ? {
+        bot: modeBot,
+        task: composerTask,
+        disabled: Boolean(modeBot.busy),
+        onPin: (surface) => dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } }),
+      } : undefined}
+    />
+  );
+
   return (
     <div className={cn("pointer-events-none relative px-5 max-md:px-3", "pb-3")}>
       {speechError && (
@@ -773,30 +788,12 @@ export function Composer({
             className={cn("pointer-events-none absolute -left-5 -right-5 bg-app", "-bottom-3 top-1/2")}
           />
         <div ref={shellRef} data-tour="composer" data-look="composer" className={cn("@container/composer relative z-[1]", singleRow ? "flex min-w-0 items-center gap-2 pb-1" : cn("rounded-2xl px-2 py-1.5", ELEVATED_FLOAT))}>
-        {singleRow && !locked && (
-          <div className="flex shrink-0 items-center">
-            <PhonePlus
-              onAttach={() => fileInput.current?.click()}
-              onChoosePhoto={() => photoInput.current?.click()}
-              onTakePhoto={() => cameraInput.current?.click()}
-              goal={goal}
-              teach={canLearn ? teachTask : undefined}
-              approval={approvalChoice && modeBot && { name: modeBot.name, choice: approvalChoice }}
-              callBotId={bot && !group ? bot.id : undefined}
-              place={modeBot && !remoteClient ? {
-                bot: modeBot,
-                task: composerTask,
-                disabled: Boolean(modeBot.busy),
-                onPin: (surface) => dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } }),
-              } : undefined}
-            />
-          </div>
-        )}
+        {singleRow && toolsMenu}
         <div className={singleRow ? cn("min-w-0 flex-1 rounded-[26px] px-3 py-1.5 [--composer-reply-gap:6px]", ELEVATED_FLOAT) : "contents"}>
         {replyTo && <ComposerReplyStrip message={replyTo} fallbackName={bot?.name} onClear={onClearReply} />}
-        <div data-composer-row className={cn("flex items-end", "gap-1", !singleRow && "@max-[30rem]/composer:flex-wrap", stacked && "flex-wrap")}>
+        <div data-composer-row className={cn("flex items-center gap-1", !singleRow && "@max-[30rem]/composer:flex-wrap", stacked && "flex-wrap")}>
           {singleRow && !locked && <>
-            <input ref={photoInput} type="file" accept="image/*" multiple hidden onChange={onPickFiles} />
+            <input ref={photoInput} type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/heic,image/heif,image/avif,image/bmp,image/tiff,image/svg+xml" multiple hidden onChange={onPickFiles} />
             <input ref={cameraInput} type="file" accept="image/*" capture="environment" hidden onChange={onPickFiles} />
           </>}
           <input
@@ -806,33 +803,7 @@ export function Composer({
             className="hidden"
             onChange={onPickFiles}
           />
-          {!locked && !singleRow && (
-            <div className={cn("flex items-center gap-1", "flex-wrap")}>
-
-              {<button
-                type="button"
-                onClick={() => fileInput.current?.click()}
-                aria-label={t("composer.attach")}
-                title={t("composer.attach")}
-                className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
-              >
-                <Paperclip size={16} strokeWidth={1.75} absoluteStrokeWidth />
-              </button>}
-              {canLearn && <TeachTaskButton onClick={teachTask} />}
-              {goal && <GoalToggle {...goal} />}
-              {approvalChoice && <ApprovalModeSelector {...approvalChoice} />}
-
-              {modeBot && !remoteClient && (
-                <PlaceChip
-                  bot={modeBot}
-                  task={composerTask}
-                  live={Boolean(modeBot.busy)}
-                  disabled={Boolean(modeBot.busy)}
-                  onPin={(surface) => dispatch({ type: "updateTask", botId: modeBot.id, threadId: modeBot.threadId, patch: { surface } })}
-                />
-              )}
-            </div>
-          )}
+          {!singleRow && toolsMenu}
           <MentionTextarea
           singleLinePlaceholder={singleRow}
           wrapperClassName={singleRow ? undefined : cn("@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full", stacked && "order-first basis-full")}
@@ -929,26 +900,12 @@ export function Composer({
           })}
           aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
             className={cn(
-              "block max-h-[9rem] w-full resize-none overflow-y-auto bg-transparent placeholder:text-ink-tertiary focus:outline-none",
+              "block max-h-[9rem] w-full resize-none overflow-x-hidden overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden bg-transparent placeholder:text-ink-tertiary focus:outline-none",
               "px-1 text-[15px]",
               "min-h-6 py-1 leading-6",
             )}
           />
           <div data-composer-actions className={cn("flex items-center", "gap-1", !singleRow && "@max-[30rem]/composer:ml-auto", stacked && "ml-auto")}>
-          {(busy && mayStop) && !locked && (
-          <button
-            onClick={interruptTurn}
-            aria-label={t("chat.stopTurn")}
-            className={cn(
-              "flex shrink-0 items-center justify-center rounded-full",
-              "size-8 text-ink-secondary hover:bg-raised hover:text-ink",
-            )}
-            style={undefined}
-            title={t("chat.stop")}
-          >
-            <Square size={14} className="fill-current" />
-          </button>
-        )}
         {!locked && <ComposerContextMenu bot={bot} group={group} members={members} className={cn("size-8", "text-ink-secondary hover:bg-raised hover:text-ink")} />}
         {!locked && !busy && micReady && (
           <button
@@ -966,10 +923,15 @@ export function Composer({
             <Mic size={16} strokeWidth={1.75} absoluteStrokeWidth className="[&_rect]:fill-current" />
           </button>
         )}
-        {bot && !group && <CallButton bot={bot} placement="composer" fill={undefined} ink={slot.ink} inverse={singleRow} />}
+        {!showSend && (busy && mayStop && !locked ? (
+          <button type="button" onClick={interruptTurn} aria-label={t("chat.stopTurn")} title={t("chat.stop")}
+            className="flex size-8 shrink-0 items-center justify-center rounded-full bg-black text-white">
+            <Square size={11} fill="currentColor" aria-hidden="true" />
+          </button>
+        ) : bot && !group && <CallButton bot={bot} placement="composer" inverse />)}
 
-        {hasContent && !locked && (
-          <ComposerSendButton waits={busy && !steersNow} label={sendNames.label} title={sendNames.title} look={slot.button}
+        {showSend && (
+          <ComposerSendButton waits={busy && !steersNow} label={sendNames.label} title={sendNames.title}
             disabled={attachmentPending} onSend={(alternate) => send(followUpFor(alternate))} onChoose={send}
             menu={followUpFor(false) && { choices: followUpChoices(followUpDefault, canSteer), name: busyName, sendKey: sendLabel, alternateKey: alternateSendLabel(sendKey) }} />
           )}

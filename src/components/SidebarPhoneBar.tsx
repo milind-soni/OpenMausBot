@@ -62,14 +62,14 @@ export function SidebarPhoneBar({ onInboxOpened }: { onInboxOpened: () => void }
       <CloudUsageCard />
       <div className="flex items-center gap-2 not-first:mt-2">
         <SidebarProfileMenu iconOnly circle />
-        <SidebarInboxButton className="size-10" onOpened={onInboxOpened} />
+        <SidebarInboxButton className="size-11 border border-hairline bg-transparent ring-0" onOpened={onInboxOpened} />
         <SidebarPopoverMenu
           items={items}
           ariaLabel={t("sidebar.tools")}
-          triggerClassName="shrink-0 rounded-full"
+          triggerClassName="flex shrink-0 rounded-full"
           triggerTitle={t("sidebar.tools")}
           renderTrigger={({ open }) => (
-            <span className={`relative flex size-11 items-center justify-center rounded-full border border-hairline text-ink ${open ? "bg-raised" : "bg-card"}`}>
+            <span className={`relative flex size-11 items-center justify-center rounded-full border border-hairline text-ink ${open ? "bg-raised" : "bg-transparent"}`}>
               <LayoutGrid size={19} aria-hidden="true" />
               {automationsNeedYou && <span aria-hidden className="absolute right-1 top-1 size-2.5 rounded-full bg-danger ring-2 ring-app" />}
             </span>
@@ -79,7 +79,7 @@ export function SidebarPhoneBar({ onInboxOpened }: { onInboxOpened: () => void }
           type="button"
           onClick={openCommandPalette}
           aria-haspopup="dialog"
-          className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-hairline bg-card px-3.5 text-ink-secondary hover:bg-raised focus-visible:outline-2 focus-visible:outline-focus"
+          className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-hairline bg-transparent px-3.5 text-ink-secondary hover:bg-raised focus-visible:outline-2 focus-visible:outline-focus"
         >
           <Search size={17} aria-hidden="true" />
           {t("sidebar.search")}

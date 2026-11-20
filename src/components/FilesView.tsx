@@ -1,5 +1,6 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { Folder, FolderOpen, MoreHorizontal } from "lucide-react";
 import type { CloudFilesBridge, CloudFilesDisk, CloudFilesState, FolderCheck, SharedFolder } from "../../electron/cloud-sync.mjs";
 import { cn } from "@/lib/cn";
@@ -150,9 +151,9 @@ function FilesPage({ bridge }: { bridge: CloudFilesBridge }) {
       : <ConfirmDialog open tone="neutral" icon={<FolderOpen size={18} />} title={t("files.share.title", { name: ask.check.name })}
         body={t("files.share.body", { size: folderSize(ask.check) })} confirmLabel={t("files.share.confirm")}
         onCancel={close} onConfirm={() => share([ask.check.token])} />)}
-    {ask?.kind === "stop" && <ConfirmDialog open title={t("files.stop.title", { name: ask.folder.name })} body={t("files.stop.body")}
-      confirmLabel={t("files.stop")} onCancel={close} onConfirm={() => { close(); void run(() => bridge.stopSharing(ask.folder.id)); }} />}
-    {ask?.kind === "suggest" && <FilesDialog label={t("files.suggest.title")} onClose={close} actions={<>
+    <OverlayPresence>{ask?.kind === "stop" && <ConfirmDialog open title={t("files.stop.title", { name: ask.folder.name })} body={t("files.stop.body")}
+      confirmLabel={t("files.stop")} onCancel={close} onConfirm={() => { close(); void run(() => bridge.stopSharing(ask.folder.id)); }} />}</OverlayPresence>
+    <OverlayPresence>{ask?.kind === "suggest" && <FilesDialog label={t("files.suggest.title")} onClose={close} actions={<>
       <button type="button" autoFocus className="ui-button" onClick={close}>{t("files.cancel")}</button>
       <button type="button" disabled={!ask.chosen.length} className="ui-button ui-button-primary" onClick={() => share(ask.chosen)}>{t("files.share.confirm")}</button>
     </>}>
@@ -169,7 +170,7 @@ function FilesPage({ bridge }: { bridge: CloudFilesBridge }) {
           </label>
         </li>)}
       </ul>
-    </FilesDialog>}
+    </FilesDialog>}</OverlayPresence>
   </>;
 }
 

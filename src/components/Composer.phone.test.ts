@@ -97,6 +97,7 @@ describe("the phone composer", () => {
     expect(fixture.call).toMatchObject({ inverse: true });
     openPlus();
     const keys = [...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"));
+    expect(keys.slice(0, 3)).toEqual(["take-photo", "choose-photo", "attach"]);
     expect(keys).toEqual(expect.arrayContaining(["attach", "teach", "place", "approval", "call:turns", "call:live"]));
     expect(item("place")?.textContent).toContain("Works on");
   });
@@ -104,7 +105,7 @@ describe("the phone composer", () => {
   it("opens separate camera and photo-library inputs from the + menu", () => {
     render({ bot });
     const camera = container.querySelector<HTMLInputElement>('input[capture="environment"]')!;
-    const library = container.querySelector<HTMLInputElement>('input[accept="image/*"][multiple]:not([capture])')!;
+    const library = container.querySelector<HTMLInputElement>('input[accept^="image/"][multiple]:not([capture])')!;
     expect(camera.accept).toBe("image/*");
     const take = vi.spyOn(camera, "click").mockImplementation(() => {});
     const choose = vi.spyOn(library, "click").mockImplementation(() => {});
@@ -116,11 +117,13 @@ describe("the phone composer", () => {
     expect(choose).toHaveBeenCalledOnce();
   });
 
-  it("keeps the buttons in a row on a wider screen", () => {
+  it("opens the tools menu on a wider screen", () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: !query.includes("max-width"), addEventListener() {}, removeEventListener() {} }));
     render({ bot });
-    expect(container.querySelector('button[aria-label="Attach a file"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="place-chip"]')).not.toBeNull();
-    expect(fixture.call?.inverse).toBe(false);
+    expect(container.querySelector('button[aria-label="Attach a file"]')).toBeNull();
+    expect(container.querySelector('[data-testid="place-chip"]')).toBeNull();
+    openPlus();
+    expect(item("place")).not.toBeNull();
+    expect(fixture.call?.inverse).toBe(true);
   });
 });

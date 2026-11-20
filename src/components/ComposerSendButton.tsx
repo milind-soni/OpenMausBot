@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import { ArrowUp, ChevronUp, Clock, CornerDownRight, RotateCcw } from "lucide-react";
 
 import type { FollowUp } from "../../shared/follow-up";
@@ -18,12 +17,11 @@ export interface FollowUpMenu {
 
 /** The composer's round Send button. While a one-to-one bot works, a click does what Enter does and a Ctrl/⌘-click the
  * other one; the chevron beside it lists every way this message can meet the running turn. */
-export function ComposerSendButton({ waits, label, title, look, disabled, onSend, menu, onChoose }: {
+export function ComposerSendButton({ waits, label, title, disabled, onSend, menu, onChoose }: {
   /** The message will wait for the running turn: a clock on a quiet button instead of the bot's colour. */
   waits: boolean;
   label: string;
   title: string;
-  look: { className: string; style?: CSSProperties };
   disabled: boolean;
   onSend: (alternate: boolean) => void;
   menu?: FollowUpMenu;
@@ -36,11 +34,10 @@ export function ComposerSendButton({ waits, label, title, look, disabled, onSend
       disabled={disabled}
       aria-label={label}
       title={menu && alternate ? t("composer.followUp.buttonTitle", { title, key: menu.alternateKey, alternate: t(`composer.followUp.${alternate}`) }) : title}
-      style={waits ? undefined : look.style}
       className={cn(
         "flex shrink-0 items-center justify-center rounded-full disabled:cursor-default",
-        "size-8",
-        waits ? "bg-raised text-ink-secondary hover:bg-raised-hover" : look.className,
+        "size-8 max-md:size-9",
+        "bg-composer-action text-composer-action-ink hover:opacity-90",
       )}
     >
       {waits ? <Clock size={15} /> : <ArrowUp size={16} strokeWidth={1.75} absoluteStrokeWidth />}

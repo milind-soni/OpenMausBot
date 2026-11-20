@@ -1,5 +1,5 @@
 import { useEffect, useState, type ComponentType, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { t } from "@/lib/i18n";
 
 // Not React.lazy: it suspends on every first render even with the chunk loaded (React holds a commit after a fallback

@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { CalendarClock, ChevronRight, FileText, Plus } from "lucide-react";
 import { useState } from "react";
 import { useStore, type Bot } from "@/state/store";
@@ -19,6 +20,6 @@ export function RoutinesSection({ bot, routines, runs, defaultRunOn }: { bot: Bo
     </div>
     <RoutineList routines={routines} runs={runs} pausedBots={state.config?.pausedBots} heldBots={state.config?.heldBots} loading={state.routinesLoadState === "loading" && routines.length === 0} error={state.routinesLoadState === "error"} unreadable={state.config?.routinesUnreadable} onOpen={setEditing} onLogs={(routine) => dispatch({ type: "showRoutines", section: "logs", botId: bot.id, routineId: routine.id })} onToggle={(routine) => dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: !routine.enabled } })} />
     <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "schedule", view: "list", botId: bot.id })} className="self-start text-[12px] text-accent hover:underline">{t("computer.routines.openTitle")} <ChevronRight size={14} aria-hidden="true" className="inline align-[-2px] rtl:-scale-x-100" /></button>
-    {editing && <RoutineEditor key={bot.id} routine={editing === "new" ? undefined : editing} bots={[bot]} lockedBotId={bot.id} defaultRunOn={defaultRunOn} onClose={() => setEditing(null)} />}
+    <OverlayPresence>{editing && <RoutineEditor key={bot.id} routine={editing === "new" ? undefined : editing} bots={[bot]} lockedBotId={bot.id} defaultRunOn={defaultRunOn} onClose={() => setEditing(null)} />}</OverlayPresence>
   </div>;
 }

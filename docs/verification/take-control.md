@@ -3,7 +3,7 @@
 Run the focused checks in disposable homes:
 
 ```sh
-pnpm exec vitest run src/components/ComputerPanel.takeover.test.ts src/components/computer-takeover.test.ts src/components/ComputerPanel.simple.test.ts
+pnpm exec vitest run src/components/ComputerPanel.takeover.test.ts src/components/computer-takeover.test.ts
 pnpm exec vitest run server/computer-take-control.e2e.test.ts server/boat-desktop-link.test.ts server/container-computer.test.ts server/vps-computer.test.ts server/routes/desktop-viewer.test.ts
 ```
 

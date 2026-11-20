@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { Lock, Users } from "lucide-react";
 
 import type { BotAccess, BotAccessLevel, GrantedLevel } from "../../../shared/bot-access";

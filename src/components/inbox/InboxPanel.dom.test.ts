@@ -128,12 +128,16 @@ describe("the inbox panel", () => {
     expect(listed()).toEqual([approvalRow.id, reportRow.id]);
   });
 
-  it("is a sheet at phone width", async () => {
+  it("closes the phone sheet when a finished conversation opens", async () => {
     vi.stubGlobal("matchMedia", (query: string) => ({ matches: query.includes("max-width"), addEventListener() {}, removeEventListener() {} }));
     openInbox();
-    await mount(createElement(InboxPanel));
+    const bot = { id: "planner", name: "Planner", tasks: [{ threadId: "daily", title: "Daily plan", createdAt: 0, updatedAt: INBOX_NOW }] } as Bot;
+    await mount(createElement(InboxPanel), [bot]);
     expect(document.querySelector('[data-inbox-panel="sheet"]')).not.toBeNull();
     expect(document.querySelector('[data-inbox-panel="side"]')).toBeNull();
+    await click("[data-inbox-finished] button");
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ threadId: "daily" }));
+    expect(currentInboxPanel().open).toBe(false);
   });
 
   it("shows a pinned conversation once, and counts its unread news once", async () => {

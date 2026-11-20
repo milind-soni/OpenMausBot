@@ -2,7 +2,7 @@
 
 ```sh
 pnpm exec vitest run server/custom-acp-models.e2e.test.ts
-pnpm exec vitest run src/components/CustomAcpModelPicker.test.ts src/components/ModelPicker.test.ts src/components/ModelPicker.interaction.test.ts src/components/ModelPicker.simple.test.ts
+pnpm exec vitest run src/components/CustomAcpModelPicker.test.ts src/components/ModelPicker.test.ts src/components/ModelPicker.interaction.test.ts src/components/ModelPicker.dom.test.ts
 ```
 
 The end-to-end test uses `launchVerificationServer` from the shared control

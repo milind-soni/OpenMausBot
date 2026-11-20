@@ -1,7 +1,8 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 // A shareable template of a bot or a department: its card (in the chat and in the department's Share), what it brings
 // (the Details sheet, also Import's preview), and the card's actions.
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { ArrowUpRight, Check, ChevronDown, Copy, FolderDown, Github, Library, Loader2, MoreHorizontal, RefreshCw, Trash2, Upload } from "lucide-react";
 
 import { COMMUNITY_UPLOAD_URL, TEMPLATE_UPDATE_MESSAGE, type TemplateAvatar, type TemplateCard, type TemplateDetails, type TemplateRepoPublish } from "../../shared/share-card";
@@ -221,8 +222,8 @@ export function TemplateChatCard({ message, botId, threadId }: { message: Messag
             renderTrigger={() => <span className={cn(ASK_CHIP, ASK_CHIP_IDLE, "px-2")}><MoreHorizontal size={14} aria-hidden="true" /></span>} />
         </>} />
       <TemplateNotes actions={actions} />
-      {details && <TemplateDetailsSheet id={card.id} name={card.name} onClose={() => setDetails(false)} />}
-      {repo && <TemplateRepoPublishDialog card={card} onClose={() => setRepo(false)} />}
+      <OverlayPresence>{details && <TemplateDetailsSheet id={card.id} name={card.name} onClose={() => setDetails(false)} />}</OverlayPresence>
+      <OverlayPresence>{repo && <TemplateRepoPublishDialog card={card} onClose={() => setRepo(false)} />}</OverlayPresence>
     </div>
   );
 }

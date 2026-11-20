@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 
 const fixture = vi.hoisted(() => ({
   services: {} as Record<string, unknown>,
@@ -40,6 +42,9 @@ vi.mock("./EmailCard", () => ({ EmailCard: () => null }));
 vi.mock("./Avatar", () => ({ BotAvatar: () => null }));
 
 import { api } from "@/state/store";
+
+useReducedMotionForTests();
+
 const { PluginsPanel } = await import("./PluginsPanel");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

@@ -1,5 +1,6 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { ArrowDown, ArrowDownToLine, Loader2, PackageOpen, RefreshCw, X } from "lucide-react";
 
 import { updaterMessage, useUpdaterState, type UpdaterState } from "@/lib/updater";
@@ -39,7 +40,7 @@ export function UpdateIndicator({ className, bar }: { className?: string; bar?: 
   }, [settled]);
   if (framed && bar === undefined) return null;
   if (!state || !updateIndicatorShown(state)) {
-    return open && !settled ? <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} /> : null;
+    return <OverlayPresence>{open && !settled ? <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} /> : null}</OverlayPresence>;
   }
   const label = updateIndicatorLabel(state);
   const ready = state.status === "downloaded";
@@ -57,7 +58,7 @@ export function UpdateIndicator({ className, bar }: { className?: string; bar?: 
       >
         <ArrowDownToLine size={15} strokeWidth={2} aria-hidden className={cn(!ready && "animate-pulse motion-reduce:animate-none")} />
       </button>
-      {open && <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} />}
+      <OverlayPresence>{open && <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} />}</OverlayPresence>
     </>
   );
   return (
@@ -78,7 +79,7 @@ export function UpdateIndicator({ className, bar }: { className?: string; bar?: 
       >
         <ArrowDown size={16} strokeWidth={2.25} aria-hidden className={cn(!ready && "animate-pulse")} />
       </button>
-      {open && <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} />}
+      <OverlayPresence>{open && <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} />}</OverlayPresence>
     </div>
   );
 }

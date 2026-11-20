@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { createElement, useState } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import { DataFilter, type DataFilterValue } from "./DataFilter";
+
+useReducedMotionForTests();
 
 const columns = [{ name: "id", type: "BIGINT" }, { name: "display.name", type: "VARCHAR" }, { name: "created", type: "TIMESTAMP" }, { name: "active", type: "BOOLEAN" }];
 const changed = vi.fn();

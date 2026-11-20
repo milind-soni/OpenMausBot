@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 // Settings → Servers: what this app connects to. Each server saved by hand says how it is reached and how it is doing,
 // with the one thing to do when it needs the person; My Cloud and teams are the Admin's. This app never stops a server:
 // Remove only forgets it here and signs this app out.
@@ -132,8 +133,8 @@ export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVe
       <SettingsLinkRow title={t("connect.title")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} strokeWidth={1.75} aria-hidden="true" /></span>}
         onClick={() => { if (!busy) setSheet({ address: "", locked: false, title: t("connect.title") }); }} data={{ "data-server-connect": "" }} />
     </SettingsRows>
-    {sheet && <RailSheet focusKey={sheet.locked ? "pair-again" : "connect"} onClose={() => setSheet(null)}>
+    <OverlayPresence>{sheet && <RailSheet focusKey={sheet.locked ? "pair-again" : "connect"} onClose={() => setSheet(null)}>
       <OwnServerLink onBack={null} onConnected={() => setSheet(null)} start={sheet} />
-    </RailSheet>}
+    </RailSheet>}</OverlayPresence>
   </>;
 }

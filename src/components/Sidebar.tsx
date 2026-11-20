@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { BotEngineMark, BotModelBadge, botTooltip } from "./BotModelBadge";
 import { NeedsYouButton, OwnerPickerHost } from "./TeamOwner";
 import { SidebarPeople } from "./SidebarPeople";
@@ -5,7 +6,7 @@ import { TeamSideSwitch, useTeamSideLists } from "./TeamSideSwitch";
 import { setAttentionPinned, useAttentionPinned } from "./inbox/attention-pinned";
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderInput, FolderPlus, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, PanelLeft, Pencil, Phone, Plus, SquarePen, TextQuote, Trash2, Users, X } from "lucide-react";
 import { sidebarState } from "./sidebar-state"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { api, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
@@ -629,13 +630,14 @@ export function BotThreadList({ bot, selected, pendingQueued, routineRuns, revea
           if (threadId) dispatch({ type: "refreshTaskPermissions", botId: bot.id, threadId, acknowledgeLocalAuto: true });
         }}
       />
-      {projectToEdit && <BotProjectDialog bot={bot} project={projectToEdit} onClose={() => setEditingProject(null)} />}
+      <OverlayPresence>{projectToEdit && <BotProjectDialog bot={bot} project={projectToEdit} onClose={() => setEditingProject(null)} />}</OverlayPresence>
       </>}
     </div>
   );
 }
 
 export interface BotRowProps {
+  phoneHome?: boolean;
   bot: Bot;
   selected: boolean;
   deleting: boolean;
@@ -658,7 +660,7 @@ export function botRowProps<State extends Pick<AppState, "activeView" | "selecte
   state: State,
   dispatch: Dispatch<Action>,
   bot: Bot,
-  layout: Pick<BotRowProps, "density" | "onMenu" | "renameRequest" | "botDrag" | "botDrop" | "botDragging">,
+  layout: Pick<BotRowProps, "density" | "phoneHome" | "onMenu" | "renameRequest" | "botDrag" | "botDrop" | "botDragging">,
 ): BotRowProps {
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
   const reveal = state.revealThread;
@@ -697,12 +699,13 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const tooltip = !iconOnly ? botTooltip(bot, instances) : undefined;
   const visible = useVisibleMessages(bot);
   const last = lastNonReceipt(visible);
+  const highlight = selected && !props.phoneHome;
   const rowClass = cn(
     "flex w-full items-center rounded-xl text-left transition-colors duration-150", SIMPLE_ROW_FOCUS,
     iconOnly ? "h-[54px] justify-center" : cn("gap-2 rounded-[8px] py-2 pe-2 md:h-[54px] md:py-0", canExpand ? "ps-6" : "ps-2"),
     !iconOnly && "max-md:rounded-2xl max-md:py-2.5",
-    sidebarRowTone(selected),
-    !iconOnly && rowSurface(selected),
+    sidebarRowTone(highlight),
+    !iconOnly && rowSurface(highlight),
   );
   const { waiting, working, failed, teammateWait, queued } = sidebarBotStatus(bot, pendingQueued, visible);
   const { unread } = useBotUnread(bot);
@@ -831,7 +834,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
             : undefined
         }
         aria-busy={deleting || undefined} aria-keyshortcuts={drag ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
-        aria-current={selected && !expanded && !renaming ? "page" : undefined}
+        aria-current={highlight && !expanded && !renaming ? "page" : undefined}
         data-sidebar-bot-row={bot.id} data-look="sidebar-bot"
         title={renaming ? undefined : tooltip}
         onClick={onSelect}
@@ -1063,7 +1066,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const attention = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups);
   const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
-  const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, onMenu: setMenu, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
+  const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, phoneHome: phone, onMenu: setMenu, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
   const plusItem = cn(MENU_ITEM, "text-ink hover:bg-menu-hover"), plusBot = state.activeView === "chat" ? state.bots.find((candidate) => candidate.id === state.selectedId) : undefined, newBotHere = useNewBotHereLabel();
   const restoreToggleFocus = useRef(false);
   const sidebarToggleLabel = t(rail ? "sidebar.expand" : "sidebar.collapse");
@@ -1263,7 +1266,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
         <div className={cn("flex flex-col", simpleDesk ? cn("gap-0.5 pb-2", !tiles && "pt-2") :  "gap-1 pb-2 pt-2")}>
           <NeedsYouButton compact={rail} /><SidebarPeople compact={rail} onOpened={phone ? onClose : undefined} />
           {unsectionedChief && (phone ? (
-            <PhoneHero bot={unsectionedChief} selected={botRow(unsectionedChief).selected} onOpen={() => openBotRow(dispatch, unsectionedChief, showThreads, botRow(unsectionedChief).selected)} onMenu={setMenu} />
+            <PhoneHero bot={unsectionedChief} onOpen={() => openBotRow(dispatch, unsectionedChief, showThreads, botRow(unsectionedChief).selected)} onMenu={setMenu} />
           ) : (
             <div className={rail ? undefined : "mb-1.5"}>
               <BotListItem {...botRow(unsectionedChief)} />
@@ -1413,15 +1416,15 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           onRename={(botId) => setRenameRequest((current) => ({ botId, nonce: (current?.nonce ?? 0) + 1 }))}
           onNewSection={density === "icons" ? undefined : (botId) => botDrag.startNew([botId])}
         />
-      {showThreads && newFolderBotId && state.bots.find((bot) => bot.id === newFolderBotId) && <BotProjectDialog bot={state.bots.find((bot) => bot.id === newFolderBotId)!} onClose={() => setNewFolderBotId(null)} />}
-      {showThreads && newTaskFolderBot && <NewTaskFolderDialog bot={newTaskFolderBot} onClose={() => setNewTaskFolderBotId(null)} onReturnFocus={() => {
+      <OverlayPresence>{showThreads && newFolderBotId && state.bots.find((bot) => bot.id === newFolderBotId) && <BotProjectDialog bot={state.bots.find((bot) => bot.id === newFolderBotId)!} onClose={() => setNewFolderBotId(null)} />}</OverlayPresence>
+      <OverlayPresence>{showThreads && newTaskFolderBot && <NewTaskFolderDialog bot={newTaskFolderBot} onClose={() => setNewTaskFolderBotId(null)} onReturnFocus={() => {
         sidebarRef.current?.querySelector<HTMLElement>(`[data-sidebar-bot-row="${CSS.escape(newTaskFolderBot.id)}"]`)?.focus();
-      }} />}
+      }} />}</OverlayPresence>
       <ConfirmDialog {...botConfirmProps(confirm, state.bots, { archive: (bot) => { setConfirm(null); void archiveBot(bot); }, remove: (bot) => { setConfirm(null); dispatch({ type: "deleteBot", botId: bot.id }); },
         archiveInstead: (chief) => { setConfirm(null); void archiveBotWithNotice(chief, { bots: state.bots, selectedId: state.selectedId, dispatch, showThreads, notify: setTeamFeedback }); } })}
         onCancel={cancelConfirm} returnFocusRef={sidebarRef} />
       <OwnerPickerHost />
-      {newTeam && <TeamDialog onClose={() => setNewTeam(false)} />}
+      <OverlayPresence>{newTeam && <TeamDialog onClose={() => setNewTeam(false)} />}</OverlayPresence>
       {teamMotion.shown && teamMotion.value && createPortal(<div className={cn("fixed inset-0 z-40", teamMotion.closing && "pointer-events-none")} onMouseDown={closeTeamMenu}>
         <div role="menu" aria-label={teamMotion.value.name} style={{ left: teamMotion.value.x, top: teamMotion.value.y }}
           className={cn("absolute w-[256px] text-ink", MENU_SHEET, teamMotion.className)} {...teamMotion.exitProps}
@@ -1451,9 +1454,9 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
             .catch(cause => setTeamFeedback({ error: true, text: cause instanceof Error ? cause.message : String(cause) }))
             .finally(() => { teamDeleteRunning.current = false; setTeamDeletePending(false); });
         }} />
-      {moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}
-      {shareTeam !== null && <ShareDepartmentDialog department={shareTeam} onClose={() => setShareTeam(null)} />}
-      {teamSettings !== null && <TeamSettingsDialog team={teamSettings} onClose={() => setTeamSettings(null)} />}
+      <OverlayPresence>{moveToTeam && <TeamDialog section={moveToTeam} onClose={() => setMoveToTeam(null)} />}</OverlayPresence>
+      <OverlayPresence>{shareTeam !== null && <ShareDepartmentDialog department={shareTeam} onClose={() => setShareTeam(null)} />}</OverlayPresence>
+      <OverlayPresence>{teamSettings !== null && <TeamSettingsDialog team={teamSettings} onClose={() => setTeamSettings(null)} />}</OverlayPresence>
       <SectionPicker
           current={sectionPicker ? state.bots.find((b) => b.id === sectionPicker.botId)?.section : undefined}
           anchor={sectionPicker}
@@ -1535,8 +1538,8 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           }}
         />
       )}
-      {!remoteClient && importUrl !== null && <ImportDialog initialUrl={importUrl || undefined} onClose={() => setImportUrl(null)}
-        onAdded={(line) => { setImportUrl(null); setTeamFeedback({ error: false, text: line }); }} />}
+      <OverlayPresence>{!remoteClient && importUrl !== null && <ImportDialog initialUrl={importUrl || undefined} onClose={() => setImportUrl(null)}
+        onAdded={(line) => { setImportUrl(null); setTeamFeedback({ error: false, text: line }); }} />}</OverlayPresence>
       {teamFeedback &&
         createPortal(
           <div

@@ -16,9 +16,10 @@ type RemoteProfilePatch = Partial<
   Pick<Bot, "name" | "title" | "description" | "avatarUrl" | "avatarCrop" | "voice" | "speakReplies" | "notifications">
 >;
 
-export function RemoteAgentSettingsPanel({ bot, overlay = false }: {
+export function RemoteAgentSettingsPanel({ bot, closing = false, overlay = false }: {
   bot: Bot;
   overlay?: boolean;
+  closing?: boolean;
 }) {
   const { dispatch } = useStore();
   const { dragProps } = useCaptionChrome();
@@ -76,8 +77,8 @@ export function RemoteAgentSettingsPanel({ bot, overlay = false }: {
   };
 
   return (
-    <aside className={cn(
-      "animate-panel-in absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel",
+    <aside data-drawer-motion={closing ? "out" : "in"} inert={closing} aria-hidden={closing || undefined} className={cn(
+      "[--drawer-width:400px] absolute inset-0 z-40 flex h-full min-w-0 flex-col border-l border-hairline/40 bg-panel",
       overlay ? "md:left-auto md:w-[400px] md:shadow-2xl" : "md:relative md:z-20 md:w-[400px] md:shrink-0",
     )}>
       <div {...dragProps} className="flex items-center justify-between px-4 py-3">

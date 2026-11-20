@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { formattedReplyWidth, isFormattedReply } from "@/lib/formatted-reply";
 import { activeLocale, intlLocale, t } from "@/lib/i18n";
@@ -987,9 +988,9 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
   return (
     <main data-look="chat" className="relative flex h-full min-w-0 flex-1 flex-col bg-app">
       <GroupCallOverlay group={group} members={members} />
-      {membersOpen && !remoteClient && !group.dm && (
+      <OverlayPresence>{membersOpen && !remoteClient && !group.dm && (
         <ManageMembersPanel group={group} onClose={closeMembers} triggerRef={membersTriggerRef} />
-      )}
+      )}</OverlayPresence>
       <GlassScrollFrame className="flex-1 [--glass-tint:var(--color-app)]">
       {/* z-[25]: above the room set-up card (z-20), below the GroupCallOverlay (z-30). */}
       <GlassBar edge="top" className="z-[25]">

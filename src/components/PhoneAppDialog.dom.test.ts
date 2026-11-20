@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -6,6 +7,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import { GlassBar } from "./GlassScrollFrame";
 import { PhoneAppDialog, type PhoneAppConnect } from "./PhoneAppDialog";
+
+useReducedMotionForTests();
 
 let host: HTMLDivElement;
 let root: Root;

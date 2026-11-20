@@ -1,12 +1,16 @@
 // @vitest-environment happy-dom
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 
 import { PREVIEW_STREAM_LIBRARIES_COMMAND, PREVIEW_STREAM_SANDBOX_STEPS_URL, type PreviewStreamControl, type PreviewStreamEvents, type PreviewStreamInput } from "@/lib/browser-stream-client";
 import { setLocale } from "@/lib/i18n";
 import { controlPill } from "./ChromeRow";
 import { letterbox, mapToPage, mapToSurface, StreamSurface } from "./StreamSurface";
+
+useReducedMotionForTests();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

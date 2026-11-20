@@ -1,7 +1,7 @@
 import { engineDisplayName } from "@/lib/engine-rail";
 import { modelLabel, modelProvider } from "@/lib/model-label";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, KeyRound, Loader2, RefreshCw, X } from "lucide-react";
 import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store"; import { sameFields, useStoreActions, useStoreSelector } from "@/state/store-select";
 import type { EffortLevel } from "../../shared/wire";
@@ -34,6 +34,8 @@ import { usePickerPane } from "@/lib/model-picker-pane";
 import { threadsOnOwnModel } from "../../shared/thread-model";
 import { ThreadModelsLine } from "./ThreadModelsLine";
 import { USAGE_WARN_WIDENS, UsageBars, UsageMenuRows } from "./EngineUsage";
+import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
+import { PhoneModelSheet } from "./PhoneModelSheet";
 import { Select } from "./Select";
 
 const COMPACT_MODEL_COUNT = 5;
@@ -216,6 +218,8 @@ export function ModelPicker({
   size?: "sm" | "md";
 }) {
   const { dispatch: storeDispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStoreActions(), state = useStoreSelector((s) => ({ instances: s.instances, modelVariantSessions: s.modelVariantSessions, profile: s.bots.find((candidate) => candidate.id === shown.id) }), sameFields);
+  const phoneWidth = useMediaQuery(PHONE_LAYOUT);
+  const phoneSheet = phoneWidth && !contained && Boolean(threadId);
   const [open, setOpen] = useState(false);
   const { bot, dispatch } = useAiSwitch({ bot: shown, threadId, contained, dispatch: storeDispatch, setOpen: (next) => (next ? openMenu() : setOpen(false)) });
   const locked = lockedWhileBusy(state, bot, contained, threadId);
@@ -252,7 +256,7 @@ export function ModelPicker({
 
   const popoverWidth = POPOVER_WIDTH;
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open || phoneSheet) return;
     const place = (event?: Event) => {
       if (event?.type === "scroll" && event.target instanceof Node && menuRef.current?.contains(event.target)) return;
       const anchor = triggerRef.current?.getBoundingClientRect();
@@ -274,7 +278,7 @@ export function ModelPicker({
       window.removeEventListener("scroll", place, true);
       window.removeEventListener("animationend", settled, true);
     };
-  }, [open, popoverWidth]);
+  }, [open, popoverWidth, phoneSheet]);
 
   useEffect(() => {
     if (!open || !placement || focusOnPlace.current === null) return;
@@ -288,7 +292,8 @@ export function ModelPicker({
     target?.scrollIntoView?.({ block: "nearest" });
   }, [open, placement]);
 
-  const selection = bot.modelSelection;
+  const profile = (state.profile?.id === bot.id ? state.profile : undefined) ?? bot;
+  const selection = phoneSheet && canUpdateBotDefault ? profile.modelSelection : bot.modelSelection;
   const refocusAfterPick = useRefocusAfterPick(menuRef, open, selection, query);
   const instances = withTypedModels(state.instances, selection, query);
   const active = instances.find((instance) => instance.instanceId === selection.instanceId);
@@ -351,7 +356,7 @@ export function ModelPicker({
     if (bot.busy) setOpen(false);
   }, [bot.busy]);
 
-  usePopoverDismiss(open, inside, () => setOpen(false));
+  usePopoverDismiss(open && !phoneSheet, inside, () => setOpen(false));
 
   const close = (refocus: boolean) => {
     setOpen(false);
@@ -422,7 +427,6 @@ export function ModelPicker({
   };
 
 
-  const profile = (state.profile?.id === bot.id ? state.profile : undefined) ?? bot;
   const follows = threadId ? profile.tasks?.find((task) => task.threadId === threadId)?.followsBotModel : undefined;
   const botModelInstance = state.instances.find((instance) => instance.instanceId === profile.modelSelection.instanceId);
   const botModelName = botModelInstance ? `${engineDisplayName(botModelInstance)} · ${modelLabel(botModelInstance, profile.modelSelection.model)}${variantSuffix(botModelInstance, profile.modelSelection.model, profile.modelSelection.variant)}` : profile.modelSelection.model;
@@ -452,7 +456,7 @@ export function ModelPicker({
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
     if (variant !== undefined) nextSelection.variant = variant;
-    const updateBotDefault = !threadId || (canUpdateBotDefault && (scope === "bot"));
+    const updateBotDefault = !threadId || (canUpdateBotDefault && (phoneSheet || scope === "bot"));
     const targets = [currentTaskBot(profile, threadId ?? bot.threadId), ...(updateBotDefault ? [profile] : [])];
     if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
       state.instances.find((candidate) => candidate.instanceId === target.modelSelection.instanceId)?.driverKind,
@@ -472,7 +476,7 @@ export function ModelPicker({
     if (updateBotDefault && threadId) setChangedBotModel(true);
     // A model with reasoning levels keeps the menu open, so its level can be set next without opening it again;
     // picking a variant row already sets that level.
-    if (variant !== undefined || contained || !offersReasoning(state, instance, nextSelection, threadId ?? bot.threadId)) close(true);
+    if (phoneSheet || variant !== undefined || contained || !offersReasoning(state, instance, nextSelection, threadId ?? bot.threadId)) close(true);
     else refocusAfterPick();
   };
 
@@ -571,15 +575,15 @@ export function ModelPicker({
         contained
           ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
           : iconOnly
-            ? "size-9 justify-center border border-edge bg-composer p-0 hover:bg-raised"
+            ? "size-9 max-md:size-11 justify-center border border-edge bg-composer p-0 hover:bg-raised"
             : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
         !iconOnly && !contained && active && !showActiveAccount && cn(COMPACT_SQUARE, USAGE_WARN_WIDENS),
       )}
     >
       {active && (contained
         ? <InstanceProviderMark instance={active} size={14} subtle />
-        : <span className="flex shrink-0 group-disabled:opacity-50"><InstanceProviderMark instance={active} size={14} subtle /></span>)}
-      {iconOnly && !active && <ChevronDown size={14} />}
+        : <span className="flex shrink-0 group-disabled:opacity-50"><InstanceProviderMark instance={active} size={iconOnly ? 20 : 14} subtle /></span>)}
+      {iconOnly && !active && <ChevronDown size={20} />}
       {!iconOnly && <>
         {!contained && active && showActiveAccount && (
           <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{engineDisplayName(active)}</span>
@@ -864,7 +868,14 @@ export function ModelPicker({
     </>
   );
 
-  const menu = motion.shown && (
+  const menu = phoneSheet ? motion.shown && (
+    <PhoneModelSheet updatesDefault={canUpdateBotDefault} closing={motion.closing} bot={profile} id={menuId} instances={pickerInstances} instance={railInstance} selection={selection} loading={loadingList}
+      onInstance={selectRail} onClose={() => close(true)} onPick={(instance, choice) => pick(instance, choice.nativeModel ?? choice.id, choice.variant)}>
+      {bot.busy ? (
+        <p className="px-5 pb-3 text-sm text-ink-secondary">{t("model.threadBusy")}</p>
+      ) : undefined}
+    </PhoneModelSheet>
+  ) : motion.shown && (
     <div
       ref={menuRef}
       id={menuId}

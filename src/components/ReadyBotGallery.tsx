@@ -1,5 +1,6 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useState } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { Plus } from "lucide-react";
 import { stoppedAtBotLimit } from "@/lib/bot-limit";
 import { MausAvatar } from "./Avatar";
@@ -71,6 +72,6 @@ export function ReadyBotGallery({ search, onDialog, onAdded }: {
         </p>}
       </article>; })}
     </div>
-    {adding && createPortal(<NewBotDialog readyBotId={adding} onClose={() => open(null)} onCreated={(bot) => { onDialog(false); onAdded(bot); }} />, document.body)}
+    <OverlayPresence>{adding && createPortal(<NewBotDialog readyBotId={adding} onClose={() => open(null)} onCreated={(bot) => { onDialog(false); onAdded(bot); }} />, document.body)}</OverlayPresence>
   </section>;
 }

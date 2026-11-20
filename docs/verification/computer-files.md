@@ -33,7 +33,7 @@ Check the following in the browser:
 Focused checks:
 
 ```sh
-pnpm exec vitest run src/components/ComputerFilesPane.test.ts src/components/ComputerPanel.simple.test.ts src/components/AttachmentGallery.test.ts src/components/AttachmentPreview.test.ts server/message-file.test.ts scripts/testing/verification-docs.test.ts
+pnpm exec vitest run src/components/ComputerFilesPane.test.ts src/components/AttachmentGallery.test.ts src/components/AttachmentPreview.test.ts server/message-file.test.ts scripts/testing/verification-docs.test.ts
 pnpm typecheck
 pnpm lint
 pnpm i18n:check

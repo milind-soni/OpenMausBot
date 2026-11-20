@@ -2,7 +2,7 @@
 // move ("Move everything" as the quick way), a bot's own "Move to My Cloud" in its menu, the line that says how it goes,
 // and the one row the bots that moved leave in the sidebar. Main runs the move (electron/bot-move-main.mjs).
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { ArrowRightLeft, Check, Cloud, Loader2, X } from "lucide-react";
 import type { BotMoveState, BotMoveView } from "../../electron/cloud-send.mjs";
 import { botMoveLine, filterBots, ipcErrorText, CHOOSER_PAGE, MY_CLOUD_TEAM } from "@/lib/cloud-send";

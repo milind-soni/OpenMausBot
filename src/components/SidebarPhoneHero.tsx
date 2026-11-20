@@ -6,7 +6,7 @@ import { BotAvatar } from "./Avatar";
 import { openBotContextMenu, useVisibleMessages, type MenuState } from "./Sidebar";
 
 /** The phone's home leads with the chief of staff, large and centred, instead of a row. */
-export function PhoneHero({ bot, selected, onOpen, onMenu }: { bot: Bot; selected: boolean; onOpen: () => void; onMenu: (menu: MenuState) => void }) {
+export function PhoneHero({ bot, onOpen, onMenu }: { bot: Bot; onOpen: () => void; onMenu: (menu: MenuState) => void }) {
   const visible = useVisibleMessages(bot);
   return (
     <div className="relative mb-2 flex flex-col items-center pb-2 pt-1">
@@ -14,7 +14,6 @@ export function PhoneHero({ bot, selected, onOpen, onMenu }: { bot: Bot; selecte
         type="button"
         data-sidebar-hero={bot.id}
         data-sidebar-bot-row={bot.id}
-        aria-current={selected ? "page" : undefined}
         onClick={onOpen}
         onContextMenu={(event) => openBotContextMenu(onMenu, bot.id, event)}
         className="flex flex-col items-center gap-1.5 rounded-2xl px-6 py-1 outline-none focus-visible:ring-1 focus-visible:ring-accent/60"
@@ -30,7 +29,7 @@ export function PhoneHero({ bot, selected, onOpen, onMenu }: { bot: Bot; selecte
       </button>
       <button type="button" data-bot-actions={bot.id} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu"
         onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
-        className="absolute right-1 top-1 flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"><MoreHorizontal size={16} /></button>
+        className="absolute start-[calc(50%+32px)] top-1 flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"><MoreHorizontal size={16} /></button>
     </div>
   );
 }

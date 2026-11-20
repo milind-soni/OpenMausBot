@@ -1,5 +1,6 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { Share } from "lucide-react";
 
 import { t } from "@/lib/i18n";
@@ -33,7 +34,7 @@ export function ShareBotButton({ bot, className, headerMenu, iconSize = 16, lead
         aria-haspopup="dialog" onClick={() => setOpen(true)} className={className}>
         <Share size={iconSize} aria-hidden="true" className="pointer-events-none" />
       </button>
-      {open && <ShareBotDialog bot={bot} teamName={teamName} onClose={() => setOpen(false)} onChanged={setChange} headerMenu={headerMenu} />}
+      <OverlayPresence>{open && <ShareBotDialog bot={bot} teamName={teamName} onClose={() => setOpen(false)} onChanged={setChange} headerMenu={headerMenu} />}</OverlayPresence>
       {change && <UndoToast key={`${change.text}:${JSON.stringify(change.after)}`} text={change.text}
         onUndo={() => saveAccess(bot.id, change.before)} onDone={settled} />}
     </>

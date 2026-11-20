@@ -71,6 +71,6 @@ export function SqlEditor({ sql, externalRevision, onChange }: { sql: string; ex
   }, [externalRevision, sql]);
   return (
     <div ref={host} data-testid="sql-editor"
-      className="min-h-0 w-full flex-1 overflow-hidden rounded-lg border border-hairline/50 bg-inset focus-within:ring-1 focus-within:ring-accent" />
+      className="min-h-0 w-full flex-1 overflow-hidden rounded-lg border border-hairline/50 bg-transparent focus-within:border-ink-secondary/50" />
   );
 }

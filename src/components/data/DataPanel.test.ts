@@ -39,18 +39,12 @@ const page: DataPage = { columns: [{ name: "n", type: "BIGINT" }], rows: [["1"],
 
 let host: HTMLDivElement;
 let root: Root;
-let fullscreenElement: Element | null;
 let panelHeight: number;
 let observers: Array<{ callback: () => void; targets: Set<Element> }>;
 let capturedPointers: Set<number>;
 const settle = async () => { for (let turn = 0; turn < 8; turn++) await new Promise((resolve) => setTimeout(resolve, 0)); };
 const render = (requestedCard?: { id: string; requestId: number }) => flushSync(() => root.render(createElement(DataPanel, { bot, requestedCard })));
 const click = (label: string) => flushSync(() => [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === label)!.click());
-const toggleFullscreen = (label: "Enter fullscreen" | "Exit fullscreen") => flushSync(() => host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click());
-const selectHistory = (title: string) => {
-  host.querySelector<HTMLDetailsElement>('[data-testid="data-history"]')!.open = true;
-  flushSync(() => [...host.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((button) => button.textContent === title)!.click());
-};
 const editorDom = () => host.querySelector<HTMLElement>('[role="textbox"][aria-label="SQL"]')!;
 const editorView = () => EditorView.findFromDOM(editorDom())!;
 const editorValue = () => editorView().state.doc.toString();
@@ -108,16 +102,6 @@ beforeEach(() => {
   Object.defineProperty(HTMLElement.prototype, "setPointerCapture", { configurable: true, value: vi.fn((pointerId: number) => capturedPointers.add(pointerId)) });
   Object.defineProperty(HTMLElement.prototype, "hasPointerCapture", { configurable: true, value: (pointerId: number) => capturedPointers.has(pointerId) });
   Object.defineProperty(HTMLElement.prototype, "releasePointerCapture", { configurable: true, value: vi.fn((pointerId: number) => capturedPointers.delete(pointerId)) });
-  fullscreenElement = null;
-  Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => fullscreenElement });
-  Object.defineProperty(HTMLElement.prototype, "requestFullscreen", { configurable: true, value: vi.fn(async () => {
-    fullscreenElement = host.querySelector('[data-testid="data-panel"]');
-    document.dispatchEvent(new Event("fullscreenchange"));
-  }) });
-  Object.defineProperty(document, "exitFullscreen", { configurable: true, value: vi.fn(async () => {
-    fullscreenElement = null;
-    document.dispatchEvent(new Event("fullscreenchange"));
-  }) });
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -147,7 +131,8 @@ describe("DataPanel", () => {
     render();
     expect(viewedResult()).toEqual({ botId: "pepper", threadId: "thread-1", cardId: "orders" });
     expect(editorValue()).toBe("select 42");
-    selectHistory("old");
+    render({ id: "old", requestId: 1 });
+    await settle();
     expect(viewedResult()).toEqual({ botId: "pepper", threadId: "thread-1", cardId: "old" });
     type("");
     expect(viewedResult().draftSql).toBe("");
@@ -240,7 +225,8 @@ describe("DataPanel", () => {
     expect(editorView().state.selection.main).toMatchObject({ from: 7, to: 10 });
     expect(host.querySelector('[role="region"]')).toBe(grid);
     expect(runRequests()).toHaveLength(calls);
-    selectHistory("old");
+    render({ id: "old", requestId: 1 });
+    await settle();
     expect(dock().style.height).toBe("128px");
   });
 
@@ -267,7 +253,7 @@ describe("DataPanel", () => {
     expect(runRequests()).toHaveLength(0);
   });
 
-  it("clamps a resized dock when its container shrinks and keeps the resized editor on fullscreen changes", async () => {
+  it("clamps a resized dock when its container shrinks and keeps the resized editor on container changes", async () => {
     fixture.sheets.pepper = sheet([card("orders", {})]);
     render();
     await settle();
@@ -279,12 +265,10 @@ describe("DataPanel", () => {
     resizePanel(360);
     expect(separator().getAttribute("aria-valuemax")).toBe("174");
     expect(separator().getAttribute("aria-valuenow")).toBe("174");
-    toggleFullscreen("Enter fullscreen");
     resizePanel(900);
     expect(separator().getAttribute("aria-valuemax")).toBe("714");
     resizeKey("ArrowUp");
     expect(dock().style.height).toBe("198px");
-    toggleFullscreen("Exit fullscreen");
     resizePanel(360);
     expect(dock().style.height).toBe("174px");
     expect(editorDom()).toBe(editor);
@@ -382,7 +366,7 @@ describe("DataPanel", () => {
     expect(host.querySelector('[data-testid="sources-strip"]')?.textContent).toContain("sales");
     expect(host.querySelector('[data-testid="markdown"]')?.textContent).toBe("**Up** 12%");
     expect(fixture.api).not.toHaveBeenCalled();
-    selectHistory("Orders by month");
+    render({ id: "orders", requestId: 1 });
     await settle();
     const strip = host.querySelector('[data-testid="sources-strip"]')!;
     expect(strip.textContent).toContain("sales");
@@ -392,9 +376,7 @@ describe("DataPanel", () => {
     expect(editorValue()).toBe("select * from orders");
     expect(host.querySelector('[data-testid="data-query"]')?.querySelectorAll('[role="textbox"][aria-label="SQL"]')).toHaveLength(1);
     expect(host.querySelector('[data-testid="data-query"]')?.querySelectorAll("button, pre")).toHaveLength(0);
-    expect(host.querySelector('[data-testid="data-result-footer"] [data-testid="data-history"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="data-result-footer"] [aria-label="Export"]')).not.toBeNull();
-    expect(host.querySelector('[data-testid="data-result-footer"] [aria-label="Enter fullscreen"]')).not.toBeNull();
     expect(strip.querySelectorAll("button")).toHaveLength(0);
     expect(fixture.api).toHaveBeenCalledWith("/api/bots/pepper/data/page", expect.objectContaining({ method: "POST" }));
     expect(host.querySelector('[data-testid="data-card-table"]')?.textContent).toContain("3 rows");
@@ -492,51 +474,10 @@ describe("DataPanel", () => {
     fixture.sheets = { pepper: sheet([card("old", {}), card("orders", { sql: "select * from orders limit 1", updatedAt: "2026-10-09T12:00:00Z" })]) };
     render();
     expect(editorValue()).toBe("select * from orders limit 5");
-    selectHistory("old");
+    render({ id: "old", requestId: 1 });
     await settle();
     expect(editorValue()).toBe("select * from old");
     expect(signal.aborted).toBe(true);
-  });
-
-  it("keeps the same input, draft, caret and grid while entering and leaving fullscreen", async () => {
-    fixture.sheets = { pepper: sheet([card("orders", {})]) };
-    render();
-    await settle();
-    type("select unfinished");
-    const editor = editorDom();
-    const grid = host.querySelector('[role="region"]');
-    editorView().dispatch({ selection: { anchor: 7, head: 10 } });
-    toggleFullscreen("Enter fullscreen");
-    await settle();
-    expect(fullscreenElement).toBe(host.querySelector('[data-testid="data-panel"]'));
-    expect(editorDom()).toBe(editor);
-    expect(host.querySelector('[role="region"]')).toBe(grid);
-    expect(editorView().state.selection.main).toMatchObject({ from: 7, to: 10 });
-    toggleFullscreen("Exit fullscreen");
-    await settle();
-    expect(fullscreenElement).toBeNull();
-    expect(editorDom()).toBe(editor);
-    expect(editorValue()).toBe("select unfinished");
-    toggleFullscreen("Enter fullscreen");
-    await settle();
-    fullscreenElement = null;
-    flushSync(() => document.dispatchEvent(new Event("fullscreenchange")));
-    expect(host.querySelector('button[aria-label="Enter fullscreen"]')).not.toBeNull();
-    expect(editorDom()).toBe(editor);
-  });
-
-  it("reports fullscreen failure without replacing the input or its error slot", async () => {
-    fixture.sheets = { pepper: sheet([card("orders", {})]) };
-    render();
-    await settle();
-    const editor = editorDom();
-    const error = host.querySelector('[data-testid="data-query-error"]');
-    vi.mocked(HTMLElement.prototype.requestFullscreen).mockRejectedValueOnce(new Error("Unavailable"));
-    toggleFullscreen("Enter fullscreen");
-    await settle();
-    expect(host.querySelector('[role="alert"]')).toBe(error);
-    expect(error?.textContent).not.toBe("");
-    expect(editorDom()).toBe(editor);
   });
 
   it("shows catalog table names and counts as plain references without extra controls", async () => {
@@ -582,7 +523,7 @@ describe("DataPanel", () => {
     expect(host.querySelector('[data-testid="data-chart"]')).not.toBeNull();
   });
 
-  it("ignores errors from superseded edits and aborts a pending edit when switching history", async () => {
+  it("ignores errors from superseded edits and aborts a pending edit when opening another result", async () => {
     fixture.sheets = { pepper: sheet([card("old", {}), card("orders", {})]) };
     render();
     await settle();
@@ -595,31 +536,25 @@ describe("DataPanel", () => {
     expect(host.querySelector('[role="alert"]')).toBeNull();
     expect(editorValue()).toBe("select 1");
     const latestSignal = runRequests()[1]![1].signal as AbortSignal;
-    selectHistory("old");
+    render({ id: "old", requestId: 1 });
     await settle();
     expect(latestSignal.aborted).toBe(true);
     expect(editorValue()).toBe("select * from old");
   });
 
-  it("follows updated results but keeps an explicit History selection through broadcasts", async () => {
+  it("follows updated results but keeps a result opened from chat through broadcasts", async () => {
     const old = card("old", { createdAt: "2026-10-08T10:00:00Z", updatedAt: "2026-10-08T10:00:00Z", pinned: true });
     const newer = card("new", {});
     fixture.sheets = { pepper: sheet([old, newer]) };
     render();
     expect(host.querySelector("article")?.getAttribute("data-card-id")).toBe("new");
-    selectHistory("old");
+    render({ id: "old", requestId: 1 });
     fixture.sheets = { pepper: { ...sheet([old, newer]), updatedAt: "2026-10-09T11:00:00Z" } };
     render();
     expect(host.querySelector("article")?.getAttribute("data-card-id")).toBe("old");
     fixture.sheets = { pepper: sheet([old, newer, card("newest", { updatedAt: "2026-10-09T12:00:00Z" })]) };
     render();
     expect(host.querySelector("article")?.getAttribute("data-card-id")).toBe("old");
-    selectHistory("Latest result");
-    expect(host.querySelector("article")?.getAttribute("data-card-id")).toBe("newest");
-    fixture.sheets = { pepper: sheet([{ ...old, updatedAt: "2026-10-09T13:00:00Z" }, newer]) };
-    render();
-    expect(host.querySelector("article")?.getAttribute("data-card-id")).toBe("old");
-    expect(fixture.dispatch.mock.calls.every(([action]) => ["loadDataSheet", "dataView"].includes(action.type))).toBe(true);
   });
 
   it("opens an exact older result requested from chat, including repeated requests", async () => {
@@ -627,7 +562,7 @@ describe("DataPanel", () => {
     render({ id: "old", requestId: 1 });
     await settle();
     expect(host.querySelector("article")?.getAttribute("data-card-id")).toBe("old");
-    selectHistory("new");
+    render({ id: "new", requestId: 1 });
     render({ id: "old", requestId: 2 });
     await settle();
     expect(host.querySelector("article")?.getAttribute("data-card-id")).toBe("old");
@@ -639,15 +574,13 @@ describe("DataPanel", () => {
     await settle();
     expect(host.querySelector("article")).toBeNull();
     expect(host.textContent).toContain("This result is no longer available.");
-    selectHistory("Latest result");
-    expect(host.querySelector("article")?.getAttribute("data-card-id")).toBe("latest");
   });
 
   it("refreshes cached sheets on mount and when a new chat request is missing, preserving selection", async () => {
     fixture.sheets = { pepper: sheet([card("old", {}), card("latest", {})]) };
     render();
     expect(fixture.dispatch.mock.calls.filter(([action]) => action.type === "loadDataSheet")).toHaveLength(1);
-    selectHistory("old");
+    render({ id: "old", requestId: 1 });
     fixture.sheets = { pepper: sheet([card("old", {}), card("latest", {}), card("newest", {})]) };
     render();
     expect(host.querySelector("article")?.getAttribute("data-card-id")).toBe("old");

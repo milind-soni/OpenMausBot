@@ -8046,7 +8046,8 @@ describe("harness HTTP API", () => {
       ids.push(created.body.bot.id);
       return created.body.bot;
     };
-    expect((await api("PUT", "/api/config", { profile: { name: "Milind Soni" }, features: { smartSetupChoices: true } })).status).toBe(200);
+    const language = (await api("GET", "/api/config")).body.language ?? "";
+    expect((await api("PUT", "/api/config", { language: "en", profile: { name: "Milind Soni" }, features: { smartSetupChoices: true } })).status).toBe(200);
     try {
       writeFileSync(setupAnswersFile, `${JSON.stringify(answers)}\n`);
       rmSync(setupAnswersDump, { force: true });
@@ -8073,7 +8074,7 @@ describe("harness HTTP API", () => {
     } finally {
       rmSync(setupAnswersFile, { force: true });
       for (const id of ids) await api("DELETE", `/api/bots/${id}`);
-      await api("PUT", "/api/config", { profile: { name: before }, features: { smartSetupChoices: false } });
+      await api("PUT", "/api/config", { language, profile: { name: before }, features: { smartSetupChoices: false } });
     }
   });
 
@@ -8087,7 +8088,8 @@ describe("harness HTTP API", () => {
     };
     const answer = (choices: string[]) => { writeFileSync(setupAnswersFile, `${JSON.stringify(choices)}\n`); rmSync(setupAnswersDump, { force: true }); };
     let id = "";
-    expect((await api("PUT", "/api/config", { features: { smartSetupChoices: true } })).status).toBe(200);
+    const language = (await api("GET", "/api/config")).body.language ?? "";
+    expect((await api("PUT", "/api/config", { language: "en", features: { smartSetupChoices: true } })).status).toBe(200);
     try {
       rmSync(setupAnswersFile, { force: true });
       const created = await api("POST", "/api/bots", { name: "Pepper", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true });
@@ -8112,7 +8114,7 @@ describe("harness HTTP API", () => {
     } finally {
       rmSync(setupAnswersFile, { force: true });
       if (id) await api("DELETE", `/api/bots/${id}`);
-      await api("PUT", "/api/config", { features: { smartSetupChoices: false } });
+      await api("PUT", "/api/config", { language, features: { smartSetupChoices: false } });
     }
   });
 
@@ -14466,8 +14468,13 @@ describe("message pages", () => {
     expect(response.headers.get("content-disposition")).toBe("inline");
     expect(response.headers.get("cross-origin-resource-policy")).toBe("same-origin");
     expect(response.headers.get("referrer-policy")).toBe("no-referrer");
-    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("cache-control")).toBe("private, no-cache");
     expect(await response.text()).toBe("png preview bytes");
+    const etag = response.headers.get("etag");
+    expect(etag).toBeTruthy();
+    const cached = await fetch(response.url, { headers: { "if-none-match": etag! } });
+    expect(cached.status).toBe(304);
+    expect(await cached.text()).toBe("");
 
     expect((await fetch(
       `${BASE}/api/threads/${threadId}/messages/linked-file-message/file?preview=1&ref=0`,

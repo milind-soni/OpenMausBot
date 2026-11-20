@@ -1,7 +1,7 @@
 // A team bot's owner on a Team Cloud: the picker that changes it (for an Admin, or its owner now), a teammate's face,
 // and this person's Needs you.
 import { useCallback, useEffect, useState } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { Bell, Check } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { avatarMarks } from "@/lib/avatar-marks";

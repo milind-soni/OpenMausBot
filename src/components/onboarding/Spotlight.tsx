@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
 import type { MausState } from "@/lib/mascot";

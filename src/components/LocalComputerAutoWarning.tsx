@@ -1,3 +1,4 @@
+import { useMenuMotion } from "./MenuMotion";
 import { useEffect, useRef } from "react";
 import { AlertTriangle } from "lucide-react";
 import { t } from "@/lib/i18n";
@@ -26,10 +27,12 @@ export function LocalComputerAutoWarning({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onCancel]);
 
-  if (!open) return null;
+  const motion = useMenuMotion(open);
+  if (!motion.shown) return null;
 
   return (
     <div
+      {...motion.exitProps} data-overlay-fade={motion.closing ? "out" : "in"}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
       onMouseDown={(event) => event.target === event.currentTarget && onCancel()}
     >

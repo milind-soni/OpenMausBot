@@ -1,5 +1,6 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { ArrowUpRight, X } from "lucide-react";
 import { CLOUD_PLAN_URL } from "@/lib/app-links";
 import { botRoom, closeBotLimit, planRefusal, showBotLimit, useBotLimitReason, useCreatedPausedBot, type BotLimitReason } from "@/lib/bot-limit";
@@ -29,7 +30,7 @@ export function BotLimitPopup() {
     if (next.show) showBotLimit(next.show);
   }, [loaded, turns?.refusedAt]);
   const reason = useBotLimitReason(), created = useCreatedPausedBot();
-  return reason ? <BotLimitDialog reason={reason} created={created} onClose={closeBotLimit} /> : null;
+  return <OverlayPresence>{reason ? <BotLimitDialog reason={reason} created={created} onClose={closeBotLimit} /> : null}</OverlayPresence>;
 }
 
 function BotLimitDialog({ reason, created, onClose }: { reason: BotLimitReason; created: string | null; onClose: () => void }) {

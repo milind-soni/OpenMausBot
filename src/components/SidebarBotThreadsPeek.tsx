@@ -1,6 +1,6 @@
 import { Archive, Check, ChevronRight, Plus, Star, Trash2 } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { isTypeaheadKey, typeaheadMatch, typeaheadText, type Typeahead } from "@/lib/menu-keys";

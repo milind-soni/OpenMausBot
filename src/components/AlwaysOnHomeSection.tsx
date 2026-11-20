@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 // Settings → Phone & devices → Always-on home: a spare computer (a Mac mini, say) as the person's own Cloud at home. On
 // that computer, one switch makes it one; on their main computer, the steps to add it and what it then does for them.
 import { useEffect, useState } from "react";
@@ -211,9 +212,9 @@ function AddAlwaysOnComputer() {
         </ol>
         {servers.map((server) => <AddedComputer key={server.id} server={server} status={status.find((row) => row.id === server.id)} offered={offers.includes(server.id)} />)}
       </SettingsFoldRow>
-      {connecting && <RailSheet focusKey="connect" onClose={() => { setConnecting(false); setVersion((n) => n + 1); }}>
+      <OverlayPresence>{connecting && <RailSheet focusKey="connect" onClose={() => { setConnecting(false); setVersion((n) => n + 1); }}>
         <OwnServerLink onBack={null} onConnected={() => { setConnecting(false); setVersion((n) => n + 1); }} />
-      </RailSheet>}
+      </RailSheet>}</OverlayPresence>
     </>
   );
 }

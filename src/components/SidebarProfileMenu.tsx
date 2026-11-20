@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { ELEVATED_CONTROL, ELEVATED_OPEN, ELEVATED_TINT } from "./elevated";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -646,7 +647,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         items={items}
         ariaLabel={name}
         onOpenChange={setMenuOpen}
-        triggerClassName={iconOnly || simple ? cn("shrink-0", circle || simple ? "rounded-full" : "rounded-xl") : "w-full"}
+        triggerClassName={iconOnly || simple ? cn("flex shrink-0", circle || simple ? "rounded-full" : "rounded-xl") : "w-full"}
         triggerTitle={iconOnly || simple ? label : undefined}
         triggerLabel={label}
         triggerTour={account?.place.switchable ? "server-switcher" : undefined}
@@ -665,11 +666,11 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             className={cn(
               "relative flex items-center justify-center rounded-xl transition-colors",
               "size-[46px]",
-              circle && "size-10 rounded-full border border-hairline bg-card",
+              circle && "size-11 rounded-full bg-transparent",
               open ? "bg-raised" : "hover:bg-raised/50",
             )}
           >
-            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={circle ? 26 : 28} />
+            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={circle ? 44 : 28} />
             {dot && <span aria-hidden data-account-dot={dot} className={cn("absolute end-1 top-1 size-2.5 rounded-full ring-2 ring-app", DOT_COLOR[dot])} />}
           </span>
         ) : (
@@ -709,7 +710,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
         onConfirm={() => signingOut === "browser"
           ? api("/api/auth/logout", { method: "POST" }).finally(() => location.reload())
           : window.ogb?.cloudAccount?.signOut()} />}
-      {accounts.sheet && <AccountsSheet adding={accounts.sheet.email} note={accounts.sheet.note} onClose={accounts.closeSheet} />}
+      <OverlayPresence>{accounts.sheet && <AccountsSheet adding={accounts.sheet.email} note={accounts.sheet.note} onClose={accounts.closeSheet} />}</OverlayPresence>
     </>
   );
 }

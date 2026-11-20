@@ -98,3 +98,17 @@ it.each([
   await show({ ...START, ...change });
   expect(expanded()).toBe("false");
 });
+
+
+it("opens on the phone home and keeps it visible while the initial bot loads", async () => {
+  vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  await show({ ...START, selectedId: "", botThread: undefined });
+  expect(expanded()).toBe("true");
+  await show(START);
+  expect(expanded()).toBe("true");
+  await press('[data-row="thread"]');
+  await show({ ...START, selectedId: "planner" });
+  expect(expanded()).toBe("false");
+});

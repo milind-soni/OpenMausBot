@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { keyboardFocusTarget } from "@/lib/keyboard-focus-target";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, ChevronRight, Loader2, RefreshCw, Search, Server, TriangleAlert, X } from "lucide-react";
@@ -733,7 +734,7 @@ export function PluginsPanel() {
         <ConfirmDialog open={disconnecting !== null} layer="z-[60]" tone="danger" title={t("connectors.disconnect")} confirmLabel={t("connectors.disconnect")}
           body={disconnecting ? disconnectAccountConfirmation(disconnecting.label, disconnecting.account) : ""} onCancel={() => setDisconnecting(null)}
           onConfirm={() => { if (disconnecting) disconnectAccount(disconnecting.slug, disconnecting.account.id); setDisconnecting(null); }} />
-        {appGrants.changing && (
+        <OverlayPresence>{appGrants.changing && (
           <AppGrantPrompt
             key={appGrants.changing}
             app={cards?.find((card) => card.slug === appGrants.changing)?.label ?? appGrants.changing}
@@ -742,7 +743,7 @@ export function PluginsPanel() {
             onDone={appGrants.done}
             onDismiss={appGrants.dismiss}
           />
-        )}
+        )}</OverlayPresence>
       </div>
     </div>
   );

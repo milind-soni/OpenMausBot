@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { ChevronDown, Database, History, Loader2, Maximize2, Minimize2, Pin } from "lucide-react";
+import { Database, Loader2 } from "lucide-react";
 import { DATA_ROUTES, type DataRunRequest } from "../../../shared/data-surface";
 import { api, useStore, type Bot } from "@/state/store";
 import { t } from "@/lib/i18n";
@@ -36,8 +36,6 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
   const [selection, setSelection] = useState<{ cardId: string } | null>(() => requestedCard ? { cardId: requestedCard.id } : null);
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
-  const [fullscreen, setFullscreen] = useState(false);
-  const [fullscreenError, setFullscreenError] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
   const query = useRef<HTMLDivElement>(null);
   const queryId = useId();
@@ -58,19 +56,6 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
   useEffect(() => {
     if (requestedCard) setSelection({ cardId: requestedCard.id });
   }, [requestedCard?.id, requestedCard?.requestId]);
-  useEffect(() => {
-    const update = () => setFullscreen(Boolean(panel.current) && document.fullscreenElement === panel.current);
-    document.addEventListener("fullscreenchange", update);
-    return () => document.removeEventListener("fullscreenchange", update);
-  }, []);
-  const toggleFullscreen = async () => {
-    if (!panel.current) return;
-    try {
-      if (document.fullscreenElement === panel.current) await document.exitFullscreen();
-      else await panel.current.requestFullscreen();
-      setFullscreenError(false);
-    } catch { setFullscreenError(true); }
-  };
 
   useEffect(() => {
     const reconnected = previousConnection.current === false && state.connected === true;
@@ -220,36 +205,9 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
     setQueryHeight((current) => clampHeight((current ?? query.current?.offsetHeight ?? QUERY_MIN_HEIGHT) + delta, bounds));
   };
 
-  const select = (next: typeof selection) => {
-    setSelection(next);
-  };
   const empty = sheet && cards.length === 0 && !selection;
-  const control = "flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-inset hover:text-ink";
-  const controls = <>
-        <details className="relative" data-testid="data-history">
-          <summary role="button" className={`${control} cursor-pointer list-none [&::-webkit-details-marker]:hidden`} aria-label={t("data.history")} title={t("data.history")}>
-            <History size={14} aria-hidden="true" /><span className="hidden @min-[460px]/data:inline">{t("data.history")}</span><ChevronDown size={12} aria-hidden="true" />
-          </summary>
-          <div className="absolute right-0 bottom-full z-30 mb-1 flex max-h-[min(20rem,calc(100cqh-3rem))] w-72 max-w-[70vw] flex-col overflow-y-auto rounded-xl border border-hairline/50 bg-menu p-1.5 shadow-xl" role="menu" aria-label={t("data.history")}>
-            <button type="button" role="menuitemradio" aria-checked={selection === null} className={`${control} text-left`} onClick={(event) => { select(null); event.currentTarget.closest("details")?.removeAttribute("open"); }}>{t("data.latest")}</button>
-            {cards.map((candidate) => (
-              <button key={candidate.id} type="button" role="menuitemradio" aria-checked={selection !== null && card?.id === candidate.id} className={`${control} text-left`}
-                onClick={(event) => { select({ cardId: candidate.id }); event.currentTarget.closest("details")?.removeAttribute("open"); }}>
-                <span className="min-w-0 flex-1 truncate">{candidate.title}</span>
-                {candidate.pinned && <Pin size={12} aria-label={t("data.card.pin")} />}
-                {candidate.status === "running" && <Loader2 size={12} className="animate-spin" aria-label={t("data.card.running")} />}
-              </button>
-            ))}
-          </div>
-        </details>
-        <button type="button" className={control} aria-label={t(fullscreen ? "desktopViewer.exitFullscreen" : "desktopViewer.fullscreen")} title={t(fullscreen ? "desktopViewer.exitFullscreen" : "desktopViewer.fullscreen")} onClick={() => void toggleFullscreen()}>
-          {fullscreen ? <Minimize2 size={14} aria-hidden="true" /> : <Maximize2 size={14} aria-hidden="true" />}
-        </button>
-  </>;
-  const queryError = runError ?? (fullscreenError ? t("desktopViewer.fullscreenFailed") : null);
-
   return (
-    <div ref={panel} className="@container/data flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-card text-ink fullscreen:rounded-none fullscreen:border-0 fullscreen:h-full fullscreen:w-full" data-testid="data-panel">
+    <div ref={panel} className="@container/data flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-card text-ink" data-testid="data-panel">
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden [container-type:size]" data-testid="data-result">
         {!sheet && !loadError && (
           <p className="flex items-center justify-center gap-2 py-10 text-[13px] text-ink-secondary" role="status">
@@ -264,8 +222,8 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
             <p className="px-6 text-[13px] text-ink-secondary">{t("data.empty")}</p>
           </div>
         )}
-        {card && <DataCard key={card.id} bot={bot} card={card} theme={theme} controls={controls} running={running} onCancel={cancel} />}
-        {!card && <div className="mt-auto"><DataResultFooter controls={<>{running && <RunningStatus onCancel={cancel} />}{controls}</>} /></div>}
+        {card && <DataCard key={card.id} bot={bot} card={card} theme={theme} running={running} onCancel={cancel} />}
+        {!card && running && <div className="mt-auto"><DataResultFooter controls={<RunningStatus onCancel={cancel} />} /></div>}
       </div>
       <div role="separator" aria-orientation="horizontal" aria-label={t("data.editor.resize")} aria-controls={queryId}
         aria-valuemin={bounds.min} aria-valuemax={bounds.max} aria-valuenow={queryHeight ?? undefined} tabIndex={0}
@@ -277,7 +235,7 @@ function BotDataPanel({ bot, requestedCard }: { bot: Bot; requestedCard?: { id: 
       <div ref={query} id={queryId} style={{ height: queryHeight ?? undefined }} className="flex min-h-0 shrink-0 flex-col overflow-hidden px-3 py-2" data-testid="data-query">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <SqlEditor sql={shown.sql} externalRevision={String(shown.revision)} onChange={edit} />
-          <p role={queryError ? "alert" : undefined} title={queryError ?? undefined} className="mt-1 h-4 shrink-0 truncate text-[12px] text-danger" data-testid="data-query-error">{queryError}</p>
+          <p role={runError ? "alert" : undefined} title={runError ?? undefined} className="mt-1 h-4 shrink-0 truncate text-[12px] text-danger" data-testid="data-query-error">{runError}</p>
         </div>
         <div className="shrink-0"><SourcesStrip sources={tables} /></div>
       </div>

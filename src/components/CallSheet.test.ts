@@ -1,11 +1,15 @@
 // @vitest-environment happy-dom
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
 
+
 import type { Message } from "@/state/store";
 import { CallRecordRow } from "./CallRecordRow";
+
+useReducedMotionForTests();
 
 const at = 1_700_000_000_000;
 const msg = (id: string, fields: Partial<Message>): Message => ({ id, role: "bot", kind: "text", at, ...fields }) as Message;

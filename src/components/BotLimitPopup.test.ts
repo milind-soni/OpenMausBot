@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 
 const fixture = vi.hoisted(() => ({ state: { config: { cloudHome: true, botLimit: 5 } as Record<string, unknown>, bots: [] as unknown[] } }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: fixture.state, dispatch: vi.fn() }) }));
@@ -15,6 +17,8 @@ import { openExternalLink } from "@/lib/app-links";
 import { setLocale } from "@/lib/i18n";
 import { initialAwake } from "./AwakeBotsPicker";
 import { BotLimitPopup } from "./BotLimitPopup";
+
+useReducedMotionForTests();
 
 const STARTER = { tier: "starter", resetsAt: 1, meters: [], upgrades: [{ tier: "pro", amount: 4900 }, { tier: "max", amount: 9900 }] };
 const made = (count: number) => Array.from({ length: count }, (_, i) => ({ id: `b${i}` }));

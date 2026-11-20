@@ -1,5 +1,6 @@
+import { useMenuMotion } from "./MenuMotion";
 import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { t } from "@/lib/i18n";
 import { setNewBotNameAsker } from "@/lib/new-bot";
 import { imeComposing } from "@/lib/send-key";
@@ -21,11 +22,12 @@ export function NewBotNameHost() {
     input.current?.focus();
     return () => { if (opener?.isConnected) opener.focus(); };
   }, [open]);
-  if (!answer) return null;
-  const done = (value: string | null) => { setAnswer(null); answer(value); };
+  const motion = useMenuMotion(open);
+  if (!motion.shown) return null;
+  const done = (value: string | null) => { setAnswer(null); answer?.(value); };
   const create = () => { if (name.trim()) done(name.trim()); };
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) done(null); }}>
+    <div {...motion.exitProps} data-overlay-fade={motion.closing ? "out" : "in"} className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) done(null); }}>
       <form data-new-bot-name role="dialog" aria-modal="true" aria-labelledby="new-bot-name-title"
         className="w-full max-w-[400px] rounded-2xl border border-hairline/50 bg-panel p-5 text-ink shadow-2xl"
         onSubmit={(event) => { event.preventDefault(); create(); }}

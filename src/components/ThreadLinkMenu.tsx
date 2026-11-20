@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type MouseEvent } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { Link2, Link2Off, Pin } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";

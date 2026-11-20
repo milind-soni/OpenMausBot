@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useState, type ReactNode } from "react";
 import type { CloudRenewal } from "../../../electron/cloud-list.mjs";
 import type { CloudUsage } from "../../../electron/cloud-home.mjs";
@@ -50,7 +51,7 @@ export function CancelPlanRow({ renewal, actions, onChanged }: { renewal: CloudR
         </button>
       </SettingRow>
     </div>
-    {open && <CloudCancelSheet renewal={renewal} actions={actions} onClose={(changed) => { setOpen(false); if (changed) onChanged?.(); }} />}
+    <OverlayPresence>{open && <CloudCancelSheet renewal={renewal} actions={actions} onClose={(changed) => { setOpen(false); if (changed) onChanged?.(); }} />}</OverlayPresence>
   </>;
 }
 

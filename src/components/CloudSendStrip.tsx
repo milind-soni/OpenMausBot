@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useState } from "react";
 import type { CloudSendNotice, CloudSendPageBridge } from "../../electron/cloud-send.mjs";
 import { moveQuietUntil } from "@/lib/cloud-send";
@@ -44,7 +45,7 @@ export function CloudSendStrip({ cloudHome }: { cloudHome: boolean }) {
   const [notNow, setNotNow] = useState(false);
   if (!bridge || !notice) return null;
   return <>
-    {notice.move?.phase === "choose" && !notNow && <MoveChooser onClose={() => setNotNow(true)} />}
+    <OverlayPresence>{notice.move?.phase === "choose" && !notNow && <MoveChooser onClose={() => setNotNow(true)} />}</OverlayPresence>
     {cloudHome && notice.teamMove && <TeamMoveLine move={notice.teamMove} onChange={(next) => setNotice({ ...notice, teamMove: next ?? undefined })} />}
     {!cloudHome && notice.botMove && <BotMoveLine move={notice.botMove} onChange={(next) => setNotice({ ...notice, botMove: next ?? undefined })} />}
   </>;

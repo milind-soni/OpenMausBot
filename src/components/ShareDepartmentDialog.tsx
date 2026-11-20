@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useId, useState } from "react";
 import { Loader2 } from "lucide-react";
 
@@ -30,7 +31,7 @@ function Shared({ card }: { card: TemplateCard }) {
         </button>}
       </>} />
     <TemplateNotes actions={actions} />
-    {repo && <TemplateRepoPublishDialog card={actions.card} onClose={() => setRepo(false)} />}
+    <OverlayPresence>{repo && <TemplateRepoPublishDialog card={actions.card} onClose={() => setRepo(false)} />}</OverlayPresence>
   </>;
 }
 

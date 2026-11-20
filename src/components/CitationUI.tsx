@@ -1,5 +1,6 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { cn } from "@/lib/cn";
 import { Quote, X } from "lucide-react";
 import {
@@ -330,7 +331,7 @@ export function CitationBadge({
       {onRemove && (
         <button type="button" onClick={onRemove} aria-label={t("chat.citation.remove")} className={cn("flex size-5 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink", solid && "bg-app")}><X size={11} /></button>
       )}
-      {open && createPortal(
+      <OverlayPresence>{open && createPortal(
         <div
           role="dialog"
           aria-label={t("chat.citation.details")}
@@ -357,7 +358,7 @@ export function CitationBadge({
           </div>
         </div>,
         document.body,
-      )}
+      )}</OverlayPresence>
     </span>
   );
 }

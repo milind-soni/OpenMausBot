@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { userError } from "../user-errors.ts";
 import { basename, join } from "node:path";
 
@@ -29,6 +31,15 @@ import { createJobRoutes } from "./jobs.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
 const UPLOADED_NAME = /^[A-Za-z0-9-]+\.[A-Za-z0-9]{1,10}$/;
+
+function cachedImageIsCurrent(req: IncomingMessage, res: ServerResponse, version: string | Buffer): boolean {
+  const tag = '"' + createHash("sha256").update(version).digest("base64url") + '"';
+  res.setHeader("etag", tag);
+  res.setHeader("cache-control", "private, no-cache");
+  res.setHeader("vary", "Authorization, Cookie");
+  const validators = req.headers["if-none-match"]?.split(",") ?? [];
+  return validators.some(value => value.trim() === "*" || value.trim().replace(/^W\//, "") === tag);
+}
 
 export type MessagePage = { messages: Array<Message | Record<string, unknown>>; hasMore?: boolean; activeLeafId: string | null };
 
@@ -180,11 +191,14 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       }
       const message = store.messagesFor(m[1]).find((msg) => msg.id === m![2]);
       if (!message?.png) return json(res, 404, { error: "no image on that message" });
+      if (cachedImageIsCurrent(req, res, message.png)) {
+        res.writeHead(304);
+        return res.end();
+      }
       const bytes = Buffer.from(message.png, "base64");
       res.writeHead(200, {
         "content-type": message.mime ?? "image/png",
         "content-length": String(bytes.byteLength),
-        "cache-control": "private, no-store",
       });
       return res.end(bytes);
     }
@@ -310,6 +324,11 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         res.setHeader("cache-control", "private, no-store");
         return json(res, 200, { url: `/api/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(message.id)}/file?media=${id}`, mime: file.mime, bytes: file.bytes });
       }
+      if (streamsMessageImage && cachedImageIsCurrent(req, res, file.version)) {
+        await file.handle.close();
+        res.writeHead(304);
+        return res.end();
+      }
       const inline = streamsMessageImage || Boolean(mediaGrant);
       const rawRange = Array.isArray(req.headers.range) ? req.headers.range[0] : req.headers.range;
       // Without a Range header (Save As) the whole file streams; a player's range never ties up more than one chunk.
@@ -328,11 +347,10 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         "content-disposition": mediaGrant
           ? messageFileDisposition(messageFileDownloadName(downloadName, file.name), "inline")
           : inline ? "inline" : messageFileDisposition(messageFileDownloadName(downloadName, file.name)),
-        "cache-control": "private, no-store",
+        ...(!streamsMessageImage && { "cache-control": "private, no-store", vary: "Authorization" }),
         "cdn-cache-control": "no-store",
         "cloudflare-cdn-cache-control": "no-store",
         pragma: "no-cache",
-        vary: "Authorization",
         "x-content-type-options": "nosniff",
         ...(inline
           ? {
@@ -474,11 +492,16 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
     if (m && method === "GET") {
       const attachment = readAttachment(m[1]!);
       if (!attachment) return json(res, 404, { error: "no such attachment" });
+      const image = attachment.mime.startsWith("image/");
+      if (image && cachedImageIsCurrent(req, res, attachment.bytes)) {
+        res.writeHead(304);
+        return res.end();
+      }
       const size = attachment.bytes.byteLength;
       // Visibility is decided per request, so the browser must never reuse one member's copy for another identity.
       const headers = {
         "content-type": attachment.mime,
-        "cache-control": "private, no-store",
+        ...(!image && { "cache-control": "private, no-store" }),
         "x-content-type-options": "nosniff",
       };
       if (attachment.mime.startsWith("audio/")) {

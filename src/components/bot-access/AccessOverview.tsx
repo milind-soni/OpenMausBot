@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, Search } from "lucide-react";
 
@@ -102,8 +103,8 @@ export function AccessOverview() {
         <p className="ps-4 text-[12px] text-ink-secondary">{t("botAccess.admins")}</p>
       </>}
       {error && <p role="alert" className="text-[13px] text-danger">{error}</p>}
-      {sharing && <ShareBotDialog bot={sharing} teamName={teamName} onClose={() => setSharingId(null)}
-        onChanged={(next) => setChange({ botId: sharing.id, ...next })} />}
+      <OverlayPresence>{sharing && <ShareBotDialog bot={sharing} teamName={teamName} onClose={() => setSharingId(null)}
+        onChanged={(next) => setChange({ botId: sharing.id, ...next })} />}</OverlayPresence>
       {change && <UndoToast key={`${change.botId}:${change.text}:${JSON.stringify(change.after)}`} text={change.text}
         onUndo={() => saveAccess(change.botId, change.before)} onDone={settled} />}
     </div>

@@ -15,6 +15,7 @@ vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => true, useReactor: () 
 vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 
 const { ChatView } = await import("./ChatView");
+const { ChatV2 } = await import("./chat-v2/ChatV2");
 const { GroupView } = await import("./GroupView");
 const { BotEditorStore, initialState } = await import("@/state/store");
 const { t } = await import("@/lib/i18n");
@@ -67,9 +68,9 @@ function expectReceipts(container: HTMLElement) {
 }
 
 describe("a Data receipt in the transcript", () => {
-  it("renders as the result chip in a 1:1 chat whatever the result is called", () => {
+  it.each(["classic", "v2"])("renders the result chip in %s chat whatever the result is called", layout => {
     vi.stubGlobal("fetch", () => new Promise(() => {}));
-    const mounted = mount(createElement(ChatView, { bot }));
+    const mounted = mount(layout === "v2" ? createElement(ChatV2, { profile: bot, onClose: () => {} }) : createElement(ChatView, { bot }));
     try {
       expectReceipts(mounted.container);
     } finally {

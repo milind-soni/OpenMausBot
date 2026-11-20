@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ExternalLink, RotateCw, X } from "lucide-react";
 
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
@@ -7,6 +7,7 @@ import { closeAppPreview, useAppPreview } from "@/lib/app-preview";
 import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 import { PANEL_MIN_WIDTH, useComputerPanelResize } from "../computer-panel-resize";
+import { useHeldMenuMotion } from "../MenuMotion";
 import { SiteFrame } from "./SiteFrame";
 
 /** The published app a card's Preview or a link in a message opened, beside the conversation where the Computer panel
@@ -20,18 +21,19 @@ export function AppPreviewPanel() {
     if (otherPanel && !hadOtherPanel.current) closeAppPreview();
     hadOtherPanel.current = otherPanel;
   }, [otherPanel]);
-  if (!preview || otherPanel || state.activeView !== "chat") return null;
-  return <PreviewPanel key={preview.url} url={preview.url} title={preview.title} loginOnly={preview.loginOnly === true} />;
+  const motion = useHeldMenuMotion(!otherPanel && state.activeView === "chat" ? preview : null);
+  if (!motion.shown || !motion.value) return null;
+  return <PreviewPanel closing={motion.closing} key={motion.value.url} url={motion.value.url} title={motion.value.title} loginOnly={motion.value.loginOnly === true} />;
 }
 
-function PreviewPanel({ url, title, loginOnly }: { url: string; title: string; loginOnly: boolean }) {
+function PreviewPanel({ url, title, loginOnly, closing }: { closing: boolean; url: string; title: string; loginOnly: boolean }) {
   const { dragProps } = useCaptionChrome();
   const { panelWidth, maxWidth, separatorRef, separatorWidth, onSeparatorKeyDown, onResizeStart, onResizeMove, onResizeEnd } = useComputerPanelResize();
   const [attempt, setAttempt] = useState(0);
   const [dragging, setDragging] = useState(false);
   return (
-    <aside aria-label={t("publishedApps.preview.aria", { name: title })} data-app-preview={url} style={{ width: panelWidth }}
-      className="animate-panel-in relative flex h-full shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-0 max-md:z-40 max-md:w-full!">
+    <aside data-drawer-motion={closing ? "out" : "in"} inert={closing} aria-hidden={closing || undefined} aria-label={t("publishedApps.preview.aria", { name: title })} data-app-preview={url} style={{ width: panelWidth, "--drawer-width": `${panelWidth}px` } as CSSProperties}
+      className="relative flex h-full shrink-0 flex-col border-l border-hairline/40 bg-panel max-md:absolute max-md:inset-0 max-md:z-40 max-md:w-full!">
       <div
         ref={separatorRef}
         role="separator"

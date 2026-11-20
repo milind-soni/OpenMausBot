@@ -1,3 +1,4 @@
+import { ImageCacheScope } from "./components/CachedChatImage";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -73,7 +74,8 @@ async function chooseRoot(): Promise<React.ReactNode> {
   }
   const { default: App } = await (appPage ?? loadApp());
   void loadTheme();
-  return <App />;
+  const imageScope = session.kind === "session" ? session.id : session.kind === "loopback" ? "loopback" : null;
+  return <ImageCacheScope.Provider value={imageScope}><App /></ImageCacheScope.Provider>;
 }
 
 // The window is named before the brand file is asked for: the answer only ever renames it.

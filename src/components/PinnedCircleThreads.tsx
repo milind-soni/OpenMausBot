@@ -1,5 +1,6 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type DragEvent, type KeyboardEvent } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { ChevronRight, FolderPlus, Plus } from "lucide-react";
 import { openBotRow, visibleMessages, type Bot, type Message } from "@/state/store";
 import { avatarCropRadius, botAvatarProfile } from "../../shared/bot-avatar";
@@ -65,7 +66,7 @@ export function PinnedCircleThreadPanel(props: BotRowProps) {
           <FolderPlus aria-hidden="true" size={13} />{t("folder.new")}
         </button>
       </div>
-      {creatingProject && <BotProjectDialog bot={bot} onClose={() => setCreatingProject(false)} />}
+      <OverlayPresence>{creatingProject && <BotProjectDialog bot={bot} onClose={() => setCreatingProject(false)} />}</OverlayPresence>
     </div>
   );
 }

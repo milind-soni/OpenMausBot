@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
@@ -6,6 +7,8 @@ import type { CloudFilesBridge, CloudFilesState, FolderCheck, SharedFolder } fro
 import { setLocale } from "@/lib/i18n";
 import { BotEditorStore, initialState, type useStore } from "@/state/store";
 import { FilesView } from "./FilesView";
+
+useReducedMotionForTests();
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const GB = 1024 ** 3;

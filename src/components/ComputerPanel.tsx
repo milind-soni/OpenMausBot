@@ -1132,6 +1132,7 @@ export function ComputerPanel({
   };
 
   const chooseTab = (view: ComputerPanelView) => {
+    if (view !== "data") setDataRequest(undefined);
     if (view === "browser") setError(null);
     selectPanelView(view);
   };

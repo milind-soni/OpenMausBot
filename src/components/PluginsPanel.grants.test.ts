@@ -1,7 +1,9 @@
 // @vitest-environment happy-dom
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { act, createElement, Fragment, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 
 import type { Bot, InstanceInfo } from "@/state/store";
 
@@ -48,6 +50,9 @@ vi.mock("./EmailCard", () => ({
 vi.mock("./Avatar", () => ({ BotAvatar: () => null }));
 
 import { AppGrantNotice, connectAppFromBot, showAppGrantNotice } from "./AppGrantPrompt";
+
+useReducedMotionForTests();
+
 const { PluginsPanel } = await import("./PluginsPanel");
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

@@ -1,3 +1,4 @@
+import { OverlayPresence } from "./ModalPresence";
 import { useEffect, useRef, useState } from "react";
 import type { ManagedDesktopState } from "../../electron/managed-desktop.mjs";
 import type { WorkspaceBackupSummary } from "../../shared/workspace-backup";
@@ -270,10 +271,10 @@ export function ConnectedCompanyBackupSettings({ connection, bridge }: { connect
       {!dialog && busyView}
       {!dialog && statusMessage && <p role="alert" className="break-words text-[13px] text-danger">{statusMessage}</p>}
     </div>
-    {dialog && <dialog ref={nativeDialog} aria-labelledby="company-backup-dialog-title" onKeyDown={(event) => {
+    <OverlayPresence>{dialog && <dialog ref={nativeDialog} aria-labelledby="company-backup-dialog-title" onKeyDown={(event) => {
       // The enclosing Settings dialog has its own window-level keyboard trap.
       if (event.key === "Escape" || event.key === "Tab") event.stopPropagation();
-    }} onCancel={(event) => { event.preventDefault(); if (!action) closeDialog(); }} className="fixed inset-0 m-auto max-h-[85dvh] w-[min(34rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-hairline/50 bg-app p-5 text-ink shadow-xl backdrop:bg-black/45">
+    }} onCancel={(event) => { event.preventDefault(); if (!action) closeDialog(); }} className="fading-dialog fixed inset-0 m-auto max-h-[85dvh] w-[min(34rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-hairline/50 bg-app p-5 text-ink shadow-xl backdrop:bg-black/45">
       <div className="flex flex-col gap-3">
         <h3 id="company-backup-dialog-title" className="text-[16px] font-semibold">{title}</h3>
         {needsRestart && <WorkspaceBackupRestartNotice />}
@@ -304,6 +305,6 @@ export function ConnectedCompanyBackupSettings({ connection, bridge }: { connect
         {statusMessage && <p role="alert" className="break-words text-[13px] text-danger">{statusMessage}</p>}
         <button type="button" autoFocus className="ui-button w-fit" disabled={action !== null} onClick={closeDialog}>{t("companyBackup.cancel")}</button>
       </div>
-    </dialog>}
+    </dialog>}</OverlayPresence>
   </Card>;
 }

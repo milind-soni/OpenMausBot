@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from "react";
+import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from "react";
 import { ChevronDown, Download, Loader2 } from "lucide-react";
 import { DATA_ROUTES, type DataCard as DataCardModel, type DataColumn, type DataExportFormat, type DataExportRequest, type DataReduction } from "../../../shared/data-surface";
 import { api, type Bot } from "@/state/store";
@@ -16,7 +16,6 @@ export interface DataCardProps {
   bot: Bot;
   card: DataCardModel;
   theme: ColorScheme;
-  controls?: ReactNode;
   running?: boolean;
   onCancel: () => void;
 }
@@ -82,7 +81,7 @@ export function ExportMenu({ formats, busy, onExport, onCopyMarkdown }: { format
   );
 }
 
-export function DataCard({ bot, card, theme, controls, running, onCancel }: DataCardProps) {
+export function DataCard({ bot, card, theme, running, onCancel }: DataCardProps) {
   const grid = useRef<DataGridHandle | null>(null);
   const [view, setView] = useState<"chart" | "table">("chart");
   const target = useMemo(() => ({ cardId: card.id }), [card.id]);
@@ -111,7 +110,6 @@ export function DataCard({ bot, card, theme, controls, running, onCancel }: Data
         onCopyMarkdown={card.kind === "table" || view === "table" ? () => void exporter.copyMarkdown() : undefined} />
     )}
     {exporter.notice && <span role={exporter.notice.kind} className={cn("absolute inset-x-0 bottom-full z-10 truncate border-t border-hairline/40 bg-card px-3 py-1 text-[11px]", exporter.notice.kind === "alert" ? "text-danger" : "text-ink-secondary")} title={exporter.notice.text}>{exporter.notice.text}</span>}
-    {controls}
   </>;
 
   const table = card.status === "ready" && card.kind !== "text" && !(card.kind === "chart" && card.vegaLite && view === "chart");

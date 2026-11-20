@@ -8,6 +8,7 @@ import type { Bot, InstanceInfo } from "@/state/store";
 const fixture = vi.hoisted(() => ({
   instances: [] as InstanceInfo[],
   bots: [] as Bot[],
+  owner: true,
   dispatch: vi.fn(),
   refreshModels: vi.fn(() => Promise.resolve()),
   refreshInstances: vi.fn(() => Promise.resolve()),
@@ -21,7 +22,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
     refreshModels: fixture.refreshModels,
   }),
 }));
-vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => fixture.owner }));
 vi.mock("./Avatar", () => ({ BotAvatar: () => null }));
 
 const { ModelPicker } = await import("./ModelPicker");
@@ -78,6 +79,7 @@ const openWith = async (key: "ArrowDown" | "click") => {
 };
 
 beforeEach(() => {
+  fixture.owner = true;
   fixture.bots = [];
   fixture.instances = [claude(three)];
   fixture.dispatch.mockReset();
@@ -92,6 +94,30 @@ beforeEach(() => {
 afterEach(() => {
   flushSync(() => root.unmount());
   host.remove();
+});
+
+it.each([true, false])("picks a phone model with the appropriate default-model permission (%s)", async (owner) => {
+  fixture.owner = owner;
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: query.includes("767.98px"), addEventListener() {}, removeEventListener() {},
+  }));
+  try {
+    render(ownModelThread(three[2].id, three[0].id));
+    await openWith("click");
+    const sheet = document.querySelector<HTMLDialogElement>("[data-phone-model-sheet]")!;
+    expect(sheet.open).toBe(true);
+    expect(menu()).toBeNull();
+    const rows = sheet.querySelectorAll<HTMLButtonElement>("[data-phone-model-list] button[aria-pressed]");
+    expect(rows[owner ? 0 : 2].getAttribute("aria-pressed")).toBe("true");
+    flushSync(() => rows[1].click());
+    expect(fixture.dispatch).toHaveBeenCalledWith({
+      type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: owner,
+      selection: { instanceId: "claude", model: three[1].id },
+    });
+    expect(document.querySelector("[data-phone-model-sheet]")).toBeNull();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 describe("the full picker's search and the rows around it", () => {

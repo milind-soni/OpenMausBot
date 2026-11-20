@@ -21,28 +21,17 @@ the shared [chat UI controls](chat-ui.md):
 ```sh
 H=/tmp/openmausbot-verify-data-XXXXXX/ui.json
 pnpm control:omb ui snapshot --ui "$H" --interactive
-pnpm control:omb ui click --ui "$H" --name History
-pnpm control:omb ui snapshot --ui "$H" --interactive
-# Use the snapshot's menuitemradio reference for "Revenue by region":
-pnpm control:omb ui click --ui "$H" --ref @eN
-pnpm control:omb ui click --ui "$H" --name Table
-pnpm control:omb ui click --ui "$H" --name Chart
-pnpm control:omb ui click --ui "$H" --name "Enter fullscreen"
-pnpm control:omb ui screenshot --ui "$H" --out .omb-scratch/data-fullscreen.png
-pnpm control:omb ui click --ui "$H" --name "Exit fullscreen"
+
 ```
 
 Expected: one active result fills the viewer without a title/header above it.
-The row/column count and **Export**, **History**, and fullscreen controls share
-its footer; chart results also put **Chart**/**Table** there. **History** selects
-an earlier result, and **Latest result** resumes following arriving results. A prefilled
+The footer shows the row and column counts and **Export**. Charts also offer **Chart**/**Table**. Open an earlier result from its chat receipt. A prefilled
 SQL box stays in a bottom dock, with plain table names and row counts nearby.
 CodeMirror colours SQL keywords (including DuckDB clauses), strings and numbers
 without adding an editor toolbar or Run button.
 Drag the separator above SQL up or down to resize it, or focus the separator
 and use the arrow keys. The result fills the remaining space above it; resizing
-keeps the draft and does not execute SQL. **Enter fullscreen** expands the
-same workspace, and **Exit fullscreen** restores its panel width and query. Every edit
+keeps the draft and does not execute SQL. Every edit
 updates the selected result once typing pauses for 50 ms (one burst of
 keystrokes is one query), without a Run button; an incomplete
 or invalid query keeps the last good preview visible, and **Cancel** in the
@@ -62,10 +51,9 @@ The asserted browser run uses the same pinned agent-browser and Chrome as
 `control-omb ui`; on the first run it may install them into the checkout's
 ignored verification-tools directory. It checks a bounded table DOM before and
 after scrolling to row 100,000, one mounted result despite 20 history entries,
-history selection and unclipped menu bounds, Chart/Table switching, always-visible
+Chart/Table switching, always-visible
 SQL docked below the result, the shared counts/control footer, table fill,
-chart proportions and visible axes, native fullscreen
-expansion and restoration, and a new result delivered through the real event
+chart proportions and visible axes, and a new result delivered through the real event
 stream. It also opens an older
 chart through its persisted in-chat result receipt and checks that a consumed
 receipt does not override a later Browser selection after closing and reopening
@@ -73,8 +61,7 @@ the panel. The receipt expands to show the bot's recorded SQL, collapses again,
 and keeps that original SQL after the viewer query is edited.
 
 Resize checks use real pointer drags and keyboard arrows with tables and charts,
-including minimum/maximum bounds, a narrow 360px panel in a short window, and
-fullscreen. They assert that the SQL draft is unchanged, resizing sends no SQL
+including minimum/maximum bounds and a narrow 360px panel in a short window. They assert that the SQL draft is unchanged, resizing sends no SQL
 requests, table rows remain virtualized, chart axes fit, footer menus remain
 inside the output, and wrapped table references do not clip the SQL input.
 

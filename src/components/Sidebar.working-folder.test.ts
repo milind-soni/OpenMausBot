@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
 // Exercises the production entry point: an unmounted picker export is no proof that a person can reach this workflow.
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
+
+useReducedMotionForTests();
 
 const access = vi.hoisted(() => ({ admin: true, advanced: true }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => access.admin }));

@@ -267,7 +267,7 @@ export function ChatHeaderMenu({ bot, history, openOnHover = true }: { bot: Bot;
         <span
           data-testid="chat-more"
           className={cn(
-            "flex size-8 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
+            "flex size-8 max-md:size-11 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
             open || on ? "text-accent" : "text-ink-secondary hover:text-ink",
           )}
           title={t("chat.more")}

@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useState } from "react";
 import { Mail } from "lucide-react";
 import type { UpdatesConsentBridge, UpdatesConsentState, UpdatesConsentStatus } from "../../electron/updates-consent.mjs";
@@ -104,7 +105,7 @@ export function UpdatesConsentRow() {
         else if (state.signedIn) void set("opted_in").catch(() => {});
         else setAsking(true);
       }} />
-    {asking && <UpdatesConsentDialog signedIn={false} onNo={() => setAsking(false)}
-      onYes={async email => { await set("opted_in", email); setAsking(false); }} />}
+    <OverlayPresence>{asking && <UpdatesConsentDialog signedIn={false} onNo={() => setAsking(false)}
+      onYes={async email => { await set("opted_in", email); setAsking(false); }} />}</OverlayPresence>
   </SettingRow>;
 }

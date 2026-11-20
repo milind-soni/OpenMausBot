@@ -2,11 +2,14 @@
 // A team bot's Share dialog in a real DOM: whether everyone in the team can use the bot or only the people added, adding
 // a teammate from the keyboard, a change applied at once with its Undo, handing the bot on, and what someone who can't
 // edit the bot is shown. A person's stored level is kept, never shown.
+import { useReducedMotionForTests } from "@/testing/reduced-motion";
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
+
+useReducedMotionForTests();
 
 const server = vi.hoisted(() => ({ calls: [] as Array<{ path: string; body: unknown }>, team: true, refuse: "" }));
 vi.mock("@/state/store", async (importOriginal) => ({

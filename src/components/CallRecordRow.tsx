@@ -1,3 +1,4 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useMemo, useState } from "react";
 import { AudioLines, ChevronRight } from "lucide-react";
 
@@ -53,7 +54,7 @@ export function CallRecordRow({ message, transcript, botName, threadId, busy, ha
         )}
         {partial && <p className="max-w-full text-center text-[12px] text-ink-tertiary">{t("chat.callRecord.partial")}</p>}
       </div>
-      {open && (
+      <OverlayPresence>{open && (
         <CallSheet
           message={message}
           transcript={transcript}
@@ -63,7 +64,7 @@ export function CallRecordRow({ message, transcript, botName, threadId, busy, ha
           partial={partial}
           onClose={() => setOpen(false)}
         />
-      )}
+      )}</OverlayPresence>
     </>
   );
 }

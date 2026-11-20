@@ -1,5 +1,5 @@
 import { useLayoutEffect, useId, useRef, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { X } from "lucide-react";
 import { useDismissMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";

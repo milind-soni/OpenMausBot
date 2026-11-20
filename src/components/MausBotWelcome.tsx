@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { invitedToTeam, teamWelcomeShownThisLaunch, useTeamWelcomeRecord, type TeamWelcomeRecord } from "@/lib/team-welcome";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { BookOpen, Crown, Pencil, Sparkles, Wand2 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";

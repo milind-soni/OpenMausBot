@@ -1,6 +1,7 @@
+import { OverlayPresence } from "@/components/ModalPresence";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { ArrowRight, BookOpen, Box, Loader2, Monitor, Plus, Save, Users, UsersRound, X } from "lucide-react";
 
 import { api, formatTime, openBot, openThread, useStore, type Bot } from "@/state/store";
@@ -420,7 +421,7 @@ export function TeamMapPage() {
           onClose={() => setContextEditor(null)}
         />
       )}
-      {teamEditor && <TeamDialog {...teamEditor} onClose={() => setTeamEditor(null)} />}
+      <OverlayPresence>{teamEditor && <TeamDialog {...teamEditor} onClose={() => setTeamEditor(null)} />}</OverlayPresence>
       {memoryMotion.shown && memoryMotion.value && <TeamMemoryDialog open={memoryEditor !== null} key={memoryMotion.value.section} {...memoryMotion.value} onClose={() => setMemoryEditor(null)} />}
       <ConfirmDialog open={pendingMove !== null} tone="neutral" title={t("canvas.moveConfirmTitle", { name: pendingMove?.bot.name ?? t("canvas.bot"), team: pendingMove?.destination || t("settings.section.general") })}
         body={t("canvas.moveConfirmBody")}

@@ -71,7 +71,7 @@ AI or ones already listed, the bin removes one, and the list keeps its order (up
 to five). There is no switch; the card says when a backup is used.
 
 ```sh
-pnpm exec vitest run src/components/bot-panel/BackupAis.dom.test.ts src/components/BotSettingsDialog.simple.test.ts src/components/bot-settings/ModelSection.test.ts
+pnpm exec vitest run src/components/AutomaticRecoverySettings.test.ts src/components/bot-settings/ModelSection.test.ts
 ```
 
 The pictures come from `control-omb ui launch --engine codex` (fake Claude and
