@@ -77,3 +77,22 @@ export function searchMessagesInDatabase(database: DatabaseSync, query: string, 
     };
   });
 }
+
+export interface RecallRange {
+  since?: number;
+  until?: number;
+}
+
+export function rangeClause(range: RecallRange | undefined, column: string): { sql: string; params: number[] } {
+  const parts: string[] = [];
+  const params: number[] = [];
+  if (range?.since !== undefined) {
+    parts.push(`${column} >= ?`);
+    params.push(range.since);
+  }
+  if (range?.until !== undefined) {
+    parts.push(`${column} <= ?`);
+    params.push(range.until);
+  }
+  return { sql: parts.map((part) => ` AND ${part}`).join(""), params };
+}

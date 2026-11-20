@@ -12,9 +12,9 @@ import { ensureMemoryIndex } from "./message-db-memory-index.ts";
 import { cjkSearchText, cjkTokenParts, ensureSearchIndex, ftsPhrase, hasCjk, withoutSearchMarks } from "./cjk-search.ts";
 import { attentionSelect } from "./message-db-attention.ts";
 import { MessageSearchWorker } from "./message-search-worker.ts";
-import { searchMessagesInDatabase, type SearchHit } from "./message-search-query.ts";
+import { rangeClause, searchMessagesInDatabase, type RecallRange, type SearchHit } from "./message-search-query.ts";
 import type { Notification, NotificationLogEntry } from "../shared/notification.ts";
-export type { SearchHit } from "./message-search-query.ts";
+export type { RecallRange, SearchHit } from "./message-search-query.ts";
 
 const DB_FILE = () => join(DATA_DIR, "messages.db");
 /** The rows the Today page reads, and among them the failed tool calls. JSON.stringify escapes every quote inside a
@@ -804,25 +804,6 @@ export function readMessageText(
     ...(row.from_name ? { from: row.from_name } : {}),
     ...(peer ? { peer } : {}),
   };
-}
-
-export interface RecallRange {
-  since?: number;
-  until?: number;
-}
-
-function rangeClause(range: RecallRange | undefined, column: string): { sql: string; params: number[] } {
-  const parts: string[] = [];
-  const params: number[] = [];
-  if (range?.since !== undefined) {
-    parts.push(`${column} >= ?`);
-    params.push(range.since);
-  }
-  if (range?.until !== undefined) {
-    parts.push(`${column} <= ?`);
-    params.push(range.until);
-  }
-  return { sql: parts.map((part) => ` AND ${part}`).join(""), params };
 }
 
 export function recallMessages(query: string, threadIds: readonly string[], limit = 12, range?: RecallRange, mode: SearchMode = "all"): RecallHit[] {

@@ -18,7 +18,7 @@ import { draftSummary, foldPoint } from "./compaction-summary.ts";
 import { compactBudget, compactionReading, contextWindowFor, shouldCompact } from "./context-budget.ts";
 import { autoCompactWindow } from "./drivers/claude.ts";
 import { RoomContextTracker, roomResetNote } from "./room-context.ts";
-import { createRoomTranscript, GROUP_CONTEXT_MESSAGES } from "./host/room-transcript.ts";
+import { createRoomTranscript } from "./host/room-transcript.ts";
 import { createRoomSessions } from "./host/room-sessions.ts";
 import { LentComputers, provenRequestPerson, SharedComputers, sharedComputerOperation } from "./shared-computers.ts"; import { lentScreenResult } from "./lent-screen-guidance.ts"; import { DeviceLinks } from "./device-links.ts"; import { createLentMcp, isLentMcpPath } from "./lent-mcp.ts";
 import { cloudHomeLendingRefusal, cloudHomeOwnTurnRefusal, createCloudRoutineAuthors, ownerOnlyConversation } from "./cloud-lending.ts"; import { createOwnHome, oneOwner, selfHostedPersonName } from "./own-home.ts"; import { createPlacesElsewhere } from "./places-elsewhere.ts"; import { createPlacesElsewhereRoutes } from "./routes/places-elsewhere.ts"; import { assertRoomFolder } from "./room-folder.ts"; import { cloudConnectedAppsBrokerUrl, startCloudHomeConnectedApps, stopCloudHomeConnectedApps } from "./cloud-connected-apps.ts"; import { createTeamConnectionsHost } from "./host/team-connections-host.ts"; import { createCloudLendingTurns } from "./host/cloud-lending-turns.ts"; import { createTeamConnectionRoutes } from "./routes/team-connections.ts";
@@ -43,7 +43,6 @@ import {
   type ApprovalMode,
 } from "../shared/approval-mode.ts";
 import { createApprovalModeSupport } from "./harness-capabilities.ts";
-import { escapeAttribute } from "../src/lib/composer-attachments.ts";
 import { isPendingSignInRequest, normalizeSignInSite, signInCardWaits, signInOutcome, signInResumePrompt } from "../shared/sign-in-request.ts";
 
 import { createRoomTurnLevels } from "./room-turn-level.ts";
@@ -91,7 +90,7 @@ import { landTurnFiles, parkedFilesKey, settleParkedFiles, takeParkedFiles, type
 import { createReplyVoiceNotes } from "./host/reply-voice-notes.ts";
 import { runtimeRequestCardFields } from "./request-card.ts";
 import type { DirectSendInput, DirectSendReceipt } from "./direct-send.ts";
-import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnNarrationIds, roomTurnReply } from "./room-reply.ts";
+import { finishedWithoutSummaryLine, ROOM_SUMMARY_REASK, roomTurnReply } from "./room-reply.ts";
 import { chosenPlace, pickComputer } from "./computer-selection.ts";
 import * as boat from "./boat.ts"; import { keyHint, keyStatus, nestedKeyStatus, withoutKeyHints } from "./key-hint.ts";
 import { cloudComputerRpc } from "./cloud-computer-tools.ts"; import { createBoatRecovery } from "./boat-recovery.ts"; import { CLOUD_COMPUTER_PERSON_LINES, CLOUD_COMPUTER_REPLACING, CLOUD_COMPUTER_RESTARTING, CLOUD_COMPUTER_RESTORING, CLOUD_COMPUTER_WAKING, RUN_COMPUTER_LINES } from "../shared/cloud-computer-recovery.ts"; import { boatReadiness } from "./boat-ready.ts"; import { createRunComputerGate } from "./host/cloud-computer-run-gate.ts"; import { cloudComputerDisk } from "./cloud-computer-disk.ts"; import { runComputerMemory } from "./host/cloud-computer-run-memory.ts";
@@ -323,7 +322,7 @@ import {
 import * as tts from "./tts/index.ts";
 import { voiceNoteFailure } from "./tts/errors.ts";
 import { createDecider, deciderReady, describeDecider } from "./decider/index.ts"; import { createExtractor, describeHelpers } from "./extractor/index.ts";
-import { createStopLineRoutes } from "./routes/stop-line.ts"; import { decideRoomResponder } from "./decider/room-routing.ts"; import { roomRoutingInput } from "./host/room-routing-input.ts";
+import { createStopLineRoutes } from "./routes/stop-line.ts"; import { decideRoomResponder } from "./decider/room-routing.ts"; import { roomReplyBot, roomRoutingHistory, roomRoutingInput } from "./host/room-routing-input.ts";
 import { autoRoomDefault, roomTurnMembers } from "./room-routing-members.ts";
 import { liveHistoryFrom, LiveSessionError, type LiveBot, type LiveHistoryMessage } from "./live-call.ts";
 import { LiveCallController, LiveCallSignedOutError } from "./live-call-controller.ts"; import { liveSessionWiring } from "./live-session-wiring.ts";
@@ -442,7 +441,8 @@ import { addHeldSecretScrubber, redactSecretsInText, scrubHeldSecrets } from "./
 import * as vps from "./vps-computer.ts";
 import { vpsConfigForBot, vpsSshAliasForBot } from "./vps-hosts.ts";
 import { ROUTINE_RESTARTED, RoutineManager, type Routine, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts"; import { routineModelRefusal, routineThreadModel, type RoutineModelChecks } from "./routine-input.ts"; import { routineHistoryFor, routineRunsFor } from "./routine-run-window.ts"; import { runTurnLive } from "./routine-turn-live.ts"; import { batchSaves, flushLaterSaves } from "./save-batch.ts";
-import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
+import { CalendarCallManager } from "./calendar-calls.ts";
+import { createCalendarCallRooms } from "./host/calendar-call-rooms.ts";
 import { BROWSER_UPLOAD_TOOL, browserRuntimeEnv } from "./browser-runtime.ts";
 import { BrowserUploadRefusal, uploadableFiles } from "./browser-upload.ts";
 import { listSignedInSites, signOutOfSites } from "./browser-sites.ts";
@@ -8894,6 +8894,11 @@ store.reconcileInterruptedGroupGoals((runId, threadId) => {
   );
   return { status, detail, finishedAt: run.finishedAt ?? groupGoalRecoveryAt };
 });
+const { ensureCalendarCallRoom, deliverCalendarCall } = createCalendarCallRooms({
+  store, roomSetupPending, roomAudienceConflict,
+  startGroupTurn: (groupId, text, sendId) => startGroupTurn(groupId, text, undefined, sendId),
+  linkRoom: (callId, roomId) => calendarCalls!.linkRoom(callId, roomId),
+});
 calendarCalls = new CalendarCallManager({
   botExists: (botId) => Boolean(store.bot(botId)),
   onDue: deliverCalendarCall,
@@ -10665,12 +10670,6 @@ type StartGroupTurnOptions = {
   queuedGroup?: ChannelQueueItem[]; /** What the person pointed at in a member's page: the page's bot reads it on its turn, and the line shows the chips. */ pointed?: RoomPick;
 };
 
-function roomReplyBot(group: GroupRecord, replyTo: ReplyTarget | undefined, routableMembers: readonly BotRecord[]) {
-  if (!group.dm && group.defaultResponder.kind === "auto" && replyTo?.role === "bot") {
-    return routableMembers.find((member) => member.id === replyTo.from?.botId);
-  }
-}
-
 function startGroupTurn(
   groupId: string,
   text: string,
@@ -10753,15 +10752,7 @@ function startGroupTurn(
   }
 
   const historyBeforeSend = autoCandidate
-    ? (() => {
-        const excluded = pendingChannelRows(threadId);
-        for (const item of options.queuedGroup ?? []) {
-          if (item.rowId) excluded.add(item.rowId);
-        }
-        const before = store.messagesFor(threadId).filter((row) => !excluded.has(row.id));
-        const narration = roomTurnNarrationIds(before);
-        return before.filter((m) => m.kind === "text" && m.text && !narration.has(m.id)).slice(-GROUP_CONTEXT_MESSAGES);
-      })()
+    ? roomRoutingHistory(store.messagesFor(threadId), pendingChannelRows(threadId), options.queuedGroup)
     : [];
   const queuedGroup = options.queuedGroup;
   const message = queuedGroup?.length
@@ -10980,50 +10971,6 @@ function drainQueuedChannelSendsNow(): void {
       return groupQueues.get(threadId);
     },
   );
-}
-
-function sameCalendarRoster(group: GroupRecord, botIds: readonly string[]): boolean {
-  if (group.dm || group.memberIds.length !== botIds.length) return false;
-  const wanted = new Set(botIds);
-  return group.memberIds.every((id) => wanted.has(id));
-}
-
-function ensureCalendarCallRoom(call: CalendarCall): GroupRecord {
-  const linked = call.roomId ? store.group(call.roomId) : undefined;
-  let group = linked && sameCalendarRoster(linked, call.botIds) && !roomSetupPending(linked)
-    ? linked
-    : undefined;
-  const conflict = group ? null : roomAudienceConflict(call.botIds);
-  if (conflict) throw Object.assign(new Error(conflict), { status: 400 });
-  group ??= store.createGroup(call.name, call.botIds, false, undefined, {
-    bulletin: "",
-    defaultResponder: { kind: "everyone" },
-    completed: true,
-  });
-  if (call.roomId !== group.id) calendarCalls!.linkRoom(call.id, group.id);
-  return group;
-}
-
-function deliverCalendarCall(call: CalendarCall, scheduledFor: number): void {
-  if (call.botIds.length < 2) return;
-  let group: GroupRecord;
-  try {
-    group = ensureCalendarCallRoom(call);
-  } catch (error) {
-    console.warn(`calendar call "${call.name}" did not start: ${error instanceof Error ? error.message : String(error)}`);
-    return;
-  }
-  const text = [
-    `@everyone ${call.description.trim() || call.name}`,
-    ...call.attachments.map((attachment) =>
-      `<${attachment.kind === "image" ? "attached-image" : "attached-file"} path="${escapeAttribute(attachment.path)}" name="${escapeAttribute(attachment.name)}" />`
-    ),
-  ].join("\n\n");
-  const sendId = `calendar_${call.id}_${scheduledFor}`;
-  const threadIds = new Set([group.threadId, ...(group.tasks ?? []).map((task) => task.threadId)]);
-  const messages = [...threadIds].flatMap((threadId) => store.messagesFor(threadId));
-  if (messages.some((message) => message.sendId === sendId)) return;
-  startGroupTurn(group.id, text, undefined, sendId);
 }
 
 function resolveReplyTarget(threadId: string, value: unknown): Message | undefined { return replyTargetIn(store.messagesFor(threadId), value); }

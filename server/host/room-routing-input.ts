@@ -3,8 +3,10 @@
 import type { ResolvedSender } from "../../shared/wire.ts";
 import type { RoomRoutingInput } from "../decider/room-routing.ts";
 import { redactSecretsInText } from "../redact.ts";
-import { speakerOf, type PersonName } from "../replies.ts";
-import type { BotRecord, Message } from "../store.ts";
+import { speakerOf, type PersonName, type ReplyTarget } from "../replies.ts";
+import type { BotRecord, GroupRecord, Message } from "../store.ts";
+import { roomTurnNarrationIds } from "../room-reply.ts";
+import { GROUP_CONTEXT_MESSAGES } from "./room-transcript.ts";
 import { extractTurnImages } from "../turn-images.ts";
 
 /** Scrubbed of secrets and attachment markup before it leaves this machine. */
@@ -36,4 +38,23 @@ export function roomRoutingInput(
     recent,
     message: { from, text: clean(text) },
   };
+}
+
+export function roomReplyBot(group: GroupRecord, replyTo: ReplyTarget | undefined, routableMembers: readonly BotRecord[]) {
+  if (!group.dm && group.defaultResponder.kind === "auto" && replyTo?.role === "bot") {
+    return routableMembers.find((member) => member.id === replyTo.from?.botId);
+  }
+}
+
+export function roomRoutingHistory(
+  messages: readonly Message[],
+  excluded: Set<string>,
+  queued?: readonly { rowId?: string }[],
+): Message[] {
+  for (const item of queued ?? []) {
+    if (item.rowId) excluded.add(item.rowId);
+  }
+  const before = messages.filter((row) => !excluded.has(row.id));
+  const narration = roomTurnNarrationIds(before);
+  return before.filter((row) => row.kind === "text" && row.text && !narration.has(row.id)).slice(-GROUP_CONTEXT_MESSAGES);
 }
