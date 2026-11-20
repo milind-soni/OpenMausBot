@@ -49,10 +49,11 @@ export function trimmedHeld<T extends HeldOwner>(owner: T, keepFromId?: string):
   return from > 0 ? { ...owner, messages: owner.messages.slice(from), hasMore: true } : owner;
 }
 
+const shownThread = (state: AppState, threadId: string) => state.activeView === "chat" &&
+  [...state.bots, ...state.groups].some((owner) => owner.id === state.selectedId && owner.threadId === threadId);
+
 export function reduceTrimHeldMessages(state: AppState, { threadId, keepFromId }: TrimHeldMessages): AppState {
-  const shown = state.activeView === "chat" &&
-    [...state.bots, ...state.groups].some((owner) => owner.id === state.selectedId && owner.threadId === threadId);
-  if (shown) return state;
+  if (shownThread(state, threadId)) return state;
   let changed = false;
   const trim = <T extends HeldOwner>(owner: T): T => {
     if (owner.threadId !== threadId) return owner;
@@ -63,6 +64,20 @@ export function reduceTrimHeldMessages(state: AppState, { threadId, keepFromId }
   const bots = state.bots.map(trim);
   const groups = state.groups.map(trim);
   return changed ? { ...state, bots, groups } : state;
+}
+
+/** Holds fewer rows than one page while the server has more: a snapshot's tail, or a conversation switched to. */
+export const shortHeld = <T extends { messages: Message[]; hasMore?: boolean }>(owner: T | undefined): owner is T =>
+  Boolean(owner?.hasMore) && owner!.messages.length < MESSAGE_PAGE_SIZE;
+
+/** Opening a conversation held as a short tail asks for the page before it at once, through the older-rows path. */
+export function loadShortHeldOnOpen(state: AppState, ownerId: string, inFlight: Set<string>,
+  dispatch: (action: Action) => void, showError: (error: unknown) => void): void {
+  const owner = [...state.bots, ...state.groups].find((candidate) => candidate.id === ownerId);
+  if (!shortHeld(owner) || state.loadingOlder[owner.threadId]) return;
+  const load = { type: "loadOlderMessages", threadId: owner.threadId } as const;
+  dispatch(load);
+  loadOlderPage(load, state, inFlight, dispatch, showError);
 }
 
 export function loadOlderPage(action: LoadOlderMessages, current: AppState, inFlight: Set<string>,
