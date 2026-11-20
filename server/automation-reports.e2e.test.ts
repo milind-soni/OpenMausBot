@@ -209,7 +209,10 @@ it("copies a question a run waits on into the main chat, and the answer given th
   await s.api("POST", `/api/threads/${s.main}/respond`, { requestId: copy.card.requestId, behavior: "answer", message: "Work" });
   await expect.poll(() => answers.find((answer) => answer.id === "which-account"), { timeout: 20_000 }).toMatchObject({ t: "answer", behavior: "answer", message: "Work", source: "user" });
   await s.settled(id, "running");
-  await expect.poll(async () => (await s.messages(s.main)).find((message) => message.id === copy.id)?.card?.answered, { timeout: 20_000 }).toBeTruthy();
+  await expect.poll(async () => {
+    const settledCopy = (await s.messages(s.main)).find((message) => message.id === copy.id);
+    return [settledCopy?.card?.answered, settledCopy?.automation?.needsYou];
+  }, { timeout: 20_000 }).toEqual(["answer", undefined]);
   expect((await s.messages(threadId)).find((message) => message.id === original.id)?.card?.answered).toBeTruthy();
   writeFileSync(gate, "done");
   await s.reported(id, "posted");
