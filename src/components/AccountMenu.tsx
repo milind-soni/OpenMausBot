@@ -39,6 +39,7 @@ export function useSheetOffered(enabled = true): boolean {
   useEffect(() => {
     if (!enabled || !remote) return;
     let alive = true;
+    setOffered(false); // a new check starts from "no", so an old yes never shows while it is pending
     void remote.offered().then((yes) => { if (alive) setOffered(yes === true); }).catch(() => { if (alive) setOffered(false); });
     return () => { alive = false; };
   }, [enabled, remote]);
