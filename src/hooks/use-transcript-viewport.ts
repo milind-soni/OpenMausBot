@@ -358,7 +358,10 @@ export function useTranscriptViewport<T extends { id: string; role?: string }>({
         break;
       }
     }
-    el.scrollTop += moved ?? el.scrollHeight - held.height;
+    // Rows let go above the reader can leave the content shorter than where they were, and the browser has already
+    // pulled scrollTop back to the new end; the last scroll seen is where they were.
+    const clamped = el.scrollTop >= el.scrollHeight - el.clientHeight - 1 && lastTop.current > el.scrollTop;
+    el.scrollTop = (clamped ? lastTop.current : el.scrollTop) + (moved ?? el.scrollHeight - held.height);
     lastTop.current = el.scrollTop;
   });
 
