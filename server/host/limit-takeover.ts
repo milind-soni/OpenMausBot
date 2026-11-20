@@ -9,12 +9,13 @@ import { approvalModeFor, modelSwitchNeedsAsk, type ApprovalMode } from "../../s
 import { writeFileAtomic } from "../atomic.ts";
 import { recoveryCapabilityError } from "../automatic-recovery.ts";
 import type { InstanceConfigMap, ProviderAdapter, RuntimeEvent } from "../contracts.ts";
-import { readyToRun, type DefaultSelectionContext, type SelectableInstance } from "../default-model-selection.ts";
+import { readyToRun, signedOut as statusSignedOut, type DefaultSelectionContext, type SelectableInstance } from "../default-model-selection.ts";
 import { engineFailureKind } from "../drivers/engine-errors.ts";
 import { classifyError } from "../drivers/retry.ts";
 import { failoverLine, limitBackupAllowed, signedOutLine, type LimitFailover } from "../limit-failover.ts";
 import { LimitNotices, limitNoticeText, signedOutNoticeText } from "../limit-notices.ts";
 import { UNNAMED_LIMIT_MS } from "../limit-resets.ts";
+import { redactSecretsInText } from "../redact.ts";
 import type { ModelSelection } from "../../shared/wire.ts";
 
 /** What a usage limit refused (the runtime error's `limit`): the account on that engine, one model's own window, or
@@ -36,6 +37,10 @@ const EVERY_BOT = "every-bot";
 
 /** A model held by its own limit: until when, when the limit said it resets, and which limit it is. */
 export interface ModelHold { until: number; resetsAt?: number; scope: "model" | "credits" }
+
+export type BackupSkip = "not-configured" | "not-ready" | "limited" | "model-held" | "signed-out" | "same-plan" | "needs-approval"
+  | "missing-capability" | "unknown-model" | "probe-timed-out" | "switch-refused" | "conversation-changed";
+export interface SkippedBackup { selection: ModelSelection; why: BackupSkip; detail?: string }
 
 export type TakeoverEngine = SelectableInstance & { displayName?: string; capabilities: ProviderAdapter["capabilities"] };
 type Bot = { id: string; name: string };
@@ -73,6 +78,7 @@ export interface LimitTakeoverDeps {
   signedOutNoticed?(instanceId: string): void;
   /** The bots that run on this AI, for the sign-out notice's list of those with nothing to carry on for them. */
   botsOn?(instanceId: string): Array<ThreadBot & { modelSelection: ModelSelection }>;
+  log?(line: string): void;
   now?(): number;
 }
 
@@ -160,37 +166,64 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     notices.endedEverywhere(signedOutKey(instanceId));
   };
 
-  const usable = (engines: TakeoverEngine[], current: TakeoverEngine, selection: ModelSelection, scope: TakeoverScope, approval?: ApprovalMode): boolean => {
+  const notReady = (engine: TakeoverEngine): string => engine.enabled === false ? "switched off"
+    : engine.snapshot.state !== "available" ? engine.snapshot.reason ?? "unavailable"
+    : deps.context.refusal?.(engine) ?? (statusSignedOut(engine) ? "signed out" : "not ready");
+
+  const skipped = (engines: TakeoverEngine[], current: TakeoverEngine, selection: ModelSelection, scope: TakeoverScope, approval?: ApprovalMode): Omit<SkippedBackup, "selection"> | null => {
     const engine = engines.find((candidate) => candidate.instanceId === selection.instanceId);
-    if (!engine || !readyToRun(engine, deps.context) || deps.blockedUntil(engine.instanceId, selection.model) !== null || modelHeld(selection) !== null) return false;
+    if (!engine) return { why: "not-configured" };
+    if (!readyToRun(engine, deps.context)) return { why: "not-ready", detail: notReady(engine) };
+    if (deps.blockedUntil(engine.instanceId, selection.model) !== null) return { why: "limited" };
+    if (modelHeld(selection) !== null) return { why: "model-held" };
     if (engine.instanceId !== current.instanceId) {
-      if (signedOutHeld(engine.instanceId)) return false;
+      if (signedOutHeld(engine.instanceId)) return { why: "signed-out" };
       // Another sign-in to the same plan never carries a limit (that rotates accounts); it may stand in for one signed out.
-      if (scope !== "signed-out" && !limitBackupAllowed(current, engine, deps.configs()[engine.instanceId])) return false;
+      if (scope !== "signed-out" && !limitBackupAllowed(current, engine, deps.configs()[engine.instanceId])) return { why: "same-plan" };
       // The same rule as switching by hand: a level the other AI has no such mode for needs the person first.
-      if (approval && modelSwitchNeedsAsk(approval, current.driverKind, engine.driverKind)) return false;
+      if (approval && modelSwitchNeedsAsk(approval, current.driverKind, engine.driverKind)) return { why: "needs-approval" };
     }
-    if (recoveryCapabilityError(current, engine)) return false;
-    return engine.models.default === selection.model || engine.models.options.some((model) => model.id === selection.model);
+    const missing = recoveryCapabilityError(current, engine);
+    if (missing) return { why: "missing-capability", detail: missing };
+    return engine.models.default === selection.model || engine.models.options.some((model) => model.id === selection.model) ? null : { why: "unknown-model" };
   };
 
   /** The AIs that may carry on while `from` is limited or signed out, best first: for one model's limit the same AI's own
    * default model, then the backups the person chose. No other AI is picked for them: with none of those usable the bot
-   * waits for the reset or a sign-in. `approval`: the thread's level, when known. */
-  function backups(botId: string, from: ModelSelection, scope: TakeoverScope = "engine", approval?: ApprovalMode): ModelSelection[] {
+   * waits for the reset or a sign-in. `approval`: the thread's level, when known. `skipped`: each backup left out, and why. */
+  function weighBackups(botId: string, from: ModelSelection, scope: TakeoverScope = "engine", approval?: ApprovalMode): { backups: ModelSelection[]; skipped: SkippedBackup[] } {
     const engines = deps.engines();
     const current = engines.find((engine) => engine.instanceId === from.instanceId);
-    if (!current) return [];
+    if (!current) return { backups: [], skipped: [] };
     const out: ModelSelection[] = [];
+    const left: SkippedBackup[] = [];
     const add = (selection: ModelSelection) => {
-      if (selection.instanceId === from.instanceId && (scope === "engine" || scope === "signed-out" || selection.model === from.model)) return;
-      if (out.some((known) => known.instanceId === selection.instanceId && known.model === selection.model)) return;
-      if (usable(engines, current, selection, scope, approval)) out.push({ instanceId: selection.instanceId, model: selection.model });
+      const pick = { instanceId: selection.instanceId, model: selection.model };
+      if (pick.instanceId === from.instanceId && pick.model === from.model) return;
+      if ([...out, ...left.map((one) => one.selection)].some((known) => known.instanceId === pick.instanceId && known.model === pick.model)) return;
+      if (pick.instanceId === from.instanceId && (scope === "engine" || scope === "signed-out")) {
+        left.push({ selection: pick, why: scope === "signed-out" ? "signed-out" : "limited" });
+        return;
+      }
+      const why = skipped(engines, current, pick, scope, approval);
+      if (why) left.push({ selection: pick, ...why });
+      else out.push(pick);
     };
     if (scope === "model" || scope === "credits") add({ instanceId: current.instanceId, model: current.models.default });
     for (const selection of scope === "signed-out" ? deps.signedOutChosen?.(botId) ?? deps.chosen(botId) : deps.chosen(botId)) add(selection);
-    return out;
+    return { backups: out, skipped: left };
   }
+
+  function backups(botId: string, from: ModelSelection, scope: TakeoverScope = "engine", approval?: ApprovalMode): ModelSelection[] {
+    return weighBackups(botId, from, scope, approval).backups;
+  }
+
+  const passedOver = (bot: Bot, from: ModelSelection, scope: TakeoverScope, left: readonly SkippedBackup[]): void => {
+    for (const { selection, why, detail } of left) {
+      // A status reason or a refusal may carry an engine's address with its credential in it.
+      (deps.log ?? console.warn)(redactSecretsInText(`limit takeover: ${bot.name} (${bot.id}) on ${from.instanceId}/${from.model} (${scope}) passed over backup ${selection.instanceId}/${selection.model}: ${why}${detail ? ` (${detail})` : ""}`));
+    }
+  };
 
   const label = (selection: ModelSelection, from: ModelSelection) => (selection.instanceId === from.instanceId
     ? `${deps.engineName(selection.instanceId)} ${selection.model}` : deps.engineName(selection.instanceId));
@@ -232,6 +265,8 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
 
   return {
     backups,
+    weighBackups,
+    passedOver,
     /** This model alone, held by its own limit; null when it is not. */
     modelHeld,
     /** This model's own limit refused a turn: it is held until the reset the limit named, an hour when it named none,

@@ -130,6 +130,68 @@ describe("which AI carries on while one is limited", () => {
   it("has none for an AI it doesn't know", () => {
     expect(takeover().instance.backups("kai", on("gone", "m"))).toEqual([]);
   });
+
+  it("says why it left out each backup the person chose, and leaves the choice as it was", () => {
+    const unread = engine("cursor", "cursorAgent", ["auto"], { snapshot: { state: "unavailable", reason: "not read yet" } });
+    const fewerTools = engine("claude", "claudeAgent", ["claude-opus-5-5"], { capabilities: { agentsMcp: true } as unknown as TakeoverEngine["capabilities"] });
+    const secondCodex = engine("codex-2", "codex", ["gpt-6"]);
+    const chosen = [on("codex", "gpt-6-mini"), on("gone", "m"), on("cursor", "auto"), on("codex-2", "gpt-6"), on("claude", "claude-opus-5-5"),
+      on("opencode", "go-gone"), on("opencode", "go-default"), on("cursor", "auto")];
+    const { instance } = takeover({ engines: () => [CODEX, unread, secondCodex, fewerTools, GO], chosen: () => chosen });
+    const weighed = instance.weighBackups("kai", on("codex", "gpt-6"));
+    expect(weighed.backups).toEqual([on("opencode", "go-default")]);
+    expect(weighed.backups).toEqual(instance.backups("kai", on("codex", "gpt-6")));
+    expect(weighed.skipped, "each once, in the person's order").toEqual([
+      { selection: on("codex", "gpt-6-mini"), why: "limited" },
+      { selection: on("gone", "m"), why: "not-configured" },
+      { selection: on("cursor", "auto"), why: "not-ready", detail: "not read yet" },
+      { selection: on("codex-2", "gpt-6"), why: "same-plan" },
+      { selection: on("claude", "claude-opus-5-5"), why: "missing-capability", detail: "The backup does not support all of this AI's tools and attachments." },
+      { selection: on("opencode", "go-gone"), why: "unknown-model" },
+    ]);
+  });
+
+  it("names what keeps a backup from running: the refusal before a sign-in, which a custom endpoint never needs", () => {
+    const custom = engine("cursor", "cursorAgent", ["auto"], { access: "custom", snapshot: { state: "available", authenticated: false } });
+    const signedOutCodex = engine("codex-2", "codex", ["gpt-6"], { snapshot: { state: "available", authenticated: false } });
+    const { instance } = takeover({ engines: () => [CLAUDE, custom, signedOutCodex], context: { refusal: (one) => one.instanceId === "cursor" ? "Your organisation blocks this endpoint." : undefined },
+      chosen: () => [on("cursor", "auto"), on("codex-2", "gpt-6")] });
+    expect(instance.weighBackups("kai", on("claude", "claude-opus-5-5")).skipped).toEqual([
+      { selection: on("cursor", "auto"), why: "not-ready", detail: "Your organisation blocks this endpoint." },
+      { selection: on("codex-2", "gpt-6"), why: "not-ready", detail: "signed out" },
+    ]);
+  });
+
+  it("says a backup is at its own limit, holding that model, signed out, or one the thread's approval level must ask about", () => {
+    const chosen = { chosen: () => [on("claude", "claude-opus-5-5"), on("opencode", "go-default")] };
+    const limited = takeover({ blockedUntil: (id) => (id === "claude" ? NOW + HOUR : null), ...chosen }).instance;
+    expect(limited.weighBackups("kai", on("codex", "gpt-6")).skipped).toEqual([{ selection: on("claude", "claude-opus-5-5"), why: "limited" }]);
+    const held = takeover(chosen).instance;
+    held.holdModel(on("claude", "claude-opus-5-5"), "model");
+    expect(held.weighBackups("kai", on("codex", "gpt-6")).skipped).toEqual([{ selection: on("claude", "claude-opus-5-5"), why: "model-held" }]);
+    const signedOut = takeover(chosen).instance;
+    signedOut.noteSignedOut("claude");
+    expect(signedOut.weighBackups("kai", on("codex", "gpt-6")).skipped).toEqual([{ selection: on("claude", "claude-opus-5-5"), why: "signed-out" }]);
+    expect(takeover(chosen).instance.weighBackups("kai", on("codex", "gpt-6"), "engine", "edits").skipped.map((one) => one.why)).toContain("needs-approval");
+    expect(takeover({ chosen: () => [on("claude", "claude-opus-5-5")] }).instance.weighBackups("kai", on("claude", "claude-opus-5-5"), "model").skipped,
+      "the refused model itself is no backup passed over").toEqual([]);
+  });
+
+  it("writes each backup it passed over to the server log", () => {
+    const lines: string[] = [];
+    const { instance } = takeover({ log: (line) => lines.push(line) });
+    instance.passedOver(KAI, on("codex", "gpt-6"), "engine", [
+      { selection: on("cursor", "auto"), why: "not-ready", detail: "not read yet" },
+      { selection: on("claude", "claude-opus-5-5"), why: "probe-timed-out" },
+    ]);
+    instance.passedOver(KAI, on("codex", "gpt-6"), "engine", []);
+    instance.passedOver(KAI, on("codex", "gpt-6"), "engine", [{ selection: on("ollama", "llama"), why: "not-ready", detail: "Can't reach Ollama at http://me:hunter2pass@10.0.0.5:11434" }]);
+    expect(lines.pop(), "an address's credential stays out of the log").not.toContain("hunter2pass");
+    expect(lines).toEqual([
+      "limit takeover: Kai (kai) on codex/gpt-6 (engine) passed over backup cursor/auto: not-ready (not read yet)",
+      "limit takeover: Kai (kai) on codex/gpt-6 (engine) passed over backup claude/claude-opus-5-5: probe-timed-out",
+    ]);
+  });
 });
 
 describe("a model's own limit", () => {
