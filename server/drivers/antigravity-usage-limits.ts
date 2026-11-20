@@ -21,7 +21,7 @@ import { antigravityQuotaFamily } from "./antigravity-turn-outcome.ts";
 export const ANTIGRAVITY_USAGE_LIMITS = true;
 
 export function antigravityUserAgent(platform: NodeJS.Platform, architecture: string): string {
-  return `antigravity/hub/2.24.0 (aidev_client; os_type=${platform}; arch=${architecture}; cl=963137146)`;
+  return `antigravity/hub/2.33.0 (aidev_client; os_type=${platform}; arch=${architecture}; cl=963137146)`;
 }
 
 const DAILY_ENDPOINT = "https://daily-cloudcode-pa.googleapis.com";
@@ -250,6 +250,7 @@ export interface AntigravityUsageDeps {
   fetch: PlanFetch;
   now?: () => number;
   timeoutMs?: number;
+  proxyUrl?: string;
 }
 
 /** `work`, or a rejection once `signal` aborts: a request that ignores its signal does not hold the others' answers. */
