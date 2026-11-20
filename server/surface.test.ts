@@ -446,6 +446,21 @@ describe("surfacePrompt", () => {
     expect(none).toContain("No place's tools can open apps, click, or inspect a screen this turn.");
     expect(surfacePrompt({ computer: "local", browser: false }, { lentToServer: lent })).toContain("Their Mac (Studio) is reached only through shared_computer");
   });
+
+  // With This computer pickable too, the own-files line said the person's files are on this computer and never on a
+  // shared computer: a file on the lent Mac got two routes, one of them the server host.
+  it("gives a file on a computer lent to a self-hosted server one route, shared_computer", () => {
+    const lent = [{ name: "Studio", platform: "darwin" as const }];
+    const thisComputer = { bot: "Ada", platform: "linux" as const };
+    const both = surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, lentToServer: lent, thisComputer });
+    expect(both).not.toContain("never one of the shared computers");
+    expect(both).not.toContain("or \"my PC\") is on this computer");
+    expect(both).toContain("A file or folder at a path of this computer (a path such as /home/…) is on this computer, which the Local VM cannot reach.");
+    expect(both).toContain("A file or folder on their Mac (Studio) is on that computer: reach it only through shared_computer, as above. When they don't say which computer a file is on, ask in one line.");
+    // Nothing lent: the own-files line is unchanged.
+    expect(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, lentToServer: [], thisComputer }))
+      .toBe(surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, thisComputer }));
+  });
 });
 
 describe("surface parsing", () => {
