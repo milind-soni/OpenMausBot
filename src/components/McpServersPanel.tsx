@@ -624,7 +624,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
 
   if (hostedCards) {
     const own = hostedCards.ownServers;
-    if (loadError !== null) {
+    if (loadError !== null && servers === null) {
       if (!own && !HOSTED_MCP_APPS.some((app) => hostedCards.shown(app.id))) return null;
       return (
         <div className="col-span-full flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-lg bg-danger/10 px-3 py-2">

@@ -5755,6 +5755,7 @@
   "mcp.cancel": "Cancelar",
   "mcp.save": "Salvar",
   "mcp.loading": "Carregando servidores MCP…",
+  "mcp.loadAppsFailed": "Não foi possível carregar os apps MCP: {reason}",
   "mcp.empty.title": "Nenhum servidor MCP próprio ainda",
   "mcp.empty.desc": "Adicione um servidor MCP confiável (um comando local ou uma URL) para dar mais ferramentas aos bots.",
   "mcp.badge.on": "Ligado",
