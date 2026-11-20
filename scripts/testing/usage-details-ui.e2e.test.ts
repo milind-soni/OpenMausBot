@@ -119,6 +119,32 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
     await expect.poll(() => evaluate("getComputedStyle(document.querySelector('[role=dialog]')).position")).toBe("static");
     await ui("press", "--keys", "Escape");
     expect(await evaluate("Boolean(document.querySelector('[aria-label=Inspector]'))")).toBe(true);
+    // Simple's 320 bot panel keeps the open sidebar beside it from 1040 wide (280 + a 440 chat + 320); narrower, or
+    // beside a wider panel (Advanced's above) under 1280, the sidebar folds to its avatars.
+    await openMore();
+    await activate('[role="menu"][aria-label="More"] button[data-menu-key="inspector"]');
+    await expect.poll(() => evaluate("Boolean(document.querySelector('[aria-label=Inspector]'))")).toBe(false);
+    await evaluate(`(() => { localStorage.setItem("omb-advanced-mode", "0"); window.dispatchEvent(new StorageEvent("storage", { key: "omb-advanced-mode", storageArea: localStorage })); return true; })()`);
+    await agentBrowser(browser.binary, sessionEnv(browser), ["set", "viewport", "1040", "900"]);
+    await expect.poll(() => evaluate("innerWidth")).toBe(1040);
+    await activate('[data-chathead-pill][aria-expanded="false"]');
+    const besidePanel = () => evaluate(`(() => {
+      const width = selector => document.querySelector(selector)?.getBoundingClientRect().width ?? 0;
+      return { sidebar: width('[data-sidebar]'), panel: width('[role=dialog][aria-labelledby=bot-settings-title]'), chat: width('main'),
+        scroll: document.documentElement.scrollWidth, moving: (document.querySelector('[role=dialog][aria-labelledby=bot-settings-title]')?.getAnimations() ?? []).length > 0 };
+    })()`);
+    // The panel slides in: measure once it has landed.
+    await expect.poll(async () => { const at = await besidePanel(); return Math.round(at.panel) === 320 && !at.moving; }, { timeout: 10_000 }).toBe(true);
+    const open1040 = await besidePanel();
+    expect(open1040.sidebar).toBe(280);
+    expect(open1040.chat).toBeGreaterThanOrEqual(440);
+    expect(open1040.scroll).toBeLessThanOrEqual(1040);
+    await ui("screenshot", "--out", `${handle.logPath}.bot-panel-1040.png`);
+    await agentBrowser(browser.binary, sessionEnv(browser), ["set", "viewport", "1039", "900"]);
+    await expect.poll(async () => (await besidePanel()).sidebar).toBe(92);
+    await agentBrowser(browser.binary, sessionEnv(browser), ["set", "viewport", "1040", "900"]);
+    await expect.poll(async () => (await besidePanel()).sidebar).toBe(280);
+    geometry.push({ botPanel1040: open1040 });
     const consoleResult = await ui("console");
     expect((consoleResult.messages ?? []).filter((row: { type?: string }) => row.type === "error")).toEqual([]);
     const evidence = handle.logPath + ".usage-details.json";

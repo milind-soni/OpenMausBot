@@ -102,6 +102,20 @@ describe("sidebar footer places", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showWebPanel", id: "panel-1" });
   });
 
+  it("draws a labelled place like a bot row: a 16px icon, a 10px gap, a regular 14/20 label, radius 12 and the ink hover", () => {
+    fixture.advanced = true;
+    fixture.panels = [{ id: "panel-1", name: "Fleet board", url: "http://127.0.0.1:7841/" }];
+    const html = render("comfortable").html;
+    const row = /<button type="button" data-sidebar-nav="web-panel-panel-1"[^>]*class="([^"]*)"[^>]*>([\s\S]*?)<\/button>/.exec(html)!;
+    const classes = row[1]!.split(" ");
+    expect(classes).toEqual(expect.arrayContaining(["rounded-xl", "gap-2.5", "hover:bg-ink/[0.06]"]));
+    expect(classes).not.toContain("gap-3");
+    expect(classes).not.toContain("hover:bg-raised/50");
+    expect(row[2]).toMatch(/<svg[^>]*width="16" height="16"[^>]*class="lucide lucide-globe/);
+    expect(row[2]).toContain('<span class="flex-1 truncate text-[14px] leading-5">Fleet board</span>');
+    expect(html).not.toContain("font-medium");
+  });
+
   it("shows a pinned panel as an icon with its name as the label in the toolbar layout", () => {
     fixture.advanced = true;
     fixture.panels = [{ id: "panel-1", name: "Fleet board", url: "http://127.0.0.1:7841/" }];

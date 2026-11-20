@@ -291,6 +291,34 @@ describe("Simple-mode sidebar layout", () => {
     }
     expect(width()).toBe("360px");
   });
+  it("keeps to 280px while open beside a side panel in a window under 1280, whatever width was saved", () => {
+    fixture.storage.set(SIMPLE_SIDEBAR_WIDTH_KEY, "400");
+    const beside = (besidePanel: boolean) => {
+      fixture.index = 0;
+      fixture.values = [];
+      const root = drawSidebar({ open: false, onClose: () => {}, besidePanel }) as ReactElement<Props>;
+      const handle = nodes(root.props.children).find((node) => node.type === SidebarResizeHandle)!.props as Parameters<typeof SidebarResizeHandle>[0];
+      return { max: root.props.style!["--sidebar-max"], value: handle.sizing.valueNow, className: String(root.props.className) };
+    };
+    expect(beside(false)).toMatchObject({ max: "calc(100vw - 320px)", value: 400 });
+    const open = beside(true);
+    expect(open).toMatchObject({ max: "280px", value: 280 });
+    expect(open.className).toContain("md:max-w-[var(--sidebar-max)]");
+    expect(open.className).not.toContain("w-[92px]");
+  });
+
+  it("puts the pinned pages in Simple's tiles after the bots, and shows the tiles for pages alone", () => {
+    fixture.storage.set("omb-web-panels", JSON.stringify([{ id: "board", name: "Fleet board", url: "http://127.0.0.1:7841/" }]));
+    fixture.state = { ...fixture.state, activeView: "web-panel", webPanelId: "board" };
+    const grid = () => render().tree.find((node) => node.type === SidebarTileGrid)?.props as Parameters<typeof SidebarTileGrid>[0] | undefined;
+    expect(grid()).toMatchObject({ primary: null, pinned: [], openPage: "board", dispatch: fixture.dispatch });
+    expect(grid()!.pages!.map((page) => page.name)).toEqual(["Fleet board"]);
+    fixture.values = [];
+    fixture.advanced = true;
+    expect(grid()).toBeUndefined();
+    fixture.storage.delete("omb-web-panels");
+  });
+
   const edge = (tree: ReactElement<Props>[]) => tree.find((node) => node.type === SidebarResizeHandle)?.props as Parameters<typeof SidebarResizeHandle>[0] | undefined;
 
   it("becomes a rail when its edge is dragged narrow, keeping the Simple order with a hairline between sections", () => {
