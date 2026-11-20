@@ -13,6 +13,7 @@ import { build } from "esbuild";
 import { probeCuaVersion } from "./cua-binary-version.mjs";
 import { resolveCuaMacArches } from "./cua-mac-arches.mjs";
 import { LIPO_ARCH, writeThinMachO } from "./mac-thin.mjs";
+import { CUA_MIN_MACOS } from "../electron/cua-min-macos.mjs";
 
 if (process.platform !== "darwin") throw new Error("prepare-cua is macOS-only");
 
@@ -98,6 +99,7 @@ if (!details.isFile() || (details.mode & 0o111) === 0) {
 // its own slice of the universal driver and SDK files. The driver is asserted
 // universal, so a non-universal pin fails here rather than on an Intel Mac.
 const MAC_ARCHES = resolveCuaMacArches(process.env);
+const SDK_NATIVE_FILES = ["libcua_driver_sdk.dylib", "cua_driver_node_runtime.node"];
 
 const { stdout: archList } = await run("/usr/bin/lipo", ["-archs", binary]);
 for (const arch of MAC_ARCHES) {
@@ -125,8 +127,27 @@ for (const arch of MAC_ARCHES) {
     );
   }
   await mkdir(nativeDir, { recursive: true });
-  await Promise.all(["libcua_driver_sdk.dylib", "cua_driver_node_runtime.node"].map((name) =>
+  await Promise.all(SDK_NATIVE_FILES.map((name) =>
     writeThinMachO(join(realpathSync(nativePackage), name), join(nativeDir, name), LIPO_ARCH[arch])));
+}
+
+async function assertRunsOnMinimumMacOS(file) {
+  const { stdout } = await run("/usr/bin/otool", ["-l", file]);
+  // A slice built for macOS before 10.14 says its minimum in LC_VERSION_MIN_MACOSX
+  // instead (the x64 cua_driver_node_runtime.node of @trycua/cua-driver-darwin-x64 0.45.4: 10.12).
+  const minos = /(?:LC_BUILD_VERSION[\s\S]*?minos|LC_VERSION_MIN_MACOSX[\s\S]*?version) (\d+)/.exec(stdout)?.[1];
+  if (minos === undefined) throw new Error(`cannot read minos of ${file}`);
+  if (Number(minos) > CUA_MIN_MACOS) {
+    throw new Error(`${file} needs macOS ${minos}; raise CUA_MIN_MACOS in electron/cua-min-macos.mjs`);
+  }
+}
+
+for (const arch of MAC_ARCHES) {
+  const archStage = join(stage, arch);
+  await Promise.all([
+    join(archStage, "cua-driver"),
+    ...SDK_NATIVE_FILES.map((name) => join(archStage, "cua-sdk", "native", name)),
+  ].map(assertRunsOnMinimumMacOS));
 }
 
 // One ESM file, so electron-builder's node_modules exclusion cannot drop it. The

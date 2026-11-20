@@ -14,6 +14,7 @@ import { pathToFileURL } from "node:url";
 import localOriginModule from "./local-origin.cjs";
 import { createLocalComputerGrant } from "./local-computer-grant.mjs";
 import { driverFailure } from "./cua-failure.mjs";
+import { CUA_MIN_MACOS } from "./cua-min-macos.mjs";
 import { createHelperRestarts, followLinuxConnection } from "./cua-restart.mjs";
 import { watchDriver } from "./cua-watch.mjs";
 import { missingPermissions } from "./lent-screen-failures.mjs";
@@ -317,6 +318,11 @@ async function startEmbedded(binary, signal) {
   }
 }
 
+// os.release() is the Darwin version: macOS 11 to 15 are Darwin 20 to 24, so the major minus 9; macOS 26 is Darwin 25.
+function macOSTooOld() {
+  return process.platform === "darwin" && Number(os.release().split(".")[0]) - 9 < CUA_MIN_MACOS;
+}
+
 export async function startCua({ attempt = 0 } = {}) {
   if (process.platform === "linux") return (await ensureLinuxRuntime()).initialize();
   const tooOld = macDriverUnsupported(process.platform, os.release());
@@ -327,6 +333,9 @@ export async function startCua({ attempt = 0 } = {}) {
   startupAbort?.abort();
   startupAbort = new AbortController();
   const { signal } = startupAbort;
+  if (macOSTooOld()) {
+    return persistAndNotify({ mode: "unavailable", reason: `computer use needs macOS ${CUA_MIN_MACOS} or later` });
+  }
   const binary = resolveDriverBinary();
   if (!binary) {
     return persistAndNotify({
