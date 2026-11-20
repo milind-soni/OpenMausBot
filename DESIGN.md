@@ -257,6 +257,10 @@ Motion explains a change. It never decorates.
   animate layout.
 - **No loops** except a live status that is really live (a bot working).
   Never animate something just to draw the eye.
+- **Mascots hold still at rest.** A mascot moves while its bot is doing
+  something, for a beat that explains a change, and under the pointer (its
+  eyes follow, it blinks). Every change blends in over about 300ms, and it
+  settles and stops when the reason ends.
 - **Respect reduced motion.** Pair every transition with
   `motion-reduce:transition-none` and every animation with
   `motion-reduce:animate-none`, or gate it in CSS on
