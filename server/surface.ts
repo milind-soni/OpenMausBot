@@ -338,7 +338,10 @@ export function surfacePrompt(
     for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
     text = text.replace(UNREACHABLE_OWN, `${theirComputer(opts.ownComputer).theirs} is not one of these places`) + ownComputerSentence(opts.ownComputer, computer);
   }
-  if (!opts.cloudHome && opts.lentToServer?.length) text += ownComputerSentence(opts.lentToServer, computer);
+  if (!opts.cloudHome && opts.lentToServer?.length) {
+    for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
+    text += ownComputerSentence(opts.lentToServer, computer);
+  }
   if (opts.thisComputer && !opts.cloudHome && !reportBack && mounted.computer !== "local") {
     text += ownFilesSentence(opts.thisComputer, mounted.computer, Boolean(opts.canSelect));
   }

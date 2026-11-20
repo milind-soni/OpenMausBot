@@ -440,6 +440,11 @@ describe("surfacePrompt", () => {
       expect(surfacePrompt(mounted, { ...opts, lentToServer: [] })).toBe(surfacePrompt(mounted, opts));
       expect(surfacePrompt(mounted, { ...opts, cloudHome: true, lentToServer: lent })).toBe(surfacePrompt(mounted, { ...opts, cloudHome: true }));
     }
+    // Nothing mounted: the lent computer is still reachable, so the paragraph never says no screen can be reached.
+    const none = surfacePrompt({ computer: null, browser: false }, { lentToServer: lent });
+    expect(none).not.toContain("You cannot open apps, click, or inspect a screen through OpenMausBot.");
+    expect(none).toContain("No place's tools can open apps, click, or inspect a screen this turn.");
+    expect(surfacePrompt({ computer: "local", browser: false }, { lentToServer: lent })).toContain("Their Mac (Studio) is reached only through shared_computer");
   });
 });
 

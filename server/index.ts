@@ -887,7 +887,7 @@ function sharedComputerPrincipal(capability: Pick<InternalCapability, "botId" | 
   if (CLOUD_HOME) return cloudLendingRefusal(capability) === null ? CLOUD_HOME_LENDER : null;
   return lendingPerson(provenRequestPerson(directRequestOwners.get(capability.threadId), capability.generation,
     (messageId) => linePersonKey(store.messagesFor(capability.threadId).find((message) => message.id === messageId))), ownHome.ownServer(), () => sessions.list());
-} /** On a self-hosted server, the computers lent to it by the person this turn provably acts for. */ function lentToServer(agents: unknown, turn: Pick<InternalCapability, "botId" | "threadId" | "generation">) { return CLOUD_HOME || CLOUD_TEAM || DESKTOP_MANAGED || !agents || !botLending() ? undefined : sharedComputers.known(sharedComputerPrincipal(turn)); }
+} /** On a self-hosted server, the computers lent to it by the person this turn provably acts for. */ function lentToServer(agents: unknown, turn: Pick<InternalCapability, "botId" | "threadId" | "generation">) { return CLOUD_HOME || CLOUD_TEAM || DESKTOP_MANAGED || !agents || !botLending() ? undefined : sharedComputers.known(sharedComputerPrincipal(turn)).filter((computer) => computer.lent); }
 
 /** The only conversations that may feed a bot's memory, daily log, recall or brief; dropped whenever a session is revoked. */
 const ownerOnlyCache = new Map<string, { length: number; last?: string; owner: boolean }>();
@@ -10057,7 +10057,7 @@ async function runClaimedGroupMemberTurn(
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {}), mcpServersHost.off(bot)) + teamConnections.prompt(threadId, internalGeneration, integrations) },
     { id: "computer", label: "Computer", text: computerPrompt(roomComputerPromptKind) },
     { id: "team-computer", label: "Team computer", text: teamComputerPrompt(roomTeamComputer) },
-    { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind), browser: Boolean(integrations.browser) }, { note: roomPlan.note, cloudHome: Boolean(CLOUD_HOME), ownComputer: CLOUD_HOME && integrations.agents && lendingEnabled() ? sharedComputers.known(CLOUD_HOME_LENDER) : undefined, lentToServer: lentToServer(integrations.agents, { botId: bot.id, threadId, generation: internalGeneration }) }) },
+    { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind), browser: Boolean(integrations.browser) }, { note: roomPlan.note, cloudHome: Boolean(CLOUD_HOME), ownComputer: CLOUD_HOME && integrations.agents && lendingEnabled() ? sharedComputers.known(CLOUD_HOME_LENDER) : undefined }) },
     { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled(), syncedFolders(DATA_DIR), sharedComputers.known(CLOUD_HOME_LENDER), CLOUD_PERSONAL) : "" }, phoneLinkPart(),
     { id: "browser", label: "Browser", text: integrations.browser ? browserPromptFor(bot, Boolean(integrations.agents)) : "" },
     { id: "data", label: "Data", text: integrations.data ? dataPrompt(readyBot.id, threadId, `${roomContext}\n${latestUser?.text ?? ""}`) : "" },
