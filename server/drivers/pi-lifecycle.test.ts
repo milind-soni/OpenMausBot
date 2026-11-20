@@ -167,7 +167,7 @@ it("makes the private turn MCP configuration available inside the bot box", asyn
     const request = wrap.mock.calls.map(([request]) => request).find(({ env }) => env.OMB_MCP_CONFIG);
     const configPath = request?.env.OMB_MCP_CONFIG;
     expect(configPath).toBeDefined();
-    expect(request?.rw).toEqual([dirname(configPath!)]);
+    expect(request?.rw).toContain(dirname(configPath!));
     expect(JSON.parse(readFileSync(configPath!, "utf8"))).toMatchObject({ askUser: true, mcpServers: {} });
     if (process.platform !== "win32") expect(statSync(configPath!).mode & 0o777).toBe(0o600);
     await instance.adapter.interruptTurn("boxed-mcp");
