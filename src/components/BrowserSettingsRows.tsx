@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { productName } from "@/lib/brand";
 import { browserAvailable, browserUnavailableReason, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
@@ -36,6 +37,8 @@ export function BuiltInBrowserRow() {
   const desktopBrowser = browserAvailable(state.config);
   const browserInstallable = state.config?.browserEngine?.installable === true;
   const browserBlockedOnWindows = window.ogb?.platform === "win32" && !desktopBrowser && !browserInstallable;
+  const withoutChrome = desktopBrowser && browser && state.config?.browserEngine?.noChrome === true;
+  const myChrome = state.config?.browserEngine?.myChrome === true;
   const { saving, error, save } = useConfigSave();
 
   return (
@@ -44,13 +47,16 @@ export function BuiltInBrowserRow() {
     // While it's on, the line says how it stands (Ready, or that it installs on first use), not what the switch does.
     subtitle={desktopBrowser
         ? browser
-        ? t("settings.ai.ready")
+        ? withoutChrome ? t("settings.browser.noChrome") : t("settings.ai.ready")
         : t("settings.browser.offShort")
         : browserBlockedOnWindows
         ? t("settings.experimental.browserWindows")
         : browserInstallable ? (browser ? t("settings.browser.installsFirst") : t("settings.browser.notInstalledShort"))
         : browserUnavailableReason(state.config)}
-    message={error ? <p role="alert" className="text-danger">{error}</p> : null}
+    message={withoutChrome || error ? <>
+      {withoutChrome && <p>{t("settings.browser.noChromeFix", { app: productName() })}{myChrome && ` ${t("settings.browser.noChromeMyChrome")}`}</p>}
+      {error && <p role="alert" className="text-danger">{error}</p>}
+    </> : null}
     >
       <Switch
           checked={browser}
