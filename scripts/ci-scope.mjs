@@ -356,8 +356,8 @@ export function laneOf(event) {
 
 // The slowest shard sets the run's length. Windows and macOS run only the e2e files that depend on their OS. A macOS
 // shard runs one file at a time: four took 24 minutes each on average in November 2026, and about one in eight hit
-// the 30-minute cap, so macOS runs five. The account runs five macOS jobs at a time; the full lane's two short macOS
-// browser jobs wait for a free one.
+// the 30-minute cap, so macOS runs five. The account runs five macOS jobs at a time; the full lane's other macOS jobs
+// (the smokes, browser identity and the browser driver) wait for a free one.
 export const VITEST_SHARDS = { "macos-latest": 5, "ubuntu-latest": 8, "windows-latest": 8 };
 
 // Test files at once on each platform's runner (OMB_VITEST_WORKERS, vite.config.ts). A Linux shard mostly waits on real
