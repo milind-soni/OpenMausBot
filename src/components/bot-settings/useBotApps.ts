@@ -8,6 +8,9 @@ import { EMAIL_SLUG, type EmailStatus } from "../../../shared/email";
 import { preloadConnectedApps, type ConnectorInventory } from "@/lib/connected-apps";
 import type { ConnectorAccount } from "@/lib/connector-status";
 import type { ToolkitCard } from "../ServiceIcon";
+import { cardsBySlug, loadAppCards, onAppCatalog } from "@/lib/app-catalog-cache";
+
+export { loadAppCards };
 
 export interface BotApp {
   slug: string;
@@ -23,17 +26,6 @@ export interface BotApps {
   phase: "loading" | "ready" | "unknown";
   apps: BotApp[];
   connectedSlugs: string[];
-}
-
-let cardsRequest: Promise<Map<string, ToolkitCard>> | null = null;
-export function loadAppCards(): Promise<Map<string, ToolkitCard>> {
-  cardsRequest ??= api("/api/connectors/catalog")
-    .then((response: { cards?: ToolkitCard[] }) => new Map((response.cards ?? []).map((card) => [card.slug, card])))
-    .catch(() => {
-      cardsRequest = null;
-      return new Map<string, ToolkitCard>();
-    });
-  return cardsRequest;
 }
 
 function slugLabel(slug: string): string {
@@ -110,12 +102,14 @@ export function useBotApps(bot: Bot, load = true): BotAppsState {
       setCards(result);
       setCardsSettled(true);
     });
+    const stopCatalog = onAppCatalog((catalog) => setCards(cardsBySlug(catalog)));
     void api("/api/email")
       .then((result: EmailStatus) => { if (!cancelled) setEmail(result); })
       .catch(() => {})
       .finally(() => { if (!cancelled) setEmailSettled(true); });
     return () => {
       cancelled = true;
+      stopCatalog();
     };
   }, [load]);
 
