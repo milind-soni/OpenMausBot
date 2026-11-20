@@ -50,6 +50,9 @@ type Line = z.infer<typeof lineSchema>;
  * it in the run's Results chat. */
 export interface OpenCardRow { threadId: string; id: string; at: number; card: string | null; fromBotId: string | null; copyOf?: string | null }
 
+/** An inbox row plus, for a Results-chat copy of a question, the id of the original card (never sent to clients). */
+type AskRow = InboxRow & { copyOf?: string | null };
+
 /** Who is asking for the inbox: its owner (on a server with members, a member), a guest on someone's Cloud, or nobody it
  * belongs to (a bot's shell on a Cloud, a local service). */
 export type InboxViewer = { kind: "owner" } | { kind: "guest"; key: string } | { kind: "nobody" };
@@ -138,11 +141,10 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     return viewer.kind === "guest" ? line.guest === viewer.key : line.guest === undefined;
   };
 
-  function askRows(auth: RequestAuth): InboxRow[] {
+  function askRows(auth: RequestAuth): AskRow[] {
     if (deps.viewer(auth).kind === "nobody") return [];
-    const rows = new Map<string, InboxRow>();
+    const rows = new Map<string, AskRow>();
     const passed = new Map<string, Set<string>>();
-    const copies = new Map<string, string>();
     const overtaken = (threadId: string, messageId: string): boolean => {
       let questions = passed.get(threadId);
       if (!questions) passed.set(threadId, questions = overtakenQuestions(store.activePath(threadId), Boolean(store.groupByThread(threadId))));
@@ -158,17 +160,14 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
       const group = store.groupByThread(row.threadId);
       const guest = deps.guestOf(row.threadId);
       const handed = workingFor(row.threadId);
-      const key = `${row.threadId}\u0000${card.requestId}`;
-      if (row.copyOf) copies.set(key, row.copyOf);
-      rows.set(key, {
-        id: row.id, kind: "ask", tab: "needs-you", from: { name: bot.name, botId: bot.id },
+      rows.set(`${row.threadId}\u0000${card.requestId}`, {
+        id: row.id, kind: "ask", tab: "needs-you", from: { name: bot.name, botId: bot.id }, ...(row.copyOf ? { copyOf: row.copyOf } : {}),
         ...(handed ? { workingFor: handed } : {}), ...(guest ? { askedBy: { name: deps.guestName(row.threadId) ?? "" } } : {}),
         origin: { botId: bot.id, threadId: row.threadId, title: titleOf(bot.id, row.threadId), ...(group ? { groupId: group.id } : {}), messageId: row.id },
         text: clip(card.subtitle || card.title || "", ROW_TEXT_MAX), at: row.at, unread: !seenAsks.has(row.id), card,
       });
     }
     const listed = new Set([...rows.values()].map((row) => row.id));
-    for (const [key, original] of copies) if (listed.has(original)) rows.delete(key);
     const viewer = deps.viewer(auth);
     for (const wait of deps.waiting?.() ?? []) {
       if (listed.has(wait.messageId) || !deps.sees(auth, wait.threadId)) continue;
@@ -205,9 +204,12 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
   };
 
   function view(auth: RequestAuth): InboxView {
-    const visible = [...askRows(auth), ...lines.filter((line) => lineFor(auth, line)).map(lineRow)].sort((a, b) => b.at - a.at);
+    const visible: AskRow[] = [...askRows(auth), ...lines.filter((line) => lineFor(auth, line)).map(lineRow)].sort((a, b) => b.at - a.at);
     // What is still active comes first, so settled lines never push it out of the view; settled ones fill the rest.
-    const rows = [...visible.filter((row) => row.tab !== "done"), ...visible.filter((row) => row.tab === "done")].slice(0, VIEW_ROWS);
+    const kept = [...visible.filter((row) => row.tab !== "done"), ...visible.filter((row) => row.tab === "done")].slice(0, VIEW_ROWS);
+    // An automation's question shows once: its Results-chat copy drops out when the original made it into the view.
+    const shown = new Set(kept.map((row) => row.id));
+    const rows = kept.filter((row) => !(row.copyOf && shown.has(row.copyOf))).map(({ copyOf: _copyOf, ...row }) => row);
     return { botId: null, threadId: null, rows, anchor: null };
   }
 

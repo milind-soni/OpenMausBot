@@ -193,6 +193,18 @@ describe("the inbox of a place that is no team's", () => {
     expect(f.inbox.count(OWNER)).toBe(1);
   });
 
+  it("keeps the Results chat's copy when the Inbox limit cuts the older original", () => {
+    const f = setup();
+    const original = f.ask("eli-launch", "q", {}, 1);
+    for (let index = 0; index < 200; index++) f.ask("eli-main", `r${index}`, {}, 2 + index);
+    f.cards.push({ ...original, threadId: "eli-pricing", id: "copy-q", at: 1_000, copyOf: original.id });
+    const ids = f.inbox.view(OWNER).rows.map((row) => row.id);
+    expect(ids).toHaveLength(200);
+    expect(ids[0]).toBe("copy-q");
+    expect(ids).not.toContain("card-q");
+    expect(f.inbox.view(OWNER).rows[0]).not.toHaveProperty("copyOf");
+  });
+
   it("still lists the Results chat's copy when the person can't see the run's own chat", () => {
     const f = setup({ sees: (_auth, threadId) => threadId !== "eli-launch" });
     const original = f.ask("eli-launch", "q");
