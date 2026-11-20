@@ -190,6 +190,20 @@ describe("findAccepted, undoRemove", () => {
     expect(memory.undoRemove("", entry.id, removed.revision!)).toBe(false);
   });
 
+  it("keeps all 50 earlier versions when it brings a removed entry back", () => {
+    let entry = accepted({ kind: "term", name: "OKR", detail: "v0" });
+    for (let version = 1; version <= 50; version++) {
+      const edited = memory.update("", entry.id, { detail: `v${version}` })!;
+      entry = memory.list("").find((candidate) => candidate.id === edited.id)!;
+    }
+    expect(entry.history).toHaveLength(50);
+    memory.remove("", entry.id, entry.revision);
+    const removed = memory.list("", true).find((candidate) => candidate.id === entry.id)!;
+    expect(removed.history).toHaveLength(51);
+    expect(memory.undoRemove("", entry.id, removed.revision!)).toBe(true);
+    expect(memory.list("")).toEqual([entry]);
+  });
+
   it("does not bring an entry back over a newer one with its key", () => {
     const entry = accepted({ kind: "term", name: "OKR", detail: "first" });
     memory.remove("", entry.id, entry.revision);

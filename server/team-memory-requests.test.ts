@@ -16,6 +16,7 @@ let memory: TeamMemory;
 let rows: Row[];
 let decisions: Array<Omit<DecisionRow, "at">>;
 let requests: ReturnType<typeof createTeamMemoryRequests>;
+let failAppend: boolean;
 const scout = { id: "b1", name: "Scout", color: "#000", section: "" };
 
 beforeEach(() => {
@@ -23,11 +24,13 @@ beforeEach(() => {
   memory = new TeamMemory(join(dir, "team-memory.json"));
   rows = [];
   decisions = [];
+  failAppend = false;
   requests = createTeamMemoryRequests({
     teamMemory: memory,
     store: {
       messagesFor: () => rows,
       appendMessage: (_threadId, message) => {
+        if (failAppend) throw new Error("disk full");
         const row = { id: `m${rows.length + 1}`, card: message.card, ...(message.from ? { from: { botId: message.from.botId } } : {}) };
         rows.push(row);
         return row;
@@ -101,6 +104,18 @@ describe("forget", () => {
     save("OKR", "second");
     expect(requests.resolve("t1", String(pending.body.requestId), "allow")).toEqual({ ok: true, outcome: "unavailable" });
     expect(memory.list("").map((entry) => entry.detail)).toEqual(["second"]);
+  });
+
+  it("puts the entry back when the Undo card cannot be written, so a retry still finds it", () => {
+    save("OKR", "The quarter's goals.");
+    const before = memory.list("");
+    failAppend = true;
+    expect(() => requests.forget(scout, "t1", false, { kind: "term", name: "OKR" }, "", "level")).toThrow("disk full");
+    expect(memory.list("")).toEqual(before);
+    expect(decisions.filter((row) => row.decision === "auto-approved")).toHaveLength(1);
+    failAppend = false;
+    expect(requests.forget(scout, "t1", false, { kind: "term", name: "OKR" }, "", "level")).toMatchObject({ status: 201, body: { status: "applied" } });
+    expect(accepted()).toEqual([]);
   });
 
   it("removes nothing when no accepted entry matches, and says how to find one", () => {

@@ -89,8 +89,10 @@ export function teamMemoryRevision(entry: TeamMemoryEntry): string {
   return createHash("sha256").update(canonicalJson(stored)).digest("hex");
 }
 const active = (entry: TeamMemoryEntry) => entry.status === "accepted" || entry.status === "proposed";
-const rememberVersion = (entry: TeamMemoryEntry) => {
-  entry.history = [...(entry.history ?? []), { name: entry.name, detail: entry.detail, at: entry.updatedAt }].slice(-50);
+const HISTORY_MAX = 50;
+/** `keep` is one more than HISTORY_MAX for a removal, so its snapshot does not push out the oldest version that Undo restores. */
+const rememberVersion = (entry: TeamMemoryEntry, keep = HISTORY_MAX) => {
+  entry.history = [...(entry.history ?? []), { name: entry.name, detail: entry.detail, at: entry.updatedAt }].slice(-keep);
 };
 const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
@@ -246,7 +248,7 @@ export class TeamMemory {
     for (const previous of replaced) {
       rememberVersion(previous);
       proposal.pinned = proposal.pinned ?? previous.pinned;
-      proposal.history = [...(proposal.history ?? []), ...(previous.history ?? [])].slice(-50);
+      proposal.history = [...(proposal.history ?? []), ...(previous.history ?? [])].slice(-HISTORY_MAX);
       previous.status = "superseded";
       previous.supersededBy = proposal.id;
     }
@@ -282,7 +284,7 @@ export class TeamMemory {
     const index = entries.findIndex((entry) => entry.id === id);
     if (index === -1 || !active(entries[index])) return false;
     this.checkRevision(entries[index], expectedRevision);
-    rememberVersion(entries[index]);
+    rememberVersion(entries[index], HISTORY_MAX + 1);
     entries[index].status = "deleted";
     entries[index].updatedAt = Date.now();
     this.save();

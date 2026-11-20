@@ -115,20 +115,27 @@ export function createTeamMemoryRequests(deps: TeamMemoryRequestDeps) {
       const language = deps.language(threadId);
       const summary = why ? serverLine(language, "server.teamMemory.forgetWhy", { entry: entrySummary(entry), why }) : entrySummary(entry);
       const requestId = newId();
-      const message = store.appendMessage(threadId, {
-        role: "bot",
-        kind: "options",
-        ...(inRoom ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
-        card: {
-          title: serverLine(language, direct ? "server.teamMemory.forgottenTitle" : "server.teamMemory.forgetTitle"),
-          subtitle: summary,
-          options: direct ? [] : [serverLine(language, "server.teamMemory.forget"), serverLine(language, "server.teamMemory.keep")],
-          ...(direct ? { answered: "allow", autoApplied: true } : {}),
-          requestId,
-          tool: TOOL,
-          teamMemoryRequest: { section: deps.sectionKey(from.section), entryId: entry.id, kind: entry.kind, forget: true, ...(revision ? { revision } : {}) },
-        },
-      });
+      let message: { id: string };
+      try {
+        message = store.appendMessage(threadId, {
+          role: "bot",
+          kind: "options",
+          ...(inRoom ? { from: { botId: from.id, name: from.name, color: from.color } } : {}),
+          card: {
+            title: serverLine(language, direct ? "server.teamMemory.forgottenTitle" : "server.teamMemory.forgetTitle"),
+            subtitle: summary,
+            options: direct ? [] : [serverLine(language, "server.teamMemory.forget"), serverLine(language, "server.teamMemory.keep")],
+            ...(direct ? { answered: "allow", autoApplied: true } : {}),
+            requestId,
+            tool: TOOL,
+            teamMemoryRequest: { section: deps.sectionKey(from.section), entryId: entry.id, kind: entry.kind, forget: true, ...(revision ? { revision } : {}) },
+          },
+        });
+      } catch (error) {
+        // The card is the only receipt and the only Undo, so a removal without a card is put back. Then a retry finds the entry.
+        if (direct && revision) teamMemory.undoRemove(from.section, entry.id, revision);
+        throw error;
+      }
       deps.decide({ threadId, requestId, botId: from.id, botName: from.name, tool: TOOL, summary,
         decision: direct ? "auto-approved" : "card-shown", source: direct ?? "team-memory" });
       return { status: 201, body: { status: direct ? "applied" : "proposed", state: direct ? "applied" : "pending", requestId, messageId: message.id, summary } };
