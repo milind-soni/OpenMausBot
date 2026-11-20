@@ -4055,7 +4055,12 @@
       "server.checkBack.pending": "3485ef5b61e2e50dabbe819ee194e953ad6872b16398fc33861b2ebe579f0549",
       "server.checkBack.started": "65fea36da026916e99f81c23b26bd6204cd870d003bdde01b25e43f0fe8704c3",
       "server.checkBack.cancelled": "2bc90e45e77b2d3a20a1d8a3bd9c6674080fb2897563103dcfdde6e267a33f22",
-      "server.checkBack.failed": "cab3bc124333339d06dc937a01b485c192040fad067a74e7558db8df3e2b0dda"
+      "server.checkBack.failed": "cab3bc124333339d06dc937a01b485c192040fad067a74e7558db8df3e2b0dda",
+      "server.teamMemory.forgottenTitle": "a2612a58c907ab925605dfc2201e42f0cb1d98940f94f669e3694e1c01b5f527",
+      "server.teamMemory.forgetTitle": "69a01cd072e51afbc05d6c3fc87fff657317e3b3b08ab89552ddb7867a48bf92",
+      "server.teamMemory.forget": "a6bd489d955044992dd33f0f18fee68c83842c20eb0f6f50cb96f07b7d6dd8dd",
+      "server.teamMemory.keep": "183f00f483d3844e875d26eac74c676054383aef38ed5a8e4d1505ef21008585",
+      "server.teamMemory.forgetWhy": "348c742b72d5935ecf496da5149feff82e888c418906e5054a136e3a2d9bb373"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37229,7 +37234,8 @@
       "cloudAccount.resetKept": "9243efedc1e40bb499acadf970053efa1b7e3a9fc90e3662b3efdd67b89bf453",
       "cloudAccount.unsaved": "69f16bd2ad4856e040d928ce9482507b14e26f66c500287859c8634ef6117149",
       "homeScreen.offlineNetwork": "f628e51f2e014252ca9826b7828fb417ad2895267a42716fb41e7140615154c8",
-      "homeScreen.offlineWait": "7de832bcc189e9fa19b386a0a67d938840772d5500985c835fa1db1afee4d49f"
+      "homeScreen.offlineWait": "7de832bcc189e9fa19b386a0a67d938840772d5500985c835fa1db1afee4d49f",
+      "approval.applied.teamMemoryForgotten": "3a845c51e10914df72cc2a008e7aef77e415d2c4a96b4e12627d4edd053e03f2"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

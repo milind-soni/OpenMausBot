@@ -636,8 +636,8 @@ export interface OptionCardData extends WaitCardField, ComputerAskField, AccessR
   /** The harness asks the owner to let this line of theirs use the lent computer (server/host/lending-lifts.ts). */ lendingLift?: { requestMessageId: string; memoryToken?: string; outside?: true; botOpened?: true; allowedAt?: number };
   /** calls: one per outbound call the card covers, in subtitle order. */
   outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
-  /** `revision`: the entry as it applied without a person, so Undo can tell it changed since. */
-  teamMemoryRequest?: { section: string; entryId: string; kind: string; revision?: string };
+  /** `revision`: the entry as it applied without a person, so Undo can tell it changed since (or as a waiting card shows it). `forget`: a removal. */
+  teamMemoryRequest?: { section: string; entryId: string; kind: string; revision?: string; forget?: true };
   title: string;
   subtitle: string;
   /** Fixed `chat.notice.*` words for `subtitle`; the English fallback stays stored in `subtitle`. */
