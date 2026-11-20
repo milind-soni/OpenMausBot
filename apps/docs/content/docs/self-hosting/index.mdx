@@ -45,7 +45,10 @@ Stop the server before a filesystem backup. Application state under `.openmausbo
 Self-hosting MausBot does not self-host every optional provider:
 
 - Agent providers authenticate and bill through their own CLI or API.
-- Composio owns connected-app OAuth grants unless you replace that integration.
+- Composio owns connected-app OAuth grants. MausBot's connected-apps service serves only the desktop app and MausBot's Clouds; a server you run yourself needs your own Composio project key, in **Settings → AI → Other services**.
+- The MausBot account service (`accounts.openmausbot.com`) sends emailed sign-in codes unless you set your own mail server (`OMB_SIGNIN_SMTP_URL`), reserves the `serve --tunnel` address, signs a server in to MausBot Relay for phones (`OMB_PHONE_RELAY`), and relays closed-app phone alerts when those are switched on.
+- GitHub answers update checks: the release list and the stable channel's file.
+- Publishing pages and sharing to the community go through MausBot from a Cloud or the desktop app only; a standalone server does not offer them.
 - Boat owns managed cloud computers.
 - ElevenLabs or Fish Audio synthesizes speech when its hosted voice engine is enabled. On Windows and Linux, Fish Audio also turns what you say into text for Take turns calls and dictation.
 
