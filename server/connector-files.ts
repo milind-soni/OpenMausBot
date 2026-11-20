@@ -14,7 +14,7 @@ import { connectorCallsIn } from "../shared/outbound.ts";
 import { FILE_MAX_BYTES, limitMegabytes } from "../shared/upload-limits.ts";
 import { guestWorkspaceToHost } from "./bot-attachment.ts";
 import type { BrokerAccess } from "./composio-broker-access.ts";
-import { requestFileUpload } from "./composio-files.ts";
+import { requestFileUpload, UploadServiceOutdatedError } from "./composio-files.ts";
 import type { AppConfig } from "./config.ts";
 import { withFailedCallHint } from "./connector-scope-hint.ts";
 import { serviceSlugFor, serviceSlugForCandidates } from "./connector-verdict.ts";
@@ -252,6 +252,13 @@ export function uploadFailedText(reference: Pick<FileReference, "tool">, name: s
     + `${app} failed and why, and do not keep retrying.`;
 }
 
+/** What the bot is told when the connected-apps service is too old to take the file. */
+function uploadServiceOutdatedText(reference: Pick<FileReference, "tool">, name: string, app: string): string {
+  return `OpenMausBot did not run ${reference.tool}: uploading ${name} for ${app} failed: the connected-apps service is out of date `
+    + `and does not take file uploads yet. Nothing was written to ${app}. Trying again will not help: tell the person that sending `
+    + `files to ${app} works once the OpenMausBot team updates that service. A ${app} tool that takes text instead of a file still works.`;
+}
+
 export interface PreparedFiles {
   /** The files the call will upload, for its approval card. */
   files: Array<CardFile & { tool: string; source: unknown }>;
@@ -299,7 +306,9 @@ export async function prepareConnectorFiles(frame: unknown, deps: FileStagingDep
         await put(link.url, file.bytes, mimetype);
         reference.replace({ name, mimetype, s3key: link.key });
       } catch (error) {
-        throw new Error(uploadFailedText(reference, name, app, reasonOf(error)));
+        throw new Error(error instanceof UploadServiceOutdatedError
+          ? uploadServiceOutdatedText(reference, name, app)
+          : uploadFailedText(reference, name, app, reasonOf(error)));
       }
     }
     return found.frame;

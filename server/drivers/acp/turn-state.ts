@@ -63,6 +63,8 @@ export interface AcpSession {
   dead: boolean;
   readonly stderr: string;
   current: AcpTurn | null;
+  /** When a turn of ours last settled on this session. */
+  settledAt?: number;
   /** The slash commands the agent last advertised for this session. */
   commands?: ReadonlySet<string>;
   fallbackNotice?: string;

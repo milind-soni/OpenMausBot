@@ -99,6 +99,10 @@ export interface ConfigStatus {
     model?: string;
     /** Voice note with every reply, for every bot without its own choice. Absent from older servers. */
     everyReply?: boolean;
+    /** "elevenlabs": the person chose to be heard through their own ElevenLabs key (Scribe). Absent: the default. */
+    hearWith?: "elevenlabs";
+    /** The language the person speaks to Scribe (ISO 639 code); absent lets Scribe detect it. */
+    hearLanguage?: string;
     /** Fish Audio speech model; present only while Fish is the provider. */
     fishModel?: "s2.1-pro" | "s2.1-pro-free";
     /** ElevenLabs voice comes with Cloud Pro; no key is saved. */

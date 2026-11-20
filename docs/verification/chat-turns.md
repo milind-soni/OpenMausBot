@@ -28,6 +28,40 @@ The wait result must be `settled`, and the messages result must contain the
 fake engine's bot response. Use `--dry-run` on `send` when checking a target or
 command without starting a turn.
 
+## Uploaded images used by file tools
+
+Upload a product photo in a chat, then ask the bot to pass that photo to a
+media-upload CLI. The engine needs both native vision input and a file reference;
+being able to describe the image does not prove that a file tool can read it.
+
+```sh
+pnpm exec vitest run server/turn-images.test.ts server/box-attachments.test.ts server/box-attachments.linux.test.ts server/bot-api.test.ts server/host/handoff-files.test.ts
+pnpm exec vitest run server/index.test.ts -t "keeps a channel image|sends an earlier image"
+```
+
+For an end-to-end check, launch the isolated fixture above, upload a synthetic
+PNG to its `POST /api/attachments` endpoint with `Content-Type: image/png`, then
+send `Use this photo with a media-upload CLI` followed by a standalone
+`<attached-image path="RETURNED_PATH" name="mug.png" />` through `control:omb send`.
+Use only the fixture's explicit URL. Wait for `settled` and save `messages`.
+In the fixture's `fake-claude-dump.json`, inspect only `prompt`: it must contain
+native image content and an `<attached-file>` reference for `mug.png`, with no
+remaining `<attached-image>` tag. Read the referenced file and compare its bytes
+with the uploaded PNG.
+
+The regression test also passes the extracted prompt through `attachmentsForBox`
+with confinement on and off and reads the resulting path in a real child process, including an
+admitted path spelled with a nonexistent `missing/../` segment.
+It checks that Codex still receives the same inline image bytes and that unrelated
+uploads are not copied into the conversation's uploads directory. This is not a
+kernel sandbox test; the Linux bubblewrap test supplies that coverage when the
+host supports it.
+
+Last exercised on Linux with Node 24.22.3 against an isolated fake-engine server:
+the turn settled with both native image content and a readable file reference.
+The focused suite passed 74 tests, and both selected server image workflow tests
+passed. The bubblewrap test was skipped because this container cannot run its sandbox. No real model or marketplace upload was used.
+
 ## Gotchas
 
 - Omitting `--task` snapshots the selected task before sending, waiting,

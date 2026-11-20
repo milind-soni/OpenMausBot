@@ -64,6 +64,13 @@ If it is too long for one message or file, split it: send several documents, eac
 
 export type GrokImportErrorCode = "notExport" | "cutOff" | "tooLarge" | "credentials" | "newerVersion" | "unusable";
 
+/** Why a moved Bot's chat didn't come over from the Grok Bot app on this computer: the app isn't here, no Bot or several
+ * Bots there have its name, or it has no chat saved. */
+export const GROK_HISTORY_REASONS = ["noApp", "noMatch", "ambiguous", "empty"] as const;
+export type GrokHistoryReason = typeof GROK_HISTORY_REASONS[number];
+/** The answer to POST /api/setup-import/grok/history: how many messages of the Bot's chat are in its thread here. */
+export type GrokHistoryAnswer = { messages: number } | { reason: GrokHistoryReason };
+
 export class GrokImportError extends Error {
   readonly code: GrokImportErrorCode;
   /** The credential-looking keys, for "credentials". */

@@ -1,6 +1,6 @@
 // Grok Build: the official `grok` CLI over ACP stdio (`grok … agent stdio`) on the grok.com
 // subscription login (~/.grok/auth.json), not the xAI API key. Verified against grok 1.0.0.
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { parse as parseYaml } from "yaml";
@@ -10,6 +10,9 @@ import { harnessHome, splitCliString } from "../../env-path.ts";
 import type { DeviceSignIn, DeviceSignInState } from "../device-auth.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
 import { createAcpDriver, type AcpSupport } from "./core.ts";
+import { closeEndsBackgroundWork } from "./background-work.ts";
+import { readGrokFollowUp } from "./grok-follow-up.ts";
+import type { AcpPromptSteer } from "./steer.ts";
 import { bundledEngineCatalog } from "../../model-manifest/bundled.ts";
 import { currentEngineCatalog } from "../../model-manifest/manifest.ts";
 import { ENGINE_MODEL_ID } from "../../model-manifest/schema.ts";
@@ -338,6 +341,53 @@ export function grokToolScopeProfile(scope: unknown, init: unknown, inherited?: 
   };
 }
 
+/** grok 1.0.89: with `[ui] follow_up_behavior = "steer"` in config.toml, a second `session/prompt` is injected into the running
+ * turn at its next safe point and answers `cancelled` with `_meta.completionKind: "removedFromQueue"` and no tokens; with the
+ * default "queue" it waits for the turn to end. `initialize` does not report the setting, and `GROK_CONFIG` cannot set `ui`. */
+export const GROK_STEER: AcpPromptSteer = {
+  kind: "prompt",
+  enabled: (env) => {
+    try {
+      return readGrokFollowUp(readFileSync(join(grokHome(env), "config.toml"), "utf8")).value === "steer";
+    } catch {
+      return false;
+    }
+  },
+  folded: (response) => (response as { _meta?: { completionKind?: unknown } } | null)?._meta?.completionKind === "removedFromQueue",
+};
+
+/** grok 1.0.89 (auto_wake, on by default): a background subagent or shell command that finishes after the turn wakes a turn
+ * no `session/prompt` asked for; `session/close` ends it and `session/load` of the same id brings the history back. */
+const GROK_BACKGROUND = closeEndsBackgroundWork();
+
+/** Turns on Grok's mid-turn steering for a signed-in account, unless its config.toml already sets `follow_up_behavior`. */
+export function ensureGrokSteer(env: Record<string, string | undefined> = process.env): void {
+  if (!grokSignedIn(env)) return;
+  const path = join(grokHome(env), "config.toml");
+  let text = "";
+  try {
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
+  }
+  const found = readGrokFollowUp(text);
+  if (found.present || found.unclear || (found.insertAt === undefined && found.uiElsewhere)) return;
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const line = `follow_up_behavior = "steer"${eol}`;
+  const next = found.insertAt !== undefined
+    ? text.slice(0, found.insertAt) + (text.slice(0, found.insertAt).endsWith("\n") ? "" : eol) + line + text.slice(found.insertAt)
+    : `${text}${text && !text.endsWith("\n") ? eol : ""}${text ? eol : ""}[ui]${eol}${line}`;
+  // config.toml can hold `api_key` values (ensureGrokInjectSlug writes them), so the staged copy is private from its first byte.
+  const staged = `${path}.omb-${process.pid}.tmp`;
+  try {
+    writeFileSync(staged, next, { mode: 0o600, flag: "wx" });
+    renameSync(staged, path);
+  } catch {
+    rmSync(staged, { force: true });
+    // Grok then keeps queueing mid-turn messages, its default.
+  }
+}
+
 /** Grok's `ask_user_question` blocks its turn on this extension request (xai-org/grok-build ask_user_question/types.rs);
  * ACP's Rust SDK adds the `_` prefix on the wire. Answers are keyed by Grok's question text, one label per pick; own
  * words ride as "Other" with the text in annotations[].notes. */
@@ -403,6 +453,8 @@ const support: AcpSupport = {
     signInCommand: "grok login",
   },
   deviceSignIn: GROK_DEVICE_SIGN_IN,
+  steer: GROK_STEER,
+  backgroundWork: GROK_BACKGROUND,
 
   // With the instance HOME/GROK_HOME: ensureGrokInjectSlug defaults to process.env.
   resolveTurnModel: (model, env) => (model ? ensureGrokInjectSlug(model, env) : model),
@@ -484,6 +536,7 @@ const support: AcpSupport = {
     delete env.XAI_API_KEY;
   },
   applyTurnEnv: (env, { toolScope }) => {
+    ensureGrokSteer(env);
     if (toolScope !== undefined) {
       // These env switches outrank account defaults in the verified runtime.
       env.GROK_MANAGED_MCPS_ENABLED = "false";

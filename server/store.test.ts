@@ -25,6 +25,7 @@ import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
 import { TeamComputers } from "./team-computers.ts";
 import { allowsTool } from "../shared/tool-scope.ts";
+import { approvalModeFor } from "../shared/approval-mode.ts";
 import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
@@ -1342,6 +1343,24 @@ describe("Store", () => {
       expect(bot.modelSelection.effort).toBe("medium");
       expect(bot.tasks?.[0].modelSelection).toBeUndefined();
     }
+  });
+
+  it("starts a bot a team setup creates at the saved New bot level, and at the default without one", () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ name: "Chief", section: "Ops" });
+    store.patchBot(chief.id, { chiefOfStaff: true });
+    const setup = (requestId: string, botId: string, approval?: "ask" | "auto" | "full") => store.applyTeamSetup({ version: 1, requestId, botId: chief.id,
+      threadId: chief.threadId, reason: "Requested", createdAt: 1, requesterRevision: "fixture", newTeams: [], operations: [
+        { action: "create", botId, threadId: `${botId}-thread`, fields: { name: botId, section: "Ops", modelSelection: selection() } },
+      ] }, approval);
+    setup("setup-auto", "templated", "auto");
+    setup("setup-plain", "plain");
+    const reloaded = new Store(selection);
+    expect(approvalModeFor(reloaded.bot("templated")!)).toBe("auto");
+    expect(reloaded.bot("templated")?.autoApprove).toBe(true);
+    expect(approvalModeFor(reloaded.projectBotForTask("templated", "templated-thread")!)).toBe("auto");
+    expect(reloaded.bot("plain")?.approvalMode).toBeUndefined();
+    expect(reloaded.bot("plain")?.autoApprove).toBe(false);
   });
 
   it("gives a new department to a Chief in charge of every department once the write that made it is saved", async () => {

@@ -320,6 +320,22 @@ describe.skipIf(process.platform !== "linux")("Linux DEB upgrade hook", () => {
     expect(fs.existsSync(profile)).toBe(false);
   });
 
+  it("keeps the profile through an rpm upgrade and removes it when rpm erases the package", () => {
+    const { appRoot, apparmorDir } = fixture();
+    expect(runHook(appRoot).status).toBe(0);
+    const profile = path.join(apparmorDir, "openmausbot-browser");
+    for (const remaining of ["1", "2", "100"]) {
+      const upgraded = runRemoveHook(appRoot, remaining);
+      expect(upgraded.status, upgraded.stderr).toBe(0);
+      expect(upgraded.stdout).not.toContain("profile operation");
+      expect(fs.existsSync(profile)).toBe(true);
+    }
+    const erased = runRemoveHook(appRoot, "0");
+    expect(erased.status, erased.stderr).toBe(0);
+    expect(erased.stdout).toContain(`profile operation: -R ${profile}`);
+    expect(fs.existsSync(profile)).toBe(false);
+  });
+
   it("removes an already unloaded profile without asking the kernel again", () => {
     const { appRoot, apparmorDir, systemRoot } = fixture();
     expect(runHook(appRoot).status).toBe(0);

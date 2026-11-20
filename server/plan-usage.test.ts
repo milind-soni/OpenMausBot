@@ -173,6 +173,23 @@ describe("plan usage parsers", () => {
     expect(JSON.stringify(parsed)).not.toContain(SECRET);
   });
 
+  it("marks Codex credits only for a positive balance or an unlimited account", () => {
+    const flag = (credits: unknown) => parseCodexUsage({ plan_type: "plus", ...(credits === undefined ? {} : { credits }) }).codexCredits;
+    expect(flag({ has_credits: true, unlimited: false, balance: "12.50" })).toBe(true);
+    expect(flag({ has_credits: false, unlimited: true, balance: null })).toBe(true);
+    const odd = [
+      undefined, null, "yes", 1, [], {},
+      { has_credits: "true", unlimited: 1 }, { has_credits: null, unlimited: null },
+      { has_credits: false, unlimited: false, balance: "0" },
+      { has_credits: true, unlimited: false, balance: "0" },
+      { has_credits: true, balance: null },
+      { has_credits: true, balance: "abc" },
+      { has_credits: true, balance: true },
+      { has_credits: true, balance: "1,234.00" },
+    ];
+    for (const credits of odd) expect(flag(credits)).toBeUndefined();
+  });
+
   it("keeps Codex model windows separate from the account plan", () => {
     const parsed = parseCodexUsage({
       plan_type: "pro",
