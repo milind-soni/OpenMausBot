@@ -1,6 +1,8 @@
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError, retryRequest, snapshotArrays } from "./api";
-import { loadOlderPage, MESSAGE_PAGE_SIZE, reduceOlderMessages, reduceTrimHeldMessages } from "./message-history";
+import { capHeldInBackground, loadOlderPage, MESSAGE_PAGE_SIZE, olderThanHeld, reduceOlderMessages, reduceTrimHeldMessages } from "./message-history";
+import { readChatSnapshot } from "./chat-snapshot";
+import { followHeldTails, noteAppPagePatch } from "./held-tails";
 export { MESSAGE_PAGE_SIZE } from "./message-history";
 import { addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
 import { use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
@@ -20,7 +22,7 @@ import type { EngineInstall } from "./engine-install";
 import { optimisticMessageId, optimisticUserMessage, sendArrived, sendReconciled } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
-import { keepBotNavigation, keepGroupNavigation, navigatedSince, visibleMessages } from "./snapshot-navigation";
+import { hydratedSelectedId, keepBotNavigation, keepGroupNavigation, navigatedSince, visibleMessages } from "./snapshot-navigation";
 export { visibleMessages } from "./snapshot-navigation";
 export { awayFromMainThread, botOpensTo, markedThread, openBot, openBotRow, openBotThread, openRoomThread, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
@@ -855,7 +857,8 @@ function dismissOnboardingCard(state: AppState, botId: string): AppState {
 
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
 
-export function reducer(state: AppState, action: Action): AppState {
+export function reducer(state: AppState, action: Action): AppState { return olderThanHeld(state, action) ? state : capHeldInBackground(reduceApp(state, action), action); }
+function reduceApp(state: AppState, action: Action): AppState {
   const [newChatState, newChatOnly] = reduceNewChat(state, action); if (newChatOnly) return newChatState; state = newChatState;
   if (action.type === "optimisticMessageRemoved") state = removeForkOptimistic(state, action);
   if (action.type === "messageAdded" || action.type === "messagePatched" || action.type === "threadActive" || action.type === "optimisticMessageRemoved") {
@@ -871,11 +874,7 @@ export function reducer(state: AppState, action: Action): AppState {
   if (isNotificationFeedAction(action)) return { ...state, notifications: reduceNotificationFeed(state.notifications, action) };
   switch (action.type) {
     case "hydrate": {
-      const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
-      const resume = action.resumeId;
-      const resumed =
-        resume && (action.bots.some((b) => b.id === resume && !b.hidden) || action.groups.some((g) => g.id === resume)) ? resume : "";
-      const selectedId = state.selectedId && known(state.selectedId) ? state.selectedId : resumed || (action.bots[0]?.id ?? "");
+      const selectedId = hydratedSelectedId(state.selectedId, action.bots, action.groups, action.resumeId);
       const hydrated = {
         ...state,
         bots: action.bots.map((sent) => {
@@ -2255,7 +2254,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (previousOpened !== opened && cur.notice?.threadId && opened && cur.notice.threadId !== opened) rawDispatch({ type: "notice", notice: null });
       switch (action.type) {
         case "loadOlderMessages": {
-          loadOlderPage(action, stateRef.current, olderPagesInFlight, rawDispatch, showError);
+          loadOlderPage(action, store.getState(), olderPagesInFlight, rawDispatch, showError);
           break;
         }
         case "notice":
@@ -2846,6 +2845,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     return wrapped;
   }, [botPatchQueue]);
+  useEffect(() => followHeldTails(store, dispatch), [store, dispatch]);
 
   const launched = useRef(false);
   useEffect(() => {
@@ -2974,7 +2974,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         })
         .catch(() => {});
       const chat = () =>
-        api(`/api/bots?messages=${MESSAGE_PAGE_SIZE}`).then((answer) => snapshotArrays(answer, "bots")).then(({ bots, groups, sections, computerControl, botQueuedMessages }) => {
+        readChatSnapshot(store.getState, readLastConversation() ?? undefined).then(({ bots, groups, sections, computerControl, botQueuedMessages }) => {
           if (!alive) return;
           rawDispatch({
             type: "hydrate",
@@ -3082,6 +3082,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "message.patch":
           rawDispatch({ type: "messagePatched", threadId: frame.threadId, message: frame.message as Message });
           rawDispatch({ type: "forkPanelMessage", threadId: frame.threadId, message: frame.message as Message, patch: true });
+          noteAppPagePatch(frame.threadId, frame.message as Message);
           break;
         case "thread":
           rawDispatch({ type: "threadActive", threadId: frame.threadId, activeLeafId: frame.activeLeafId });
