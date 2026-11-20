@@ -157,7 +157,7 @@ element's job and never a pixel value:
 | Fields, controls | 8px | `rounded-lg` |
 | Cards, menus, popovers, sidebar rows and pinned bots | 12px | `rounded-xl` |
 | Dialogs | 14px | `.ui-modal` |
-| Bubbles, cards in the transcript | 18px | `rounded-4xl` |
+| Bubbles, cards in the transcript | 18px; a bubble in a run of its sender's bubbles keeps a 6px tail at its bottom corner on its own side (`joinedCorners`) | `rounded-4xl` |
 | Composer | 22px (18px once it wraps, and always in Advanced mode, whose field sits above a footer row) | set by the composer |
 | Window panes | 0 | |
 
@@ -222,10 +222,18 @@ element's job and never a pixel value:
 
 - **Only floating things cast shadows:** menus, popovers and dialogs. Use
   `menu-surface` or `popover-surface`, which carry each skin's shadow. Cards
-  in the page are flat, with a `hairline` border or a tint.
+  in the page are flat, with a `hairline` border or a tint. Two things in the
+  chat also float, over the scrolling transcript: the chat header's pill and
+  controls (`shadow-(--shadow-float)`, through `ELEVATED_FLOAT`) and the
+  composer (`shadow-(--shadow-composer)`, through `ELEVATED_COMPOSER`). The
+  lift shows on light grounds only; in Daylight the composer drops its 0.5px
+  ring at rest and gets it back on hover and focus.
 - **Borders are 1px `hairline`.** Panes meet on a 0.5px `edge`. An element in
   the page gets a border or a tint, not both, and no shadow. Floating surfaces
-  take their surface class, which already balances all three.
+  take their surface class, which already balances all three. One exception:
+  a bot's bubble is a tint finished with a faint top-lit sheen and a 0.5px
+  inset line of ink at 6% (`BOT_BUBBLE_FINISH`), on light grounds only; a
+  dark ground keeps the flat tint.
 - **Rich content in a reply stays in the bubble.** Tables, code and quotes are
   drawn alike: no fill of their own, a 1px hairline and a faint tint. One
   reply is one bubble.
@@ -263,7 +271,10 @@ Motion explains a change. It never decorates.
 - **300ms ceiling.** Only first-run onboarding may run longer.
 - **Nothing scales in from zero.** Things grow from about 96% and fade.
 - **Hover and press transitions are 120ms** on colour and opacity only. Don't
-  animate layout.
+  animate layout. One exception: buttons (`.ui-button`, `.ui-icon-button`)
+  and the sidebar's bot rows and pinned bots shrink to 98% while pressed, over
+  50ms, and not at all with reduced motion. The stylesheet does this; don't
+  add your own press scale.
 - **No loops** except a live status that is really live (a bot working).
   Never animate something just to draw the eye.
 - **Mascots hold still at rest.** A mascot moves while its bot is doing
