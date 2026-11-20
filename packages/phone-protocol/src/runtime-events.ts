@@ -206,6 +206,8 @@ export type RuntimeEvent = RuntimeEventBase &
     | { type: "runtime.notice"; message: string; text?: ServerText }
     /** The engine condensed the conversation into its own summary (Claude Code's compact_boundary); the chat marks it. */
     | { type: "context.compacted" }
+    /** The app is summarizing earlier messages (true), or has finished or stopped (false). */
+    | { type: "context.summarizing"; active: boolean }
   );
 
 export type RuntimeEventListener = (event: RuntimeEvent) => void;

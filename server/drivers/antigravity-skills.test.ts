@@ -65,6 +65,21 @@ describe("Antigravity skill staging", () => {
     expect(() => stageAntigravitySkills({ ...turn, text: "Read " + JSON.stringify(other.file), skillFiles: [other.file] }, other.cwd)).toThrow("staging path");
   });
 
+  it("skips caches and hidden files in a skill folder instead of refusing the skill", () => {
+    const { source, cwd, file } = fixture("caches");
+    writeFileSync(join(source, ".DS_Store"), "Finder");
+    mkdirSync(join(source, "references", "__pycache__"));
+    writeFileSync(join(source, "references", "__pycache__", "guide.cpython-312.pyc"), "bytecode");
+    mkdirSync(join(source, "node_modules", "x"), { recursive: true });
+    writeFileSync(join(source, "node_modules", "x", "index.js"), "module.exports = 1;");
+    const turn = { threadId: "thread", text: "Read " + JSON.stringify(file), skillFiles: [file] };
+    const staged = stageAntigravitySkills(turn, cwd);
+    const folder = join(JSON.parse(staged.text.slice(5)) as string, "..");
+    expect(readdirSync(folder).sort()).toEqual(["SKILL.md", "references"]);
+    expect(readdirSync(join(folder, "references"))).toEqual(["guide.md"]);
+    expect(stageAntigravitySkills(turn, cwd).text).toBe(staged.text);
+  });
+
   it("never stages through a task directory link", () => {
     const { cwd, file } = fixture("task-race");
     const task = join(DATA_DIR, "replaceable-task");

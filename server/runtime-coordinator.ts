@@ -34,6 +34,9 @@ const requestKey = (root: Assignment): string => root.origin.kind === "person" ?
 const BRIEF_MAX = 12_000;
 const RUNTIME_DEPTH = /^Assignment depth limit reached/;
 const NEEDS_INPUT = /^needs input:/i;
+/** A NEEDS INPUT line whose whole value says there is nothing to ask ("none", "无", …) asks nothing. */
+const NOTHING_TO_ASK = new Set(["none", "nothing", "n/a", "nil", "-", "—", "无", "無", "没有", "沒有", "无需", "暂无", "なし", "없음", "нет",
+  "ninguna", "ninguno", "nada", "aucune", "aucun", "rien", "keine", "nichts", "nenhuma", "nenhum", "không", "ไม่มี"]);
 
 /** Per-turn stalls belong to the host's watchdog: this only keeps the runtime's window out of its way. */
 const TURN_STALL_MS = 24 * 60 * 60_000;
@@ -85,7 +88,9 @@ export function needsInputQuestion(text: string): string | undefined {
   const at = /^default:/i.test(lines[last]!.trim()) ? filled(last - 1) : last;
   const line = at < 0 ? "" : lines[at]!.trim();
   if (!NEEDS_INPUT.test(line)) return undefined;
-  const question = [line.slice("NEEDS INPUT:".length), ...lines.slice(at + 1)].join("\n").trim();
+  const value = line.slice("NEEDS INPUT:".length).trim();
+  if (NOTHING_TO_ASK.has(value.replace(/[.!。！]+$/u, "").toLowerCase())) return undefined;
+  const question = [value, ...lines.slice(at + 1)].join("\n").trim();
   return question || undefined;
 }
 

@@ -179,14 +179,14 @@ export function readClaudeAuthSettings(
   }
 }
 
-/** OMB_CLAUDE_AUTOCOMPACT: a token count, "auto" (the CLI's own window) or "off". The CLI rejects
- * a window outside 100k-1M as an argument error, so a configured value is clamped. */
-export function autoCompactWindow(env: NodeJS.ProcessEnv): string | null {
+/** OMB_CLAUDE_AUTOCOMPACT: a token count, "auto" (the CLI's own window) or "off"; unset, 1M for the "Claude Opus 5.5 (1M)" pick, else 200K.
+ * The CLI rejects a window outside 100k-1M as an argument error, so a configured value is clamped. */
+export function autoCompactWindow(env: NodeJS.ProcessEnv, model?: string | null): string | null {
   const raw = (env.OMB_CLAUDE_AUTOCOMPACT ?? "").trim().toLowerCase();
   if (raw === "off") return null;
   if (raw === "auto") return "auto";
-  const parsed = raw ? Number(raw) : DEFAULT_AUTOCOMPACT_TOKENS;
-  if (!Number.isFinite(parsed) || parsed <= 0) return String(DEFAULT_AUTOCOMPACT_TOKENS);
+  const fallback = model?.toLowerCase() === "claude-opus-5-5[1m]" ? 1_000_000 : DEFAULT_AUTOCOMPACT_TOKENS, parsed = raw ? Number(raw) : fallback;
+  if (!Number.isFinite(parsed) || parsed <= 0) return String(fallback);
   return String(Math.min(1_000_000, Math.max(100_000, Math.floor(parsed))));
 }
 
@@ -863,6 +863,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       } | null;
       idleTimer: ReturnType<typeof setTimeout> | null;
       closing: boolean;
+      unconfirmedStopWarned?: boolean;
       /** Started before any message was sent (the adapter's `prestart`) and not yet taken by a turn: it says nothing in the chat.
        * `take` makes the turn that takes it the one its launch is counted as. */
       spare?: boolean;
@@ -874,6 +875,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       costTotal: number | null | undefined;
       /** Root close can precede a failed group stop; retry its finalization. */
       finishClose?: () => Promise<void>;
+      /** A dead root's surviving group members cannot take the session back; warns, then settles the stopRequested turn. */
+      releaseInterrupted?: () => void;
       closed: Promise<void>;
     }
     const sessions = new Map<string, Session>();
@@ -885,17 +888,22 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
     const stopSession = (session: Session) => {
       void killCliTree(session.child).then((stopped) => {
         if (stopped) void session.finishClose?.();
+        // A live root keeps the verified-stop wait; a dead root's surviving group members cannot take the session back.
+        else if (session.child.exitCode !== null || session.child.signalCode !== null) session.releaseInterrupted?.();
       });
+    };
+    // The MCP config carries credentials and argv is readable via `ps`: the 0600 file must not sit on disk.
+    const clearMcpConfig = (session: Session) => {
+      if (!session.mcpConfigPath) return;
+      try {
+        rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
+      } catch {}
+      session.mcpConfigPath = null;
     };
     /** Forgets a CLI that died mid-turn and removes its files, so the retry starts a clean session. */
     const discardSession = (threadId: string, session: Session) => {
       session.elicit.close(); session.context.close();
-      if (session.mcpConfigPath) {
-        try {
-          rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
-        } catch {}
-        session.mcpConfigPath = null;
-      }
+      clearMcpConfig(session);
       if (session.systemPromptPath) {
         removePrivateTempDir(session.systemPromptPath);
         session.systemPromptPath = null;
@@ -1032,6 +1040,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       if (turn.guestConfined) args.push("--restricted", "--tools", GUEST_CLAUDE_TOOLS.join(","));
       else if (config.tools !== undefined) args.push("--tools", config.tools.join(","));
       const turnEnvironment = environment();
+      const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(turn.model, turnEnvironment, config.endpointModels);
+      const injected = config.managed || config.endpointModels ? { model: turnModel ?? null, injected: false } : applyClaudeInject({ ...turnEnvironment }, turnModel);
       const launchCli = findCliCandidates(config.cli, turnEnvironment.PATH ?? "")[0]; await ensureCliVersion(turnEnvironment);
       for (let tries = 0; tries < 2 && cliVersionChecked && cliProbedAt !== launchCli; tries++) await ensureCliVersion(turnEnvironment); // another copy's late check landed while this turn waited
       const ownCli = cliProbedAt === launchCli, turnCliVersion = ownCli ? cliVersion : null; // still another copy's state: none of its flags, its version counts as unknown
@@ -1052,12 +1062,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (projectSettingsOnly) args.push("--setting-sources", "project");
         if (turn.userSkillsDir) args.push("--add-dir", turn.userSkillsDir);
       }
-      const compactWindow = autoCompactWindow(turnEnvironment);
+      const compactWindow = autoCompactWindow(turnEnvironment, injected.model);
       const passedAutocompact = Boolean(compactWindow) && ownCli && cliHasAutocompact === true; if (compactWindow && passedAutocompact) args.push("--autocompact", compactWindow);
       // --resume keeps the recorded system prompt, so every turn refreshes it.
       if (ownCli && cliVersionChecked && claudeCliSupports(cliVersion, "--system-prompt-snapshot")) args.push("--system-prompt-snapshot", "off");
-      const turnModel = config.managed ? turn.model : await resolveClaudeTurnModel(turn.model, turnEnvironment, config.endpointModels);
-      const injected = config.managed || config.endpointModels ? { model: turnModel ?? null, injected: false } : applyClaudeInject({ ...turnEnvironment }, turnModel);
       if (injected.model) args.push("--model", injected.model);
       if (turn.effort) args.push("--effort", turn.effort);
 
@@ -1393,13 +1401,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           t.continuationSilence = null;
         }
         session.broker?.pause();
-        // The CLI read the credential-bearing config at start; it must not sit on disk.
-        if (session.mcpConfigPath) {
-          try {
-            rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
-          } catch {}
-          session.mcpConfigPath = null;
-        }
+        clearMcpConfig(session);
         if (session.systemPromptPath) {
           if (removePrivateTempDir(session.systemPromptPath)) session.systemPromptPath = null;
         }
@@ -1416,6 +1418,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       };
       const settleResult = (result: NativeTurnResult) => settle(result.ok, result.stopReason, result.cost, result.usage);
       const currentTurnId = () => session.turn?.turnId ?? turnId;
+      const unconfirmedStopWarning = () => { if (session.unconfirmedStopWarned) return; session.unconfirmedStopWarned = true; emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: "Claude could not be confirmed stopped; its helper processes may still be running." }); };
+      session.releaseInterrupted = () => { if (session.turn?.stopRequested) { unconfirmedStopWarning(); settle(false, "interrupted"); } };
       const reachLimit = (frame: { api_error_params?: { rate_limit_info?: unknown } }, words: unknown) => {
         const t = session.turn;
         if (!t || t.limitReached) return;
@@ -1694,7 +1698,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (!(await killCliTree(child, 0))) {
           session.broker?.close();
           session.broker = undefined;
-          if (!session.spare) emit({ ...base(threadId, currentTurnId()), type: "runtime.error", message: "Claude could not be confirmed stopped; its helper processes may still be running." });
+          if (!session.spare) { if (!session.turn?.stopRequested) unconfirmedStopWarning(); session.releaseInterrupted?.(); }
           return;
         }
         if (closeFinalized) return;
@@ -1812,11 +1816,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         session.broker?.close();
         session.elicit.close();
         session.context.close();
-        if (session.mcpConfigPath) {
-          try {
-            rmSync(dirname(session.mcpConfigPath), { recursive: true, force: true });
-          } catch {}
-        }
+        clearMcpConfig(session);
         removePrivateTempDir(session.systemPromptPath);
         if (sessions.get(threadId) === session) sessions.delete(threadId);
       };

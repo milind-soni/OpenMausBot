@@ -110,6 +110,14 @@ describe("LiveCallController lifecycle", () => {
     expect(other.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot2", voice: "sol" }));
   });
 
+  it.each(["nuri", "juni", "flitz", "brise", "sillage", "nira", "harema", "shida", "noeul"])("starts the called bot's session in %s instead of the app's voice", async (voice) => {
+    const t = setup({ botVoice: () => voice });
+    const started = await t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" });
+    expect(t.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ voice }));
+    expect(started.call.voice).toBe(voice);
+    await t.controller.shutdown();
+  });
+
   it("uses the app's voice when the bot's own is not a GPT-Live voice", async () => {
     const t = setup({ botVoice: () => "Kore" });
     await t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" });

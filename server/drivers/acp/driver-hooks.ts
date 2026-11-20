@@ -5,6 +5,9 @@ import type { ChildProcess } from "node:child_process";
 import type { AcpHost } from "./host.ts";
 
 export interface AcpDriverHooks {
+  /** Local video, image, audio and PDF files named in the turn text go to the model as `resource_link` blocks
+   * the agent reads itself, for an agent whose own file tool returns media as raw bytes (Antigravity). */
+  mediaLinks?: boolean;
   /** An agent that asks for a sign-in no turn can give. Its turns fail at once with `loginNote`, its process is closed
    * and `required` is told, instead of the turn waiting on a sign-in nobody sees. */
   signInRequest?: {
@@ -23,6 +26,9 @@ export interface AcpDriverHooks {
   /** Called before each session/prompt. The check it returns gets that prompt's result and names the failure the agent
    * reported as an ordinary reply, which then fails the turn. Neither may throw. */
   promptOutcome?(instanceId: string, sessionId: string): Promise<(result: unknown) => Promise<Error | undefined>>;
+  /** The failure a turn's thrown error stands for, in the person's words (a usage limit with its reset), or undefined to
+   * keep the error as it is. Must not throw. */
+  reportedFailure?(error: unknown): Error | undefined;
 }
 
 const MAX_LINE_CHARS = 64 * 1024;

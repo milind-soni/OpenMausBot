@@ -1,5 +1,4 @@
-// No model here speaks video natively (OpenAI's chat-completions content parts are only "text" and "image_url",
-// and a local vision model takes the same two); ffmpeg on PATH stands in by sampling stills from the clip.
+// Samples stills from a clip with ffprobe and ffmpeg on PATH.
 import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

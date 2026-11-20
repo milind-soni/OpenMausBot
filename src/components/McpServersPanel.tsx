@@ -683,7 +683,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
         </div>
 
         {servers === null ? (
-          <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin" /> {t("mcp.loading")}</div>
+          <div className="flex items-center justify-center gap-2 py-24 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin" /><span>{t("mcp.loading")}</span></div>
         ) : visibleServers?.length === 0 && !editing ? (
           <div className="mt-5 flex min-h-32 flex-col items-center justify-center rounded-2xl border border-dashed border-hairline/60 text-center">
             <div className="flex size-11 items-center justify-center rounded-xl bg-raised text-ink-secondary"><ServerCog size={21} /></div>

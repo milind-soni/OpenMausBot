@@ -70,12 +70,14 @@ describe("claudeCompactionDisabled", () => {
 describe("compactConversation", () => {
   const bot = { id: "bot" } as BotRecord;
   const thread = "thread";
-  function setup(options: { tokens: number; nativeCompaction?: boolean; engineCompactionOn?: boolean; engineCompact?: boolean; compactAt?: number }) {
+  function setup(options: { tokens: number; nativeCompaction?: boolean; engineCompactionOn?: boolean; engineCompact?: boolean; compactAt?: number;
+    generateText?: ConversationCompactionDeps["generateText"]; claimIsCurrent?: () => boolean }) {
     const messages: Message[] = ["one", "two", "three", "four"].flatMap((word, index) => [
       { id: `u${index}`, role: "user", kind: "text", text: `ask ${word}`, at: index * 2 } as Message,
       { id: `b${index}`, role: "bot", kind: "text", text: `answer ${word}`, at: index * 2 + 1 } as Message,
     ]);
     const asked: string[] = [];
+    const summarizing: boolean[] = [];
     const deps: ConversationCompactionDeps = {
       store: {
         taskByThread: () => ({ lastContextModel: "engine:model", usage: { context: { tokens: options.tokens, window: 200_000 } }, resumeCursors: {} }) as never,
@@ -89,16 +91,17 @@ describe("compactConversation", () => {
       nativeCompactTokens: () => 200_000,
       engineCompactionOn: () => options.engineCompactionOn ?? true,
       engineCompact: async (target) => { asked.push(target.instanceId); return options.engineCompact ?? false; },
-      generateText: () => undefined,
-      claimIsCurrent: () => true,
+      generateText: options.generateText ?? (() => undefined),
+      claimIsCurrent: options.claimIsCurrent ?? (() => true),
       controllers: new Map(),
       cancelled: (reason) => new Error(reason),
       idleFraction: 0.85,
+      summarizing: (threadId, active) => { if (threadId === thread) summarizing.push(active); },
     };
     const instance = { instanceId: "engine", driverKind: "claudeAgent", adapter: { capabilities: { nativeCompaction: options.nativeCompaction ?? true } } };
     const run = (manual: boolean) => createConversationCompaction(deps)({ bot, threadId: thread, generation: "g", instance, model: "model", excludedIds: new Set(), manual });
     const folds = () => messages.filter((m) => m.kind === "compaction");
-    return { run, folds, asked, deps };
+    return { run, folds, asked, deps, summarizing };
   }
 
   it("writes no fold before a turn at 164k on an engine that compacts itself, and one on an engine that does not", async () => {
@@ -142,5 +145,41 @@ describe("compactConversation", () => {
     await fed.run(true);
     expect(fed.asked).toEqual([]);
     expect(fed.folds()).toHaveLength(1);
+  });
+  it("says it is summarizing while a summary someone waits on is written, and clears it on every way out", async () => {
+    const written = setup({ tokens: 50_000 });
+    await written.run(true);
+    expect(written.folds()).toHaveLength(1);
+    expect(written.summarizing).toEqual([true, false]);
+
+    const stopped = setup({ tokens: 164_274, nativeCompaction: false, claimIsCurrent: () => false });
+    await expect(stopped.run(false)).rejects.toThrow("context summarization stopped");
+    expect(stopped.folds()).toHaveLength(0);
+    expect(stopped.summarizing).toEqual([true, false]);
+
+    let started: () => void = () => {};
+    const begun = new Promise<void>((resolve) => { started = resolve; });
+    const aborted = setup({ tokens: 50_000, nativeCompaction: false,
+      generateText: () => (_prompt, options) => new Promise<string>((_resolve, reject) => {
+        started();
+        options?.signal?.addEventListener("abort", () => reject(options?.signal?.reason), { once: true });
+      }) });
+    const pending = aborted.run(true);
+    await begun;
+    expect(aborted.summarizing).toEqual([true]);
+    aborted.deps.controllers.get(thread)!.controller.abort();
+    await expect(pending).rejects.toBeDefined();
+    expect(aborted.folds()).toHaveLength(0);
+    expect(aborted.summarizing).toEqual([true, false]);
+    expect(aborted.deps.controllers.size).toBe(0);
+  });
+
+  it("never shows the summarizing line for a session left to its engine, or for an idle summary", async () => {
+    const own = setup({ tokens: 164_274 });
+    await own.run(false);
+    expect(own.summarizing).toEqual([]);
+    const done = setup({ tokens: 50_000, engineCompact: true });
+    await done.run(true);
+    expect(done.summarizing).toEqual([]);
   });
 });

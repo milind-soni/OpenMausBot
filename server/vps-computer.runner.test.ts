@@ -15,7 +15,7 @@ vi.mock("./procs.ts", async () => ({
   killCliTree: stopMock,
 }));
 
-import { defaultRunner, dockerCliInstallCommand } from "./vps-computer.ts";
+import { defaultRunner, dockerCliInstallCommand, VpsHostUnreachableError } from "./vps-computer.ts";
 import { resolveCliSpawn } from "./env-path.ts";
 
 type FakeChild = EventEmitter & {
@@ -43,6 +43,24 @@ describe("default VPS command runner", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("calls a host unreachable only when ssh itself says it never got there", async () => {
+    const transport = fakeChild();
+    const lost = defaultRunner(["info"]);
+    // Docker puts ssh's words first; a long tail after them must not hide them.
+    transport.stderr.write("error during connect: command [ssh -- vps docker system dial-stdio] has exited with exit status 255, " +
+      "stderr=ssh: connect to host vps port 22: Connection refused\n" + "debug1: retrying\n".repeat(200));
+    transport.emit("close", 1, null);
+    await expect(lost).rejects.toBeInstanceOf(VpsHostUnreachableError);
+
+    const remote = fakeChild();
+    const refused = defaultRunner(["info"]);
+    remote.stderr.write("error during connect: command [ssh -- vps docker system dial-stdio] has exited with exit status 255, stderr=dial-stdio is not allowed here");
+    remote.emit("close", 1, null);
+    const error = await refused.catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(VpsHostUnreachableError);
   });
 
   it("collects output and resolves after the child closes", async () => {

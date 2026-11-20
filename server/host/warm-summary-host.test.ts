@@ -6,6 +6,7 @@ import type { Message } from "../store.ts";
 import { createJobSlots } from "../job-slots.ts";
 import { WARM_SUMMARY_GIVE_UP_MS, WARM_SUMMARY_IDLE_MS, WARM_SUMMARY_NOW_MS, WARM_SUMMARY_RETRY_MS, WARM_SUMMARY_SOON_MS } from "../warm-summary.ts";
 import { addServerLinePacks } from "../server-lines.ts";
+import { autoCompactWindow } from "../drivers/claude.ts";
 import { COMPACTION_STARTED_LINE, createWarmSummaryHost, keptAfterSummary, PRESENCE_HOLD_MS, summaryInstructions, type WarmSummaryHostDeps } from "./warm-summary-host.ts";
 
 let at = 0;
@@ -234,6 +235,19 @@ describe("warm summaries for a Claude conversation", () => {
     near.finishTurn();
     await near.advance(WARM_SUMMARY_NOW_MS);
     expect(near.compactCalls).toHaveLength(1);
+  });
+
+  it("starts no summary ahead for Claude Opus 5.5 (1M) at 170k, whose own point is near 1M, and does for a 200k session at 165k", async () => {
+    const compactAt = (model: string) => () => Number(autoCompactWindow({}, model));
+    expect(compactAt("claude-opus-5-5[1m]")()).toBe(1_000_000);
+    const wide = setup({ nativeCompactAt: compactAt("claude-opus-5-5[1m]") }, { tokens: 170_000 });
+    wide.finishTurn();
+    await wide.advance(WARM_SUMMARY_SOON_MS);
+    expect(wide.compactCalls).toEqual([]);
+    const usual = setup({ nativeCompactAt: compactAt("claude-opus-5-5") }, { tokens: 165_000 });
+    usual.finishTurn();
+    await usual.advance(WARM_SUMMARY_NOW_MS);
+    expect(usual.compactCalls).toHaveLength(1);
   });
 
   it("places both points below where the engine compacts at a lower setting too", async () => {

@@ -46,7 +46,12 @@ async function setup(hang: boolean, fakeEnv: NodeJS.ProcessEnv) {
     const turns = () => existsSync(`${plan}.evidence.jsonl`) ? readFileSync(`${plan}.evidence.jsonl`, "utf8")
       .trim().split("\n").filter(Boolean).map(line => JSON.parse(line)) : [];
     ready = true;
-    return { session, api, cli, bot, thread, messages, task, idle, send, turns,
+    const summarizing = () => {
+      const file = join(session.info.dataDir, "events", `${thread}.ndjson`);
+      return existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line))
+        .filter(event => event.type === "context.summarizing").map(event => event.active as boolean) : [];
+    };
+    return { session, api, cli, bot, thread, messages, task, idle, send, turns, summarizing,
       compact: () => api(`/api/bots/${bot.id}/compact`, { threadId: thread }),
       restart: async (beforeLaunch?: () => void) => {
         await waitForExit(restarted ?? session.child, { signal: "SIGTERM" });
@@ -172,6 +177,7 @@ it("automatically folds old exchanges while keeping the two latest and the incom
   expect(prompt).toContain("THIRD_EXCHANGE correction -5 != 5");
   expect(prompt).toContain("INCOMING do not summarize this request");
   expect(f.turns().at(-1).resumed).toBe(false);
+  await expect.poll(f.summarizing, { message: "the status line says it is summarizing, then stops saying it" }).toEqual([true, false]);
 }), 70_000);
 
 it("Stop cancels a stalled summary without writing a late record or starting an agent", () => fixture(async f => {
@@ -187,9 +193,11 @@ it("Stop cancels a stalled summary without writing a late record or starting an 
     return typeof dump.prompt === "string" && dump.prompt.startsWith("Summarize this conversation");
   }).toBe(true);
   await expect(f.compact()).rejects.toThrow(/already working/);
+  await expect.poll(f.summarizing).toEqual([true]);
   await f.cli("interrupt", "--bot", f.bot.id, "--task", f.thread);
   await f.idle();
   expect((await f.messages()).filter(m => m.kind === "compaction")).toHaveLength(0);
+  await expect.poll(f.summarizing, { message: "a stopped summary clears the status line" }).toEqual([true, false]);
   expect((await f.messages()).slice(0, before.length)).toEqual(before.map(message =>
     message.id === previousRequest.id ? { ...message, requestPending: true } : message));
   expect(f.turns()).toHaveLength(count);
