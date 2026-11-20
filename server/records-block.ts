@@ -5,7 +5,11 @@ import { escapeNotes } from "./peer-provenance.ts";
 
 export const RECORDS_END = "[end of records]";
 // Characters with no width: dropped, so a marker split by one is whole again before it is checked.
-const INVISIBLE = /[\u00ad\u200b-\u200f\u2060-\u2064\ufeff\u061c\u180e\u115f\u3164\u{e0000}-\u{e007f}]|\u034f|[\ufe00-\ufe0f]/gu;
+const INVISIBLE = /[\u00ad\u200b\u200e\u200f\u2060-\u2064\ufeff\u061c\u180e\u115f\u3164\u{e0000}-\u{e007f}]|\u034f|[\ufe00-\ufe0e]/gu;
+// Joiners and the emoji selector stay only inside a word or an emoji, between visible non-ASCII characters; our markers
+// are ASCII, so none of them can be split by one that stays.
+const WORD_PART = String.raw`(?![\p{ASCII}\u200c\u200d\ufe0f])[\p{L}\p{M}\p{Extended_Pictographic}\p{Emoji_Modifier}]`;
+const STRAY_JOINER = new RegExp(String.raw`(?<!${WORD_PART}|\p{Extended_Pictographic}\ufe0f)[\u200c\u200d]|[\u200c\u200d](?!${WORD_PART})|(?<!\p{Extended_Pictographic})\ufe0f`, "gu");
 // Line separators and bidi overrides: a space, so they never glue two words together or reorder what is shown.
 const LINE_AND_BIDI = /[\u2028-\u202e\u2066-\u2069]/g;
 const isControl = (code: number): boolean => code < 0x20 || (code >= 0x7f && code <= 0x9f);
@@ -18,7 +22,7 @@ const defuseMarkers = (text: string): string => text.replace(FORGED_END, "(end o
 
 /** Outside text with its lines kept: no invisible or control characters but newlines and tabs, and none of our markers. */
 export function defuse(text: string): string {
-  const visible = Array.from(text.replace(INVISIBLE, ""), (ch) => ch !== "\n" && ch !== "\t" && isControl(ch.codePointAt(0)!) ? " " : ch).join("");
+  const visible = Array.from(text.replace(INVISIBLE, "").replace(STRAY_JOINER, ""), (ch) => ch !== "\n" && ch !== "\t" && isControl(ch.codePointAt(0)!) ? " " : ch).join("");
   return escapeNotes(defuseMarkers(visible.replace(LINE_AND_BIDI, " ")));
 }
 
