@@ -79,6 +79,8 @@ export const persistedBots = (bots: readonly BotRecord[]) => bots.map(persistedB
 
 /** Set to 1, every save of bots.json serializes every bot. */
 export const BOTS_FULL_SAVE_ENV = "OMB_BOTS_FULL_SAVE";
+/** Set to 1 (fixture servers), a narrowed save that differs from the whole serialization throws. */
+export const BOTS_SAVE_CHECK_ENV = "OMB_BOTS_SAVE_CHECK";
 /** The waiting whole pass after a narrowed save has its own key: a whole write of the live list supersedes the waiting
  * writes of BOTS_FILE, and is that pass's job too. */
 const WHOLE_PASS = `${BOTS_FILE}:whole`;
@@ -95,9 +97,9 @@ export class JsonRegistry implements RegistryStore {
   private readonly groupsFile = new OwnedFile(GROUPS_FILE, { mode: 0o600 });
   private readonly botsText = new BotsText(persistedBot);
   private readonly narrows = process.env[BOTS_FULL_SAVE_ENV] !== "1";
-  /** In tests, every narrowed text is compared with the whole serialization, so a path that changes a bot its save
-   * does not name fails there instead of waiting for the next whole pass. */
-  private readonly checksNarrowing = process.env.VITEST !== undefined;
+  /** In tests and fixture servers, every narrowed text is compared with the whole serialization, so a path that changes
+   * a bot its save does not name fails there instead of waiting for the next whole pass. */
+  private readonly checksNarrowing = process.env.VITEST !== undefined || process.env[BOTS_SAVE_CHECK_ENV] === "1";
   private narrowing = false;
   /** A narrowed text was written since the last whole one. */
   private narrowedSinceWhole = false;

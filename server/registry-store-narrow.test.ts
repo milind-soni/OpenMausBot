@@ -72,6 +72,29 @@ describe("bots.json saves that name their bot serialize only that bot", () => {
     expect(onDisk()).toBe(JSON.stringify(persistedBots(bots)));
   });
 
+  it("writes a permission changed in place on a bot no save named in the very next save, whichever bot that names", () => {
+    const vitest = process.env.VITEST;
+    delete process.env.VITEST;
+    const registry = new JsonRegistry(); // as outside tests: no self-check, so only the safety digest can catch it
+    process.env.VITEST = vitest;
+    const bots = [bot("a"), bot("b"), bot("c")];
+    Object.assign(bots[1]!, { approvalMode: "full", alwaysAllow: ["Bash(git push)"] });
+    Object.assign(bots[2]!.tasks![1]!, { alwaysAllow: ["Bash(rm -rf build)"] });
+    const save = () => registry.writeBots(bots, true);
+    save();
+    for (const revoke of [
+      () => { bots[1]!.approvalMode = "ask"; },
+      () => { bots[1]!.alwaysAllow = []; },
+      () => { delete bots[2]!.tasks![1]!.alwaysAllow; },
+      () => { bots[2]!.toolScope = { allow: [], deny: ["native:bash"] } as never; },
+    ]) {
+      revoke();
+      bots[0]!.name = `${bots[0]!.name}.`;
+      registry.upsertThread(owner("a"), undefined, "now", save);
+      expect(onDisk(), "on disk when the save returns, with no whole pass yet").toBe(JSON.stringify(persistedBots(bots)));
+    }
+  });
+
   it("serializes every owner a batch named, however many saves it held", () => {
     const registry = new JsonRegistry();
     const bots = [bot("a"), bot("b"), bot("c")];
