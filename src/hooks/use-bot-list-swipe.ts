@@ -1,4 +1,4 @@
-import { useRef, type DragEvent, type MouseEvent, type PointerEvent } from "react";
+import { useEffect, useRef, type DragEvent, type MouseEvent, type PointerEvent } from "react";
 import { flushSync } from "react-dom";
 
 type StagePointer = PointerEvent<HTMLDivElement>;
@@ -26,6 +26,10 @@ const FLICK_AGE = 90;
 export function useBotListSwipe(enabled: boolean, open: boolean, show: () => void, hide: () => void) {
   const swipe = useRef<Swipe | null>(null);
   const suppressClick = useRef(false);
+  const frame = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+  }, []);
 
   function track(event: StagePointer, drag: Swipe) {
     const x = event.clientX;
@@ -35,7 +39,6 @@ export function useBotListSwipe(enabled: boolean, open: boolean, show: () => voi
       drag.sampleX = x;
     }
     drag.position = Math.min(drag.width, Math.max(0, drag.origin + (x - drag.x) * drag.direction));
-    event.currentTarget.style.setProperty("--drawer-progress", String(drag.position / drag.width));
   }
 
   function finish(event: StagePointer, commit: boolean) {
@@ -44,8 +47,13 @@ export function useBotListSwipe(enabled: boolean, open: boolean, show: () => voi
     if (!drag?.dragging) return;
 
     const stage = event.currentTarget;
+    if (frame.current !== null) {
+      cancelAnimationFrame(frame.current);
+      frame.current = null;
+    }
     if (commit) {
       track(event, drag);
+      stage.style.setProperty("--drawer-progress", String(drag.position / drag.width));
       const distance = (event.clientX - drag.x) * drag.direction;
       const flick = Math.abs(distance) >= FLICK_DISTANCE &&
         event.timeStamp - drag.sampleAt <= FLICK_AGE && Math.abs(drag.velocity) >= FLICK_SPEED;
@@ -100,6 +108,12 @@ export function useBotListSwipe(enabled: boolean, open: boolean, show: () => voi
         stage.setAttribute("data-drawer-dragging", "");
       }
       track(event, drag);
+      if (frame.current !== null) return;
+      const stage = event.currentTarget;
+      frame.current = requestAnimationFrame(() => {
+        frame.current = null;
+        stage.style.setProperty("--drawer-progress", String(drag.position / drag.width));
+      });
     },
     onPointerUp(event: StagePointer) {
       if (swipe.current?.id === event.pointerId) finish(event, true);

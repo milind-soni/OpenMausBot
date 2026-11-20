@@ -2,7 +2,7 @@
 import { isExternalImageSource } from "./CachedChatImage";
 import { FilePreviewDialog } from "./FilePreviewDialog";
 import { MENU_MOTION_MS } from "./MenuMotion";
-import { act, createElement } from "react";
+import { act, createElement, Profiler } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -340,20 +340,24 @@ describe("full-screen image actions", () => {
     document.body.append(container);
     const root = createRoot(container);
     const onClose = vi.fn();
-    await act(async () => { root.render(createElement(AttachmentPreviewDialog, { image, images, onClose })); });
+    const onRender = vi.fn();
+    await act(async () => {
+      root.render(createElement(Profiler, { id: "preview", onRender },
+        createElement(AttachmentPreviewDialog, { image, images, onClose })));
+    });
     const dialog = document.querySelector('[role="dialog"]')!;
     expect(dialog.className).toContain("fixed inset-0");
     const button = () => document.querySelector<HTMLButtonElement>('button[title="Copy image"], button[title="Image copied"]');
     const openMenu = () => act(() => {
       dialog.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 }));
     });
-    return { button, dialog, onClose, openMenu, close: async () => { await act(() => root.unmount()); container.remove(); } };
+    return { button, dialog, onClose, onRender, openMenu, close: async () => { await act(() => root.unmount()); container.remove(); } };
   }
 
   it.each(["touch", "mouse"])("tracks a %s drag, rebounds on short drags and advances on longer ones", async pointerType => {
     const next = { ...image, src: "/next.png", name: "next.png" };
-    const { dialog, onClose, close } = await openPreview([image, next]);
-    const track = dialog.querySelector<HTMLElement>("[style*=translateX]")!;
+    const { dialog, onClose, onRender, close } = await openPreview([image, next]);
+    const track = dialog.querySelector<HTMLElement>("[data-preview-track]")!;
     Object.assign(dialog, { setPointerCapture: vi.fn() });
     const pointer = (type: string, x: number) => act(() => {
       dialog.dispatchEvent(new PointerEvent(type, {
@@ -362,26 +366,35 @@ describe("full-screen image actions", () => {
     });
     try {
       await pointer("pointerdown", 120);
+      onRender.mockClear();
       await pointer("pointermove", 94);
-      expect(track.style.transform).toContain("-26px");
+      expect(track.style.getPropertyValue("--preview-drag-x")).toBe("-26px");
+      expect(onRender).not.toHaveBeenCalled();
       await pointer("pointerup", 94);
-      expect(track.style.transform).toContain("0% + 0px");
+      expect(track.style.getPropertyValue("--preview-drag-x")).toBe("");
+      expect(track.hasAttribute("data-preview-dragging")).toBe(false);
+      expect(track.style.transform).toContain("calc(0% +");
       await act(() => dialog.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
       expect(onClose).not.toHaveBeenCalled();
       await pointer("pointerdown", 120);
       await pointer("pointermove", 40);
-      expect(track.style.transform).toContain("-80px");
+      expect(track.style.getPropertyValue("--preview-drag-x")).toBe("-80px");
       await pointer("pointercancel", 40);
-      expect(track.style.transform).toContain("0% + 0px");
+      expect(track.style.getPropertyValue("--preview-drag-x")).toBe("");
+      expect(track.hasAttribute("data-preview-dragging")).toBe(false);
+      expect(track.style.transform).toContain("calc(0% +");
       await pointer("pointerdown", 120);
       await pointer("pointermove", 40);
       await pointer("pointerup", 40);
-      expect(track.style.transform).toContain("-100% + 0px");
+      expect(track.style.getPropertyValue("--preview-drag-x")).toBe("");
+      expect(track.style.transform).toContain("calc(-100% +");
       await pointer("pointerdown", 40);
       await pointer("pointermove", 120);
-      expect(track.style.transform).toContain("-100% + 80px");
+      expect(track.style.getPropertyValue("--preview-drag-x")).toBe("80px");
       await pointer("pointerup", 120);
-      expect(track.style.transform).toContain("0% + 0px");
+      expect(track.style.getPropertyValue("--preview-drag-x")).toBe("");
+      expect(track.hasAttribute("data-preview-dragging")).toBe(false);
+      expect(track.style.transform).toContain("calc(0% +");
     } finally {
       await close();
     }
@@ -417,7 +430,7 @@ describe("full-screen image actions", () => {
     vi.useFakeTimers();
     const { dialog, onClose, close } = await openPreview();
     const active = dialog.querySelector<HTMLImageElement>("[data-preview-active-image]")!;
-    const track = dialog.querySelector<HTMLElement>("[style*=translateX]")!;
+    const track = dialog.querySelector<HTMLElement>("[data-preview-track]")!;
     Object.assign(dialog, { setPointerCapture: vi.fn() });
     const pointer = (type: string, id: number, x: number, y: number) => act(() => {
       dialog.dispatchEvent(new PointerEvent(type, {
@@ -436,7 +449,7 @@ describe("full-screen image actions", () => {
       await pointer("pointerup", 1, 100, 100);
       await pointer("pointerdown", 1, 100, 100);
       await pointer("pointermove", 1, 100, 225);
-      expect(track.style.transform).toContain("translateY(125px)");
+      expect(track.style.getPropertyValue("--preview-drag-y")).toBe("125px");
       await pointer("pointerup", 1, 100, 225);
       expect(dialog.getAttribute("data-overlay-fade")).toBe("out");
       await act(() => { vi.runAllTimers(); });

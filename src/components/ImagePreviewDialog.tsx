@@ -51,7 +51,7 @@ export function AttachmentPreviewDialog({
     setMenu(null);
     setIndex((value) => nextImageIndex(value, step, items.length));
   }, [items.length, cancelPress]);
-  const { drag, zoom, animateZoom, handlers, tapSurface, clearTap } = usePreviewGestures(index, items.length, navigate, motion.dismiss, cancelPress);
+  const { trackRef, zoom, animateZoom, handlers, tapSurface, clearTap } = usePreviewGestures(index, items.length, navigate, motion.dismiss, cancelPress);
 
   useEffect(() => {
     if (!motion.open) return;
@@ -151,8 +151,8 @@ export function AttachmentPreviewDialog({
         setMenu({ x: event.clientX, y: event.clientY });
       }}
     >
-      <div className={cn("pointer-events-none absolute inset-0", drag === null && "motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out")}
-        style={{ transform: `translateX(calc(${-100 * index}% + ${drag?.x ?? 0}px)) translateY(${drag?.y ?? 0}px)` }}>
+      <div ref={trackRef} data-preview-track="" className="pointer-events-none absolute inset-0"
+        style={{ transform: `translateX(calc(${-100 * index}% + var(--preview-drag-x, 0px))) translateY(var(--preview-drag-y, 0px))` }}>
         {items.slice(Math.max(0, index - 1), index + 2).map((item, offset) => {
           const position = Math.max(0, index - 1) + offset;
           const active = position === index;
@@ -185,6 +185,7 @@ export function AttachmentPreviewDialog({
                   version={item.version}
                   alt={active ? item.name : ""}
                   draggable={false}
+                  decoding="async"
                   data-preview-active-image={active ? "" : undefined}
                   style={active ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined}
                   onPointerDown={event => {

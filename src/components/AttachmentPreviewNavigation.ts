@@ -90,7 +90,19 @@ export function usePreviewGestures(
   const zoomRef = useRef(FIT);
   const [zoom, setZoom] = useState(FIT);
   const [animateZoom, setAnimateZoom] = useState(false);
-  const [drag, setDrag] = useState<Point | null>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  function setDrag(offset: Point | null) {
+    const track = trackRef.current;
+    if (!track) return;
+    track.toggleAttribute("data-preview-dragging", offset !== null);
+    if (offset) {
+      track.style.setProperty("--preview-drag-x", `${offset.x}px`);
+      track.style.setProperty("--preview-drag-y", `${offset.y}px`);
+    } else {
+      track.style.removeProperty("--preview-drag-x");
+      track.style.removeProperty("--preview-drag-y");
+    }
+  }
   const updateZoom = useCallback((next: Zoom, animate = false) => {
     zoomRef.current = next;
     setZoom(next);
@@ -204,5 +216,5 @@ export function usePreviewGestures(
     tap.current = setTimeout(() => { tap.current = null; dismiss(); }, TAP_DELAY_MS);
   }
 
-  return { drag, zoom, animateZoom, handlers, tapSurface, clearTap };
+  return { trackRef, zoom, animateZoom, handlers, tapSurface, clearTap };
 }

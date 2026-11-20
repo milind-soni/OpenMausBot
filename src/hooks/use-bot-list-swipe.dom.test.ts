@@ -40,6 +40,7 @@ function pointer(target: HTMLElement, type: string, x: number, at: number, y = 8
 const progress = () => Number(stage.style.getPropertyValue("--drawer-progress"));
 
 beforeEach(() => {
+  vi.useFakeTimers();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   clickRow.mockClear();
   host = document.createElement("div");
@@ -50,6 +51,7 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   host.remove();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -57,8 +59,10 @@ it("follows the mouse one to one, reverses in place, and returns after a short s
   mount();
   pointer(chat, "pointerdown", 8, 100);
   pointer(stage, "pointermove", 98, 350);
+  vi.advanceTimersToNextFrame();
   expect(progress()).toBe(0.25);
   pointer(stage, "pointermove", 62, 550);
+  vi.advanceTimersToNextFrame();
   expect(progress()).toBe(0.15);
   pointer(stage, "pointerup", 62, 750);
   expect(stage.dataset.open).toBe("false");
@@ -70,6 +74,7 @@ it("commits a quick touch flick even before halfway", () => {
   mount();
   pointer(chat, "pointerdown", 8, 100, 80, "touch");
   pointer(stage, "pointermove", 80, 160, 80, "touch");
+  vi.advanceTimersToNextFrame();
   expect(progress()).toBe(0.2);
   pointer(stage, "pointerup", 80, 175, 80, "touch");
   expect(stage.dataset.open).toBe("true");
@@ -79,6 +84,7 @@ it("closes from the list on a long drag without selecting the row", () => {
   mount(true);
   pointer(list, "pointerdown", 280, 100);
   pointer(stage, "pointermove", 82, 700);
+  vi.advanceTimersToNextFrame();
   expect(progress()).toBe(0.45);
   pointer(stage, "pointerup", 82, 810);
   expect(stage.dataset.open).toBe("false");
@@ -90,6 +96,7 @@ it("uses the right edge in RTL and rolls back a cancelled swipe", () => {
   mount(false, true);
   pointer(chat, "pointerdown", 352, 100, 80, "touch");
   pointer(stage, "pointermove", 100, 300, 80, "touch");
+  vi.advanceTimersToNextFrame();
   expect(progress()).toBe(0.7);
   pointer(stage, "pointercancel", 100, 310, 80, "touch");
   expect(stage.dataset.open).toBe("false");
@@ -102,4 +109,21 @@ it.each([[80, 10, 80], [8, 24, 160]])("leaves interior and vertical gestures alo
   pointer(stage, "pointermove", x + dx, 160, y);
   expect(stage.hasAttribute("data-drawer-dragging")).toBe(false);
   expect(stage.setPointerCapture).not.toHaveBeenCalled();
+});
+
+it("paints the latest position once per frame and discards pending updates on release", () => {
+  mount();
+  const write = vi.spyOn(stage.style, "setProperty");
+  pointer(chat, "pointerdown", 8, 100);
+  pointer(stage, "pointermove", 44, 160);
+  pointer(stage, "pointermove", 98, 200);
+  expect(write).not.toHaveBeenCalled();
+  vi.advanceTimersToNextFrame();
+  expect(write).toHaveBeenCalledExactlyOnceWith("--drawer-progress", "0.25");
+
+  pointer(stage, "pointermove", 110, 300);
+  pointer(stage, "pointerup", 208, 500);
+  expect(stage.dataset.open).toBe("true");
+  vi.advanceTimersToNextFrame();
+  expect(stage.style.getPropertyValue("--drawer-progress")).toBe("");
 });

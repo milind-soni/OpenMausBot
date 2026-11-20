@@ -3798,6 +3798,10 @@ button:disabled.bg-danger {
 }
 
 @media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion="true"]) [data-preview-track]:not([data-preview-dragging]) {
+    transition: transform 200ms ease-out;
+  }
+
   :root:not([data-reduced-motion="true"]) .preview-zoom-transition {
     transition: transform 220ms ease-out;
   }
