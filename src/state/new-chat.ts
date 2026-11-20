@@ -2,7 +2,7 @@ import type { Dispatch } from "react";
 import type { Action, AppState, Bot } from "./store";
 
 /** A blank new chat with one bot: shown in place of its open conversation and made into one by the first send. */
-export type NewChat = { botId: string; projectId?: string; held: HeldAction[] };
+export type NewChat = { session: number; botId: string; projectId?: string; held: HeldAction[] };
 type HeldAction = Extract<Action, { type: "setModel" } | { type: "updateTask" }>;
 
 const THREAD_PREFIX = "new-chat-";
@@ -16,7 +16,7 @@ const LEAVING = new Set<Action["type"]>(["select", "switchTask", "taskSwitched",
 export function reduceNewChat(state: AppState, action: Action): [state: AppState, done: boolean] {
   const open = state.newChat ?? null;
   if (action.type === "newTask" && action.cwd === undefined) {
-    if (open?.botId !== action.botId) return [{ ...state, newChat: { botId: action.botId, projectId: action.projectId, held: [] } }, false];
+    if (open?.botId !== action.botId) return [{ ...state, newChat: { session: action.blankChat ?? 0, botId: action.botId, projectId: action.projectId, held: [] } }, false];
     return [open.projectId === action.projectId ? state : { ...state, newChat: { ...open, projectId: action.projectId } }, false];
   }
   if ("threadId" in action && isNewChatThread(action.threadId)) {
@@ -54,24 +54,27 @@ type Effects = {
 };
 
 /** The store's effects for the blank chat, answering true for an action they took. While a bot's blank chat is open, a
- * send to the conversation it covers goes into the blank chat too. The first send makes the conversation, once per bot
- * however many arrive while it is being made, then each is sent into it. */
+ * send to the conversation it covers goes into the blank chat too. The first send makes the conversation, once per blank
+ * chat however many arrive while it is being made, then each is sent into it. The conversation opens only if the person
+ * is still in that blank chat when it is made. */
 export function createNewChat(effects: Effects) {
-  const making = new Map<string, Promise<string>>();
+  const making = new Map<number, Promise<string>>();
+  let sessions = 0;
   const make = (open: NewChat) => {
     const made = effects.create(open.botId, open.projectId).then(({ bot }) => {
-      effects.dispatch({ type: "taskSwitched", bot });
-      for (const held of open.held) effects.dispatch({ ...held, threadId: bot.threadId });
+      const now = effects.state().newChat, stillOpen = now?.session === open.session && now.botId === open.botId;
+      if (stillOpen) effects.dispatch({ type: "taskSwitched", bot });
+      for (const held of stillOpen ? now.held : open.held) effects.dispatch({ ...held, threadId: bot.threadId });
       return bot.threadId;
     });
-    making.set(open.botId, made);
-    void made.finally(() => making.delete(open.botId)).catch(() => {});
+    making.set(open.session, made);
+    void made.finally(() => making.delete(open.session)).catch(() => {});
     return made;
   };
   return (action: Action): boolean => {
     if (action.type === "newTask" && action.cwd === undefined) {
       effects.navigated(action.botId);
-      effects.rawDispatch(action);
+      effects.rawDispatch({ ...action, blankChat: ++sessions });
       focusComposer();
       return true;
     }
@@ -82,7 +85,7 @@ export function createNewChat(effects: Effects) {
       effects.rawDispatch(action);
       return true;
     }
-    const made = making.get(action.botId) ?? (open?.botId === action.botId ? make(open) : null);
+    const made = open?.botId === action.botId ? making.get(open.session) ?? make(open) : null;
     if (!made) {
       action.onError?.();
       return true;

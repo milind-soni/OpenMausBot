@@ -691,7 +691,7 @@ export type Action =
       rememberCommand?: boolean;
       onError?: (message: string) => void;
     }
-  | { type: "newTask"; botId: string; projectId?: string; cwd?: string; onCreated?: () => void; onError?: (message: string) => void }
+  | { type: "newTask"; botId: string; projectId?: string; cwd?: string; onCreated?: () => void; onError?: (message: string) => void; blankChat?: number }
   | { type: "switchTask"; botId: string; threadId: string; whole?: true }
   | { type: "switchTaskFailed"; botId: string; threadId: string }
   | { type: "taskSwitched"; bot: Bot }

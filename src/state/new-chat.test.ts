@@ -214,6 +214,52 @@ describe("a new conversation opens blank and is made by its first send", () => {
     await vi.waitFor(() => expect(taskPatches).toEqual(["/api/bots/bot/tasks/made"]));
   });
 
+  it("keeps the conversation the person moved to while the first send was making one, and still sends into the new one", async () => {
+    let answer!: () => void;
+    createAnswer = new Promise((resolve) => { answer = () => resolve(json({ bot: { ...bot("made", ["a", "made"]), messages: [] } }, 201)); });
+    openBlank();
+    send("First");
+    await settle();
+    flushSync(() => dispatch({ type: "switchTask", botId: "bot", threadId: "a" }));
+    await vi.waitFor(() => expect(pepper().switchingTo).toBeUndefined());
+    answer();
+    await vi.waitFor(() => expect(sends).toHaveLength(1));
+
+    expect(pepper().threadId).toBe("a");
+    expect(sends[0]).toMatchObject({ threadId: "made", text: "First" });
+  });
+
+  it("applies a model picked while the first send is making the conversation", async () => {
+    let answer!: () => void;
+    createAnswer = new Promise((resolve) => { answer = () => resolve(json({ bot: { ...bot("made", ["a", "made"]), messages: [] } }, 201)); });
+    const picked = { instanceId: "fake", model: "late" };
+    openBlank();
+    send("First");
+    await settle();
+    flushSync(() => dispatch({ type: "setModel", botId: "bot", threadId: DRAFT, selection: picked }));
+    answer();
+    await vi.waitFor(() => expect(sends).toHaveLength(1));
+
+    expect(pepper().tasks?.find((task) => task.threadId === "made")?.modelSelection).toEqual(picked);
+  });
+
+  it("makes a separate conversation for a blank chat opened again while the last one's was still being made", async () => {
+    let answer!: () => void;
+    createAnswer = new Promise((resolve) => { answer = () => resolve(json({ bot: { ...bot("made", ["a", "made"]), messages: [] } }, 201)); });
+    openBlank("folder-1");
+    send("In folder one");
+    await settle();
+    flushSync(() => dispatch({ type: "select", id: "other" }));
+    createAnswer = null;
+    openBlank("folder-2");
+    send("In folder two");
+    await vi.waitFor(() => expect(creates).toHaveLength(2));
+    answer();
+    await vi.waitFor(() => expect(sends).toHaveLength(2));
+
+    expect(creates).toEqual([{ projectId: "folder-1" }, { projectId: "folder-2" }]);
+  });
+
   it("makes the conversation in the folder the blank chat was opened from", async () => {
     openBlank("folder-1");
     send("Hi");
