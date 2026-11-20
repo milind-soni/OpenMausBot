@@ -69,7 +69,8 @@ function backendProxy(mode: string, port: number, env: Record<string, string>): 
       const host = request.headers.host;
       if (request.headers.origin !== `http://${host}`) return;
       const address = request.socket.localAddress;
-      if (host === `127.0.0.1:${port}` || (address && isIPv4(address) && host === `${address}:${port}`)) {
+      const localAlias = host === `localhost:${port}` && !networkPeer(request);
+      if (localAlias || host === `127.0.0.1:${port}` || (address && isIPv4(address) && host === `${address}:${port}`)) {
         request.headers.origin = target.origin;
       }
     },
