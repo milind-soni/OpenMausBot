@@ -53,6 +53,7 @@ const READS: Record<string, number> = {
   "src/components/EngineBrowserSignIn.tsx": 1,
   "src/components/EngineSetup.tsx": 5,
   "src/components/EngineUsage.tsx": 3,
+  "src/components/FilePreviewPanel.tsx": 1,
   "src/components/FilesView.tsx": 2,
   "src/components/FirstReplyRescueRow.tsx": 1,
   "src/components/ForkPanel.tsx": 1,
