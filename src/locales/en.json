@@ -5423,6 +5423,8 @@
   "computer.mac.permission.accessibilitySettings": "Open Accessibility Settings",
   "computer.mac.permission.relaunch": "Relaunch {app}",
   "computer.mac.permission.driverDetail": "Driver detail",
+  "computer.mac.needsMacOS.title": "This Mac needs a newer macOS",
+  "computer.mac.needsMacOS.body": "Bots can use this computer once it runs macOS {version} or later.",
   "computer.phase.vmUnavailable": "The private desktop isn't available for this bot",
   "computer.phase.error": "Couldn't reach the bot's screen",
   "computer.resizeAria": "Resize panel",

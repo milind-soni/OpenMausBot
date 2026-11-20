@@ -68,8 +68,8 @@ afterEach(async () => {
 });
 const pause = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Darwin 22 is macOS 13: an older Mac stops at the gate before any of this.
-describe.skipIf(process.platform !== "darwin" || Number(os.release().split(".")[0]) < 22)("the Mac driver dies after it started", () => {
+// Darwin 24 is macOS 15: an older Mac stops at the gate before any of this.
+describe.skipIf(process.platform !== "darwin" || Number(os.release().split(".")[0]) < 24)("the Mac driver dies after it started", () => {
   it("leaves a driver that answers alone", async () => {
     await cua.startCua();
     await pause();

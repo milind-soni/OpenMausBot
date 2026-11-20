@@ -1,4 +1,5 @@
 import { t } from "@/lib/i18n";
+import { macOSRequirement } from "@/lib/mac-cua-permissions";
 import type { Bot, InstanceInfo } from "@/state/store";
 
 export function instanceSupportsLocalComputer(
@@ -50,6 +51,8 @@ export function localComputerDisabledReason({
   if (capabilities.host.label === "Browser") return t("computer.problem.localNeedsApp");
   if (capabilities.host.platform === "win32") return t("computer.problem.localWindows");
   if (capabilities.localComputer.reasonCode === "macos-version-unsupported") return t("computer.problem.localMacTooOld");
+  const required = macOSRequirement(capabilities.localComputer.message);
+  if (required) return t("computer.mac.needsMacOS.body", { version: required });
   return t("computer.problem.localMac");
 }
 

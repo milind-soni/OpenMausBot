@@ -102,22 +102,25 @@ afterEach(async () => {
   rmSync(fixture.home, { recursive: true, force: true });
 });
 
-it("skips computer use on a Mac older than macOS 13 before launching anything", async () => {
-  const platform = Object.getOwnPropertyDescriptor(process, "platform");
-  const release = vi.spyOn(os, "release").mockReturnValue("21.6.0");
-  try {
-    Object.defineProperty(process, "platform", { ...platform, value: "darwin" });
-    await expect(cua.startCua()).resolves.toEqual({ mode: "unavailable", reason: "computer use needs macOS 13 or later" });
-    expect(fixture.hosts).toHaveLength(0);
-    expect(fixture.calls).toHaveLength(0);
-  } finally {
-    Object.defineProperty(process, "platform", platform);
-    release.mockRestore();
-  }
-});
+// Darwin 21 is macOS 12 and Darwin 23 is macOS 14: the pinned SDK links ScreenCaptureKit classes from 14 and 15, so neither reaches a launch.
+for (const [releaseVersion, macos] of [["21.6.0", "12"], ["23.6.0", "14"]]) {
+  it(`skips computer use on macOS ${macos} before launching anything`, async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, "platform");
+    const release = vi.spyOn(os, "release").mockReturnValue(releaseVersion);
+    try {
+      Object.defineProperty(process, "platform", { ...platform, value: "darwin" });
+      await expect(cua.startCua()).resolves.toEqual({ mode: "unavailable", reason: "computer use needs macOS 15 or later" });
+      expect(fixture.hosts).toHaveLength(0);
+      expect(fixture.calls).toHaveLength(0);
+    } finally {
+      Object.defineProperty(process, "platform", platform);
+      release.mockRestore();
+    }
+  });
+}
 
-// Darwin 22 is macOS 13: an older Mac stops at the gate before any of these launches.
-describe.skipIf(process.platform !== "darwin" || Number(os.release().split(".")[0]) < 22)("async standalone CUA launch (isolated commands)", () => {
+// Darwin 24 is macOS 15: an older Mac stops at the gate before any of these launches.
+describe.skipIf(process.platform !== "darwin" || Number(os.release().split(".")[0]) < 24)("async standalone CUA launch (isolated commands)", () => {
   it("keeps the event loop responsive and publishes the existing descriptor shape", async () => {
     let ticks = 0;
     const timer = setInterval(() => ticks++, 10);

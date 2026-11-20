@@ -5079,6 +5079,8 @@
   "computer.phase.vpsIncompatible": "O desktop na sua própria máquina é de uma versão anterior do app {app}",
   "computer.phase.vpsStopped": "O desktop na sua própria máquina está parado",
   "computer.phase.localUnavailable": "O controle do computador local não está pronto.",
+  "computer.mac.needsMacOS.title": "Este Mac precisa de um macOS mais recente",
+  "computer.mac.needsMacOS.body": "Os bots poderão usar este computador quando ele tiver o macOS {version} ou superior.",
   "computer.mac.permission.requiredOne": "O app {app} precisa de {permission} para usar este computador. Conceda a permissão em Ajustes do Sistema → Privacidade e Segurança e reabra o app {app}.",
   "computer.mac.permission.requiredBoth": "O app {app} precisa de Gravação de Tela e Acessibilidade para usar este computador. Conceda as permissões em Ajustes do Sistema → Privacidade e Segurança e reabra o app {app}.",
   "computer.mac.permission.generic": "O controle do computador local não está pronto. O app {app} precisa de Acessibilidade e Gravação de Tela para usar este Mac. Confira Detalhes do driver ou Ajustes do Sistema e clique em Tentar novamente.",

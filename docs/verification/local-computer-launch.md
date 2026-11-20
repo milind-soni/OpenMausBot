@@ -44,12 +44,12 @@ The Electron subprocess ratchet permits only the pre-existing cached boot-ID
 read and Linux private-group lookup. Those synchronous ownership checks remain
 outside this narrow change; the active macOS launch/status calls are asynchronous.
 
-A Mac older than macOS 13 never reaches those launches: `startCua` publishes
-"computer use needs macOS 13 or later" before it loads the SDK, which a test in
+A Mac older than macOS 15 never reaches those launches: `startCua` publishes
+"computer use needs macOS 15 or later" before it loads the SDK, which a test in
 that file pins, and the launch checks skip there. `node scripts/prepare-cua.mjs`
 reads `minos` of every staged native file with `otool -l` and fails when one needs
-a newer macOS than `CUA_MIN_MACOS`; it cannot run on a Mac older than macOS 13,
-because it starts the driver to read its version.
+a newer macOS than `CUA_MIN_MACOS`; it cannot run on a Mac where that driver
+cannot load, because it starts the driver to read its version.
 
 Reference: OpenClaw's [macOS host coordinator](https://github.com/openclaw/openclaw/blob/7e1b9a63cf64fa5e77b92a7f77e8fccba7b61812/apps/macos/Sources/OpenClaw/CuaDriverHostCoordinator.swift)
 keeps the daemon owned by the desktop host, and its
