@@ -4057,7 +4057,12 @@
       "server.checkBack.started": "65fea36da026916e99f81c23b26bd6204cd870d003bdde01b25e43f0fe8704c3",
       "server.checkBack.cancelled": "2bc90e45e77b2d3a20a1d8a3bd9c6674080fb2897563103dcfdde6e267a33f22",
       "server.checkBack.failed": "cab3bc124333339d06dc937a01b485c192040fad067a74e7558db8df3e2b0dda",
-      "computer.problem.localMacTooOld": "bf3b76c9975f9e324731f76a694f19ebab0ef4dad5758b77176547c5953fc9ed"
+      "computer.problem.localMacTooOld": "bf3b76c9975f9e324731f76a694f19ebab0ef4dad5758b77176547c5953fc9ed",
+      "voice.hearWithEleven": "0e179499c302bb4e934abef524b14055911d4944188e205d34e7afadad716484",
+      "voice.hearWithEleven.help": "fb2aab6844f1ecd9bbbb92b589062d6317fbfa2c1384b4c3ceb4e9f88f49c53a",
+      "voice.hearLanguage": "e0e77e5c6f38efbd4bbb93e7b7641c5de9f88214c48133d6582fd0149cf8cbef",
+      "voice.hearLanguage.help": "4047e2f61649a10025e8c030a9d3c0ba5a7f8af7704cf8ecad42ab589549c39e",
+      "voice.hearLanguage.auto": "836e5a7f8e818a97ddea1777b429755700ce1fc997f931e980501fa271b17d8f"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37237,7 +37242,13 @@
       "cloudAccount.unsaved": "69f16bd2ad4856e040d928ce9482507b14e26f66c500287859c8634ef6117149",
       "homeScreen.offlineNetwork": "f628e51f2e014252ca9826b7828fb417ad2895267a42716fb41e7140615154c8",
       "computer.problem.localMacTooOld": "bf3b76c9975f9e324731f76a694f19ebab0ef4dad5758b77176547c5953fc9ed",
-      "homeScreen.offlineWait": "7de832bcc189e9fa19b386a0a67d938840772d5500985c835fa1db1afee4d49f"
+      "homeScreen.offlineWait": "7de832bcc189e9fa19b386a0a67d938840772d5500985c835fa1db1afee4d49f",
+      "voice.hearWithEleven": "0e179499c302bb4e934abef524b14055911d4944188e205d34e7afadad716484",
+      "voice.hearWithEleven.help": "fb2aab6844f1ecd9bbbb92b589062d6317fbfa2c1384b4c3ceb4e9f88f49c53a",
+      "voice.hearLanguage": "e0e77e5c6f38efbd4bbb93e7b7641c5de9f88214c48133d6582fd0149cf8cbef",
+      "voice.hearLanguage.help": "4047e2f61649a10025e8c030a9d3c0ba5a7f8af7704cf8ecad42ab589549c39e",
+      "voice.hearLanguage.auto": "836e5a7f8e818a97ddea1777b429755700ce1fc997f931e980501fa271b17d8f",
+      "call.mode.turnsHintEleven": "7e6acaf1930622f9d5cfe37b70dcd2c22ca99c5aacb16f624af9d71fa79bf2eb"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

@@ -8,6 +8,7 @@ import { t } from "@/lib/i18n";
 import { BoatOfferPanel } from "../BoatOffer";
 import { LiveProviderSettings } from "../LiveProviderSettings";
 import { VoiceEveryReplySetting } from "../VoiceEveryReplySetting";
+import { VoiceHearingSetting } from "../VoiceHearingSetting";
 import { BuiltInReplyWait, LmStudioServer, OtherOpenAiCompatServers } from "../OpenAiCompatServers";
 import { OllamaServer } from "../OllamaServer";
 import { KEY_CATALOG, KEY_SECTIONS, keyHidden, keyMatches, savedState, type KeyEntry, type KeyId, type KeySectionId } from "./key-catalog";
@@ -107,6 +108,7 @@ function KeySection({ id, rows, open, onToggle }: { id: KeySectionId; rows: KeyE
       <div id={bodyId} hidden={!open} className="flex flex-col gap-0.5 border-t border-hairline/40 px-1 py-1.5 in-data-[settings-look=simple]:border-t-[0.5px] in-data-[settings-look=simple]:border-(--settings-edge)">
         {rows.map((entry) => <KeyCatalogRow key={entry.id} entry={entry} visible={open} />)}
         {id === "voice" && <VoiceEveryReplySetting />}
+        {id === "voice" && <VoiceHearingSetting />}
       </div>
     </section>
   );
@@ -180,6 +182,7 @@ export function KeysPage({ bare = false, exclude = [] }: { bare?: boolean; exclu
                 <div data-keys-section={id} className="flex flex-col gap-0.5 py-1.5">
                   {sectionRows.map((entry) => <KeyCatalogRow key={entry.id} entry={entry} visible={open.has(id)} />)}
                   {id === "voice" && <VoiceEveryReplySetting />}
+                  {id === "voice" && <VoiceHearingSetting />}
                 </div>
               </SettingsFoldRow>
             );

@@ -192,9 +192,10 @@ export function synthesize(text: string, voiceId: string, key: string, api: stri
 }
 
 /** Speech-to-text with Scribe, for listening where no Fish Audio key is saved. Only the person's own key comes here. */
-export async function transcribe(audio: Uint8Array, mime: string, key: string, api: string): Promise<string> {
+export async function transcribe(audio: Uint8Array, mime: string, key: string, api: string, language?: string): Promise<string> {
   const form = new FormData();
   form.append("model_id", HEARING_MODEL);
+  if (language) form.append("language_code", language);
   form.append("tag_audio_events", "false");
   form.append("file", new Blob([audio as Uint8Array<ArrayBuffer>], { type: mime }), "speech.wav");
   let res: Response;
