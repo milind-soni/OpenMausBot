@@ -300,6 +300,20 @@ describe("Antigravity subscription limits", () => {
     expect(all.every((window) => window.kind === "other" && window.windowDurationMins === undefined)).toBe(true);
   });
 
+  it("keeps Argon and Carbon apart from Gemini's own allowance in the model quotas", async () => {
+    const { windows } = fixture({
+      summaryStatus: 404,
+      models: { models: {
+        "gemini-a": { modelProvider: "MODEL_PROVIDER_GOOGLE", weeklyQuotaInfo: { remainingFraction: 0.75, resetTime: "2026-10-12T12:00:00Z" } },
+        "gemini-4-argon": { modelProvider: "MODEL_PROVIDER_GOOGLE", weeklyQuotaInfo: { remainingFraction: 0, resetTime: "2026-10-11T12:00:00Z" } },
+        "gemini-4-carbon": { modelProvider: "MODEL_PROVIDER_GOOGLE", weeklyQuotaInfo: { remainingFraction: 0.5, resetTime: "2026-10-13T12:00:00Z" } },
+      } },
+    });
+    const row = antigravityPlanWindows(await windows());
+    expect(row.weekly).toMatchObject({ usedPercent: 25, resetsAt: "2026-10-12T12:00:00.000Z" });
+    expect(row.models.map((model) => [model.name, model.windows.map((window) => window.usedPercent)])).toEqual([["Gemini Argon", [100]], ["Gemini Carbon", [50]]]);
+  });
+
   it("skips disabled and missing fractions and clamps valid percentages", async () => {
     const { windows } = fixture({
       summary: { buckets: [
