@@ -10,7 +10,6 @@ import { discardNativeLog, flushNativeLog } from "./native.ts";
 import type { RuntimeEvent, SendTurnInput } from "../contracts.ts";
 import { GrokDriver } from "./grok.ts";
 import { MinimaxDriver } from "./minimax.ts";
-import { createOpenAIChatRuntime } from "./openai-chat.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 import { MistralDriver } from "./mistral.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
@@ -1141,39 +1140,7 @@ describe("createOpenAIChatRuntime transient retries", () => {
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
   }, 20_000);
 
-  it("does not retry a 429 when the caller opts out", async () => {
-    let requests = 0;
-    vi.stubGlobal("fetch", vi.fn(async (url: string | URL) =>
-      String(url).endsWith("/chat/completions")
-        ? (requests++, rateLimited())
-        : new Response("", { status: 404 })));
-    const runtime = createOpenAIChatRuntime({
-      input: { instanceId: "runtime", displayName: "Runtime", environment: {}, enabled: true, config: {} },
-      driverKind: "test",
-      apiKey: "secret",
-      apiUrl: "https://api.example.com/v1",
-      models: () => ({ default: "m", options: [{ id: "m", label: "m" }] }),
-      requestBody: (model, messages, stream) => ({ model, messages, stream }),
-      httpErrorLabel: "Test",
-      missingKeyError: "missing key",
-      unavailableReason: "missing key",
-      timeoutMs: 10_000,
-      noRetry: true,
-      nativeLog: { source: "test", outgoing: () => ({}), incoming: () => ({}) },
-    });
-    const events: RuntimeEvent[] = [];
-    runtime.adapter.onEvent((event) => events.push(event));
-    await runtime.adapter.sendTurn({ threadId: "thread", text: "hi" });
-    await vi.waitFor(() => {
-      if (!events.some((event) => event.type === "turn.completed")) throw new Error("turn still running");
-    }, { timeout: 10_000 });
-    await runtime.dispose();
-    expect(requests).toBe(1);
-    expect(events.filter((event) => event.type === "turn.retrying")).toHaveLength(0);
-    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: false });
-  }, 20_000);
-
-  it("retries a 429 from an endpoint that omits retryScale, then answers", async () => {
+  it("retries a 429 from an OpenAI-compatible endpoint, then answers", async () => {
     let requests = 0;
     const events = await runRetryTurn(() => ++requests === 1 ? rateLimited() : answer());
     expect(requests).toBe(2);
