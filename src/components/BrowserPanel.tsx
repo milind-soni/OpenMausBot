@@ -187,6 +187,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     } else if (message.type === "starting") {
       setStarting(true);
     } else if (message.type === "asleep" || message.type === "awake") {
+      if (message.type === "asleep") pageNow.current = null;
       setAsleep(message.type === "asleep" ? "asleep" : "");
     }
   }, []);

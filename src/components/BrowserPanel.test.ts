@@ -416,6 +416,24 @@ describe("what the person does in the panel", () => {
     await flush();
     expect(socket.sent.at(-1)).toEqual({ type: "navigate", url: "https://accounts.example.com/login" });
   });
+  it("opens the sign-in page on the woken browser's blank tab, not the page it had before sleeping", async () => {
+    await render({ signIn: { url: "https://accounts.example.com/login", site: "example.com", nonce: 1 } });
+    const socket = FakeSocket.instances.at(-1)!;
+    await act(async () => {
+      socket.open();
+      socket.message({ type: "tabs", tabs: [{ tabId: "t1", title: "Docs", url: "https://docs.example.com/", active: true }] });
+      socket.control("unclaimed");
+      socket.message({ type: "asleep" });
+    });
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }]);
+    await act(async () => socket.message({ type: "awake" }));
+    await flush();
+    await act(async () => socket.message({ type: "tabs", tabs: [{ tabId: "t2", title: "", url: "about:blank", active: true }] }));
+    await act(async () => socket.control("you"));
+    await flush();
+    expect(socket.sent.at(-1)).toEqual({ type: "navigate", url: "https://accounts.example.com/login" });
+  });
 });
 
 describe("a published page's Open", () => {
