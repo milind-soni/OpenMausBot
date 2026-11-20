@@ -8,7 +8,7 @@ import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInf
 import { cn } from "@/lib/cn";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { useMenuMotion } from "./MenuMotion";
-import { ELEVATED_CARD, ELEVATED_FLOAT } from "./elevated";
+import { ELEVATED_CARD, ELEVATED_COMPOSER, ELEVATED_FLOAT } from "./elevated";
 import { uploadDraftImage } from "@/lib/composer-uploads";
 import { intakeFilesWithNotice } from "@/lib/attach-notice";
 import { activeLocale, t } from "@/lib/i18n";
@@ -778,7 +778,7 @@ export function Composer({
             data-composer-backdrop
             className={cn("pointer-events-none absolute -left-4 -right-4 bg-app", advanced ? "-bottom-3 top-1/2" : cn("top-0", simpleDock ? "-bottom-4" : "-bottom-3"))}
           />
-        <div ref={shellRef} data-tour="composer" data-look="composer" data-multiline={multiline ? "" : undefined} className={cn("@container/composer relative z-[1]", singleRow ? "flex items-end gap-2" : simpleDock ? cn(SIMPLE_COMPOSER, multiline ? "rounded-[18px]" : "rounded-[22px]") : cn("rounded-[18px] px-2 pb-2 pt-2.5", ELEVATED_FLOAT))}>
+        <div ref={shellRef} data-tour="composer" data-look="composer" data-multiline={multiline ? "" : undefined} className={cn("@container/composer relative z-[1]", singleRow ? "flex items-end gap-2" : simpleDock ? cn(SIMPLE_COMPOSER, multiline ? "rounded-[18px]" : "rounded-[22px]") : cn("rounded-[18px] px-2 pb-2 pt-2.5", ELEVATED_COMPOSER))}>
         {singleRow && !locked && (
           <div className="flex shrink-0 items-center">
             <PhonePlus
