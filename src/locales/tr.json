@@ -1911,7 +1911,7 @@
   "attach.retryAria": "{name} yüklemesini yeniden dene",
   "attach.imageUnavailable": "Görsel kullanılamıyor",
   "attach.imageOutsideWorkspace": "Bu görsel, bu sohbetin çalışma klasörünün dışında olduğu için burada gösterilemiyor",
-  "attach.previewOutsideWorkspace": "Bu dosya, bu sohbetin çalışma klasörünün dışında olduğu için burada açılamıyor",
+  "attach.previewOutsideWorkspace": "Bu dosya, bu sohbetin çalışma klasörünün dışında olduğu için burada açılamıyor. Dosyayı kaydeden bottan bir kopyasını eklemesini isteyin.",
   "attach.previewImageAria": "Eklenen {name} resmini önizle",
   "attach.externalHidden": "Harici resim gizlilik nedeniyle gizlendi",
   "attach.savedTo": "{path} konumuna kaydedildi",

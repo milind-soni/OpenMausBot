@@ -9,7 +9,7 @@ export function OutsideWorkspacePreview({ filePath }: { filePath: string }) {
     <div className="p-8 text-center text-sm">
       <p role="alert" className="mb-3 text-ink-secondary">{t("attach.previewOutsideWorkspace")}</p>
       {!revealable && <p className="mb-1 text-[12px] text-ink-secondary">{t("attach.outsideWorkspacePath")}</p>}
-      <div className="flex flex-wrap items-center justify-center gap-x-1.5 text-[12px]"><OutsideWorkspaceFile filePath={filePath} /></div>
+      <div className="flex flex-wrap items-center justify-center gap-x-1.5 text-[12px]"><OutsideWorkspaceFile filePath={filePath} standalone /></div>
     </div>
   );
 }

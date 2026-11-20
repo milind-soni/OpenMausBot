@@ -2524,7 +2524,7 @@
   "attach.retryAria": "{name} 다시 불러오기",
   "attach.imageUnavailable": "이미지를 볼 수 없음",
   "attach.imageOutsideWorkspace": "이 사진은 이 채팅의 작업 폴더 밖에 있어서 여기에 표시할 수 없어요",
-  "attach.previewOutsideWorkspace": "이 파일은 이 채팅의 작업 폴더 밖에 있어서 여기서 열 수 없어요",
+  "attach.previewOutsideWorkspace": "이 파일은 이 채팅의 작업 폴더 밖에 있어서 여기서 열 수 없어요. 파일을 저장한 봇에게 사본을 첨부해 달라고 요청하세요.",
   "attach.previewImageAria": "첨부 이미지 {name} 미리보기",
   "attach.externalHidden": "개인정보 보호를 위해 외부 이미지를 숨겼어요",
   "attach.savedTo": "{path}에 저장됨",

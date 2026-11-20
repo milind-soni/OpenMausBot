@@ -422,7 +422,7 @@ export function revealBridge(): NonNullable<Window["ogb"]>["revealInFolder"] {
   return ogb?.remoteClient?.active ? undefined : ogb?.revealInFolder;
 }
 
-export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
+export function OutsideWorkspaceFile({ filePath, standalone = false }: { filePath: string; standalone?: boolean }) {
   const [problem, setProblem] = useState("");
   const reveal = revealBridge();
   if (!reveal || !REVEALABLE_PATH.test(filePath)) {
@@ -448,7 +448,7 @@ export function OutsideWorkspaceFile({ filePath }: { filePath: string }) {
         type="button"
         onClick={() => void show()}
         title={filePath}
-        className="inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent"
+        className={`${standalone ? "min-h-8 " : ""}inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent`}
       >
         <FolderOpen size={12} className="shrink-0" aria-hidden="true" />
         {t("attach.showInFolder")}

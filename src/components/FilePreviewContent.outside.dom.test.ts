@@ -44,7 +44,7 @@ describe("a previewed file outside the chat's folders", () => {
   for (const { kind, extension } of files) {
     it(`${kind}: says why it can't open and offers no Save or Retry that would fail the same way`, async () => {
       const fetch = await show(kind, extension, outside);
-      expect(host.querySelector("[role=alert]")!.textContent).toBe("This file is outside this chat's working folder, so it can't be opened here");
+      expect(host.querySelector("[role=alert]")!.textContent).toBe("This file is outside this chat's working folder, so it can't be opened here. Ask the bot that saved it to attach a copy.");
       expect(buttons()).toEqual([]);
       expect(host.textContent).toContain("Find this file at this path on the computer running");
       expect(host.querySelector("code")?.textContent).toBe(`${onDisk}${extension}`);
@@ -71,7 +71,7 @@ describe("a previewed file outside the chat's folders", () => {
   it("speaks the person's language", async () => {
     setLocale("de");
     await show("markdown", ".md", outside);
-    expect(host.querySelector("[role=alert]")!.textContent).toBe("Diese Datei liegt außerhalb des Arbeitsordners dieses Chats und kann hier nicht geöffnet werden");
+    expect(host.querySelector("[role=alert]")!.textContent).toBe("Diese Datei liegt außerhalb des Arbeitsordners dieses Chats und kann hier nicht geöffnet werden. Bitte den Bot, der sie gespeichert hat, eine Kopie anzuhängen.");
   });
 });
 

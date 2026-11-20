@@ -1911,7 +1911,7 @@
   "attach.retryAria": "Thử tải lại {name}",
   "attach.imageUnavailable": "Hình ảnh không khả dụng",
   "attach.imageOutsideWorkspace": "Hình ảnh này nằm ngoài thư mục làm việc của cuộc trò chuyện này, vì vậy không thể hiển thị ở đây",
-  "attach.previewOutsideWorkspace": "Tệp này nằm ngoài thư mục làm việc của cuộc trò chuyện này, vì vậy không thể mở ở đây",
+  "attach.previewOutsideWorkspace": "Tệp này nằm ngoài thư mục làm việc của cuộc trò chuyện này, vì vậy không thể mở ở đây. Hãy nhờ bot đã lưu tệp đính kèm một bản sao.",
   "attach.previewImageAria": "Xem trước hình ảnh đính kèm {name}",
   "attach.externalHidden": "Hình ảnh bên ngoài bị ẩn vì lý do quyền riêng tư",
   "attach.savedTo": "Đã lưu vào {path}",
