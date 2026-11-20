@@ -104,3 +104,21 @@ describe("review: the Computer panel's recently changed files on a tailed bot (o
     stop();
   });
 });
+
+describe("review: a genuinely new row whose server time is behind the tail's first row", () => {
+  const rows = Array.from({ length: 20 }, (_, k) => ({ id: `r${k}`, at: 1_000_000 + k, parentId: k ? `r${k - 1}` : "r-1", role: "bot", kind: "text", text: `r${k}` }) as Message);
+  const bot = { id: "b", threadId: "t", name: "B", messages: rows, hasMore: true, activeLeafId: "r19", tasks: [] } as unknown as Bot;
+  const other = { id: "o", threadId: "ot", name: "O", messages: [], hasMore: false, tasks: [] } as unknown as Bot;
+  const land = (message: Partial<Message>) => reducer({ ...initialState, bots: [bot, other], selectedId: "o", activeView: "chat" },
+    { type: "messageAdded", threadId: "t", message: { id: "new", at: 999_000, role: "bot", kind: "text", text: "NEW REPLY", ...message } as Message }).bots[0]!;
+
+  it("is kept (server clock stepped back a second)", () => {
+    expect(land({ parentId: "r19" }).messages.at(-1)?.id).toBe("new");
+  });
+
+  it("is kept when it continues any held row, or names no parent at all", () => {
+    expect(land({ parentId: "r7" }).messages.at(-1)?.id).toBe("new");
+    expect(land({ parentId: null }).messages.at(-1)?.id).toBe("new");
+    expect(land({}).messages.at(-1)?.id).toBe("new");
+  });
+});

@@ -100,10 +100,11 @@ describe("a conversation the snapshot sent as a short tail", () => {
       store.dispatch(select);
       await settle();
       expect(asked, select.type).toEqual([{ type: "loadOlderMessages", threadId: "work" }]);
+      store.dispatch({ type: "loadOlderMessages", threadId: "work" });
       store.dispatch({ type: "select", id: "reader" });
       store.dispatch(select);
       await settle();
-      expect(asked, "once").toHaveLength(1);
+      expect(asked, "not again while its page is on the way").toHaveLength(1);
       stop();
     }
   });
@@ -124,6 +125,43 @@ describe("a conversation the snapshot sent as a short tail", () => {
     store.dispatch({ type: "threadActive", threadId: "work", activeLeafId: "elsewhere" });
     await settle();
     expect(asked).toEqual([{ type: "loadOlderMessages", threadId: "work" }]);
+    stop();
+  });
+
+  it("asks again after a failed page, at most once per opening, and stops once a page lands", async () => {
+    const bot = tailed(20);
+    const thread = worker(400).messages;
+    const { store, asked, stop, settle } = await follow({ ...initialState, bots: [reader, bot], selectedId: "reader", activeView: "chat" }, [bot]);
+    const fail = () => {
+      store.dispatch({ type: "loadOlderMessages", threadId: "work" });
+      store.dispatch({ type: "olderMessages", threadId: "work", generation: 0, before: "w0", messages: [], hasMore: true });
+    };
+    store.dispatch({ type: "select", id: "worker" });
+    await settle();
+    expect(asked).toHaveLength(1);
+    fail();
+    await settle();
+    expect(asked, "one more ask after a failed page").toHaveLength(2);
+    fail();
+    await settle();
+    expect(asked, "no loop").toHaveLength(2);
+
+    store.dispatch({ type: "select", id: "reader" });
+    store.dispatch({ type: "select", id: "worker" });
+    await settle();
+    expect(asked, "selected again: a fresh ask").toHaveLength(3);
+    store.dispatch({ type: "loadOlderMessages", threadId: "work" });
+    store.dispatch({ type: "olderMessages", threadId: "work", generation: 0, before: "w0", messages: thread.slice(0, 0), hasMore: true });
+    await settle();
+    expect(asked).toHaveLength(4);
+    const older = Array.from({ length: 200 }, (_, index) => ({ ...thread[0]!, id: `older-${index}` }));
+    store.dispatch({ type: "olderMessages", threadId: "work", generation: 0, before: "w0", messages: older, hasMore: true });
+    await settle();
+    expect(held(store.getState()).messages).toHaveLength(220);
+    store.dispatch({ type: "select", id: "reader" });
+    store.dispatch({ type: "select", id: "worker" });
+    await settle();
+    expect(asked, "landed: nothing more to ask").toHaveLength(4);
     stop();
   });
 

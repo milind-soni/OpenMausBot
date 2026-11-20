@@ -96,13 +96,16 @@ export const shortHeld = <T extends { messages: Message[]; hasMore?: boolean }>(
   Boolean(owner?.hasMore) && owner!.messages.length < MESSAGE_PAGE_SIZE;
 
 /** A row from before a short tail, landing in a conversation nobody has on screen (a frame queued while the snapshot was
- * read): appended, it would read as the newest row. The page before the tail brings it in order when the tail opens. */
+ * read): appended, it would read as the newest row. The page before the tail brings it in order when the tail opens.
+ * Only a row that is older than the tail and continues a row the tail does not hold counts: a row continuing the held
+ * rows is new, whatever its time says. */
 export function olderThanHeld(state: AppState, action: Action): boolean {
   if (action.type !== "messageAdded") return false;
   const owner = [...state.bots, ...state.groups].find((candidate) => candidate.threadId === action.threadId);
-  const first = owner?.messages[0];
-  return shortHeld(owner) && first !== undefined && action.message.at < first.at && !shownThread(state, action.threadId) &&
-    !owner.messages.some((message) => message.id === action.message.id);
+  const first = owner?.messages[0], parentId = action.message.parentId;
+  if (!shortHeld(owner) || first === undefined || action.message.at >= first.at || typeof parentId !== "string") return false;
+  if ("activeLeafId" in owner && owner.activeLeafId === parentId) return false;
+  return !shownThread(state, action.threadId) && !owner.messages.some((message) => message.id === action.message.id || message.id === parentId);
 }
 
 export function loadOlderPage(action: LoadOlderMessages, current: AppState, inFlight: Set<string>,

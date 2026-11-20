@@ -3,7 +3,7 @@ import { selectedOwner, shortHeld } from "./message-history";
 import type { Action, AppState, Message } from "./store";
 
 /** The conversations the last snapshot sent as a short tail, by the first row it sent, until the page before the tail
- * is asked for. */
+ * lands. */
 const tails = new Map<string, string>();
 
 export function noteSnapshotTails(owners: Iterable<{ threadId: string; messages: readonly { id: string }[] }>): void {
@@ -11,26 +11,55 @@ export function noteSnapshotTails(owners: Iterable<{ threadId: string; messages:
   for (const owner of owners) if (owner.messages[0]) tails.set(owner.threadId, owner.messages[0].id);
 }
 
+/** How often one opening of a tail asks for the page before it: the first ask, and one more after a failed or
+ * discarded answer. */
+const ASKS_PER_OPENING = 2;
+
 /**
  * Asks for the page before a snapshot's tail once the conversation is selected however that happens (a click, the team
  * map's computer, a bot's settings, a deletion moving the selection), or once its branch moves anywhere but onto a new
  * newest row (another client switching branches), since the rest of that branch may lie before the tail. Every request
- * goes through `loadOlderMessages`.
+ * goes through `loadOlderMessages`; selecting it again, or another branch move, starts a fresh round of asks.
  */
 export function followHeldTails(store: { getState(): AppState; subscribe(listener: () => void): () => void }, dispatch: (action: Action) => void): () => void {
   const leaves = new Map<string, string | null | undefined>();
+  const asks = new Map<string, number>();
+  const moved = new Set<string>();
+  const queued = new Set<string>();
+  let selectedThread: string | undefined;
   const check = () => {
     if (!tails.size) return;
     const state = store.getState();
     const selected = selectedOwner(state);
+    if (selected?.threadId !== selectedThread) {
+      selectedThread = selected?.threadId;
+      if (selectedThread) asks.delete(selectedThread);
+    }
     for (const owner of [...state.bots, ...state.groups]) {
-      if (tails.get(owner.threadId) !== owner.messages[0]?.id || !shortHeld(owner)) continue;
+      const threadId = owner.threadId, first = tails.get(threadId);
+      if (first === undefined) continue;
+      if (owner.messages[0]?.id !== first || !shortHeld(owner)) {
+        if (asks.has(threadId)) {
+          tails.delete(threadId);
+          asks.delete(threadId);
+          moved.delete(threadId);
+        }
+        continue;
+      }
       const leaf = "activeLeafId" in owner ? owner.activeLeafId : undefined;
-      const moved = leaves.has(owner.threadId) && leaves.get(owner.threadId) !== leaf;
-      leaves.set(owner.threadId, leaf);
-      if (state.loadingOlder[owner.threadId] || (owner !== selected && !(moved && leaf !== owner.messages.at(-1)?.id))) continue;
-      tails.delete(owner.threadId);
-      queueMicrotask(() => dispatch({ type: "loadOlderMessages", threadId: owner.threadId }));
+      if (leaves.has(threadId) && leaves.get(threadId) !== leaf && leaf !== owner.messages.at(-1)?.id) {
+        moved.add(threadId);
+        asks.delete(threadId);
+      }
+      leaves.set(threadId, leaf);
+      const asked = asks.get(threadId) ?? 0;
+      if ((owner !== selected && !moved.has(threadId)) || state.loadingOlder[threadId] || queued.has(threadId) || asked >= ASKS_PER_OPENING) continue;
+      asks.set(threadId, asked + 1);
+      queued.add(threadId);
+      queueMicrotask(() => {
+        queued.delete(threadId);
+        dispatch({ type: "loadOlderMessages", threadId });
+      });
     }
   };
   check();
