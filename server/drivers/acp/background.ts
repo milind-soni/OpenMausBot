@@ -51,45 +51,47 @@ export function acpBackgroundWork(scope: readonly string[], waitMs = 10_000): Ac
       const sessionId = session.sessionId;
       if (!sessionId) return;
       const can = session.initResult?.agentCapabilities?.sessionCapabilities ?? {};
-      if (!can.delete) return;
       const path = pathFor(threadId, sessionId);
-      if (deleted.has(path)) return;
+      if (deleted.has(path)) return true;
+      if (!can.delete) return false;
       const quietly = (method: string, params: unknown) => request(method, params, waitMs).catch(() => undefined);
       const deleteOriginal = async () => {
         await request("session/delete", { sessionId }, waitMs);
         deleted.add(path);
       };
       if (forkFor(threadId, sessionId)) {
-        await deleteOriginal().catch(() => undefined);
-        return;
+        return deleteOriginal().then(() => true, () => false);
       }
-      if (!can.fork) return;
+      if (!can.fork) return false;
       let fork: unknown;
       try {
         fork = (await request("session/fork", { sessionId, cwd: session.cwd, mcpServers: [] }, waitMs))?.sessionId;
       } catch {
-        return;
+        return false;
       }
-      if (typeof fork !== "string" || !fork || fork === sessionId) return;
+      if (typeof fork !== "string" || !fork || fork === sessionId) return false;
       try {
         mkdirSync(dir, { recursive: true, mode: 0o700 });
         writeFileAtomic(path, fork, { mode: 0o600 });
       } catch {
         await quietly("session/delete", { sessionId: fork });
-        return;
+        return false;
       }
+      let confirmed = false;
       try {
         await deleteOriginal();
+        confirmed = true;
       } catch (error) {
         // A lost response can leave the original deleted. Keep the fork unless ACP explicitly rejected the request.
         if (typeof (error as { code?: unknown } | null)?.code === "number") {
-          try { rmSync(path); } catch { return; }
+          try { rmSync(path); } catch { return false; }
           await quietly("session/delete", { sessionId: fork });
-          return;
+          return false;
         }
       }
       // The fork was opened without the bot's MCP servers: the next turn loads it with them.
       await quietly("session/close", { sessionId: fork });
+      return confirmed;
     },
   };
 }

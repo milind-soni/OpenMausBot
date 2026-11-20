@@ -393,15 +393,22 @@ describe("OpenCode catalog", () => {
       }
     });
 
-    it("leaves an OpenCode that cannot fork and delete sessions as it is", async () => {
-      const { instance, recorder, calls, steps, ask } = await start("opencode-background-no-fork", { FAKE_ACP_NO_FORK: "1" });
+    it("restarts OpenCode when Stop cannot end its background jobs through ACP", async () => {
+      const { instance, recorder, calls, steps } = await start("opencode-background-no-fork", { FAKE_ACP_NO_FORK: "1", FAKE_ACP_WAKE_MS: "5000" });
       const threadId = "t-opencode-background-no-fork";
       try {
-        expect(await ask(threadId, "build it")).toMatchObject({ ok: true });
-        const session = promptedSession(calls)!;
-        await until(() => steps() > 0);
-        expect(await ask(threadId, "and now?")).toMatchObject({ ok: true });
-        expect(promptedSession(calls)).toBe(session);
+        const first = await instance.adapter.sendTurn({ threadId, text: "build it STOP_ME", model: "opencode/big-pickle" });
+        await recorder.until((event) => event.turnId === first.turnId && event.type === "content.delta" && event.delta.includes("build started"));
+        const origin = calls().find((call) => call.method === "session/prompt")!;
+        expect(origin.sessionId).toBeTruthy();
+        await instance.adapter.interruptTurn(threadId);
+        expect(await recorder.until((event) => event.turnId === first.turnId && event.type === "turn.completed")).toMatchObject({ stopReason: "cancelled" });
+        const next = await instance.adapter.sendTurn({ threadId, text: "go on", model: "opencode/big-pickle", resumeCursor: origin.sessionId });
+        expect(await recorder.until((event) => event.turnId === next.turnId && event.type === "turn.completed")).toMatchObject({ ok: true });
+        const resumed = calls().filter((call) => call.method === "session/prompt").at(-1)!;
+        expect(resumed.pid).not.toBe(origin.pid);
+        expect(calls()).toContainEqual(expect.objectContaining({ method: "session/load", sessionId: origin.sessionId, pid: resumed.pid }));
+        expect(steps()).toBe(0);
         expect(calls().filter((call) => ["session/fork", "session/delete", "session/close"].includes(call.method))).toEqual([]);
       } finally {
         recorder.stop();

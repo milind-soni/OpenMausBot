@@ -25,7 +25,7 @@ describe("ACP background work", () => {
       calls.push(`${method} ${params.sessionId}`);
       return method === "session/fork" ? { sessionId: `${params.sessionId}-f` } : {};
     };
-    await work.end(thread, { sessionId: "s1", cwd: "/w", initResult: capable }, request);
+    expect(await work.end(thread, { sessionId: "s1", cwd: "/w", initResult: capable }, request)).toBe(true);
     expect(calls).toEqual(["session/fork s1", "session/delete s1", "session/close s1-f"]);
     expect(work.resumeCursor(thread, "s1", null)).toBe("s1-f");
     expect(acpBackgroundWork(["test"]).resumeCursor(thread, "s1", null)).toBe("s1-f");
@@ -46,24 +46,24 @@ describe("ACP background work", () => {
     const requests: string[] = [];
     const session = { sessionId: "s1", cwd: "/w", initResult: capable };
     const work = acpBackgroundWork(scope);
-    await work.end(thread, session, async (method, params: any) => {
+    expect(await work.end(thread, session, async (method, params: any) => {
       requests.push(`${method} ${params.sessionId}`);
       if (method === "session/fork") return { sessionId: "s1-f" };
       if (method === "session/delete") throw new Error("connection lost");
       return {};
-    });
+    })).toBe(false);
     expect(requests).toEqual(["session/fork s1", "session/delete s1", "session/close s1-f"]);
     expect(acpBackgroundWork(scope).resumeCursor(thread, "s1", null)).toBe("s1-f");
-    await work.end(thread, session, async (method, params: any) => {
+    expect(await work.end(thread, session, async (method, params: any) => {
       requests.push(`${method} ${params.sessionId}`);
       throw Object.assign(new Error("invalid session"), { code: -32602 });
-    });
+    })).toBe(false);
     const restarted = acpBackgroundWork(scope);
     expect(restarted.resumeCursor(thread, "s1", null)).toBe("s1-f");
-    await restarted.end(thread, session, async (method, params: any) => {
+    expect(await restarted.end(thread, session, async (method, params: any) => {
       requests.push(`${method} ${params.sessionId}`);
       return {};
-    });
+    })).toBe(true);
     expect(requests.slice(3)).toEqual(["session/delete s1", "session/delete s1"]);
   });
 
@@ -79,20 +79,29 @@ describe("ACP background work", () => {
     expect(work.resumeCursor(thread, "s0", null)).toBe("s0");
   });
 
-  it("does nothing when the agent cannot fork and delete, and keeps the session when the delete fails", async () => {
+  it("reports unconfirmed cleanup when capabilities are missing or deletion is refused", async () => {
     const work = acpBackgroundWork(["test"]);
     const calls: string[] = [];
-    await work.end(thread, { sessionId: "s1", cwd: "/w", initResult: { agentCapabilities: { sessionCapabilities: { close: {} } } } },
-      async (method: string, params: any) => { calls.push(`${method} ${params.sessionId}`); return {}; });
+    for (const sessionCapabilities of [{ fork: {} }, { delete: {} }]) {
+      expect(await work.end(thread, { sessionId: "s3", cwd: "/w", initResult: { agentCapabilities: { sessionCapabilities } } },
+        async (method: string, params: any) => { calls.push(`${method} ${params.sessionId}`); return {}; })).toBe(false);
+    }
     expect(calls).toEqual([]);
 
     calls.length = 0;
-    await work.end(thread, { sessionId: "s2", cwd: "/w", initResult: capable }, async (method: string, params: any) => {
+    expect(await work.end(thread, { sessionId: "s2", cwd: "/w", initResult: capable }, async (method: string, params: any) => {
       calls.push(`${method} ${params.sessionId}`);
       if (method === "session/delete" && params.sessionId === "s2") throw Object.assign(new Error("busy"), { code: -32603 });
       return method === "session/fork" ? { sessionId: "s2-f" } : {};
-    });
+    })).toBe(false);
     expect(calls).toEqual(["session/fork s2", "session/delete s2", "session/delete s2-f"]);
     expect(work.resumeCursor(thread, "s2", null)).toBe("s2");
+  });
+
+  it("reports unconfirmed cleanup when forking fails or returns an invalid cursor", async () => {
+    const work = acpBackgroundWork(["bad-fork"]);
+    const session = { sessionId: "s1", cwd: "/w", initResult: capable };
+    expect(await work.end(thread, session, async () => { throw new Error("cannot fork"); })).toBe(false);
+    expect(await work.end(thread, session, async () => ({ sessionId: "s1" }))).toBe(false);
   });
 });
