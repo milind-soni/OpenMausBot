@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { approvalModeFor } from "../shared/approval-mode.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
+import { createOwnThreads } from "./host/own-threads.ts";
 import { Store } from "./store.ts";
 
 const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
@@ -90,5 +91,25 @@ describe("a thread a bot opens while a level change is being confirmed", () => {
     store.patchBot(bot.id, { approvalMode: "ask" });
     store.patchBot(bot.id, { approvalGrant: { requestId: REQUEST, mode: "full", phase: "prepared", threadId: bot.threadId, threadOnly: true } });
     expect(levelOf(store, bot.id, store.createTask(bot.id, "Still Ask", false)!.threadId)).toBe("ask");
+  });
+
+  it("still opens at Ask on an engine without the bot's level, while the open chat's grant is pending", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    store.patchBot(bot.id, { approvalMode: "edits", autoApprove: false });
+    const parent = store.createTask(bot.id, "On Codex", false)!;
+    const codex: ModelSelection = { instanceId: "codex", model: "gpt-5" };
+    store.patchTask(bot.id, parent.threadId, { modelSelection: codex });
+    store.patchBot(bot.id, { approvalGrant: { requestId: REQUEST, mode: "full", phase: "prepared", threadId: bot.threadId, threadOnly: true } });
+    const drivers: Record<string, string> = { claude: "claudeAgent", codex: "codex" };
+    const own = createOwnThreads({ store, registry: { instances: () => [], cliTarget: (id) => ({ driverKind: drivers[id]! }) }, node: () => undefined,
+      current: () => undefined, proposalRefusal: () => null, givesWay: () => null, modelName: (one) => one.model });
+
+    // Auto-accept edits does not exist on Codex, so a burst child or an own thread there starts at Ask, as without a grant.
+    expect(own.approvalFor(store.bot(bot.id)!, codex)).toBe("ask");
+    expect(own.inherited(bot.id, parent.threadId)).toEqual({ modelSelection: codex, approvalMode: "ask" });
+    const child = store.createTask(bot.id, "Burst child", false, undefined, undefined, own.approvalFor(store.bot(bot.id)!, codex), codex)!;
+    expect(levelOf(store, bot.id, child.threadId)).toBe("ask");
+    expect(levelOf(store, bot.id, store.createTask(bot.id, "Same engine", false)!.threadId)).toBe("edits");
   });
 });

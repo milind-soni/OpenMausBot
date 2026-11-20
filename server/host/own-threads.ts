@@ -6,6 +6,9 @@ import { modelMenu, type MenuEngine, type ModelMenu } from "../routes/internal-m
 import type { BotRecord, Store } from "../store.ts";
 import type { ThreadModelFallback } from "../thread-model.ts";
 
+/** The level a new thread of the bot's starts at (task-record.ts), never a pending grant's Ask mask. */
+const savedLevel = (bot: BotRecord) => approvalModeFor({ ...bot, approvalGrant: undefined });
+
 type Placed = { botId: string; threadId: string; groupId?: string };
 type Node = Omit<Placed, "threadId"> & { parentId?: string };
 
@@ -50,13 +53,13 @@ export function createOwnThreads(deps: {
     },
     /** "ask" when running on `selection` crosses to an engine where this bot's permission level does not carry over. */
     approvalFor(bot: BotRecord, selection: ModelSelection): "ask" | undefined {
-      return modelSwitchNeedsAsk(approvalModeFor(bot), deps.registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, deps.registry.cliTarget(selection.instanceId)?.driverKind) ? "ask" : undefined;
+      return modelSwitchNeedsAsk(savedLevel(bot), deps.registry.cliTarget(bot.modelSelection.instanceId)?.driverKind, deps.registry.cliTarget(selection.instanceId)?.driverKind) ? "ask" : undefined;
     },
     inherited(botId: string, parentThreadId: string): { modelSelection?: ModelSelection; approvalMode?: "ask" } {
       const bot = store.bot(botId);
       const modelSelection = bot && store.taskByThread(bot.id, parentThreadId)?.modelSelection;
       if (!bot || !modelSelection) return {};
-      const needsAsk = modelSwitchNeedsAsk(approvalModeFor(bot),
+      const needsAsk = modelSwitchNeedsAsk(savedLevel(bot),
         deps.registry.cliTarget(bot.modelSelection.instanceId)?.driverKind,
         deps.registry.cliTarget(modelSelection.instanceId)?.driverKind);
       return { modelSelection, ...(needsAsk ? { approvalMode: "ask" as const } : {}) };
