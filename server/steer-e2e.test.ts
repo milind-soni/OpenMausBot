@@ -458,7 +458,8 @@ posixOnly("mid-turn steering e2e", () => {
           type: "image",
           source: { type: "base64", media_type: "image/png", data: "[image data: 16 base64 chars]" },
         },
-        { type: "text", text: "look at this\n\n\n\nand this\n\n" },
+        // Each image keeps a file reference beside its pixels, so a file tool can use the upload.
+        { type: "text", text: `look at this\n\n<attached-file path="${firstImagePath}" name="first.png" />\n\nand this\n\n<attached-file path="${secondImagePath}" name="second.png" />` },
       ]);
     } finally {
       await api("PATCH", "/api/config", { threads: { maxConcurrentPerBot: previousLimit } });
@@ -494,7 +495,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(steered.steered).toBe(true);
     const replies = bot.messages.filter((m: any) => m.role === "bot" && m.kind === "text" && m.text.startsWith("reply to:"));
     expect(replies).toHaveLength(1);
-    expect(withoutTurnClock(replies[0].text)).toBe("reply to: first + steered: [image] and look at this");
+    expect(withoutTurnClock(replies[0].text)).toBe(`reply to: first + steered: [image] and look at this\n\n<attached-file path="${imagePath}" name="shot.png" />`);
 
     const nativeRows = readFileSync(join(home, ".openmausbot", "native", `${created.threadId}.ndjson`), "utf8")
       .trim().split("\n").map((line) => JSON.parse(line));
@@ -504,7 +505,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(steerRow.uuid).toEqual(expect.any(String));
     expect(steerRow.message.content).toEqual([
       { type: "image", source: { type: "base64", media_type: "image/png", data: "[image data: 16 base64 chars]" } },
-      { type: "text", text: "and look at this\n\n" },
+      { type: "text", text: `and look at this\n\n<attached-file path="${imagePath}" name="shot.png" />` },
     ]);
   }, 40_000);
 
@@ -1029,7 +1030,7 @@ posixOnly("mid-turn steering e2e", () => {
     expect(steerRow.uuid).toEqual(expect.any(String));
     expect(steerRow.message.content).toEqual([
       { type: "image", source: { type: "base64", media_type: "image/png", data: "[image data: 20 base64 chars]" } },
-      { type: "text", text: "what about this one\n\n" },
+      { type: "text", text: `what about this one\n\n<attached-file path="${join(home, ".openmausbot", "attachments", "123e4567-e89b-42d3-a456-426614174007.png")}" name="room.png" />` },
     ]);
   }, 40_000);
 

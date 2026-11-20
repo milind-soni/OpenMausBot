@@ -748,6 +748,16 @@ beforeAll(async () => {
           text: `[Clip](<${pathToFileURL(linkedVideo).href}>) and [notes](<${pathToFileURL(linkedFile).href}>)`,
           from: { botId: "test-bot-a", name: "Test bot A", color: "purple" },
         },
+        {
+          id: "handoff-result-card", at: 14, parentId: "linked-video-message", role: "bot", kind: "activity",
+          roomRequest: { id: "handoff-request", phase: "result" },
+          attachments: [{ kind: "file", path: deliveredImage, mime: "image/png", name: "returned.png" }],
+          from: { botId: "test-bot-a", name: "Test bot A", color: "purple" },
+        },
+        {
+          id: "plain-activity-card", at: 15, parentId: "handoff-result-card", role: "bot", kind: "activity",
+          tool: { name: "Did something", ok: true },
+        },
       ],
     }),
   );
@@ -5293,6 +5303,11 @@ describe("harness HTTP API", () => {
     expect(Buffer.from(await imageWithRange.arrayBuffer()).equals(png)).toBe(true);
   });
 
+  const imagePromptText = (prompt: { message: { content: string | Array<{ type: string; text?: string }> } }) =>
+    typeof prompt.message.content === "string"
+      ? prompt.message.content
+      : prompt.message.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n");
+
   it("keeps a channel image in its transcript while sending native pixels to the responder", async () => {
     const created = await api("POST", "/api/bots", {
       modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
@@ -5337,7 +5352,9 @@ describe("harness HTTP API", () => {
         text: expect.stringContaining("Describe this image"),
       });
       expect(JSON.stringify(dump.prompt)).not.toContain("attached-image");
-      expect(JSON.stringify(dump.prompt)).not.toContain(imagePath);
+      const channelMessage = imagePromptText(dump.prompt).split("\n").find((line) => line.startsWith("User: "));
+      expect(channelMessage).toBeDefined();
+      expect(JSON.parse(channelMessage!.slice("User: ".length))).toContain(`<attached-file path="${imagePath}" name="tiny.png" />`);
 
       const current = (await api("GET", "/api/bots?messages=20")).body.groups.find(
         (candidate: { id: string }) => candidate.id === room.id,
@@ -5371,7 +5388,7 @@ describe("harness HTTP API", () => {
       });
       expect(uploaded.status).toBe(201);
       const { path: imagePath } = await uploaded.json() as { path: string };
-      type Dump = { prompt: { message: { content: string | Array<{ type: string; source?: { data?: string } }> } } };
+      type Dump = { prompt: { message: { content: string | Array<{ type: string; text?: string; source?: { data?: string } }> } } };
       const imageBlocks = (dump: Dump) => {
         const { content } = dump.prompt.message;
         return typeof content === "string" ? [] : content.filter((part) => part.type === "image");
@@ -5400,7 +5417,7 @@ describe("harness HTTP API", () => {
         expect.objectContaining({ source: expect.objectContaining({ data: png.toString("base64") }) }),
       ]);
       expect(JSON.stringify(rewound.prompt)).not.toContain("attached-image");
-      expect(JSON.stringify(rewound.prompt)).not.toContain(imagePath);
+      expect(imagePromptText(rewound.prompt)).toContain(`<attached-file path="${imagePath}" name="tiny.png" />`);
       await releaseTurn(bot.id);
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
@@ -14666,6 +14683,20 @@ describe("message pages", () => {
     });
     expect(saved.status).toBe(200);
     expect(await saved.text()).toBe("delivered photo bytes");
+  });
+
+  it("saves a file attached to a hand-off result card, and only that file", async () => {
+    const threadId = "test-linked-file-room-thread";
+    const save = (id: string, path: string) => api("POST", `/api/threads/${threadId}/messages/${id}/file`, { path });
+    const attached = await fetch(`${BASE}/api/threads/${threadId}/messages/handoff-result-card/file`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: join(home, ".openmausbot", "attachments", "5e1dbd0a-7c3a-4f1e-9b2d-6a0c4f8e2b71.png") }),
+    });
+    expect(attached.status).toBe(200);
+    expect(await attached.text()).toBe("delivered photo bytes");
+    expect((await save("handoff-result-card", join(home, "Downloads", "sideboard.png"))).status).toBe(403);
+    expect((await save("plain-activity-card", join(home, ".openmausbot", "attachments", "5e1dbd0a-7c3a-4f1e-9b2d-6a0c4f8e2b71.png"))).status).toBe(403);
   });
 
   it("downloads an exact user attachment only from the private attachment store", async () => {

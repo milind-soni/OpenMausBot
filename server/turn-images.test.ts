@@ -54,12 +54,23 @@ describe("turn image admission", () => {
     const result = extractTurnImages(source, { attachmentsDir: root });
 
     expect(source).toContain(png);
-    expect(result.text).toBe("compare these\n\n\n\n");
+    expect(result.text).toBe(source.replaceAll("<attached-image", "<attached-file"));
     expect(result.images).toEqual([
       { path: png, mime: "image/png", bytes: 7 },
       { path: jpg, mime: "image/jpeg", bytes: 9 },
     ]);
-    expect(result.text).not.toContain(root);
+    expect(result.text).toContain(root);
+  });
+
+  it("emits the admitted path while preserving the encoded display name", () => {
+    const root = store("&uploads");
+    const path = image(root, 0);
+    const encoded = path.replaceAll("&", "&amp;");
+    const raw = `${root}/missing/../${IDS[0]}.png`.replaceAll("&", "&amp;");
+    const result = extractTurnImages(`<attached-image path="${raw}" name="mug &amp; &quot;cup&quot;.png" />`, { attachmentsDir: root });
+
+    expect(result.text).toBe(`<attached-file path="${encoded}" name="mug &amp; &quot;cup&quot;.png" />`);
+    expect(result.images).toEqual([{ path, mime: "image/png", bytes: 4 }]);
   });
 
   it("leaves inline, fenced, missing, outside-store, and non-generated tags as text", () => {
@@ -90,7 +101,7 @@ describe("turn image admission", () => {
     const encoded = path.replaceAll("&", "&amp;");
 
     expect(extractTurnImages(`<attached-image path="${encoded}" />`, { attachmentsDir: root })).toEqual({
-      text: "",
+      text: `<attached-file path="${encoded}" />`,
       images: [{ path, mime: "image/webp", bytes: 5 }],
       videos: [],
     });
@@ -127,7 +138,7 @@ describe("turn image admission", () => {
     ].join("\n\n");
 
     const result = extractTurnImages(source, { attachmentsDir: root });
-    expect(result.text).toBe(`\n\n<attached-file path="${clip}" name="clip.webm" />`);
+    expect(result.text).toBe(source.replace("<attached-image", "<attached-file"));
     expect(result.images).toEqual([{ path: png, mime: "image/png", bytes: 4 }]);
     expect(result.videos).toEqual([{ path: clip, mime: "video/webm", bytes: 6 }]);
   });
@@ -145,7 +156,7 @@ describe("turn image admission", () => {
     });
   });
 
-  it("rejects count and aggregate limits before partially stripping the prompt", () => {
+  it("rejects count and aggregate limits before partially rewriting the prompt", () => {
     const root = store();
     const first = image(root, 0, ".png", 4);
     const second = image(root, 1, ".gif", 4);
@@ -193,7 +204,7 @@ describe("turn image admission", () => {
     ];
 
     expect(extractSteerImages(texts, { attachmentsDir: root })).toEqual({
-      texts: ["look\n\n", "plain words stay exactly as sent", "and this\n\n"],
+      texts: texts.map((text) => text.replace("<attached-image", "<attached-file")),
       images: [
         { path: first, mime: "image/png", bytes: 5 },
         { path: second, mime: "image/webp", bytes: 6 },
@@ -225,7 +236,7 @@ describe("turn image admission", () => {
 
     expect(result.images.map((entry) => entry.path)).toEqual([join(root, `${IDS[2]}.png`), join(root, `${IDS[3]}.png`)]);
     expect(result.transcript.map((entry) => entry.text)).toEqual([
-      transcript[0]!.text, transcript[1]!.text, `older\n\n${REPLAYED_IMAGE_NOTE}`, `newest\n\n${REPLAYED_IMAGE_NOTE}`,
+      transcript[0]!.text, transcript[1]!.text, `older\n\n${REPLAYED_IMAGE_NOTE}\n\n${tag(2).replace("<attached-image", "<attached-file")}`, `newest\n\n${REPLAYED_IMAGE_NOTE}\n\n${tag(3).replace("<attached-image", "<attached-file")}`,
     ]);
     expect(transcript[3]!.text).toContain("<attached-image");
   });
@@ -242,7 +253,7 @@ describe("turn image admission", () => {
     const result = extractReplayImages(transcript, [], { attachmentsDir: root });
 
     expect(result.images.map((entry) => entry.path)).toEqual([join(root, `${IDS[0]}.png`)]);
-    expect(result.transcript[0]!.text).toBe(`login fails, see screenshot\n\n${REPLAYED_IMAGE_NOTE}`);
+    expect(result.transcript[0]!.text).toBe(`login fails, see screenshot\n\n${REPLAYED_IMAGE_NOTE}\n\n${tag(0).replace("<attached-image", "<attached-file")}`);
     expect(REPLAYED_IMAGE_NOTE).toMatch(/earlier/i);
     expect(result.transcript[2]!.text).toBe("A");
   });
@@ -250,7 +261,7 @@ describe("turn image admission", () => {
   it("keeps a current turn's own images unmarked", () => {
     const root = store();
     const result = extractTurnImages(`look\n\n<attached-image path="${image(root, 0)}" name="0.png" />`, { attachmentsDir: root });
-    expect(result.text).toBe("look\n\n");
+    expect(result.text).toBe(`look\n\n<attached-file path="${join(root, `${IDS[0]}.png`)}" name="0.png" />`);
   });
 
   it("stops at the first replayed message whose images no longer fit", () => {

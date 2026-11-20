@@ -148,6 +148,8 @@ export interface LiveBot {
   name: string;
   title?: string;
   description?: string;
+  /** The voice the bot speaks with in chat; an ElevenLabs Live call uses it when it is an ElevenLabs voice id. */
+  voice?: string;
 }
 
 export interface LiveHistoryMessage {
