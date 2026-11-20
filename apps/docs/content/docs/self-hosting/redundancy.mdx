@@ -153,6 +153,9 @@ Build B fresh, never from a disk snapshot or image of A. Both need `sqlite3` (3.
    case "$STATE" in /*|*..*) fail "'$STATE' must be a folder name" ;; esac
    state=$DATA/$STATE
    [ -d "$state" ] || fail "$state is not a folder"
+   # A second run would put the old copy over the data B has written since the first.
+   [ ! -e "$state/.standby-taken-over" ] || fail "B has already taken over: nothing was changed"
+   if curl -sf --max-time 5 http://127.0.0.1:8799/api/health >/dev/null; then fail "a server answers on this machine: nothing was changed"; fi
    [ -f "$COPIES/messages.db" ] || fail "no copy of messages.db in $COPIES"
    age=$(( $(date +%s) - $(stat -c %Y "$COPIES/messages.db") ))
    echo "the last copy of messages.db is $age seconds old"
