@@ -1,8 +1,8 @@
 import { piModelId } from "./pi-model-id.ts";
 import { RuntimeNoticeError, runtimeErrorText } from "./runtime-notice-error.ts";
 // The pi coding agent (@earendil-works/pi-coding-agent) over its own stdio JSON-RPC mode
-// (`pi --mode rpc`), not ACP. pi is BYOK and reads auth.json from its agent folder (pi-agent-dir.ts) itself, so this
-// driver holds no key; resumeCursor is pi's `sessionFile` (switch_session).
+// (`pi --mode rpc`), not ACP. pi is BYOK and reads auth.json from its agent folder itself, so this driver
+// holds no key; resumeCursor is pi's `sessionFile` (switch_session).
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

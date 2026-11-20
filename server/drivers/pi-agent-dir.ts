@@ -5,7 +5,7 @@
 // stays theirs), their own providers (models.json) and the model and connection parts of settings.json (both copied, so
 // MausBot's local models never land in their files), and the search tools Pi downloaded (bin, linked).
 import { createHash } from "node:crypto";
-import { linkSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { linkSync, lstatSync, mkdirSync, readFileSync, rmSync, statSync, symlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
@@ -62,8 +62,10 @@ function linked(target: string, link: string): boolean {
     const have = statSync(link, { bigint: true });
     if (have.ino === want.ino && have.dev === want.dev) return true;
   } catch {}
-  // A link that points elsewhere, or what Pi made here while the person had none.
-  rmSync(link, { recursive: true, force: true });
+  // A link that points elsewhere (removed as a link, never followed), or what Pi made here while the person had none.
+  let stale;
+  try { stale = lstatSync(link); } catch {}
+  if (stale) rmSync(link, { recursive: stale.isDirectory() && !stale.isSymbolicLink(), force: true });
   const folder = want.isDirectory();
   try {
     symlinkSync(target, link, folder ? "junction" : "file");
