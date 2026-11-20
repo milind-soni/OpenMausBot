@@ -26,6 +26,7 @@ import { useCloudPlan } from "../ProIntroduction";
 import { xResearchAction } from "@/lib/cloud-plan";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useBotApps } from "./useBotApps";
+import { connectAppFromBot } from "../AppGrantPrompt";
 import {
   classifyConnectorTool,
   connectorServiceAccess,
@@ -798,10 +799,7 @@ export function AccessSection({
         {connectedAppsEnabled && connectedAppsConfigured && (
           <button
             type="button"
-            onClick={() => {
-              dispatch({ type: "toggleSettings", open: false });
-              dispatch({ type: "togglePlugins", open: true, surface: "apps" });
-            }}
+            onClick={() => connectAppFromBot(dispatch, bot.id)}
             className="mt-3 flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
           >
             <Plus size={14} /> {t("botAccess.connectApp")}

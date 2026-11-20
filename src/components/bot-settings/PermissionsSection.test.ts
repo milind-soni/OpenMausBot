@@ -22,10 +22,10 @@ const dispatch = vi.fn();
 let host: HTMLDivElement;
 let root: Root;
 
-function render(bot: Bot, trustedModesAvailable = false, others: Bot[] = []) {
+function render(bot: Bot, trustedModesAvailable = false, others: Bot[] = [], driverKind = "claudeAgent") {
   const derived = {
     patch: (patch: object) => dispatch({ type: "updateBot", botId: bot.id, patch }),
-    engine: { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude" },
+    engine: { instanceId: "claude", driverKind, displayName: "Claude" },
     canCoordinate: true, approvalMode: bot.approvalMode ?? "ask", trustedModesAvailable,
     sectionName: "General", currentChief: undefined,
   } as unknown as Derived;
@@ -75,6 +75,28 @@ describe("Full access in bot settings", () => {
     expect(dialogs()).toBe(0);
     expect(dispatch).toHaveBeenCalledExactlyOnceWith({
       type: "updateBot", botId: "pepper", patch: { approvalMode: "full", applyToAllThreads: true },
+    });
+  });
+
+  it("applies Ask to every thread, so a chat that ran at Full asks from its next turn", () => {
+    render({ ...base, approvalMode: "full" });
+    choose("Ask for approval");
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({
+      type: "updateBot", botId: "pepper", patch: { approvalMode: "ask", applyToAllThreads: true },
+    });
+  });
+
+  it("sets a level some engines lack on the bot alone", () => {
+    render(base);
+    choose("Auto-accept edits");
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({
+      type: "updateBot", botId: "pepper", patch: { approvalMode: "edits" },
+    });
+    dispatch.mockReset();
+    render(base, true, [], "codex");
+    choose("Custom");
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({
+      type: "updateBot", botId: "pepper", patch: { approvalMode: "custom" },
     });
   });
 

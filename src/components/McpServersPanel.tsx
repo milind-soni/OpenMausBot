@@ -659,7 +659,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
               disabled={busy !== null || (restricted && !policy?.mcp.allowlist.length)}
               title={restricted && policy ? t("policy.managedBy", { organization: policy.organizationName }) : undefined}
               onClick={() => openEditor("new")}
-              className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white disabled:opacity-40"
+              className="flex items-center gap-1.5 rounded-lg bg-control/80 px-3 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:opacity-40"
             >
               <Plus size={14} /> {t(embedded ? "apps.mcp.add" : "mcp.addServer")}
             </button>

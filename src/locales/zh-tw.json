@@ -3137,7 +3137,7 @@
   "permissions.chief.make": "讓這個機器人成為 {section} 部門的主要聯絡人。",
   "permissions.approval.title": "核准等級",
   "permissions.approval.draftHanded": "新機器人的對話、例行工作，以及轉交給它的工作的預設值。",
-  "permissions.approval.helpHanded": "新對話、例行工作，以及轉交給它的工作的預設值。完整存取權限也會立即套用到所有現有對話。如要將目前層級套用到某段對話，請在對話中使用「重新整理權限」。",
+  "permissions.approval.helpHanded": "新對話、例行工作，以及轉交給它的工作的預設值。「要求核准」和「完整存取權」也會立即套用到所有現有對話。",
   "permissions.approval.applyFull": "將完整存取套用到所有對話",
   "permissions.outbound.title": "代表你傳送",
   "permissions.outbound.help": "透過已連線的應用程式傳送電子郵件、訊息、貼文、邀請和付款。閱讀和起草不算傳送。除非你在這裡設定規則，否則完整存取會直接傳送而不詢問。",

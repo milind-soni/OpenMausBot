@@ -2132,7 +2132,7 @@
   "model.noProviders": "Không có nhà cung cấp mô hình nào khả dụng.",
   "model.noMatch": "Không có kết quả nào khớp với “{query}”",
   "permissions.approval.draftHanded": "Mặc định cho các luồng, tác vụ định kỳ của bot mới và việc được giao cho bot.",
-  "permissions.approval.helpHanded": "Mặc định cho các luồng mới, tác vụ định kỳ và việc được giao cho bot. Toàn quyền truy cập cũng áp dụng ngay cho mọi luồng hiện có. Dùng Làm mới quyền trên một luồng để áp dụng mức hiện tại cho cuộc trò chuyện đó.",
+  "permissions.approval.helpHanded": "Mặc định cho các luồng mới, tác vụ định kỳ và việc được giao cho bot. Hỏi trước khi phê duyệt và Toàn quyền truy cập cũng áp dụng ngay cho mọi luồng hiện có.",
   "rename.aria": "Đổi tên",
   "rename.named": "Đổi tên {name}",
   "rename.agent": "Đổi tên agent",

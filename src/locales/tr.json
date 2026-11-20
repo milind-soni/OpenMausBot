@@ -2132,7 +2132,7 @@
   "model.noProviders": "Kullanılabilir model sağlayıcısı yok.",
   "model.noMatch": "“{query}” ile eşleşen bir şey bulunamadı",
   "permissions.approval.draftHanded": "Yeni botun konuları, rutinleri ve ona aktarılan işler için varsayılan.",
-  "permissions.approval.helpHanded": "Yeni konular, rutinler ve ona aktarılan işler için varsayılan. Tam erişim ayrıca mevcut tüm konulara hemen uygulanır. Geçerli düzeyi o konuşmaya uygulamak için bir konuda İzinleri yenile'yi kullanın.",
+  "permissions.approval.helpHanded": "Yeni konular, rutinler ve ona aktarılan işler için varsayılan. Onay iste ve Tam erişim ayrıca mevcut tüm konulara hemen uygulanır.",
   "rename.aria": "Yeniden Adlandır",
   "rename.named": "{name} adını değiştir",
   "rename.agent": "Ajanı yeniden adlandır",
