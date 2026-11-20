@@ -378,9 +378,18 @@ export async function readCodexModelCatalog(
   env: Record<string, string | undefined> = process.env,
   fetchImpl: typeof fetch = fetch,
   cli?: string,
+  officialOnly?: boolean,
 ): Promise<ModelCatalog> {
   const official = cli ? await readCodexAppServerModelCatalog(cli, env) : null;
   const catalog = await catalogAround(official ?? STATIC_CODEX_MODELS, env, fetchImpl);
+  if (officialOnly) {
+    // A plan account routes only through OpenAI: custom Codex providers would bill outside the
+    // subscription. Filtering in place keeps the object's identity, so the startup cache's
+    // unconfirmed marker (a WeakSet entry on this object) survives the filter.
+    const options = catalog.options.filter(option => decodeCodexSelection(option.id).modelProvider === OFFICIAL_CODEX_PROVIDER);
+    catalog.options = options;
+    catalog.default = options.some(option => option.id === catalog.default) ? catalog.default : options[0]?.id ?? "";
+  }
   if (cli && !official) unconfirmedModelCatalog(catalog);
   return catalog;
 }

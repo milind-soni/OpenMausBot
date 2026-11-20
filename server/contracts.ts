@@ -599,7 +599,7 @@ export interface ProviderInstance {
   readonly installRuntime?: () => Promise<void>;
   readonly startAuthentication?: () => Promise<ProviderAuthenticationStart>;
   /** Named when the calls an instance offers do not tell its sign-in apart; `callback-url` is a link plus a redirect URL pasted back. */
-  readonly authenticationMethod?: "browser-pkce" | "browser" | "callback-url";
+  readonly authenticationMethod?: "browser-pkce" | "browser" | "callback-url" | "device-code";
   readonly getAuthentication?: (flowId: string) => Promise<ProviderAuthenticationStatus>;
   readonly completeAuthentication?: (flowId: string, callbackUrl: string) => Promise<void>;
   readonly cancelAuthentication?: () => Promise<void>;

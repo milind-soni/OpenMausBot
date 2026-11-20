@@ -276,7 +276,7 @@ export class ChatGptPlanAuthController {
       server.close();
       void this.complete(flow, callback.searchParams);
     });
-    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(Number(process.env.OMB_SIGNIN_PORT || 0), process.env.OMB_SIGNIN_PORT ? "0.0.0.0" : "127.0.0.1", resolve); });
     if (this.disposed) { server.close(); throw new Error("This provider was removed."); }
     const address = server.address();
     if (!address || typeof address === "string") { server.close(); throw new Error("ChatGPT sign-in listener could not start."); }
