@@ -29,6 +29,7 @@ const place = {
   computerName: "Studio", newBots: { effort: "high" }, signIn: { admins: ["ada@example.com"], members: [] },
   membership: { authority: "local", pairingCodes: true }, cloudStarter: true, waitingForRoom: true,
   planTurns: { running: 1, waiting: 2, refusedAt: 5, refused: "tasks" }, decisions: { retentionDays: 30 }, safetyFloor: { enabled: true },
+  routinesUnreadable: true, botLimit: 3,
 };
 const FIELDS = Object.keys(place) as Array<keyof typeof place>;
 
@@ -101,6 +102,14 @@ describe("a config frame", () => {
     flushSync(() => dispatch({ type: "configStatus", config: { ...settings, ...place } as unknown as ConfigStatus }));
     await configFrame(settings);
     expect(held()).toEqual(place);
+  });
+
+  it("drops the routines alert once a frame no longer carries it, as GET would", async () => {
+    flushSync(() => dispatch({ type: "configStatus", config: { ...settings, ...place } as unknown as ConfigStatus }));
+    const { routinesUnreadable: _unreadable, ...readable } = place;
+    await configFrame({ ...settings, ...readable });
+    expect(seen.config?.routinesUnreadable).toBeUndefined();
+    expect(seen.config?.botLimit).toBe(3);
   });
 
   it("drops the Starter turns once a frame no longer carries them, as GET would", async () => {
