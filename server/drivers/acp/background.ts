@@ -29,6 +29,7 @@ export function acpBackgroundWork(scope: readonly string[], waitMs = 10_000): Ac
   const dir = join(DATA_DIR, "acp-background-forks");
   const pathFor = (threadId: string, sessionId: string) => join(dir,
     createHash("sha256").update(JSON.stringify([...scope, threadId, sessionId])).digest("hex"));
+  const deleted = new Set<string>();
   const forkFor = (threadId: string, sessionId: string) => {
     try {
       return readFileSync(pathFor(threadId, sessionId), "utf8") || null;
@@ -46,19 +47,33 @@ export function acpBackgroundWork(scope: readonly string[], waitMs = 10_000): Ac
     resumeCursor: (threadId, cursor, live) => {
       let id = typeof cursor === "string" ? cursor : live !== null && forkFor(threadId, live) ? live : null;
       if (id === null) return null;
-      for (let hops = 0; hops < 64; hops++) {
+      const original = id;
+      const visited = new Set<string>();
+      while (!visited.has(id)) {
+        visited.add(id);
         const fork = forkFor(threadId, id);
-        if (!fork) break;
+        if (!fork) return id;
         id = fork;
       }
-      return id;
+      return original;
     },
     end: async (threadId, session, request) => {
       const sessionId = session.sessionId;
-      if (!sessionId || forkFor(threadId, sessionId)) return;
+      if (!sessionId) return;
       const can = session.initResult?.agentCapabilities?.sessionCapabilities ?? {};
-      if (!can.fork || !can.delete) return;
+      if (!can.delete) return;
+      const path = pathFor(threadId, sessionId);
+      if (deleted.has(path)) return;
       const quietly = (method: string, params: unknown) => request(method, params, waitMs).catch(() => undefined);
+      const deleteOriginal = async () => {
+        await request("session/delete", { sessionId }, waitMs);
+        deleted.add(path);
+      };
+      if (forkFor(threadId, sessionId)) {
+        await deleteOriginal().catch(() => undefined);
+        return;
+      }
+      if (!can.fork) return;
       let fork: unknown;
       try {
         fork = (await request("session/fork", { sessionId, cwd: session.cwd, mcpServers: [] }, waitMs))?.sessionId;
@@ -66,7 +81,6 @@ export function acpBackgroundWork(scope: readonly string[], waitMs = 10_000): Ac
         return;
       }
       if (typeof fork !== "string" || !fork || fork === sessionId) return;
-      const path = pathFor(threadId, sessionId);
       try {
         mkdirSync(dir, { recursive: true, mode: 0o700 });
         writeFileAtomic(path, fork, { mode: 0o600 });
@@ -75,7 +89,7 @@ export function acpBackgroundWork(scope: readonly string[], waitMs = 10_000): Ac
         return;
       }
       try {
-        await request("session/delete", { sessionId }, waitMs);
+        await deleteOriginal();
       } catch (error) {
         // A lost response can leave the original deleted. Keep the fork unless ACP explicitly rejected the request.
         if (typeof (error as { code?: unknown } | null)?.code === "number") {

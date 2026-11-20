@@ -178,7 +178,7 @@ async function readQwenNativeModels(env: Record<string, string | undefined>, cli
   const listed = await listQwenModels(env, cli || "qwen");
   if (listed) return listed;
   try {
-    const catalog = await discoverAcpModels(env, cli || "qwen", ["--acp"], { custom: true, variants: false });
+    const catalog = await discoverAcpModels(env, cli || "qwen", ["--acp"], { variants: false });
     return catalog.options.filter((option) => !isQwenRouteId(option.id));
   } catch {
     return [];
@@ -211,7 +211,7 @@ async function resolveModels(env: Record<string, string | undefined>, config: Pi
   return { default: options.some((option) => option.id === preferred) ? preferred : options[0]?.id ?? "", options };
 }
 
-export function resolveQwenTurnModel(model: string | undefined, env: Record<string, string | undefined>): string | undefined {
+export function resolveQwenTurnModel(model: string | undefined, env: Record<string, string | undefined>, catalog?: ModelCatalog): string | undefined {
   if (!model) return model;
   const injected = decodeInjectId(model);
   if (injected) ensureQwenInjectModel(model, env);
@@ -223,6 +223,7 @@ export function resolveQwenTurnModel(model: string | undefined, env: Record<stri
     return route.id;
   }
   if (routes.some((route) => route.id === model)) return model;
+  if (catalog?.options.some((option) => option.id === model && !option.custom)) return model;
   const matches = routes.filter((route) => route.model === model);
   if (matches.length > 1) throw new Error("This Qwen model has multiple providers. Refresh models and select the intended provider again.");
   if (!matches.length && !isQwenRouteId(model)) return model;

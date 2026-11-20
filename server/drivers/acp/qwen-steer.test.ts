@@ -120,6 +120,18 @@ describe("Qwen steering", () => {
     expect(await instance!.adapter.steer!(threadId, "too late")).toBe("refused");
   });
 
+  it("keeps the next turn's steering and reply after cancelling a gated turn", async () => {
+    await start();
+    const first = await runningTurn();
+    await instance!.adapter.interruptTurn(threadId);
+    expect(await recorder!.until((event) => event.type === "turn.completed" && event.turnId === first)).toMatchObject({ stopReason: "cancelled" });
+    const next = await runningTurn();
+    expect(await instance!.adapter.steer!(threadId, "continue")).toBe("steered");
+    await until(() => methods().includes("session/prompt.steer"));
+    expect(await finished(next)).toMatchObject({ ok: true });
+    expect(replyOf(next)).toEqual(["working. done; steered: continue"]);
+  });
+
   it("refuses without sending on a Qwen build older than the tested one", async () => {
     await start("1.0.0-preview.1");
     const turnId = await runningTurn();

@@ -777,7 +777,8 @@ function advertiseHermesCommands(sessionId: string) {
     availableCommands: (process.env.FAKE_ACP_HERMES_COMMANDS ?? "help,steer,queue").split(",").map((name) => ({ name, description: name })) } } });
 }
 
-let gatedTurn: { run: string; steers: string[]; pending: unknown[] } | null = null;
+type GatedTurn = { run: string; steers: string[]; pending: unknown[]; poll?: ReturnType<typeof setInterval> };
+let gatedTurn: GatedTurn | null = null;
 let gatedRuns = 0;
 /** A prompt that says "working. " and waits for FAKE_ACP_GATE_FILE. devin-steer: a prompt during it joins the run and is
  * answered with the first one, with the same usage and run id, as Devin does. opencode-steer: only `_session/steering` joins it. */
@@ -789,7 +790,7 @@ function gatedPrompt(msg: any) {
     if (mode === "devin-steer") gatedTurn.pending.push(msg.id);
     return;
   }
-  const turn = { run: `run-${++gatedRuns}`, steers: [] as string[], pending: [msg.id] as unknown[] };
+  const turn: GatedTurn = { run: `run-${++gatedRuns}`, steers: [], pending: [msg.id] };
   gatedTurn = turn;
   const say = (line: string) => out({ jsonrpc: "2.0", method: "session/update",
     params: { sessionId: msg.params.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: line } } } });
@@ -808,6 +809,7 @@ function gatedPrompt(msg: any) {
     clearInterval(poll);
     finish();
   }, 50);
+  turn.poll = poll;
 }
 
 /** OpenCode's `_session/steering`: promptRequired when no turn runs; FAKE_ACP_STEER_FAIL=rpc answers a JSON-RPC error. */
@@ -1776,6 +1778,7 @@ function handle(msg: any) {
       break;
     case "session/cancel":
       if (gatedTurn) {
+        clearInterval(gatedTurn.poll);
         for (const id of gatedTurn.pending) result(id, { stopReason: "cancelled", _meta: {} });
         gatedTurn = null;
       }

@@ -140,23 +140,30 @@ describe("QwenAgentDriver catalog", () => {
   });
 
   it("lists every account model and launches a process per model with QWEN_MODEL", async () => {
-    const home = scratchSettings({});
+    const home = scratchSettings({ modelProviders: { openai: [{ id: "qfmodel" }] } });
     const dump = join(home, "dump.json");
     const launches = join(home, "launches");
     const instance = await QwenAgentDriver.create({ instanceId: "qwen-list", displayName: "Qwen", enabled: true,
-      environment: { ...homeEnv(home), FAKE_ACP_MODELS: "qfmodel,qmodel_38max", FAKE_ACP_MODELS_LIST: "qwen",
+      environment: { ...homeEnv(home), FAKE_ACP_MODELS: "qfmodel,qmodel_38max,qfmodel(openai)", FAKE_ACP_MODELS_LIST: "qwen",
         FAKE_ACP_DUMP: dump, FAKE_ACP_LAUNCH_COUNT_FILE: launches },
       config: { cli: FAKE_CLI, fullAuto: false } });
     const recorder = recordEvents(instance.adapter);
     try {
-      expect(instance.models.options).toEqual([{ id: "qfmodel", label: "QFMODEL" }, { id: "qmodel_38max", label: "QMODEL_38MAX" }]);
+      expect(instance.models.options).toEqual([
+        { id: "qfmodel(openai)", label: "qfmodel", custom: true, provider: "openai" },
+        { id: "qfmodel", label: "QFMODEL" }, { id: "qmodel_38max", label: "QMODEL_38MAX" },
+      ]);
       rmSync(launches, { force: true });
       for (const model of ["qfmodel", "qmodel_38max"]) {
         const { turnId } = await instance.adapter.sendTurn({ threadId: "qwen-thread", text: "hi", approvalMode: "ask", model, cwd: home });
         expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
         expect(JSON.parse(readFileSync(dump, "utf8")).env.QWEN_MODEL).toBe(model);
       }
-      expect(Number(readFileSync(launches, "utf8"))).toBe(2);
+      const { turnId } = await instance.adapter.sendTurn({ threadId: "qwen-thread", text: "hi", approvalMode: "ask", model: "qfmodel(openai)", cwd: home });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId)).toMatchObject({ ok: true });
+      expect(recorder.events).toContainEqual(expect.objectContaining({ type: "session.started", turnId, model: "qfmodel(openai)" }));
+      expect(JSON.parse(readFileSync(dump, "utf8")).env.QWEN_MODEL).toBeUndefined();
+      expect(Number(readFileSync(launches, "utf8"))).toBe(3);
     } finally {
       await instance.dispose();
     }
