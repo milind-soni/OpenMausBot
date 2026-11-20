@@ -78,7 +78,7 @@ function fixture(options: FixtureOptions = {}) {
     }
     expect(init.headers.Authorization).toBe("Bearer access-token");
     expect(JSON.parse(init.body!)).toEqual({ project: "project-id" });
-    expect(init.headers["User-Agent"]).toMatch(/^antigravity\/hub\/2\.24\.0 /);
+    expect(init.headers["User-Agent"]).toMatch(/^antigravity\/hub\/2\.33\.0 /);
     const host = new URL(url).host;
     return url.endsWith(":retrieveUserQuotaSummary")
       ? respond(options.summaryByHost?.[host] ?? options.summary ?? summary, options.summaryStatusByHost?.[host] ?? options.summaryStatus ?? 200)

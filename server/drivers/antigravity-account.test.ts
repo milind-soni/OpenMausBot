@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { antigravityAccount } from "./antigravity-account.ts";
+import { antigravityAccount, createProxiedFetch } from "./antigravity-account.ts";
 
 let home: string;
 let path: string;
@@ -62,4 +62,10 @@ it.each(["offline", "denied", "bad-token", "bad-email"])("keeps lookup failure n
   const calls = fetcher.mock.calls.length;
   expect(await antigravityAccount(path)).toBeUndefined();
   expect(fetcher).toHaveBeenCalledTimes(calls);
+});
+
+it("supports proxyUrl and creates proxied fetch correctly", async () => {
+  const customFetch = createProxiedFetch("http://127.0.0.1:30082");
+  expect(typeof customFetch).toBe("function");
+  expect(createProxiedFetch()).toBe(fetch);
 });
