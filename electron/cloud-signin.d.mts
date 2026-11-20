@@ -16,6 +16,8 @@ export interface CloudSignInBlocked { outcome: "blocked"; reason: CloudSignInBlo
 export declare function signInBlock(input: { closed: boolean; restoring: boolean; issued: unknown; grant: unknown; cleanupNeeded: boolean; connecting?: boolean }): CloudSignInBlockReason | null;
 export declare const RESET_AFTER_TRIES: number;
 export declare const RESET_AFTER_MS: number;
-export declare function resetOffered(input: { platform: string; failures: number; since: number; now: number }): boolean;
+export declare const READ_WAIT_MS: number;
+export declare function settledWithin(promise: Promise<unknown>, ms: number): Promise<void>;
+export declare function resetOffered(input: { failures: number; since: number; now: number }): boolean;
 export declare function failureKind(error: unknown): string;
 export declare function retryAfterSeconds(headers: { get(name: string): string | null } | null | undefined, now?: number): number | undefined;

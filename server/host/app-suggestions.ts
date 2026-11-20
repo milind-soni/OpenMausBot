@@ -36,7 +36,8 @@ export interface AppSuggestionDeps {
   store: Pick<Store, "bots" | "bot" | "onChange">;
   configured(): boolean;
   catalog(): Promise<{ cards: ToolkitCard[] }>;
-  services(): Promise<Record<string, { connected: boolean }>>;
+  /** `live` reads the service now, for what a bot is told; otherwise the read the Apps page shares will do. */
+  services(live?: boolean): Promise<Record<string, { connected: boolean }>>;
   /** False for an app the organization, the team or this kind of connection doesn't let anyone connect here. */
   offerable(slug: string): boolean;
   pickAvailable(): boolean;
@@ -88,10 +89,10 @@ export function createAppSuggestions(deps: AppSuggestionDeps) {
     return (app: string) => deps.offerable(app) && (!bots.length || bots.some((one) => !one.connectorScopes || one.connectorScopes.apps[app]));
   };
 
-  async function reading() {
+  async function reading(live = false) {
     if (!deps.configured()) return null;
     try {
-      const [{ cards }, services] = await Promise.all([deps.catalog(), deps.services()]);
+      const [{ cards }, services] = await Promise.all([deps.catalog(), deps.services(live)]);
       const connected = Object.entries(services).filter(([, service]) => service.connected).map(([app]) => app).sort();
       return { cards, connected, held: Object.keys(services), key: pickKey(connected, roles()) };
     } catch {
@@ -134,7 +135,7 @@ export function createAppSuggestions(deps: AppSuggestionDeps) {
 
     /** A bot's catalog search, as the lines it reads. `refusal`: why this conversation can't connect an app, if it can't. */
     async find(input: { query: string; bot: BotRecord; refusal(app: string): string | null | undefined }): Promise<string> {
-      const here = await reading();
+      const here = await reading(true);
       if (!here) return "The list of apps can't be read right now. Try again in a minute.";
       const matches = searchCatalog(here.cards, input.query, FIND_LIMIT * 3);
       const scope = input.bot.connectorScopes;
