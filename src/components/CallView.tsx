@@ -41,7 +41,8 @@ export type CallButtonPlacement = "header" | "composer" | "panel";
 /** `fill` (Simple composer): a round button in that colour with its glyph in `ink`, and no chevron; the + menu picks the
  * call mode. */
 /** `inverse` (phone composer): a round ink-coloured button with an app-coloured glyph: white on Midnight, dark on Meadow. */
-export function CallButton({ bot, placement = "header", fill, ink, inverse }: { bot: Bot; placement?: CallButtonPlacement; fill?: string; ink?: string; inverse?: boolean }) {
+/** `modeMenu: false` drops the call-mode chevron beside the button, for a composer whose + menu offers the modes. */
+export function CallButton({ bot, placement = "header", fill, ink, inverse, modeMenu }: { bot: Bot; placement?: CallButtonPlacement; fill?: string; ink?: string; inverse?: boolean; modeMenu?: boolean }) {
   const { state } = useStore();
   return (
     <CallTargetButton
@@ -49,6 +50,7 @@ export function CallButton({ bot, placement = "header", fill, ink, inverse }: { 
       fill={fill}
       ink={ink}
       inverse={inverse}
+      modeMenu={modeMenu}
       targetId={bot.id}
       targetName={bot.name}
       threadId={bot.threadId}
@@ -74,11 +76,13 @@ export function CallTargetButton({
   fill,
   ink = "#ffffff",
   inverse,
+  modeMenu = true,
 }: {
   placement?: CallButtonPlacement;
   fill?: string;
   ink?: string;
   inverse?: boolean;
+  modeMenu?: boolean;
   targetId: string;
   targetName: string;
   threadId?: string;
@@ -137,7 +141,7 @@ export function CallTargetButton({
   const keyId = useId();
   const elsewhereName = liveElsewhere ? state.bots.find((candidate) => candidate.id === media.botId)?.name : undefined;
   const composer = placement === "composer";
-  const round = Boolean(fill) || Boolean(inverse) || placement === "panel";
+  const round = Boolean(fill) || Boolean(inverse) || placement === "panel" || !modeMenu;
   const label = active
     ? t("call.hangUpOn", { name: targetName })
     : liveElsewhere
