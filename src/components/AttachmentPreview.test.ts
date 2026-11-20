@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { isExternalImageSource } from "./CachedChatImage";
 import { FilePreviewDialog } from "./FilePreviewDialog";
 import { MENU_MOTION_MS } from "./MenuMotion";
 import { act, createElement } from "react";
@@ -18,7 +19,6 @@ import {
   canonicalDownloadFilename,
   contentDispositionFilename,
   imageGalleryLayout,
-  isExternalImageSource,
   messageImagePreviewUrl,
   previewImage,
   previewKeyAction,
@@ -127,27 +127,27 @@ describe("attachment preview surfaces", () => {
     expect(html).toContain("fetchPriority=\"high\"");
   });
 
-  it("keeps remote Markdown images private until explicitly loaded", () => {
+  it("automatically lazy loads standalone remote Markdown images", () => {
     const html = renderToStaticMarkup(createElement(MarkdownImagePreview, {
       src: "https://assets.example/preview.png?signature=abc",
       name: "Result image",
       openUrl: "https://assets.example/preview.png?signature=abc",
     }));
 
-    expect(html).toContain("External image hidden for privacy");
-    expect(html).toContain("Load image");
-    expect(html).not.toContain("src=\"https://assets.example/preview.png?signature=abc\"");
+    expect(html).toContain('loading="lazy"');
+    expect(html).not.toContain("Load image");
+    expect(html).toContain("src=\"https://assets.example/preview.png?signature=abc\"");
     expect(html).toContain("https://assets.example/preview.png?signature=abc");
   });
 
-  it("does not need an outer link to hide a remote Markdown image", () => {
+  it("automatically loads protocol-relative images without an outer link", () => {
     const html = renderToStaticMarkup(createElement(MarkdownImagePreview, {
       src: "//assets.example/preview.png",
       name: "Result image",
     }));
 
-    expect(html).toContain("External image hidden for privacy");
-    expect(html).not.toContain("src=\"//assets.example/preview.png\"");
+    expect(html).toContain('loading="lazy"');
+    expect(html).toContain("src=\"//assets.example/preview.png\"");
   });
 
   it("uses the stored image extension for downloads, not the display label", () => {

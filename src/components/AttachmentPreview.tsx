@@ -1,8 +1,9 @@
-import { CachedChatImage } from "./CachedChatImage";
+import { CachedChatImage, ChatImagePreloads, isExternalImageSource, preloadOnEntry } from "./CachedChatImage";
 // Security: model text never turns an arbitrary local path into a browser request; transcript paths resolve through
 // attachmentImageUrl.
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
@@ -41,6 +42,7 @@ export { canonicalDownloadFilename, contentDispositionFilename, safeDownloadFile
 export { previewKeyAction, nextImageIndex, type PreviewKeyAction } from "./AttachmentPreviewNavigation";
 
 export interface PreviewImage {
+  version?: string;
   src: string;
   name: string;
   downloadUrl?: string;
@@ -64,15 +66,6 @@ export function imageGalleryLayout(count: number): string {
   if (count <= 1) return "w-[min(32rem,70vw)] grid-cols-1";
   if (count === 2) return "w-[min(36rem,70vw)] grid-cols-2";
   return "w-[min(38rem,70vw)] grid-cols-2 sm:grid-cols-3";
-}
-
-export function isExternalImageSource(src: string): boolean {
-  const value = src.trim();
-  // The URL parser drops embedded ASCII tab/LF/CR and treats backslashes as slashes for special schemes.
-  const networkSpelling = value.replace(/[\t\n\r]/g, "").replace(/\\/g, "/");
-  // Chromium canonicalizes special-scheme variants (`https:host/x`, `https:/host/x`, backslashes) into network
-  // requests.
-  return networkSpelling.startsWith("//") || /^https?:/i.test(networkSpelling);
 }
 
 /**
@@ -434,6 +427,7 @@ export function AttachmentThumbnail({
           <CachedChatImage
             key={`${image.src}:${attempt}`}
             src={image.src}
+            version={image.version}
             alt={image.name}
             loading={eager ? "eager" : "lazy"}
             fetchPriority={eager ? "high" : undefined}
@@ -522,63 +516,47 @@ export function MarkdownImagePreview({
   const localSourceOffset = typeof sourceOffset === "number" && Number.isSafeInteger(sourceOffset) && sourceOffset >= 0
     ? sourceOffset
     : null;
-  const localMessageImage = Boolean(
-    filePath && threadId && messageId && localSourceOffset !== null,
-  );
-  const localImageKey = localMessageImage ? `${threadId}\u0000${messageId}\u0000${localSourceOffset}` : null;
-  const [visibleLocalImageKey, setVisibleLocalImageKey] = useState<string | null>(null);
   const external = !filePath && isExternalImageSource(src);
-  const [approvedExternalSource, setApprovedExternalSource] = useState<string | null>(null);
-
+  const scopedSource = (filePath || external) && threadId && messageId && localSourceOffset !== null
+    ? messageImagePreviewUrl({ threadId, messageId }, localSourceOffset) : null;
+  const version = filePath ?? (external ? src : undefined);
+  const entries = useContext(ChatImagePreloads);
+  const [visibleKey, setVisibleKey] = useState<string | null>(null);
   useEffect(() => {
-    if (!localImageKey) return;
+    if (!scopedSource) return;
     const element = containerRef.current;
-    if (!element || typeof IntersectionObserver === "undefined") {
-      setVisibleLocalImageKey(localImageKey);
+    if (preloadOnEntry(entries, scopedSource, version) || !element || typeof IntersectionObserver === "undefined") {
+      setVisibleKey(scopedSource);
       return;
     }
-    setVisibleLocalImageKey(null);
     const observer = new IntersectionObserver(([entry]) => {
       if (!entry?.isIntersecting) return;
-      setVisibleLocalImageKey(localImageKey);
+      setVisibleKey(scopedSource);
       observer.disconnect();
-    }, { rootMargin: "320px 0px" });
+    }, { rootMargin: "1000px 0px" });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [localImageKey]);
+  }, [scopedSource, version, entries]);
 
-  const shouldLoadLocalImage = localMessageImage && (visibleLocalImageKey === localImageKey || gallery);
-  const externalAllowed = !external || approvedExternalSource === src;
-  const visibleSource = externalAllowed
-    ? localMessageImage
-      ? shouldLoadLocalImage && filePath && threadId && messageId && localSourceOffset !== null
-        ? messageImagePreviewUrl({ threadId, messageId }, localSourceOffset)
-        : null
-      : src
-    : null;
+  const visibleSource = scopedSource && visibleKey !== scopedSource && !gallery ? null : scopedSource ?? src;
   const image: PreviewImage = {
     src: visibleSource ?? "",
+    version,
     name,
-    downloadUrl: localMessageImage ? visibleSource ?? undefined : undefined,
-    downloadName: localMessageImage
-      ? canonicalDownloadFilename({ fallback: name, source: filePath })
+    downloadUrl: scopedSource ? visibleSource ?? undefined : undefined,
+    downloadName: scopedSource
+      ? canonicalDownloadFilename({ fallback: name, source: filePath ?? src })
       : undefined,
   };
   return (
     <>
       <span ref={containerRef} className="my-1 block w-fit max-w-full">
-        {external && !externalAllowed ? (
-          <span className="flex aspect-[4/3] w-48 max-w-full flex-col items-center justify-center gap-2 rounded-xl border border-hairline/40 bg-inset px-4 text-center text-[12px] text-ink-secondary">
-            <ImageOff size={20} />
-            <span>{t("attach.externalHidden")}</span>
-            <button type="button" className="rounded-md border border-hairline/50 bg-panel px-2.5 py-1 text-ink interaction:bg-raised/50" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setApprovedExternalSource(src); }}>{t("attach.loadImage")}</button>
-          </span>
-        ) : filePath && (!threadId || !messageId || localSourceOffset === null) ? (
+        {filePath && (!threadId || !messageId || localSourceOffset === null) ? (
           <span className="flex aspect-[4/3] w-48 max-w-full items-center justify-center gap-2 rounded-xl border border-hairline/40 bg-inset text-[12px] text-ink-secondary" role="alert">
             <ImageOff size={17} /> {t("attach.oldImage")}
           </span>
         ) : visibleSource ? (
-          <AttachmentThumbnail key={image.src} image={image} onPreview={setGallery} layout={layout} className="max-w-full" eager explainRefusal={localMessageImage} />
+          <AttachmentThumbnail key={image.src} image={image} onPreview={setGallery} layout={layout} className="max-w-full" eager={Boolean(scopedSource)} explainRefusal={Boolean(filePath)} />
         ) : (
           <ImageLoading name={name} className="aspect-[4/3] w-48 max-w-full rounded-xl border border-hairline/40 bg-inset" />
         )}

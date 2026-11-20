@@ -336,7 +336,6 @@ export interface Bot extends DefaultBotFields, Pick<WireBot, "mascotFaceColor" |
 
   previewText?: string;
   needsHistory?: boolean;
-  chatPage?: { threadId: string; messages: Message[]; hasMore: boolean };
   chatPatches?: ReadonlyMap<string, Message>;
   messages: Message[];
   hasMore?: boolean;
@@ -1537,7 +1536,6 @@ export function reducer(state: AppState, action: Action): AppState {
       return updateBot(bumpTranscriptGeneration(state, action.threadId), bot.id, (b) => ({
         ...b,
         activeLeafId: action.activeLeafId,
-        chatPage: undefined,
       }));
     }
     case "switchBranch": {
@@ -1549,7 +1547,7 @@ export function reducer(state: AppState, action: Action): AppState {
         if (!children.length) break;
         cur = children.reduce((a, b) => (b.at >= a.at ? b : a)).id;
       }
-      return updateBot(bumpTranscriptGeneration(state, bot.threadId), action.botId, (b) => ({ ...b, activeLeafId: cur, chatPage: undefined }));
+      return updateBot(bumpTranscriptGeneration(state, bot.threadId), action.botId, (b) => ({ ...b, activeLeafId: cur }));
     }
     case "patchGroup":
       return {
@@ -1690,12 +1688,10 @@ export function reducer(state: AppState, action: Action): AppState {
         computer: action.bot.computer,
         toolScope: action.bot.toolScope, managedSections: action.bot.managedSections,
         vpsAlias: action.bot.vpsAlias, liveVoice: action.bot.liveVoice,
-        messages: action.bot.chatPage && bot.threadId === action.bot.threadId ? bot.messages :
-          action.bot.messages ?? (bot.threadId === action.bot.threadId ? bot.messages : []),
+        messages: action.bot.messages ?? (bot.threadId === action.bot.threadId ? bot.messages : []),
         needsHistory: action.bot.needsHistory ?? (action.bot.messages === undefined && bot.threadId === action.bot.threadId && bot.needsHistory),
         previewText: action.bot.previewText,
         chatPatches: bot.threadId === action.bot.threadId ? bot.chatPatches : undefined,
-        chatPage: action.bot.chatPage ?? (action.bot.messages === undefined && bot.threadId === action.bot.threadId ? bot.chatPage : undefined),
         hasMore: action.bot.hasMore ?? (bot.threadId === action.bot.threadId ? bot.hasMore : undefined),
         awaitingThreadSnapshot: false,
         switchingTo: undefined,
@@ -2743,7 +2739,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           navigation.set(action.botId, revision);
           const selectedAtStart = selectionRevision.current;
           const currentBot = stateRef.current.bots.find(bot => bot.id === action.botId);
-          const warm = action.type === "switchTask" && currentBot?.threadId === action.threadId && (!currentBot.needsHistory || Boolean(stateRef.current.chatV2 && currentBot.chatPage?.threadId === action.threadId));
+          const warm = action.type === "switchTask" && currentBot?.threadId === action.threadId && !currentBot.needsHistory;
           const compact = action.type === "switchTask" && !action.whole && !warm && stateRef.current.chatV2
             && !currentBot?.tasks?.find(task => task.threadId === action.threadId)?.busy;
           const ready = action.type === "newTask"
@@ -2751,16 +2747,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             : Promise.resolve();
           void ready.then(() => api<{ bot: Bot }>(action.type === "newTask"
             ? `/api/bots/${action.botId}/tasks?main=1`
-            : `/api/bots/${action.botId}/tasks/${action.threadId}${action.whole ? "" : `?messages=${warm ? 0 : SWITCH_MESSAGE_COUNT}${compact ? "&view=chat" : ""}`}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId, cwd: action.cwd } : {}) }))
+            : `/api/bots/${action.botId}/tasks/${action.threadId}${action.whole ? "" : `?messages=${warm || compact ? 0 : SWITCH_MESSAGE_COUNT}`}`, { method: "POST", body: JSON.stringify(action.type === "newTask" ? { projectId: action.projectId, cwd: action.cwd } : {}) }))
             .then((r) => {
               if (action.type === "newTask") { settle(null); action.onCreated?.(); }
               if (navigation.get(action.botId) !== revision) return;
               if (!r?.bot) { if (action.type === "switchTask") rawDispatch({ type: "switchTaskFailed", botId: action.botId, threadId: action.threadId }); return; }
               const selectsAfterCreation = action.type === "newTask" && action.cwd !== undefined;
               if (selectsAfterCreation && selectionRevision.current !== selectedAtStart) return;
-              const bot = compact ? { ...r.bot, needsHistory: true, messages: [], chatPage: {
-                threadId: r.bot.threadId, messages: r.bot.messages, hasMore: Boolean(r.bot.hasMore),
-              } } : r.bot;
+              const bot = compact ? { ...r.bot, needsHistory: true } : r.bot;
               dispatch({ type: "taskSwitched", bot });
               if (selectsAfterCreation) rawDispatch({ type: "select", id: action.botId });
             })

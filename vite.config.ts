@@ -101,13 +101,14 @@ function devServer(mode: string): ServerOptions {
   };
 }
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig(({ mode, command }) => ({
   plugins: [react(), tailwindcss(), railPage()],
   build: {
     rollupOptions: { input: { index: page("./index.html"), rail: page("./rail.html") } },
   },
   define: {
     __APP_VERSION__: JSON.stringify(version),
+    "import.meta.env.VITE_CHAT_BACKEND": JSON.stringify(command === "serve" ? backendProxy(mode, 0, loadEnv(mode, root, "OMB_")).target : null),
   },
   test: {
     environment: "node",

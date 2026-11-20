@@ -755,23 +755,23 @@ describe("message-scoped file targets", () => {
 });
 
 describe("ChatMarkdown attachments", () => {
-  it("requires consent before loading a remote image", () => {
+  it("automatically loads a remote Markdown image", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
       text: "![Launch art](https://assets.example/hero.png)",
     }));
 
-    expect(html).toContain("External image hidden for privacy");
-    expect(html).toContain("Load image");
-    expect(html).not.toContain("src=\"https://assets.example/hero.png\"");
+    expect(html).not.toContain("External image hidden for privacy");
+    expect(html).toContain('loading="lazy"');
+    expect(html).toContain("src=\"https://assets.example/hero.png\"");
   });
 
-  it("requires consent for a protocol-relative image even inside a local link", () => {
+  it("uses the scoped preview for a protocol-relative image inside a local link", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, {
       text: "[![Launch art](//assets.example/hero.png)](/workspace/original.png)",
       message: { threadId: "thread-1", messageId: "message-1" },
     }));
 
-    expect(html).toContain("External image hidden for privacy");
+    expect(html).not.toContain("External image hidden for privacy");
     expect(html).not.toContain("src=\"//assets.example/hero.png\"");
   });
 

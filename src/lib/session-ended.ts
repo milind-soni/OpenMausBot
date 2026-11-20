@@ -1,3 +1,4 @@
+import { clearChatCache } from "./chat-cache";
 import { useSyncExternalStore } from "react";
 import { readSessionState } from "./session";
 
@@ -14,6 +15,7 @@ export function noteRefusedRequest(): void {
   checking = readSessionState().then((state) => {
     if (state.kind !== "unauthenticated") return;
     ended = true;
+    void clearChatCache();
     try { sessionStorage.setItem(ENDED_KEY, "1"); } catch { }
     for (const listener of listeners) listener();
   }).finally(() => { checking = null; });

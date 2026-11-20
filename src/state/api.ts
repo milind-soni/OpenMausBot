@@ -1,3 +1,4 @@
+import { clearChatCache } from "../lib/chat-cache";
 import { locationClientId } from "../lib/device-location";
 import { DEVICE_LOCATION_HEADER } from "../../shared/device-location";
 // The renderer's JSON request helper. A Cloud home that went to sleep is never woken by a background poll
@@ -60,6 +61,7 @@ export async function api<T = any>(path: string, init?: ApiInit): Promise<T> {
     if (res.status === 409 && isBotPausedRefusal(refused)) showBotLimit("paused");
     throw refused;
   }
+  if (path === "/api/auth/logout") await clearChatCache();
   return body;
 }
 

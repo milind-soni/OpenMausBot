@@ -661,7 +661,7 @@ function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
       layout={userImages ? "square" : "oriented"}
       openUrl={markdownImageOpenUrl(typeof (props as Record<string, unknown>)["data-open-url"] === "string" ? String((props as Record<string, unknown>)["data-open-url"]) : src)}
       filePath={filePath}
-      message={filePath ? message : undefined}
+      message={message}
       sourceOffset={sourceOffset === undefined ? undefined : imageOffsets?.get(sourceOffset) ?? sourceOffset}
     />
   );

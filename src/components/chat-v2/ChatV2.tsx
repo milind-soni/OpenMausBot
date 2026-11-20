@@ -1,3 +1,4 @@
+import { ChatImagePreloads } from "../CachedChatImage";
 import type { MentionPeer } from "@/lib/mentions";
 import { useTeammates } from "@/state/team-people";
 import { groupChatWork, type TranscriptItem } from "@/lib/activity-runs";
@@ -225,7 +226,12 @@ function ChatWork({ item, focusedId, children }: {
 }
 
 export function ChatV2({ profile, phoneLayout = false, onClose }: { profile: Bot; phoneLayout?: boolean; onClose: () => void }) {
-  const bot = useMemo(() => currentTaskBot(profile), [profile]);
+  const bot = useMemo(() => {
+    if (!profile.switchingTo || profile.switchingTo === profile.threadId) return currentTaskBot(profile);
+    return { ...currentTaskBot(profile, profile.switchingTo), threadId: profile.switchingTo,
+      messages: [], chatPatches: undefined, activeLeafId: null, awaitingThreadSnapshot: true };
+  }, [profile]);
+  const imagePreloads = useMemo(() => new Set<string>(), [bot.id, bot.threadId]);
   const ownBubbleStyle = useMemo(() => userBubbleStyle(bot.color, { whiteInk: true }), [bot.color]);
   const dispatch = useStoreDispatch();
   const writable = useCanWriteIn(bot.threadId, bot.yourAccess) !== false;
@@ -317,12 +323,13 @@ export function ChatV2({ profile, phoneLayout = false, onClose }: { profile: Bot
     <div className="v2-scroll" ref={viewport.scrollRef} {...viewport.scrollHandlers}>
       <div ref={viewport.transcriptRef} className="v2-paper chat-column" role="log" aria-label={t("chat.conversationWith", { name: bot.name })}>
         {viewport.hasEarlier && <div ref={viewport.topSentinelRef} aria-hidden="true" className="h-px w-full" />}
-        {(viewport.olderPending || bot.switchingTo || (bot.awaitingThreadSnapshot && !messages.length)) && (
+        {(viewport.olderPending || ((bot.switchingTo || bot.awaitingThreadSnapshot) && !messages.length)) && (
           <div role="status" className="flex w-full justify-center py-1 text-ink-secondary">
             <Loader2 size={18} aria-hidden="true" className="motion-safe:animate-spin" />
             <span className="sr-only">{t("chat.loadingEarlier")}</span>
           </div>
         )}
+        <ChatImagePreloads.Provider value={imagePreloads}>
         <ExchangeTimeline items={items} botId={bot.id} focusId={focused?.messageId ?? null} unreadId={unread.messageId}
           render={item => {
             if (item.kind === "message") return renderMessage(item.message);
@@ -331,6 +338,7 @@ export function ChatV2({ profile, phoneLayout = false, onClose }: { profile: Bot
               {item.messages.map(renderMessage)}
             </ChatWork>;
           }} />
+        </ChatImagePreloads.Provider>
         {viewport.laterCount > 0 && <button onClick={viewport.showLater}>{t("chat.showLater", { count: viewport.laterCount })}</button>}
       </div>
     </div>

@@ -3,48 +3,78 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
-import { CachedChatImage, ImageCacheScope } from "./CachedChatImage";
+import { CachedChatImage } from "./CachedChatImage";
+import { ChatCacheScope } from "../lib/chat-cache";
 
-it.each([
-  { scope: "session", status: 304, immediate: false },
-  { scope: "session", status: 403, immediate: false },
-  { scope: "loopback", status: 304, immediate: true },
-  { scope: "loopback", status: 503, immediate: true },
-])("renders a cached image for $scope with update status $status", async ({ scope, status, immediate }) => {
-  const cached = { blob: new Blob(["cached"]), saved: Date.now(), etag: '"image"' };
-  function lookup<T>(result: T) {
-    const request = { result, onsuccess: () => {} };
-    queueMicrotask(() => request.onsuccess());
-    return request;
-  }
-  const store = {
-    get: () => lookup(cached),
-    delete: vi.fn(),
-    index: () => ({ openCursor: () => lookup(null) }),
-  };
-  const db = { transaction: () => ({ objectStore: () => store }) };
-  vi.stubGlobal("indexedDB", { open: () => lookup(db) });
-  vi.stubGlobal("IDBKeyRange", { upperBound: () => ({}) });
-  const result = Promise.withResolvers<Response>();
-  const fetchImage = vi.fn(() => result.promise);
-  vi.stubGlobal("fetch", fetchImage);
-  const url = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:cached");
-  const host = document.createElement("div");
-  const root = createRoot(host);
-  const src = "/api/attachments/example.png";
+vi.mock("../lib/chat-cache", async original => ({
+  ...await original<typeof import("../lib/chat-cache")>(),
+  readChatCache: vi.fn(async () => new Blob(["cached"])),
+}));
+
+it("shows a stored attachment without contacting the server on remount", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:cached");
   try {
-    flushSync(() => root.render(createElement(ImageCacheScope.Provider, { value: scope },
-      createElement(CachedChatImage, { src }))));
-    await vi.waitFor(() => expect(fetchImage).toHaveBeenCalledWith(src, expect.objectContaining({
-      headers: { "If-None-Match": cached.etag },
-    })));
-    if (immediate) await vi.waitFor(() => expect(host.querySelector("img")?.getAttribute("src")).toBe("blob:cached"));
-    else expect(url).not.toHaveBeenCalled();
-    result.resolve(new Response(null, { status }));
-    await vi.waitFor(() => expect(host.querySelector("img")?.getAttribute("src")).toBe(status === 304 || immediate ? "blob:cached" : src));
-    expect(url).toHaveBeenCalledTimes(status === 304 || immediate ? 1 : 0);
+    for (let visit = 0; visit < 2; visit++) {
+      const host = document.createElement("div");
+      const root = createRoot(host);
+      flushSync(() => root.render(createElement(ChatCacheScope.Provider, { value: "paired" },
+        createElement(CachedChatImage, { src: "/api/attachments/example.png" }))));
+      await vi.waitFor(() => expect(host.querySelector("img")?.getAttribute("src")).toBe("blob:cached"));
+      flushSync(() => root.unmount());
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  } finally {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("checks three distinct lazy images before intersection and downloads only misses", async () => {
+  const { ChatImagePreloads } = await import("./CachedChatImage");
+  const { readChatCache } = await import("../lib/chat-cache");
+  const fetch = vi.fn(async (_src: string) => new Response(new Blob(["image"])));
+  vi.stubGlobal("fetch", fetch);
+  vi.stubGlobal("IntersectionObserver", class { observe() {} disconnect() {} });
+  vi.mocked(readChatCache).mockImplementation(async (_kind, _scope, key) =>
+    key.includes("a.png") ? new Blob(["cached"]) : undefined);
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:test");
+  const root = createRoot(document.createElement("div"));
+  try {
+    flushSync(() => root.render(createElement(ChatCacheScope.Provider, { value: "paired" },
+      createElement(ChatImagePreloads.Provider, { value: new Set<string>() },
+        ["a", "b", "b", "c", "d"].map((name, key) => createElement(CachedChatImage, {
+          key, src: "/api/attachments/" + name + ".png", loading: "lazy",
+        }))))));
+    await vi.waitFor(() => expect(fetch.mock.calls.map(call => call[0])).toEqual([
+      "/api/attachments/b.png", "/api/attachments/c.png",
+    ]));
   } finally {
     flushSync(() => root.unmount());
+    vi.mocked(readChatCache).mockResolvedValue(new Blob(["cached"]));
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("shares one download for the same external Markdown image in two saved messages", async () => {
+  const { readChatCache } = await import("../lib/chat-cache");
+  vi.mocked(readChatCache).mockResolvedValue(undefined);
+  const fetch = vi.fn(async () => new Response(new Blob(["image"])));
+  vi.stubGlobal("fetch", fetch);
+  vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:remote");
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  try {
+    flushSync(() => root.render(createElement(ChatCacheScope.Provider, { value: "paired" },
+      ["one", "two"].map(id => createElement(CachedChatImage, { key: id,
+        src: `/api/threads/t/messages/${id}/file?preview=1&ref=0`, version: "https://images.example/flower.png" })))));
+    await vi.waitFor(() => expect(host.querySelectorAll('img[src="blob:remote"]')).toHaveLength(2));
+    expect(fetch).toHaveBeenCalledTimes(1);
+  } finally {
+    flushSync(() => root.unmount());
+    vi.mocked(readChatCache).mockResolvedValue(new Blob(["cached"]));
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   }

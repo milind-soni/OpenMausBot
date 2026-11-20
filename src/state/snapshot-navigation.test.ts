@@ -110,7 +110,7 @@ async function mount(v2: boolean, speech?: Partial<Window["ogb"]>, fixture?: {
     }
     const task = path.match(/^\/api\/bots\/bot\/tasks\/([ab])/);
     if (task) return switchResponse?.promise ?? json({ bot: bot(task[1]!, `fresh-${task[1]}`) });
-    if (path === "/api/bots/bot/tasks" || path === "/api/groups/room/tasks") return newTaskResponse?.promise ?? json({});
+    if (path === "/api/bots/bot/tasks?main=1" || path === "/api/groups/room/tasks") return newTaskResponse?.promise ?? json({});
     if (path.startsWith("/api/groups/room/tasks/room-b")) return json({ group: room("b", "fresh-room-b") });
     if (path === "/api/bots/bot/messages" || path === "/api/groups/room/messages") sends.push(JSON.parse(String(init?.body)));
     if (path === "/api/bots/bot/setup-request" && init?.method === "POST" && fixture?.setupRequests) {

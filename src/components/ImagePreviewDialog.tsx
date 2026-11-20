@@ -186,6 +186,7 @@ export function AttachmentPreviewDialog({
                 <CachedChatImage
                   key={attempt}
                   src={item.src}
+                  version={item.version}
                   alt={active ? item.name : ""}
                   draggable={false}
                   onPointerDown={event => {

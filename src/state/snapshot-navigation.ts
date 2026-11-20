@@ -18,8 +18,8 @@ export function reduceChatView(state: AppState, action: Extract<Action, { type: 
   const chatV2 = Boolean(phoneLayout || desktopChatV2);
   return {
     ...state, chatV2, desktopChatV2, phoneLayout,
-    bots: !chatV2 && state.chatV2 ? state.bots.map(bot => bot.chatPage || bot.chatPatches
-      ? { ...bot, chatPage: undefined, chatPatches: undefined } : bot) : state.bots,
+    bots: !chatV2 && state.chatV2 ? state.bots.map(bot => bot.chatPatches
+      ? { ...bot, chatPatches: undefined } : bot) : state.bots,
   };
 }
 

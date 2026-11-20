@@ -1,3 +1,4 @@
+import { fetchPublicPage } from "../wait-probes.ts";
 import { createHash } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { userError } from "../user-errors.ts";
@@ -248,6 +249,18 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
           ? (typeof body.path === "string" ? body.path : "")
           : messageImageTargetAt(messageText, Number(rawReference));
       if (!href) return json(res, 400, { error: "path is required" });
+
+      if (streamsMessageImage && /^(?:https?:|\/\/)/i.test(href)) {
+        const address = href.startsWith("//") ? "https:" + href : href;
+        const remote = await fetchPublicPage(address, { maxBytes: IMAGE_MAX_BYTES + 1, timeoutMs: 15_000 });
+        if (!remote.ok) return json(res, 502, { error: "Remote image unavailable" });
+        if (remote.body.length > IMAGE_MAX_BYTES) return json(res, 413, { error: "Image too large" });
+        const mime = remote.headers["content-type"]?.split(";")[0].trim().toLowerCase();
+        if (!mime || !/^image\/[a-z0-9.+-]+$/.test(mime)) return json(res, 415, { error: "Expected an image" });
+        res.writeHead(200, { "content-type": mime, "cache-control": "private, no-store",
+          "content-security-policy": "sandbox; default-src 'none'", "x-content-type-options": "nosniff" });
+        return res.end(remote.body);
+      }
 
       let roots: string[];
       let downloadName: string | undefined;

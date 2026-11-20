@@ -61,37 +61,39 @@ it("still asks for the whole chat when a jump needs it", async () => {
   await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-other", expect.objectContaining({ method: "POST" })));
 });
 
-it("reuses the current thread and requests a compact cold V2 switch", async () => {
+it("reuses the current thread and leaves cold V2 history to the page reader", async () => {
   flushSync(() => dispatch({ type: "switchTask", botId: "B", threadId: "B-old" }));
   await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-old?messages=0", expect.anything()));
   flushSync(() => dispatch({ type: "switchTask", botId: "B", threadId: "B-other" }));
-  await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-other?messages=80&view=chat", expect.anything()));
+  await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-other?messages=0", expect.anything()));
 });
 
 const line = (id: string, text = id, parentId: string | null = null): Message => ({
   id, text, parentId, role: "bot", kind: "text", at: 1,
 });
 
-function showCompact(messages: Message[], hasMore = false) {
+function showMessages(messages: Message[], hasMore = false) {
   flushSync(() => dispatch({ type: "taskSwitched", bot: {
-    ...profile, needsHistory: true, activeLeafId: messages.at(-1)?.id,
-    chatPage: { threadId: profile.threadId, messages, hasMore },
+    ...profile, needsHistory: true, activeLeafId: messages.at(-1)?.id, messages, hasMore,
   } }));
   flushSync(() => dispatch({ type: "chatView", v2: true }));
 }
 
 it("replaces the compact page on branch changes and ignores an old page still in flight", async () => {
   const url = "/api/threads/B-old/messages?view=chat&limit=200";
+  let nextPage = { messages: [line("old")], hasMore: true };
   let answerOld!: (response: Response) => void;
   requests.mockImplementation(input => {
     if (input === url + "&before=old") return new Promise(resolve => { answerOld = resolve; });
-    if (input === url) return Promise.resolve(Response.json({ messages: [line("new")], hasMore: false }));
+    if (input === url) return Promise.resolve(Response.json(nextPage));
     return new Promise(() => {});
   });
-  showCompact([line("old")], true);
-  expect(host.textContent).toBe("old");
+  showMessages([line("old")], true);
+  await vi.waitFor(() => expect(host.textContent).toBe("old"));
+  await new Promise(resolve => setTimeout(resolve, 10));
   flushSync(() => host.querySelector("button")!.click());
   await vi.waitFor(() => expect(requests).toHaveBeenCalledWith(url + "&before=old", expect.anything()));
+  nextPage = { messages: [line("new")], hasMore: false };
   flushSync(() => dispatch({ type: "threadActive", threadId: "B-old", activeLeafId: "new" }));
   expect(host.textContent).not.toContain("old");
   await vi.waitFor(() => expect(host.textContent).toBe("new"));
@@ -100,9 +102,9 @@ it("replaces the compact page on branch changes and ignores an old page still in
   expect(host.textContent).toBe("new");
 });
 
-it("updates a card loaded only in a compact page when its server patch arrives", () => {
+it("updates a visible card when its server patch arrives", () => {
   const card: Message = { ...line("card", "Waiting for answer"), kind: "options" };
-  showCompact([card]);
+  showMessages([card]);
   expect(host.textContent).toBe("Waiting for answer");
   flushSync(() => dispatch({ type: "messagePatched", threadId: "B-old", message: { ...card, text: "Answered" } }));
   expect(host.textContent).toBe("Answered");
@@ -121,12 +123,35 @@ it("shares the phone's forced V2 mode with history loading and restores the desk
     narrow = true;
     flushSync(() => media.dispatchEvent(new Event("change")));
     flushSync(() => dispatch({ type: "switchTask", botId: "B", threadId: "B-other" }));
-    await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-other?messages=80&view=chat", expect.anything()));
+    await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-other?messages=0", expect.anything()));
     narrow = false;
     flushSync(() => media.dispatchEvent(new Event("change")));
     flushSync(() => dispatch({ type: "switchTask", botId: "B", threadId: "B-other" }));
     await vi.waitFor(() => expect(requests).toHaveBeenCalledWith("/api/bots/B/tasks/B-other?messages=80", expect.anything()));
   } finally {
     spy.mockRestore();
+  }
+});
+
+it("shows persisted messages while refreshing, then applies edits and deletions silently", async () => {
+  const cache = await import("../lib/chat-cache");
+  const local = { messages: [line("a", "cached"), line("b", "removed")], hasMore: false };
+  const fresh = { messages: [line("a", "edited")], hasMore: false };
+  const read = vi.spyOn(cache, "readChatCache").mockResolvedValue(local);
+  const write = vi.spyOn(cache, "writeChatCache").mockResolvedValue();
+  const response = Promise.withResolvers<Response>();
+  requests.mockImplementation(() => response.promise);
+  try {
+    flushSync(() => root.render(createElement(cache.ChatCacheScope.Provider, { value: "test" },
+      createElement(StoreProvider, null, createElement(Probe)))));
+    flushSync(() => dispatch({ type: "chatView", v2: true }));
+    await vi.waitFor(() => expect(host.textContent).toBe("cached,removed"));
+    expect(requests).toHaveBeenCalledWith("/api/threads/B-old/messages?view=chat&limit=200", expect.anything());
+    response.resolve(Response.json(fresh));
+    await vi.waitFor(() => expect(host.textContent).toBe("edited"));
+    expect(write).toHaveBeenCalledWith("pages", "test", expect.any(String), fresh);
+  } finally {
+    read.mockRestore();
+    write.mockRestore();
   }
 });

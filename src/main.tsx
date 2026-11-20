@@ -1,6 +1,6 @@
 import { setWebPushSession, syncWebPush, usesWebPush } from "./lib/web-push";
 import { finishedNotificationsEnabled } from "./lib/notification-preferences";
-import { ImageCacheScope } from "./components/CachedChatImage";
+import { ChatCacheScope, setChatCacheScope } from "./lib/chat-cache";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -80,8 +80,10 @@ async function chooseRoot(): Promise<React.ReactNode> {
   }
   const { default: App } = await (appPage ?? loadApp());
   void loadTheme();
-  const imageScope = session.kind === "session" ? session.id : session.kind === "loopback" ? "loopback" : null;
-  return <ImageCacheScope.Provider value={imageScope}><App /></ImageCacheScope.Provider>;
+  const identity = session.kind === "session" ? [session.id, [...session.scopes].sort(), session.openedThreads?.slice().sort()] : session.kind === "loopback" ? "loopback" : null;
+  const scope = identity && JSON.stringify([import.meta.env.VITE_CHAT_BACKEND ?? location.origin, identity]);
+  setChatCacheScope(scope, session.kind === "session" ? session.expiresAt : undefined);
+  return <ChatCacheScope.Provider value={scope}><App /></ChatCacheScope.Provider>;
 }
 
 // The window is named before the brand file is asked for: the answer only ever renames it.
