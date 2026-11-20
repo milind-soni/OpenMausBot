@@ -152,8 +152,10 @@ A bot's **Local VM** is a desktop that runs in a container. When the server
 itself runs in a container, that takes Docker inside it. The `dind` image
 (`ghcr.io/milind-soni/openmausbot:dind`) is the server image with a Docker
 engine added. The setup screen's **Prepare** step downloads and builds the
-desktop on demand; nothing else is installed up front. No checkout and no
-build: save this as `compose.yaml` and run it.
+desktop on demand; nothing else is installed up front. The image is published
+for x86-64 and arm64 (a Raspberry Pi 4 or 5, a Rock Pi, an ARM server), and the
+desktop image it pulls has both builds too. No checkout and no build: save this
+as `compose.yaml` and run it.
 
 ```yaml
 services:
@@ -246,6 +248,12 @@ The three commented settings are what make Docker inside the container work:
 | `privileged: true` | `dockerd` needs it to mount filesystems and set up networking. |
 | `cgroup: host` | Without it, a host on cgroup v2 refuses to start the nested container (`cannot enter cgroupv2 … threaded mode`). |
 | a volume on `/var/lib/docker` | `overlay2` cannot sit on the container's own filesystem. Use a real disk, not a network share. |
+
+The host's kernel has to provide overlayfs, cgroup v2 and netfilter NAT.
+Current Debian, Ubuntu and Fedora kernels do, on x86-64 and arm64 alike; some
+vendor kernels on small ARM boards do not, and there `dockerd` cannot start (the
+server still does, as above). The desktop wants 4 GB of memory, so a board with
+2 GB will struggle.
 
 The image starts as root, runs `dockerd`, then runs the server as the
 unprivileged `maus` user. If `dockerd` cannot start (no `privileged`, no
