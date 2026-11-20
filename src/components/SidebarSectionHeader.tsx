@@ -78,7 +78,7 @@ export function SidebarSectionHeader({
 
   if (line) {
     const tail = onToggle && (
-      <Chevron size={14} aria-hidden="true" className="shrink-0 text-ink-secondary opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 touch:opacity-100" />
+      <Chevron size={12} aria-hidden="true" className="shrink-0 text-ink-secondary opacity-0 transition-opacity group-hover/section:opacity-100 group-focus-within/section:opacity-100 touch:opacity-100" />
     );
     return (
       <div
@@ -143,15 +143,15 @@ export function SidebarSectionHeader({
           title={toggleTitle}
           className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-raised/50"
         >
-          <span className="truncate text-[12px] font-semibold text-ink-secondary">
+          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">
             {name}
           </span>
-          <Chevron size={13} className="shrink-0 text-ink-secondary" aria-hidden="true" />
+          <Chevron size={12} className="shrink-0 text-ink-secondary" aria-hidden="true" />
           <SectionAttention attention={attention} label={attentionLabel} alert={alert} />
         </button>
       ) : (
         <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1 py-0.5">
-          <span className="truncate text-[12px] font-semibold text-ink-secondary">
+          <span className="truncate text-[13px] leading-[18px] text-ink-secondary">
             {name}
           </span>
           {attentionLabel && <span className="sr-only">{attentionLabel}</span>}

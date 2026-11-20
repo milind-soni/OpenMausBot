@@ -280,7 +280,7 @@ export function CallTargetButton({
       >
         {active
           ? <PhoneOff size={composer || round ? 15 : 17} />
-          : composer ? fill ? <AudioLines size={15} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" /> : <AudioLines size={16} aria-hidden="true" /> : <Phone size={round ? 15 : 17} />}
+          : composer ? fill ? <AudioLines size={16} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" /> : <AudioLines size={16} aria-hidden="true" /> : <Phone size={round ? 15 : 17} />}
         {unavailable && (
           <span className="absolute right-1 top-1 size-1.5 rounded-full bg-warning ring-2 ring-app" aria-hidden="true" />
         )}

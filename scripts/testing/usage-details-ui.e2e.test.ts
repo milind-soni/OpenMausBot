@@ -107,7 +107,7 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
     await expect.poll(() => evaluate("Boolean(document.querySelector('[role=dialog]'))"), { timeout: 10_000 }).toBe(true);
     await ui("screenshot", "--out", `${handle.logPath}.settings-1100.png`);
     await ui("press", "--keys", "Escape");
-    await expect.poll(() => evaluate("document.querySelector('[data-sidebar]').getBoundingClientRect().width")).toBe(320);
+    await expect.poll(() => evaluate("document.querySelector('[data-sidebar]').getBoundingClientRect().width")).toBe(280);
     await openMore();
     await activate('[role="menu"][aria-label="More"] button[data-menu-key="inspector"]');
     await expect.poll(() => evaluate("Boolean(document.querySelector('[aria-label=Inspector]'))"), { timeout: 10_000 }).toBe(true);

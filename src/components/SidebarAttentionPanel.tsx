@@ -30,7 +30,7 @@ export function SidebarAttentionPanel({ entries, onUnpin, onJump, collapsed, onT
         <Activity size={12} aria-hidden="true" className="shrink-0" />
         <span className="min-w-0 flex-1 truncate">{t("attention.title")}</span>
         {entries.length > 0 && (
-          <span className="text-[11px] font-normal tabular-nums">{entries.length}</span>
+          <span className="text-[12px] font-normal tabular-nums">{entries.length}</span>
         )}
         <button
           type="button"
@@ -43,7 +43,7 @@ export function SidebarAttentionPanel({ entries, onUnpin, onJump, collapsed, onT
         </button>
       </div>
       {!collapsed && (entries.length === 0 ? (
-        <div className="px-2.5 pb-1.5 pt-0.5 text-[11px] text-ink-secondary">{t("attention.empty")}</div>
+        <div className="px-2.5 pb-1.5 pt-0.5 text-[12px] leading-4 text-ink-secondary">{t("attention.empty")}</div>
       ) : (
         <div className="max-h-56 overflow-y-auto">
           <AttentionThreadRows entries={entries} onJump={onJump} />

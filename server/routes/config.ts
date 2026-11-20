@@ -46,6 +46,7 @@ import * as vps from "../vps-computer.ts";
 import { refusalBody, userError, userErrorFields } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import type { Postiz } from "../postiz/service.ts";
+import { patchMayChangeEngineStatus } from "./config-engine-effect.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BusyFlag {
@@ -607,7 +608,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       localVmModeChanged?.();
       postiz?.configSaved(patch);
       // A saved key reaches an engine through the environment its status read uses, often with no reload.
-      registry.forgetSnapshots();
+      if (patchMayChangeEngineStatus(patch)) registry.forgetSnapshots();
       if (patch.localVm?.idleTimeoutMinutes !== undefined) {
         for (const idle of localVmIdles.values()) idle.setIdleMs(localVmIdleMs());
       }
