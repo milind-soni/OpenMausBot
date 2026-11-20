@@ -110,7 +110,9 @@ export function setupPaths(machine: Pick<SetupMachine, "home" | "platform" | "en
   // Hermes Agent (hermes_constants.get_hermes_home) and OpenClaw (docs.openclaw.ai/help/environment) homes.
   const hermesDefault = platform === "win32" ? join(absolute(env.LOCALAPPDATA) ?? join(home, "AppData", "Local"), "hermes") : join(home, ".hermes");
   const hermesHome = absolute(env.HERMES_HOME) ?? hermesDefault;
-  const hermesLabel = hermesHome === hermesDefault ? (platform === "win32" ? "%LOCALAPPDATA%/hermes/skills" : "~/.hermes/skills") : "$HERMES_HOME/skills";
+  // Named by where it is: a HERMES_HOME that points at ~/.hermes (as on any system but Windows by default) still reads ~/.hermes.
+  const hermesLabel = hermesHome === join(home, ".hermes") ? "~/.hermes/skills"
+    : hermesHome === hermesDefault ? "%LOCALAPPDATA%/hermes/skills" : "$HERMES_HOME/skills";
   const openclawHome = absolute(env.OPENCLAW_STATE_DIR) ?? join(home, ".openclaw");
   const openclawLabel = openclawHome === join(home, ".openclaw") ? "~/.openclaw" : "$OPENCLAW_STATE_DIR";
   return {
