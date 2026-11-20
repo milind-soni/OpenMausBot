@@ -86,6 +86,7 @@ const exited = (child: ChildProcess) => new Promise<void>((resolve) => {
 afterEach(async () => {
   for (const instance of instances.splice(0)) await instance.dispose();
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   started.clear();
   for (const scratch of scratches.splice(0)) removeTempDir(scratch);
 });
@@ -227,6 +228,9 @@ describe("ACP threads sharing one agent process", () => {
   });
 
   it("starts a fresh process once a shared one is full", async () => {
+    // Every thread here stays idle in the shared process. The cap on idle engines follows the host's memory (4 on a
+    // 7 GB runner) and would close sessions before the process fills, so it is set above the seven threads.
+    vi.stubEnv("OMB_IDLE_ENGINES_MAX", "16");
     const f = await fixture();
     for (let i = 0; i < 7; i++) await f.run(`thread-${i}`);
     expect(f.spawned).toHaveLength(2);
