@@ -148,6 +148,14 @@ export function taskWorkspaceIds(cwd: string, dataDir: string): { botId: string;
   return { botId: rel[0]!, threadId: rel[1]! };
 }
 
+/** The conversation whose uploads a box in `cwd` sees: a conversation folder's own, or for a turn working in its bot's own
+ * folder (workspaces/<bot>: a room, a bot whose folder is its own), that turn's conversation. Null for any other folder. */
+export function uploadsConversation(cwd: string, dataDir: string, turn?: { botId: string; threadId: string } | null): { botId: string; threadId: string } | null {
+  const ids = taskWorkspaceIds(cwd, dataDir);
+  if (ids || !turn || !ID.test(turn.botId) || !ID.test(turn.threadId)) return ids;
+  return cwd === join(dataDir, "workspaces", turn.botId) ? { botId: turn.botId, threadId: turn.threadId } : null;
+}
+
 /** The server-owned folder holding a conversation's uploads for its boxes (server/box-attachments.ts), bound read-only. */
 export function boxUploadsDir(dataDir: string, botId: string, threadId: string): string {
   return join(dataDir, "box-uploads", botId, threadId);
@@ -281,9 +289,13 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source: engines, target: engines, optional: true });
   }
   // The person's uploads for this conversation, after every read-write line: readable, but never writable or swappable.
-  if (ids) {
+  // A turn in its bot's own folder sees only its own conversation's: a process there is never shared with another
+  // conversation (procs.ts sharedBoxScope), so this holds for one started for several of them too.
+  const turnIds = !ids && cwd && request.conversationFolder ? taskWorkspaceIds(resolve(request.conversationFolder), dataDir) : null;
+  const uploadsOf = ids ?? (turnIds && turnIds.botId === botId ? uploadsConversation(cwd!, dataDir, turnIds) : null);
+  if (uploadsOf) {
     const shown = scoped ? [...scoped.rw, ...scoped.ro].filter((id) => ID.test(id)).map((id) => boxUploadsDir(dataDir, threads!, id))
-      : [threads ? join(dataDir, "box-uploads", threads) : boxUploadsDir(dataDir, ids.botId, ids.threadId)];
+      : [threads ? join(dataDir, "box-uploads", threads) : boxUploadsDir(dataDir, uploadsOf.botId, uploadsOf.threadId)];
     for (const folder of shown) mounts.push({ kind: "ro", source: folder, target: folder, optional: true });
   }
   // The team's conversations a non-team shared process may read, and the team's folder, after every read-write line too.

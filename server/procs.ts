@@ -313,12 +313,13 @@ export function boxedSpawn(resolved: ResolvedSpawn, opts: CliSpawnOptions, owner
 }
 
 /** A configured project folder can lie inside another bot's folder, so a turn working there still needs its own bot's
- * folder and conversation folder in its box. */
+ * folder and conversation folder in its box. A turn in its bot's own folder (a room's) needs its conversation's too, for
+ * that conversation's uploads (server/box-attachments.ts). */
 function projectFolderTurn(cwd: string | undefined): { botId: string; conversationFolder: string } | null {
   const dataDir = botBox.startOptions()?.dataDir, turn = currentTurn();
   if (!cwd || !dataDir || !turn?.botId) return null;
   const full = resolve(cwd), workspaces = join(resolve(dataDir), "workspaces"), conversations = join(resolve(dataDir), "task-workspaces");
-  if (under(full, conversations) || dirname(full) === workspaces || full === workspaces) return null;
+  if (under(full, conversations) || (dirname(full) === workspaces && basename(full) !== turn.botId) || full === workspaces) return null;
   return { botId: turn.botId, conversationFolder: join(conversations, turn.botId, turn.threadId) };
 }
 
@@ -337,9 +338,11 @@ export function sharedBoxScope(cwd: string): string | null {
   if (!botBox.enabled()) return null;
   const parent = dirname(resolve(cwd));
   if (basename(dirname(parent)) !== "task-workspaces") {
-    // Another bot's turn in the same project folder has that bot's folder in its box, so it never shares this process.
+    // Another bot's turn in the same project folder has that bot's folder in its box, so it never shares this process;
+    // nor does another conversation's turn in the bot's own folder, whose box has only its own conversation's uploads.
     const turn = projectFolderTurn(cwd);
-    return turn ? `${resolve(cwd)}#${turn.botId}` : resolve(cwd);
+    if (!turn) return resolve(cwd);
+    return `${resolve(cwd)}#${basename(resolve(cwd)) === turn.botId ? turn.conversationFolder : turn.botId}`;
   }
   const threadId = engineHomes.thread(), conversationBot = engineHomes.bot();
   const threads = botBox.sharedThreadsKey({ cwd, ...(threadId ? { threadId } : {}), ...(conversationBot ? { conversationBot } : {}) });
