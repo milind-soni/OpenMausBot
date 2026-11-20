@@ -9,7 +9,7 @@ import { approvalModeFor, modelSwitchNeedsAsk, type ApprovalMode } from "../../s
 import { writeFileAtomic } from "../atomic.ts";
 import { recoveryCapabilityError } from "../automatic-recovery.ts";
 import type { InstanceConfigMap, ProviderAdapter, RuntimeEvent } from "../contracts.ts";
-import { readyToRun, type DefaultSelectionContext, type SelectableInstance } from "../default-model-selection.ts";
+import { readyToRun, signedOut as statusSignedOut, type DefaultSelectionContext, type SelectableInstance } from "../default-model-selection.ts";
 import { engineFailureKind } from "../drivers/engine-errors.ts";
 import { classifyError } from "../drivers/retry.ts";
 import { failoverLine, limitBackupAllowed, signedOutLine, type LimitFailover } from "../limit-failover.ts";
@@ -170,7 +170,7 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
 
   const notReady = (engine: TakeoverEngine): string => engine.enabled === false ? "switched off"
     : engine.snapshot.state !== "available" ? engine.snapshot.reason ?? "unavailable"
-    : engine.snapshot.authenticated === false ? "signed out" : deps.context.refusal?.(engine) ?? "not ready";
+    : deps.context.refusal?.(engine) ?? (statusSignedOut(engine) ? "signed out" : "not ready");
 
   const skipped = (engines: TakeoverEngine[], current: TakeoverEngine, selection: ModelSelection, scope: TakeoverScope, approval?: ApprovalMode): Omit<SkippedBackup, "selection"> | null => {
     const engine = engines.find((candidate) => candidate.instanceId === selection.instanceId);

@@ -164,6 +164,20 @@ describe("which AI carries on while one is limited", () => {
     ]);
   });
 
+  it("names what keeps a backup from running: the refusal before a sign-in, which a custom endpoint never needs", () => {
+    const custom = engine("cursor", "cursorAgent", ["auto"], { access: "custom", snapshot: { state: "available", authenticated: false } });
+    const signedOutCodex = engine("codex-2", "codex", ["gpt-6"], { snapshot: { state: "available", authenticated: false } });
+    const signedOutBlocked = engine("codex-3", "codex", ["gpt-6"], { snapshot: { state: "available", authenticated: false } });
+    const blocked = new Set(["cursor", "codex-3"]);
+    const { instance } = takeover({ engines: () => [CLAUDE, custom, signedOutCodex, signedOutBlocked], context: { refusal: (one) => blocked.has(one.instanceId) ? "Your organisation blocks this endpoint." : undefined },
+      chosen: () => [on("cursor", "auto"), on("codex-2", "gpt-6"), on("codex-3", "gpt-6")] });
+    expect(instance.weighBackups("kai", on("claude", "claude-opus-5-5")).skipped).toEqual([
+      { selection: on("cursor", "auto"), why: "not-ready", detail: "Your organisation blocks this endpoint." },
+      { selection: on("codex-2", "gpt-6"), why: "not-ready", detail: "signed out" },
+      { selection: on("codex-3", "gpt-6"), why: "not-ready", detail: "Your organisation blocks this endpoint." },
+    ]);
+  });
+
   it("says a backup is at its own limit, holding that model, signed out, or one the thread's approval level must ask about", () => {
     const chosen = { chosen: () => [on("claude", "claude-opus-5-5"), on("opencode", "go-default")] };
     const limited = takeover({ blockedUntil: (id) => (id === "claude" ? NOW + HOUR : null), ...chosen }).instance;
