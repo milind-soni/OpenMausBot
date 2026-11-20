@@ -68,6 +68,15 @@ beforeEach(() => {
 });
 
 describe("SignInRequestCard while it waits", () => {
+  it("sits in the chat flow instead of floating over page content", () => {
+    const tag = /<div[^>]*data-ask-card="pending"[^>]*>/u.exec(view())?.[0];
+    expect(tag).toBeDefined();
+    const classes = /class="([^"]*)"/u.exec(tag!)?.[1].split(" ") ?? [];
+    expect(classes).not.toContain("sticky");
+    expect(classes).not.toContain("z-10");
+    expect(classes).toContain("bg-composer");
+  });
+
   it("leads with the site, quotes the bot's reason, and offers Open, Done and Cancel", () => {
     const html = view();
     expect(html).toContain("Sign in needed");
