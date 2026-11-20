@@ -89,6 +89,7 @@ import { useSessionEnded } from "@/lib/session-ended";
 import { PairPage } from "./pair/PairPage";
 import { WebPanelPage } from "@/components/WebPanelPage";
 import { AppPreviewPanel } from "@/components/published-apps/AppPreviewPanel";
+import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { refreshPublishedApps } from "@/lib/own-published-apps";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
@@ -464,6 +465,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         )
       )}
       <AppPreviewPanel />
+      <FilePreviewPanel threadId={group?.threadId ?? bot?.threadId} />
       {state.forkPanel && sidebarInline && <ForkPanel />}
       {!state.forkPanel && roomPanelOpen && group && (
         <RoomPanel key={`room:${group.id}`} group={group} overlay={notificationFeed && state.notificationsOpen && !twoSidePanelsFit} />
