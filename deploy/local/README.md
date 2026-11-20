@@ -15,6 +15,9 @@ The image also carries Grok Build, pinned by `GROK_VERSION` in
 `deploy/local/Dockerfile`; Grok and Codex sign in from the app's engine setup
 with a one-time code, no terminal needed.
 
+For the Local VM desktop inside the server's container (Docker-in-Docker), see
+[Docker Compose with the Local VM desktop](../../docs/self-hosting.md#docker-compose-with-the-local-vm-desktop).
+
 For Tailscale Serve, set `OMB_PUBLIC_URL` to your HTTPS URL and
 `OMB_HTTPS_HOST` to its hostname without scheme or path. Configure Tailscale
 Serve on the host to forward to the chosen localhost HTTP port.

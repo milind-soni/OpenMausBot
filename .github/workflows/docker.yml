@@ -49,6 +49,23 @@ jobs:
           # the renderer is served by the server itself (OMB_STATIC_DIR)
           docker exec omb curl -sf http://127.0.0.1:8799/ | grep -qi "<html" || { docker logs omb; echo "UI not served"; exit 1; }
           docker logs omb | tail -5
+      - name: The Docker-in-Docker image starts with and without its privileges
+        run: |
+          set -euo pipefail
+          docker build --target server-dind -t openmausbot-dind:ci .
+          healthy() { for i in $(seq 1 40); do docker exec "$1" curl -sf http://127.0.0.1:8799/api/health | grep -q openmausbot && return 0; sleep 2; done; docker logs "$1"; return 1; }
+          docker run -d --name omb-dind-plain openmausbot-dind:ci
+          healthy omb-dind-plain
+          grep -q 'dockerd did not start' <<<"$(docker logs omb-dind-plain 2>&1)"
+          docker rm -f omb-dind-plain >/dev/null
+          docker run -d --name omb-dind --privileged --cgroupns host -v omb-dind-lib:/var/lib/docker openmausbot-dind:ci
+          healthy omb-dind
+          for i in $(seq 1 40); do docker exec omb-dind docker info >/dev/null 2>&1 && break; sleep 2; if [ "$i" = "40" ]; then docker logs omb-dind; exit 1; fi; done
+          test "$(docker top omb-dind -eo pid,uid,args | awk '/desktop-entry/ { print $2; exit }')" = "$(docker exec omb-dind id -u maus)"
+          docker restart omb-dind >/dev/null
+          healthy omb-dind
+          for i in $(seq 1 40); do docker exec omb-dind docker info >/dev/null 2>&1 && break; sleep 2; if [ "$i" = "40" ]; then docker logs omb-dind; exit 1; fi; done
+          docker rm -f omb-dind >/dev/null
       - name: Prove the image finds its enterprise layer
         # The image ships dist-server/ alone, so the bundled layer sits inside
         # the server root (server/enterprise.ts looks there after the sibling
@@ -582,6 +599,28 @@ jobs:
             CHROMIUM_CACHE_TAG=${{ steps.keys.outputs.chromium }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # The server with a Docker engine inside, for the Local VM desktop
+      # (docs/self-hosting.md): the same commit and layers as the image above.
+      - id: dind-meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=dind,enable={{is_default_branch}}
+            type=sha,format=long,suffix=-dind
+            type=ref,event=tag,suffix=-dind
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          target: server-dind
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.dind-meta.outputs.tags }}
+          labels: ${{ steps.dind-meta.outputs.labels }}
+          build-args: |
+            CHROME_CACHE_TAG=${{ steps.keys.outputs.chrome }}
+            CHROMIUM_CACHE_TAG=${{ steps.keys.outputs.chromium }}
+          cache-from: type=gha
       # The Cloud Pro home machine (the Dockerfile's cloud-home target), on the
       # same runtime layers as the server image just pushed, with Claude Code,
       # Codex and Grok baked in. The Admin pins it by digest

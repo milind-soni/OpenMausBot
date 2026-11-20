@@ -56,7 +56,9 @@ describe("container images", () => {
   it("keeps the self-hosted server the default target, and Cloud home a target of the same file", () => {
     expect(all.at(-1)!.name).toBe("server");
     expect(all.find(s => s.name === "cloud-home")!.from).toBe("runtime");
-    expect(all.find(s => s.name === "server")!.from).toBe("runtime");
+    expect(all.find(s => s.name === "server-app")!.from).toBe("runtime");
+    expect(all.find(s => s.name === "server")!.from).toBe("server-app");
+    expect(all.find(s => s.name === "server-dind")!.from).toBe("server-app");
     // the build arg docker-compose.yml passes keeps its name and empty default
     expect(chain("server")).toContainEqual({ op: "ARG", args: 'ENGINES=""' });
   });
