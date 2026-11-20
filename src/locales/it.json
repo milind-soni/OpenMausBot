@@ -2168,7 +2168,7 @@
   "composer.dictation.start": "Avvia la dettatura",
   "composer.dictation.stop": "Interrompi la dettatura",
   "composer.dictation.stopHint": "Interrompi la dettatura (Esc)",
-  "composer.dictation.hint": "Detta",
+  "composer.dictation.hintKey": "Detta ({keys})",
   "composer.failed.notSent": "Non inviato: “{text}”",
   "composer.failed.attachment": "allegato",
   "composer.failed.dismiss": "Chiudi",

@@ -627,7 +627,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -4061,7 +4060,8 @@
       "voice.hearWithEleven.help": "fb2aab6844f1ecd9bbbb92b589062d6317fbfa2c1384b4c3ceb4e9f88f49c53a",
       "voice.hearLanguage": "e0e77e5c6f38efbd4bbb93e7b7641c5de9f88214c48133d6582fd0149cf8cbef",
       "voice.hearLanguage.help": "4047e2f61649a10025e8c030a9d3c0ba5a7f8af7704cf8ecad42ab589549c39e",
-      "voice.hearLanguage.auto": "836e5a7f8e818a97ddea1777b429755700ce1fc997f931e980501fa271b17d8f"
+      "voice.hearLanguage.auto": "836e5a7f8e818a97ddea1777b429755700ce1fc997f931e980501fa271b17d8f",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -5604,7 +5604,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -10480,7 +10479,8 @@
       "alwaysOn.title": "2006f993f0189bf13dac31689d811ebd7581f8889987927aa6f0f11bf6b4679d",
       "alwaysOn.add.title": "007f4d7546061eba19c8b6edd78fc70404d2f745fb1f7f3aac83a22d216a9ccc",
       "inbox.settled.title": "7804f7a79a9eee323b6e89d3f8287c7d36076f4d76291646295f435b0dec736e",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9"
     },
     "fr": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -11016,7 +11016,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -14308,7 +14307,8 @@
       "alwaysOn.title": "2006f993f0189bf13dac31689d811ebd7581f8889987927aa6f0f11bf6b4679d",
       "alwaysOn.add.title": "007f4d7546061eba19c8b6edd78fc70404d2f745fb1f7f3aac83a22d216a9ccc",
       "inbox.settled.title": "7804f7a79a9eee323b6e89d3f8287c7d36076f4d76291646295f435b0dec736e",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9"
     },
     "hi": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -14844,7 +14844,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -17990,7 +17989,8 @@
       "alwaysOn.title": "2006f993f0189bf13dac31689d811ebd7581f8889987927aa6f0f11bf6b4679d",
       "alwaysOn.add.title": "007f4d7546061eba19c8b6edd78fc70404d2f745fb1f7f3aac83a22d216a9ccc",
       "inbox.settled.title": "7804f7a79a9eee323b6e89d3f8287c7d36076f4d76291646295f435b0dec736e",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9"
     },
     "ja": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -19704,7 +19704,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -25950,7 +25949,8 @@
       "alwaysOn.title": "2006f993f0189bf13dac31689d811ebd7581f8889987927aa6f0f11bf6b4679d",
       "alwaysOn.add.title": "007f4d7546061eba19c8b6edd78fc70404d2f745fb1f7f3aac83a22d216a9ccc",
       "inbox.settled.title": "7804f7a79a9eee323b6e89d3f8287c7d36076f4d76291646295f435b0dec736e",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9"
     },
     "pt-br": {
       "voice.gemini.keyPlaceholder": "8c87ba2043a4a89d63c90cae8a6dafd5cbd193652e923b97988e381a74773e10",
@@ -28416,7 +28416,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -37242,7 +37241,9 @@
       "voice.hearLanguage": "e0e77e5c6f38efbd4bbb93e7b7641c5de9f88214c48133d6582fd0149cf8cbef",
       "voice.hearLanguage.help": "4047e2f61649a10025e8c030a9d3c0ba5a7f8af7704cf8ecad42ab589549c39e",
       "voice.hearLanguage.auto": "836e5a7f8e818a97ddea1777b429755700ce1fc997f931e980501fa271b17d8f",
-      "call.mode.turnsHintEleven": "7e6acaf1930622f9d5cfe37b70dcd2c22ca99c5aacb16f624af9d71fa79bf2eb"
+      "call.mode.turnsHintEleven": "7e6acaf1930622f9d5cfe37b70dcd2c22ca99c5aacb16f624af9d71fa79bf2eb",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
+      "shortcuts.dictation-toggle": "77a64385f20682a528749c67d2bddf1fc2c60eae56509c520adcb3e78c7ba7a8"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -38083,7 +38084,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -47331,7 +47331,9 @@
       "chat.unreadContext.images": "1aa4cb0bcca76e92e30677e809bb3d4b5c066715ef4d558184e319496bcc5125",
       "chat.unreadContext.files": "50009ce1da4d15e1c4a04024df691eed5f0d598e2c4c67092f205366d0adf99e",
       "chat.unreadContext.moreCitations": "1a2612705dd797842beda42948a2979b5b6c763ee71acf4f87868f5c2c254420",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
+      "shortcuts.dictation-toggle": "77a64385f20682a528749c67d2bddf1fc2c60eae56509c520adcb3e78c7ba7a8"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -48417,7 +48419,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -57519,7 +57520,9 @@
       "alwaysOn.title": "2006f993f0189bf13dac31689d811ebd7581f8889987927aa6f0f11bf6b4679d",
       "alwaysOn.add.title": "007f4d7546061eba19c8b6edd78fc70404d2f745fb1f7f3aac83a22d216a9ccc",
       "inbox.settled.title": "7804f7a79a9eee323b6e89d3f8287c7d36076f4d76291646295f435b0dec736e",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9",
+      "shortcuts.dictation-toggle": "77a64385f20682a528749c67d2bddf1fc2c60eae56509c520adcb3e78c7ba7a8"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -58211,7 +58214,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -61621,7 +61623,8 @@
       "alwaysOn.title": "2006f993f0189bf13dac31689d811ebd7581f8889987927aa6f0f11bf6b4679d",
       "alwaysOn.add.title": "007f4d7546061eba19c8b6edd78fc70404d2f745fb1f7f3aac83a22d216a9ccc",
       "inbox.settled.title": "7804f7a79a9eee323b6e89d3f8287c7d36076f4d76291646295f435b0dec736e",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9"
     },
     "vi": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -62973,7 +62976,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -67542,7 +67544,8 @@
       "alwaysOn.title": "2006f993f0189bf13dac31689d811ebd7581f8889987927aa6f0f11bf6b4679d",
       "alwaysOn.add.title": "007f4d7546061eba19c8b6edd78fc70404d2f745fb1f7f3aac83a22d216a9ccc",
       "inbox.settled.title": "7804f7a79a9eee323b6e89d3f8287c7d36076f4d76291646295f435b0dec736e",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9"
     },
     "tr": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -68894,7 +68897,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -73463,7 +73465,8 @@
       "alwaysOn.title": "2006f993f0189bf13dac31689d811ebd7581f8889987927aa6f0f11bf6b4679d",
       "alwaysOn.add.title": "007f4d7546061eba19c8b6edd78fc70404d2f745fb1f7f3aac83a22d216a9ccc",
       "inbox.settled.title": "7804f7a79a9eee323b6e89d3f8287c7d36076f4d76291646295f435b0dec736e",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9"
     },
     "pl": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -75158,7 +75161,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -80586,7 +80588,8 @@
       "alwaysOn.title": "2006f993f0189bf13dac31689d811ebd7581f8889987927aa6f0f11bf6b4679d",
       "alwaysOn.add.title": "007f4d7546061eba19c8b6edd78fc70404d2f745fb1f7f3aac83a22d216a9ccc",
       "inbox.settled.title": "7804f7a79a9eee323b6e89d3f8287c7d36076f4d76291646295f435b0dec736e",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9"
     },
     "ru": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -82295,7 +82298,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -87763,7 +87765,8 @@
       "alwaysOn.title": "2006f993f0189bf13dac31689d811ebd7581f8889987927aa6f0f11bf6b4679d",
       "alwaysOn.add.title": "007f4d7546061eba19c8b6edd78fc70404d2f745fb1f7f3aac83a22d216a9ccc",
       "inbox.settled.title": "7804f7a79a9eee323b6e89d3f8287c7d36076f4d76291646295f435b0dec736e",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9"
     },
     "it": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -89428,7 +89431,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -94752,7 +94754,8 @@
       "alwaysOn.title": "2006f993f0189bf13dac31689d811ebd7581f8889987927aa6f0f11bf6b4679d",
       "alwaysOn.add.title": "007f4d7546061eba19c8b6edd78fc70404d2f745fb1f7f3aac83a22d216a9ccc",
       "inbox.settled.title": "7804f7a79a9eee323b6e89d3f8287c7d36076f4d76291646295f435b0dec736e",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9"
     },
     "ko": {
       "connectedWorkspaces.localTitle": "7d6deafeab011d734c3fdd1bfd6f69544fbb746a004019269bdb48544b01164b",
@@ -96807,7 +96810,6 @@
       "composer.dictation.start": "d886bad793cf5643cba915994fa400d2df1f277b83bc2cafff4614c2a248502b",
       "composer.dictation.stop": "093b82bad0a26e1db290ab311666b930ce1500e27b0b7e5f2b66b842b3389eea",
       "composer.dictation.stopHint": "8d8e3224444a417d7e5d0c22d1ca1c9a65bbf92e9578733db97f1186748d3b9c",
-      "composer.dictation.hint": "0b7004c8459afc3af4f4509f70882ebe107951ac2c21332fe85446cd8674712a",
       "composer.failed.notSent": "0c0a1026c21762cb4246bb8edb99e206bbee6af164040fbe236018411ec3e709",
       "composer.failed.attachment": "602a5e69c3021bdbd3d25156a02d2cbb467605b8203248eea6af3fb42168d663",
       "composer.failed.dismiss": "48845bff334a50a59aaecf499f28a7a24c3b4b891b8b18a9f1169ad8e8a6b261",
@@ -102405,7 +102407,8 @@
       "alwaysOn.title": "2006f993f0189bf13dac31689d811ebd7581f8889987927aa6f0f11bf6b4679d",
       "alwaysOn.add.title": "007f4d7546061eba19c8b6edd78fc70404d2f745fb1f7f3aac83a22d216a9ccc",
       "inbox.settled.title": "7804f7a79a9eee323b6e89d3f8287c7d36076f4d76291646295f435b0dec736e",
-      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca"
+      "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
+      "composer.dictation.hintKey": "ad34499eb8ecf3174898c031bb1e45b63f46045a1105be0bffafb82368323de9"
     }
   }
 }

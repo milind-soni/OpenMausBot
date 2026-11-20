@@ -2212,7 +2212,7 @@
   "composer.dictation.start": "Rozpocznij dyktowanie",
   "composer.dictation.stop": "Zatrzymaj dyktowanie",
   "composer.dictation.stopHint": "Zatrzymaj dyktowanie (Esc)",
-  "composer.dictation.hint": "Dyktuj",
+  "composer.dictation.hintKey": "Dyktuj ({keys})",
   "composer.failed.notSent": "Nie wysłano: „{text}”",
   "composer.failed.attachment": "załącznik",
   "composer.failed.dismiss": "Odrzuć",

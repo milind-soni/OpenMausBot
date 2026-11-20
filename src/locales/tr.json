@@ -1786,7 +1786,7 @@
   "composer.dictation.start": "Dikteyi başlat",
   "composer.dictation.stop": "Dikteyi durdur",
   "composer.dictation.stopHint": "Dikteyi durdur (Esc)",
-  "composer.dictation.hint": "Dikte et",
+  "composer.dictation.hintKey": "Dikte et ({keys})",
   "composer.failed.notSent": "Gönderilemedi: “{text}”",
   "composer.failed.attachment": "ek",
   "composer.failed.dismiss": "Kapat",

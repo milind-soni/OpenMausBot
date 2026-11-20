@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
 import { restoreComposerDraft } from "@/lib/drafts";
 import { t } from "@/lib/i18n";
+import { isMacPlatform } from "@/lib/keyboard-shortcuts";
 
 const fixture = vi.hoisted(() => ({ dispatch: vi.fn() }));
 vi.mock("@/state/store", async (importOriginal) => {
@@ -112,6 +113,20 @@ describe("native dictation in the real composer", () => {
     expect(speechStop).toHaveBeenCalled();
     hear("遅れた結果。");
     expect(input().value).toBe("");
+  });
+
+  it("stops and starts again with the dictation shortcut in the text field", () => {
+    const press = () => {
+      const event = new KeyboardEvent("keydown", { key: "d", code: "KeyD", bubbles: true, cancelable: true, ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }) });
+      flushSync(() => input().dispatchEvent(event));
+      return event;
+    };
+    expect(press().defaultPrevented).toBe(true);
+    expect(speechStop).toHaveBeenCalledOnce();
+    expect(button(t("composer.dictation.start"))).not.toBeNull();
+    press();
+    expect(speechStart).toHaveBeenCalledTimes(2);
+    expect(button(t("composer.dictation.stop"))).not.toBeNull();
   });
 
   it("accepts multiple recognition results before React paints", () => {

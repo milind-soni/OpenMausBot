@@ -958,7 +958,7 @@
   "composer.dictation.start": "श्रुतलेख शुरू करें",
   "composer.dictation.stop": "श्रुतलेख रोकें",
   "composer.dictation.stopHint": "श्रुतलेख रोकें (Esc)",
-  "composer.dictation.hint": "बोलकर लिखें",
+  "composer.dictation.hintKey": "बोलकर लिखें ({keys})",
   "composer.failed.notSent": "नहीं भेजा गया: “{text}”",
   "composer.failed.attachment": "अटैचमेंट",
   "composer.failed.dismiss": "हटाएँ",

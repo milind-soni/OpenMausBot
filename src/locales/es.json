@@ -2080,7 +2080,7 @@
   "composer.dictation.start": "Iniciar el dictado",
   "composer.dictation.stop": "Detener el dictado",
   "composer.dictation.stopHint": "Detener el dictado (Esc)",
-  "composer.dictation.hint": "Dictar",
+  "composer.dictation.hintKey": "Dictar ({keys})",
   "composer.failed.notSent": "No enviado: «{text}»",
   "composer.failed.attachment": "adjunto",
   "composer.failed.dismiss": "Descartar",
