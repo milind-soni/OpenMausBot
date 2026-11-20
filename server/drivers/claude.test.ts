@@ -3,7 +3,7 @@ import { createServer as createHttpServer, type IncomingHttpHeaders } from "node
 import { connect, createServer as createNetServer, type AddressInfo, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
-import { CLAUDE_IMAGE_KEEP, transcriptPath } from "./claude-transcript-images.ts";
+import { CLAUDE_IMAGE_LIMIT, transcriptPath } from "./claude-transcript-images.ts";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -3825,14 +3825,18 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     // 19 held + none new: still the warm process
     const second = await instance.adapter.sendTurn({ threadId: "t-images", text: "two", cwd, resumeCursor: announced });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
-    writeFileSync(file, Array.from({ length: 25 }, (_, i) => row(i)).join("\n") + "\n");
-    const third = await instance.adapter.sendTurn({ threadId: "t-images", text: "three", cwd, resumeCursor: announced });
+    // 16 held + 5 new: over, so a fresh process resumes a transcript that leaves room for this turn's own
+    writeFileSync(file, Array.from({ length: 16 }, (_, i) => row(i)).join("\n") + "\n");
+    const imagePath = join(scratch, "page.png");
+    writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const images = Array.from({ length: 5 }, () => ({ path: imagePath, mime: "image/png", bytes: 4 }));
+    const third = await instance.adapter.sendTurn({ threadId: "t-images", text: "three", images, cwd, resumeCursor: announced });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === third.turnId);
     const closes = readFileSync(join(NATIVE_DIR, "t-images.ndjson"), "utf8").split("\n").filter(Boolean)
       .map((line) => { try { return JSON.parse(line).msg?.close; } catch { return undefined; } }).filter(Boolean);
     expect(closes).toEqual(["images over the request limit"]);
     const kept = readFileSync(file, "utf8");
-    expect(kept.split('"type":"image"').length - 1).toBe(CLAUDE_IMAGE_KEEP);
+    expect(kept.split('"type":"image"').length - 1).toBe(CLAUDE_IMAGE_LIMIT - 5);
   }, 20_000);
 
   it("names the changed contract fields when a warm process is replaced", async () => {

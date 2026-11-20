@@ -1333,8 +1333,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
         if (authSettingsPath) {
           writeFileSync(authSettingsPath, JSON.stringify(settings), { mode: 0o600 });
         }
-        // A resumed thread resends every image of its past turns: older ones become a note under the endpoints' limit.
-        if (sessionId) { foldTranscriptImages({ ...transcript, sessionId, ...(imagesOver ? { minBytes: 0 } : {}) }); args.push("--resume", sessionId); }
+        // A resumed thread resends every image of its past turns: older ones become a note, leaving room for this turn's own.
+        if (sessionId) { foldTranscriptImages({ ...transcript, sessionId, incoming: turn.images?.length ?? 0 }); args.push("--resume", sessionId); }
         else args.push("--session-id", newSessionId!);
       } catch (error) {
         cleanupUnownedLaunch();

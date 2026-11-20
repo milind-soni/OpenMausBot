@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "vitest";
 
-import { CLAUDE_IMAGE_KEEP, CLAUDE_IMAGE_LIMIT, foldTranscriptImages, transcriptImagesOver, transcriptPath } from "./claude-transcript-images.ts";
+import { CLAUDE_IMAGE_KEEP, CLAUDE_IMAGE_LIMIT, foldTranscriptImages, imagesToKeep, transcriptImagesOver, transcriptPath } from "./claude-transcript-images.ts";
 
 const image = (n: number) => ({ type: "image", source: { type: "base64", media_type: "image/png", data: `img${n}` } });
 const userRow = (blocks: unknown[], n: number) => JSON.stringify({ type: "user", message: { role: "user", content: blocks }, uuid: `u${n}` });
@@ -25,7 +25,7 @@ const count = (text: string, needle: string) => text.split(needle).length - 1;
 test("a resumed thread keeps its newest images: older ones become a note, the engine's JSONL stays one row per message", () => {
   const rows = Array.from({ length: 25 }, (_, i) => userRow([{ type: "text", text: `page ${i + 1}` }, image(i + 1)], i + 1));
   const { configDir, cwd, sessionId, file } = setup(rows);
-  const result = foldTranscriptImages({ configDir, cwd, sessionId, minBytes: 0 });
+  const result = foldTranscriptImages({ configDir, cwd, sessionId });
   assert.deepEqual(result, { total: 25, folded: 25 - CLAUDE_IMAGE_KEEP });
   const text = readFileSync(file, "utf8");
   assert.equal(count(text, '"type":"image"'), CLAUDE_IMAGE_KEEP);
@@ -43,23 +43,24 @@ test("a resumed thread keeps its newest images: older ones become a note, the en
 test("tool-result images count too, and a transcript already under the limit is left untouched", () => {
   const toolResult = (n: number) => JSON.stringify({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: [image(n)] }] } });
   const few = setup([toolResult(1), toolResult(2)]);
-  assert.deepEqual(foldTranscriptImages({ configDir: few.configDir, cwd: few.cwd, sessionId: few.sessionId, minBytes: 0 }), { total: 2, folded: 0 });
+  assert.deepEqual(foldTranscriptImages({ configDir: few.configDir, cwd: few.cwd, sessionId: few.sessionId }), { total: 2, folded: 0 });
   const before = readFileSync(few.file, "utf8");
 
   const many = setup(Array.from({ length: 20 }, (_, i) => toolResult(i + 1)));
-  assert.equal(foldTranscriptImages({ configDir: many.configDir, cwd: many.cwd, sessionId: many.sessionId, minBytes: 0 }).folded, 20 - CLAUDE_IMAGE_KEEP);
+  assert.equal(foldTranscriptImages({ configDir: many.configDir, cwd: many.cwd, sessionId: many.sessionId }).folded, 20 - CLAUDE_IMAGE_KEEP);
   assert.equal(count(readFileSync(many.file, "utf8"), '"type":"image"'), CLAUDE_IMAGE_KEEP);
   assert.equal(readFileSync(few.file, "utf8"), before);
 });
 
-test("a missing transcript is a no-op, and the same file is not parsed twice", () => {
+test("a missing transcript is a no-op, and a folded one is not folded again", () => {
   const { configDir, cwd } = setup([]);
-  assert.equal(foldTranscriptImages({ configDir, cwd, sessionId: "nope", minBytes: 0 }).skipped, "missing");
+  assert.equal(foldTranscriptImages({ configDir, cwd, sessionId: "nope" }).skipped, "missing");
 
   const rows = Array.from({ length: 21 }, (_, i) => userRow([image(i)], i));
   const one = setup(rows);
-  assert.equal(foldTranscriptImages({ configDir: one.configDir, cwd: one.cwd, sessionId: one.sessionId, minBytes: 0 }).folded, 21 - CLAUDE_IMAGE_KEEP);
-  assert.equal(foldTranscriptImages({ configDir: one.configDir, cwd: one.cwd, sessionId: one.sessionId, minBytes: 0 }).skipped, "unchanged");
+  assert.equal(foldTranscriptImages({ configDir: one.configDir, cwd: one.cwd, sessionId: one.sessionId }).folded, 21 - CLAUDE_IMAGE_KEEP);
+  const again = foldTranscriptImages({ configDir: one.configDir, cwd: one.cwd, sessionId: one.sessionId });
+  assert.deepEqual(again, { total: CLAUDE_IMAGE_KEEP, folded: 0 });
 });
 
 test("a warm process is over the limit once what it holds plus this turn's images passes 20", () => {
@@ -71,9 +72,53 @@ test("a warm process is over the limit once what it holds plus this turn's image
   assert.equal(transcriptImagesOver(under, 2), false);
   assert.equal(transcriptImagesOver({ ...under, sessionId: "nope" }, 50), false);
   // after the fold the same session has room again
-  foldTranscriptImages({ ...at, minBytes: 0 });
+  foldTranscriptImages({ ...at });
   assert.equal(transcriptImagesOver(at, CLAUDE_IMAGE_LIMIT - CLAUDE_IMAGE_KEEP), false);
   // the word "image" in text is not an image
   const words = setup([userRow([{ type: "text", text: '"image" '.repeat(30) }], 1)]);
   assert.equal(transcriptImagesOver(words, 0), false);
+});
+
+test("a small transcript is folded too: size says nothing about how many images it holds", () => {
+  const { file, ...options } = setup(Array.from({ length: 25 }, (_, i) => userRow([image(i)], i)));
+  assert.ok(statSync(file).size < 16 * 1024);
+  assert.equal(foldTranscriptImages(options).folded, 25 - CLAUDE_IMAGE_KEEP);
+});
+
+test("the turn's own images get room: 16 held and 5 new keep 15, even after a fold that kept 16", () => {
+  const { file, ...options } = setup(Array.from({ length: CLAUDE_IMAGE_KEEP + 2 }, (_, i) => userRow([image(i)], i)));
+  assert.equal(foldTranscriptImages(options).folded, 2);
+  assert.equal(transcriptImagesOver(options, 5), true);
+  assert.deepEqual(foldTranscriptImages({ ...options, incoming: 5 }), { total: CLAUDE_IMAGE_KEEP, folded: 1 });
+  assert.equal(count(readFileSync(file, "utf8"), '"type":"image"'), CLAUDE_IMAGE_LIMIT - 5);
+  assert.equal(transcriptImagesOver(options, 5), false);
+  assert.equal(imagesToKeep(0), CLAUDE_IMAGE_KEEP);
+  assert.equal(imagesToKeep(30), 0);
+});
+
+test("the transcript is found where Claude Code writes it: a linked working directory, and a path over 200 characters", () => {
+  const base = mkdtempSync(join(tmpdir(), "claude-images-"));
+  const configDir = join(base, ".claude-api");
+  const rows = Array.from({ length: 21 }, (_, i) => userRow([image(i)], i)).join("\n");
+  // the folder named after the resolved directory, built here by the CLI's own rule rather than through transcriptPath
+  const real = join(base, "real");
+  mkdirSync(real);
+  const link = join(base, "link");
+  symlinkSync(real, link);
+  const linked = join(configDir, "projects", real.replace(/[^A-Za-z0-9]/g, "-"));
+  mkdirSync(linked, { recursive: true });
+  writeFileSync(join(linked, "s1.jsonl"), rows);
+  assert.equal(transcriptImagesOver({ configDir, cwd: link, sessionId: "s1" }), true);
+  assert.equal(foldTranscriptImages({ configDir, cwd: link, sessionId: "s1" }).folded, 21 - CLAUDE_IMAGE_KEEP);
+  // a long working directory: cut at 200 characters, then '-' and the CLI's hash of the full path
+  const long = "/" + "deep/".repeat(50) + "thread";
+  assert.equal(transcriptPath(configDir, long, "s1"), join(configDir, "projects", `${long.replace(/[^A-Za-z0-9]/g, "-").slice(0, 200)}-h0oumx`, "s1.jsonl"));
+});
+
+test("a transcript that cannot be read keeps the warm process and costs the turn nothing", () => {
+  const options = setup([]);
+  const unreadable = { configDir: options.configDir, cwd: options.cwd, sessionId: "dir" };
+  mkdirSync(transcriptPath(options.configDir, options.cwd, "dir"));     // stat works, read does not
+  assert.equal(transcriptImagesOver(unreadable, 25), false);
+  assert.equal(foldTranscriptImages(unreadable).skipped, "unreadable");
 });
