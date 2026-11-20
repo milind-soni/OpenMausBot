@@ -242,6 +242,6 @@ describe("phone pairing instructions", () => {
     expect(text).toContain("Camera will not open it in a browser");
     expect(text).toContain("https://maus.example/pair");
     expect(text).not.toContain("not the Android native pairing scanner");
-    expect(text).toContain("five minutes");
+    expect(text).toContain("10 minutes");
   });
 });
