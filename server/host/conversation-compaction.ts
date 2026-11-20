@@ -53,7 +53,7 @@ export interface ConversationCompactionDeps {
   directContext(bot: BotRecord, threadId: string, messages: Message[]): ContextMessage[];
   latestCompaction(messages: readonly Message[]): ({ id: string; firstKeptId?: string } & Record<string, unknown>) | undefined;
   /** Where the engine compacts by itself, in tokens, when OpenMausBot set that point. */
-  nativeCompactTokens(instance: CompactionInstance): number | undefined;
+  nativeCompactTokens(instance: CompactionInstance, model: string): number | undefined;
   /** False for an engine whose own compaction is switched off in its environment. */
   engineCompactionOn(instance: CompactionInstance): boolean;
   /** The engine's own compaction of this conversation's session, asked for by the person; false when it has none to offer now. */
@@ -63,6 +63,8 @@ export interface ConversationCompactionDeps {
   controllers: Map<string, { generation: string; controller: AbortController }>;
   cancelled(reason: string): Error;
   idleFraction: number;
+  /** Told true when a summary of a conversation someone is waiting on starts, and false once it is written, failed or stopped. */
+  summarizing?(threadId: string, active: boolean): void;
 }
 
 export function createConversationCompaction(deps: ConversationCompactionDeps) {
@@ -95,7 +97,7 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
     }
     const engineCompacts = instance.adapter.capabilities.nativeCompaction === true && deps.engineCompactionOn(instance);
     if (!manual && !foldDue({ engineCompacts, configuredCompactAt: settings?.compactAt, contextTokens: measurement?.tokens, estimatedBytes: bytes,
-      window, nativeCompactAt: deps.nativeCompactTokens(instance), floor, idleFraction: idle ? deps.idleFraction : 1 })) return;
+      window, nativeCompactAt: deps.nativeCompactTokens(instance, model), floor, idleFraction: idle ? deps.idleFraction : 1 })) return;
     const fold = manual ? { folded: history, firstKeptId: "" } : foldPoint(history);
     if (!fold) return;
     const foldedThroughId = manual
@@ -107,9 +109,12 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
     idle?.addEventListener("abort", () => controller.abort(), { once: true });
     if (idle?.aborted) controller.abort();
     deps.controllers.set(threadId, { generation, controller });
+    // Someone waits on this summary (not an idle one): the status line says so until every way out below, in the finally.
+    let shown = false;
     try {
       if (manual && engineCompacts && await deps.engineCompact({ botId: bot.id, threadId, instanceId: instance.instanceId }, controller.signal)) return;
       controller.signal.throwIfAborted();
+      if (!idle && deps.summarizing) { shown = true; deps.summarizing(threadId, true); }
       const summary = await draftSummary(fold.folded, { signal: controller.signal, generateText: deps.generateText(bot.id, instance) });
       if (!idle && !deps.claimIsCurrent(bot.id, generation, threadId)) throw deps.cancelled("context summarization stopped");
       controller.signal.throwIfAborted();
@@ -123,6 +128,7 @@ export function createConversationCompaction(deps: ConversationCompactionDeps) {
           tokensBefore: measurement?.tokens ?? Math.ceil(bytes / 4), by: manual ? "person" : "harness" },
       }, { kind: "compaction.append", key: `${threadId}:${messages.at(-1)?.id}:${fold.firstKeptId}` });
     } finally {
+      if (shown) deps.summarizing?.(threadId, false);
       if (deps.controllers.get(threadId)?.generation === generation) deps.controllers.delete(threadId);
     }
   };

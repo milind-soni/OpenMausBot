@@ -1,9 +1,9 @@
 ---
 title: Move from Grok Bot
-description: Bring your Grok Bot Bots to MausBot, on your computer or on My Cloud. What comes over (instructions, skills, routines, memories, apps), what doesn't, and each step.
+description: Bring your Grok Bot Bots to MausBot, on your computer or on My Cloud. What comes over (instructions, skills, routines, memories, apps, chats), what doesn't, and each step.
 ---
 
-MausBot is an open-source alternative to Grok Bot, with no tie to xAI. You can bring each of your Grok Bot Bots over, with its instructions, skills, routines, memories and the list of apps it used. It takes a few minutes per Bot, and nothing changes in Grok Bot.
+MausBot is an open-source alternative to Grok Bot, with no tie to xAI. You can bring each of your Grok Bot Bots over, with its instructions, skills, routines, memories, the list of apps it used and, on the desktop app, its whole chat. It takes a few minutes per Bot, and nothing changes in Grok Bot.
 
 Grok Bot has no export button. So MausBot gives you a message to send to each Bot, the Bot writes down its own setup, and MausBot reads what it wrote.
 
@@ -18,10 +18,11 @@ Grok Bot has no export button. So MausBot gives you a message to send to each Bo
 | Routines that start on an event (Slack, GitHub, email, a webhook) or whose schedule can't be read | Saved as a note in the bot's memory, `memory/grok-bot-event-routines.md`, with their trigger and full instruction, so you can set each one up again. |
 | What it remembers, and what it knows about you | The bot's memory (`MEMORY.md`), under *Notes from Grok Bot*. |
 | Connected apps and MCP servers | Listed as apps to connect again. Where the Bot gave a remote MCP server's `https` address, MausBot keeps that address with any key taken out. |
+| Its chat, from the first message (desktop app, with the Grok Bot app on the same computer) | A thread on the new bot called *Chat from Grok Bot*, with every message in order and with its time. A card the Bot showed (a question with choices, a shared template, a request to connect an app, images) comes over as a line saying what it was, with your answer to a question. Keys and tokens in the text are redacted. The bot doesn't reply to it or act on it: carry on in that thread when you're ready. |
 
 ## What doesn't come over
 
-- **Chats and their history.** The Bot writes its setup, not its conversations.
+- **Chats, on My Cloud or in a browser.** Chats come from the Grok Bot app's own copy on your computer, so only the desktop app on that computer can bring them over.
 - **Files on Grok Bot's computer.** Add any files your bot needs to its folder in MausBot.
 - **Passwords, API keys, tokens and sign-ins.** The message tells the Bot to leave them out. If what it writes still has a password or key field in it, MausBot refuses the whole thing and says which fields; ask the Bot to write it again without them. Token-shaped text anywhere else is redacted before anything is saved.
 - **App sign-ins.** Connect each app again under **Connected apps**.
@@ -67,6 +68,7 @@ Then choose **Continue**.
 - that routines come over paused,
 - how many apps need connecting again,
 - which Bots are already here (moved before) and won't be added twice,
+- on the desktop app, that each Bot's chat comes over too,
 - which skills a safety check keeps off,
 - anything that couldn't be read.
 
@@ -74,7 +76,9 @@ Choose **Back** to bring back a different reply, or **Import**.
 
 ### 5. Import
 
-Each Bot becomes a bot in your sidebar, and MausBot opens the first one. The report names each Bot (*Bramble is here*, for a Bot called Bramble) with what came over. If one Bot can't be added, the others still are.
+Each Bot becomes a bot in your sidebar, and MausBot opens the first one. The report names each Bot (*Bramble is here*, for a Bot called Bramble) with what came over, its chat messages included. If one Bot can't be added, the others still are.
+
+MausBot finds each Bot's chat by the name in what the Bot wrote. Grok Bot lets several Bots share a name (five called *New Bot*, say), so the MausBot bot in Grok Bot adds the first 8 characters of a Bot's ID to a name that repeats. When a name still fits several Bots, or none, no chat comes over for that Bot and the report says why: MausBot never guesses which chat is whose.
 
 Choose **Move another Bot** for the next one, or **Done**.
 
@@ -89,7 +93,7 @@ Choose **Move another Bot** for the next one, or **Done**.
 
 ## On My Cloud
 
-With MausBot Cloud, your bots live on My Cloud, and the desktop app opens My Cloud by itself (see [One assistant, everywhere](./using-the-desktop-app-with-my-cloud.mdx)). Moving from Grok Bot works the same way there, in **Settings → Import & export → Move from Grok Bot**, with one difference: My Cloud can't look in your computer's Downloads folder or at the Grok Bot app. So in step 3, paste the Bot's reply, or choose or drop the file it made.
+With MausBot Cloud, your bots live on My Cloud, and the desktop app opens My Cloud by itself (see [One assistant, everywhere](./using-the-desktop-app-with-my-cloud.mdx)). Moving from Grok Bot works the same way there, in **Settings → Import & export → Move from Grok Bot**, with one difference: My Cloud can't look in your computer's Downloads folder or at the Grok Bot app. So in step 3, paste the Bot's reply, or choose or drop the file it made, and the Bots' chats don't come over.
 
 The moved bots live on My Cloud. Once you turn their routines on, they run with your computer off.
 
@@ -100,9 +104,10 @@ If you moved Bots into MausBot on this computer before you had MausBot Cloud, yo
 Only while **Move from Grok Bot** is open in the desktop app, and only when your bots live on this computer:
 
 - files named `grok-bot-export…` (`.json`, `.md` or `.txt`) in your Downloads folder, up to 20 of them;
-- the names of your Bots, from the list the Grok Bot app keeps on this computer, to show *Your Bots on this computer*.
+- the names of your Bots, from the list the Grok Bot app keeps on this computer, to show *Your Bots on this computer*;
+- when you choose **Import**, the chat the Grok Bot app keeps for each Bot you move, and no other.
 
-It never opens Grok Bot's sign-in files, cookies or chats. A file you drop on the dialog is read by the dialog only: it is not attached to the chat behind it.
+It never opens Grok Bot's sign-in files or cookies, or the chat of a Bot you aren't moving. A file you drop on the dialog is read by the dialog only: it is not attached to the chat behind it.
 
 ## When something goes wrong
 
@@ -115,6 +120,10 @@ It never opens Grok Bot's sign-in files, cookies or chats. A file you drop on th
 | *This was written for a newer OpenMausBot.* | Update MausBot, then try again. |
 | *This couldn't be turned into a bot.* | Ask the Bot to write it again. |
 | *Already here* | That Bot was moved before. Delete the moved bot first if you want to move it again. |
+| *No chat came over: the Grok Bot app isn't on this computer.* | Move from the desktop app on the computer where you use Grok Bot. |
+| *No chat came over: the Grok Bot app on this computer has no Bot with this name.* | The Bot wrote a different name from the one Grok Bot shows for it, or it's in the Grok Bot app on another computer. Ask it to write its setup again under the name Grok Bot shows, or move it from that computer. Delete the moved bot first. |
+| *No chat came over: several Bots in the Grok Bot app have this name.* | Ask the Bot to write its setup again with the first 8 characters of its ID after its name, or give it a name of its own in Grok Bot. Delete the moved bot, then move it again. |
+| *No chat came over: the Grok Bot app has none saved for this Bot.* | The Grok Bot app keeps no copy of that chat here. Open the Bot's chat in the Grok Bot app, then delete the moved bot and move it again. |
 
 ## Not the same as Backups
 

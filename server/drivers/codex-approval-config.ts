@@ -37,6 +37,15 @@ export function effectiveApprovalsReviewer(value: unknown): string {
   return value === "auto_review" || value === "guardian_subagent" ? value : "user";
 }
 
+const SANDBOX_ACCESS_ORDER: readonly unknown[] = ["readOnly", "workspaceWrite", "dangerFullAccess"];
+
+/** Codex may resolve a stricter sandbox than asked (read-only on Windows without its own sandbox), never a looser or unknown one. */
+export function resolvedSandboxAllowed(requested: unknown, resolved: unknown): boolean {
+  if (resolved === requested) return true;
+  const access = SANDBOX_ACCESS_ORDER.indexOf(resolved);
+  return access >= 0 && access < SANDBOX_ACCESS_ORDER.indexOf(requested);
+}
+
 export interface CodexApprovalParams {
   thread: Record<string, unknown>;
   turn: Record<string, unknown>;
@@ -82,7 +91,7 @@ export function withResolvedSandbox(params: CodexApprovalParams, session: unknow
   if (!sandbox || typeof sandbox.type !== "string") {
     throw new Error("Codex did not return its resolved sandbox policy. Update Codex, then retry; the turn was not started because its permissions could not be verified.");
   }
-  if (sandbox.type !== requested.type) {
+  if (!resolvedSandboxAllowed(requested.type, sandbox.type)) {
     throw new Error("Codex did not apply the requested sandbox mode; cannot safely start the turn.");
   }
   return { ...params, turn: { ...params.turn, sandboxPolicy: sandbox } };

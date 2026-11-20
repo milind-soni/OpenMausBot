@@ -85,6 +85,8 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     if (path !== "/api/cloud-send" && !path.startsWith("/api/cloud-send/")) return PASS;
     const home = deps.cloudHome === true || deps.ownHome?.(ctx.auth) === true;
     const scoped = deps.scope?.(ctx.auth) ?? null;
+    // Downstream handlers rely on this outer wrapper as the sole gate: team refusal rejects callers unless
+    // scoped to a specific bot move session.
     if (deps.refusal && !scoped) { req.resume(); return json(res, 403, deps.refusal); }
     // A move of one bot into a team reads that bot only, on both sides.
     const bot = scoped ?? (/^[\w-]{1,128}$/u.test(url.searchParams.get("bot") ?? "") ? url.searchParams.get("bot")! : undefined);

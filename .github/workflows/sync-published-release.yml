@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Published canonical tag to mirror (for recovery)"
+        description: "Published canonical tag to mirror (for recovery). A tag released before the .rpm assets needs this workflow run from that tag, not main."
         required: true
         type: string
 
@@ -60,7 +60,8 @@ jobs:
             "OpenMausBot-$version-x64.zip"
             "OpenMausBot-$version-x64.zip.blockmap"
             "OpenMausBot-$version-x86_64.AppImage"
-            OpenMausBot-amd64.deb OpenMausBot-intel.dmg OpenMausBot-setup.exe
+            "OpenMausBot-$version-x86_64.rpm"
+            OpenMausBot-amd64.deb OpenMausBot-intel.dmg OpenMausBot-setup.exe OpenMausBot-x86_64.rpm
             OpenMausBot.AppImage OpenMausBot.dmg SHA256SUMS-ubuntu-x64.txt
           )
           for file in "${required[@]}"; do
@@ -89,6 +90,7 @@ jobs:
             ["latest-linux.yml", [
               `OpenMausBot-${version}-x86_64.AppImage`,
               `OpenMausBot-${version}-amd64.deb`,
+              `OpenMausBot-${version}-x86_64.rpm`,
             ]],
           ]);
           let bad = 0;
