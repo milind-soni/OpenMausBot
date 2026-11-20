@@ -427,7 +427,7 @@ export function OutsideWorkspaceFile({ filePath, standalone = false }: { filePat
   const reveal = revealBridge();
   if (!reveal || !REVEALABLE_PATH.test(filePath)) {
     return (
-      <code title={t("attach.outsideWorkspacePath")} className="select-all break-all text-ink">
+      <code title={t("attach.outsideWorkspacePath")} className="select-all whitespace-pre-wrap break-all text-ink">
         {filePath}
       </code>
     );
@@ -448,9 +448,9 @@ export function OutsideWorkspaceFile({ filePath, standalone = false }: { filePat
         type="button"
         onClick={() => void show()}
         title={filePath}
-        className={`${standalone ? "min-h-8 touch:min-h-10 " : ""}inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent`}
+        className={standalone ? "ui-button touch:min-h-10" : "inline-flex items-center gap-1 text-accent underline decoration-accent/40 hover:decoration-accent"}
       >
-        <FolderOpen size={12} className="shrink-0" aria-hidden="true" />
+        <FolderOpen size={standalone ? 14 : 12} className="shrink-0" aria-hidden="true" />
         {t("attach.showInFolder")}
       </button>
       {problem && <span role="alert" className="text-danger">{problem}</span>}

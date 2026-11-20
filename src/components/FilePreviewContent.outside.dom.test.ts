@@ -64,6 +64,14 @@ describe("a previewed file outside the chat's folders", () => {
     });
   }
 
+  it("leaves out the find-it-at-this-path hint for a relative link, which names no folder to start from", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => outside()));
+    await act(async () => root.render(createElement(FilePreviewContent, { kind: "markdown", path: "../finance-head/report.md", shownPath: "../finance-head/report.md", name: "report.md", message })));
+    await vi.waitFor(() => expect(host.textContent).toContain("Ask the bot that saved it to attach a copy."), { timeout: 5_000 });
+    expect(host.textContent).not.toContain("Find this file at this path");
+    expect(buttons()).toEqual([]);
+  });
+
   it("keeps Retry for a refusal that may pass next time", async () => {
     await show("markdown", ".md", () => new Response(JSON.stringify({ error: "the linked file changed while it was being opened" }), { status: 409, headers: { "content-type": "application/json" } }));
     expect(host.querySelector("[role=alert]")!.textContent).toContain("the linked file changed while it was being opened");
