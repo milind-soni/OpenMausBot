@@ -86,6 +86,18 @@ describe("Full access in bot settings", () => {
     });
   });
 
+  it("re-applies Ask to a thread still at Full when the bot is already on Ask, and stays quiet when every thread matches", () => {
+    render({ ...base, tasks: [{ threadId: "current", title: "Current thread", createdAt: 1, approvalMode: "full" }] });
+    choose("Ask for approval");
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({
+      type: "updateBot", botId: "pepper", patch: { approvalMode: "ask", applyToAllThreads: true },
+    });
+    dispatch.mockReset();
+    render(base);
+    choose("Ask for approval");
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
   it("sets a level some engines lack on the bot alone", () => {
     render(base);
     choose("Auto-accept edits");

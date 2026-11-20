@@ -143,6 +143,24 @@ describe("after connecting an app", () => {
     expect(toast()?.textContent).toContain("Your bots can now use Apollo.");
   });
 
+  it("takes the bot it was started from while the Apps pop-up is already open, and only for that one connection", async () => {
+    fixture.state.bots = [bot("scout", { composio: false }), bot("ada", { composio: false })];
+    await open();
+    connectAppFromBot(fixture.dispatch, "ada");
+    await flush();
+    fixture.dispatch.mockClear();
+    await connectApollo();
+    expect(writes()).toEqual([{ type: "updateBot", botId: "ada", patch: { composio: true, connectorScopes: { apps: { apollo: "write" } } } }]);
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    fixture.dispatch.mockClear();
+    fixture.state.bots = [bot("scout", { composio: false }), bot("ada", { composio: false })];
+    await open();
+    await connectApollo();
+    expect(writes()).toEqual([]);
+  });
+
   it("says plainly when every bot's apps are off, and Change opens the switches", async () => {
     fixture.state.bots = [bot("scout", { composio: false }), bot("ada", { composio: false })];
     await open();

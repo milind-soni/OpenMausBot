@@ -6,7 +6,7 @@ import { Crown } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { useStore, type Bot } from "@/state/store";
+import { threadApprovalModes, useStore, type Bot } from "@/state/store";
 import type { ApprovalMode } from "../../../shared/approval-mode";
 import { effectiveOutboundPolicy, type OutboundPolicy } from "../../../shared/outbound";
 import { ApprovalModeSelector } from "../ApprovalModeSelector";
@@ -41,12 +41,16 @@ export function PermissionsSection({
   const applyEverywhere = (mode: "ask" | "full") =>
     dispatch({ type: "updateBot", botId: bot.id, patch: { approvalMode: mode, applyToAllThreads: true } });
   const setApprovalMode = (mode: ApprovalMode) => {
+    if (mode === "ask") {
+      if (approvalMode !== "ask" || threadApprovalModes(bot).some((threadMode) => threadMode !== "ask")) applyEverywhere("ask");
+      return;
+    }
     if (mode === approvalMode) return;
     if (mode === "auto" && bot.computer === "local") {
       setLocalAutoWarning(bot.id);
       return;
     }
-    if (mode === "ask" || mode === "full") applyEverywhere(mode);
+    if (mode === "full") applyEverywhere("full");
     else patch({ approvalMode: mode });
   };
 

@@ -30,6 +30,7 @@ function subscribe(watch: () => void) {
 /** The Apps pop-up, opened from inside a bot: an app connected there goes to that bot even if its apps were off. */
 export function connectAppFromBot(dispatch: (action: Action) => void, botId: string) {
   connectingFromBot = botId;
+  tell();
   dispatch({ type: "toggleSettings", open: false });
   dispatch({ type: "togglePlugins", open: true, surface: "apps" });
 }
@@ -87,11 +88,16 @@ export function useAppGrants({ status, emailConnected, inventoryReady }: { statu
   const instances = useStoreSelector((state) => state.instances);
   const allowed = useStoreSelector((state) => state.config?.managedPolicy?.apps);
   const admin = useOwnerOrAdmin();
-  const [startingBot] = useState(takeConnectingBot);
+  const [startingBot, setStartingBot] = useState(takeConnectingBot);
+  const handedBot = useSyncExternalStore(subscribe, () => connectingFromBot, () => null);
   const [changing, setChanging] = useState<string | null>(null);
   const requested = useSyncExternalStore(subscribe, () => changeRequested, () => null);
   const bots = botsForApps(everyBot, instances);
   const canChange = admin === true && inventoryReady && bots.length > 0;
+
+  useEffect(() => {
+    if (handedBot) setStartingBot(takeConnectingBot());
+  }, [handedBot]);
 
   useEffect(() => {
     if (!requested) return;
