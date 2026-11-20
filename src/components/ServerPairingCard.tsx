@@ -299,7 +299,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
             <SettingsRows icons>
               {listed.map((device) => (
                 <div key={device.id} className="flex min-h-16 items-center gap-3 px-4 py-3" data-paired-device={device.id}>
-                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Smartphone size={18} strokeWidth={1.75} aria-hidden="true" /></span>
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Smartphone size={18} aria-hidden="true" /></span>
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
                     <span className="truncate text-[14px] leading-5 text-ink">{device.person ?? device.label}</span>
                     <span className="truncate text-[13px] leading-[18px] text-ink-secondary">

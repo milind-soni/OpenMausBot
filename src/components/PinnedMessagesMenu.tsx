@@ -85,7 +85,7 @@ export function PinnedMessagesMenu({ pins, onJump, onUnpin, triggerClassName }: 
         title={t("chat.pinnedMessages")}
         aria-haspopup="menu"
         aria-expanded={open}
-        className={cn("flex size-8 items-center justify-center rounded-full text-ink-secondary hover:text-ink aria-expanded:text-accent", triggerClassName)}
+        className={cn("flex size-9 items-center justify-center rounded-full text-ink-secondary hover:text-ink aria-expanded:text-accent", triggerClassName)}
       >
         <Pin size={16} />
       </button>

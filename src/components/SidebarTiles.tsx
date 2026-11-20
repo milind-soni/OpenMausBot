@@ -75,8 +75,8 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
       onKeyDown={onKeyDown}
       onContextMenu={(event) => openBotContextMenu(onMenu, bot.id, event)}
       className={cn(
-        "flex h-[92px] w-[78px] shrink-0 cursor-pointer flex-col items-center rounded-[8px] bg-[var(--tile)] px-1 pt-2 transition-colors duration-150", SIMPLE_ROW_FOCUS,
-        selected ? "[--tile:var(--color-raised)]" : "[--tile:var(--color-panel)] hover:[--tile:color-mix(in_srgb,var(--color-raised)_50%,var(--color-panel))]",
+        "flex h-[92px] w-[95px] shrink-0 cursor-pointer flex-col items-center rounded-xl bg-[var(--tile)] px-2 pb-1 pt-1.5 transition-colors duration-150", SIMPLE_ROW_FOCUS,
+        selected ? "[--tile:var(--color-raised)]" : "[--tile:var(--color-panel)] hover:[--tile:color-mix(in_srgb,var(--color-ink)_6%,var(--color-panel))]",
         pinnedCircleDragClass({ drag, dragging, drop }),
       )}
     >
@@ -84,7 +84,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
         <BotAvatar
           bot={bot}
           state={stateForBot({ ...bot, messages: visible })}
-          size={56}
+          size={60}
           motion={mascotMotion?.kind ?? "none"}
           motionKey={mascotMotion?.nonce ?? 0}
           animated={working || noticing || (mascotMotion?.kind ?? "none") !== "none"}
@@ -119,8 +119,8 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
           title={tooltip}
           onCommit={rename}
           onEditingChange={setRenaming}
-          className="min-w-0 truncate text-center text-[13px] font-medium leading-4 text-ink"
-          inputClassName="w-full rounded bg-inset px-1 text-center text-[13px] font-medium leading-4"
+          className="min-w-0 truncate text-center text-[12px] leading-4 text-ink"
+          inputClassName="w-full rounded bg-inset px-1 text-center text-[12px] leading-4"
         />
       </span>
     </div>
@@ -172,7 +172,7 @@ export function SidebarTileGrid({ primary, pinned, row, corner = false }: { prim
   if (!primary && order.ranked.length === 0) return null;
   return (
     <div ref={besideCorner.ref} data-sidebar-tiles="" data-beside-corner={besideCorner.beside ? "" : undefined}
-      className="flex max-h-[40vh] flex-wrap justify-center gap-1 overflow-y-auto px-3 pb-4 pt-2.5" {...order.frameProps}>
+      className="flex max-h-[40vh] flex-wrap justify-center gap-x-1 gap-y-3 overflow-y-auto px-3 pb-4 pt-2.5" {...order.frameProps}>
       {primary && <SidebarBotTile {...row(primary)} primary />}
       {order.ranked.map((bot) => <SidebarBotTile key={bot.id} {...row(bot)} {...order.dragProps(bot)} />)}
       <span role="status" className="sr-only">{order.moved}</span>

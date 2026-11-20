@@ -89,7 +89,8 @@ function paint(): void {
     }
     if (theme.font) {
       root.style.setProperty("--font-sans", theme.font);
-      painted.push("--font-sans");
+      root.style.setProperty("--tracking-ui", "0");
+      painted.push("--font-sans", "--tracking-ui");
     }
     root.dataset.theme = worn!.id;
     applyThemeCss(theme.css ?? "");

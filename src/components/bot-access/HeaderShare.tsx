@@ -48,7 +48,7 @@ export function HeaderShare({ bot }: { bot: Bot }) {
   );
   return (
     <span data-header-share={shared?.kind ?? "private"} className="flex shrink-0 items-center gap-1.5">
-      <ShareBotButton bot={bot} headerMenu={<ExportMore key={bot.threadId} bot={bot} />} className={cn("size-8 items-center justify-center rounded-full text-ink-secondary hover:text-ink", ELEVATED_FLOAT, ELEVATED_HOVER, shared ? WIDE_ONLY : "flex")}
+      <ShareBotButton bot={bot} headerMenu={<ExportMore key={bot.threadId} bot={bot} />} className={cn("size-9 items-center justify-center rounded-full text-ink-secondary hover:text-ink", ELEVATED_FLOAT, ELEVATED_HOVER, shared ? WIDE_ONLY : "flex")}
         leading={(open) => shared?.kind === "everyone" ? marker(t("teamSettings.everyone", { team: teamName }), "bg-accent/15 text-accent", open)
           : shared?.kind === "added" ? marker(t("botAccess.onlyAdded"), "bg-ink/[0.08] text-ink-secondary", open)
           : shared?.kind === "people" ? <>

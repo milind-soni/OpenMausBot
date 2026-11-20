@@ -21,7 +21,7 @@ export function SidebarActiveThreads({ entries, icons, phone, dispatch }: { entr
       <button type="button" onClick={() => setOpen((value) => !value)} aria-label={attentionTriggerLabel(entries.length)} title={attentionTriggerLabel(entries.length)}
         className={cn("relative flex items-center justify-center text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
           icons ? "size-[46px] shrink-0 rounded-xl" : phone ? "size-10 shrink-0 rounded-full border border-hairline bg-card text-ink" : "size-8 rounded-full")}>
-        <Activity size={icons ? 20 : 18} strokeWidth={1.5} />
+        <Activity size={icons ? 20 : 18} />
         {entries.length > 0 && <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[10px] font-semibold leading-4 text-ink">{entries.length > 9 ? "9+" : entries.length}</span>}
         {attentionHasRunningWork(entries) && <span data-header-activity="" className="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-success" aria-hidden="true" />}
       </button>
