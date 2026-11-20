@@ -190,8 +190,9 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
 
   /** The AIs that may carry on while `from` is limited or signed out, best first: for one model's limit the same AI's own
    * default model, then the backups the person chose. No other AI is picked for them: with none of those usable the bot
-   * waits for the reset or a sign-in. `approval`: the thread's level, when known. `skipped`: each backup left out, and why. */
-  function weighBackups(botId: string, from: ModelSelection, scope: TakeoverScope = "engine", approval?: ApprovalMode): { backups: ModelSelection[]; skipped: SkippedBackup[] } {
+   * waits for the reset or a sign-in. `approval`: the thread's level, when known. `chosen`: the backups to weigh instead of
+   * the bot's and the installation's. `skipped`: each backup left out, and why. */
+  function weighBackups(botId: string, from: ModelSelection, scope: TakeoverScope = "engine", approval?: ApprovalMode, chosen?: readonly ModelSelection[]): { backups: ModelSelection[]; skipped: SkippedBackup[] } {
     const engines = deps.engines();
     const current = engines.find((engine) => engine.instanceId === from.instanceId);
     if (!current) return { backups: [], skipped: [] };
@@ -210,12 +211,12 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
       else out.push(pick);
     };
     if (scope === "model" || scope === "credits") add({ instanceId: current.instanceId, model: current.models.default });
-    for (const selection of scope === "signed-out" ? deps.signedOutChosen?.(botId) ?? deps.chosen(botId) : deps.chosen(botId)) add(selection);
+    for (const selection of chosen ?? (scope === "signed-out" ? deps.signedOutChosen?.(botId) ?? deps.chosen(botId) : deps.chosen(botId))) add(selection);
     return { backups: out, skipped: left };
   }
 
-  function backups(botId: string, from: ModelSelection, scope: TakeoverScope = "engine", approval?: ApprovalMode): ModelSelection[] {
-    return weighBackups(botId, from, scope, approval).backups;
+  function backups(botId: string, from: ModelSelection, scope: TakeoverScope = "engine", approval?: ApprovalMode, chosen?: readonly ModelSelection[]): ModelSelection[] {
+    return weighBackups(botId, from, scope, approval, chosen).backups;
   }
 
   const passedOver = (bot: Bot, from: ModelSelection, scope: TakeoverScope, left: readonly SkippedBackup[]): void => {
@@ -263,6 +264,24 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     signedIn(selection.instanceId);
   };
 
+  function heldAtStart(bot: ThreadBot, selection: ModelSelection, recovering = false, chosen?: readonly ModelSelection[]): { scope: TakeoverScope; resetsAt?: number } | null {
+    const engineUntil = deps.blockedUntil(selection.instanceId, selection.model);
+    const model = engineUntil === null ? modelHeld(selection) : null;
+    const scope: TakeoverScope | null = engineUntil !== null ? "engine" : model ? model.scope : signedOutHeld(selection.instanceId) ? "signed-out" : null;
+    if (!scope) return null;
+    const carries = (deps.enabled?.() ?? true) && backups(bot.id, selection, scope, approvalModeFor(bot), chosen).length > 0;
+    if (!carries && !(recovering && scope !== "signed-out")) return null;
+    const resetsAt = scope === "engine" ? deps.resetAt?.(selection.instanceId, selection.model) ?? undefined : model?.resetsAt;
+    return { scope, ...(resetsAt && resetsAt > now() ? { resetsAt } : {}) };
+  }
+
+  function carryOnRows(bot: Bot, from: ModelSelection, to: ModelSelection, facts: { scope: TakeoverScope; resetsAt?: number }): CarriedOnRow[] {
+    const told = tell(bot, from, { ...facts, backup: to });
+    const line = facts.scope === "signed-out" ? signedOutLine(refusedName(from, facts.scope), label(to, from))
+      : failoverLine(refusedName(from, facts.scope), label(to, from), facts.resetsAt);
+    return [{ name: `recovery: ${line}`, ok: true, ...(facts.scope === "signed-out" ? { nameCode: "chat.notice.failoverSignedOut", nameParams: { from: refusedName(from, facts.scope), to: label(to, from) } } : {}) }, ...(told && facts.scope === "signed-out" ? [{ name: `notice: ${told}`, ok: true, setup: true }] : [])];
+  }
+
   return {
     backups,
     weighBackups,
@@ -281,16 +300,7 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     /** Before a turn on `selection`: what holds that AI, when another AI can take the turn instead, so it starts there
      * with no refused turn first. Null when nothing holds it, or when nothing could carry on and the AI is tried as
      * usual. `recovering`: Automatic recovery has backups of its own for a limit. */
-    heldAtStart(bot: ThreadBot, selection: ModelSelection, recovering = false): { scope: TakeoverScope; resetsAt?: number } | null {
-      const engineUntil = deps.blockedUntil(selection.instanceId, selection.model);
-      const model = engineUntil === null ? modelHeld(selection) : null;
-      const scope: TakeoverScope | null = engineUntil !== null ? "engine" : model ? model.scope : signedOutHeld(selection.instanceId) ? "signed-out" : null;
-      if (!scope) return null;
-      const carries = (deps.enabled?.() ?? true) && backups(bot.id, selection, scope, approvalModeFor(bot)).length > 0;
-      if (!carries && !(recovering && scope !== "signed-out")) return null;
-      const resetsAt = scope === "engine" ? deps.resetAt?.(selection.instanceId, selection.model) ?? undefined : model?.resetsAt;
-      return { scope, ...(resetsAt && resetsAt > now() ? { resetsAt } : {}) };
-    },
+    heldAtStart,
     /** Every runtime event of a bot's thread, with the model its turn ran on: a model's own limit holds that model, a
      * refused sign-in holds the AI, and a turn that works ends what held it. */
     noteRuntimeEvent(botId: string, selection: ModelSelection | undefined, event: RuntimeEvent): void {
@@ -311,11 +321,20 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
      * the notice whose Sign in fixes it. */
     carriedOn(bot: Bot, threadId: string, from: ModelSelection, to: ModelSelection, facts: { scope: TakeoverScope; resetsAt?: number }): CarriedOnRow[] {
       moved(bot.id, threadId, from, to, facts.resetsAt, facts.scope);
-      const told = tell(bot, from, { ...facts, backup: to });
-      const line = facts.scope === "signed-out" ? signedOutLine(refusedName(from, facts.scope), label(to, from))
-        : failoverLine(refusedName(from, facts.scope), label(to, from), facts.resetsAt);
-      return [{ name: `recovery: ${line}`, ok: true, ...(facts.scope === "signed-out" ? { nameCode: "chat.notice.failoverSignedOut", nameParams: { from: refusedName(from, facts.scope), to: label(to, from) } } : {}) }, ...(told && facts.scope === "signed-out" ? [{ name: `notice: ${told}`, ok: true, setup: true }] : [])];
+      return carryOnRows(bot, from, to, facts);
     },
+    /** Before a turn on `selection`: when what holds that AI is already known and one of `chosen` can take the turn, that
+     * backup and what held it; the backups passed over are logged. Null when the turn goes to `selection` as usual. */
+    takeoverAtStart(bot: ThreadBot, selection: ModelSelection, chosen: readonly ModelSelection[]): { to: ModelSelection; scope: TakeoverScope; resetsAt?: number } | null {
+      const held = heldAtStart(bot, selection, false, chosen);
+      if (!held) return null;
+      const { backups: usable, skipped } = weighBackups(bot.id, selection, held.scope, approvalModeFor(bot), chosen);
+      passedOver(bot, selection, held.scope, skipped);
+      return usable[0] ? { to: usable[0], ...held } : null;
+    },
+    /** A turn of a room that runs on `to` while `from` is held: the person hears it once, and these are the rows the room
+     * shows. Nothing is recorded to go back, since the member's own AI is tried again on its next turn. */
+    carryOnRows,
     /** True once per bot for each stretch of this limit or sign-out: the one incident its Chief is told about, not one per
      * refused turn. */
     firstIncident(botId: string, from: ModelSelection, scope: TakeoverScope = "engine", resetsAt?: number): boolean {
