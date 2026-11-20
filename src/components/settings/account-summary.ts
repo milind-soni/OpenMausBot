@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import type { CloudAccountState, CloudPlanSnapshot } from "../../../electron/cloud-account.mjs";
 import { cloudPlanLabel, cloudPlanView } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
-import { profileForSession, readSessionState, type SessionState } from "@/lib/session";
+import { profileForSession, type SessionState } from "@/lib/session";
+import { readSharedSessionState } from "@/lib/shared-session";
 import { useStore } from "@/state/store";
 
 export interface AccountSummary {
@@ -56,7 +57,7 @@ export function useYou(): { profile: { name?: string; email?: string; avatarUrl?
   const [session, setSession] = useState<SessionState | null>(null);
   useEffect(() => {
     let alive = true;
-    void readSessionState().then((next) => { if (alive) setSession(next); });
+    void readSharedSessionState().then((next) => { if (alive) setSession(next); });
     return () => { alive = false; };
   }, []);
   return { profile: profileForSession(state.config?.profile, session), session };
