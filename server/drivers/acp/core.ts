@@ -66,7 +66,7 @@ import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
 import { AcpHost } from "./host.ts"; import { SignInRequests, type AcpDriverHooks } from "./driver-hooks.ts";
 import { exitBeforeResult } from "./exit-report.ts"; import { readNodeVersion } from "./node-version.ts";
-import { dropFailedChunk, endTurn, replyFailureOf, trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
+import { endTurn, receiveText, trackRunningTool, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { noticeFailure } from "../../chat-notices.ts";
 import { armIdleClose, engineIdleMs, sessionIdlePolicy, stopIdleClose } from "../session-idle.ts";
@@ -842,8 +842,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 if (support.resendsReasoningReply && messageId && messageId === current.state.textMessageId
                     && isHermesReasoningReplay(delta, current.state.text)) break;
                 current.state.textMessageId = messageId;
-                current.state.text += delta;
-                current.state.lastText = delta;
+                receiveText(current.state, delta, support.replyFailure);
                 const trimmed = current.state.text.trimStart();
                 if (!trimmed.startsWith("<SYSTEM_MESSAGE") &&
                     !trimmed.startsWith("The following is a <SYSTEM_MESSAGE") &&
@@ -1081,7 +1080,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         ): Promise<any> =>
           signIn.refused(session.host) ?? session.acp.request(method, params, timeoutMs, receive, idleMs, idleMessage);
 
-        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, repliedText: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false, lastText: "", cancelling: false };
+        const state: AcpTurn["state"] = { settled: false, promptSent: false, text: "", textMessageId: null, producedItem: false, repliedText: false, startupActivity: false, stopped: false, usagePeak: null, usageLast: null, usageCompacted: false, failedChunk: null, cancelling: false };
         let acknowledge = () => {};
         let rejectStartup = (_error: TurnNotStartedError) => {};
         const startupAck = turn.startupRecovery ? new Promise<{ turnId: string }>((resolve, reject) => {
@@ -1412,7 +1411,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               );
             const steersOut = current.steering?.promptAnswered();
             if (steersOut && !state.stopped) { current.flushAssistantText(); await steersOut; }
-            const failure = replyFailureOf(current, support.replyFailure);
+            const failure = state.failedChunk?.failure;
             // session/prompt resolving is the acceptance boundary: a rejected or reported-failed prompt leaves no receipt.
             if (pendingSplitReceipt && !failure) commitPromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt, { compacted: state.usageCompacted, last: state.usageLast, peak: state.usagePeak });
             const answers = turnAnswers(support.steer, result, current.steering?.replies);
@@ -1426,7 +1425,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             }
             const final = answers.at(-1);
             const reason = final?.stopReason, reported = await promptOutcome?.(final); if (reported) throw reported;
-            if (failure && reason === "end_turn") throw dropFailedChunk(current, failure);
+            if (failure && reason === "end_turn") { flushAssistantText(); throw new Error(failure); }
             if (reason === "end_turn") settle(threadId, session, true, null);
             else if (reason === "cancelled" || state.stopped) settle(threadId, session, true, "cancelled");
             else {

@@ -732,6 +732,50 @@ describe("CursorAgentDriver", () => {
       }
     });
 
+    // Cursor's prompt handler waits on backgrounded shells after the failure line, shown as a "Watching: …" tool call.
+    const scripted = async (threadId: string, updates: Array<Record<string, unknown>>) => {
+      ensureDirs();
+      chmodSync(FAKE_CLI, 0o755);
+      const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-reply-held-"));
+      scratchDirs.push(scratch);
+      process.env.FAKE_ACP_UPDATES_FILE = join(scratch, "updates.json");
+      writeFileSync(process.env.FAKE_ACP_UPDATES_FILE, JSON.stringify(updates.map((update) => ({ update }))));
+      const instance = await CursorAgentDriver.create({
+        instanceId: "cursor-reply-held", displayName: "Cursor", environment: {}, enabled: true, config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      const recorder = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId, text: "go" });
+        const done = await recorder.until((e) => e.type === "turn.completed");
+        const replies = recorder.events.flatMap((e) => e.type === "item.completed" && e.itemType === "assistant_text" ? [e.text] : []);
+        return { done, replies, errors: recorder.events.filter((e) => e.type === "runtime.error") };
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+        delete process.env.FAKE_ACP_UPDATES_FILE;
+      }
+    };
+    const text = (chunk: string) => ({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: chunk } });
+    const watching = [
+      { sessionUpdate: "tool_call", toolCallId: "watch-1", title: "Watching: wait until 06:15", kind: "other" },
+      { sessionUpdate: "tool_call_update", toolCallId: "watch-1", status: "completed" },
+    ];
+
+    it("fails the turn when a tool call follows the failure line, and never sends the line as a reply", async () => {
+      const { done, replies, errors } = await scripted("t-cursor-503-watching", [text("\n\nError: RetriableError: [unavailable] HTTP 503"), ...watching]);
+      expect(done).toMatchObject({ ok: false, stopReason: "rpc_error" });
+      expect(replies.some((reply) => reply.includes("RetriableError"))).toBe(false);
+      expect(errors).toEqual([expect.objectContaining({ message: expect.stringMatching(/^Cursor had a temporary server problem \(HTTP 503/) })]);
+    });
+
+    it("puts the line back in the reply when the agent goes on writing after it", async () => {
+      const line = "\n\nError: RetriableError: [unavailable] HTTP 503";
+      const { done, replies, errors } = await scripted("t-cursor-503-went-on", [text(line), ...watching, text(" Retried, and it went through.")]);
+      expect(done).toMatchObject({ ok: true, stopReason: null });
+      expect(replies.at(-1)).toBe("Error: RetriableError: [unavailable] HTTP 503 Retried, and it went through.");
+      expect(errors).toEqual([]);
+    });
+
     it("keeps a reply whose own words end by quoting such a line", async () => {
       const quoted = "The log ended with:\n\nError: RetriableError: [unavailable] HTTP 503";
       const { done, replies, errors } = await turn("t-cursor-quoted", quoted);

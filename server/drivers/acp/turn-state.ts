@@ -26,8 +26,8 @@ export interface AcpTurn {
     usagePeak: number | null;
     usageLast: number | null;
     usageCompacted: boolean;
-    /** The last text chunk received; it may since have been sent with `text`. */
-    lastText: string;
+    /** A chunk the driver read as a failed model call, kept out of `text` while it is the agent's last words. */
+    failedChunk: { chunk: string; failure: string } | null;
     /** Stop went unanswered: only the cancel timeout settles the turn, once its session is closed or its process gone. */
     cancelling: boolean;
   };
@@ -82,17 +82,13 @@ export function trackRunningTool(current: AcpTurn, update: { toolCallId?: unknow
   else if (status === "pending" || status === "in_progress") current.runningTools.add(update.toolCallId);
 }
 
-/** The failure `read` finds in the turn's last text chunk while that chunk still ends the unsent reply; null otherwise. */
-export function replyFailureOf(current: AcpTurn, read: AcpDriverHooks["replyFailure"]): string | null {
-  const { text, lastText } = current.state;
-  return lastText && text.endsWith(lastText) ? read?.(lastText) ?? null : null;
-}
-
-/** Sends the reply before the failed chunk, never the chunk itself, and gives the error that fails the turn. */
-export function dropFailedChunk(current: AcpTurn, failure: string): Error {
-  current.state.text = current.state.text.slice(0, -current.state.lastText.length);
-  current.flushAssistantText();
-  return new Error(failure);
+/** Adds a text chunk to the unsent reply. A chunk `read` names a failed model call is held back instead, so no flush
+ * sends it; later words return it to the reply, as it was not the agent's last. */
+export function receiveText(state: AcpTurn["state"], delta: string, read: AcpDriverHooks["replyFailure"]): void {
+  if (state.failedChunk) state.text += state.failedChunk.chunk;
+  const failure = read?.(delta) ?? null;
+  state.failedChunk = failure === null ? null : { chunk: delta, failure };
+  if (failure === null) state.text += delta;
 }
 
 export interface AcpTurnEnd {
