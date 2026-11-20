@@ -16,6 +16,7 @@ import { closeMessageDb,
   latestMessageAts,
   latestPersonLineAts,
   optionCardsForTools,
+  openCardRows,
   logNotification,
   openRescueMessages,
   LATEST_SAID_BY_BOT_SQL,
@@ -531,6 +532,13 @@ describe("start-up reads on their indexes", () => {
     expect(optionCardsForTools(["your_computer"])).toEqual([{ threadId: "b", messageId: "second" }, { threadId: "a", messageId: "first" }]);
     expect(optionCardsForTools(["your_computer", "ask_peer"]).map((row) => row.messageId)).toEqual(["second", "first", "other"]);
     expect(optionCardsForTools([])).toEqual([]);
+  });
+
+  it("says which open card is an automation's copy of another one", () => {
+    const card = { title: "Allow?", subtitle: "", options: ["Approve", "Deny"], requestType: "question", requestId: "q" } as Message["card"];
+    insertMessage("run", { ...msg("asked", "", { at: 10, role: "bot" }), kind: "options", card });
+    insertMessage("results", { ...msg("copy", "", { at: 20, role: "bot" }), kind: "options", card, automation: { routineId: "r", runId: "run-1", needsYou: true, copyOf: "asked" } } as Message);
+    expect(openCardRows().map((row) => [row.threadId, row.id, row.copyOf])).toEqual([["run", "asked", null], ["results", "copy", "asked"]]);
   });
 });
 

@@ -46,8 +46,9 @@ const lineSchema = z.object({
 const fileSchema = z.object({ version: z.literal(1), lines: z.array(lineSchema).max(MAX_LINES), seenAsks: z.array(id).max(MAX_SEEN_ASKS) });
 type Line = z.infer<typeof lineSchema>;
 
-/** An open card as the messages table holds it. */
-export interface OpenCardRow { threadId: string; id: string; at: number; card: string | null; fromBotId: string | null }
+/** An open card as the messages table holds it; `copyOf` names the original card when this one is an automation's copy of
+ * it in the run's Results chat. */
+export interface OpenCardRow { threadId: string; id: string; at: number; card: string | null; fromBotId: string | null; copyOf?: string | null }
 
 /** Who is asking for the inbox: its owner (on a server with members, a member), a guest on someone's Cloud, or nobody it
  * belongs to (a bot's shell on a Cloud, a local service). */
@@ -141,6 +142,7 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     if (deps.viewer(auth).kind === "nobody") return [];
     const rows = new Map<string, InboxRow>();
     const passed = new Map<string, Set<string>>();
+    const copies = new Map<string, string>();
     const overtaken = (threadId: string, messageId: string): boolean => {
       let questions = passed.get(threadId);
       if (!questions) passed.set(threadId, questions = overtakenQuestions(store.activePath(threadId), Boolean(store.groupByThread(threadId))));
@@ -156,7 +158,9 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
       const group = store.groupByThread(row.threadId);
       const guest = deps.guestOf(row.threadId);
       const handed = workingFor(row.threadId);
-      rows.set(`${row.threadId}\u0000${card.requestId}`, {
+      const key = `${row.threadId}\u0000${card.requestId}`;
+      if (row.copyOf) copies.set(key, row.copyOf);
+      rows.set(key, {
         id: row.id, kind: "ask", tab: "needs-you", from: { name: bot.name, botId: bot.id },
         ...(handed ? { workingFor: handed } : {}), ...(guest ? { askedBy: { name: deps.guestName(row.threadId) ?? "" } } : {}),
         origin: { botId: bot.id, threadId: row.threadId, title: titleOf(bot.id, row.threadId), ...(group ? { groupId: group.id } : {}), messageId: row.id },
@@ -164,6 +168,7 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
       });
     }
     const listed = new Set([...rows.values()].map((row) => row.id));
+    for (const [key, original] of copies) if (listed.has(original)) rows.delete(key);
     const viewer = deps.viewer(auth);
     for (const wait of deps.waiting?.() ?? []) {
       if (listed.has(wait.messageId) || !deps.sees(auth, wait.threadId)) continue;
