@@ -326,4 +326,17 @@ describe("export", () => {
     const missing = await run(["export", "--thread", LEAD, "--out", join(dir, "none"), "--root", "nope", "--json"]);
     expect(missing).toMatchObject({ code: 2, result: { error: "no job with root nope in this conversation" } });
   });
+
+  it("leaves an earlier export intact when --force is paired with an unknown job root", async () => {
+    const out = join(dir, "invalid-root");
+    expect((await run(["export", "--thread", LEAD, "--out", out, "--json"])).code).toBe(0);
+    const saved = [
+      "manifest.json", "job.json", "transcripts/conversation-lead-thr.json", "transcripts/conversation-lead-thr.md",
+      "files/conversation-lead-thr/report.md", "screens/conversation-lead-thr/001-s1.png",
+    ].map((file) => ({ file, bytes: readFileSync(join(out, file)) }));
+
+    const refused = await run(["export", "--thread", LEAD, "--out", out, "--force", "--root", "nope", "--json"]);
+    expect(refused).toMatchObject({ code: 2, result: { error: "no job with root nope in this conversation" } });
+    for (const { file, bytes } of saved) expect(readFileSync(join(out, file))).toEqual(bytes);
+  });
 });
