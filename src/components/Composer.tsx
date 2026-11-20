@@ -689,7 +689,7 @@ export function Composer({
   const goal = !group?.dm ? { on: effectiveChannelMode === "goal", onToggle: toggleGoal, solo: !group } : undefined;
 
   return (
-    <div className={cn("pointer-events-none relative px-5", simpleDock ? "pb-4" : "pb-3")}>
+    <div className={cn("pointer-events-none relative px-4", simpleDock ? "pb-4" : "pb-3")}>
       {speechError && (
         <div className="pointer-events-auto mb-2 w-full rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[12px] text-warning">
           {speechError}
@@ -776,7 +776,7 @@ export function Composer({
           <div
             aria-hidden
             data-composer-backdrop
-            className={cn("pointer-events-none absolute -left-5 -right-5 bg-app", advanced ? "-bottom-3 top-1/2" : cn("top-0", simpleDock ? "-bottom-4" : "-bottom-3"))}
+            className={cn("pointer-events-none absolute -left-4 -right-4 bg-app", advanced ? "-bottom-3 top-1/2" : cn("top-0", simpleDock ? "-bottom-4" : "-bottom-3"))}
           />
         <div ref={shellRef} data-tour="composer" data-look="composer" data-multiline={multiline ? "" : undefined} className={cn("@container/composer relative z-[1]", singleRow ? "flex items-end gap-2" : simpleDock ? cn(SIMPLE_COMPOSER, multiline ? "rounded-[18px]" : "rounded-[22px]") : cn("rounded-2xl px-2 py-1.5", ELEVATED_FLOAT))}>
         {singleRow && !locked && (
@@ -820,7 +820,7 @@ export function Composer({
                 title={t("composer.attach")}
                 className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
               >
-                <Paperclip size={16} strokeWidth={1.75} absoluteStrokeWidth />
+                <Paperclip size={16} />
               </button>}
               {advanced && canLearn && <TeachTaskButton onClick={teachTask} />}
               {/* Simple mode shows a mode's chip only while it is on, so a choice made in the + menu or the bot panel stays in view. */}
@@ -970,7 +970,7 @@ export function Composer({
             )}
             title={recording ? t("composer.dictation.stopHint") : t("composer.dictation.hint")}
           >
-            <Mic size={16} strokeWidth={1.75} absoluteStrokeWidth className="[&_rect]:fill-current" />
+            <Mic size={16} className="[&_rect]:fill-current" />
           </button>
         )}
         {callShown && bot && !group && <CallButton bot={bot} placement="composer" fill={advanced || singleRow ? undefined : slot.fill} ink={slot.ink} inverse={singleRow} />}

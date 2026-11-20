@@ -85,7 +85,7 @@ describe("the header's right side", () => {
       expect(controls).toContain("data-test-model-control");
       expect(fixture.model).toMatchObject({ threadId: "selected" });
       const computer = controls.match(/<button[^>]*data-tour="computer"[^>]*>/)?.[0] ?? "";
-      expect(computer.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "size-8"]));
+      expect(computer.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "size-9"]));
       expect(markup).not.toContain('data-testid="chat-more"');
       expect(fixture.menus.find((menu) => menu.ariaLabel === "More")).toBeUndefined();
       expect(markup).toContain("data-chathead-pill");

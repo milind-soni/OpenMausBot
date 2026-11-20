@@ -211,7 +211,7 @@ export function CommandPalette({ onOpenChange }: { onOpenChange?: (open: boolean
               roomOffset + i,
               () => void activate({ kind: "room", group }),
               <>
-                <Users size={16} strokeWidth={1.75} className="mx-[3px] shrink-0 text-ink-secondary" />
+                <Users size={16} className="mx-[3px] shrink-0 text-ink-secondary" />
                 <span className="truncate text-[14px] text-ink">{group.name}</span>
               </>,
             ),

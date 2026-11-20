@@ -8,7 +8,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const OFF_SCALE = /(?<![\w-])(?:border-hairline(?:\/\d+)?|bg-inset|leading-relaxed|leading-snug|leading-tight|(?:[pm][xytblr]?|gap(?:-[xy])?|space-[xy])-(?:2\.5|3\.5|0\.75|1\.25|9|10|11|14)|text-\[(?:9|10|15|17|19|22)px\])(?![\w\-./[])/g;
+const OFF_SCALE = /(?<![\w-])(?:border-hairline(?:\/\d+)?|bg-inset|leading-relaxed|leading-snug|leading-tight|(?:[pm][xytblr]?|gap(?:-[xy])?|space-[xy])-(?:2\.5|3\.5|0\.75|1\.25|9|10|11|14)|text-\[(?:9|10|15|19|22)px\])(?![\w\-./[])/g;
 
 const FILES = [
   "src/components/AboutMeSettings.tsx",
@@ -107,7 +107,7 @@ const DEBT: Record<string, number> = {
   "src/components/ImportSettings.tsx": 8,
   "src/components/LocalComputerSection.tsx": 11,
   "src/components/MacLocalControl.tsx": 2,
-  "src/components/NewBotDialog.tsx": 11,
+  "src/components/NewBotDialog.tsx": 10,
   "src/components/OrganizationSettings.tsx": 3,
   "src/components/PhoneDevicesSection.tsx": 5,
   "src/components/PlanUsage.tsx": 3,
@@ -126,7 +126,7 @@ const DEBT: Record<string, number> = {
   "src/components/WorkspaceBackupSettings.tsx": 1,
   "src/components/keys/KeyRow.tsx": 3,
   "src/components/keys/KeysPage.tsx": 2,
-  "src/components/usage/TraceWaterfall.tsx": 15,
+  "src/components/usage/TraceWaterfall.tsx": 14,
 };
 
 describe("Settings' closed scales (§6.8)", () => {
