@@ -1,6 +1,6 @@
 import "../testing/scrub-ambient-omb-env.ts";
 
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -85,6 +85,22 @@ it("keeps a completed run successful when its export is written", async () => {
   expect(result).toMatchObject({ ok: true, exitCode: 0, state: "completed", export: { ok: true } });
   expect(JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"))).toMatchObject({ ok: true, threadId: "t1" });
   expect(sends).toBe(1);
+});
+
+it.each([false, true])("refuses a file as the export folder before sending a job (force: %s)", async (force) => {
+  refuseExport = false;
+  const out = join(dir, `report-${sequence++}.json`);
+  writeFileSync(out, "earlier report");
+  const stdout: string[] = [];
+  const code = await runHeadless(["run", "--bot", "lead", "--task", "t1", "Write the report", "--export", out, ...(force ? ["--force"] : []), "--json"], {
+    env: { OPENMAUSBOT_URL: origin },
+    io: { out: (text) => stdout.push(text), err: () => undefined, readStdin: async () => "" },
+  });
+  expect(code).toBe(2);
+  expect(JSON.parse(stdout.join("\n"))).toMatchObject({ ok: false, exitCode: 2, error: expect.stringContaining("ENOTDIR"), hint: "choose a folder" });
+  expect(sends).toBe(0);
+  expect(exports).toBe(0);
+  expect(readFileSync(out, "utf8")).toBe("earlier report");
 });
 
 it.each([["needs-input", 3], ["failed", 1]] as const)("preserves the %s job's exit code when export also fails", async (jobState, expectedCode) => {
