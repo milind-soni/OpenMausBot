@@ -46,6 +46,8 @@ export interface RegistryStore {
    */
   upsertThread(owner: RegistryOwner & { kind: "bot" }, threadId: string | undefined, durability: RegistryDurability, write: () => void): void;
   upsertThread(owner: RegistryOwner & { kind: "group" }, threadId: string | undefined, durability: Exclude<RegistryDurability, "later">, write: () => void): void;
+  /** An owner's record or one of its threads changed in place with no save of its own: it goes with the next save. */
+  changedInPlace(owner: RegistryOwner): void;
   /** An owner and all its threads leave the registry; `write` saves the list without it, synced, before it returns. */
   deleteOwner(owner: RegistryOwner, write: () => void): void;
   /** Saves asked for with "pass" while `run` runs are written once when it returns: one transaction in a row layout. */
@@ -164,6 +166,10 @@ export class JsonRegistry implements RegistryStore {
       this.narrowing = false;
     }
     if (this.narrowedSinceWhole) saveLater(WHOLE_PASS, write);
+  }
+
+  changedInPlace(owner: RegistryOwner): void {
+    if (owner.kind === "bot") this.botsText.name(owner.id);
   }
 
   deleteOwner(_owner: RegistryOwner, write: () => void): void {

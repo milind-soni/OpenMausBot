@@ -155,6 +155,15 @@ describe("bots.json saves that name their bot serialize only that bot", () => {
     expect(JSON.stringify(persistedBots(reloaded.bots))).toBe(live());
   });
 
+  it("carries a thread's new activity time, which no save of its own writes, in the next narrowed save of any bot", () => {
+    const store = new Store(selection);
+    const [a, b] = [store.createBot({ name: "A" }, { seedMessages: false }), store.createBot({ name: "B" }, { seedMessages: false })];
+    store.patchBot(b.id, { title: "Warm" });
+    store.appendMessage(a.threadId, { role: "user", kind: "text", text: "Hello" });
+    expect(serialized(store.bots, () => store.patchBot(b.id, { title: "Next" })).sort()).toEqual([a.id, b.id].sort());
+    expect(onDisk()).toBe(JSON.stringify(persistedBots(store.bots)));
+  });
+
   it("serializes one bot of a hundred for a setting saved by a person and for a turn's bookkeeping", () => {
     const store = new Store(selection);
     for (let i = 0; i < 100; i++) store.createBot({ name: `Bot ${i}` }, { seedMessages: false });
