@@ -2,7 +2,7 @@ import { OrganizationIdentity } from "./OrganizationIdentity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { createPortal } from "react-dom";
 import { Archive, Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderInput, FolderPlus, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, Phone, Pin, Plus, Search, SquarePen, TextQuote, Trash2, Users, X } from "lucide-react";
-import { sidebarState } from "./sidebar-state"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
+import { sidebarState } from "./sidebar-state"; import { useWebPanels } from "@/lib/web-panel-preferences"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { api, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { approvalModeFor } from "../../shared/approval-mode";
 import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
@@ -833,7 +833,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
               )}
             </span>
           )}
-          {simpleRow && <BotEngineMark bot={bot} instances={instances} className="ms-auto" />}
+          {simpleRow && <BotEngineMark bot={bot} instances={instances} className="ms-auto opacity-0 transition-opacity duration-150 motion-reduce:transition-none group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-100" />}
           {!simpleRow && unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
         </div>}
         {simpleRow && <RowStatusText working={working} failed={failed} unread={unread} />}
@@ -918,10 +918,10 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   );
 });
 
-export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = false }: {
+export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = false, besidePanel = false }: {
   open: boolean;
   onClose: () => void;
-  collapseToIcons?: boolean;
+  collapseToIcons?: boolean; besidePanel?: boolean;
 }) {
   const state = useStoreSelector(sidebarState, sameFields), dispatch = useStoreDispatch();
   const now = useRelativeNow();
@@ -986,14 +986,14 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const simple = !advanced && density !== "icons";
   const simpleDesk = simple && !phone;
   const rail = !advanced && density === "icons";
-  const sidePanelOpen = state.computerOpen || state.inspectorOpen;
+  const sidePanelOpen = state.computerOpen || state.inspectorOpen || besidePanel;
   const sizing = useSidebarWidth({ simple: !advanced, sidePanelOpen, sidebarRef });
   const [searchOpen, setSearchOpen] = useState(false);
   const searchShown = searchOpen || query !== "";
   const searchToggleRef = useRef<HTMLButtonElement>(null);
   const closeSearch = () => { setSearchOpen(false); setQuery(""); searchToggleRef.current?.focus(); };
   const pinnedCircles = usePinnedCircles();
-  const universalPins = useUniversalPins();
+  const universalPins = useUniversalPins(), pinnedPages = useWebPanels();
   const [pinnedCircleThreadsCollapsed, setPinnedCircleThreadsCollapsed] = useState(true);
 
   useEffect(() => {
@@ -1125,7 +1125,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const layout = sections.arrange(naturalSectionIds);
   const sectionIds = layout.sectionIds;
   const showPinnedCircleThreads = !simpleDesk && pinnedCircleThreadListVisible(pinnedCircles, density, pinnedBots.length);
-  const tiles = simpleDesk && (primary !== null || pinnedBots.length > 0);
+  const tiles = simpleDesk && (primary !== null || pinnedBots.length > 0 || pinnedPages.length > 0);
   const { interactive: layoutInteractive, collapsed: sectionCollapsed, toggle: toggleSection } = sections;
   const archivedBots = state.bots.filter((bot) => bot.hidden && !bot.movedTo);
   const archivedEntry = remoteClient ? undefined : { count: archivedBots.length, open: () => setArchivedBotsOpen(true) };
@@ -1359,8 +1359,8 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           onToggle={layoutInteractive ? () => toggleSection(PINNED_THREADS_SECTION_ID) : undefined}
         />
       )}
-      {tiles && <SidebarTileGrid primary={primary} pinned={pinnedBots} row={botRow} corner={corner} />}
-      {simpleDesk && !tiles && <SidebarNoBots />}
+      {tiles && <SidebarTileGrid primary={primary} pinned={pinnedBots} row={botRow} corner={corner} pages={pinnedPages} openPage={state.activeView === "web-panel" ? state.webPanelId : undefined} dispatch={dispatch} />}
+      {simpleDesk && primary === null && pinnedBots.length === 0 && <SidebarNoBots />}
       </GlassBar>
 
       {!collapseToIcons && !phone && <SidebarResizeHandle sizing={sizing} sidebarRef={sidebarRef} avatars={density === "icons"} avatarsWidth={rail ? 92 : 80}
