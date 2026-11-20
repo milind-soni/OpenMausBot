@@ -42,7 +42,7 @@ export function usePresence(state: AppState, dispatch: (action: Action) => void)
       void api("/api/presence/active", { method: "POST", body: JSON.stringify(body) }).then((answer) => {
         const live = latest.current;
         const target = existingThreadTarget(openTarget(answer), live.state);
-        if (target && selection(live.state) === sentFrom) openThread(live.dispatch, target, live.state, live.showThreads);
+        if (target && !live.state.newChat && selection(live.state) === sentFrom) openThread(live.dispatch, target, live.state, live.showThreads);
       }, () => {});
     };
     const onActivity = () => ping();
