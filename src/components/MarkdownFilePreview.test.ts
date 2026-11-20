@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { AttachedFileChip } from "./AttachmentPreview";
 import { isMarkdownFile } from "./HtmlFilePreview";
-import MarkdownFileContent, { MARKDOWN_PREVIEW_MAX_BYTES, MarkdownFileView } from "./MarkdownFilePreview";
+import MarkdownFileContent, { MarkdownFileView } from "./MarkdownFilePreview";
+import { PREVIEW_MAX_BYTES } from "../../shared/upload-limits";
 import { readTableResponse } from "./TableFilePreview";
 
 const message = { threadId: "t", messageId: "m" };
@@ -56,13 +57,13 @@ describe("MarkdownFileView (#4765)", () => {
 
   it("stops a file at its cap", async () => {
     const signal = new AbortController().signal;
-    await expect(readTableResponse(new Response(new Uint8Array(MARKDOWN_PREVIEW_MAX_BYTES + 1)), signal, MARKDOWN_PREVIEW_MAX_BYTES)).rejects.toThrow("size");
+    await expect(readTableResponse(new Response(new Uint8Array(PREVIEW_MAX_BYTES + 1)), signal, PREVIEW_MAX_BYTES)).rejects.toThrow("size");
   });
 
   it("still reports the cap when the oversized body already errored", async () => {
     const body = new ReadableStream({ start(controller) { controller.error(new Error("network")); } });
-    const response = new Response(body, { headers: { "content-length": String(MARKDOWN_PREVIEW_MAX_BYTES + 1) } });
-    await expect(readTableResponse(response, new AbortController().signal, MARKDOWN_PREVIEW_MAX_BYTES)).rejects.toThrow("size");
+    const response = new Response(body, { headers: { "content-length": String(PREVIEW_MAX_BYTES + 1) } });
+    await expect(readTableResponse(response, new AbortController().signal, PREVIEW_MAX_BYTES)).rejects.toThrow("size");
   });
 
   it("keeps Save and Retry on screen while the file is still loading, wrapping for long names", () => {

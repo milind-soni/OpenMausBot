@@ -4,8 +4,9 @@ import { requestMessageFile, useLocalFileSave, type MessageAttachmentContext } f
 import { ChatMarkdown } from "./ChatMarkdown";
 import { readTableResponse } from "./TableFilePreview";
 import { t } from "@/lib/i18n";
+import { PREVIEW_MAX_BYTES } from "../../shared/upload-limits";
 
-export const MARKDOWN_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
+const AUTO_RENDER_MAX_CHARS = 2 * 1024 * 1024;
 
 /** A Markdown file in a message, drawn the way the chat draws a reply. Security: no message context is passed on, so
  * paths written in the file stay plain text instead of becoming links that fetch other files. */
@@ -25,8 +26,11 @@ export default function MarkdownFileContent({ path, name, message }: { path: str
         const response = await requestMessageFile(path, message, controller.signal);
         answered = true;
         // Notes saved by Windows apps are often Windows-1252, not UTF-8.
-        const text = await readTableResponse(response, controller.signal, MARKDOWN_PREVIEW_MAX_BYTES, "windows-1252");
-        if (!controller.signal.aborted) setSource(text);
+        const text = await readTableResponse(response, controller.signal, PREVIEW_MAX_BYTES, "windows-1252");
+        if (!controller.signal.aborted) {
+          setShowSource(text.length > AUTO_RENDER_MAX_CHARS);
+          setSource(text);
+        }
       } catch (reason) {
         if (controller.signal.aborted) return;
         // A refusal from the server says why; only a request that got no answer (TypeError) is the connection.
@@ -38,7 +42,7 @@ export default function MarkdownFileContent({ path, name, message }: { path: str
   }, [path, message.threadId, message.messageId, attempt]);
   // Save and Retry stay on screen while loading too, so a stalled request never leaves only a spinner; they wrap so a long name can't push Retry off a narrow dialog.
   const recovery = <><div className="mt-3 flex flex-wrap justify-center gap-2"><button type="button" className="inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-lg border border-hairline px-3 py-2 hover:bg-raised" disabled={save.state === "saving"} onClick={() => void save.save()}><Download size={14} className="shrink-0" /><span className="min-w-0 break-all">{t("attach.saveAria", { name })}</span></button><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>{save.state === "failed" && <p role="alert" className="mt-2 text-[12px] text-danger">{save.reason}</p>}</>;
-  if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="text-ink-secondary">{typeof error === "object" ? t("markdown.refused", { reason: error.reason }) : t(error === "size" ? "markdown.tooLarge" : error === "encoding" ? "markdown.notText" : "markdown.loadFailed")}</p>{recovery}</div>;
+  if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="text-ink-secondary">{typeof error === "object" ? t("markdown.refused", { reason: error.reason }) : t(error === "size" ? "attach.fileTooLarge" : error === "encoding" ? "markdown.notText" : "markdown.loadFailed")}</p>{recovery}</div>;
   if (source === null) return <div className="p-12 text-center text-sm text-ink-secondary"><span role="status" className="inline-flex items-center gap-2"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</span>{recovery}</div>;
   return <div className="flex flex-col gap-2">
     <div className="flex items-center justify-end gap-1">
