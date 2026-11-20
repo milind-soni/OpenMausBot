@@ -330,6 +330,23 @@ describe("a new conversation once an AI is known to be at its limit", () => {
     expect(boot().instance.heldAtStart(KAI, on("claude", "claude-opus-5-5")), "the next turn checks it again").toBeNull();
   });
 
+  it("names the backup a room member's turn starts on, says it once, and records nothing to go back to", () => {
+    const { boot } = server();
+    const { clock, instance, told } = boot();
+    const own = [on("codex", "gpt-6")];
+    expect(instance.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), own), "nothing holds Claude yet").toBeNull();
+    refused(clock, "t1", NOW + 5 * HOUR);
+    expect(instance.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), []), "only the backups given, never the installation's").toBeNull();
+    expect(instance.heldAtStart(KAI, on("claude", "claude-opus-5-5"), false, []), "nothing to carry on with").toBeNull();
+    const taken = instance.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), own);
+    expect(taken).toEqual({ to: on("codex", "gpt-6"), scope: "engine", resetsAt: NOW + 5 * HOUR });
+    const rows = instance.carryOnRows(KAI, on("claude", "claude-opus-5-5"), taken!.to, taken!);
+    expect(rows).toEqual([{ name: expect.stringMatching(/^recovery: Claude hit its limit \(resets .+\), so Codex took over\.$/), ok: true }]);
+    instance.carryOnRows(KAI, on("claude", "claude-opus-5-5"), taken!.to, taken!);
+    expect(told, "the person hears it once for the stretch").toHaveLength(1);
+    expect(instance.takeoverAtStart({ ...KAI, approvalMode: "edits" }, on("claude", "claude-opus-5-5"), own), "a level that must ask first").toBeNull();
+  });
+
   it("goes to no AI the thread's approval level can't move to by itself, and then tries its own AI as usual", () => {
     const { boot } = server();
     const { clock, instance } = boot();
