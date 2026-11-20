@@ -1,13 +1,26 @@
 import type { ConfigStatus } from "@/state/config-status";
 
-// A section left out here is wiped from state.config whenever a config frame lands.
+// A setting left out here is wiped from state.config whenever a config frame lands.
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
   "awakeLimit" | "pausedBots" | "pausedByPerson" | "heldBots" | "xai" | "mistral" | "cerebras" | "groq" | "greenference" | "modelgo" | "meta" | "deepseek" | "xResearch" | "treg" | "postiz" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "mcp" | "threads" | "automaticRecovery" | "cacheKeepWarm" | "localVm" | "opencodeGo" | "tts" | "decider" | "helpers" | "imageGen" | "live" | "savedKeys" | "profile" | "everyBotRules" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome" | "team" | "workspaceBanner" | "toolGroups"
 >;
 
-export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
+/** What the server says about the place itself. Its frames carry them as GET /api/config does, one left out meaning
+ * unset (planTurns off Starter, routinesUnreadable once the routines read again); a frame with none of them (an older
+ * server's) says nothing about them. */
+const PLACE_FIELDS = ["computerName", "newBots", "signIn", "membership", "cloudStarter", "waitingForRoom", "planTurns", "decisions", "safetyFloor", "routinesUnreadable", "botLimit"];
+
+function placeFields(frame: object, held: ConfigStatus | null | undefined): Partial<ConfigStatus> {
+  const carried = PLACE_FIELDS.some((field) => field in frame);
+  const source = (carried ? frame : held ?? {}) as Record<string, unknown>;
+  return Object.fromEntries(PLACE_FIELDS.flatMap((field) => source[field] === undefined ? [] : [[field, source[field]]]));
+}
+
+/** `held`: the config the store holds now, which keeps the place fields a frame without them says nothing about. */
+export function configStatusFromFrame(frame: ConfigStatusFrame, held?: ConfigStatus | null): ConfigStatus {
   return {
+    ...placeFields(frame, held),
     xai: frame.xai,
     mistral: frame.mistral,
     cerebras: frame.cerebras,

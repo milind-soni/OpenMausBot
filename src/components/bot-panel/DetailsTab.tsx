@@ -2,7 +2,7 @@ import { Calendar, CalendarPlus, ChevronRight, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { currentTaskBot, useStore, type Bot } from "@/state/store";
+import { currentTaskBot, type Bot } from "@/state/store";
 import { useChatMoreItems } from "../ChatMoreMenu";
 import { EffortRow, ModelPicker } from "../ModelPicker";
 import type { SidebarMenuItem } from "../SidebarPopoverMenu";
@@ -11,6 +11,7 @@ import { BotConversations } from "./Conversations";
 import type { SimplePageId } from "./page-registry";
 import { TryAsking } from "./TryAsking";
 import { Card, CardLabel, LabelAction, panelActionCls, NavRow, RowIcon, rowCls, RowText } from "./rows";
+import { useStoreDispatch } from "@/state/store-select";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
@@ -46,7 +47,7 @@ export function DetailsTab({ bot, derived, onOpen }: {
   onOpen: (page: SimplePageId) => void;
 }) {
   const { items } = useChatMoreItems(bot);
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const thread = currentTaskBot(bot);
   const routinesOn = derived.botRoutines.filter((routine) => routine.enabled).length;
   const conversationItems = CONVERSATION_ITEMS.flatMap((key) => items.filter((item) => item.key === key));

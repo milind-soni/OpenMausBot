@@ -3,11 +3,12 @@ import { Gauge } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 import { tidyMemoryNow } from "@/lib/memory";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, type Bot } from "@/state/store";
 import { buttonCls, Card, RowIcon, rowCls, RowText } from "./rows";
+import { useStoreDispatch } from "@/state/store-select";
 
 export function HeavyBotRow({ bot }: { bot: Bot }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [heavy, setHeavy] = useState(false);
   const [tidying, setTidying] = useState(false);
   const [checked, setChecked] = useState(0);
