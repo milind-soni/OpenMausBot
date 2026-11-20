@@ -521,8 +521,9 @@ What the stack does, so you can adapt it:
   left Caddy refusing HTTPS in the old one while both showed healthy.
 - [`deploy/Caddyfile`](../deploy/Caddyfile) terminates TLS and forwards
   the real `Host` plus `X-Forwarded-For`/`X-Forwarded-Proto`; the server's
-  own pairing is the login. A shared-password `basic_auth` block is there,
-  commented out, if you want a second wall in front of pairing.
+  own pairing is the login. It adds no password: a Caddy password would
+  refuse clients that send their own `Authorization` header. For a second
+  wall, use a tailnet or a firewall.
 
 Update with `git pull && ./update.sh`: it copies the data aside, starts the
 stable version, and puts the old version and the data back if the new one
