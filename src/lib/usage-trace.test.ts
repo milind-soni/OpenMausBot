@@ -10,7 +10,7 @@ vi.mock("@/state/store", async (original) => {
   const actual = await original<typeof import("@/state/store")>();
   return { ...actual, useStore: () => ({ state: actual.initialState, dispatch: vi.fn() }), api: vi.fn(() => new Promise(() => {})) };
 });
-const { TraceWaterfall } = await import("../components/usage/TraceWaterfall");
+const { TraceWaterfall, modelName } = await import("../components/usage/TraceWaterfall");
 const { GroupBars, usageGroupLabel } = await import("../components/UsageSection");
 
 const T0 = Date.UTC(2026, 9, 22, 9, 0, 0);
@@ -44,6 +44,13 @@ const detail: TraceDetail = {
 
 describe("trace helpers", () => {
   afterEach(() => { vi.unstubAllGlobals(); setLocale("en"); });
+  it("names a turn's model from its own engine when engines share a model id", () => {
+    const engine = (driverKind: string, label: string) => ({ driverKind, models: { default: "agent-default", options: [{ id: "agent-default", label }] } }) as never;
+    const instances = [engine("commandCodeAgent", "Command Code default"), engine("devinAgent", "Devin default")];
+    expect(modelName("agent-default", instances, "devinAgent")).toBe("Devin default");
+    expect(modelName("agent-default", instances)).toBe("Command Code default");
+    expect(modelName("gone", instances, "devinAgent")).toBe("gone");
+  });
   it("formats durations the way the waterfall labels them", () => {
     expect([450, 6_900, 51_000, 100_000, 3_600_000, 7_500_000].map(formatDuration)).toEqual(["450ms", "6.9s", "51s", "1m 40s", "1h", "2h 5m"]);
     expect([0, 20_000, 90_000, 5_400_000].map(formatTick)).toEqual(["0s", "20s", "1m 30s", "1h 30m"]);

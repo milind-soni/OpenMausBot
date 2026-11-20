@@ -18,6 +18,8 @@ vi.mock("@/state/store", async (importOriginal) => {
   }) };
 });
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+// The model picker in Advanced mode's footer reads a store this file does not build.
+vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 vi.mock("@/lib/use-slash-skills", () => ({ useSlashSkills: () => [] }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => false }));
 vi.mock("./CallView", () => ({ CallButton: () => null }));

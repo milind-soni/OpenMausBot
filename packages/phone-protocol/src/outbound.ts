@@ -67,8 +67,9 @@ function actionTokens(name: string): string[] {
     const [, server = "", ...rest] = name.split("__");
     action = rest.join("_");
     if (isConnectedAppsServer(server)) return actionTokens(action);
-  } else if (/^[A-Z][A-Z0-9]*_[A-Z0-9_]+$/.test(name)) {
-    action = name.slice(name.indexOf("_") + 1);
+  } else if (/^(?:[A-Z][A-Z0-9]*|_[A-Z0-9]+)_[A-Z0-9_]+$/.test(name)) {
+    const start = name.startsWith("_") ? 1 : 0;
+    action = name.slice(name.indexOf("_", start) + 1);
   }
   return action
     .replace(/([a-z0-9])([A-Z])/g, "$1_$2")
@@ -127,6 +128,8 @@ export function trimOutboundPolicy(bot: { outbound?: OutboundPolicy }): boolean 
 export interface ConnectorCall {
   slug: string;
   arguments?: unknown;
+  /** The connected account a multi-execute item names (its id or alias). */
+  account?: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -147,7 +150,11 @@ export function connectorCallsIn(name: string, args: unknown): ConnectorCall[] {
       if (!isRecord(item)) return [{ slug: "COMPOSIO_PROXY_EXECUTE", arguments: args }];
       const slug = [item.tool_slug, item.slug, item.name, item.tool].find((value) => typeof value === "string" && value);
       if (typeof slug !== "string") return [{ slug: "COMPOSIO_PROXY_EXECUTE", arguments: args }];
-      calls.push({ slug, ...(item.arguments !== undefined ? { arguments: item.arguments } : {}) });
+      calls.push({
+        slug,
+        ...(item.arguments !== undefined ? { arguments: item.arguments } : {}),
+        ...(typeof item.account === "string" && item.account.trim() ? { account: item.account.trim() } : {}),
+      });
     }
     return calls;
   }

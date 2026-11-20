@@ -181,8 +181,8 @@ export class WaitManager {
 
   /**
    * Makes a wait once its first check shows the condition is not met yet. Limits are checked before
-   * and after that check, and `input.stillAllowed` last of all, since the check can take seconds and
-   * the work that asked for the wait can end meanwhile.
+   * and after that check. The work that asked for the wait must still be authorized after the probe,
+   * before returning an already-met result or persisting a wait.
    */
   async create(input: NewWait): Promise<CreateWaitResult> {
     const full = this.limitRefusal(input);
@@ -192,11 +192,11 @@ export class WaitManager {
     if (verdict.gone) return { state: "refused", status: 400, error: `${(condition as { botName: string }).botName} no longer exists. Use a name or id from list_bots.` };
     if (verdict.unlisted) return { state: "refused", status: 400, error: NO_PROCESS_LIST };
     if (verdict.page && !verdict.page.ok && verdict.page.refused) return { state: "refused", status: 400, error: verdict.page.error };
+    const ended = input.stillAllowed?.();
+    if (ended) return { state: "refused", status: 403, error: ended };
     if (verdict.met) return { state: "already", text: `${describeCondition(condition)} already. Nothing was set up: tell the person now.` };
     const crowded = this.limitRefusal(input);
     if (crowded) return crowded;
-    const ended = input.stillAllowed?.();
-    if (ended) return { state: "refused", status: 403, error: ended };
     const now = this.now();
     const wait: WaitRecord = {
       id: randomUUID(),

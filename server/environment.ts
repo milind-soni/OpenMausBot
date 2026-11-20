@@ -112,9 +112,10 @@ export function reportableServerVersion(version = serverVersion()): string | und
   return RELEASE_VERSION.test(version) ? version : undefined;
 }
 
-/** How this server was started: the Docker image (OMB_CLI_PREFIX, or Docker's own /.dockerenv), a checkout, npx, or a
- * global install. */
+/** How this server was started: the rootless Podman service (its unit sets OMB_PODMAN_SERVICE), the Docker image
+ * (OMB_CLI_PREFIX, or Docker's own /.dockerenv), a checkout, npx, or a global install. */
 export function serverInstall(env: NodeJS.ProcessEnv = process.env, script = process.argv[1] ?? "", docker = () => existsSync("/.dockerenv")): ServerInstall {
+  if (env.OMB_PODMAN_SERVICE?.trim()) return "podman-service";
   const prefix = cliPrefix(env, script);
   if (prefix.includes("docker") || docker()) return "docker";
   if (prefix === "pnpm omb" || script.endsWith(".ts")) return "source";
@@ -123,7 +124,7 @@ export function serverInstall(env: NodeJS.ProcessEnv = process.env, script = pro
 
 /** What a server only its one owner signs in to takes from that owner's own desktop by default: told in the owner's own
  * /api/auth/session answer, never in the description anyone may read before pairing. */
-export const OWNER_LENDING = Object.freeze({ sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, lentMcp: true } as const);
+export const OWNER_LENDING = Object.freeze({ sharedComputers: true, lendingDetails: true, commandTimeouts: true, longCommands: true, fileEdits: true, lentMcp: true, mcpCaller: true } as const);
 
 export function environmentDescriptor(input: { environmentId: string; desktopManaged: boolean; emailSignIn?: boolean; sharedComputers?: boolean; cloudHome?: boolean; cloudTeam?: boolean; ownHome?: boolean; label?: string }): EnvironmentDescriptor {
   return {
@@ -137,7 +138,7 @@ export function environmentDescriptor(input: { environmentId: string; desktopMan
       // lendingDetails: a lent computer may say its platform, and this server remembers what was lent to it.
       ...(input.sharedComputers === true ? { sharedComputers: true as const, lendingDetails: true as const, commandTimeouts: true as const, longCommands: true as const, fileEdits: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true ? { deviceLink: true as const } : {}),
-      ...(input.sharedComputers === true && input.cloudTeam !== true ? { lentMcp: true as const } : {}),
+      ...(input.sharedComputers === true && input.cloudTeam !== true ? { lentMcp: true as const, mcpCaller: true as const } : {}),
       ...(input.sharedComputers === true && input.cloudHome === true && input.cloudTeam !== true ? { myChromeLink: true as const, computerAsks: true as const } : {}),
       ...(input.cloudHome === true ? { cloudHome: true as const, move: 1 as const } : {}),
       ...(input.ownHome === true && input.cloudHome !== true ? { move: 1 as const } : {}),

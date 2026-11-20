@@ -1,6 +1,7 @@
 import { requestNotificationPermission } from "@/lib/notify";
 import { t } from "@/lib/i18n";
-import type { Bot } from "@/state/store";
+import { useStore, type Bot } from "@/state/store";
+import { BotLiveVoiceSelect } from "../BotLiveVoiceSelect";
 import { Switch } from "../SettingsPrimitives";
 import { VoiceSettings } from "../VoiceSettings";
 import type { useBotSettingsDerived } from "./useBotSettingsDerived";
@@ -15,10 +16,26 @@ export function VoiceSection({
 }) {
   const { patch } = derived;
   const { draft } = useBotEditor();
+  const { state } = useStore();
+  const live = state.config?.live;
+  // Fish Audio and ElevenLabs calls speak in their agent's own voice, so only the other providers have a voice to pick.
+  // A bot being created has no call voice yet: new-bot defaults don't keep one.
+  const liveVoicePicker = !draft && live?.configured && live.provider !== "fish" && live.provider !== "elevenlabs";
 
   return (
     <div className="flex flex-col gap-4">
       <VoiceSettings bot={bot} onPatch={patch} />
+
+      {liveVoicePicker && (
+        <div data-live-call-voice className="flex flex-col gap-2 rounded-xl bg-card p-4 text-[13px]">
+          <div>
+            <div className="text-[15px] font-medium text-ink">{t("voice.liveCall.title")}</div>
+            <div className="mt-0.5 text-ink-secondary">{t("voice.liveCall.help")}</div>
+          </div>
+          <BotLiveVoiceSelect bot={bot} gemini={live.provider === "gemini"} onChange={(liveVoice) => patch({ liveVoice })} />
+          <div className="text-[12px] text-ink-tertiary">{t("call.live.voiceNext")}</div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between gap-4 rounded-xl bg-card p-4">
         <div>

@@ -92,6 +92,7 @@ so each service bills you directly and OpenMausBot pays for none of it.
 | --- | --- | --- |
 | **AgentMail**, email inboxes | `https://mcp.agentmail.to/mcp` | Browser sign-in |
 | **AgentPhone**, US and Canadian numbers, texts and calls | `https://mcp.agentphone.ai/mcp` | Browser sign-in |
+| **Higgsfield**, AI images and videos | `https://mcp.higgsfield.ai/mcp` | Browser sign-in |
 | **Vapi**, phone calls | `https://mcp.vapi.ai/mcp` | A private API key from the Vapi dashboard |
 | **Telnyx**, numbers in many countries, texts and calls | `https://api.telnyx.com/v2/mcp` | An API key from the Telnyx portal |
 
@@ -413,6 +414,22 @@ tool search used by bots that cannot search tools themselves, two minutes).
 An HTTP 401 tells the bot to send the message again (a sign-in is refreshed
 when a message starts) and, if that fails, to sign in again or check the
 server's header values in Plugins → MCP servers.
+
+### Which bot made a call, on a server that runs on a lent computer
+
+A server saved on a Cloud to run on a computer lent to it is started by that
+computer. Each tool call it gets names the bot and conversation that made it,
+in the call's `_meta`:
+
+```json
+{ "_meta": { "openmausbot/caller": { "botId": "…", "threadId": "…", "verified": false } } }
+```
+
+It is a hint for the server's own logs or per-bot settings, never proof of
+who called: the Cloud says it, the computer passes it on as it is, and
+OpenMausBot never uses it to allow or refuse anything. The Cloud sends it
+only to a desktop app new enough to pass it on, so an older one keeps running
+calls as before; a listing of the server's tools never carries it.
 
 ## What a Claude bot sees, and the "Also use my Claude Code MCP servers" switch
 

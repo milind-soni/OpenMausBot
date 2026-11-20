@@ -178,7 +178,7 @@ describe("loading the client", () => {
   it("says which app sent every event, and from which page, before the first one", async () => {
     const fresh = await freshAnalytics();
     await fresh.initAnalytics();
-    expect(ph.registered).toEqual([{ app_version: appVersion(), surface: "server" }]);
+    expect(ph.registered).toEqual([{ app_version: appVersion(), surface: "server", platform: "browser" }]);
     expect(appVersion()).toMatch(/^\d+\.\d+\.\d+/);
     expect(ph.calls.indexOf("register")).toBeLessThan(ph.calls.indexOf("capture app_first_open"));
     vi.stubGlobal("window", { ogb: { environments: {} } });
@@ -382,7 +382,7 @@ describe("app_active", () => {
     await page.load();
     expect(ph.calls).toEqual([...OPENED, "capture app_active"]);
     expect(active()).toEqual([{ event: "app_active", props: { platform: "browser", mode: "simple" } }]);
-    expect(ph.registered).toEqual([{ app_version: appVersion(), surface: "server" }]);
+    expect(ph.registered).toEqual([{ app_version: appVersion(), surface: "server", platform: "browser" }]);
     expect(store.get(DAY)).toBe("2026-10-23");
 
     page.fire("focus");

@@ -37,7 +37,7 @@ function world({ parked = true, opener = "a", card = true } = {}) {
   });
   const routing = createQuestionRouting({
     store: store as never, active: () => [requester, node], node: (id: string) => [requester, node].find((one) => one.id === id), parkedFor: (botId: string) => parked && botId === "b" ? [node] : [],
-    answerNode, live: (_threadId: string, requestId: string) => requestId === "live-1", unattended: () => false, answerLive, settleSignIns: () => {}, keptPrivate: () => false, steer: async () => true, mayReach: () => true,
+    answerNode, live: (_threadId: string, requestId: string) => requestId === "live-1", hasLive: () => true, unattended: () => false, answerLive, settleSignIns: () => {}, keptPrivate: () => false, steer: async () => true, mayReach: () => true,
     handedInUnproven: gate.handedInUnproven,
   } as never);
   const allowed = () => gate.cloudLendingRefusal({ botId: "b", threadId: "t-b", generation: "g1" });

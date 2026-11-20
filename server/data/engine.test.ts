@@ -2,7 +2,7 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { cpus, tmpdir, totalmem } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import type { DuckDBConnection } from "@duckdb/node-api";
@@ -107,6 +107,43 @@ describe("loading the binding", () => {
     expect(error.error.message).toBe(reason);
   });
 
+  it("answers a status read from the binding's files, loading nothing, then confirms by loading", async () => {
+    const loadedFrom = (dir: string) => Object.keys(createRequire(import.meta.url).cache).filter((file) => file.startsWith(realpathSync(dir)));
+    const fresh = join(root, "duckdb-status");
+    cpSync(outOfTree, fresh, { recursive: true });
+    const changed = vi.fn();
+    const e = engine({ env: { ...process.env, OMB_DUCKDB_DIR: fresh }, confirmInstalledMs: 0 });
+    e.onInstalledChange(changed);
+    expect(e.installed()).toBe(true);
+    expect(loadedFrom(fresh)).toEqual([]);
+    await vi.waitFor(() => expect(loadedFrom(fresh).some((file) => file.endsWith("duckdb.node"))).toBe(true));
+    expect(e.installed()).toBe(true);
+    expect(changed).not.toHaveBeenCalled();
+    expect(engine({ env: { ...process.env, OMB_DUCKDB_DIR: join(root, "no-binding-here") } }).installed()).toBe(false);
+  });
+
+  it("tells its listeners when files that looked right do not load", async () => {
+    const broken = join(root, "duckdb-broken");
+    cpSync(outOfTree, broken, { recursive: true });
+    writeFileSync(join(broken, "node_modules", "@duckdb", `node-bindings-${process.platform}-${process.arch}`, "duckdb.node"), "not a library");
+    const changed = vi.fn();
+    const e = engine({ env: { ...process.env, OMB_DUCKDB_DIR: broken }, confirmInstalledMs: 0 });
+    e.onInstalledChange(changed);
+    expect(e.installed()).toBe(true);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    expect(e.installed()).toBe(false);
+    expect(e.unavailable()).toContain(broken);
+  });
+
+  it("tells its listeners when a binding whose files were not found loads after all", async () => {
+    const changed = vi.fn();
+    const e = engine({ confirmInstalledMs: 0, filesFound: () => false });
+    e.onInstalledChange(changed);
+    expect(e.installed()).toBe(false);
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    expect(e.installed()).toBe(true);
+  });
+
   it("ships a default engine that loads nothing until asked", () => {
     expect(typeof dataEngine.forBot).toBe("function");
     expect(dataEngine.unavailable()).toBeNull();
@@ -121,10 +158,9 @@ describe("loading the binding", () => {
 
 describe("instance settings", () => {
   it("caps memory at a quarter of RAM or 2 GB, threads at four, and keeps extensions per version", () => {
-    const settings = instanceSettings("/bots/b", "/data", "v1.5.6", {});
-    const expectedMiB = Math.max(256, Math.floor(Math.min(2 * 1024 ** 3, Math.floor(totalmem() / 4)) / 1024 ** 2));
-    expect(settings.memory_limit).toBe(`${expectedMiB}MiB`);
-    expect(settings.threads).toBe(String(Math.min(4, cpus().length)));
+    const settings = instanceSettings("/bots/b", "/data", "v1.5.6", {}, { cpus: 10, memoryBytes: 64 * 1024 ** 3 });
+    expect(settings.memory_limit).toBe("2048MiB");
+    expect(settings.threads).toBe("4");
     expect(settings.temp_directory).toBe(join("/bots/b", "data-tmp"));
     expect(settings.extension_directory).toBe(join("/data", "duckdb-extensions", "v1.5.6"));
     expect(settings.max_temp_directory_size).toBe("20GB");
@@ -135,6 +171,13 @@ describe("instance settings", () => {
     expect(instanceSettings("/b", "/d", "v1", { OMB_DUCKDB_MEMORY_LIMIT: "3GB", OMB_DUCKDB_MAX_TEMP_SIZE: "1GB" })).toMatchObject({ memory_limit: "3GB", max_temp_directory_size: "1GB" });
   });
 
+  it("sizes threads and memory from the container's limits, not the host's", () => {
+    const limited = instanceSettings("/b", "/d", "v1", {}, { cpus: 2, memoryBytes: 2 * 1024 ** 3 });
+    expect(limited.threads).toBe("2");
+    expect(limited.memory_limit).toBe("512MiB");
+    expect(instanceSettings("/b", "/d", "v1", {}, { cpus: 0.5, memoryBytes: 512 * 1024 ** 2 })).toMatchObject({ threads: "1", memory_limit: "256MiB" });
+  });
+
   it("applies them to the opened database", async () => {
     const e = engine({ env: { ...process.env, OMB_DUCKDB_DIR: outOfTree, OMB_DUCKDB_MEMORY_LIMIT: "300MiB" } });
     const db = await e.forBot("settings");
@@ -142,7 +185,7 @@ describe("instance settings", () => {
     const result = await db.run(`SELECT ${names.map((name) => `current_setting('${name}')`).join(", ")}`, bot);
     const [memory, threads, temp, extensions, secrets, order, autoinstall, autoload] = result.rows[0];
     expect(memory).toBe("300.0 MiB");
-    expect(threads).toBe(String(Math.min(4, cpus().length)));
+    expect(threads).toBe(String(Math.min(4, availableParallelism())));
     expect(temp).toBe(join(root, "bots", "settings", "data-tmp"));
     expect(String(extensions).startsWith(join(root, "data", "duckdb-extensions"))).toBe(true);
     expect(String(extensions)).toMatch(/v\d+\.\d+\.\d+$/);

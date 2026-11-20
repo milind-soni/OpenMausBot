@@ -154,7 +154,7 @@ export function SettingsWindow() {
       <SettingsShellContext.Provider value={shell}>
         <div className="glass-popup-frame" data-settings-sheet data-settings-look="simple" style={{ ...glassPopupFrameStyle(), ["--settings-narrow-top" as string]: `${glassPopupTopInset() === GLASS_POPUP_GUTTER ? 12 : glassPopupTopInset()}px` }} onMouseDown={(event) => event.target === event.currentTarget && close()}>
           <div aria-hidden="true" className="glass-scrim pointer-events-none absolute inset-0" />
-          <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="app-settings-title" tabIndex={-1} style={{ outline: "none" }}
+          <div ref={dialogRef} role="dialog" data-look="settings" aria-modal="true" aria-labelledby="app-settings-title" tabIndex={-1} style={{ outline: "none" }}
             data-settings-page-open={target.page} data-settings-advanced={ctx.advanced ? "" : undefined}
             className="glass-surface glass-popup animate-pop-in relative flex flex-col overflow-hidden text-ink">
             <span id="app-settings-title" className="sr-only">{t("settings.title")}</span>
@@ -186,7 +186,7 @@ export function SettingsWindow() {
                 <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
                   {!narrow && closeButton}
                   <div ref={scrollRef} data-settings-scroll data-settings-content=""
-                    className={cn("settings-scroll min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]", narrow ? "pb-12" : "px-8 pb-12")}>
+                    className={cn("settings-scroll min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]", narrow ? "pb-12" : "pb-12 pl-8 pr-16")}>
                     <div className={cn("flex max-w-[640px] flex-col", narrow && "max-w-none")}>
                       <SettingsPageHeader page={page} ctx={ctx} place={place} narrow={narrow} missing={missing} />
                       <div key={target.page} data-settings-page-body={target.page} className={cn("flex flex-col gap-6", narrow && "px-4")}>

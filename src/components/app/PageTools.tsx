@@ -18,6 +18,7 @@ import type { PublishedPageCard } from "../../../shared/published-page";
 import { canonicalDownloadFilename } from "../AttachmentPreview";
 import { appDownloadPath, publishAppPage, unpublishPage } from "./app-api";
 import { AppFrame, type AppFrameHandle } from "./AppFrame";
+import type { AppSelection } from "./app-frame-host";
 import { ASK_CHIP, ASK_CHIP_IDLE, ASK_CHIP_PICKED, ASK_PRIMARY_BUTTON } from "../AskCard";
 
 /** A page starts at this height in the chat and grows to its content up to the cap, then scrolls inside. */
@@ -314,8 +315,8 @@ function fullScreenLabel({ open, pane }: PageToolsProps["fullScreen"]): string {
 /** The chat's page pane: the messages area, above the transcript and below the message box. null outside a bot chat. */
 export const PagePaneContext = createContext<HTMLElement | null>(null);
 
-/** How tall the compact card in the chat is when a page opens in the pane. */
-export const PAGE_PREVIEW_HEIGHT = 220;
+/** How tall the preview on a page's compact card is, at most. */
+export const PAGE_PREVIEW_HEIGHT = 296;
 
 function typing(target: EventTarget | null): boolean {
   return target instanceof HTMLElement && (target.isContentEditable || target.matches("input, textarea, select"));
@@ -330,6 +331,8 @@ export function PageFullScreen(props: PageToolsProps & {
   close(): void;
   /** Open in this pane, leaving the message box usable, rather than over the whole window. */
   pane?: HTMLElement | null;
+  /** Text the person selected in the page, to cite it: never in a room. */
+  onSelection?(selection: AppSelection | null): void;
 }) {
   const { point, close, pane } = props;
   const closer = useRef<HTMLDivElement | null>(null);
@@ -358,7 +361,8 @@ export function PageFullScreen(props: PageToolsProps & {
       </div>
       <div className={cn("relative min-h-0 flex-1 bg-app", point.pointing && "ring-2 ring-inset ring-accent/60")}>
         <AppFrame doc={props.doc} botId={props.botId} threadId={props.threadId} title={props.title} height={600} handle={props.handle}
-          onHeight={() => {}} onProblem={() => {}} onTeardownRequested={close} fill />
+          onHeight={() => {}} onProblem={() => {}} onTeardownRequested={close} fill
+          {...(props.onSelection ? { onSelection: props.onSelection } : {})} />
       </div>
     </div>,
     pane ?? document.body,

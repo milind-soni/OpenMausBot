@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { IMAGE_PROVIDERS, looksLikeApiKey, normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
+import { IMAGE_COMPLEXITIES, IMAGE_PROVIDERS, looksLikeApiKey, normalizeImageGenerationUrl, type ImageGenerationConfig } from "../shared/image-generation.ts";
 
 const imageModelIdSchema = z.string().trim().max(200).refine(
   (value) => !["\r", "\n", "\0"].some((character) => value.includes(character)),
@@ -13,6 +13,7 @@ export const imageGenConfigSchema = z.object({
   primary: imageSlotSchema.optional(),
   fallback: imageSlotSchema.optional(),
   maxPerTurn: z.number().int().min(1).max(10).optional(),
+  complexity: z.enum(IMAGE_COMPLEXITIES).optional(),
   provider: z.enum(["openai", "xai", "custom"]).optional(),
   key: z.string().optional(),
   geminiKey: z.string().optional(),

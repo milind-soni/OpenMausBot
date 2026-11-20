@@ -136,6 +136,13 @@ describe("routeDirectTurn", () => {
     expect(routeDirectTurn(bot, {}, worked, message, instance, false).tier).toBe("complex");
   });
 
+  it("keeps a message whose only attachment is a video on the configured model", () => {
+    const video = { text: "and the other one?", images: [], videos: [{ path: "/attachments/clip.mp4" }] };
+    const route = routeDirectTurn(bot, {}, [], video, instance, false);
+    expect(route.tier).toBe("complex");
+    expect(route.quickModel).toBeUndefined();
+  });
+
   it("never moves a short line when the sign-in can refuse a catalog model, as Codex on a ChatGPT account does", () => {
     const codex = { models: mixed, adapter: { capabilities: { effortLevels: ["low", "high"] as const } } };
     const own = { replyStyle: "conversational" as const, modelSelection: { instanceId: "codex", model: "gpt-5.4", effort: "high" as const } };

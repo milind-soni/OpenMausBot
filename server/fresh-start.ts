@@ -31,3 +31,12 @@ export function startFresh(store: FreshStartStore, botId: string, threadId: stri
     compaction: { summary: "", firstKeptId: "", foldedThroughId: newest.id, tokensBefore: 0, by: "person", fresh: true },
   });
 }
+
+/** Whether the engine process kept for a conversation still holds what the next turn will replace: the conversation the
+ * person left with Start fresh or a rewind, or the full history a summary written since its last turn stands in for. */
+export function engineSessionOutdated(store: Pick<Store, "activePath" | "taskByThread">, botId: string, threadId: string): boolean {
+  const task = store.taskByThread(botId, threadId);
+  if (!task || task.rewound === true) return Boolean(task);
+  const summary = sinceFreshStart(store.activePath(threadId)).findLast((message) => message.kind === "compaction" && message.compaction);
+  return summary !== undefined && summary.id !== task.appliedCompactionId;
+}

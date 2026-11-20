@@ -109,7 +109,7 @@ export function PlaceMark({ place, size = TILE }: { place: MarkedPlace; size?: n
   return <span aria-hidden="true" data-rail-offline={place.offline ? "" : undefined} data-rail-ended={place.ended ? "" : undefined}
     className={cn("grid shrink-0 place-items-center font-semibold leading-none", color ? "text-white" : "bg-card text-ink", (place.offline || place.ended) && "opacity-55 grayscale")}
     style={{ width: size, height: size, borderRadius: tileRadius(size), fontSize: Math.round(size * 0.4), ...(color ? { background: cloudColorFill(color) } : {}) }}>
-    {place.kind === "computer" && !place.named ? <Laptop size={Math.round(size * 0.46)} strokeWidth={1.75} /> : place.kind === "account" ? <UserRound size={Math.round(size * 0.5)} strokeWidth={1.75} /> : placeInitials(place.name)}
+    {place.kind === "computer" && !place.named ? <Laptop size={Math.round(size * 0.46)} /> : place.kind === "account" ? <UserRound size={Math.round(size * 0.5)} /> : placeInitials(place.name)}
   </span>;
 }
 
@@ -459,7 +459,7 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     const nav = navRef.current;
     setMenu({ place, top: nav ? Math.max(8, Math.min(topWithin(from, nav) - 6, nav.clientHeight - 200)) : 8 });
   };
-  return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail style={drag}
+  return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail data-look="rail" style={drag}
     className={cn("relative w-9 shrink-0 flex-col items-center", chrome ? "flex h-full" : "hidden md:flex",
       framed ? "bg-frame [--rail-surface:var(--color-frame)]" : cn("border-r bg-panel [--rail-surface:var(--color-panel)]", calm ? "border-r-[0.5px] border-edge" : "border-hairline/50"))}>
     <div aria-hidden="true" className={cn(above, "shrink-0")} />

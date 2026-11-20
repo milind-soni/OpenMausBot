@@ -63,6 +63,32 @@ export function allowedServerOrigin(origin) {
   }
 }
 
+/**
+ * Saved servers reached over plain http on a private network. Chromium treats their pages as insecure and hides the
+ * microphone (navigator.mediaDevices) from them, so a Live call there could not start; the desktop app vouches for
+ * these origins at launch. Loopback is already secure, and an http address on the open internet is never vouched for.
+ */
+export function plainHttpServerOrigins(environments) {
+  const origins = new Set();
+  for (const env of environments ?? []) {
+    if (typeof env?.origin !== "string" || !allowedServerOrigin(env.origin)) continue;
+    const url = new URL(env.origin);
+    // Chromium splits the switch on commas: a host holding one would vouch for a different, public host too.
+    if (url.protocol === "http:" && !isLoopbackHost(url.hostname) && !url.hostname.includes(",")) origins.add(url.origin);
+  }
+  return [...origins];
+}
+
+const INSECURE_AS_SECURE = "unsafely-treat-insecure-origin-as-secure";
+
+/** Vouches for plainHttpServerOrigins, keeping any origin already given on the command line. Chromium reads the switch
+ * only at launch (Electron 43), so a server saved later counts from the next start. */
+export function vouchForPlainHttpServers(commandLine, environments) {
+  const origins = plainHttpServerOrigins(environments);
+  if (origins.length === 0) return;
+  commandLine.appendSwitch(INSECURE_AS_SECURE, [commandLine.getSwitchValue(INSECURE_AS_SECURE), ...origins].filter(Boolean).join(","));
+}
+
 export function normalizePairingCode(input) {
   return String(input).toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/0/g, "O").replace(/1/g, "I");
 }

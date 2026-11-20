@@ -3,8 +3,7 @@ import { useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { withOpenSettings } from "@/components/OpenSystemSettings";
 import { useStoreSelector } from "@/state/store-select";
 import { t } from "./i18n";
-import { fishSpeech } from "./fish-speech";
-import { listensHere, speechBridge } from "./speech";
+import { listensHere, recordsClips, speechBridge } from "./speech";
 
 export function useComposerDictation({ draftId, text, onText }: {
   draftId: string;
@@ -12,14 +11,16 @@ export function useComposerDictation({ draftId, text, onText }: {
   onText: (text: string) => void;
 }) {
   const { capabilities } = useDesktopCapabilities();
-  const ready = listensHere(capabilities, useStoreSelector((state) => state.config));
+  const config = useStoreSelector((state) => state.config);
+  const ready = listensHere(capabilities, config);
+  const configNow = useRef(config);
+  configNow.current = config;
   const [recording, setRecording] = useState(false);
   const [speechError, setSpeechError] = useState<ReactNode>(null);
   const draft = useRef({ id: draftId, text });
   draft.current = { id: draftId, text };
   const session = useRef({ draftId: "", base: "" });
   const cancel = useRef<(() => void) | null>(null);
-  // Fish Audio hears the clip only at its end, so stopping the mic must finish it.
   const finish = useRef<(() => void) | null>(null);
   const stop = useCallback(() => {
     cancel.current?.();
@@ -28,7 +29,8 @@ export function useComposerDictation({ draftId, text, onText }: {
 
   useEffect(() => {
     if (!recording) return;
-    const bridge = speechBridge();
+    // Chosen once per recording, so a voice change mid-recording cannot stop or insert through another bridge.
+    const bridge = speechBridge(configNow.current);
     if (!bridge || session.current.draftId !== draftId) {
       setRecording(false);
       return;
@@ -44,7 +46,7 @@ export function useComposerDictation({ draftId, text, onText }: {
       setRecording(false);
     };
     cancel.current = cancelSession;
-    finish.current = bridge === fishSpeech ? () => void fishSpeech.speechFinish() : null;
+    finish.current = recordsClips(bridge) ? () => void bridge.speechFinish?.() : null;
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (!active || draft.current.id !== draftId) return;
       if (draft.current.text !== lastText) {
@@ -86,7 +88,7 @@ export function useComposerDictation({ draftId, text, onText }: {
   }, [recording, draftId, onText]);
 
   const toggle = () => {
-    if (!ready || !speechBridge()) {
+    if (!ready || !speechBridge(config)) {
       setSpeechError(t("composer.dictation.unavailable"));
     } else if (recording) {
       if (finish.current) finish.current();

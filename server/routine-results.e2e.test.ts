@@ -8,6 +8,7 @@ import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { waitForExit } from "./testing/cleanup.ts";
 import { splitLaunchNote } from "./testing/launch-note.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 it("reports every run into the bot's main thread while fresh executions, approvals, deletion and unread stay reachable", async () => {
   const fixture = await launchVerificationServer();
@@ -65,7 +66,7 @@ it("reports every run into the bot's main thread while fresh executions, approva
     expect(savedBot.threadId).toBe(originalThread);
     expect(savedBot.tasks.filter((task: any) => !task.routineRunId)).toHaveLength(1);
     expect(savedBot.tasks.some((task: any) => task.title.endsWith("· Results"))).toBe(false);
-    expect(savedBot.tasks.find((task: any) => task.threadId === destination).unread).toBe(true);
+    expect(savedBot.tasks.find((task: any) => task.threadId === destination).unread, "plain reports need nothing from the person").toBe(false);
     for (const run of completed) expect(savedBot.tasks.find((task: any) => task.threadId === run.threadId))
       .toMatchObject({ routineRunId: run.id, unread: false, autoApprove: false, approvalMode: "ask" });
 
@@ -301,9 +302,9 @@ it("after the upgrade, reports into and opens the conversation the person last w
       delete file.frozenResultsCleared;
       file.routines.find((candidate: any) => candidate.id === routine).resultsThreadId = oldest;
     }, (dataDir) => {
-      const bots = JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8")) as any[];
+      const bots = readRegistry(dataDir).bots as any[];
       for (const saved of bots) for (const each of saved.tasks ?? []) delete each.askedAt;
-      writeFileSync(join(dataDir, "bots.json"), JSON.stringify(bots));
+      writeRegistry(dataDir, { bots });
       rmSync(join(dataDir, "asked-at-filled"), { force: true });
     });
     const saved = await f.savedBot(bot.id);

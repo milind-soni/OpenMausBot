@@ -30,7 +30,7 @@ export type PairingInputProblem = "emailCode" | "oldCode" | "scriptKey" | "notAC
 /** English for each problem; src/locales/en.json carries the same sentences under the same keys. */
 export const PAIRING_INPUT_PROBLEM_TEXT = {
   "serverError.pair.emailCode": "That's a sign-in code from an email. Pairing needs a 12-character code like 7KQ2-M9XD-H4TP.",
-  "serverError.pair.oldCode": "That's a code from an older MausBot. Make a new one on the other computer: Phone & devices → Pair a device.",
+  "serverError.pair.oldCode": "That code is for the phone app. Pairing here needs a 12-character code like 7KQ2-M9XD-H4TP, made in Settings → Phone & devices on the computer or server you are connecting to.",
   "serverError.pair.scriptKey": "That's a script key. Pairing needs a pairing code.",
   "serverError.pair.notACode": "That isn't a pairing code. Pairing needs a 12-character code like 7KQ2-M9XD-H4TP.",
 } as const;
@@ -41,6 +41,36 @@ export const PAIRING_INPUT_PROBLEM_KEY: Record<PairingInputProblem, keyof typeof
   oldCode: "serverError.pair.oldCode",
   scriptKey: "serverError.pair.scriptKey",
   notACode: "serverError.pair.notACode",
+};
+
+/** The `code` on every refused pairing: `POST /api/pair` on a computer, a server or a Cloud, and `POST /api/auth/pair`.
+ * `error` stays plain words any client can show; a client branches on `code`, never on `error`. */
+export type PairingErrorCode =
+  /** Not JSON, or not the fields a pairing sends. */
+  | "pairing_bad_request"
+  /** No open pairing has this code or credential. */
+  | "pairing_code_wrong"
+  /** A computer has no pairing open. */
+  | "pairing_not_open"
+  /** Too many wrong codes: wait (a server or Cloud says until when), or start pairing again (a computer). */
+  | "pairing_too_many"
+  /** A browser sign-in link that has expired or was used. */
+  | "pairing_link_expired"
+  | "pairing_email_code"
+  | "pairing_old_code"
+  | "pairing_script_key"
+  /** Through the encrypted relay only the QR code's credential pairs, never a typed code. */
+  | "pairing_qr_only"
+  /** A computer already has as many paired devices as it allows: the person removes an old phone on that computer. */
+  | "pairing_device_limit"
+  /** A personal Cloud pairs only its owner's devices. */
+  | "cloud_personal"
+  | "pairing_failed";
+
+export const PAIRING_INPUT_PROBLEM_CODE: Record<Exclude<PairingInputProblem, "notACode">, PairingErrorCode> = {
+  emailCode: "pairing_email_code",
+  oldCode: "pairing_old_code",
+  scriptKey: "pairing_script_key",
 };
 
 function fromLink(raw: string): string | null {

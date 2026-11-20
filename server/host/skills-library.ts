@@ -16,6 +16,7 @@ import { nativeSkillListing, nativeSkills, projectSkillListing, projectSkills, p
 import { redactSecretsInText } from "../redact.ts";
 import { readSectionContext } from "../section-context.ts";
 import { librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
+import { librarySkillFiles, ownSkillFiles, type StoredSkillFiles } from "../skill-side-files.ts";
 import {
   conversationAssignedSkills,
   prepareShareNote,
@@ -29,7 +30,7 @@ import {
 } from "../skill-share.ts";
 import { enabledSkillFiles, listSkills, readSkillFile, resolveBotSkills, skillsSystemPrompt, type SkillListing } from "../skills.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
-import { claudeUserSkillsEnabled } from "../turn-settings.ts";
+import { claudeUserSkillsEnabled, settingsTurnFields } from "../turn-settings.ts";
 import { typedWords } from "../typed-sends.ts";
 import { supportsWorkspaceFiles, TASK_WORKSPACES_DIR } from "../workspace.ts";
 
@@ -112,6 +113,14 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     const native = nativesFor(bot).find((skill) => skill.name === name) ?? projectFor(bot, bot.threadId).find((skill) => skill.name === name);
     return native ? readNativeSkillFile(native) : null;
   };
+  /** The files beside the SKILL.md readBotSkillFile reads, from the same copy: none for a skill shared from this
+   * computer, null when they changed since they came in. */
+  const readBotSkillFiles = (bot: BotRecord, name: string): StoredSkillFiles => {
+    if (readSkillFile(bot.id, name) !== null) return ownSkillFiles(bot.id, name);
+    if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
+    if (skillsLibraryEnabled(cfg) && listLibrarySkills().some((skill) => skill.name === name && (bot.assignedSkills?.includes(name) || (skill.everyBot && !librarySkillOptOuts(bot.id).has(name))))) return librarySkillFiles(name);
+    return [];
+  };
 
   const shareBotsNow = (): ShareBot[] =>
     store.bots.map((bot) => ({ id: bot.id, name: bot.name, section: bot.section, assignedSkills: bot.assignedSkills, visibility: bot.visibility }));
@@ -134,6 +143,13 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   const liveAssigned = (bot: BotRecord) => store.bot(bot.id)?.assignedSkills ?? bot.assignedSkills ?? [];
   const conversationSkills = (bot: BotRecord, threadId: string): string[] | undefined =>
     skillsLibraryEnabled(cfg) ? conversationAssignedSkills(bot.id, liveAssigned(bot), conversationStartedAt(threadId)) : undefined;
+  const turnSkillFiles = (bot: BotRecord, threadId: string, instance?: TurnInstance): string[] => {
+    const assigned = skillsLibraryEnabled(cfg) ? liveAssigned(bot) : undefined;
+    const names = resolveBotSkills(bot.id, assigned).filter((skill) => skill.enabled).map((skill) => skill.name);
+    return [...new Set([...enabledSkillFiles(bot.id, names, assigned).values(),
+      ...importsFor(bot, conversationSkills(bot, threadId), instance).map((skill) => skill.file),
+      ...importsFor(bot, assigned, instance).map((skill) => skill.file)])];
+  };
 
   const engineOf = (instance: TurnInstance | undefined): SkillTurnEngine | undefined => {
     if (!instance) return undefined;
@@ -276,6 +292,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   return {
     listBotSkills,
     readBotSkillFile,
+    readBotSkillFiles,
 
     mode,
 
@@ -299,6 +316,15 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
      * skill folders by itself sees no more than the prompt does. */
     turnImports(bot: BotRecord, threadId: string, instance?: TurnInstance): ImportedSkillView[] {
       return listedImports(bot, importsFor(bot, conversationSkills(bot, threadId), instance));
+    },
+
+    turnSkillFiles,
+
+    turnSettings(bot: BotRecord, threadId: string, instance: TurnInstance, restrictsMcp: boolean) {
+      return {
+        ...settingsTurnFields(cfg, DATA_DIR, restrictsMcp),
+        ...(instance.driverKind === "antigravityAgent" ? { skillFiles: turnSkillFiles(bot, threadId, instance) } : {}),
+      };
     },
 
     /** Each `/name` called for one of the bot's own, library or imported skills, one its engine loads by itself, or one its

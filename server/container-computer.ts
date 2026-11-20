@@ -1,11 +1,10 @@
 // Cua-backed Local VM: OMB owns only the sandbox boundary; desktop automation is Cua Driver's (`cua-driver mcp` in the container).
-import { execFile } from "node:child_process";
+import { execFileInGroupAsync } from "./group-exec.ts";
 import { createHash, randomBytes } from "node:crypto";
 import { lstatSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { workspacePreparationDockerfile } from "./container-workspace.ts";
@@ -35,7 +34,8 @@ import {
 } from "./container-isolation.ts";
 import { SPAWNED_PROXIES } from "./proxy-paths.ts";
 
-const run = promisify(execFile);
+// Its own group: a timeout also ends the docker CLI plugins and credential helpers it started.
+const run = execFileInGroupAsync;
 const SCREENSHOT_STATUS_TTL_MS = 10_000;
 
 export type CommandRunner = (

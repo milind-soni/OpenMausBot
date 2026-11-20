@@ -173,6 +173,23 @@ describe("plan usage parsers", () => {
     expect(JSON.stringify(parsed)).not.toContain(SECRET);
   });
 
+  it("marks Codex credits only for a positive balance or an unlimited account", () => {
+    const flag = (credits: unknown) => parseCodexUsage({ plan_type: "plus", ...(credits === undefined ? {} : { credits }) }).codexCredits;
+    expect(flag({ has_credits: true, unlimited: false, balance: "12.50" })).toBe(true);
+    expect(flag({ has_credits: false, unlimited: true, balance: null })).toBe(true);
+    const odd = [
+      undefined, null, "yes", 1, [], {},
+      { has_credits: "true", unlimited: 1 }, { has_credits: null, unlimited: null },
+      { has_credits: false, unlimited: false, balance: "0" },
+      { has_credits: true, unlimited: false, balance: "0" },
+      { has_credits: true, balance: null },
+      { has_credits: true, balance: "abc" },
+      { has_credits: true, balance: true },
+      { has_credits: true, balance: "1,234.00" },
+    ];
+    for (const credits of odd) expect(flag(credits)).toBeUndefined();
+  });
+
   it("keeps Codex model windows separate from the account plan", () => {
     const parsed = parseCodexUsage({
       plan_type: "pro",
@@ -464,6 +481,26 @@ describe("plan usage fetcher", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
     await loadPlanUsage({ accounts, now: NOW + 11_000 + 45_000, fetch: fetchImpl, credentials });
     expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it("serves a caller that asks for some of a report's accounts from that read, and reads again for one it does not hold", async () => {
+    const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({
+      five_hour: { utilization: 25, resets_at: "2026-09-26T12:00:00.000Z" },
+      seven_day: { utilization: 40, resets_at: "2026-10-03T00:00:00.000Z" },
+    }));
+    const both = [account("claude"), account("claude", { id: "second", name: "Second" })];
+    const credentials = { read: () => ({ token: SECRET, accountId: null, expired: false }) };
+    await loadPlanUsage({ accounts: both, now: NOW, fetch: fetchImpl, credentials });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const some = await loadPlanUsage({ accounts: [both[1]!], now: NOW + 1_000, fetch: fetchImpl, credentials });
+    expect(some.providers.map((row) => row.id)).toEqual(["second"]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect((await loadPlanUsage({ accounts: both, now: NOW + 2_000, fetch: fetchImpl, credentials })).providers).toHaveLength(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    await loadPlanUsage({ accounts: [account("claude", { id: "third", name: "Third" })], now: NOW + 3_000, fetch: fetchImpl, credentials });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    await loadPlanUsage({ accounts: [{ ...both[1]!, configDir: "/elsewhere" }], now: NOW + 4_000, fetch: fetchImpl, credentials });
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
 
   it("does not share the cache when GROK_HOME changes", async () => {

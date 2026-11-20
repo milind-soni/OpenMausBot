@@ -2,6 +2,7 @@ import { redactSecretsInText } from "../../shared/redact.ts";
 import type { PriceList } from "../prices.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import type { SpendState } from "../spend.ts";
+import type { UsageCapView } from "../host/usage-cap-gate.ts";
 import {
   flushUsageLedger,
   parseUsageRange,
@@ -14,6 +15,7 @@ import {
   type UsageRow,
   type UsageSplitBy,
 } from "../usage-ledger.ts";
+import { insightReadRange, summarizeInsights, validTimeZone } from "../usage-insights.ts";
 import { DETAIL_MAX, ERROR_MAX } from "../usage-trace/detail.ts";
 import type { ToolReceipt, TraceRecorder } from "../usage-trace/recorder.ts";
 import { createTraceService, PAGE_MAX, type TraceServiceDeps } from "../usage-trace/service.ts";
@@ -23,6 +25,10 @@ export interface UsageRouteDeps {
   dataDir: string;
   prices(): PriceList | null;
   budget(): SpendState | null;
+  /** The open usage caps with their use now, for the owner; null for anyone else. */
+  caps(auth: RequestAuth): UsageCapView | null;
+  /** Whether this engine is signed in with a subscription now: its dollars are an estimate nobody is billed. */
+  onPlan(instanceId: string): boolean;
   currency(): string;
   recorder: TraceServiceDeps["recorder"];
   messages: TraceServiceDeps["messages"];
@@ -39,6 +45,21 @@ const whole = (raw: string | null, fallback: number, max: number): number | null
   if (raw === null) return fallback;
   return /^\d{1,7}$/.test(raw) && Number(raw) <= max ? Number(raw) : null;
 };
+
+/** The period's dollars booked on engines signed in with a subscription now, and the turns they came from. A row keeps
+ * no record of how its engine was signed in when it ran, so this reads the sign-in as it is today. */
+export function notBilledShare(rows: readonly UsageRow[], onPlan: (instanceId: string) => boolean): { usd: number; turns: number } {
+  const plan = new Map<string, boolean>();
+  let usd = 0, turns = 0;
+  for (const row of rows) {
+    if (typeof row.costUsd !== "number" || !(row.costUsd > 0)) continue;
+    if (!plan.has(row.instanceId)) plan.set(row.instanceId, onPlan(row.instanceId));
+    if (!plan.get(row.instanceId)) continue;
+    usd += row.costUsd;
+    turns += 1;
+  }
+  return { usd, turns };
+}
 
 /** The usage endpoints: trace browsing plus the grouped token and cost summary with its CSV export. */
 export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
@@ -64,6 +85,18 @@ export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
       const found = await traces.detail(id, around === null ? null : Number(around), deps.canSee(auth));
       res.setHeader("cache-control", "no-store");
       return found ? json(res, 200, found) : json(res, 404, { error: "no such trace" });
+    }
+    if (method === "GET" && path === "/api/usage/insights") {
+      const from = url.searchParams.get("from");
+      const to = url.searchParams.get("to");
+      const range = parseUsageRange(from, to);
+      if (!range || !from || !to) return json(res, 400, { error: "from and to must be YYYY-MM-DD, from no later than to, at most a year apart" });
+      const timeZone = validTimeZone(url.searchParams.get("tz") ?? "UTC");
+      if (!timeZone) return json(res, 400, { error: "tz must be an IANA time zone" });
+      await flushUsageLedger(deps.dataDir);
+      const rows = readUsage(deps.dataDir, insightReadRange(from, to)).map(deps.rowFor(auth));
+      res.setHeader("cache-control", "no-store");
+      return json(res, 200, summarizeInsights(rows, { from, to }, timeZone));
     }
     if (!(method === "GET" && (path === "/api/usage" || path === "/api/usage.csv"))) return PASS;
     const range = parseUsageRange(url.searchParams.get("from"), url.searchParams.get("to"));
@@ -99,6 +132,8 @@ export function createUsageRoutes(deps: UsageRouteDeps): RouteHandler {
       splitBy,
       ...summarizeUsage(rows, groupBy, prices, splitBy),
       budget: deps.budget(),
+      caps: deps.caps(auth),
+      notBilled: notBilledShare(rows, deps.onPlan),
       billing: prices ? { currency: deps.currency() } : null,
     });
   };

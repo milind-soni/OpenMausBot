@@ -34,7 +34,7 @@ const modelCard = z.object({
   name: z.string().nullable().optional(),
   aliases: z.array(z.string()).optional(),
   archived: z.boolean().optional(),
-  capabilities: z.object({ completion_chat: z.boolean().optional() }).optional(),
+  capabilities: z.object({ completion_chat: z.boolean().optional(), vision: z.boolean().optional() }).optional(),
   max_context_length: z.number().int().positive().optional(),
 });
 
@@ -52,7 +52,7 @@ export const MistralDriver: ProviderDriver<MistralConfig> = {
   install: {
     docsUrl: "https://console.mistral.ai/api-keys",
     settings: "connections",
-    signInCommand: "Save a Mistral API key in Settings → API keys, or set MISTRAL_API_KEY on the server.",
+    signInCommand: "Save a Mistral API key in Settings → AI → Providers, or set MISTRAL_API_KEY on the server.",
   },
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
@@ -67,6 +67,7 @@ export const MistralDriver: ProviderDriver<MistralConfig> = {
       return { default: options.some((option) => option.id === preferred) ? preferred : options[0].id, options };
     };
     let catalog = withConfiguredModel(DEFAULT_MODELS.options);
+    let imageModels = new Set<string>();
     const refreshModels = async () => {
       if (!apiKey) return;
       try {
@@ -80,6 +81,7 @@ export const MistralDriver: ProviderDriver<MistralConfig> = {
         const rows = Array.isArray(json) ? json : z.object({ data: z.array(z.unknown()) }).parse(json).data;
         const options: ModelCatalog["options"] = [];
         const seen = new Set<string>();
+        const images = new Set<string>();
         for (const row of rows) {
           const parsed = modelCard.safeParse(row);
           if (!parsed.success || parsed.data.archived || parsed.data.capabilities?.completion_chat === false) continue;
@@ -87,21 +89,26 @@ export const MistralDriver: ProviderDriver<MistralConfig> = {
           for (const id of [card.id, ...(card.aliases ?? [])]) {
             if (!id.trim() || seen.has(id)) continue;
             seen.add(id);
+            if (card.capabilities?.vision) images.add(id);
             options.push({ id, label: id === card.id ? card.name?.trim() || id : id,
               ...(card.max_context_length ? { contextWindow: card.max_context_length } : {}) });
           }
         }
-        if (options.length) catalog = withConfiguredModel(options);
+        if (options.length) {
+          catalog = withConfiguredModel(options);
+          imageModels = images;
+        }
       } catch {}
     };
     if (apiKey) void refreshModels();
     return createOpenAIChatRuntime({
       input, driverKind: "mistral", apiKey, apiUrl: config.url,
       tools: config.tools, models: () => catalog, refreshModels, contentText,
+      computerUse: true, imageInput: (model) => imageModels.has(model),
       requestBody: (model, messages, stream) => ({ model, messages, stream }),
       httpErrorLabel: "Mistral",
-      missingKeyError: "Save a Mistral API key in Settings → API keys, or set MISTRAL_API_KEY.",
-      unavailableReason: "No Mistral API key — open Settings → API keys.",
+      missingKeyError: "Save a Mistral API key in Settings → AI → Providers, or set MISTRAL_API_KEY.",
+      unavailableReason: "No Mistral API key — open Settings → AI → Providers.",
       timeoutMs: 180_000, billing: "metered", includeUsageInCompleted: true,
       nativeLog: {
         source: "mistral.chat.completions",

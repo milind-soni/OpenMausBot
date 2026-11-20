@@ -17,10 +17,11 @@ import { usePhonePlaceState } from "./phone-status";
 import type { SettingsPlace } from "./settings-context";
 import { OWNERS, pageById, type SearchHit, type SettingsContext, type SettingsOwner, type SettingsPage, type SettingsPageId } from "./settings-index";
 import { useUpdaterState } from "@/lib/updater";
+import { isMacPlatform } from "@/lib/keyboard-shortcuts";
 import { keySection, type KeyEntry } from "../keys/key-catalog";
 import { HELP_CENTER_URL, desktopAppVersion } from "@/lib/app-links";
 
-export const NAV_ITEM = "relative flex h-8 w-full shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-[13px] leading-5 text-ink transition-colors motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
+export const NAV_ITEM = "relative flex h-8 w-full shrink-0 cursor-pointer items-center gap-2 rounded-lg px-[9px] py-[7px] text-left text-[13px] leading-5 text-ink transition-colors motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus";
 
 /** A place's badge as its rail circle draws it; with no colour of its own (This computer, or a Cloud in a browser) it is a
  * quiet filled tile with an edge, so it never vanishes on the sheet. */
@@ -33,7 +34,7 @@ export function PlaceBadge({ place, size }: { place: Pick<SettingsPlace, "kind" 
     <span aria-hidden="true" data-place-badge={place.kind}
       className="grid shrink-0 place-items-center bg-ink/[0.06] font-semibold leading-none text-ink-secondary shadow-[inset_0_0_0_0.5px_var(--settings-edge)]"
       style={{ width: size, height: size, borderRadius: Math.round(size * 0.3), fontSize: Math.max(7, Math.round(size * 0.4)) }}>
-      {place.kind === "computer" && !place.named ? <Laptop size={glyph} strokeWidth={1.75} /> : placeInitials(place.name)}
+      {place.kind === "computer" && !place.named ? <Laptop size={glyph} /> : placeInitials(place.name)}
     </span>
   );
 }
@@ -106,7 +107,7 @@ function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; l
   return (
     <button type="button" data-settings-page={page.id} data-settings-section={page.id} aria-current={current ? "page" : undefined} onClick={onOpen}
       className={cn(NAV_ITEM, current ? "bg-menu-active font-medium" : "hover:bg-menu-hover")}>
-      <span className="flex w-6 shrink-0 justify-center">{Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" className={current ? "text-ink" : "text-ink-secondary"} />}</span>
+      <span className="flex w-6 shrink-0 justify-center">{Icon && <Icon size={16} aria-hidden="true" className={current ? "text-ink" : "text-ink-secondary"} />}</span>
       <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-hidden" title={label}>
         <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap [grid-area:1/1]">{label}</span>
         <span aria-hidden="true" className="invisible h-0 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-medium [grid-area:1/1]">{label}</span>
@@ -210,7 +211,7 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
                 {group.map((page) => narrow ? (
                   <button key={page.id} type="button" data-settings-page={page.id} data-settings-section={page.id} onClick={() => onOpen(page.id)}
                     className="flex h-11 w-full cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-[14px] leading-5 text-ink hover:bg-menu-hover">
-                    <span className="flex w-6 shrink-0 justify-center">{page.icon && <page.icon size={16} strokeWidth={1.75} aria-hidden="true" className="text-ink-secondary" />}</span>
+                    <span className="flex w-6 shrink-0 justify-center">{page.icon && <page.icon size={16} aria-hidden="true" className="text-ink-secondary" />}</span>
                     <span className="min-w-0 flex-1 truncate">{t(page.labelKey)}</span>
                     {dot(page.id) && <span aria-hidden="true" className={cn("size-1.5 rounded-full", dot(page.id) === "success" ? "bg-success" : "bg-warning")} />}
                     <ChevronRight size={14} aria-hidden="true" className="text-ink-tertiary rtl:-scale-x-100" />
@@ -283,7 +284,7 @@ export function hitLabel(hit: SearchHit, place: SettingsPlace, desktop: boolean)
   if (hit.entry.id === "page:overview") return place.name;
   if (hit.entry.id === "page:account") return t("settings.page.account");
   if (hit.entry.id === "page:app") return desktop ? t("settings.page.app") : t("settings.page.browser");
-  return t(hit.entry.labelKey, { app: productName(), helper: "" });
+  return t(hit.entry.macLabelKey && isMacPlatform() ? hit.entry.macLabelKey : hit.entry.labelKey, { app: productName(), helper: "" });
 }
 
 function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place: SettingsPlace; hit: SearchHit; query: string; onHit: (hit: SearchHit) => void }) {
@@ -298,7 +299,7 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
   return (
     <button type="button" data-settings-hit={entry.id} onClick={() => onHit(hit)} title={full ? `${label} · ${full}` : label}
       className="flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
-      <span className="flex h-5 w-6 shrink-0 items-center justify-center text-ink-secondary">{Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" />}</span>
+      <span className="flex h-5 w-6 shrink-0 items-center justify-center text-ink-secondary">{Icon && <Icon size={16} aria-hidden="true" />}</span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span data-settings-hit-title="" className="line-clamp-2 text-[13px] leading-5 text-ink [overflow-wrap:anywhere]">{highlight(label, query)}</span>
         {(where || tag) && (

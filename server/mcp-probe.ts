@@ -5,6 +5,7 @@ import {
   stripWorkspaceCredentialEnv,
 } from "./config.ts";
 import { createLineSplitter } from "./mcp-bridge.ts";
+import { mcpCommandEnvironment } from "./mcp-environment.ts";
 import { UI_EXTENSION, withUiExtension } from "./mcp-app-observer.ts";
 import { MAX_REMOTE_MCP_BYTES, McpHttpError, McpRpcError, REMOTE_MCP_STARTUP_MS, RemoteMcpClient } from "./mcp-http.ts";
 import { discoverMcpAuth } from "./mcp-oauth-discovery.ts";
@@ -58,12 +59,11 @@ const MAX_TOOLS = 100;
 export const STDIO_PROBE_TIMEOUT_MS = 8_000;
 export const REMOTE_PROBE_TIMEOUT_MS = REMOTE_MCP_STARTUP_MS;
 
-export function probeEnvironment(server: Pick<StoredStdioMcpServer, "env">): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, PATH: augmentedPath() };
+export function probeEnvironment(server: Pick<StoredStdioMcpServer, "env">, source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...source, PATH: augmentedPath() };
   stripWorkspaceCredentialEnv(env);
   for (const key of PROVIDER_CREDENTIAL_ENV) delete env[key];
-  Object.assign(env, server.env);
-  return env;
+  return mcpCommandEnvironment(env, server.env);
 }
 
 function publicProbeError(kind: "spawn" | "timeout" | "protocol" | "closed" | "cancelled"): string {

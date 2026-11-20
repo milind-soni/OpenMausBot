@@ -40,7 +40,8 @@ function composeUp() {
   const wanted = image(composeImage());
   if (!wanted) fail(`pull access denied for ${composeImage()}`);
   if (state.failUp === wanted.id) fail("Error response from daemon: driver failed programming external connectivity");
-  const crashes = wanted.behaviour === "crashes";
+  // `repairable`: it crashes until its doctor has repaired the data (`doctor --data --fix`, below).
+  const crashes = wanted.behaviour === "crashes" || (wanted.behaviour === "repairable" && !state.repaired);
   state.containers.omb = { id: `omb-${++state.serial}`, image: wanted.id, status: crashes ? "restarting" : "running", restarts: crashes ? 5 : 0, started: `start-${state.serial}` };
   state.containers.caddy = { id: `caddy-${state.serial}`, status: wanted.behaviour === "no-caddy" ? "exited" : "running" };
   // A server that starts writes to its data, as a new version's migrations do.
@@ -61,6 +62,7 @@ function compose(rest) {
   }
   if (verb === "up") return composeUp();
   if (verb === "logs") return out(image(omb?.image)?.lastWords ?? "");
+  if (more.includes("doctor") && more.includes("--fix")) return doctor(verb, omb);
   if (verb === "exec") {
     // As the real one does: `docker compose exec` forwards its standard input to the container, so it takes whatever is
     // waiting there, an answer meant for update.sh's question included.
@@ -76,6 +78,26 @@ function compose(rest) {
     if (line.includes("/environment")) return out(JSON.stringify({ environmentId: "e", version: serving.serves ?? serving.version }));
   }
   fail(`fake docker: unknown compose command: ${line}`, 64);
+}
+
+/** `openmausbot doctor --data --fix --json`, run by `compose exec` in the running server or by `compose run` with it
+ * stopped. `doctor`: what the image's doctor finds, "repairs" (and then the next start works) or "nothing"; an image
+ * without one answers as a version before the doctor: a usage error. */
+function doctor(verb, omb) {
+  const serving = image(verb === "exec" ? omb?.image : composeImage());
+  if (verb === "exec" && omb?.status !== "running") fail("service omb is not running");
+  if (verb === "run" && omb?.status === "running") fail("fake docker: the doctor's one-off container beside a running server", 64);
+  state.doctorRuns = [...(state.doctorRuns ?? []), verb];
+  if (serving?.doctor === "repairs") {
+    state.repaired = true;
+    return out(JSON.stringify({ ok: true, counts: { checked: 9, problems: 0, fixed: 2, blocking: 0 } }, null, 2));
+  }
+  if (serving?.doctor === "nothing") {
+    out(JSON.stringify({ ok: false, counts: { checked: 9, problems: 1, fixed: 0, blocking: 0 } }, null, 2));
+    save();
+    process.exit(8);
+  }
+  fail("openmausbot doctor: unknown option '--data'", 2);
 }
 
 function inspect(format, target) {

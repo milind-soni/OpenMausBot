@@ -3,9 +3,9 @@ import { createECDH, createHash, type webcrypto } from "node:crypto";
 import { isCredentialTargetId, isProviderCredentialTarget } from "../shared/credential-request.ts";
 import type { CipherSuite } from "@hpke/core";
 
-export const PHONE_SECRET_PROTOCOL_VERSION = 1 as const;
-export const PHONE_SECRET_INFO = "OpenMausBot phone credential v1";
-export const PHONE_SECRET_MAX_BYTES = 4_096;
+import { PHONE_SECRET_INFO, PHONE_SECRET_MAX_BYTES, PHONE_SECRET_PROTOCOL_VERSION } from "../shared/phone-secret-envelope.ts";
+
+export { PHONE_SECRET_INFO, PHONE_SECRET_MAX_BYTES, PHONE_SECRET_PROTOCOL_VERSION };
 
 const BASE64URL = /^[A-Za-z0-9_-]+$/;
 const ROUTE_ID = /^[\w-]{1,128}$/;

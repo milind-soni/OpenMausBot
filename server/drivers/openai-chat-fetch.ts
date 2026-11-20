@@ -10,3 +10,15 @@ export async function fetchPastLimit(url: string, init: RequestInit): Promise<Re
   unlimitedAgent ??= new UndiciAgent({ headersTimeout: 0, bodyTimeout: 0 });
   return fetchWithoutLimits(url, { ...init, dispatcher: unlimitedAgent } as Parameters<typeof fetchWithoutLimits>[1]) as unknown as Promise<Response>;
 }
+
+/** Stop this completion's wait without cancelling model preparation shared with other turns. */
+export function prepareChatModel(prepare: () => Promise<string>, signal: AbortSignal): Promise<string> {
+  let cleanup = () => {};
+  return new Promise<string>((resolve, reject) => {
+    signal.throwIfAborted();
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    cleanup = () => signal.removeEventListener("abort", abort);
+    prepare().then(resolve, reject);
+  }).finally(() => cleanup());
+}

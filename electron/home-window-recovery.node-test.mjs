@@ -23,7 +23,7 @@ test("the recovery owns the window until it settles, and a server chosen meanwhi
   const leaving = world({ journal: null, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });
   leaving.reopenAnswer = false;
   await leaving.home.show();
-  assert.deepEqual(leaving.home.view(), { screen: "offline", reason: "Your bots are on Garage server." });
+  assert.deepEqual(leaving.home.view(), { screen: "offline", name: "Garage server", reason: "Your bots are on Garage server." });
   assert.equal(leaving.timers.length, 1, "it was going to look again by itself");
   leaving.url = "https://studio.example.test/";
   leaving.home.cancel();
@@ -40,7 +40,7 @@ test("the recovery owns the window until it settles, and a server chosen meanwhi
   await overlapped.later(OPEN_MS);
   await tick();
   assert.equal(settled, true, "a second show() leaves the deadline to the recovery");
-  assert.deepEqual(overlapped.home.view(), { screen: "offline", reason: "Your bots are on Garage server." }, "a page that never commits is still bounded");
+  assert.deepEqual(overlapped.home.view(), { screen: "offline", name: "Garage server", reason: "Your bots are on Garage server." }, "a page that never commits is still bounded");
   assert.equal(overlapped.timers.length, 1, "and looks again by itself");
   await firstLook;
   const replaced = world({ journal: null, marker, state: { status: "signed-out" }, url: `${LOCAL}${HOME_SCREEN_PATH}` });

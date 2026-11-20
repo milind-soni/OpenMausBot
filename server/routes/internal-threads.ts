@@ -1,9 +1,11 @@
 import { chiefTidies } from "../chief-of-staff.ts";
 import type { Coordinator, HandoffView } from "../coordinator.ts";
 import { reachablePeers } from "../peer-roster.ts";
-import type { BotRecord, Store, TaskRecord } from "../store.ts";
+import { threadTitleFrom, type BotRecord, type Store, type TaskRecord } from "../store.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 import { conversationLanguage, serverLine } from "../server-lines.ts";
+
+const THREADS_PAGE = 100;
 
 type ThreadState = "running" | "waiting-on-you" | "queued" | "idle" | "closed";
 
@@ -18,7 +20,7 @@ interface ThreadRow {
 
 /** Only dispatch inside the internal capability gate: `from` and `fromThreadId` come from the caller's capability. */
 export function createInternalThreadRoutes(deps: {
-  store: Pick<Store, "bot" | "bots" | "tasks" | "taskByThread" | "appendMessage" | "patchTask" | "setTaskClosedBy">;
+  store: Pick<Store, "bot" | "bots" | "tasks" | "taskByThread" | "appendMessage" | "patchTask" | "setTaskClosedBy" | "renameTask">;
   coordinator: Pick<Coordinator, "awaitingAnswer" | "parkedDirect" | "activeDirect" | "active">;
   from: BotRecord;
   fromThreadId: string;
@@ -29,9 +31,11 @@ export function createInternalThreadRoutes(deps: {
   queuedThreadPosition(botId: string, threadId: string): number | null;
   /** `showTitle`: the caller is the receiver, so its own busy threads it may see can be named. */
   queuedReason(node: HandoffView, showTitle?: (threadId: string) => boolean): string;
+  /** The caller's body, read only while its turn still holds the capability. */
+  readBody(): Promise<unknown>;
 }): RouteHandler {
   const { store, coordinator, from, fromThreadId } = deps;
-  return async ({ res, path, method, json }) => {
+  return async ({ res, url, path, method, json }) => {
     // list_threads: the caller's own threads plus, on reachable peers, only threads it opened; a peer's other threads are its own business.
     if (method === "GET" && path === "/api/internal/threads") {
       if (!deps.ownsThread(from.id, fromThreadId)) {
@@ -77,7 +81,29 @@ export function createInternalThreadRoutes(deps: {
         }
       }
       rows.sort((a, b) => b.openedAt - a.openedAt);
-      return json(res, 200, { threads: rows.slice(0, 100) });
+      const asked = Number(url.searchParams.get("page"));
+      const page = Number.isSafeInteger(asked) && asked > 0 ? asked : 1;
+      const start = (page - 1) * THREADS_PAGE;
+      return json(res, 200, { threads: rows.slice(start, start + THREADS_PAGE), total: rows.length, page, pageSize: THREADS_PAGE });
+    }
+    // rename_thread names only the conversation the turn speaks in. A room's thread is the room's, and an automation's
+    // chat keeps the name its runs find it by.
+    if (method === "POST" && path === "/api/internal/thread-title") {
+      if (!deps.ownsThread(from.id, fromThreadId)) {
+        return json(res, 403, { error: "source conversation does not belong to sender" });
+      }
+      const body = await deps.readBody() as { title?: unknown } | null;
+      const title = typeof body?.title === "string" ? body.title.replace(/\s+/g, " ").trim() : "";
+      if (!title) return json(res, 400, { error: "rename_thread needs a title: one short line" });
+      const task = store.taskByThread(from.id, fromThreadId);
+      if (!task) return json(res, 404, { error: "this conversation is not one of your own threads (a room's thread keeps the room's name)" });
+      if (task.routineRunId || task.title.endsWith(" · Results")) {
+        return json(res, 409, { error: `#${task.title} holds an automation's results and keeps its name` });
+      }
+      const previous = task.title;
+      const renamed = store.renameTask(from.id, fromThreadId, threadTitleFrom(title));
+      if (!renamed) return json(res, 404, { error: "this conversation is not one of your own threads" });
+      return json(res, 200, { renamed: true, title: renamed.title, previous });
     }
     // close_thread folds a thread, never deletes it (a person's confirmed action), and never while it runs.
     const closeMatch = method === "POST" ? path.match(/^\/api\/internal\/threads\/([\w-]+)\/close$/) : null;

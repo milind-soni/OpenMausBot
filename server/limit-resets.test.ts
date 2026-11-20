@@ -113,6 +113,30 @@ describe("engineLimitFromUsage", () => {
     expect(engineLimitFromUsage(codex([10, NOW + HOUR], [97, NOW + 90 * HOUR]))).toMatchObject({ blocked: false, window: "weekly", usedPercent: 97 });
   });
 
+  it("does not hold Codex at a full window while its ChatGPT credits can pay for more", () => {
+    const withCredits = (credits: unknown) => row("codex", "codex", parseCodexUsage({
+      plan_type: "plus",
+      rate_limit: {
+        primary_window: { used_percent: 100, limit_window_seconds: 5 * 3600, reset_at: Math.floor((NOW + HOUR) / 1000) },
+        secondary_window: { used_percent: 50, limit_window_seconds: 7 * 86400, reset_at: Math.floor((NOW + 90 * HOUR) / 1000) },
+      },
+      ...(credits === undefined ? {} : { credits }),
+    }));
+    const resetsAt = Math.floor((NOW + HOUR) / 1000) * 1000;
+    expect(engineLimitFromUsage(withCredits({ has_credits: true, unlimited: false, balance: "12.50" }))).toMatchObject({ blocked: false, window: "5-hour", usedPercent: 100, resetsAt });
+    expect(engineLimitFromUsage(withCredits({ has_credits: false, unlimited: true, balance: null }))).toMatchObject({ blocked: false, usedPercent: 100 });
+    expect(engineLimitFromUsage(withCredits({ has_credits: false, unlimited: false, balance: "0" }))).toMatchObject({ blocked: true, resetsAt });
+    expect(engineLimitFromUsage(withCredits({ has_credits: true, unlimited: false, balance: "0" }))).toMatchObject({ blocked: true });
+    for (const odd of [undefined, null, "yes", 1, [], {}, { has_credits: "true", unlimited: 1 }, { has_credits: null, unlimited: null }]) {
+      expect(engineLimitFromUsage(withCredits(odd))).toMatchObject({ blocked: true, resetsAt });
+    }
+  });
+
+  it("holds Claude at a full window as before, whatever credits fields it carries", () => {
+    const claudeFull = row("claude", "claude", { ...parseClaudeUsage({ five_hour: { utilization: 100, resets_at: iso(NOW + 2 * HOUR) } }), codexCredits: true });
+    expect(engineLimitFromUsage(claudeFull)).toMatchObject({ blocked: true });
+  });
+
   it("has nothing to say for a row that could not be read, and no time for a row without windows", () => {
     expect(engineLimitFromUsage({ ...claude([1, NOW], [1, NOW]), ok: false, error: "Sign in again in Claude" })).toBeNull();
     expect(engineLimitFromUsage(row("claude", "claude", parseClaudeUsage({})))).toMatchObject({ usedPercent: null, resetsAt: null, blocked: false, windows: [] });
@@ -232,6 +256,18 @@ describe("LimitResetClock", () => {
     const instance = new LimitResetClock({ accounts: () => current, now: () => NOW, loadUsage: load });
     await instance.refresh(true);
     current = accounts;
+    await instance.refresh(true);
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not ask for the usage of an engine whose usage holds nothing here", async () => {
+    const load = vi.fn(async (_asked: Array<{ id: string }>) => report(claude([50, NOW + HOUR], [5, NOW + 90 * HOUR])));
+    const antigravity = { id: "antigravity", name: "Antigravity", driver: "antigravity" as const, environment: {} };
+    let current = [...accounts, antigravity];
+    const instance = new LimitResetClock({ accounts: () => current, now: () => NOW, loadUsage: load });
+    await instance.refresh(true);
+    expect(load.mock.calls.map(([asked]) => asked.map((account) => account.id))).toEqual([["claude"]]);
+    current = [antigravity];
     await instance.refresh(true);
     expect(load).toHaveBeenCalledTimes(1);
   });
@@ -464,7 +500,7 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("claude")).toBeNull();
   });
 
-  it("re-reads usage every few minutes while an engine is held, with nothing else waiting, and so ends a hold that reset early", async () => {
+  it("re-reads usage every few minutes while an engine is held and turns run, with nothing else waiting, and so ends a hold that reset early", async () => {
     vi.useFakeTimers({ now: NOW });
     let usage = report(claude([100, NOW + 23 * HOUR], [8, NOW + 5 * 24 * HOUR]));
     const loadUsage = vi.fn(async () => ({ ...usage, fetchedAt: iso(Date.now()) }));
@@ -472,7 +508,9 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     instance.start();
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(loadUsage, "nothing held, nothing waiting: no reads").not.toHaveBeenCalled();
-    instance.noteRefusal("claude", Date.now() + 23 * HOUR);
+    // A turn on Claude meets its limit: the home is in use.
+    instance.noteRuntimeEvent("claude", { eventId: "e", provider: "claudeAgent", createdAt: iso(Date.now()), threadId: "t1", type: "runtime.error",
+      message: "limit", limitResetsAt: Date.now() + 23 * HOUR } as RuntimeEvent);
     await vi.advanceTimersByTimeAsync(6_000);
     expect(instance.blockedUntil("claude"), "the read soon after the refusal still shows the full window").not.toBeNull();
     usage = report(claude([2, NOW + 5 * HOUR], [8, NOW + 5 * 24 * HOUR]));
@@ -512,6 +550,29 @@ describe("LimitResetClock and the turns that follow a refusal", () => {
     expect(instance.blockedUntil("opencodeGo"), "a full month keeps it held").not.toBeNull();
     instance.noteUsage(report(go(40)));
     expect(instance.blockedUntil("opencodeGo")).toBeNull();
+  });
+
+  it("holds only OpenCode Go's own models at a full Go meter, so Zen's free models on the same login keep working", () => {
+    const goAccounts = [{ id: "opencodeGo", name: "OpenCode", driver: "opencode" as const, environment: {} }];
+    const instance = new LimitResetClock({ accounts: () => goAccounts, now: () => NOW });
+    instance.noteUsage(report(row("opencodeGo", "opencode", parseOpenCodeUsage({ usage: {
+      rolling: { percent: 100, resetsAt: iso(NOW + 4 * HOUR) },
+      weekly: { percent: 60, resetsAt: iso(NOW + 5 * 24 * HOUR) },
+    } }))));
+    expect(instance.blockedUntil("opencodeGo", "opencode-go/kimi-k2")).toBe(NOW + 4 * HOUR);
+    expect(instance.blockedUntil("opencodeGo", "typed::opencode-go/new-model"), "a Go model typed by hand").toBe(NOW + 4 * HOUR);
+    expect(instance.blockedUntil("opencodeGo"), "no model named: the whole engine, as before").toBe(NOW + 4 * HOUR);
+    expect(instance.blockedUntil("opencodeGo", "opencode/big-pickle")).toBeNull();
+    instance.noteRefusal("opencodeGo", NOW + 2 * HOUR);
+    expect(instance.blockedUntil("opencodeGo", "opencode/big-pickle"), "a refusal of the whole account still holds every model").not.toBeNull();
+    expect(instance.resetAt("opencodeGo", "opencode/big-pickle"), "a free model resets with the refusal, not the Go meter").toBeLessThan(NOW + 4 * HOUR);
+    expect(instance.resetAt("opencodeGo", "opencode-go/kimi-k2")).toBe(NOW + 4 * HOUR);
+  });
+
+  it("still holds every model of an engine other than OpenCode at a full window", () => {
+    const instance = new LimitResetClock({ accounts: () => accounts, now: () => NOW });
+    instance.noteUsage(report(claude([100, NOW + 2 * HOUR], [40, NOW + 3 * 24 * HOUR])));
+    expect(instance.blockedUntil("claude", "claude-sonnet-5")).toBe(NOW + 2 * HOUR);
   });
 
   it("ends a hold at once on Try again now, saved across a restart, and a new refusal holds it again", () => {

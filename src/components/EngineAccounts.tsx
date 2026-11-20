@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Check, Loader2, MoreHorizontal, Plus } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
+import { useShowInstances } from "@/state/use-show-instances";
 import { t } from "@/lib/i18n";
 import { engineDisplayName } from "@/lib/engine-name";
 import { cn } from "@/lib/cn";
@@ -36,11 +37,14 @@ const COPY: Record<AccountGroup, Record<"title" | "add" | "removeBody", LocaleKe
   chatgpt: { title: "accounts.chatgpt", add: "accounts.addChatgpt", removeBody: "accounts.removeBodyChatgpt" },
 };
 
-/** What an account's menu offers. Only accounts added here can be removed; each provider's first account stays. */
-export function accountActions(group: AccountGroup, instance: InstanceInfo): { signOut: boolean; remove: boolean } {
+/** What an account's menu offers. Only accounts added here can be removed; each provider's first account stays, and
+ * ChatGPT's built-in rows (Codex, ChatGPT plan) can be hidden instead. */
+export function accountActions(group: AccountGroup, instance: InstanceInfo): { signOut: boolean; remove: boolean; hide: boolean } {
+  const remove = group === "claude" ? instance.instanceId !== "claude" && instance.claudeAccount?.isDefault !== true : instance.instanceId.startsWith("chatgpt-");
   return {
     signOut: accountState(instance) === "signedIn" && instance.authentication?.signOut === true && instance.snapshot.account?.method !== "api-key",
-    remove: group === "claude" ? instance.instanceId !== "claude" && instance.claudeAccount?.isDefault !== true : instance.instanceId.startsWith("chatgpt-"),
+    remove,
+    hide: group === "chatgpt" && !remove,
   };
 }
 
@@ -66,14 +70,15 @@ function summaryFor(group: AccountGroup, accounts: InstanceInfo[]): EngineCardSu
 }
 
 function AccountMenu({ group, instance, onRename }: { group: AccountGroup; instance: InstanceInfo; onRename: () => void }) {
-  const { state, dispatch, refreshInstances } = useStore();
+  const { state } = useStore();
+  const showInstances = useShowInstances();
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState<"signOut" | "remove" | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const { signOut: canSignOut, remove: canRemove } = accountActions(group, instance);
-  const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId).length;
+  const { signOut: canSignOut, remove: canRemove, hide: canHide } = accountActions(group, instance);
+  const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId || bot.fallback?.some((backup) => backup.instanceId === instance.instanceId)).length;
 
   useEffect(() => {
     if (!open) return;
@@ -89,16 +94,15 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
     };
   }, [open]);
 
-  const run = async (action: "signOut" | "remove") => {
+  const run = async (action: "signOut" | "remove" | "hide") => {
     setConfirm(null);
     setBusy(true);
     setError(null);
     try {
       const path = `/api/instances/${encodeURIComponent(instance.instanceId)}${action === "signOut" ? "/auth/sign-out" : ""}`;
-      const { instances } = await api(path, action === "signOut" ? { method: "POST" } : { method: "DELETE" });
-      // The response is the confirmed state: a second request could fail and leave a stale row.
-      if (Array.isArray(instances)) dispatch({ type: "instances", instances });
-      else await refreshInstances().catch(() => {});
+      // Hide leaves the account out of every model list until Unhide (Settings → AI → More providers).
+      const init = action === "signOut" ? { method: "POST" } : action === "remove" ? { method: "DELETE" } : { method: "PATCH", body: JSON.stringify({ hidden: true }) };
+      await showInstances(await api(path, init)).catch(() => {});
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -123,7 +127,8 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
         <div role="menu" className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden text-[13px]", MENU_SHEET)}>
           <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); onRename(); }}>{t("accounts.rename")}</button>
           {canSignOut && <button type="button" role="menuitem" className={cn(item, "text-ink")} onClick={() => { setOpen(false); setConfirm("signOut"); }}>{t("accounts.signOut")}</button>}
-          {canRemove && usedBy > 0 && <p className="px-3 pb-1 pt-0.5 text-[11px] leading-snug text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
+          {canHide && <button type="button" role="menuitem" disabled={usedBy > 0} title={t("engines.hideHint")} className={cn(item, "text-ink")} onClick={() => { setOpen(false); void run("hide"); }}>{t("engines.hide")}</button>}
+          {(canRemove || canHide) && usedBy > 0 && <p className="px-3 pb-1 pt-0.5 text-[11px] leading-snug text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}
         </div>
       )}
       {error && <p role="alert" className="absolute right-0 top-full z-30 mt-1 w-[260px] rounded-lg bg-card p-2 text-[12px] text-danger shadow-lg">{error}</p>}

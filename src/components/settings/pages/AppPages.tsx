@@ -13,6 +13,7 @@ import {
 } from "../../AppSettingsRows";
 import { ChromeRailRow } from "../../ChromeRailToggle";
 import { ConnectedWorkspacesSettings } from "../../ConnectedWorkspacesSettings";
+import { CustomThemesSettings } from "../../CustomThemesSettings";
 import { DiagnosticsRow } from "../../DiagnosticsRow";
 import { NotificationRows } from "../../NotificationSettingsRows";
 import { OpenAtLoginRow } from "../../OpenAtLoginRow";
@@ -104,7 +105,7 @@ function PlacesFromHere() {
             <button type="button" className="ui-button" data-place-switch={other.key} onClick={other.open}>{t("servers.switch")}</button>
           </SettingRow>
         ))}
-        {workspaces.add && <SettingsLinkRow title={t("connect.title")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} strokeWidth={1.75} aria-hidden="true" /></span>}
+        {workspaces.add && <SettingsLinkRow title={t("connect.title")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} aria-hidden="true" /></span>}
           onClick={() => void workspaces.add?.("address")} data={{ "data-server-connect": "" }} />}
       </SettingsRows>
     </SettingsGroup>
@@ -163,6 +164,7 @@ export function AppearancePage() {
         {!ctx.client && <SettingsLinkRow title={t("placeLook.sidebarColor")} value={place.name} badge={<PlaceBadge place={place} size={14} />} onClick={() => go("overview", "sidebar")} data={{ "data-settings-door": "sidebar-color" }} />}
       </SettingsRows>
     </SettingsGroup>
+    <CustomThemesSettings />
     <SettingsGroup label={t("settings.appearance.chat")} block="chat">
       <SettingsRows>
         {!ctx.client && <ToolCallsRow />}

@@ -164,21 +164,23 @@ beforeAll(async () => {
     "const relay = new PassThrough();",
     "const real = process.stdin;",
     'Object.defineProperty(process, "stdin", { value: relay, configurable: true });',
-    "let decided = false;",
     'let held = "";',
     'real.on("data", (chunk) => {',
-    "  if (decided) { relay.write(chunk); return; }",
     "  held += chunk;",
-    '  const nl = held.indexOf("\\n");',
-    "  if (nl === -1) return;",
-    "  const marker = /\\[\\[gate:([\\w-]+)\\]\\]/.exec(held.slice(0, nl));",
-    '  const key = marker?.[1] ?? thread ?? "peer";',
-    `  process.env.FAKE_CLAUDE_SLOW_FINISH_GATE = join(${JSON.stringify(gates)}, key + ".gate");`,
-    `  process.env.FAKE_CLAUDE_DUMP = join(${JSON.stringify(gates)}, key + ".json");`,
-    `  process.env.FAKE_CLAUDE_PROMPTS = join(${JSON.stringify(gates)}, key + ".prompts.jsonl");`,
-    "  decided = true;",
-    "  relay.write(held);",
-    '  held = "";',
+    "  let nl;",
+    '  while ((nl = held.indexOf("\\n")) !== -1) {',
+    "    const line = held.slice(0, nl + 1);",
+    "    held = held.slice(nl + 1);",
+    "    if (line.includes('\"type\":\"user\"')) {",
+    '      const withoutInstructions = line.replace(/<system-reminder>[\\s\\S]*?<\\/system-reminder>/g, "");',
+    "      const marker = /\\[\\[gate:([\\w-]+)\\]\\]/.exec(withoutInstructions);",
+    '      const key = marker?.[1] ?? thread ?? "peer";',
+    `      process.env.FAKE_CLAUDE_SLOW_FINISH_GATE = join(${JSON.stringify(gates)}, key + ".gate");`,
+    `      process.env.FAKE_CLAUDE_DUMP = join(${JSON.stringify(gates)}, key + ".json");`,
+    `      process.env.FAKE_CLAUDE_PROMPTS = join(${JSON.stringify(gates)}, key + ".prompts.jsonl");`,
+    "    }",
+    "    relay.write(line);",
+    "  }",
     "});",
     'real.on("end", () => relay.end());',
     'process.env.FAKE_CLAUDE_MODE = "slow";',
@@ -741,7 +743,7 @@ describe("coordinate_bots on a teammate", () => {
   it("still buzzes when a coordinated thread asks the person a question, deep-linked to that thread", async () => {
     const pm = await createBot("Pam", "gated");
     const sage = await createBot("Sage", "curious", "fake-model");
-    // On "Ask me first" a teammate's question is the person's; at Full access the bot that handed the work on answers it.
+    // On "Ask for approval" a teammate's question is the person's; at Full access the bot that handed the work on answers it.
     for (const bot of [pm, sage]) expect((await api("PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
     const stream = await openSse(`${base}/api/events`);
     try {

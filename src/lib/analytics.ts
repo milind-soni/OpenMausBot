@@ -110,8 +110,8 @@ function start(posthog: PostHog) {
   // opt_out_capturing() persists in PostHog's own storage, so a later opt-in would boot opted out.
   if (posthog.has_opted_out_capturing()) posthog.opt_in_capturing({ captureEventName: false });
   client = posthog;
-  posthog.register({ app_version: appVersion(), surface: analyticsSurface() });
   const platform = pagePlatform();
+  posthog.register({ app_version: appVersion(), surface: analyticsSurface(), platform });
   if (!localStorage.getItem("omb-installed")) {
     localStorage.setItem("omb-installed", new Date().toISOString());
     posthog.capture("app_first_open", { platform });

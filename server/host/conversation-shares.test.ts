@@ -31,6 +31,16 @@ describe("conversation shares", () => {
     expect(createConversationShares({ dataDir: dir, team: true }).audienceOf("t1"), "kept across a restart").toBe("team");
   });
 
+  it("remembers a conversation its person opened from a Slack channel, across a restart", () => {
+    const shares = createConversationShares({ dataDir: dir, team: true });
+    shares.share("t1", rui, "team", 100, "slack");
+    shares.share("t2", rui, "team", 100);
+    const again = createConversationShares({ dataDir: dir, team: true });
+    expect([again.fromSlack("t1"), again.fromSlack("t2"), again.fromSlack("t3")]).toEqual([true, false, false]);
+    expect(again.audienceOf("t1")).toBe("team");
+    expect(createConversationShares({ dataDir: dir, team: false }).fromSlack("t1")).toBe(false);
+  });
+
   it("is nothing off a team", () => {
     createConversationShares({ dataDir: dir, team: true }).share("t1", rui, marta);
     const off = createConversationShares({ dataDir: dir, team: false });

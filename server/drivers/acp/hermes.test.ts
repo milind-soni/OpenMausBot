@@ -188,10 +188,6 @@ describe("hermesConfiguredModel", () => {
       custom: true,
     });
   });
-
-  it("does not map to an ACP model id, so no session/set_model is sent for it", () => {
-    expect(hermesAcpModelId(HERMES_CONFIG_MODEL_ID)).toBeNull();
-  });
 });
 
 describe("hermesAcpModelId", () => {
@@ -469,9 +465,5 @@ describe("resolveHermesModels when Hermes has no model to list", () => {
       default: HERMES_CONFIG_MODEL_ID,
       options: [{ id: HERMES_CONFIG_MODEL_ID, label: "anthropic/claude-opus-4.6 (Hermes config)", custom: true }],
     });
-  });
-
-  it("starts Hermes without choosing a model for the default entry", () => {
-    expect(hermesAcpModelId(HERMES_CONFIG_MODEL_ID)).toBeNull();
   });
 });

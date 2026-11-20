@@ -21,6 +21,19 @@ export type VpsCommandRunner = (
 
 const STREAM_CAP_CHARS = 16 * 1024 * 1024;
 
+/** SSH never got through (or the command ran out of time): unlike a Docker refusal, nothing on the host answered. */
+export class VpsHostUnreachableError extends Error {}
+
+// OpenSSH's own words when it never reached the host. Exit status 255 alone is not proof: ssh also passes on a remote command's 255.
+const SSH_TRANSPORT_FAILURE = /\bssh: (?:Could not resolve hostname|connect to host \S+ port \d+:)/i;
+
+/** Only a lookup or connection failure ssh reports itself, or a timeout, means nothing on the host answered. */
+function sshNeverReachedHost(error: unknown): boolean {
+  if ((error as { killed?: boolean }).killed === true) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return SSH_TRANSPORT_FAILURE.test(message) || message === "VPS SSH initialization timed out";
+}
+
 function tailCollector() {
   const chunks: string[] = [];
   let total = 0;
@@ -46,8 +59,14 @@ export async function defaultRunner(args: string[], options: VpsCommandOptions =
   let deadline = Date.now() + (options.timeoutMs ?? 120_000);
   const destination = args[0] === "-H" && args[1]?.startsWith("ssh://") ? args[1].slice(6) : null;
   // Time spent waking a paused host does not count against the command's own timeout.
-  if (destination) deadline += await ensureVpsSshMaster(ssh, destination, Math.min(30_000, deadline - Date.now()));
-  if (Date.now() >= deadline) throw new Error("Docker-over-SSH command timed out");
+  if (destination) {
+    try { deadline += await ensureVpsSshMaster(ssh, destination, Math.min(30_000, deadline - Date.now())); }
+    catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw sshNeverReachedHost(error) ? new VpsHostUnreachableError(message) : new Error(message);
+    }
+  }
+  if (Date.now() >= deadline) throw new VpsHostUnreachableError("Docker-over-SSH command timed out");
   return new Promise((resolve, reject) => {
     // Docker's SSH transport runs the first `ssh` on PATH: the app's shim, which shares one connection.
     const child = spawnCli("docker", args, {
@@ -79,7 +98,7 @@ export async function defaultRunner(args: string[], options: VpsCommandOptions =
       };
       void killCliTree(child, COMMAND_TIMEOUT_TERM_GRACE_MS).then(cleaned, cleaned);
     };
-    timeout = setTimeout(() => fail(new Error("Docker-over-SSH command timed out")), Math.max(1, deadline - Date.now()));
+    timeout = setTimeout(() => fail(new VpsHostUnreachableError("Docker-over-SSH command timed out")), Math.max(1, deadline - Date.now()));
     timeout.unref?.();
 
     child.stdout.setEncoding("utf8");
@@ -100,8 +119,9 @@ export async function defaultRunner(args: string[], options: VpsCommandOptions =
       if (failure) return;
       settle(() => {
         if (code === 0) return resolve({ stdout: stdout.text(), stderr: stderr.text() });
-        const detail = stderr.text().trim().slice(-1000);
-        reject(new Error(detail || `Docker-over-SSH exited ${code ?? signal ?? "without a status"}`));
+        const captured = stderr.text().trim();
+        const message = captured.slice(-1000) || `Docker-over-SSH exited ${code ?? signal ?? "without a status"}`;
+        reject(SSH_TRANSPORT_FAILURE.test(captured) ? new VpsHostUnreachableError(message) : new Error(message));
       });
     });
     try {

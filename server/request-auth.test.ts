@@ -193,7 +193,7 @@ describe("scopes", () => {
       ["POST", "/api/bots/x/local-computer/join"], ["POST", "/api/bots/x/local-computer/screenshot"],
       ["GET", "/api/computers/boxes"], ["POST", "/api/computers/boxes/bx_23456789/delete"],
       ["POST", "/api/webhooks"], ["POST", "/api/webhooks/w/rotate"], ["POST", "/api/bots/x/skills"], ["PATCH", "/api/bots/x/skills/s"],
-      ["PATCH", "/api/bots/x/model"], ["PATCH", "/api/groups/g/setup"], ["POST", "/api/teams/import"], ["GET", "/api/teams/scout"],
+      ["PATCH", "/api/bots/x/model"], ["PATCH", "/api/groups/g/setup"], ["POST", "/api/teams/import"], ["POST", "/api/share/import"], ["POST", "/api/share/export"],
       ["POST", "/api/team-library/github"], ["GET", "/api/setup-import/grok"],
       ["GET", "/api/bots/x/memory"], ["PUT", "/api/bots/x/memory"], ["PUT", "/api/section-context"], ["PUT", "/api/groups/order"], ["GET", "/api/threads/t/events"],
       ["GET", "/api/mcp/servers"], ["POST", "/api/mcp/servers"], ["GET", "/api/bots/x/mcp-servers"], ["POST", "/api/connectors/slack/authorize"],
@@ -308,6 +308,10 @@ describe("resolveRequestAuth", () => {
       ["GET", "/api/bots/b/browser/live"], ["POST", "/api/bots/b/browser/action"],
     ]) expect(check(method, path).auth?.kind, path).toBe("loopback");
     expect(check("GET", "/api/phones/self/jobs").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" });
+    expect(check("GET", "/api/bots/b/skills").auth?.kind).toBe("loopback");
+    expect(check("POST", "/api/bots/b/skills").auth).toBeNull();
+    expect(check("DELETE", "/api/attachments/abc-1.jpg").auth).toEqual({ kind: "loopback", scopes: ["admin", "client"], companionDevice: "phone-1" });
+    expect(check("DELETE", "/api/attachments/..%2Fconfig.json").auth).toBeNull();
     const plain = resolveRequestAuth(request({ host: "127.0.0.1:8799", "x-openmausbot-companion": "1", "x-openmausbot-companion-device": "phone-1" }, "GET"), {
       sessions, cookieName, streamPath: "/api/events", url: new URL("/api/phones/self/jobs", "http://localhost"),
       loopbackMutationToken: "desktop-secret", companionMutationToken: "relay-secret",
@@ -588,6 +592,7 @@ describe("resolveRequestAuth", () => {
     ["POST", "/api/instances/claude-work/auth/sign-out"],
     ["GET", "/api/usage?from=2026-09-01&to=2026-09-30"],
     ["GET", "/api/usage.csv?from=2026-09-01&to=2026-09-30"],
+    ["GET", "/api/usage/insights?from=2026-09-01&to=2026-09-30"],
     ["POST", "/api/keys/test"],
     ["GET", "/api/fleet"],
     ["POST", "/api/fleet/workspaces"],

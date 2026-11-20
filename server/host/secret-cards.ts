@@ -4,7 +4,6 @@ import { userError } from "../user-errors.ts";
 import { randomUUID } from "node:crypto";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { z } from "zod";
 
 import {
   CREDENTIAL_TARGETS,
@@ -28,7 +27,6 @@ import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import { addHeldSecretScrubber } from "../redact.ts";
 import { SECRET_VALUE_MAX_BYTES, SecretVault, type SavedSecret, type SecretFileHome } from "../secret-vault.ts";
 import {
-  PHONE_SECRET_PROTOCOL_VERSION,
   PhoneSecretError,
   assertPhoneSecretRequestMatches,
   phoneSecretOperationId,
@@ -44,17 +42,9 @@ import { fittingChoices } from "../vault/choices.ts";
 import { linkedSecretNames } from "../vault/providers.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { serverLine } from "../server-lines.ts";
+import { phoneSecretEnvelopeSchema } from "../../shared/phone-secret-envelope.ts";
 
-export const phoneSecretEnvelopeSchema = z.object({
-  version: z.literal(PHONE_SECRET_PROTOCOL_VERSION),
-  threadId: z.string().regex(/^[\w-]{1,128}$/),
-  keyId: z.string().regex(/^[A-Za-z0-9_-]{22}$/),
-  deviceId: z.string().regex(/^[\w-]{1,128}$/),
-  target: z.string().regex(/^[A-Za-z][A-Za-z0-9]{0,63}$/),
-  requestKey: z.string().regex(/^[\w-]{1,128}$/),
-  encapsulatedKey: z.string().regex(/^[A-Za-z0-9_-]{87}$/),
-  ciphertext: z.string().regex(/^[A-Za-z0-9_-]{23,5483}$/),
-}).strict();
+export { phoneSecretEnvelopeSchema };
 
 export interface SecretCardsDeps {
   store: Pick<Store, "activePath" | "appendMessage" | "patchMessage" | "messagesFor" | "botByThread" | "groupByThread" | "onChange">;
@@ -664,6 +654,8 @@ export function createSecretCards(deps: SecretCardsDeps) {
     }
     const path = store.activePath(threadId);
     const language = deps.threadLanguage?.(threadId);
+    const savedAsRef = asked.delivery === "file" && !asked.replace && vaultStore.usableSecret(asked.label, from.id, "ref", reader) !== null;
+    const refNote = savedAsRef ? ` ${serverLine(language, "server.connect.secretSavedAsRef", { label: asked.label, bot: from.name })}` : "";
     const message = store.appendMessage(threadId, {
       role: "bot",
       kind: "secret",
@@ -672,7 +664,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
       secret: {
         target: CUSTOM_SECRET_TARGET,
         label: asked.label,
-        description: `${asked.reason} ${deliveryNote(from.name, asked.delivery, language)}`,
+        description: `${asked.reason} ${deliveryNote(from.name, asked.delivery, language)}${refNote}`,
         reason: asked.reason,
         placeholder: asked.placeholder,
         helpUrl: "",
@@ -686,8 +678,7 @@ export function createSecretCards(deps: SecretCardsDeps) {
       store.patchMessage(threadId, prior.id, { secret: { ...prior.secret, superseded: true } });
       deps.followCard(threadId, prior.id, message.id);
     }
-    const savedAs = asked.delivery === "file" && !asked.replace && vaultStore.usableSecret(asked.label, from.id, "ref", reader) ? { savedAs: "ref" } : {};
-    return { status: 201, body: { messageId: message.id, label: asked.label, delivery: asked.delivery, ...savedAs } };
+    return { status: 201, body: { messageId: message.id, label: asked.label, delivery: asked.delivery, ...(savedAsRef ? { savedAs: "ref" } : {}) } };
   }
 
   return {

@@ -20,3 +20,10 @@ export function threadsOnOwnModel<T extends { modelSelection?: ModelSelection; f
 ): T[] {
   return tasks.filter((task) => task.followsBotModel === false && !sameModelSelection(task.modelSelection ?? botModel, botModel));
 }
+
+export function followBotModel<T extends { modelSelection?: ModelSelection; followsBotModel?: boolean }>(
+  botModel: ModelSelection,
+  tasks: readonly T[] | undefined,
+): T[] | undefined {
+  return tasks?.map((task) => task.followsBotModel ? { ...task, modelSelection: botModel } : task);
+}

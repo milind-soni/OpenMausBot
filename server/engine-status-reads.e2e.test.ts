@@ -20,12 +20,12 @@ afterEach(async () => {
   for (const home of homes.splice(0)) await removeTempDir(home);
 });
 
-function freshHome(): string {
+function freshHome(extra: Record<string, unknown> = {}): string {
   const home = mkdtempSync(join(tmpdir(), "omb-engine-status-"));
   homes.push(home);
   mkdirSync(join(home, "tmp"), { recursive: true });
   writeFileSync(join(home, "config.json"), JSON.stringify({
-    instances: { claude: { driver: "claudeAgent", displayName: "Verification fixture", config: { cli: FAKE_CLI } } },
+    instances: { claude: { driver: "claudeAgent", displayName: "Verification fixture", config: { cli: FAKE_CLI } }, ...extra },
   }));
   return home;
 }
@@ -154,4 +154,35 @@ it("probes again after a sign-out, a model refresh, a saved key and a Claude upd
   expect(await server.call("POST", "/api/instances/claude/claude-update", {})).toMatchObject({ ok: true });
   await engines();
   expect(probeCount(probes, "auth")).toBe(step.before + 1);
+}, 60_000);
+
+it("hides and shows a provider without reloading its engine, and a read after a global invalidation still probes each engine once", async () => {
+  const home = freshHome({ claude2: { driver: "claudeAgent", displayName: "Second fixture", config: { cli: FAKE_CLI } } });
+  const probes = join(home, "probes.log");
+  const server = await boot(home, { FAKE_CLAUDE_PROBE_LOG: probes });
+  const ids = (body: { instances: Array<{ instanceId: string }> }) => body.instances.map((instance) => instance.instanceId);
+  const counts = () => ({ version: probeCount(probes, "version"), auth: probeCount(probes, "auth") });
+  const patch = (hidden: boolean) => server.call("PATCH", "/api/instances/claude2", { hidden });
+
+  expect(ids(await server.call("GET", "/api/instances"))).toEqual(expect.arrayContaining(["claude", "claude2"]));
+  const warm = counts();
+
+  expect(ids(await patch(true))).not.toContain("claude2");
+  expect(counts()).toEqual(warm);
+  expect(ids(await patch(false))).toContain("claude2");
+  expect(counts()).toEqual(warm);
+
+  expect(await server.call("POST", "/api/instances/claude/claude-update", {})).toMatchObject({ ok: true });
+  const invalidated = counts();
+  expect(ids(await patch(true))).not.toContain("claude2");
+  expect(counts().auth).toBe(invalidated.auth + 2);
+  await server.call("GET", "/api/instances");
+  expect(counts().auth).toBe(invalidated.auth + 2);
+}, 60_000);
+
+it("removing a built-in API-key instance disposes its engine though the saved fleet adds it back", async () => {
+  const server = await boot(freshHome());
+  const ids = (body: { instances: Array<{ instanceId: string }> }) => body.instances.map((instance) => instance.instanceId);
+  expect(ids(await server.call("GET", "/api/instances"))).toContain("claudeApi");
+  expect(ids(await server.call("DELETE", "/api/instances/claudeApi"))).not.toContain("claudeApi");
 }, 60_000);

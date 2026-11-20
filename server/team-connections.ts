@@ -27,7 +27,7 @@ export type ConnectionKind = "app" | "mcp";
 export const SCOPES_FILE = "team-connection-scopes.json";
 export const PEOPLE_CONNECTIONS_DIR = "people-connections";
 /** Composio's toolkit slugs; an MCP server's name as mcp-registry.ts allows it. */
-export const APP_SLUG = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+export const APP_SLUG = /^(?!__proto__$)[a-z0-9_][a-z0-9_-]{0,63}$/;
 export const MCP_NAME = /^[a-z][a-z0-9_-]{0,31}$/;
 const PERSON = /^p_[\w-]{22}$/;
 const TOKEN = /^[0-9a-f]{64}$/;

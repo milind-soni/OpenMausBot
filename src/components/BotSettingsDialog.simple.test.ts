@@ -138,7 +138,7 @@ const { PageHeader } = await import("./bot-panel/rows");
 const { ChatShareMenu } = await import("./ChatMoreMenu");
 const { SoulField } = await import("./SoulField");
 const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
-const { ModelPicker } = await import("./ModelPicker");
+const { EffortRow, ModelPicker } = await import("./ModelPicker");
 const { ThreadModelsLine } = await import("./ThreadModelsLine");
 const { ModelSection } = await import("./bot-settings/ModelSection");
 const { RoutineList } = await import("./routines/RoutineList");
@@ -630,6 +630,43 @@ describe("the Details tab", () => {
     expect(switches(rendered.html)).toBe(0);
   });
 
+  describe("the Model and Reasoning rows", () => {
+    const opus = { instanceId: "claude", model: "claude-opus-5-5" };
+    const thread = (modelSelection?: Bot["modelSelection"]) => makeBot({
+      modelSelection: { ...opus, effort: "low" },
+      tasks: [{ threadId: "thread-scout", title: "Main", createdAt: 1, ...(modelSelection ? { modelSelection, followsBotModel: false } : {}) }],
+    });
+    const pickHigh = (bot: Bot) => {
+      const row = ofType(botTab(bot), EffortRow)!;
+      const select = capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).nodes
+        .find((node) => node.props["aria-label"] === "Reasoning effort")!;
+      change(select, "high");
+      return (fixture.dispatch as ReturnType<typeof vi.fn>).mock.lastCall![0] as Record<string, unknown>;
+    };
+    beforeEach(() => {
+      fixture.storeState = { ...fixture.storeState, instances: [engine()] };
+    });
+
+    it("shows the open conversation's model, not the bot's default", () => {
+      const own = { instanceId: "claude", model: "claude-haiku-4-5", effort: "max" as const };
+      const rendered = botTab(thread(own));
+      const picker = ofType(rendered, ModelPicker)!;
+      expect((picker.props.bot as Bot).modelSelection).toEqual(own);
+      expect(picker.key).toMatch(/thread-scout$/);
+      const row = ofType(rendered, EffortRow)!;
+      expect(capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).html).toMatch(/<option value="max" selected="">/);
+    });
+
+    it.each([true, false, null] as const)("sets a reasoning level on the open conversation only, whatever its model (owner: %s)", (ownerOrAdmin) => {
+      fixture.ownerOrAdmin = ownerOrAdmin;
+      expect(pickHigh(thread())).toEqual({ type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...opus, effort: "high" } });
+      const haiku = { instanceId: "claude", model: "claude-haiku-4-5" };
+      expect(pickHigh(thread({ ...haiku, effort: "low" }))).toEqual({
+        type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...haiku, effort: "high" },
+      });
+    });
+  });
+
   it("offers Add a routine, which says what routines are, and Automations while the bot has none, and lists them once it has some", () => {
     const empty = botTab(makeBot());
     expect(empty.html).toContain('data-panel-empty="routines"');
@@ -786,10 +823,10 @@ describe("the Bot settings page", () => {
     expect(has(drifted, "data-panel-done", "soul")).toBe(false);
   });
 
-  it("offers Ask me first and Just do it with no hint text, and writes either for every conversation", () => {
+  it("offers Ask for approval and Full access, as Advanced mode names them, with no hint text, and writes either for every conversation", () => {
     const rendered = settingsPage(makeBot());
     const acts = segment(rendered, "data-approval-choice");
-    expect(acts.options.map((option) => [option.value, option.label])).toEqual([["ask", "Ask me first"], ["full", "Just do it"]]);
+    expect(acts.options.map((option) => [option.value, option.label])).toEqual([["ask", "Ask for approval"], ["full", "Full access"]]);
     expect(acts.value).toBe("ask");
     for (const hint of ["Checks before changes", "Acts without checking", "Acts, then tells you"]) expect(rendered.html).not.toContain(`>${hint}<`);
     acts.onChange("ask");
@@ -804,12 +841,12 @@ describe("the Bot settings page", () => {
     expect(patch).not.toHaveBeenCalled();
   });
 
-  it.each([["auto", "Decide for me", undefined], ["edits", "Auto-accept edits", undefined], ["custom", "Custom", "Change this in Advanced mode"]] as const)(
+  it.each([["auto", "Approve for me", undefined], ["edits", "Auto-accept edits", undefined], ["custom", "Custom", "Change this in Advanced mode"]] as const)(
     "shows a bot in %s mode as a third, selected pill it cannot pick again, beside the two choices", (mode, label, tooltip) => {
       fixture.derived.approvalMode = mode;
       const rendered = settingsPage(makeBot());
       const acts = segment(rendered, "data-approval-choice");
-      expect(acts.options.map((option) => [option.value, option.label, Boolean(option.disabled)])).toEqual([["ask", "Ask me first", false], ["full", "Just do it", false], [mode, label, true]]);
+      expect(acts.options.map((option) => [option.value, option.label, Boolean(option.disabled)])).toEqual([["ask", "Ask for approval", false], ["full", "Full access", false], [mode, label, true]]);
       expect((acts.options[2] as { tooltip?: string }).tooltip).toBe(tooltip);
       expect(pressed(rendered.html, "data-approval-choice")).toEqual([mode]);
       acts.onChange(mode);

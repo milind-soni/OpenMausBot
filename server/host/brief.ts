@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
+import { isCountedSkip } from "../../shared/routines.ts";
 import type { NeedsYouItem } from "../../shared/today.ts";
 import type { WidgetText } from "../../shared/widget-text.ts";
 import type { WidgetAction, WidgetRoot } from "../../shared/widget.ts";
@@ -240,7 +241,7 @@ export function createBrief(deps: BriefDeps) {
     const latest = new Map<string, RoutineRun>();
     for (const run of deps.runs()) {
       const end = run.finishedAt ?? run.createdAt;
-      if (end < since || !["completed", "failed", "missed"].includes(run.status) || run.report?.state === "quiet") continue;
+      if (end < since || !["completed", "failed", "missed"].includes(run.status) || run.report?.state === "quiet" || isCountedSkip(run)) continue;
       if (run.status === "completed" && run.deliver === "brief") continue;
       const seen = latest.get(run.routineId);
       if (!seen || (seen.finishedAt ?? seen.createdAt) <= end) latest.set(run.routineId, run);

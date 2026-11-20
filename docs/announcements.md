@@ -172,6 +172,35 @@ that use it.
 - **Invalid is ignored.** A card that fails validation, has no `ends` or is past it is skipped; a file that fails as a
   whole is ignored and the last good copy kept. At most 20 cards and 64 KB are read.
 
+## The Announcements page
+
+Profile menu → **Announcements** lists, newest first, everything announced to this person here: the app's own popups and
+cards, and the current cards from this file. It lists what was *for* them by each one's own rules (a branded build has
+none, a desktop an organization runs has no promotions, a sponsor's card skips a Team Cloud's members), whether or not
+they saw it and whenever it ran; an offer whose time is over says **Ended** in place of its button. A popup's row opens
+the popup again; a card's row has the card's own buttons.
+
+A red dot on the profile button and on the menu's Announcements row means something here is newer than the last time the
+person opened the page, and they have not seen it. Opening the page clears it. The time they last opened it is kept the
+way the notices are kept: in the browser, in the desktop's own record for every page of its window, and in the place's
+record as an `announcements-read-<ms>` hint, the newest only (on a Team Cloud, in that person's own record). Someone who
+never opened it counts as having read everything up to the last announcement before the Teams one, so people who used the
+app before see the dot for Teams alone.
+
+A card from this file is dated by its `starts`, else by the file's `updatedAt` (which `GET /api/announcements` hands over
+with the cards). Give a card `starts` when its date matters.
+
+### Adding an announcement
+
+- **A card, without a release:** add it to `announcements/announcements.json` as above. It is listed and raises the dot by
+  itself.
+- **A popup or card built into a release:** add its component and notice to the queue (`src/lib/notices.ts`,
+  `src/components/AppNotices.tsx`), then add one entry to `BUILT_IN_ANNOUNCEMENTS` in `src/lib/announcement-history.ts`:
+  its notice id, its date, its title and body keys, its mark, whom it is for (`for`, from the same facts as its notice's
+  own rules), and either the popup it reopens (`{ modal }`, drawn by `AnnouncementsPage`'s replay) or its buttons
+  (`{ buttons }`: open a page, write an email, open Add a Cloud). Give an offer its `until` to show Ended after it. Its
+  date newer than the person's last look is what raises the dot.
+
 ## Turning it off
 
 - **`OMB_DISABLE_ANNOUNCEMENTS=1`** in the server's environment stops the download and every remote card on that server's

@@ -27,7 +27,7 @@ export function botPreview(bot: Bot, visible: Message[], instances: InstanceInfo
 
 function plainStep(message: Message): boolean {
   const tool = message.kind === "activity" ? message.tool : undefined;
-  return Boolean(tool) && !message.dataResult && failedTurnCause(tool!.name) === null && !isStoppedTurnName(tool!.name) && !STATUS_MARKER.test(tool!.name);
+  return Boolean(tool) && tool!.ok !== false && !message.dataResult && failedTurnCause(tool!.name) === null && !isStoppedTurnName(tool!.name) && !STATUS_MARKER.test(tool!.name);
 }
 
 /** Simple mode quotes the bot: a step that went fine gives way to the newest thing said since the person last wrote. */

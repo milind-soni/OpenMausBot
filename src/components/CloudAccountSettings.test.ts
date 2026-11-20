@@ -198,6 +198,32 @@ it("a saved sign-in that can't be read right now says the app tries again by its
   expect(html).toContain("This computer couldn&#x27;t open its saved Cloud sign-in. Unlock your keychain, and the app tries again by itself.");
   none(html, ["could not be read or cleared", "sign out again", "Sign out of MausBot Cloud, then"]);
 });
+it("a saved sign-in this computer still can't read: what may open it first, then a secondary button that clears it and starts the sign-in", async () => {
+  for (const [platform, onSignIn, step] of [["win32", undefined, "Restarting the app may fix it."], ["darwin", vi.fn(), "Unlock your keychain or restart the app"],
+    ["linux", vi.fn(), "Unlock your system keyring or restart the app"]] as const) {
+    f.values = []; f.platform = platform;
+    bridge.resetSaved = vi.fn().mockResolvedValue({ status: "signed-out" }); vi.mocked(bridge.begin).mockClear(); if (onSignIn) onSignIn.mockClear();
+    await ready({ status: "unavailable", message: "restore-failed", reset: true });
+    const html = render({ onSignIn }).html;
+    expect(html, platform).toContain(step);
+    expect(html, platform).toContain("If it doesn&#x27;t, clear it to sign in again.");
+    if (platform === "win32") expect(html).not.toMatch(/keychain|keyring|unlock/i);
+    none(html, ["tries again by itself", "nothing you need to do"]);
+    const clears = render({ onSignIn }).nodes.filter(node => node.type === "button" && node.props.children === "Clear and sign in again");
+    expect(clears.length, platform).toBeGreaterThan(0);
+    for (const clear of clears) expect(String((clear.props as { className?: string }).className), "never the primary button").not.toContain("ui-button-primary");
+    clears[0]!.props.onClick!(); await flush();
+    expect(bridge.resetSaved).toHaveBeenCalledOnce();
+    if (onSignIn) { expect(onSignIn).toHaveBeenCalledOnce(); expect(bridge.begin).not.toHaveBeenCalled(); }
+    else expect(bridge.begin).toHaveBeenCalledOnce();
+  }
+});
+it("a saved sign-in that couldn't be removed, and one kept for this run only, each say so", async () => {
+  await ready({ status: "signed-out", message: "reset-kept" });
+  expect(render().html).toContain("The saved sign-in couldn&#x27;t be removed from this computer, but you can sign in now.");
+  push({ ...free, unsaved: true });
+  expect(render().html).toContain("Signed in for now. This computer couldn&#x27;t save the sign-in");
+});
 it("a sign-out that could not clear the saved sign-in still asks for it", async () => {
   await ready({ status: "unavailable", message: "signout-storage-failed" });
   const html = render().html;
@@ -454,16 +480,23 @@ it("on the Cloud itself, the plan card has no phone button: pairing a phone is o
   expect(view().nodes.some(node => node.type === "button")).toBe(false);
 });
 
-it("on a Team Cloud, sends people to the Plan page for its people and plan, never to 'the app on your computer'", () => {
+it("on a Team Cloud, sends its admins to the invite box on the team's People page, its Owner to seats too, and tells anyone else to ask an admin", () => {
   const plan = { state: vi.fn().mockRejectedValue(new Error("cloud-plan:state is only available in this app's window")), manage: vi.fn() };
   vi.stubGlobal("window", { ogb: { cloudPlan: plan } });
-  const team = { name: "Acme", cloudPage: "https://cloud.example.com/cloud" };
+  const team = { id: "team-acme", name: "Acme", cloudPage: "https://cloud.example.com/cloud" };
   const onTeam = render({ cloudHome: true, teamHome: team }).nodes;
   expect(onTeam.some(node => node.type === CloudPlanOnCloud), "a team's people and plan are on its Overview, not Plan & billing").toBe(false);
-  const html = renderToStaticMarkup(createElement(TeamPeopleCard, { team }));
-  all(html, ["People and plan", "Invite people to Acme, change their roles and manage its plan on your Plan page.", 'href="https://cloud.example.com/cloud"', "Open your Plan page"]);
-  none(html, ["managed in the MausBot app on your computer"]);
-  expect(renderToStaticMarkup(createElement(TeamPeopleCard, { team: { name: "Acme" } }))).not.toContain("href=");
+  const html = renderToStaticMarkup(createElement(TeamPeopleCard, { team, admin: true }));
+  all(html, ["People and plan", "Invite or remove people in Acme and change their roles on its People page on MausBot Cloud.",
+    'href="https://cloud.example.com/cloud/team/team-acme/people?do=invite"', "Invite people"]);
+  none(html, ["managed in the MausBot app on your computer", "Plan page", "seats"]);
+  const owner = renderToStaticMarkup(createElement(TeamPeopleCard, { team, admin: true, owner: true }));
+  all(owner, ["Invite or remove people in Acme, add seats and change roles", 'href="https://cloud.example.com/cloud/team/team-acme/people?do=invite"',
+    'href="https://cloud.example.com/cloud/team/team-acme/people?do=seats"', "Add seats"]);
+  expect(renderToStaticMarkup(createElement(TeamPeopleCard, { team: { id: "team-acme", name: "Acme" }, admin: true }))).not.toContain("href=");
+  const member = renderToStaticMarkup(createElement(TeamPeopleCard, { team, admin: false }));
+  all(member, ["Ask a team admin to invite people to Acme."]);
+  none(member, ["href=", "Invite people", "seats"]);
   // My Cloud's own page is unchanged.
   expect(render({ cloudHome: true }).nodes.some(node => node.type === CloudPlanOnCloud)).toBe(true);
 });

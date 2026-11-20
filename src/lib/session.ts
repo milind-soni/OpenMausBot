@@ -1,5 +1,6 @@
 import { t } from "./i18n";
 import { serverErrorText } from "./server-error";
+import { forgetSharedSession } from "./session-reuse";
 
 export interface EnvironmentDescriptor {
   environmentId: string;
@@ -148,6 +149,8 @@ export async function pairWithCode(
     });
   } catch (error) {
     return { ok: false, error: t("pair.unreachable", { error: error instanceof Error ? error.message : String(error) }) };
+  } finally {
+    forgetSharedSession();
   }
   const body: unknown = await res.json().catch(() => ({}));
   if (res.ok) return { ok: true };
@@ -185,6 +188,8 @@ async function postAuth(path: string, body: Record<string, unknown>, fetchImpl: 
     res = await fetchImpl(path, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   } catch (error) {
     return { ok: false, error: t("pair.unreachable", { error: error instanceof Error ? error.message : String(error) }) };
+  } finally {
+    forgetSharedSession();
   }
   const parsed: unknown = await res.json().catch(() => ({}));
   if (res.ok) return { ok: true };

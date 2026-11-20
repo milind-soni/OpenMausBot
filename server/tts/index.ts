@@ -6,9 +6,10 @@ import * as openai from "./openai.ts";
 import * as grok from "./grok.ts";
 import * as fish from "./fish.ts";
 import * as gemini from "./gemini.ts";
+import * as deepseek from "./deepseek.ts";
 import * as systemVoices from "./system-voices.ts";
 
-export type VoiceProvider = "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai";
+export type VoiceProvider = "elevenlabs" | "fish" | "system" | "chatterbox" | "xai" | "gemini" | "openai" | "deepseek";
 
 export class NoVoiceConfigured extends Error {
   // Not a parameter property: the harness runs under strip-only `node --experimental-strip-types`, which rejects one at load.
@@ -26,6 +27,8 @@ export class NoVoiceConfigured extends Error {
 }
 
 const elevenLabs = (cfg: AppConfig) => voiceCredential(cfg.tts?.key);
+/** A bot's voice from another provider's catalog speaks in the workspace's DeepSeek voice. */
+const deepseekVoice = (cfg: AppConfig, voiceId?: string) => (deepseek.isDeepSeekVoice(voiceId) ? voiceId : cfg.tts?.voice ?? "");
 
 /**
  * Resolves the active voice synthesis provider from configuration.
@@ -34,7 +37,7 @@ const elevenLabs = (cfg: AppConfig) => voiceCredential(cfg.tts?.key);
  */
 export function voiceProvider(cfg: AppConfig): VoiceProvider {
   const provider = cfg.tts?.provider;
-  return provider === "gemini" || provider === "openai" || provider === "xai" || provider === "fish" || provider === "system" || provider === "chatterbox" ? provider : "elevenlabs";
+  return provider === "deepseek" || provider === "gemini" || provider === "openai" || provider === "xai" || provider === "fish" || provider === "system" || provider === "chatterbox" ? provider : "elevenlabs";
 }
 
 /**
@@ -46,6 +49,7 @@ export function providerConfigured(cfg: AppConfig): boolean {
   const provider = voiceProvider(cfg);
   if (provider === "gemini") return Boolean(cfg.tts?.geminiKey);
   if (provider === "openai") return Boolean(cfg.openai?.key);
+  if (provider === "deepseek") return Boolean(cfg.deepseek?.key);
   if (provider === "xai") return Boolean(cfg.xai?.key);
   if (provider === "system") return systemVoices.systemVoicesAvailable();
   if (provider === "chatterbox") return Boolean(cfg.tts?.baseUrl?.trim());
@@ -62,6 +66,7 @@ export function voiceConfigured(cfg: AppConfig): boolean {
   const provider = voiceProvider(cfg);
   if (provider === "gemini") return Boolean(cfg.tts?.geminiKey && gemini.isSupportedVoice(cfg.tts?.voice));
   if (provider === "openai") return Boolean(cfg.openai?.key && cfg.tts?.voice);
+  if (provider === "deepseek") return Boolean(cfg.deepseek?.key && deepseek.isDeepSeekVoice(cfg.tts?.voice));
   if (provider === "xai") return Boolean(cfg.xai?.key && cfg.tts?.voice);
   if (provider === "system") {
     return systemVoices.systemVoicesAvailable() && Boolean(cfg.tts?.voice);
@@ -81,6 +86,7 @@ export function voiceReady(cfg: AppConfig, voiceId?: string): boolean {
   const provider = voiceProvider(cfg);
   if (provider === "gemini") return Boolean(cfg.tts?.geminiKey && gemini.isSupportedVoice(voiceId || cfg.tts?.voice));
   if (provider === "openai") return Boolean(cfg.openai?.key && (voiceId || cfg.tts?.voice));
+  if (provider === "deepseek") return Boolean(cfg.deepseek?.key && deepseek.isDeepSeekVoice(deepseekVoice(cfg, voiceId)));
   if (provider === "xai") return Boolean(cfg.xai?.key && (voiceId || cfg.tts?.voice));
   if (provider === "system") {
     return systemVoices.systemVoicesAvailable() && Boolean(voiceId || cfg.tts?.voice);
@@ -108,6 +114,8 @@ export function describeVoice(cfg: AppConfig) {
     ...(provider === "fish" ? { fishModel: cfg.tts?.fishModel ?? fish.DEFAULT_FISH_MODEL } : {}),
     ...(included ? { included: true as const } : {}),
     ...(cfg.tts?.everyReply ? { everyReply: true as const } : {}),
+    ...(cfg.tts?.hearWith === "elevenlabs" ? { hearWith: "elevenlabs" as const } : {}),
+    ...(cfg.tts?.hearLanguage ? { hearLanguage: cfg.tts.hearLanguage } : {}),
   };
 }
 
@@ -138,6 +146,7 @@ export async function listVoices(
   const provider = voiceProvider(cfg);
   if (provider === "gemini") return cfg.tts?.geminiKey ? gemini.listVoices() : [];
   if (provider === "openai") return cfg.openai?.key ? openai.listVoices() : [];
+  if (provider === "deepseek") return cfg.deepseek?.key ? deepseek.listVoices() : [];
   if (provider === "xai") return cfg.xai?.key ? grok.listVoices(cfg.xai.key) : [];
   if (provider === "system") return systemVoices.listSystemVoices(run);
   if (provider === "chatterbox") {
@@ -173,6 +182,7 @@ export async function addSharedVoice(cfg: AppConfig, publicOwnerId: string, voic
  * @param text The plain text to synthesize into spoken audio.
  * @param voiceId Optional override voice ID.
  * @param run Optional runner for system voices.
+ * @param signal Cancels network speech requests when the listener stops playback.
  * @returns Synthesized audio buffer or stream promise.
  */
 export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: systemVoices.Runner, signal?: AbortSignal) {
@@ -182,15 +192,16 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     if (!key) throw new NoVoiceConfigured("key", "Add a Gemini API key in Settings to use Gemini voice.");
     const voice = voiceId || cfg.tts?.voice;
     if (!voice) throw new NoVoiceConfigured("voice");
-    return gemini.synthesize(text, voice, key, cfg.tts?.model);
+    return gemini.synthesize(text, voice, key, cfg.tts?.model, signal);
   }
   if (provider === "openai") return openai.synthesize(text, voiceId || cfg.tts?.voice || "", cfg.openai?.key || "", signal);
+  if (provider === "deepseek") return deepseek.synthesize(text, deepseekVoice(cfg, voiceId), cfg.deepseek?.key || "", signal);
   if (provider === "xai") {
     const key = cfg.xai?.key;
     if (!key) throw new NoVoiceConfigured("key", "Add an xAI key in Settings to use Grok voice.");
     const voice = voiceId || cfg.tts?.voice;
     if (!voice) throw new NoVoiceConfigured("voice");
-    return grok.synthesize(text, voice, key);
+    return grok.synthesize(text, voice, key, signal);
   }
   if (provider === "system") {
     const voice = voiceId || cfg.tts?.voice;
@@ -208,7 +219,7 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     }
     const voice = voiceId || cfg.tts?.voice;
     if (!voice) throw new NoVoiceConfigured("voice");
-    return chatterbox.synthesizeChatterbox(text, voice, baseUrl, cfg.tts?.model);
+    return chatterbox.synthesizeChatterbox(text, voice, baseUrl, cfg.tts?.model, signal);
   }
   if (provider === "fish") {
     const key = cfg.tts?.fishKey;
@@ -220,13 +231,13 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     }
     const voice = voiceId || cfg.tts?.voice;
     if (!voice) throw new NoVoiceConfigured("voice");
-    return fish.synthesize(text, voice, key, cfg.tts?.fishModel);
+    return fish.synthesize(text, voice, key, cfg.tts?.fishModel, signal);
   }
   const credential = elevenLabs(cfg);
   if (!credential) throw new NoVoiceConfigured("key");
   const voice = voiceId || cfg.tts?.voice;
   if (!voice) throw new NoVoiceConfigured("voice");
-  return elevenlabs.synthesize(text, voice, credential.token, credential.api, credential.included).audio;
+  return elevenlabs.synthesize(text, voice, credential.token, credential.api, credential.included, signal).audio;
 }
 
 export type { Voice } from "./elevenlabs.ts";

@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { launchVerificationServer, runControlOmb, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const TOKEN = `omb_workspace_${"s".repeat(43)}`;
@@ -146,8 +147,7 @@ beforeAll(async () => {
 
   // Seed a prior release's saved selections only after the owned server exits.
   await waitForExit(child, { signal: "SIGTERM" });
-  const botsPath = join(fixture.info.dataDir, "bots.json");
-  const saved = JSON.parse(readFileSync(botsPath, "utf8")) as SavedBot[];
+  const saved = readRegistry(fixture.info.dataDir).bots as SavedBot[];
   // A prior release copied the bot's model onto every thread and had not run the one-time cleanup yet.
   rmSync(join(fixture.info.dataDir, "thread-model-copies-cleared"), { force: true });
   for (const bot of saved) for (const task of bot.tasks) {
@@ -164,7 +164,7 @@ beforeAll(async () => {
   stale.tasks.find((task) => task.title === "Raw OpenRouter variant task")!.modelSelection = { instanceId: "opencode", model: INITIAL.openrouter[1], variant: "high" };
   stale.tasks.find((task) => task.title === "Raw OpenRouter effort task")!.modelSelection = { instanceId: "opencode", model: INITIAL.openrouter[1], effort: "high" };
   beforeTasks = structuredClone(stale.tasks);
-  writeFileSync(botsPath, JSON.stringify(saved));
+  writeRegistry(fixture.info.dataDir, { bots: saved });
   const configPath = join(fixture.info.dataDir, "config.json");
   const config = JSON.parse(readFileSync(configPath, "utf8"));
   config.defaultModelSelection = { instanceId: "opencode", model: INITIAL.openrouter[1], variant: "high" };
@@ -231,7 +231,7 @@ describe("hosted model policy in the full runtime", () => {
     expect(JSON.parse(persisted).defaultModelSelection).toEqual({ instanceId: "opencode", model: INITIAL.openrouter[1] });
     expect(persisted).not.toContain(TOKEN);
     expect(persisted).not.toContain("/api/gateway/");
-    const migrated = JSON.parse(readFileSync(join(fixture!.info.dataDir, "bots.json"), "utf8")) as SavedBot[];
+    const migrated = readRegistry(fixture!.info.dataDir).bots as SavedBot[];
     for (const bot of migrated.filter((candidate) => candidate.id !== ids["Default hosted bot"])) {
       for (const task of bot.tasks) {
         expect(task.resumeCursors).toEqual({});
@@ -261,7 +261,7 @@ describe("hosted model policy in the full runtime", () => {
     expect(after.messages.filter((message: { id: string }) => originalIds.has(message.id))).toEqual(history.messages);
     expect(after.messages.length).toBeGreaterThan(history.messages.length);
     history = after;
-    const persisted = JSON.parse(readFileSync(join(fixture!.info.dataDir, "bots.json"), "utf8")) as SavedBot[];
+    const persisted = readRegistry(fixture!.info.dataDir).bots as SavedBot[];
     const task = persisted.find((bot) => bot.id === primary.id)!.tasks.find((item) => item.threadId === primary.threadId)!;
     expect(task.modelSelection).toEqual({ instanceId: "claude", model: INITIAL.anthropic[1] });
     expect(task.resumeCursors.claude).toBeTruthy();
@@ -316,14 +316,13 @@ describe("hosted model policy in the full runtime", () => {
     ]) {
       await control(["send", "--bot", bot.id, "--task", bot.threadId, "--text", "Remember this synthetic message before switching models."]);
       expect(await control(["wait", "--bot", bot.id, "--task", bot.threadId, "--timeout", "15"])).toMatchObject({ status: "settled" });
-      const botPath = join(fixture!.info.dataDir, "bots.json");
-      const before = JSON.parse(readFileSync(botPath, "utf8")) as SavedBot[];
+      const before = readRegistry(fixture!.info.dataDir).bots as SavedBot[];
       expect(before.find(row => row.id === bot.id)!.tasks[0].resumeCursors.claude).toBeTruthy();
       const messages = (await api("GET", `/api/threads/${bot.threadId}/messages?limit=50`)).body;
       const modelSelection = { instanceId: "claude", model };
       const result = await api("PATCH", path, path.endsWith("/model") ? modelSelection : { modelSelection });
       expect(result.status, JSON.stringify(result.body)).toBe(200);
-      const after = JSON.parse(readFileSync(botPath, "utf8")) as SavedBot[];
+      const after = readRegistry(fixture!.info.dataDir).bots as SavedBot[];
       const task = after.find(row => row.id === bot.id)!.tasks[0];
       expect(task.modelSelection).toBeUndefined();
       expect(after.find(row => row.id === bot.id)!.modelSelection).toEqual(modelSelection);
@@ -346,15 +345,14 @@ describe("hosted model policy in the full runtime", () => {
     const first = await bots();
     // A later managed session must survive an unchanged policy restart.
     await waitForExit(child, { signal: "SIGTERM" });
-    const botsPath = join(fixture!.info.dataDir, "bots.json");
-    const persisted = JSON.parse(readFileSync(botsPath, "utf8")) as SavedBot[];
+    const persisted = readRegistry(fixture!.info.dataDir).bots as SavedBot[];
     const validTask = persisted.find((bot) => bot.id === ids["Valid choice"])!.tasks[0];
     validTask.resumeCursors = { codex: "synthetic-current-managed-session" };
     validTask.lastInstanceId = "codex";
-    writeFileSync(botsPath, JSON.stringify(persisted));
+    writeRegistry(fixture!.info.dataDir, { bots: persisted });
     await restart(changed);
     expect(await bots()).toEqual(first);
-    const restarted = JSON.parse(readFileSync(botsPath, "utf8")) as SavedBot[];
+    const restarted = readRegistry(fixture!.info.dataDir).bots as SavedBot[];
     expect(restarted.find((bot) => bot.id === ids["Valid choice"])!.tasks[0]).toMatchObject({
       resumeCursors: { codex: "synthetic-current-managed-session" }, lastInstanceId: "codex",
     });

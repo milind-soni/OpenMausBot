@@ -6,9 +6,10 @@ import type { CloudColor } from "../../electron/cloud-buy.mjs";
 import type { CloudAccountState, CloudCheckoutOutcome } from "../../electron/cloud-account.mjs";
 import type { CloudOffer } from "../../electron/cloud-home.mjs";
 import { track } from "@/lib/analytics";
+import { cloudAccountBridge } from "@/lib/cloud-add-web";
 import { cn } from "@/lib/cn";
 import { cloudColor, cloudNameShown, DEFAULT_CLOUD_COLOR } from "@/lib/cloud-look";
-import { cloudAddView, offerPlan, sameTerms, startedSleeps, type CloudAddView, type CloudSignInPhase } from "@/lib/cloud-plan";
+import { blockedProblem, cloudAddView, offerPlan, sameTerms, startedSleeps, type CloudAddView, type CloudSignInPhase } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import { welcomeOnScreen } from "@/lib/onboarding";
 import { useStore } from "@/state/store";
@@ -27,6 +28,10 @@ export interface CloudAddActions {
   back(): void;
   email(value: string): void;
   sendCode(): void;
+  /** Clears a saved sign-in this computer can't read, then sends the code. */
+  resetSaved(): void;
+  /** Ends the sign-in under way in the browser, then sends the code. */
+  cancelBrowser(): void;
   changeEmail(): void;
   code(value: string): void;
   resend(): void;
@@ -69,7 +74,7 @@ export function CloudAddPanel({ view, ui, actions }: { view: CloudAddView; ui: C
       onStart={actions.start} onSignIn={actions.signIn} />;
     case "sign-in": return <SignInScreen phase={view.phase} email={ui.email} code={ui.code} profileEmail={ui.profileEmail} busy={ui.busy} now={ui.now}
       onBack={actions.back} onEmail={actions.email} onSend={actions.sendCode} onChangeEmail={actions.changeEmail} onCode={actions.code}
-      onResend={actions.resend} onBrowser={actions.browser} />;
+      onResend={actions.resend} onBrowser={actions.browser} onReset={actions.resetSaved} onCancelBrowser={actions.cancelBrowser} />;
     case "signing-in": return <BrowserSignInScreen code={view.code} checkout={view.checkout} busy={ui.busy}
       trial={ui.offerShown ? Boolean(offerPlan(ui.offerShown, ui.chosen).trialDays) : false} onReopen={actions.reopenBrowser} onCancel={actions.cancelSignIn} />;
     case "waiting": return <PayScreen plan={view.plan} offer={ui.offerShown} browser={view.browser} late={view.late} link={view.link} email={view.email}
@@ -112,7 +117,7 @@ type Note = "copied" | "pay-failed" | "interest-sent" | "interest-failed" | null
 export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
   const { state, dispatch } = useStore();
   const request = state.cloudAdd;
-  const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.cloudAccount;
+  const bridge = cloudAccountBridge();
   const [account, setAccount] = useState<CloudAccountState | null>(null);
   const [offer, setOffer] = useState<CloudOffer | null | undefined>(undefined);
   const [chosen, setChosen] = useState<string | null>(null);
@@ -291,19 +296,21 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     setSignIn({ step: "email", intent, problem: null });
     setForm({ email: form.email || profileEmail || "", code: "" });
   };
-  const sendCode = () => {
+  /** `before`: what clears the way first (a saved sign-in cleared, the browser's ended), as one step with the send. */
+  const send = (before: () => Promise<unknown> = async () => {}) => {
     if (busy || !bridge.signInStart || !signIn || signIn.step === "done") return;
     const phase = signIn;
     setBusy(true);
-    void bridge.signInStart(form.email).then(result => {
+    void before().then(() => bridge.signInStart!(form.email)).then(result => {
       if (result.outcome === "sent") {
         setSignIn({ step: "code", intent: phase.intent, email: result.email, resendAt: result.resendAt, problem: null, triesLeft: null,
           ...(result.signupOpen === false ? { signupOpen: false } : {}) });
         setForm({ email: result.email, code: "" });
         track("cloud_signin", { step: "code_sent", source: request.source });
-      } else setSignIn({ ...phase, problem: result.outcome });
+      } else setSignIn({ ...phase, problem: result.outcome === "blocked" ? blockedProblem(result) : result.outcome });
     }, () => setSignIn({ ...phase, problem: "failed" })).finally(() => setBusy(false));
   };
+  const sendCode = () => send();
   const verify = (code: string) => {
     if (!bridge.signInVerify || signIn?.step !== "code") return;
     const phase = signIn, plan = phase.intent ? planNow() : null;
@@ -313,7 +320,7 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
         const result = await bridge.signInVerify!(code);
         if (result.outcome !== "signed-in") {
           setForm({ email: form.email, code: "" });
-          setSignIn({ ...phase, problem: result.outcome, triesLeft: result.outcome === "wrong-code" ? result.triesLeft : null });
+          setSignIn({ ...phase, problem: result.outcome === "blocked" ? blockedProblem(result) : result.outcome, triesLeft: result.outcome === "wrong-code" ? result.triesLeft : null });
           return;
         }
         setAccount(result.state); setArrived(true);
@@ -338,6 +345,8 @@ export function CloudAddDialog({ now = Date.now }: { now?: () => number }) {
     back: () => { setSignIn(null); void bridge.signInCancel?.().catch(() => {}); },
     email: value => setForm({ email: value, code: form.code }),
     sendCode,
+    resetSaved: () => { if (bridge.resetSaved) send(async () => setAccount(await bridge.resetSaved!())); },
+    cancelBrowser: () => send(async () => setAccount(await bridge.cancel())),
     changeEmail: () => { if (signIn) { setSignIn({ step: "email", intent: signIn.intent, problem: null }); void bridge.signInCancel?.().catch(() => {}); } },
     code: value => {
       const digits = codeDigits(value);

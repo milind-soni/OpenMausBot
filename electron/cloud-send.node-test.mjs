@@ -392,7 +392,7 @@ test("1Password refused on My Cloud is told in words for this computer, not My C
   sides.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {} } });
   const outcome = await createCloudSend(sides.deps).send();
   assert.deepEqual(outcome.result.failed, [{ key: "1password", kind: "1password", label: "1Password",
-    error: "My Cloud's 1Password did not accept this computer's token: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Logins, and it goes to My Cloud by itself.", final: true }]);
+    error: "My Cloud's 1Password did not accept this computer's token: it may have been revoked, expired, or lost access to its vault. Connect 1Password again in this computer's Settings → Vault, and it goes to My Cloud by itself.", final: true }]);
   const other = fakeSides({ localItems: [{ key: itemKey.onePassword(), kind: "1password", label: "1Password", parts: { token: "t" } }],
     refuse: { "/api/logins/1password": { status: 503, error: "busy" } } });
   other.deps.handoff = async () => ({ onePassword: { token: "ops_fake", grants: {} } });

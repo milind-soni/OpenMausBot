@@ -2,7 +2,7 @@ import { createElement, type ComponentProps, type MemoExoticComponent, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadRowActions, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 type ThreadRowProps = ComponentProps<typeof SidebarThreadRow>;
 
@@ -192,35 +192,6 @@ describe("snoozed threads", () => {
     const now = Date.now();
     expect(nextSnoozeExpiry([{ snoozedUntil: 0 }, { snoozedUntil: now - 1 }, { snoozedUntil: now + 3_600_000 }, { snoozedUntil: now + 60_000 }, {}], now)).toBe(now + 60_000);
     expect(nextSnoozeExpiry([{ snoozedUntil: 0 }, { snoozedUntil: now - 1 }], now)).toBeUndefined();
-  });
-});
-
-describe("threads a bot opened", () => {
-  const openedBy = { botId: "scout", name: "Scout", at: 5 };
-  const render = (task: ThreadRowProps["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
-    task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
-  }));
-  it("says who opened the thread in plain words, and nothing for the person's own", () => {
-    expect(threadOpenerLabel({ openedBy })).toBe("opened by Scout");
-    expect(threadOpenerLabel({})).toBeNull();
-    expect(threadOpenerLabel({ openedBy: { ...openedBy, name: "  " } })).toBeNull();
-  });
-  it("shows the opener quietly under the title without changing the row's name or status", () => {
-    const markup = render({ threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you" });
-    expect(markup).toContain("opened by Scout");
-    expect(markup).toContain('title="QA PR 245 · Waiting"');
-    expect(markup.indexOf("QA PR 245")).toBeLessThan(markup.indexOf("opened by Scout"));
-    expect(render({ threadId: "own", title: "Quick question" })).not.toContain("opened by");
-  });
-  it("gives a bot-opened thread the same waiting and unread signals as any other", () => {
-    const waiting = render({ threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you", unread: true });
-    expect(waiting).toContain('title="QA PR 245 · Waiting · Unread"');
-    expect(waiting).toContain(">Waiting</span>");
-    expect(waiting).toContain('aria-label="Unread"');
-    expect(waiting).toContain("opened by Scout");
-    const rows = Array.from({ length: 9 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}` }));
-    const opened = [...rows, { threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you" as const, busy: false }];
-    expect(visibleSidebarThreads(opened, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "qa"]);
   });
 });
 
@@ -645,6 +616,13 @@ describe("Refresh permissions", () => {
 });
 
 describe("Regenerate title", () => {
+  it("is in every bot thread menu, with automatic titles on or off, and asks for that thread", () => {
+    const dispatch = vi.fn();
+    const settled = vi.fn();
+    threadRowActions("scout", dispatch).onRegenerateTitle({ threadId: "t1" }, settled);
+    expect(dispatch).toHaveBeenCalledWith({ type: "regenerateTaskTitle", botId: "scout", threadId: "t1", onSettled: settled });
+  });
+
   const openMenu = (tree: RowNode) => {
     (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
   };

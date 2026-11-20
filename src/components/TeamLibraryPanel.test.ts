@@ -10,4 +10,9 @@ describe("TeamLibraryPanel", () => {
     expect(overlay).toContain("bg-black/55");
     expect(source).not.toMatch(/backdrop-blur|backdrop-filter|backdropFilter/);
   });
+
+  it("is one gallery: no tabs, and no import, scout, share or backup inside it", () => {
+    expect(source).not.toMatch(/role="tab(list)?"/);
+    expect(source).not.toMatch(/teams\/scout|team-library\/github|ShareTeamDialog|openmaus\.backup|type="file"/);
+  });
 });

@@ -23,6 +23,12 @@ describe("MausBot in the sidebar", () => {
     expect(someoneElsesDefaultBot(bots[2]!, "ADA@example.com".toLowerCase())).toBe(true);
   });
 
+  it("keeps a regular bot left with MausBot's Show switch off (demoted while hidden) in the sidebar", () => {
+    const bots = [bot("demoted", { sidebarHidden: true }), bot("writer")];
+    expect(hiddenFromSidebar(bots[0]!, null)).toBe(false);
+    expect(partitionSidebarBots(bots, { viewerEmail: null }).unsectionedBots.map((entry) => entry.id)).toEqual(["demoted", "writer"]);
+  });
+
   it("finds the viewer's own MausBot: their own on a team, the place's otherwise, none until the viewer is known", () => {
     const team = [bot("ada-maus", { defaultBot: { person: "ada@example.com" } }), bot("writer")];
     expect(myDefaultBot(team, undefined)).toBeUndefined();

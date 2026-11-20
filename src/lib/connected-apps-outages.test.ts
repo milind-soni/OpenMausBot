@@ -46,4 +46,17 @@ describe("connected app refresh failures", () => {
     expect(connectorStatusMemory()).toEqual({ services: old, authoritative: true });
     expect(fixture.write).toHaveBeenCalledExactlyOnceWith(old, expect.any(Number));
   });
+
+  it("asks the server to read anew only for a forced refresh", async () => {
+    const { preloadConnectedApps } = await import("./connected-apps");
+    fixture.api.mockResolvedValue({ services: current });
+    await preloadConnectedApps();
+    await preloadConnectedApps(true);
+    await preloadConnectedApps(true, true);
+    expect(fixture.api.mock.calls).toEqual([
+      ["/api/connectors/connected", undefined],
+      ["/api/connectors/connected", { headers: { "cache-control": "no-cache" } }],
+      ["/api/connectors/connected", { headers: { "cache-control": "no-cache" }, background: true }],
+    ]);
+  });
 });

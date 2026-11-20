@@ -48,7 +48,7 @@ const EVERYDAY_KEYS: Record<string, readonly string[]> = {
     "botOverview.line.computer", "botOverview.line.privateWorkspace", "botOverview.preference.cloud", "botOverview.preference.vm",
     "botSettings.replyStyle.conversationalHint", "voice.engine",
   ],
-  "adding and sharing a bot": ["newBot.presetKeeps", "presetShare.never"],
+  "adding and sharing a bot": ["newBot.presetKeeps", "template.neverShared", "template.arrives"],
   "signing in to an AI, the Cloud's own sign-in included": [
     "engineSetup.claude.description", "engineSetup.claude.connectedAccount", "engineSetup.device.description", "engineSetup.device.security",
     "engineSetup.device.connectedAccount", "engineSetup.device.failed", "engineSetup.device.enableHint", "engineSetup.grok.description",
@@ -84,6 +84,7 @@ const PENDING_WORDS: readonly Word[] = [
 ];
 
 const ALLOWED: Record<string, string> = {
+  "grokMove.connect.where": "names the Server URL field of Grok Bot's own form, where the link is pasted",
   "sidebar.servers": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServer": "the switcher's own Servers list, renamed with the one-workspace switcher",
   "sidebar.switchServerError": "points at the app menu's Server menu",

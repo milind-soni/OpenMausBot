@@ -1,8 +1,9 @@
 import type { ReadableStreamReadResult } from "node:stream/web";
 import { z } from "zod";
 
-import { IMAGE_DEFAULT_MODELS, IMAGE_PROVIDERS, looksLikeApiKey, normalizeImageGenerationUrl, type ImageGenerationConfig, type ImageProvider } from "../shared/image-generation.ts";
+import { IMAGE_DEFAULT_MODELS, IMAGE_PROVIDERS, looksLikeApiKey, supportsImageComplexity, normalizeImageGenerationUrl, type ImageGenerationConfig, type ImageProvider } from "../shared/image-generation.ts";
 import { decodeGeneratedImage } from "./generated-image.ts";
+import { generateHiggsfieldImage, higgsfieldReady } from "./higgsfield-mcp.ts";
 
 export const IMAGE_GENERATION_TIMEOUT_MS = 120_000;
 const MAX_UPSTREAM_RESPONSE_BYTES = 15 * 1024 * 1024;
@@ -25,15 +26,46 @@ export interface ImageSlot {
 
 export type ImageAspect = "1:1" | "16:9" | "9:16";
 
+export interface ImageInput {
+  bytes: Buffer;
+  mime: string;
+}
+
 export interface ImageRequest {
   prompt: string;
   aspect?: ImageAspect;
   draft?: boolean;
+  /** An animated GIF, from a GPT-Image-2.6 model only. */
+  gif?: { frames?: number; frameDurationMs?: number };
+  /** Changes `image` instead of making a new one; `markup` is a transparent PNG of marks drawn over it. GPT-Image-2.6 only. */
+  edit?: { image: ImageInput; markup?: ImageInput };
+}
+
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+
+function pngInfo(bytes: Buffer): { width: number; height: number; alpha: boolean } | null {
+  if (bytes.length < 26 || !bytes.subarray(0, 8).equals(PNG_SIGNATURE)) return null;
+  return {
+    width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20),
+    alpha: bytes[25] === 4 || bytes[25] === 6 || bytes.includes("tRNS", 0, "latin1"),
+  };
+}
+
+/** Why the markup cannot go with this image, in words a bot can act on; null when it can. */
+export function markupProblem(image: ImageInput, markup: ImageInput): string | null {
+  const marks = pngInfo(markup.bytes);
+  if (!marks) return "The markup must be a PNG.";
+  if (!marks.alpha) return "The markup must be a transparent PNG: the marks drawn on a transparent background, not a flattened copy of the image.";
+  const base = pngInfo(image.bytes);
+  if (base && (base.width !== marks.width || base.height !== marks.height)) {
+    return `The markup is ${marks.width}x${marks.height} but the image is ${base.width}x${base.height}; they must be the same size.`;
+  }
+  return null;
 }
 
 export interface GeneratedImage {
   bytes: Buffer;
-  mime: "image/png" | "image/jpeg" | "image/webp";
+  mime: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
 }
 
 export interface GeneratedSlotImage extends GeneratedImage, ImageSlot {
@@ -49,6 +81,7 @@ const PROVIDERS: Record<ImageProvider, {
   missing: string;
   key: (cfg: ImageCredentials) => string | undefined;
   url: (cfg: ImageCredentials) => string;
+  editUrl?: string;
   body: (request: ImageRequest) => Record<string, unknown>;
 }> = {
   openai: {
@@ -56,6 +89,7 @@ const PROVIDERS: Record<ImageProvider, {
     missing: "Add an OpenAI image API key first",
     key: (cfg) => cfg.imageGen?.key,
     url: () => "https://api.openai.com/v1/images/generations",
+    editUrl: "https://api.openai.com/v1/images/edits",
     body: (request) => ({ size: OPENAI_SIZES[request.aspect ?? "1:1"], quality: request.draft ? "low" : "auto", output_format: "webp" }),
   },
   xai: {
@@ -79,6 +113,13 @@ const PROVIDERS: Record<ImageProvider, {
     key: (cfg) => cfg.openrouter?.key,
     url: () => "https://openrouter.ai/api/v1/images",
     body: (request) => ({ aspect_ratio: request.aspect ?? "1:1" }),
+  },
+  higgsfield: {
+    name: "Higgsfield",
+    missing: "Connect Higgsfield in Plugins first",
+    key: () => undefined,
+    url: () => "",
+    body: () => ({}),
   },
   custom: {
     name: "Custom",
@@ -144,6 +185,7 @@ export function primaryImageSlot(cfg: ImageCredentials): ImageSlot {
 
 export function imageSlotConfigured(cfg: ImageCredentials, slot: ImageSlot): boolean {
   if (slot.provider === "custom") return Boolean(customImageUrl(cfg) && slot.model);
+  if (slot.provider === "higgsfield") return higgsfieldReady() && Boolean(slot.model);
   return Boolean(PROVIDERS[slot.provider].key(cfg)?.trim() && slot.model);
 }
 
@@ -204,20 +246,45 @@ export async function generateImageWith(
 ): Promise<GeneratedImage> {
   const provider = PROVIDERS[slot.provider];
   if (!imageSlotConfigured(cfg, slot)) fail(provider.missing, 409, true);
+  if (slot.provider === "higgsfield") {
+    if (request.edit || request.gif) fail("Higgsfield makes new images only: no edits or animated GIFs", 409, true);
+    return generateHiggsfieldImage({ model: slot.model, prompt: request.prompt, ...(request.aspect && { aspect: request.aspect }) }, { ...(cancel && { signal: cancel }) });
+  }
 
   const apiKey = provider.key(cfg)?.trim();
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const { edit } = request;
+  const headers: Record<string, string> = edit ? {} : { "content-type": "application/json" };
   if (apiKey) headers.authorization = `Bearer ${apiKey}`;
-  const body = { model: slot.model, prompt: request.prompt, ...provider.body(request) };
+  const gpt26 = supportsImageComplexity(slot);
+  if (request.gif && !gpt26) fail("Animated GIFs need a GPT-Image-2.6 model (Sunburst or Flare) on OpenAI", 409, true);
+  const complexity = gpt26 ? cfg.imageGen?.complexity : undefined;
+  const { frames, frameDurationMs } = request.gif ?? {};
+  const gif = request.gif && {
+    output_format: "gif", ...(frames && { frame_count: frames }), ...(frameDurationMs && { frame_duration_ms: frameDurationMs }),
+  };
+  if (edit && !(gpt26 && provider.editUrl)) fail("Editing an image needs a GPT-Image-2.6 model (Sunburst or Flare) on OpenAI", 409, true);
+  const { size: generatedSize, ...params } = provider.body(request);
+  const url = (edit && provider.editUrl) || provider.url(cfg);
+  const body = {
+    model: slot.model, prompt: request.prompt, ...(edit ? params : { ...params, size: generatedSize }),
+    ...(complexity && { complexity }), ...gif,
+  };
+  const multipart = (fields: Record<string, unknown>, { image, markup }: NonNullable<typeof edit>) => {
+    const form = new FormData();
+    for (const [key, value] of Object.entries(fields)) form.append(key, String(value));
+    form.append("image", new Blob([new Uint8Array(image.bytes)], { type: image.mime }), "image");
+    if (markup) form.append("markup", new Blob([new Uint8Array(markup.bytes)], { type: markup.mime }), "markup.png");
+    return form;
+  };
 
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const cancelled = () => cancel?.aborted === true && !timeoutSignal.aborted;
   const send = async (payload: Record<string, unknown>): Promise<Response> => {
     try {
-      return await fetchImpl(provider.url(cfg), {
+      return await fetchImpl(url, {
         method: "POST",
         headers,
-        body: JSON.stringify(payload),
+        body: edit ? multipart(payload, edit) : JSON.stringify(payload),
         redirect: "error",
         signal: cancel ? AbortSignal.any([timeoutSignal, cancel]) : timeoutSignal,
       });
@@ -279,7 +346,7 @@ export async function generateImageWith(
   }
   try {
     const image = decodeGeneratedImage(encoded);
-    if (image.mime === "image/gif") throw new Error("unsupported image format");
+    if (image.mime === "image/gif" && !request.gif) throw new Error("unsupported image format");
     return { bytes: image.bytes, mime: image.mime };
   } catch {
     fail(`${provider.name} returned invalid or oversized image data; expected PNG, JPEG, or WebP`, 502);

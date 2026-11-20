@@ -41,10 +41,11 @@ export function createUploadOwners(dataDir: string) {
   };
 }
 
-/** The thread routes' `uploads` (server/routes/threads.ts): a session's uploader is its person, anything else "local";
- * on a Team Cloud (`team`) a member's are remembered past a restart. */
+/** The thread routes' `uploads` (server/routes/threads.ts): a session's uploader is its person, a paired phone's is that
+ * phone, anything else "local"; on a Team Cloud (`team`) a member's are remembered past a restart. */
 export function uploadsFor(owners: ReturnType<typeof createUploadOwners>, team: boolean) {
-  const uploaderOf = (auth: RequestAuth) => auth.kind === "session" ? personKey(auth.session) : "local";
+  const uploaderOf = (auth: RequestAuth) => auth.kind === "session" ? personKey(auth.session)
+    : auth.companionDevice ? `companion:${auth.companionDevice}` : "local";
   const teamMemberOf = (auth: RequestAuth) => team && auth.kind === "session" && auth.session.membershipAuthority === "team" ? personKey(auth.session) : undefined;
   return {
     note: (auth: RequestAuth, name: string) => owners.note(uploaderOf(auth), name, teamMemberOf(auth)),

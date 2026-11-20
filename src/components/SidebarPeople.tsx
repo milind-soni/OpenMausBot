@@ -4,6 +4,7 @@
 // People page, where invitations are sent, so someone alone on a new team still has a way to bring people in.
 import { UserPlus } from "lucide-react";
 import { botOwner } from "../../shared/bot-owner";
+import { teamPeoplePage } from "@/lib/app-links";
 import { openAsksOf } from "@/lib/bot-unread";
 import { cn } from "@/lib/cn";
 import { leadComposerDraft } from "@/lib/drafts";
@@ -31,11 +32,6 @@ function openComposer(state: Pick<AppState, "activeView" | "selectedId" | "group
   return bot ? `bot:${bot.id}:${bot.threadId}` : null;
 }
 
-/** Where a team's admins invite people: the Team admin's People page on the Cloud that runs this team. */
-export function teamPeoplePage(team: { id: string; cloudPage?: string } | null | undefined): string | null {
-  return team?.cloudPage ? `${team.cloudPage}/team/${encodeURIComponent(team.id)}/people` : null;
-}
-
 const focusComposer = () => requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea')?.focus());
 
 /** You first, then whoever is here now, then everyone else, each by name. */
@@ -53,7 +49,7 @@ function PeopleStatusLine({ compact }: { compact: boolean }) {
   if (compact || status === "ready") return null;
   return (
     <section aria-label={t("sidebar.people.title")} data-sidebar-people={status} className="px-2 pb-1">
-      <div className="px-2 pb-0.5 pt-1 text-[11px] font-medium text-ink-tertiary">{t("sidebar.people.title")}</div>
+      <div className="px-2 pb-0.5 pt-1 text-[12px] font-medium leading-4 text-ink-tertiary">{t("sidebar.people.title")}</div>
       {status === "loading" ? <div role="status" className="px-2 py-1 text-[13px] text-ink-tertiary">{t("sidebar.people.loading")}</div> : (
         <div role="alert" className="flex items-center gap-2 px-2 py-1 text-[13px] text-ink-secondary">
           <span className="min-w-0 flex-1 truncate">{t("sidebar.people.failed")}</span>
@@ -126,7 +122,7 @@ export function SidebarPeople({ compact, onOpened }: { compact: boolean; onOpene
             <a href={invite} target="_blank" rel="noreferrer" aria-label={t("sidebar.people.invite")} title={t("sidebar.people.invite")} data-people-invite
               className="flex items-center justify-center rounded-full p-1 text-ink-secondary hover:bg-raised/60 hover:text-ink">
               <span className="flex items-center justify-center rounded-full border border-dashed border-hairline" style={{ width: face, height: face }}>
-                <UserPlus aria-hidden="true" size={compact ? 13 : 14} strokeWidth={1.75} className="shrink-0" />
+                <UserPlus aria-hidden="true" size={compact ? 13 : 14} className="shrink-0" />
               </span>
             </a>
           </li>

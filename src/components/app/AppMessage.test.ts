@@ -212,15 +212,13 @@ describe("a bot's page", () => {
     expect(frame().style.height).toBe("333px");
   });
 
-  it("in a room, shows the page to everyone with Full screen and Point but no Share, and the page sends nothing for anyone", async () => {
+  it("in a room, shows the page to everyone as a card that opens with Point but no Share, and the page sends nothing for anyone", async () => {
     fetchMock.mockImplementation(async (path) => /\/app(\?|$)/.test(path) ? json(200, botHtmlDocument({ messageId: "a1", rev: 0, html: counter.html, room: true })) : json(202, { ok: true }));
     await mount(row(htmlPayload()), true);
     expect(find("[data-app]")!.hasAttribute("data-app-room")).toBe(true);
     expect(frame().getAttribute("sandbox")).toBe("allow-scripts allow-forms");
     expect(frame().getAttribute("srcdoc")).toContain("var room = true;");
-    expect(button("Point")).toBeTruthy();
-    expect(button("Share")).toBeUndefined();
-    expect(button("Full screen")).toBeTruthy();
+    expect(find("[data-page-tools]")).toBeNull();
     await handshake();
     await engage();
     await fromView({ jsonrpc: "2.0", id: "m1", method: "ui/message", params: { role: "user", content: [{ type: "text", text: "I have had 3 cups." }] } });
@@ -230,6 +228,11 @@ describe("a bot's page", () => {
     expect(toView.find((message) => message.id === "c1")).toEqual({ jsonrpc: "2.0", id: "c1", error: { code: -32000, message: ROOM_VIEW_ONLY } });
     expect(posts("/messages")).toEqual([]);
     expect(posts("/context")).toEqual([]);
+    await act(async () => { button("Open page")!.click(); });
+    const opened = Array.from(document.body.querySelectorAll<HTMLButtonElement>("[role=dialog][data-page-fullscreen] button"), (element) => element.textContent?.trim() || element.getAttribute("aria-label"));
+    expect(opened).toContain("Point");
+    expect(opened).toContain("Close full screen");
+    expect(opened).not.toContain("Share");
   });
 
   it("opens a link the person clicked through the desktop's browser", async () => {

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Search, SquarePen } from "lucide-react";
 
 import { cn } from "@/lib/cn";
-import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 import { activeLocale, t } from "@/lib/i18n";
 import { SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-media-query";
 import { api, currentTaskBot, openBotThread, useStore, visibleMessages, type Bot, type Message } from "@/state/store";
@@ -63,11 +62,10 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const [searching, setSearching] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const generatedTitles = llmThreadTitlesEnabled(state.config);
   const actions = useMemo(() => {
-    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch, generatedTitles);
+    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch);
     return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive };
-  }, [bot.id, dispatch, generatedTitles]);
+  }, [bot.id, dispatch]);
 
   const side = useConversationSide(bot);
   const tasks = bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }];
@@ -83,7 +81,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const conversations = orderedThreadList(threads.filter((task) => !isArchived(task) || task.threadId === bot.threadId));
   const archived = orderedThreadList(threads.filter((task) => isArchived(task) && task.threadId !== bot.threadId));
   const needle = query.trim();
-  const collapsed = conversations.filter((task, index) => index < CONVERSATIONS_SHOWN || task.threadId === bot.threadId);
+  const collapsed = conversations.filter((task, index) => index < CONVERSATIONS_SHOWN || task.threadId === bot.threadId || task.threadId === bot.mainThreadId);
   const recent = useRecentMessages(bot, [...(needle || expanded ? conversations : collapsed), ...(showArchived ? archived : [])]);
   const preview = (threadId: string) => {
     const messages = recent(threadId);
@@ -119,7 +117,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const row = (task: (typeof threads)[number]) => (
     <div role="listitem" key={task.threadId} data-conversation={task.threadId}>
       <SidebarThreadRow panel preview={preview(task.threadId)} task={task} ownerId={bot.id} current={task.threadId === bot.threadId}
-        folders={bot.projects} now={stampClock(threadRecency(task), now)} locale={activeLocale()} onSelect={select} {...actions} />
+        main={task.threadId === bot.mainThreadId} folders={bot.projects} now={stampClock(threadRecency(task), now)} locale={activeLocale()} onSelect={select} {...actions} />
     </div>
   );
 

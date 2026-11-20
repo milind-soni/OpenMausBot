@@ -27,7 +27,7 @@ import { callStarted } from "@/lib/product-events";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { callCapabilityHelp, type CallCapabilityHelp } from "@/lib/call-capability";
 import { onCallStartRequest } from "@/lib/call-start-request";
-import { CALL_ENDPOINT_MS, fishListeningReady, listensHere, speechBridge } from "@/lib/speech";
+import { CALL_ENDPOINT_MS, listensHere, missingListenKey, speechBridge } from "@/lib/speech";
 import { VoiceSetupDialog } from "./VoiceSetupDialog";
 import { openBotSettings } from "./bot-panel/panel-link";
 import { MENU_SHEET } from "./menu-recipe";
@@ -41,7 +41,8 @@ export type CallButtonPlacement = "header" | "composer" | "panel";
 /** `fill` (Simple composer): a round button in that colour with its glyph in `ink`, and no chevron; the + menu picks the
  * call mode. */
 /** `inverse` (phone composer): a round ink-coloured button with an app-coloured glyph: white on Midnight, dark on Meadow. */
-export function CallButton({ bot, placement = "header", fill, ink, inverse }: { bot: Bot; placement?: CallButtonPlacement; fill?: string; ink?: string; inverse?: boolean }) {
+/** `modeMenu: false` drops the call-mode chevron beside the button, for a composer whose + menu offers the modes. */
+export function CallButton({ bot, placement = "header", fill, ink, inverse, modeMenu }: { bot: Bot; placement?: CallButtonPlacement; fill?: string; ink?: string; inverse?: boolean; modeMenu?: boolean }) {
   const { state } = useStore();
   return (
     <CallTargetButton
@@ -49,6 +50,7 @@ export function CallButton({ bot, placement = "header", fill, ink, inverse }: { 
       fill={fill}
       ink={ink}
       inverse={inverse}
+      modeMenu={modeMenu}
       targetId={bot.id}
       targetName={bot.name}
       threadId={bot.threadId}
@@ -74,11 +76,13 @@ export function CallTargetButton({
   fill,
   ink = "#ffffff",
   inverse,
+  modeMenu = true,
 }: {
   placement?: CallButtonPlacement;
   fill?: string;
   ink?: string;
   inverse?: boolean;
+  modeMenu?: boolean;
   targetId: string;
   targetName: string;
   threadId?: string;
@@ -102,7 +106,7 @@ export function CallTargetButton({
   const active = onCall || onLiveCall;
   const remoteClient = globalThis.window?.ogb?.remoteClient?.active === true;
   const capabilityHelp = capabilitiesReady
-    ? callCapabilityHelp(capabilities, Boolean(speechBridge()?.speechStart), fishListeningReady(state.config))
+    ? callCapabilityHelp(capabilities, Boolean(speechBridge(state.config)?.speechStart), missingListenKey(capabilities, state.config))
     : null;
   const supported = capabilitiesReady && !capabilityHelp;
   const localVoice = localSystemVoiceActive();
@@ -137,7 +141,7 @@ export function CallTargetButton({
   const keyId = useId();
   const elsewhereName = liveElsewhere ? state.bots.find((candidate) => candidate.id === media.botId)?.name : undefined;
   const composer = placement === "composer";
-  const round = Boolean(fill) || Boolean(inverse) || placement === "panel";
+  const round = Boolean(fill) || Boolean(inverse) || placement === "panel" || !modeMenu;
   const label = active
     ? t("call.hangUpOn", { name: targetName })
     : liveElsewhere
@@ -280,7 +284,7 @@ export function CallTargetButton({
       >
         {active
           ? <PhoneOff size={composer || round ? 15 : 17} />
-          : composer ? fill ? <AudioLines size={15} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" /> : <AudioLines size={16} aria-hidden="true" /> : <Phone size={round ? 15 : 17} />}
+          : composer ? fill ? <AudioLines size={16} strokeWidth={1.75} absoluteStrokeWidth aria-hidden="true" /> : <AudioLines size={16} aria-hidden="true" /> : <Phone size={round ? 15 : 17} />}
         {unavailable && (
           <span className="absolute right-1 top-1 size-1.5 rounded-full bg-warning ring-2 ring-app" aria-hidden="true" />
         )}
@@ -406,6 +410,7 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
   onChoose: (mode: CallMode) => void;
   onClose: () => void;
 }) {
+  const { state } = useStore();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     ref.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
@@ -443,7 +448,7 @@ export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header"
             <span className="min-w-0 flex-1">
               <span className={cn("block text-[14px] leading-[18px]", unavailable ? "text-ink-tertiary" : "text-ink")}>{t(entry.label)}</span>
               <span className="mt-0.5 block text-[12px] leading-[1.4] text-ink-secondary">
-                {unavailable ? `${unavailable.label}. ${unavailable.reason}` : callModeHint(entry.id, { cloudHome })}
+                {unavailable ? `${unavailable.label}. ${unavailable.reason}` : callModeHint(entry.id, { cloudHome, config: state.config })}
               </span>
             </span>
             {mode === entry.id && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
@@ -467,13 +472,15 @@ export function CallOverlay({ bot }: { bot: Bot }) {
 }
 
 function Call({ bot }: { bot: Bot }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
+  // One bridge for the whole call: a voice change mid-call must not stop or hear through another.
+  const [bridge] = useState(() => speechBridge(state.config));
   const speech = useSpeech();
   const initialPhase: Phase = bot.busy ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [heard, setHeard] = useState("");
   const [note, setNote] = useState<string | null>(null);
-  const pushToTalk = usePushToTalk(bot.id, phase === "listening", () => {
+  const pushToTalk = usePushToTalk(bot.id, bridge, phase === "listening", () => {
     setNote(t("call.turns.pushToTalkFailed"));
   });
 
@@ -513,20 +520,20 @@ function Call({ bot }: { bot: Bot }) {
   }, []);
 
   const hush = useCallback(() => {
-    void speechBridge()?.speechStop();
-  }, []);
+    void bridge?.speechStop();
+  }, [bridge]);
 
   const listen = useCallback(() => {
     if (!alive.current || currentCall() !== bot.id) return;
     move("listening");
     setHeard("");
     setNote(null);
-    void speechBridge()?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+    void bridge?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === bot.id) {
         setNote(t("call.turns.micFailed"));
       }
     });
-  }, [bot.id, move]);
+  }, [bridge, bot.id, move]);
 
   const say = useCallback(
     async (text: string) => {
@@ -561,7 +568,6 @@ function Call({ bot }: { bot: Bot }) {
   }, [bot.id]);
 
   useEffect(() => {
-    const bridge = speechBridge();
     if (!bridge) return;
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (!alive.current || currentCall() !== bot.id || phaseRef.current !== "listening") return;
@@ -659,10 +665,10 @@ function Call({ bot }: { bot: Bot }) {
     return () => {
       offTranscript();
       offEnd();
-      void speechBridge()?.speechStop();
+      void bridge.speechStop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bot.id, bot.threadId, dispatch, hush, listen, move, sayThenListen]);
+  }, [bot.id, bot.threadId, bridge, dispatch, hush, listen, move, sayThenListen]);
 
   useEffect(() => {
     // The card may be resolved elsewhere (the approval UI, another client) while this call is open.

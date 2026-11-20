@@ -7,7 +7,8 @@ import { t } from "@/lib/i18n";
 import { useCopyFeedback } from "@/lib/copy-text";
 import { formatUsd, hasFiniteCost } from "@/lib/usage";
 import { readMembership, type Membership } from "../lib/membership";
-import { readSessionState, type SessionState } from "../lib/session";
+import type { SessionState } from "../lib/session";
+import { readSharedSessionState } from "../lib/shared-session";
 import { canPairDevices } from "./ServerPairingCard";
 import { normalizeAccessEntry, withEntry, withoutEntry, type SignInLists } from "./SignInAccessCard";
 import { Card } from "./SettingsPrimitives";
@@ -224,7 +225,7 @@ export function PeopleSection({ simple = false, startOpen = false }: { simple?: 
   }, []);
 
   useEffect(() => {
-    void readSessionState().then((state) => {
+    void readSharedSessionState().then((state) => {
       setSession(state);
       if (canPairDevices(state)) void load();
     });

@@ -1,5 +1,3 @@
-import { PLACE_EN } from "../shared/place-view.ts";
-
 type Outcome = { id: string; routineId: string; status: string; error?: string | null; createdAt: number; finishedAt?: number | null };
 
 /** A routine's finished runs (failed or completed), newest first. */
@@ -8,24 +6,24 @@ export function outcomesNewestFirst<T extends Outcome>(runs: readonly T[], routi
     .sort((a, b) => (b.finishedAt ?? b.createdAt) - (a.finishedAt ?? a.createdAt) || b.createdAt - a.createdAt);
 }
 
+const TIME = /\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?/g;
+const UUID = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+const PATH = /(?:\b[A-Za-z]:)?(?:[\\/][\w.@~+-]+){2,}[\\/]?/g;
+/** A provider's request or object id ("req_011CUa7xYz9", "msg_01…", "toolu_01…") and a long hex digest. */
+const PREFIXED_ID = /\b[a-z]{2,8}_[A-Za-z0-9]{8,}\b|\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{12,}\b/g;
+/** A number of four digits or more on its own (a process id, a port, a count): never one inside a model id, and never a
+ * shorter one, so exit codes and HTTP statuses stay apart. */
+const LONG_NUMBER = /(?<![\w.-])\d{4,}(?![\w-]|\.\d)/g;
+
+/** A failure's words without what changes from one run to the next (times, ids, paths, long numbers), so two runs that
+ * fail for one reason read as the same failure, and an exit code, an HTTP status or a model still tell two apart. */
+export function failureShape(text: string): string {
+  return text.replace(TIME, "<time>").replace(PATH, "<path>").replace(UUID, "<id>").replace(PREFIXED_ID, "<id>")
+    .replace(LONG_NUMBER, "#").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
 /** The run failed the same way the routine's previous outcome did. */
 export function failsLikeLastOutcome<T extends Outcome>(runs: readonly T[], run: T): boolean {
   const last = outcomesNewestFirst(runs, run.routineId, run.id)[0];
-  return last?.status === "failed" && last.error === run.error;
-}
-
-/** Runs in a row, since the routine was last turned on or changed, that failed because its cloud computer didn't start. */
-export const NO_START_RUNS_BEFORE_OFF = 3;
-const [beforeBot, afterBot] = PLACE_EN["place.view.ccNoStart.line"].split("{bot}").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-const NO_START = new RegExp(`^${beforeBot}.+${afterBot}`);
-
-/** Each run on a cloud computer that doesn't start spends the bot's AI for minutes before it fails, so the third such
- * run in a row turns the routine off and says so. Turning it on again, or any change, starts the count afresh. A busy
- * or unavailable Cloud service is not counted: that passes by itself, and nothing would turn the routine back on. */
-export function offAfterNoStarts<R extends { enabled: boolean; nextRunAt: number | null; updatedAt: number }, T extends Outcome>(routine: R | undefined, runs: readonly T[], run: T, now: number): { routine: R; alert: { detail: string } } | undefined {
-  if (!routine?.enabled || run.status !== "failed" || !run.error || run.createdAt < routine.updatedAt || !NO_START.test(run.error)) return undefined;
-  const earlier = outcomesNewestFirst(runs, run.routineId, run.id).slice(0, NO_START_RUNS_BEFORE_OFF - 1);
-  if (earlier.length < NO_START_RUNS_BEFORE_OFF - 1 || earlier.some((other) => other.status !== "failed" || other.error !== run.error || other.createdAt < routine.updatedAt)) return undefined;
-  Object.assign(routine, { enabled: false, nextRunAt: null, updatedAt: Math.max(now, routine.updatedAt + 1) });
-  return { routine, alert: { detail: `${run.error} It was turned off after ${NO_START_RUNS_BEFORE_OFF} runs in a row failed this way: turn it on again once its computer starts.` } };
+  return last?.status === "failed" && failureShape(last.error ?? "") === failureShape(run.error ?? "");
 }

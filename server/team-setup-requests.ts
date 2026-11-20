@@ -8,7 +8,9 @@ import { profileSnapshot } from "./profile-revision.ts";
 import { recordProfileChange, type HistoryActor } from "./profile-versions.ts";
 import { validateBotCwd } from "./bot-cwd.ts";
 import { UNDO_STALE, type DirectApply } from "./direct-apply.ts";
+import type { NewBotApproval } from "./new-bot-defaults.ts";
 import { harnessCapabilityLines, type DriverCapabilities } from "./harness-capabilities.ts";
+import { MAX_MCP_SERVERS, mcpServerNameError } from "./mcp-registry.ts";
 import { redactSecretsInText } from "./redact.ts"; import { chiefLevel } from "./chief-level.ts"; import { defaultBotRefusal } from "./default-bot.ts";
 import type { BotRecord, OptionCardData } from "./store.ts"; import { outsideDepartmentReason } from "./peer-roster.ts";
 import type { TeamSetupFields, TeamSetupOperation, TeamSetupRequest, TeamSetupResult, TeamSetupUndo } from "../shared/team-setup.ts";
@@ -28,7 +30,10 @@ const fieldsSchema = z.object({
   cwd: z.string().optional(),
   section: z.string().trim().max(60).refine(fitsOnOneLine).refine((value) => redactSecretsInText(value) === value, "Team names cannot contain credentials").optional(),
   modelSelection: z.object({ instanceId: z.string().trim().min(1), model: z.string().trim().min(1), effort: z.string().optional(), variant: z.string().optional() }).strict().optional(),
+  mcpServers: z.array(z.string()).max(MAX_MCP_SERVERS, `Select at most ${MAX_MCP_SERVERS} MCP servers.`).optional(),
 }).strict();
+/** The card says which execution permission a plan changes when it changes a bot's MCP servers. */
+const touchesMcp = (request: TeamSetupRequest) => request.operations.some((operation) => operation.fields.mcpServers !== undefined);
 const planSchema = z.object({
   reason: z.string().trim().min(1).max(500),
   newTeams: z.array(teamName).max(8).default([]),
@@ -37,6 +42,19 @@ const planSchema = z.object({
     z.object({ action: z.literal("update"), botId: z.string().min(1).max(128), fields: fieldsSchema }).strict(),
   ])).min(1).max(MAX_SETUP_BOTS, `Review at most ${MAX_SETUP_BOTS} bots in one setup`),
 }).strict();
+
+function takenKeys(path: readonly PropertyKey[]): string {
+  const last = path.at(-1);
+  if (last === "fields") return Object.keys(fieldsSchema.shape).join(", ");
+  if (last === "modelSelection") return "instanceId, model, effort, variant";
+  return path.length ? "action, key (create) or botId (update), fields" : Object.keys(planSchema.shape).join(", ");
+}
+
+function planProblem(error: z.ZodError): string {
+  const issue = error.issues[0];
+  if (issue?.code !== "unrecognized_keys") return issue?.message ?? "Invalid team setup";
+  return `${issue.path.length ? `${issue.path.map(String).join(".")}: ` : ""}${issue.message}. It takes ${takenKeys(issue.path)}.`;
+}
 
 export class TeamSetupError extends Error {
   readonly status: number;
@@ -64,6 +82,7 @@ export function teamSetupRevision(bot: BotRecord, fields?: TeamSetupFields): str
   if (fields.section !== undefined) scope.section = section(bot.section);
   if (fields.modelSelection !== undefined) scope.modelSelection = bot.modelSelection;
   if (fields.chiefOfStaff !== undefined) scope.chiefOfStaff = Boolean(bot.chiefOfStaff);
+  if (fields.mcpServers !== undefined) scope.mcpServers = bot.mcpServers ?? null;
   return createHash("sha256").update(JSON.stringify(scope)).digest("hex");
 }
 
@@ -73,7 +92,7 @@ interface SetupStore {
   messagesFor(threadId: string): Array<{ id: string; role?: string; card?: OptionCardData }>;
   appendMessage(threadId: string, message: { role: "bot"; kind: "options"; card: OptionCardData; from?: { botId: string; name: string; color: string } }): { id: string };
   patchMessage(threadId: string, messageId: string, patch: { card: OptionCardData }): unknown;
-  applyTeamSetup(request: TeamSetupRequest): TeamSetupResult;
+  applyTeamSetup(request: TeamSetupRequest, approval?: NewBotApproval): TeamSetupResult;
   patchBot(id: string, patch: Partial<BotRecord>): unknown;
 }
 
@@ -84,10 +103,14 @@ interface Options {
   canPersist(botId: string, threadId: string): { ok: true } | { ok: false; status: number; error: string };
   validateModel(selection: ModelSelection, current?: BotRecord): string | null;
   targetBusy(botId: string, sourceThreadId?: string): boolean;
+  /** The approval level the saved New bot defaults give a new bot, if they set one this setup may use. */
+  newBotApproval?(): NewBotApproval | undefined;
   /** Null only where the owner confirms on a card (direct-apply.ts). */
   autoApply?(botId: string, threadId: string): DirectApply | null;
   driverCapabilities?(instanceId: string): DriverCapabilities | undefined;
   validateChange?(before: BotRecord, fields: TeamSetupFields): void;
+  /** Why this MCP server cannot be given to this bot (unknown, or another bot's own); null when it can. */
+  mcpServerProblem?(name: string, botId: string): string | null;
   maxBots: number;
   ownsThread(botId: string, threadId: string): boolean;
   /** `request` only for a reviewed deletion; Undo of a creation deletes without one. */
@@ -121,7 +144,7 @@ export class TeamSetupRequestService {
   }
 
   private fields(input: z.infer<typeof fieldsSchema>, current?: BotRecord): TeamSetupFields {
-    const { section: targetSection, modelSelection, chiefOfStaff, cwd: rawCwd, ...profile } = input;
+    const { section: targetSection, modelSelection, chiefOfStaff, cwd: rawCwd, mcpServers, ...profile } = input;
     const safe = Object.fromEntries(Object.entries(profile).map(([key, value]) => [key, redactSecretsInText(value!)]));
     const parsed = parseBotProfilePatch(safe, true);
     if (!parsed.ok) throw new TeamSetupError(parsed.error);
@@ -140,6 +163,15 @@ export class TeamSetupRequestService {
       if (error) throw new TeamSetupError(error);
       result.modelSelection = selection;
     }
+    if (mcpServers !== undefined) {
+      if (!current) throw new TeamSetupError("MCP servers can only be chosen for an existing bot; a new bot starts with the Chief's apps");
+      const names = [...new Set(mcpServers)];
+      for (const name of names) {
+        const problem = mcpServerNameError(name) ?? this.options.mcpServerProblem?.(name, current.id) ?? null;
+        if (problem) throw new TeamSetupError(`MCP server ${JSON.stringify(name)}: ${problem}`);
+      }
+      result.mcpServers = names;
+    }
     return result;
   }
 
@@ -151,7 +183,11 @@ export class TeamSetupRequestService {
     if (confirming && teamSetupRevision(chief, this.requesterScope(request)) !== request.requesterRevision) throw new TeamSetupError("The Chief's settings changed. This setup was cancelled; review a new proposal.", 409);
     const existingTeams = new Set(this.options.teams().map(section));
     if (new Set([...(chief.managedSections ?? []), ...request.newTeams]).size > 100) throw new TeamSetupError("A Chief may coordinate at most 100 additional teams", 409);
-    for (const name of request.newTeams) if (existingTeams.has(name)) throw new TeamSetupError(`Team ${JSON.stringify(name)} now exists. Review a new proposal.`, 409);
+    for (const name of request.newTeams) if (existingTeams.has(name)) throw new TeamSetupError(confirming
+      ? `Team ${JSON.stringify(name)} now exists. Review a new proposal.`
+      // At proposal time no card exists yet, so the stale-card wording above reads as "a review is pending".
+      : `Team ${JSON.stringify(name)} already exists, so it can't be a new team. ${this.options.hasTeamAuthority(chief, name)
+        ? "Leave it out of newTeams and use it as an existing team." : outsideDepartmentReason(chief, { section: name })} Nothing was proposed.`, 409);
     const allowed = (name?: string) => request.newTeams.includes(section(name)) || this.options.hasTeamAuthority(chief, name);
     const targets = new Set<string>();
     const projected = this.options.store.bots.map((bot) => ({ id: bot.id, name: bot.name, section: section(bot.section), chiefOfStaff: bot.chiefOfStaff, hidden: bot.hidden, createdBy: bot.createdBy, reportsTo: bot.reportsTo }));
@@ -199,7 +235,7 @@ export class TeamSetupRequestService {
 
   private prepare(args: SetupArgs) {
     const parsed = planSchema.safeParse(args.plan);
-    if (!parsed.success) throw new TeamSetupError(parsed.error.issues[0]?.message ?? "Invalid team setup");
+    if (!parsed.success) throw new TeamSetupError(planProblem(parsed.error));
     const chief = this.chief(args.botId);
     const combined = new Map<string, typeof parsed.data.operations[number]>();
     for (const operation of parsed.data.operations) {
@@ -302,6 +338,9 @@ export class TeamSetupRequestService {
               this.options.driverCapabilities((value as ModelSelection).instanceId),
             ));
           }
+        } else if (key === "mcpServers") {
+          const list = (names?: string[] | null) => names == null ? "every enabled server" : names.length ? names.join(", ") : "none";
+          lines.push(`MCP servers it can use: ${current ? `${list(current.mcpServers)} → ` : ""}${list(value as string[])}`);
         } else {
           const before = current ? (key === "section" ? current.section || "General" : String(current[key as keyof BotRecord] ?? "")) : undefined;
           const after = key === "section" ? (value as string) || "General" : String(value);
@@ -314,7 +353,7 @@ export class TeamSetupRequestService {
       if (request.operations.some((operation) => operation.action === "create")) {
         lines.push(`New bots stay owner-owned after creation: the same connected apps as @${chief.name}, the workspace's default access level, a private workspace by default, avatar untouched.`);
       }
-      lines.push("Existing execution permissions are unchanged.");
+      lines.push(touchesMcp(request) ? "Other execution permissions are unchanged." : "Existing execution permissions are unchanged.");
     }
     if (!immediate) lines.push("After this decision the Chief continues once with the result.");
     const title = request.deletion ? `Delete @${request.deletion.name}?`
@@ -338,7 +377,7 @@ export class TeamSetupRequestService {
       const bot = operation.action === "update" ? this.options.store.bot(operation.botId) : undefined;
       return bot ? [{ id: bot.id, profile: profileSnapshot(bot) }] : [];
     });
-    const result = this.options.store.applyTeamSetup(request);
+    const result = this.options.store.applyTeamSetup(request, this.options.newBotApproval?.());
     for (const { id, profile } of before) {
       const bot = this.options.store.bot(id);
       if (bot) recordProfileChange(id, actor, via, profile, profileSnapshot(bot));

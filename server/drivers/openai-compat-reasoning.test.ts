@@ -36,8 +36,9 @@ async function turn(instance: ProviderInstance, model: string, variant?: string)
   const recorder = recordEvents(instance.adapter);
   const threadId = randomUUID();
   await instance.adapter.sendTurn({ threadId, text: "hi", model, ...(variant ? { variant } : {}) });
-  await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId);
+  const completed = await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId);
   recorder.stop();
+  return completed;
 }
 
 const variantsOf = (instance: ProviderInstance) => Object.fromEntries(instance.models.options.map((option) => [option.id, option.variants?.map((choice) => choice.id)]));
@@ -56,8 +57,9 @@ describe("reasoning effort on an API key", () => {
       });
       await turn(instance, "gpt-5.2", "low");
       await turn(instance, "gpt-5.2");
-      await turn(instance, "gpt-4.1", "low");
-      expect(chats.map((chat) => chat.reasoning_effort)).toEqual(["low", undefined, undefined]);
+      expect(await turn(instance, "gpt-4.1", "low"), "a level the model does not list is left out").toMatchObject({ ok: true });
+      expect(await turn(instance, "gpt-5.2", "max")).toMatchObject({ ok: true });
+      expect(chats.map((chat) => chat.reasoning_effort)).toEqual(["low", undefined, undefined, undefined]);
     } finally { await instance.dispose(); }
   });
 
@@ -66,22 +68,24 @@ describe("reasoning effort on an API key", () => {
     const instance = await create({ url: "https://openrouter.ai/api/v1" });
     try {
       expect(instance.adapter.capabilities.modelVariants).toBe(true);
-      expect(variantsOf(instance)).toMatchObject({ "acme/thinker": ["low", "medium", "high"], "acme/plain": undefined });
+      expect(variantsOf(instance)).toMatchObject({ "acme/thinker": ["low", "medium", "high", "xhigh", "max"], "acme/plain": undefined });
       await turn(instance, "acme/thinker", "high");
-      await turn(instance, "acme/plain", "high");
-      expect(chats.map((chat) => chat.reasoning)).toEqual([{ effort: "high" }, undefined]);
+      await turn(instance, "acme/thinker", "max");
+      expect(await turn(instance, "acme/thinker", "ultra"), "a level the model does not list is left out").toMatchObject({ ok: true });
+      expect(await turn(instance, "acme/plain", "high")).toMatchObject({ ok: true });
+      expect(chats.map((chat) => chat.reasoning)).toEqual([{ effort: "high" }, { effort: "max" }, undefined, undefined]);
       expect(chats.every((chat) => chat.reasoning_effort === undefined)).toBe(true);
     } finally { await instance.dispose(); }
   });
 
-  it("sends nothing to any other server, and offers it no control", async () => {
+  it("offers a compatible server the advertised control and sends its nested field", async () => {
     const chats = server([{ id: "gpt-5.2", supported_parameters: ["reasoning"] }]);
     const instance = await create({ url: "https://llm.example.test/v1" });
     try {
-      expect(instance.adapter.capabilities.modelVariants).toBeUndefined();
+      expect(instance.adapter.capabilities.modelVariants).toBe(true);
       await turn(instance, "gpt-5.2", "high");
       expect(chats[0]).not.toHaveProperty("reasoning_effort");
-      expect(chats[0]).not.toHaveProperty("reasoning");
+      expect(chats[0]).toHaveProperty("reasoning", { effort: "high" });
     } finally { await instance.dispose(); }
   });
 });
