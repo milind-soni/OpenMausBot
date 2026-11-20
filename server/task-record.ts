@@ -11,6 +11,14 @@ export function threadTitleFrom(title?: string): string {
   return title?.trim().slice(0, TASK_TITLE_MAX) || UNTITLED_THREAD;
 }
 
+/** A new thread starts at its bot's level. A pending grant is not that level: a composer grant belongs to its own
+ * thread, and a bot-wide one may still roll back, so a thread made meanwhile follows the bot live instead of keeping
+ * the Ask mask the grant shows (or a Full access that was never confirmed). */
+function botLevel(bot: BotRecord): Pick<TaskRecord, "approvalMode" | "autoApprove" | "alwaysAllow"> {
+  if (bot.approvalGrant && !bot.approvalGrant.threadOnly) return {};
+  return { approvalMode: approvalModeFor({ ...bot, approvalGrant: undefined }), autoApprove: Boolean(bot.autoApprove), alwaysAllow: [...(bot.alwaysAllow ?? [])] };
+}
+
 export function buildTask(bot: BotRecord, title?: string, projectId?: string, openedBy?: TaskOpenedBy,
   approvalMode?: "ask" | "full", modelSelection?: ModelSelection, cwd?: string | null): TaskRecord {
   const createdAt = Date.now();
@@ -24,9 +32,7 @@ export function buildTask(bot: BotRecord, title?: string, projectId?: string, op
     ...(openedBy ? { openedBy: structuredClone(openedBy) } : {}),
     resumeCursors: {},
     ...(modelSelection && !sameModelSelection(modelSelection, bot.modelSelection) ? { modelSelection: structuredClone(modelSelection) } : {}),
-    approvalMode: approvalMode ?? approvalModeFor(bot),
-    autoApprove: approvalMode ? false : Boolean(bot.autoApprove),
-    alwaysAllow: approvalMode ? [] : [...(bot.alwaysAllow ?? [])],
+    ...(approvalMode ? { approvalMode, autoApprove: false, alwaysAllow: [] } : botLevel(bot)),
     unread: false,
     activity: "idle",
     busy: false,

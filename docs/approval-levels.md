@@ -30,6 +30,12 @@ library. A level a person picks stays until someone changes it. On a hosted
 company workspace the default stays Ask, because Full access there comes only
 from the operator's dedicated policy.
 
+A thread a bot opens (its own `start_thread`, a hand-off, a burst, a routine
+run) starts at its bot's level. A level change the desktop is still confirming
+does not leak into it: a composer change belongs to that one conversation, and
+while a bot-wide change is unconfirmed the new thread follows the bot, so it
+gets the new level once confirmed and Ask if it rolls back.
+
 | Level | Behavior |
 | --- | --- |
 | **Ask for approval** | Requests approval for commands and file changes, the way the provider's supervised mode does. |
