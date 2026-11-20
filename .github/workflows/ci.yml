@@ -246,8 +246,9 @@ jobs:
         run: node scripts/testing/ci-retry-summary.mjs
       - name: Broker and Electron unit tests
         if: matrix.node_tests
-        # About half a minute; node --test has no overall deadline, so a file
-        # that never exits would otherwise hold the job to its cap.
+        # About two minutes on macOS and Windows, which the duration sequencer
+        # counts against this shard; node --test has no overall deadline, so a
+        # file that never exits would otherwise hold the job to its cap.
         timeout-minutes: 5
         run: pnpm broker:test && pnpm test:electron
 
