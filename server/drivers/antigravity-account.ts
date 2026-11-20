@@ -1,20 +1,24 @@
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { ProxyAgent, fetch as undiciFetch } from "undici";
+import type { Dispatcher } from "undici";
 
 type Identity = { email: string; method: "login" } | undefined;
 const identities = new Map<string, { fingerprint: string; expires: number; result: Promise<Identity> }>();
 
 export type AccessFetch = (url: string, init: { method?: "POST"; headers?: Record<string, string>; body?: string | URLSearchParams; redirect: "error" | "manual"; signal: AbortSignal }) => Promise<Pick<Response, "ok" | "json">>;
 
-/** Returns a fetch function that routes traffic through an HTTP/HTTPS proxy via undici ProxyAgent.
- * If proxyUrl is empty, falls back to globalThis.fetch. */
-export function createProxiedFetch(proxyUrl?: string): AccessFetch {
-  if (!proxyUrl) return fetch as unknown as AccessFetch;
-  const agent = new ProxyAgent(proxyUrl);
-  return (async (url: string, init: any) => {
-    return undiciFetch(url, { ...init, dispatcher: agent });
-  }) as unknown as AccessFetch;
+const proxies = new Map<string, Dispatcher>();
+
+/** A fetch that goes through the instance's own proxy (its HTTPS_PROXY or HTTP_PROXY), so Google sees the same route the
+ * engine takes; the global fetch without one. undici loads only once a proxy is set, and each proxy keeps one agent. */
+export function createProxiedFetch(proxyUrl?: string): (url: string, init: RequestInit) => Promise<Response> {
+  if (!proxyUrl) return fetch;
+  return async (url, init) => {
+    const { ProxyAgent, fetch: fetchVia } = await import("undici");
+    let agent = proxies.get(proxyUrl);
+    if (!agent) proxies.set(proxyUrl, agent = new ProxyAgent(proxyUrl));
+    return await fetchVia(url, { ...init, dispatcher: agent } as Parameters<typeof fetchVia>[1]) as unknown as Response;
+  };
 }
 
 /** The official ACP file stores refresh credentials, not the account email.
@@ -69,15 +73,15 @@ export async function refreshAntigravityAccess(
 async function lookup(credentials: AntigravityStoredSignIn, proxyUrl?: string): Promise<Identity> {
   try {
     const signal = AbortSignal.timeout(3_000);
-    const fetcher = proxyUrl ? createProxiedFetch(proxyUrl) : fetch;
-    const access = await refreshAntigravityAccess(credentials, signal, fetcher as AccessFetch);
+    const fetcher = createProxiedFetch(proxyUrl);
+    const access = await refreshAntigravityAccess(credentials, signal, fetcher);
     if (!access) return undefined;
     const identity = await fetcher("https://www.googleapis.com/oauth2/v3/userinfo", {
-      headers: { Authorization: "Bearer " + access.accessToken }, redirect: "error", signal,
+      headers: { Authorization: `Bearer ${access.accessToken}` }, redirect: "error", signal,
     });
     if (!identity.ok) return undefined;
     const user = await identity.json() as { email?: unknown };
-    if (typeof user.email !== "string" || user.email.length > 254 || !/^[^s@]+@[^s@]+.[^s@]+$/.test(user.email)) return undefined;
+    if (typeof user.email !== "string" || user.email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user.email)) return undefined;
     return { email: user.email, method: "login" };
   } catch {
     // Identity lookup failure must not mark a working engine as signed out.

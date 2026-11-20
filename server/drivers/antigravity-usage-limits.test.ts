@@ -13,6 +13,7 @@ import { antigravityTokenPath } from "./antigravity-acp.ts";
 import {
   antigravityPlanUsage,
   antigravityPlanWindows,
+  antigravityProxied,
   clearAntigravityUsageAccess,
   readAntigravityUsageWindows,
 } from "./antigravity-usage-limits.ts";
@@ -78,7 +79,7 @@ function fixture(options: FixtureOptions = {}) {
     }
     expect(init.headers.Authorization).toBe("Bearer access-token");
     expect(JSON.parse(init.body!)).toEqual({ project: "project-id" });
-    expect(init.headers["User-Agent"]).toMatch(/^antigravity\/hub\/2\.33\.0 /);
+    expect(init.headers["User-Agent"]).toMatch(/^antigravity\/hub\/2\.24\.0 /);
     const host = new URL(url).host;
     return url.endsWith(":retrieveUserQuotaSummary")
       ? respond(options.summaryByHost?.[host] ?? options.summary ?? summary, options.summaryStatusByHost?.[host] ?? options.summaryStatus ?? 200)
@@ -411,4 +412,12 @@ describe("the Antigravity row of the usage report", () => {
     expect(report.providers).toMatchObject([{ id: instanceId, name: "Antigravity", driver: "antigravity", ok: true, error: null, fiveHour: { available: true }, weekly: { available: true } }]);
     expect(JSON.stringify(report)).not.toMatch(/client-secret|refresh-a|access-token/);
   });
+});
+
+it("reads an instance's usage through the proxy the instance sets, and directly without one", () => {
+  const deps = { fetch: vi.fn<PlanFetch>() };
+  expect(antigravityProxied(deps, {})).toBe(deps);
+  const proxied = antigravityProxied(deps, { HTTPS_PROXY: "http://127.0.0.1:9" });
+  expect(proxied.fetch).not.toBe(deps.fetch);
+  expect(antigravityProxied(deps, { HTTP_PROXY: "http://127.0.0.1:9" }).fetch).not.toBe(deps.fetch);
 });

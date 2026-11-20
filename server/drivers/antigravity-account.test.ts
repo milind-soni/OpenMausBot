@@ -64,8 +64,7 @@ it.each(["offline", "denied", "bad-token", "bad-email"])("keeps lookup failure n
   expect(fetcher).toHaveBeenCalledTimes(calls);
 });
 
-it("supports proxyUrl and creates proxied fetch correctly", async () => {
-  const customFetch = createProxiedFetch("http://127.0.0.1:30082");
-  expect(typeof customFetch).toBe("function");
+it("goes through the instance's proxy when it sets one, and uses the global fetch otherwise", () => {
   expect(createProxiedFetch()).toBe(fetch);
+  expect(createProxiedFetch("http://127.0.0.1:30082")).not.toBe(fetch);
 });
