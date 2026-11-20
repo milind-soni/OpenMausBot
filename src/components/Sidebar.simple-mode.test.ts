@@ -177,7 +177,9 @@ describe("bot-first sidebar", () => {
     expect(working).toContain('data-testid="working-dot" title="Working" class="absolute bottom-0.5 right-0.5 size-2 rounded-full ring-2 ring-[var(--row)] bg-success"');
     expect(working).toContain('<span class="sr-only">Working</span>');
     expect(working).not.toContain('role="status"');
-    expect(working).toContain("[--row:var(--color-panel)]");
+    expect(working).toContain("[--row-base:var(--color-panel)]");
+    expect(working).toContain("max-md:[--row-base:var(--color-app)]");
+    expect(working).toContain("interaction:[--row:color-mix(in_srgb,var(--color-raised)_50%,var(--row-base))]");
   });
 
   it.each([false, true])("says the step a working bot is on in place of its last message, and its last message again once done (advanced: %s)", (advanced) => {

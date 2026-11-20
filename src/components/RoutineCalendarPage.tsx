@@ -201,7 +201,7 @@ function AttachmentChips({
         <div key={attachment.id} className="flex max-w-[260px] items-center gap-2 rounded-lg border border-hairline/50 bg-inset px-2.5 py-2 text-[12px] text-ink">
           <FileText size={14} className="shrink-0 text-accent" />
           <span className="min-w-0 flex-1 truncate">{attachment.name}</span>
-          {onRemove && <button type="button" onClick={() => onRemove(attachment.id)} className="rounded p-0.5 text-ink-secondary hover:bg-raised hover:text-ink" aria-label={t("routines.attachment.remove", { name: attachment.name })}><X size={12} /></button>}
+          {onRemove && <button type="button" onClick={() => onRemove(attachment.id)} className="rounded p-0.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink" aria-label={t("routines.attachment.remove", { name: attachment.name })}><X size={12} /></button>}
         </div>
       ))}
     </div>
@@ -241,7 +241,7 @@ function BotPicker({
               disabled={locked}
               aria-pressed={active}
               onClick={() => onChange(multiple ? (active ? selected.filter((id) => id !== bot.id) : [...selected, bot.id]) : [bot.id])}
-              className={cn("flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left motion-safe:transition-colors", active ? "bg-accent/10 ring-1 ring-inset ring-accent/25" : "hover:bg-raised", locked && "cursor-default")}
+              className={cn("flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left motion-safe:transition-colors", active ? "bg-accent/10 ring-1 ring-inset ring-accent/25" : "interaction:bg-raised/50", locked && "cursor-default")}
             >
               <BotAvatar bot={bot} state={active ? "happy" : "idle"} size={26} animated={false} />
               <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{bot.name}</span>
@@ -558,7 +558,7 @@ export function EventEditor({
                 <button
                   type="button"
                   onClick={() => selectRoutineTarget("bot")}
-                  className={cn("flex items-start gap-3 rounded-xl border p-3 text-left transition", routineTarget === "bot" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}
+                  className={cn("flex items-start gap-3 rounded-xl border p-3 text-left transition", routineTarget === "bot" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset interaction:bg-raised/50")}
                 >
                   <UserRoundPlus size={17} className={cn("mt-0.5 shrink-0", routineTarget === "bot" ? "text-accent" : "text-ink-secondary")} />
                   <span><span className="block text-[13px] font-medium text-ink">{t("routines.editor.botTask")}</span><span className="mt-1 block text-[11px] leading-relaxed text-ink-secondary">{t("routines.editor.botTaskHelp")}</span></span>
@@ -566,7 +566,7 @@ export function EventEditor({
                 <button
                   type="button"
                   onClick={() => selectRoutineTarget("room-goal")}
-                  className={cn("flex items-start gap-3 rounded-xl border p-3 text-left transition", routineTarget === "room-goal" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}
+                  className={cn("flex items-start gap-3 rounded-xl border p-3 text-left transition", routineTarget === "room-goal" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset interaction:bg-raised/50")}
                 >
                   <Target size={17} className={cn("mt-0.5 shrink-0", routineTarget === "room-goal" ? "text-accent" : "text-ink-secondary")} />
                   <span><span className="block text-[13px] font-medium text-ink">{t("routines.editor.teamGoal")}</span><span className="mt-1 block text-[11px] leading-relaxed text-ink-secondary">{t("routines.editor.teamGoalHelp")}</span></span>
@@ -611,7 +611,7 @@ export function EventEditor({
               {isCronChoice(recurrence) && kind === "routine" && cron && <CronScheduleFields choice={recurrence} value={cronDraft} onChange={(draft) => { setCronDraft(draft); setCronChanged(true); }} runs={cron.runs} error={cron.error} />}
               {recurrence === "custom" && (
                 <div className="flex flex-wrap gap-1.5">
-                  {DAY_NAMES.map((label, day) => <button key={label} type="button" onClick={() => setWeekdays((current) => current.includes(day) ? (current.length === 1 ? current : current.filter((value) => value !== day)) : [...current, day].sort())} className={cn("size-8 rounded-full text-[10px] font-semibold", weekdays.includes(day) ? "bg-accent text-white" : "bg-inset text-ink-secondary hover:bg-raised hover:text-ink")}>{dayName(day).charAt(0).toLocaleUpperCase(intlLocale())}</button>)}
+                  {DAY_NAMES.map((label, day) => <button key={label} type="button" onClick={() => setWeekdays((current) => current.includes(day) ? (current.length === 1 ? current : current.filter((value) => value !== day)) : [...current, day].sort())} className={cn("size-8 rounded-full text-[10px] font-semibold", weekdays.includes(day) ? "bg-accent text-white" : "bg-inset text-ink-secondary interaction:bg-raised/50 hover:text-ink")}>{dayName(day).charAt(0).toLocaleUpperCase(intlLocale())}</button>)}
                 </div>
               )}
               {recurrence === "interval" && kind === "routine" && (
@@ -708,7 +708,7 @@ export function EventEditor({
                               : [...current, day].sort())}
                             aria-label={t(intervalWeekdays.includes(day) ? "routines.interval.daySelected" : "routines.interval.dayNotSelected", { day: dayName(day) })}
                             aria-pressed={intervalWeekdays.includes(day)}
-                            className={cn("size-8 rounded-full text-[10px] font-semibold", intervalWeekdays.includes(day) ? "bg-accent text-white" : "bg-inset text-ink-secondary hover:bg-raised hover:text-ink")}
+                            className={cn("size-8 rounded-full text-[10px] font-semibold", intervalWeekdays.includes(day) ? "bg-accent text-white" : "bg-inset text-ink-secondary interaction:bg-raised/50 hover:text-ink")}
                           >
                             {t("routines.interval.dayChips").split(" ")[day]}
                           </button>
@@ -808,7 +808,7 @@ export function EventEditor({
               </div>
             ) : <div className="min-w-0 flex-1 space-y-2">
               <input ref={fileInput} type="file" multiple className="hidden" onChange={(event) => { void pickFiles(event.target.files); event.target.value = ""; }} />
-              <button type="button" onClick={() => fileInput.current?.click()} className="rounded-lg border border-hairline/50 px-3 py-2 text-[13px] font-medium text-ink hover:bg-raised">{t("routines.attachment.add")}</button>
+              <button type="button" onClick={() => fileInput.current?.click()} className="rounded-lg border border-hairline/50 px-3 py-2 text-[13px] font-medium text-ink interaction:bg-raised/50">{t("routines.attachment.add")}</button>
               <AttachmentChips attachments={attachments} onRemove={(id) => setAttachments((current) => current.filter((attachment) => attachment.id !== id))} />
               <div className="text-[11px] leading-relaxed text-ink-secondary">
                 {kind === "routine"
@@ -831,8 +831,8 @@ export function EventEditor({
                     <div className="mt-1 text-[11px] leading-relaxed text-ink-secondary">{t("routines.editor.roomGoalKept")}</div>
                   </div>
                 ) : <div className="grid grid-cols-2 gap-2">
-                  <button type="button" onClick={() => setRunOn("maus")} className={cn("rounded-xl border p-3 text-left", runOn === "maus" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[13px] font-medium text-ink">{t("routines.editor.currentSetup")}</div><div className="mt-1 text-[11px] text-ink-secondary">Keeps its model and configured computer, including a self-hosted VPS.</div></button>
-                  <button type="button" disabled={!cloudReady || attachments.length > 0} onClick={() => setRunOn("cloud")} className={cn("rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset hover:bg-raised")}><div className="text-[13px] font-medium text-ink">{t("routines.runsOn.boat")}</div><div className="mt-1 text-[11px] text-ink-secondary">{t(cloudHome ? "routines.runsOn.boatHintCloudHome" : "routines.runsOn.boatHint")}</div></button>
+                  <button type="button" onClick={() => setRunOn("maus")} className={cn("rounded-xl border p-3 text-left", runOn === "maus" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset interaction:bg-raised/50")}><div className="text-[13px] font-medium text-ink">{t("routines.editor.currentSetup")}</div><div className="mt-1 text-[11px] text-ink-secondary">Keeps its model and configured computer, including a self-hosted VPS.</div></button>
+                  <button type="button" disabled={!cloudReady || attachments.length > 0} onClick={() => setRunOn("cloud")} className={cn("rounded-xl border p-3 text-left disabled:cursor-not-allowed disabled:opacity-45", runOn === "cloud" ? "border-accent/60 bg-accent/10" : "border-hairline/50 bg-inset interaction:bg-raised/50")}><div className="text-[13px] font-medium text-ink">{t("routines.runsOn.boat")}</div><div className="mt-1 text-[11px] text-ink-secondary">{t(cloudHome ? "routines.runsOn.boatHintCloudHome" : "routines.runsOn.boatHint")}</div></button>
                 </div>}
               </div>
             </div>
@@ -852,7 +852,7 @@ export function EventEditor({
       <div ref={dialogRef} data-routine-editor="" role="dialog" aria-modal="true" aria-label={t(existingRoutine || existingCall ? "routines.event.editLabel" : "routines.event.createLabel")} tabIndex={-1} className="ui-modal flex max-h-full w-full max-w-[600px] flex-col overflow-hidden shadow-float">
         <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/40 px-4 py-3 sm:px-6">
           <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-ink">{headerTitle}</h2>
-          <button type="button" onClick={onClose} className="grid size-8 shrink-0 place-items-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink" aria-label={t("common.close")}><X size={17} /></button>
+          <button type="button" onClick={onClose} className="grid size-8 shrink-0 place-items-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink" aria-label={t("common.close")}><X size={17} /></button>
         </div>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
@@ -884,7 +884,7 @@ export function EventEditor({
                       type="button"
                       aria-pressed={recurrence === choice}
                       onClick={() => selectRecurrence(choice)}
-                      className={cn("min-h-7 whitespace-nowrap rounded-full border px-2.5 text-[12px] font-medium motion-safe:transition-colors", recurrence === choice ? "border-ink/40 bg-control text-ink" : "border-hairline/35 bg-inset text-ink-secondary hover:bg-raised hover:text-ink")}
+                      className={cn("min-h-7 whitespace-nowrap rounded-full border px-2.5 text-[12px] font-medium motion-safe:transition-colors", recurrence === choice ? "border-ink/40 bg-control text-ink" : "border-hairline/35 bg-inset text-ink-secondary interaction:bg-raised/50 hover:text-ink")}
                     >
                       {t(label)}
                     </button>
@@ -924,7 +924,7 @@ export function EventEditor({
                     {!advanced && kind === "routine" ? (
                       <Select aria-label={t("routines.editor.who")} className="w-full [&_button]:w-full" value={botIds[0] ?? ""} disabled={Boolean(lockedBotId)}
                         onChange={(event) => selectBots([event.target.value])}
-                        triggerContent={<span className="flex min-h-9 w-full min-w-0 items-center gap-2 rounded-lg border border-hairline/45 bg-control px-3 text-start text-[13px] text-ink hover:bg-raised">
+                        triggerContent={<span className="flex min-h-9 w-full min-w-0 items-center gap-2 rounded-lg border border-hairline/45 bg-control px-3 text-start text-[13px] text-ink interaction:bg-raised/50">
                           {selectedBots[0] && <BotAvatar bot={selectedBots[0]} size={24} state="idle" animated={false} />}
                           <span className="min-w-0 flex-1 truncate">{selectedBots[0]?.name ?? t("routines.editor.who")}</span>
                           <ChevronDown size={14} className="shrink-0 text-ink-secondary" aria-hidden="true" />
@@ -935,7 +935,7 @@ export function EventEditor({
                     {(advanced || kind === "call") && <div className="mt-2 text-[12px] text-ink-secondary">{kind === "routine" ? t("routines.event.botOwnsRuns") : t(selectedBots.length === 0 ? "routines.event.invitedNone" : selectedBots.length === 1 ? "routines.event.invitedOne" : "routines.event.invitedMany", { count: selectedBots.length })}</div>}{kind === "routine" && <RoutineAudience team={state.config?.team} bot={selectedBots[0]} value={resultsThreadId} madeIn={existingRoutine?.sourceThreadId} />}
                   </>
                 ) : (
-                  <button type="button" onClick={() => { dispatch({ type: "newBot" }); onClose(); }} className="w-full rounded-xl border border-dashed border-accent/45 bg-accent/[0.06] px-4 py-4 text-left hover:bg-accent/10">
+                  <button type="button" onClick={() => { dispatch({ type: "newBot" }); onClose(); }} className="w-full rounded-xl border border-dashed border-accent/45 bg-accent/[0.06] px-4 py-4 text-left interaction:bg-raised/50">
                     <div className="text-[13px] font-medium text-accent">{t("routines.event.createFirstBot")}</div>
                     <div className="mt-1 text-[12px] text-ink-secondary">{t("routines.event.needsBot")}</div>
                   </button>
@@ -964,7 +964,7 @@ export function EventEditor({
                 aria-expanded={moreOpen}
                 aria-controls={moreId}
                 onClick={() => setMoreOpen((open) => !open)}
-                className="flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-start text-[13px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
+                className="flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-start text-[13px] font-medium text-ink-secondary interaction:bg-raised/50 hover:text-ink"
               >
                 <ChevronRight size={14} className={cn("motion-safe:transition-transform", moreOpen && "rotate-90")} />
                 {t(moreOpen ? "routines.editor.fewer" : "routines.editor.more")}
@@ -1102,14 +1102,14 @@ export function QuickComposer({
     <div ref={dialogRef} role="dialog" aria-label={t("routines.quick.label")} style={dialogPosition ?? undefined} className={cn("fixed z-50 max-h-[calc(100vh-24px)] w-[min(430px,calc(100vw-24px))] overflow-y-auto rounded-2xl border border-hairline/60 bg-panel shadow-2xl", !dialogPosition && "left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2")}>
       <div className="flex items-center justify-between bg-raised/70 px-4 py-2.5">
         <div className="text-[12px] font-medium text-ink-secondary">{t("routines.quick.title")}</div>
-        <button onClick={onClose} className="rounded-full p-1.5 text-ink-secondary hover:bg-inset hover:text-ink" aria-label={t("common.close")}><X size={16} /></button>
+        <button onClick={onClose} className="rounded-full p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink" aria-label={t("common.close")}><X size={16} /></button>
       </div>
       <div className="space-y-3 p-4">
         <input autoFocus value={name} onChange={(event) => setName(event.target.value)} aria-label={t("routines.editor.titleLabel")} placeholder={t("routines.event.addTitle")} onKeyDown={(event) => { if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return; if (event.key === "Enter" && valid) void save(); }} className="w-full border-b border-hairline/60 bg-transparent pb-2 text-[18px] font-medium text-ink outline-none placeholder:text-ink-tertiary focus:border-accent" />
         {!routinesOnly && !seed.limitReset && (
           <div className="flex items-center gap-1 border-b border-hairline/35 pb-2">
-            <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "routine" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>{t("routines.kind.routine")}</button>
-            <button type="button" onClick={() => setKind("call")} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "call" ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised hover:text-ink")}>{t("routines.kind.call")}</button>
+            <button type="button" onClick={() => { setKind("routine"); setBotIds((ids) => ids.slice(0, 1)); }} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "routine" ? "bg-accent/15 text-accent" : "text-ink-secondary interaction:bg-raised/50 hover:text-ink")}>{t("routines.kind.routine")}</button>
+            <button type="button" onClick={() => setKind("call")} className={cn("rounded-lg px-3 py-1.5 text-[12px] font-medium", kind === "call" ? "bg-accent/15 text-accent" : "text-ink-secondary interaction:bg-raised/50 hover:text-ink")}>{t("routines.kind.call")}</button>
           </div>
         )}
         <div className="flex items-start gap-3 text-[13px] text-ink">
@@ -1119,7 +1119,7 @@ export function QuickComposer({
         <div className="flex items-start gap-3">
           <UserRoundPlus size={16} className="mt-2.5 shrink-0 text-ink-secondary" />
           {bots.length === 0 ? (
-            <button type="button" onClick={() => { dispatch({ type: "newBot" }); onClose(); }} className="min-w-0 flex-1 rounded-xl border border-dashed border-accent/45 bg-accent/[0.06] px-3 py-3 text-left hover:bg-accent/10">
+            <button type="button" onClick={() => { dispatch({ type: "newBot" }); onClose(); }} className="min-w-0 flex-1 rounded-xl border border-dashed border-accent/45 bg-accent/[0.06] px-3 py-3 text-left interaction:bg-raised/50">
               <div className="text-[12px] font-medium text-accent">{t("routines.event.createFirstBot")}</div>
               <div className="mt-0.5 text-[11px] text-ink-secondary">{t("routines.quick.comeBack")}</div>
             </button>
@@ -1140,7 +1140,7 @@ export function QuickComposer({
         {error && <div className="rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-danger">{error}</div>}
       </div>
       <div className="flex items-center justify-end gap-2 border-t border-hairline/40 px-4 py-3">
-        <button onClick={() => onMore({ ...seed, kind, botIds, name, description, durationMinutes, resultsThreadId })} title={t("routines.quick.moreTitle")} className="rounded-lg px-3 py-2 text-[12px] font-medium text-accent hover:bg-accent/10">{t("routines.editor.more")}</button>
+        <button onClick={() => onMore({ ...seed, kind, botIds, name, description, durationMinutes, resultsThreadId })} title={t("routines.quick.moreTitle")} className="rounded-lg px-3 py-2 text-[12px] font-medium text-accent interaction:bg-raised/50">{t("routines.editor.more")}</button>
         <button onClick={save} disabled={!valid || working} className="flex items-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-[12px] font-semibold text-white hover:brightness-110 disabled:opacity-40">{working && <Loader2 size={13} className="animate-spin" />}{t("common.save")}</button>
       </div>
     </div>
@@ -1426,7 +1426,7 @@ export function EventDetails({
             <span className="text-[11px] text-ink-secondary">{niceDate(item.at)} · {niceTime(item.at)}{isCall ? ` – ${niceTime(item.at + item.durationMinutes * 60_000)}` : ""}</span>
           </div>
         </div>
-        <button type="button" onClick={onClose} className="rounded-full p-1.5 text-ink-secondary hover:bg-raised hover:text-ink" aria-label={t("routines.drawer.close")}><X size={16} /></button>
+        <button type="button" onClick={onClose} className="rounded-full p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink" aria-label={t("routines.drawer.close")}><X size={16} /></button>
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-4">
@@ -1458,7 +1458,7 @@ export function EventDetails({
         {attachments.length > 0 && <DrawerField label={t("routines.drawer.attachments")}><AttachmentChips attachments={attachments} />{call && <div className="mt-1.5 text-[11px] leading-relaxed text-ink-secondary">{t(call.botIds.length > 1 ? "routines.drawer.callSharedHelp" : "routines.drawer.callKeptHelp")}</div>}</DrawerField>}
         {!isCall && <DrawerField label={t("routines.drawer.runLimit")}><div className="text-[13px] text-ink">{safetyLimit == null ? t("routines.drawer.noTimeLimit", { duration: durationLabel(isRoomGoal ? ROUTINE_GOAL_RUN_LIMIT_MINUTES : ROUTINE_RUN_LIMIT_MINUTES) }) : t("routines.drawer.stopsAfter", { duration: durationLabel(safetyLimit) })}</div></DrawerField>}
         {!isCall && (
-          <DrawerField label={t("routines.logs")} action={routine && <button type="button" onClick={() => { dispatch({ type: "showRoutines", section: "logs", routineId: routine.id, botId: routine.botId }); onClose(); }} className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-accent-text hover:bg-raised"><FileText size={11} />{t("routines.drawer.allRuns")}</button>}>
+          <DrawerField label={t("routines.logs")} action={routine && <button type="button" onClick={() => { dispatch({ type: "showRoutines", section: "logs", routineId: routine.id, botId: routine.botId }); onClose(); }} className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-accent-text interaction:bg-raised/50"><FileText size={11} />{t("routines.drawer.allRuns")}</button>}>
             {recentRuns.length === 0
               ? <div className="text-[12px] text-ink-secondary">{t("routines.drawer.noRuns")}</div>
               : <div className="space-y-1">{recentRuns.map((recent) => <RecentRunRow key={recent.id} run={recent} current={recent.id === run?.id} onOpen={() => onOpenRun?.(recent)} />)}</div>}
@@ -1471,19 +1471,19 @@ export function EventDetails({
         {routine && (
           <div className="flex items-center gap-2">
             <button onClick={runRoutineNow} disabled={working} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-accent-ink hover:brightness-110 disabled:opacity-50">{starting ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}{starting ? t("routines.starting") : t("routines.runNow")}</button>
-            <button disabled={working} onClick={() => void invoke(`/api/routines/${routine.id}`, "PATCH", { enabled: !routine.enabled })} title={t(routine.enabled ? "routines.drawer.pauseRoutine" : "routines.drawer.resumeRoutine")} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-hairline/50 bg-control px-3 py-2 text-[12px] font-medium text-ink hover:bg-raised-hover disabled:opacity-40">{routine.enabled ? <Pause size={13} /> : <Play size={13} />}{routine.enabled ? t("routines.pause") : t("routines.resume")}</button>
+            <button disabled={working} onClick={() => void invoke(`/api/routines/${routine.id}`, "PATCH", { enabled: !routine.enabled })} title={t(routine.enabled ? "routines.drawer.pauseRoutine" : "routines.drawer.resumeRoutine")} className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-hairline/50 bg-control px-3 py-2 text-[12px] font-medium text-ink interaction:bg-raised/50 disabled:opacity-40">{routine.enabled ? <Pause size={13} /> : <Play size={13} />}{routine.enabled ? t("routines.pause") : t("routines.resume")}</button>
           </div>
         )}
         <div className="flex flex-wrap items-center gap-1">
           {roomId && <button onClick={() => onOpenRoom(roomId)} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-accent-ink hover:brightness-110"><ExternalLink size={13} />{t("routines.drawer.joinGroup")}</button>}
           {call && call.botIds.length > 1 && <button onClick={joinRoom} disabled={working} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-[12px] font-semibold text-accent-ink hover:brightness-110 disabled:opacity-50"><ExternalLink size={13} />{t("routines.drawer.joinGroup")}</button>}
-          {isRoomGoal && goalGroup && !executionThreadId && <button onClick={() => { onOpenRoom(goalGroup.id); onClose(); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"><ExternalLink size={13} />{t("routines.drawer.openGroup")}</button>}
-          {canOpenExecution && <button onClick={openRunTask} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"><ExternalLink size={13} />{t(isRoomGoal && goalGroupId ? "routines.drawer.openGroupThread" : "routines.drawer.openThread")}</button>}
-          {canOpenResults && openResultsId && <button type="button" onClick={() => { openThread(dispatch, { botId: botIds[0], threadId: openResultsId }, state, showThreads); onClose(); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"><ExternalLink size={13} />{t("routines.results.open")}</button>}
-          {run && ["queued", "running", "waiting"].includes(run.status) && <button onClick={() => void invoke(`/api/routine-runs/${run.id}/cancel`)} disabled={working} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"><X size={13} />{t("routines.drawer.cancelRun")}</button>}
+          {isRoomGoal && goalGroup && !executionThreadId && <button onClick={() => { onOpenRoom(goalGroup.id); onClose(); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"><ExternalLink size={13} />{t("routines.drawer.openGroup")}</button>}
+          {canOpenExecution && <button onClick={openRunTask} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"><ExternalLink size={13} />{t(isRoomGoal && goalGroupId ? "routines.drawer.openGroupThread" : "routines.drawer.openThread")}</button>}
+          {canOpenResults && openResultsId && <button type="button" onClick={() => { openThread(dispatch, { botId: botIds[0], threadId: openResultsId }, state, showThreads); onClose(); }} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"><ExternalLink size={13} />{t("routines.results.open")}</button>}
+          {run && ["queued", "running", "waiting"].includes(run.status) && <button onClick={() => void invoke(`/api/routine-runs/${run.id}/cancel`)} disabled={working} className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40"><X size={13} />{t("routines.drawer.cancelRun")}</button>}
           <div className="ml-auto flex items-center gap-1">
-            {(routine || call) && <button onClick={onEdit} className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-ink hover:bg-raised">{t("routines.edit")}</button>}
-            {(routine || call) && <button onClick={() => void deleteEvent()} className="rounded-lg p-2 text-ink-secondary hover:bg-danger/10 hover:text-danger" title={t("routines.delete")} aria-label={t("routines.delete")}><Trash2 size={14} /></button>}
+            {(routine || call) && <button onClick={onEdit} className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-ink interaction:bg-raised/50">{t("routines.edit")}</button>}
+            {(routine || call) && <button onClick={() => void deleteEvent()} className="rounded-lg p-2 text-ink-secondary interaction:bg-danger/10 hover:text-danger" title={t("routines.delete")} aria-label={t("routines.delete")}><Trash2 size={14} /></button>}
           </div>
         </div>
       </div>
@@ -1522,7 +1522,7 @@ function RecentRunRow({ run, current, onOpen }: { run: RoutineRun; current: bool
       onClick={onOpen}
       aria-label={t("routines.openRun", { name: run.routineName, status: routineRunLabel(run) })}
       aria-current={current || undefined}
-      className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-raised", current && "bg-raised")}
+      className={cn("flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left interaction:bg-raised/50", current && "bg-raised")}
     >
       {ok
         ? <CheckCircle2 size={14} className="shrink-0 text-success" aria-hidden="true" />
@@ -1558,7 +1558,7 @@ export function PausedList({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-3" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("routines.paused.title")} tabIndex={-1} className="w-full max-w-[520px] rounded-2xl border border-hairline/60 bg-panel shadow-2xl">
-        <div className="flex items-center justify-between border-b border-hairline/40 px-5 py-4"><div><div className="text-[16px] font-semibold text-ink">{t("routines.paused.title")}</div><div className="mt-0.5 text-[12px] text-ink-secondary">{t("routines.paused.help")}</div></div><button onClick={onClose} className="rounded-full p-2 text-ink-secondary hover:bg-raised" aria-label={t("routines.paused.close")}><X size={17} /></button></div>
+        <div className="flex items-center justify-between border-b border-hairline/40 px-5 py-4"><div><div className="text-[16px] font-semibold text-ink">{t("routines.paused.title")}</div><div className="mt-0.5 text-[12px] text-ink-secondary">{t("routines.paused.help")}</div></div><button onClick={onClose} className="rounded-full p-2 text-ink-secondary interaction:bg-raised/50" aria-label={t("routines.paused.close")}><X size={17} /></button></div>
         <div className="max-h-[55vh] space-y-1 overflow-y-auto p-3">
           {routines.map((routine) => {
             const bot = bots.find((candidate) => candidate.id === routine.botId);
@@ -1566,15 +1566,15 @@ export function PausedList({
               ? groups.find((candidate) => candidate.id === routine.groupId)
               : undefined;
             return (
-              <div key={routine.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 hover:bg-raised/60">
+              <div key={routine.id} className="flex items-center gap-3 rounded-xl px-3 py-2.5 interaction:bg-raised/50">
                 {room ? <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-accent/12 text-accent"><UsersRound size={17} /></span> : bot && <BotAvatar bot={bot} state="sleeping" size={36} animated={false} />}
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[13px] font-medium text-ink">{routine.name}</div>
                   <div className="mt-0.5 truncate text-[11px] text-ink-secondary">{room ? `${t("routines.editor.teamGoal")} · ${room.name} · ` : ""}{scheduleLabel(routine.schedule)}</div>
                 </div>
-                {room && <button onClick={() => { onOpenRoom(room.id); onClose(); }} className="rounded-lg px-2 py-1.5 text-[11px] text-ink-secondary hover:bg-inset">{t("routines.group")}</button>}
+                {room && <button onClick={() => { onOpenRoom(room.id); onClose(); }} className="rounded-lg px-2 py-1.5 text-[11px] text-ink-secondary interaction:bg-raised/50">{t("routines.group")}</button>}
                 <button onClick={() => dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: true } })} className="rounded-lg bg-accent/15 px-2.5 py-1.5 text-[11px] font-medium text-accent">{t("routines.resume")}</button>
-                <button onClick={() => onEdit(routine)} className="rounded-lg px-2 py-1.5 text-[11px] text-ink-secondary hover:bg-inset">{t("routines.edit")}</button>
+                <button onClick={() => onEdit(routine)} className="rounded-lg px-2 py-1.5 text-[11px] text-ink-secondary interaction:bg-raised/50">{t("routines.edit")}</button>
               </div>
             );
           })}

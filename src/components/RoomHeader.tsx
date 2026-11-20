@@ -150,7 +150,7 @@ export function RoomHeader({
   const pinned = (
     <PinnedMessagesMenu
       pins={pinnedPreview(group.messages, group.pinnedMessageId, t("room.aBot"), false)}
-      triggerClassName="transition-colors hover:bg-ink/[0.06]"
+      triggerClassName="transition-colors interaction:bg-raised/50"
       onJump={(messageId) => dispatch({ type: "focusMessage", threadId: group.threadId, messageId })}
       onUnpin={remoteClient ? undefined : () => dispatch({ type: "patchGroup", groupId: group.id, patch: { pinnedMessageId: "" } })}
     />
@@ -189,7 +189,7 @@ export function RoomHeader({
             aria-label={t("chat.find")}
             aria-pressed={findOpen}
             className={cn(
-              "flex size-8 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
+              "flex size-8 items-center justify-center rounded-full transition-colors interaction:bg-raised/50",
               findOpen ? "text-accent" : "text-ink-secondary hover:text-ink",
             )}
             title={t("chat.findShortcut")}
@@ -215,7 +215,7 @@ export function RoomHeader({
               onClick={onOpenMembers}
               title={t("room.members.manage")}
               aria-label={membersLabel}
-              className="flex items-center gap-1.5 rounded-full py-0.5 pl-1 pr-1.5 hover:bg-raised/60"
+              className="flex items-center gap-1.5 rounded-full py-0.5 pl-1 pr-1.5 interaction:bg-raised/50"
             >
               {faces}
               <span className="flex size-[18px] items-center justify-center rounded-full border border-dashed border-hairline/70 text-ink-secondary">

@@ -43,7 +43,7 @@ export function EdgeRow({ edge, bots }: { edge: TeamMapEdge; bots: Bot[] }) {
         else if (edge.groupId) dispatch({ type: "select", id: edge.groupId });
         else openBot(dispatch, target, showThreads);
       }}
-      className="flex w-full items-center gap-3 rounded-xl border border-hairline/40 bg-card px-3 py-2.5 text-left transition hover:bg-raised/50"
+      className="flex w-full items-center gap-3 rounded-xl border border-hairline/40 bg-card px-3 py-2.5 text-left transition interaction:bg-raised/50"
     >
       <div className="flex min-w-0 flex-1 items-center gap-2">
         <span className="truncate text-[13px] font-medium text-ink">{source.name}</span>
@@ -212,7 +212,7 @@ export function SectionContextDialog({ section, label, onClose }: { section: str
             onClick={requestClose}
             disabled={saving}
             aria-label={t("team.instructionsClose")}
-            className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40"
           >
             <X size={19} />
           </button>
@@ -247,7 +247,7 @@ export function SectionContextDialog({ section, label, onClose }: { section: str
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-hairline/40 px-6 py-4 sm:px-8">
-          <button onClick={requestClose} disabled={saving} className="rounded-lg px-3.5 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
+          <button onClick={requestClose} disabled={saving} className="rounded-lg px-3.5 py-2 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40">
             {t("common.cancel")}
           </button>
           <button
@@ -365,30 +365,30 @@ export function TeamMapPage() {
         </div>
         {!remoteClient && <div className="flex items-center gap-2">
           <button onClick={() => setShowComputers(!showComputers)} aria-pressed={showComputers} title={t("canvas.showComputersHint")}
-            className={cn("flex items-center gap-2 rounded-lg border px-3 py-2 text-[12px] font-medium transition-colors", showComputers ? "border-accent/40 bg-accent/10 text-ink" : "border-hairline/60 bg-panel text-ink-secondary hover:bg-control hover:text-ink")}>
+            className={cn("flex items-center gap-2 rounded-lg border px-3 py-2 text-[12px] font-medium transition-colors", showComputers ? "border-accent/40 bg-accent/10 text-ink" : "border-hairline/60 bg-panel text-ink-secondary interaction:bg-raised/50 hover:text-ink")}>
             <span aria-hidden className={cn("relative h-4 w-7 shrink-0 rounded-full transition-colors", showComputers ? "bg-accent" : "bg-control")}>
               <span className={cn("absolute top-0.5 size-3 rounded-full bg-white shadow-sm transition-[left]", showComputers ? "left-3.5" : "left-0.5")} />
             </span>
             {t("canvas.showComputers")}
           </button>
-          <button onClick={() => setComputersOpen((value) => !value)} aria-label={t("canvas.computers")} aria-expanded={computersOpen} className="rounded-lg p-2 text-ink-secondary hover:bg-control hover:text-ink"><Monitor size={17} /></button>
+          <button onClick={() => setComputersOpen((value) => !value)} aria-label={t("canvas.computers")} aria-expanded={computersOpen} className="rounded-lg p-2 text-ink-secondary interaction:bg-raised/50 hover:text-ink"><Monitor size={17} /></button>
           {admin !== false && <details className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.removeAttribute("open"); }} onKeyDown={(event) => {
             if (event.key === "Escape") { event.currentTarget.removeAttribute("open"); event.currentTarget.querySelector("summary")?.focus(); }
           }}>
-            <summary aria-label={t("canvas.addToMap")} className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-hairline/60 bg-panel px-3 py-2 text-[12px] font-medium hover:bg-control [&::-webkit-details-marker]:hidden"><Plus size={14} /> {t("common.add")}</summary>
+            <summary aria-label={t("canvas.addToMap")} className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-hairline/60 bg-panel px-3 py-2 text-[12px] font-medium interaction:bg-raised/50 [&::-webkit-details-marker]:hidden"><Plus size={14} /> {t("common.add")}</summary>
             <div className="absolute right-0 top-full z-40 mt-2 w-52 rounded-xl border border-hairline/60 bg-panel p-1.5 shadow-xl" onClick={(event) => {
               const details = event.currentTarget.closest("details"); details?.querySelector("summary")?.focus(); details?.removeAttribute("open");
             }}>
-              <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => setTeamEditor({})}><Users size={14} />{t("team.create")}</button>
-              <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => { setComputersOpen(true); setCreateComputerRequest((value) => value + 1); }}><Box size={14} />{t("canvas.cloudComputer")}</button>
-              {placeOffered("vm", state.config) && <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => dispatch({ type: "toggleAppSettings", section: "computer", open: true })}><Monitor size={14} />{t("canvas.localVm")}</button>}
+              <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] interaction:bg-raised/50" onClick={() => setTeamEditor({})}><Users size={14} />{t("team.create")}</button>
+              <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] interaction:bg-raised/50" onClick={() => { setComputersOpen(true); setCreateComputerRequest((value) => value + 1); }}><Box size={14} />{t("canvas.cloudComputer")}</button>
+              {placeOffered("vm", state.config) && <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] interaction:bg-raised/50" onClick={() => dispatch({ type: "toggleAppSettings", section: "computer", open: true })}><Monitor size={14} />{t("canvas.localVm")}</button>}
             </div>
           </details>}
         </div>}
       </header>
       {(error || refreshError) && <div role="alert" className="flex shrink-0 items-center justify-between gap-3 border-b border-danger/20 bg-danger/10 px-6 py-2 text-[12px] text-danger">
         {error || refreshError}
-        <button aria-label={t("common.close")} className="rounded p-1 hover:bg-danger/10" onClick={() => { setError(null); setRefreshError(null); }}><X size={14} /></button>
+        <button aria-label={t("common.close")} className="rounded p-1 interaction:bg-danger/10" onClick={() => { setError(null); setRefreshError(null); }}><X size={14} /></button>
       </div>}
       <div className="relative flex min-h-0 flex-1">
       <div className="relative flex min-h-0 min-w-0 flex-1">

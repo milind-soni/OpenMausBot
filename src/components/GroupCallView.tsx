@@ -471,7 +471,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
       <button
         onClick={() => endCall(group.id)}
         aria-label={t("call.live.hangUp")}
-        className="absolute right-5 top-5 rounded-md p-2 text-ink-secondary hover:bg-raised hover:text-ink"
+        className="absolute right-5 top-5 rounded-md p-2 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
       >
         <X size={18} />
       </button>
@@ -542,7 +542,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
           <span>{note}</span>
           <button
             onClick={listen}
-            className="rounded-full border border-warning/40 px-3 py-1.5 text-[12px] hover:bg-warning/10"
+            className="rounded-full border border-warning/40 px-3 py-1.5 text-[12px] interaction:bg-warning/10"
           >
             {t("call.turns.tryMicrophone")}
           </button>
@@ -554,7 +554,7 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
         {speaker.isSpeaking() && (
           <button
             onClick={interruptSpeech}
-            className="rounded-full border border-hairline/50 px-4 py-2 text-[14px] text-ink hover:bg-raised"
+            className="rounded-full border border-hairline/50 px-4 py-2 text-[14px] text-ink interaction:bg-raised/50"
           >
             {t("call.turns.interrupt")}
           </button>

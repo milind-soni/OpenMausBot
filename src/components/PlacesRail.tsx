@@ -473,12 +473,12 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
     <div className="relative mt-2 flex flex-col items-center gap-2 pb-3" style={noDrag} ref={moreRef}>
       {state.places.length > RAIL_SHOWN && <button type="button" aria-label={t("rail.more", { count: state.places.length })} title={t("rail.more", { count: state.places.length })}
         aria-haspopup="dialog" aria-expanded={more} data-rail-more-button onClick={() => setMore(!more)}
-        className="grid size-6 place-items-center rounded-[8px] text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus aria-expanded:bg-ink/[0.06]">
+        className="grid size-6 place-items-center rounded-[8px] text-ink-secondary interaction:bg-raised/50 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus aria-expanded:bg-ink/[0.06]">
         <MoreHorizontal size={13} aria-hidden="true" />
       </button>}
       {more && <MorePlaces places={places} canPair={canPair} onOpen={open} onMenu={openMenu} onClose={() => setMore(false)} />}
       {canAdd && <button type="button" aria-label={addLabel} title={addLabel} aria-haspopup="dialog" data-rail-add onClick={() => { track("rail_add", { step: "opened" }); setAdding(true); }}
-        className="grid size-6 place-items-center rounded-[8px] border border-dashed border-ink/25 text-ink-secondary hover:border-ink/40 hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+        className="grid size-6 place-items-center rounded-[8px] border border-dashed border-ink/25 text-ink-secondary hover:border-ink/40 interaction:bg-raised/50 hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
         <Plus size={13} aria-hidden="true" />
       </button>}
     </div>

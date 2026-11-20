@@ -90,7 +90,7 @@ export function BudgetCard({ budget }: { budget: BudgetState | null }) {
           {t("usage.budget.warnAt")}
           <input value={warnAt} onChange={(e) => setWarnAt(e.target.value)} inputMode="numeric" aria-label={t("usage.budget.warnAt")} disabled={saving} className="w-20 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[13px] tabular-nums text-ink focus:outline-none disabled:opacity-50" />
         </label>
-        <button type="submit" disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+        <button type="submit" disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50">
           {saving && <Loader2 size={13} className="animate-spin" />}{t("common.save")}
         </button>
       </form>
@@ -176,13 +176,13 @@ export function PricesCard() {
             <input value={row.input} onChange={(e) => update(index, { input: e.target.value })} inputMode="decimal" aria-label={t("usage.prices.colInput")} disabled={saving} className={cell} />
             <input value={row.output} onChange={(e) => update(index, { output: e.target.value })} inputMode="decimal" aria-label={t("usage.prices.colOutput")} disabled={saving} className={cell} />
             <input value={row.cached} onChange={(e) => update(index, { cached: e.target.value })} inputMode="decimal" placeholder="—" aria-label={t("usage.prices.colCached")} disabled={saving} className={cell} />
-            <button type="button" onClick={() => setRows((current) => current.filter((_, i) => i !== index))} aria-label={t("usage.prices.remove")} disabled={saving} className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"><Trash2 size={13} /></button>
+            <button type="button" onClick={() => setRows((current) => current.filter((_, i) => i !== index))} aria-label={t("usage.prices.remove")} disabled={saving} className="rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-danger disabled:opacity-50"><Trash2 size={13} /></button>
           </div>
         ))}
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button type="button" onClick={() => setRows((current) => [...current, { key: "", input: "", output: "", cached: "" }])} disabled={saving} className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"><Plus size={13} />{t("usage.prices.add")}</button>
-        <button type="button" onClick={() => void save()} disabled={saving} className="ml-auto flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+        <button type="button" onClick={() => setRows((current) => [...current, { key: "", input: "", output: "", cached: "" }])} disabled={saving} className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"><Plus size={13} />{t("usage.prices.add")}</button>
+        <button type="button" onClick={() => void save()} disabled={saving} className="ml-auto flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50">
           {saving && <Loader2 size={13} className="animate-spin" />}{t("common.save")}
         </button>
       </div>

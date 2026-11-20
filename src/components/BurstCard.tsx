@@ -9,7 +9,7 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import type { LocaleKey } from "@/locales";
 import type { BurstCardData, BurstChildRow, BurstChildStatus, BurstView } from "../../shared/burst";
 
-const BUTTON = "rounded-lg border border-hairline/50 px-2.5 py-1 text-[12px] font-medium text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50";
+const BUTTON = "rounded-lg border border-hairline/50 px-2.5 py-1 text-[12px] font-medium text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50";
 const PRIMARY = "rounded-lg bg-accent px-3 py-1 text-[12px] font-medium text-white hover:bg-accent/90 disabled:opacity-50";
 
 const STATUS: Record<BurstChildStatus, LocaleKey> = {
@@ -185,7 +185,7 @@ export function BurstRows({ botId, rows }: { botId: string; rows: BurstChildRow[
           <li key={row.seq}>
             {row.threadId ? (
               <button type="button" title={row.error ?? t("chat.openThread", { title: row.title })} onClick={() => openThread(dispatch, { botId, threadId: row.threadId! }, state, showThreads)}
-                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">{label}</button>
+                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink">{label}</button>
             ) : (
               <div className="flex w-full items-center gap-2 px-1.5 py-1 text-[12px] text-ink-secondary">{label}</div>
             )}

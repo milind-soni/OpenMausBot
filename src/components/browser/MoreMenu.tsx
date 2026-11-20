@@ -27,8 +27,8 @@ export const VIEWPORTS: ReadonlyArray<{ label: LocaleKey; setting: PreviewViewpo
 const sameSetting = (a: PreviewViewportSetting, b: PreviewViewportSetting) =>
   a.mode === b.mode && (a.mode !== "preset" || (b.mode === "preset" && a.preset === b.preset));
 
-const item = "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left hover:bg-inset disabled:cursor-not-allowed disabled:opacity-40";
-const small = "rounded-md border border-hairline p-1 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-40";
+const item = "flex w-full items-center gap-2 rounded-md px-3 py-1.5 text-left interaction:bg-raised/50 disabled:cursor-not-allowed disabled:opacity-40";
+const small = "rounded-md border border-hairline p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40";
 
 export function MoreMenu({ stream, ready, typing, setting, zoom, pip, onViewport, onZoom, onPip, onType, onSecret, onReconnect, onRestart }: {
   /** Viewport sizes, zoom and picture in picture come with the v2 stream only. */
@@ -56,7 +56,7 @@ export function MoreMenu({ stream, ready, typing, setting, zoom, pip, onViewport
   const section = (children: ReactNode) => <div className="border-b border-hairline/40 py-1 last:border-b-0">{children}</div>;
   return (
     <details ref={menu} className="relative shrink-0">
-      <summary className="list-none cursor-pointer rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink [&::-webkit-details-marker]:hidden" aria-label={t("browser.panel.menu")} title={t("browser.panel.menu")}><EllipsisVertical size={16} /></summary>
+      <summary className="list-none cursor-pointer rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink [&::-webkit-details-marker]:hidden" aria-label={t("browser.panel.menu")} title={t("browser.panel.menu")}><EllipsisVertical size={16} /></summary>
       <div className="absolute right-0 top-full z-40 mt-2 flex w-56 flex-col rounded-xl border border-hairline/50 bg-card p-1 text-[12px] text-ink shadow-xl" role="menu">
         {stream ? section(<>
           <div className="px-3 pb-1 pt-1.5 text-[11px] text-ink-tertiary">{t("browser.viewport.title")}</div>

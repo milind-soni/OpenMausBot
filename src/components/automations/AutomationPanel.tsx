@@ -58,7 +58,7 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
           <h2 className="break-words text-[18px] font-semibold tracking-tight leading-snug text-ink">{name || sentence}</h2>
           {name && <p className="mt-0.5 text-[13px] text-ink-secondary">{automationSubtitle(automation, botName)}</p>}
         </div>
-        <button type="button" onClick={onClose} className="grid size-8 shrink-0 place-items-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink" aria-label={t("automations.panel.close")}><X size={16} /></button>
+        <button type="button" onClick={onClose} className="grid size-8 shrink-0 place-items-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink" aria-label={t("automations.panel.close")}><X size={16} /></button>
       </div>
 
       <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 pt-2 pb-5">
@@ -92,7 +92,7 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
                   {calls.length === 0 ? <p className="mt-0.5">{t("automations.calls.none")}</p> : (
                     <ul className="mt-1 space-y-0.5">{calls.map((call) => (
                       <li key={call.id} data-call={call.ok ? "ok" : "refused"}>
-                        <button type="button" aria-expanded={openCall === call.id} onClick={() => setOpenCall((current) => (current === call.id ? null : call.id))} className="flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left hover:bg-raised">
+                        <button type="button" aria-expanded={openCall === call.id} onClick={() => setOpenCall((current) => (current === call.id ? null : call.id))} className="flex w-full items-baseline gap-2 rounded-md px-1.5 py-1 text-left interaction:bg-raised/50">
                           <span className="shrink-0">{capital(lastWhen(call.at))}</span>
                           <span className={cn("shrink-0 font-semibold", call.ok ? "text-success" : "text-danger")}>{call.ok ? "✓" : "✗"}</span>
                           <span className="min-w-0 truncate text-ink">{call.reason}</span>
@@ -106,13 +106,13 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
                 {credential ? (
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1" data-secret={secretShown ? "shown" : "masked"}>
                     <span className="min-w-0 break-all font-mono text-[11px]">{t("automations.address.secret", { secret: secretShown ? credential.secret : "••••••••" })}</span>
-                    <button type="button" aria-label={t(secretShown ? "automations.address.hideSecretLabel" : "automations.address.showSecretLabel")} onClick={() => setSecretShown((shown) => !shown)} className="rounded-md px-1.5 py-0.5 font-medium text-ink hover:bg-raised">{t(secretShown ? "automations.address.hideSecret" : "automations.address.revealSecret")}</button>
-                    <button type="button" aria-label={t("automations.address.copySecretLabel")} onClick={() => void copySecret(credential.secret)} className="rounded-md px-1.5 py-0.5 font-medium text-ink hover:bg-raised">{secretCopied ? t("automations.address.copied") : t("automations.address.copySecret")}</button>
+                    <button type="button" aria-label={t(secretShown ? "automations.address.hideSecretLabel" : "automations.address.showSecretLabel")} onClick={() => setSecretShown((shown) => !shown)} className="rounded-md px-1.5 py-0.5 font-medium text-ink interaction:bg-raised/50">{t(secretShown ? "automations.address.hideSecret" : "automations.address.revealSecret")}</button>
+                    <button type="button" aria-label={t("automations.address.copySecretLabel")} onClick={() => void copySecret(credential.secret)} className="rounded-md px-1.5 py-0.5 font-medium text-ink interaction:bg-raised/50">{secretCopied ? t("automations.address.copied") : t("automations.address.copySecret")}</button>
                   </div>
                 ) : <p className="break-all font-mono text-[11px]">{t("automations.address.secretUnknown")}</p>}
                 <p>{t("automations.address.header")}</p>
                 {webhook.eventTypes?.length ? <p>{t("automations.address.events", { events: webhook.eventTypes.join(", ") })}</p> : null}
-                <button type="button" disabled={Boolean(actions.busy)} onClick={() => { if (window.confirm(t("automations.address.replaceConfirm"))) void actions.copyAddress(webhook.id, true); }} className="flex items-center gap-1.5 rounded-lg border border-hairline/50 px-2.5 py-1.5 text-ink hover:bg-raised"><RotateCw size={12} />{t("automations.address.replace")}</button>
+                <button type="button" disabled={Boolean(actions.busy)} onClick={() => { if (window.confirm(t("automations.address.replaceConfirm"))) void actions.copyAddress(webhook.id, true); }} className="flex items-center gap-1.5 rounded-lg border border-hairline/50 px-2.5 py-1.5 text-ink interaction:bg-raised/50"><RotateCw size={12} />{t("automations.address.replace")}</button>
               </div>
             </details>
           </section>
@@ -132,7 +132,7 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
               return (
                 <li key={run.id}>
                   <button type="button" disabled={!threadId} onClick={() => actions.openRun(automation, run)} title={threadId ? t("automations.panel.open") : undefined}
-                    className="flex w-full items-baseline gap-2 px-3 py-2.5 text-start text-[13px] hover:bg-raised disabled:hover:bg-transparent">
+                    className="flex w-full items-baseline gap-2 px-3 py-2.5 text-start text-[13px] interaction:bg-raised/50 disabled:hover:bg-transparent">
                     <span className="shrink-0 text-ink-secondary">{line.when}</span>
                     <span className={cn("shrink-0 font-semibold", line.mark === "✓" ? "text-success" : line.mark === "✗" ? "text-danger" : "text-warning")}>{line.mark}</span>
                     <span className="min-w-0 truncate text-ink">{line.text}</span>
@@ -146,9 +146,9 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
 
       <div className="flex flex-wrap items-center gap-2 border-t border-hairline/35 px-5 py-3.5">
         <button type="button" disabled={Boolean(actions.busy)} onClick={() => void actions.runNow(automation)} className={cn(BUTTON, "bg-ink text-app hover:opacity-85")}><Play size={14} />{actions.busy === `run:${automation.id}` ? t("automations.starting") : t("automations.runNow")}</button>
-        {status.state !== "done" && <button type="button" disabled={Boolean(actions.busy)} onClick={() => void actions.toggle(automation)} className={cn(BUTTON, "border border-hairline/50 bg-control text-ink hover:bg-raised-hover")}>{automation.enabled ? <Pause size={14} /> : <Play size={14} />}{automation.enabled ? t("automations.pause") : t("automations.resume")}</button>}
-        <button type="button" onClick={onEdit} className={cn(BUTTON, "text-ink hover:bg-raised")}><Pencil size={14} />{t("automations.edit")}</button>
-        <button type="button" disabled={Boolean(actions.busy)} onClick={() => void actions.remove(automation, t("automations.deleteConfirm", { sentence })).then((gone) => { if (gone) onDeleted(); })} className={cn(BUTTON, "ms-auto text-ink-secondary hover:bg-danger/10 hover:text-danger")}><Trash2 size={14} />{t("automations.delete")}</button>
+        {status.state !== "done" && <button type="button" disabled={Boolean(actions.busy)} onClick={() => void actions.toggle(automation)} className={cn(BUTTON, "border border-hairline/50 bg-control text-ink interaction:bg-raised/50")}>{automation.enabled ? <Pause size={14} /> : <Play size={14} />}{automation.enabled ? t("automations.pause") : t("automations.resume")}</button>}
+        <button type="button" onClick={onEdit} className={cn(BUTTON, "text-ink interaction:bg-raised/50")}><Pencil size={14} />{t("automations.edit")}</button>
+        <button type="button" disabled={Boolean(actions.busy)} onClick={() => void actions.remove(automation, t("automations.deleteConfirm", { sentence })).then((gone) => { if (gone) onDeleted(); })} className={cn(BUTTON, "ms-auto text-ink-secondary interaction:bg-danger/10 hover:text-danger")}><Trash2 size={14} />{t("automations.delete")}</button>
       </div>
     </aside>
   );

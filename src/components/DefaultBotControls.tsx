@@ -22,7 +22,7 @@ export function HideDefaultBotItem({ bot, onDone, className = "flex w-full items
       data-default-bot-hide=""
       onClick={() => { showDefaultBot(dispatch, bot, false); onDone(); }}
       title={t("defaultBot.hideHint")}
-      className={cn(className, "text-ink hover:bg-menu-hover")}
+      className={cn(className, "text-ink interaction:bg-raised/50")}
     >
       <EyeOff size={16} className="text-ink-secondary" />
       {t("defaultBot.hide")}
@@ -43,7 +43,7 @@ export function DemoteDefaultBotItem({ bot, onDone, className = "flex w-full ite
         onDone();
       }}
       title={t("defaultBot.demoteHint")}
-      className={cn(className, "text-ink hover:bg-menu-hover")}
+      className={cn(className, "text-ink interaction:bg-raised/50")}
     >
       <UserMinus size={16} className="text-ink-secondary" />
       {t("defaultBot.demote")}

@@ -67,7 +67,7 @@ export function FollowBotModelRow({ name, model, follows, onPick }: { name: stri
       data-menu-row
       aria-pressed={follows}
       onClick={onPick}
-      className="flex h-9 w-full shrink-0 items-center justify-between gap-2 border-b-[0.5px] border-ink/10 px-3.5 text-left text-[13px] leading-[18px] text-ink hover:bg-ink/[0.06] focus:bg-ink/[0.06]"
+      className="flex h-9 w-full shrink-0 items-center justify-between gap-2 border-b-[0.5px] border-ink/10 px-3.5 text-left text-[13px] leading-[18px] text-ink interaction:bg-raised/50 focus:bg-ink/[0.06]"
     >
       <span className="flex min-w-0 items-baseline gap-2">
         <span className="shrink-0 font-medium">{t("model.useBotModel", { name })}</span>
@@ -150,7 +150,7 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
         title={`${label} · ${managedBy ?? engineStatus(target)}`}
         className={cn(
           "group relative flex size-9 shrink-0 items-center justify-center rounded-[8px]",
-          selected ? "bg-ink/[0.08]" : "hover:bg-ink/[0.06]",
+          selected ? "bg-ink/[0.08]" : "interaction:bg-raised/50",
           managedBy && "opacity-40",
         )}
       >
@@ -177,7 +177,7 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
           onClick={onAddApiKeys}
           aria-label={apiKeysLabel(instances)}
           title={apiKeysLabel(instances)}
-          className="flex size-9 shrink-0 items-center justify-center rounded-[8px] border border-dashed border-ink/20 text-ink-tertiary hover:bg-ink/[0.06] hover:text-ink"
+          className="flex size-9 shrink-0 items-center justify-center rounded-[8px] border border-dashed border-ink/20 text-ink-tertiary interaction:bg-raised/50 hover:text-ink"
         >
           <Plus size={16} strokeWidth={MENU_STROKE} aria-hidden="true" />
         </button>

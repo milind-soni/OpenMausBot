@@ -63,7 +63,7 @@ export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetFor
   onDelete: () => void;
   onSetForAll?: () => void;
 }) {
-  const item = cn(MENU_ITEM, "hover:bg-menu-hover [&>svg]:text-ink-secondary");
+  const item = cn(MENU_ITEM, "interaction:bg-raised/50 [&>svg]:text-ink-secondary");
   return (
     <>
       <button type="button" role="menuitem" autoFocus className={item} onClick={onAddBots}><Users size={16} />{t("team.addBots")}</button>

@@ -65,7 +65,7 @@ function CopyValue({ value, label }: { value: string; label: string }) {
     <span className="flex min-w-0 items-center gap-2">
       <code className="min-w-0 select-all truncate font-mono text-[12px] leading-4 text-ink">{value}</code>
       <button type="button" onClick={copy} aria-label={state === "failed" ? t("common.copyFailed") : label}
-        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-secondary hover:bg-menu-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-focus">
+        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-secondary interaction:bg-raised/50 hover:text-ink focus-visible:outline-2 focus-visible:outline-focus">
         {state === "copied" ? <Check size={12} className="text-success" /> : <Copy size={12} />}
       </button>
     </span>

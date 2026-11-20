@@ -31,7 +31,7 @@ export function ToolActivity({ tool, place = null, live = false, source }: { too
       <button type="button" onClick={() => setExpanded(value => !value)} aria-controls={bodyId}
         aria-expanded={expanded}
         aria-label={t("toolDetail.label", { name: label, status })}
-        className={cn("flex min-h-8 w-full cursor-pointer items-center text-start gap-2 rounded-xl px-3 py-1.5 hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent", failed ? "text-danger" : "text-ink-secondary")}
+        className={cn("flex min-h-8 w-full cursor-pointer items-center text-start gap-2 rounded-xl px-3 py-1.5 interaction:bg-raised/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent", failed ? "text-danger" : "text-ink-secondary")}
       >
         <span className="shrink-0" aria-hidden="true">{tool.ok === undefined ? (live ? <WorkingDots size={3.5} /> : <Circle size={13} />) : failed ? <X size={13} /> : <Check size={13} className="text-success" />}</span>
         {place && <PlaceIcon place={place} size={13} className="shrink-0 opacity-70" role="img" aria-label={t(placeLabelKey(place))} data-testid="tool-place" />}

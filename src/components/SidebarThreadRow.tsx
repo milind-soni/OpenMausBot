@@ -117,7 +117,7 @@ export function HelperThreadGroup<T>({ tasks, renderThread }: { tasks: T[]; rend
   const label = t("task.helperGroup");
   return <div data-sidebar-helper-threads="">
     <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} aria-label={t(open ? "task.collapseNamed" : "task.expandNamed", { name: label })}
-      className="flex min-h-8 w-full items-center gap-1.5 rounded-md py-1 pl-1.5 pr-3 text-left text-[12px] text-ink-secondary hover:bg-raised/30 hover:text-ink">
+      className="flex min-h-8 w-full items-center gap-1.5 rounded-md py-1 pl-1.5 pr-3 text-left text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink">
       <ChevronRight aria-hidden="true" size={11} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
       <span className="truncate">{label}</span>
       <span className="shrink-0 text-[10px] opacity-50">{tasks.length}</span>
@@ -337,7 +337,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
     )}
   </span>;
   return <>
-    <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", selectMode && checked ? "bg-accent/10" : current ? rowSelectedSurface : "hover:bg-raised/50", panel && cn("items-start rounded-[8px]", current ? "bg-ink/[0.07]" : "hover:bg-ink/[0.04]"))}>
+    <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", selectMode && checked ? "bg-accent/10" : current ? rowSelectedSurface : "interaction:bg-raised/50", panel && cn("items-start rounded-[8px]", current ? "bg-ink/[0.07]" : "interaction:bg-raised/50"))}>
       {renaming ? <input autoFocus value={draft} maxLength={80} aria-label={t("task.renameAria")}
         onFocus={(event) => event.currentTarget.select()} onChange={(event) => setDraft(event.target.value)} onBlur={() => finishRename(true)}
         onKeyDown={(event) => { if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; } if (event.key === "Enter") { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
@@ -364,7 +364,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         </span> : heading}
       </button>}
       {task.link && <a href={task.link} target="_blank" rel="noreferrer" dir="ltr" title={task.link} aria-label={t("task.openLink", { link: threadLinkLabel(task.link) ?? task.link })}
-        className={cn("shrink-0 rounded px-1 font-mono text-[11px] text-ink-secondary hover:bg-raised hover:text-ink outline-none focus-visible:ring-1 focus-visible:ring-accent/60 [unicode-bidi:isolate]", panel && "mt-2.5")}>{threadLinkLabel(task.link) ?? t("task.link")}</a>}
+        className={cn("shrink-0 rounded px-1 font-mono text-[11px] text-ink-secondary interaction:bg-raised/50 hover:text-ink outline-none focus-visible:ring-1 focus-visible:ring-accent/60 [unicode-bidi:isolate]", panel && "mt-2.5")}>{threadLinkLabel(task.link) ?? t("task.link")}</a>}
       {!renaming && <span className={cn("flex shrink-0 items-center gap-2 px-1", panel && "pt-2.5 empty:hidden")} onClick={choose} onContextMenu={contextMenu}>
         {updatedLabel && !panel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 tabular-nums text-[10px] text-ink-secondary">{updatedLabel}</time>}
         {task.pinned === true && <Pin size={11} className="shrink-0 text-ink-secondary" aria-label={t("sidebar.bot.pin")} />}
@@ -373,38 +373,38 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
       </span>}
       {!selectMode && <button ref={actionRef} type="button" aria-label={t("task.actions", { title: displayTitle })} aria-expanded={Boolean(menu)}
         onClick={(event) => { if (menu) { setMenu(null); return; } const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); }}
-        className={cn("mr-0.5 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/thread:opacity-100 max-md:opacity-70 touch:opacity-70", panel && "absolute end-1.5 top-1.5 me-0")}>
+        className={cn("mr-0.5 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 interaction:bg-raised/50 hover:text-ink focus-visible:opacity-100 group-hover/thread:opacity-100 max-md:opacity-70 touch:opacity-70", panel && "absolute end-1.5 top-1.5 me-0")}>
         <MoreHorizontal size={13} />
       </button>}
     </div>
     {menuMotion.shown && menuMotion.value && createPortal(<div ref={menuRef} data-thread-overlay role="group" aria-label={t("task.actions", { title: displayTitle })} style={menuMotion.value}
       className={cn("fixed z-50 max-h-[calc(100vh-16px)] w-[220px] overflow-y-auto", MENU_SHEET, menuMotion.className)} {...menuMotion.exitProps}
       onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); actionRef.current?.focus(); } }}>
-      <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2 size={16} />{t("task.copyLink")}</button>
-      {webLink && <button type="button" onClick={() => { setMenu(null); void copyText(webLink); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2 size={16} />{t("task.copyLink")} (HTTP{webLink.startsWith("https:") ? "S" : ""})</button>}
-      {!task.sharedChat && <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Pencil size={16} />{t("task.renameAria")}</button>}
+      <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink interaction:bg-raised/50"><Link2 size={16} />{t("task.copyLink")}</button>
+      {webLink && <button type="button" onClick={() => { setMenu(null); void copyText(webLink); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink interaction:bg-raised/50"><Link2 size={16} />{t("task.copyLink")} (HTTP{webLink.startsWith("https:") ? "S" : ""})</button>}
+      {!task.sharedChat && <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink interaction:bg-raised/50"><Pencil size={16} />{t("task.renameAria")}</button>}
       <ShareRowItems botId={ownerId} task={task} onPicked={() => setMenu(null)} />
-      {onRegenerateTitle && !task.sharedChat && <button type="button" disabled={regenerating} aria-busy={regenerating} onClick={regenerateTitle} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{regenerating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}{regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle")}</button>}
+      {onRegenerateTitle && !task.sharedChat && <button type="button" disabled={regenerating} aria-busy={regenerating} onClick={regenerateTitle} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink interaction:bg-raised/50 disabled:opacity-40">{regenerating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}{regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle")}</button>}
       {onMove && Boolean(folders?.length) && <label className="block rounded-md px-2 py-1.5 text-[13px] text-ink"><span className="mb-1 flex items-center gap-2 text-ink-secondary"><FolderInput size={16} />{t("folder.move")}</span>
         <Select size="sm" className="w-full" aria-label={t("folder.moveNamed", { title: task.title })} value={folders?.some((folder) => folder.id === task.projectId) ? task.projectId : ""}
           onChange={(event) => { onMove(task, event.target.value || null); setMenu(null); }}>
           <option value="">{t("folder.none")}</option>{folders?.map((folder) => <option key={folder.id} value={folder.id}>{folder.emoji ? `${folder.emoji} ` : ""}{folder.name}</option>)}
         </Select>
       </label>}
-      {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task, task.pinned !== true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover">{task.pinned === true ? <PinOff size={16} /> : <Pin size={16} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
-      {onLink && task.link && <button type="button" onClick={() => { setMenu(null); onLink(task, null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><Link2Off size={16} />{t("task.removeLink")}</button>}
-      {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(task, isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
+      {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task, task.pinned !== true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink interaction:bg-raised/50">{task.pinned === true ? <PinOff size={16} /> : <Pin size={16} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
+      {onLink && task.link && <button type="button" onClick={() => { setMenu(null); onLink(task, null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink interaction:bg-raised/50"><Link2Off size={16} />{t("task.removeLink")}</button>}
+      {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(task, isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink interaction:bg-raised/50 disabled:opacity-40">{archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
       {onSnooze && <div className="px-2 pt-1">
         <span className="flex items-center gap-2 text-[12px] font-medium text-ink-secondary"><Clock size={16} />{t("task.snooze")}</span>
         <div className="mt-0.5 flex flex-col">
           {[{ label: t("task.snoozeUntilActivity"), at: 0 }, { label: t("task.snoozeTonight"), at: nextSixPm() }, { label: t("task.snoozeTomorrow"), at: tomorrowNineAm() }].map((preset) => (
-            <button key={preset.label} type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onSnooze(task, preset.at); }} className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40">{preset.label}</button>
+            <button key={preset.label} type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onSnooze(task, preset.at); }} className="flex w-full items-center rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink interaction:bg-raised/50 disabled:opacity-40">{preset.label}</button>
           ))}
         </div>
       </div>}
-      {onSnooze && snoozed && <button type="button" onClick={() => { setMenu(null); onSnooze(task, null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover"><BellOff size={16} />{t("task.stopSnoozing")}</button>}
-      {onRefreshPermissions && <button type="button" disabled={isWorking(task)} title={t("task.refreshPermissionsHint")} onClick={() => { setMenu(null); onRefreshPermissions(task); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover disabled:opacity-40"><RefreshCw size={16} />{t("task.refreshPermissions")}</button>}
-      <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-danger hover:bg-menu-hover disabled:opacity-40"><Trash2 size={16} />{t("task.deleteAria")}</button>
+      {onSnooze && snoozed && <button type="button" onClick={() => { setMenu(null); onSnooze(task, null); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink interaction:bg-raised/50"><BellOff size={16} />{t("task.stopSnoozing")}</button>}
+      {onRefreshPermissions && <button type="button" disabled={isWorking(task)} title={t("task.refreshPermissionsHint")} onClick={() => { setMenu(null); onRefreshPermissions(task); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink interaction:bg-raised/50 disabled:opacity-40"><RefreshCw size={16} />{t("task.refreshPermissions")}</button>}
+      <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-danger interaction:bg-raised/50 disabled:opacity-40"><Trash2 size={16} />{t("task.deleteAria")}</button>
     </div>, document.body)}
     <ConfirmDialog open={deleting} title={t("task.deleteConfirm")} body={t("task.deleteBody", { title: task.title })} confirmLabel={t("task.deleteAria")}
       onCancel={() => setDeleting(false)} onConfirm={() => { if (!isWorking(task)) onDelete(task); setDeleting(false); }} returnFocusRef={actionRef} />

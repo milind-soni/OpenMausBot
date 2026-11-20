@@ -164,7 +164,7 @@ export function LinuxLocalControl() {
             type="button"
             disabled={busy}
             onClick={() => void run("enable")}
-            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
           >
             {pending === "enable" ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
             {t("computer.linux.tryAgain")}
@@ -186,7 +186,7 @@ export function LinuxLocalControl() {
                 type="button"
                 disabled={busy}
                 onClick={() => void run("retry")}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
               >
                 {pending === "retry" ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
                 {t("computer.linux.tryAgain")}
@@ -196,7 +196,7 @@ export function LinuxLocalControl() {
               type="button"
               disabled={pending !== null}
               onClick={() => void run("disable")}
-              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+              className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
             >
               {pending === "disable" ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
               {t("computer.linux.disable")}
@@ -208,7 +208,7 @@ export function LinuxLocalControl() {
       <button
         type="button"
         onClick={() => window.open(hyprland ? OMARCHY_DOCS_URL : LINUX_GUIDE_URL, "_blank", "noopener,noreferrer")}
-        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink"
+        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-[11px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
       >
         {capabilities.host.packaged ? t("computer.linux.guide") : t("computer.linux.driverSetup")}{" "}
         <ExternalLink size={11} />

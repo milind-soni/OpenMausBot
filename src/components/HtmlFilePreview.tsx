@@ -32,7 +32,7 @@ class MarkdownPreviewBoundary extends Component<{ children: ReactNode }, { faile
 
   render() {
     if (!this.state.failed) return this.props.children;
-    return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{t("markdown.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => location.reload()}>{t("page.broken.reload")}</button></div>;
+    return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{t("markdown.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 interaction:bg-raised/50" onClick={() => location.reload()}>{t("page.broken.reload")}</button></div>;
   }
 }
 
@@ -142,7 +142,7 @@ function HtmlFileContent({ path, name, message }: { path: string; name: string; 
     })();
     return () => controller.abort();
   }, [path, message.threadId, message.messageId, attempt]);
-  if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{typeof error === "object" ? t("html.refused", { reason: error.reason }) : t(error === "size" ? "html.tooLarge" : "html.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>;
+  if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{typeof error === "object" ? t("html.refused", { reason: error.reason }) : t(error === "size" ? "html.tooLarge" : "html.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 interaction:bg-raised/50" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>;
   if (source === null) return <div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("html.loading")}</div>;
   return <div className="flex flex-col gap-2">
     <div className="flex items-center justify-end gap-1">

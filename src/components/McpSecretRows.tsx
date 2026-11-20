@@ -53,7 +53,7 @@ export function McpSecretRows({ kind, rows, onChange, valuesOf, placeholder }: {
               {valueInput(row)}
               <button type="button" aria-label={t("mcp.row.remove", { name: row.name.trim() || t("mcp.row.value") })}
                 onClick={() => onChange(rows.length > 1 ? rows.filter((other) => other.id !== row.id) : [secretRow()])}
-                className="shrink-0 rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink">
+                className="shrink-0 rounded-lg p-2 text-ink-secondary interaction:bg-raised/50 hover:text-ink">
                 <X size={14} />
               </button>
             </div>

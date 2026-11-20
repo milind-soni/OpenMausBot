@@ -61,7 +61,7 @@ export function ResetCloudComputerButton({ botId, botName, view, onReset }: {
         onClick={reset}
         disabled={resetting}
         aria-busy={resetting}
-        className="mt-1 inline-flex items-center gap-1.5 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-60"
+        className="mt-1 inline-flex items-center gap-1.5 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50 disabled:opacity-60"
       >
         {resetting ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
         {t("computer.reset.button")}

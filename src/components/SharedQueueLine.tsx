@@ -63,7 +63,7 @@ export function SharedQueueLine({ waiting, viewer, onRemove, className }: {
             onClick={() => onRemove(own.queueId)}
             aria-label={t("chat.queue.removeYours")}
             title={t("chat.queue.removeYours")}
-            className="flex size-5 shrink-0 items-center justify-center rounded text-ink-tertiary outline-none hover:bg-raised-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="flex size-5 shrink-0 items-center justify-center rounded text-ink-tertiary outline-none interaction:bg-raised/50 hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60"
           >
             <X size={12} aria-hidden="true" />
           </button>

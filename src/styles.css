@@ -3,6 +3,13 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 
+@custom-variant interaction {
+  @media (hover: hover) {
+    &:hover:where(:not(:disabled, [aria-disabled="true"])) { @slot; }
+  }
+  &:active:where(:not(:disabled, [aria-disabled="true"])) { @slot; }
+}
+
 /* Phones and tablets have no hover, and Tailwind only applies `hover:` and
    `group-hover:` under `@media (hover: hover)`. A control revealed on hover
    (`opacity-0 group-hover:opacity-100`) is therefore invisible there. Pair
@@ -102,7 +109,8 @@
   color: var(--color-ink-secondary);
   cursor: pointer;
 }
-.table-action:hover, .table-action[aria-pressed="true"] { background: var(--color-raised); color: var(--color-ink); }
+.table-action:is(:hover, :active) { background: color-mix(in srgb, var(--color-raised) 50%, transparent); color: var(--color-ink); }
+.table-action[aria-pressed="true"] { background: var(--color-raised); color: var(--color-ink); }
 .table-action:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }
 @media (pointer: coarse) { .table-action { min-width: 40px; min-height: 40px; } }
 /* inside a 28px file pill under a reply, the table preview is a 24px circle */
@@ -1414,8 +1422,8 @@ body {
     background: var(--color-accent);
     color: var(--color-accent-ink);
   }
-  .ui-button-primary:enabled:hover,
-  a.ui-button-primary:hover {
+  .ui-button-primary:enabled:is(:hover, :active),
+  a.ui-button-primary:is(:hover, :active) {
     background: var(--color-accent);
     color: var(--color-accent-ink);
     filter: brightness(1.1);
@@ -1439,9 +1447,9 @@ body {
     line-height: 1.25rem;
     transition: background-color 120ms ease, color 120ms ease;
   }
-  button.ui-pill:enabled:hover,
-  a.ui-pill:hover {
-    background: var(--color-raised);
+  button.ui-pill:enabled:is(:hover, :active),
+  a.ui-pill:is(:hover, :active) {
+    background: color-mix(in srgb, var(--color-raised) 50%, transparent);
     color: var(--color-ink);
   }
   button.ui-pill:disabled { opacity: 0.6; }
@@ -1488,16 +1496,12 @@ body {
     font-weight: 400;
     line-height: 18px;
   }
-  .ui-menu-row:enabled:hover { background: var(--color-menu-hover); }
+  .ui-menu-row:enabled:is(:hover, :active) { background: color-mix(in srgb, var(--color-raised) 50%, transparent); }
   .ui-menu-row:disabled { opacity: 0.6; }
-  .ui-button:enabled:hover,
-  .ui-icon-button:enabled:hover {
-    background: var(--color-raised-hover);
+  .ui-button:enabled:not(.ui-button-primary):is(:hover, :active),
+  .ui-icon-button:enabled:is(:hover, :active) {
+    background: color-mix(in srgb, var(--color-raised) 50%, transparent);
     color: var(--color-ink);
-  }
-  .ui-button:enabled:active,
-  .ui-icon-button:enabled:active {
-    background: var(--color-raised);
   }
   .ui-button:disabled,
   .ui-icon-button:disabled {
@@ -1510,18 +1514,12 @@ body {
     border-color: color-mix(in srgb, var(--color-ink) 10%, transparent);
     background: color-mix(in srgb, var(--color-ink) 4%, transparent);
   }
-  :root[data-skin="midnight"] .ui-button:enabled:is(:hover, :active) {
-    background: color-mix(in srgb, var(--color-ink) 8%, transparent);
-  }
   :root:is([data-skin="midnight"], [data-skin="daylight"]) :is(.ui-button, .ui-icon-button) {
     border-radius: 9999px;
   }
   :root[data-skin="daylight"] .ui-button {
     border-color: color-mix(in srgb, var(--color-ink) 12%, transparent);
     background: color-mix(in srgb, var(--color-ink) 6%, transparent);
-  }
-  :root[data-skin="daylight"] .ui-button:enabled:is(:hover, :active) {
-    background: color-mix(in srgb, var(--color-ink) 10%, transparent);
   }
   /* A dialog for the first-run surfaces: the menu tone on a hairline of ink, lifted only in Daylight. */
   .ui-modal {
@@ -1717,7 +1715,7 @@ body {
   color: var(--color-ink);
 }
 [data-settings-look] .ui-button:not(.ui-button-primary):enabled:is(:hover, :active) {
-  background: color-mix(in srgb, var(--color-ink) 10%, transparent);
+  background: color-mix(in srgb, var(--color-raised) 50%, transparent);
 }
 [data-settings-look] .settings-quiet {
   border-radius: 6px;
@@ -1729,7 +1727,7 @@ body {
 }
 /* A quiet button's text ends on the control edge (card right − 16), like a filled button's edge. */
 [data-settings-look] :is([data-settings-control], [data-settings-actions], [data-settings-form-foot]) > .settings-quiet:last-child { margin-inline-end: -6px; }
-[data-settings-look] .settings-quiet:enabled:hover { color: var(--color-ink); background: color-mix(in srgb, var(--color-ink) 5%, transparent); }
+[data-settings-look] .settings-quiet:enabled:is(:hover, :active) { color: var(--color-ink); background: color-mix(in srgb, var(--color-raised) 50%, transparent); }
 [data-settings-look] .settings-quiet[data-danger]:enabled:hover { color: var(--color-danger); }
 /* Rows in a card part with a hairline that starts where their text starts: 16 in, 60 in a card whose rows lead with an icon. */
 /* A row wrapped in a `display: contents` element (for a data hook) parts from the one above all the same. */
@@ -2378,8 +2376,8 @@ html[data-cloud-intent-morph] [data-tour="composer"] { view-transition-name: clo
   text-align: start;
   cursor: pointer;
 }
-.turn-now-toggle:hover, .turn-now-toggle[aria-expanded="true"] {
-  background: color-mix(in srgb, var(--color-ink) 5%, transparent);
+.turn-now-toggle:is(:hover, :active, [aria-expanded="true"]) {
+  background: color-mix(in srgb, var(--color-raised) 50%, transparent);
 }
 .turn-now-toggle:focus-visible {
   outline: 1.5px solid var(--color-focus);
@@ -3770,7 +3768,7 @@ button:disabled.bg-danger {
 }
 
 .bot-mention {
-  --mention-hover: color-mix(in srgb, var(--mention-color) 12%, var(--color-raised));
+  --mention-hover: color-mix(in srgb, var(--color-raised) 50%, var(--color-composer));
   padding: .12em .4em;
   border-radius: .55em;
   color: inherit;

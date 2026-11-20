@@ -46,7 +46,7 @@ export function ClaudeUpdatePrompt({
     <button
       type="button"
       onClick={onRetry}
-      className="flex items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink hover:bg-raised-hover"
+      className="flex items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink interaction:bg-raised/50"
     >
       <RefreshCw size={12} aria-hidden="true" /> {t("chat.retry")}
     </button>
@@ -68,7 +68,7 @@ export function ClaudeUpdatePrompt({
             <button
               type="button"
               onClick={() => setPhase({ kind: "manual" })}
-              className="rounded-full border border-hairline/40 px-3 py-1 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
+              className="rounded-full border border-hairline/40 px-3 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
             >
               {t("chat.claudeUpdate.myself")}
             </button>
@@ -99,7 +99,7 @@ export function ClaudeUpdatePrompt({
               onClick={copyCommand}
               aria-label={copyLabel}
               title={copyLabel}
-              className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+              className="rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
             >
               {copyState === "copied" ? <Check size={13} className="text-success" /> : copyState === "failed" ? <X size={13} className="text-danger" /> : <Copy size={13} />}
             </button>
@@ -110,7 +110,7 @@ export function ClaudeUpdatePrompt({
               <button
                 type="button"
                 onClick={update}
-                className="rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink"
+                className="rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
               >
                 {t("chat.claudeUpdate.tryAgain")}
               </button>

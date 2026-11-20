@@ -88,7 +88,7 @@ function IdentityRow({ page, current, badge, name, line, onOpen, narrow }: {
   return (
     <button type="button" data-settings-page={page} data-settings-section={page} data-settings-identity="" aria-current={current ? "page" : undefined} onClick={onOpen}
       className={cn("flex w-full shrink-0 cursor-pointer items-center gap-2 rounded-lg px-2 py-1 text-left", narrow ? "h-12" : "h-11", " transition-colors motion-reduce:transition-none focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus",
-        current ? "bg-menu-active" : "hover:bg-menu-hover")}>
+        current ? "bg-menu-active" : "interaction:bg-raised/50")}>
       <span className="flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-[6px]">{badge}</span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="truncate text-[14px] font-medium leading-[18px] text-ink">{name}</span>
@@ -103,7 +103,7 @@ function PageItem({ page, label, current, dot, onOpen }: { page: SettingsPage; l
   const Icon = page.icon;
   return (
     <button type="button" data-settings-page={page.id} data-settings-section={page.id} aria-current={current ? "page" : undefined} onClick={onOpen}
-      className={cn(NAV_ITEM, current ? "bg-menu-active font-medium" : "hover:bg-menu-hover")}>
+      className={cn(NAV_ITEM, current ? "bg-menu-active font-medium" : "interaction:bg-raised/50")}>
       <span className="flex w-6 shrink-0 justify-center">{Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" className={current ? "text-ink" : "text-ink-secondary"} />}</span>
       <span className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)] overflow-hidden" title={label}>
         <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap [grid-area:1/1]">{label}</span>
@@ -205,7 +205,7 @@ export function SettingsNav({ ctx, place, pages, current, query, hits, keyHits, 
               <div className="mt-0.5 flex flex-col gap-0.5">
                 {group.map((page) => narrow ? (
                   <button key={page.id} type="button" data-settings-page={page.id} data-settings-section={page.id} onClick={() => onOpen(page.id)}
-                    className="flex h-11 w-full cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-[14px] leading-5 text-ink hover:bg-menu-hover">
+                    className="flex h-11 w-full cursor-pointer items-center gap-2 rounded-lg px-2 text-left text-[14px] leading-5 text-ink interaction:bg-raised/50">
                     <span className="flex w-6 shrink-0 justify-center">{page.icon && <page.icon size={16} strokeWidth={1.75} aria-hidden="true" className="text-ink-secondary" />}</span>
                     <span className="min-w-0 flex-1 truncate">{t(page.labelKey)}</span>
                     {dot(page.id) && <span aria-hidden="true" className={cn("size-1.5 rounded-full", dot(page.id) === "success" ? "bg-success" : "bg-warning")} />}
@@ -241,7 +241,7 @@ function SearchResults({ ctx, place, hits, keyHits, onKey, query, onHit }: {
       {here.map((hit) => <HitRow key={`h:${hit.entry.id}`} ctx={ctx} place={place} hit={hit} query={query} onHit={onHit} />)}
       {keyHits.map((entry) => (
         <button key={`k:${entry.id}`} type="button" data-settings-key-result={entry.id} onClick={() => onKey(entry)}
-          className="flex w-full cursor-pointer flex-col rounded-lg px-2 py-1.5 text-left hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
+          className="flex w-full cursor-pointer flex-col rounded-lg px-2 py-1.5 text-left interaction:bg-raised/50 focus-visible:bg-raised/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
           <span className="truncate text-[13px] leading-5 text-ink">{highlight(t(entry.labelKey), query)}</span>
           <span className="truncate text-[12px] leading-4 text-ink-secondary">{[place.name, t("settings.group.ai"), t(keySection(entry).titleKey)].join(" › ")}</span>
         </button>
@@ -280,7 +280,7 @@ function HitRow({ ctx, place, hit, query, onHit }: { ctx: SettingsContext; place
   // first so the page name always shows. The full path is the row's tooltip.
   return (
     <button type="button" data-settings-hit={entry.id} onClick={() => onHit(hit)} title={full ? `${label} · ${full}` : label}
-      className="flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
+      className="flex w-full cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-left interaction:bg-raised/50 focus-visible:bg-raised/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
       <span className="flex h-5 w-6 shrink-0 items-center justify-center text-ink-secondary">{Icon && <Icon size={16} strokeWidth={1.75} aria-hidden="true" />}</span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span data-settings-hit-title="" className="line-clamp-2 text-[13px] leading-5 text-ink [overflow-wrap:anywhere]">{highlight(label, query)}</span>

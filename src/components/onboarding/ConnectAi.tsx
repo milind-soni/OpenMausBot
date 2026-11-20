@@ -31,7 +31,7 @@ function OtherWay({ instance, open, onToggle }: { instance: InstanceInfo; open: 
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-ink/[0.04] focus-visible:outline-offset-[-2px]"
+        className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors interaction:bg-raised/50 focus-visible:outline-offset-[-2px]"
       >
         <span className="flex size-[18px] shrink-0 items-center justify-center">
           <InstanceProviderMark instance={instance} size={18} />
@@ -115,7 +115,7 @@ export function ConnectAi({ hosted = false, tested, onChoose }: { hosted?: boole
               <button
                 type="button"
                 onClick={tested.retry}
-                className="-mx-2 mt-1.5 flex items-center gap-1.5 rounded-full px-2 py-1 text-[13px] font-medium text-ink transition-colors hover:bg-ink/[0.06]"
+                className="-mx-2 mt-1.5 flex items-center gap-1.5 rounded-full px-2 py-1 text-[13px] font-medium text-ink transition-colors interaction:bg-raised/50"
               >
                 <RefreshCw size={12} aria-hidden="true" />
                 {t("common.checkAgain")}
@@ -169,7 +169,7 @@ export function ConnectAi({ hosted = false, tested, onChoose }: { hosted?: boole
             type="button"
             onClick={() => void refresh()}
             disabled={checking}
-            className="flex w-full items-center gap-1.5 px-4 py-2.5 text-left text-[12px] text-ink-secondary transition-colors hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-offset-[-2px] disabled:opacity-50"
+            className="flex w-full items-center gap-1.5 px-4 py-2.5 text-left text-[12px] text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline-offset-[-2px] disabled:opacity-50"
           >
             <RefreshCw size={12} className={checking ? "animate-spin" : ""} />
             {checking ? t("common.checking") : t("common.checkAgain")}
@@ -206,7 +206,7 @@ export function ConnectAiDialog({ hosted = false, tested, onChoose, onClose }: {
         <div className="flex h-[52px] shrink-0 items-center justify-between pl-4 pr-3">
           <h2 id="connect-ai-title" className="text-[14px] font-semibold leading-[22px] text-ink">{t("onboarding.meet.connectAi")}</h2>
           <button type="button" autoFocus onClick={onClose} aria-label={t("common.close")} title={t("common.close")}
-            className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink">
+            className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink">
             <X size={16} />
           </button>
         </div>

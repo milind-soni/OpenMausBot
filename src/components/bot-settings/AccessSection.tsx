@@ -87,7 +87,7 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
           <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px] text-ink" title={bot.cwd}>
             {bot.cwd ? shortPath(bot.cwd, home) : <span className="text-ink-secondary">{t("botAccess.folder.private")}</span>}
           </div>
-          <button onClick={() => void pick()} disabled={saving} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+          <button onClick={() => void pick()} disabled={saving} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50">
             <FolderOpen size={14} /> {t("botAccess.folder.choose")}
           </button>
           {bot.cwd && (
@@ -111,7 +111,7 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
             value={draft ?? bot.cwd ?? ""}
             onChange={(e) => setDraft(e.target.value)}
           />
-          <button type="submit" disabled={saving || draft === null} className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+          <button type="submit" disabled={saving || draft === null} className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50">
             {t("botAccess.folder.save")}
           </button>
         </form>
@@ -188,7 +188,7 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
       )}
       <ToolBudgetLine botId={bot.id} busy={!!bot.busy} />
       <div className="mt-3 flex items-center gap-2">
-        <button type="button" onClick={openPlugins} className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover">
+        <button type="button" onClick={openPlugins} className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50">
           <Plus size={14} /> {t("botAccess.mcpAdd")}
         </button>
         {!usesAll && servers && servers.length > 0 && (
@@ -345,7 +345,7 @@ function ConnectorToolsGrants({
                   setOpenSlug(open ? null : slug);
                   setSearch("");
                 }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-control/60"
+                className="flex w-full items-center gap-2 px-3 py-2 text-left interaction:bg-raised/50"
               >
                 {open ? <ChevronDown size={14} className="shrink-0 text-ink-secondary" /> : <ChevronRight size={14} className="shrink-0 text-ink-secondary" />}
                 <span className="min-w-0 flex-1 truncate font-mono text-[13px] text-ink">{slug}</span>
@@ -373,7 +373,7 @@ function ConnectorToolsGrants({
                           onClick={() => (isAll ? leaveAllForService(slug) : allForService(slug))}
                           className={cn(
                             "rounded-full px-2.5 py-1 text-[12px] font-medium",
-                            isAll ? "bg-accent/15 text-accent-text" : "bg-control text-ink hover:bg-raised-hover",
+                            isAll ? "bg-accent/15 text-accent-text" : "bg-control text-ink interaction:bg-raised/50",
                           )}
                         >
                           {t("botAccess.grants.allTools")}
@@ -382,7 +382,7 @@ function ConnectorToolsGrants({
                           <button
                             type="button"
                             onClick={() => patch({ connectorTools: null })}
-                            className="rounded-full bg-control px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-raised-hover"
+                            className="rounded-full bg-control px-2.5 py-1 text-[12px] font-medium text-ink interaction:bg-raised/50"
                           >
                             {t("botAccess.grants.allApps")}
                           </button>
@@ -422,7 +422,7 @@ function ConnectorToolsGrants({
                                     setLastExplicit((prev) => ({ ...prev, [slug]: next }));
                                     apply(slug, { tools: next });
                                   }}
-                                  className="rounded-full bg-control px-2.5 py-1 text-[11px] text-ink hover:bg-raised-hover"
+                                  className="rounded-full bg-control px-2.5 py-1 text-[11px] text-ink interaction:bg-raised/50"
                                 >
                                   {t(VERB_LABELS[verb])} · {names.length}
                                 </button>
@@ -440,7 +440,7 @@ function ConnectorToolsGrants({
                             {matches.map((tool) => {
                               const checked = isAll || selected.includes(tool.name);
                               return (
-                                <label key={tool.name} className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1 hover:bg-control/60">
+                                <label key={tool.name} className="flex cursor-pointer items-start gap-2 rounded-md px-1.5 py-1 interaction:bg-raised/50">
                                   <input
                                     type="checkbox"
                                     checked={checked}
@@ -609,7 +609,7 @@ export function VpsAliasField({ bot }: { bot: Bot }) {
         <button
           type="submit"
           disabled={saving || draft === null}
-          className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+          className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
         >
           {t("botAccess.cloud.serverSave")}
         </button>
@@ -743,7 +743,7 @@ export function AccessSection({
               dispatch({ type: "toggleSettings", open: false });
               dispatch({ type: "toggleComputer", open: true });
             }}
-            className="mt-3 rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
+            className="mt-3 rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink interaction:bg-raised/50"
           >
             {t("place.action.openComputerPanel")}
           </button>
@@ -802,7 +802,7 @@ export function AccessSection({
               dispatch({ type: "toggleSettings", open: false });
               dispatch({ type: "togglePlugins", open: true, surface: "apps" });
             }}
-            className="mt-3 flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
+            className="mt-3 flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50"
           >
             <Plus size={14} /> {t("botAccess.connectApp")}
           </button>
@@ -906,7 +906,7 @@ export function AccessSection({
                   type="button"
                   aria-label={t("botAccess.always.remove", { entry })}
                   onClick={() => patch({ alwaysAllow: alwaysAllow.filter((key) => key !== entry) })}
-                  className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-danger/10 hover:text-danger"
+                  className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-secondary interaction:bg-danger/10 hover:text-danger"
                 >
                   {t("botAccess.always.removeButton")}
                 </button>

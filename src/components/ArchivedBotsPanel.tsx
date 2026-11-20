@@ -85,7 +85,7 @@ export function ArchivedBotRow({
         <button
           onClick={onRestore}
           disabled={disabled || deleting}
-          className="flex min-w-[78px] items-center justify-center gap-2 rounded-full bg-raised h-7 px-3.5 text-[13px] font-medium leading-4 text-ink hover:bg-raised-hover disabled:opacity-40"
+          className="flex min-w-[78px] items-center justify-center gap-2 rounded-full bg-raised h-7 px-3.5 text-[13px] font-medium leading-4 text-ink interaction:bg-raised/50 disabled:opacity-40"
         >
           {restoring && <Loader2 size={13} className="animate-spin" />}
           {t("sidebar.archived.restore")}
@@ -95,7 +95,7 @@ export function ArchivedBotRow({
           onClick={onDelete}
           disabled={disabled || deleting}
           aria-label={t("sidebar.archived.deleteAria", { name: bot.name })}
-          className="flex items-center justify-center gap-2 rounded-full h-7 px-3.5 text-[13px] font-medium leading-4 text-danger hover:bg-danger/10 disabled:opacity-40"
+          className="flex items-center justify-center gap-2 rounded-full h-7 px-3.5 text-[13px] font-medium leading-4 text-danger interaction:bg-danger/10 disabled:opacity-40"
         >
           {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
           {t("common.delete")}
@@ -214,7 +214,7 @@ export function ArchivedBotsPanel({
               <button
                 onClick={() => void restoreAll()}
                 disabled={locked}
-                className="flex items-center gap-2 rounded-full bg-raised h-7 px-3.5 text-[13px] font-medium leading-4 text-ink hover:bg-raised-hover disabled:opacity-40"
+                className="flex items-center gap-2 rounded-full bg-raised h-7 px-3.5 text-[13px] font-medium leading-4 text-ink interaction:bg-raised/50 disabled:opacity-40"
               >
                 {restoringAll && <Loader2 size={13} className="animate-spin" />}
                 {t("sidebar.archived.restoreAll")}
@@ -225,7 +225,7 @@ export function ArchivedBotsPanel({
                 type="button"
                 onClick={() => setPendingDelete("all")}
                 disabled={locked}
-                className="flex items-center gap-2 rounded-full h-7 px-3.5 text-[13px] font-medium leading-4 text-danger hover:bg-danger/10 disabled:opacity-40"
+                className="flex items-center gap-2 rounded-full h-7 px-3.5 text-[13px] font-medium leading-4 text-danger interaction:bg-danger/10 disabled:opacity-40"
               >
                 <Trash2 size={13} />
                 {t("sidebar.archived.deleteAll")}
@@ -234,7 +234,7 @@ export function ArchivedBotsPanel({
             <button
               onClick={onClose}
               disabled={locked}
-              className="flex size-10 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
+              className="flex size-10 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40"
               aria-label={t("sidebar.archived.close")}
             >
               <X size={21} />

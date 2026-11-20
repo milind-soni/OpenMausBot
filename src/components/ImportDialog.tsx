@@ -38,7 +38,7 @@ function TeamTemplateList({ team, onOpen, disabled }: { team: string; onOpen: (s
       <h3 id={headingId} dir="auto" className="text-[13px] font-medium text-ink">{t("templateImport.fromTeam", { team })}</h3>
       <ul className="mt-1.5 flex flex-col">
         {templates.map((one) => (
-          <li key={one.slug} data-team-template={one.slug} className="group flex min-w-0 items-center gap-1 rounded-md hover:bg-ink/[0.06]">
+          <li key={one.slug} data-team-template={one.slug} className="group flex min-w-0 items-center gap-1 rounded-md interaction:bg-raised/50">
             <button type="button" onClick={() => onOpen(one.slug)} disabled={disabled || removing !== null} className="min-w-0 flex-1 px-1.5 py-1.5 text-start">
               <span className="flex min-w-0 items-center gap-2">
                 <span dir="auto" className="min-w-0 truncate text-[13px] text-ink">{one.name}</span>

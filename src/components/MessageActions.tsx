@@ -10,7 +10,7 @@ import { StreamingReplyContext } from "@/state/live-reply";
 export const ACTION_ICON = { size: 16, strokeWidth: 1.5 } as const;
 
 export const messageActionClass =
-  "inline-flex size-7 items-center justify-center rounded-full text-ink-tertiary transition-colors hover:bg-ink/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent";
+  "inline-flex size-7 items-center justify-center rounded-full text-ink-tertiary transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent";
 
 export type MessageMenuItem = {
   key: string;
@@ -257,7 +257,7 @@ export function MessageActions({
                 setMenuOpen(false);
                 moreRef.current?.focus();
               }}
-              className={cn(MENU_ITEM, "text-start text-ink hover:bg-menu-hover focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60")}
+              className={cn(MENU_ITEM, "text-start text-ink interaction:bg-raised/50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60")}
             >
               <span className="flex size-4 shrink-0 items-center justify-center text-ink-secondary [&>svg]:size-4" aria-hidden="true">{item.icon}</span>
               <span className="min-w-0 flex-1 truncate">{item.label}</span>

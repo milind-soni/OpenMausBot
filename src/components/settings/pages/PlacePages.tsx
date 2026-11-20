@@ -77,7 +77,7 @@ export function OverviewPage() {
       <SettingsRows>
         <div className="flex min-h-11 items-center gap-6 py-2 pl-4 pr-2" data-settings-grouped-note="">
           <p className="min-w-0 flex-1 text-[14px] leading-5 text-ink">{t(ctx.desktop ? "settings.overview.grouped" : "settings.overview.groupedBrowser", { place: place.name })}</p>
-          <button type="button" aria-label={t("settings.dismiss")} onClick={dismiss} className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-ink-secondary hover:bg-menu-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-focus"><X size={14} aria-hidden="true" /></button>
+          <button type="button" aria-label={t("settings.dismiss")} onClick={dismiss} className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink focus-visible:outline-2 focus-visible:outline-focus"><X size={14} aria-hidden="true" /></button>
         </div>
       </SettingsRows>
     )}

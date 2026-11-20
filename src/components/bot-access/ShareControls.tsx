@@ -14,7 +14,7 @@ export function QuietMenu({ label, shown, items, align = "end", className }: {
 }) {
   return (
     <SidebarPopoverMenu items={items} ariaLabel={label} align={align}
-      triggerClassName={cn("flex max-w-full items-center gap-1 rounded-md px-2 py-1 text-[13px] leading-[18px] hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.06]", className ?? "text-ink-secondary hover:text-ink")}
+      triggerClassName={cn("flex max-w-full items-center gap-1 rounded-md px-2 py-1 text-[13px] leading-[18px] interaction:bg-raised/50 aria-expanded:bg-ink/[0.06]", className ?? "text-ink-secondary hover:text-ink")}
       renderTrigger={() => <><span className="truncate">{shown}</span><ChevronDown size={14} aria-hidden="true" className="shrink-0 opacity-70" /></>} />
   );
 }

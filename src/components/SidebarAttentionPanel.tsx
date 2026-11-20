@@ -23,7 +23,7 @@ export function SidebarAttentionPanel({ entries, onUnpin, onJump, collapsed, onT
           disabled={!onToggle}
           aria-expanded={!collapsed}
           aria-label={t(collapsed ? "sidebar.section.expand" : "sidebar.section.collapse", { name: t("attention.title") })}
-          className="flex size-5 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex size-5 shrink-0 items-center justify-center rounded text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           <Chevron size={12} aria-hidden="true" />
         </button>
@@ -37,7 +37,7 @@ export function SidebarAttentionPanel({ entries, onUnpin, onJump, collapsed, onT
           onClick={onUnpin}
           aria-label={t("attention.unpin")}
           title={t("attention.unpin")}
-          className="flex size-5 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex size-5 shrink-0 items-center justify-center rounded text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           <PinOff size={12} aria-hidden="true" />
         </button>

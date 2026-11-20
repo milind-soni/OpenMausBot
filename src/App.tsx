@@ -386,7 +386,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         aria-label={t("app.openBotList")}
         aria-expanded={drawerOpen}
         onClick={openDrawer}
-        className="absolute start-2 top-2.5 z-30 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink max-md:flex max-md:size-11 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-edge max-md:bg-composer max-md:p-0 max-md:text-ink md:hidden"
+        className="absolute start-2 top-2.5 z-30 rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink max-md:flex max-md:size-11 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-edge max-md:bg-composer max-md:p-0 max-md:text-ink md:hidden"
       >
         <Menu size={18} className="max-md:hidden" />
         <ChevronLeft size={20} aria-hidden="true" className="hidden max-md:block rtl:-scale-x-100" />

@@ -137,10 +137,10 @@ export function ActivitySection() {
           {t("activity.to")}
           <input type="date" value={filters.to} min={filters.from || undefined} onChange={(e) => set({ to: e.target.value })} className={inputClass} />
         </label>
-        <button type="button" onClick={() => void load()} disabled={loading} aria-label={t("activity.refresh")} title={t("activity.refresh")} className="cursor-pointer rounded-md p-2 text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50">
+        <button type="button" onClick={() => void load()} disabled={loading} aria-label={t("activity.refresh")} title={t("activity.refresh")} className="cursor-pointer rounded-md p-2 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50">
           {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
         </button>
-        <a href={`/api/admin-activity.csv${query}`} download className="ui-button hover:bg-raised-hover">
+        <a href={`/api/admin-activity.csv${query}`} download className="ui-button interaction:bg-raised/50">
           <Download size={13} aria-hidden="true" />{t("activity.export")}
         </a>
       </div>

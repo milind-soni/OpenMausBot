@@ -79,7 +79,7 @@ export function SidebarPhoneBar({ onInboxOpened }: { onInboxOpened: () => void }
           type="button"
           onClick={openCommandPalette}
           aria-haspopup="dialog"
-          className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-hairline bg-transparent px-3.5 text-ink-secondary hover:bg-raised focus-visible:outline-2 focus-visible:outline-focus"
+          className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-hairline bg-transparent px-3.5 text-ink-secondary interaction:bg-raised/50 focus-visible:outline-2 focus-visible:outline-focus"
         >
           <Search size={17} aria-hidden="true" />
           {t("sidebar.search")}

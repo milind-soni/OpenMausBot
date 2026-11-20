@@ -156,7 +156,7 @@ function RoundChatMoreMenu({ bot, phoneHeader }: { bot: Bot; phoneHeader: boolea
           data-testid="chat-more"
           className={cn(
             "flex size-8 items-center justify-center rounded-full",
-            "bg-raised/50 transition-colors hover:bg-raised",
+            "bg-raised/50 transition-colors interaction:bg-raised",
             "max-md:size-9 max-md:border max-md:border-hairline max-md:bg-card",
             open || on ? "text-accent" : "text-ink",
           )}
@@ -201,7 +201,7 @@ export function ExportMore({ bot }: { bot: Bot }) {
   const { items } = useChatMoreItems(bot);
   return (
     <SidebarPopoverMenu items={exportItems(items)} ariaLabel={t("chat.more")} align="end" triggerTitle={t("chat.more")}
-      triggerClassName="flex shrink-0 rounded-md p-1.5 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.06]"
+      triggerClassName="flex shrink-0 rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink aria-expanded:bg-ink/[0.06]"
       renderTrigger={() => <MoreHorizontal size={16} aria-hidden="true" />} />
   );
 }
@@ -236,7 +236,7 @@ export function ChatHeaderMenu({ bot, history, openOnHover = true }: { bot: Bot;
         <span
           data-testid="chat-more"
           className={cn(
-            "flex size-8 max-md:size-11 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
+            "flex size-8 max-md:size-11 items-center justify-center rounded-full transition-colors interaction:bg-raised/50",
             open || on ? "text-accent" : "text-ink-secondary hover:text-ink",
           )}
           title={t("chat.more")}

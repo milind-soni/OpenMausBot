@@ -96,7 +96,7 @@ export function BotInstructionsDialog({ bot, onClose, inline = false, open = tru
             type="button"
             onClick={close}
             aria-label={t("botIdentity.dialog.close")}
-            className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             <X size={19} />
           </button>
@@ -118,7 +118,7 @@ export function BotInstructionsDialog({ bot, onClose, inline = false, open = tru
 
         <footer className="flex items-center justify-between gap-4 border-t border-hairline/40 px-6 py-4 text-[12px] text-ink-secondary sm:px-8">
           <span>{t("botIdentity.dialog.contextHelp")}</span>
-          <button type="button" onClick={close} className="rounded-lg bg-control px-3.5 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover">
+          <button type="button" onClick={close} className="rounded-lg bg-control px-3.5 py-2 text-[13px] font-medium text-ink interaction:bg-raised/50">
             {t("common.done")}
           </button>
         </footer>

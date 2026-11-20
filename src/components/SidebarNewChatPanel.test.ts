@@ -99,14 +99,17 @@ describe("SidebarNewChatPanel", () => {
     expect(container!.textContent).not.toContain("Create new bot");
     expect(container!.textContent).toContain("Create group chat");
     key(input, "Enter");
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newTask", botId: "scout" });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "scout", threadId: "latest" });
   });
 
-  it("starts a new thread with the first bot on Enter", () => {
+  it("opens the same conversation by keyboard and by click", () => {
     const { props, input } = open();
     key(input, "Enter");
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newTask", botId: "scout" });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: "scout", threadId: "latest" });
     expect(props.onClose).toHaveBeenCalled();
+    fixture.dispatch.mockClear();
+    flushSync(() => container!.querySelector<HTMLButtonElement>("[aria-label^='Scout,']")!.click());
+    expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "switchTask", botId: "scout", threadId: "latest" });
   });
 
   it("filters by name and arrows through the matches", () => {
@@ -114,7 +117,7 @@ describe("SidebarNewChatPanel", () => {
     type(input, "qu");
     expect(container!.textContent).not.toContain("Scout");
     key(input, "Enter");
-    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "newTask", botId: "quill" });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "select", id: "quill" });
   });
 
   it("does nothing on Enter when no bot matches", () => {

@@ -667,7 +667,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
               "relative flex items-center justify-center rounded-xl transition-colors",
               "size-[46px]",
               circle && "size-11 rounded-full bg-transparent",
-              open ? "bg-raised" : "hover:bg-raised/50",
+              open ? "bg-raised" : "interaction:bg-raised/50",
             )}
           >
             <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={circle ? 44 : 28} />
@@ -678,7 +678,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             ref={triggerRef}
             className={cn(
               "flex min-h-[46px] w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition-colors",
-              open ? "bg-raised" : "hover:bg-raised/50",
+              open ? "bg-raised" : "interaction:bg-raised/50",
             )}
           >
             <span className="relative flex shrink-0">

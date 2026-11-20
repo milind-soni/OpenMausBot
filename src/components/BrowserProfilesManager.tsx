@@ -150,7 +150,7 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
   if (canManage === false) return <p className="text-[12px] text-ink-secondary">{t("settings.profiles.ownerOnly")}</p>;
 
   const inputClass = "min-w-0 flex-1 rounded-md border border-hairline/40 bg-inset px-2.5 py-2 text-[13px] text-ink outline-none focus:border-accent disabled:opacity-50";
-  const buttonClass = "shrink-0 rounded-md bg-control px-2.5 py-2 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50";
+  const buttonClass = "shrink-0 rounded-md bg-control px-2.5 py-2 text-[12px] text-ink interaction:bg-raised/50 disabled:opacity-50";
   const selected = currentBot?.browserProfile ?? "";
   const selectedProfile = profiles.find((profile) => profile.id === selected);
   const usersOf = (profileId: string) => bots.filter((candidate) => candidate.browserProfile === profileId).map((candidate) => candidate.name);
@@ -273,7 +273,7 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
                     ) : (
                       <>
                         <button type="button" disabled={locked} onClick={() => { setRenaming({ id: profile.id, name: profile.name }); setError(""); }} className="min-w-0 flex-1 truncate text-left text-[13px] font-medium text-ink hover:underline disabled:opacity-50" title={t("settings.profiles.rename")}>{profile.name}</button>
-                        <button type="button" onClick={() => void remove(profile)} disabled={locked || Boolean(blocked)} title={blocked ?? t("settings.profiles.deleteTitle")} aria-label={`${t("common.delete")} ${profile.name}`} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"><Trash2 size={13} />{t("common.delete")}</button>
+                        <button type="button" onClick={() => void remove(profile)} disabled={locked || Boolean(blocked)} title={blocked ?? t("settings.profiles.deleteTitle")} aria-label={`${t("common.delete")} ${profile.name}`} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-danger disabled:opacity-50"><Trash2 size={13} />{t("common.delete")}</button>
                       </>
                     )}
                   </div>

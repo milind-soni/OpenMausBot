@@ -9,7 +9,7 @@ import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { randomUuid } from "@/lib/random-uuid";
 
-const control = "rounded-lg px-3 py-2 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40";
+const control = "rounded-lg px-3 py-2 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40";
 const field = "w-full rounded-lg border border-hairline/60 bg-inset px-3 py-2 text-[12px] text-ink outline-none focus:border-accent";
 type Inventory = { computers: TeamComputer[]; configured: boolean; problem?: string };
 
@@ -223,7 +223,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
               {busy === "create" && <Loader2 size={13} className="animate-spin" />}{t("canvasComputers.create")}
             </button>
           </div>
-        </form> : <button className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-hairline/60 px-3 py-3 text-[12px] text-ink-secondary hover:bg-control hover:text-ink" disabled={busy !== null} onClick={() => setCreating(true)}><Plus size={14} /> {t("canvasComputers.newCloud")}</button>}
+        </form> : <button className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-hairline/60 px-3 py-3 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink" disabled={busy !== null} onClick={() => setCreating(true)}><Plus size={14} /> {t("canvasComputers.newCloud")}</button>}
         {inventory?.computers.map((computer) => {
           const ready = ["idle", "ready", "running"].includes(computer.state);
           const starting = ["init", "provisioning", "provisioned", "cloning", "starting"].includes(computer.state);
@@ -265,7 +265,7 @@ export function CanvasComputers({ open, createRequest, drop, sections, onClose, 
             {heldHereNow && <button className={`${control} text-accent`} disabled={busy !== null} onClick={() => void mutate(computer.id, () => post(computer.id, "control", { action: "release", controlLeaseId: controlLeaseId.current }), () => { setHeldHere(null); setViewer(null); })}>{t("canvasComputers.returnToBots")}</button>}
             {computer.held && !heldHereNow && <button className={control} disabled title={t("canvasComputers.inUseTitle")}>{t("canvasComputers.inUse")}</button>}
           </div>
-          {viewer?.id === computer.id && <a href={viewer.url} target="_blank" rel="noopener noreferrer" className="mt-2 block rounded-lg px-3 py-2 text-[12px] text-accent hover:bg-control">{t("canvasComputers.openSecure")} <ArrowUpRight size={14} aria-hidden="true" className="inline align-[-2px]" /></a>}
+          {viewer?.id === computer.id && <a href={viewer.url} target="_blank" rel="noopener noreferrer" className="mt-2 block rounded-lg px-3 py-2 text-[12px] text-accent interaction:bg-raised/50">{t("canvasComputers.openSecure")} <ArrowUpRight size={14} aria-hidden="true" className="inline align-[-2px]" /></a>}
         </article>; })}
       </div>
       <footer className="border-t border-hairline/40 p-3"><button className={`${control} w-full text-left`} onClick={settings}>{t("canvasComputers.moreSettings")}</button></footer>

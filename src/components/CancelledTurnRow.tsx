@@ -21,7 +21,7 @@ export function CancelledTurnRow({ onRetry, name, stoppedBy }: { onRetry?: () =>
         <button
           type="button"
           onClick={onRetry}
-          className="inline-flex items-center gap-1 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+          className="inline-flex items-center gap-1 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           <RefreshCw size={12} /> {t("chat.retry")}
         </button>

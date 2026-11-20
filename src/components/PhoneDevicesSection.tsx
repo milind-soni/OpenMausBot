@@ -102,11 +102,11 @@ export function RouteNotices({ c, notices }: { c: PhoneSetupController; notices:
         <div key={route} role="status" data-route-notice={route} className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-inset px-3 py-2.5 text-[13px] text-ink">
           <span className="min-w-0">{t(NOTICE_KEY[route])}</span>
           <span className="flex shrink-0 gap-2">
-            <button type="button" disabled={c.busy} className="rounded-lg border border-hairline/40 px-2.5 py-1 text-[12px] hover:bg-control disabled:opacity-40"
+            <button type="button" disabled={c.busy} className="rounded-lg border border-hairline/40 px-2.5 py-1 text-[12px] interaction:bg-raised/50 disabled:opacity-40"
               onClick={() => void c.act((companion) => (route === "tailscale" ? setCompanionTailscale(companion, false) : companion.setRoute?.(route, false) ?? companion.state()))}>
               {t("remote.notice.turnOff")}
             </button>
-            <button type="button" disabled={c.busy} className="rounded-lg px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-control disabled:opacity-40"
+            <button type="button" disabled={c.busy} className="rounded-lg px-2.5 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 disabled:opacity-40"
               onClick={() => void c.act((companion) => companion.dismissNotice?.(route) ?? companion.state())}>
               {t("common.ok")}
             </button>

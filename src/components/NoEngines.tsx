@@ -32,7 +32,7 @@ export function NoEngines() {
           <p className="mt-2 text-[14px] leading-relaxed text-ink-secondary">
             {t("noEngines.remote.body", { app: productName() })}
           </p>
-          <button onClick={() => void recheck()} disabled={rechecking} className="mt-5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-60">
+          <button onClick={() => void recheck()} disabled={rechecking} className="mt-5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-60">
             {t(rechecking ? "common.checking" : "common.checkAgain")}
           </button>
         </div>
@@ -82,7 +82,7 @@ export function NoEngines() {
                     type="button"
                     data-no-engines-api-keys
                     onClick={() => dispatch(openKeySettings())}
-                    className="flex items-center gap-3 rounded-xl border border-hairline/40 bg-card p-3.5 text-left hover:bg-control/40"
+                    className="flex items-center gap-3 rounded-xl border border-hairline/40 bg-card p-3.5 text-left interaction:bg-raised/50"
                   >
                     <KeyRound size={16} className="shrink-0 text-ink-secondary" />
                     <span className="min-w-0 flex-1">
@@ -102,7 +102,7 @@ export function NoEngines() {
         <button
           onClick={recheck}
           disabled={rechecking}
-          className="mt-6 flex items-center gap-2 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-60"
+          className="mt-6 flex items-center gap-2 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-60"
         >
           {rechecking ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
           {rechecking ? t("common.checking") : t("common.checkAgain")}

@@ -55,7 +55,7 @@ function ListBody({ root, items, headed }: { root: WidgetNode; items: WidgetNode
     <button
       type="button"
       onClick={() => setAll(true)}
-      className="flex min-h-11 w-full items-center rounded-[12px] px-3 text-start text-[13px] font-medium leading-[18px] text-ink-secondary transition-colors hover:bg-inset hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+      className="flex min-h-11 w-full items-center rounded-[12px] px-3 text-start text-[13px] font-medium leading-[18px] text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
     >
       {t("widget.showAll", { count: items.length })}
     </button>
@@ -145,7 +145,7 @@ function ChoiceRows({ rows, name, required, takesOther, more }: { rows: WidgetNo
               }}
               className={cn(
                 WIDGET_ROW, ALIGN[widgetString(row, "align") ?? "center"], CHOICE,
-                checked && "bg-inset", (checked || !form.locked) && "group/row", !form.locked && "cursor-pointer hover:bg-inset",
+                checked && "bg-inset", (checked || !form.locked) && "group/row", !form.locked && "cursor-pointer interaction:bg-raised/50",
               )}
               style={{ gap }}
             >
@@ -159,7 +159,7 @@ function ChoiceRows({ rows, name, required, takesOther, more }: { rows: WidgetNo
           <div
             {...choice(rows.length, choosingOther)}
             onClick={() => choose(rows.length, true)}
-            className={cn(WIDGET_ROW, ALIGN.center, CHOICE, "gap-3", choosingOther && "bg-inset", !form.locked && "cursor-pointer hover:bg-inset")}
+            className={cn(WIDGET_ROW, ALIGN.center, CHOICE, "gap-3", choosingOther && "bg-inset", !form.locked && "cursor-pointer interaction:bg-raised/50")}
           >
             <WidgetRadioMark on={choosingOther} invalid={invalid} />
             <span dir="auto" className="min-w-0 text-[14px] leading-5 text-ink">{t("question.other")}</span>

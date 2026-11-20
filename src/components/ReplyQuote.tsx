@@ -44,7 +44,7 @@ export function ReplyQuote({
         <div className="flex min-w-0 flex-1 items-center gap-2">{body}</div>
       )}
       {onClear && (
-        <button type="button" onClick={onClear} aria-label={t("chat.reply.cancel")} className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+        <button type="button" onClick={onClear} aria-label={t("chat.reply.cancel")} className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-ink-tertiary interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
           <X size={14} strokeWidth={1.5} aria-hidden="true" />
         </button>
       )}
@@ -80,7 +80,7 @@ export function ComposerReplyStrip({
           onClick={onClear}
           aria-label={t("chat.reply.cancel")}
           title={t("chat.reply.cancel")}
-          className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-ink-tertiary interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           <X size={14} strokeWidth={1.5} aria-hidden="true" />
         </button>

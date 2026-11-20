@@ -77,7 +77,7 @@ export function InboxQuestionAnswer({ row, question, asker, onAnswer }: {
                 <button key={option.label} type="button" role={multi ? "checkbox" : "radio"} aria-checked={on} data-inbox-option={label} disabled={sending}
                   onClick={() => toggle(option.label)}
                   className={cn("flex w-full items-start gap-2.5 rounded-xl px-3 py-2.5 text-start transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-60",
-                    on ? "bg-ink/[0.10]" : "bg-ink/[0.045] hover:bg-ink/[0.075]")}>
+                    on ? "bg-ink/[0.10]" : "bg-ink/[0.045] interaction:bg-raised/50")}>
                   <span aria-hidden="true" className={cn("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-[6px] border",
                     on ? "border-ink bg-ink text-app" : "border-ink/35")}>
                     {on && <Check size={11} strokeWidth={3} />}
@@ -98,7 +98,7 @@ export function InboxQuestionAnswer({ row, question, asker, onAnswer }: {
           </div>
           <button type="button" data-inbox-action="close" onClick={() => send(closeResponse(row))} disabled={sending}
             aria-label={t("inbox.action.closeQuestion")} title={t("inbox.action.closeQuestion")}
-            className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-ink/[0.07] hover:text-ink">
+            className="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary interaction:bg-raised/50 hover:text-ink">
             <X size={15} aria-hidden="true" />
           </button>
         </div>

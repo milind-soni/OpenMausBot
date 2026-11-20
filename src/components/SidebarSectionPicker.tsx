@@ -72,7 +72,7 @@ export function SectionPicker({
               onClick={() => assign(section)}
               className={cn(
                 MENU_ITEM, "justify-between",
-                section === sectionCurrent ? "bg-menu-active text-ink" : "text-ink hover:bg-menu-hover",
+                section === sectionCurrent ? "bg-menu-active text-ink" : "text-ink interaction:bg-raised/50",
               )}
             >
               <span className="truncate">{section}</span>
@@ -111,7 +111,7 @@ export function SectionPicker({
           <div role="separator" className={MENU_ITEM_SEPARATOR} />
           <button
             onClick={() => assign("")}
-            className={cn(MENU_ITEM, "text-danger hover:bg-menu-hover")}
+            className={cn(MENU_ITEM, "text-danger interaction:bg-raised/50")}
           >
             <FolderMinus size={16} />
             {t("sidebar.section.removeFromContext")}

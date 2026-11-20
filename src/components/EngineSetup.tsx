@@ -82,7 +82,7 @@ export function CommandRow({
           onClick={() => void copy()}
           aria-label={t("engineSetup.copyCommand")}
           title={t("engineSetup.copyCommand")}
-          className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-ink-secondary hover:bg-control hover:text-ink"
+          className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           {copyIcon(12)}
           {t(status === "copied" ? "engineSetup.copied" : status === "failed" ? "common.copyFailed" : "engineSetup.copy")}
@@ -118,7 +118,7 @@ export function CommandRow({
             onClick={() => void copy()}
             aria-label={t("engineSetup.copyCommand")}
             title={t("engineSetup.copyCommand")}
-            className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[12px] font-medium text-ink-secondary hover:bg-control hover:text-ink"
+            className="flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[12px] font-medium text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             {copyIcon(12)}
             {t(status === "copied" ? "engineSetup.copied" : status === "failed" ? "common.copyFailed" : "engineSetup.copy")}
@@ -144,7 +144,7 @@ export function CommandRow({
         <button
           type="button"
           onClick={() => void copy()}
-          className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-control px-3 py-2 text-[13px] font-semibold text-ink hover:bg-raised-hover"
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-control px-3 py-2 text-[13px] font-semibold text-ink interaction:bg-raised/50"
         >
           {copyIcon(14)}
           {t(status === "copied" ? "engineSetup.commandCopied" : status === "failed" ? "common.copyFailed" : "engineSetup.copyCommand")}
@@ -192,7 +192,7 @@ function ServerEngineInstall({ instance, mode, command, quiet = false }: { insta
         disabled={busy}
         onClick={() => void run()}
         className={cn("flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-[13px] font-semibold disabled:cursor-wait disabled:opacity-70",
-          quiet ? "bg-control text-ink hover:bg-raised-hover" : "ui-button-primary bg-accent text-white hover:brightness-110")}
+          quiet ? "bg-control text-ink interaction:bg-raised/50" : "ui-button-primary bg-accent text-white hover:brightness-110")}
       >
         {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
         {busy
@@ -401,7 +401,7 @@ function ManagedEngineSetup({ instance, signInOnly }: { instance: InstanceInfo; 
       {busy === "signin" && <p role="status" className="text-[12px] text-ink-secondary">{t("engineSetup.antigravitySlow")}</p>}
       {flow && (
         <>
-          <button type="button" onClick={() => void check()} className="w-full rounded-lg bg-control px-3 py-2 text-[12px] font-semibold text-ink hover:bg-raised-hover">
+          <button type="button" onClick={() => void check()} className="w-full rounded-lg bg-control px-3 py-2 text-[12px] font-semibold text-ink interaction:bg-raised/50">
             {busy === "check" ? t("common.checking") : t("engineSetup.finishedSignIn")}
           </button>
           <div data-redirect-paste className="rounded-lg border border-hairline/50 bg-app px-2.5 py-2 text-[12px] text-ink-secondary">
@@ -522,7 +522,7 @@ function ApiKeyEngineSetup({ instance, className, unframed, configured = false }
         <button
           type="button"
           onClick={() => dispatch(openKeysFor(instance))}
-          className="mt-3 flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-raised-hover"
+          className="mt-3 flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] font-medium text-ink interaction:bg-raised/50"
         >
           <KeyRound size={13} aria-hidden="true" />
           {t(copy.action)}

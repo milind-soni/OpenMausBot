@@ -246,7 +246,7 @@ export function CodeBlock({ code, lang, initialWrap = false, open = false }: Cod
             className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors ${
               wrapLines
                 ? "bg-accent/15 text-accent font-medium"
-                : "text-ink-secondary hover:bg-raised hover:text-ink"
+                : "text-ink-secondary interaction:bg-raised/50 hover:text-ink"
             }`}
             title={wrapLines ? t("code.unwrapLong") : t("code.wrapLong")}
             aria-label={wrapLines ? t("code.unwrapLong") : t("code.wrapLong")}
@@ -258,7 +258,7 @@ export function CodeBlock({ code, lang, initialWrap = false, open = false }: Cod
           <button
             type="button"
             onClick={download}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary interaction:bg-raised/50 hover:text-ink transition-colors"
             title={t("code.saveTitle")}
             aria-label={t("code.saveTitle")}
           >
@@ -268,7 +268,7 @@ export function CodeBlock({ code, lang, initialWrap = false, open = false }: Cod
           <button
             type="button"
             onClick={copy}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary interaction:bg-raised/50 hover:text-ink transition-colors"
             title={copied === "copied" ? t("code.copiedTitle") : copied === "failed" ? t("common.copyFailed") : t("code.copyTitle")}
             aria-label={copied === "copied" ? t("code.copiedAria") : copied === "failed" ? t("common.copyFailed") : t("code.copyAria")}
           >

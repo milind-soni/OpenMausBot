@@ -65,7 +65,7 @@ function Row({ item, locale, onModal, canReopen, to }: {
   const modal = item.source === "built-in" && "modal" in item.entry.open ? item.entry.open.modal : null;
   if (modal && canReopen(modal)) {
     return <li data-announcement-item={item.id}>
-      <button type="button" onClick={() => onModal(modal)} className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-start transition-colors hover:bg-ink/[0.04] focus-visible:outline-2 focus-visible:outline-focus">
+      <button type="button" onClick={() => onModal(modal)} className="flex w-full items-start gap-3 rounded-xl px-3 py-3 text-start transition-colors interaction:bg-raised/50 focus-visible:outline-2 focus-visible:outline-focus">
         <Mark item={item} />
         <span className="min-w-0 flex-1">{words}</span>
         <span className="ui-button ui-button-sm pointer-events-none mt-4 shrink-0 rounded-full px-3 text-[12px]">{t("announcements.showAgain")}</span>

@@ -44,7 +44,7 @@ function UpdateNote({ name, status, appVersion, onHide }: { name: string; status
 function CopyAddress({ origin, name }: { origin: string; name: string }) {
   const { state, copy } = useCopyFeedback(origin);
   return <button type="button" onClick={copy} aria-label={t("servers.copyAddressFor", { name })} title={t(state === "copied" ? "servers.copied" : "servers.copyAddress")}
-    className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-ink">{state === "copied" ? <Check size={14} /> : <Copy size={14} />}</button>;
+    className="rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink">{state === "copied" ? <Check size={14} /> : <Copy size={14} />}</button>;
 }
 
 /** One row's status line, with at most one button. */

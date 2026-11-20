@@ -78,7 +78,7 @@ export function RoutineDatePicker({ value, onChange, min, label, invalid, descri
       <button ref={trigger} type="button" aria-label={`${label} · ${dateLabel}`} aria-expanded={open}
         aria-controls={open ? calendarId : undefined} aria-invalid={invalid} aria-describedby={describedBy}
         onClick={() => setOpen(value => !value)}
-        className={cn("flex min-h-9 max-w-full items-center gap-2 rounded-lg border bg-control px-3 text-start text-[13px] text-ink hover:bg-raised", invalid ? "border-danger/70" : "border-hairline/45")}>
+        className={cn("flex min-h-9 max-w-full items-center gap-2 rounded-lg border bg-control px-3 text-start text-[13px] text-ink interaction:bg-raised/50", invalid ? "border-danger/70" : "border-hairline/45")}>
         <CalendarDays size={15} className="shrink-0 text-ink-secondary" aria-hidden="true" />
         <span className="truncate">{dateLabel}</span>
         <ChevronDown size={13} className="shrink-0 text-ink-secondary" aria-hidden="true" />

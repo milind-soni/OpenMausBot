@@ -25,8 +25,8 @@ type Gesture = {
   moved: boolean;
 } & ({ kind: "pan" } | { kind: "team"; key: string; origin: Point } | { kind: "bot"; bot: Bot });
 
-const iconButton = "flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent";
-const menuButton = "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] text-ink-secondary hover:bg-control hover:text-ink";
+const iconButton = "flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent";
+const menuButton = "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink";
 
 function BotCard({ bot, selected, moving, connected, tagged = false, sent, onComputer, onArrange }: {
   bot: Bot;
@@ -75,7 +75,7 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, onCom
         onClick={() => onComputer(bot)}><Monitor size={13} /></button>}
       <button aria-label={t("canvas.changeModel", { name: bot.name })} title={`${t("canvas.defaultModel")}: ${model}`}
         onClick={() => openBotSettings(dispatch, "model", { botId: bot.id })}
-        className="ml-auto flex h-8 min-w-0 max-w-[130px] items-center gap-1.5 rounded-md px-2 text-[10px] text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
+        className="ml-auto flex h-8 min-w-0 max-w-[130px] items-center gap-1.5 rounded-md px-2 text-[10px] text-ink-secondary interaction:bg-raised/50 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
         <span className="flex size-3.5 shrink-0 items-center justify-center">{instance
           ? <InstanceProviderMark instance={instance} size={13} />
           : <ProviderMark driverKind="" size={13} />}</span>
@@ -437,7 +437,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
             </button>
             {computer && <button aria-label={t("canvas.teamComputer", { team: section.name, name: computer.name })} title={`${computer.name}${computer.state ? ` · ${computer.state}` : ""}`}
               disabled={!onTeamComputer} onClick={() => onTeamComputer?.(section.key)}
-              className="flex min-w-0 max-w-[120px] shrink items-center gap-1.5 rounded-md px-1.5 py-2 text-[10px] text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:pointer-events-none">
+              className="flex min-w-0 max-w-[120px] shrink items-center gap-1.5 rounded-md px-1.5 py-2 text-[10px] text-ink-secondary interaction:bg-raised/50 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:pointer-events-none">
               <Monitor size={12} className="shrink-0" /><span className="truncate">{computer.name}</span>
             </button>}
             <span className="text-[11px] tabular-nums text-ink-secondary">{section.chiefs.length + section.members.length}</span>
@@ -506,7 +506,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
       </div>
       <div className="pointer-events-auto flex shrink-0 items-center gap-0.5 rounded-xl border border-hairline/60 bg-panel p-1 shadow-sm">
         <button className={iconButton} aria-label={t("canvas.zoomOut")} onClick={() => zoom(1 / 1.2)}><Minus size={15} /></button>
-        <button className="min-w-12 rounded-md px-1 py-2 text-[11px] tabular-nums text-ink-secondary hover:bg-control" aria-label={t("canvas.fit")} title={t("canvas.fitHint")} onClick={fit}>{Math.round(view.scale * 100)}%</button>
+        <button className="min-w-12 rounded-md px-1 py-2 text-[11px] tabular-nums text-ink-secondary interaction:bg-raised/50" aria-label={t("canvas.fit")} title={t("canvas.fitHint")} onClick={fit}>{Math.round(view.scale * 100)}%</button>
         <button className={iconButton} aria-label={t("canvas.zoomIn")} onClick={() => zoom(1.2)}><Plus size={15} /></button>
       </div>
     </div>

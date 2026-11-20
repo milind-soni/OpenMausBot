@@ -21,7 +21,7 @@ export function AppCopyNotice({ instance, className }: { instance: InstanceInfo;
         type="button"
         aria-label={t("engineSetup.usingAppCopyDismiss")}
         onClick={() => dismissAppCopySwitch(instance.instanceId)}
-        className="shrink-0 rounded-md p-1 text-ink-tertiary hover:bg-control hover:text-ink"
+        className="shrink-0 rounded-md p-1 text-ink-tertiary interaction:bg-raised/50 hover:text-ink"
       >
         <X size={12} aria-hidden="true" />
       </button>
@@ -52,7 +52,7 @@ export function AppCopySetup({ instance, className, unframed }: { instance: Inst
           <button
             type="button"
             onClick={() => dispatch(openKeySettings(keyForInstance(instance.instanceId)))}
-            className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-raised-hover"
+            className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] font-medium text-ink interaction:bg-raised/50"
           >
             <KeyRound size={13} aria-hidden="true" />
             {t("engineSetup.apiKey.open")}

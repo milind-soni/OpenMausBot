@@ -106,7 +106,7 @@ export function AvatarFraming({
             type="button"
             disabled={disabled}
             onClick={() => onPatch({ avatarZoom: AVATAR_ZOOM_MIN, avatarFocusX: AVATAR_FOCUS_CENTER, avatarFocusY: AVATAR_FOCUS_CENTER })}
-            className="shrink-0 rounded-md px-2 py-1 text-ink hover:bg-control disabled:opacity-50"
+            className="shrink-0 rounded-md px-2 py-1 text-ink interaction:bg-raised/50 disabled:opacity-50"
           >
             {t("botIdentity.framing.reset")}
           </button>
@@ -122,7 +122,7 @@ export function OrganizationAvatarIcons({ busy, onUpload }: { busy: boolean; onU
   return (
     <div className="mb-3 border-b border-hairline/40 pb-3">
       <div className="mb-2 text-[13px] font-medium text-ink-secondary">{t("botIdentity.orgIcons", { name: organization.name })}</div>
-      <div className="flex flex-wrap gap-2">{organization.icons.map(icon => <button key={icon.id} type="button" disabled={busy} title={icon.name} aria-label={t("botIdentity.useOrgIcon", { name: icon.name })} className="flex size-12 items-center justify-center rounded-lg border border-hairline/40 hover:bg-control disabled:opacity-50" onClick={() => {
+      <div className="flex flex-wrap gap-2">{organization.icons.map(icon => <button key={icon.id} type="button" disabled={busy} title={icon.name} aria-label={t("botIdentity.useOrgIcon", { name: icon.name })} className="flex size-12 items-center justify-center rounded-lg border border-hairline/40 interaction:bg-raised/50 disabled:opacity-50" onClick={() => {
         const bytes = Uint8Array.from(atob(icon.image.slice(22)), byte => byte.charCodeAt(0));
         onUpload(new File([bytes], `${icon.id}.png`, { type: "image/png" }));
       }}><img src={icon.image} alt="" className="size-10 rounded-md object-contain" /></button>)}</div>

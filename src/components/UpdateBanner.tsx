@@ -103,7 +103,7 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
         {!installing && (
           <button
             onClick={() => setDismissed(key)}
-            className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
+            className="shrink-0 rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
             title={t("update.banner.dismiss")}
           >
             <X size={14} />
@@ -161,7 +161,7 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
                 void updater.check();
               }}
               disabled={pending !== null}
-              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:text-ink-secondary disabled:hover:bg-control"
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control py-1.5 text-[13px] text-ink interaction:bg-raised/50 disabled:text-ink-secondary "
             >
               {pending === "check" ? (
                 <>
@@ -175,7 +175,7 @@ export function UpdateBanner({ sidebarIndicator = false }: UpdateBannerProps) {
           <button
             onClick={() => setDismissed(key)}
             disabled={pending !== null}
-            className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50 disabled:hover:bg-transparent"
+            className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50 disabled:hover:bg-transparent"
           >
             {t(s.status === "handed-off" || s.retryable === false ? "update.banner.dismiss" : "update.card.later")}
           </button>

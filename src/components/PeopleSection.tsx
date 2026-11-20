@@ -123,7 +123,7 @@ export function PeopleTable({ people, busy, onRole, onRemove, onLink, readOnly =
             {hasFiniteCost(person.costUsd) ? `${person.estimated ? "~" : ""}${formatUsd(person.costUsd)}` : "—"}
           </span>
           {readOnly ? <span /> : <span className="flex items-center justify-end gap-2 text-[12px]">
-            <button type="button" disabled={busy} onClick={() => onLink(person)} aria-label={t("people.link")} title={t("people.link")} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"><Link2 size={13} /></button>
+            <button type="button" disabled={busy} onClick={() => onLink(person)} aria-label={t("people.link")} title={t("people.link")} className="rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"><Link2 size={13} /></button>
             <button type="button" disabled={busy} onClick={() => onRole(person, person.role === "admin" ? "member" : "admin")} className="text-ink-secondary hover:text-ink disabled:opacity-50">
               {person.role === "admin" ? t("people.makeMember") : t("people.makeAdmin")}
             </button>
@@ -142,7 +142,7 @@ export function CopyLink({ link }: { link: string }) {
       <div className="mb-1 text-ink-secondary">{t("people.link")}</div>
       <div className="flex items-center gap-2">
         <code className="min-w-0 flex-1 select-all break-all text-ink">{link}</code>
-        <button type="button" onClick={copy} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-ink">
+        <button type="button" onClick={copy} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink">
           {state === "copied" ? <Check size={13} className="text-success" /> : state === "failed" ? <X size={13} className="text-danger" /> : <Copy size={13} />}
           {t(state === "copied" ? "people.copied" : state === "failed" ? "common.copyFailed" : "people.copy")}
         </button>
@@ -163,7 +163,7 @@ export function PortalPeople({ peopleUrl, people }: { peopleUrl: string | null; 
             href={peopleUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex w-fit items-center gap-2 rounded-lg bg-control px-3 py-2 font-medium text-ink hover:bg-control/70"
+            className="flex w-fit items-center gap-2 rounded-lg bg-control px-3 py-2 font-medium text-ink interaction:bg-raised/50"
           >
             {t("people.portal.open")} <ExternalLink size={14} aria-hidden="true" />
           </a>
@@ -277,7 +277,7 @@ export function PeopleSection({ simple = false, startOpen = false }: { simple?: 
         <button type="submit" disabled={busy || !draft.trim()} className="ui-button ui-button-primary">
           {busy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />}{t("people.invite")}
         </button>
-        <button type="button" onClick={() => void load()} disabled={loading || busy} aria-label={t("people.refresh")} title={t("people.refresh")} className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"><RefreshCw size={13} className={cn(loading && "animate-spin")} /></button>
+        <button type="button" onClick={() => void load()} disabled={loading || busy} aria-label={t("people.refresh")} title={t("people.refresh")} className="rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"><RefreshCw size={13} className={cn(loading && "animate-spin")} /></button>
       </form>
       <p className="mt-2 text-[12px] leading-relaxed text-ink-secondary">{t("people.inviteHint")}</p>
       {link && <CopyLink link={link} />}

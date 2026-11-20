@@ -139,7 +139,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
         data-testid="place-chip"
         onClick={() => setOpen((value) => !value)}
         className={cn(
-          "relative flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink",
+          "relative flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink",
           pinned && "text-accent hover:text-accent",
           (disabled || off) && "cursor-not-allowed opacity-45 hover:bg-transparent",
         )}
@@ -156,7 +156,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
               role="menuitemradio"
               aria-checked={!pinned}
               onClick={() => choose(null)}
-              className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-left", !pinned ? "bg-menu-active" : "hover:bg-menu-hover")}
+              className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-left", !pinned ? "bg-menu-active" : "interaction:bg-raised/50")}
             >
               <PlaceIcon place={botDefault} size={16} className="mt-px shrink-0 text-ink-secondary" aria-hidden="true" />
               <span className="min-w-0 flex-1">
@@ -180,7 +180,7 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
                   disabled={!reachable}
                   title={!policy ? t("place.unavailable") : placeHasIssue(view) ? view.line : undefined}
                   onClick={() => choose(place)}
-                  className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-left", selected ? "bg-menu-active" : reachable ? "hover:bg-menu-hover" : "cursor-not-allowed opacity-45")}
+                  className={cn("flex items-start gap-2 rounded-md px-2 py-1.5 text-left", selected ? "bg-menu-active" : reachable ? "interaction:bg-raised/50" : "cursor-not-allowed opacity-45")}
                 >
                   <PlaceIcon place={place} size={16} className="mt-px shrink-0 text-ink-secondary" aria-hidden="true" />
                   <span className="min-w-0 flex-1">

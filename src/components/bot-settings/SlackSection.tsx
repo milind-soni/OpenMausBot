@@ -10,7 +10,7 @@ export function SlackSection({ managementUrl }: { managementUrl: string }) {
         href={managementUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="flex w-fit items-center gap-2 rounded-lg bg-control px-3 py-2 font-medium text-ink hover:bg-control/70"
+        className="flex w-fit items-center gap-2 rounded-lg bg-control px-3 py-2 font-medium text-ink interaction:bg-raised/50"
       >
         {t("botSlack.manage")} <ExternalLink size={14} aria-hidden="true" />
       </a>

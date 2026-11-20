@@ -75,7 +75,7 @@ export function SoulField({
             type="button"
             disabled={resolving}
             onClick={() => onPatch({ soul: bot.description, description: firstSentence(bot.description) })}
-            className="rounded-md px-1.5 py-1 text-[12px] font-medium text-accent-text hover:bg-accent/10"
+            className="rounded-md px-1.5 py-1 text-[12px] font-medium text-accent-text interaction:bg-raised/50"
           >
             {t("botIdentity.soul.moveToFile")}
           </button>
@@ -92,7 +92,7 @@ export function SoulField({
             <button type="button" disabled={resolving} onClick={() => void resolve("apply-file")} className="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:brightness-110 disabled:opacity-50">
               {t("botIdentity.soul.useFile")}
             </button>
-            <button type="button" disabled={resolving} onClick={() => void resolve("discard-file")} className="rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50">
+            <button type="button" disabled={resolving} onClick={() => void resolve("discard-file")} className="rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50 disabled:opacity-50">
               {t("botIdentity.soul.keepSaved")}
             </button>
           </div>

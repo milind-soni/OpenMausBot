@@ -53,7 +53,7 @@ function PeopleStatusLine({ compact }: { compact: boolean }) {
       {status === "loading" ? <div role="status" className="px-2 py-1 text-[13px] text-ink-tertiary">{t("sidebar.people.loading")}</div> : (
         <div role="alert" className="flex items-center gap-2 px-2 py-1 text-[13px] text-ink-secondary">
           <span className="min-w-0 flex-1 truncate">{t("sidebar.people.failed")}</span>
-          <button type="button" onClick={retryTeamPeople} data-people-retry className="shrink-0 rounded-md px-1.5 text-[12px] font-medium text-accent hover:bg-raised/60">{t("sidebar.people.retry")}</button>
+          <button type="button" onClick={retryTeamPeople} data-people-retry className="shrink-0 rounded-md px-1.5 text-[12px] font-medium text-accent interaction:bg-raised/50">{t("sidebar.people.retry")}</button>
         </div>
       )}
     </section>
@@ -104,7 +104,7 @@ export function SidebarPeople({ compact, onOpened }: { compact: boolean; onOpene
           return (
             <li key={person.email}>
               <button type="button" onClick={() => open(person)} aria-label={label} title={label} data-person={person.email}
-                className="relative flex rounded-full p-1 hover:bg-raised/60">
+                className="relative flex rounded-full p-1 interaction:bg-raised/50">
                 <span className="relative inline-flex shrink-0" data-person-here={here || undefined}>
                   <PersonFace person={person} size={face} />
                   {here && <HereDot size={face} />}
@@ -120,7 +120,7 @@ export function SidebarPeople({ compact, onOpened }: { compact: boolean; onOpene
         {invite && (
           <li>
             <a href={invite} target="_blank" rel="noreferrer" aria-label={t("sidebar.people.invite")} title={t("sidebar.people.invite")} data-people-invite
-              className="flex items-center justify-center rounded-full p-1 text-ink-secondary hover:bg-raised/60 hover:text-ink">
+              className="flex items-center justify-center rounded-full p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink">
               <span className="flex items-center justify-center rounded-full border border-dashed border-hairline" style={{ width: face, height: face }}>
                 <UserPlus aria-hidden="true" size={compact ? 13 : 14} strokeWidth={1.75} className="shrink-0" />
               </span>

@@ -68,7 +68,7 @@ export function LiveCallPill({ onOpen, currentBotId, iconOnly = false }: {
           aria-label={title}
           title={t("call.live.back")}
           onClick={() => onOpen(bot.id, threadId)}
-          className={cn(round, "relative text-success hover:bg-raised")}
+          className={cn(round, "relative text-success interaction:bg-raised/50")}
         >
           <Phone className="size-4" />
           <span className="absolute right-0.5 top-0.5 size-1.5 animate-pulse rounded-full bg-success" aria-hidden />
@@ -98,7 +98,7 @@ export function LiveCallChip({ currentBotId, onOpen }: { currentBotId: string; o
       type="button"
       onClick={() => onOpen(bot.id, threadId)}
       title={t("call.live.pill", { name: bot.name })}
-      className="flex shrink-0 items-center gap-1.5 rounded-full border border-success/40 px-2.5 py-1 text-[12px] text-ink hover:bg-raised md:hidden"
+      className="flex shrink-0 items-center gap-1.5 rounded-full border border-success/40 px-2.5 py-1 text-[12px] text-ink interaction:bg-raised/50 md:hidden"
     >
       <span className="size-2 animate-pulse rounded-full bg-success" aria-hidden />
       {t("call.live.back")}

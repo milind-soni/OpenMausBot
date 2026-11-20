@@ -64,7 +64,7 @@ export function WorksOnGrid({ options, onSelect }: { options: readonly WorksOnOp
               : "border-hairline/50 bg-app text-ink",
             disabled
               ? "cursor-not-allowed"
-              : "hover:border-accent/40 hover:bg-control/60",
+              : "hover:border-accent/40 interaction:bg-raised/50",
           )}
         >
           <span className="flex items-center gap-2 text-[12px] font-medium leading-4">

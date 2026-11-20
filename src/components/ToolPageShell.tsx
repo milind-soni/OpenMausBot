@@ -29,7 +29,7 @@ export function ToolPageHeader({ backLabel, onBack, backRef, children }: {
   return (
     <header className="shrink-0 border-b border-hairline/35 bg-app py-3 pr-4 pl-12 md:pl-4" style={macInset ? DRAG : undefined}>
       <div className="flex flex-wrap items-center gap-2">
-        <button type="button" ref={backRef} onClick={onBack} aria-label={backLabel} title={backLabel} className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink" style={macInset ? NO_DRAG : undefined}><ArrowLeft size={18} /></button>
+        <button type="button" ref={backRef} onClick={onBack} aria-label={backLabel} title={backLabel} className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink" style={macInset ? NO_DRAG : undefined}><ArrowLeft size={18} /></button>
         {children}
       </div>
     </header>

@@ -137,10 +137,10 @@ export function AutomationsCalendar({ botFilter, department = "all", selectedAut
   return (
     <div className="@container/routines relative flex min-h-0 flex-1 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-hairline/30 px-4 py-2">
-        <button type="button" onClick={() => setAnchor((current) => addDays(current, -days))} className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink" aria-label={t("routines.previous")}><ChevronLeft size={16} /></button>
-        <button type="button" onClick={() => setAnchor((current) => addDays(current, days))} className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink" aria-label={t("routines.next")}><ChevronRight size={16} /></button>
+        <button type="button" onClick={() => setAnchor((current) => addDays(current, -days))} className="rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink" aria-label={t("routines.previous")}><ChevronLeft size={16} /></button>
+        <button type="button" onClick={() => setAnchor((current) => addDays(current, days))} className="rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink" aria-label={t("routines.next")}><ChevronRight size={16} /></button>
         <div className="min-w-0 truncate px-1 text-[14px] font-medium text-ink" aria-live="polite">{calendarRangeLabel(rangeStart, days)}</div>
-        <button type="button" onClick={() => setAnchor(startOfDay(Date.now()))} className="rounded-lg border border-hairline/50 px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-raised">{t("routines.today")}</button>
+        <button type="button" onClick={() => setAnchor(startOfDay(Date.now()))} className="rounded-lg border border-hairline/50 px-2.5 py-1 text-[12px] font-medium text-ink interaction:bg-raised/50">{t("routines.today")}</button>
         <div role="group" className={cn(TAB_GROUP, "ml-auto")} aria-label={t("routines.view.label")}>
           <button type="button" aria-pressed={days === 1} onClick={() => setDays(1)} className={TAB_BUTTON}>{t("routines.view.day")}</button>
           <button type="button" aria-pressed={days === 7} onClick={() => setDays(7)} className={TAB_BUTTON}>{t("routines.view.week")}</button>

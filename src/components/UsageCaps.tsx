@@ -186,7 +186,7 @@ function CapsForm({ view, onSaved }: { view: UsageCapView; onSaved?: () => void 
             <div className="mb-1.5 flex items-center gap-2 text-[13px] text-ink">
               {botName(row.botId)}
               <button type="button" onClick={() => setBots((current) => current.filter((other) => other.botId !== row.botId))} aria-label={t("usage.caps.removeBot", { bot: botName(row.botId) })} disabled={saving}
-                className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"><Trash2 size={13} /></button>
+                className="rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-danger disabled:opacity-50"><Trash2 size={13} /></button>
             </div>
             <LimitInputs who={botName(row.botId)} draft={row.draft} disabled={saving}
               onChange={(field, value) => setBots((current) => current.map((other) => (other.botId === row.botId ? { ...other, draft: { ...other.draft, [field]: value } } : other)))} />
@@ -202,7 +202,7 @@ function CapsForm({ view, onSaved }: { view: UsageCapView; onSaved?: () => void 
               </Select>
             </label>
           )}
-          <button type="submit" disabled={saving} className="ml-auto flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+          <button type="submit" disabled={saving} className="ml-auto flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50">
             {saving && <Loader2 size={13} className="animate-spin" />}{t("common.save")}
           </button>
         </div>

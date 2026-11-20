@@ -258,7 +258,7 @@ export function TraceWaterfall({ detail, now, actions }: { detail: TraceDetail; 
                 role="treeitem"
                 aria-level={row.depth + 1}
                 aria-expanded={row.expandable ? row.open : undefined}
-                className="group grid grid-cols-1 hover:bg-raised/40 sm:grid-cols-[minmax(220px,38%)_1fr]"
+                className="group grid grid-cols-1 interaction:bg-raised/50 sm:grid-cols-[minmax(220px,38%)_1fr]"
                 title={tokens ?? undefined}
                 data-kind={row.node.kind}
               >
@@ -267,7 +267,7 @@ export function TraceWaterfall({ detail, now, actions }: { detail: TraceDetail; 
                     <button
                       type="button"
                       onClick={() => toggle(row.node.id)}
-                      className="flex size-5 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+                      className="flex size-5 shrink-0 items-center justify-center rounded text-ink-secondary interaction:bg-raised/50 hover:text-ink"
                       aria-label={t(row.open ? "trace.collapse" : "trace.expand")}
                     >
                       {row.open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}

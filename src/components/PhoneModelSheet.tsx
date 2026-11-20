@@ -55,7 +55,7 @@ export function PhoneModelSheet({ updatesDefault, id, bot, closing, instances, i
             <h2 className="truncate text-[18px] font-semibold leading-6">{bot.name}</h2>
             <p className="text-[13px] leading-5 text-ink-secondary">{t(updatesDefault ? "model.section.default" : "model.scope.thread")}</p>
           </div>
-          <button type="button" aria-label={t("common.close")} onClick={onClose} className="grid size-11 shrink-0 place-items-center rounded-full text-ink-secondary hover:bg-raised">
+          <button type="button" aria-label={t("common.close")} onClick={onClose} className="grid size-11 shrink-0 place-items-center rounded-full text-ink-secondary interaction:bg-raised/50">
             <X size={18} />
           </button>
         </header>

@@ -12,7 +12,7 @@ import { isPostizStatus, POSTIZ_CLOUD, POSTIZ_KEY_PAGE, POSTIZ_SERVER, type Post
 import { cleanKey, looksLikeKey, saveCredential } from "./keys/key-save";
 import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 
-const pill = "inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors hover:bg-raised-hover disabled:opacity-40";
+const pill = "inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors interaction:bg-raised/50 disabled:opacity-40";
 const field = "h-8 w-full min-w-0 rounded-lg bg-inset px-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent/50";
 const link = "text-[12px] text-accent-text underline underline-offset-2";
 const SERVER = encodeURIComponent(POSTIZ_SERVER);
@@ -258,7 +258,7 @@ export function PostizCard({ refreshKey = 0, onConnection }: {
       triggerClassName="shrink-0"
       items={[{ key: "disconnect", label: t("connectors.disconnect"), disabled: busy !== null, onSelect: () => void disconnect() }]}
       renderTrigger={() => (
-        <span className="inline-flex size-7 items-center justify-center rounded-full bg-control/80 text-ink hover:bg-raised-hover">
+        <span className="inline-flex size-7 items-center justify-center rounded-full bg-control/80 text-ink interaction:bg-raised/50">
           {busy === "disconnect" ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={15} aria-hidden="true" />}
         </span>
       )}
@@ -267,7 +267,7 @@ export function PostizCard({ refreshKey = 0, onConnection }: {
   const offerConnect = status !== null && !connected && !blocked;
 
   return (
-    <div data-app-tile="postiz" data-postiz-state={status?.state ?? "loading"} className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40">
+    <div data-app-tile="postiz" data-postiz-state={status?.state ?? "loading"} className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors interaction:bg-raised/50">
       <div className="flex items-center gap-3">
         <PostizIcon />
         <div className="min-w-0 flex-1">

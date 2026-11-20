@@ -34,7 +34,7 @@ export function CallRecordRow({ message, transcript, botName, threadId, busy, ha
         aria-label={t("chat.callRecord.label", { title, duration })}
         title={new Date(call.endedAt).toLocaleString(intlLocale())}
         onClick={() => setOpen(true)}
-        className="mx-auto flex w-fit max-w-[min(32rem,90%)] cursor-pointer flex-col items-center gap-1 rounded-2xl border border-hairline/40 bg-panel px-4 py-2 text-[13px] text-ink-secondary transition-colors hover:border-hairline hover:bg-raised"
+        className="mx-auto flex w-fit max-w-[min(32rem,90%)] cursor-pointer flex-col items-center gap-1 rounded-2xl border border-hairline/40 bg-panel px-4 py-2 text-[13px] text-ink-secondary transition-colors hover:border-hairline interaction:bg-raised/50"
       >
         <button
           type="button"

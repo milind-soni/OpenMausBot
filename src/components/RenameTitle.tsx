@@ -113,7 +113,7 @@ export function RenameTitle({
           onClick={startRename}
           aria-label={t("rename.named", { name: value })}
           title={t("rename.agent")}
-          className={cn("flex size-10 shrink-0 items-center justify-center rounded text-ink-secondary opacity-70 hover:bg-raised hover:text-ink hover:opacity-100", editButtonClassName)}
+          className={cn("flex size-10 shrink-0 items-center justify-center rounded text-ink-secondary opacity-70 interaction:bg-raised/50 hover:text-ink hover:opacity-100", editButtonClassName)}
         >
           <Pencil size={12} />
         </button>

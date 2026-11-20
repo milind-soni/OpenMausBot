@@ -39,7 +39,7 @@ export function SignedInSites({ target, scope = {}, sharedBy, disabled = false, 
   }, [bare, key]);
 
   const locked = disabled || busy;
-  const buttonClass = "flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50";
+  const buttonClass = "flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50";
   const list = (
       <div className={bare ? "flex min-w-0 flex-col gap-2" : "mt-2 flex flex-col gap-2"} aria-busy={busy}>
         {sharedBy.length > 1 && <p className="text-[11px] leading-relaxed text-ink-secondary">{t("settings.sites.shared", { names: sharedBy.join(", ") })}</p>}

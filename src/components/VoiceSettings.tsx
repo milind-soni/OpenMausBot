@@ -386,7 +386,7 @@ export function VoiceSettings({
           <button
             onClick={() => void saveKey()}
             disabled={saving || !key.trim()}
-            className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />{t("common.save")}</>}
           </button>
@@ -466,7 +466,7 @@ export function VoiceSettings({
           <button
             onClick={() => void saveServer()}
             disabled={savingServer || !serverUrl.trim()}
-            className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {savingServer ? <Loader2 size={13} className="animate-spin" /> : <><Check size={13} />{t("common.save")}</>}
           </button>
@@ -560,7 +560,7 @@ export function VoiceSettings({
               aria-busy={preparingSample}
               title={ready ? t("voice.hear") : t("voice.pickFirst")}
               aria-label={t("voice.hear")}
-              className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex w-[72px] shrink-0 items-center justify-center gap-1.5 rounded-lg bg-control py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {preparingSample ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />} {t("voice.try")}
             </button>

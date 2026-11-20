@@ -72,14 +72,14 @@ export function MoveChooser({ onClose }: { onClose: () => void }) {
         {found.slice(0, shown).map((bot) => {
           const on = chosen.has(bot.id);
           return <li key={bot.id}>
-            <button type="button" role="checkbox" aria-checked={on} data-move-bot={bot.id} onClick={() => toggle(bot.id)} className="flex w-full items-center gap-2.5 px-3 py-2 text-start text-[14px] hover:bg-raised">
+            <button type="button" role="checkbox" aria-checked={on} data-move-bot={bot.id} onClick={() => toggle(bot.id)} className="flex w-full items-center gap-2.5 px-3 py-2 text-start text-[14px] interaction:bg-raised/50">
               <span className="min-w-0 flex-1 truncate" dir="auto">{bot.name}</span>
               {on && <Check size={15} aria-hidden="true" />}
             </button>
           </li>;
         })}
         {bots !== null && !found.length && <li className="px-3 py-3 text-[13px] text-ink-tertiary">{t("cloudSend.choose.none")}</li>}
-        {found.length > shown && <li><button type="button" data-move-more="" className="w-full px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised" onClick={() => setShown((count) => count + CHOOSER_PAGE)}>
+        {found.length > shown && <li><button type="button" data-move-more="" className="w-full px-3 py-2 text-[13px] text-ink-secondary interaction:bg-raised/50" onClick={() => setShown((count) => count + CHOOSER_PAGE)}>
           {t("cloudSend.choose.more", { count: found.length - shown })}
         </button></li>}
       </ul>
@@ -145,7 +145,7 @@ export function MovedToMyCloudRow({ bots }: { bots: readonly Bot[] }) {
   const page = bridge();
   return <div className="flex flex-col px-2 pb-1">
     <button type="button" data-moved-to-my-cloud={moved.length} disabled={!page?.openMyCloud} onClick={() => { void page?.openMyCloud?.().catch(() => {}); }}
-      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-secondary enabled:hover:bg-menu-hover enabled:hover:text-ink">
+      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-ink-secondary enabled:interaction:bg-raised/50 enabled:hover:text-ink">
       <ArrowRightLeft size={14} aria-hidden="true" className="shrink-0" />
       <span className="truncate" dir="auto">{moved.length === 1 ? t("cloudSend.botMove.movedOne", { bot: moved[0]!.name }) : t("cloudSend.botMove.movedMany", { count: moved.length })}</span>
     </button>

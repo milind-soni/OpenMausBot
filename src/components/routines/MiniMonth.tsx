@@ -63,7 +63,7 @@ export function MiniMonth({ anchor, min, onSelect }: MiniMonthProps) {
           <button
             type="button"
             onClick={() => setVisibleMonth((month) => moveMonth(month, -1))}
-            className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
             aria-label={t("routines.miniCalendar.previous")}
           >
             <ChevronLeft size={15} aria-hidden="true" />
@@ -71,7 +71,7 @@ export function MiniMonth({ anchor, min, onSelect }: MiniMonthProps) {
           <button
             type="button"
             onClick={() => setVisibleMonth((month) => moveMonth(month, 1))}
-            className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+            className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
             aria-label={t("routines.miniCalendar.next")}
           >
             <ChevronRight size={15} aria-hidden="true" />
@@ -120,8 +120,8 @@ export function MiniMonth({ anchor, min, onSelect }: MiniMonthProps) {
                     : isToday
                       ? "font-semibold text-accent group-hover:bg-accent/12"
                       : isOutsideMonth
-                        ? "text-ink-tertiary group-hover:bg-raised group-hover:text-ink"
-                        : "text-ink group-hover:bg-raised"
+                        ? "text-ink-tertiary group-hover:bg-raised/50 group-hover:text-ink"
+                        : "text-ink group-hover:bg-raised/50"
                 }`}
               >
                 {date.getDate()}

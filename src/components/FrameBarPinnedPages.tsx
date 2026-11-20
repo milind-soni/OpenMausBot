@@ -11,10 +11,10 @@ import { useWindowPlace } from "./WindowPlaceTitle";
 
 /** The frame bar's own button recipe, as WindowFrameBar draws its buttons (kept here so this file does not import
  * the bar it is rendered by). */
-const BAR_BUTTON = "flex size-[22px] shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors hover:bg-ink/[0.07] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus";
+const BAR_BUTTON = "flex size-[22px] shrink-0 items-center justify-center rounded-md text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus";
 
 /** A page named in the bar: the same height as a bar button, room to read the name, and the accent while it is open. */
-const PAGE_CHIP = "flex h-[22px] max-w-[12rem] shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] text-ink-secondary transition-colors hover:bg-ink/[0.07] hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus";
+const PAGE_CHIP = "flex h-[22px] max-w-[12rem] shrink-0 items-center gap-1 rounded-md px-1.5 text-[12px] text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus";
 
 /** Whether every pinned page's name fits in the bar's left half, which is what stays free beside the place name.
  * `pagesLeft` is where the names start inside the bar, `pagesWidth` what they need; both are measured, not guessed. */

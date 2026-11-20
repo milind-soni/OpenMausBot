@@ -29,7 +29,7 @@ const SOURCE_KEYS = {
 /** A linked secret's line says which password manager it is in. */
 const sourceKey = (secret: VaultSecret | LinkedSecret) => secret.source === "linked" && secret.provider === "bitwarden" ? SOURCE_KEYS.bitwarden : SOURCE_KEYS[secret.source];
 
-const ROW_BUTTON = "flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50";
+const ROW_BUTTON = "flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50";
 
 type Filter = "all" | "logins" | "secrets";
 type Adding = "login" | "secret" | "env" | null;
@@ -233,7 +233,7 @@ export function VaultSettings() {
           {menu && (
             <div className="popover-surface absolute end-0 top-full z-10 mt-1 flex min-w-[11rem] flex-col rounded-[12px] p-1" data-vault-add data-look="popover">
               {ADD_CHOICES.map(([kind, key]) => (
-                <button key={kind} type="button" className="h-8 rounded-lg px-2 text-start text-[14px] leading-5 text-ink hover:bg-menu-hover" onClick={() => startAdding(kind)}>{t(key)}</button>
+                <button key={kind} type="button" className="h-8 rounded-lg px-2 text-start text-[14px] leading-5 text-ink interaction:bg-raised/50" onClick={() => startAdding(kind)}>{t(key)}</button>
               ))}
             </div>
           )}

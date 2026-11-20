@@ -29,7 +29,7 @@ export function PhoneHero({ bot, onOpen, onMenu }: { bot: Bot; onOpen: () => voi
       </button>
       <button type="button" data-bot-actions={bot.id} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu"
         onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
-        className="absolute start-[calc(50%+32px)] top-1 flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"><MoreHorizontal size={16} /></button>
+        className="absolute start-[calc(50%+32px)] top-1 flex size-8 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink"><MoreHorizontal size={16} /></button>
     </div>
   );
 }

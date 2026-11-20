@@ -11,7 +11,7 @@ export function PhoneSetupSignInRoutes({ c }: { c: PhoneSetupController }) {
       <button
         disabled={c.busy || c.accountBusy}
         onClick={c.useLocal}
-        className="flex items-center justify-center gap-2 rounded-lg border border-hairline/50 py-2.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
+        className="flex items-center justify-center gap-2 rounded-lg border border-hairline/50 py-2.5 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-40"
       >
         <Wifi size={15} /> {t("phone.signIn.wifiInstead")}
       </button>
@@ -22,7 +22,7 @@ export function PhoneSetupSignInRoutes({ c }: { c: PhoneSetupController }) {
         <button
           disabled={c.busy || c.accountBusy}
           onClick={c.useTailscale}
-          className="mt-2 flex items-center justify-center gap-2 rounded-lg border border-hairline/50 py-2.5 text-[13px] text-ink hover:bg-control disabled:opacity-40"
+          className="mt-2 flex items-center justify-center gap-2 rounded-lg border border-hairline/50 py-2.5 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-40"
         >
           {t("phone.signIn.tailscaleInstead")}
         </button>

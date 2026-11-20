@@ -116,12 +116,12 @@ function AccountMenu({ group, instance, onRename }: { group: AccountGroup; insta
     <div ref={menuRef} className="relative flex items-center gap-1">
       {canRemove && <button type="button" disabled={busy || usedBy > 0} onClick={() => setConfirm("remove")}
         title={usedBy > 0 ? t("accounts.inUse", { count: String(usedBy) }) : undefined}
-        className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50">
+        className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-danger interaction:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50">
         {t("accounts.remove")}
       </button>}
       <button type="button" onClick={() => setOpen((value) => !value)} disabled={busy} aria-haspopup="menu" aria-expanded={open}
         aria-label={t("accounts.menu", { name: engineDisplayName(instance) })}
-        className="flex size-8 items-center justify-center rounded-lg text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50">
+        className="flex size-8 items-center justify-center rounded-lg text-ink-secondary outline-none interaction:bg-raised/50 hover:text-ink focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50">
         {busy ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={16} />}
       </button>
       {open && (
@@ -181,10 +181,10 @@ function RenameForm({ instance, onDone }: { instance: InstanceInfo; onDone: () =
           aria-label={t("accounts.nameLabel")}
           onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onDone(); } }}
           className="min-w-0 flex-1 rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink outline-none focus:border-accent-border disabled:opacity-50" />
-        <button type="submit" disabled={saving || !name.trim()} className="rounded-lg bg-raised px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-raised-hover disabled:opacity-50">
+        <button type="submit" disabled={saving || !name.trim()} className="rounded-lg bg-raised px-3 py-1.5 text-[12px] font-medium text-ink interaction:bg-raised/50 disabled:opacity-50">
           {saving ? <Loader2 size={13} className="animate-spin" /> : t("common.save")}
         </button>
-        <button type="button" onClick={onDone} disabled={saving} className="rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control">{t("common.cancel")}</button>
+        <button type="button" onClick={onDone} disabled={saving} className="rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50">{t("common.cancel")}</button>
       </div>
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
     </form>
@@ -224,7 +224,7 @@ function AccountRow({ group, instance, signingIn, onSignIn, onSignInDone }: {
             </div>
             {state !== "signedIn" && state !== "unavailable" && !blocked && !signingIn && (
               <button type="button" onClick={onSignIn} className={cn("shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-semibold",
-                state === "signedOut" ? "bg-accent text-white hover:brightness-110" : "bg-control text-ink hover:bg-raised-hover")}>
+                state === "signedOut" ? "bg-accent text-white hover:brightness-110" : "bg-control text-ink interaction:bg-raised/50")}>
                 {t("accounts.signIn")}
               </button>
             )}
@@ -291,7 +291,7 @@ export function AddAccount({ label, endpoint, extra, folder: offerFolder = false
 
   if (!open) {
     return (
-      <button type="button" onClick={() => setOpen(true)} aria-describedby={describedBy} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
+      <button type="button" onClick={() => setOpen(true)} aria-describedby={describedBy} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-secondary outline-none interaction:bg-raised/50 hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
         <Plus size={14} />{label}
       </button>
     );
@@ -314,7 +314,7 @@ export function AddAccount({ label, endpoint, extra, folder: offerFolder = false
       )}
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={() => { setOpen(false); setError(null); }} disabled={saving} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-control disabled:opacity-50">{t("common.cancel")}</button>
+        <button type="button" onClick={() => { setOpen(false); setError(null); }} disabled={saving} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50 disabled:opacity-50">{t("common.cancel")}</button>
         <button type="submit" disabled={saving || !name.trim()} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-semibold text-white hover:brightness-110 disabled:opacity-50">
           {saving && <Loader2 size={13} className="animate-spin" />}{t("accounts.addSubmit")}
         </button>

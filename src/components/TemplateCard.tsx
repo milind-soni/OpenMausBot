@@ -234,7 +234,7 @@ function Disclosure({ label, count, children }: { label: string; count?: number;
   return (
     <div className="border-b border-hairline/35 last:border-b-0">
       <button type="button" aria-expanded={open} aria-controls={id} onClick={() => setOpen((value) => !value)}
-        className="flex min-h-9 w-full items-center gap-2 rounded-md px-1 text-start text-[13px] text-ink hover:bg-ink/[0.06]">
+        className="flex min-h-9 w-full items-center gap-2 rounded-md px-1 text-start text-[13px] text-ink interaction:bg-raised/50">
         <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
         {count !== undefined && <span className="text-[12px] text-ink-tertiary tabular-nums">{count}</span>}
         <ChevronDown size={14} aria-hidden="true" className={cn("shrink-0 text-ink-tertiary transition-transform duration-[120ms] motion-reduce:transition-none", open && "rotate-180")} />

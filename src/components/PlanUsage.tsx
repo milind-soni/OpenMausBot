@@ -259,7 +259,7 @@ export function PlanUsage() {
           disabled={loading}
           aria-label={t("planUsage.refresh")}
           title={t("planUsage.refresh")}
-          className="rounded-md p-2 text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"
+          className="rounded-md p-2 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"
         >
           {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
         </button>

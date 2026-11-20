@@ -23,7 +23,7 @@ function PairWithCloud() {
     <div data-settings-block="pair-cloud" className="flex flex-col gap-2">
       <SettingsRows icons>
         <button type="button" data-pair-with-cloud="" onClick={() => { setFailed(false); void bridge.connectHomeForPhone().catch(() => setFailed(true)); }}
-          className="flex min-h-16 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
+          className="flex min-h-16 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors interaction:bg-raised/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus">
           <span className="flex size-8 shrink-0 items-center justify-center">
             <PlaceMark place={{ kind: "cloud", name, color: home?.color ?? null }} size={24} />
           </span>

@@ -33,7 +33,7 @@ export function GoalToggle({ on, onToggle, solo = false }: { on: boolean; onTogg
         "h-8 px-3",
         on
           ? "border-accent/35 bg-accent/10 text-accent"
-          : "border-hairline/20 bg-transparent text-ink-secondary hover:bg-raised hover:text-ink",
+          : "border-hairline/20 bg-transparent text-ink-secondary interaction:bg-raised/50 hover:text-ink",
       )}
     >
       <Target size={14} aria-hidden="true" />
@@ -107,7 +107,7 @@ export function TeachTaskButton({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       aria-label={t("composer.teachTask")}
       title={t("composer.teachTask")}
-      className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
+      className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink"
     >
       <GraduationCap size={16} strokeWidth={1.75} absoluteStrokeWidth />
     </button>
@@ -280,7 +280,7 @@ function ComposerMenu({ items, trigger }: { items: SidebarMenuItem[]; trigger: R
                 close(false);
                 item.onSelect();
               }}
-              className="flex h-[34px] w-full items-center gap-2 rounded-[8px] px-3 text-start text-[15px] text-ink transition-colors hover:bg-menu-hover focus-visible:bg-menu-hover focus-visible:outline-none disabled:opacity-50"
+              className="flex h-[34px] w-full items-center gap-2 rounded-[8px] px-3 text-start text-[15px] text-ink transition-colors interaction:bg-raised/50 focus-visible:bg-raised/50 focus-visible:outline-none disabled:opacity-50"
             >
               <span className={cn("flex size-3.5 shrink-0 items-center justify-center [&_svg]:size-3.5 [&_svg]:stroke-[1.5]", item.active ? "text-accent" : "text-ink-secondary")} aria-hidden="true">{item.icon}</span>
               <span className="min-w-0 flex-1 truncate">{item.label}</span>

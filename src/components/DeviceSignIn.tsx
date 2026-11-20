@@ -128,7 +128,7 @@ export function DeviceSignInProgress({ auth, browserPkce = false, provider = "co
           aria-label={copyLabel}
           title={copyLabel}
           onClick={copyCode}
-          className="rounded-md p-2 text-ink-secondary hover:bg-control hover:text-ink"
+          className="rounded-md p-2 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           {codeCopy === "copied" ? <Check size={15} className="text-success" /> : codeCopy === "failed" ? <X size={15} className="text-danger" /> : <Copy size={15} />}
         </button>

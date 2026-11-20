@@ -30,7 +30,7 @@ export function RunLog({ events }: { events: TimelineEvent[] }) {
           onClick={() => void copy()}
           aria-label={t("inspector.run.copy")}
           title={t("inspector.run.copy")}
-          className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          className="rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
         >
           {copyState === "copied" ? <Check size={14} /> : <Copy size={14} />}
         </button>}

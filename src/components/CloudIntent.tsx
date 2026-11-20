@@ -210,7 +210,7 @@ export function CloudIntent() {
                 onBlur={() => setPeek(null)}
                 className={cn(
                   "animate-rise inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-[13px] transition-[background-color,border-color,color,transform] duration-150 ease-out active:scale-[0.97]",
-                  chosen ? "border-accent/45 bg-accent/10 text-ink" : "border-hairline/50 bg-card/40 text-ink-secondary hover:border-hairline hover:bg-card hover:text-ink",
+                  chosen ? "border-accent/45 bg-accent/10 text-ink" : "border-hairline/50 bg-card/40 text-ink-secondary hover:border-hairline interaction:bg-raised/50 hover:text-ink",
                 )}
                 style={staggerIndex(4 + index)}
               >

@@ -9,7 +9,7 @@ import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { Select } from "./Select";
 import { outgoingFieldsOf, type EmailAccountView, type EmailOutgoingAnswer, type EmailOutgoingFields, type EmailSignInHint, type EmailTestAnswer } from "../../shared/email";
 
-export const EMAIL_PILL = "inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors hover:bg-raised-hover disabled:opacity-40";
+export const EMAIL_PILL = "inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors interaction:bg-raised/50 disabled:opacity-40";
 export const EMAIL_FIELD = "h-8 w-full min-w-0 rounded-lg bg-inset px-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent/50";
 export const EMAIL_LINK = "self-start text-[12px] text-ink-secondary underline underline-offset-2 hover:text-ink";
 

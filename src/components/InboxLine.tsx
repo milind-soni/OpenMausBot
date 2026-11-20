@@ -54,7 +54,7 @@ export function InboxCaption({ message }: { message: Message }) {
       {origin && (
         <button type="button" onClick={() => openThread(dispatch, { botId: origin.botId, threadId: origin.threadId }, state, showThreads)}
           aria-label={t("inbox.openOrigin", { title: origin.title })} title={t("inbox.openOrigin", { title: origin.title })}
-          className="min-w-0 truncate rounded px-1 hover:bg-inset hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+          className="min-w-0 truncate rounded px-1 interaction:bg-raised/50 hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
           · {t("inbox.in", { title: origin.title })}
         </button>
       )}

@@ -229,7 +229,7 @@ function ConversationTaskPicker({
         title={switchTitle}
         aria-label={t("task.switch")}
         className={cn(
-          "flex max-w-[220px] items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink",
+          "flex max-w-[220px] items-center gap-1.5 rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink",
           COMPACT_BUBBLE,
         )}
       >
@@ -299,7 +299,7 @@ function ConversationTaskPicker({
                 <Fragment key={task.threadId}>
                 {bot?.projects?.length && heading ? <div className={cn("flex items-center gap-1.5 px-2 pb-1 pt-2 text-[12px] font-medium text-ink-secondary", index > 0 && "border-t border-hairline/30")}>{heading.id && <FolderIcon emoji={heading.emoji} size={12} />}{heading.name}</div> : null}
                 <div
-                  className={cn("group flex items-center gap-2 rounded-md px-2 py-1.5", active ? "bg-menu-active" : "hover:bg-menu-hover")}
+                  className={cn("group flex items-center gap-2 rounded-md px-2 py-1.5", active ? "bg-menu-active" : "interaction:bg-raised/50")}
                 >
                   <Check size={14} className={cn("shrink-0", active ? "text-accent" : "opacity-0")} />
                   {renaming === task.threadId ? (
@@ -364,7 +364,7 @@ function ConversationTaskPicker({
                       onClick={() => onPin(task.threadId, task.pinned !== true)}
                       aria-label={task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}
                       title={task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}
-                      className="rounded-md p-1 text-ink-secondary opacity-0 hover:bg-menu-hover hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 touch:opacity-70"
+                      className="rounded-md p-1 text-ink-secondary opacity-0 interaction:bg-raised/50 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 touch:opacity-70"
                     >
                       {task.pinned === true ? <PinOff size={14} /> : <Pin size={14} />}
                     </button>
@@ -375,12 +375,12 @@ function ConversationTaskPicker({
                       onClick={() => startRename(task)}
                       aria-label={t("task.renameNamed", { title: task.title })}
                       title={t("task.renameTitle")}
-                      className="rounded-md p-1 text-ink-secondary opacity-0 hover:bg-menu-hover hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 touch:opacity-70"
+                      className="rounded-md p-1 text-ink-secondary opacity-0 interaction:bg-raised/50 hover:text-ink focus-visible:opacity-100 group-hover:opacity-100 touch:opacity-70"
                     >
                       <SquarePen size={14} />
                     </button>
                   )}
-                  {bot && onMove && (bot.projects?.length ?? 0) > 0 && <div title={t("folder.move")} className="relative rounded-md p-1 text-ink-secondary opacity-0 hover:bg-menu-hover hover:text-ink focus-within:opacity-100 group-hover:opacity-100 touch:opacity-70">
+                  {bot && onMove && (bot.projects?.length ?? 0) > 0 && <div title={t("folder.move")} className="relative rounded-md p-1 text-ink-secondary opacity-0 interaction:bg-raised/50 hover:text-ink focus-within:opacity-100 group-hover:opacity-100 touch:opacity-70">
                     <Select triggerContent={<FolderInput size={14} />} aria-label={t("folder.moveNamed", { title: task.title })} value={bot.projects?.some((project) => project.id === task.projectId) ? task.projectId : ""}
                       onFocus={clearDismiss} onChange={(event) => { clearDismiss(); onMove(task.threadId, event.target.value || null); }}>
                       <option value="">{t("folder.none")}</option>
@@ -393,7 +393,7 @@ function ConversationTaskPicker({
                     disabled={Boolean(task.busy) || busy && active}
                     aria-label={t("task.deleteAria")}
                     title={t("task.deleteTitle")}
-                    className="rounded-md p-1 text-ink-secondary opacity-0 hover:bg-menu-hover hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-20 touch:opacity-70 touch:disabled:opacity-20"
+                    className="rounded-md p-1 text-ink-secondary opacity-0 interaction:bg-raised/50 hover:text-danger focus-visible:opacity-100 group-hover:opacity-100 disabled:opacity-20 touch:opacity-70 touch:disabled:opacity-20"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -403,14 +403,14 @@ function ConversationTaskPicker({
             })}
           </div>
           <div role="separator" className={MENU_ITEM_SEPARATOR} />
-          {bot ? <NewThreadButton bot={bot} onCreated={closeMenu} className="min-h-[30px] w-full rounded-md px-2 text-[14px] text-ink hover:bg-menu-hover" /> : <button
+          {bot ? <NewThreadButton bot={bot} onCreated={closeMenu} className="min-h-[30px] w-full rounded-md px-2 text-[14px] text-ink interaction:bg-raised/50" /> : <button
             type="button"
             onClick={() => {
               onNew();
               closeMenu();
             }}
             disabled={busy}
-            className="flex min-h-[30px] w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] text-ink hover:bg-menu-hover disabled:opacity-40"
+            className="flex min-h-[30px] w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] text-ink interaction:bg-raised/50 disabled:opacity-40"
           >
             <SquarePen size={16} className="text-ink-secondary" /> {t("task.newShort")}
           </button>}

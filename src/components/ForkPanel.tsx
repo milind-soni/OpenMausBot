@@ -24,14 +24,14 @@ export function ForkPanel() {
     <aside data-drawer-motion={motion.closing ? "out" : "in"} {...motion.exitProps} aria-label={t("chat.forkPanel")} className="[--drawer-width:clamp(360px,48vw,640px)] relative flex h-full w-[min(48vw,640px)] min-w-[360px] flex-col border-l border-hairline bg-app">
       <div className="flex items-center justify-between border-b border-hairline px-4 py-2 text-sm font-medium text-ink">
         <span className="truncate">{task?.title ?? t("chat.forkPanel")}</span>
-        <button type="button" aria-label={t("chat.closeForkPanel")} className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+        <button type="button" aria-label={t("chat.closeForkPanel")} className="rounded p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           onClick={() => dispatch({ type: "closeForkPanel" })}><X size={16} /></button>
       </div>
       <div className="min-h-0 flex-1">
         {panel.loading ? <p className="p-4 text-sm text-ink-secondary">{t("chat.loadingFork")}</p>
           : panel.loadFailed ? <div className="flex items-center gap-3 p-4 text-sm text-ink-secondary">
             <span>{t("chat.forkUnavailable")}</span>
-            <button type="button" className="rounded px-2 py-1 text-ink hover:bg-raised"
+            <button type="button" className="rounded px-2 py-1 text-ink interaction:bg-raised/50"
               onClick={() => dispatch({ type: "openForkPanel", kind: panel.kind, ownerId: panel.ownerId, threadId: panel.threadId })}>
               {t("chat.retry")}
             </button>

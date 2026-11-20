@@ -5,7 +5,7 @@ import { useLiveTurn } from "@/lib/stop-turn";
 import { useStore } from "@/state/store";
 import type { FirstReplyRescue } from "../../shared/first-reply-rescue";
 
-const pill = "rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink hover:bg-raised";
+const pill = "rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink interaction:bg-raised/50";
 
 /** A first reply that has not come: who is waiting on which AI, and two ways out. A quiet notice, never an error; it
  * goes once the AI starts answering, and keeps no live buttons once its own turn is no longer the one running.

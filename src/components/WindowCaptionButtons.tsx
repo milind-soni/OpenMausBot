@@ -30,7 +30,7 @@ export function WindowCaptionButtons({ visible }: { visible: boolean }) {
   const noDrag = { WebkitAppRegion: "no-drag" } as CSSProperties;
   const captionButton = cn(
     "flex h-7 w-11 items-center justify-center text-ink-secondary",
-    "hover:bg-raised hover:text-ink active:bg-raised/60",
+    "interaction:bg-raised/50 hover:text-ink",
   );
 
   return (

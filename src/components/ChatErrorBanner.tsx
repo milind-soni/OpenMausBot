@@ -37,7 +37,7 @@ export function ChatErrorBanner({ message, onDismiss }: { message: string | null
           onClick={onDismiss}
           aria-label={t("chat.error.dismiss")}
           title={t("chat.error.dismiss")}
-          className="shrink-0 rounded p-0.5 hover:bg-danger/10"
+          className="shrink-0 rounded p-0.5 interaction:bg-danger/10"
         >
           <X size={13} />
         </button>

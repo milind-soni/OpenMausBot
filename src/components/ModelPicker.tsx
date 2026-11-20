@@ -104,7 +104,7 @@ export function EffortRow({
               "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
               selection.effort === level
                 ? "border-accent/60 bg-control text-ink"
-                : "border-hairline/40 text-ink-secondary hover:bg-control/60 hover:text-ink",
+                : "border-hairline/40 text-ink-secondary interaction:bg-raised/50 hover:text-ink",
             )}
           >
             {level === undefined ? t("model.effort.default") : effortLabel(level)}
@@ -181,7 +181,7 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
               onClick={() => choose(option.id)}
               className={cn(
                 "rounded-full border px-2.5 py-1 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/70",
-                selection.variant === option.id ? "border-accent/60 bg-control text-ink" : "border-hairline/40 text-ink-secondary hover:bg-control/60 hover:text-ink",
+                selection.variant === option.id ? "border-accent/60 bg-control text-ink" : "border-hairline/40 text-ink-secondary interaction:bg-raised/50 hover:text-ink",
               )}
             >
               {variantLabel(option, instance.driverKind)}
@@ -548,7 +548,7 @@ export function ModelPicker({
     ref: triggerRef,
     "data-tour": "model",
     type: "button" as const,
-    disabled: locked,
+   disabled: locked,
     onClick: () => (open ? close(false) : openMenu()),
     onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
       if (event.key === "Escape" && open) {
@@ -573,10 +573,10 @@ export function ModelPicker({
       className={cn(
         "group flex items-center gap-1.5 rounded-full py-1 pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed",
         contained
-          ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
+          ? "interaction:bg-raised/50 aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
           : iconOnly
-            ? "size-9 max-md:size-11 justify-center border border-edge bg-composer p-0 hover:bg-raised"
-            : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
+            ? "size-9 max-md:size-11 justify-center border border-edge bg-composer p-0 interaction:bg-raised/50"
+            : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary "),
         !iconOnly && !contained && active && !showActiveAccount && cn(COMPACT_SQUARE, USAGE_WARN_WIDENS),
       )}
     >
@@ -638,7 +638,7 @@ export function ModelPicker({
                 {(["thread", "bot"] as const).map((value) => (
                   <button key={value} type="button" aria-pressed={scope === value} onClick={() => setScope(value)}
                     className={cn("h-6 rounded-full px-2.5 text-[12px] leading-4",
-                      scope === value ? "bg-ink/[0.08] font-medium text-ink" : "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink")}>
+                      scope === value ? "bg-ink/[0.08] font-medium text-ink" : "text-ink-secondary interaction:bg-raised/50 hover:text-ink")}>
                     {value === "bot" ? t("model.scope.bot") : t("model.scope.thread")}
                   </button>
                 ))}
@@ -665,7 +665,7 @@ export function ModelPicker({
                           : t("model.refresh", { name: engineDisplayName(railInstance) })
                       }
                       title={t("model.refreshTitle")}
-                      className="flex size-7 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/[0.06] hover:text-ink disabled:cursor-wait"
+                      className="flex size-7 items-center justify-center rounded-full text-ink-tertiary interaction:bg-raised/50 hover:text-ink disabled:cursor-wait"
                     >
                       {loadingInstances || refreshingId !== null ? (
                         <Loader2 size={14} className="animate-spin" aria-hidden="true" />
@@ -835,7 +835,7 @@ export function ModelPicker({
                   }
                   disabled={!canOpenCustom}
                   onClick={() => openLocalModels(railInstance)}
-                  className="flex h-10 w-full shrink-0 items-center justify-between gap-2 border-t-[0.5px] border-ink/10 px-3.5 text-left text-[13px] leading-[18px] text-ink hover:bg-ink/[0.06] focus:bg-ink/[0.06] disabled:cursor-not-allowed disabled:text-ink-tertiary disabled:hover:bg-transparent"
+                  className="flex h-10 w-full shrink-0 items-center justify-between gap-2 border-t-[0.5px] border-ink/10 px-3.5 text-left text-[13px] leading-[18px] text-ink interaction:bg-raised/50 focus:bg-ink/[0.06] disabled:cursor-not-allowed disabled:text-ink-tertiary disabled:hover:bg-transparent"
                 >
                   <span>{t("model.useLocal")}</span>
                   <span className="flex items-center gap-2">
@@ -853,11 +853,11 @@ export function ModelPicker({
           {!remote && (
             <div className="flex h-9 shrink-0 items-center gap-1 border-t-[0.5px] border-ink/10 px-1.5">
               <button type="button" onClick={openEngines}
-                className="h-7 min-w-0 flex-1 truncate rounded-md px-2 text-left text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
+                className="h-7 min-w-0 flex-1 truncate rounded-md px-2 text-left text-[12px] leading-4 text-ink-secondary interaction:bg-raised/50 hover:text-ink">
                 {t("settings.engines.title")}
               </button>
               <button type="button" data-model-add-api-keys onClick={openApiKeys}
-                className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] leading-4 text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
+                className="flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] leading-4 text-ink-secondary interaction:bg-raised/50 hover:text-ink">
                 <KeyRound size={14} strokeWidth={MENU_STROKE} aria-hidden="true" />
                 {apiKeysLabel(pickerInstances)}
               </button>
@@ -920,7 +920,7 @@ export function ModelPicker({
           className="menu-surface absolute right-0 top-full z-30 mt-1 flex w-max max-w-[min(300px,calc(100vw-2rem))] items-center gap-2 py-1.5 pl-3 pr-1.5 text-[13px] leading-[18px]">
           <ThreadModelsLine bot={profile} />
           <button type="button" aria-label={t("common.close")} onClick={() => setChangedBotModel(false)}
-            className="flex size-6 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/[0.06] hover:text-ink">
+            className="flex size-6 shrink-0 items-center justify-center rounded-full text-ink-tertiary interaction:bg-raised/50 hover:text-ink">
             <X size={14} aria-hidden="true" />
           </button>
         </div>

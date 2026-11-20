@@ -23,7 +23,7 @@ export interface DataCardProps {
 export function RunningStatus({ onCancel }: { onCancel: () => void }) {
   return <span className="flex items-center gap-2 text-[12px] text-ink-secondary" role="status">
     <Loader2 size={13} className="animate-spin" aria-hidden="true" />{t("data.card.running")}
-    <button type="button" onClick={onCancel} className="rounded-md border border-hairline/60 px-2 py-0.5 text-ink hover:bg-inset">{t("data.card.cancel")}</button>
+    <button type="button" onClick={onCancel} className="rounded-md border border-hairline/60 px-2 py-0.5 text-ink interaction:bg-raised/50">{t("data.card.cancel")}</button>
   </span>;
 }
 
@@ -31,8 +31,8 @@ const REDUCTION_KEYS: Record<DataReduction["method"], LocaleKey> = {
   group: "data.card.reduction.group", bins: "data.card.reduction.bins", topN: "data.card.reduction.topN",
   timeBucket: "data.card.reduction.timeBucket", m4: "data.card.reduction.m4", sample: "data.card.reduction.sample", none: "data.card.reduction.none",
 };
-const action = "flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-inset hover:text-ink disabled:cursor-not-allowed disabled:opacity-40";
-const menuItem = "rounded-md px-3 py-1.5 text-left text-[12px] hover:bg-inset disabled:opacity-40";
+const action = "flex items-center gap-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40";
+const menuItem = "rounded-md px-3 py-1.5 text-left text-[12px] interaction:bg-raised/50 disabled:opacity-40";
 
 export function useExportMenu(botId: string, target: Omit<DataExportRequest, "format">, grid: RefObject<DataGridHandle | null>) {
   const [notice, setNotice] = useState<{ kind: "status" | "alert"; text: string } | null>(null);

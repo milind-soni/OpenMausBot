@@ -403,7 +403,7 @@ export function AttachmentThumbnail({
               setState("loading");
               setAttempt((value) => value + 1);
             }}
-            className="flex items-center gap-1 rounded-md border border-hairline/50 bg-panel px-2 py-1 text-[11px] text-ink hover:bg-raised"
+            className="flex items-center gap-1 rounded-md border border-hairline/50 bg-panel px-2 py-1 text-[11px] text-ink interaction:bg-raised/50"
             aria-label={t("attach.retryAria", { name: image.name })}
           >
             <RotateCcw size={11} /> {t("chat.retry")}
@@ -571,7 +571,7 @@ export function MarkdownImagePreview({
           <span className="flex aspect-[4/3] w-48 max-w-full flex-col items-center justify-center gap-2 rounded-xl border border-hairline/40 bg-inset px-4 text-center text-[12px] text-ink-secondary">
             <ImageOff size={20} />
             <span>{t("attach.externalHidden")}</span>
-            <button type="button" className="rounded-md border border-hairline/50 bg-panel px-2.5 py-1 text-ink hover:bg-raised" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setApprovedExternalSource(src); }}>{t("attach.loadImage")}</button>
+            <button type="button" className="rounded-md border border-hairline/50 bg-panel px-2.5 py-1 text-ink interaction:bg-raised/50" onClick={(event) => { event.preventDefault(); event.stopPropagation(); setApprovedExternalSource(src); }}>{t("attach.loadImage")}</button>
           </span>
         ) : filePath && (!threadId || !messageId || localSourceOffset === null) ? (
           <span className="flex aspect-[4/3] w-48 max-w-full items-center justify-center gap-2 rounded-xl border border-hairline/40 bg-inset text-[12px] text-ink-secondary" role="alert">
@@ -622,7 +622,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
         <button
           type="button"
           {...chipNameAction(preview, save, file.name, save.retryable)}
-          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left transition-colors hover:bg-raised/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:hover:bg-transparent"
+          className="flex min-h-10 min-w-0 flex-1 items-center gap-2 px-2.5 py-2 text-left transition-colors interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:cursor-wait disabled:hover:bg-transparent"
         >
           <FileText size={14} className="shrink-0" aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate text-ink">{file.name}</span>
@@ -693,7 +693,7 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
         <button
           type="button"
           {...chipNameAction(preview, save, file.name, save.retryable)}
-          className="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-full ps-2.5 pe-2 transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-wait"
+          className="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-full ps-2.5 pe-2 transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-wait"
         >
           <FileText size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
           {name}

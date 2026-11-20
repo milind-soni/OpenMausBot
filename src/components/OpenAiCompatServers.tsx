@@ -187,7 +187,7 @@ function AddedServers({ servers }: { servers: ReturnType<typeof addedServers> })
               disabled={busy !== null}
               aria-label={t("apiInstances.remove", { name: server.displayName })}
               title={t("apiInstances.remove", { name: server.displayName })}
-              className={`${ICON_BUTTON} hover:bg-danger/10 hover:text-danger`}
+              className={`${ICON_BUTTON} interaction:bg-danger/10 hover:text-danger`}
             >
               <Trash2 size={13} aria-hidden="true" />
             </button>

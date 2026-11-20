@@ -76,7 +76,7 @@ export function ConnectorAlsoUseful({ botId, slug }: { botId: string; slug: stri
               disabled={Boolean(now)}
               onClick={() => void connect(card)}
               aria-label={now === "connected" ? `${card.label} · ${t("connectors.card.connected")}` : t("hostedMcp.connect", { service: card.label })}
-              className="inline-flex h-7 items-center gap-1.5 rounded-full bg-control/70 ps-1.5 pe-2.5 text-[12px] font-medium text-ink transition-colors hover:bg-raised-hover disabled:opacity-70"
+              className="inline-flex h-7 items-center gap-1.5 rounded-full bg-control/70 ps-1.5 pe-2.5 text-[12px] font-medium text-ink transition-colors interaction:bg-raised/50 disabled:opacity-70"
             >
               {now === "busy" ? <Loader2 size={14} className="animate-spin" /> : now === "connected" ? <Check size={14} className="text-success" /> : <ServiceIcon card={card} className="size-4 rounded" />}
               {card.label}

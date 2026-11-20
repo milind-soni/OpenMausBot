@@ -643,7 +643,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                 type="button"
                 onClick={() => void pickFolder()}
                 disabled={saving}
-                className="flex shrink-0 items-center gap-1.5 rounded-xl border border-hairline/50 bg-raised px-3 py-2 text-[13px] font-medium text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="flex shrink-0 items-center gap-1.5 rounded-xl border border-hairline/50 bg-raised px-3 py-2 text-[13px] font-medium text-ink interaction:bg-raised/50 disabled:opacity-50"
               >
                 <FolderOpen size={14} /> {t("room.folder.chooseShort")}
               </button>
@@ -668,7 +668,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                 "flex min-h-[72px] w-full cursor-pointer flex-col items-start justify-between rounded-2xl border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50",
                 behavior === "auto"
                   ? "border-accent bg-accent/10 text-ink ring-1 ring-accent/30"
-                  : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline hover:bg-raised",
+                  : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline interaction:bg-raised/50",
               )}
             >
               <span className="flex items-center gap-2 text-[13px] font-semibold">
@@ -703,7 +703,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                   "flex min-h-[72px] w-full flex-col items-start justify-between rounded-2xl border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50",
                   behavior === "lead"
                     ? "border-accent bg-accent/10 text-ink ring-1 ring-accent/30"
-                    : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline hover:bg-raised",
+                    : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline interaction:bg-raised/50",
                 )}
               >
                 <span className="flex w-full items-center justify-between gap-2">
@@ -753,7 +753,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                           }}
                           className={cn(
                             "flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left transition",
-                            selected ? "bg-accent/10" : "hover:bg-raised",
+                            selected ? "bg-accent/10" : "interaction:bg-raised/50",
                           )}
                         >
                           <BotAvatar
@@ -788,7 +788,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                 "flex min-h-[72px] w-full flex-col items-start justify-between rounded-2xl border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50",
                 behavior === "everyone"
                   ? "border-accent bg-accent/10 text-ink ring-1 ring-accent/30"
-                  : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline hover:bg-raised",
+                  : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline interaction:bg-raised/50",
               )}
             >
               <span className="flex items-center gap-2 text-[13px] font-semibold">
@@ -818,7 +818,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
                 "flex min-h-[72px] w-full flex-col items-start justify-between rounded-2xl border px-3 py-3 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:cursor-not-allowed disabled:opacity-50",
                 behavior === "mentions"
                   ? "border-accent bg-accent/10 text-ink ring-1 ring-accent/30"
-                  : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline hover:bg-raised",
+                  : "border-hairline/50 bg-inset text-ink-secondary hover:border-hairline interaction:bg-raised/50",
               )}
             >
               <span className="flex items-center gap-2 text-[13px] font-semibold">
@@ -855,7 +855,7 @@ function RoomSetup({ group, members }: { group: Group; members: Bot[] }) {
             type="button"
             onClick={() => void finish("skip")}
             disabled={saving}
-            className="rounded-xl px-3 py-2 text-left text-[13px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
+            className="rounded-xl px-3 py-2 text-left text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"
           >
             {t("room.setup.skip")}
           </button>
@@ -1102,7 +1102,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
             <div className="flex justify-center">
               <button
                 onClick={showLater}
-                className="rounded-full border border-hairline/40 bg-panel px-3 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+                className="rounded-full border border-hairline/40 bg-panel px-3 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
               >
                 {t("chat.showLater", { count: laterCount })}
               </button>

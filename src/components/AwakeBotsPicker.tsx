@@ -58,7 +58,7 @@ export function AwakeBotsPicker({ limit, onSaved, swapIn }: { limit: number; onS
           return (
             <li key={bot.id}>
               <button type="button" role="checkbox" aria-checked={on} disabled={!on && chosen.size >= wanted} onClick={() => toggle(bot.id)}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-[14px] hover:bg-raised disabled:opacity-50">
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-[14px] interaction:bg-raised/50 disabled:opacity-50">
                 <BotAvatar bot={bot} size={22} animated={false} />
                 <span className="min-w-0 flex-1 truncate">{bot.name}</span>
                 {!on && <span className="text-[12px] text-ink-tertiary">{t("botLimit.paused.badge")}</span>}

@@ -91,7 +91,7 @@ export function ToolSelectionCard({ bot, engineKind }: { bot: Bot; engineKind?: 
     {bot.busy && <p className="mt-2 text-[12px] text-ink-secondary">{t("botAccess.nextTurn")}</p>}
     <div className="mt-3 flex flex-wrap items-center gap-3">
       <button type="button" disabled={saving || !draft || !parsed.ok} onClick={() => void save()}
-        className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+        className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50">
         {t(saving ? "botAccess.tools.saving" : "botAccess.tools.save")}
       </button>
       <a href="https://github.com/milind-soni/OpenMausBot/blob/main/docs/tool-selection.md" target="_blank" rel="noreferrer" className="text-[12px] text-ink-secondary underline">{t("botAccess.tools.examples")}</a>

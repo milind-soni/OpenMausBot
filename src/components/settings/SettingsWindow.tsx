@@ -135,7 +135,7 @@ export function SettingsWindow() {
     && window.innerWidth / 2 - 16 - (30 + t("settings.title").length * 7) < (pageLabel(page, place, ctx.desktop).length * 9) / 2;
   const closeButton = (
     <button type="button" onClick={close} aria-label={t("settings.close")} title={`${t("settings.close")} (${shortcutLabel("close-panel")})`}
-      className={cn("ui-icon-button z-20 size-8 shrink-0 cursor-pointer rounded-full text-ink-secondary hover:bg-menu-hover hover:text-ink", !narrow && "absolute right-3 top-3")}>
+      className={cn("ui-icon-button z-20 size-8 shrink-0 cursor-pointer rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink", !narrow && "absolute right-3 top-3")}>
       <X size={16} aria-hidden="true" />
     </button>
   );
@@ -158,7 +158,7 @@ export function SettingsWindow() {
                       {/* "‹ Settings" when it fits beside the centred title; a longer pair (German, a long page name) keeps the
                           chevron alone, so the title stays centred and clear of the close button. */}
                       <button type="button" data-settings-back="" aria-label={compactBack ? t("settings.backTo") : undefined} onClick={() => { setNarrowPage(false); setQuery(""); }}
-                        className={cn("flex h-8 shrink-0 cursor-pointer items-center gap-0.5 rounded-full text-[13px] font-medium leading-5 text-ink-secondary hover:bg-menu-hover hover:text-ink", compactBack ? "w-8 justify-center" : "pl-1 pr-2")}>
+                        className={cn("flex h-8 shrink-0 cursor-pointer items-center gap-0.5 rounded-full text-[13px] font-medium leading-5 text-ink-secondary interaction:bg-raised/50 hover:text-ink", compactBack ? "w-8 justify-center" : "pl-1 pr-2")}>
                         <ChevronLeft size={16} aria-hidden="true" className="rtl:-scale-x-100" />{!compactBack && t("settings.title")}
                       </button>
                       <h2 className={cn("pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 truncate text-center text-[16px] font-semibold leading-[22px] text-ink", compactBack ? "max-w-[calc(100%-96px)]" : "max-w-[calc(100%-224px)]")}>{pageLabel(page, place, ctx.desktop)}</h2>

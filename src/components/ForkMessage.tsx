@@ -27,7 +27,7 @@ export function ForkLinks(owner: Owner & { phone: boolean }) {
     <div className="mt-1 flex flex-wrap gap-1" data-testid="fork-links">
       {forks.map((fork) => (
         <button key={fork.threadId} type="button"
-          className="rounded-full border border-hairline px-2 py-0.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"
+          className="rounded-full border border-hairline px-2 py-0.5 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           onClick={() => dispatch({ type: "openForkPanel", kind: owner.kind, ownerId: owner.ownerId, threadId: fork.threadId })}>
           <GitFork size={12} className="mr-1 inline" />{t("chat.openFork", { title: fork.title })}
         </button>

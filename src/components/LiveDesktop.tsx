@@ -114,11 +114,11 @@ export function LiveDesktop({ target, threadId, name, poster, expanded, onExpand
               aria-label={t("desktopViewer.text")}
               className="w-44 min-w-0 rounded-lg border border-hairline bg-inset px-2.5 py-1.5 text-[12px] text-ink outline-none focus:border-focus max-sm:w-28"
             />
-            <button type="submit" disabled={connection !== "connected" || !text} title={t("desktopViewer.send")} aria-label={t("desktopViewer.send")} className={cn(iconButton, "bg-control text-ink hover:bg-raised-hover")}>
+            <button type="submit" disabled={connection !== "connected" || !text} title={t("desktopViewer.send")} aria-label={t("desktopViewer.send")} className={cn(iconButton, "bg-control text-ink interaction:bg-raised/50")}>
               <Send size={14} aria-hidden="true" />
             </button>
           </form>
-          <button type="button" style={noDragStyle} onClick={() => onExpandedChange(false)} className={cn(iconButton, "bg-control text-ink hover:bg-raised-hover")}>
+          <button type="button" style={noDragStyle} onClick={() => onExpandedChange(false)} className={cn(iconButton, "bg-control text-ink interaction:bg-raised/50")}>
             <Minimize2 size={14} aria-hidden="true" />
             <span className="max-sm:hidden">{t("desktopViewer.exitFullscreen")}</span>
           </button>
@@ -142,7 +142,7 @@ export function LiveDesktop({ target, threadId, name, poster, expanded, onExpand
         {connection === "disconnected" && (
           <div role="alert" className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-2 bg-card/95 p-3 text-center text-[12px] text-ink-secondary">
             <span>{t("desktopViewer.disconnected")}</span>
-            <button type="button" onClick={() => setAttempt((value) => value + 1)} className="flex items-center gap-1.5 rounded-md bg-control px-3 py-1.5 text-ink hover:bg-raised-hover">
+            <button type="button" onClick={() => setAttempt((value) => value + 1)} className="flex items-center gap-1.5 rounded-md bg-control px-3 py-1.5 text-ink interaction:bg-raised/50">
               <RefreshCw size={13} aria-hidden="true" />
               {t("desktopViewer.reconnect")}
             </button>

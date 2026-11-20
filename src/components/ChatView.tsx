@@ -216,7 +216,7 @@ export function ErrorRow({
             <button
               type="button"
               onClick={action.onClick}
-              className="ui-button ui-button-md mt-1.5 rounded-full border-danger/30 bg-transparent text-danger hover:bg-danger/15"
+              className="ui-button ui-button-md mt-1.5 rounded-full border-danger/30 bg-transparent text-danger interaction:bg-danger/15"
             >
               {action.label}
             </button>
@@ -225,7 +225,7 @@ export function ErrorRow({
           onRetry && (
             <button
               onClick={onRetry}
-              className="ui-button ui-button-md mt-1.5 rounded-full border-danger/30 bg-transparent text-danger hover:bg-danger/15"
+              className="ui-button ui-button-md mt-1.5 rounded-full border-danger/30 bg-transparent text-danger interaction:bg-danger/15"
             >
               <RefreshCw size={12} /> {t("chat.retry")}
             </button>
@@ -551,7 +551,7 @@ const Bubble = memo(function Bubble({
           <button
             onClick={() => switchTo(forks[versionIndex - 1])}
             disabled={versionIndex <= 0 || busy}
-            className="rounded p-0.5 hover:bg-raised hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+            className="rounded p-0.5 interaction:bg-raised/50 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
             title={t("chat.previousVersion")}
           >
             <ChevronLeft size={14} />
@@ -562,7 +562,7 @@ const Bubble = memo(function Bubble({
           <button
             onClick={() => switchTo(forks[versionIndex + 1])}
             disabled={versionIndex >= forks.length - 1 || busy}
-            className="rounded p-0.5 hover:bg-raised hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+            className="rounded p-0.5 interaction:bg-raised/50 hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
             title={t("chat.nextVersion")}
           >
             <ChevronRight size={14} />
@@ -1005,7 +1005,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
               type="button"
               data-chathead-back
               onClick={() => openBot(dispatch, profile, false)}
-              className="shrink-0 whitespace-nowrap rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium text-ink-secondary hover:bg-raised-hover hover:text-ink"
+              className="shrink-0 whitespace-nowrap rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium text-ink-secondary interaction:bg-raised/50 hover:text-ink"
             >
               {t("chat.backToMainThread")}
             </button>
@@ -1019,7 +1019,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
             <button
               onClick={() => dispatch({ type: "interrupt", botId: bot.id, threadId: bot.threadId })}
               className={cn(
-                "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink",
+                "flex items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink",
                 COMPACT_BUBBLE,
               )}
               title={t("chat.stopTurn")}
@@ -1060,8 +1060,8 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
       {<BotActivityPicker bot={bot} />}{privateChat && team && <TeamPrivateFirstLine key={team.id} team={team} />}
       {routineExecution && <div className="mx-5 mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[12px] text-ink-secondary">
         <span className="min-w-0 flex-1 truncate">{t("routines.executionDetails", { name: routineExecution.routineName })}</span>
-        {canOpenResults && resultsThreadId && <button type="button" onClick={() => openThread(dispatch, { botId: bot.id, threadId: resultsThreadId }, store.state(), showThreads)} className="rounded px-2 py-1 text-accent hover:bg-raised">{t("routines.results.back")}</button>}
-        <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "logs", routineId: routineExecution.routineId, botId: bot.id })} className="rounded px-2 py-1 hover:bg-raised hover:text-ink">{t("routines.logs")}</button>
+        {canOpenResults && resultsThreadId && <button type="button" onClick={() => openThread(dispatch, { botId: bot.id, threadId: resultsThreadId }, store.state(), showThreads)} className="rounded px-2 py-1 text-accent interaction:bg-raised/50">{t("routines.results.back")}</button>}
+        <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "logs", routineId: routineExecution.routineId, botId: bot.id })} className="rounded px-2 py-1 interaction:bg-raised/50 hover:text-ink">{t("routines.logs")}</button>
       </div>}
       {findOpen && <ChatFindBar threadId={bot.threadId} inForkPanel={inForkPanel} onClose={() => setFindOpen(false)} />}
 

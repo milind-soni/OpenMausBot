@@ -11,7 +11,7 @@ export const SCREEN = "flex flex-col gap-5 px-6 pb-6 pt-5";
 export const ON_NIGHT = "group-has-[[data-night-card]]/sheet:[color-scheme:var(--code-color-scheme)] group-has-[[data-night-card]]/sheet:text-(--cloud-night-ink-quiet) group-has-[[data-night-card]]/sheet:hover:bg-white/15 group-has-[[data-night-card]]/sheet:hover:text-(--cloud-night-ink)";
 /** A tag on a night card: a faint wash of the card's own ink. */
 export const TAG_ON_NIGHT = "bg-white/12 text-(--cloud-night-ink-quiet)";
-export const CLOSE = "flex size-8 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink motion-reduce:transition-none";
+export const CLOSE = "flex size-8 items-center justify-center rounded-full text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink motion-reduce:transition-none";
 /** A neutral ink pill in Midnight and Daylight, the skin's accent elsewhere. */
 export const PRIMARY = "ui-button ui-button-primary ui-button-pill";
 export const QUIET = "ui-button ui-button-pill";
@@ -31,7 +31,7 @@ export function Heading({ title, sub }: { title: string; sub?: ReactNode }) {
 
 export function BackLink({ label, onClick }: { label: string; onClick: () => void }) {
   return <button type="button" onClick={onClick}
-    className="-ms-1.5 inline-flex items-center gap-0.5 self-start rounded-full py-1 pe-2.5 ps-1 text-[13px] leading-[18px] text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink motion-reduce:transition-none">
+    className="-ms-1.5 inline-flex items-center gap-0.5 self-start rounded-full py-1 pe-2.5 ps-1 text-[13px] leading-[18px] text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink motion-reduce:transition-none">
     <ChevronLeft size={16} strokeWidth={1.5} aria-hidden="true" className="rtl:-scale-x-100" />{label}
   </button>;
 }

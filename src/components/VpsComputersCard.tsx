@@ -142,7 +142,7 @@ export function VpsComputersCard({
                 disabled={loading || instance.inUse || removingName !== null}
                 aria-busy={removing || undefined}
                 title={t("vm.vps.removeTitle")}
-                className="flex shrink-0 items-center gap-1.5 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex shrink-0 items-center gap-1.5 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12px] font-medium text-danger interaction:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {removing ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                 {t("vm.vps.remove")}

@@ -58,7 +58,7 @@ export function UnreadContextCard({
           <button
             type="button"
             onClick={onJump}
-            className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] hover:bg-raised"
+            className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] interaction:bg-raised/50"
           >
             {t("chat.citation.goToSource")}
           </button>

@@ -126,7 +126,7 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
         <span className="min-w-0 flex-1 truncate" title={view.text}>{view.text}</span>
         {view.micSettings && <OpenSystemSettings pane="mic" />}
         {action && (
-          <button type="button" aria-label={action.label} className={cn(button, "bg-raised hover:bg-raised-hover")} onClick={takeLiveCallAction}>
+          <button type="button" aria-label={action.label} className={cn(button, "bg-raised interaction:bg-raised/50")} onClick={takeLiveCallAction}>
             <action.Icon className="size-3.5" /> <span className="hidden sm:inline">{action.label}</span>
           </button>
         )}

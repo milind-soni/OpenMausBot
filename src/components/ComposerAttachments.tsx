@@ -160,7 +160,7 @@ export function ComposerAttachments({
                 <button
                   type="button"
                   onClick={() => onDisplayInChatBox(a)}
-                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-accent/25 bg-accent/5 px-2 py-1.5 text-[11px] font-medium text-accent-text transition-colors hover:border-accent/50 hover:bg-accent/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
+                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border border-accent/25 bg-accent/5 px-2 py-1.5 text-[11px] font-medium text-accent-text transition-colors hover:border-accent/50 interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60"
                   aria-label={t("composer.chip.displayLabel")}
                   title={t("composer.chip.display")}
                 >

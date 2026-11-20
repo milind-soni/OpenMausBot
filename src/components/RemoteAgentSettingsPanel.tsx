@@ -85,7 +85,7 @@ export function RemoteAgentSettingsPanel({ bot, closing = false, overlay = false
         <button
           onClick={close}
           aria-label={t("remoteAgent.collapse")}
-          className="flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-control hover:text-ink"
+          className="flex size-10 items-center justify-center rounded-md text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           <ChevronLeft size={18} />
         </button>
@@ -93,7 +93,7 @@ export function RemoteAgentSettingsPanel({ bot, closing = false, overlay = false
         <button
           onClick={close}
           aria-label={t("remoteAgent.close")}
-          className="flex size-10 items-center justify-center rounded-md text-ink-secondary hover:bg-control hover:text-ink"
+          className="flex size-10 items-center justify-center rounded-md text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           <X size={18} />
         </button>
@@ -106,10 +106,10 @@ export function RemoteAgentSettingsPanel({ bot, closing = false, overlay = false
               <BotAvatar bot={bot} state="idle" size={64} motion="none" motionKey={0} animated={false} />
               <div className="flex gap-2">
                 <input ref={avatarInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="sr-only" onChange={(event) => void uploadAvatar(event.target.files?.[0])} />
-                <button type="button" disabled={uploading || saving} onClick={() => avatarInput.current?.click()} className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+                <button type="button" disabled={uploading || saving} onClick={() => avatarInput.current?.click()} className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50">
                   {uploading ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />} {t("botIdentity.avatar")}
                 </button>
-                {bot.avatarUrl && <button type="button" disabled={saving} onClick={() => void patch({ avatarUrl: null, avatarCrop: "mascot" })} aria-label={t("remoteAgent.removeAvatar")} className="flex size-9 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-danger"><Trash2 size={14} /></button>}
+                {bot.avatarUrl && <button type="button" disabled={saving} onClick={() => void patch({ avatarUrl: null, avatarCrop: "mascot" })} aria-label={t("remoteAgent.removeAvatar")} className="flex size-9 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-danger"><Trash2 size={14} /></button>}
               </div>
             </div>
             <label className="block text-[12px] font-medium text-ink-secondary">{t("botSettings.identity.name")}

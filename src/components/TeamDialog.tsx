@@ -81,7 +81,7 @@ export function TeamDialog({ section, rename = false, onClose, onRenamed }: {
         }}>
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 id="team-dialog-title" className="text-[17px] font-semibold">{title}</h2>
-          <button aria-label={t("team.closeDialog")} disabled={saving} onClick={onClose} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"><X size={18} /></button>
+          <button aria-label={t("team.closeDialog")} disabled={saving} onClick={onClose} className="rounded-lg p-1.5 text-ink-secondary interaction:bg-raised/50"><X size={18} /></button>
         </div>
         {(!moving || rename) && <label className="mb-3 block text-[13px] text-ink-secondary">{t("team.name")}
           <input value={name} maxLength={60} disabled={saving} onChange={(event) => setName(event.target.value)}
@@ -93,7 +93,7 @@ export function TeamDialog({ section, rename = false, onClose, onRenamed }: {
             {managing ? t("team.manageIntro") : moving ? t("team.moveIntro") : t("team.createIntro")} {t("team.moveWarning")}
           </p>
           {managing && <button disabled={saving || state.botCreationPending} onClick={createBot}
-            className="mb-3 flex items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] text-accent hover:bg-raised disabled:opacity-40">
+            className="mb-3 flex items-center gap-1.5 rounded-lg px-3 py-2 text-[13px] text-accent interaction:bg-raised/50 disabled:opacity-40">
             <Plus size={14} />{t("sidebar.newBot")}
           </button>}
           <fieldset disabled={saving}>
@@ -107,7 +107,7 @@ export function TeamDialog({ section, rename = false, onClose, onRenamed }: {
         </>}
         {error && <p role="alert" className="mt-3 text-[13px] text-danger">{error}</p>}
         <div className="mt-4 flex justify-end gap-2">
-          <button disabled={saving} onClick={onClose} className="rounded-lg px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised">{t("common.cancel")}</button>
+          <button disabled={saving} onClick={onClose} className="rounded-lg px-3 py-2 text-[13px] text-ink-secondary interaction:bg-raised/50">{t("common.cancel")}</button>
           <button disabled={saving || (!moving && !name.trim()) || unchanged} onClick={() => void save()}
             className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white disabled:opacity-40">
             {saving ? t("team.saving") : rename ? t("folder.saveName") : managing ? t("common.save") : moving ? picked.size ? t(picked.size === 1 ? "team.moveOne" : "team.moveMany", { count: picked.size }) : t("team.moveSelected") : t("team.create")}

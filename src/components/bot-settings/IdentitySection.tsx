@@ -50,7 +50,7 @@ export function IdentitySection({
             {(["female", "male"] as const).map(kind => <button
               key={kind}
               type="button"
-              className="rounded-md px-2 py-1 text-xs text-ink-secondary hover:bg-control hover:text-ink"
+              className="rounded-md px-2 py-1 text-xs text-ink-secondary interaction:bg-raised/50 hover:text-ink"
               onClick={() => patch({ name: randomBotName(kind, bot.name, state.bots.map(existing => existing.name)) })}
             >{t(kind === "female" ? "newBot.randomFemaleName" : "newBot.randomMaleName")}</button>)}
           </div>}
@@ -83,7 +83,7 @@ export function IdentitySection({
           <button
             type="button"
             onClick={() => setInstructionsOpen(true)}
-            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] font-medium text-accent-text hover:bg-accent/10"
+            className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] font-medium text-accent-text interaction:bg-raised/50"
           >
             <BookOpen size={12} /> {t("botSettings.identity.viewFull")}
           </button>

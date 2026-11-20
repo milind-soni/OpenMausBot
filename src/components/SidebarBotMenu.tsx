@@ -185,7 +185,7 @@ export function BotContextMenu({
       className={cn(
         MENU_ITEM,
         opts?.danger ? "text-danger" : "text-ink",
-        opts?.disabled ? "cursor-default opacity-40" : "hover:bg-menu-hover",
+        opts?.disabled ? "cursor-default opacity-40" : "interaction:bg-raised/50",
       )}
     >
       {icon}

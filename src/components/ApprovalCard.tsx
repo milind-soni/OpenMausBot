@@ -307,7 +307,7 @@ function AppliedChangeLine({
             type="button"
             onClick={share}
             disabled={sharing}
-            className="rounded-md px-1.5 py-0.5 font-medium text-accent hover:bg-inset disabled:opacity-60"
+            className="rounded-md px-1.5 py-0.5 font-medium text-accent interaction:bg-raised/50 disabled:opacity-60"
           >
             {sharing ? t("approval.applied.sharingSkill") : t("approval.applied.shareSkill")}
           </button>
@@ -345,7 +345,7 @@ export const APPROVAL_CODE_CHIP =
   "inline-flex min-w-0 max-w-full items-baseline rounded-full bg-inset px-2 pb-px pt-[3px] font-mono text-[13px] leading-5 text-ink";
 
 const TEXT_ACTION =
-  "inline-flex h-6 items-center rounded-full px-2 hover:bg-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
+  "inline-flex h-6 items-center rounded-full px-2 interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
 
 function firstLineOf(text: string): string {
   const line = text.split("\n", 1)[0] ?? "";
@@ -407,7 +407,7 @@ function CompactApprovalRow({
               aria-expanded={open}
               title={detail}
               onClick={toggle}
-              className={cn(APPROVAL_CODE_CHIP, "text-left hover:bg-control focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus")}
+              className={cn(APPROVAL_CODE_CHIP, "text-left interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus")}
             >
               <span className="truncate">{detail}</span>
             </button>

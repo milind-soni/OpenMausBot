@@ -72,7 +72,7 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
               title={bodyName(id)}
               data-mausbot-welcome-body={id}
               onClick={() => shape({ mascotBody: id })}
-              className={cn("flex h-11 items-center justify-center rounded-xl", !picture && (preview.mascotBody ?? "cursor") === id ? "bg-ink/[0.08] ring-[1.5px] ring-inset ring-ink/25" : "hover:bg-ink/[0.05]")}
+              className={cn("flex h-11 items-center justify-center rounded-xl", !picture && (preview.mascotBody ?? "cursor") === id ? "bg-ink/[0.08] ring-[1.5px] ring-inset ring-ink/25" : "interaction:bg-raised/50")}
             >
               <MausAvatar color={preview.color} bodyId={id} size={30} animated={false} trackPointer={false} />
             </button>
@@ -84,18 +84,18 @@ export function MausBotCustomize({ preview, name, nameRef, image, onName, onPatc
           <input ref={image.fileRef} type="file" accept={AVATAR_FILE_TYPES} className="sr-only" tabIndex={-1} aria-hidden="true"
             onChange={(event) => void image.upload(event.target.files?.[0])} />
           <button type="button" data-mausbot-welcome-upload="" disabled={image.busy} onClick={() => image.fileRef.current?.click()}
-            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-ink-secondary hover:bg-ink/[0.05] hover:text-ink disabled:opacity-50">
+            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50">
             {image.uploading ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <ImagePlus size={14} aria-hidden="true" />}
             {t("mausbotWelcome.upload")}
           </button>
           <span aria-hidden="true" className="text-ink-tertiary">·</span>
           <button type="button" data-mausbot-welcome-generate="" aria-expanded={generating} onClick={() => setGenerating(!generating)}
-            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-ink-secondary hover:bg-ink/[0.05] hover:text-ink">
+            className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink">
             <Sparkles size={14} aria-hidden="true" />{t("mausbotWelcome.generate")}
           </button>
           {picture && (
             <div className="basis-full"><button type="button" data-mausbot-welcome-remove="" disabled={image.busy} onClick={image.removeImage}
-              className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-ink/[0.05] hover:text-ink disabled:opacity-50">
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50">
               <Trash2 size={13} aria-hidden="true" />{t("mausbotWelcome.removePicture")}
             </button></div>
           )}

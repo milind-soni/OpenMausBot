@@ -57,7 +57,7 @@ export function PhoneAppDialog({ open, onClose, connect = [] }: { open: boolean;
                 }}
                 className={index === 0
                   ? "flex w-full flex-col items-center rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-accent-ink hover:opacity-90"
-                  : "flex w-full flex-col items-center rounded-xl border border-hairline/50 px-4 py-2 text-[13px] font-medium text-ink hover:bg-raised"}
+                  : "flex w-full flex-col items-center rounded-xl border border-hairline/50 px-4 py-2 text-[13px] font-medium text-ink interaction:bg-raised/50"}
               >
                 <span>{t("sidebar.menu.connectPhone")}</span>
                 <span className="text-[12px] font-normal opacity-80">{destination.subtitle}</span>

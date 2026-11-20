@@ -121,7 +121,7 @@ function BotList({ bots, anyBots, team, onOpen }: { bots: Bot[]; anyBots: boolea
         const owner = botOwner(bot);
         return (
           <li key={bot.id} className="min-w-0">
-            <button type="button" aria-haspopup="dialog" data-access-row={bot.id} onClick={() => onOpen(bot.id)} className={cn(ROW, "hover:bg-ink/[0.06] focus-visible:bg-ink/[0.06] focus-visible:outline-none")}>
+            <button type="button" aria-haspopup="dialog" data-access-row={bot.id} onClick={() => onOpen(bot.id)} className={cn(ROW, "interaction:bg-raised/50 focus-visible:bg-raised/50 focus-visible:outline-none")}>
               <BotAvatar bot={bot} size={32} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[14px] leading-[18px] text-ink">{bot.name}</span>
@@ -146,7 +146,7 @@ function PeopleList({ people, anyPeople, bots, onOpen }: { people: TeamPerson[];
         const count = bots.filter((bot) => hasAccess(bot, person.email)).length;
         return (
           <li key={person.email} className="min-w-0">
-            <button type="button" data-access-person={person.email} onClick={() => onOpen(person.email)} className={cn(ROW, "hover:bg-ink/[0.06] focus-visible:bg-ink/[0.06] focus-visible:outline-none")}>
+            <button type="button" data-access-person={person.email} onClick={() => onOpen(person.email)} className={cn(ROW, "interaction:bg-raised/50 focus-visible:bg-raised/50 focus-visible:outline-none")}>
               <PersonFace person={person} size={32} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[14px] leading-[18px] text-ink">{person.name}</span>
@@ -168,7 +168,7 @@ function PersonBots({ person, bots, team, teamName, apply, onBack }: {
   return (
     <>
       <div>
-        <button type="button" autoFocus data-access-back onClick={onBack} className="-ms-2 flex items-center gap-1 rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
+        <button type="button" autoFocus data-access-back onClick={onBack} className="-ms-2 flex items-center gap-1 rounded-md px-2 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink">
           <ChevronLeft size={14} aria-hidden="true" className="rtl:-scale-x-100" />{t("botAccess.overview.allPeople")}
         </button>
       </div>
@@ -206,7 +206,7 @@ function PersonBotRow({ bot, person, team, teamName, apply }: {
         {owns ? <span className="px-2">{t("lookedAfter.owner")}</span> : own ? (
           <button type="button" data-access-remove={bot.id} aria-label={t("botAccess.overview.removeFrom", { name: person.name, bot: bot.name })}
             onClick={() => void apply(bot, withPerson(access, person.email, null), t("botAccess.overview.toastRemoved", { name: person.name, bot: bot.name }))}
-            className="rounded-md px-2 py-1 hover:bg-ink/[0.06] hover:text-ink">{t("botAccess.remove")}</button>
+            className="rounded-md px-2 py-1 interaction:bg-raised/50 hover:text-ink">{t("botAccess.remove")}</button>
         ) : null}
       </span>
     </li>

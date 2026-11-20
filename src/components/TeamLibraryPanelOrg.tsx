@@ -111,7 +111,7 @@ function OrgPackageCard({
             onClick={() => onDetails(entry)}
             disabled={busy !== null}
             aria-label={t("orgLibrary.detailsAria", { name: entry.name })}
-            className="rounded-full px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40"
+            className="rounded-full px-2.5 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40"
           >
             {t("orgLibrary.details")}
           </button>

@@ -352,7 +352,7 @@ function AppRow({ botId, botName, threadId, message, payload, pool, room }: {
             {current && !point.pointing && (
               <button type="button" data-page-open onClick={tools.fullScreen.toggle} aria-pressed={fullScreen}
                 aria-label={t(fullScreen ? "chat.preview.closePage" : "chat.preview.openPage")}
-                className="absolute inset-0 cursor-pointer rounded-2xl transition-colors duration-[120ms] hover:bg-ink/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus motion-reduce:transition-none" />
+                className="absolute inset-0 cursor-pointer rounded-2xl transition-colors duration-[120ms] interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus motion-reduce:transition-none" />
             )}
           </div>
           {info}

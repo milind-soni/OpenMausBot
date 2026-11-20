@@ -110,7 +110,7 @@ export function ActivityPanel({ bot, closing = false }: { bot: Bot; closing?: bo
         <span className="flex items-center gap-1">
           <button
             onClick={() => void load()}
-            className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+            className="rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
             title={t("activity.panel.reload")}
             aria-label={t("activity.panel.reload")}
           >
@@ -120,7 +120,7 @@ export function ActivityPanel({ bot, closing = false }: { bot: Bot; closing?: bo
             onClick={() => dispatch({ type: "toggleActivity", open: false })}
             aria-label={t("activity.panel.close")}
             title={t("activity.panel.close")}
-            className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+            className="rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             <X size={18} />
           </button>
@@ -162,7 +162,7 @@ function ActivityLine({ row, current, focused, onJump }: { row: ActivityRow; cur
       onClick={onJump}
       aria-current={focused || undefined}
       data-activity-focused={focused ? "" : undefined}
-      className={cn("flex w-full items-start gap-3 border-b border-hairline/20 px-4 py-2 text-left hover:bg-raised/60", focused && "bg-raised/60")}
+      className={cn("flex w-full items-start gap-3 border-b border-hairline/20 px-4 py-2 text-left interaction:bg-raised/50", focused && "bg-raised/60")}
       title={current ? row.tool : t("activity.panel.openOtherTask", { tool: row.tool })}
     >
       <span className="mt-[2px] shrink-0 tabular-nums text-[11px] text-ink-secondary">{formatActivityTime(row.at)}</span>

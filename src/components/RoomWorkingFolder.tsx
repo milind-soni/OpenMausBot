@@ -58,7 +58,7 @@ export function RoomWorkingFolder({ group, heading = true }: { group: Group; hea
           <div className="min-w-0 flex-1 truncate rounded-lg border border-hairline/40 bg-inset px-3 py-2 font-mono text-[13px] text-ink" title={group.cwd}>
             {group.cwd ? shortPath(group.cwd, home) : <span className="text-ink-secondary">{t("room.folder.own")}</span>}
           </div>
-          <button onClick={() => void pick()} disabled={saving} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+          <button onClick={() => void pick()} disabled={saving} className="flex shrink-0 items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50">
             <FolderOpen size={14} /> {t("room.folder.choose")}
           </button>
           {group.cwd && (
@@ -82,7 +82,7 @@ export function RoomWorkingFolder({ group, heading = true }: { group: Group; hea
             value={draft ?? group.cwd ?? ""}
             onChange={(e) => setDraft(e.target.value)}
           />
-          <button type="submit" disabled={saving || draft === null} className="shrink-0 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50">
+          <button type="submit" disabled={saving || draft === null} className="shrink-0 rounded-lg bg-raised px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50">
             {t("common.save")}
           </button>
         </form>
@@ -104,7 +104,7 @@ export function RoomWorkingFolderChip({ group, onToggle }: { group: Group; onTog
     return (
       <button
         onClick={onToggle}
-        className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"
+        className="rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         title={t("room.folder.chipTitle")}
       >
         <Folder size={14} />
@@ -114,7 +114,7 @@ export function RoomWorkingFolderChip({ group, onToggle }: { group: Group; onTog
   return (
     <button
       onClick={onToggle}
-      className="flex max-w-[180px] items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+      className="flex max-w-[180px] items-center gap-1.5 rounded-full border border-hairline/40 bg-raised/60 px-2.5 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
       title={t("chat.workingFolder", { folder: folder.path })}
     >
       <Folder size={12} />

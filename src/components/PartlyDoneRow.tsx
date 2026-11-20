@@ -13,7 +13,7 @@ export function PartlyDoneRow({ cause, onRetry }: { cause: string; onRetry?: () 
         </div>
         <details className="mt-2 text-[12px] text-ink-secondary"><summary className="cursor-pointer">{t("chat.error.details")}</summary><p className="mt-1 break-words">{cause}</p></details>
         {onRetry && (
-          <button onClick={onRetry} className="ui-button ui-button-md mt-1.5 rounded-full border-warning/30 bg-transparent text-warning hover:bg-warning/15">
+          <button onClick={onRetry} className="ui-button ui-button-md mt-1.5 rounded-full border-warning/30 bg-transparent text-warning interaction:bg-warning/15">
             <RefreshCw size={12} /> {t("chat.retry")}
           </button>
         )}

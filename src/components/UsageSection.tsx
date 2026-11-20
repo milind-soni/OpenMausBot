@@ -232,7 +232,7 @@ function WhereItWent({ range, version, onSummary }: { range: { from: string; to:
                 aria-selected={other === option}
                 onClick={() => setOther(option)}
                 className={cn("rounded-md px-2 py-0.5 text-[11px] font-medium uppercase tracking-[0.06em]",
-                  other === option ? "bg-accent/12 text-accent" : "text-ink-secondary hover:bg-raised/60 hover:text-ink")}
+                  other === option ? "bg-accent/12 text-accent" : "text-ink-secondary interaction:bg-raised/50 hover:text-ink")}
               >{t(GROUP_LABEL_KEYS[option])}</button>
             ))}
           </div>
@@ -284,7 +284,7 @@ export function RunRow({ root, onOpen }: { root: TraceRootSummary; onOpen: () =>
   const names = root.bots.map((entry) => currentBotName(state.bots, entry.id, entry.name)).join(", ");
   return (
     <li>
-      <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2.5 text-left hover:bg-raised/50" data-testid="usage-run">
+      <button type="button" onClick={onOpen} className="grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl px-3 py-2.5 text-left interaction:bg-raised/50" data-testid="usage-run">
         <span className="flex w-[38px] shrink-0 -space-x-1.5 sm:w-[74px]">
           {root.bots.slice(0, 4).map((entry, index) => {
             const bot = state.bots.find((item) => item.id === entry.id);
@@ -402,7 +402,7 @@ export function UsageSection() {
           <Select size="sm" value={period} onChange={(event) => { setPeriod(event.target.value as UsagePeriod); setOpen(null); }} aria-label={t("usage.history.period")}>
             {USAGE_PERIODS.map((option) => <option key={option} value={option}>{t(PERIOD_LABEL_KEYS[option])}</option>)}
           </Select>
-          <a href={usageExportHref(range)} download className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-raised/50 hover:text-ink">
+          <a href={usageExportHref(range)} download className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink">
             <Download size={13} />{t("usage.history.export")}
           </a>
         </div>
@@ -410,7 +410,7 @@ export function UsageSection() {
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       {open ? (
         <TraceView id={open.id} at={open.at} actions={(
-          <button type="button" onClick={() => setOpen(null)} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">
+          <button type="button" onClick={() => setOpen(null)} className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink">
             <ArrowLeft size={13} />{t("trace.back")}
           </button>
         )} />
@@ -432,7 +432,7 @@ export function UsageSection() {
               {list?.roots.map((root) => <RunRow key={root.id} root={root} onOpen={() => setOpen({ id: root.id, at: root.startedAt })} />)}
             </ul>
             {list?.next !== undefined && (
-              <button type="button" onClick={more} className="m-2 rounded-lg px-3 py-1.5 text-[13px] text-accent hover:bg-raised/50">{t("usage.page.more")}</button>
+              <button type="button" onClick={more} className="m-2 rounded-lg px-3 py-1.5 text-[13px] text-accent interaction:bg-raised/50">{t("usage.page.more")}</button>
             )}
             {untimed && <p className="px-3 pb-3 pt-1 text-[12px] text-ink-tertiary">{t("usage.page.untimedNote")}</p>}
           </section>

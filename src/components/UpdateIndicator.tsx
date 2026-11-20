@@ -86,7 +86,7 @@ export function UpdateIndicator({ className, bar }: { className?: string; bar?: 
 
 const button = "inline-flex h-7 min-w-0 items-center justify-center gap-2 rounded-full px-3.5 text-[13px] font-medium leading-4 transition-colors";
 const primary = `${button} bg-accent text-white hover:brightness-110 disabled:cursor-default disabled:bg-control disabled:text-ink-secondary disabled:hover:brightness-100`;
-const secondary = `${button} text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50`;
+const secondary = `${button} text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50`;
 
 export function UpdateCard({
   state,
@@ -198,7 +198,7 @@ export function UpdateCard({
           type="button"
           onClick={onClose}
           aria-label={t("update.card.close")}
-          className="absolute end-3 top-3 flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink"
+          className="absolute end-3 top-3 flex size-7 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           <X size={16} aria-hidden />
         </button>

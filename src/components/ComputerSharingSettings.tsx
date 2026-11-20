@@ -50,7 +50,7 @@ export function ComputerSharingSettings({ workspace, own = false, onClose }: { w
     <div className="flex flex-col gap-4 text-[13px]">
       <div className="flex items-center justify-between gap-2">
         <p role="status" className="text-ink-secondary">{!state ? t("computerSharing.loading") : !state.enabled ? t("computerSharing.notShared") : state.connected ? t("computerSharing.sharing") : "Waiting for the workspace to connect"}</p>
-        <button type="button" aria-label={t("computerSharing.close")} onClick={onClose} className="rounded p-1 text-ink-secondary hover:bg-control"><X size={16} /></button>
+        <button type="button" aria-label={t("computerSharing.close")} onClick={onClose} className="rounded p-1 text-ink-secondary interaction:bg-raised/50"><X size={16} /></button>
       </div>
       <p className="text-ink-secondary">{own ? t("computerSharing.ownIntro", { name: workspace.name }) : "Choose what this workspace’s bots can use. Shared files and screen content may be sent to its AI provider. Access stays on when you switch workspaces, until you stop sharing or close the desktop app."}</p>
       {own && state?.enabled && <div data-sharing-pause className="flex items-center gap-3 rounded-lg bg-inset px-3 py-2">
@@ -58,7 +58,7 @@ export function ComputerSharingSettings({ workspace, own = false, onClose }: { w
         <button type="button" disabled={busy} onClick={() => void perform(async () => {
           await (state.paused ? bridge.resume?.() : bridge.pause?.());
           const next = await bridge.state(workspace.id); if (mounted.current) setState(next);
-        })} className="shrink-0 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-50">{t(state.paused ? "computerSharing.resume" : "computerSharing.pause")}</button>
+        })} className="shrink-0 rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50 disabled:opacity-50">{t(state.paused ? "computerSharing.resume" : "computerSharing.pause")}</button>
       </div>}
       <fieldset disabled={busy || !state} className="flex flex-col gap-3 disabled:opacity-50">
         <legend className="mb-2 font-medium text-ink">{t("computerSharing.folders")}</legend>
@@ -66,12 +66,12 @@ export function ComputerSharingSettings({ workspace, own = false, onClose }: { w
         {folders.map(folder => <div key={folder.id} className="flex flex-wrap items-center gap-3 rounded-lg border border-hairline/40 p-3">
           <div className="min-w-0 flex-1"><p className="font-medium text-ink">{folder.name}</p><p className="break-all text-[12px] text-ink-secondary">{folder.path}</p></div>
           <label className="flex items-center gap-2 text-[12px] text-ink-secondary"><input type="checkbox" checked={folder.write} onChange={event => setFolders(current => current.map(entry => entry.id === folder.id ? { ...entry, write: event.target.checked } : entry))} />{t("computerSharing.allowEdits")}</label>
-          <button type="button" aria-label={t("lending.removeFolder", { name: folder.name })} onClick={() => setFolders(current => current.filter(entry => entry.id !== folder.id))} className="rounded p-1 text-ink-secondary hover:bg-control"><X size={14} /></button>
+          <button type="button" aria-label={t("lending.removeFolder", { name: folder.name })} onClick={() => setFolders(current => current.filter(entry => entry.id !== folder.id))} className="rounded p-1 text-ink-secondary interaction:bg-raised/50"><X size={14} /></button>
         </div>)}
         <button type="button" disabled={folders.length >= 20} onClick={() => void perform(async () => {
           const folder = await bridge.chooseFolder();
           if (mounted.current && folder) setFolders(current => current.some(entry => entry.path === folder.path) ? current : [...current, folder]);
-        })} className="flex w-fit items-center gap-2 rounded-lg border border-hairline/40 px-3 py-2 text-ink hover:bg-control"><FolderPlus size={14} />{t("computerSharing.chooseFolder")}</button>
+        })} className="flex w-fit items-center gap-2 rounded-lg border border-hairline/40 px-3 py-2 text-ink interaction:bg-raised/50"><FolderPlus size={14} />{t("computerSharing.chooseFolder")}</button>
         <p className="text-[12px] text-ink-secondary">{t("computerSharing.smallFiles")}</p>
       </fieldset>
       <fieldset disabled={busy || !state} className="flex flex-col gap-3 border-t border-hairline/40 pt-3 disabled:opacity-50">

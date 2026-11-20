@@ -4,7 +4,7 @@ import { t } from "@/lib/i18n";
 import { BOT_BUTTON, botButtonStyle, botButtonTone, type BotButton } from "@/lib/bot-button";
 
 /** Simple mode's small round controls in the composer: the +, the mic and Stop beside the round button. */
-export const SIMPLE_CONTROL = "size-7 rounded-full bg-ink/[0.05] ring-[0.5px] ring-inset ring-ink/[0.07] text-ink-tertiary hover:bg-ink/[0.09] hover:text-ink";
+export const SIMPLE_CONTROL = "size-7 rounded-full bg-ink/[0.05] ring-[0.5px] ring-inset ring-ink/[0.07] text-ink-tertiary interaction:bg-raised/50 hover:text-ink";
 
 const ROOM_FILL = { fill: "var(--color-accent)", ink: "var(--color-accent-ink)" };
 

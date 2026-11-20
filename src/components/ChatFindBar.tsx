@@ -122,7 +122,7 @@ export function ChatFindBar({ threadId, onClose, inForkPanel = false }: { thread
           onClick={() => move(-1)}
           disabled={!hits.length}
           aria-label={t("chat.find.previous")}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-30"
+          className="rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-30"
         >
           <ChevronUp size={15} />
         </button>
@@ -131,7 +131,7 @@ export function ChatFindBar({ threadId, onClose, inForkPanel = false }: { thread
           onClick={() => move(1)}
           disabled={!hits.length}
           aria-label={t("chat.find.next")}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-30"
+          className="rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-30"
         >
           <ChevronDown size={15} />
         </button>
@@ -139,7 +139,7 @@ export function ChatFindBar({ threadId, onClose, inForkPanel = false }: { thread
           type="button"
           onClick={onClose}
           aria-label={t("chat.find.close")}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           <X size={15} />
         </button>

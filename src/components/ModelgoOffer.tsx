@@ -38,7 +38,7 @@ export function ModelgoOption({ open, onToggle, children }: { open: boolean; onT
     </span>
   </>;
   return <div data-modelgo-option="">
-    <div className="flex items-center gap-2 pr-4 transition-colors hover:bg-ink/[0.04]">
+    <div className="flex items-center gap-2 pr-4 transition-colors interaction:bg-raised/50">
       {children ? <button type="button" aria-expanded={open} onClick={() => { if (!open) reportModelgoOffer("add_key", "onboarding"); onToggle(); }}
         className="flex min-w-0 flex-1 items-center gap-3 py-2.5 pl-4 text-left focus-visible:outline-offset-[-2px]">
         {name}

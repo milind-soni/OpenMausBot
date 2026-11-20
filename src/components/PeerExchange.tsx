@@ -102,7 +102,7 @@ export function PeerExchangeView({ lines, peerName, peerBot, botName, self, onCl
       <aside ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} data-testid="peer-exchange" className="flex h-full w-[min(440px,100vw)] flex-col border-l border-hairline/50 bg-panel shadow-2xl shadow-black/50">
         <header className="flex items-center justify-between gap-3 border-b border-hairline/40 px-4 py-3">
           <h2 className="truncate text-[14px] font-medium text-ink">{title}</h2>
-          <button type="button" onClick={onClose} title={t("common.close")} aria-label={t("common.close")} className="rounded p-1 text-ink-secondary hover:bg-raised hover:text-ink">
+          <button type="button" onClick={onClose} title={t("common.close")} aria-label={t("common.close")} className="rounded p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink">
             <X size={16} />
           </button>
         </header>

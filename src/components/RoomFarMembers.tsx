@@ -31,7 +31,7 @@ export function RoomFarMembers({ members, picked, onToggle }: { members: FarMemb
             aria-checked={picked.has(member.id)}
             data-far-member={member.id}
             data-far-state={member.state}
-            className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-raised/50"
+            className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left interaction:bg-raised/50"
           >
             <span className="min-w-0 flex-1">
               <span className={cn("block truncate text-[14px]", member.state === "ok" ? "text-ink" : "text-ink-secondary")}>{member.name}</span>

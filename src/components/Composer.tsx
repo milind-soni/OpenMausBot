@@ -719,7 +719,7 @@ export function Composer({
             <button
               type="button"
               onClick={() => retryFailedSend(failed)}
-              className="shrink-0 rounded px-2 py-1 font-medium hover:bg-danger/10"
+              className="shrink-0 rounded px-2 py-1 font-medium interaction:bg-danger/10"
             >
               {t("chat.retry")}
             </button>
@@ -728,7 +728,7 @@ export function Composer({
               onClick={() => forgetFailedComposerSend(draftId, failed.id)}
               aria-label={t("composer.failed.dismissAria")}
               title={t("composer.failed.dismiss")}
-              className="flex size-5 shrink-0 items-center justify-center rounded hover:bg-danger/10"
+              className="flex size-5 shrink-0 items-center justify-center rounded interaction:bg-danger/10"
             >
               <X size={13} strokeWidth={2.5} />
             </button>
@@ -911,7 +911,7 @@ export function Composer({
             )}
           />
           <div data-composer-actions className={cn("flex items-center", "gap-1", !singleRow && "@max-[30rem]/composer:ml-auto", stacked && "ml-auto")}>
-        {!locked && <ComposerContextMenu bot={bot} group={group} members={members} className={cn("size-8", "text-ink-secondary hover:bg-raised hover:text-ink")} />}
+        {!locked && <ComposerContextMenu bot={bot} group={group} members={members} className={cn("size-8", "text-ink-secondary interaction:bg-raised/50 hover:text-ink")} />}
         {!locked && !busy && micReady && (
           <button
             onClick={toggleMic}
@@ -921,7 +921,7 @@ export function Composer({
               "size-8",
               recording
                 ? "animate-pulse bg-danger/20 text-danger"
-                : "text-ink-secondary hover:bg-raised hover:text-ink",
+                : "text-ink-secondary interaction:bg-raised/50 hover:text-ink",
             )}
             title={recording ? t("composer.dictation.stopHint") : t("composer.dictation.hint")}
           >

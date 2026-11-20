@@ -9,7 +9,7 @@ import { cn } from "@/lib/cn";
 
 export const ThreadLinkContext = createContext<{ link?: string; assign: (link: string | null) => void } | null>(null);
 
-const ITEM_CLASS = `${MENU_ITEM} text-ink hover:bg-menu-hover [&>svg]:text-ink-secondary`;
+const ITEM_CLASS = `${MENU_ITEM} text-ink interaction:bg-raised/50 [&>svg]:text-ink-secondary`;
 
 export function useThreadLinkMenu(href: string | undefined) {
   const thread = useContext(ThreadLinkContext);

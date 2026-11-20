@@ -152,7 +152,7 @@ export function ChiefIntro({ replay, onDone, onLeave }: { replay: boolean; onDon
                     }
                   }}
                   className={cn("flex min-h-10 items-center gap-2 rounded-lg p-2 transition-colors focus-visible:outline-offset-[-2px]",
-                    able ? "cursor-pointer hover:bg-ink/[0.06]" : "opacity-40", checked && "bg-ink/[0.06]")}
+                    able ? "cursor-pointer interaction:bg-raised/50" : "opacity-40", checked && "bg-ink/[0.06]")}
                 >
                   <BotAvatar bot={bot} size={24} />
                   <span className="min-w-0 flex-1 truncate text-[13px] leading-[18px] text-ink">{bot.name}</span>

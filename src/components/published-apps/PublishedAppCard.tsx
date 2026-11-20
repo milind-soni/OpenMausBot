@@ -44,7 +44,7 @@ export function PublishedAppCard({ app, onOpen, onPreview, onAsk, onDelete }: {
     setConfirming(false);
     setProblem(failed);
   };
-  const icon = "ui-icon-button shrink-0 hover:bg-raised hover:text-ink";
+  const icon = "ui-icon-button shrink-0 interaction:bg-raised/50 hover:text-ink";
   return (
     <li data-published-app={app.id} data-source={app.source} className="flex flex-col overflow-hidden rounded-2xl border border-hairline/40 bg-card">
       {online ? (

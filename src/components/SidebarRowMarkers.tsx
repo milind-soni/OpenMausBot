@@ -5,14 +5,14 @@ import { t } from "@/lib/i18n";
 export function rowSurface(selected: boolean): string {
   return selected
     ? "[--row:var(--color-raised)]"
-    : "[--row:var(--color-panel)] max-md:[--row:var(--color-app)] hover:[--row:color-mix(in_srgb,var(--color-raised)_50%,var(--color-panel))]";
+    : "[--row-base:var(--color-panel)] max-md:[--row-base:var(--color-app)] [--row:var(--row-base)] interaction:[--row:color-mix(in_srgb,var(--color-raised)_50%,var(--row-base))]";
 }
 
 /** The conversation the chat window has open: the same plain fill as a selected row. */
 export const rowSelectedSurface = "bg-raised";
 
 export function sidebarRowTone(selected: boolean): string {
-  return selected ? rowSelectedSurface : "hover:bg-raised/50";
+  return selected ? rowSelectedSurface : "interaction:bg-raised/50";
 }
 
 export type RowActivity = "working" | "failed" | "teammate" | "queued";

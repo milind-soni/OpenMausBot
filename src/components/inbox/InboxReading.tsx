@@ -13,7 +13,7 @@ import { askOf, closeResponse, senderLabel, textOf } from "./inbox-view";
 import { useAskContext } from "./use-ask-context";
 import { useInboxActions } from "./use-inbox-actions";
 
-const NAV_BUTTON = "flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink disabled:pointer-events-none disabled:opacity-35 pointer-coarse:size-9";
+const NAV_BUTTON = "flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:pointer-events-none disabled:opacity-35 pointer-coarse:size-9";
 
 function settledLabel(row: InboxRow): string {
   if (row.kind !== "ask") return t("common.done");
@@ -60,7 +60,7 @@ export function InboxReading({ view, row, now, position, onStep }: {
     <article data-inbox-reading={row.id} aria-label={`${senderLabel(row)} · ${headline}`} className="flex min-h-0 flex-1 flex-col">
       <header className="flex items-center gap-1 px-2 py-1.5">
         <button type="button" onClick={() => readInboxLine(null)} aria-label={t("inbox.action.back")} title={t("inbox.action.back")}
-          className="flex h-7 shrink-0 items-center gap-0.5 rounded-md pe-2 ps-1 text-[13px] font-medium text-ink hover:bg-raised pointer-coarse:h-9">
+          className="flex h-7 shrink-0 items-center gap-0.5 rounded-md pe-2 ps-1 text-[13px] font-medium text-ink interaction:bg-raised/50 pointer-coarse:h-9">
           <ChevronLeft size={16} aria-hidden="true" className="rtl:rotate-180" />{t("inbox.panel.title")}
         </button>
         <span className="flex-1" />

@@ -24,7 +24,7 @@ export function SettingsSectionRow({ id, icon: Icon, label, open, hidden, keepMo
       <button type="button" aria-expanded={open} aria-controls={bodyId}
         onClick={onToggle}
         className={cn("group flex min-h-10 w-full items-center gap-2.5 rounded-xl px-2.5 py-1 text-left text-[13px] font-medium text-ink transition-colors", SIMPLE_ROW_FOCUS,
-          open ? "bg-raised/50" : "hover:bg-raised/60")}>
+          open ? "bg-raised/50" : "interaction:bg-raised/50")}>
         <span className="grid size-7 shrink-0 place-items-center rounded-lg bg-control/70 text-ink-secondary group-hover:text-ink">
           <Icon size={15} strokeWidth={1.65} aria-hidden="true" />
         </span>

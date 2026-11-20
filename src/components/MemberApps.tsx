@@ -11,7 +11,7 @@ import { ServiceIcon } from "./ServiceIcon";
 /** One app an admin made each person's own, as GET /api/team/my-connections lists it. */
 export interface OwnApp { slug: string; name: string; connected: boolean; reconnect?: boolean }
 
-const ACTION = "inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors hover:bg-raised-hover disabled:opacity-40";
+const ACTION = "inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors interaction:bg-raised/50 disabled:opacity-40";
 
 /** The Apps page for a Team Cloud's member: only the apps that are theirs to connect, used by their own private chats
  * alone. What the team's admins connect for everyone isn't theirs to change, so it isn't here. */
@@ -86,7 +86,7 @@ export function MemberApps() {
         <header className="px-5 pb-4 pt-5 sm:px-7 sm:pt-6">
           <div className="flex items-center justify-between gap-3">
             <h2 id="member-apps-title" className="min-w-0 truncate text-[20px] font-semibold leading-7 tracking-[-0.01em] text-ink">{t("apps.title")}</h2>
-            <button onClick={close} aria-label={t("common.close")} className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"><X size={18} /></button>
+            <button onClick={close} aria-label={t("common.close")} className="flex size-8 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink"><X size={18} /></button>
           </div>
           <p className="mt-0.5 text-[13px] leading-5 text-ink-secondary">{t("memberApps.subtitle", { team })}</p>
         </header>
@@ -96,7 +96,7 @@ export function MemberApps() {
             : apps.length === 0 ? <p data-member-apps-none className="py-10 text-center text-[13px] text-ink-secondary">{t("memberApps.none", { team })}</p>
             : <AppsSection id="member-apps-yours" title={t("memberApps.yours")}>
                 {apps.map((app) => (
-                  <div key={app.slug} data-app-tile={app.slug} className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40">
+                  <div key={app.slug} data-app-tile={app.slug} className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors interaction:bg-raised/50">
                     <div className="flex items-center gap-3">
                       <ServiceIcon card={{ logo: null, domain: null, label: app.name }} className="size-10 shrink-0 rounded-[8px]" />
                       <div className="flex min-w-0 flex-1 items-center gap-1.5">

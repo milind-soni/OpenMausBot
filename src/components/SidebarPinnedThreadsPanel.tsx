@@ -25,7 +25,7 @@ export function SidebarPinnedThreadsPanel({ entries, now, onJump, onUnpin, colla
           disabled={!onToggle}
           aria-expanded={!collapsed}
           aria-label={t(collapsed ? "sidebar.section.expand" : "sidebar.section.collapse", { name: t("sidebar.pinnedThreads.title") })}
-          className="flex size-5 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex size-5 shrink-0 items-center justify-center rounded text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           <Chevron size={12} aria-hidden="true" />
         </button>

@@ -229,7 +229,7 @@ export function SkillsSection() {
                 className={
                   activeTag === null
                     ? "rounded-full bg-control px-2.5 py-1 text-[12px] font-medium text-ink"
-                    : "rounded-full px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-control/50 hover:text-ink"
+                    : "rounded-full px-2.5 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
                 }
               >
                 {t("skills.library.allTags")}
@@ -242,7 +242,7 @@ export function SkillsSection() {
                   className={
                     activeTag === tag
                       ? "rounded-full bg-control px-2.5 py-1 font-mono text-[12px] font-medium text-ink"
-                      : "rounded-full px-2.5 py-1 font-mono text-[12px] text-ink-secondary hover:bg-control/50 hover:text-ink"
+                      : "rounded-full px-2.5 py-1 font-mono text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
                   }
                 >
                   {tag}
@@ -302,7 +302,7 @@ export function SkillsSection() {
                             title={t("skills.library.removeAssignment", { bot: bot.name })}
                             disabled={Boolean(working || importing)}
                             onClick={() => void unassign(skill, bot.id)}
-                            className="flex size-4 items-center justify-center rounded-full text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                            className="flex size-4 items-center justify-center rounded-full text-ink-secondary interaction:bg-danger/10 hover:text-danger disabled:opacity-40"
                           >
                             <X size={11} />
                           </button>
@@ -329,7 +329,7 @@ export function SkillsSection() {
                         type="button"
                         disabled={!assignBot || Boolean(working || importing)}
                         onClick={() => void assign(skill)}
-                        className="rounded-lg bg-control px-2.5 py-1 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                        className="rounded-lg bg-control px-2.5 py-1 text-[12px] text-ink interaction:bg-raised/50 disabled:opacity-50"
                       >
                         {t("skills.library.assign")}
                       </button>
@@ -363,7 +363,7 @@ export function SkillsSection() {
             <button
               type="submit"
               disabled={importing || Boolean(working) || !importText.trim()}
-              className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+              className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
             >
               {importing ? t("skills.library.importing") : t("skills.library.importButton")}
             </button>
@@ -401,7 +401,7 @@ function SkillSourceDialog({ viewing, error, working, onClose, onEnable }: {
                 type="button"
                 disabled={working}
                 onClick={onClose}
-                className="rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink"
+                className="rounded-md px-2 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
               >
                 {t("skills.library.close")}
               </button>

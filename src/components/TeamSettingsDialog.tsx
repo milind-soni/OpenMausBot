@@ -139,7 +139,7 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
         onKeyDown={(event) => { if (event.key === "Escape" && !consent) { event.stopPropagation(); close(); } }}>
         <div className="mb-2 flex items-center justify-between gap-3">
           <h2 id="team-settings-title" className="text-[17px] font-semibold">{t("teamSettings.title", { name: team || t("teamSettings.general") })}</h2>
-          <button type="button" aria-label={t("teamSettings.close")} disabled={running} onClick={close} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"><X size={18} /></button>
+          <button type="button" aria-label={t("teamSettings.close")} disabled={running} onClick={close} className="rounded-lg p-1.5 text-ink-secondary interaction:bg-raised/50"><X size={18} /></button>
         </div>
         {results && counts ? (
           <>
@@ -163,7 +163,7 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
               <fieldset disabled={running} className="flex flex-col gap-1">
                 <legend className="sr-only">{t("teamSettings.tab.approval")}</legend>
                 {approvalModeOptions().filter((option) => (TEAM_APPROVAL_MODES as readonly string[]).includes(option.mode)).map((option) => (
-                  <label key={option.mode} className={cn("flex cursor-pointer items-start gap-2 rounded-lg px-3 py-2", mode === option.mode ? "bg-raised" : "hover:bg-raised/60")}>
+                  <label key={option.mode} className={cn("flex cursor-pointer items-start gap-2 rounded-lg px-3 py-2", mode === option.mode ? "bg-raised" : "interaction:bg-raised/50")}>
                     <input type="radio" name="team-approval" className="mt-1" checked={mode === option.mode}
                       onChange={() => setMode(option.mode as TeamApprovalMode)} />
                     <span>
@@ -225,7 +225,7 @@ export function TeamSettingsDialog({ team, onClose }: { team: string; onClose: (
             )}
             <div className="mt-4 flex items-center justify-end gap-2">
               {running && <span role="status" className="mr-auto text-[12px] text-ink-secondary">{t("teamSettings.progress", { done: progress, count: plan.length })}</span>}
-              <button type="button" disabled={running} onClick={close} className="rounded-lg px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised">{t("common.cancel")}</button>
+              <button type="button" disabled={running} onClick={close} className="rounded-lg px-3 py-2 text-[13px] text-ink-secondary interaction:bg-raised/50">{t("common.cancel")}</button>
               <button type="button" disabled={running || !applying} onClick={apply}
                 className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white disabled:opacity-40">
                 {t(applying === 1 ? "teamSettings.applyOne" : "teamSettings.applyMany", { count: applying })}

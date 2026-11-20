@@ -134,7 +134,7 @@ export function EmailCard({ refreshKey = 0, onConnection }: {
   const description = connected ? accounts.map((account) => account.address).join(", ") : t("email.description");
 
   return (
-    <div data-app-tile="email" data-email-state={status?.state ?? "loading"} className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40">
+    <div data-app-tile="email" data-email-state={status?.state ?? "loading"} className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors interaction:bg-raised/50">
       <div className="flex items-center gap-3">
         <EmailIcon />
         <div className="min-w-0 flex-1">
@@ -160,7 +160,7 @@ export function EmailCard({ refreshKey = 0, onConnection }: {
                   { key: "email-add", label: t("email.addAnother"), onSelect: () => { setOpen(true); setError(null); } },
                   ...accounts.map((account) => ({ key: `email-remove-${account.address}`, label: t("email.disconnect", { address: account.address }), onSelect: () => void disconnect(account.address) })),
                 ]}
-                renderTrigger={() => <span className="inline-flex size-7 items-center justify-center rounded-full bg-control/80 text-ink hover:bg-raised-hover"><MoreHorizontal size={15} aria-hidden="true" /></span>}
+                renderTrigger={() => <span className="inline-flex size-7 items-center justify-center rounded-full bg-control/80 text-ink interaction:bg-raised/50"><MoreHorizontal size={15} aria-hidden="true" /></span>}
               />
             )}
           </div>

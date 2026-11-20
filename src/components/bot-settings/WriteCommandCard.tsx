@@ -108,7 +108,7 @@ export function WriteCommandCard({ bot, taken, onSaved }: { bot: Bot; taken: rea
           <button
             type="submit"
             disabled={saving || Boolean(problem)}
-            className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+            className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
           >
             {saving ? t("skills.write.saving") : t("skills.write.save")}
           </button>

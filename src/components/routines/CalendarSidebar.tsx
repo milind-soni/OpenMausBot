@@ -72,7 +72,7 @@ export function CalendarSidebar({ bots, anchor, onSelectDate }: CalendarSidebarP
               draggable
               onDragStart={(event) => beginBotDrag(event, bot)}
               role="listitem"
-              className="group flex cursor-grab items-center gap-2 rounded-xl px-2 py-2 transition-colors hover:bg-raised/80 active:cursor-grabbing"
+              className="group flex cursor-grab items-center gap-2 rounded-xl px-2 py-2 transition-colors interaction:bg-raised/50 active:cursor-grabbing"
               aria-label={t("routines.sidebar.dragBot", { name: bot.name })}
               title={t("routines.sidebar.dragBot", { name: bot.name })}
             >

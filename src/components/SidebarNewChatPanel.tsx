@@ -3,11 +3,11 @@ import { Plus, Users, X } from "lucide-react";
 import { openBot, useStore, type Bot } from "@/state/store";
 import { rankByName } from "@/lib/palette-rank";
 import { imeComposing } from "@/lib/send-key";
-import { useShowThreads } from "@/lib/thread-preferences";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
+import { sidebarRowTone } from "./SidebarRowMarkers";
 
 const MIN_BESIDE_WIDTH = 320;
 const PANEL_WIDTH = 360;
@@ -54,7 +54,6 @@ export function SidebarNewChatPanel({
   style?: CSSProperties;
 }) {
   const { state, dispatch } = useStore();
-  const showThreads = useShowThreads();
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(onNewBot ? 2 : 1);
   const [place, setPlace] = useState(() => newChatPanelPlacement(null, typeof window === "undefined" ? 0 : window.innerWidth));
@@ -92,11 +91,10 @@ export function SidebarNewChatPanel({
   ];
   const count = actions.length + bots.length;
   const selected = cursor < actions.length ? cursor : bots.length ? Math.min(cursor, count - 1) : -1;
-  const rowLabel = showThreads ? t("sidebar.newChat.start") : t("sidebar.newChat.open");
+  const rowLabel = t("sidebar.newChat.open");
 
   const start = (bot: Bot) => {
-    if (showThreads) dispatch({ type: "newTask", botId: bot.id });
-    else openBot(dispatch, bot, false);
+    openBot(dispatch, bot, false);
     onClose();
   };
   const activate = (index: number) => {
@@ -123,8 +121,9 @@ export function SidebarNewChatPanel({
   };
 
   const rowClass = (index: number) => cn(
-    "flex h-12 w-full items-center gap-3 rounded-2xl px-3 text-start text-[14px] text-ink outline-none focus-visible:bg-raised-hover",
-    index === selected && "bg-raised-hover",
+    "flex h-12 w-full items-center gap-3 rounded-lg px-3 text-start text-[14px] text-ink outline-none focus-visible:bg-raised/50",
+    sidebarRowTone(false),
+    index === selected && "bg-raised/50",
   );
 
   return (
@@ -169,7 +168,7 @@ export function SidebarNewChatPanel({
           onClick={onClose}
           aria-label={t("common.close")}
           title={t("common.close")}
-          className="-me-2 flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary outline-none hover:bg-raised hover:text-ink focus-visible:bg-raised"
+          className="-me-2 flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary outline-none interaction:bg-raised/50 hover:text-ink focus-visible:bg-raised/50"
         >
           <X size={16} />
         </button>

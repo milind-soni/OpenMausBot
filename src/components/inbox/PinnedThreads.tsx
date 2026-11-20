@@ -64,7 +64,7 @@ export function PinnedThreads({ bots, groups, queued, now, current, onOpen, onUn
             </button>
             <button type="button" data-inbox-unpin aria-label={t("sidebar.bot.unpin")} title={t("sidebar.bot.unpin")}
               onClick={() => onUnpin(row)}
-              className="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/pinned:opacity-100 max-md:opacity-70 touch:opacity-70">
+              className="mr-1 flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary opacity-0 interaction:bg-raised/50 hover:text-ink focus-visible:opacity-100 group-hover/pinned:opacity-100 max-md:opacity-70 touch:opacity-70">
               <PinOff size={13} aria-hidden="true" />
             </button>
           </div>

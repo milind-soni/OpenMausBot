@@ -5,7 +5,7 @@ import type { Task } from "@/state/store";
 import { useOptionalStoreRef } from "@/state/store-ref";
 import { openConversationDialog, shareChoices } from "./conversation-share";
 
-const ROW = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink hover:bg-menu-hover";
+const ROW = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] text-ink interaction:bg-raised/50";
 
 /** "Share with the team" and "Share with…" in a conversation's row menu, for the person it is private to. */
 export function ShareRowItems({ botId, task, onPicked }: { botId: string; task: Pick<Task, "threadId" | "private" | "shared" | "sharedWith" | "sharedChat">; onPicked: () => void }) {

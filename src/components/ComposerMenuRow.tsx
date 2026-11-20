@@ -24,7 +24,7 @@ export function ComposerMenuRow({
       {...rest}
       className={cn(
         "flex w-full items-center gap-2.5 px-3 py-2 text-start",
-        selected && "bg-menu-hover",
+        selected && "bg-raised/50",
         className,
       )}
     >

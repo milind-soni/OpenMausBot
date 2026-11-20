@@ -6,7 +6,7 @@ import { bugReportFixedText } from "./BugReportNote";
 import { CancelledTurnRow } from "./CancelledTurnRow";
 import { FirstReplyRescueRow } from "./FirstReplyRescueRow";
 
-const pill = "rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink hover:bg-raised";
+const pill = "rounded-full border border-hairline/40 px-2.5 py-1 text-[13px] text-ink interaction:bg-raised/50";
 
 export function StatusActivityRow({ message }: { message: Message }) {
   const { dispatch } = useStore();

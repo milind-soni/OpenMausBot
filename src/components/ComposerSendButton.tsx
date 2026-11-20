@@ -64,7 +64,7 @@ export function ComposerSendButton({ waits, label, title, disabled, onSend, menu
         ariaLabel={t("composer.followUp.menu")}
         triggerTitle={t("composer.followUp.menu")}
         triggerClassName={cn(
-          "flex shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink",
+          "flex shrink-0 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink",
           "h-8 w-6",
         )}
         renderTrigger={() => <ChevronUp size={14} aria-hidden="true" />}

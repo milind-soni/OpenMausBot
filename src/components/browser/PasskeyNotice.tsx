@@ -44,7 +44,7 @@ export function PasskeyNotice({ wall, botName, onDismiss }: { wall: PasskeyWall;
           </ol>
           <button type="button" className="mt-1 text-accent-text underline" onClick={() => void openExternalLink(PASSKEY_HELP_URL)}>{t("browser.passkey.learnMore")}</button>
         </div>
-        <button type="button" className="rounded-md p-1 text-ink-tertiary hover:bg-inset hover:text-ink" aria-label={t("browser.passkey.dismiss")} onClick={onDismiss}><X size={14} /></button>
+        <button type="button" className="rounded-md p-1 text-ink-tertiary interaction:bg-raised/50 hover:text-ink" aria-label={t("browser.passkey.dismiss")} onClick={onDismiss}><X size={14} /></button>
       </div>
     </section>
   );

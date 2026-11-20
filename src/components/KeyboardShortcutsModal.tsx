@@ -91,7 +91,7 @@ export function KeyboardShortcutsModal({ open, onClose }: KeyboardShortcutsModal
             type="button"
             onClick={onClose}
             aria-label={t("shortcuts.close")}
-            className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"
+            className="rounded-lg p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             <X size={18} />
           </button>

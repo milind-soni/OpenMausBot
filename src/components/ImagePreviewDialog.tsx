@@ -245,7 +245,7 @@ export function AttachmentPreviewDialog({
             download={current.downloadName ?? canonicalDownloadFilename({ fallback: current.name, source: current.src })}
             target="_blank" rel="noreferrer"
             aria-label={t("attach.downloadAria", { name: current.name })}
-            className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover")}>
+            className={cn(MENU_ITEM, "text-ink interaction:bg-raised/50")}>
             <Download size={16} /> {t("attach.download")}
           </a>
         </div>

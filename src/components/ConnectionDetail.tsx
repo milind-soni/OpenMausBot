@@ -24,14 +24,14 @@ export function ConnectionDetail({ label, value }: { label: string; value: strin
       </div>
       <button
         onClick={() => setRevealed((current) => !current)}
-        className="shrink-0 rounded px-2 py-1 text-[11px] text-ink-secondary hover:bg-control hover:text-ink"
+        className="shrink-0 rounded px-2 py-1 text-[11px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
       >
         {t(revealed ? "connectionDetail.hide" : "connectionDetail.reveal")}
       </button>
       <button
         onClick={copy}
         aria-label={copyState === "failed" ? t("common.copyFailed") : t("connectionDetail.copy", { label })}
-        className="shrink-0 rounded p-1.5 text-ink-secondary hover:bg-control hover:text-ink"
+        className="shrink-0 rounded p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
       >
         {copyState === "copied" ? <Check size={13} className="text-success" /> : copyState === "failed" ? <X size={13} className="text-danger" /> : <Copy size={13} />}
       </button>

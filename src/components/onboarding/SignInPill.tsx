@@ -168,7 +168,7 @@ function CodeSlot({ code }: { code: string }) {
     <div data-sign-in="code" className="flex h-9 w-[288px] max-w-full items-center justify-between rounded-[18px] border-[0.5px] border-ink/10 bg-composer pl-4 pr-1">
       <span className="font-mono text-[15px] tracking-[0.08em] text-ink">{code}</span>
       <button type="button" onClick={copy} aria-label={t("engineSetup.copy")} title={t("engineSetup.copy")}
-        className="flex size-7 items-center justify-center rounded-full text-ink-secondary hover:bg-ink/[0.06] hover:text-ink">
+        className="flex size-7 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink">
         {state === "copied" ? <Check size={14} /> : <Copy size={14} />}
       </button>
     </div>

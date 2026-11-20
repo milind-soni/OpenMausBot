@@ -58,7 +58,7 @@ export function LocalComputerAutoWarning({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl px-4 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+            className="rounded-xl px-4 py-2 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             {t("common.cancel")}
           </button>

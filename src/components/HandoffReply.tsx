@@ -36,7 +36,7 @@ export function HandoffReply({ message, threadId, children }: { message: Message
         ? <p className={"max-w-[min(38rem,100%)] rounded-xl border border-hairline/40 bg-panel px-3 py-1.5 text-[13px] break-words text-ink-secondary"}>{result.preview}</p>
         : (
           <details className="group/reply w-fit max-w-full rounded-xl border border-hairline/40 bg-panel text-[13px] open:w-[min(38rem,100%)]">
-            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-3 py-1.5 text-ink-secondary hover:bg-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
+            <summary className="flex cursor-pointer list-none items-center gap-2 rounded-xl px-3 py-1.5 text-ink-secondary interaction:bg-raised/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent [&::-webkit-details-marker]:hidden">
               <span className="min-w-0 max-w-[34rem] truncate">{result.preview}</span>
               <ChevronRight size={13} className="ml-auto shrink-0 group-open/reply:rotate-90" aria-hidden="true" />
             </summary>

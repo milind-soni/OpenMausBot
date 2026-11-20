@@ -207,7 +207,7 @@ export const GroupListItem = memo(function GroupListItem({
     </button>}
     {!group.dm && density !== "icons" && <button type="button" disabled={roomBusy} aria-label={t("task.newShort")} title={t(roomBusy ? "task.newBusy" : "task.newShort")}
       onClick={() => { setThreadsOpen(true); dispatch({ type: "newGroupTask", groupId: group.id }); }}
-      className="pointer-events-none absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink disabled:opacity-40 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70 touch:disabled:opacity-40"><Plus size={14} /></button>}
+      className="pointer-events-none absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 interaction:bg-raised/50 hover:text-ink disabled:opacity-40 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70 touch:disabled:opacity-40"><Plus size={14} /></button>}
     </div>
     {expanded && <GroupThreadList group={group} selected={selected} />}
     </>
@@ -311,7 +311,7 @@ function RoomContextMenu({
             onClick={saveDescription}
             aria-label={t("sidebar.room.saveDescription")}
             title={t("common.save")}
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             <Check size={15} />
           </button>
@@ -320,7 +320,7 @@ function RoomContextMenu({
             onClick={onClose}
             aria-label={t("common.cancel")}
             title={t("common.cancel")}
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             <X size={15} />
           </button>
@@ -351,7 +351,7 @@ function RoomContextMenu({
             onClick={saveRename}
             aria-label={isBotChat ? t("sidebar.room.saveChatName") : t("sidebar.room.saveChannelName")}
             title={t("common.save")}
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             <Check size={15} />
           </button>
@@ -360,7 +360,7 @@ function RoomContextMenu({
             onClick={onClose}
             aria-label={isBotChat ? t("sidebar.room.cancelChatRename") : t("sidebar.room.cancelChannelRename")}
             title={t("common.cancel")}
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             <X size={15} />
           </button>
@@ -372,7 +372,7 @@ function RoomContextMenu({
             setDraft(group.name);
             setRenaming(true);
           }}
-          className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover")}
+          className={cn(MENU_ITEM, "text-ink interaction:bg-raised/50")}
         >
           <Pencil size={16} className="text-ink-secondary" />
           {isBotChat ? t("sidebar.room.renameChat") : t("sidebar.room.renameChannel")}
@@ -385,7 +385,7 @@ function RoomContextMenu({
             setDescriptionDraft(group.description ?? "");
             setDescribing(true);
           }}
-          className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover")}
+          className={cn(MENU_ITEM, "text-ink interaction:bg-raised/50")}
         >
           <TextQuote size={16} className="text-ink-secondary" />
           {t("sidebar.room.setDescription")}
@@ -398,7 +398,7 @@ function RoomContextMenu({
             onClose();
             onMoveToSection(group.id);
           }}
-          className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover")}
+          className={cn(MENU_ITEM, "text-ink interaction:bg-raised/50")}
         >
           <FolderPlus size={16} className="text-ink-secondary" />
           {t("sidebar.section.moveToContext")}
@@ -410,7 +410,7 @@ function RoomContextMenu({
           void copyText(group.threadId);
           onClose();
         }}
-        className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover")}
+        className={cn(MENU_ITEM, "text-ink interaction:bg-raised/50")}
       >
         <ClipboardCopy size={16} className="text-ink-secondary" />
         {t("sidebar.copyConversationId")}
@@ -421,7 +421,7 @@ function RoomContextMenu({
           onClose();
           onDelete(group.id);
         }}
-        className={cn(MENU_ITEM, "text-danger hover:bg-menu-hover")}
+        className={cn(MENU_ITEM, "text-danger interaction:bg-raised/50")}
       >
         <Trash2 size={16} />
         {isBotChat ? t("sidebar.room.deleteChat") : t("sidebar.room.deleteChannel")}
@@ -574,7 +574,7 @@ export function BotThreadList({ bot, selected, pendingQueued, routineRuns, revea
               if (from) saveOrder(placeFolder(projectIds, from, project.id, event.clientY < rect.top + rect.height / 2 ? "before" : "after"));
               resetFolderDrag();
             }}
-            className={cn("group/folder flex items-center gap-0.5 rounded-md pl-0.5 text-ink-secondary hover:bg-raised/30",
+            className={cn("group/folder flex items-center gap-0.5 rounded-md pl-0.5 text-ink-secondary interaction:bg-raised/50",
               folderDrop?.id === project.id && draggingFolder.current !== project.id && (folderDrop.place === "before" ? "shadow-[0_-2px_var(--color-accent)]" : "shadow-[0_2px_var(--color-accent)]"))}>
             <button type="button" aria-expanded={open} onClick={() => setCollapsed((previous) => {
               const next = new Set(previous);
@@ -583,7 +583,7 @@ export function BotThreadList({ bot, selected, pendingQueued, routineRuns, revea
             })} className="flex size-6 shrink-0 items-center justify-center rounded outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent/60" aria-label={t(open ? "task.collapseNamed" : "task.expandNamed", { name: project.name })}>
               <ChevronRight aria-hidden="true" size={11} className={cn("shrink-0 transition-transform", open && "rotate-90")} />
             </button>
-            <button type="button" aria-label={t("folder.iconNamed", { name: project.name })} title={t("folder.iconNamed", { name: project.name })} onClick={() => setEditingProject(project.id)} className="flex size-6 shrink-0 items-center justify-center rounded hover:bg-raised"><FolderIcon emoji={project.emoji} size={14} /></button>
+            <button type="button" aria-label={t("folder.iconNamed", { name: project.name })} title={t("folder.iconNamed", { name: project.name })} onClick={() => setEditingProject(project.id)} className="flex size-6 shrink-0 items-center justify-center rounded interaction:bg-raised/50"><FolderIcon emoji={project.emoji} size={14} /></button>
             <button type="button" data-sidebar-folder-label={project.id} draggable={!reordering} aria-expanded={open} onClick={() => setCollapsed((previous) => {
               const next = new Set(previous);
               if (next.has(project.id)) next.delete(project.id); else next.add(project.id);
@@ -594,7 +594,7 @@ export function BotThreadList({ bot, selected, pendingQueued, routineRuns, revea
               {!open && (waiting ? <span className="text-[10px] text-warning">{t("task.waiting")}</span> : working ? <Loader2 size={10} className="shrink-0 animate-spin text-success" /> : projectTasks.some((task) => task.unread) ? <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} /> : null)}
             </button>
             <button type="button" title={t("task.newIn", { name: project.name })} aria-label={t("task.newIn", { name: project.name })} onClick={() => dispatch({ type: "newTask", botId: bot.id, projectId: project.id })}
-              className="flex size-6 items-center justify-center rounded opacity-0 hover:bg-raised hover:text-ink focus-visible:opacity-100 group-hover/folder:opacity-100 max-md:opacity-70 touch:opacity-70"><Plus size={12} /></button>
+              className="flex size-6 items-center justify-center rounded opacity-0 interaction:bg-raised/50 hover:text-ink focus-visible:opacity-100 group-hover/folder:opacity-100 max-md:opacity-70 touch:opacity-70"><Plus size={12} /></button>
             <FolderActions project={project} canMoveUp={index > 0} canMoveDown={index < projects.length - 1} canMarkRead={folderUnreadThreadIds(bot, project.id).length > 0} saving={reordering || markingRead}
               menu={folderMenu?.projectId === project.id ? folderMenu : null} onMenuChange={(menu) => setFolderMenu(menu ? { ...menu, projectId: project.id } : null)}
               onEdit={() => setEditingProject(project.id)} onMove={(direction, onSaved) => saveOrder(moveFolder(projectIds, project.id, direction), onSaved)}
@@ -850,7 +850,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       )}
       {!renaming && !deleting && !iconOnly && <>
         <button type="button" data-bot-actions={bot.id} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
-          className="pointer-events-none absolute end-[3px] top-1.5 flex size-6 items-center justify-center rounded-lg text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70"><MoreHorizontal size={15} /></button>
+          className="pointer-events-none absolute end-[3px] top-1.5 flex size-6 items-center justify-center rounded-lg text-ink-secondary opacity-0 interaction:bg-raised/50 hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70"><MoreHorizontal size={15} /></button>
       </>}
       {deleting && iconOnly && (
         <span className="pointer-events-none absolute bottom-1 right-1 rounded-full bg-card p-1 text-ink-secondary">
@@ -1052,7 +1052,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
   const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, phoneHome: phone, onMenu: setMenu, renameRequest: renameRequest?.botId === bot.id ? renameRequest.nonce : 0, ...drops.row(bot.id) });
-  const plusItem = cn(MENU_ITEM, "text-ink hover:bg-menu-hover"), newBotHere = useNewBotHereLabel();
+  const plusItem = cn(MENU_ITEM, "text-ink interaction:bg-raised/50"), newBotHere = useNewBotHereLabel();
   const restoreToggleFocus = useRef(false);
   const sidebarToggleLabel = t(rail ? "sidebar.expand" : "sidebar.collapse");
   const sidebarToggle = (
@@ -1343,7 +1343,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
                     ) : sectionBotItems.map((bot) => <BotListItem key={bot.id} {...botRow(bot)} />)}
                     {!remoteClient && sectionName && layoutInteractive && !drops.naming(sectionName) && (sectionChiefItems.length + sectionGroupItems.length + sectionBotItems.length === 0) && (
                       <button onClick={() => setMoveToTeam(sectionName)} aria-label={t(state.bots.some(bot => !bot.hidden && bot.section?.trim() === sectionName) ? "team.manageBotsIn" : "team.addBotsTo", { name: sectionName })}
-                        className="mx-3 my-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">
+                        className="mx-3 my-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink">
                         <Plus size={13} /> {t(state.bots.some(bot => !bot.hidden && bot.section?.trim() === sectionName) ? "team.manageBots" : "team.addBots")}
                       </button>
                     )}
@@ -1540,7 +1540,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
               {pendingBotUndo && (
                 <button
                   onClick={() => void undoBotArchive(pendingBotUndo)}
-                  className="rounded-md px-1.5 py-0.5 font-medium text-accent hover:bg-raised"
+                  className="rounded-md px-1.5 py-0.5 font-medium text-accent interaction:bg-raised/50"
                 >
                   {t("common.undo")}
                 </button>

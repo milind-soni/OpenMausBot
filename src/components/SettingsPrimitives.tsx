@@ -225,7 +225,7 @@ export function SettingsLinkRow({ title, subtitle, value, badge, leading, extern
 }) {
   return (
     <button type="button" onClick={onClick} {...data}
-      className="group flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
+      className="group flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors interaction:bg-raised/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
       {leading !== undefined && <span data-settings-slot="" className={SLOT}>{leading}</span>}
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="text-[14px] leading-5 text-ink">{title}</span>
@@ -256,7 +256,7 @@ export function SettingsFoldRow({ id, title, subtitle, value, leading, open, onT
   return <>
     <div data-settings-disclosure={id} data-settings-fold="">
       <button type="button" aria-expanded={open} onClick={onToggle}
-        className="group flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-menu-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
+        className="group flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors interaction:bg-raised/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus motion-reduce:transition-none">
         {leading !== undefined && <span data-settings-slot="" className={SLOT}>{leading}</span>}
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-[14px] leading-5 text-ink">{title}</span>

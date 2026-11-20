@@ -76,7 +76,7 @@ export function cloudEngineChoices(engines: CloudEngineChoices, { handing = fals
               "animate-rise group relative flex flex-col rounded-2xl border p-4 text-left transition-[border-color,background-color,box-shadow,transform] duration-200 ease-out active:scale-[0.985]",
               picked
                 ? "border-accent/70 bg-accent/[0.07] shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent)_16%,transparent)]"
-                : connected ? "border-success/60 bg-card/50 hover:bg-card" : "border-hairline/50 bg-card/50 hover:border-hairline hover:bg-card",
+                : connected ? "border-success/60 bg-card/50 interaction:bg-raised/50" : "border-hairline/50 bg-card/50 hover:border-hairline interaction:bg-raised/50",
             )}
             style={staggerIndex(3 + i)}
           >
@@ -132,7 +132,7 @@ export function cloudEngineChoices(engines: CloudEngineChoices, { handing = fals
       <button
         type="button"
         onClick={() => dispatch(openKeySettings())}
-        className="group inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-[14px] font-medium text-ink transition-[background-color,transform] duration-150 ease-out hover:bg-raised/60 active:scale-[0.97]"
+        className="group inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-[14px] font-medium text-ink transition-[background-color,transform] duration-150 ease-out interaction:bg-raised/50 active:scale-[0.97]"
       >
         <KeyRound size={15} aria-hidden="true" className="text-ink-secondary" />
         {t("cloudSignIn.apiKey")}
@@ -152,7 +152,7 @@ export function cloudEngineChoices(engines: CloudEngineChoices, { handing = fals
         type="button"
         onClick={() => void recheck()}
         disabled={checking}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 font-medium text-ink transition-[background-color,transform] duration-150 ease-out hover:bg-raised active:scale-[0.97] disabled:opacity-60"
+        className="flex items-center gap-1.5 rounded-md px-2 py-1 font-medium text-ink transition-[background-color,transform] duration-150 ease-out interaction:bg-raised/50 active:scale-[0.97] disabled:opacity-60"
       >
         <RefreshCw size={12} aria-hidden="true" className={checking ? "animate-spin" : ""} />
         {checking ? t("common.checking") : t("common.checkAgain")}
@@ -206,7 +206,7 @@ export function CloudEngineSignIn() {
             <figcaption className="flex items-center justify-between gap-3 text-[12px] text-ink-secondary">
               {t("cloudIntent.pending")}
               {!handing && (
-                <button type="button" onClick={() => withViewTransition(() => reopenCloudIntent(true))} className="rounded-md px-1.5 py-0.5 font-medium text-ink-secondary transition-colors hover:bg-raised hover:text-ink">
+                <button type="button" onClick={() => withViewTransition(() => reopenCloudIntent(true))} className="rounded-md px-1.5 py-0.5 font-medium text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink">
                   {t("cloudIntent.edit")}
                 </button>
               )}

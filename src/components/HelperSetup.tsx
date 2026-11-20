@@ -49,7 +49,7 @@ export function HelperSetup() {
               if (step === "cloud") track("onboarding_cloud", { action: "start_trial" });
               dispatch(setupAction(step));
             }}
-              className="inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-ink hover:bg-accent/20">
+              className="inline-flex items-center gap-1.5 rounded-full bg-accent/10 px-3 py-1.5 text-[13px] font-medium text-ink interaction:bg-raised/50">
               <Icon size={14} aria-hidden="true" className="text-accent" />{t(label)}
             </button>
           );

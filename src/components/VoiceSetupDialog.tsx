@@ -135,7 +135,7 @@ export function VoiceSetupDialog({
             type="button"
             onClick={close}
             aria-label={t("call.voiceSetup.close")}
-            className="shrink-0 rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"
+            className="shrink-0 rounded-lg p-2 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             <X size={20} />
           </button>

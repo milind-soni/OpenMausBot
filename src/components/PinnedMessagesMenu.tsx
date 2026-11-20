@@ -119,7 +119,7 @@ export function PinnedMessagesMenu({ pins, onJump, onUnpin, triggerClassName }: 
                   aria-label={t("chat.unpinMessage")}
                   title={t("chat.unpin")}
                   onClick={() => unpin(pin.id)}
-                  className="flex size-[30px] shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus:bg-ink/[0.06] focus:text-ink touch:size-10"
+                  className="flex size-[30px] shrink-0 items-center justify-center rounded-md text-ink-secondary interaction:bg-raised/50 hover:text-ink focus:bg-ink/[0.06] focus:text-ink touch:size-10"
                 >
                   <PinOff size={16} />
                 </button>

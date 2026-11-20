@@ -123,7 +123,7 @@ export function RemoteComputerSection({ hideWhenUnavailable = false, legacyOnly 
             type="button"
             disabled={busy}
             onClick={() => void disconnect()}
-            className="flex w-fit items-center gap-2 rounded-lg border border-danger/30 px-3 py-2 text-[13px] text-danger hover:bg-danger/10 disabled:opacity-50"
+            className="flex w-fit items-center gap-2 rounded-lg border border-danger/30 px-3 py-2 text-[13px] text-danger interaction:bg-danger/10 disabled:opacity-50"
           >
             {busy ? <Loader2 size={14} className="animate-spin" /> : <Unplug size={14} />}
             {t("remote.client.disconnect")}

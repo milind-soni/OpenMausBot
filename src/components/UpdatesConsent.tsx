@@ -11,7 +11,7 @@ export const UPDATES_CONSENT_POPUP = "[data-updates-consent-popup]";
 const TITLE = "updates-consent-title";
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const PRIMARY = "inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-accent px-4 py-2 text-[14px] font-medium text-accent-ink hover:opacity-90 disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
-const SECONDARY = "inline-flex min-h-10 items-center justify-center rounded-lg px-3 py-2 text-[14px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+const SECONDARY = "inline-flex min-h-10 items-center justify-center rounded-lg px-3 py-2 text-[14px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 export function updatesConsentBridge(): UpdatesConsentBridge | undefined {
   return window.ogb?.remoteClient?.active === true ? undefined : window.ogb?.updatesConsent;

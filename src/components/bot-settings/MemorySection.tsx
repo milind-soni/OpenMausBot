@@ -39,8 +39,8 @@ import { Switch } from "../SettingsPrimitives";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { inputCls } from "./field";
 
-const buttonCls = "rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50";
-const quietButtonCls = "rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50";
+const buttonCls = "rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50";
+const quietButtonCls = "rounded-md px-2 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50";
 
 interface Editing {
   path: string;
@@ -633,7 +633,7 @@ export function MemoryFileRows({
               key={file.path}
               className={cn(
                 "flex items-center gap-2 border-b border-hairline/40 px-3 py-2 last:border-b-0",
-                selected === file.path ? "bg-control/60" : "hover:bg-control/40",
+                selected === file.path ? "bg-control/60" : "interaction:bg-raised/50",
               )}
             >
               <button type="button" onClick={() => onOpen(file)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
@@ -648,7 +648,7 @@ export function MemoryFileRows({
                 onClick={() => onDelete(file)}
                 aria-label={t("memory.deleteFile", { name: file.name })}
                 title={t("memory.delete")}
-                className="shrink-0 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-danger"
+                className="shrink-0 rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-danger"
               >
                 <Trash2 size={14} />
               </button>
@@ -699,7 +699,7 @@ export function MemoryJournalList({
                   type="button"
                   disabled={reverting !== null}
                   onClick={() => onRevert(row)}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-accent-text hover:bg-accent/10 disabled:opacity-50"
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[12px] font-medium text-accent-text interaction:bg-raised/50 disabled:opacity-50"
                 >
                   <RotateCcw size={12} />
                   {reverting === row.id ? t("memory.undoing") : t("memory.undo")}

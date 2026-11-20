@@ -285,7 +285,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
             className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] transition-colors ${
               showSource
                 ? "bg-accent/15 text-accent font-medium"
-                : "text-ink-secondary hover:bg-raised hover:text-ink"
+                : "text-ink-secondary interaction:bg-raised/50 hover:text-ink"
             }`}
             title={t(showSource ? "chat.mermaid.hideSourceTitle" : "chat.mermaid.showSourceTitle")}
             aria-label={t(showSource ? "chat.mermaid.hideSourceTitle" : "chat.mermaid.showSourceTitle")}
@@ -297,7 +297,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
           <button
             type="button"
             onClick={copy}
-            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink transition-colors"
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-ink-secondary interaction:bg-raised/50 hover:text-ink transition-colors"
             title={copied === "copied" ? t("chat.code.copied") : copied === "failed" ? t("common.copyFailed") : t("chat.mermaid.copy")}
             aria-label={copied === "copied" ? t("chat.mermaid.copiedLabel") : copied === "failed" ? t("common.copyFailed") : t("chat.mermaid.copyLabel")}
           >

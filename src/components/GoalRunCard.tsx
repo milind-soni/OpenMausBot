@@ -99,7 +99,7 @@ export function GoalRunCard({ message, solo = false, onStop }: { message: Messag
           <button
             type="button"
             onClick={onStop}
-            className="shrink-0 rounded-lg border border-hairline/50 px-2.5 py-1 text-[12px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
+            className="shrink-0 rounded-lg border border-hairline/50 px-2.5 py-1 text-[12px] font-medium text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             {t("chat.stop")}
           </button>

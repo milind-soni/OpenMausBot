@@ -91,7 +91,7 @@ export function ApprovalModeSelector({
         triggerRef.current?.focus();
         onManageCommandAllowlist();
       }}
-      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] text-ink hover:bg-menu-hover"
+      className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-[14px] text-ink interaction:bg-raised/50"
     >
       <ListChecks size={16} className="shrink-0 text-ink-secondary" />
       {t("commandAllowlist.title")}
@@ -109,8 +109,8 @@ export function ApprovalModeSelector({
         onClick={() => setOpen((value) => !value)}
         className={cn(
           wide
-            ? "flex h-10 w-full items-center justify-between rounded-lg border border-hairline/40 bg-inset px-3.5 text-[13px] text-ink hover:bg-raised"
-            : "flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink",
+            ? "flex h-10 w-full items-center justify-between rounded-lg border border-hairline/40 bg-inset px-3.5 text-[13px] text-ink interaction:bg-raised/50"
+            : "flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink",
         )}
       >
         {wide ? (
@@ -169,7 +169,7 @@ export function ApprovalModeSelector({
                       setOpen(false);
                     }}
                     className={cn(
-                      "flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-menu-hover",
+                      "flex items-start gap-2 rounded-md px-2 py-1.5 text-left interaction:bg-raised/50",
                       modesDisabled && "cursor-not-allowed opacity-45 hover:bg-transparent",
                     )}
                   >

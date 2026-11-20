@@ -40,7 +40,7 @@ export interface BotApiView {
 /** The key rides only on the answer that made it: nothing keeps it after this view. */
 type Minted = BotApiView & { key: string };
 
-const buttonCls = "rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50";
+const buttonCls = "rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink interaction:bg-raised/50 disabled:cursor-not-allowed disabled:opacity-50";
 
 export function callsLine(view: Pick<BotApiView, "callCount" | "lastCalledAt">, now = Date.now()): string {
   if (!view.callCount || view.lastCalledAt === undefined) return t("botApi.callsNone");

@@ -88,7 +88,7 @@ export function SidebarSectionHeader({
         draggable={reorderable || undefined}
         onDragStart={reorderable ? onDragStart : undefined}
         onDragEnd={reorderable ? onDragEnd : undefined}
-        className={cn("group/section flex h-[30px] items-center gap-1.5 rounded-[6px] px-2 pb-1.5 pt-2 hover:bg-raised/50", reorderable && "cursor-grab", dragging && "opacity-40", naming && "py-0.5", dropMark)}
+        className={cn("group/section flex h-[30px] items-center gap-1.5 rounded-[6px] px-2 pb-1.5 pt-2 interaction:bg-raised/50", reorderable && "cursor-grab", dragging && "opacity-40", naming && "py-0.5", dropMark)}
       >
         {naming ? <SectionNameField {...naming} /> : onToggle ? (
           <button
@@ -119,7 +119,7 @@ export function SidebarSectionHeader({
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={(event) => onMenu(event.currentTarget)}
-            className="flex size-6 shrink-0 items-center justify-center rounded-[6px] text-ink-tertiary opacity-0 transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus group-hover/section:opacity-100 group-focus-within/section:opacity-100 aria-expanded:bg-raised aria-expanded:text-ink aria-expanded:opacity-100 touch:opacity-100"
+            className="flex size-6 shrink-0 items-center justify-center rounded-[6px] text-ink-tertiary opacity-0 transition-opacity interaction:bg-raised/50 hover:text-ink focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-focus group-hover/section:opacity-100 group-focus-within/section:opacity-100 aria-expanded:bg-raised aria-expanded:text-ink aria-expanded:opacity-100 touch:opacity-100"
           >
             <MoreHorizontal size={15} aria-hidden="true" />
           </button>
@@ -139,7 +139,7 @@ export function SidebarSectionHeader({
           aria-expanded={!collapsed}
           aria-keyshortcuts={reorderable ? "Alt+ArrowUp Alt+ArrowDown" : undefined}
           title={toggleTitle}
-          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left hover:bg-raised/50"
+          className="flex min-w-0 flex-1 items-center gap-1.5 rounded-md px-1 py-0.5 text-left interaction:bg-raised/50"
         >
           <span className="truncate text-[12px] font-semibold text-ink-secondary">
             {name}
@@ -161,7 +161,7 @@ export function SidebarSectionHeader({
           onClick={onDelete}
           aria-label={t("sidebar.section.deleteAria", { name })}
           title={t("sidebar.section.deleteAria", { name })}
-          className="flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-danger/10 hover:text-danger"
+          className="flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary interaction:bg-danger/10 hover:text-danger"
         >
           <Trash2 size={13} aria-hidden="true" />
         </button>
@@ -174,7 +174,7 @@ export function SidebarSectionHeader({
           onDragStart={onDragStart}
           onDragEnd={onDragEnd}
           className={cn(
-            "flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink",
+            "flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-ink-secondary interaction:bg-raised/50 hover:text-ink",
             dragging && "opacity-40",
           )}
         >

@@ -44,7 +44,7 @@ export function AndroidKeyButton({ onClick, disabled, children }: { onClick: () 
     <button
       onClick={onClick}
       disabled={disabled}
-      className="flex items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50 disabled:hover:bg-raised"
+      className="flex items-center justify-center gap-1.5 rounded-lg bg-raised py-2 text-[12px] text-ink interaction:bg-raised/50 disabled:opacity-50 "
     >
       {children}
     </button>

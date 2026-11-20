@@ -16,7 +16,7 @@ const RoutineEditor = lazy(async () => ({ default: (await import("./RoutinesPage
 const WebhookEditor = lazy(async () => ({ default: (await import("./WebhookTrigger")).WebhookEditor }));
 const AppEventEditor = lazy(async () => ({ default: (await import("./automations/AppEventEditor")).AppEventEditor }));
 
-const ACTION = "rounded-md px-1.5 py-0.5 font-medium hover:bg-inset focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50";
+const ACTION = "rounded-md px-1.5 py-0.5 font-medium interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50";
 
 /** What a chat-made automation leaves in the conversation: one sentence, what happens next or what happened last. */
 export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId?: string }) {

@@ -68,7 +68,7 @@ export function AntigravityFreeSpace({ instance, initial = { kind: "idle" } }: {
             type="button"
             onClick={() => void scan()}
             disabled={busy}
-            className="flex shrink-0 items-center gap-1 rounded-lg border border-hairline/40 px-3 py-1 text-[12px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"
+            className="flex shrink-0 items-center gap-1 rounded-lg border border-hairline/40 px-3 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"
           >
             {busy && <Loader2 size={12} className="animate-spin" />}
             {t("engines.freeSpace.action")}
@@ -87,14 +87,14 @@ export function AntigravityFreeSpace({ instance, initial = { kind: "idle" } }: {
           <button
             type="button"
             onClick={() => setPhase({ kind: "idle" })}
-            className="rounded-lg px-3 py-1 text-[12px] text-ink-secondary hover:bg-raised/50 hover:text-ink"
+            className="rounded-lg px-3 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             {t("common.cancel")}
           </button>
           <button
             type="button"
             onClick={() => void remove()}
-            className="rounded-lg bg-raised px-3 py-1 text-[12px] text-ink hover:bg-raised-hover"
+            className="rounded-lg bg-raised px-3 py-1 text-[12px] text-ink interaction:bg-raised/50"
           >
             {t("engines.freeSpace.delete")}
           </button>

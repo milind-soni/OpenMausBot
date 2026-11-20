@@ -46,7 +46,7 @@ export function PhonesList() {
                     disabled={removing !== null}
                     onClick={() => remove(phone.key)}
                     aria-label={t("remote.phones.remove", { name })}
-                    className="shrink-0 rounded p-1.5 text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-40"
+                    className="shrink-0 rounded p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-danger disabled:opacity-40"
                   >
                     <Trash2 size={14} />
                   </button>

@@ -147,7 +147,7 @@ export function ReactAction({ threadId, message, badgeOnly }: { threadId: string
                 close(true);
               }}
               className={cn(
-                "flex size-8 items-center justify-center rounded-full text-[18px] leading-none transition-transform hover:scale-110 hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus motion-reduce:transition-none motion-reduce:hover:scale-100",
+                "flex size-8 items-center justify-center rounded-full text-[18px] leading-none transition-transform hover:scale-110 interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus motion-reduce:transition-none motion-reduce:hover:scale-100",
                 mine === emoji && "bg-accent/15",
               )}
             >
@@ -198,7 +198,7 @@ function Chips({ threadId, message, bots = [], align = "start", canReact = true,
         return canReact && Object.hasOwn(LABEL, emoji) ? (
           <button key={emoji} type="button" aria-pressed={mine === emoji} aria-label={label} title={people.join(", ")}
             onClick={() => react(emoji as Reaction)}
-            className={cn(chip, "hover:bg-raised focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus")}>
+            className={cn(chip, "interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus")}>
             {face}
           </button>
         ) : (

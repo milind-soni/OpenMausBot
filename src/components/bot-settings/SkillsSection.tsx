@@ -268,7 +268,7 @@ export function SkillReviewDialog({
             type="button"
             disabled={working}
             onClick={onCancel}
-            className="rounded-lg px-4 py-2 text-[13px] font-medium text-ink-secondary hover:bg-raised disabled:opacity-40"
+            className="rounded-lg px-4 py-2 text-[13px] font-medium text-ink-secondary interaction:bg-raised/50 disabled:opacity-40"
           >
             {t("common.cancel")}
           </button>
@@ -432,7 +432,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                   type="button"
                   disabled={!addFromLibrary || Boolean(working)}
                   onClick={() => void addToBot()}
-                  className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                  className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
                 >
                   {t("common.add")}
                 </button>
@@ -461,7 +461,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
               <button
                 type="submit"
                 disabled={importing || !source.trim()}
-                className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="shrink-0 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
               >
                 {importing ? t("skills.import.importing") : t("skills.import.button")}
               </button>
@@ -510,7 +510,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
                       title={t("skills.remove")}
                       disabled={Boolean(working)}
                       onClick={() => void remove(skill)}
-                      className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40"
+                      className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-secondary interaction:bg-danger/10 hover:text-danger disabled:opacity-40"
                     >
                       <Trash2 size={15} />
                     </button>
@@ -562,7 +562,7 @@ export function SkillsSection({ bot }: { bot: Bot }) {
               <button
                 type="button"
                 onClick={() => setViewing(null)}
-                className="rounded-md px-2 py-1 text-[13px] text-ink-secondary hover:bg-control hover:text-ink"
+                className="rounded-md px-2 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
               >
                 {t("common.close")}
               </button>

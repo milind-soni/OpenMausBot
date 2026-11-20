@@ -52,7 +52,7 @@ export function ImportRow({ icon, label, summary, hint, sources, checked, disabl
     );
   }
   return (
-    <label className={cn("flex items-start gap-3 px-3.5 py-3 transition-colors", disabled ? "cursor-default" : "cursor-pointer hover:bg-raised/40")}>
+    <label className={cn("flex items-start gap-3 px-3.5 py-3 transition-colors", disabled ? "cursor-default" : "cursor-pointer interaction:bg-raised/50")}>
       <input
         type="checkbox"
         checked={checked}

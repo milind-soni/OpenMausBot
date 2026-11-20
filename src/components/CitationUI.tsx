@@ -99,7 +99,7 @@ function CitationEditor({
       />
       {tooLong && <p role="status" className="mt-1 text-[11px] text-danger">{t("chat.citation.commentTooLong", { count: CITATION_MAX_COMMENT_LENGTH.toLocaleString(intlLocale()) })}</p>}
       <div className="mt-2 flex justify-end gap-2">
-        <button type="button" onClick={onCancel} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-raised">{t("common.cancel")}</button>
+        <button type="button" onClick={onCancel} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50">{t("common.cancel")}</button>
         <button type="button" disabled={tooLong} onClick={() => onSave(withCitationComment(citation, comment))} className="rounded-lg bg-accent px-3 py-1.5 text-[12px] font-medium text-white disabled:opacity-40">{t("common.save")}</button>
       </div>
     </div>,
@@ -329,7 +329,7 @@ export function CitationBadge({
         <span className="truncate">{citation.quote.replace(/\s+/g, " ")}</span>
       </button>
       {onRemove && (
-        <button type="button" onClick={onRemove} aria-label={t("chat.citation.remove")} className={cn("flex size-5 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink", solid && "bg-app")}><X size={11} /></button>
+        <button type="button" onClick={onRemove} aria-label={t("chat.citation.remove")} className={cn("flex size-5 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink", solid && "bg-app")}><X size={11} /></button>
       )}
       <OverlayPresence>{open && createPortal(
         <div
@@ -352,8 +352,8 @@ export function CitationBadge({
           {citation.comment && <div className="mt-2 text-[12px]"><span className="font-semibold">{t("chat.citation.comment")}</span> <span className="whitespace-pre-wrap">{citation.comment}</span></div>}
           {unavailable && <p role="status" className="mt-2 text-[11px] text-warning">{t("chat.citation.unavailable")}</p>}
           <div className="mt-3 flex justify-end gap-2">
-            {onNavigate && <button type="button" onClick={() => { void onNavigate().then((found) => { setUnavailable(!found); if (found) setOpen(false); }); }} className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] hover:bg-raised">{t("chat.citation.goToSource")}</button>}
-            {onChange && <button type="button" onClick={() => { setOpen(false); setEditing(true); }} className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] hover:bg-raised">{t("chat.citation.editComment")}</button>}
+            {onNavigate && <button type="button" onClick={() => { void onNavigate().then((found) => { setUnavailable(!found); if (found) setOpen(false); }); }} className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] interaction:bg-raised/50">{t("chat.citation.goToSource")}</button>}
+            {onChange && <button type="button" onClick={() => { setOpen(false); setEditing(true); }} className="rounded-lg border border-hairline/40 px-3 py-1.5 text-[12px] interaction:bg-raised/50">{t("chat.citation.editComment")}</button>}
             <button type="button" onClick={() => { setOpen(false); restoreTriggerFocus(); }} className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-white">{t("common.close")}</button>
           </div>
         </div>,

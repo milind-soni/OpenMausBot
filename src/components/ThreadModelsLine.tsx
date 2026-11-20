@@ -27,7 +27,7 @@ export function ThreadModelsLine({ bot, className }: { bot: Bot; className?: str
             },
           });
         }}
-        className="h-6 shrink-0 rounded-full px-2.5 text-[12px] font-medium leading-4 text-ink ring-[0.5px] ring-ink/25 hover:bg-ink/[0.06]"
+        className="h-6 shrink-0 rounded-full px-2.5 text-[12px] font-medium leading-4 text-ink ring-[0.5px] ring-ink/25 interaction:bg-raised/50"
       >
         {count === 1 ? t("model.switchItToo") : t("model.switchThemToo")}
       </button>

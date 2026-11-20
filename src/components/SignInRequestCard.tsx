@@ -240,7 +240,7 @@ export function SignInBanner({
           onClick={() => void answer("done")}
           disabled={pending !== null}
           className={cn("flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-[13px] font-medium disabled:opacity-50",
-            takeControl ? "bg-control text-ink hover:bg-raised-hover" : "flex-1 bg-accent text-accent-ink hover:brightness-110")}
+            takeControl ? "bg-control text-ink interaction:bg-raised/50" : "flex-1 bg-accent text-accent-ink hover:brightness-110")}
         >
           {pending === "done" ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
           {t("signIn.done")}
@@ -249,7 +249,7 @@ export function SignInBanner({
           type="button"
           onClick={() => void answer("cancel")}
           disabled={pending !== null}
-          className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+          className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
         >
           {t("signIn.cancel")}
         </button>

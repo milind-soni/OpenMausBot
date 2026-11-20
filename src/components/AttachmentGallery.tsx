@@ -308,7 +308,7 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
             <Film size={24} className="text-ink-tertiary" aria-hidden="true" />
             <p role="alert" className="text-[12px] text-ink-secondary">{error}</p>
             <a href={preview} download={file.name} aria-label={t("attach.downloadAria", { name: file.name })}
-              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] text-accent-text hover:bg-ink/[0.06] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+              className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] text-accent-text interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
               <Download size={14} aria-hidden="true" />{t("attach.download")}
             </a>
           </div>
@@ -335,7 +335,7 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
             disabled={loading || tooLarge}
             onClick={() => void load()}
             aria-label={t("attach.previewVideo", { name: file.name })}
-            className={`flex size-full flex-col items-center justify-center gap-2 p-3 text-center text-ink-secondary transition-colors hover:bg-raised/60 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 ${tooLarge ? "disabled:cursor-default" : "disabled:cursor-wait"} disabled:hover:bg-transparent`}
+            className={`flex size-full flex-col items-center justify-center gap-2 p-3 text-center text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 ${tooLarge ? "disabled:cursor-default" : "disabled:cursor-wait"} disabled:hover:bg-transparent`}
           >
             {loading ? <LoaderCircle size={24} className="animate-spin" /> : <Play size={24} />}
             <span className="text-[12px]">{loading ? t("attach.videoLoading") : error && !tooLarge ? t("chat.retry") : t("attach.loadVideo")}</span>
@@ -343,7 +343,7 @@ function VideoAttachment({ file, message }: { file: GalleryFile; message: Messag
           </button>
         )}
         {(preview || loading || error) && (
-          <button type="button" aria-label={t("attach.closeVideo")} onClick={close} className="absolute right-2 top-2 z-20 flex size-7 items-center justify-center rounded-full bg-panel/90 text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
+          <button type="button" aria-label={t("attach.closeVideo")} onClick={close} className="absolute right-2 top-2 z-20 flex size-7 items-center justify-center rounded-full bg-panel/90 text-ink-secondary interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60">
             <X size={14} />
           </button>
         )}
@@ -440,13 +440,13 @@ function AudioAttachment({ file, message }: { file: GalleryFile; message: Messag
         {src ? <Music size={14} className="shrink-0 text-accent" aria-hidden="true" />
           : (
             <button type="button" disabled={loading} onClick={() => void load()} aria-label={t("attach.previewAudio", { name: file.name })}
-              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent transition-colors hover:bg-accent/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-wait">
+              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-accent/15 text-accent transition-colors interaction:bg-raised/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:cursor-wait">
               {loading ? <LoaderCircle size={14} className="animate-spin" /> : <Play size={13} fill="currentColor" />}
             </button>
           )}
         <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink" title={file.name}>{file.name}</span>
         {src && <a href={src} download={file.name} aria-label={t("attach.saveAria", { name: file.name })} title={t("attach.saveAria", { name: file.name })}
-          className="shrink-0 rounded-lg p-1 text-ink-secondary hover:bg-raised hover:text-ink"><Download size={14} /></a>}
+          className="shrink-0 rounded-lg p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink"><Download size={14} /></a>}
       </div>
       {src && !error && <audio src={src} controls autoPlay preload="metadata" aria-label={t("attach.previewAudio", { name: file.name })} onError={() => { setSrc(null); setError(t("attach.audioUnavailable")); }} className="h-9 w-full" />}
       {error && <p role="alert" className="text-[11px] text-danger">{error}</p>}
@@ -538,7 +538,7 @@ export function AttachmentGallery({ images = [], files = [], originals, message,
               ? <span key={`${message.threadId}:${message.messageId}:${item.key}`} className="contents" {...reveal.targetProps(item.source)}><AudioAttachment file={item.file} message={message} /></span>
               : item.kind === "file" && <span key={item.key} className="contents" {...reveal.targetProps(item.source)}><AttachedFileChip file={item.file} linked={item.file.linked} message={message} compact /></span>)}
             {items.length > limit && (
-              <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded} className="inline-flex h-7 items-center rounded-full px-2.5 text-[13px] leading-none text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+              <button type="button" onClick={() => setExpanded(!expanded)} aria-expanded={expanded} className="inline-flex h-7 items-center rounded-full px-2.5 text-[13px] leading-none text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
                 {expanded ? t("attach.showLess") : t("attach.moreCount", { count: items.length - limit })}
               </button>
             )}

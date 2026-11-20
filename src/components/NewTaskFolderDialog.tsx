@@ -49,7 +49,7 @@ export function NewTaskFolderDialog({ bot, onClose, onReturnFocus }: { bot: Bot;
         </label>
         {error && <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p>}
         <div className="mt-5 flex justify-end gap-2">
-          <button type="button" disabled={saving} onClick={close} className="rounded-lg px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised disabled:opacity-40">{t("common.cancel")}</button>
+          <button type="button" disabled={saving} onClick={close} className="rounded-lg px-3 py-2 text-[13px] text-ink-secondary interaction:bg-raised/50 disabled:opacity-40">{t("common.cancel")}</button>
           <button type="submit" disabled={saving || !cwd.trim()} className="rounded-lg bg-accent px-3 py-2 text-[13px] font-medium text-white disabled:opacity-40">{t(saving ? "task.folder.creating" : "task.newShort")}</button>
         </div>
       </form>

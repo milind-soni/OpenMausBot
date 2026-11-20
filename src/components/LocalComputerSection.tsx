@@ -446,7 +446,7 @@ export function CloudComputersCard({
                   disabled={loading || instance.inUse || pending !== null || !canSleep}
                   aria-busy={isPending && pending?.action === "sleep" ? true : undefined}
                   title={canSleep ? t("vm.cloud.sleepTitle") : t("vm.cloud.sleepBlocked", { state: state.toLowerCase() })}
-                  className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex items-center gap-1.5 rounded-lg border border-hairline/40 px-2.5 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isPending && pending?.action === "sleep" ? <Loader2 size={12} className="animate-spin" /> : <Moon size={12} />}
                   {t("vm.cloud.sleep")}
@@ -457,7 +457,7 @@ export function CloudComputersCard({
                   disabled={loading || instance.inUse || pending !== null || isRemoving}
                   aria-busy={isPending && pending?.action === "delete" ? true : undefined}
                   title={t("vm.cloud.deleteTitle")}
-                  className="flex items-center gap-1.5 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex items-center gap-1.5 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12px] font-medium text-danger interaction:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {isPending && pending?.action === "delete" ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                   {t("common.delete")}
@@ -594,7 +594,7 @@ export function LocalVmInventoryCard({
                     ? t("vm.perBot.deleteBlocked")
                     : t("vm.perBot.deleteTitle", { name: instance.name })
                 }
-                className="flex shrink-0 items-center gap-1.5 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12px] font-medium text-danger hover:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex shrink-0 items-center gap-1.5 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[12px] font-medium text-danger interaction:bg-danger/15 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
                 {t("common.delete")}

@@ -88,7 +88,7 @@ export function TraceDialog({ id, at, open, onClose }: { id: string; at?: number
         <header className="trace-dialog-header">
           <h2>{t("trace.title")}</h2>
           <button type="button" autoFocus aria-label={t("trace.close")} onClick={onClose}
-            className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink">
+            className="flex size-8 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink">
             <X size={17} />
           </button>
         </header>

@@ -19,7 +19,7 @@ export function CopyImageButton({ src, name }: { src: string; name: string }) {
       type="button"
       onClick={copy}
       disabled={!supported}
-      className={cn(MENU_ITEM, "text-ink hover:bg-menu-hover disabled:opacity-50")}
+      className={cn(MENU_ITEM, "text-ink interaction:bg-raised/50 disabled:opacity-50")}
       aria-label={state === "idle" ? t("attach.copyImageAria", { name }) : label}
       title={label}
     >

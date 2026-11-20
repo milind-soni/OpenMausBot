@@ -132,8 +132,8 @@ function ProfilePhoto({ initials }: { initials: string }) {
                   <input aria-label={t("settings.profile.avatar.zoom")} type="range" min="1" max="2.5" step="0.05" value={draft.zoom} onChange={(event) => replaceDraft({ ...draft, zoom: Number(event.target.value) })} className="ml-2 w-28 align-middle accent-accent" />
                 </label>
               </div>
-              <button type="button" className="rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control" onClick={() => replaceDraft(null)}>{t("settings.profile.avatar.cancel")}</button>
-              <button type="button" className="rounded-md bg-control px-2 py-1 text-[12px] text-ink hover:bg-raised-hover" disabled={busy} onClick={() => save(draft)}>{t("settings.profile.avatar.save")}</button>
+              <button type="button" className="rounded-md px-2 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50" onClick={() => replaceDraft(null)}>{t("settings.profile.avatar.cancel")}</button>
+              <button type="button" className="rounded-md bg-control px-2 py-1 text-[12px] text-ink interaction:bg-raised/50" disabled={busy} onClick={() => save(draft)}>{t("settings.profile.avatar.save")}</button>
             </div>
           </div>
         ) : avatarUrl ? <img {...avatarMarks("person", "picture")} src={avatarUrl} alt="" className="size-10 rounded-full object-cover" />

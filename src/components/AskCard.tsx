@@ -19,7 +19,7 @@ export function AskHeader({ asker, line, origin }: { asker: Asker; line: string;
       <span dir="auto" className="min-w-0 truncate">{line}</span>
       {origin && (
         <button type="button" onClick={origin.open} aria-label={origin.hint} title={origin.hint}
-          className="-ms-1 min-w-0 shrink truncate rounded-md px-1 text-ink-tertiary hover:bg-ink/[0.06] hover:text-ink-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+          className="-ms-1 min-w-0 shrink truncate rounded-md px-1 text-ink-tertiary interaction:bg-raised/50 hover:text-ink-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
           · {origin.label}
         </button>
       )}
@@ -81,7 +81,7 @@ export function AskCard({
             aria-label={dismissLabel}
             title={dismissLabel}
             className={cn(
-              "-me-1.5 flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/[0.07] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:size-9",
+              "-me-1.5 flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:size-9",
               header ? "-mt-7" : "-mt-0.5",
             )}
           >
@@ -153,7 +153,7 @@ export function AskChoices({ choices, label, onPick, sending = null, picked = []
             aria-busy={sending === choice.label || undefined}
             disabled={disabled || (sending !== null && sending !== choice.label)}
             onClick={() => onPick(choice.label)}
-            className={cn(ASK_CHOICE, on ? "bg-ink/[0.08] ring-ink/25" : "enabled:hover:bg-ink/[0.045]", quiet && !on && "text-ink-secondary")}
+            className={cn(ASK_CHOICE, on ? "bg-ink/[0.08] ring-ink/25" : "enabled:interaction:bg-raised/50", quiet && !on && "text-ink-secondary")}
           >
             <span className="min-w-0 flex-1">
               <span dir="auto" className="block break-words [unicode-bidi:plaintext]">{choice.label}</span>
@@ -290,18 +290,18 @@ export function askPrimary(color: MausColor | undefined, shape = ASK_BUTTON_SHAP
 }
 
 /** A card's other answers: Deny, Cancel, Not now. */
-export const ASK_SECONDARY_BUTTON = `${ASK_BUTTON_SHAPE} ${ASK_LOOK} bg-ink/[0.07] text-ink enabled:hover:bg-ink/[0.11] enabled:active:bg-ink/[0.15]`;
+export const ASK_SECONDARY_BUTTON = `${ASK_BUTTON_SHAPE} ${ASK_LOOK} bg-ink/[0.07] text-ink enabled:interaction:bg-raised/50`;
 /** An extra option that should not compete with the answer: Always allow, Details. */
-export const ASK_QUIET_ANSWER = `${ASK_BUTTON_SHAPE} ${ASK_LOOK} text-ink-secondary enabled:hover:bg-ink/[0.06] enabled:hover:text-ink enabled:active:bg-ink/[0.1]`;
+export const ASK_QUIET_ANSWER = `${ASK_BUTTON_SHAPE} ${ASK_LOOK} text-ink-secondary enabled:interaction:bg-raised/50 enabled:hover:text-ink`;
 
 const ASK_CHOICE = `flex min-h-10 w-full items-center gap-2.5 rounded-[12px] px-3.5 py-2 text-start text-[14px] leading-5 text-ink ring-[0.5px] ring-ink/[0.14] transition-colors ${ASK_LOOK} disabled:cursor-default pointer-coarse:min-h-11`;
 
 export const ASK_CHIP = `${ASK_CONTROL} max-w-full border`;
-export const ASK_CHIP_IDLE = "border-transparent bg-ink/[0.07] text-ink hover:bg-ink/[0.12]";
+export const ASK_CHIP_IDLE = "border-transparent bg-ink/[0.07] text-ink interaction:bg-raised/50";
 export const ASK_CHIP_PICKED = "border-accent bg-accent/15 text-ink";
 
 export const ASK_SMALL_PILL = ASK_CONTROL;
-export const ASK_QUIET_BUTTON = `${ASK_SMALL_PILL} -my-1 text-ink-tertiary hover:bg-ink/[0.07] hover:text-ink-secondary`;
+export const ASK_QUIET_BUTTON = `${ASK_SMALL_PILL} -my-1 text-ink-tertiary interaction:bg-raised/50 hover:text-ink-secondary`;
 
 export const ASK_FIELD =
   "h-7 rounded-full border border-hairline/60 bg-inset px-3 text-[13px] leading-5 text-ink outline-none placeholder:text-ink-tertiary focus:border-accent disabled:opacity-60 pointer-coarse:h-9";

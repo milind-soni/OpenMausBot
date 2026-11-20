@@ -37,7 +37,7 @@ export function FullScreenButton({ held, frame, name, disabled, takeDisabled, er
         type="button"
         onClick={() => (held ? onTakeControl(true) : setWatching(true))}
         disabled={disabled}
-        className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+        className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
         title={t(held ? "computer.openLiveDesktop" : "computer.watchFullScreenTitle")}
       >
         <Maximize2 size={14} />
@@ -101,7 +101,7 @@ function WatchFullScreen({ frame, name, takeDisabled, error, onClose, onTakeCont
         <span className="pointer-events-none rounded-full bg-black/70 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm">
           {t("computer.watchingBotWorks")}
         </span>
-        <button ref={exitRef} type="button" style={noDragStyle} onClick={motion.dismiss} aria-label={t("desktopViewer.exitFullscreen")} className={cn(iconButton, "ml-auto bg-control text-ink hover:bg-raised-hover")}>
+        <button ref={exitRef} type="button" style={noDragStyle} onClick={motion.dismiss} aria-label={t("desktopViewer.exitFullscreen")} className={cn(iconButton, "ml-auto bg-control text-ink interaction:bg-raised/50")}>
           <Minimize2 size={14} aria-hidden="true" />
           <span className="max-sm:hidden">{t("desktopViewer.exitFullscreen")}</span>
         </button>

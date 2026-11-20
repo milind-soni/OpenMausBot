@@ -18,7 +18,7 @@ const ACTION_LOOK: Record<QuickAction, { Icon: LucideIcon; label: LocaleKey }> =
   open: { Icon: ExternalLink, label: "inbox.action.openInChat" },
 };
 
-const ROW_ACTION = "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.07] hover:text-ink active:bg-ink/[0.11] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:size-9";
+const ROW_ACTION = "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus pointer-coarse:size-9";
 
 export function InboxRowItem({ row, now, onOpen, onAction, inCard = false }: {
   row: InboxRow;
@@ -39,7 +39,7 @@ export function InboxRowItem({ row, now, onOpen, onAction, inCard = false }: {
   return (
     <div data-inbox-row={row.id} data-tab={row.tab} data-unread={row.unread ? "" : undefined}
       className={cn("group relative flex min-w-0 items-center gap-2 pr-1.5 transition-colors duration-150",
-        inCard ? (row.unread ? "bg-raised/45 hover:bg-raised/50" : sidebarRowTone(false)) : cn("rounded-[8px]", sidebarRowTone(false)))}>
+        inCard ? (row.unread ? "bg-raised/45 interaction:bg-raised/50" : sidebarRowTone(false)) : cn("rounded-[8px]", sidebarRowTone(false)))}>
       <button type="button" onClick={() => onOpen(row)} title={[sender, inCard ? subject : headline, place].filter(Boolean).join(" · ")}
         className={cn("flex min-w-0 flex-1 gap-2 pl-2.5 text-left text-[13px] outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60", inCard ? "items-center py-1.5" : "items-start py-2",
           row.unread ? "font-semibold text-ink" : "font-normal text-ink-secondary")}>

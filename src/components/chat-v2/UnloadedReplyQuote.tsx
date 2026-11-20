@@ -39,7 +39,7 @@ export function UnloadedReplyQuote({ threadId, messageId, botName, inverse, canJ
       className="fading-dialog m-auto max-h-[80dvh] w-[min(36rem,calc(100%-2rem))] overflow-auto rounded-2xl bg-panel p-5 text-ink shadow-xl backdrop:bg-black/50">
       <div className="mb-3 flex items-center justify-between gap-4">
         <strong>{name}</strong>
-        <form method="dialog"><button className="rounded-md px-2 py-1 hover:bg-raised">{t("common.close")}</button></form>
+        <form method="dialog"><button className="rounded-md px-2 py-1 interaction:bg-raised/50">{t("common.close")}</button></form>
       </div>
       <ChatMarkdown text={source.message.text ?? ""} message={{ threadId, messageId }} />
     </dialog>

@@ -46,7 +46,7 @@ export function NewBotNameHost() {
             className="mt-1 w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[14px] text-ink" />
         </label>
         <div className="mt-4 flex justify-end gap-2">
-          <button type="button" onClick={() => done(null)} className="rounded-lg px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised">{t("common.cancel")}</button>
+          <button type="button" onClick={() => done(null)} className="rounded-lg px-3 py-2 text-[13px] text-ink-secondary interaction:bg-raised/50">{t("common.cancel")}</button>
           <button type="submit" disabled={!name.trim()} className="rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white disabled:opacity-40">{t("newBot.create")}</button>
         </div>
       </form>

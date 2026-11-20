@@ -294,7 +294,7 @@ export function GrokMoveDialog({ onClose, inline = false }: { onClose: () => voi
             {preview ? t("grokMove.previewTitle") : t("settings.import.grokTitle")}
           </h2>
           {!inline && <button type="button" disabled={importing} onClick={onClose} aria-label={t("common.close")} title={t("common.close")}
-            className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink disabled:opacity-40">
+            className="flex size-7 items-center justify-center rounded-full text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink disabled:opacity-40">
             <X size={16} />
           </button>}
         </div>

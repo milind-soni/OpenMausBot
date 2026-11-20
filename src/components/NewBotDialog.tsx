@@ -163,7 +163,7 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
       <div className="flex shrink-0 items-center justify-between border-b border-hairline/40 px-5 py-4">
         <h2 className="text-[17px] font-semibold text-ink">{title}</h2>
         <button type="button" onClick={() => closeRef.current()} aria-label={t("common.close")}
-          className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"><X size={18} className="pointer-events-none" /></button>
+          className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40"><X size={18} className="pointer-events-none" /></button>
       </div>
         {team && !defaultsMode && teamName && <WhoCanUse team={teamName} everyone={everyone} disabled={saving} onChange={setEveryone} />}
         {choosesVisibility && (
@@ -195,7 +195,7 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
       <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
         <nav aria-label={t("newBot.sections")} className="flex shrink-0 gap-1 overflow-x-auto border-b border-hairline/40 p-2 sm:w-40 sm:flex-col sm:border-b-0 sm:border-r">
           {sections.map(label => <button key={label} type="button" onClick={() => setActive(label)} aria-current={active === label ? "page" : undefined}
-            className={cn("shrink-0 rounded-lg px-3 py-2 text-left text-[13px]", active === label ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/50")}>{t(SECTION_KEYS[label])}</button>)}
+            className={cn("shrink-0 rounded-lg px-3 py-2 text-left text-[13px]", active === label ? "bg-control text-ink" : "text-ink-secondary interaction:bg-raised/50")}>{t(SECTION_KEYS[label])}</button>)}
         </nav>
         <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-4 sm:p-5">
           {!ready && !error && <div role="status" className="flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={16} className="animate-spin" />{t("newBot.loading")}</div>}
@@ -209,7 +209,7 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
       </div>
       {error && <p role="alert" className="max-h-24 overflow-y-auto border-t border-hairline/40 px-5 py-3 text-[13px] text-danger">{error}</p>}
       <div className="flex shrink-0 justify-end gap-2 border-t border-hairline/40 px-5 py-3">
-        <button type="button" onClick={() => closeRef.current()} className="rounded-lg px-4 py-2 text-[13px] text-ink-secondary hover:bg-control">{t("common.cancel")}</button>
+        <button type="button" onClick={() => closeRef.current()} className="rounded-lg px-4 py-2 text-[13px] text-ink-secondary interaction:bg-raised/50">{t("common.cancel")}</button>
         <button type="button" disabled={!ready || saving || (!defaultsMode && !bot.name.trim())} onClick={() => void save()}
           className="ui-button-primary flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-[13px] font-medium text-white hover:brightness-110 disabled:opacity-40">
           {saving && <Loader2 size={15} className="animate-spin" />}{t(defaultsMode ? "newBot.saveDefaults" : "newBot.create")}
@@ -327,7 +327,7 @@ function StartingRole({ draft, defaultsMode }: { draft: BotCreationDraft; defaul
     {chosen && <div className="mt-2 space-y-1 rounded-lg bg-card px-3 py-2.5 text-[13px] text-ink-secondary" data-new-bot-preset>
       {presetSummaryLines(chosen).map((line, index) => <p key={index} className="break-words">{line}</p>)}
       {chosen.source === "file" && <button type="button" onClick={() => void remove(chosen)}
-        className="mt-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary hover:bg-control hover:text-ink">{t("newBot.presetRemove")}</button>}
+        className="mt-1 rounded-md px-2 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink">{t("newBot.presetRemove")}</button>}
     </div>}
     {error && <p role="alert" className="mt-2 text-[13px] text-danger">{error}</p>}
   </div>;
@@ -355,7 +355,7 @@ function DraftRoutines({ draft }: { draft: BotCreationDraft }) {
     {draft.routines.map(routine => <div key={routine.id} className="flex items-center gap-2 rounded-lg bg-card p-3">
       <button type="button" className="min-w-0 flex-1 text-left text-[13px]" onClick={() => setEditing(routine)}>{routine.name}</button>
       <label className="flex items-center gap-1.5 text-[12px] text-ink-secondary"><input type="checkbox" checked={routine.enabled} onChange={event => draft.setRoutineEnabled(routine.id, event.target.checked)} />{t("newBot.enabled")}</label>
-      <button type="button" aria-label={t("newBot.removeRoutine", { name: routine.name })} onClick={() => draft.removeRoutine(routine.id)} className="rounded p-1.5 hover:bg-control"><Trash2 size={15} /></button>
+      <button type="button" aria-label={t("newBot.removeRoutine", { name: routine.name })} onClick={() => draft.removeRoutine(routine.id)} className="rounded p-1.5 interaction:bg-raised/50"><Trash2 size={15} /></button>
     </div>)}
     <OverlayPresence>{editing && <RoutineEditor routine={editing === "new" ? undefined : editing} bots={[draft.bot]} lockedBotId={draft.id} onClose={() => setEditing(null)} />}</OverlayPresence>
   </div>;
@@ -371,7 +371,7 @@ export function DefaultBotSettings({ simple = false }: { simple?: boolean }) {
 
   const content = <>
     <div className="flex shrink-0 gap-2">
-      <button type="button" onClick={() => setOpen(true)} className="cursor-pointer rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover">{t("newBot.edit")}</button>
+      <button type="button" onClick={() => setOpen(true)} className="cursor-pointer rounded-lg bg-control px-3 py-1.5 text-[13px] text-ink interaction:bg-raised/50">{t("newBot.edit")}</button>
     </div>
     {dialogs}
   </>;

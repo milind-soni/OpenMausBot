@@ -191,7 +191,7 @@ export function CloudWelcome() {
               return <li key={step} className="min-w-0">
                 <button type="button" data-welcome-rail={step} data-finished={finished || undefined} data-bringing={bringing || undefined} data-skipped={skipped || undefined} aria-current={current ? "step" : undefined} onClick={() => go(step)}
                   className={cn("flex w-full min-w-0 items-center gap-2 rounded-full text-left transition-colors duration-150 motion-reduce:transition-none @2xl/welcome:items-start @2xl/welcome:gap-2.5 @2xl/welcome:rounded-[8px] @2xl/welcome:p-2.5",
-                    current ? "bg-raised py-1.5 pl-1.5 pr-3" : "p-1.5 hover:bg-raised/60")}>
+                    current ? "bg-raised py-1.5 pl-1.5 pr-3" : "p-1.5 interaction:bg-raised/50")}>
                   <span aria-hidden="true" className={cn("flex size-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] text-[12px] font-semibold tabular-nums",
                     finished ? "check-in border-success bg-success" : current ? "border-accent text-accent-text" : "border-ink-secondary/40 text-ink-secondary")}>
                     {finished ? <Check size={12} strokeWidth={3} /> : bringing ? <Loader2 size={12} strokeWidth={2.5} className="animate-spin" /> : skipped ? <Minus size={11} strokeWidth={3} /> : index + 1}

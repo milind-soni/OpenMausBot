@@ -78,7 +78,7 @@ export function NotificationBell({ bar }: { bar?: string }) {
       aria-label={unread > 0 ? t("notifications.railUnread", { count: unread }) : t("notifications.title")}
       title={t("notifications.title")}
       aria-pressed={state.notificationsOpen}
-      className={cn("relative", bar ?? "flex size-8 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink", bar && state.notificationsOpen && "text-accent hover:text-accent")}
+      className={cn("relative", bar ?? "flex size-8 items-center justify-center rounded-md text-ink-secondary interaction:bg-raised/50 hover:text-ink", bar && state.notificationsOpen && "text-accent hover:text-accent")}
     >
       <Bell size={bar ? 15 : 17} strokeWidth={bar ? 1.75 : undefined} aria-hidden="true" />
       {unread > 0 && (
@@ -171,7 +171,7 @@ export function NotificationsPanel({ closing = false }: { closing?: boolean } = 
           aria-pressed={state.notificationsPinned}
           title={state.notificationsPinned ? t("notifications.unpin") : t("notifications.pin")}
           className={cn(
-            "flex size-[26px] shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink",
+            "flex size-[26px] shrink-0 items-center justify-center rounded-md text-ink-secondary interaction:bg-raised/50 hover:text-ink",
             state.notificationsPinned && "text-accent",
           )}
         >
@@ -182,7 +182,7 @@ export function NotificationsPanel({ closing = false }: { closing?: boolean } = 
           onClick={() => dispatch({ type: "toggleNotifications", open: false })}
           aria-label={t("notifications.close")}
           title={t("notifications.close")}
-          className="flex size-[26px] shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink"
+          className="flex size-[26px] shrink-0 items-center justify-center rounded-md text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           <X size={14} />
         </button>
@@ -222,7 +222,7 @@ function NotificationRow({ entry, title, now, bot, threadName, onOpen }: { entry
       onClick={onOpen}
       title={title}
       className={cn(
-        "flex w-full gap-2.5 border-b border-hairline/20 px-3.5 py-2.5 text-left hover:bg-raised/60",
+        "flex w-full gap-2.5 border-b border-hairline/20 px-3.5 py-2.5 text-left interaction:bg-raised/50",
         !entry.read && "bg-accent/5",
       )}
     >

@@ -124,7 +124,7 @@ export function CloudCancelSheet({ renewal, actions, onClose }: { renewal: Cloud
         }}>
         <header className="flex items-start justify-between gap-3 px-6 pb-1 pt-5">
           <h2 id="cloud-cancel-title" className="text-[17px] font-semibold">{title}</h2>
-          <button type="button" aria-label={t("cloudCancel.close")} disabled={busy} onClick={close} className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised"><X size={18} /></button>
+          <button type="button" aria-label={t("cloudCancel.close")} disabled={busy} onClick={close} className="rounded-lg p-1.5 text-ink-secondary interaction:bg-raised/50"><X size={18} /></button>
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5 pt-1">
           {state.step === "ask" && <>

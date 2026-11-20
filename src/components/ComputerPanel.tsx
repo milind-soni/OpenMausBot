@@ -1116,7 +1116,7 @@ export function ComputerPanel({
   };
   const panelOffers = (id: PlaceActionId | undefined): id is PlaceActionId => Boolean(id) && id !== "watch" && id !== "open-computer-panel"
     && ((id !== "start" && id !== "wake") || (canManageCloud && !profileBot.busy));
-  const placeActionButton = (view: PlaceView, className = "mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover") =>
+  const placeActionButton = (view: PlaceView, className = "mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50") =>
     view.action && panelOffers(view.action.id) ? (
       <button type="button" data-testid="place-action" onClick={() => runPlaceAction(view.action!.id)} className={className}>
         {view.action.label}
@@ -1197,7 +1197,7 @@ export function ComputerPanel({
               dispatch({ type: "toggleComputer", open: false });
               dispatch({ type: "toggleSettings", open: true });
             }}
-            className="grid size-8 shrink-0 place-items-center rounded-xl text-ink-secondary hover:bg-control hover:text-ink"
+            className="grid size-8 shrink-0 place-items-center rounded-xl text-ink-secondary interaction:bg-raised/50 hover:text-ink"
             title={t("computer.botSettings")}
           >
             <Settings size={18} aria-hidden="true" />
@@ -1363,7 +1363,7 @@ export function ComputerPanel({
               {phase === "local" && !isLinux && localMisses >= 3 && (
                 <button
                   onClick={() => window.ogb?.permOpenSettings?.("screen")}
-                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
+                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50"
                 >
                   {t("computer.openSettings")}
                 </button>
@@ -1371,7 +1371,7 @@ export function ComputerPanel({
               {phase === "browser" && browserEnabled && (
                 <button
                   onClick={() => selectPanelView("browser")}
-                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
+                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50"
                 >
                   {t("computer.openBrowserTab")}
                 </button>
@@ -1380,7 +1380,7 @@ export function ComputerPanel({
                 <button
                   type="button"
                   onClick={() => updateComputerSelection({ computer: "cloud" })}
-                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
+                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50"
                 >
                   {phase === "show-sleeping-boat"
                     ? t("computer.chooseCloudWake")
@@ -1420,7 +1420,7 @@ export function ComputerPanel({
                 ) : (
                   <button
                     onClick={openVmSettings}
-                    className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
+                    className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50"
                   >
                     {t("computer.openVmSetup")}
                   </button>
@@ -1430,7 +1430,7 @@ export function ComputerPanel({
               {computerStatusCurrent && (phase === "vps-unconfigured" || phase === "vps-stopped") && (
                 <button
                   onClick={openConnectionSettings}
-                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover"
+                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50"
                 >
                   {t("computer.openVpsSettings")}
                 </button>
@@ -1439,7 +1439,7 @@ export function ComputerPanel({
                 <button
                   onClick={() => run("provision")}
                   disabled={pending === "provision"}
-                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                  className="mt-1 rounded-lg bg-control px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50 disabled:opacity-50"
                 >
                   {pending === "provision" && <Loader2 size={13} className="mr-1.5 inline animate-spin" />}
                   {phase === "vps-stopped" ? t("computer.startVps") : t("computer.prepareVps")}
@@ -1478,7 +1478,7 @@ export function ComputerPanel({
             </div>
             <button
               onClick={openConnectionSettings}
-              className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
+              className="rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50"
             >
               {t("computer.openVpsSettings")}
             </button>
@@ -1493,7 +1493,7 @@ export function ComputerPanel({
               type="button"
               onClick={() => onOpenVmWorkspace(bot.id)}
               disabled={pending !== null}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/10 py-2 text-[13px] font-medium text-ink hover:bg-accent/15 disabled:opacity-50"
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-accent/30 bg-accent/10 py-2 text-[13px] font-medium text-ink interaction:bg-raised/50 disabled:opacity-50"
               title={t("computer.twoDesktopsTitle")}
             >
               <Columns2 size={14} />
@@ -1524,7 +1524,7 @@ export function ComputerPanel({
           <button
             onClick={() => void takeControl(control.held)}
             disabled={controlPending || !liveTarget}
-            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-control py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
             title={control.held ? t("computer.openLiveDesktop") : t("computer.takeControlTitle")}
           >
             {controlPending ? <Loader2 size={14} className="animate-spin" /> : control.held ? <Maximize2 size={14} /> : <Hand size={14} />}
@@ -1535,7 +1535,7 @@ export function ComputerPanel({
           <button
             onClick={() => void runVmAction("vm-delete")}
             disabled={pending !== null || profileBot.busy}
-            className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-danger/30 py-2 text-[13px] text-danger hover:bg-danger/10 disabled:opacity-50"
+            className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg border border-danger/30 py-2 text-[13px] text-danger interaction:bg-danger/10 disabled:opacity-50"
             title={profileBot.busy ? t("computer.deleteVmBlocked") : t("computer.deleteVmTitle", { name: bot.name })}
           >
             {pending === "vm-delete" ? <Loader2 size={14} className="animate-spin" /> : <Power size={14} />}
@@ -1549,7 +1549,7 @@ export function ComputerPanel({
               <button
                 onClick={() => void takeControl()}
                 disabled={controlPending || pending === "join"}
-                className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
                 title={t("computer.takeControlTitle")}
               >
                 {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : <Hand size={14} />}
@@ -1560,7 +1560,7 @@ export function ComputerPanel({
               <button
                 onClick={() => void takeControl(true)}
                 disabled={pending === "join"}
-                className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
               >
                 {pending === "join" ? <Loader2 size={14} className="animate-spin" /> : liveTarget ? <Maximize2 size={14} /> : <Monitor size={14} />}
                 {t(liveTarget ? "computer.fullScreen" : "computer.openLiveDesktop")}
@@ -1570,7 +1570,7 @@ export function ComputerPanel({
               <button
                 onClick={() => run("sleep")}
                 disabled={pending === "sleep" || profileBot.busy}
-                className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+                className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
                 title={t("computer.sleepTitle")}
               >
                 {pending === "sleep" ? <Loader2 size={14} className="animate-spin" /> : <Moon size={14} />}
@@ -1611,7 +1611,7 @@ export function ComputerPanel({
           )}
         </div>
 
-        <button type="button" onClick={() => selectPanelView("routines")} className="mt-4 flex w-full items-start gap-3 rounded-xl bg-transparent p-4 text-left hover:bg-raised">
+        <button type="button" onClick={() => selectPanelView("routines")} className="mt-4 flex w-full items-start gap-3 rounded-xl bg-transparent p-4 text-left interaction:bg-raised/50">
           <CalendarClock size={17} className="mt-0.5 shrink-0 text-accent" />
           <span className="min-w-0 flex-1">
             <span className="block text-[14px] font-medium text-ink">{t("computer.tab.routines")} <span className="ml-1 text-[11px] text-ink-secondary">{botRoutines.length}</span></span>

@@ -58,7 +58,7 @@ export function HistorySection({
                 type="button"
                 disabled={rollingBack}
                 onClick={() => onRollback(row.id)}
-                className="shrink-0 rounded-md px-2 py-1 text-[12px] font-medium text-accent-text hover:bg-accent/10 disabled:opacity-50"
+                className="shrink-0 rounded-md px-2 py-1 text-[12px] font-medium text-accent-text interaction:bg-raised/50 disabled:opacity-50"
               >
                 {t("history.undo")}
               </button>

@@ -173,7 +173,7 @@ export function InspectorPanel({ bot, closing = false }: { bot: Bot; closing?: b
           onClick={() => dispatch({ type: "toggleInspector", open: false })}
           aria-label={t("inspector.close")}
           title={t("inspector.close")}
-          className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink"
+          className="rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           <X size={18} />
         </button>
@@ -214,7 +214,7 @@ export function InspectorPanel({ bot, closing = false }: { bot: Bot; closing?: b
         {lens !== "run" && <span className="ml-auto text-[11px] text-ink-secondary">
           {page ? (shown < total ? t("inspector.entries.lastOf", { shown, total }) : t("inspector.entries.count", { count: shown })) : t("inspector.entries.loading")}
         </span>}
-        {lens !== "run" && <button onClick={() => managedRefresh.current()} className="rounded-md p-1 text-ink-secondary hover:bg-raised hover:text-ink" title={t("inspector.reload")}>
+        {lens !== "run" && <button onClick={() => managedRefresh.current()} className="rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink" title={t("inspector.reload")}>
           <RefreshCw size={14} />
         </button>}
       </div>
@@ -245,7 +245,7 @@ function Row({ row, open, onToggle }: { row: InspectorRow; open: boolean; onTogg
         row.tone === "error" && "bg-danger/10",
       )}
     >
-      <button onClick={onToggle} className="flex w-full items-start gap-2 px-3 py-1.5 text-left hover:bg-raised/60">
+      <button onClick={onToggle} className="flex w-full items-start gap-2 px-3 py-1.5 text-left interaction:bg-raised/50">
         <span className="mt-[1px] shrink-0 text-ink-secondary">{open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}</span>
         <span className="shrink-0 tabular-nums text-ink-secondary">{formatTime(row.at)}</span>
         <span

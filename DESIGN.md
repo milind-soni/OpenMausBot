@@ -79,8 +79,8 @@ Rules:
 - **No raw colours.** No hex, `rgb()`, or Tailwind palette classes
   (`text-gray-500`, `bg-white`, `text-black`). A skin can't restyle them.
   The only exception is a third-party logo that needs its own plate.
-- **Hover and pressed fills are ink at low opacity:** `hover:bg-ink/[0.06]`,
-  `active:bg-ink/[0.08]`. They work on every skin.
+- **Neutral hover and pressed fills match the sidebar:** use `interaction:bg-raised/50`.
+  Use the same fill for keyboard highlighting when a control uses a filled focus state.
 - **Hierarchy comes from ink, not colour.** Use the three ink levels and
   size. Don't use grey hex values or extra opacity to make a fourth level.
 - **Accent is rare.** Use it for links, focus and the selected state. In

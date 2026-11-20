@@ -32,7 +32,7 @@ export function CloudBackendPicker({
             className={cn(
               "flex-1 py-1.5 text-[12px]",
               i > 0 && "border-l border-hairline/40",
-              value === backend ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
+              value === backend ? "bg-raised text-ink" : "text-ink-secondary interaction:bg-raised/50 hover:text-ink",
             )}
           >
             {backend === "vps" ? t("botAccess.cloud.selfHostedVps") : t("botAccess.cloud.boat")}

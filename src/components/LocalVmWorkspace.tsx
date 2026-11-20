@@ -471,7 +471,7 @@ function LocalVmPane({
             type="button"
             onClick={() => onTake(bot.id)}
             disabled={!canDrive || controlPending || heldElsewhere}
-            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-raised px-2.5 py-2 text-[12px] text-ink hover:bg-raised-hover disabled:opacity-45"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg bg-raised px-2.5 py-2 text-[12px] text-ink interaction:bg-raised/50 disabled:opacity-45"
             title={t("vm.workspace.takeControlTitle")}
           >
             {controlPending ? <Loader2 size={13} className="animate-spin" /> : <Hand size={13} />}
@@ -514,14 +514,14 @@ function LocalVmPane({
                 <button
                   type="button"
                   onClick={() => setRetry((value) => value + 1)}
-                  className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[12px] text-ink hover:bg-raised-hover"
+                  className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-2 text-[12px] text-ink interaction:bg-raised/50"
                 >
                   <RefreshCw size={13} /> {t("vm.workspace.retryStatus")}
                 </button>
                 <button
                   type="button"
                   onClick={() => onOpenComputer(bot.id)}
-                  className="rounded-lg bg-raised px-3 py-2 text-[12px] text-ink hover:bg-raised-hover"
+                  className="rounded-lg bg-raised px-3 py-2 text-[12px] text-ink interaction:bg-raised/50"
                 >
                   {t("vm.workspace.openComputer")}
                 </button>
@@ -777,7 +777,7 @@ export function LocalVmWorkspace({
           type="button"
           onClick={() => void closeWorkspace()}
           disabled={controlPending}
-          className="rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
+          className="rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"
           aria-label={t("vm.workspace.closeView")}
         >
           <X size={18} />

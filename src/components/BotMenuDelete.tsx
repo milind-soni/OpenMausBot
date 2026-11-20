@@ -13,7 +13,7 @@ export function BotDeleteMenuItem({ deleting, onClick, className = "flex w-full 
       className={cn(
         className,
         "text-danger",
-        deleting ? "cursor-default opacity-40" : "hover:bg-menu-hover",
+        deleting ? "cursor-default opacity-40" : "interaction:bg-raised/50",
       )}
     >
       {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}

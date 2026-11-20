@@ -186,7 +186,7 @@ export function CloudSetup({ viewer, welcomeShown = false }: { viewer: WelcomeVi
     </span>;
     return <li key={item.id} data-cloud-setup-step={item.id} data-status={item.status} className="animate-rise" style={staggerIndex(index)}>
       {pending
-        ? <button type="button" onClick={() => setChosen(item.id)} className="-mx-2 flex w-[calc(100%+16px)] items-start gap-2.5 rounded-lg px-2 py-1.5 text-left text-ink transition-colors hover:bg-raised/70">{mark(item)}{title}</button>
+        ? <button type="button" onClick={() => setChosen(item.id)} className="-mx-2 flex w-[calc(100%+16px)] items-start gap-2.5 rounded-lg px-2 py-1.5 text-left text-ink transition-colors interaction:bg-raised/50">{mark(item)}{title}</button>
         : <div className="-mx-2 flex items-start gap-2.5 px-2 py-1.5 text-ink-secondary">{mark(item)}{title}</div>}
     </li>;
   };

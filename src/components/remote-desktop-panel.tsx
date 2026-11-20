@@ -326,7 +326,7 @@ export function RemoteDesktopPanel({ bot, closing = false }: { bot: Bot; closing
             <button
               type="button"
               onClick={() => dispatch({ type: "showRoutines" })}
-              className="mt-3 flex w-full items-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-left text-[12px] text-accent hover:bg-accent/15"
+              className="mt-3 flex w-full items-center gap-2 rounded-lg border border-accent/25 bg-accent/10 px-3 py-2 text-left text-[12px] text-accent interaction:bg-raised/50"
             >
               <Loader2 size={13} className={activeRoutineRun.status === "queued" ? "" : "animate-spin"} />
               <span className="min-w-0 flex-1 truncate">
@@ -341,7 +341,7 @@ export function RemoteDesktopPanel({ bot, closing = false }: { bot: Bot; closing
                   type="button"
                   key={routine.id}
                   onClick={() => dispatch({ type: "showRoutines" })}
-                  className="flex w-full items-center gap-2 rounded-lg bg-inset px-3 py-2 text-left hover:bg-control/60"
+                  className="flex w-full items-center gap-2 rounded-lg bg-inset px-3 py-2 text-left interaction:bg-raised/50"
                 >
                   <span className={cn("size-1.5 shrink-0 rounded-full", routine.enabled ? "bg-success" : "bg-ink-secondary/40")} />
                   <span className="min-w-0 flex-1">
@@ -367,7 +367,7 @@ export function RemoteDesktopPanel({ bot, closing = false }: { bot: Bot; closing
             <button
               type="button"
               onClick={() => dispatch({ type: "showRoutines" })}
-              className="flex items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover"
+              className="flex items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50"
               title={t("computer.routines.openTitle")}
             >
               <CalendarDays size={14} />

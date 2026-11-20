@@ -19,7 +19,7 @@ import { BROWSER_HELD_ELSEWHERE } from "../../shared/browser-held";
 import { passkeyWallAt } from "../../shared/passkey-wall";
 import { browserScope, withBrowserScope } from "@/lib/team-browser";
 
-const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed";
+const button = "rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed";
 const NO_NAV: BrowserNav = { url: "", loading: false, canGoBack: false, canGoForward: false };
 
 export type BrowserSignIn = { url: string; site: string; nonce: number };
@@ -357,8 +357,8 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
         <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-card/95 p-6 text-center text-[13px] text-ink-secondary">
           {asleep ? <Moon size={24} /> : heldElsewhere ? <Hand size={24} /> : gone ? <Globe size={24} /> : <Loader2 size={24} className="animate-spin" />}
           <span>{asleep ? t("browser.panel.asleep") : heldElsewhere ? BROWSER_HELD_ELSEWHERE : gone ? t("browser.panel.disconnected") : !starting ? t("browser.panel.opening") : stream ? t("browser.panel.starting") : t("browser.live.botBusy", { name: bot.name })}</span>
-          {asleep ? <button type="button" disabled={asleep === "waking"} className="rounded-lg border border-hairline px-3 py-1.5 text-[12px] text-ink hover:bg-inset disabled:opacity-60" onClick={wake}>{t(asleep === "waking" ? "browser.panel.waking" : "browser.panel.wake")}</button>
-            : gone ? <button type="button" className="rounded-lg border border-hairline px-3 py-1.5 text-[12px] text-ink hover:bg-inset" onClick={reconnect}>{t("browser.panel.reconnect")}</button> : null}
+          {asleep ? <button type="button" disabled={asleep === "waking"} className="rounded-lg border border-hairline px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50 disabled:opacity-60" onClick={wake}>{t(asleep === "waking" ? "browser.panel.waking" : "browser.panel.wake")}</button>
+            : gone ? <button type="button" className="rounded-lg border border-hairline px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50" onClick={reconnect}>{t("browser.panel.reconnect")}</button> : null}
         </div>
       ) : null}
     </div>

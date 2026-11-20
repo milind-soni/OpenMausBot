@@ -141,7 +141,7 @@ export function CommandAllowlistDialog({ botId, botName, threadId, onClose }: {
             <p className="mt-1 text-[12px] text-ink-secondary">{t("commandAllowlist.forBot", { name: botName })}</p>
           </div>
           <button ref={closeRef} type="button" onMouseDown={(event) => event.stopPropagation()} onClick={onClose} aria-label={t("commandAllowlist.close")}
-            className="shrink-0 rounded-md p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"><X size={17} className="pointer-events-none" /></button>
+            className="shrink-0 rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink"><X size={17} className="pointer-events-none" /></button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
           <p id={scopeId} className="mt-3 text-[12px] leading-relaxed text-ink-secondary">{t("commandAllowlist.scope")}</p>
@@ -164,7 +164,7 @@ export function CommandAllowlistDialog({ botId, botName, threadId, onClose }: {
                 <button type="button" disabled={Boolean(saving)} onClick={() => void save(rule)}
                   aria-label={t("commandAllowlist.removeAria", { command: rule.command })}
                   title={t(saving === rule.id ? "commandAllowlist.removing" : "commandAllowlist.remove")}
-                  className="shrink-0 rounded-md p-1.5 text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40">
+                  className="shrink-0 rounded-md p-1.5 text-ink-secondary interaction:bg-danger/10 hover:text-danger disabled:opacity-40">
                   {saving === rule.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
                 </button>
               </li>)}

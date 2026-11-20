@@ -132,9 +132,9 @@ function MenuRows({
             onPointerEnter={(event) => onRowEnter?.(item, event.currentTarget, { x: event.clientX, y: event.clientY })}
             onPointerLeave={() => onRowLeave?.(item)}
             className={cn(
-              "flex min-h-8 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-start text-[14px] leading-5 disabled:opacity-60 focus-visible:bg-menu-hover focus-visible:outline-none",
+              "flex min-h-8 w-full items-center gap-2 rounded-lg px-2 py-1.5 text-start text-[14px] leading-5 disabled:opacity-60 focus-visible:bg-raised/50 focus-visible:outline-none",
               item.large && "min-h-12 py-1.5",
-              item.active || (item.submenu && openSubmenu === item.key && (engaged || dense)) ? "bg-menu-active text-ink" : "text-ink hover:bg-menu-hover",
+              item.active || (item.submenu && openSubmenu === item.key && (engaged || dense)) ? "bg-menu-active text-ink" : "text-ink interaction:bg-raised/50",
             )}
           >
             {item.icon && (

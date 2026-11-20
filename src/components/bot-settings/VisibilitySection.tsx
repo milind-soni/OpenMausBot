@@ -152,7 +152,7 @@ export function VisibilitySection({ bot }: { bot: Bot }) {
                 type="button"
                 disabled={busy}
                 onClick={() => void resetRoom(room.id)}
-                className="rounded-md bg-control px-2 py-1 text-[12px] text-ink hover:bg-control/70 disabled:opacity-50"
+                className="rounded-md bg-control px-2 py-1 text-[12px] text-ink interaction:bg-raised/50 disabled:opacity-50"
               >
                 {t("botSettings.visibility.resetRoom", { room: JSON.stringify(room.name) })}
               </button>

@@ -22,7 +22,7 @@ export interface BrowserNav {
   canGoForward: boolean;
 }
 
-const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:cursor-not-allowed disabled:opacity-40";
+const button = "rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:cursor-not-allowed disabled:opacity-40";
 
 export type PillState = "connecting" | "watching" | "bot" | "yours" | "held" | "elsewhere" | "taking" | "waiting";
 
@@ -102,7 +102,7 @@ export const ChromeRow = forwardRef<HTMLInputElement, {
           title={yours && props.hint ? props.hint : t(handsBack ? "browser.control.handBack" : "browser.control.take")}
           disabled={!connected || pill === "elsewhere" || pill === "connecting" || pill === "taking" || pill === "waiting"}
           onClick={handsBack ? props.onHandBack : props.onTake}
-          className={`flex max-w-56 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] disabled:cursor-default ${handsBack ? "border-accent-border bg-accent/15 text-accent-text" : "border-hairline text-ink-secondary hover:bg-inset hover:text-ink"}`}
+          className={`flex max-w-56 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] disabled:cursor-default ${handsBack ? "border-accent-border bg-accent/15 text-accent-text" : "border-hairline text-ink-secondary interaction:bg-raised/50 hover:text-ink"}`}
           data-pill={pill}
         >
           {pill === "taking" || pill === "waiting" || pill === "connecting" ? <Loader2 size={12} className="shrink-0 animate-spin" aria-hidden="true" /> : <Hand size={12} className="shrink-0" aria-hidden="true" />}

@@ -94,7 +94,7 @@ export function PhoneScreenPanel({ serial, name }: { serial: string; name: strin
             disabled={status.kind !== "live"}
             className={cn(
               "flex shrink-0 items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] disabled:opacity-50",
-              held ? "bg-accent font-medium text-accent-ink hover:brightness-110" : "bg-control text-ink hover:bg-raised-hover",
+              held ? "bg-accent font-medium text-accent-ink hover:brightness-110" : "bg-control text-ink interaction:bg-raised/50",
             )}
           >
             <Hand size={13} /> {t(held ? "computer.handBack" : "computer.takeControl")}

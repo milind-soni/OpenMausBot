@@ -124,7 +124,7 @@ export function OrganisationRow({
         type="button"
         disabled={busy}
         onClick={() => void perform(() => bridge.cancelEnrollment())}
-        className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-secondary transition-colors hover:bg-raised hover:text-ink disabled:opacity-50"
+        className="shrink-0 rounded-md px-2 py-1 text-[12px] text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink disabled:opacity-50"
       >
         {t("organization.cancel")}
       </button>

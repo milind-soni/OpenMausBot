@@ -549,7 +549,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     const failed = error || (cardFailure?.id === app.id ? cardFailure.message : null) || (result && !result.ok ? result.error : null);
     const pending = busy !== null || signingIn !== null;
     const mine = busy === `hosted:${app.id}` || (server !== undefined && (signingIn === server.name || busy === `signout:${server.name}`));
-    return <div data-app-tile={app.id} className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40">
+    return <div data-app-tile={app.id} className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors interaction:bg-raised/50">
       <div className="flex items-center gap-3">
         <HostedMcpIcon app={app} />
         <div className="min-w-0 flex-1">
@@ -563,7 +563,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
           <button type="button" aria-label={t(connected ? "hostedMcp.disconnect" : "hostedMcp.connect", { service: app.label })}
             disabled={pending || (servers !== null && !connected && (Boolean(server?.managedBy) || (restricted && !policy?.mcp.allowlist.length) || ("key" in app && !keys[app.id]?.trim())))}
             onClick={() => void (servers === null ? load() : connected && server ? signOut(server, app) : connectHosted(app))}
-            className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink hover:bg-raised-hover disabled:opacity-40">
+            className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink interaction:bg-raised/50 disabled:opacity-40">
             {pending && (mine || busy === "load") ? <Loader2 size={14} className="animate-spin" /> : servers === null ? t("connectors.action.retry") : t(connected ? "connectors.disconnect" : "connectors.action.connect")}
           </button>}
       </div>
@@ -585,7 +585,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
         <summary className="cursor-pointer">{t("hostedMcp.access")}</summary>
         <p className="mt-2 leading-relaxed">{t(app.notice)}</p>
         <p className="mt-2 leading-relaxed">{t("hostedMcp.accessHint")}</p>
-        <div className="mt-2 flex flex-wrap gap-2">{(store.bots ?? []).filter((bot) => !bot.hidden).map((bot) => <button key={bot.id} type="button" onClick={() => { dispatch({ type: "togglePlugins", open: false }); openBotSettings(dispatch, "access", { botId: bot.id }); }} className="rounded-lg bg-control px-2.5 py-1.5 text-ink hover:bg-raised-hover">{t("hostedMcp.botSettings", { name: bot.name })}</button>)}</div>
+        <div className="mt-2 flex flex-wrap gap-2">{(store.bots ?? []).filter((bot) => !bot.hidden).map((bot) => <button key={bot.id} type="button" onClick={() => { dispatch({ type: "togglePlugins", open: false }); openBotSettings(dispatch, "access", { botId: bot.id }); }} className="rounded-lg bg-control px-2.5 py-1.5 text-ink interaction:bg-raised/50">{t("hostedMcp.botSettings", { name: bot.name })}</button>)}</div>
       </details>
       </div>
     </div>;
@@ -596,7 +596,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
     const result = probe[server.name];
     const failure = result && !result.ok && !result.auth ? t("mcp.check.failed", { reason: failureReason(server, result) }) : null;
     const status = needsSignIn ? t("mcp.auth.needsSignIn") : server.offFor?.length ? t("mcp.offFor", { bots: server.offFor.map(botName).join(", ") }) : isRemoteMcpListing(server) ? server.url : [server.command, ...server.args].join(" ");
-    return <div key={server.name} data-app-tile={server.name} data-mcp-tile="" className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40">
+    return <div key={server.name} data-app-tile={server.name} data-mcp-tile="" className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors interaction:bg-raised/50">
       <div className="flex items-center gap-3">
         <div className="flex size-10 shrink-0 items-center justify-center rounded-[8px] bg-raised text-ink-secondary">{isRemoteMcpListing(server) ? <Globe size={19} /> : <ServerCog size={19} />}</div>
         <div className="min-w-0 flex-1">
@@ -609,7 +609,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
         {signingIn === server.name
           ? <button type="button" onClick={() => signInAbort.current?.abort()} className="inline-flex h-7 shrink-0 items-center rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink">{t("mcp.auth.cancel")}</button>
           : <button type="button" disabled={needsSignIn && (busy !== null || signingIn !== null || Boolean(server.managedBy))} onClick={() => void (needsSignIn ? signIn(server) : manage())}
-              className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink hover:bg-raised-hover disabled:opacity-40">
+              className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink interaction:bg-raised/50 disabled:opacity-40">
               {t(needsSignIn ? "mcp.auth.signIn" : "apps.mcp.manage")}
             </button>}
       </div>
@@ -649,7 +649,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
               type="button"
               onClick={() => void load()}
               disabled={busy !== null}
-              className="rounded-lg p-2 text-ink-secondary transition-colors hover:bg-raised hover:text-ink disabled:opacity-40"
+              className="rounded-lg p-2 text-ink-secondary transition-colors interaction:bg-raised/50 hover:text-ink disabled:opacity-40"
               aria-label={t("mcp.refreshAria")}
             >
               <RefreshCw size={16} className={cn(busy === "load" && "animate-spin")} />
@@ -724,7 +724,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
                     </div>
                     <div data-mcp-row-actions className="ml-auto flex flex-wrap items-center justify-end gap-1">
                       {signingIn === server.name ? (
-                        <button type="button" onClick={() => signInAbort.current?.abort()} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink">
+                        <button type="button" onClick={() => signInAbort.current?.abort()} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink">
                           <Loader2 size={14} className="animate-spin" /> {t("mcp.auth.cancel")}
                         </button>
                       ) : canSignIn ? (
@@ -732,15 +732,15 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
                           <LogIn size={14} /> {hosted ? t("hostedMcp.connect", { service: hosted.label }) : t("mcp.auth.signIn")}
                         </button>
                       ) : auth === "signed-in" ? (
-                        <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => void signOut(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
+                        <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => void signOut(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40">
                           {busy === `signout:${server.name}` ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />} {hosted ? t("hostedMcp.disconnect", { service: hosted.label }) : t("mcp.auth.signOut")}
                         </button>
                       ) : null}
-                      <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => void test(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">
+                      <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => void test(server)} className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40">
                         {busy === `test:${server.name}` ? <Loader2 size={14} className="animate-spin" /> : <FlaskConical size={14} />} {t("mcp.test")}
                       </button>
-                      <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => openEditor(server.name)} className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40" aria-label={t("mcp.editAria", { name: server.name })}><Pencil size={14} /></button>
-                      <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => void remove(server)} className="rounded-lg p-2 text-ink-secondary hover:bg-danger/10 hover:text-danger disabled:opacity-40" aria-label={t("mcp.removeAria", { name: server.name })}><Trash2 size={14} /></button>
+                      <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => openEditor(server.name)} className="rounded-lg p-2 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40" aria-label={t("mcp.editAria", { name: server.name })}><Pencil size={14} /></button>
+                      <button type="button" disabled={busy !== null || signingIn !== null} onClick={() => void remove(server)} className="rounded-lg p-2 text-ink-secondary interaction:bg-danger/10 hover:text-danger disabled:opacity-40" aria-label={t("mcp.removeAria", { name: server.name })}><Trash2 size={14} /></button>
                       <span className="ml-1 flex items-center">
                         {busy === `toggle:${server.name}` && <Loader2 size={13} className="mr-1.5 animate-spin text-ink-secondary" />}
                         <Switch
@@ -761,7 +761,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
                     <details className="mt-2">
                       <summary className="cursor-pointer font-medium text-ink">{t("hostedMcp.access")}</summary>
                       <p className="mt-2">{t("hostedMcp.accessHint")}</p>
-                      <div className="mt-2 flex flex-wrap gap-2">{(store.bots ?? []).filter((bot) => !bot.hidden).map((bot) => <button key={bot.id} type="button" onClick={() => { dispatch({ type: "togglePlugins", open: false }); openBotSettings(dispatch, "access", { botId: bot.id }); }} className="rounded-lg bg-control px-2.5 py-1.5 text-ink hover:bg-raised-hover">{t("hostedMcp.botSettings", { name: bot.name })}</button>)}</div>
+                      <div className="mt-2 flex flex-wrap gap-2">{(store.bots ?? []).filter((bot) => !bot.hidden).map((bot) => <button key={bot.id} type="button" onClick={() => { dispatch({ type: "togglePlugins", open: false }); openBotSettings(dispatch, "access", { botId: bot.id }); }} className="rounded-lg bg-control px-2.5 py-1.5 text-ink interaction:bg-raised/50">{t("hostedMcp.botSettings", { name: bot.name })}</button>)}</div>
                     </details>
                   </div>}
                   <McpAppsSwitch<McpServerListing> server={server} disabled={busy !== null || signingIn !== null} onSaved={(next) => { loadGeneration.current += 1; listed(next); }} />{renderSignIn(server)}
@@ -780,7 +780,7 @@ export function McpServersPanel({ embedded = false, hostedCards, hideHosted = fa
                           {(result.reason === "keys" && isRemoteMcpListing(server)) || result.reason === "unreachable" || result.reason === "timeout" ? (
                             <button type="button" disabled={busy !== null || signingIn !== null}
                               onClick={() => result.reason === "keys" ? openEditor(server.name, true) : void connect(server.name)}
-                              className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 font-medium text-ink hover:bg-raised-hover disabled:opacity-40">
+                              className="shrink-0 rounded-lg bg-card px-2.5 py-1.5 font-medium text-ink interaction:bg-raised/50 disabled:opacity-40">
                               {t(result.reason === "keys" ? "mcp.check.fixKeys" : "mcp.check.tryAgain")}
                             </button>
                           ) : null}

@@ -123,7 +123,7 @@ function BedrockForm({ instance, onDone }: { instance?: InstanceInfo; onDone: ()
       </details>
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={onDone} disabled={saving} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-control disabled:opacity-50">{t("common.cancel")}</button>
+        <button type="button" onClick={onDone} disabled={saving} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50 disabled:opacity-50">{t("common.cancel")}</button>
         <button type="submit" disabled={saving || !ready} className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-[12px] font-semibold text-white hover:brightness-110 disabled:opacity-50">
           {saving && <Loader2 size={13} className="animate-spin" />}{t("common.save")}
         </button>
@@ -162,13 +162,13 @@ function BedrockRow({ instance, onEdit }: { instance: InstanceInfo; onEdit: () =
           <div className="truncate text-[13px] font-medium text-ink" title={instance.displayName}>{instance.displayName}</div>
           <div className="truncate font-mono text-[11px] text-ink-secondary">{t("claudeBedrock.rowSubtitle", { profile: bedrock?.awsProfile ?? "", region: bedrock?.awsRegion ?? "" })}</div>
         </div>
-        <button type="button" onClick={onEdit} disabled={removing} className="shrink-0 rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50">
+        <button type="button" onClick={onEdit} disabled={removing} className="shrink-0 rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50">
           {t("claudeBedrock.edit")}
         </button>
         <button type="button" disabled={removing || usedBy > 0} onClick={() => setConfirming(true)}
           title={usedBy > 0 ? t("accounts.inUse", { count: String(usedBy) }) : t("accounts.remove")}
           aria-label={t("claudeBedrock.remove", { name: instance.displayName })}
-          className="flex size-8 shrink-0 items-center justify-center rounded-lg text-danger hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50">
+          className="flex size-8 shrink-0 items-center justify-center rounded-lg text-danger interaction:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-50">
           {removing ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
         </button>
       </div>
@@ -197,7 +197,7 @@ export function ClaudeBedrockEndpoints() {
         </ul>}
       {open === "new"
         ? <BedrockForm onDone={() => setOpen(null)} />
-        : <button type="button" onClick={() => setOpen("new")} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-secondary outline-none hover:bg-control hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
+        : <button type="button" onClick={() => setOpen("new")} className="flex min-h-8 w-fit items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-ink-secondary outline-none interaction:bg-raised/50 hover:text-ink focus-visible:ring-2 focus-visible:ring-accent">
           <Plus size={14} />{t("claudeBedrock.add")}
         </button>}
     </div>

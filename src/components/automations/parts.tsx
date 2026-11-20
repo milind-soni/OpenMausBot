@@ -35,11 +35,11 @@ export function FixButton({ automation, status, actions, onEdit, className }: {
   };
   return (
     <>
-      <button type="button" onClick={onClick} disabled={Boolean(actions.busy)} className={cn("shrink-0 rounded-lg bg-warning/15 px-2.5 py-1 text-[12px] font-medium text-warning hover:bg-warning/25 disabled:opacity-50", className)}>
+      <button type="button" onClick={onClick} disabled={Boolean(actions.busy)} className={cn("shrink-0 rounded-lg bg-warning/15 px-2.5 py-1 text-[12px] font-medium text-warning interaction:bg-warning/25 disabled:opacity-50", className)}>
         {t(AUTOMATION_FIX_LABEL[fix])}
       </button>
       {waiting && (
-        <button type="button" data-automation-cancel-run onClick={() => void actions.cancelRun(automation, waiting)} disabled={Boolean(actions.busy)} className={cn("shrink-0 rounded-lg px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50", className)}>
+        <button type="button" data-automation-cancel-run onClick={() => void actions.cancelRun(automation, waiting)} disabled={Boolean(actions.busy)} className={cn("shrink-0 rounded-lg px-2.5 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50", className)}>
           {t("routines.drawer.cancelRun")}
         </button>
       )}

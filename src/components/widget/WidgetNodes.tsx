@@ -58,7 +58,7 @@ export function WidgetNodeView({ node, where }: { node: WidgetNode; where: Widge
       const ink = INK[widgetString(node, "color") ?? ""];
       if (!(where.item && where.lead)) return <WidgetGlyph name={node.name} size={size} className={ink} />;
       return (
-        <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-[8px] bg-inset group-hover/row:bg-composer group-aria-checked/row:bg-composer", ink ?? "text-ink-secondary")}>
+        <span className={cn("flex size-10 shrink-0 items-center justify-center rounded-[8px] bg-inset group-hover/row:bg-raised/50 group-aria-checked/row:bg-composer", ink ?? "text-ink-secondary")}>
           <WidgetGlyph name={node.name} size={size} />
         </span>
       );
@@ -159,7 +159,7 @@ export function WidgetListRow({ node }: { node: WidgetNode }) {
   const pressed = form.pendingRef === node.id
     ? <LoaderCircle aria-hidden="true" size={14} className="shrink-0 animate-spin text-ink-tertiary" />
     : form.sentRef === node.id ? <Check aria-hidden="true" size={14} className="shrink-0 text-success" /> : null;
-  const className = cn(shape, "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus", live ? "group/row cursor-pointer hover:bg-inset active:bg-inset" : "cursor-default");
+  const className = cn(shape, "transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus", live ? "group/row cursor-pointer interaction:bg-raised/50" : "cursor-default");
   const shared = { "data-widget-ref": node.id, "aria-busy": form.pendingRef === node.id || undefined, title: widgetActionUrl(entry), className, style };
   if (!holdsControl(node)) {
     return <button type="button" {...shared} disabled={!live} onClick={() => form.press(node.id)}>{content}{pressed}</button>;

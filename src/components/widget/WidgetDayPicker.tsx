@@ -74,7 +74,7 @@ export function WidgetDayPicker({ node, labelledBy, end = false }: { node: Widge
               onClick={() => toggle(name)}
               className={cn(
                 "flex size-8 shrink-0 items-center justify-center rounded-full text-[12px] font-semibold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 focus-visible:ring-offset-composer disabled:cursor-not-allowed",
-                on ? "bg-accent text-accent-ink enabled:hover:brightness-110" : "bg-ink/[0.07] text-ink-secondary enabled:hover:bg-ink/[0.12] enabled:hover:text-ink",
+                on ? "bg-accent text-accent-ink enabled:hover:brightness-110" : "bg-ink/[0.07] text-ink-secondary enabled:interaction:bg-raised/50 enabled:hover:text-ink",
                 !on && invalid && "shadow-[inset_0_0_0_1.5px_var(--color-danger)]",
               )}
             >

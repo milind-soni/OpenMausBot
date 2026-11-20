@@ -45,7 +45,7 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
   };
   const choice = (value: SetUpKind, label: string, Icon: typeof CalendarClock) => (
     <button type="button" role="radio" aria-checked={kind === value} onClick={() => setKind(value)}
-      className={cn("flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left text-[14px]", kind === value ? "border-accent/70 bg-accent/10 text-ink" : "border-hairline/50 text-ink-secondary hover:bg-raised")}>
+      className={cn("flex w-full items-center gap-3 rounded-xl border px-3.5 py-3 text-left text-[14px]", kind === value ? "border-accent/70 bg-accent/10 text-ink" : "border-hairline/50 text-ink-secondary interaction:bg-raised/50")}>
       <Icon size={16} className="shrink-0 text-accent" />{label}
     </button>
   );
@@ -55,7 +55,7 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t("automations.newBox.title")} tabIndex={-1} className="w-full max-w-[560px] rounded-2xl border border-hairline/60 bg-panel p-5 shadow-2xl">
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-[17px] font-semibold text-ink">{yourself ? t("automations.newBox.when") : t("automations.newBox.title")}</h2>
-          <button type="button" onClick={onClose} aria-label={t("automations.newBox.cancel")} className="rounded-full p-1.5 text-ink-secondary hover:bg-raised hover:text-ink"><X size={16} /></button>
+          <button type="button" onClick={onClose} aria-label={t("automations.newBox.cancel")} className="rounded-full p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink"><X size={16} /></button>
         </div>
         {yourself ? (
           <>
@@ -65,7 +65,7 @@ export function NewAutomation({ initialText = "", onClose, onSetUpYourself }: {
               {choice("webhook", t("automations.newBox.whenApp"), Share2)}
             </div>
             <div className="mt-5 flex items-center justify-between gap-2">
-              <button type="button" onClick={() => setYourself(false)} className="rounded-lg px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">{t("automations.newBox.back")}</button>
+              <button type="button" onClick={() => setYourself(false)} className="rounded-lg px-2 py-1.5 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink">{t("automations.newBox.back")}</button>
               <button type="button" onClick={() => onSetUpYourself(kind, bot?.id ?? "")} className="rounded-xl bg-accent px-4 py-2 text-[13px] font-medium text-accent-ink hover:brightness-110">{t("automations.newBox.continue")}</button>
             </div>
           </>

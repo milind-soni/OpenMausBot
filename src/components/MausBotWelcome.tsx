@@ -212,7 +212,7 @@ export function MausBotWelcomeCard({ bot, onClose }: { bot: Bot; onClose: () => 
 
         <div className={cn("mt-4 flex flex-col-reverse gap-2 sm:flex-row sm:items-center", "sm:justify-between")}>
           <button type="button" data-mausbot-welcome-later="" onClick={() => choose(false)} title={t("mausbotWelcome.notNowHint", { name })}
-            className={"rounded-full px-3 py-2 text-[13px] text-ink-secondary hover:bg-raised-hover hover:text-ink"}>
+            className={"rounded-full px-3 py-2 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"}>
             {t("mausbotWelcome.notNow")}
           </button>
           <button type="button" data-mausbot-welcome-add="" onClick={() => choose(true)}

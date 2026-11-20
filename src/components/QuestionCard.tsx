@@ -183,7 +183,7 @@ export function QuestionCard({
               role="tab"
               aria-selected={index === currentIndex}
               onClick={() => setActive(index)}
-              className={cn(ASK_SMALL_PILL, index === currentIndex ? "bg-ink/[0.08] text-ink" : "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink")}
+              className={cn(ASK_SMALL_PILL, index === currentIndex ? "bg-ink/[0.08] text-ink" : "text-ink-secondary interaction:bg-raised/50 hover:text-ink")}
             >
               {answered[index] && <Check size={13} strokeWidth={2.4} className="text-success" />}
               {tabLabel(question, index)}

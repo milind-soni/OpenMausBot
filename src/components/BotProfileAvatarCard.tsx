@@ -40,7 +40,7 @@ export function BotProfileAvatarCard({
         <button
           disabled={busy}
           onClick={() => onPatch(RESET_MASCOT_PATCH)}
-          className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50"
+          className="rounded-md px-2 py-1.5 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"
         >
           {t("botIdentity.resetMascot")}
         </button>
@@ -74,7 +74,7 @@ export function BotProfileAvatarCard({
             type="button"
             onClick={() => fileRef.current?.click()}
             disabled={busy}
-            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+            className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
           >
             {uploading ? <Loader2 size={14} className="animate-spin" /> : <ImagePlus size={14} />}
             {t("botIdentity.uploadImage")}
@@ -86,7 +86,7 @@ export function BotProfileAvatarCard({
               disabled={busy}
               aria-label={t("botIdentity.removeAvatar")}
               title={t("botIdentity.removeImage")}
-              className="flex size-10 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"
+              className="flex size-10 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-danger disabled:opacity-50"
             >
               <Trash2 size={14} />
             </button>
@@ -108,7 +108,7 @@ export function BotProfileAvatarCard({
               className={cn(
                 "py-1.5 text-[13px] disabled:opacity-50",
                 index > 0 && "border-l border-hairline/40",
-                crop === candidate ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60 hover:text-ink",
+                crop === candidate ? "bg-control text-ink" : "text-ink-secondary interaction:bg-raised/50 hover:text-ink",
               )}
             >
               {t(`botIdentity.crop.${candidate}` as never)}
@@ -131,7 +131,7 @@ export function BotProfileAvatarCard({
                   aria-pressed={activeState === expression}
                   onClick={() => onPatch({ mascotExpression: expression })}
                   className={cn(
-                    "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors hover:bg-control disabled:opacity-50",
+                    "flex h-[58px] items-center justify-center rounded-xl bg-inset transition-colors interaction:bg-raised/50 disabled:opacity-50",
                     activeState === expression && "ring-2 ring-accent-border",
                   )}
                   title={expressionName(expression)}
@@ -221,7 +221,7 @@ function BodyButton({ id, name, bot, busy, onPatch }: {
       onClick={() => onPatch({ mascotBody: id })}
       className={cn(
         "flex items-center justify-center rounded-lg py-1.5 disabled:opacity-50",
-        selected ? "bg-control text-ink" : "text-ink-secondary hover:bg-control/60",
+        selected ? "bg-control text-ink" : "text-ink-secondary interaction:bg-raised/50",
       )}
     >
       <MausAvatar color={bot.color} faceColor={bot.mascotFaceColor} bodyId={id} size={34} animated={false} trackPointer={false} />

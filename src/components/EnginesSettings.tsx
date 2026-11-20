@@ -153,7 +153,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
         <button
           onClick={onClose}
           disabled={busy}
-          className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"
+          className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"
         >
           {t("common.cancel")}
         </button>
@@ -162,14 +162,14 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
             <button
               onClick={() => setProbe(null)}
               disabled={busy}
-              className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary hover:bg-raised/50 hover:text-ink disabled:opacity-50"
+              className="rounded-lg px-3 py-1.5 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"
             >
               {t("engines.editPath")}
             </button>
             <button
               onClick={() => persist()}
               disabled={busy}
-              className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-danger hover:bg-raised-hover disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-lg bg-raised px-3 py-1.5 text-[13px] text-danger interaction:bg-raised/50 disabled:opacity-50"
             >
               {saving ? <Loader2 size={13} className="animate-spin" /> : t("engines.saveAnyway")}
             </button>
@@ -180,7 +180,7 @@ function CustomPicker({ instance, cliDefault, onClose, onSaved }: {
             disabled={busy || !value || !dirty}
             className={cn(
               "flex w-[72px] items-center justify-center gap-1.5 rounded-lg py-1.5 text-[13px]",
-              "bg-raised text-ink hover:bg-raised-hover",
+              "bg-raised text-ink interaction:bg-raised/50",
               "disabled:cursor-not-allowed disabled:opacity-50",
             )}
           >
@@ -306,7 +306,7 @@ function EngineAdvanced({ instance }: { instance: InstanceInfo }) {
             aria-expanded={open}
             className={cn(
               "shrink-0 rounded-lg border border-hairline/40 px-3 py-1 text-[12px]",
-              open ? "bg-accent/15 text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
+              open ? "bg-accent/15 text-accent" : "text-ink-secondary interaction:bg-raised/50 hover:text-ink",
               "disabled:opacity-50",
             )}
           >
@@ -358,7 +358,7 @@ function EngineAccountAction({ instance, action, cli = false, removeBody = "acco
   };
   return <>
     <div className="flex flex-wrap items-center gap-2">
-      <button type="button" disabled={running || usedBy > 0} onClick={() => setConfirming(true)} aria-label={remove ? undefined : t("accounts.signOutAria", { name: instance.displayName })} className={cn("rounded-lg px-2.5 py-1.5 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-50", remove ? "text-danger hover:bg-danger/10" : "text-ink-secondary hover:bg-raised hover:text-ink")}>
+      <button type="button" disabled={running || usedBy > 0} onClick={() => setConfirming(true)} aria-label={remove ? undefined : t("accounts.signOutAria", { name: instance.displayName })} className={cn("rounded-lg px-2.5 py-1.5 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-50", remove ? "text-danger interaction:bg-danger/10" : "text-ink-secondary interaction:bg-raised/50 hover:text-ink")}>
         {running ? <Loader2 size={13} className="animate-spin" /> : label}
       </button>
       {usedBy > 0 && <p className="text-[11px] text-ink-secondary">{t("accounts.inUse", { count: String(usedBy) })}</p>}

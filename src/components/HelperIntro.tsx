@@ -40,7 +40,7 @@ export function HelperIntro({ botId, threadId, message, answered }: IntroProps) 
               type="button"
               data-helper-ask={key}
               onClick={() => ask(key)}
-              className="rounded-full border border-hairline/60 bg-app px-3 py-1.5 text-[13px] text-ink hover:bg-raised-hover"
+              className="rounded-full border border-hairline/60 bg-app px-3 py-1.5 text-[13px] text-ink interaction:bg-raised/50"
             >
               {t(key)}
             </button>
@@ -51,7 +51,7 @@ export function HelperIntro({ botId, threadId, message, answered }: IntroProps) 
             onClick={() => dispatch({ type: "dismissCard", botId, threadId, messageId: message.id })}
             aria-label={t("helperIntro.dismiss")}
             title={t("helperIntro.dismiss")}
-            className="flex size-7 items-center justify-center rounded-full text-ink-tertiary hover:bg-raised-hover hover:text-ink"
+            className="flex size-7 items-center justify-center rounded-full text-ink-tertiary interaction:bg-raised/50 hover:text-ink"
           >
             <X size={14} />
           </button>

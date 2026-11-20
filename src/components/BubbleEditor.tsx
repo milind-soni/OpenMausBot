@@ -57,7 +57,7 @@ export function BubbleEditor({
       <div className="mt-2 flex items-center justify-end gap-2">
         <button
           onClick={onCancel}
-          className="rounded-full px-3 py-1 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+          className="rounded-full px-3 py-1 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
         >
           {t("common.cancel")}
         </button>

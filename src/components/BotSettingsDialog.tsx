@@ -183,7 +183,7 @@ export function BotSettingsDialog({ bot, overlay = false, closing = false }: {
             {bot.name}
           </span>
           <span className="flex shrink-0 items-center gap-1">
-            <ShareBotButton bot={bot} className="rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink" />
+            <ShareBotButton bot={bot} className="rounded-md p-1 text-ink-secondary interaction:bg-raised/50 hover:text-ink" />
           </span>
         </RightSidePanelHeader>
 

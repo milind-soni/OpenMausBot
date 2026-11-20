@@ -52,7 +52,7 @@ export function UndoToast({ text, onUndo, onDone, actionLabel = t("common.undo")
     <div role="status" data-access-toast className="fixed bottom-5 left-1/2 z-[70] flex max-w-[min(420px,calc(100vw-32px))] -translate-x-1/2 items-center gap-3 rounded-xl border border-hairline/50 bg-card px-3.5 py-2.5 text-[13px] text-ink shadow-xl">
       <span className="min-w-0 flex-1">{failed ? t("botAccess.undoFailed") : text}</span>
       {!failed && (
-        <button type="button" onClick={() => void onUndo().then(onDone, () => setFailed(true))} className="shrink-0 rounded-md px-1.5 py-0.5 font-medium text-accent hover:bg-raised">
+        <button type="button" onClick={() => void onUndo().then(onDone, () => setFailed(true))} className="shrink-0 rounded-md px-1.5 py-0.5 font-medium text-accent interaction:bg-raised/50">
           {actionLabel}
         </button>
       )}

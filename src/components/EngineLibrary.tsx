@@ -123,7 +123,7 @@ export function RefreshEngines() {
     </button>;
   }
   return <div>
-    <button type="button" disabled={busy} onClick={() => void check()} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] font-medium text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
+    <button type="button" disabled={busy} onClick={() => void check()} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] font-medium text-ink-secondary interaction:bg-raised/50 hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
       <RefreshCw size={13} aria-hidden="true" className={cn(busy && "animate-spin")} />
       {busy ? t("common.checking") : t("engines.library.refresh")}
     </button>

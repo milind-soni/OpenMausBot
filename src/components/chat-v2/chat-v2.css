@@ -10,7 +10,7 @@
 }
 .v2-exchange { width: 100%; margin-block: .45rem; }
 .v2-exchange summary { display: flex; width: fit-content; max-width: 100%; align-items: center; gap: .45rem; margin: auto; padding: .35rem .65rem; color: var(--color-ink-secondary); font-size: .8rem; cursor: pointer; border-radius: .65rem; }
-.v2-exchange summary:hover { background: var(--color-raised); }
+.v2-exchange summary:is(:hover, :active) { background: color-mix(in srgb, var(--color-raised) 50%, transparent); }
 .v2-exchange summary::-webkit-details-marker { display: none; }
 .v2-exchange[open] > summary { margin-bottom: .6rem; }
 .v2-exchange[open] > summary > svg:last-child { transform: rotate(90deg); }
@@ -46,7 +46,7 @@
 .v2-step p { white-space:pre-wrap; overflow-wrap:anywhere; }
 .v2-dock { grid-row:3; position:relative; width:100%; padding-top:8px; }
 .v2-jump-to-latest { background:var(--color-panel); }
-.v2-jump-to-latest:hover { background:color-mix(in srgb, var(--color-panel), var(--color-ink) 5%); }
+.v2-jump-to-latest:is(:hover, :active) { background:color-mix(in srgb, var(--color-raised) 50%, transparent); }
 .v2-turn-status { padding:0 1.25rem 8px; }
 .v2-turn-status:empty { display:none; }
 .v2-turn-status .thinking-shimmer { font-size:15px; }
@@ -70,8 +70,8 @@
   0%, 65%, 100% { opacity:.55; transform:scale(1); }
   30% { opacity:1; transform:translateY(-3px) scale(1.2); }
 }
-.v2-identity:hover, .v2-identity:focus-visible { background:linear-gradient(color-mix(in srgb,var(--color-raised) 50%,transparent),color-mix(in srgb,var(--color-raised) 50%,transparent)),var(--color-composer); }
-.v2-identity:active, .v2-identity[aria-expanded=true] { background:var(--color-raised); }
+.v2-identity:is(:hover, :active, :focus-visible) { background:linear-gradient(color-mix(in srgb,var(--color-raised) 50%,transparent),color-mix(in srgb,var(--color-raised) 50%,transparent)),var(--color-composer); }
+.v2-identity[aria-expanded=true] { background:var(--color-raised); }
 .v2-identity-arrow { flex:none; display:flex; align-items:center; width:0; margin-inline-start:-6px; overflow:hidden; opacity:0; transform:translateX(-5px); color:var(--color-ink-secondary); }
 .v2-identity-arrow svg { flex:none; }
 .v2-identity:is(:hover,:focus-visible,[aria-expanded=true]) .v2-identity-arrow { width:16px; margin-inline-start:0; opacity:1; transform:translateX(0); }

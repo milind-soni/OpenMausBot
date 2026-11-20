@@ -252,7 +252,7 @@ function AddPerson({ team, access, owner, disabled, onAdd }: {
           ) : matches.map((person, index) => (
             <li key={person.email} id={`${listId}-${index}`} role="option" aria-selected={index === current} data-share-suggestion={person.email}
               onMouseEnter={() => setActive(index)} onMouseDown={() => add(person)}
-              className={cn("flex shrink-0 cursor-pointer items-center gap-3 rounded-md px-2 py-1", index === current && "bg-menu-hover")}>
+              className={cn("flex shrink-0 cursor-pointer items-center gap-3 rounded-md px-2 py-1", index === current && "bg-raised/50")}>
               <EntryFace person={person} size={32} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[14px] leading-[18px] text-ink">{person.name}</span>

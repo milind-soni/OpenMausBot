@@ -49,7 +49,7 @@ function OtherPlaceBotRow({ row, dim, iconOnly }: { row: PlaceBotRow; dim: boole
   return (
     <button type="button" data-placed-bot={placedKey(row.home, row.id)} data-bot-home={row.home} data-bot-address={row.address} title={iconOnly ? label : undefined} aria-label={label}
       onClick={() => openOtherPlaceBot(row.id)}
-      className={cn("flex w-full items-center rounded-xl text-left transition-colors duration-150 hover:bg-raised/50", SIMPLE_ROW_FOCUS,
+      className={cn("flex w-full items-center rounded-xl text-left transition-colors duration-150 interaction:bg-raised/50", SIMPLE_ROW_FOCUS,
         iconOnly ? "justify-center px-1 py-1.5" : "gap-2 rounded-[8px] px-2 py-2", dim && "opacity-60")}>
       <span className="relative flex shrink-0">
         <BotAvatar bot={avatarOf(row)} state="idle" size={iconOnly ? 44 : 36} motion="none" animated={false} />

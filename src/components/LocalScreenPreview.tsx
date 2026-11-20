@@ -179,7 +179,7 @@ export function LocalScreenPreview() {
             ? () => releaseStream("idle", phaseCopy.idle)
             : () => void start()
         }
-        className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink hover:bg-raised-hover disabled:cursor-not-allowed disabled:opacity-50"
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-raised py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {phase === "requesting" ? (
           <Loader2 size={14} className="animate-spin" />

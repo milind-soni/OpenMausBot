@@ -139,7 +139,7 @@ export function ClaudeSignIn({ instanceId, autoStart = false, onDone, onStart }:
           <p className="text-[12px] font-medium text-ink">{t("accounts.claude.step1")}</p>
           <a href={link} target="_blank" rel="noopener noreferrer" onClick={(event) => {
             if (window.ogb?.openExternal) { event.preventDefault(); void openExternalLink(link); }
-          }} className="flex w-fit items-center gap-1.5 rounded-lg bg-control px-3 py-1.5 text-[12px] font-medium text-ink hover:bg-raised-hover">
+          }} className="flex w-fit items-center gap-1.5 rounded-lg bg-control px-3 py-1.5 text-[12px] font-medium text-ink interaction:bg-raised/50">
             {t("accounts.claude.openAgain")} <ExternalLink size={12} />
           </a>
         </div>
@@ -165,7 +165,7 @@ export function ClaudeSignIn({ instanceId, autoStart = false, onDone, onStart }:
         {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}
         <div className="flex items-center justify-between gap-3">
           <p className="text-[11px] leading-relaxed text-ink-secondary">{t("accounts.claude.security")}</p>
-          <button type="button" disabled={busy !== null} onClick={() => void cancel()} className="shrink-0 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-50">
+          <button type="button" disabled={busy !== null} onClick={() => void cancel()} className="shrink-0 rounded-lg px-2.5 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50">
             {t("common.cancel")}
           </button>
         </div>
@@ -189,7 +189,7 @@ export function ClaudeSignIn({ instanceId, autoStart = false, onDone, onStart }:
           {busy === "start" ? t("engineSetup.claude.starting") : auth || error ? t("engineSetup.device.tryAgain") : t("engineSetup.claude.start")}
         </button>
         {onDone && (auth || error) && busy === null && (
-          <button type="button" onClick={() => onDone(false)} className="rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary hover:bg-control hover:text-ink">{t("common.cancel")}</button>
+          <button type="button" onClick={() => onDone(false)} className="rounded-lg px-2.5 py-2 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink">{t("common.cancel")}</button>
         )}
       </div>
       {error && <p role="alert" className="text-[12px] text-danger">{error}</p>}

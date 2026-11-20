@@ -194,7 +194,7 @@ export function AppGrantPrompt({ app, slug, bots, onDone, onDismiss }: {
       >
         <div className="flex items-start justify-between gap-3">
           <h3 id="app-grant-title" className="min-w-0 text-[15px] font-semibold text-ink">{t("apps.whichBots", { app })}</h3>
-          <button type="button" aria-label={t("common.close")} onClick={onDismiss} className="-mt-1 -me-1 flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink">
+          <button type="button" aria-label={t("common.close")} onClick={onDismiss} className="-mt-1 -me-1 flex size-7 shrink-0 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink">
             <X size={16} />
           </button>
         </div>

@@ -167,7 +167,7 @@ export function TeamMemoryDialog({ section, label, onClose, open = true }: { sec
           <button
             onClick={onClose}
             aria-label={t("teamMemory.close")}
-            className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             <X size={19} />
           </button>
@@ -245,7 +245,7 @@ export function TeamMemoryDialog({ section, label, onClose, open = true }: { sec
                             if (event.key === "Enter") (event.target as HTMLInputElement).blur();
                           }}
                           aria-label={t("teamMemory.entryDetailLabel", { name: entry.name })}
-                          className="mt-0.5 block w-full rounded bg-transparent px-1 py-0.5 text-[13px] text-ink outline-none hover:bg-card focus:bg-card"
+                          className="mt-0.5 block w-full rounded bg-transparent px-1 py-0.5 text-[13px] text-ink outline-none interaction:bg-raised/50 focus:bg-card"
                         />
                         <span className="block px-1 text-[11px] text-ink-secondary">
                           {entry.source.botName || t("teamMemory.you")} · {new Date(entry.updatedAt).toLocaleDateString(intlLocale())} · {loadedIds.includes(entry.id) ? t("teamMemory.loaded") : t("teamMemory.searchable")}

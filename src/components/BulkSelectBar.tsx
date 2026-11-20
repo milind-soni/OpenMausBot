@@ -72,7 +72,7 @@ export function bulkDeleteOutcome(outcome: BulkDeleteResult): string {
 
 const OLDER_DAYS = 30;
 
-const chip = "rounded-full border border-hairline/50 px-2.5 py-0.5 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40";
+const chip = "rounded-full border border-hairline/50 px-2.5 py-0.5 text-[11px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40";
 
 /** Each render hands `forRows` the rows the list shows, in display order, so ranges and filters touch only visible rows. */
 export function useBulkSelect() {
@@ -158,9 +158,9 @@ export function BulkSelectBar({ rows, selected, maxDeletable, freshConversation,
     <div className="flex items-center gap-2">
       <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">{t("task.bulk.selected", { count })}</span>
       <button type="button" disabled={count === 0 || pending || retitling} onClick={() => onChange(clearSelection())}
-        className="rounded-md px-2.5 py-1 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-40">{t("task.bulk.cancel")}</button>
+        className="rounded-md px-2.5 py-1 text-[12px] text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-40">{t("task.bulk.cancel")}</button>
       {onRetitle && <button type="button" disabled={count === 0 || pending || retitling} aria-busy={retitling || undefined} onClick={retitle}
-        className="rounded-md px-2.5 py-1 text-[12px] font-medium text-ink hover:bg-raised disabled:opacity-40">
+        className="rounded-md px-2.5 py-1 text-[12px] font-medium text-ink interaction:bg-raised/50 disabled:opacity-40">
         {retitling ? t("task.bulk.retitling") : t("task.bulk.retitle")}
       </button>}
       <button type="button" disabled={count === 0 || overLimit || pending || retitling} aria-busy={pending || undefined} onClick={() => setConfirming(true)}

@@ -24,7 +24,7 @@ import { ASK_CHIP, ASK_CHIP_IDLE, ASK_CHIP_PICKED, ASK_PRIMARY_BUTTON } from "..
 export const PAGE_HEIGHT = { start: 520, cap: 560 } as const;
 const FLASH_MS = 2_500;
 const TOOL =
-  "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary transition-colors hover:bg-ink/[0.07] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-40";
+  "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-40";
 
 /** The oldest version a row's page still keeps, and its current one. */
 export function pageVersions(app: AppPayload): { first: number; last: number } {

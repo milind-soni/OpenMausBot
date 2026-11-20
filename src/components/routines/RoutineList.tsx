@@ -50,7 +50,7 @@ export function RoutineList({ routines, runs, bots, pausedBots, heldBots, loadin
           <div className="min-w-0 text-[12px]">
             {latest ? <><span className={routineRunTone(latest)}>{t("routines.latestRun", { status: routineRunLabel(latest) })}</span><span className="block text-[11px] text-ink-secondary">{routineDateTime(latest.finishedAt ?? latest.startedAt ?? latest.scheduledFor)}</span></> : <span className="text-ink-secondary">{t("routines.neverRun")}</span>}
           </div>
-          <button type="button" onClick={() => onLogs(routine)} aria-label={t("routines.logsFor", { name: routine.name })} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] text-ink-secondary hover:bg-raised hover:text-ink"><FileText size={12} />{t("routines.logs")}</button>
+          <button type="button" onClick={() => onLogs(routine)} aria-label={t("routines.logsFor", { name: routine.name })} className="flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-[11px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"><FileText size={12} />{t("routines.logs")}</button>
         </div>
         {latest && said && <p className={cn("mt-2 line-clamp-2 whitespace-pre-wrap text-[12px] leading-relaxed", latest.error ? "text-danger" : "text-ink-secondary")}>{routineRunText(latest, said)}</p>}
         {!!routine.failureStreak && <p className="mt-2 text-[12px] text-danger">{t("routines.failureStreak", { count: routine.failureStreak })}</p>}

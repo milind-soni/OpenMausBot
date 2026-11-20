@@ -20,7 +20,7 @@ function StatusIcon({ status }: { status: RunStep["status"] }) {
 }
 
 const ICON_BUTTON =
-  "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary outline-none hover:bg-raised-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60";
+  "flex size-7 shrink-0 items-center justify-center rounded-lg text-ink-secondary outline-none interaction:bg-raised/50 hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60";
 
 export function VerifyCard({
   steps,
@@ -95,7 +95,7 @@ export function VerifyCard({
               <button
                 type="button"
                 onClick={onSave}
-                className="flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-ink-secondary outline-none hover:bg-raised-hover hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60"
+                className="flex h-7 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[13px] font-medium text-ink-secondary outline-none interaction:bg-raised/50 hover:text-ink focus-visible:ring-2 focus-visible:ring-accent/60"
               >
                 <BookmarkPlus size={13} aria-hidden="true" />
                 {t("chat.verify.save")}

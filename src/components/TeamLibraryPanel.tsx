@@ -250,7 +250,7 @@ export function TeamLibraryPanel({
                 <button
                   onClick={() => { setPending(null); setError(""); }}
                   disabled={importing}
-                  className="rounded-lg p-1.5 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
+                  className="rounded-lg p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"
                   aria-label={t("templates.back")}
                 >
                   <ArrowLeft size={18} />
@@ -266,7 +266,7 @@ export function TeamLibraryPanel({
             {!pending && (
               <button
                 onClick={() => void openExternalLink(catalog?.repositoryUrl || COMMUNITY_REPOSITORY_URL).catch(() => {})}
-                className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink"
+                className="flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-[13px] text-ink-secondary interaction:bg-raised/50 hover:text-ink"
                 title={t("templates.openRepository")}
               >
                 <Github size={16} />
@@ -277,7 +277,7 @@ export function TeamLibraryPanel({
             <button
               onClick={onClose}
               disabled={importing}
-              className="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
+              className="rounded-lg p-2 text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"
               aria-label={t("templates.close")}
             >
               <X size={21} />
@@ -352,7 +352,7 @@ export function TeamLibraryPanel({
               {!catalogLoading && catalogError && (
                 <div className="rounded-xl bg-danger/10 p-4 text-[13px] text-danger">
                   <p>{catalogError}</p>
-                  <button onClick={() => void loadCatalog()} className="mt-3 rounded-full bg-raised px-3.5 py-2 text-ink hover:bg-raised-hover">{t("common.tryAgain")}</button>
+                  <button onClick={() => void loadCatalog()} className="mt-3 rounded-full bg-raised px-3.5 py-2 text-ink interaction:bg-raised/50">{t("common.tryAgain")}</button>
                 </div>
               )}
               {!catalogLoading && catalog && (
@@ -374,7 +374,7 @@ export function TeamLibraryPanel({
                         <button
                           onClick={() => void loadLibraryTeam(entry)}
                           disabled={busySlug !== null}
-                          className="flex min-w-[72px] items-center justify-center gap-1.5 rounded-full bg-raised px-3.5 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-40"
+                          className="flex min-w-[72px] items-center justify-center gap-1.5 rounded-full bg-raised px-3.5 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-40"
                         >
                           {busySlug === entry.slug && <Loader2 size={13} className="animate-spin" />}
                           {busySlug === entry.slug ? t("templates.loadingShort") : t("templates.load")}

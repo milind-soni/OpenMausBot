@@ -103,7 +103,7 @@ export function ExportTranscriptMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         className={cn(
-          "flex size-8 items-center justify-center rounded-full transition-colors hover:bg-ink/[0.06]",
+          "flex size-8 items-center justify-center rounded-full transition-colors interaction:bg-raised/50",
           open ? "text-accent" : "text-ink-secondary hover:text-ink",
           className,
         )}

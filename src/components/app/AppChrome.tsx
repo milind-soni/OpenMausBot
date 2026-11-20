@@ -9,7 +9,7 @@ import { ASK_CHIP, ASK_CHIP_IDLE, ASK_QUIET_BUTTON } from "../AskCard";
 const PAGE_ICON = "flex shrink-0 text-ink-secondary";
 export const APP_SURFACE = "w-full overflow-hidden rounded-2xl bg-composer ring-1 ring-composer-ring";
 const ICON_BUTTON =
-  "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary transition-colors hover:bg-ink/[0.07] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40";
+  "flex size-7 shrink-0 items-center justify-center rounded-full text-ink-tertiary transition-colors interaction:bg-raised/50 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-40";
 
 const decimal = (value: number, digits: number) =>
   new Intl.NumberFormat(intlLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }).format(value);

@@ -123,14 +123,14 @@ function TableViewport({ columns, rows, order, name, wrap, large, sort, onSort, 
           className={"h-10 border-b border-hairline/60 px-3 py-2 font-medium"} style={{ textAlign: alignment(column, index) }}>
           <div className="inline-flex max-w-full items-center gap-1 whitespace-nowrap" style={fit ? { minWidth: minimums[index] } : undefined}>
             <span dir="auto" className="min-w-0 truncate" title={column.text}>{header(column, index)}</span>
-            <button type="button" className="inline-flex shrink-0 rounded hover:bg-inset focus-visible:outline-accent" aria-label={sortLabel(column, index)} title={sortLabel(column, index)} onClick={() => onSort(index)}>{arrow(index)}</button>
+            <button type="button" className="inline-flex shrink-0 rounded interaction:bg-raised/50 focus-visible:outline-accent" aria-label={sortLabel(column, index)} title={sortLabel(column, index)} onClick={() => onSort(index)}>{arrow(index)}</button>
           </div>
         </th>)}
       </tr></thead>
       <tbody>
         {before > 0 && <tr aria-hidden="true"><td colSpan={columns.length} style={{ height: before, padding: 0 }} /></tr>}
         {items.map((item) => <tr key={item.key} data-index={item.index} ref={virtual ? virtualizer.measureElement : undefined} aria-rowindex={item.index + 2}
-          className={item.index % 2 ? "bg-inset/35 hover:bg-raised/70" : "hover:bg-raised/70"}>
+          className={item.index % 2 ? "bg-inset/35 interaction:bg-raised/50" : "interaction:bg-raised/50"}>
           {columns.map((column, index) => {
             const cell = rows[order[item.index]!]![index];
             return <td key={index} className={"border-b border-hairline/20 px-3 py-2.5 align-top tabular-nums"} style={{ textAlign: cell?.align ?? alignment(column, index), verticalAlign: cell?.vAlign }}>

@@ -11,7 +11,7 @@ export function DialogTitle({ title, onClose }: { title: string; onClose: () => 
     <div className="-my-[5px] -mr-2 flex items-center justify-between gap-2" data-dialog-title="">
       <div className="min-w-0 text-[16px] font-semibold leading-[22px] text-ink">{title}</div>
       <button type="button" onClick={onClose} aria-label={t("common.close")}
-        className="ui-icon-button size-8 shrink-0 cursor-pointer rounded-full text-ink-secondary hover:bg-menu-hover hover:text-ink">
+        className="ui-icon-button size-8 shrink-0 cursor-pointer rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink">
         <X size={16} aria-hidden="true" />
       </button>
     </div>

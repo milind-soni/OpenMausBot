@@ -30,7 +30,7 @@ export function PointedChips({ threadId }: { threadId: string }) {
                 {chip.note ? <StickyNote size={12} aria-hidden="true" className="shrink-0 text-accent-text" /> : null}
               </button>
               <button type="button" onClick={() => removePointedChip(threadId, chip.id)} aria-label={t("chat.preview.removePoint", { label })}
-                className="flex size-5 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-ink/[0.08] hover:text-ink">
+                className="flex size-5 shrink-0 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink">
                 <X size={12} />
               </button>
             </span>

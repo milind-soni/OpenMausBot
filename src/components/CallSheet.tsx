@@ -129,7 +129,7 @@ export function CallSheet({ message, transcript, botName, threadId, busy, partia
             type="button"
             onClick={onClose}
             aria-label={t("common.close")}
-            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink"
+            className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary interaction:bg-raised/50 hover:text-ink"
           >
             <X size={17} />
           </button>

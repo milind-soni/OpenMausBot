@@ -9,7 +9,7 @@ import { cn } from "@/lib/cn";
 import { MENU_ITEM, MENU_SHEET } from "./menu-recipe";
 
 const REVEALABLE_PATH = /^(?:\/(?!\/)|[a-zA-Z]:[\\/])/;
-const ITEM_CLASS = `${MENU_ITEM} text-ink hover:bg-menu-hover [&>svg]:text-ink-secondary`;
+const ITEM_CLASS = `${MENU_ITEM} text-ink interaction:bg-raised/50 [&>svg]:text-ink-secondary`;
 
 type Reveal = NonNullable<NonNullable<Window["ogb"]>["revealInFolder"]>;
 

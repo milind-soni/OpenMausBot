@@ -455,7 +455,7 @@ export function PluginsPanel() {
   const pill = "inline-flex h-7 shrink-0 items-center justify-center gap-2 rounded-full px-3 text-[13px] font-medium leading-5 transition-colors";
   const pillTone = (selected: boolean) => selected
     ? "bg-ink text-app"
-    : "bg-control/70 text-ink-secondary hover:bg-raised-hover hover:text-ink";
+    : "bg-control/70 text-ink-secondary interaction:bg-raised/50 hover:text-ink";
 
   return (
     <div
@@ -487,7 +487,7 @@ export function PluginsPanel() {
                 onClick={() => chooseFilter(filter === "connected" ? "all" : "connected")}
                 className={cn(
                   "inline-flex h-8 items-center gap-2 rounded-full ps-1.5 pe-2 text-[13px] font-medium leading-5 transition-colors",
-                  filter === "connected" ? "bg-raised text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
+                  filter === "connected" ? "bg-raised text-ink" : "text-ink-secondary interaction:bg-raised/50 hover:text-ink",
                 )}
               >
                 {connectedCards.length > 0 && (
@@ -507,7 +507,7 @@ export function PluginsPanel() {
               <button
                 onClick={() => { setCardsRefresh((value) => value + 1); void loadConnectionInventory(true); }}
                 disabled={refreshing}
-                className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink disabled:opacity-50"
+                className="flex size-8 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink disabled:opacity-50"
                 title={t("connectors.refreshTitle")}
                 aria-label={t("connectors.refreshTitle")}
               >
@@ -516,7 +516,7 @@ export function PluginsPanel() {
               <button data-tour="apps-close"
                 onClick={close}
                 aria-label={t("connectors.closeAria")}
-                className="flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-raised hover:text-ink"
+                className="flex size-8 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink"
               >
                 <X size={18} />
               </button>
@@ -540,7 +540,7 @@ export function PluginsPanel() {
               data-apps-filter="mcp"
               aria-pressed={filter === "mcp"}
               onClick={() => chooseFilter(filter === "mcp" ? "all" : "mcp")}
-              className={cn(pill, "h-9 border border-hairline/40 px-3.5", filter === "mcp" ? "bg-ink text-app" : "text-ink hover:bg-raised")}
+              className={cn(pill, "h-9 border border-hairline/40 px-3.5", filter === "mcp" ? "bg-ink text-app" : "text-ink interaction:bg-raised/50")}
             >
               <Server size={14} aria-hidden="true" />
               <span className="hidden sm:inline">{t("apps.filter.mcp")}</span>
@@ -686,7 +686,7 @@ export function PluginsPanel() {
                         <button
                           type="button"
                           onClick={() => setShowAllApps(true)}
-                          className={cn(pill, "bg-control/70 px-4 text-ink hover:bg-raised-hover")}
+                          className={cn(pill, "bg-control/70 px-4 text-ink interaction:bg-raised/50")}
                         >
                           {t("apps.showAll", { count: allCards.length.toLocaleString(intlLocale()) })}
                         </button>
@@ -705,7 +705,7 @@ export function PluginsPanel() {
                             type="button"
                             disabled={refreshing}
                             onClick={() => void loadConnectionInventory(true)}
-                            className={cn(pill, "mt-4 bg-raised text-ink hover:bg-raised-hover disabled:opacity-50")}
+                            className={cn(pill, "mt-4 bg-raised text-ink interaction:bg-raised/50 disabled:opacity-50")}
                           >
                             <RefreshCw size={14} className={cn(refreshing && "animate-spin")} />
                             {t("connectors.action.retry")}
@@ -795,7 +795,7 @@ export function PluginsPanel() {
       <div
         key={card.slug}
         data-app-tile={card.slug}
-        className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors hover:bg-raised/40"
+        className="flex min-w-0 flex-col rounded-xl px-2 py-2 transition-colors interaction:bg-raised/50"
       >
         <div className="flex items-center gap-3">
           <ServiceIcon card={card} className="size-10 shrink-0 rounded-[8px]" />
@@ -848,7 +848,7 @@ export function PluginsPanel() {
                 setAliasDraft("");
               }
             }}
-            className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors hover:bg-raised-hover disabled:opacity-40"
+            className="inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors interaction:bg-raised/50 disabled:opacity-40"
           >
             {unavailableReason ? (
               t("connectors.selfHostOnly")
@@ -888,7 +888,7 @@ export function PluginsPanel() {
                   type="button"
                   onClick={() => appGrants.change(card.slug)}
                   aria-label={t("apps.whichBots", { app: card.label })}
-                  className="ms-auto shrink-0 rounded-full px-2 text-[12px] font-medium leading-5 text-accent-text transition-colors hover:bg-raised-hover"
+                  className="ms-auto shrink-0 rounded-full px-2 text-[12px] font-medium leading-5 text-accent-text transition-colors interaction:bg-raised/50"
                 >
                   {t("apps.usedByChange")}
                 </button>
@@ -912,7 +912,7 @@ export function PluginsPanel() {
                         type="button"
                         disabled={busy}
                         onClick={() => void connect(card.slug, account.alias, account)}
-                        className="ms-auto shrink-0 rounded-full px-2 text-[12px] font-medium leading-5 text-accent-text transition-colors hover:bg-raised-hover disabled:opacity-40"
+                        className="ms-auto shrink-0 rounded-full px-2 text-[12px] font-medium leading-5 text-accent-text transition-colors interaction:bg-raised/50 disabled:opacity-40"
                         aria-label={t("connectors.reconnectAria", { account: account.alias || account.id, service: card.label })}
                       >
                         {t("connectors.action.reconnect")}
@@ -922,7 +922,7 @@ export function PluginsPanel() {
                       type="button"
                       disabled={busy}
                       onClick={() => setDisconnecting({ slug: card.slug, label: card.label, account })}
-                      className={cn("shrink-0 rounded-full px-2 text-[12px] font-medium leading-5 text-ink-secondary transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40", !reconnectable && "ms-auto")}
+                      className={cn("shrink-0 rounded-full px-2 text-[12px] font-medium leading-5 text-ink-secondary transition-colors interaction:bg-danger/10 hover:text-danger disabled:opacity-40", !reconnectable && "ms-auto")}
                       aria-label={t("connectors.disconnectAria", {
                         account: account.alias || account.id,
                         service: card.label,

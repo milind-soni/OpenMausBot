@@ -189,7 +189,7 @@ function UsageOverview({ engine }: { engine: string | undefined }) {
             <button key={limit.engine} type="button" data-usage-engine={limit.engine} aria-pressed={limit === shown} aria-label={limitLine(limit, now, ", ")}
               title={limitLine(limit, now)} onClick={() => setPicked(limit.engine)}
               className={cn("flex h-6 min-w-0 items-center gap-1.5 rounded-full px-1.5 text-[12px] leading-4",
-                limit === shown ? "bg-ink/[0.08] font-medium text-ink" : "text-ink-secondary hover:bg-ink/[0.06] hover:text-ink")}>
+                limit === shown ? "bg-ink/[0.08] font-medium text-ink" : "text-ink-secondary interaction:bg-raised/50 hover:text-ink")}>
               <UsageRing limit={limit} />
               <span className="max-w-28 truncate">{limit.name}</span>
             </button>

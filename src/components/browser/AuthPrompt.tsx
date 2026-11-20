@@ -27,7 +27,7 @@ export function AuthPrompt({ origin, realm, onAnswer }: {
       <input name="username" aria-label={t("browser.auth.username")} autoComplete="off" spellCheck={false} maxLength={1024} placeholder={t("browser.auth.username")} className="rounded-lg bg-inset px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-accent" />
       <input name="password" type="password" aria-label={t("logins.password")} autoComplete="new-password" maxLength={1024} placeholder={t("logins.password")} className="rounded-lg bg-inset px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-accent" />
       <div className="flex justify-end gap-2">
-        <button type="button" onClick={() => onAnswer(null)} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-inset">{t("common.cancel")}</button>
+        <button type="button" onClick={() => onAnswer(null)} className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50">{t("common.cancel")}</button>
         <button type="submit" className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-accent-ink">{t("browser.auth.signIn")}</button>
       </div>
     </form>

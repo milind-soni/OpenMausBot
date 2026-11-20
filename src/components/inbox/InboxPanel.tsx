@@ -128,7 +128,7 @@ export function InboxPanel({ open: shown = true }: { open?: boolean }) {
               {done.length > 0 && (
                 <section data-inbox-done className="px-1.5 pb-1.5">
                   <button type="button" data-inbox-done-toggle aria-expanded={showDone} onClick={() => setShowDone(!showDone)}
-                    className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-ink-tertiary hover:bg-raised/70 hover:text-ink-secondary">
+                    className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] text-ink-tertiary interaction:bg-raised/50 hover:text-ink-secondary">
                     <Check size={13} aria-hidden="true" className="shrink-0" />
                     <span className="font-medium">{t("common.done")}</span>
                     <span className="tabular-nums">{done.length}</span>

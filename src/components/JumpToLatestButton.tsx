@@ -10,7 +10,7 @@ export function JumpToLatestButton({ onClick, className, style }: { onClick: () 
       type="button"
       aria-label={t("chat.jumpToLatestAria")}
       title={t("chat.jumpToLatest")}
-      className={cn("animate-pop-in absolute left-1/2 z-10 flex size-9 -translate-x-1/2 items-center justify-center rounded-full border border-hairline/40 bg-raised text-ink shadow-lg hover:bg-raised-hover", className)}
+      className={cn("animate-pop-in absolute left-1/2 z-10 flex size-9 -translate-x-1/2 items-center justify-center rounded-full border border-hairline/40 bg-raised text-ink shadow-lg interaction:bg-raised/50", className)}
       style={style}
     >
       <ArrowDown size={18} aria-hidden="true" />

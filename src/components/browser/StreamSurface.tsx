@@ -712,7 +712,7 @@ export function StreamSurface(props: {
               }}
             />
             <div className="flex justify-end gap-2">
-              <button type="button" className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-inset" onClick={() => answerFileChooser([])}>{t("common.cancel")}</button>
+              <button type="button" className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50" onClick={() => answerFileChooser([])}>{t("common.cancel")}</button>
               <button type="button" className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-accent-ink" onClick={() => fileInputRef.current?.click()}>{t(fileChooser.multiple ? "browser.page.chooseFiles" : "browser.page.chooseFile")}</button>
             </div>
           </div>
@@ -724,7 +724,7 @@ export function StreamSurface(props: {
               <>
                 {control.dialog.type === "prompt" ? <input aria-label={t("browser.dialog.response")} value={promptText} onChange={(event) => setPromptText(event.target.value)} className="rounded-lg bg-inset px-3 py-2 text-[13px] outline-none focus:ring-1 focus:ring-accent" /> : null}
                 <div className="flex justify-end gap-2">
-                  <button type="button" className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary hover:bg-inset" onClick={() => direct({ type: "dialog", accept: false })}>{t("browser.dialog.dismiss")}</button>
+                  <button type="button" className="rounded-lg px-3 py-1.5 text-[12px] text-ink-secondary interaction:bg-raised/50" onClick={() => direct({ type: "dialog", accept: false })}>{t("browser.dialog.dismiss")}</button>
                   <button type="button" className="rounded-lg bg-accent px-3 py-1.5 text-[12px] text-accent-ink" onClick={() => direct({ type: "dialog", accept: true, ...(control.dialog?.type === "prompt" ? { promptText } : {}) })}>{t("browser.dialog.accept")}</button>
                 </div>
               </>
@@ -758,7 +758,7 @@ export function StreamSurface(props: {
                     <button type="button" className="shrink-0 rounded-md bg-accent px-2 py-0.5 text-accent-ink" onClick={() => { void copyText(notice.text); dismiss(notice.id); }}>{t("common.copy")}</button>
                   </>
                 ) : <span role="alert" className="min-w-0 text-danger">{notice.message}</span>}
-                <button type="button" aria-label={t("browser.dialog.dismiss")} className="shrink-0 rounded-md p-0.5 text-ink-secondary hover:bg-inset" onClick={() => dismiss(notice.id)}><X size={12} /></button>
+                <button type="button" aria-label={t("browser.dialog.dismiss")} className="shrink-0 rounded-md p-0.5 text-ink-secondary interaction:bg-raised/50" onClick={() => dismiss(notice.id)}><X size={12} /></button>
               </div>
             ))}
           </div>
@@ -772,7 +772,7 @@ export function StreamSurface(props: {
           ) : (
             <a href={PREVIEW_STREAM_SANDBOX_STEPS_URL} target="_blank" rel="noopener noreferrer" className="text-[12px] text-ink underline">Browser sandbox setup steps</a>
           )}
-          <button type="button" className="rounded-lg border border-hairline px-3 py-1.5 text-[12px] text-ink hover:bg-inset" onClick={() => setHostSetup(null)}>{t("common.tryAgain")}</button>
+          <button type="button" className="rounded-lg border border-hairline px-3 py-1.5 text-[12px] text-ink interaction:bg-raised/50" onClick={() => setHostSetup(null)}>{t("common.tryAgain")}</button>
         </div>
       ) : null}
     </div>

@@ -98,7 +98,7 @@ export function CloudComputerRecoveryRow({ botId, name, always }: { botId: strin
           type="button"
           onClick={() => void act("restart")}
           disabled={busy}
-          className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink hover:bg-raised-hover disabled:opacity-50"
+          className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-control px-3 py-2 text-[13px] text-ink interaction:bg-raised/50 disabled:opacity-50"
           title={t("computer.recovery.restartTitle")}
         >
           {pending === "restart" ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
@@ -108,7 +108,7 @@ export function CloudComputerRecoveryRow({ botId, name, always }: { botId: strin
           type="button"
           onClick={() => void act("replace")}
           disabled={busy}
-          className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-danger/30 px-3 py-2 text-[13px] text-danger hover:bg-danger/10 disabled:opacity-50"
+          className="flex flex-auto items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-danger/30 px-3 py-2 text-[13px] text-danger interaction:bg-danger/10 disabled:opacity-50"
           title={t("computer.recovery.replaceTitle")}
         >
           {pending === "replace" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
