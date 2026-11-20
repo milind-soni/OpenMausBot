@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { HERE_REPEAT_MS, PRESENCE_HERE_PATH, type PresenceFrame, type PresenceHereBody } from "../../shared/team-presence";
 import type { ServerFrame } from "../../shared/wire";
 import { listenLiveFrames } from "@/lib/live-events";
+import { forgetSharedSession } from "@/lib/session-reuse";
 import { api } from "./api";
 import type { AppState } from "./store";
 import { rereadTeamChats } from "./team-chats";
@@ -33,6 +34,7 @@ export function applyPresenceFrame(frame: PresenceFrame): void {
     case "thread.presence":
       return setThreads(new Map(threads).set(frame.threadId, frame.people));
     case "team.people":
+      forgetSharedSession();
       reloadTeamPeople();
       rereadTeamChats();
   }
