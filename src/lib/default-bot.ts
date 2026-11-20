@@ -34,8 +34,10 @@ export function someoneElsesDefaultBot(bot: DefaultBotFields, viewer: string | n
   return Boolean(bot.defaultBot && person && person !== (viewer ?? ""));
 }
 
+/** MausBot with its Show switch off, or someone else's. The switch is MausBot's alone: a bot demoted while it was off
+ * stays listed. */
 export function hiddenFromSidebar(bot: DefaultBotFields, viewer: string | null | undefined): boolean {
-  return Boolean(bot.sidebarHidden) || someoneElsesDefaultBot(bot, viewer);
+  return Boolean(bot.defaultBot && bot.sidebarHidden) || someoneElsesDefaultBot(bot, viewer);
 }
 
 export function myDefaultBot<T extends DefaultBotFields>(bots: readonly T[], viewer: string | null | undefined): T | undefined {

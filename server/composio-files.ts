@@ -36,6 +36,13 @@ export interface FileUploadRequest {
   md5: string;
 }
 
+/** The connected-apps service answered its unknown-route 404: it runs a version from before it took file uploads. */
+export class UploadServiceOutdatedError extends Error {
+  constructor() {
+    super("the connected-apps service is out of date and does not take file uploads yet");
+  }
+}
+
 const projectAnswerSchema = z.object({ key: z.string().min(1), new_presigned_url: z.string().optional(), newPresignedUrl: z.string().optional() });
 const serviceAnswerSchema = z.object({ key: z.string().min(1), url: z.string().min(1) });
 
@@ -49,6 +56,7 @@ export async function requestFileUpload(cfg: AppConfig, request: FileUploadReque
     body: JSON.stringify(request),
     signal: AbortSignal.timeout(30_000),
   });
+  if (broker && response.status === 404) throw new UploadServiceOutdatedError();
   if (!response.ok) throw new Error(await responseError(response, `the upload service answered HTTP ${response.status}`));
   const body: unknown = await response.json();
   const answer = apiKey ? projectAnswerSchema.parse(body) : serviceAnswerSchema.parse(body);

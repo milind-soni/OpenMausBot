@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { forgetPresence, personAsks, sawThread, seenWithin } from "../thread-presence.ts";
 import {
-  armIdleClose, engineIdleMs, idleEnginesAllowed, keepWarm, PRESTART_IDLE_MS, PRESTART_MOST, prestartAllowed, sessionIdlePolicy, SMALL_BOX_BYTES, SMALL_BOX_IDLE_MS, stopIdleClose, sweepIdleEngines,
-  UNWATCHED_IDLE_MS, warmEngineKeys,
+  armedIdleCount, armIdleClose, engineIdleMs, idleEnginesAllowed, keepWarm, PRESTART_IDLE_MS, PRESTART_MOST, prestartAllowed, sessionIdlePolicy, SMALL_BOX_BYTES, SMALL_BOX_IDLE_MS, stopIdleClose, sweepIdleEngines,
+  UNWATCHED_IDLE_MS, warmEngineKeys, type WarmEngine,
 } from "./session-idle.ts";
 
 const GB = 1024 ** 3;
@@ -157,6 +157,54 @@ describe("idle engines on a small box", () => {
       vi.advanceTimersByTime(1);
       expect(a.state.closed).toBe(1);
       stopIdleClose("a", timer);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("never closes an engine a turn took again or one still held when its idle timer runs out", () => {
+    vi.useFakeTimers();
+    const before = armedIdleCount();
+    try {
+      const working = engine();
+      const held = engine();
+      const warmHeld: WarmEngine = { ...held.warm, held: () => true };
+      const quiet = engine();
+      const timers = [
+        armIdleClose("working", 150_000, working.warm),
+        armIdleClose("held", 150_000, warmHeld),
+        armIdleClose("quiet", 150_000, quiet.warm),
+      ];
+      working.state.busy = true;
+      vi.advanceTimersByTime(150_000);
+      expect([working.state.closed, held.state.closed, quiet.state.closed]).toEqual([0, 0, 1]);
+      expect(armedIdleCount()).toBe(before);
+      working.state.busy = false;
+      const again = armIdleClose("working", 150_000, working.warm);
+      vi.advanceTimersByTime(150_000);
+      expect(working.state.closed).toBe(1);
+      stopIdleClose("working", again);
+      stopIdleClose("held", timers[1]);
+      stopIdleClose("quiet", timers[2]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves a later arm's entry and engine alone when an old timer still fires", () => {
+    vi.useFakeTimers();
+    const before = armedIdleCount();
+    try {
+      const old = engine();
+      const fresh = engine();
+      armIdleClose("g", 150_000, old.warm);
+      const freshTimer = armIdleClose("g", 300_000, fresh.warm);
+      vi.advanceTimersByTime(150_000);
+      expect(old.state.closed).toBe(0);
+      expect(armedIdleCount()).toBe(before + 1);
+      vi.advanceTimersByTime(150_000);
+      expect(fresh.state.closed).toBe(1);
+      stopIdleClose("g", freshTimer);
     } finally {
       vi.useRealTimers();
     }

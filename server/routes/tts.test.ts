@@ -112,6 +112,41 @@ describe("transcribe route", () => {
     expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain("/v1/asr");
   });
 
+  it("hears through Scribe in the chosen language when the person picked ElevenLabs, over Fish and DeepSeek", async () => {
+    const seen: Array<{ url: string; language: unknown }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
+      seen.push({ url, language: (init.body as FormData).get("language_code") });
+      return new Response(JSON.stringify({ text: "hola" }), { status: 200 });
+    }));
+    const cfg = {
+      deepseek: { key: "ds-key" },
+      tts: { provider: "deepseek", fishKey: "fish-key", key: "el-own", hearWith: "elevenlabs", hearLanguage: "es" },
+    } as AppConfig;
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, cfg, upload(Buffer.from("RIFF")));
+    expect(answers).toEqual([[200, { text: "hola" }]]);
+    expect(seen).toEqual([{ url: expect.stringMatching(/\/v1\/speech-to-text$/), language: "es" }]);
+  });
+
+  it("lets Scribe detect the language when none is chosen, and sends no language when Scribe was not picked", async () => {
+    const languages: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      languages.push((init.body as FormData).get("language_code"));
+      return new Response(JSON.stringify({ text: "hi" }), { status: 200 });
+    }));
+    await call("POST", "/api/tts/transcribe", {}, { tts: { key: "el-own", hearWith: "elevenlabs", hearLanguage: "" } } as AppConfig, upload(Buffer.from("RIFF")));
+    await call("POST", "/api/tts/transcribe", {}, { tts: { key: "el-own", hearLanguage: "es" } } as AppConfig, upload(Buffer.from("RIFF")));
+    expect(languages).toEqual([null, null]);
+  });
+
+  it("keeps Fish Audio when ElevenLabs was picked but no own ElevenLabs key is saved", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ text: "from fish" }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const cfg = { tts: { fishKey: "fish-key", hearWith: "elevenlabs" } } as AppConfig;
+    const { answers } = await call("POST", "/api/tts/transcribe", {}, cfg, upload(Buffer.from("RIFF")));
+    expect(answers).toEqual([[200, { text: "from fish" }]]);
+    expect(String((fetchMock.mock.calls[0] as unknown[])[0])).toContain("/v1/asr");
+  });
+
   it("names the Speech to Text permission when ElevenLabs refuses the key", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ detail: { message: "missing_permissions" } }), { status: 401 })));
     const { answers } = await call("POST", "/api/tts/transcribe", {}, { tts: { key: "el-own" } } as AppConfig, upload(Buffer.from("RIFF")));

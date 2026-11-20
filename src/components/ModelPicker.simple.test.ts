@@ -547,6 +547,20 @@ describe("the model picker in Simple mode", () => {
     }));
   });
 
+  it.each([true, false] as const)("lets the bot panel's picker return its conversation's variant to the session setting, in that conversation only (owner: %s)", (ownerOrAdmin) => {
+    fixture.ownerOrAdmin = ownerOrAdmin;
+    const variants = [{ id: "low", label: "Low" }, { id: "high", label: "High" }];
+    fixture.instances = [{ ...engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-4-neon", label: "Gemini 4 Neon", variants },
+    ]), capabilities: { modelVariants: true } }];
+    const neon = { instanceId: "antigravity", model: "gemini-4-neon" };
+    const simple = pane(open({ ...bot(), modelSelection: { ...neon, variant: "low" } }, { contained: true, thread: true }))!;
+    (simple.props as { onResetVariant: () => void }).onResetVariant();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({
+      type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: false, selection: neon,
+    });
+  });
+
   it("shows the picked Antigravity thinking level on the closed picker, so the pick visibly lands (#4160)", () => {
     const variants = [{ id: "low", label: "Low" }, { id: "medium", label: "Medium" }];
     fixture.instances = [{ ...engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [

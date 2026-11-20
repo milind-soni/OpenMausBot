@@ -9,7 +9,8 @@ import type { ProviderInstance } from "../../contracts.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { BUILT_IN_DRIVERS } from "../builtIn.ts";
-import { ClineAgentDriver } from "./cline.ts";
+import { CLINE_SUPPORT, ClineAgentDriver, clinePlanLimit, clineReportedFailure } from "./cline.ts";
+import { clineTierModels } from "./cline-models.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 import { assertToolScopeSupported } from "../../../shared/tool-scope-support.ts";
 
@@ -88,8 +89,7 @@ describe("Cline ACP driver", () => {
     const { turnId } = await instance.adapter.sendTurn({ threadId: "cline-saved", text: "hello" });
     await recorder.until((event) => event.type === "turn.completed" && event.turnId === turnId);
     const launch = JSON.parse(readFileSync(join(scratch, "launch.json"), "utf8"));
-    expect(launch.env.CLINE_PROVIDER).toBe("openai-compatible");
-    expect(launch.env.CLINE_MODEL).toBe("fixture-model");
+    expect(launch.env.CLINE_PROVIDER).toBeUndefined();
     expect(launch.env.CLINE_API_KEY).toBe("saved-fixture-key");
     const calls = JSON.parse(readFileSync(join(scratch, "launch.json.config.json"), "utf8"));
     expect(calls).toContainEqual({ method: "session/set_model", params: { sessionId: expect.any(String), modelId: "fixture-model" } });
@@ -126,6 +126,116 @@ describe("Cline ACP driver", () => {
     await instance.dispose();
     expect(existsSync(first.path)).toBe(false);
     expect(existsSync(second.path)).toBe(false);
+  });
+
+  it("lists ClinePass then free models, keeping the last list Cline answered", async () => {
+    const answer = (body: unknown, ok = true) => (async () => ({ ok, json: async () => body })) as unknown as typeof fetch;
+    const live = await clineTierModels(answer({
+      free: [{ id: "cline-free/solar-mini4", name: "Solar Mini 4" }, { id: "openai/gpt-x" }],
+      clinePass: [{ id: "cline-pass/glm-5.3", name: "cline-pass/glm-5.3" }],
+    }));
+    expect(live).toEqual([
+      { id: "cline-pass/glm-5.3", label: "glm-5.3 (ClinePass)" },
+      { id: "cline-free/solar-mini4", label: "Solar Mini 4 (free)" },
+    ]);
+    expect(await clineTierModels(answer({}, false))).toEqual(live);
+    expect(await clineTierModels(answer({ free: "nope" }))).toEqual(live);
+    expect(await clineTierModels((async () => { throw new Error("offline"); }) as typeof fetch)).toEqual(live);
+  });
+
+  it("runs a tier model on its Cline provider and puts the saved provider back afterwards", async () => {
+    const calls: Array<[string, unknown]> = [];
+    const request = async (method: string, params: unknown) => { calls.push([method, params]); return {}; };
+    const configOptions = [{ id: "provider", currentValue: "openai-compatible" }, { id: "model", currentValue: "fixture-model" }];
+    const base = { request, sessionId: "s", config: { cli: "cline" }, sessionModels: [], currentModelId: "fixture-model", configOptions, notice() {} } as any;
+    expect(CLINE_SUPPORT.resolveTurnModel!("cline-pass/glm-5.3", {}, ClineAgentDriver.models)).toBe("cline-pass/glm-5.3");
+    expect(() => CLINE_SUPPORT.resolveTurnModel!("openai/gpt-x", {}, ClineAgentDriver.models)).toThrow(/Pick a Cline model/);
+    await CLINE_SUPPORT.configureSession!({ ...base, env: {}, turn: { model: "cline-pass/glm-5.3" } });
+    await CLINE_SUPPORT.configureSession!({ ...base, env: {}, turn: { model: "cline-free/solar-mini4" } });
+    expect(calls).toEqual([
+      ["session/set_config_option", { sessionId: "s", configId: "provider", value: "cline-pass" }],
+      ["session/set_config_option", { sessionId: "s", configId: "model", value: "cline-pass/glm-5.3" }],
+      ["session/set_config_option", { sessionId: "s", configId: "provider", value: "cline" }],
+      ["session/set_config_option", { sessionId: "s", configId: "model", value: "cline-free/solar-mini4" }],
+    ]);
+    calls.length = 0;
+    const switched = [{ id: "provider", currentValue: "cline-pass" }, { id: "model", currentValue: "cline-pass/glm-5.3" }];
+    await CLINE_SUPPORT.configureSession!({ ...base, configOptions: switched, env: { OMB_CLINE_PROVIDER: "openai-compatible", CLINE_MODEL: "fixture-model" }, turn: { model: "cline-default" } });
+    expect(calls).toEqual([
+      ["session/set_config_option", { sessionId: "s", configId: "provider", value: "openai-compatible" }],
+      ["session/set_model", { sessionId: "s", modelId: "fixture-model" }],
+    ]);
+  });
+
+  it("keeps CLINE_PROVIDER from Cline but still restores it, and returns to a tier model after Cline default", async () => {
+    const env: Record<string, string | undefined> = { CLINE_PROVIDER: "openai-compatible", CLINE_MODEL: "fixture-model", CLINE_PROVIDER_SETTINGS_PATH: join(scratch, "missing.json") };
+    CLINE_SUPPORT.transformEnv!(env, { cli: "cline" } as any, "cline", undefined as any);
+    expect(env.CLINE_PROVIDER).toBeUndefined();
+    const oauth: Record<string, string | undefined> = { CLINE_PROVIDER: "cline", CLINE_PROVIDER_SETTINGS_PATH: join(scratch, "missing.json") };
+    CLINE_SUPPORT.transformEnv!(oauth, { cli: "cline" } as any, "cline", undefined as any);
+    expect(CLINE_SUPPORT.pickAuthMethod([{ id: "cline" }], oauth)).toBe("cline");
+    const calls: Array<[string, unknown]> = [];
+    let options = [{ id: "provider", currentValue: "cline-pass" }, { id: "model", currentValue: "cline-pass/glm-5.3" }];
+    const request = async (method: string, params: any) => {
+      calls.push([method, params.value ?? params.modelId]);
+      if (method !== "session/set_config_option") return {};
+      options = options.map((entry) => entry.id === params.configId ? { ...entry, currentValue: params.value } : entry);
+      return { configOptions: options };
+    };
+    const run = (model: string) => CLINE_SUPPORT.configureSession!({
+      request, sessionId: "s", env, config: { cli: "cline" }, sessionModels: [], currentModelId: undefined, configOptions: options, notice() {}, turn: { model },
+    } as any);
+    await run("cline-default");
+    await run("cline-pass/glm-5.3");
+    expect(calls).toEqual([
+      ["session/set_config_option", "openai-compatible"],
+      ["session/set_model", "fixture-model"],
+      ["session/set_config_option", "cline-pass"],
+      ["session/set_config_option", "cline-pass/glm-5.3"],
+    ]);
+  });
+
+  it("reads a ClinePass limit as a usage limit with its reset", () => {
+    const now = Date.UTC(2026, 10, 18);
+    const limit = clinePlanLimit(new Error("Internal error: You have reached your weekly Clinepass limit. The limit resets in 8h 30m, please try again later. (session/prompt)"), now);
+    expect(limit).toMatchObject({ acpUsageLimit: true, facts: { limitResetsAt: now + (8 * 60 + 31) * 60_000 } });
+    expect(clinePlanLimit(new Error("You have reached your weekly Clinepass limit. The limit resets in 0m."), now)?.facts.limitResetsAt).toBe(now + 60_000);
+    expect(clinePlanLimit(new Error("You have reached your daily Clinepass limit."), now)?.facts.limitResetsAt).toBeUndefined();
+    expect(clinePlanLimit(new Error("You hit your rate limit"), now)).toBeUndefined();
+    expect(clinePlanLimit(new Error("reached your context window limit"), now)).toBeUndefined();
+  });
+
+  it("holds only the ClinePass models when the ClinePass allowance runs out", () => {
+    const pass = CLINE_SUPPORT.limitFacts!("You have reached your weekly Clinepass limit.", "cline-pass/glm-5.3");
+    expect(pass.limit).toBe("model");
+    expect(pass.limitModels).toContain("cline-pass/glm-5.3");
+    expect(pass.limitModels!.some((model) => model.startsWith("cline-free/"))).toBe(false);
+    expect(CLINE_SUPPORT.limitFacts!("This Cline account has reached its usage limit.", undefined)).toEqual({ limit: "engine" });
+  });
+
+  it("holds Cline default with the ClinePass models when the saved ClinePass provider runs out", () => {
+    const failure = clinePlanLimit(new Error("You have reached your weekly Clinepass limit. The limit resets in 8h 30m, please try again later."))!;
+    expect(failure.message).toMatch(/^Your ClinePass allowance has run out, which resets .*pick a free Cline model or another AI/);
+    // CLINE_MODEL unset: resolveTurnModel gives no model for Cline default.
+    const facts = CLINE_SUPPORT.limitFacts!(failure.message, undefined);
+    expect(facts.limit).toBe("model");
+    expect(facts.limitModels).toContain("cline-default");
+    expect(facts.limitModels).toContain("cline-pass/glm-5.3");
+    expect(facts.limitModels!.some((model) => model.startsWith("cline-free/"))).toBe(false);
+    expect(CLINE_SUPPORT.limitFacts!(clinePlanLimit(new Error("You have reached your weekly Codex limit."))!.message, undefined)).toEqual({ limit: "engine" });
+  });
+
+  it("says plainly that ClinePass models need a subscription", () => {
+    const words = "No access to ClinePass subscription models yet. Subscribe to ClinePass, the low cost open weights model coding plan: https://app.cline.bot/dashboard/subscription?personal=true";
+    const failure = clineReportedFailure(new Error(`Internal error: ${words}: ${words} (session/prompt)`));
+    expect(failure).toMatchObject({ acpUsageLimit: false, message: expect.stringMatching(/^ClinePass models need a ClinePass subscription\..*pick a free Cline model\.$/) });
+    expect(clineReportedFailure(new Error("Invalid params"))).toBeUndefined();
+  });
+
+  it("passes effort as --thinking, and omits it when unset", () => {
+    const config = { cli: "cline", fullAuto: false };
+    expect(CLINE_SUPPORT.spawnArgs(config, { threadId: "t", text: "hi", effort: "high" })).toEqual(["--acp", "--auto-approve", "false", "--thinking", "high"]);
+    expect(CLINE_SUPPORT.spawnArgs(config, { threadId: "t", text: "hi" })).not.toContain("--thinking");
   });
 
   it("fails the turn rather than silently using a fallback model", async () => {

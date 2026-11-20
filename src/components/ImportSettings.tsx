@@ -11,7 +11,9 @@ import { importOutcome, localSetupImport, setupImportApi, skillsSummary, toolsSu
 import { useStore } from "@/state/store";
 import { detectionCount, detectionSources, type SetupDetection, type SetupImportResult, type SetupSource } from "../../shared/setup-import";
 import { GrokBotMark } from "./GrokBotMark";
+import { HermesMark } from "./HermesMark";
 import { GrokMoveDialog } from "./lazy-screens";
+import { OpenClawMark } from "./OpenClawMark";
 import { ClaudeMark, CodexMark, CursorMark, PresetProviderMark } from "./ProviderIcons";
 
 function SourceMarks({ sources }: { sources: readonly SetupSource[] }) {
@@ -23,6 +25,8 @@ function SourceMarks({ sources }: { sources: readonly SetupSource[] }) {
           case "codex": return <CodexMark key={source} size={12} />;
           case "cursor": return <CursorMark key={source} size={12} />;
           case "gemini": return <PresetProviderMark key={source} preset="google" size={12} />;
+          case "hermes": return <HermesMark key={source} size={12} />;
+          case "openclaw": return <OpenClawMark key={source} size={12} />;
           default: return <ClaudeMark key={source} size={12} />;
         }
       })}
@@ -221,7 +225,7 @@ export function GrokImportSection() {
   if (useContext(SettingsLook)) {
     return (
       <div data-import-section="grok" data-settings-block="grok-move" className="flex flex-col">
-        <SettingRow title={t("settings.import.grokTitle")} subtitle={t("settings.import.grokLine")} leading={<SettingsMark><GrokBotMark size={18} /></SettingsMark>}>
+        <SettingRow title={t("settings.import.grokTitle")} subtitle={t("settings.import.grokLineChats")} leading={<SettingsMark><GrokBotMark size={18} /></SettingsMark>}>
           <button type="button" className="ui-button" data-grok-move-open aria-expanded={open} onClick={() => { setStarted(true); setOpen(!open); }}>{t(open ? "common.close" : "settings.import.moveAction")}</button>
         </SettingRow>
         {started && <div className={open ? "px-4 pb-3" : "hidden"}><GrokMoveDialog inline onClose={() => { setStarted(false); setOpen(false); }} /></div>}

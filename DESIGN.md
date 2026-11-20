@@ -41,7 +41,7 @@ The app has three places: the **sidebar** (bots and conversations), the
 where they belong instead of adding new places.
 
 - **No new header buttons.** The chat header shows the bot, its model and its
-  screen. Anything else goes in the bot panel, a menu or the command palette.
+  screen; Advanced mode's composer shows the model under its field instead. Anything else goes in the bot panel, a menu or the command palette.
   A button that exists only while the conversation has what it shows (its
   pinned message) is fine: it opens a menu and is gone when there is nothing
   to show.
@@ -157,7 +157,7 @@ element's job and never a pixel value:
 | Cards, menus, popovers, sidebar rows and pinned bots | 12px | `rounded-xl` |
 | Dialogs | 14px | `.ui-modal` |
 | Bubbles, cards in the transcript | 18px | `rounded-4xl` |
-| Composer | 22px (18px once it wraps) | set by the composer |
+| Composer | 22px (18px once it wraps, and always in Advanced mode, whose field sits above a footer row) | set by the composer |
 | Window panes | 0 | |
 
 - **No in-between values** (`rounded-[10px]`, `rounded-[14px]`). Pick the step
@@ -324,7 +324,9 @@ on. Simple is the default for new installs.
   One exception: where Advanced already shows something in place (a bot's
   threads as a tree under its row), Simple may offer a shortcut to the same
   thing there instead of a second copy of it: a menu that opens on a click
-  of a small chevron, never on hover.
+  of a small chevron, never on hover. A second: Advanced mode's composer puts
+  the field on its own line with a footer row under it, and the model and
+  effort picker sits in that footer, next to the + menu both modes share.
 - **Switching modes never loses data.**
 
 ## 14. Accessibility

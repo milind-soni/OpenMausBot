@@ -71,6 +71,22 @@ describe("a thread's live turn", () => {
     expect(turnLive("t")).toEqual({ turnId: "turn-2", ended: false, status: null });
   });
 
+  it("says it is summarizing earlier messages until the summary is done, and leaves anything newer on the line", () => {
+    note({ type: "turn.completed", ok: true } as Partial<RuntimeEvent>);
+    note({ type: "context.summarizing", active: true, turnId: undefined } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-1", ended: false, status: { activity: "summarizing" } });
+    note({ type: "context.summarizing", active: false, turnId: undefined } as Partial<RuntimeEvent>);
+    expect(turnLive("t").status, "a finished or stopped summary clears the line").toBeNull();
+    expect(turnLive("t").ended, "a summary after the turn ended (Compact button) leaves it ended").toBe(true);
+    note({ type: "context.summarizing", active: true, turnId: undefined } as Partial<RuntimeEvent>);
+    note({ type: "turn.started", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toEqual({ turnId: "turn-2", ended: false, status: null });
+    note({ type: "content.delta", streamKind: "reasoning_text", delta: "x", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    note({ type: "context.summarizing", active: false, turnId: undefined } as Partial<RuntimeEvent>);
+    expect(turnLive("t").status, "a late end leaves the turn's own status").toEqual({ activity: "thinking" });
+    expect(turnLive("t").ended, "a summary inside a running turn leaves it running").toBe(false);
+  });
+
   it("carries what a call works on, how it is doing and its last output, and changes only when one of them does", () => {
     note({ type: "item.started", itemType: "tool", itemId: "c", title: "Bash" } as Partial<RuntimeEvent>);
     note({ type: "turn.progress", activity: "command", itemId: "c", target: "scrape.py", detail: "python3 scrape.py" } as Partial<RuntimeEvent>);

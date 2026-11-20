@@ -32,6 +32,20 @@ export function switchNote(result: Pick<RailOpenResult | AccountSwitchResult, "o
   }
 }
 
+/** Whether main will open the accounts sheet from this page (a refused click would do nothing, so the row waits for a yes). */
+export function useSheetOffered(enabled = true): boolean {
+  const remote = window.ogb?.accountSheet;
+  const [offered, setOffered] = useState(false);
+  useEffect(() => {
+    if (!enabled || !remote) return;
+    let alive = true;
+    setOffered(false); // a new check starts from "no", so an old yes never shows while it is pending
+    void remote.offered().then((yes) => { if (alive) setOffered(yes === true); }).catch(() => { if (alive) setOffered(false); });
+    return () => { alive = false; };
+  }, [enabled, remote]);
+  return enabled && offered && Boolean(remote);
+}
+
 /** Who is signed in on this device, on this app's own page; on any other page, only whether main offers the sheet. */
 export function useAccounts(): AccountsAccess & { sheet: { email: string | null; note: string | null } | null; closeSheet(): void } {
   const bridge = window.ogb?.remoteClient?.active ? undefined : window.ogb?.accounts;
@@ -39,7 +53,7 @@ export function useAccounts(): AccountsAccess & { sheet: { email: string | null;
   const own = window.ogb?.app?.ownPage === true && Boolean(bridge);
   const places = usePlaces();
   const [view, setView] = useState<AccountsView | null>(null);
-  const [offered, setOffered] = useState(false);
+  const offered = useSheetOffered(!own);
   const [sheet, setSheet] = useState<{ email: string | null; note: string | null } | null>(null);
   useEffect(() => {
     if (!own) return;
@@ -47,12 +61,6 @@ export function useAccounts(): AccountsAccess & { sheet: { email: string | null;
     read();
     return bridge!.onChanged(read);
   }, [own, bridge]);
-  useEffect(() => {
-    if (own || !remote) return;
-    let alive = true;
-    void remote.offered().then((yes) => { if (alive) setOffered(yes === true); }).catch(() => {});
-    return () => { alive = false; };
-  }, [own, remote]);
   return {
     view: own ? view : null,
     openSheet: !own && offered && remote ? () => { void remote.open().catch(() => {}); } : null,

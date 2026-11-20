@@ -52,7 +52,7 @@ type EndedTurn = SettledTurn & { threadId: string; turnId?: string; ok: boolean 
 export interface PeerLimitResendDeps<Opts, Outcome> {
   store: Pick<Store, "botByThread" | "projectBotForTask" | "taskByThread" | "activePath" | "appendMessage" | "switchTaskModel">;
   registry: Pick<ProviderRegistry, "get">;
-  takeover(): Pick<LimitTakeover, "backups" | "carriedOn">;
+  takeover(): Pick<LimitTakeover, "weighBackups" | "passedOver" | "carriedOn">;
   turnStops: Pick<TurnStops, "read" | "failureCause">;
   hostedModels: ReturnType<typeof hostedModelPolicy>;
   providerConfigs(): InstanceConfigMap;
@@ -184,7 +184,9 @@ export function createPeerLimitResend<Opts extends PeerTurnOpts<Outcome>, Outcom
         // A file the turn made lands after its end was judged: anything it left by now still means no resend.
         || !nothingRan(store.activePath(threadId), turn.since, turn.turnId, turn.stopError)) return giveUp();
       const from = current.modelSelection, instance = registry.get(from.instanceId);
-      const backup = deps.takeover().backups(turn.botId, from, turn.scope, approvalModeFor(current)).find(candidate => {
+      const { backups, skipped } = deps.takeover().weighBackups(turn.botId, from, turn.scope, approvalModeFor(current));
+      deps.takeover().passedOver(current, from, turn.scope, skipped);
+      const backup = backups.find(candidate => {
         const target = registry.get(candidate.instanceId);
         return target?.enabled && (candidate.instanceId !== from.instanceId || candidate.model !== from.model)
           && (candidate.instanceId === from.instanceId ? turn.scope !== "engine" : !instance || limitBackupAllowed(instance, target, deps.providerConfigs()[candidate.instanceId]));

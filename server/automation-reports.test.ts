@@ -469,6 +469,57 @@ describe("automation reports", () => {
     expect(f.added()).toEqual([]);
   });
 
+  it.each([
+    { answered: "answer", answeredText: "Work" },
+    { dismissed: true },
+    { expired: true },
+  ])("settles a copied question after the person took over: %j", (resolution) => {
+    const f = fixture();
+    const run = f.finished(null, "Inbox brief", { status: "waiting" });
+    const card = { title: "Question", subtitle: "Which account?", options: ["Work"], requestId: "ask-1", requestType: "question" as const };
+    const original = f.store.appendMessage(run.threadId!, { role: "bot", kind: "options", card });
+    const [copy] = f.lines();
+    expect(copy?.automation).toMatchObject({ copyOf: original.id, needsYou: true });
+    f.store.patchTask(f.bot.id, run.threadId!, { routineRunId: undefined });
+    f.store.patchTask(f.bot.id, f.main, { unread: false });
+
+    f.store.patchMessage(run.threadId!, original.id, { card: { ...card, ...resolution } });
+
+    expect(f.lines()).toEqual([expect.objectContaining({ id: copy!.id, card: { ...card, ...resolution } })]);
+    expect(f.lines()[0]!.automation).not.toHaveProperty("needsYou");
+    expect(f.store.taskByThread(f.bot.id, f.main)?.unread).toBe(false);
+    expect(f.notified).toEqual([]);
+  });
+
+  it("reconciles only matching, already copied questions on startup", () => {
+    const f = fixture();
+    const run = f.finished(null, "Inbox brief", { status: "waiting" });
+    const card = { title: "Question", subtitle: "Which account?", options: ["Work"], requestId: "ask-1", requestType: "question" as const };
+    const original = f.store.appendMessage(run.threadId!, { role: "bot", kind: "options", card });
+    const stillOpen = f.store.appendMessage(run.threadId!, { role: "bot", kind: "options", card: { ...card, requestId: "ask-2" } });
+    const [copy, openCopy] = f.lines();
+    expect(openCopy?.automation?.copyOf).toBe(stillOpen.id);
+    f.store.patchTask(f.bot.id, run.threadId!, { routineRunId: undefined });
+    f.offline();
+    const settled = { ...card, expired: true };
+    f.store.patchMessage(run.threadId!, original.id, { card: settled });
+    f.store.appendMessage(run.threadId!, { role: "bot", kind: "options", card: { ...settled, requestId: "never-copied" } });
+    const mismatched = f.store.appendMessage(f.main, {
+      role: "bot", kind: "options", card: { ...card, requestId: "different-request" }, automation: copy!.automation,
+    });
+    expect(f.lines()[0]?.card).toEqual(card);
+    f.online();
+
+    const restarted = f.create();
+    restarted.flush();
+    expect(f.lines()).toEqual([expect.objectContaining({ id: copy!.id, card: settled }), openCopy, mismatched]);
+    expect(f.lines()[0]!.automation).not.toHaveProperty("needsYou");
+    const patched = f.lines()[0];
+    f.create().flush();
+    expect(f.lines()[0]).toBe(patched);
+    expect(f.notified).toEqual([]);
+  });
+
   it("carries what the run attached with its last reply", () => {
     const f = fixture();
     const run = f.finished(null);

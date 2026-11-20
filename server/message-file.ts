@@ -475,7 +475,7 @@ export async function openFileSavedSince(
   if (hidden || refused.some((root) => containedBy(root, canonical))) {
     throw statusError(403, "files in hidden folders or in the app's own data can't be attached", "outside_workspace");
   }
-  const file = await openMessageFile(canonical, [dirname(canonical)], maxBytes);
+  const file = await openMessageFile(pathToFileURL(canonical).href, [dirname(canonical)], maxBytes);
   const opened = await file.handle.stat().catch(async (error: unknown) => {
     await file.handle.close().catch(() => undefined);
     throw error;

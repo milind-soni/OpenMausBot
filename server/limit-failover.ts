@@ -64,6 +64,8 @@ export interface LimitFailover {
   at: number;
   /** `from` was signed out, not limited: the conversation goes back once it is signed in again. */
   why?: "signed-out";
+  /** Only the usage meter held `from`, not a refusal: the conversation goes back once the meter no longer holds it. */
+  meter?: true;
 }
 
 /** With no reset time known, a conversation tries its own engine again no sooner than this. */
@@ -90,7 +92,7 @@ function load(file: string): LimitFailover[] {
     const rows = JSON.parse(readFileSync(file, "utf8")) as unknown;
     return Array.isArray(rows) ? rows.filter((row): row is LimitFailover => typeof row?.botId === "string" && typeof row?.threadId === "string" &&
       typeof row?.from?.instanceId === "string" && typeof row?.to?.instanceId === "string" && (row.resetsAt === null || Number.isFinite(row.resetsAt)) &&
-      Number.isFinite(row.at) && (row.why === undefined || row.why === "signed-out")) : [];
+      Number.isFinite(row.at) && (row.why === undefined || row.why === "signed-out") && (row.meter === undefined || row.meter === true)) : [];
   } catch {
     return [];
   }
@@ -124,8 +126,9 @@ export class LimitFailovers {
     const now = this.deps.now?.() ?? Date.now();
     const current = this.deps.threadModel(botId, threadId);
     if (!current || !sameModelSelection(current, row.to)) return this.forget(threadId);
-    const waitUntil = row.why === "signed-out" ? row.at : row.resetsAt ?? row.at + UNKNOWN_RESET_WAIT_MS;
-    if (waitUntil > now || this.deps.blockedUntil(row.from.instanceId, row.from.model) !== null) return false;
+    const blocked = this.deps.blockedUntil(row.from.instanceId, row.from.model) !== null;
+    const waitUntil = row.why === "signed-out" ? row.at : row.meter ? row.at : row.resetsAt ?? row.at + UNKNOWN_RESET_WAIT_MS;
+    if (waitUntil > now || blocked) return false;
     if (row.why === "signed-out" && this.deps.signedOut?.(row.from.instanceId)) return false;
     if (!this.deps.switchBack(row)) return false;
     this.forget(threadId);

@@ -22,6 +22,7 @@ export const ROUTINE_LINE = {
   "routines.server.backupSignedOut": "Starting again on the backup AI: this bot's AI is signed out",
   "routines.server.busyTooLong": "Did not run: the bot was busy for more than {minutes} minutes",
   "routines.server.overLimit": "Stopped: this run ran longer than the {hours}-hour limit",
+  "routines.server.overOwnLimit": "Stopped after reaching the {minutes}-minute run limit",
   "routines.server.stopPending": "Its turn has not confirmed that it stopped. The next run waits for that, up to {minutes} minutes.",
   "routines.server.stopUnconfirmed": "Its turn never confirmed that it stopped, so the next run started without that.",
   "routines.server.skippedOne": "Skipped because {why}",
@@ -142,4 +143,9 @@ export function clipRunOutput(text: string, max: number): string {
   }
   const room = max - tail.length - 3;
   return room > 0 ? `${text.slice(0, room).trimEnd()}\n…\n${tail}` : tail;
+}
+
+/** A run's reply, kept: a later item that says nothing does not erase the report the run already delivered. */
+export function keptRunOutput(delivered: string | undefined, text: string, max: number): string | undefined {
+  return clipRunOutput(text, max) || delivered;
 }

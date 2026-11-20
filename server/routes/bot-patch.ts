@@ -207,8 +207,9 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
       for (const key of ["unread", "cloudBackend", "color", "mascotExpression", "mascotBody", "pinned", "hidden", "sidebarHidden", "welcomed"] as const) {
         if (body[key] !== undefined) patch[key] = body[key];
       }
-      // null clears the default-bot mark, demoting the bot to a regular (deletable) one.
-      if (body.defaultBot === null && existingBot?.defaultBot) patch.defaultBot = undefined;
+      // null clears the default-bot mark, demoting the bot to a regular (deletable) one. MausBot's Show switch goes
+      // with it: a regular bot is never hidden this way, and has no switch to show it again.
+      if (body.defaultBot === null && existingBot?.defaultBot) Object.assign(patch, { defaultBot: undefined, sidebarHidden: undefined });
       const computerSpecified = Object.prototype.hasOwnProperty.call(body, "computer");
       let requestedComputer = existingBot?.computer;
       if (computerSpecified) {

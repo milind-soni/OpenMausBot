@@ -4,7 +4,8 @@ import { QRCodeSVG } from "qrcode.react";
 import { t } from "@/lib/i18n";
 import { copyText, type CopyFeedback } from "@/lib/copy-text";
 import { api } from "@/state/store";
-import { isOwnerOrAdmin, readSessionState, type SessionState } from "../lib/session";
+import { isOwnerOrAdmin, type SessionState } from "../lib/session";
+import { readSharedSessionState } from "../lib/shared-session";
 import { readMembership } from "../lib/membership";
 import { codeUntil, lastSeen } from "../lib/pairing-time";
 import { revealPhonePairing, takePairOnOpen } from "../lib/phone-pairing";
@@ -113,7 +114,7 @@ export function ServerPairingCard({ initialSession = null, initialPairingCodes =
   }
 
   useEffect(() => {
-    void readSessionState().then((state) => {
+    void readSharedSessionState().then((state) => {
       setSession(state);
       if (canPairDevices(state)) void loadDevices();
       if (state.kind === "loopback" || state.kind === "session") {

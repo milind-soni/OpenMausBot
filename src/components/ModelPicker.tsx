@@ -206,14 +206,14 @@ export function ModelPicker({
   className,
   contained = false,
   label,
-  size = "md",
+  size = "md", quiet = false,
 }: {
   bot: Bot;
   threadId?: string;
   className?: string;
   contained?: boolean;
   label?: ReactNode;
-  size?: "sm" | "md";
+  size?: "sm" | "md"; quiet?: boolean;
 }) {
   const { dispatch: storeDispatch, refreshInstances, refreshModels: refreshInstanceModels } = useStoreActions(), state = useStoreSelector((s) => ({ instances: s.instances, modelVariantSessions: s.modelVariantSessions, profile: s.bots.find((candidate) => candidate.id === shown.id) }), sameFields);
   const [open, setOpen] = useState(false);
@@ -313,7 +313,7 @@ export function ModelPicker({
   // never local models.
   const hasOfficialModels = Boolean(railInstance?.snapshot.chatgptPlan || railInstance?.models.options.some((option) => !option.custom));
   const customOnly = isCustomOnly(railInstance);
-  const { pane, setPane, loading: loadingList } = usePickerPane({ instanceId: displayedInstanceId, railId, hasOfficialModels, customOnly,
+  const { pane, setPane, loading: loadingList } = usePickerPane({ instanceId: displayedInstanceId, railId, hasOfficialModels, customOnly: customOnly && !hasOfficialModels,
     reading: open && (loadingInstances || refreshingId !== null),
     selectedIsCustom: Boolean(railInstance?.models.options.some((option) => option.id === selection.model && option.custom)) }, () => resetList());
 
@@ -368,7 +368,7 @@ export function ModelPicker({
     const selectedIsCustom = instance?.models.options.some(
       (option) => option.id === selection.model && option.custom,
     );
-    setPane(selectedIsCustom || isCustomOnly(instance) || (official.length === 0 && !instance?.snapshot.chatgptPlan) ? "custom" : "main");
+    setPane(selectedIsCustom || (official.length === 0 && !instance?.snapshot.chatgptPlan) ? "custom" : "main");
     resetList();
   };
 
@@ -405,7 +405,7 @@ export function ModelPicker({
     if (signInFamily(instance) === "openai") lastOpenaiIdRef.current = instance.instanceId;
     setRailId(instance.instanceId);
     const official = instance.models.options.filter((option) => !option.custom);
-    setPane(isCustomOnly(instance) || (official.length === 0 && !instance.snapshot.chatgptPlan) ? "custom" : "main");
+    setPane(official.length === 0 && !instance.snapshot.chatgptPlan ? "custom" : "main");
     resetList();
   };
 
@@ -492,7 +492,7 @@ export function ModelPicker({
 
   const resetVariant = contained && selection.variant !== undefined ? () => {
     const { variant: _variant, ...nextSelection } = selection;
-    dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: !threadId || simpleUpdatesBotDefault, selection: nextSelection });
+    dispatch({ type: "setModel", botId: bot.id, threadId: threadId ?? bot.threadId, updateBotDefault: !threadId, selection: nextSelection });
     close(true);
   } : undefined;
 
@@ -513,7 +513,7 @@ export function ModelPicker({
       : needsCli(railInstance) || needsSignIn(railInstance)
     : false;
   const canOpenCustom = Boolean(railInstance && !needsCli(railInstance));
-  const canReturnToOfficial = official.length > 0 && !isCustomOnly(railInstance);
+  const canReturnToOfficial = official.length > 0;
   const lookingForLocal = Boolean(railInstance && probing.has(railInstance.instanceId));
   const lookingForLocalStatus = (
     <div role="status" className={cn(MENU_LINE, "justify-center text-ink-tertiary")}>
@@ -606,8 +606,8 @@ export function ModelPicker({
     <button
       {...triggerProps}
       className={cn(
-        cn("group flex items-center gap-1.5 rounded-full pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed", contained ? "py-1" : "h-9"),
-        contained
+        cn("group flex items-center gap-1.5 rounded-full pl-2 pr-2.5 text-[13px] text-ink disabled:cursor-not-allowed", contained || quiet ? "py-1" : "h-9"),
+        contained || quiet
           ? "hover:bg-ink/[0.06] aria-expanded:bg-ink/[0.08] disabled:opacity-50 disabled:hover:bg-transparent"
           : cn(ELEVATED_FLOAT, ELEVATED_HOVER, "disabled:text-ink-tertiary disabled:hover:bg-composer"),
         !contained && active && !showActiveAccount && cn(COMPACT_SQUARE, USAGE_WARN_WIDENS),
@@ -1006,7 +1006,7 @@ export function ModelPicker({
       {menu && floating ? createPortal(menu, document.body) : menu}
       {!contained && changedBotModel && !open && ownModelThreads > 0 && (
         <div data-thread-models-notice role="status"
-          className="menu-surface absolute right-0 top-full z-30 mt-1 flex w-max max-w-[min(300px,calc(100vw-2rem))] items-center gap-2 py-1.5 pl-3 pr-1.5 text-[13px] leading-[18px]">
+          className={cn("menu-surface absolute z-30 flex w-max max-w-[min(300px,calc(100vw-2rem))] items-center gap-2 py-1.5 pl-3 pr-1.5 text-[13px] leading-[18px]", quiet ? "bottom-full left-0 mb-1" : "right-0 top-full mt-1")}>
           <ThreadModelsLine bot={profile} />
           <button type="button" aria-label={t("common.close")} onClick={() => setChangedBotModel(false)}
             className="flex size-6 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/[0.06] hover:text-ink">

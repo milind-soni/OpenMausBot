@@ -4,7 +4,8 @@ import { SettingsDialog } from "./settings/SettingsDialog";
 import { Globe, Plus, Trash2 } from "lucide-react";
 import { api, ApiError, useStore, type Bot, type BotAnnouncement, type BrowserProfile, type ConfigStatus } from "@/state/store";
 import { browserProfileDeletionBlockReason, browserProfilesMutation, newBrowserProfileId } from "@/lib/browser-profiles";
-import { isOwnerOrAdmin, readSessionState } from "@/lib/session";
+import { isOwnerOrAdmin } from "@/lib/session";
+import { readSharedSessionState } from "@/lib/shared-session";
 import { t } from "@/lib/i18n";
 import { computerDeviceText } from "@/lib/computer-device";
 import { SignedInSites } from "./SignedInSites";
@@ -36,7 +37,7 @@ export function BrowserProfilesManager({ bot, onProfileChanged, disabled = false
 
   useEffect(() => {
     let alive = true;
-    void readSessionState().then((session) => {
+    void readSharedSessionState().then((session) => {
       if (alive) setCanManage(isOwnerOrAdmin(session));
     });
     return () => { alive = false; };
