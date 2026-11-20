@@ -41,6 +41,7 @@
 .v2-body { max-width:100%; overflow-wrap:anywhere; min-width:0; padding:10px 15px; border-radius:8px 17px 17px; background:var(--color-panel); line-height:1.55; }
 .v2-user-content { display:flex; flex-direction:column; align-items:flex-end; max-width:90%; min-width:0; }
 .v2-message[data-own] .v2-body { border-radius:20px 20px 8px 20px; color:var(--color-bubble-user-ink); }
+.v2-message[data-own] .v2-body .chat-md :is(p, li, blockquote) { text-wrap:wrap; }
 .v2-body.v2-body-image { padding:0; background:transparent; }
 .v2-step { font-size:13px; color:var(--color-ink-secondary); }
 .v2-step p { white-space:pre-wrap; overflow-wrap:anywhere; }

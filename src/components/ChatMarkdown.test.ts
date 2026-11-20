@@ -57,6 +57,23 @@ vi.mock("shiki/engine/javascript", () => ({
 // Tests below undo every stubbed global, so the observer is deleted instead.
 delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
 
+describe("CJK bold text", () => {
+  it("renders adjacent sentences without adding a space", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "**这是估计误差。**下一句。**这里也一样！**继续。**普通加粗**，结束。",
+    }));
+    expect(html).toContain("<strong>这是估计误差。</strong>下一句。<strong>这里也一样！</strong>继续。<strong>普通加粗</strong>，结束。");
+  });
+
+  it("preserves escaped asterisks, code, and unmatched delimiters", () => {
+    const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+      text: "\\*\\*示例。**下一句\n\n`**示例。**下一句`\n\n**未关闭。",
+    }));
+    expect(html).not.toContain("<strong>");
+    expect(html).toMatch(/<code\b[^>]*>\*\*示例。\*\*下一句<\/code>/);
+  });
+});
+
 describe("soft line breaks", () => {
   it("keeps a reply's single line breaks as line breaks, outside code", () => {
     const html = renderToStaticMarkup(createElement(ChatMarkdown, { text: "1\n2\n3\n\n`a`\nb\n\n```\nx\ny\n```" }));

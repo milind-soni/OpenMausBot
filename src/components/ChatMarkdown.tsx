@@ -110,6 +110,37 @@ const normalizationParseOptions: MarkdownParseOptions = {
   mdastExtensions: [...(gfmParseData.fromMarkdownExtensions ?? []), windowsPathDestinations],
 };
 
+function remarkCjkStrong() {
+  return (tree: { children?: any[] }, file: { value: unknown }) => {
+    const source = file.value;
+    if (typeof source !== "string") return;
+    const visit = (node: { children?: any[] }) => {
+      if (!node.children) return;
+      node.children = node.children.flatMap((child) => {
+        if (child.type !== "text") {
+          if (child.type !== "link") visit(child);
+          return [child];
+        }
+        const value: string = child.value;
+        if (!value.includes("**")) return [child];
+        const start = child.position?.start.offset;
+        const end = child.position?.end.offset;
+        if (start === undefined || end === undefined || source.slice(start, end) !== value) return [child];
+
+        // CommonMark leaves closing asterisks literal between punctuation and an adjacent CJK letter.
+        const parts = value.split(/(?<!\*)\*\*(?![\s*])([^*\r\n]*[。！？；：，、」』）》】])\*\*(?=[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}])/u);
+        if (parts.length === 1) return [child];
+        return parts.flatMap((part, index) => {
+          if (!part) return [];
+          const text = { type: "text", value: part };
+          return [index % 2 ? { type: "strong", children: [text] } : text];
+        });
+      });
+    };
+    visit(tree);
+  };
+}
+
 /** A reply's newlines and a table cell's attribute-free <br> tags become Markdown breaks, without parsing raw HTML. */
 function remarkSoftBreaks() {
   return (tree: { children?: any[] }) => {
@@ -760,7 +791,7 @@ const NO_THREAD_REFS: ThreadRefsValue = { threads: [] };
 
 // One plugin list for everything every message shares; a message adds mentions only when it has an "@" and thread
 // links only when it may name one, so most messages render the same way whatever the bot list holds.
-const BASE_REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [[remarkGfm, GFM_OPTIONS], remarkMath, remarkWindowsPathDestinations, remarkPlainPaths, unwrapLinkedImages, remarkSoftBreaks, remarkGithubRefs];
+const BASE_REMARK_PLUGINS: NonNullable<MarkdownOptions["remarkPlugins"]> = [[remarkGfm, GFM_OPTIONS], remarkMath, remarkWindowsPathDestinations, remarkPlainPaths, unwrapLinkedImages, remarkCjkStrong, remarkSoftBreaks, remarkGithubRefs];
 const NO_REHYPE_PLUGINS: NonNullable<MarkdownOptions["rehypePlugins"]> = [];
 let katexPlugins: { plugin: KatexPlugin; list: NonNullable<MarkdownOptions["rehypePlugins"]> } | null = null;
 const rehypePluginsFor = (math: KatexPlugin | null) => {
