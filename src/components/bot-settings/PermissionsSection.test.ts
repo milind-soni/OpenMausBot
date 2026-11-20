@@ -98,6 +98,12 @@ describe("Full access in bot settings", () => {
     expect(dispatch).not.toHaveBeenCalled();
   });
 
+  it("sets Ask on the bot alone when a thread on Custom can only leave it from the desktop app", () => {
+    render({ ...base, approvalMode: "edits", tasks: [{ threadId: "current", title: "Current thread", createdAt: 1, approvalMode: "custom" }] });
+    choose("Ask for approval");
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "updateBot", botId: "pepper", patch: { approvalMode: "ask" } });
+  });
+
   it("sets a level some engines lack on the bot alone", () => {
     render(base);
     choose("Auto-accept edits");
@@ -162,6 +168,12 @@ describe("Sending on your behalf", () => {
     expect(option("Ask every time")?.getAttribute("aria-pressed")).toBe("true");
     flushSync(() => option("Send without asking")!.click());
     expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "updateBot", botId: "pepper", patch: { outbound: { policy: "allow" } } });
+  });
+
+  it("saves Ask as the bot's own rule when it already shows Ask, so a thread at Full asks too", () => {
+    render(base);
+    flushSync(() => option("Ask every time")!.click());
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "updateBot", botId: "pepper", patch: { outbound: { policy: "ask" } } });
   });
 
   it("has no limit to set or count, even for a rule saved with a daily cap", () => {

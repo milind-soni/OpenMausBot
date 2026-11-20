@@ -96,7 +96,9 @@ export function useAppGrants({ status, emailConnected, inventoryReady }: { statu
   const canChange = admin === true && inventoryReady && bots.length > 0;
 
   useEffect(() => {
-    if (handedBot) setStartingBot(takeConnectingBot());
+    if (!handedBot) return;
+    setStartingBot(takeConnectingBot());
+    tell();
   }, [handedBot]);
 
   useEffect(() => {
@@ -115,12 +117,15 @@ export function useAppGrants({ status, emailConnected, inventoryReady }: { statu
 
   const appConnected = useCallback((slug: string, app: string) => {
     const now = latest.current;
+    const fromBot = now.startingBot;
+    now.startingBot = null;
+    setStartingBot(null);
     if (now.admin !== true || !now.bots.length) return;
     if (now.allowed && !now.allowed.allowAll && !now.allowed.allowlist.includes(slug)) return;
     let using = 0;
     for (const bot of now.bots) {
       if (botAppScope(bot, slug) !== null) using += 1;
-      else if (bot.composio !== false || bot.id === now.startingBot) {
+      else if (bot.composio !== false || bot.id === fromBot) {
         now.write(bot, slug, true);
         using += 1;
       }

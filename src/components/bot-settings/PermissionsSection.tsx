@@ -42,7 +42,10 @@ export function PermissionsSection({
     dispatch({ type: "updateBot", botId: bot.id, patch: { approvalMode: mode, applyToAllThreads: true } });
   const setApprovalMode = (mode: ApprovalMode) => {
     if (mode === "ask") {
-      if (approvalMode !== "ask" || threadApprovalModes(bot).some((threadMode) => threadMode !== "ask")) applyEverywhere("ask");
+      const threadModes = threadApprovalModes(bot);
+      const reachesEveryThread = trustedModesAvailable || !threadModes.includes("custom");
+      if (reachesEveryThread && (approvalMode !== "ask" || threadModes.some((threadMode) => threadMode !== "ask"))) applyEverywhere("ask");
+      else if (approvalMode !== "ask") patch({ approvalMode: "ask" });
       return;
     }
     if (mode === approvalMode) return;
@@ -180,7 +183,7 @@ function OutboundControl({ bot, fullAccess, onChange }: { bot: Bot; fullAccess: 
             type="button"
             aria-pressed={policy.policy === value}
             onClick={() => {
-              if (value !== policy.policy) onChange({ policy: value });
+              if (value !== bot.outbound?.policy) onChange({ policy: value });
             }}
             className={cn(
               "flex-1 rounded-md px-2.5 py-1.5 text-[13px] font-medium",
