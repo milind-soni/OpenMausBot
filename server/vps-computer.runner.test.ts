@@ -63,6 +63,15 @@ describe("default VPS command runner", () => {
     expect(error).not.toBeInstanceOf(VpsHostUnreachableError);
   });
 
+  it("keeps a failed command's exit status and output on the error", async () => {
+    const child = fakeChild();
+    const failed = defaultRunner(["exec", "desktop", "false"]);
+    child.stdout.write("partial");
+    child.stderr.write("boom");
+    child.emit("close", 3, null);
+    await expect(failed).rejects.toMatchObject({ message: "boom", exitCode: 3, stdout: "partial", stderr: "boom" });
+  });
+
   it("collects output and resolves after the child closes", async () => {
     const child = fakeChild();
     const result = defaultRunner(["info"], { input: "request" });
