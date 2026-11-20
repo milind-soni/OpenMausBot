@@ -29,6 +29,7 @@ describe("usage formatting", () => {
     expect(formatTokens(950)).toBe("950");
     expect(formatTokens(12_400)).toBe("12.4k");
     expect(formatTokens(120_000)).toBe("120k");
+    expect(formatTokens(999_500)).toBe("1M");
     expect(formatTokens(2_300_000)).toBe("2.3M");
   });
 
