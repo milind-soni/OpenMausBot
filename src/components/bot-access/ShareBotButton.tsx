@@ -5,7 +5,8 @@ import { Share } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { useStore, type Bot } from "@/state/store";
 import { saveAccess } from "./access";
-import { ShareBotDialog, type AccessChange } from "./ShareBotDialog";
+import { ShareBotDialog } from "../lazy-screens";
+import type { AccessChange } from "./ShareBotDialog";
 
 const TOAST_MS = 6_000;
 
