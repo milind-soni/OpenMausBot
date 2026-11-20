@@ -14,7 +14,8 @@ import { readFile, stat } from "node:fs/promises";
 
 import type { PlanExtra, PlanFetch, PlanModelUsage, PlanWindow, PlanWindows } from "../plan-usage.ts";
 import { antigravityTokenPath } from "./antigravity-acp.ts";
-import { refreshAntigravityAccess } from "./antigravity-account.ts";
+import { createProxiedFetch, refreshAntigravityAccess } from "./antigravity-account.ts";
+import { antigravityQuotaFamily } from "./antigravity-turn-outcome.ts";
 
 /** Whether Antigravity accounts are asked for their limits at all. Off, they have no row in the usage report. */
 export const ANTIGRAVITY_USAGE_LIMITS = true;
@@ -162,6 +163,8 @@ export function antigravitySummaryWindows(response: unknown, requestedAt: number
   return [...windows.values()];
 }
 
+const GEMINI_FAMILIES: Readonly<Record<string, string>> = { "gemini-argon": "Gemini Argon", "gemini-carbon": "Gemini Carbon" };
+
 /** Older accounts expose model quotas without a window length. Do not invent a reset cadence. */
 export function antigravityModelWindows(response: unknown): AntigravityUsageWindow[] {
   const models = record(record(response)?.models);
@@ -171,7 +174,7 @@ export function antigravityModelWindows(response: unknown): AntigravityUsageWind
     const model = record(value);
     if (!model) continue;
     const family = model.modelProvider === "MODEL_PROVIDER_GOOGLE" || modelId.startsWith("gemini-")
-      ? "Gemini"
+      ? GEMINI_FAMILIES[antigravityQuotaFamily(modelId)] ?? "Gemini"
       : model.modelProvider === "MODEL_PROVIDER_ANTHROPIC" || modelId.startsWith("claude-")
         ? "Claude"
         : model.modelProvider === "MODEL_PROVIDER_OPENAI" || modelId.startsWith("gpt-")
@@ -181,7 +184,7 @@ export function antigravityModelWindows(response: unknown): AntigravityUsageWind
     for (const [suffix, entry] of [["quota", quota(model.quotaInfo)], ["weekly", quota(model.weeklyQuotaInfo)]] as const) {
       if (!entry) continue;
       const window = quotaWindow(
-        `${family.toLowerCase()}-${suffix}`,
+        `${family.toLowerCase().replaceAll(" ", "-")}-${suffix}`,
         family,
         suffix === "weekly" ? "Weekly" : "Reported quota",
         entry,
@@ -247,6 +250,12 @@ export interface AntigravityUsageDeps {
   fetch: PlanFetch;
   now?: () => number;
   timeoutMs?: number;
+}
+
+/** The usage reads of an instance with a proxy of its own go through it, as its engine's traffic does. */
+export function antigravityProxied(deps: AntigravityUsageDeps, environment: Record<string, string | undefined>): AntigravityUsageDeps {
+  const proxyUrl = environment.HTTPS_PROXY || environment.HTTP_PROXY;
+  return proxyUrl ? { ...deps, fetch: createProxiedFetch(proxyUrl) } : deps;
 }
 
 /** `work`, or a rejection once `signal` aborts: a request that ignores its signal does not hold the others' answers. */

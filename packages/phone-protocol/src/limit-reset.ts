@@ -39,7 +39,7 @@ export interface EngineLimit {
   engine: string;
   /** The engine's display name ("Claude", "Codex", or the instance's own name). */
   name: string;
-  driver: "claude" | "codex" | "grok" | "opencode";
+  driver: "claude" | "codex" | "grok" | "opencode" | "antigravity";
   /** The window that decides the reset: the fullest, or the one refusing work. */
   window: LimitWindowName | null;
   /** 0–100, or null when the engine reported no window. */
@@ -50,6 +50,11 @@ export interface EngineLimit {
   blocked: boolean;
   /** Blocked only by a refusal's hold, which "Try again now" can end; absent when a window at its limit blocks it. */
   held?: boolean;
+  /** Whose allowance the windows measure when it is not the whole engine's: "Gemini" on Antigravity, whose other models
+   * draw on allowances of their own. Such a limit is shown only: it is never `blocked`, its `resetsAt` is that window's
+   * reset and not the engine's, and no limit-reset automation waits for it. Absent when the windows are the engine's; a
+   * hold on the whole engine is reported without it. */
+  meter?: string;
   /** Every window the engine reported, in the engine's order. A server that predates it sends only the deciding window above. */
   windows?: LimitWindowUsage[];
 }

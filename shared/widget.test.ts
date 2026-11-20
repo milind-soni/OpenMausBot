@@ -103,6 +103,16 @@ describe("parseWidgetInput", () => {
     expect(fine).toMatchObject({ min: "2026-01-01", max: "2026-12-31", defaultValue: "2026-06-01" });
   });
 
+  it("takes a children list a model wrapped in an object", () => {
+    const tree = { type: "Card", children: [{ type: "Row", children: [{ type: "Text", value: "Hi" }] }] };
+    expect(parsed({ type: "Card", children: { item: tree.children } })).toEqual(parsed(tree));
+    expect(parsed({ type: "Card", children: { item: tree.children![0] } })).toEqual(parsed(tree));
+  });
+
+  it("says a node has no type, and where", () => {
+    expect(refusal({ type: "Card", children: [{ label: "Go" }] })).toMatch(/^widget\.children\[0\]: has no type; use one of Card, /);
+  });
+
   it("refuses with the path of the problem", () => {
     expect(refusal(null)).toBe("widget: must be an object with a type.");
     expect(refusal("not json")).toBe("widget: must be a JSON object, not text.");

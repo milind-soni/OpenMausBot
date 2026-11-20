@@ -107,7 +107,7 @@ describe("the run limit", () => {
     const clock = new RunClock();
     const own = run({ timeoutMinutes: 10 });
     expect(runOverLimit(own, clock, 10 * MINUTE - 1)).toBeNull();
-    expect(runOverLimit(own, clock, 10 * MINUTE)).toEqual({ text: "Stopped after reaching the 10-minute run limit", codes: { errorCode: undefined, errorParams: undefined } });
+    expect(runOverLimit(own, clock, 10 * MINUTE)).toEqual({ text: "Stopped after reaching the 10-minute run limit", codes: { errorCode: "routines.server.overOwnLimit", errorParams: { minutes: 10 } } });
     const long = run({ timeoutMinutes: 1_440 });
     expect(runOverLimit(long, clock, 24 * HOUR - 1)).toBeNull();
     expect(runOverLimit(long, clock, 24 * HOUR)?.text).toBe("Stopped after reaching the 1440-minute run limit");

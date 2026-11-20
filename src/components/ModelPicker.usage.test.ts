@@ -216,6 +216,22 @@ describe("the model menu's usage rings", () => {
     expect(shownRows(menu)).toEqual(["5-hour", "weekly"]);
   });
 
+  it("name Antigravity's windows as Gemini's, and show a full one at its limit with nothing to retry since it holds no turns", async () => {
+    remember([usage(38), { ...usage(100), engine: "antigravity", name: "Antigravity", driver: "antigravity", meter: "Gemini",
+      windows: [{ window: "5-hour", usedPercent: 100, resetsAt: RESET }, { window: "weekly", usedPercent: 40, resetsAt: RESET }] }]);
+    const menu = await openMenu();
+    expect(rings(menu).map((ring) => [ring.dataset.usageEngine, ring.querySelector("[data-usage-ring]")?.getAttribute("data-usage-ring")]))
+      .toEqual([["claude", "fine"], ["antigravity", "out"]]);
+    expect(rings(menu)[1]!.getAttribute("aria-label")).toBe("Antigravity (Gemini): 100% used, resets 3:40 PM");
+    flushSync(() => rings(menu)[1]!.click());
+    expect(shownRows(menu)).toEqual(["5-hour", "weekly"]);
+    expect(menu.querySelector("[data-usage-rows]")?.textContent).toContain("Antigravity usage");
+    expect([...menu.querySelectorAll("[data-usage-row] > div > span:first-child")].map((label) => label.textContent)).toEqual(["Gemini 5-hour", "Gemini weekly"]);
+    expect(menu.querySelector("[data-usage-row='5-hour'] [data-usage-track]")?.getAttribute("class")).toContain("bg-danger");
+    expect(menu.querySelector("[data-usage-check]")).toBeNull();
+    expect(menu.querySelector("[data-usage-release]")).toBeNull();
+  });
+
   it("show another AI's ring, with no rows until it is pressed, when the bot's own AI reports no usage", async () => {
     remember([other("codex", "Codex", 91)]);
     const menu = await openMenu();
