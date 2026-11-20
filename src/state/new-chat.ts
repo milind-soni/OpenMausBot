@@ -58,17 +58,18 @@ type Effects = {
  * chat however many arrive while it is being made, then each is sent into it. The conversation opens only if the person
  * is still in that blank chat when it is made. */
 export function createNewChat(effects: Effects) {
-  const making = new Map<number, Promise<string>>();
+  const making = new Map<number, Promise<string>>(), heldWhileMaking = new Map<number, HeldAction[]>();
   let sessions = 0;
   const make = (open: NewChat) => {
+    heldWhileMaking.set(open.session, open.held);
     const made = effects.create(open.botId, open.projectId).then(({ bot }) => {
-      const now = effects.state().newChat, stillOpen = now?.session === open.session && now.botId === open.botId;
-      if (stillOpen) effects.dispatch({ type: "taskSwitched", bot });
-      for (const held of stillOpen ? now.held : open.held) effects.dispatch({ ...held, threadId: bot.threadId });
+      const now = effects.state().newChat;
+      if (now?.session === open.session && now.botId === open.botId) effects.dispatch({ type: "taskSwitched", bot });
+      for (const held of heldWhileMaking.get(open.session) ?? open.held) effects.dispatch({ ...held, threadId: bot.threadId });
       return bot.threadId;
     });
     making.set(open.session, made);
-    void made.finally(() => making.delete(open.session)).catch(() => {});
+    void made.finally(() => { making.delete(open.session); heldWhileMaking.delete(open.session); }).catch(() => {});
     return made;
   };
   return (action: Action): boolean => {
@@ -83,6 +84,8 @@ export function createNewChat(effects: Effects) {
     if (!intoBlank && !("threadId" in action && isNewChatThread(action.threadId))) return false;
     if (action.type !== "send") {
       effects.rawDispatch(action);
+      const after = effects.state().newChat;
+      if (after && heldWhileMaking.has(after.session)) heldWhileMaking.set(after.session, after.held);
       return true;
     }
     const made = open?.botId === action.botId ? making.get(open.session) ?? make(open) : null;

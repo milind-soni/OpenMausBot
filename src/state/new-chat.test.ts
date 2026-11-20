@@ -243,6 +243,20 @@ describe("a new conversation opens blank and is made by its first send", () => {
     expect(pepper().tasks?.find((task) => task.threadId === "made")?.modelSelection).toEqual(picked);
   });
 
+  it("applies a model picked during creation even when the person left before it was made", async () => {
+    let answer!: () => void;
+    createAnswer = new Promise((resolve) => { answer = () => resolve(json({ bot: { ...bot("made", ["a", "made"]), messages: [] } }, 201)); });
+    openBlank();
+    send("First");
+    await settle();
+    flushSync(() => dispatch({ type: "setModel", botId: "bot", threadId: DRAFT, selection: { instanceId: "fake", model: "late" } }));
+    flushSync(() => dispatch({ type: "select", id: "other" }));
+    answer();
+    await vi.waitFor(() => expect(sends).toHaveLength(1));
+
+    await vi.waitFor(() => expect(taskPatches).toEqual(["/api/bots/bot/tasks/made"]));
+  });
+
   it("makes a separate conversation for a blank chat opened again while the last one's was still being made", async () => {
     let answer!: () => void;
     createAnswer = new Promise((resolve) => { answer = () => resolve(json({ bot: { ...bot("made", ["a", "made"]), messages: [] } }, 201)); });

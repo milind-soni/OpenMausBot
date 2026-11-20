@@ -11,7 +11,7 @@ const ACTIVITY = ["focus", "pointerdown", "keydown"] as const;
 function selection(state: AppState): string {
   const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
   const threadId = bot ? bot.switchingTo ?? bot.threadId : state.groups.find((group) => group.id === state.selectedId)?.threadId;
-  return `${state.selectedId}\n${threadId ?? ""}`;
+  return `${state.selectedId}\n${threadId ?? ""}\n${state.newChat?.session ?? ""}`;
 }
 
 /** The bot conversation open in front of the person, if one is. */
