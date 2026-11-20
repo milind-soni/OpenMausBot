@@ -10158,6 +10158,7 @@
   "chat.notice.backupConversationBusy": "switched to {name}. This conversation is working, so your message was not sent again.",
   "chat.notice.backupQuestionWaiting": "switched to {name}. A teammate's question is waiting for your answer in this conversation, so your message was not sent again. Answer it, then send your message again.",
   "chat.notice.backupMessageMissing": "switched to {name}, but your message could not be found to send again. Send it again.",
+  "chat.notice.backupAlreadyRan": "switched to {name}. Part of your request had already run, so it was not sent again. Send what is still to do.",
   "chat.notice.backupContinuingLimit": "continuing on {name} after hitting the usage limit",
   "chat.notice.backupContinuingSignedOut": "continuing on {name} while {engine} is signed out",
   "chat.notice.backupCouldNotContinue": "could not continue on {name}: {error}",

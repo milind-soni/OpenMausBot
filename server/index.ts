@@ -6677,7 +6677,7 @@ bus.subscribe((event: RuntimeEvent) => {
       const facts = { ...turnStops.read(event.threadId, event.turnId)?.flags, stopReason: directRequestOwners.get(event.threadId)?.stopped ? "cancelled" : event.stopReason };
       const held = facts.limit ?? (signedOutStop(facts.stopReason, failureDetail) ? "signed-out" as const : undefined); // a limit or a sign-out: one incident a stretch, the person told by its own notice
       const fileIncident = () => { if (broken && (!held || limitTakeover.firstIncident(broken.id, broken.modelSelection, held, facts.limitResetsAt))) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: failureDetail, facts, notified: Boolean(held) }); };
-      if (failed && bot) void quotaSwitch.turnFailed(bot, event, internal);
+      let directSettled = () => {}; const settledDirect = new Promise<void>((resolve) => { directSettled = resolve; }); if (failed && bot) void quotaSwitch.turnFailed(bot, event, internal, settledDirect);
       else if (bot && event.ok) quotaSwitch.turnSucceeded(bot, event.threadId);
       if (bot && event.ok && !stopped && completedTurnId && !routineRun && !coordinator.assignerOf(event.threadId)) askCards.ownQuestion(bot.id, event.threadId, completedTurnId);
       const lastReported = turnUsage.get(event.threadId);
@@ -6782,9 +6782,9 @@ bus.subscribe((event: RuntimeEvent) => {
           }).catch(() => {}).finally(() => {
             clearTimeout(timeout);
           });
-          void Promise.all([screenSettled, digestSettled]).finally(() => settleDirectTurn(true)).finally(fileIncident);
+          void Promise.all([screenSettled, digestSettled]).finally(() => settleDirectTurn(true)).finally(directSettled).finally(fileIncident);
         } else {
-          void digestSettled.finally(() => settleDirectTurn(true)).finally(fileIncident);
+          void digestSettled.finally(() => settleDirectTurn(true)).finally(directSettled).finally(fileIncident);
         }
       } else if (group && speaker) {
         const tokens = event.usage ?? lastReported;
