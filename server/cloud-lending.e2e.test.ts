@@ -660,16 +660,18 @@ it("a routine the bot changes in the owner's own chat keeps the lent computer on
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { token: owner, body: { text, threadId: bot.threadId } })).status).toBe(202);
   }, bot.id, bot.threadId);
   const stop = async () => expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { token: owner, body: { threadId: bot.threadId } })).status).toBe(200);
-  const runs = async () => (await api("GET", "/api/routines", { token: owner })).body.runs as Array<{ id: string; routineId: string; status: string; error?: string }>;
+  const runs = async () => (await api("GET", "/api/routines", { token: owner })).body.runs as Array<{ id: string; routineId: string; status: string; threadId?: string; triggerSource?: string; error?: string }>;
   /** A run started by Run now, or with `scheduled` by its schedule alone: its tools, the dump that ends it, and its row once ended. */
   const runOf = async (routineId: string, scheduled = false) => {
     const call = await proxyFor(async () => {
       if (!scheduled) expect((await api("POST", `/api/routines/${routineId}/run`, { token: owner })).status).toBe(201);
     }, bot.id);
-    const dump = turnDump;
-    const runId = (await runs()).find((run) => run.routineId === routineId && ["running", "waiting"].includes(run.status))?.id;
-    expect(runId).toBeTruthy();
-    return { call, ended: async () => {
+    const dump = turnDump, threadId = turn.mcpConfig.mcpServers.agents.env.OMB_THREAD_ID;
+    // The turn these tools belong to is this run's own.
+    const started = (await runs()).find((run) => run.routineId === routineId && run.threadId === threadId && ["running", "waiting"].includes(run.status));
+    expect(started).toBeTruthy();
+    const runId = started!.id;
+    return { call, trigger: started!.triggerSource, ended: async () => {
       finish(dump);
       let row: Awaited<ReturnType<typeof runs>>[number] | undefined;
       await expect.poll(async () => (row = (await runs()).find((run) => run.id === runId))?.status, { timeout: hostTimeout(20_000) }).toMatch(/^(completed|failed)$/u);
@@ -686,6 +688,7 @@ it("a routine the bot changes in the owner's own chat keeps the lent computer on
   await stop();
   // Its next run starts on its schedule, with nobody pressing Run now, and has the computer.
   const scheduled = await runOf(morning, true);
+  expect(scheduled.trigger).toBe("schedule");
   expect(lent(await scheduled.call("list_shared_computers")).computers).toHaveLength(1);
   expect((await scheduled.ended()).status).toBe("completed");
   await expect.poll(async () => (await chat()).some((line) => line.automation?.routineId === morning), { timeout: hostTimeout(15_000) }).toBe(true);

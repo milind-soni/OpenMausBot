@@ -8,8 +8,8 @@ import type { RoutineRunStatus } from "../../shared/routines.ts";
 type Device = "PC" | "Mac" | "computer";
 
 export interface RefusedLendingDeps {
-  /** The run this conversation is, when it is one. */
-  runOf(threadId: string): { id: string } | undefined;
+  /** The run this conversation is, when it is one; `startedAt` tells a retry of it from the attempt that was refused. */
+  runOf(threadId: string): { id: string; startedAt?: number } | undefined;
   /** Where the run with this id stands; nothing once its row left the history. */
   statusOf(runId: string): RoutineRunStatus | undefined;
   /** The kind of computer the person lends now; null when they lend none, and a refusal cost the run nothing. */
@@ -21,24 +21,26 @@ export interface RefusedLendingDeps {
 const NOT_FINISHED: ReadonlySet<RoutineRunStatus> = new Set<RoutineRunStatus>(["queued", "running", "waiting"]);
 
 export function createRefusedLending(deps: RefusedLendingDeps) {
-  const refused = new Map<string, { name: string; device: Device }>();
+  const refused = new Map<string, { name: string; device: Device; startedAt?: number }>();
   return {
     /** The run `runId`, in this conversation, was refused the lent computer for the routine `name`. */
     refused(threadId: string, runId: string, name: string): void {
-      const device = deps.lentDevice();
-      if (!device || deps.runOf(threadId)?.id !== runId) return;
+      const device = deps.lentDevice(), run = deps.runOf(threadId);
+      if (!device || run?.id !== runId) return;
       // A run that has ended never takes its own, so it keeps none.
       for (const id of refused.keys()) {
         const status = id === runId ? undefined : deps.statusOf(id);
         if (id !== runId && (status === undefined || !NOT_FINISHED.has(status))) refused.delete(id);
       }
-      refused.set(runId, { name, device });
+      refused.set(runId, { name, device, startedAt: run.startedAt });
     },
     /** The run in this conversation is ending well: what it must say instead, once; null when it was never refused. */
     take(threadId: string): string | null {
       const run = deps.runOf(threadId), seen = run && refused.get(run.id);
       if (!run || !seen) return null;
       refused.delete(run.id);
+      // A retry starts afresh: the attempt that was refused is not the one ending now.
+      if (seen.startedAt !== run.startedAt) return null;
       return serverLine(deps.language(threadId), "server.runs.lentComputerUnconfirmed", { name: seen.name, device: seen.device });
     },
   };

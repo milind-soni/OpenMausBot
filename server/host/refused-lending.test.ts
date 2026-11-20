@@ -7,12 +7,12 @@ import ptBr from "../../src/locales/pt-br.json" with { type: "json" };
 import { createRefusedLending } from "./refused-lending.ts";
 
 function fixture(over: { device?: "PC" | "Mac" | "computer" | null; status?: (id: string) => RoutineRunStatus | undefined; language?: string } = {}) {
-  let current: { id: string } | undefined = { id: "run_1" };
+  let current: { id: string; startedAt?: number } | undefined = { id: "run_1" };
   const refused = createRefusedLending({
     runOf: () => current, statusOf: (id) => over.status?.(id) ?? "running",
     lentDevice: () => (over.device === undefined ? "PC" : over.device), language: () => over.language,
   });
-  return { refused, now: (run: { id: string } | undefined) => { current = run; } };
+  return { refused, now: (run: { id: string; startedAt?: number } | undefined) => { current = run; } };
 }
 
 describe("a routine's run refused the lent computer (server/host/refused-lending.ts)", () => {
@@ -53,6 +53,16 @@ describe("a routine's run refused the lent computer (server/host/refused-lending
     expect(refused.take("t")).toBeNull();
     now({ id: "run_2" });
     expect(refused.take("t")).toBe(changedRoutineRefusalText("Evening plan", "PC"));
+  });
+
+  it("is not a retry's: the same run started again after its refused attempt ends as that attempt did", () => {
+    const { refused, now } = fixture();
+    now({ id: "run_1", startedAt: 1 });
+    refused.refused("t", "run_1", "Morning plan");
+    now({ id: "run_1", startedAt: 2 });
+    expect(refused.take("t")).toBeNull();
+    now({ id: "run_1", startedAt: 1 });
+    expect(refused.take("t"), "taken once, by the attempt that ended").toBeNull();
   });
 
   it("reads in the language of the chat it reports to", () => {
