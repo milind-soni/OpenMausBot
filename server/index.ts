@@ -102,6 +102,7 @@ import { createPhones } from "./host/phones.ts";
 import { NOT_THE_OWNER } from "./phones/owner.ts";
 import { PHONE_INTERNAL_MCP_PATH } from "./phones/rpc.ts";
 import { createWebPush } from "./web-push.ts";
+import type { NotificationLogEntry } from "../shared/notification.ts";
 import { isLongPollPath, phoneKey } from "./routes/phones.ts"; import { createPhoneActivityRoutes, createPhonePushRoutes } from "./routes/phone-push.ts"; import { PhoneActivity } from "./phone-activity.ts"; import { PhonePush, PhonePushAccessSource, phonePushEnabled } from "./phone-push.ts"; import { DEFAULT_COMPANION_CONTROL_PLANE_URL } from "../electron/companion-account-service.mjs"; import { TUNNEL_CREDENTIALS_FILE } from "./tunnel.ts";
 import { createDataRoutes } from "./data/routes.ts";
 import { DataSheetRegistry } from "./data/sheet.ts";
@@ -199,7 +200,7 @@ import { assertWithinBudget, noteSpend, spendAlertText, spendState, takeSpendAle
 import { fleetAvailable, fleetSocketPath } from "./fleet-client.ts";
 import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSION } from "./hosted-contract.ts";
 import { cliProbeEnvironment, testCliBinary } from "./cli-probe.ts";
-import { buildMentionNotification, buildNoticeNotification, buildNotification, buildSpendNotification, type Notification, summarize, unaskedBotThread } from "./notify.ts";
+import { buildMentionNotification, buildNoticeNotification, buildNotification, buildSpendNotification, type Notification, unaskedBotThread } from "./notify.ts";
 import {
   isModelVariant,
   TurnNotStartedError, TurnAuthenticationRefusedError, TurnUsageLimitRefusedError,
@@ -4724,6 +4725,13 @@ function broadcast(payload: Record<string, unknown>, options: { adminOnly?: bool
   const clientPayload = options.adminOnly ? null : kind === "config" ? configForAccess(payload as ReturnType<typeof configStatus>, false) : memberFramePayload(payload);
   const clientFrame = clientPayload === null ? null : clientPayload === payload ? frame : `id: ${STREAM_ID}:${seq}\ndata: ${JSON.stringify({ ...clientPayload, seq })}\n\n`;
   replayBuffer.push({ seq, kind, frame, clientFrame, payload, ...(options.person ? { person: options.person } : {}), ...(options.frames ? { frames: options.frames } : {}) }); if (kind === "notify") phonePush.offer({ notification: payload.notification, seq }, (key) => pushReaches(key, payload, seq, options)); if (kind === "notify" || kind === "bot" || kind === "runtime") phoneActivity.offer(payload, (key) => pushReaches(key, payload, seq, options));
+  if (kind === "notify") {
+    const notification = payload.notification as NotificationLogEntry;
+    if (notification.kind === "done") {
+      void webPush.offer(notification, notification.id, (id) => pushReaches(`session:${id}`, payload, seq, options))
+        .catch(() => console.warn("Could not load or save web push registrations"));
+    }
+  }
   const ownGroups: OwnGroupFrames = new Map();
   for (const client of Array.from(sseClients)) {
     if (!wants(client, kind, options.frames) || !teamOwners.reaches(client.ask, payload) || !streamFor(client, options.person)) continue;
@@ -6686,18 +6694,7 @@ bus.subscribe((event: RuntimeEvent) => {
       landParkedFiles();
       if (completedTurnId) {
         const terminal = store.markTerminalAssistantMessage(event.threadId, completedTurnId);
-        if (terminal) {
-          const firstCompletion = terminal.turnSucceeded === undefined;
-          store.patchMessage(event.threadId, terminal.id, { turnSucceeded: event.ok });
-          const author = bot ?? (speaker && store.bot(speaker.botId));
-          if (author && author.notifications !== false && firstCompletion && event.ok && !stopped && (!internal || reviewAnswer) && !quietTurnThreads.has(event.threadId)) {
-            const notice: Notification = { kind: "done", botId: author.id, botName: author.name, threadId: event.threadId,
-              title: group ? serverLine(threadLanguage(event.threadId), "server.notify.inRoom", { bot: author.name, room: group.name }) : author.name,
-              body: summarize(terminal.text ?? ""), ...(group ? { groupId: group.id } : {}) };
-            void webPush.offer(notice, terminal.id, (id) => pushReaches(`session:${id}`, { kind: "notify", notification: notice }, lastSeq, {}))
-              .catch(() => console.warn("Could not load or save web push registrations"));
-          }
-        }
+        if (terminal) store.patchMessage(event.threadId, terminal.id, { turnSucceeded: event.ok });
         if (bot && event.ok) store.suggestTaskLink(bot.id, event.threadId, store.activePath(event.threadId)
           .filter((message) => message.role === "bot" && message.kind === "text" && message.turnId === completedTurnId)
           .map((message) => message.text ?? "").join("\n"));

@@ -1,10 +1,24 @@
 import { api } from "../state/api";
 import { notificationSoundsEnabled } from "./notification-preferences";
 
-export function usesWebPush() {
+let signedIn = false;
+export function setWebPushSession(eligible: boolean) {
+  signedIn = eligible;
+}
+
+export function usesNotificationWorker() {
   return typeof window !== "undefined" && !window.ogb?.desktopNotifications &&
     window.matchMedia?.("(display-mode: standalone)").matches === true &&
-    "Notification" in window && "serviceWorker" in navigator && "PushManager" in window;
+    "Notification" in window && "serviceWorker" in navigator;
+}
+
+export function usesWebPush() {
+  return signedIn && usesNotificationWorker() && "PushManager" in window;
+}
+
+export async function notificationWorker() {
+  await navigator.serviceWorker.register("/bot-notifications.js");
+  return navigator.serviceWorker.ready;
 }
 
 let subscribed = false;
@@ -31,8 +45,7 @@ export function syncWebPush(enabled: boolean): Promise<void> {
       await api("/api/push/web", { method: "DELETE" });
       return;
     }
-    await navigator.serviceWorker.register("/bot-notifications.js");
-    const worker = await navigator.serviceWorker.ready;
+    const worker = await notificationWorker();
     const { publicKey } = await api<{ publicKey: string }>("/api/push/web");
     let subscription = await worker.pushManager.getSubscription();
     if (subscription && subscription.options.applicationServerKey) {

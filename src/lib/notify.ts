@@ -1,4 +1,4 @@
-import { hasWebPush, usesWebPush } from "./web-push";
+import { hasWebPush, notificationWorker, usesNotificationWorker } from "./web-push";
 import type { Notification } from "../../shared/notification";
 import { plainPreviewText } from "../../shared/plain-preview";
 import { finishedNotificationsEnabled, notificationSoundsEnabled } from "./notification-preferences";
@@ -60,11 +60,13 @@ export function showNotification(
     };
   };
   const desktop = window.ogb?.desktopNotifications;
-  if (usesWebPush()) {
+  if (usesNotificationWorker()) {
     if (frame.kind === "done" && hasWebPush()) return;
-    void navigator.serviceWorker.getRegistration("/").then((worker) => worker?.showNotification(title, {
+    void notificationWorker().then((worker) => worker.showNotification(title, {
       ...options, data: { threadId: frame.threadId, botId: frame.botId },
-    })).catch(() => {});
+    })).catch(() => {
+      try { shownByPage(); } catch { /* Some mobile browsers only support worker notifications. */ }
+    });
     return;
   }
   if (!desktop) return shownByPage();

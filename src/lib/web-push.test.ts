@@ -1,9 +1,9 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { api } from "../state/api";
-import { hasWebPush, syncWebPush } from "./web-push";
+import { hasWebPush, setWebPushSession, syncWebPush } from "./web-push";
 
 vi.mock("../state/api", () => ({ api: vi.fn() }));
-afterEach(() => { vi.unstubAllGlobals(); vi.clearAllMocks(); });
+afterEach(() => { setWebPushSession(false); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 it("registers the service worker subscription, restores it on reopen and unsubscribes this device", async () => {
   const subscription = { endpoint: "https://web.push.apple.com/example", unsubscribe: vi.fn(async () => true), options: {} };
@@ -15,6 +15,9 @@ it("registers the service worker subscription, restores it on reopen and unsubsc
   vi.stubGlobal("window", { matchMedia: () => ({ matches: true }), PushManager: {}, Notification: {} });
   vi.stubGlobal("navigator", { serviceWorker: { register: vi.fn(), ready: Promise.resolve(worker), getRegistration: async () => worker } });
   vi.mocked(api).mockResolvedValue({ publicKey: "key" });
+  await syncWebPush(true);
+  expect(api).not.toHaveBeenCalled();
+  setWebPushSession(true);
   await syncWebPush(true);
   await syncWebPush(true);
   expect(worker.pushManager.subscribe).toHaveBeenCalledExactlyOnceWith({ userVisibleOnly: true, applicationServerKey: "key" });

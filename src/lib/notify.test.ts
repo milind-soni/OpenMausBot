@@ -46,6 +46,33 @@ afterEach(() => {
   sounds.finished = true;
 });
 
+it("displays approvals in a standalone window before a push subscription exists", async () => {
+  const { notices } = installNotification("granted");
+  const show = vi.fn().mockResolvedValue(undefined);
+  const register = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("window", { matchMedia: () => ({ matches: true }), Notification });
+  vi.stubGlobal("navigator", { serviceWorker: { register, ready: Promise.resolve({ showNotification: show }) } });
+  sounds.finished = false;
+
+  showNotification({ ...frame, kind: "approval" }, vi.fn());
+  await vi.waitFor(() => expect(show).toHaveBeenCalledWith(frame.title,
+    expect.objectContaining({ data: { threadId: frame.threadId, botId: frame.botId } })));
+  expect(register).toHaveBeenCalledWith("/bot-notifications.js");
+  expect(notices).toHaveLength(0);
+});
+
+it("falls back to a page notification if worker display fails", async () => {
+  const { notices } = installNotification("granted");
+  vi.stubGlobal("window", { matchMedia: () => ({ matches: true }), Notification });
+  vi.stubGlobal("navigator", { serviceWorker: {
+    register: vi.fn().mockResolvedValue(undefined),
+    ready: Promise.resolve({ showNotification: vi.fn().mockRejectedValue(new Error("display failed")) }),
+  } });
+
+  showNotification({ ...frame, kind: "question" }, vi.fn());
+  await vi.waitFor(() => expect(notices).toHaveLength(1));
+});
+
 describe("desktop notifications", () => {
   it("does not request permission from a background notification frame", () => {
     const { notices, requestPermission } = installNotification("default");
