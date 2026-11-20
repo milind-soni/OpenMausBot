@@ -1,3 +1,4 @@
+import { readTranscriptPosition } from "@/lib/transcript-follow";
 import { placeUnreadDivider } from "@/lib/unread-divider";
 import { api } from "./api";
 import { visibleMessages } from "./snapshot-navigation";
@@ -49,8 +50,9 @@ export function trimmedHeld<T extends HeldOwner>(owner: T, keepFromId?: string):
   return from > 0 ? { ...owner, messages: owner.messages.slice(from), hasMore: true } : owner;
 }
 
+/** The conversation the chat draws: the selected room or bot, or the first bot when the selection names neither. */
 const shownThread = (state: AppState, threadId: string) => state.activeView === "chat" &&
-  [...state.bots, ...state.groups].some((owner) => owner.id === state.selectedId && owner.threadId === threadId);
+  (state.groups.find((group) => group.id === state.selectedId) ?? state.bots.find((bot) => bot.id === state.selectedId) ?? state.bots[0])?.threadId === threadId;
 
 export function reduceTrimHeldMessages(state: AppState, { threadId, keepFromId }: TrimHeldMessages): AppState {
   if (shownThread(state, threadId)) return state;
@@ -64,6 +66,19 @@ export function reduceTrimHeldMessages(state: AppState, { threadId, keepFromId }
   const bots = state.bots.map(trim);
   const groups = state.groups.map(trim);
   return changed ? { ...state, bots, groups } : state;
+}
+
+/** The most rows a conversation nobody has on screen gathers from live frames before it is trimmed again. */
+export const HELD_IN_BACKGROUND = HELD_FOR_PLACE + HELD_AFTER_LEAVING;
+
+/** After a row lands in a conversation nobody has on screen: past `HELD_IN_BACKGROUND` rows it is trimmed as when the
+ * reader left it, keeping the row the reader was at. */
+export function capHeldInBackground(state: AppState, action: Action): AppState {
+  if (action.type !== "messageAdded") return state;
+  const owner = [...state.bots, ...state.groups].find((candidate) => candidate.threadId === action.threadId);
+  if (!owner || owner.messages.length <= HELD_IN_BACKGROUND || shownThread(state, action.threadId)) return state;
+  const place = readTranscriptPosition(`${owner.id}:${owner.threadId}`);
+  return reduceTrimHeldMessages(state, { type: "trimHeldMessages", threadId: action.threadId, keepFromId: place?.atEnd ? undefined : place?.rowId });
 }
 
 /** Holds fewer rows than one page while the server has more: a snapshot's tail, or a conversation switched to. */

@@ -1,6 +1,6 @@
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError, retryRequest, snapshotArrays } from "./api";
-import { loadOlderPage, loadShortHeldOnOpen, MESSAGE_PAGE_SIZE, reduceOlderMessages, reduceTrimHeldMessages } from "./message-history";
+import { capHeldInBackground, loadOlderPage, loadShortHeldOnOpen, MESSAGE_PAGE_SIZE, reduceOlderMessages, reduceTrimHeldMessages } from "./message-history";
 import { readChatSnapshot } from "./chat-snapshot";
 export { MESSAGE_PAGE_SIZE } from "./message-history";
 import { addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
@@ -856,7 +856,8 @@ function dismissOnboardingCard(state: AppState, botId: string): AppState {
 
 export const CLOUD_LINK_SETTINGS = { type: "toggleAppSettings", open: true, section: "cloudAccount", cloudLink: true } as const satisfies Action;
 
-export function reducer(state: AppState, action: Action): AppState {
+export function reducer(state: AppState, action: Action): AppState { return capHeldInBackground(reduceApp(state, action), action); }
+function reduceApp(state: AppState, action: Action): AppState {
   const [newChatState, newChatOnly] = reduceNewChat(state, action); if (newChatOnly) return newChatState; state = newChatState;
   if (action.type === "optimisticMessageRemoved") state = removeForkOptimistic(state, action);
   if (action.type === "messageAdded" || action.type === "messagePatched" || action.type === "threadActive" || action.type === "optimisticMessageRemoved") {
