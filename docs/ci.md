@@ -101,7 +101,7 @@ run in the Windows Vitest/Electron jobs.
 ## Vitest shards
 
 The slowest shard sets how long a PR and a release wait. Linux and Windows run
-eight shards each, macOS four (the full lane only); `scripts/ci-scope.mjs`
+eight shards each, macOS five (the full lane only); `scripts/ci-scope.mjs`
 builds the matrix.
 
 **Files at once.** A Linux shard runs four files at a time (`VITEST_WORKERS`,
@@ -199,7 +199,7 @@ half hours. Now:
 
 - A PR runs the Vitest shards on Ubuntu (and Windows where its change can
   break Windows), a push to main or a merge group on Ubuntu and Windows; the
-  full lane adds four macOS shards, which run the host e2e files only. Only a
+  full lane adds five macOS shards, which run the host e2e files only. Only a
   couple of test blocks are macOS-only.
 - Every PR's, push's and merge group's macOS checks are one job: the
   packaged-server smoke and the Electron smokes.
