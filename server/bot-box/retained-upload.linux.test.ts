@@ -36,7 +36,7 @@ describe.skipIf(detection.box !== "bwrap")(`an upload added after a box in its b
     let out = "";
     child.stdout?.on("data", (chunk) => { out += chunk; });
     child.stderr?.on("data", (chunk) => { out += chunk; });
-    const exited = new Promise<void>((resolve) => child.once("exit", () => { wrapped.release(); resolve(); }));
+    const exited = new Promise<void>((resolve) => child.once("close", () => { wrapped.release(); resolve(); }));
     await expect.poll(() => out, { timeout: 30_000 }).toBe("started\n");
 
     // The person's first attachment, handed to the next turn after the box started.
