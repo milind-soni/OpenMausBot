@@ -81,3 +81,20 @@ it("passes through the device failure without claiming permission was denied", a
   expect(note).toContain("did not obtain a location fix in time");
   expect(note).not.toContain("permission");
 });
+
+it("uses IP only for a failed device fix and labels it as the network exit", async () => {
+  const places = new DeviceLocations(), key = locationClientKey(local, tab)!;
+  for (const failure of ["position-unavailable", "permission-denied"] as const) {
+    const write = vi.fn();
+    const pending = places.request(key, write, new AbortController().signal);
+    const request = write.mock.calls[0][0].split("\n")[1].slice(6);
+    expect(places.reply(local, tab, { request, failure, networkLocation: { city: "Example", district: "Example County", postalCode: "12345", networkCenter: { latitude: 999, longitude: 51 }, ipAddress: "fake" } })).toBe(true);
+    const result = await pending;
+    if (failure === "permission-denied") {
+      expect(result).toBe(failure);
+    } else {
+      expect(result).toEqual({ source: "ip", provider: "DB-IP", city: "Example", district: "Example County", postalCode: "12345" });
+      expect(currentLocationNote(result)).toContain("network exit");
+    }
+  }
+});

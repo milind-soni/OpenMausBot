@@ -319,3 +319,12 @@ Maps Geocoding API enabled. This sends the coordinates of a requested fix
 to Google's reverse-geocoding API. Without an available address provider,
 the bot receives coordinates and accuracy. The bot should not pass them
 to web search.
+
+If the device reports no fix or times out, the active client can query DB-IP
+over HTTPS to estimate the location of its own public IP. The bot receives
+the most specific area available. A paid plan can also supply a district,
+postal code, and estimated network center. The response labels this as an IP
+estimate, which can reflect a VPN, proxy or mobile carrier exit. Permission
+denials and inactive tabs skip this lookup. The free API has a daily cap.
+For higher usage, build the web app with `VITE_OMB_DBIP_PUBLIC_KEY` set to a
+browser-enabled public key from [DB-IP](https://db-ip.com/api/).

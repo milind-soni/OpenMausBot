@@ -595,8 +595,12 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === "get_user_location") {
     const result = await apiResponse("/api/internal/device-location", { method: "POST", body: "{}" });
-    return result.ok ? { text: JSON.stringify(result.body.location) }
-      : { text: String(result.body.error ?? "Location unavailable."), isError: true };
+    if (!result.ok) return { text: String(result.body.error ?? "Location unavailable."), isError: true };
+    const location = result.body.location;
+    if (location && typeof location === "object" && "source" in location && location.source === "ip") {
+      return { text: `${JSON.stringify(location)}\nApproximate network exit only. It may differ from the person's physical location, especially with VPN or mobile data. Use the most specific named area returned. The postal code and network center describe the network, not the user. Do not infer an address or reverse geocode the network center. Credit DB-IP.` };
+    }
+    return { text: JSON.stringify(location) };
   }
   if (name === "request_credential") {
     const credentialId = args.credential_id;

@@ -89,14 +89,109 @@ it("retries when high accuracy returns an unusable fix through the success callb
 it("preserves the native location failure instead of treating every Mac error as no fix", async () => {
   vi.spyOn(document, "hasFocus").mockReturnValue(true);
   vi.stubGlobal("ogb", { currentLocation: vi.fn().mockResolvedValue("position-timed-out") });
+  const send = vi.fn().mockResolvedValueOnce(Response.json({}, { status: 503 })).mockResolvedValue(null);
+  vi.stubGlobal("fetch", send);
+  const stream = new EventTarget();
+  listenForDeviceLocation(stream as EventSource, "tab");
+  stream.dispatchEvent(new MessageEvent("device-location", { data: "1".repeat(36) }));
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(JSON.parse(send.mock.calls[1][1].body)).toMatchObject({
+    position: null,
+    failure: "position-timed-out",
+  });
+});
+
+it("keeps high accuracy running after a temporary provider error and accepts its next fresh fix", async () => {
+  const clearWatch = vi.fn();
+  const watchPosition = vi.fn((success, failure) => {
+    failure({ code: 2 });
+    success({ coords: location, timestamp: Date.now() - 90_000 });
+    success({ coords: location, timestamp: location.timestamp });
+    return 17;
+  });
+  vi.stubGlobal("navigator", { geolocation: { watchPosition, clearWatch } });
+
+  await expect(deviceLocation()).resolves.toEqual(location);
+  expect(watchPosition).toHaveBeenCalledWith(expect.any(Function), expect.any(Function), {
+    enableHighAccuracy: true, maximumAge: 0, timeout: 15_000,
+  });
+  expect(clearWatch).toHaveBeenCalledExactlyOnceWith(17);
+});
+
+it("ends a standard position watch when the browser returns nothing", async () => {
+  vi.useFakeTimers();
+  try {
+    const clearWatch = vi.fn();
+    vi.stubGlobal("navigator", { geolocation: {
+      getCurrentPosition: vi.fn((_success, failure) => failure({ code: 3 })),
+      watchPosition: vi.fn().mockReturnValueOnce(17).mockReturnValueOnce(23),
+      clearWatch,
+    } });
+
+    const rejected = expect(deviceLocation()).rejects.toMatchObject({ code: 3 });
+    await vi.advanceTimersByTimeAsync(23_000);
+    await rejected;
+    expect(clearWatch.mock.calls).toEqual([[17], [23]]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("starts standard positioning after the high-accuracy watch expires", async () => {
+  vi.useFakeTimers();
+  try {
+    const timestamp = Date.now();
+    const clearWatch = vi.fn();
+    const watchPosition = vi.fn()
+      .mockImplementationOnce((_success, failure) => { failure({ code: 2 }); return 17; })
+      .mockImplementationOnce(success => {
+        success({ coords: location, timestamp: Date.now() });
+        return 23;
+      });
+    vi.stubGlobal("navigator", { geolocation: { watchPosition, clearWatch } });
+
+    const result = deviceLocation();
+    await vi.advanceTimersByTimeAsync(15_000);
+    await expect(result).resolves.toEqual({ ...location, timestamp: timestamp + 15_000 });
+    expect(watchPosition).toHaveBeenLastCalledWith(expect.any(Function), expect.any(Function), {
+      enableHighAccuracy: false, maximumAge: 0, timeout: 8_000,
+    });
+    expect(clearWatch.mock.calls).toEqual([[17], [23]]);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+
+it.each(["position-unavailable", "position-timed-out"])("falls back to the client IP after %s", async failure => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  vi.stubGlobal("ogb", { currentLocation: async () => failure });
+  const send = vi.fn().mockResolvedValueOnce(Response.json({
+    ipAddress: "203.0.113.123", city: "Example City", stateProv: "Example State", countryName: "Example Country",
+    district: "Example County", zipCode: "12345", latitude: 1.35, longitude: 103.82,
+  })).mockResolvedValue(null);
+  vi.stubGlobal("fetch", send);
+  const stream = new EventTarget();
+  listenForDeviceLocation(stream as EventSource, "tab");
+  stream.dispatchEvent(new MessageEvent("device-location", { data: "1".repeat(36) }));
+  await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+  expect(send.mock.calls[0][0]).toBe("https://api.db-ip.com/v2/free/self");
+  const body = JSON.parse(send.mock.calls[1][1].body);
+  expect(body.networkLocation).toEqual({
+    source: "ip", provider: "DB-IP", city: "Example City", region: "Example State", country: "Example Country",
+    district: "Example County", postalCode: "12345", networkCenter: { latitude: 1.35, longitude: 103.82 },
+  });
+  expect(JSON.stringify(body)).not.toContain("203.0.113.123");
+});
+
+it("does not look up the network IP when the user denied location permission", async () => {
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  vi.stubGlobal("ogb", { currentLocation: async () => "permission-denied" });
   const send = vi.fn().mockResolvedValue(null);
   vi.stubGlobal("fetch", send);
   const stream = new EventTarget();
   listenForDeviceLocation(stream as EventSource, "tab");
   stream.dispatchEvent(new MessageEvent("device-location", { data: "1".repeat(36) }));
   await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
-  expect(JSON.parse(send.mock.calls[0][1].body)).toMatchObject({
-    position: null,
-    failure: "position-timed-out",
-  });
+  expect(send.mock.calls[0][0]).toBe("/api/device-location");
 });

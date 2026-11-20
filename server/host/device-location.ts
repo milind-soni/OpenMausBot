@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import {
-  DEVICE_LOCATION_HEADER, DEVICE_LOCATION_EVENT, DEVICE_LOCATION_TIMEOUT, cleanLocationAddress, parseDeviceLocation, LOCATION_FAILURES, type DeviceLocation, type LocationFailure, type LocationResult,
+  DEVICE_LOCATION_HEADER, DEVICE_LOCATION_EVENT, DEVICE_LOCATION_TIMEOUT, cleanLocationAddress, parseDeviceLocation, parseNetworkLocation, LOCATION_FAILURES, type DeviceLocation, type LocationFailure, type LocationResult,
 } from "../../shared/device-location.ts";
 import type { RequestAuth } from "../request-auth.ts";
 
@@ -44,12 +44,14 @@ export class DeviceLocations {
     });
   }
 
-  reply(auth: RequestAuth, clientHeader: unknown, body: { request?: unknown; position?: unknown; failure?: unknown } | null): boolean {
+  reply(auth: RequestAuth, clientHeader: unknown, body: { request?: unknown; position?: unknown; failure?: unknown; networkLocation?: unknown } | null): boolean {
     const client = locationClientKey(auth, clientHeader);
     const pending = typeof body?.request === "string" ? this.pending.get(body.request) : undefined;
     if (!pending || pending.client !== client) return false;
     const failure = LOCATION_FAILURES.find(reason => reason === body?.failure);
-    pending.finish(parseDeviceLocation(body?.position) ?? failure ?? null);
+    const network = failure === "position-unavailable" || failure === "position-timed-out"
+      ? parseNetworkLocation(body?.networkLocation) : null;
+    pending.finish(parseDeviceLocation(body?.position) ?? network ?? failure ?? null);
     return true;
   }
 }
@@ -96,6 +98,9 @@ export function currentLocationNote(location: LocationResult): string {
   if (!location || typeof location === "string") {
     return `\n\n[Device location: unavailable for this request. ${locationFailureMessage(location)} Relay this explanation. Do not infer it from a time zone, the server location, or the chat.]`;
   }
+  if ("source" in location) {
+    return `\n\n[Approximate IP location from DB-IP: ${JSON.stringify(location)}. Device coordinates were unavailable. State that this is an estimate of the network exit, which may differ from the user's physical location, especially with a VPN or mobile network. Use the most specific named area supplied. Any postal code or network center is an estimate for the network, not the person. Do not reverse geocode the network center or infer a street or building. Credit DB-IP.]`;
+  }
   return `\n\n[Current device location data: ${JSON.stringify(location)}. Answer from this reading. An address is a map match, not confirmation of a building or venue. Qualify it using the location accuracy. If no address is available, state that and give the coordinates. Do not send these coordinates to web search or infer a place from the time zone.]`;
 }
 
@@ -122,7 +127,7 @@ export function createDeviceLocationHost(
       const requestSignal = AbortSignal.any([signal, closed.signal]);
       const fix = await deviceLocations.request(connection.locationClient, frame => connection.res.write(frame), requestSignal);
       if (requestSignal.aborted) return null;
-      if (!fix || typeof fix === "string") return fix;
+      if (!fix || typeof fix === "string" || "source" in fix) return fix;
       const location = await resolveDeviceAddress(fix, requestSignal);
       return requestSignal.aborted ? null : location;
     } finally {

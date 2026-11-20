@@ -7,9 +7,34 @@ export interface DeviceLocation {
   addressSource?: "apple" | "google";
 }
 
+export interface NetworkLocation {
+  source: "ip";
+  provider: "DB-IP";
+  city?: string;
+  region?: string;
+  country?: string;
+  district?: string;
+  postalCode?: string;
+  networkCenter?: { latitude: number; longitude: number };
+}
+
+export function parseNetworkLocation(value: unknown): NetworkLocation | null {
+  if (!value || typeof value !== "object") return null;
+  const data = value as Record<string, unknown>;
+  const label = (field: unknown) => cleanLocationAddress(field)?.slice(0, 100);
+  const city = label(data.city), region = label(data.region), country = label(data.country);
+  const district = label(data.district), postalCode = label(data.postalCode);
+  const center = data.networkCenter as { latitude?: unknown; longitude?: unknown } | undefined;
+  const { latitude, longitude } = center ?? {};
+  const networkCenter = typeof latitude === "number" && Math.abs(latitude) <= 90 &&
+    typeof longitude === "number" && Math.abs(longitude) <= 180 ? { latitude, longitude } : undefined;
+  if (!city && !region && !country && !district && !postalCode && !networkCenter) return null;
+  return { source: "ip", provider: "DB-IP", city, region, country, district, postalCode, networkCenter };
+}
+
 export const LOCATION_FAILURES = ["permission-denied", "position-unavailable", "position-timed-out", "page-hidden"] as const;
 export type LocationFailure = typeof LOCATION_FAILURES[number];
-export type LocationResult = DeviceLocation | LocationFailure | null;
+export type LocationResult = DeviceLocation | NetworkLocation | LocationFailure | null;
 
 export const DEVICE_LOCATION_EVENT = "device-location";
 export const DEVICE_LOCATION_PATH = "/api/device-location";
