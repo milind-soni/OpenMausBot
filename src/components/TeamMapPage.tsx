@@ -267,6 +267,8 @@ export function SectionContextDialog({ section, label, onClose }: { section: str
 
 /** How long a card acknowledges a message sent from the map; its border fades within this. */
 const SENT_HIGHLIGHT_MS = 1_400;
+/** Longer than the 3-second poll, so a slow reply still lands; short enough that a hung one frees the poll. */
+const REFRESH_TIMEOUT_MS = 15_000;
 
 export function TeamMapPage() {
   const { state, dispatch } = useStore();
@@ -324,6 +326,7 @@ export function TeamMapPage() {
   // `background`: the 3-second poll, which never wakes a Cloud home that went to sleep.
   // Only the newest request writes: an older reply that lands late never overwrites a newer snapshot.
   // A poll tick skips while a request is still out, so a reply slower than the interval is never superseded.
+  // Every request has a time limit, so one that hangs releases the pending count and the next tick retries.
   const latestRefresh = useRef(0);
   const pendingRefreshes = useRef(0);
   const refresh = useCallback(async (background = false) => {
@@ -331,7 +334,7 @@ export function TeamMapPage() {
     const request = ++latestRefresh.current;
     pendingRefreshes.current += 1;
     try {
-      const next = await api("/api/team-map", background ? { background } : undefined);
+      const next = await api("/api/team-map", { timeoutMs: REFRESH_TIMEOUT_MS, ...(background ? { background } : {}) });
       if (request !== latestRefresh.current) return;
       setSnapshot(next);
       setRefreshError(null);
