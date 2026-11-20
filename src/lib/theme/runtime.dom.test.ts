@@ -76,3 +76,14 @@ it("follows the system's light or dark change while a theme with both blocks is 
     expect(appColor()).toBe(canvas);
   }
 });
+
+it("drops the interface tracking for a theme with its own font, and brings it back when the theme comes off", async () => {
+  const root = document.documentElement;
+  await wear({ name: "Serif", font: "Georgia, serif" }, "daylight");
+  expect(root.style.getPropertyValue("--font-sans")).toBe("Georgia, serif");
+  expect(root.style.getPropertyValue("--tracking-ui")).toBe("0");
+  const runtime = await import("./runtime");
+  runtime.wearTheme({ id: "plain", theme: { name: "Plain", accent: "#d97757" } });
+  expect(root.style.getPropertyValue("--font-sans")).toBe("");
+  expect(root.style.getPropertyValue("--tracking-ui")).toBe("");
+});

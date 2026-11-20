@@ -976,7 +976,7 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
   if (!message || (!file.private && !linked)) {
     return (
       <span title={t("attach.legacyFile", { name: file.name })} className={cn(FILE_CHIP, "gap-1.5 px-2.5", className)}>
-        <FileText size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+        <FileText size={14} className="shrink-0" aria-hidden="true" />
         {name}
         <span className="shrink-0 text-[12px]">{t("attach.unavailable")}</span>
       </span>
@@ -993,16 +993,16 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
           {...chipNameAction(preview, save, file.name, save.retryable)}
           className="inline-flex h-7 min-w-0 items-center gap-1.5 rounded-full ps-2.5 pe-2 transition-colors hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-wait"
         >
-          <FileText size={14} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+          <FileText size={14} className="shrink-0" aria-hidden="true" />
           {name}
-          {preview.opens ? <Eye size={13} strokeWidth={1.75} className="shrink-0" aria-hidden="true" /> : save.state === "saving" ? (
+          {preview.opens ? <Eye size={13} className="shrink-0" aria-hidden="true" /> : save.state === "saving" ? (
             <LoaderCircle size={13} className="shrink-0 animate-spin" aria-hidden="true" />
           ) : save.state === "saved" ? (
             <Check size={13} className="shrink-0 text-success" aria-hidden="true" />
           ) : failed ? (
             save.retryable && <RotateCcw size={13} className="shrink-0 text-danger" aria-hidden="true" />
           ) : (
-            <Download size={13} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
+            <Download size={13} className="shrink-0" aria-hidden="true" />
           )}
         </button>
         {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}

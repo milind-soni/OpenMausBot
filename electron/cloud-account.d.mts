@@ -379,6 +379,8 @@ export interface CloudAccountClient {
   reload(): Promise<CloudAccountState>;
   /** Ends a sign-in that waits on this device, at the Admin. */
   revokeSaved(record: unknown): Promise<void>;
+  /** For cloud-accounts.mjs only, never a page: the active sign-in when it is kept in memory only, as its file would hold it. */
+  memorySignIn(): unknown;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {
@@ -398,6 +400,8 @@ export declare function createCloudAccountClient(options: {
   /** Files or lending waits for a sleeping Cloud to wake: the session is read every 15 s. */
   awaitingWake?: () => boolean;
   t?: (key: string, params?: Record<string, string | number>) => string;
+  /** How long Clear waits for a read of the saved sign-in already under way (READ_WAIT_MS). */
+  readWaitMs?: number;
 }): CloudAccountClient;
 export declare function cloudPlanSnapshot(state: CloudAccountState | null | undefined, extra?: { notice?: import("./cloud-home.mjs").CloudTrialState | null }): CloudPlanSnapshot;
 /** My Cloud's line under its name in the server menus, or null for none. */

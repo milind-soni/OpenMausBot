@@ -36,7 +36,7 @@ export function preloadConnectedApps(force = false, background = false): Promise
   }
   if (connectorStatusRequest) return connectorStatusRequest;
   type ConnectedAnswer = { services?: Record<string, ConnectorStatus>; credentialStore?: string; inventoryComplete?: boolean };
-  connectorStatusRequest = unlessRefused<ConnectedAnswer | null>("/api/connectors/connected", () => api("/api/connectors/connected", background ? { background: true } : undefined), null)
+  connectorStatusRequest = unlessRefused<ConnectedAnswer | null>("/api/connectors/connected", () => api("/api/connectors/connected", force || background ? { ...(force ? { headers: { "cache-control": "no-cache" } } : {}), ...(background ? { background: true } : {}) } : undefined), null)
     .then((response): ConnectorInventory => {
       if (!response) return REFUSED_INVENTORY;
       const services: Record<string, ConnectorStatus> = response.services ?? {};

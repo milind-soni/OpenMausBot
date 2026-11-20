@@ -6,7 +6,7 @@ import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { InstanceProviderMark } from "./ProviderIcons";
 import { hasSavedApiKey, needsCli, needsSignIn } from "./EngineSetup";
-import { MENU_META, MENU_ROW, MENU_STROKE } from "./menu-recipe";
+import { MENU_META, MENU_ROW } from "./menu-recipe";
 import { Select } from "./Select";
 
 type ModelOption = InstanceInfo["models"]["options"][number];
@@ -81,7 +81,7 @@ export function FollowBotModelRow({ name, model, follows, onPick }: { name: stri
 export function ModelSearch({ value, onChange, local }: { value: string; onChange: (value: string) => void; local: boolean }) {
   return (
     <div className="group/search flex h-9 shrink-0 items-center gap-2 border-b-[0.5px] border-ink/10 px-3.5">
-      <Search size={16} strokeWidth={MENU_STROKE} className="shrink-0 text-ink-tertiary group-focus-within/search:text-ink-secondary" aria-hidden="true" />
+      <Search size={16} className="shrink-0 text-ink-tertiary group-focus-within/search:text-ink-secondary" aria-hidden="true" />
       <input
         data-menu-search
         value={value}
@@ -179,7 +179,7 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
           title={apiKeysLabel(instances)}
           className="flex size-9 shrink-0 items-center justify-center rounded-[8px] border border-dashed border-ink/20 text-ink-tertiary hover:bg-ink/[0.06] hover:text-ink"
         >
-          <Plus size={16} strokeWidth={MENU_STROKE} aria-hidden="true" />
+          <Plus size={16} aria-hidden="true" />
         </button>
       )}
       {local.length > 0 && <div className={cn(RAIL_LABEL, "pt-2")}>{t("model.rail.local")}</div>}
