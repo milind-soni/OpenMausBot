@@ -1,5 +1,5 @@
 #!/bin/sh
-# Entrypoint for the Docker-in-Docker build (deploy/local/Dockerfile, DIND=1).
+# Entrypoint of the server-dind image (Dockerfile).
 # Wants root, `privileged: true` and a volume on /var/lib/docker; without them
 # the server starts anyway, with no container runtime.
 set -u
@@ -20,6 +20,7 @@ start_dockerd() {
     update-alternatives --set iptables /usr/sbin/iptables-legacy || true
     update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
   fi
+  rm -rf /var/run/docker /var/run/docker.pid /var/run/docker.sock
   dockerd \
     --host=unix:///var/run/docker.sock \
     --storage-driver="${OMB_DIND_STORAGE_DRIVER:-overlay2}" \

@@ -61,7 +61,10 @@ jobs:
           docker run -d --name omb-dind --privileged --cgroupns host -v omb-dind-lib:/var/lib/docker openmausbot-dind:ci
           healthy omb-dind
           for i in $(seq 1 40); do docker exec omb-dind docker info >/dev/null 2>&1 && break; sleep 2; if [ "$i" = "40" ]; then docker logs omb-dind; exit 1; fi; done
-          test "$(docker exec omb-dind ps -eo user=,args= | awk '/desktop-entry/ { print $1; exit }')" = maus
+          test "$(docker top omb-dind -eo pid,uid,args | awk '/desktop-entry/ { print $2; exit }')" = "$(docker exec omb-dind id -u maus)"
+          docker restart omb-dind >/dev/null
+          healthy omb-dind
+          for i in $(seq 1 40); do docker exec omb-dind docker info >/dev/null 2>&1 && break; sleep 2; if [ "$i" = "40" ]; then docker logs omb-dind; exit 1; fi; done
           docker rm -f omb-dind >/dev/null
       - name: Prove the image finds its enterprise layer
         # The image ships dist-server/ alone, so the bundled layer sits inside

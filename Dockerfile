@@ -289,7 +289,7 @@ RUN docker_arch=x86_64 && if [ "$TARGETARCH" = arm64 ]; then docker_arch=aarch64
     | tar -xz -C /usr/local/bin --strip-components=1 \
   && docker --version | grep -qF "$DOCKER_VERSION" \
   && dockerd --version | grep -qF "$DOCKER_VERSION"
-COPY --chmod=0755 deploy/local/dind-start.sh /usr/local/bin/omb-dind-start
+COPY --chmod=0755 deploy/dind-start.sh /usr/local/bin/omb-dind-start
 ENTRYPOINT ["/usr/local/bin/omb-dind-start"]
 CMD []
 

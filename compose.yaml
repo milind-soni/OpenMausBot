@@ -10,7 +10,6 @@ services:
       args:
         BASE_IMAGE: ${OMB_BASE_IMAGE:-ghcr.io/milind-soni/openmausbot:latest}
         ENGINES: ${ENGINES-@anthropic-ai/claude-code @openai/codex}
-        DIND: ${DIND:-}
     image: ${OMB_LOCAL_IMAGE:-openmausbot-local:latest}
     restart: unless-stopped
     volumes:
