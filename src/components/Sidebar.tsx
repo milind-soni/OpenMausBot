@@ -7,7 +7,7 @@ import { api, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, 
 import { approvalModeFor } from "../../shared/approval-mode";
 import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
 import { SidebarWorkingStep } from "./SidebarWorkingStep"; import { FadeLine } from "./FadeLine";
-import { openBotRow } from "@/state/thread-navigation";
+import { openBotRow } from "@/state/thread-navigation"; import { useNewChatOpen } from "@/state/new-chat";
 
 import { BotAvatar } from "./Avatar";
 import { BotEngineMark, BotModelBadge, botTooltip } from "./BotModelBadge"; import { SidebarBotRole } from "./BotRole";
@@ -470,7 +470,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns
   const [reorderStatus, setReorderStatus] = useState("");
   const [folderDrop, setFolderDrop] = useState<{ id: string; place: "before" | "after" } | null>(null);
   const draggingFolder = useRef<string | null>(null);
-  const [showAll, setShowAll] = useSidebarShowAllThreads(bot.id);
+  const [showAll, setShowAll] = useSidebarShowAllThreads(bot.id), drafting = useNewChatOpen(bot.id);
   const [permissionRefresh, setPermissionRefresh] = useState<{ threadId: string; kind: "local-auto" } | null>(null);
   const currentProjectId = tasks.find((task) => task.threadId === bot.threadId)?.projectId;
   useEffect(() => {
@@ -514,7 +514,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns
   }), [botId, dispatch]);
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);
-    return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && task.threadId === bot.threadId} folders={projects}
+    return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && !drafting && task.threadId === bot.threadId} folders={projects}
       activityLabel={task.threadId === bot.threadId ? activityLabel : undefined} now={stampClock(threadRecency(task), now)} locale={locale} {...actions}
       selectMode={bulk.active} checked={selection.has(task.threadId)} onToggleSelect={bulk.toggle} />;
   };

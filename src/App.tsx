@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, Loader2, Menu } from "lucide-react";
 import { CLOUD_LINK_SETTINGS, openBot, StoreProvider, useStore } from "@/state/store";
 import { nextShortcutBot, shortcutBots, shownBotIds } from "@/lib/sidebar-shortcut-order";
@@ -44,6 +44,7 @@ import { CloudSendStrip } from "@/components/CloudSendStrip";
 import { HomeLine } from "@/components/HomeLine";
 import { useTeamChats } from "@/state/team-chats";
 import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
+import { newChatBot } from "@/state/new-chat";
 import { useTeamPresence } from "@/state/team-presence";
 import { inboxVersion, useInboxLoader, useInboxPanel, useInboxReady } from "@/state/inbox";
 import { InboxPanel } from "@/components/inbox/InboxPanel";
@@ -168,6 +169,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const group = state.groups.find((g) => g.id === state.selectedId);
   const chiefStep = useChiefStepOpen();
   const bot = group || chiefStep ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
+  const chatBot = useMemo(() => bot && newChatBot(bot, state.newChat), [bot, state.newChat]);
   const { open: drawerOpen, show: openDrawer, hide: hideDrawer, noteAction: noteDrawerAction } = useBotListDrawer({ selectedId: state.selectedId, botThread: bot?.threadId, groupThread: group?.threadId,
     view: state.activeView, pluginsOpen: state.pluginsOpen, settingsOpen: state.settingsOpen });
   const closeDrawer = useCallback(() => { hideDrawer(); menuButtonRef.current?.focus(); }, [hideDrawer]);
@@ -419,7 +421,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       ) : group ? (
         <GroupView key={group.id} group={group} />
       ) : bot ? (
-        <ChatView bot={bot} />
+        <ChatView bot={chatBot ?? bot} />
       ) : noEngines ? (
         <NoEngines />
       ) : (
