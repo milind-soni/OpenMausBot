@@ -695,12 +695,12 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const last = lastNonReceipt(visible);
   const highlight = selected && !props.phoneHome;
   const phoneRow = props.phoneHome && !iconOnly;
-  const previewSize = phoneRow ? "text-[14px] leading-5" : "text-[13px] leading-[18px]";
+  const previewSize = phoneRow ? "text-[15px] leading-[21px]" : "text-[13px] leading-[18px]";
   const rowClass = cn(
     "flex w-full items-center rounded-xl text-left transition-colors duration-150", SIMPLE_ROW_FOCUS,
     iconOnly ? "h-[54px] justify-center" : cn("gap-2 rounded-[8px] py-2 pe-2 md:h-[54px] md:py-0", "ps-2"),
     !iconOnly && "max-md:rounded-2xl max-md:py-2.5",
-    phoneRow && "max-md:gap-2.5 max-md:py-3",
+    phoneRow && "max-md:gap-3 max-md:py-3.5",
     sidebarRowTone(highlight),
     !iconOnly && rowSurface(highlight),
   );
@@ -714,7 +714,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
         <BotAvatar
           bot={bot}
           state={stateForBot(bot)}
-          size={iconOnly ? 36 : phoneRow ? 46 : 42}
+          size={iconOnly ? 36 : phoneRow ? 50 : 42}
           animated={avatarHovered}
         />
         {/* Bottom-left, clear of the status dots on the right and of the row's hover actions. */}
@@ -749,7 +749,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       </span>
       <div className={cn("min-w-0 flex-1", iconOnly && "hidden")}>
         <div className={cn("flex items-baseline justify-between gap-2", !iconOnly && "pe-7 group-hover:pe-[3.25rem] group-focus-within:pe-[3.25rem] touch:pe-[3.25rem] max-md:touch:pe-7")}>
-          <span className={cn("flex min-w-0 grow items-center gap-1.5 truncate text-ink", phoneRow ? "text-[15px]" : "text-[14px]", "font-medium leading-5")}>
+          <span className={cn("flex min-w-0 grow items-center gap-1.5 truncate text-ink", phoneRow ? "text-[16px] font-medium leading-[22px]" : "text-[14px] font-medium leading-5")}>
             <RenameTitle
               key={iconOnly ? "icons" : "expanded"}
               value={bot.name}
@@ -782,7 +782,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           )}
           {!iconOnly && (unread || waiting) && <RowDot waiting={waiting} />}
         </div>
-        <div className="flex items-center justify-between gap-2">
+        <div className={cn("flex items-center justify-between gap-2", phoneRow && "mt-0.5")}>
           {deleting ? (
             <span role="status" className={cn("flex min-w-0 items-center gap-1.5 truncate text-ink-secondary", previewSize)}>
               <Loader2 size={12} className="shrink-0 animate-spin" />
