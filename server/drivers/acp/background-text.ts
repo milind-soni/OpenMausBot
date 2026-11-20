@@ -1,11 +1,31 @@
 // One tool-free ACP exchange for memory upkeep: a fresh process and session, no MCP servers, an empty
 // folder. It fails closed: any agent request, or any tool call it reports, ends the call.
-import type { TextGenerationOptions, TextGenerationUsage } from "../../contracts.ts";
+import type { ModelCatalog, TextGenerationOptions, TextGenerationUsage } from "../../contracts.ts";
 import type { BoxSpawnOptions, killCliTree, spawnCli } from "../../procs.ts";
+import { acpModelOption } from "./config-options.ts";
+import type { AcpSupport } from "./core.ts";
 
 export const BACKGROUND_TEXT_TIMEOUT_MS = 120_000;
 export const BACKGROUND_TEXT_MAX_CHARS = 200_000;
 const MAX_STDOUT_BYTES = 4_000_000;
+
+/** Sets a one-shot's env for the bot's own model, not the engine's default (a local model server may hold only the
+ * model its chats run on), and returns that model for the session to pick. */
+export function applyOneShotEnv(
+  support: Pick<AcpSupport, "selectModel" | "resolveTurnModel" | "applyTurnEnv">,
+  env: Record<string, string | undefined>,
+  options: TextGenerationOptions,
+  models: ModelCatalog,
+  ctx: { fullAuto: false; cwd: string; threadId: string; mcpServers: [] },
+): AcpOneShotInput["model"] {
+  const selection = support.selectModel;
+  const requestedModel = selection ? options.model ?? options.fallback?.model : undefined;
+  const model = requestedModel && requestedModel !== selection?.agentDefault
+    ? support.resolveTurnModel?.(requestedModel, env, models) ?? requestedModel
+    : undefined;
+  support.applyTurnEnv?.(env, { ...(model ? { model, requestedModel } : {}), ...ctx });
+  return model && selection ? { configId: selection.configId, id: model } : undefined;
+}
 
 export interface AcpOneShotInput {
   displayName: string;
@@ -21,6 +41,8 @@ export interface AcpOneShotInput {
   prompt: string;
   /** The model usage is booked to when the session names none. */
   defaultModel: string;
+  /** Picked through this session config option when the session offers it; otherwise the session's own model runs. */
+  model?: { configId: string; id: string } | undefined;
   pickAuthMethod: (methods: Array<{ id?: string }>) => string | null;
   authRequired: boolean | "if-requested";
   loginNote: string;
@@ -169,6 +191,14 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
       sessionId = session.sessionId;
       model = typeof session?.models?.currentModelId === "string" ? session.models.currentModelId
         : typeof init?._meta?.modelState?.currentModelId === "string" ? init._meta.modelState.currentModelId : undefined;
+      const wanted = input.model;
+      const offered = wanted ? acpModelOption(session, wanted.configId) : undefined;
+      if (wanted && offered?.configId && offered.options.some(({ id }) => id === wanted.id)) {
+        if (offered.currentValue !== wanted.id) {
+          await request("session/set_config_option", { sessionId, configId: offered.configId, value: wanted.id });
+        }
+        model = wanted.id;
+      }
       await input.configure?.({ request: (method, params) => request(method, params), sessionId: session.sessionId, session });
       const result = await request("session/prompt", { sessionId, prompt: [{ type: "text", text: input.prompt }] });
       const reported = result?.usage ?? result?._meta ?? {};

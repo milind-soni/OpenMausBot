@@ -20,7 +20,7 @@ import { AcpBrowserAuth, acpBrowserAuthInstanceSurface, type AcpBrowserSignInSpe
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { boxAudienceKey, describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../../engine-stop.ts";
-import { runAcpOneShot } from "./background-text.ts"; import type { AcpBackgroundWork } from "./background-work.ts";
+import { applyOneShotEnv, runAcpOneShot } from "./background-text.ts"; import type { AcpBackgroundWork } from "./background-work.ts";
 import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks } from "./media-links.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
@@ -1545,7 +1545,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const cwd = mkdtempSync(join(await support.oneShotFolder?.() ?? tmpdir(), "omb-acp-memory-"));
         try {
           const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd } as SendTurnInput;
-          support.applyTurnEnv?.(env, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [] });
+          const model = applyOneShotEnv(support, env, options, catalog.models, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [] });
           const launch: { command: string; args?: string[]; env?: Record<string, string | undefined>; ro?: readonly string[] } = support.resolveCommand ? await support.resolveCommand(env, turnConfig, instanceId) : { command: turnConfig.cli };
           const spawnEnv = launch.env ?? env;
           return await runAcpOneShot({
@@ -1556,7 +1556,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             env: spawnEnv,
             cwd,
             prompt,
-            defaultModel: catalog.models.default,
+            defaultModel: catalog.models.default, model,
             pickAuthMethod: (methods) => support.pickAuthMethod(methods, spawnEnv),
             authRequired: support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail",
             loginNote: support.loginNote,
