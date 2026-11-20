@@ -589,7 +589,6 @@ export async function containerComputerStatus(
         detail?.Mounts,
         platform,
         target.workspaceDir,
-        status.runtime,
       ) ? "durable" : "unsafe";
       status.security = (
         status.runtime === "podman"
@@ -726,28 +725,27 @@ function sameWorkspaceSource(
   return platform === "win32" ? actual.toLowerCase() === expected.toLowerCase() : actual === expected;
 }
 
-/** Podman Machine exposes a Windows bind source through its WSL mount path; accept only the exact translation. */
-function samePodmanWindowsWorkspaceSource(source: string | undefined, expectedWorkspace: string): boolean {
+/**
+ * Podman Machine and Rancher Desktop (dockerd) expose a Windows bind source through its WSL mount path;
+ * accept only the exact translation, ignoring slash style, doubled slashes and a trailing slash.
+ */
+function sameWslWindowsWorkspaceSource(source: string | undefined, expectedWorkspace: string): boolean {
   if (!source) return false;
   const match = expectedWorkspace.match(/^([A-Za-z]):[\\/](.+)$/);
   if (!match) return false;
-  const expected = `/mnt/${match[1].toLowerCase()}/${match[2].replaceAll("\\", "/")}`;
-  const actual = source.replaceAll("\\", "/");
-  return actual.toLowerCase() === expected.toLowerCase();
+  const tidy = (path: string) => path.replaceAll("\\", "/").replace(/\/{2,}/g, "/").replace(/\/+$/, "").toLowerCase();
+  return tidy(source) === tidy(`/mnt/${match[1]}/${match[2]}`);
 }
 
-function dockerWorkspaceMountIsSafe(
+export function dockerWorkspaceMountIsSafe(
   mounts:
     | Array<{ Type?: string; Source?: string; Destination?: string; RW?: boolean }>
     | undefined,
   platform: NodeJS.Platform,
   expectedWorkspace: string,
-  runtime: Runtime = "docker",
 ): boolean {
   const sourceMatches = sameWorkspaceSource(mounts?.[0]?.Source, platform, expectedWorkspace) ||
-    (runtime === "podman" &&
-      platform === "win32" &&
-      samePodmanWindowsWorkspaceSource(mounts?.[0]?.Source, expectedWorkspace));
+    (platform === "win32" && sameWslWindowsWorkspaceSource(mounts?.[0]?.Source, expectedWorkspace));
   return Boolean(
     mounts?.length === 1 &&
       mounts[0]?.Type === "bind" &&

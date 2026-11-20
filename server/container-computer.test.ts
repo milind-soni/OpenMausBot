@@ -37,6 +37,7 @@ import {
   type CommandRunner,
   type LocalVmTarget,
   autoLocalVmAttachable,
+  dockerWorkspaceMountIsSafe,
 } from "./container-computer.ts";
 import { DESKTOP_FLAGS_LABEL, DESKTOP_FLAGS_VERSION, dockerSecurityIsHardened, podmanSecurityIsHardened } from "./container-isolation.ts";
 import { PIDS_LIMIT } from "./container-limits.ts";
@@ -304,6 +305,31 @@ function perBotReadyInspect(botId: string, viewerPort: number, targetLabel?: str
   };
   return JSON.stringify([detail]);
 }
+
+describe("dockerWorkspaceMountIsSafe", () => {
+  const workspace = "C:\\Users\\light\\.openmausbot\\vm-home";
+  const mount = (Source: string) => [{ Type: "bind", Source, Destination: VM_WORKSPACE_GUEST, RW: true }];
+
+  it.each([
+    "/mnt/c/Users/light/.openmausbot/vm-home",
+    "/mnt/c/Users/light/.openmausbot/vm-home/",
+    "/mnt//c/Users/light//.openmausbot/vm-home",
+    "\\mnt\\C\\Users\\light\\.openmausbot\\vm-home",
+  ])("accepts the WSL translation of a Windows workspace for any runtime: %s", (source) => {
+    expect(dockerWorkspaceMountIsSafe(mount(source), "win32", workspace)).toBe(true);
+  });
+
+  it("still rejects a different folder, other platforms and a non-bind mount", () => {
+    expect(dockerWorkspaceMountIsSafe(mount("/mnt/c/Users/light/other"), "win32", workspace)).toBe(false);
+    expect(dockerWorkspaceMountIsSafe(mount("/mnt/d/Users/light/.openmausbot/vm-home"), "win32", workspace)).toBe(false);
+    expect(dockerWorkspaceMountIsSafe(mount("/mnt/c/Users/light/.openmausbot/vm-home"), "linux", workspace)).toBe(false);
+    expect(dockerWorkspaceMountIsSafe(
+      [{ Type: "volume", Source: "/mnt/c/Users/light/.openmausbot/vm-home", Destination: VM_WORKSPACE_GUEST, RW: true }],
+      "win32",
+      workspace,
+    )).toBe(false);
+  });
+});
 
 describe("containerComputerStatus", () => {
   it("prefers the supported Podman image store when Docker is also healthy on Windows", async () => {
