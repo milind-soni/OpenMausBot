@@ -111,7 +111,14 @@ const armed = new Map<string, { engine: WarmEngine; since: number; timer: Return
 /** Closes an idle per-chat engine after `ms`, sooner on a small box once another engine goes idle after it, and sooner
  * still once the room shrinks its idle time (sweepIdleEngines). */
 export function armIdleClose(key: string, ms: number, engine: WarmEngine, now: number = Date.now()): ReturnType<typeof setTimeout> {
-  const timer = setTimeout(() => { armed.delete(key); engine.close(); }, ms);
+  const timer = setTimeout(() => {
+    // A stale timer (`timer` not the one armed under `key` now, as in stopIdleClose) leaves a later arm's entry alone.
+    if (armed.get(key)?.timer !== timer) return;
+    armed.delete(key);
+    // No longer idle (a turn took it again) or still held: its driver arms it again when it next goes idle.
+    if (!engine.idle() || engine.held?.()) return;
+    engine.close();
+  }, ms);
   timer.unref?.();
   armed.set(key, { engine, since: now, timer });
   keepWarm(key, engine);

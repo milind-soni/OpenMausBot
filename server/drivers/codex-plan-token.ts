@@ -7,6 +7,7 @@ import { startChatGptTokenBridge } from "./chatgpt-plan-token-bridge.ts";
 export const PLAN_TOKEN_BRIDGE_ENV = ["OMB_CODEX_AUTH_SOCKET", "OMB_CODEX_AUTH_SECRET", "ELECTRON_RUN_AS_NODE"];
 
 export interface PlanTokenBridge {
+  socketPath: string;
   env: Record<string, string>;
   close(): void;
 }
@@ -74,5 +75,5 @@ export async function startPlanTokenBridge(accessToken: () => Promise<string>, s
     throw error;
   }
   // The token command runs on this app's own runtime, which in the desktop app is Electron.
-  return { env: { ...bridge.env, ELECTRON_RUN_AS_NODE: "1" }, close: () => bridge.close() };
+  return { socketPath: bridge.socketPath, env: { ...bridge.env, ELECTRON_RUN_AS_NODE: "1" }, close: () => bridge.close() };
 }

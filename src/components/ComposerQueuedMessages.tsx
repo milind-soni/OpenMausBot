@@ -121,7 +121,6 @@ export function QueuedComposerMessages({
           return <li key={item.queueId} className="flex min-h-10 min-w-0 items-center gap-2 px-2.5 py-1.5">
             <CornerDownRight
               size={14}
-              strokeWidth={1.8}
               className="shrink-0 text-ink-secondary"
               aria-hidden="true"
             />

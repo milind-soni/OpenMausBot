@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { NEAR_LIMIT_PERCENT, type EngineLimit, type EngineLimitsReport, type LimitWindowName } from "../shared/limit-reset.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { LIMIT_POLL_MS, limitReadDue } from "./limit-poll.ts";
+import { codexHasCreditRoom } from "./codex-credits.ts";
 import { claudeHasExtraUsageRoom, loadPlanUsage, type PlanAccount, type PlanProviderRow, type PlanUsageReport, type PlanWindow } from "./plan-usage.ts";
 import type { RuntimeEvent } from "../shared/runtime-events.ts";
 import { OPENCODE_GO_MODEL_PREFIX, typedOpenCodeModel } from "../shared/opencode-model-id.ts";
@@ -37,8 +38,8 @@ export function engineLimitFromUsage(row: PlanProviderRow): EngineLimit | null {
   const full = windows.filter((line) => line.used >= 100);
   if (full.length) {
     const latest = full.reduce((left, right) => (right.resetsAt ?? 0) > (left.resetsAt ?? 0) ? right : left);
-    // Claude goes on past a full window on its paid extra usage while that has room; its own refusal still holds it.
-    return { ...base, window: latest.window, usedPercent: 100, resetsAt: full.some((line) => line.resetsAt === null) ? null : latest.resetsAt, blocked: !claudeHasExtraUsageRoom(row) };
+    // A full window is the meter only: the engine's own refusal still holds it.
+    return { ...base, window: latest.window, usedPercent: 100, resetsAt: full.some((line) => line.resetsAt === null) ? null : latest.resetsAt, blocked: !claudeHasExtraUsageRoom(row) && !codexHasCreditRoom(row) };
   }
   const fullest = [...windows].sort((left, right) => right.used - left.used || (left.resetsAt ?? Infinity) - (right.resetsAt ?? Infinity))[0]!;
   return { ...base, window: fullest.window, usedPercent: fullest.used, resetsAt: fullest.resetsAt, blocked: false };
@@ -146,6 +147,11 @@ export class LimitResetClock {
     const usage = this.meterFor(engine, model);
     const until = Math.max(refused ?? 0, usage?.blocked && usage.resetsAt !== null ? usage.resetsAt : 0);
     return until > now ? until : null;
+  }
+
+  /** Whether only the usage meter holds this engine now, with no refusal of its own. */
+  meterOnly(engine: string, model?: string): boolean {
+    return this.refusal(engine) === null && this.blockedUntil(engine, model) !== null;
   }
 
   /** The engine's usage reading when its meter covers `model` (every model when none is named): OpenCode's meter is

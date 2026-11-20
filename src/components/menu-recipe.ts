@@ -1,4 +1,4 @@
-export const MENU_SHEET = "popover-surface flex flex-col gap-1 rounded-[var(--radius-menu)] border border-hairline/50 bg-menu p-1.5 shadow-lg [&_svg.lucide]:stroke-[1.5]";
+export const MENU_SHEET = "popover-surface flex flex-col gap-1 rounded-[var(--radius-menu)] border border-hairline/50 bg-menu p-1.5 shadow-lg";
 
 export const MENU_ITEM = "flex min-h-[30px] w-full shrink-0 items-center gap-2 whitespace-nowrap rounded-md px-2 py-1.5 text-left text-[14px] leading-[18px] focus-visible:bg-menu-hover";
 
@@ -30,5 +30,3 @@ export const MENU_NOTE = "px-2 py-1 text-[12px] leading-4 text-ink-tertiary";
 export const MENU_ICON = "shrink-0 text-ink-secondary";
 
 export const MENU_TRAILING = "shrink-0 text-ink-tertiary rtl:-scale-x-100";
-
-export const MENU_STROKE = 1.75;

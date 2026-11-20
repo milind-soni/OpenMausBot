@@ -5,7 +5,7 @@ import { t } from "@/lib/i18n";
 export function rowSurface(selected: boolean): string {
   return selected
     ? "[--row:var(--color-raised)]"
-    : "[--row:var(--color-panel)] max-md:[--row:var(--color-app)] hover:[--row:color-mix(in_srgb,var(--color-raised)_50%,var(--color-panel))]";
+    : "[--row:var(--color-panel)] max-md:[--row:var(--color-app)] hover:[--row:color-mix(in_srgb,var(--color-ink)_6%,var(--color-panel))]";
 }
 
 /** The conversation the chat window has open: the same plain fill as a selected row. */
