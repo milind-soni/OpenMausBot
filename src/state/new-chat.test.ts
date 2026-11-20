@@ -38,6 +38,7 @@ let creates: Array<{ projectId?: string }>;
 let sends: Array<{ threadId?: string; text: string }>;
 let taskPatches: string[];
 let createAnswer: Promise<Response> | null;
+let switchAnswer: Promise<Response> | null;
 
 const send = (text: string, extra: Partial<Extract<Action, { type: "send" }>> = {}) =>
   flushSync(() => dispatch({ type: "send", botId: "bot", threadId: DRAFT, text, sendId: `send-${text}`, ...extra }));
@@ -48,6 +49,7 @@ beforeEach(async () => {
   sends = [];
   taskPatches = [];
   createAnswer = null;
+  switchAnswer = null;
   const stored = new Map<string, string>();
   vi.stubGlobal("localStorage", {
     getItem: (key: string) => stored.get(key) ?? null, setItem: (key: string, value: string) => { stored.set(key, String(value)); },
@@ -67,6 +69,7 @@ beforeEach(async () => {
     }
     if (/^\/api\/bots\/bot\/tasks\/[^/]+$/.test(path) && init?.method === "PATCH") taskPatches.push(path);
     if (path === "/api/bots/bot/tasks/a") return json({ bot: bot("a", ["a"]) });
+    if (path.startsWith("/api/bots/bot/tasks/b")) return switchAnswer ?? json({ bot: bot("b", ["a", "b"]) });
     if (path === "/api/instances") return json({ instances: [] });
     if (path.startsWith("/api/routines?since=")) return json({ routines: [], runs: [] });
     if (path === "/api/webhooks") return json({ webhooks: [], attempts: [] });
@@ -121,6 +124,27 @@ describe("a new conversation opens blank and is made by its first send", () => {
     await vi.waitFor(() => expect(sends).toHaveLength(1));
 
     expect(sends.map((body) => body.threadId)).not.toContain("a");
+  });
+
+  it("sends a message aimed at the bot's open conversation into the blank chat that covers it", async () => {
+    openBlank();
+    flushSync(() => dispatch({ type: "send", botId: "bot", text: "No thread named", sendId: "unnamed" }));
+    await vi.waitFor(() => expect(sends).toHaveLength(1));
+
+    expect(creates).toHaveLength(1);
+    expect(sends[0]).toMatchObject({ threadId: "made", text: "No thread named" });
+  });
+
+  it("stays open when a conversation switch started before it answers afterwards", async () => {
+    let answer!: () => void;
+    switchAnswer = new Promise((resolve) => { answer = () => resolve(json({ bot: bot("b", ["a", "b"]) })); });
+    flushSync(() => dispatch({ type: "switchTask", botId: "bot", threadId: "b" }));
+    openBlank();
+    answer();
+    await settle();
+
+    expect(state.newChat?.botId).toBe("bot");
+    expect(newChatBot(pepper(), state.newChat).threadId).toBe(DRAFT);
   });
 
   it("makes one conversation for sends that arrive while it is being made", async () => {

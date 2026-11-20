@@ -7,7 +7,7 @@ import { api, formatTime, visibleMessages, currentTaskBot, botOpensTo, openBot, 
 import { approvalModeFor } from "../../shared/approval-mode";
 import { liveActivityLabel, sidebarMessage } from "@/lib/live-activity";
 import { SidebarWorkingStep } from "./SidebarWorkingStep"; import { FadeLine } from "./FadeLine";
-import { openBotRow } from "@/state/thread-navigation"; import { useNewChatOpen } from "@/state/new-chat";
+import { openBotRow } from "@/state/thread-navigation";
 
 import { BotAvatar } from "./Avatar";
 import { BotEngineMark, BotModelBadge, botTooltip } from "./BotModelBadge"; import { SidebarBotRole } from "./BotRole";
@@ -450,7 +450,7 @@ export function currentArchivableBot(bots: readonly Bot[], id: string): Bot | un
 
 const NO_FOLDERS: BotProject[] = [];
 
-export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns, reveal, locale, dispatch, activityLabel, hidden = false }: BotRowProps & {
+export function BotThreadList({ bot, selected, drafting, query, pendingQueued, routineRuns, reveal, locale, dispatch, activityLabel, hidden = false }: BotRowProps & {
   activityLabel?: string;
   hidden?: boolean;
 }) {
@@ -470,7 +470,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns
   const [reorderStatus, setReorderStatus] = useState("");
   const [folderDrop, setFolderDrop] = useState<{ id: string; place: "before" | "after" } | null>(null);
   const draggingFolder = useRef<string | null>(null);
-  const [showAll, setShowAll] = useSidebarShowAllThreads(bot.id), drafting = useNewChatOpen(bot.id);
+  const [showAll, setShowAll] = useSidebarShowAllThreads(bot.id);
   const [permissionRefresh, setPermissionRefresh] = useState<{ threadId: string; kind: "local-auto" } | null>(null);
   const currentProjectId = tasks.find((task) => task.threadId === bot.threadId)?.projectId;
   useEffect(() => {
@@ -647,7 +647,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns
 
 export interface BotRowProps {
   bot: Bot;
-  selected: boolean;
+  selected: boolean; drafting?: boolean;
   deleting: boolean;
   mascotMotion: AppState["mascotMotion"];
   reveal: AppState["revealThread"];
@@ -666,7 +666,7 @@ export interface BotRowProps {
   botDragging?: boolean;
 }
 
-export function botRowProps<State extends Pick<AppState, "activeView" | "selectedId" | "revealThread" | "deletingBots" | "mascotMotion" | "pendingQueued" | "routineRuns" | "instances" | "liveCall" | "config">>(
+export function botRowProps<State extends Pick<AppState, "activeView" | "selectedId" | "revealThread" | "deletingBots" | "mascotMotion" | "pendingQueued" | "routineRuns" | "instances" | "liveCall" | "config" | "newChat">>(
   state: State,
   dispatch: Dispatch<Action>,
   bot: Bot,
@@ -677,7 +677,7 @@ export function botRowProps<State extends Pick<AppState, "activeView" | "selecte
   return {
     ...layout,
     bot,
-    selected,
+    selected, drafting: state.newChat?.botId === bot.id,
     deleting: state.deletingBots[bot.id] === true,
     mascotMotion: selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null,
     reveal: reveal && (bot.threadId === reveal.threadId || bot.tasks?.some((task) => task.threadId === reveal.threadId)) ? reveal : null,

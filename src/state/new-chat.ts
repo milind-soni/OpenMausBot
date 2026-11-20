@@ -1,6 +1,4 @@
 import type { Dispatch } from "react";
-
-import { useStoreSelector } from "./store-select";
 import type { Action, AppState, Bot } from "./store";
 
 /** A blank new chat with one bot: shown in place of its open conversation and made into one by the first send. */
@@ -46,20 +44,18 @@ export function newChatBot(bot: Bot, open: NewChat | null | undefined): Bot {
   return shown;
 }
 
-export function useNewChatOpen(botId: string): boolean {
-  return useStoreSelector((state) => state.newChat?.botId === botId);
-}
-
 type Effects = {
   state: () => AppState;
   rawDispatch: Dispatch<Action>;
   dispatch: Dispatch<Action>;
   create: (botId: string, projectId: string | undefined) => Promise<{ bot: Bot }>;
+  navigated: (botId: string) => void;
   showError: (error: unknown) => void;
 };
 
-/** The store's effects for the blank chat, answering true for an action they took. The first send makes the
- * conversation, once per bot however many sends arrive while it is being made, then sends into it. */
+/** The store's effects for the blank chat, answering true for an action they took. While a bot's blank chat is open, a
+ * send to the conversation it covers goes into the blank chat too. The first send makes the conversation, once per bot
+ * however many arrive while it is being made, then each is sent into it. */
 export function createNewChat(effects: Effects) {
   const making = new Map<string, Promise<string>>();
   const make = (open: NewChat) => {
@@ -74,16 +70,18 @@ export function createNewChat(effects: Effects) {
   };
   return (action: Action): boolean => {
     if (action.type === "newTask" && action.cwd === undefined) {
+      effects.navigated(action.botId);
       effects.rawDispatch(action);
       focusComposer();
       return true;
     }
-    if (!("threadId" in action) || !isNewChatThread(action.threadId)) return false;
+    const state = effects.state(), open = state.newChat;
+    const intoBlank = action.type === "send" && open?.botId === action.botId && action.threadId === state.bots.find((bot) => bot.id === action.botId)?.threadId;
+    if (!intoBlank && !("threadId" in action && isNewChatThread(action.threadId))) return false;
     if (action.type !== "send") {
       effects.rawDispatch(action);
       return true;
     }
-    const open = effects.state().newChat;
     const made = making.get(action.botId) ?? (open?.botId === action.botId ? make(open) : null);
     if (!made) {
       action.onError?.();
