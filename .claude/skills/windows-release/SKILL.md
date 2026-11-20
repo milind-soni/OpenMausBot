@@ -125,14 +125,18 @@ for some reason, don't publish the mac-only release under a new version tag eith
 Because the two builds must run on two machines, the tag is the join point: cut the
 release, attach mac artifacts from the Mac, attach Windows artifacts from here.
 
-## Known: the build is unsigned
+## Signing
 
-No certificate is configured, so SmartScreen shows "unknown publisher" and users
-click **More info → Run anyway**. The README documents this. Auto-update still
-works *because* it's unsigned (no `publisherName` to verify against).
+Unsigned unless the release has the Windows signing secrets
+([docs/windows-signing.md](../../../docs/windows-signing.md)). Unsigned builds
+get SmartScreen's "unknown publisher" (**More info → Run anyway**), and Smart
+App Control blocks them outright. Auto-update works on unsigned builds because
+`app-update.yml` has no `publisherName`.
 
-If signing is added later, it goes under `win.signtoolOptions` or
-`win.azureSignOptions` in `electron-builder.yml` — electron-builder 26 nests these;
-there is no top-level `win.certificateFile`. Once signed, keep the certificate
-subject stable forever, or list both old and new in `publisherName`; changing it
-strands every already-installed user.
+`scripts/package-win.mjs` adds signing over `electron-builder.yml`; never put
+signing config or `publisherName` in that file. A local `pnpm package:win`
+without the secrets builds unsigned, as before. Once `WINDOWS_SIGNING_REQUIRED`
+is true, installs verify the publisher. A manual unsigned upload would then be
+refused by every such install, so don't use the manual path for those releases.
+Keep the certificate subject stable, or ship a release that lists both subjects
+first.

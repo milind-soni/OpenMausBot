@@ -12,11 +12,14 @@ Choose your computer below. Each link always downloads the latest published buil
 |---|---|---|
 | macOS Apple silicon | [Download `.dmg`](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.dmg) | Signed and notarized. Drag to Applications. |
 | macOS Intel | [Download `.dmg`](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-intel.dmg) | Signed and notarized. |
-| Windows x64 | [Download installer](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-setup.exe) | Per-user installer; Windows signing is not yet available. |
+| Windows x64 | [Download installer](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-setup.exe) | Per-user installer. See the note below about signing. |
 | Ubuntu 24.04 x64 | [Download `.deb`](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-amd64.deb) · [AppImage](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.AppImage) | The `.deb` is recommended; the AppImage is portable. |
 
-<Callout type="warn" title="Windows SmartScreen">
-  The Windows installer is not code-signed yet. Windows may show “Unknown publisher.” Verify that you downloaded it from the official OpenMausBot releases repository before choosing **More info → Run anyway**.
+<Callout type="warn" title="Windows SmartScreen and Smart App Control">
+  Check the installer before you run it: right-click it, choose **Properties → Digital Signatures**.
+
+  - **No Digital Signatures tab:** the build is unsigned. Windows may show “Unknown publisher.” Make sure you downloaded it from the official OpenMausBot releases page, then choose **More info → Run anyway**. If Smart App Control is on, it blocks unsigned apps and offers no way to allow one app. Wait for a signed release, or turn Smart App Control off in **Windows Security → App & browser control**. Recent Windows 11 updates let you turn it back on later.
+  - **The tab shows the OpenMausBot publisher:** the build is signed and Smart App Control allows it. SmartScreen can still warn about a brand-new version for a while. **More info** shows the publisher's name.
 </Callout>
 
 ## Install an agent CLI
