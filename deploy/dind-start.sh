@@ -19,6 +19,9 @@ start_dockerd() {
   if [ -x /usr/sbin/iptables-legacy ] && iptables-legacy -t nat -L -n >/dev/null 2>&1; then
     update-alternatives --set iptables /usr/sbin/iptables-legacy || true
     update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
+  elif [ -x /usr/sbin/iptables-nft ]; then
+    update-alternatives --set iptables /usr/sbin/iptables-nft || true
+    update-alternatives --set ip6tables /usr/sbin/ip6tables-nft || true
   fi
   rm -rf /var/run/docker /var/run/docker.pid /var/run/docker.sock
   dockerd \
