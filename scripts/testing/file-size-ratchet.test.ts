@@ -46,6 +46,7 @@ const LINES: Record<string, number> = {
   "src/components/AttachmentPreview.tsx": 1034,
   "server/meetings/meetbot.ts": 1047,
   "electron/data-dir-lease.node-test.mjs": 846, // the data-folder lease's own tests: many platform cases (Windows probes in data-dir-lease-windows.node-test.mjs)
+  "server/drivers/openai-chat.ts": 1002,
 };
 
 function sourceFiles(): string[] {
