@@ -90,7 +90,7 @@ export function TeamSideSwitch({ compact, listOnly = false }: { compact: boolean
               className={cn("relative flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium transition-colors", FOCUS,
                 compact ? "size-9 rounded-xl" : "h-8 min-w-0 flex-1 px-3 text-[13px]",
                 on ? "bg-composer text-ink shadow-[0_1px_2px_rgb(0_0_0/0.12)] ring-[0.5px] ring-ink/10" : "text-ink-secondary hover:text-ink")}>
-              {compact ? <Icon size={16} strokeWidth={1.75} aria-hidden="true" /> : t(label)}
+              {compact ? <Icon size={16} aria-hidden="true" /> : t(label)}
               {unread && <span role="img" data-team-side-unread={option} aria-label={t("task.unread")}
                 className={cn("size-1.5 rounded-full bg-accent", compact && "absolute right-1.5 top-1.5")} />}
             </button>

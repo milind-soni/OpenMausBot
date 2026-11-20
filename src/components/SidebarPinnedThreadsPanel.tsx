@@ -31,7 +31,7 @@ export function SidebarPinnedThreadsPanel({ entries, now, onJump, onUnpin, colla
         </button>
         <Pin size={12} aria-hidden="true" className="shrink-0" />
         <span className="min-w-0 flex-1 truncate">{t("sidebar.pinnedThreads.title")}</span>
-        <span className="text-[11px] font-normal tabular-nums">{entries.length}</span>
+        <span className="text-[12px] font-normal tabular-nums">{entries.length}</span>
       </div>
       {!collapsed && (
         <div className="max-h-56 overflow-y-auto">

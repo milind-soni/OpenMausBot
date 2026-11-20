@@ -110,7 +110,7 @@ export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVe
           <div className="flex min-h-10 items-center gap-3">
             {/* A place shows the same mark as on the rail, in the nav and on Phone & devices: its 24 px badge. */}
             {entry.id === "local"
-              ? <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Laptop size={18} strokeWidth={1.75} aria-hidden="true" /></span>
+              ? <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Laptop size={18} aria-hidden="true" /></span>
               : <span className="flex size-8 shrink-0 items-center justify-center"><PlaceBadge place={{ kind: entry.home || entry.cloud ? "cloud" : "server", name: entry.name, color: entry.color ?? null, named: true }} size={24} /></span>}
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5 truncate text-[14px] leading-5 text-ink">{entry.name}</div>
@@ -129,7 +129,7 @@ export function ServerList({ saved, busy, sharingOffered, ownServers = [], appVe
           {showUpdate && <div className="pl-11"><UpdateNote name={entry.name} status={status!} appVersion={appVersion!} onHide={() => setHidden((list) => [...list, `${entry.id}:${status!.version}`])} /></div>}
         </div>;
       })}
-      <SettingsLinkRow title={t("connect.title")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} strokeWidth={1.75} aria-hidden="true" /></span>}
+      <SettingsLinkRow title={t("connect.title")} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} aria-hidden="true" /></span>}
         onClick={() => { if (!busy) setSheet({ address: "", locked: false, title: t("connect.title") }); }} data={{ "data-server-connect": "" }} />
     </SettingsRows>
     {sheet && <RailSheet focusKey={sheet.locked ? "pair-again" : "connect"} onClose={() => setSheet(null)}>

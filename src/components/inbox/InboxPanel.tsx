@@ -120,7 +120,7 @@ export function InboxPanel() {
                     ? <p className="px-4 py-8 text-center text-[13px] text-ink-secondary">{t("inbox.noMatch")}</p>
                     : (
                       <div data-inbox-empty className="mx-auto flex max-w-[16rem] flex-col items-center px-4 py-10 text-center">
-                        <Inbox size={22} strokeWidth={1.5} aria-hidden="true" className="text-ink-tertiary" />
+                        <Inbox size={22} aria-hidden="true" className="text-ink-tertiary" />
                         <p className="mt-3 text-[14px] font-medium text-ink">{t("inbox.empty")}</p>
                         <p className="mt-1 text-[13px] leading-[18px] text-ink-tertiary">{t("inbox.emptyHint")}</p>
                       </div>

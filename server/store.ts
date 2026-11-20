@@ -44,6 +44,7 @@ import { lastMessageId, messagesBefore } from "./thread-history.ts";
 import { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 import { buildTask, threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
 import { createBotFork, createGroupFork } from "./store-forks.ts";
+import { createThreadBotIndex } from "./thread-bot-index.ts";
 import { activeGroupTask, groupTaskByThread, groupTasks, migrateGroupTaskRead, mirrorActiveGroupTask, refreshGroupUnread, setGroupTaskRead, syncGroupReadPatch } from "./group-task-state.ts";
 export { titleFromMessage, UNTITLED_TASK } from "./thread-title.ts";
 export { threadTitleFrom, UNTITLED_THREAD } from "./task-record.ts";
@@ -1260,9 +1261,8 @@ export class Store {
     return this.bots.find((b) => b.id === id) ?? this.standIns.get(id) ?? null; } /** One of this place's own bots. Every method that changes a bot looks here and never among the stand-ins: a record with `home` is read-only on this place. */ private own(id: string) { return this.bots.find((b) => b.id === id) ?? null;
   }
 
-  botByThread(threadId: string) {
-    return this.bots.find((b) => b.threadId === threadId || b.tasks?.some((t) => t.threadId === threadId)) ?? null;
-  }
+  private readonly threadBots = createThreadBotIndex<BotRecord>();
+  botByThread(threadId: string): BotRecord | null { return this.threadBots.find(this.bots, threadId); }
 
   private newBotSelection(requested?: ModelSelection): ModelSelection {
     return this.completeNewBotSelection(requested ?? this.defaultSelection());

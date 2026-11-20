@@ -103,7 +103,7 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
             const active = entry.id === saved.activeId;
             const confirming = forgetEntry?.id === entry.id;
             return <Fragment key={entry.id}>
-              <SettingRow title={envLabel(entry)} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Laptop size={18} strokeWidth={1.75} aria-hidden="true" /></span>}
+              <SettingRow title={envLabel(entry)} leading={<span className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Laptop size={18} aria-hidden="true" /></span>}
                 subtitle={<>{entry.dataDir ?? t("connectedWorkspaces.mainFolder")}{entry.missing && <> · {t("connectedWorkspaces.missing")}</>}</>}>
                 {active ? <span className="text-[13px] leading-5 text-ink-secondary">{t("connectedWorkspaces.current")}</span> : <>
                   <button type="button" disabled={busy} aria-label={t("connectedWorkspaces.switchTo", { name: entry.name })} className="ui-button"
@@ -136,7 +136,7 @@ export function ConnectedWorkspacesSettings({ label, description }: { label?: st
             </Fragment>;
           })}
           <SettingsFoldRow id="new-environment" title={t("connectedWorkspaces.newEnvironment")} open={newOpen} onToggle={() => setNewOpen(!newOpen)}
-            leading={<span aria-hidden="true" className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} strokeWidth={1.75} /></span>}>
+            leading={<span aria-hidden="true" className="flex size-8 items-center justify-center rounded-full bg-ink/[0.05] text-ink-secondary"><Plus size={18} /></span>}>
             <form className="flex flex-col gap-3 py-3 pl-[60px] pr-4" onSubmit={(event) => {
               event.preventDefault();
               if (!envName.trim()) return;
