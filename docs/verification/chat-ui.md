@@ -134,8 +134,10 @@ unasserted user outcome.
 
 `scripts/testing/usage-details-ui.e2e.test.ts` checks the header's **More** menu,
 usage breakdown, clipboard success and refusal, and responsive geometry at
-390, 800, 1100 and 1600 px. It checks that opening bot settings folds the sidebar
-without changing its saved density and closing settings restores it. Evidence
+390, 800, 1100 and 1600 px. It checks that opening Advanced's bot settings at 1100
+folds the sidebar without changing its saved density and closing settings
+restores it, and that Simple's 320px bot panel keeps the 280px sidebar open
+beside a chat of at least 440 at 1040 px, folding it at 1039. Evidence
 includes screenshots and a `.usage-details.json` next to the fixture log.
 These are renderer checks, not native Windows caption-button verification.
 

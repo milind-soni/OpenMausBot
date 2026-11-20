@@ -1,12 +1,13 @@
-import { Crown, Loader2, Phone } from "lucide-react";
-import { memo, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { AppWindow, Crown, Globe, Loader2, Phone } from "lucide-react";
+import { memo, useLayoutEffect, useRef, useState, type Dispatch, type KeyboardEvent, type MouseEvent } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useLiveMedia } from "@/lib/live-call-media";
 import { stateForBot } from "@/lib/mascot";
 import { useShowThreads } from "@/lib/thread-preferences";
-import { api, openBotRow, useStore, type Bot } from "@/state/store";
+import { api, openBotRow, useStore, type Action, type Bot } from "@/state/store";
+import type { WebPanel } from "@/lib/web-panels";
 import { useChiefStepOpen } from "@/lib/default-bot";
 
 import { BotAvatar } from "./Avatar";
@@ -20,6 +21,12 @@ import { SIMPLE_ROW_FOCUS } from "./SidebarSimpleTop";
 import { useBotUnread } from "./unread-notice";
 
 const RING = "ring-2 ring-[var(--tile)]";
+
+/** A tile's box and its fill, which the dots' rings take as well: a bot's and a pinned page's are the same. */
+const TILE = "flex h-[92px] w-[95px] shrink-0 cursor-pointer flex-col items-center rounded-xl bg-[var(--tile)] px-2 pb-1 pt-1.5 transition-colors duration-150";
+const tileFill = (selected: boolean) => selected ? "[--tile:var(--color-raised)]" : "[--tile:var(--color-panel)] hover:[--tile:color-mix(in_srgb,var(--color-ink)_6%,var(--color-panel))]";
+/** A tile's one-line caption, under its 60px mark. */
+const CAPTION = "min-w-0 truncate text-center text-[12px] leading-4 text-ink";
 
 type TileProps = BotRowProps & PinnedCircleDragProps & { primary?: boolean };
 
@@ -75,8 +82,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
       onKeyDown={onKeyDown}
       onContextMenu={(event) => openBotContextMenu(onMenu, bot.id, event)}
       className={cn(
-        "flex h-[92px] w-[95px] shrink-0 cursor-pointer flex-col items-center rounded-xl bg-[var(--tile)] px-2 pb-1 pt-1.5 transition-colors duration-150", SIMPLE_ROW_FOCUS,
-        selected ? "[--tile:var(--color-raised)]" : "[--tile:var(--color-panel)] hover:[--tile:color-mix(in_srgb,var(--color-ink)_6%,var(--color-panel))]",
+        TILE, SIMPLE_ROW_FOCUS, tileFill(selected),
         pinnedCircleDragClass({ drag, dragging, drop }),
       )}
     >
@@ -119,13 +125,41 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
           title={tooltip}
           onCommit={rename}
           onEditingChange={setRenaming}
-          className="min-w-0 truncate text-center text-[12px] leading-4 text-ink"
+          className={CAPTION}
           inputClassName="w-full rounded bg-inset px-1 text-center text-[12px] leading-4"
         />
       </span>
     </div>
   );
 });
+
+/** Where a pinned web page's own icon is: its site's /favicon.ico, asked of that site alone and never of a favicon
+ * service, since a pinned address can be private. A bot's page in a chat has none. */
+export function pageFaviconUrl(panel: WebPanel): string | null {
+  if (!panel.url) return null;
+  try {
+    return new URL("/favicon.ico", panel.url).href;
+  } catch {
+    return null;
+  }
+}
+
+/** A pinned page in the tiles, after the bots: its site's icon, or the page or web icon, on a 60px plate where a bot
+ * has its avatar, over its name. It opens the page, as its frame-bar chip and Advanced's Tools row do. */
+export function SidebarPageTile({ panel, open, dispatch }: { panel: WebPanel; open: boolean; dispatch: Dispatch<Action> }) {
+  const [noFavicon, setNoFavicon] = useState(false);
+  const favicon = noFavicon ? null : pageFaviconUrl(panel);
+  return (
+    <button type="button" data-sidebar-tile="page" data-sidebar-page={panel.id} title={panel.name} aria-current={open ? "page" : undefined}
+      onClick={() => dispatch({ type: "showWebPanel", id: panel.id })} className={cn(TILE, SIMPLE_ROW_FOCUS, tileFill(open))}>
+      <span aria-hidden="true" className="flex size-[60px] shrink-0 items-center justify-center rounded-xl bg-card text-ink-secondary">
+        {favicon ? <img src={favicon} alt="" width={24} height={24} referrerPolicy="no-referrer" className="size-6" onError={() => setNoFavicon(true)} />
+          : panel.page ? <AppWindow size={24} /> : <Globe size={24} />}
+      </span>
+      <span className={cn("mt-1.5 w-full", CAPTION)}>{panel.name}</span>
+    </button>
+  );
+}
 
 /** The sidebar while the first run's Chief step is open over an app with no bots of the person's own yet. */
 export function SidebarNoBots() {
@@ -166,15 +200,21 @@ function useBesideCorner(corner: boolean, count: number) {
   return { ref, beside };
 }
 
-export function SidebarTileGrid({ primary, pinned, row, corner = false }: { primary: Bot | null; pinned: Bot[]; row: (bot: Bot) => BotRowProps; corner?: boolean }) {
+export function SidebarTileGrid({ primary, pinned, row, corner = false, pages = [], openPage, dispatch }: {
+  primary: Bot | null; pinned: Bot[]; row: (bot: Bot) => BotRowProps; corner?: boolean;
+  /** Pinned pages, after the bots; `openPage` is the one on screen. */
+  pages?: readonly WebPanel[]; openPage?: string; dispatch?: Dispatch<Action>;
+}) {
   const order = usePinnedCircleDrag(pinned);
-  const besideCorner = useBesideCorner(corner, (primary ? 1 : 0) + order.ranked.length);
-  if (!primary && order.ranked.length === 0) return null;
+  const shownPages = dispatch ? pages : [];
+  const besideCorner = useBesideCorner(corner, (primary ? 1 : 0) + order.ranked.length + shownPages.length);
+  if (!primary && order.ranked.length === 0 && shownPages.length === 0) return null;
   return (
     <div ref={besideCorner.ref} data-sidebar-tiles="" data-beside-corner={besideCorner.beside ? "" : undefined}
       className="flex max-h-[40vh] flex-wrap justify-center gap-x-1 gap-y-3 overflow-y-auto px-3 pb-4 pt-2.5" {...order.frameProps}>
       {primary && <SidebarBotTile {...row(primary)} primary />}
       {order.ranked.map((bot) => <SidebarBotTile key={bot.id} {...row(bot)} {...order.dragProps(bot)} />)}
+      {dispatch && shownPages.map((panel) => <SidebarPageTile key={panel.id} panel={panel} open={panel.id === openPage} dispatch={dispatch} />)}
       <span role="status" className="sr-only">{order.moved}</span>
     </div>
   );

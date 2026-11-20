@@ -257,6 +257,14 @@
   /* second speed line of the mascot — contrasts against the app ground */
   --color-maus-line: #f5f5f5;
   --shadow-float: 0 0 #0000;
+  /* The composer floats over the scrolling transcript: a soft lift with a 1px line of ink at 4%. One value for every
+     skin; on a dark ground it reads as nothing, so the dark skins keep their 0.5px ring alone. */
+  --shadow-composer: 0 2px 8px -1px rgb(0 0 0 / 0.05), 0 1px 2px rgb(0 0 0 / 0.03), 0 0 0 1px rgb(28 28 28 / 0.04);
+}
+/* Daylight's composer rests on that lift alone; its 0.5px ring comes back on hover and while it holds focus.
+   Unlayered, so it wins over the ring utility the shell carries. */
+:root[data-skin="daylight"] .composer-shell:not(:hover, :focus-within) {
+  --tw-ring-color: transparent;
 }
 
 /* ── Midnight ──────────────────────────────────────────────────────────────
@@ -1423,7 +1431,8 @@ body {
     font-size: 13px;
     font-weight: 500;
     line-height: 1.25rem;
-    transition: background-color 120ms ease, color 120ms ease;
+    /* transform: the press feedback below */
+    transition: background-color 120ms ease, color 120ms ease, transform 50ms cubic-bezier(0.165, 0.84, 0.44, 1);
   }
   .ui-button {
     /* 4px + 20px line + 4px + a 1px border each side = 30px, so the 32px
@@ -1618,7 +1627,46 @@ body {
     .ui-icon-button,
     .ui-pill { transition: none; }
   }
+  /* Press feedback: a button gives a little under the pointer, 98% over 50ms, and not at all with reduced motion
+     (DESIGN §10). Layered, so Pop's own sticker press still wins on its buttons. */
+  @media (prefers-reduced-motion: no-preference) {
+    :root:not([data-reduced-motion="true"]) :is(.ui-button, .ui-icon-button):not(:disabled):active {
+      transform: scale(0.98);
+    }
+  }
+  /* A bot's bubble on a light ground: its tint, a top-lit sheen and a 0.5px inset line of ink at 6% (DESIGN §8).
+     A dark ground keeps the flat tint: there the sheen would lift the bubble's top edge out of its tone. Layered, so
+     Pop's sticker outline on .bg-card still wins. */
+  .bubble-finish {
+    background-image: linear-gradient(rgb(255 255 255 / 0.16), transparent);
+    box-shadow:
+      inset 0 0.5px 0 rgb(255 255 255 / 0.16),
+      inset 0 -0.5px 0 rgb(255 255 255 / 0.16),
+      inset 0 0 0 0.5px color-mix(in srgb, var(--color-ink) 6%, transparent);
+  }
+  @container style(--code-color-scheme: dark) {
+    .bubble-finish { background-image: none; box-shadow: none; }
+  }
 }
+
+/* The sidebar's bot rows and pinned bots give under the pointer like a button (98% over 50ms), but not while a
+   button inside the row is the one pressed. The colour fade the rows already had is repeated here, because this
+   transition replaces theirs. */
+[data-sidebar-bot-row] {
+  transition-property: color, background-color, border-color, outline-color, fill, stroke, scale;
+  transition-duration: 150ms, 150ms, 150ms, 150ms, 150ms, 150ms, 50ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1),
+    cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion="true"]) [data-sidebar-bot-row]:active:not(:has(button:active)) {
+    scale: 0.98;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-sidebar-bot-row] { transition: none; }
+}
+:root[data-reduced-motion="true"] [data-sidebar-bot-row] { transition: none; }
 
 /* Liquid glass: the surface for centred pop-ups (Settings, Apps, Triggers).
    Every value is derived from the active skin's own tokens, so each of the
