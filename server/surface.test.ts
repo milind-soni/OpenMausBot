@@ -426,6 +426,21 @@ describe("surfacePrompt", () => {
     expect(surfacePrompt({ computer: "cloud", browser: true }, { canSelect: true }))
       .toContain("this computer is the user's host, Local VM is an isolated desktop, the cloud computer is remote");
   });
+
+  // A self-hosted server with the person's Mac lent and a Local VM mounted: "open Terminal on my Mac" ran on the Local
+  // VM, since only a Cloud home's paragraph said a lent computer is reached through shared_computer.
+  it("tells a self-hosted server's bots a computer lent to it is reached through shared_computer", () => {
+    const lent = [{ name: "Studio", platform: "darwin" as const }];
+    const vm = surfacePrompt({ computer: "vm", browser: false }, { canSelect: true, lentToServer: lent });
+    expect(vm).toContain("Their Mac (Studio) is reached only through shared_computer, never select_computer: when they ask for something on it, check list_shared_computers, then use shared_computer on it");
+    expect(vm).toContain("say so in one sentence and don't do it on the Local VM instead unless they ask.");
+    for (const { mounted, opts } of shapes) {
+      expect(surfacePrompt(mounted, { ...opts, lentToServer: lent })).toContain("Their Mac (Studio) is reached only through shared_computer");
+      // Nothing lent, or a Cloud home (which says it from ownComputer): no change.
+      expect(surfacePrompt(mounted, { ...opts, lentToServer: [] })).toBe(surfacePrompt(mounted, opts));
+      expect(surfacePrompt(mounted, { ...opts, cloudHome: true, lentToServer: lent })).toBe(surfacePrompt(mounted, { ...opts, cloudHome: true }));
+    }
+  });
 });
 
 describe("surface parsing", () => {

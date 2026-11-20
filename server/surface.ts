@@ -290,11 +290,13 @@ export function computerSelectionPrompt(opts: { cloudHome?: boolean } = {}): str
 }
 
 /** Built from what was actually mounted, never from the setting, so the model is only told about tools it can call.
- * `ownComputer`: on a Cloud home, the person's lent computers (newest first) when this turn has the shared-computer tools. */
+ * `ownComputer`: on a Cloud home, the person's lent computers (newest first) when this turn has the shared-computer tools.
+ * `lentToServer`: the same on any other server, for a person who lends it a computer. */
 export function surfacePrompt(
   mounted: MountedSurfaces,
   opts: { pinned?: Surface | null; note?: string; canSelect?: boolean; selectionRules?: boolean; cloudHome?: boolean; botOpened?: boolean;
     ownComputer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }>;
+    lentToServer?: ReadonlyArray<{ name: string; platform: LentPlatform | null }>;
     /** This computer can be picked for this bot here: its name, and the platform this server runs on. */
     thisComputer?: { bot: string; botId?: string; platform: NodeJS.Platform } } = {},
 ): string {
@@ -336,6 +338,7 @@ export function surfacePrompt(
     for (const [nowhere, places] of OWN_COMPUTER_WORDING) text = text.replace(nowhere, places);
     text = text.replace(UNREACHABLE_OWN, `${theirComputer(opts.ownComputer).theirs} is not one of these places`) + ownComputerSentence(opts.ownComputer, computer);
   }
+  if (!opts.cloudHome && opts.lentToServer?.length) text += ownComputerSentence(opts.lentToServer, computer);
   if (opts.thisComputer && !opts.cloudHome && !reportBack && mounted.computer !== "local") {
     text += ownFilesSentence(opts.thisComputer, mounted.computer, Boolean(opts.canSelect));
   }
