@@ -107,6 +107,7 @@ export function createPerfHost(deps: PerfHostDeps) {
     list: linux ? () => linuxProcessList() : psProcessList, intervalMs: linux ? LINUX_SAMPLE_MS : OTHER_SAMPLE_MS,
     scope: deps.wholeMachine && linux ? "all" : "tree", utilization: nodeUtilization(), now, engines: enginePids,
     stalled: (ms) => say("loop", `event loop stalled: the ${linux ? 60 : 300}s sampler fired ${duration(ms)} late`), afterSample: watchHolds,
+    resumed: (ms) => say("sleep", `the computer slept or the server was paused: the ${linux ? 60 : 300}s sampler fired ${duration(ms)} late, not counted as a stall`),
     seen: (rows, buckets) => { processes.sample(rows, buckets); guarded("bots", () => footprints.sample(rows), null); },
   });
   if (deps.timer !== false && !windows) sampler.start();
