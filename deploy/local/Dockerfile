@@ -16,4 +16,22 @@ RUN if [ -n "$GROK_VERSION" ]; then \
       && HOME=/tmp/grok-install grok --version | grep -qF "grok $GROK_VERSION " \
       && rm -rf /tmp/grok-install; \
     fi
+# Docker-in-Docker, opt in: DIND=1 adds the Docker engine and /usr/local/bin/omb-dind-start,
+# an entrypoint that starts dockerd and then the server as `maus`. Run it with
+# `privileged: true`, `user: "0:0"` and a volume on /var/lib/docker.
+ARG DIND=""
+ARG DOCKER_VERSION=27.5.1
+ARG TARGETARCH
+COPY dind-start.sh /usr/local/bin/omb-dind-start
+RUN if [ -n "$DIND" ]; then \
+      docker_arch=x86_64 && if [ "$TARGETARCH" = arm64 ]; then docker_arch=aarch64; fi \
+      && apt-get update \
+      && apt-get install -y --no-install-recommends iptables \
+      && rm -rf /var/lib/apt/lists/* \
+      && curl -fsSL "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_VERSION}.tgz" \
+        | tar -xz -C /usr/local/bin --strip-components=1 \
+      && chmod 0755 /usr/local/bin/omb-dind-start \
+      && docker --version | grep -qF "$DOCKER_VERSION" \
+      && dockerd --version | grep -qF "$DOCKER_VERSION"; \
+    else rm /usr/local/bin/omb-dind-start; fi
 USER maus

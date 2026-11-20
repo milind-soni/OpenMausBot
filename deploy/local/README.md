@@ -15,6 +15,14 @@ The image also carries Grok Build, pinned by `GROK_VERSION` in
 `deploy/local/Dockerfile`; Grok and Codex sign in from the app's engine setup
 with a one-time code, no terminal needed.
 
+Docker-in-Docker (for Local VM containers inside the server's container) is opt in.
+Use the `server-dind` target of the root `Dockerfile` (`docker build --target server-dind .`), or
+build this folder with `DIND=1 docker compose build omb`. Run it with `privileged: true`,
+`cgroup: host` and a volume on `/var/lib/docker`; the image starts as root,
+runs `dockerd`, then starts the server as `maus`. Without those settings the server
+starts anyway and the setup screen reports no container runtime. The desktop image
+is pulled and built from the setup screen.
+
 For Tailscale Serve, set `OMB_PUBLIC_URL` to your HTTPS URL and
 `OMB_HTTPS_HOST` to its hostname without scheme or path. Configure Tailscale
 Serve on the host to forward to the chosen localhost HTTP port.
