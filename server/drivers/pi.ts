@@ -474,7 +474,7 @@ export const PiDriver: ProviderDriver<PiConfig> = {
           return spawnCli(config.cli, childArgs, {
             stdio: ["pipe", "pipe", "pipe"],
             cwd: turn.cwd,
-            box: { rw: [sessionDir] },
+            box: { rw: [sessionDir, mcpTempDir] },
             env: piEnvironment({
               ...process.env,
               ...input.environment,
