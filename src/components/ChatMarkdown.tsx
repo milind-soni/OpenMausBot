@@ -379,7 +379,7 @@ function LocalFileLink({ filePath, shownPath, shownName, name, source, children,
       {revealMenu.menu}
       {preview.opens
         ? <SaveIconButton name={shownName} save={save} retryable={save.retryable} />
-        : <FilePreviewButton path={filePath} name={shownName} message={message} />}
+        : <FilePreviewButton path={filePath} shownPath={shownPath} name={shownName} message={message} />}
       <button
         type="button"
         onClick={preview.opens ? preview.show : () => void save.save()}

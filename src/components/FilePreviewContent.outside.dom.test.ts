@@ -3,6 +3,8 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
+import { MessageAttachmentGallery } from "./AttachmentGallery";
+import { ChatMarkdown } from "./ChatMarkdown";
 import { FilePreviewContent } from "./HtmlFilePreview";
 
 const message = { threadId: "t", messageId: "m" };
@@ -44,6 +46,7 @@ describe("a previewed file outside the chat's folders", () => {
       const fetch = await show(kind, extension, outside);
       expect(host.querySelector("[role=alert]")!.textContent).toBe("This file is outside this chat's working folder, so it can't be opened here");
       expect(buttons()).toEqual([]);
+      expect(host.textContent).toContain("Find this file at this path on the computer running");
       expect(host.querySelector("code")?.textContent).toBe(`${onDisk}${extension}`);
       expect(fetch).toHaveBeenCalledTimes(1);
     });
@@ -53,6 +56,7 @@ describe("a previewed file outside the chat's folders", () => {
       Object.assign(window, { ogb: { revealInFolder } });
       await show(kind, extension, outside);
       expect(buttons()).toEqual(["Show in folder"]);
+      expect(host.textContent).not.toContain("Find this file at this path");
       await act(async () => host.querySelector("button")!.click());
       expect(revealInFolder).toHaveBeenCalledWith(`${onDisk}${extension}`);
     });
@@ -68,5 +72,36 @@ describe("a previewed file outside the chat's folders", () => {
     setLocale("de");
     await show("markdown", ".md", outside);
     expect(host.querySelector("[role=alert]")!.textContent).toBe("Diese Datei liegt außerhalb des Arbeitsordners dieses Chats und kann hier nicht geöffnet werden");
+  });
+});
+
+describe("a linked file outside the chat's folders, opened from the chat", () => {
+  async function openFrom(element: ReturnType<typeof createElement>, label: string) {
+    const fetch = vi.fn(async (_url: string, _init?: RequestInit) => outside());
+    const revealInFolder = vi.fn(async () => "shown");
+    vi.stubGlobal("fetch", fetch);
+    Object.assign(window, { ogb: { revealInFolder } });
+    await act(async () => root.render(element));
+    await act(async () => document.body.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!.click());
+    const show = await vi.waitFor(() => {
+      const button = [...document.body.querySelectorAll("button")].find((candidate) => candidate.textContent === "Show in folder");
+      expect(button).toBeDefined();
+      return button!;
+    }, { timeout: 5_000 });
+    await act(async () => show.click());
+    const asked = JSON.parse(String(fetch.mock.calls[0]![1]!.body)) as { path: string };
+    return { asked: asked.path, revealed: revealInFolder.mock.calls[0] };
+  }
+
+  it("asks for a table by the link as written and shows it in its folder by its real path", async () => {
+    const opened = await openFrom(createElement(ChatMarkdown, { text: `Report: [Q3 report.csv](${linked}.csv)`, message }), "Preview table: Q3 report.csv");
+    expect(opened.asked).toBe(`${linked}.csv`);
+    expect(opened.revealed).toEqual([`${onDisk}.csv`]);
+  });
+
+  it("shows a file:// link from the files under a reply in its folder by its real path", async () => {
+    const opened = await openFrom(createElement(MessageAttachmentGallery, { text: `Report: [Q3](file://${linked}.md)`, message }), "Preview: Q3 report.md");
+    expect(opened.asked).toBe(`file://${linked}.md`);
+    expect(opened.revealed).toEqual([`${onDisk}.md`]);
   });
 });

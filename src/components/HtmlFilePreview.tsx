@@ -89,8 +89,8 @@ export function FilePreviewContent({ kind, path, shownPath = path, name, message
   return <MarkdownPreviewBoundary><Suspense fallback={<div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("markdown.loading")}</div>}><MarkdownFileContent key={key} path={path} shownPath={shownPath} name={name} message={message} fill={fill} /></Suspense></MarkdownPreviewBoundary>;
 }
 
-export function HtmlFileButton({ path, name, message }: { path: string; name: string; message: MessageAttachmentContext }) {
-  const preview = useHtmlPreview(path, name, message);
+export function HtmlFileButton({ path, shownPath, name, message }: { path: string; shownPath?: string; name: string; message: MessageAttachmentContext }) {
+  const preview = useHtmlPreview(path, name, message, shownPath);
   return <>
     <button type="button" className="table-action" title={preview.label} aria-label={preview.label} onClick={preview.show}><Eye size={14} /></button>
     {preview.dialog}

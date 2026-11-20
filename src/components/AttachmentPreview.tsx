@@ -416,8 +416,8 @@ export function MessageFolderFiles({ folderPath, listing, message }: {
   );
 }
 
-const REVEALABLE_PATH = /^(?:\/(?!\/)|[a-zA-Z]:[\\/])/;
-function revealBridge(): NonNullable<Window["ogb"]>["revealInFolder"] {
+export const REVEALABLE_PATH = /^(?:\/(?!\/)|[a-zA-Z]:[\\/])/;
+export function revealBridge(): NonNullable<Window["ogb"]>["revealInFolder"] {
   const ogb = typeof window === "undefined" ? undefined : window.ogb;
   return ogb?.remoteClient?.active ? undefined : ogb?.revealInFolder;
 }
@@ -892,14 +892,14 @@ export function MarkdownImagePreview({
 }
 
 export function AttachedFileChip({ file, message, linked = false, compact = false, className }: {
-  file: TranscriptFileAttachment;
+  file: TranscriptFileAttachment & { shownPath?: string };
   message?: MessageAttachmentContext;
   linked?: boolean;
   compact?: boolean;
   className?: string;
 }) {
   const save = useLocalFileSave(file.path, file.name, message);
-  const preview = useHtmlPreview(file.path, file.name, message);
+  const preview = useHtmlPreview(file.path, file.name, message, file.shownPath);
   const failed = save.state === "failed";
   if (compact) return <CompactFileChip file={file} message={message} linked={linked} save={save} preview={preview} className={className} />;
   if (!message || (!file.private && !linked)) {
@@ -934,7 +934,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
             <Download size={13} className="shrink-0" />
           )}
         </button>
-        {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}
+        {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} shownPath={file.shownPath} name={file.name} message={message} />}
         {preview.dialog}
       </div>
       {save.state !== "idle" && (
@@ -952,7 +952,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
               : saveFailureText(save)}
           {failed && save.outsideWorkspace && (
             <div className="mt-1 flex flex-wrap items-center gap-x-1.5">
-              <OutsideWorkspaceFile filePath={file.path} />
+              <OutsideWorkspaceFile filePath={file.shownPath ?? file.path} />
             </div>
           )}
         </div>
@@ -964,7 +964,7 @@ export function AttachedFileChip({ file, message, linked = false, compact = fals
 const FILE_CHIP = "inline-flex h-7 max-w-[16rem] items-center rounded-full bg-ink/[0.06] text-[13px] leading-none text-ink-secondary";
 
 function CompactFileChip({ file, message, linked, save, preview, className }: {
-  file: TranscriptFileAttachment;
+  file: TranscriptFileAttachment & { shownPath?: string };
   message?: MessageAttachmentContext;
   linked: boolean;
   save: ReturnType<typeof useLocalFileSave>;
@@ -1005,14 +1005,14 @@ function CompactFileChip({ file, message, linked, save, preview, className }: {
             <Download size={13} className="shrink-0" aria-hidden="true" />
           )}
         </button>
-        {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} name={file.name} message={message} />}
+        {preview.opens ? <SaveIconButton name={file.name} save={save} retryable={save.retryable} /> : <FilePreviewButton path={file.path} shownPath={file.shownPath} name={file.name} message={message} />}
         {preview.dialog}
       </span>
       {save.state !== "idle" && save.state !== "saved" && (
         <span role={failed ? "alert" : "status"} className={cn("px-2.5 text-[12px]", failed ? "text-danger" : "text-ink-secondary")}>
           {save.state === "saving" ? t("attach.downloading") : saveFailureText(save)}
           {failed && save.outsideWorkspace && (
-            <span className="ms-1.5 inline-flex flex-wrap items-center gap-x-1.5"><OutsideWorkspaceFile filePath={file.path} /></span>
+            <span className="ms-1.5 inline-flex flex-wrap items-center gap-x-1.5"><OutsideWorkspaceFile filePath={file.shownPath ?? file.path} /></span>
           )}
         </span>
       )}

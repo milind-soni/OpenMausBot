@@ -37,18 +37,18 @@ export async function readTableResponse(response: Response, signal: AbortSignal,
   }
 }
 
-export function TableFileButton({ path, name, message }: { path: string; name: string; message: MessageAttachmentContext }) {
+export function TableFileButton({ path, shownPath, name, message }: { path: string; shownPath?: string; name: string; message: MessageAttachmentContext }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const beside = useFileBesideChat();
   const delimiter = tableDelimiter(name) ?? tableDelimiter(path);
   if (!delimiter) return null;
   const show = () => {
-    if (!beside({ kind: "table", path, name, message, opener: trigger.current })) setOpen(true);
+    if (!beside({ kind: "table", path, shownPath, name, message, opener: trigger.current })) setOpen(true);
   };
   return <>
     <button ref={trigger} type="button" className="table-action" title={t("table.preview", { name })} aria-label={t("table.preview", { name })} onClick={show}><Table2 size={14} /></button>
-    {open && <TableDialog title={name} returnFocus={trigger.current} onClose={() => setOpen(false)}><TableFileContent key={`${message.threadId}:${message.messageId}:${path}`} path={path} name={name} message={message} delimiter={delimiter} /></TableDialog>}
+    {open && <TableDialog title={name} returnFocus={trigger.current} onClose={() => setOpen(false)}><TableFileContent key={`${message.threadId}:${message.messageId}:${path}`} path={path} shownPath={shownPath} name={name} message={message} delimiter={delimiter} /></TableDialog>}
   </>;
 }
 
