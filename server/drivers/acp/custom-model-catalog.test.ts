@@ -194,6 +194,16 @@ describe("custom ACP catalog discovery (isolated fake CLI)", () => {
     expect(sent).not.toContain("x".repeat(500));
   });
 
+  it("holds the passthrough entry to the same usability rule as discovered ids", async () => {
+    const fixture = await fake("hostile");
+    const catalog = await discoverAcpModels(fixture.env, fixture.config.cli, [], { passthrough: { id: "../stealth", label: "Stealth" }, custom: true });
+    expect(catalog.options).toEqual([
+      { id: "ok-model", label: "ok-model", custom: true },
+      { id: "good-model", label: "Good Model", custom: true },
+    ]);
+    expect(catalog.default).toBe("good-model");
+  });
+
   it("never lets an unusable session model become the catalog default", async () => {
     const fixture = await fake("hostile-default");
     const catalog = await discoverAcpModels(fixture.env, fixture.config.cli, []);
