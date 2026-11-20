@@ -63,8 +63,11 @@ async function leftBehind(of: { threadIds?: string[]; routineIds?: string[] }) {
 }
 
 type Turn = { argv: string[]; cwd: string; systemPrompt?: string; mcpConfig: { mcpServers: { agents: { command: string; args: string[]; env: Record<string, string> } } } };
-/** The latest turn `agentsFor` found. */
+/** The latest turn `agentsFor` found, and the dump it was in. */
 let turn: Turn;
+let turnDump = "";
+/** Ends the held turn that dumped itself there, as a model's last reply would. */
+const finish = (dump: string) => writeFileSync(join(turnDumps(), dump.replace(/\.json$/u, ".finish")), "");
 const turnDumps = () => join(home, "turns");
 const readTurns = () => new Map(readdirSync(turnDumps()).filter((name) => name.endsWith(".json")).flatMap((name) => {
   try { return [[name, readFileSync(join(turnDumps(), name), "utf8")] as const]; } catch { return []; }
@@ -80,7 +83,7 @@ async function agentsFor(start: () => Promise<void>, botId: string, threadId?: s
       let found: Turn;
       try { found = JSON.parse(text) as Turn; } catch { continue; }
       const env = found.mcpConfig?.mcpServers?.agents?.env;
-      if (env?.OMB_BOT_ID === botId && (!threadId || env.OMB_THREAD_ID === threadId)) { turn = found; return true; }
+      if (env?.OMB_BOT_ID === botId && (!threadId || env.OMB_THREAD_ID === threadId)) { turn = found; turnDump = name; return true; }
     }
     return false;
   }, { timeout: 15_000 }).toBe(true);
@@ -122,7 +125,8 @@ beforeAll(async () => {
 if (process.argv[2] === "auth") { console.log(JSON.stringify({ loggedIn: true, email: "person@example.test" })); process.exit(0); }
 process.env.FAKE_CLAUDE_VERSION = "2.1.284";
 // One-shot runs (a new chat's title) dump elsewhere, so they never take the place of the turn a test is waiting for.
-if (process.argv[2] !== "--version") { process.env.FAKE_CLAUDE_DUMP = ${JSON.stringify(join(home, "turns"))} + "/" + process.pid + ".json"; process.env.FAKE_CLAUDE_TEXT_DUMP = ${JSON.stringify(join(home, "one-shot.json"))}; process.env.FAKE_CLAUDE_MODE = "hang"; }
+// A held turn ends well once its own finish file exists (finish()).
+if (process.argv[2] !== "--version") { process.env.FAKE_CLAUDE_DUMP = ${JSON.stringify(join(home, "turns"))} + "/" + process.pid + ".json"; process.env.FAKE_CLAUDE_TEXT_DUMP = ${JSON.stringify(join(home, "one-shot.json"))}; process.env.FAKE_CLAUDE_MODE = "hang"; process.env.FAKE_CLAUDE_FINISH_GATE = ${JSON.stringify(join(home, "turns"))} + "/" + process.pid + ".finish"; }
 await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-claude-cli.ts")).href)});
 `, { mode: 0o755 });
   // No `features` block: the maintainer flag is off, as on every Cloud home.
@@ -635,3 +639,90 @@ it("paused, the PC still hears a bot that needs it: one card in the chat, the ap
   expect(prompts, "the app's own prompt came up once").toHaveLength(1);
   rmSync(pcHome, { recursive: true, force: true });
 }, hostTimeout(90_000));
+
+it("a routine the bot changes in the owner's own chat keeps the lent computer on its next scheduled run, as does one its own run changes; one remade beside an old report is refused, and its run ends saying so in the app's words", async () => {
+  const device = ({ win32: "PC", darwin: "Mac" } as Record<string, string>)[process.platform] ?? "computer";
+  const folderPath = realpathSync(mkdtempSync(join(tmpdir(), "omb-cloud-lent-routines-")));
+  writeFileSync(join(folderPath, "plan.md"), "from the computer");
+  const env = { id: "my-cloud", name: "My Cloud", origin: base };
+  connector?.close();
+  rmSync(join(home, "desktop-profile"), { recursive: true, force: true });
+  connector = lend(env);
+  await connector.saveCloud(env, { folders: [{ id: randomUUID(), name: "Plans", path: folderPath, write: false }], screen: false });
+  await expect.poll(() => connector!.cloudState(env).connected, { timeout: 8000 }).toBe(true);
+  const authors = () => JSON.parse(readFileSync(join(home, ".openmausbot", "lending-routines.json"), "utf8"));
+  const lent = (listing: any) => JSON.parse(listing.content[0].text);
+  const applied = (result: unknown) => { const text = JSON.stringify(result); expect(text).not.toContain("isError\":true"); return text; };
+  const made = (result: unknown) => /trigger id ([\w-]+)/u.exec(applied(result))?.[1] ?? "";
+  const bot = (await api("POST", "/api/bots", { token: owner, body: { name: "Morning reader", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } } })).body.bot;
+  const chat = async () => (await api("GET", `/api/threads/${bot.threadId}/messages`, { token: owner })).body.messages as any[];
+  const ownerAsks = (text: string) => proxyFor(async () => {
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { token: owner, body: { text, threadId: bot.threadId } })).status).toBe(202);
+  }, bot.id, bot.threadId);
+  const stop = async () => expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { token: owner, body: { threadId: bot.threadId } })).status).toBe(200);
+  const runs = async () => (await api("GET", "/api/routines", { token: owner })).body.runs as Array<{ id: string; routineId: string; status: string; error?: string }>;
+  /** A run started by Run now, or with `scheduled` by its schedule alone: its tools, the dump that ends it, and its row once ended. */
+  const runOf = async (routineId: string, scheduled = false) => {
+    const call = await proxyFor(async () => {
+      if (!scheduled) expect((await api("POST", `/api/routines/${routineId}/run`, { token: owner })).status).toBe(201);
+    }, bot.id);
+    const dump = turnDump;
+    const runId = (await runs()).find((run) => run.routineId === routineId && ["running", "waiting"].includes(run.status))?.id;
+    expect(runId).toBeTruthy();
+    return { call, ended: async () => {
+      finish(dump);
+      let row: Awaited<ReturnType<typeof runs>>[number] | undefined;
+      await expect.poll(async () => (row = (await runs()).find((run) => run.id === runId))?.status, { timeout: hostTimeout(20_000) }).toMatch(/^(completed|failed)$/u);
+      return row!;
+    } };
+  };
+
+  // The person asks in their own chat; the bot makes the routine, then rewrites it there and sets it to run in a moment.
+  let call = await ownerAsks("Every morning, read plan.md from my computer.");
+  const morning = made(await call("create_trigger", { when: "schedule", name: "Morning plan", instructions: "Read plan.md from my computer.", schedule: { type: "interval", every_minutes: 60 } }));
+  expect(morning).not.toBe("");
+  applied(await call("manage_trigger", { trigger_id: morning, action: "update", changes: { instructions: "Read plan.md from my computer, as I said it may today.", schedule: { type: "once", at: new Date(Date.now() + 8_000).toISOString() } } }));
+  expect(authors().routines[morning]).toMatch(/^[a-f0-9]{64}$/u);
+  await stop();
+  // Its next run starts on its schedule, with nobody pressing Run now, and has the computer.
+  const scheduled = await runOf(morning, true);
+  expect(lent(await scheduled.call("list_shared_computers")).computers).toHaveLength(1);
+  expect((await scheduled.ended()).status).toBe("completed");
+  await expect.poll(async () => (await chat()).some((line) => line.automation?.routineId === morning), { timeout: hostTimeout(15_000) }).toBe(true);
+
+  // A run of the owner's routine that changes the routine itself keeps it theirs (cloud-personal.e2e.test.ts pins the fingerprint).
+  call = await ownerAsks("Read plan.md from my computer every hour.");
+  const hourly = made(await call("create_trigger", { when: "schedule", name: "Hourly plan", instructions: "Read plan.md from my computer.", schedule: { type: "interval", every_minutes: 60 } }));
+  await stop();
+  const first = authors().routines[hourly];
+  const tuning = await runOf(hourly);
+  applied(await tuning.call("manage_trigger", { trigger_id: hourly, action: "update", changes: { instructions: "Read plan.md and notes.md from my computer." } }));
+  expect(authors().routines[hourly]).toMatch(/^[a-f0-9]{64}$/u);
+  expect(authors().routines[hourly]).not.toBe(first);
+  expect((await tuning.ended()).status).toBe("completed");
+  const tuned = await runOf(hourly);
+  expect(lent(await tuned.call("list_shared_computers")).computers).toHaveLength(1);
+  expect((await tuned.ended()).status).toBe("completed");
+
+  // Deleted, Morning plan's report in the chat is no longer the owner's routine's, so the chat can't be proven theirs alone
+  // (cloud-routine-level.e2e.test.ts pins this): the routine the bot makes there again is not confirmed for the computer.
+  call = await ownerAsks("Replace Morning plan with a new one.");
+  applied(await call("delete_trigger", { trigger_id: morning }));
+  const again = made(await call("create_trigger", { when: "schedule", name: "Morning plan again", instructions: "Read plan.md from my computer.", schedule: { type: "interval", every_minutes: 60 } }));
+  expect(authors().routines[again]).toBeUndefined();
+  await stop();
+  const refused = await runOf(again);
+  const said = `"Morning plan again" can't use your ${device} because it isn't confirmed as yours: it was last changed or made outside your own chats. Open it and save it to make it yours again.`;
+  const listing = lent(await refused.call("list_shared_computers"));
+  expect(listing.computers).toEqual([]);
+  expect(listing.say).toBe(said);
+  // Whatever the bot says after, the run is not a success, and the chat it reports to reads the app's own sentence.
+  const row = await refused.ended();
+  expect(row.status).toBe("failed");
+  expect(row.error).toBe(said);
+  await expect.poll(async () => (await chat()).find((line) => line.automation?.routineId === again && line.automation.failed)?.text, { timeout: hostTimeout(15_000) }).toContain(said);
+  connector.close();
+  connector = undefined;
+  rmSync(join(home, "desktop-profile"), { recursive: true, force: true });
+  rmSync(folderPath, { recursive: true, force: true });
+}, hostTimeout(150_000));
