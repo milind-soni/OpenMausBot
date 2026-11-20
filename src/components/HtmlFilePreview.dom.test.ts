@@ -23,8 +23,8 @@ const alertText = () => document.body.querySelector("[role=alert]")?.textContent
 
 describe("HTML file preview errors", () => {
   it("shows the server's own reason instead of blaming the connection or the encoding", async () => {
-    await open(async () => new Response(JSON.stringify({ error: "the linked file is outside this conversation's workspace", code: "outside_workspace" }), { status: 403, headers: { "content-type": "application/json" } }));
-    expect(alertText()).toContain("the linked file is outside this conversation's workspace");
+    await open(async () => new Response(JSON.stringify({ error: "the linked file changed while it was being opened" }), { status: 409, headers: { "content-type": "application/json" } }));
+    expect(alertText()).toContain("the linked file changed while it was being opened");
     expect(alertText()).not.toContain("Check your connection");
     expect(alertText()).not.toContain("UTF-8");
   });

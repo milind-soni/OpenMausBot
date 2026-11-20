@@ -2342,6 +2342,7 @@
   "attach.retryAria": "Spróbuj ponownie wczytać {name}",
   "attach.imageUnavailable": "Obraz niedostępny",
   "attach.imageOutsideWorkspace": "Ten obraz znajduje się poza folderem roboczym tego czatu, więc nie można go tu wyświetlić",
+  "attach.previewOutsideWorkspace": "Ten plik znajduje się poza folderem roboczym tego czatu, więc nie można go tu otworzyć",
   "attach.previewImageAria": "Podgląd załączonego obrazu {name}",
   "attach.externalHidden": "Zewnętrzny obraz ukryty ze względu na prywatność",
   "attach.savedTo": "Zapisano w: {path}",

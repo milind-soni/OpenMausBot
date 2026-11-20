@@ -2293,6 +2293,7 @@
   "attach.retryAria": "Riprova a caricare {name}",
   "attach.imageUnavailable": "Immagine non disponibile",
   "attach.imageOutsideWorkspace": "Questa immagine è fuori dalla cartella di lavoro di questa chat, quindi qui non si può mostrare",
+  "attach.previewOutsideWorkspace": "Questo file è fuori dalla cartella di lavoro di questa chat, quindi qui non si può aprire",
   "attach.previewImageAria": "Anteprima dell'immagine allegata {name}",
   "attach.externalHidden": "Immagine esterna nascosta per la privacy",
   "attach.savedTo": "Salvato in {path}",

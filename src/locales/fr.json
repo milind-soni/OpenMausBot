@@ -1032,6 +1032,7 @@
   "attach.retryAria": "Réessayer de charger {name}",
   "attach.imageUnavailable": "Image indisponible",
   "attach.imageOutsideWorkspace": "Cette image se trouve hors du dossier de travail de cette discussion et ne peut pas être affichée ici",
+  "attach.previewOutsideWorkspace": "Ce fichier se trouve hors du dossier de travail de cette discussion et ne peut pas être ouvert ici",
   "attach.previewImageAria": "Aperçu de l'image jointe {name}",
   "attach.externalHidden": "Image externe masquée pour préserver la confidentialité",
   "attach.savedTo": "Enregistré dans {path}",

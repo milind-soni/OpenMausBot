@@ -2375,6 +2375,7 @@
   "attach.retryAria": "Повторить загрузку {name}",
   "attach.imageUnavailable": "Изображение недоступно",
   "attach.imageOutsideWorkspace": "Эта картинка находится вне рабочей папки этого чата, поэтому её нельзя показать здесь",
+  "attach.previewOutsideWorkspace": "Этот файл находится вне рабочей папки этого чата, поэтому его нельзя открыть здесь",
   "attach.previewImageAria": "Просмотр прикреплённого изображения {name}",
   "attach.externalHidden": "Внешнее изображение скрыто из соображений приватности",
   "attach.savedTo": "Сохранено в {path}",

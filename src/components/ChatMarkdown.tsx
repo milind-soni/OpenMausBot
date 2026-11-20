@@ -361,7 +361,7 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
 // source: the original a delivered copy came from, offered on right-click (Show in Finder) like in the gallery.
 function LocalFileLink({ filePath, shownPath, shownName, name, source, children, message }: { filePath: string; shownPath: string; shownName: string; name?: string; source?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
   const save = useLocalFileSave(filePath, name, message);
-  const preview = useHtmlPreview(filePath, shownName, message);
+  const preview = useHtmlPreview(filePath, shownName, message, shownPath);
   const revealMenu = useRevealOriginalMenu();
   if (!message) {
     return <span title={t("chat.file.legacy")} className="break-words text-ink-secondary">{children}</span>;

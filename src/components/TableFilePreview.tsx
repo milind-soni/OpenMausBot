@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, Table2 } from "lucide-react";
 import { requestMessageFile, type MessageAttachmentContext } from "./AttachmentPreview";
+import { OutsideWorkspacePreview, refusedAsOutsideWorkspace } from "./OutsideWorkspacePreview";
 import { RichTable, TableDialog } from "./RichTable";
 import { useFileBesideChat } from "@/lib/file-preview";
 import { TABLE_FILE_MAX_BYTES, tableDelimiter, type TextTable } from "@/lib/table-data";
@@ -51,8 +52,8 @@ export function TableFileButton({ path, name, message }: { path: string; name: s
   </>;
 }
 
-export function TableFileContent({ path, name, message, delimiter }: {
-  path: string; name: string; message: MessageAttachmentContext; delimiter: "," | "\t";
+export function TableFileContent({ path, shownPath = path, name, message, delimiter }: {
+  path: string; shownPath?: string; name: string; message: MessageAttachmentContext; delimiter: "," | "\t";
 }) {
   const [attempt, setAttempt] = useState(0);
   const [table, setTable] = useState<TextTable | null>(null);
@@ -79,11 +80,12 @@ export function TableFileContent({ path, name, message, delimiter }: {
         };
         worker.onerror = () => fail("format");
         worker.postMessage({ text, delimiter });
-      } catch (reason) { fail(reason instanceof Error && reason.message === "size" ? "size" : "load"); }
+      } catch (reason) { fail(refusedAsOutsideWorkspace(reason) ? "outside" : reason instanceof Error && reason.message === "size" ? "size" : "load"); }
     })();
     return () => { controller.abort(); worker?.terminate(); };
   }, [path, message.threadId, message.messageId, delimiter, attempt]);
   const data = useMemo(() => table && ({ columns: table.headers.map((text) => ({ text })), rows: table.rows.map((row) => row.map((text) => ({ text }))) }), [table]);
+  if (error === "outside") return <OutsideWorkspacePreview filePath={shownPath} />;
   if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{t(error === "size" ? "table.tooLarge" : error === "columns" || error === "format" ? "table.invalid" : "table.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>;
   if (!data) return <div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("table.loading")}</div>;
   return <RichTable {...data} name={name} expanded />;
