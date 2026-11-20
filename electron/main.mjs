@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { buildErrorPage, desktopViewerErrorPage, showBootFailure } from "./error-pages.mjs";
 import { startCua, stopCua, registerCuaIpc, requestComputerUse, setCuaStateListener, grantLocalComputer } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
-import { finishSpeech, speechBusy, startSpeech, stopSpeech } from "./speech.mjs";
+import { currentMacLocation, finishSpeech, speechBusy, startSpeech, stopSpeech } from "./speech.mjs";
 import { installTalk, isTalkPanel } from "./talk-main.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { linuxDisablesGpu, SOFTWARE_RENDERING_ARG } from "./linux-gpu.mjs";
@@ -2544,6 +2544,15 @@ const cloudPageAsking = (event) => {
   if (cloudPageSenderAllowed(event, { contents, homeOrigin: myCloud(), activeOrigin: activeEnvironment(environmentsState)?.origin })) return "cloud";
   return null;
 };
+ipcMain.handle("location:current", async event => {
+  const canLocate = () => process.platform === "darwin" && cloudPageAsking(event) &&
+    mainWindow?.isFocused() && powerMonitor.getSystemIdleState(1) !== "locked";
+  const unavailable = "Location is only available in the active Mac workspace";
+  if (!canLocate()) throw new Error(unavailable);
+  const location = await currentMacLocation();
+  if (!canLocate()) throw new Error(unavailable);
+  return location;
+});
 const cloudPageSender = (channel, handler) => (event) => {
   const asking = cloudPageAsking(event);
   if (!asking) throw new Error(`${channel} is only available in this app's window`);

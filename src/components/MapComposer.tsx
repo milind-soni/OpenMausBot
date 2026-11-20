@@ -112,7 +112,10 @@ export function MapComposer({ bots, teams, onTagged, onSent }: {
         <div className="relative flex items-end gap-2 rounded-2xl bg-composer px-3 py-2 shadow-lg ring-1 ring-composer-ring">
           <MentionMenu listRef={listRef} motion={motion} choices={choices} highlight={highlight} everyoneCount={visible.length}
             onPick={pick} onHighlight={setHighlight} />
-          <MentionTextarea inputRef={inputRef} peers={[...visible, ...teams.map((team) => ({ name: team.name }))]} everyone
+          <MentionTextarea inputRef={inputRef} onOpenBot={(id) => {
+            const mentioned = visible.find(candidate => candidate.id === id);
+            if (mentioned) openBot(dispatch, mentioned, showThreads);
+          }} peers={[...visible, ...teams.map((team) => ({ name: team.name }))]} everyone
             aria-label={t("mapComposer.label")} placeholder={t("mapComposer.placeholder")} dir="auto" rows={1} value={text}
             className="block max-h-[9rem] min-h-6 w-full resize-none overflow-y-auto bg-transparent px-1 py-1 text-[15px] leading-6 placeholder:text-ink-secondary focus:outline-none"
             onChange={(event) => { setText(event.target.value); setCaret(event.target.selectionStart ?? event.target.value.length); setDismissedAt(null); }}

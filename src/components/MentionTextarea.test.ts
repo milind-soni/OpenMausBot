@@ -11,5 +11,5 @@ it.each(["auto", "rtl", "ltr"])("shares the %s direction between the native inpu
   }));
   expect(html).toContain(`<div dir="${dir}" aria-hidden="true" class="mention-editor-mirror`);
   expect(html).toContain(`<textarea dir="${dir}"`);
-  expect(html.match(/class="mention-highlight"/g)).toHaveLength(3);
+  expect(html.match(/data-bot-mention=""/g)).toHaveLength(3);
 });

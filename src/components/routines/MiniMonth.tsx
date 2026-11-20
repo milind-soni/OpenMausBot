@@ -24,10 +24,11 @@ function moveMonth(date: Date, offset: number) {
 
 export interface MiniMonthProps {
   anchor: number;
+  min?: number;
   onSelect: (at: number) => void;
 }
 
-export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
+export function MiniMonth({ anchor, min, onSelect }: MiniMonthProps) {
   const [visibleMonth, setVisibleMonth] = useState(() => startOfMonth(anchor));
 
   useEffect(() => {
@@ -105,11 +106,12 @@ export function MiniMonth({ anchor, onSelect }: MiniMonthProps) {
             <button
               key={`${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`}
               type="button"
+              disabled={min !== undefined && date.getTime() < min}
               onClick={() => onSelect(date.getTime())}
               aria-label={label}
               aria-current={isToday ? "date" : undefined}
               aria-pressed={isSelected}
-              className="group flex h-7 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
+              className="group flex h-7 disabled:pointer-events-none disabled:opacity-40 items-center justify-center rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
             >
               <span
                 className={`flex size-6 items-center justify-center rounded-full text-[11px] transition-colors ${

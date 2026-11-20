@@ -83,8 +83,8 @@ describe("mention highlighting", () => {
       text: "@Atlas @Juniper @everyone", everyone: true,
       mentionPeers: [{ name: "Atlas", color: "blue" }, { name: "Juniper", color: "red" }],
     }));
-    expect(html).toContain('style="--mention-color:#377FE6">@Atlas');
-    expect(html).toContain('style="--mention-color:#D94B52">@Juniper');
+    expect(html).toContain('style="--mention-color:#377FE6" class="bot-mention"');
+    expect(html).toContain('style="--mention-color:#D94B52" class="bot-mention"');
     expect(html).toContain('<span class="mention-highlight">@everyone</span>');
   });
   it("highlights known mentions in prose, lists and tables", () => {

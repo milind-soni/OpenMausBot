@@ -1,3 +1,4 @@
+import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import { routeRunOwners, type Actor, type RouteRunOwners } from "../host/run-owner.ts";
 import type { ResolvedSender, RoomTaskCreateResponse, RoomTaskUpdateResponse, RoomUpdateResponse, WireGroup } from "../../shared/wire.ts";
@@ -45,6 +46,7 @@ import { readThreadNotifications, type NotificationListed } from "./notification
 export type MessagePage = { messages: Array<Message | Record<string, unknown>>; hasMore?: boolean; activeLeafId: string | null };
 
 export interface ChannelRouteDeps {
+  bindLocationClient?(req: IncomingMessage, auth: RequestAuth, threadId: string, sendId: string): void;
   /** Whoever asked owns the run, where several people write. */
   runOwners?: RouteRunOwners;
   runActor?(auth: RequestAuth): Actor;
@@ -456,6 +458,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
             : sameNameRefusal(text, members, mentions, conversationLanguage(threadId));
           if (sameName) throw Object.assign(new Error(sameName), { status: 409 });
           if (channelMode === "chat" && !owners.stopRefusal(auth, threadId)) applyRoomHoldsFromMessage(current.id, text, mentions);
+          if (sendId && !via) deps.bindLocationClient?.(req, auth, threadId, sendId);
           const threadWorking = groupThreadIsWorking(current.id, threadId);
           const decision = admit("room", {}, { roomWorking: threadWorking, threadWorking });
           if (decision.action === "queue") {

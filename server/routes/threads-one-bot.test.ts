@@ -140,26 +140,31 @@ describe("GET /api/threads/:id/messages with before", () => {
     expect(await getPage(base, threadId, "m-256", 200)).toEqual(page);
   });
 
-  it("serves compact history with failures and rejects cursors outside the active branch", async () => {
+  it("serves completed tool steps in chat history and rejects cursors outside the active branch", async () => {
     const store = new Store(() => sonnet);
     const { threadId } = store.createBot({ name: "Compact history" }, { seedMessages: false });
     const question = store.appendMessage(threadId, { role: "user", kind: "text", text: "Try this" });
     const abandoned = store.appendMessage(threadId, { role: "bot", kind: "text", text: "Abandoned answer" });
     const revised = store.branchMessage(threadId, question.id, "Try again")!;
-    store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Read", ok: true } });
+    const tool = store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Read", ok: true, output: "File contents" } });
     const failure = store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "error: Sign in again", ok: false } });
     const base = await serve(store, "");
     const read = (cursor = "") => fetch(`${base}/api/threads/${threadId}/messages?view=chat&limit=1${cursor}`);
 
     expect(await (await read()).json()).toMatchObject({ messages: [{ id: failure.id }], hasMore: true });
-    expect(await (await read(`&before=${failure.id}`)).json()).toMatchObject({ messages: [{ id: revised.id }], hasMore: false });
+    expect(await (await read(`&before=${failure.id}`)).json()).toMatchObject({
+      messages: [{ id: tool.id, tool: { name: "Read", ok: true, output: "File contents" } }], hasMore: true,
+    });
+    expect(await (await read(`&before=${tool.id}`)).json()).toMatchObject({ messages: [{ id: revised.id }], hasMore: false });
     expect((await read(`&before=${abandoned.id}`)).status).toBe(404);
+    const next = store.appendMessage(threadId, { role: "user", kind: "text", text: "Next round" });
+    expect(await (await read(`&before=${failure.id}`)).json()).toMatchObject({ messages: [{ id: revised.id }], hasMore: false });
     const quote = (id: string) => fetch(`${base}/api/threads/${threadId}/messages?view=quote&around=${id}`);
     expect(await (await quote(abandoned.id)).json()).toMatchObject({ message: { id: abandoned.id }, onActivePath: false });
     expect(await (await quote(revised.id)).json()).toMatchObject({ message: { id: revised.id }, onActivePath: true });
     expect((await quote("missing")).status).toBe(404);
     expect((await quote(failure.id)).status).toBe(404);
-    expect(store.activeLeaf(threadId)).toBe(failure.id);
+    expect(store.activeLeaf(threadId)).toBe(next.id);
   });
 
   it("reconstructs legacy message links and falls back to the conversation's last message", async () => {

@@ -1,3 +1,5 @@
+import type { MentionPeer } from "@/lib/mentions";
+import { useTeammates } from "@/state/team-people";
 import { groupChatWork, type TranscriptItem } from "@/lib/activity-runs";
 import { cn } from "@/lib/cn";
 import { useMenuMotion } from "../MenuMotion";
@@ -95,7 +97,8 @@ function ChatV2Presence({ bot }: { bot: Bot }) {
   </div>;
 }
 
-export const Row = memo(function Row({ message: m, botId, botName, color, threadId, busy, hasMore, transcript, reply, failure, quoted, jumpTo, canLoadQuote, loadingQuote, digest, ownBubbleStyle, phoneLayout = false }: {
+export const Row = memo(function Row({ message: m, botId, botName, color, threadId, busy, hasMore, transcript, reply, failure, quoted, jumpTo, canLoadQuote, loadingQuote, digest, ownBubbleStyle, phoneLayout = false, mentionPeers }: {
+  mentionPeers?: readonly MentionPeer[];
   message: Message; botId: string; botName: string; color: Bot["color"]; threadId: string;
   failure?: React.ReactNode;
   quoted?: Message;
@@ -173,7 +176,7 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
         botName={botName} inverse={false} canJump={canLoadQuote} pending={loadingQuote} onJump={() => jumpTo(m.replyToId!, false)} />}
       {!own && <MessageAttachmentGallery text={text} attachments={m.attachments} message={attachmentContext} />}
       {m.attachments?.map(a => a.kind === "audio" && <VoiceNoteBubble key={a.path} attachment={a} />)}
-      {raw ? <pre className="whitespace-pre-wrap">{text}</pre> : <ChatMarkdown text={text} userImages={own} message={{ threadId: threadId, messageId: m.id }} />}
+      {raw ? <pre className="whitespace-pre-wrap">{text}</pre> : <ChatMarkdown text={text} mentionPeers={mentionPeers} userImages={own} message={{ threadId: threadId, messageId: m.id }} />}
       {!own && Boolean(m.reactions?.length) && <div className="v2-reaction-badge">
         <ReactionChips threadId={threadId} message={m} canReact={Boolean(reply) && !peer} badgeOnly />
       </div>}
@@ -215,7 +218,7 @@ function ChatWork({ item, focusedId, children }: {
       className={cn("grid motion-safe:transition-[grid-template-rows,opacity] motion-safe:duration-200 motion-safe:ease-in-out",
         open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
       <div className="min-h-0 min-w-0 overflow-clip">
-        {motion.shown && <div className="v2-work-steps grid min-w-0 gap-2 border-s border-hairline ps-3 pt-1">{children}</div>}
+        {motion.shown && <div className="v2-work-steps grid min-w-0 gap-2 border-s border-hairline/40 ps-3 pt-1">{children}</div>}
       </div>
     </div>
   </div>;
@@ -234,6 +237,9 @@ export function ChatV2({ profile, phoneLayout = false, onClose }: { profile: Bot
   const computerOpen = useStoreSelector(s => s.computerOpen);
   const error = useStoreSelector(s => s.error);
   const focused = useStoreSelector(s => s.focusMessage);
+  const bots = useStoreSelector(state => state.bots);
+  const teammates = useTeammates();
+  const mentionPeers = useMemo(() => [...bots, ...teammates.peers], [bots, teammates]);
   const historyPage = useChatHistory(bot);
   const { history } = historyPage;
   const messageById = useMemo(() => new Map(history.map(message => [message.id, message])), [history]);
@@ -241,7 +247,8 @@ export function ChatV2({ profile, phoneLayout = false, onClose }: { profile: Bot
     hasMore: historyPage.hasMore, historyPage, rests: staysInView, pinOn: [bot.busy] });
   const messages = useLiveTranscript(bot.threadId, viewport.windowedMessages, history);
   const unread = useUnreadDivider({ threadId: bot.threadId, messages: history, following: viewport.following, hasMore: historyPage.hasMore });
-  const items = useMemo(() => groupChatWork(messages, Boolean(bot.busy)), [messages, bot.busy]);
+  const focusId = focused?.threadId === bot.threadId && !focused.consumed ? focused.messageId : undefined;
+  const items = useMemo(() => groupChatWork(messages, Boolean(bot.busy), history, focusId), [messages, bot.busy, history, focusId]);
   const digestByReply = useMemo(() => {
     const replies = new Map<string, string>();
     const digests = new Map<string, Message>();
@@ -271,21 +278,21 @@ export function ChatV2({ profile, phoneLayout = false, onClose }: { profile: Bot
   const [editing, setEditing] = useState<Message | null>(null);
   const lastTyped = history.findLast(m => m.role === "user" && m.kind === "text" && !peerLine(m) && !m.reaction);
   const renderMessage = (message: Message) => <div key={message.id} data-mid={message.id}>
-            {message.automation && <div className="pb-3"><AutomationCaption message={message} line={message.automation} botId={bot.id} /></div>}
-            {message.id === unread.messageId && <NewMessagesDivider fading={unread.fading} />}
-            {editing?.id === message.id ? <form onSubmit={e => { e.preventDefault(); const text = String(new FormData(e.currentTarget).get("text") ?? "").trim(); if (text) { dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: editing.id, text }); setEditing(null); } }}>
-              <input autoFocus className="outline-none focus:bg-raised/50" name="text" defaultValue={editing.text} onKeyDown={e => { if (e.key === "Escape") setEditing(null); }} /></form> :
-              <Row phoneLayout={phoneLayout} ownBubbleStyle={ownBubbleStyle} digest={digestByReply.get(message.id)} message={message} botId={bot.id} botName={bot.name} color={bot.color} threadId={bot.threadId}
-                busy={Boolean(bot.busy)} hasMore={message.kind === "call" && historyPage.hasMore}
-                failure={message.tool && failedTurnCause(message.tool.name) !== null
-                  ? <FailedTurnRow tool={message.tool} engine={engine} botId={bot.id} threadId={bot.threadId}
-                      messageAt={message.at} onRetry={message.id === retryable ? retry : undefined} />
-                  : undefined}
-                transcript={message.setupOffer || richRowKind(message) === "options" || message.kind === "call" ? history : EMPTY_TRANSCRIPT}
-                quoted={message.replyToId ? messageById.get(message.replyToId) : undefined}
-                jumpTo={historyPage.jumpTo} canLoadQuote={historyPage.hasMore} loadingQuote={Boolean(message.replyToId && historyPage.pending)}
-                reply={writable ? draft.selectReply : undefined} />}
-          </div>;
+    {message.automation && <div className="pb-3"><AutomationCaption message={message} line={message.automation} botId={bot.id} /></div>}
+    {message.id === unread.messageId && <NewMessagesDivider fading={unread.fading} />}
+    {editing?.id === message.id ? <form onSubmit={e => { e.preventDefault(); const text = String(new FormData(e.currentTarget).get("text") ?? "").trim(); if (text) { dispatch({ type: "editMessage", botId: bot.id, threadId: bot.threadId, messageId: editing.id, text }); setEditing(null); } }}>
+      <input autoFocus className="outline-none focus:bg-raised/50" name="text" defaultValue={editing.text} onKeyDown={e => { if (e.key === "Escape") setEditing(null); }} /></form> :
+      <Row mentionPeers={mentionPeers} phoneLayout={phoneLayout} ownBubbleStyle={ownBubbleStyle} digest={digestByReply.get(message.id)} message={message} botId={bot.id} botName={bot.name} color={bot.color} threadId={bot.threadId}
+        busy={Boolean(bot.busy)} hasMore={message.kind === "call" && historyPage.hasMore}
+        failure={message.tool && failedTurnCause(message.tool.name) !== null
+          ? <FailedTurnRow tool={message.tool} engine={engine} botId={bot.id} threadId={bot.threadId}
+              messageAt={message.at} onRetry={message.id === retryable ? retry : undefined} />
+          : undefined}
+        transcript={message.setupOffer || richRowKind(message) === "options" || message.kind === "call" ? history : EMPTY_TRANSCRIPT}
+        quoted={message.replyToId ? messageById.get(message.replyToId) : undefined}
+        jumpTo={historyPage.jumpTo} canLoadQuote={historyPage.hasMore} loadingQuote={Boolean(message.replyToId && historyPage.pending)}
+        reply={writable ? draft.selectReply : undefined} />}
+  </div>;
   return <main data-chat-v2 className="v2-page">
     <CallOverlay bot={bot} transcript={history} />
     <div className="v2-floating">
@@ -320,8 +327,7 @@ export function ChatV2({ profile, phoneLayout = false, onClose }: { profile: Bot
           render={item => {
             if (item.kind === "message") return renderMessage(item.message);
             if (item.kind !== "turn") return null;
-            const focusedId = focused?.threadId === bot.threadId && !focused.consumed ? focused.messageId : undefined;
-            return <ChatWork key={item.id} item={item} focusedId={item.messages.some(message => message.id === focusedId) ? focusedId : undefined}>
+            return <ChatWork key={item.id} item={item} focusedId={item.messages.some(message => message.id === focusId) ? focusId : undefined}>
               {item.messages.map(renderMessage)}
             </ChatWork>;
           }} />

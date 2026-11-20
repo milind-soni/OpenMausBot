@@ -1,4 +1,5 @@
 // EventSource hides SSE comment keepalives, so liveness comes from the server's visible `ping` frame.
+import { listenForDeviceLocation, locationClientId } from "./device-location";
 import type { ServerFrame } from "../../shared/wire";
 import { cloudAsleep, markCloudAsleep, onCloudPower, sleepingFrame } from "./cloud-power";
 import { recordBotTextMessage, recordRuntimeEvent } from "./voice-latency-probe";
@@ -159,7 +160,9 @@ function browserPlatform(overrides: Partial<LiveEventsPlatform>): LiveEventsPlat
     (!NativeEventSource
       ? undefined
       : (url: string) => {
-          const native = new NativeEventSource(url);
+          const location = locationClientId();
+          const native = new NativeEventSource(location ? url + "&locationClient=" + location : url);
+          if (location && typeof native.addEventListener === "function") listenForDeviceLocation(native, location);
           const adapter: LiveEventSourceLike = {
             onopen: null,
             onerror: null,

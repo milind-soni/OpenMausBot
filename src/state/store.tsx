@@ -1276,7 +1276,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return updateBot(next, bot.id, (b) => ({
         ...b,
         messages: b.messages.map((m) => (m.id === action.message.id ? action.message : m)),
-        chatPatches: state.chatV2 && inChatHistory(action.message) && !b.messages.some(m => m.id === action.message.id)
+        chatPatches: state.chatV2 && inChatHistory(action.message, true) && !b.messages.some(m => m.id === action.message.id)
           ? new Map(b.chatPatches).set(action.message.id, action.message)
           : b.chatPatches,
       }));

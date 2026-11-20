@@ -10,8 +10,8 @@ it("uses each bot's avatar palette and updates when its color changes", () => {
       text: "@Atlas @Juniper @everyone", everyone: true,
       peers: [{ name: "Atlas", color }, { name: "Juniper", color: "purple" }],
     }));
-    expect(html).toContain(`style="--mention-color:${MAUS_COLORS[color]}">@Atlas`);
-    expect(html).toContain(`style="--mention-color:${MAUS_COLORS.purple}">@Juniper`);
+    expect(html).toContain(`style="--mention-color:${MAUS_COLORS[color]}" class="bot-mention"`);
+    expect(html).toContain(`style="--mention-color:${MAUS_COLORS.purple}" class="bot-mention"`);
     expect(html).toContain('<span class="mention-highlight">@everyone</span>');
   }
 });

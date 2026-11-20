@@ -131,7 +131,7 @@ describe("calendar event editor", () => {
       bots: [bot], plain: true, onClose: vi.fn(), onSavedCall: vi.fn(),
     }));
     const overlay = tree.find((node) => String(node.props.className ?? "").includes("fixed inset-0"))!;
-    expect(overlay.props.className).toContain("bg-black/65");
+    expect(overlay.props.className).toContain("ui-scrim");
     expect(overlay.props.className).not.toMatch(/backdrop-blur|backdrop-filter/);
   });
 

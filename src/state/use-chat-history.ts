@@ -59,12 +59,11 @@ export function useChatHistory(bot: Bot) {
   const raw = useMemo(() => bot.activeLeafId && !bot.messages.some(m => m.id === bot.activeLeafId)
     ? [] : visibleMessages(bot), [bot.messages, bot.activeLeafId]);
   const history = useMemo(() => {
-    const workingFrom = bot.busy ? raw.findLastIndex(m => m.role === "user") : raw.length;
-    const local = raw.filter((m, index) => inChatHistory(m) || m.id === focusId || index >= workingFrom);
-    if (!page) return local;
-    const merged = new Map(page.messages.map(message => [message.id, bot.chatPatches?.get(message.id) ?? message]));
-    for (const message of local) merged.set(message.id, message);
-    return [...merged.values()].sort((a, b) => a.at - b.at);
+    const merged = new Map(page?.messages.map(message => [message.id, bot.chatPatches?.get(message.id) ?? message]));
+    for (const message of raw) merged.set(message.id, message);
+    const messages = page ? [...merged.values()].sort((a, b) => a.at - b.at) : raw;
+    const latestRequestIndex = messages.findLastIndex(message => message.role === "user");
+    return messages.filter((message, index) => inChatHistory(message, latestRequestIndex === -1 ? Boolean(page || bot.busy) : index > latestRequestIndex) || message.id === focusId);
   }, [raw, page, bot.busy, bot.chatPatches, focusId]);
   const load = useCallback(() => void read(page?.messages[0]?.id), [read, page]);
   const jumpTo = useCallback((messageId: string, loaded: boolean) => {

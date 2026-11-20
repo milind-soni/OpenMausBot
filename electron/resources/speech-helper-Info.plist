@@ -16,6 +16,10 @@
     <string>APPL</string>
     <key>LSBackgroundOnly</key>
     <true/>
+    <key>NSLocationUsageDescription</key>
+    <string>OpenMausBot uses your location when a task you start needs it.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>OpenMausBot uses your location when a task you start needs it.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>OpenMausBot listens while you dictate messages or talk to a bot.</string>
     <key>NSSpeechRecognitionUsageDescription</key>

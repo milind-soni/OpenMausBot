@@ -320,7 +320,7 @@ export function InitialsAvatar({
 }: {
   initials: string;
   avatarUrl?: string;
-  size?: number;
+  size?: number | "100%";
   className?: string;
   /** drawn instead of the initials, for a person with no name or email to take them from */
   fallback?: ReactNode;
@@ -335,7 +335,7 @@ export function InitialsAvatar({
     <div
       {...avatarMarks("person", "initials")}
       className={cn("flex shrink-0 items-center justify-center rounded-full bg-raised text-ink-secondary font-medium", className)}
-      style={{ width: size, height: size, fontSize: fontSize ?? size * 0.38 }}
+      style={{ width: size, height: size, fontSize: fontSize ?? (typeof size === "number" ? size * 0.38 : undefined) }}
     >
       {fallback ?? initials}
     </div>

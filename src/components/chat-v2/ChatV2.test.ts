@@ -79,6 +79,14 @@ it("keeps one expandable work record through completion and leaves the answer vi
     expect.objectContaining({ id: "work:turn", active: false, messages: [progress, tool], label: "Worked for 3s" }),
     { kind: "message", message: answer },
   ]);
+  const nextRequest = { ...request, id: "next", at: 5000 };
+  const history = [request, progress, tool, answer, nextRequest];
+  expect(groupChatWork(history, true)).toEqual(
+    [request, answer, nextRequest].map(message => ({ kind: "message", message })),
+  );
+  expect(groupChatWork([request, progress, tool, answer], false, history)).toEqual(
+    [request, answer].map(message => ({ kind: "message", message })),
+  );
 });
 
 it("keeps a question between its surrounding work steps", () => {
@@ -89,5 +97,15 @@ it("keeps a question between its surrounding work steps", () => {
     expect.objectContaining({ kind: "turn", messages: [before] }),
     { kind: "message", message: question },
     expect.objectContaining({ kind: "turn", messages: [after] }),
+  ]);
+});
+
+it("keeps live work when the previous turn and the newest request share a timestamp", () => {
+  const previous = { id: "previous", role: "bot", kind: "text", turnId: "old", at: 1000, turnTerminal: true } as const;
+  const request = { id: "request", role: "user", kind: "text", at: 1000 } as const;
+  const live = { id: "live", role: "bot", kind: "activity", turnId: "new", at: 1000, tool: { name: "search" } } as const;
+  expect(groupChatWork([request, live], true, [previous, request])).toEqual([
+    { kind: "message", message: request },
+    expect.objectContaining({ kind: "turn", turnId: "new", messages: [live], active: true }),
   ]);
 });

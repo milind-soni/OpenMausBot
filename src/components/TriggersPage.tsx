@@ -1,3 +1,5 @@
+import { popoverClosesOnKey } from "@/hooks/use-popover-dismiss";
+import { useHeldMenuMotion } from "./MenuMotion";
 import { OverlayPresence } from "@/components/ModalPresence";
 import { TAB_BUTTON, TAB_GROUP } from "@/components/tab-styles";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -68,6 +70,17 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const showFilter = all.length >= FILTER_FROM && new Set(all.map((automation) => automation.botId)).size > 1;
   const listed = orderAutomations(all.filter((automation) => inDepartment(automation.botId) && (!showFilter || botFilter === "all" || automation.botId === botFilter)));
   const open = all.find((automation) => automation.id === openId) ?? null;
+  const panel = useHeldMenuMotion(open);
+  useEffect(() => {
+    if (!open || editing || newText !== null) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!popoverClosesOnKey(event) || document.querySelector("dialog[open]")) return;
+      event.preventDefault();
+      setOpenId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, editing, newText]);
   const sentenceOf = (automation: Automation) => automationSentence(automation, botName(automation.botId));
 
   const editRoutine = editing?.kind === "schedule" ? state.routines.find((routine) => routine.id === editing.id) : undefined;
@@ -75,7 +88,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const editApp = editing?.kind === "app" ? appTriggers.triggers.find((trigger) => trigger.id === editing.id) : undefined;
 
   return (
-    <ToolPage>
+    <ToolPage fade>
       <ToolPageHeader backLabel={t("automations.back")} onBack={onBack} backRef={backButtonRef}>
           <h1 data-tour="automations-page" className={TOOL_PAGE_TITLE}>{t("automations.title")}</h1>
           <ToolPageActions>
@@ -104,7 +117,8 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
           </ToolPageActions>
       </ToolPageHeader>
 
-      <div className="relative flex min-h-0 flex-1">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
+        <div key={view} className="flex min-h-0 min-w-0 flex-1 motion-safe:animate-fade-in">
         {view === "calendar" ? <AutomationsCalendar botFilter={botFilter} department={activeDepartment} selectedAutomationId={openId} onOpenAutomation={setOpenId} onOpenRoom={onOpenRoom} /> : (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
@@ -151,11 +165,16 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
             </div>
           </div>
         )}
-        {open && (
-          <div className="absolute inset-y-0 right-0 z-30 flex shadow-2xl lg:static lg:shadow-none">
-            <AutomationPanel key={open.id} automation={open} sentence={sentenceOf(open)} onClose={() => setOpenId(null)} onDeleted={() => setOpenId(null)} onEdit={() => setEditing({ kind: open.kind, id: open.id })} />
-          </div>
-        )}
+        </div>
+        <div {...panel.exitProps} className={cn(
+          "absolute inset-y-0 end-0 z-30 shrink-0 overflow-hidden bg-app lg:static",
+          "motion-safe:transition-[width,opacity] motion-safe:duration-200 motion-safe:ease-out",
+          open ? "w-[min(380px,100%)] opacity-100 starting:w-0 starting:opacity-0" : "w-0 opacity-0",
+        )}>
+          {panel.shown && panel.value && <AutomationPanel key={panel.value.id} automation={panel.value} sentence={sentenceOf(panel.value)}
+            onClose={() => setOpenId(null)} onDeleted={() => setOpenId(null)}
+            onEdit={() => { if (open) setEditing({ kind: open.kind, id: open.id }); }} />}
+        </div>
       </div>
 
       <OverlayPresence>{newText !== null && (

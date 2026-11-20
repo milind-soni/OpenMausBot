@@ -304,3 +304,18 @@ engines. What stays one at a time, and what the person sees:
 - One computer: a turn takes it at its first screen call, not when it starts, and keeps it until it ends.
 - Memory on a Linux Cloud: a turn that would run the machine out says "Waiting for memory", with what runs and what is ahead of it, and starts by itself. `OMB_TEST_MEMORY_GATE=1` runs the gate in a fixture on any OS, on the memory `<data dir>/host-memory.json` says; `server/memory-order.e2e.test.ts` shows whose turn goes next.
 - A Cloud that just woke: a hand-off starts at once. `OMB_TEST_RESUME_CLOCK=1` lets a fixture move `Date.now()` on as a wake does, by writing milliseconds to `<data dir>/resume-clock-ms`; `server/handoff-wake.e2e.test.ts` uses it.
+
+## Device location
+
+Ask “Where am I?” in a foreground browser tab or the Mac client. Allow device
+location when prompted. The bot should answer from a fresh device fix and
+include its estimated accuracy. Whenever resolution succeeds, the response
+can name a map-matched address or area. An address match does not establish
+that the user is inside a particular building.
+
+The Mac client uses Apple reverse geocoding. For browser requests, set
+`OMB_GOOGLE_GEOCODING_API_KEY` on the MausBot server to a key with the Google
+Maps Geocoding API enabled. This sends the coordinates of a requested fix
+to Google's reverse-geocoding API. Without an available address provider,
+the bot receives coordinates and accuracy. The bot should not pass them
+to web search.

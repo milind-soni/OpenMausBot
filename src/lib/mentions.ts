@@ -1,13 +1,14 @@
+import type { BotAvatarProps } from "@/components/Avatar";
 import { t } from "./i18n";
-import { MAUS_COLORS, type MausColor } from "./mascot";
+import { MAUS_COLORS } from "./mascot";
 import { isMentionBoundary, isMentionNameContinuation } from "../../shared/mention-boundary";
 import { personTagAt, personTagNames } from "../../shared/person-mention";
 import { devsTagAt } from "../../shared/devs-mention";
 import { blankCode } from "../../shared/skill-command";
 
 /** A name the @ list offers: a bot's, or (`person`) a teammate's on a Team Cloud. */
-export type MentionPeer = { name: string; hidden?: boolean; color?: MausColor; person?: true };
-export type MentionRange = { start: number; end: number; color?: string; you?: true; person?: true };
+export type MentionPeer = Partial<BotAvatarProps["bot"]> & { id?: string; name: string; hidden?: boolean; person?: true };
+export type MentionRange = { start: number; end: number; bot?: MentionPeer & BotAvatarProps["bot"]; color?: string; you?: true; person?: true };
 export type MentionPerson = { profileName?: string | null };
 
 export function sameMentionPerson(a?: MentionPerson, b?: MentionPerson): boolean {
@@ -80,7 +81,7 @@ export function mentionRanges(text: string, peers: readonly MentionPeer[], every
     if (length === undefined) continue;
     // Only palette values enter CSS.
     const color = !all && peer?.color && Object.hasOwn(MAUS_COLORS, peer.color) ? MAUS_COLORS[peer.color] : undefined;
-    ranges.push({ start: at, end: at + length + 1, ...(color ? { color } : {}), ...(!all && peer?.person ? { person: true as const } : {}) });
+    ranges.push({ start: at, end: at + length + 1, ...(color && peer?.color ? { color, bot: { ...peer, color: peer.color } } : {}), ...(!all && peer?.person ? { person: true as const } : {}) });
     at += length;
   }
   return ranges;
@@ -111,7 +112,7 @@ export function remarkMentions({ peers, everyone = false, person }: { peers: rea
         for (const range of ranges) {
           if (range.start > end) result.push({ type: "text", value: text.slice(end, range.start) });
           result.push({ type: "mention", data: { hName: "span", hProperties: {
-            className: mentionClassName(range),
+            className: range.bot ? "mention-bot-source" : mentionClassName(range),
             ...(range.color ? { style: `--mention-color:${range.color}` } : {}),
           } },
             children: [{ type: "text", value: text.slice(range.start, range.end) }] });

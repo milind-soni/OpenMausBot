@@ -351,6 +351,7 @@ const __APP_VERSION__: string;
       };
       /** Start native dictation. Call mode supplies endpointMs so silence
        * finalizes a turn; composer dictation omits it and remains manual. */
+      currentLocation?(): Promise<import("../../shared/device-location").DeviceLocation>;
       speechStart(options?: { endpointMs?: number }): Promise<void>;
       speechStop(): Promise<void>;
       /** Finish capture and emit the recognizer's final transcript. */

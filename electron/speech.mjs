@@ -13,6 +13,7 @@ import {
   watchFile,
   writeFileSync,
 } from "node:fs";
+import { promisify } from "node:util";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { app } from "electron";
@@ -43,6 +44,12 @@ function ensureBuilt() {
   const stale = binaryMtime < Math.max(statSync(SRC).mtimeMs, statSync(INFO).mtimeMs);
   if (!stale) return;
   buildSpeechHelper();
+}
+
+export async function currentMacLocation() {
+  ensureBuilt();
+  const { stdout } = await promisify(execFile)(BIN, ["--location"], { timeout: 35_000, maxBuffer: 4096 });
+  return JSON.parse(stdout);
 }
 
 const RELEASE_MODIFIERS = ["control", "option", "shift", "command"];

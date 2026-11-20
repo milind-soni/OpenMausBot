@@ -133,6 +133,19 @@ describe("the automation panel", () => {
     expect(visible).not.toMatch(/webhook|endpoint|payload|fired|trigger/i);
   });
 
+  it.each([
+    { resultsThreadId: botB.threadId },
+    { report: { state: "posted", threadId: botB.threadId } },
+  ])("opens the delivered summary via %j when the execution conversation is gone", destination => {
+    const run = { id: "finished", routineId: webhook.id, botId: botA.id, status: "completed",
+      createdAt: now, scheduledFor: now, output: "Delivered summary", threadId: "removed-execution", ...destination };
+    const [automation] = automationsFrom({ routines: [], webhooks: [webhook] as never, runs: [run] as never });
+    const container = mount(createElement(AutomationPanel, { automation: automation!, sentence: "s", onClose: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() }));
+    container.querySelector<HTMLButtonElement>("section ul button")!.click();
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "switchTask", botId: botB.id, threadId: botB.threadId });
+    expect(fixture.dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ threadId: "removed-execution" }));
+  });
+
   it("runs now through the test route, and pauses through its own API", async () => {
     const [automation] = automationsFrom({ routines: [], webhooks: [webhook] as never, runs: [] });
     const container = mount(createElement(AutomationPanel, { automation: automation!, sentence: "s", onClose: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() }));
@@ -212,6 +225,15 @@ describe("the Automations list switch", () => {
   const row = (id: string) => container.querySelector<HTMLElement>(`[data-automation="${id}"]`)!;
 
   beforeEach(() => { fixture.state.routines = [routine]; });
+
+  it("makes the details panel inert when Escape starts closing it", () => {
+    mountPage();
+    flushSync(() => row(routine.id).querySelector("button")!.click());
+    const panel = container.querySelector("aside")!;
+    expect(panel).toBeTruthy();
+    flushSync(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", cancelable: true })));
+    expect(panel.closest("[inert]")).toBeTruthy();
+  });
 
   it.each([
     ["a schedule", "Morning summary", "routine-1", "/api/routines/routine-1", (enabled: boolean) => ({ enabled }), (enabled: boolean) => ({ routine: { ...routine, enabled, nextRunAt: enabled ? now + 3_600_000 : null, updatedAt: now + (enabled ? 2 : 1) } })],

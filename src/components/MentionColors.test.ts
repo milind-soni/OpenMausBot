@@ -13,12 +13,9 @@ it.each(["plain text", "Markdown"] as const)("keeps all ten bot colors independe
     const html = renderToStaticMarkup(renderer === "plain text"
       ? createElement(MentionText, { text, peers: roster, everyone: true })
       : createElement(ChatMarkdown, { text, mentionPeers: roster, everyone: true }));
-    const highlights = [...html.matchAll(/<span class="mention-highlight"(?: style="--mention-color:([^"]+)")?>([^<]+)<\/span>/g)]
-      .map(([, color, name]) => ({ name, color }));
-    expect(highlights).toEqual(ordered.flatMap(({ name, color }) => [
-      { name: `@${name}`, color: MAUS_COLORS[color] },
-      { name: "@everyone", color: undefined },
-    ]));
+    const colors = [...html.matchAll(/style="--mention-color:([^"]+)" class="bot-mention"/g)].map(([, color]) => color);
+    expect(colors).toEqual(ordered.map(({ color }) => MAUS_COLORS[color]));
+    expect(html.match(/data-bot-mention=""/g)).toHaveLength(ordered.length);
     expect(html.match(/<\/span> ordinary /g)).toHaveLength(ordered.length);
     expect(html.match(/<\/span> @Unknown/g)).toHaveLength(ordered.length);
   }

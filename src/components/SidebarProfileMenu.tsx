@@ -657,7 +657,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
             data-sidebar-account=""
             className={cn("relative flex items-center justify-center rounded-full", rail ? "size-11" : "size-9")}
           >
-            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={rail ? 44 : 36} fallback={nameless} fontSize={rail ? 16 : 14} className={cn(ELEVATED_CONTROL, ELEVATED_TINT, open && ELEVATED_OPEN)} />
+            <InitialsAvatar initials={initials} avatarUrl={profile?.avatarUrl} size={rail ? 44 : "100%"} fallback={nameless} fontSize={rail ? 16 : 14} className={cn(ELEVATED_CONTROL, ELEVATED_TINT, open && ELEVATED_OPEN)} />
             {dot && <span aria-hidden data-account-dot={dot} className={cn("absolute -right-0.5 -top-0.5 size-2.5 rounded-full ring-2 ring-panel", DOT_COLOR[dot])} />}
           </span>
         ) : iconOnly ? (

@@ -593,6 +593,11 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     const message = typeof r.message === "string" ? r.message : `Updated room ${roomId}.`;
     return { text: message };
   }
+  if (name === "get_user_location") {
+    const result = await apiResponse("/api/internal/device-location", { method: "POST", body: "{}" });
+    return result.ok ? { text: JSON.stringify(result.body.location) }
+      : { text: String(result.body.error ?? "Location unavailable."), isError: true };
+  }
   if (name === "request_credential") {
     const credentialId = args.credential_id;
     if (credentialId === undefined || credentialId === "") return requestCustomSecret(args, context);

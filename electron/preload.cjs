@@ -92,7 +92,7 @@ if (typeof window !== "undefined") {
 }
 const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "rail", "cloudAdd", "cloudPlan", "cloudSendPage", "placesTogether", "accountSheet", "desktopNotices", "desktopNotifications", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls", "onOpenAppSettings", "windowFrame", "softwareRendering", "appUpdate"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
-const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
+const HOME_PAGE = ["home", "currentLocation", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
 }
@@ -333,6 +333,9 @@ const bridge = {
     input: (serial, payload) =>
       ipcRenderer.invoke("android-device:input", serial, payload).then(() => undefined),
   },
+  ...(process.platform === "darwin" ? {
+    currentLocation: () => ipcRenderer.invoke("location:current"),
+  } : {}),
   speechStart: (options) => ipcRenderer.invoke("speech:start", options),
   speechStop: () => ipcRenderer.invoke("speech:stop"),
   speechFinish: () => ipcRenderer.invoke("speech:finish"),

@@ -608,6 +608,8 @@ import { createSignInCardRoutes } from "./routes/sign-in-cards.ts";
 import { createInternalChiefTeamRoutes } from "./routes/internal-chief-team.ts"; import { createInternalModelRoutes } from "./routes/internal-models.ts"; import { createOwnThreads } from "./host/own-threads.ts"; import { burstDefaultModel, burstProposalRefusal, createBurstHost } from "./host/burst-host.ts"; import { expandBurstTurnText } from "./burst/command.ts"; import { createBurstProposalRoutes, createBurstRoutes } from "./routes/burst.ts";
 import { createRoomHoldRoutes } from "./routes/room-holds.ts";
 import { checkedGroupResponder, createGroupRoutes } from "./routes/groups.ts";
+import { asksForCurrentLocation, currentLocationNote, DeviceLocations, locationClientKey, locationFailureMessage, resolveDeviceAddress } from "./host/device-location.ts";
+import { DEVICE_LOCATION_HEADER, DEVICE_LOCATION_PATH } from "../shared/device-location.ts";
 import { createChannelRoutes } from "./routes/channels.ts";
 import { createTaskRoutes } from "./routes/tasks.ts";
 import { createTeamRoutes } from "./routes/teams.ts";
@@ -1135,7 +1137,6 @@ async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: s
 }
 
 const { viewerFor, threadOwner, visibleTo, forgetVisibility, threadShown, subjectVisible, hiddenRoutineTarget, roomFeedsBot, settleRoomFloor } = createVisibilityHost({ store: () => store, routines: () => routines,
-  showBotOpened: Boolean(CLOUD_HOME || HOSTED_WORKSPACE),
   routineIntervention: (threadId, visible) => {
     if (CLOUD_PERSONAL && visible.member) return false;
     const task = store.botByThread(threadId)?.tasks?.find(task => task.threadId === threadId);
@@ -2102,6 +2103,7 @@ function releaseTurnResources(owner: TurnOwner | undefined): void {
   if (!owner) return;
   if (autoVmClaims.get(owner.threadId)?.owner.generation === owner.generation) autoVmClaims.delete(owner.threadId);
   cancelYourComputerAsks(owner.threadId, owner.generation);
+  locationPrefetches.get(owner.generation)?.abort();
   if (settlingResourceOwners.get(owner.threadId) === owner.generation) settlingResourceOwners.delete(owner.threadId);
   cloudComputerPower.released(owner);
   turnResources.release(owner);
@@ -4602,6 +4604,7 @@ interface SseClient {
   /** Revoking or expiring this session must end the stream, not just future requests. */
   sessionId?: string;
   backpressured: boolean;
+  locationClient?: string;
   viewer: Viewer;
   seen: StreamSeen;
   ask: AskViewer;
@@ -4609,6 +4612,50 @@ interface SseClient {
   close: () => void;
 }
 const { streams: sseClients, ...teamPresence } = createTeamPresenceHost<SseClient>({ people: teamOwners.people, broadcast, audienceOf: (threadId) => teamHost.audienceOf(threadId), sharedWithOne: (threadId) => conversationShares.readers(threadId) !== null, store: () => store, visibleTo }); type StreamView = Pick<SseClient, "admin" | "person" | "viewer" | "seen" | "ask">; const phonePush = new PhonePush({ dataDir: DATA_DIR, access: () => phonePushAccess.current(), enabled: () => phonePushEnabled(cfg), live: (key) => [...sseClients].some((client) => client.pushKey === key), room: (notification) => { const group = (notification.groupId ? store.group(notification.groupId) : undefined) ?? store.groupByThread(notification.threadId); return group && !group.dm ? { id: group.id, name: group.name } : undefined; } }); const phoneActivity = new PhoneActivity({ dataDir: DATA_DIR, push: phonePush, hasOpenAsk: (botId) => openCardRows().some((row) => row.fromBotId === botId || store.botByThread(row.threadId)?.id === botId), bot: (botId) => { const bot = store.bot(botId); const working = bot ? store.tasks(botId).find((task) => threadBusy(botId, task.threadId)) : undefined; return bot ? { name: bot.name, busy: Boolean(working), threadId: working?.threadId ?? bot.threadId } : undefined; }, botOfThread: (threadId) => store.botByThread(threadId)?.id });
+
+const deviceLocations = new DeviceLocations();
+
+const locationPrefetches = new Map<string, AbortController>();
+
+function locationConnection(threadId: string, sendId: string | undefined) {
+  const key = sendId ? deviceLocations.clientFor(threadId, sendId) : undefined;
+  return key ? [...sseClients].find(client => client.locationClient === key && !client.backpressured &&
+    (!client.sessionId || sessions.isLive(client.sessionId))) : undefined;
+}
+
+async function readCurrentDeviceLocation(connection: SseClient, signal: AbortSignal) {
+  if (!connection.locationClient || connection.res.closed) return null;
+  const closed = new AbortController();
+  const abort = () => closed.abort();
+  connection.res.once("close", abort);
+  try {
+    const requestSignal = AbortSignal.any([signal, closed.signal]);
+    const fix = await deviceLocations.request(connection.locationClient, frame => connection.res.write(frame), requestSignal);
+    if (requestSignal.aborted) return null;
+    if (!fix || typeof fix === "string") return fix;
+    const location = await resolveDeviceAddress(fix, requestSignal);
+    return requestSignal.aborted ? null : location;
+  } finally {
+    connection.res.off("close", abort);
+  }
+}
+
+async function locateForExplicitQuestion(threadId: string, sendId: string | undefined, generation: string) {
+  const connection = locationConnection(threadId, sendId);
+  if (!connection) return currentLocationNote(null);
+  const controller = new AbortController();
+  locationPrefetches.set(generation, controller);
+  try {
+    return currentLocationNote(await readCurrentDeviceLocation(connection, controller.signal));
+  } finally {
+    locationPrefetches.delete(generation);
+  }
+}
+
+function bindLocationClient(req: IncomingMessage, auth: RequestAuth, threadId: string, sendId: string) {
+  const key = locationClientKey(auth, req.headers[DEVICE_LOCATION_HEADER]);
+  if (key) deviceLocations.bind(key, threadId, sendId);
+}
 
 let audienceChangedAt = 0;
 function audienceChanged(): void {
@@ -7255,7 +7302,7 @@ async function acceptDirectSend(
           carriesImages,
           engineCanSteerImages: engineSteersImages(instance),
           pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
-          engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
+          engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer && !asksForCurrentLocation(text)),
           followUp,
         });
         // A chosen wait (queue, or restart's Stop) is never cut short by person-first.
@@ -8398,6 +8445,11 @@ async function beginTurn(
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
         throw new DirectTurnSetupCancelled("turn stopped before dispatch");
       }
+      const locationNote = !opts?.cardContinuation && requestOrigin.kind === "user" && asksForCurrentLocation(text)
+        ? await locateForExplicitQuestion(threadId, userMessage.sendId, dispatchClaimId) : "";
+      if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
+        throw new DirectTurnSetupCancelled("turn stopped while locating the device");
+      }
       runningTurnEngines.set(threadId, instance);
       // Re-decide from the soul actually sent, except on an unattended continuation wake, so a session started under an old soul never survives a soul change by laundering its record.
       const dispatchedConfig = sessionConfig(liveBot?.soul ?? bot.soul);
@@ -8413,7 +8465,7 @@ async function beginTurn(
         threadId,
         botId: bot.id,
         startupRecovery,
-        text: withTurnClock(clock, withRecalled(recalled, (posted?.text ?? "") + attachmentsForBox(dispatchContext.turnText, cwd) + shareNote.text + devsReports.note(threadId, Boolean(integrations.agents)) + settingNudges.note(threadId, { tools: Boolean(integrations.agents) && personLine && !opts?.unattended, owner: phones.turnOwner({ botId: bot.id, threadId, generation: dispatchClaimId }) !== null && !cloudGuestDriven(threadId), model: `${instanceId}/${model}` }))),
+        text: withTurnClock(clock, withRecalled(recalled, (posted?.text ?? "") + attachmentsForBox(dispatchContext.turnText, cwd) + locationNote + shareNote.text + devsReports.note(threadId, Boolean(integrations.agents)) + settingNudges.note(threadId, { tools: Boolean(integrations.agents) && personLine && !opts?.unattended, owner: phones.turnOwner({ botId: bot.id, threadId, generation: dispatchClaimId }) !== null && !cloudGuestDriven(threadId), model: `${instanceId}/${model}` }))),
         ...(recalled ? { recalled } : {}),
         images: dispatchContext.images,
         approvalMode: approvalModeForTurn(bot, commsDepth > 0, threadId),
@@ -8425,7 +8477,7 @@ async function beginTurn(
         variant,
         resumeCursor: dispatchContext.resumeCursor,
         sessionReset: dispatchContext.sessionReset,
-        ...(dispatchContext.recoveryText !== undefined ? { recoveryText: withTurnClock(clock, (posted?.text ?? "") + attachmentsForBox(dispatchContext.recoveryText, cwd) + shareNote.text) } : {}),
+        ...(dispatchContext.recoveryText !== undefined ? { recoveryText: withTurnClock(clock, (posted?.text ?? "") + attachmentsForBox(dispatchContext.recoveryText, cwd) + locationNote + shareNote.text) } : {}),
         transcript,
         system: prompt.text,
         systemStable: prompt.stable,
@@ -12057,7 +12109,7 @@ ROUTES.push(createSharedComputerRoutes({ enabled: (auth) => lendingEnabled() || 
   cloudHomeLender: CLOUD_HOME ? CLOUD_HOME_LENDER : null, principal: sessionLendingPrincipal, personKey: (session) => lendingPersonKey(session, ownHome.ownServer()), power: () => cloudPower, links: CLOUD_HOME ? deviceLinks : null, upgrades, asks: computerAsks?.asks ?? null, answerer: cardAnswererFor }));
 // `routines` is assigned at boot, so it is read per request.
 ROUTES.push(createBotMessageRoutes({
-  store, registry, handoffs, liveTurn: (threadId) => liveTurns.running(threadId), phoneSecretSubmissions, directTurnDispatchClaims, groupSpeakers,
+  bindLocationClient, store, registry, handoffs, liveTurn: (threadId) => liveTurns.running(threadId), phoneSecretSubmissions, directTurnDispatchClaims, groupSpeakers,
   routines: () => routines,
   fromPhone: phones.fromPhone, notePhoneSend: phones.noteSend,
   desktopManaged: DESKTOP_MANAGED, cloudHome: Boolean(CLOUD_HOME), DirectSendRefused,
@@ -12187,7 +12239,7 @@ ROUTES.push(createGroupRoutes({
   groupFor: personRooms.groupForAuth,
 }));
 ROUTES.push(createChannelRoutes({
-  store, threadRead: teamMessages.seen, runOwners, runActor,
+  bindLocationClient, store, threadRead: teamMessages.seen, runOwners, runActor,
   personMarkRoom: personRooms.personMarkRoom,
   groupFor: personRooms.groupForAuth,
   cfg,
@@ -12916,6 +12968,24 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
       };
       const botFolders = async () => ({ roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), vmWorkspace: (await attachmentVmForTurn(internalCapability))?.workspaceDir ?? null }); if (await lentMcp.route({ method, path, req, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS || await internalToolRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, folders: botFolders }) !== PASS || await waitRoutes({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, ...waitTurnChecks(internalCapability, internalSender) }) !== PASS || await teamMessages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await devsReports.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || (computerAsks && await computerAsks.internal({ method, path, res, json, turn: internalCapability, readBody: readInternalBody }) !== PASS) || await cloudComputerResets.internal({ method, path, res, json, sender: internalSender, threadId: internalCapability.threadId, readBody: readInternalBody }) !== PASS || await meetingsHost.internal({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, active: () => internalCapabilityIsActive(internalCapability) }) !== PASS || await imageTools.internal({ method, path, res, json, readBody: readInternalBody, folders: botFolders, threadId: internalCapability.threadId, requireActive: requireActiveInternalCapability, personTurn: turnOrigin(internalCapability).kind === "user" || (Boolean(roomRun(internalCapability.generation)?.requestMessageId) && guestDrivenTurns.get(internalCapability.threadId) !== internalCapability.generation) }) !== PASS || await share.tool({ method, path, res, json, readBody: readInternalBody, bot: internalSender, threadId: internalCapability.threadId, roots: messageFileRootsForThread(internalSender.id, internalCapability.threadId).filter((root) => root !== ATTACHMENTS_DIR), actsForAdmin: teamConnections.actsForAdmin(internalCapability.threadId, internalCapability.generation), githubPerson: teamConnections.turnPerson(internalCapability.threadId, internalCapability.generation), actingName: CLOUD_TEAM ? teamHost.personName(actingPeople.requester(internalCapability.threadId, internalCapability.generation)) : undefined, personMessage: turnOrigin(internalCapability).kind === "user" ? store.messagesFor(internalCapability.threadId).find((line) => line.role === "user" && line.id === (directRequestOwners.get(internalCapability.threadId)?.messageId ?? roomRun(internalCapability.generation)?.requestMessageId))?.text ?? null : null, post: (text, template) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return source ? store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, template, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id : null; } }) !== PASS) return; const callSignal = turnCallSignals.signal(internalCapability, res); if (await publishedPages.internal({ method, path, res, json, botId: internalSender.id, threadId: internalCapability.threadId, readBody: readInternalBody, requireActive: requireActiveInternalCapability, signal: callSignal, folders: botFolders, post: (text, publishedPage, bundle) => { const source = connectorThread(internalSender.id, internalCapability.threadId); return !source ? null : (bundle && publishedPages.show({ threadId: internalCapability.threadId, card: publishedPage, bundle, bot: internalSender })) || store.appendMessage(internalCapability.threadId, { role: "bot", kind: "text", text, publishedPage, ...(source.group ? { from: { botId: internalSender.id, name: internalSender.name, color: internalSender.color } } : {}) }).id; } }) !== PASS) return;
+      if (method === "POST" && path === "/api/internal/device-location") {
+        await readInternalBody();
+        const { threadId, generation } = internalCapability;
+        const direct = directRequestOwners.get(threadId);
+        const room = roomRun(generation);
+        const messageId = direct?.generation === generation ? direct.messageId : room?.requestMessageId;
+        const line = messageId ? store.messagesFor(threadId).find(message => message.id === messageId && message.role === "user") : undefined;
+        const sendId = line?.sendId;
+        const userTurn = turnOrigin(internalCapability).kind === "user" ||
+          (room && !room.cancelled && !internalCapability.externalRuntime &&
+            guestDrivenTurns.get(threadId) !== generation && requestWorkOrigin({ line }).kind === "user");
+        const connection = userTurn ? locationConnection(threadId, sendId) : undefined;
+        if (!connection) return json(res, 409, { error: "The device that started this task is unavailable for location. Ask for their area if needed." });
+        const location = await readCurrentDeviceLocation(connection, turnCallSignals.signal(internalCapability, res));
+        requireActiveInternalCapability();
+        if (!location || typeof location === "string") return json(res, 409, { error: locationFailureMessage(location) });
+        return json(res, 200, { location });
+      }
       const delegatedThisTurn = (taskId: string) => {
         (internalCapability.delegatedThisTurn ??= new Set()).add(taskId);
       };
@@ -14605,12 +14675,20 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         : json(res, 404, { error: "no such scheduled call" });
     }
 
+    if (method === "POST" && path === DEVICE_LOCATION_PATH) {
+      const body = await readBody(req, 1024);
+      if (auth.kind === "session" && !sessions.isLive(auth.session.id)) return json(res, 401, { error: "Session ended." });
+      const received = deviceLocations.reply(auth, req.headers[DEVICE_LOCATION_HEADER], body);
+      return json(res, received ? 200 : 404, { ok: received });
+    }
+
     if (method === "GET" && path === "/api/events") {
       const pushKey = phoneKey(auth);
       const client: SseClient = {
         res, ...streamView(auth, viewer), ...(pushKey ? { pushKey } : {}),
         screens: url.searchParams.get("screens") !== "off", threadFrames: url.searchParams.get("frames") === "thread", appWindow: url.searchParams.get("window") === "1",
         backpressured: false,
+        locationClient: locationClientKey(auth, url.searchParams.get("locationClient")),
         // A comment frame keeps intermediaries from idling the connection; a data frame resets EventSource's own liveness watchdog. Heartbeats carry no id.
         close: openSseHeartbeat(res, {
           everyMs: SSE_HEARTBEAT_MS,

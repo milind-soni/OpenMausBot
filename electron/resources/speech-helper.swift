@@ -16,6 +16,7 @@
 // listed modifiers (control, option, shift, command) is no longer held.
 import AVFoundation
 import CoreGraphics
+import CoreLocation
 import Darwin
 import Foundation
 import Speech
@@ -32,6 +33,76 @@ func emit(_ obj: [String: Any]) {
 func fail(_ message: String) -> Never {
   emit(["error": message])
   exit(1)
+}
+
+final class OneShotLocation: NSObject, CLLocationManagerDelegate {
+  private let manager = CLLocationManager()
+  private var requested = false
+  private let geocoder = CLGeocoder()
+  private var resolving = false
+
+  func run() {
+    manager.delegate = self
+    manager.desiredAccuracy = kCLLocationAccuracyBest
+    if manager.authorizationStatus == .notDetermined {
+      manager.requestWhenInUseAuthorization()
+    }
+    withExtendedLifetime(self) { RunLoop.main.run() }
+  }
+
+  func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    switch manager.authorizationStatus {
+    case .authorizedAlways, .authorizedWhenInUse:
+      guard !requested else { return }
+      requested = true
+      manager.requestLocation()
+    case .notDetermined: break
+    default: fail("location-denied")
+    }
+  }
+
+  func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+    guard let location = locations.last,
+      CLLocationCoordinate2DIsValid(location.coordinate),
+      location.horizontalAccuracy >= 0,
+      abs(location.timestamp.timeIntervalSinceNow) <= 60
+    else { fail("location-unavailable") }
+    guard !resolving else { return }
+    resolving = true
+    let fix: [String: Any] = [
+      "latitude": location.coordinate.latitude,
+      "longitude": location.coordinate.longitude,
+      "accuracy": location.horizontalAccuracy,
+      "timestamp": location.timestamp.timeIntervalSince1970 * 1000,
+    ]
+    DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+      emit(fix)
+      exit(0)
+    }
+    geocoder.reverseGeocodeLocation(location) { placemarks, _ in
+      var result = fix
+      if let place = placemarks?.first {
+        let street = location.horizontalAccuracy <= 50
+          ? [place.thoroughfare, place.subThoroughfare].compactMap { $0 }.joined(separator: " ") : ""
+        let area = [street.isEmpty ? nil : street, location.horizontalAccuracy <= 500 ? place.subLocality : nil, place.locality,
+                    place.administrativeArea, place.country].compactMap { $0 }
+        var seen = Set<String>()
+        let address = area.filter { seen.insert($0).inserted }.joined(separator: ", ")
+        if !address.isEmpty { result["address"] = address }
+      }
+      emit(result)
+      exit(0)
+    }
+  }
+
+  func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+    fail("location-unavailable")
+  }
+}
+
+if CommandLine.arguments.contains("--location") {
+  OneShotLocation().run()
+  fail("location-unavailable")
 }
 
 let endpointMs: Int = {

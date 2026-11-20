@@ -448,6 +448,11 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "get_user_location",
+    description: "Get the user's current coordinates, accuracy, and map-matched address if available. Use only when needed for their task. Never send their coordinates to web search.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  },
+  {
     name: "request_credential",
     description:
       "Ask the person for a secret on a secure card in the app or a QR-paired phone, never in chat. credential_id: a key OpenMausBot keeps (onePasswordToken: a 1Password service account token; email: a mailbox on any mail host, one card for its address and password, or for its outgoing server when it is connected but can't send). Other secrets: label, reason, delivery (a saved one returns at once). You never see the value; end the turn, and you resume when they save or decline.",

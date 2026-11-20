@@ -1,3 +1,4 @@
+import { BotMention } from "./MentionText";
 // Security: model output never reaches the DOM as raw HTML (no rehype-raw); Shiki's output is generator-escaped.
 import { createContext, Fragment, memo, use, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform, type Components, type ExtraProps, type Options as MarkdownOptions } from "react-markdown";
@@ -8,7 +9,7 @@ import { Check, Copy, Download, Eye, LoaderCircle, RotateCcw, WrapText, X } from
 import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
-import { remarkMentions, sameMentionPerson, type MentionPeer, type MentionPerson } from "@/lib/mentions";
+import { mentionRanges, remarkMentions, sameMentionPerson, type MentionPeer, type MentionPerson } from "@/lib/mentions";
 import { createMarkdownRenderCache } from "@/lib/markdown-render-cache";
 import { closedFence, openFence, splitMarkdownBlocks } from "@/lib/markdown-stream-blocks";
 import { StreamingReplyContext } from "@/state/live-reply";
@@ -580,6 +581,7 @@ export function messageNeedsKatex(text: string): boolean {
  * remount the whole message. Per-message values reach them through this context.
  */
 interface MessageScope {
+  mentionPeers?: readonly MentionPeer[];
   userImages?: boolean;
   message?: MessageAttachmentContext;
   imageOffsets?: Map<number, number>;
@@ -690,9 +692,14 @@ const MARKDOWN_COMPONENTS: Components = {
   },
   span(props) {
     // SAFETY: react-markdown hands hast data-* attributes through as string props
+    const { mentionPeers } = useContext(MessageScopeContext);
     const link = threadLinkFromProps(props as Record<string, unknown>);
     if (link) return <ThreadLink target={link.target} ambiguous={link.ambiguous}>{props.children}</ThreadLink>;
     const { node: _node, children, ...rest } = props;
+    if (rest.className === "mention-bot-source" && typeof children === "string" && mentionPeers) {
+      const bot = mentionRanges(children, mentionPeers)[0]?.bot;
+      if (bot) return <BotMention bot={bot} text={children} />;
+    }
     return <span {...rest}>{children}</span>;
   },
   a: MarkdownLink,
@@ -853,7 +860,7 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
     return finished ? markdownCache.render(partText, variant, render) : <StreamSourceContext value={source}>{render()}</StreamSourceContext>;
   };
   // A message still streaming has no saved files to fetch yet.
-  const scope = { message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals, userImages };
+  const scope = { mentionPeers, message: streaming ? undefined : message, imageOffsets: streaming ? undefined : parts[0]?.imageOffsets, threads, currentBotId, delivered, originals, userImages };
   return (
     <MessageScopeContext.Provider value={scope}>
       <div data-look="bot-text" className="chat-md min-w-0 [&>*+*]:mt-2">
@@ -871,7 +878,10 @@ export function samePeers(previous: readonly MentionPeer[], next: readonly Menti
   if (previous.length !== next.length) return false;
   return previous.every((peer, index) => {
     const other = next[index]!;
-    return peer.name === other.name && peer.hidden === other.hidden && peer.color === other.color && peer.person === other.person;
+    return peer.name === other.name && peer.hidden === other.hidden && peer.color === other.color && peer.person === other.person &&
+      peer.avatarUrl === other.avatarUrl && peer.avatarCrop === other.avatarCrop && peer.avatarZoom === other.avatarZoom &&
+      peer.avatarFocusX === other.avatarFocusX && peer.avatarFocusY === other.avatarFocusY &&
+      peer.mascotBody === other.mascotBody && peer.mascotFaceColor === other.mascotFaceColor;
   });
 }
 

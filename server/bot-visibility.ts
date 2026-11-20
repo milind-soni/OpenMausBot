@@ -169,7 +169,7 @@ export interface VisibilityBot extends AccessBot {
   threadId: string;
   section?: string;
   avatarUrl?: string | null;
-  tasks?: ReadonlyArray<{ threadId: string; routineRunId?: string; openedBy?: unknown; botApi?: unknown }>;
+  tasks?: ReadonlyArray<{ threadId: string; routineRunId?: string; botApi?: unknown }>;
 }
 
 export interface VisibilityGroup {
@@ -203,14 +203,14 @@ export class VisibleSet {
     viewer: Viewer,
     ownerOf?: (threadId: string) => ThreadOwner | undefined,
     audiences?: ThreadAudiences,
-    options?: { routineIntervention?: (threadId: string, visible: VisibleSet) => boolean; showBotOpened?: boolean },
+    options?: { routineIntervention?: (threadId: string, visible: VisibleSet) => boolean },
   ) {
     this.viewer = viewer;
     this.audiences = audiences ?? null;
     this.routineIntervention = options?.routineIntervention;
     // On a Team Cloud nobody's view is everything, an admin's included: each conversation has its own audience.
     for (const bot of bots) for (const task of bot.tasks ?? []) {
-      if (task.routineRunId || task.botApi || (task.openedBy && !options?.showBotOpened)) this.internal.add(task.threadId);
+      if (task.routineRunId || task.botApi) this.internal.add(task.threadId);
     }
     this.allAudiences = this.audiences === null && (viewer.kind === "all" ||
       (!bots.some((bot) => isRestricted(bot.visibility)) && !groups.some((group) => isRestricted(group.audienceFloor))));

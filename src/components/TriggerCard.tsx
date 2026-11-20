@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-import { overlayPortal as createPortal } from "@/components/ModalPresence";
+import { OverlayPresence, overlayPortal as createPortal } from "@/components/ModalPresence";
 import { Undo2, Zap } from "lucide-react";
 
 import { automationFor, automationSentence, automationStatus, capital, cardAutomation, firstRunLine, lastWhen, latestRun, nextWhen, runLine } from "@/lib/automations";
@@ -86,14 +86,14 @@ export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId
       </div>
       {(error || actions.error) && <div role="alert" className="mt-1 pl-[22px] text-[12px] text-warning">{error ?? actions.error}</div>}
       {/* On the page, not in the transcript: the transcript's scroller would clip it and the composer would cover Save. */}
-      {editing && createPortal(
+      <OverlayPresence>{editing && createPortal(
         <Suspense fallback={null}>
           {automation.kind === "app" ? <AppEventEditor trigger={automation.appTrigger} bots={visibleBots} onClose={() => setEditing(false)} /> : automation.kind === "schedule"
             ? <RoutineEditor routine={state.routines.find((routine) => routine.id === automation.id)} bots={visibleBots} plain onClose={() => setEditing(false)} />
             : <WebhookEditor webhook={state.webhooks.find((webhook) => webhook.id === automation.id)} bots={visibleBots} onClose={() => setEditing(false)} onCredential={(credential, id) => saveWebhookCredential(webhookCredentialStore(), id, credential)} />}
         </Suspense>,
         document.body,
-      )}
+      )}</OverlayPresence>
     </section>
   );
 }

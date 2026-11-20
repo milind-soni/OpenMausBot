@@ -37,6 +37,7 @@ export function pageMessage(message: Message): Message | Record<string, unknown>
 export function messagePages(store: Pick<Store, "activePath" | "activePathIndex" | "messagesFor" | "messagesTail" | "messagesBefore" | "activeLeaf">) {
   function chatPage(threadId: string, limit: number | undefined, before?: string, around?: string) {
     const { messages: path, positions, leafId: activeLeafId } = store.activePathIndex(threadId);
+    const latestRequestIndex = path.findLastIndex(message => message.role === "user");
     const anchor = before ?? around;
     const index = anchor === undefined ? path.length : positions.get(anchor);
     if (index === undefined) return null;
@@ -44,13 +45,13 @@ export function messagePages(store: Pick<Store, "activePath" | "activePathIndex"
       const messages: Array<ReturnType<typeof pageMessage>> = [];
       for (let i = index - 1; i >= 0; i--) {
         const message = path[i]!;
-        if (!inChatHistory(message)) continue;
+        if (!inChatHistory(message, latestRequestIndex !== -1 && i > latestRequestIndex)) continue;
         if (messages.length === limit) return { messages: messages.reverse(), hasMore: true, activeLeafId };
         messages.push(pageMessage(message));
       }
       return { messages: messages.reverse(), hasMore: false, activeLeafId };
     }
-    const visible = path.filter(m => inChatHistory(m) || m.id === around);
+    const visible = path.filter((m, i) => inChatHistory(m, latestRequestIndex !== -1 && i > latestRequestIndex) || m.id === around);
     const size = limit ?? visible.length;
     const start = Math.max(0, Math.min(visible.length - size, visible.findIndex(m => m.id === around) - Math.floor(size / 2)));
     return { messages: visible.slice(start, start + size).map(pageMessage), hasMore: start > 0, activeLeafId };

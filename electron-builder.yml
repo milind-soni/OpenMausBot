@@ -133,6 +133,7 @@ mac:
     - from: dist-native/duckdb/darwin-${arch}/node_modules
       to: duckdb/node_modules
   extendInfo:
+    NSLocationUsageDescription: OpenMausBot uses your location when a task you start needs it.
     NSMicrophoneUsageDescription: OpenMausBot uses the microphone for voice dictation into the composer.
     NSSpeechRecognitionUsageDescription: OpenMausBot transcribes your voice on-device to type messages for you.
     NSAccessibilityUsageDescription: OpenMausBot uses Accessibility when you let a bot control this Mac.

@@ -175,14 +175,19 @@ export function groupTranscript(messages: Message[]): TranscriptItem[] {
   return group(messages, true);
 }
 
-export function groupChatWork(messages: Message[], busy: boolean): TranscriptItem[] {
+export function groupChatWork(messages: Message[], busy: boolean, history: readonly Message[] = messages, focusId?: string): TranscriptItem[] {
   const items: TranscriptItem[] = [];
   const foldedTurns = new Set<string>();
   const terminalByTurn = new Map<string, Message>();
-  const latestRequest = messages.findLast(message => message.role === "user");
-  const latestTurn = messages.findLast(message => message.turnId && (!latestRequest || message.at >= latestRequest.at))?.turnId;
+  const latestRequestIndex = history.findLastIndex(message => message.role === "user");
+  const latestRequest = history[latestRequestIndex];
+  const lastSaved = history.at(-1);
+  const visibleTail = lastSaved ? messages.findLastIndex(message => message.id === lastSaved.id) : -1;
+  const live = lastSaved ? messages.slice(visibleTail < 0 ? messages.length : visibleTail + 1) : messages;
+  const latestTurn = live.findLast(message => message.turnId)?.turnId ??
+    history.findLast((message, index) => index > latestRequestIndex && message.turnId)?.turnId;
   const latestReply = new Map<string, Message>();
-  for (const message of messages) {
+  for (const message of history.concat(live)) {
     const settledId = message.digest?.turnId ?? (message.turnTerminal ? message.turnId : undefined);
     if (settledId) {
       const previous = terminalByTurn.get(settledId);
@@ -190,7 +195,8 @@ export function groupChatWork(messages: Message[], busy: boolean): TranscriptIte
     }
     if (message.turnId && message.role === "bot" && message.kind === "text") latestReply.set(message.turnId, message);
   }
-  let request: Message | undefined;
+  const first = messages[0];
+  let request = first && latestRequest && history.findIndex(message => message.id === first.id) > latestRequestIndex ? latestRequest : undefined;
   for (const message of messages) {
     if (message.reaction || message.kind === "digest") continue;
     if (message.role === "user") request = message;
@@ -203,6 +209,10 @@ export function groupChatWork(messages: Message[], busy: boolean): TranscriptIte
       !isStatusActivity(message) && failedTurnCause(message.tool.name) === null));
     if (!tool && !narration) {
       items.push({ kind: "message", message });
+      continue;
+    }
+    if (request !== latestRequest || (message.turnId && latestTurn && message.turnId !== latestTurn)) {
+      if (message.comm || message.id === focusId) items.push({ kind: "message", message });
       continue;
     }
     const turnId = message.turnId ?? request?.id ?? "unassigned";

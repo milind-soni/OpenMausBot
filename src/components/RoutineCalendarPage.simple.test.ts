@@ -278,7 +278,7 @@ describe("routine editor", () => {
     seed: { kind: "routine", at: Date.now() + 3_600_000, durationMinutes: 30, botIds: [bot.id], routine: routineToEdit },
     bots: [bot], plain, onClose: vi.fn(), onSavedCall: vi.fn(),
   }));
-  const hidden = ['<select aria-label="Repeat"', "Routine safety limit", "Runs the whole job on the bot&#x27;s cloud desktop", "Add attachment", "Post results to", "Routine type"];
+  const hidden = ['<select hidden="" aria-hidden="true" aria-label="Repeat"', "Routine safety limit", "Runs the whole job on the bot&#x27;s cloud desktop", "Add attachment", "Post results to", "Routine type"];
 
 
   it("marks the routine's repeat choice", () => {
@@ -289,7 +289,7 @@ describe("routine editor", () => {
     const html = editor(cronRoutine);
     expect(html).toContain('aria-expanded="true"');
     for (const text of hidden.filter((text) => text !== "Routine type")) expect(html, text).toContain(text);
-    expect(html).not.toMatch(/aria-pressed="true"/);
+    expect(html).not.toMatch(/aria-pressed="true"[^>]*>(Once|Every day|Weekdays|Every week)</);
   });
 
   it("shows a saved startup choice when the simple editor opens", () => {
@@ -375,10 +375,10 @@ describe("routine editor", () => {
     expect(destination(editor(routine, false))).toContain('<option value="brief-thread" selected="">Morning briefs</option>');
   });
 
-  it("leaves the Advanced editor as it was", () => {
+  it("keeps the Advanced editor controls available", () => {
     fixture.advanced = true;
     const html = editor(undefined, false);
-    for (const text of ['placeholder="Add title"', '<select aria-label="Repeat"', "Assign a bot", "Runs the whole job on the bot&#x27;s cloud desktop", "Post results to", "Routine type", "New event"]) {
+    for (const text of ['placeholder="Add title"', 'aria-label="Repeat"', "Assign a bot", "Runs the whole job on the bot&#x27;s cloud desktop", "Post results to", "Routine type", "New event"]) {
       expect(html, text).toContain(text);
     }
     expect(html).not.toContain("More options");
@@ -428,8 +428,8 @@ describe("a new routine's audience on a team's Cloud", () => {
   it("opened where no chat is on screen, or moved to another bot, it is private until the person chooses", () => {
     expect(opened({ ...quotes, threadId: "main" }, { activeView: "routines" }).saved().resultsThreadId).toBe("just-me");
     const form = opened({ ...quotes, threadId: "main" });
-    const picker = form.tree().find(named("BotPicker"))!.props as { onChange: (ids: string[]) => void };
-    picker.onChange(["other"]);
+    const picker = form.tree().find(node => node.props["aria-label"] === "Who does it")!;
+    (picker.props.onChange as (event: unknown) => void)({ target: { value: "other" } });
     expect(form.line().value, "the shared chat on screen was Quotes', not Other's").toBe("just-me");
     expect(form.saved().resultsThreadId).toBe("just-me");
   });

@@ -15,8 +15,8 @@ function useMacInset(): boolean {
   return useDesktopCapabilities().capabilities.windowChrome === "mac-inset";
 }
 
-export function ToolPage({ label, children }: { label?: string; children: ReactNode }) {
-  return <main aria-label={label} className="flex h-full min-w-0 flex-1 flex-col bg-app animate-workspace-in">{children}</main>;
+export function ToolPage({ label, fade = false, children }: { label?: string; fade?: boolean; children: ReactNode }) {
+  return <main aria-label={label} className={`flex h-full min-w-0 flex-1 flex-col bg-app ${fade ? "motion-safe:animate-fade-in" : "animate-workspace-in"}`}>{children}</main>;
 }
 
 export function ToolPageHeader({ backLabel, onBack, backRef, children }: {

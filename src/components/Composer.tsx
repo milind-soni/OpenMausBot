@@ -1,3 +1,4 @@
+import { openBot } from "@/state/thread-navigation";
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
@@ -808,6 +809,10 @@ export function Composer({
           singleLinePlaceholder={singleRow}
           wrapperClassName={singleRow ? undefined : cn("@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full", stacked && "order-first basis-full")}
           inputRef={inputRef}
+          onOpenBot={(id) => {
+            const mentioned = store.state().bots.find(candidate => candidate.id === id && !candidate.hidden);
+            if (mentioned) openBot(dispatch, mentioned, false);
+          }}
           peers={[...(group ? members ?? [] : bots.filter((member) => member.id !== bot?.id)), ...teammates.peers]}
           everyone={Boolean(group && !group.dm)}
           dir="auto"

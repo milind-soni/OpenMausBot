@@ -40,7 +40,7 @@ export function MentionMenu({ listRef, motion, choices, highlight, everyoneCount
       ref={listRef}
       role="listbox"
       aria-label={t("composer.mention.aria")}
-      className={cn("absolute bottom-full start-2 z-20 mb-2 max-h-72 w-72 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-raised shadow-lg", motion.className, className)} {...motion.exitProps}
+      className={cn("absolute bottom-full start-2 z-20 mb-2 max-h-72 w-72 overflow-x-hidden overflow-y-auto overscroll-contain rounded-xl border border-hairline/40 bg-menu shadow-lg", motion.className, className)} {...motion.exitProps}
     >
       {choices.map((choice, i) => {
         const description = choice.person ? "" : choice.devs ? t("composer.mention.devsDesc") : mentionRowDescription(choice.bot ? { kind: "bot", title: choice.bot.title.trim() || (choice.bot.chiefOfStaff ? t("chat.chiefOfStaff") : "") }

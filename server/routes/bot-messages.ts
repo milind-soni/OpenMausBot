@@ -53,6 +53,7 @@ type CardAnswer = { botId: string; botName?: string; threadId: string; requestId
 type Behavior = "allow" | "deny" | "answer";
 
 export interface BotMessageRouteDeps {
+  bindLocationClient?(req: IncomingMessage, auth: RequestAuth, threadId: string, sendId: string): void;
   store: Pick<Store,
     | "activeLeaf" | "activePath" | "appendMessage" | "bot" | "botByThread" | "bots" | "groupByThread" | "messagesFor"
     | "patchMessage" | "patchTask" | "projectBotForTask" | "setActiveLeaf" | "setTaskAskedAt" | "taskByThread" | "tasks">;
@@ -337,6 +338,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       // paired session or the desktop capability proves a person and lifts the webhook block.
       const personPresent = auth.kind === "session" || DESKTOP_MANAGED;
       if (personPresent && sendId && !guarded && !press && !appSent) noteTypedSend(threadId, sendId, text);
+      if (sendId && !retried && !guarded && !press && !appSent && !phone) deps.bindLocationClient?.(req, auth, threadId, sendId);
       if (pressKey) pressesInFlight.set(pressKey, sendId);
       try {
         const receipt = await acceptDirectSend({

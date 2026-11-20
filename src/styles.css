@@ -1537,6 +1537,11 @@ body {
     border-color: color-mix(in srgb, var(--color-ink) 12%, transparent);
     box-shadow: 0 20px 32px -5px rgb(28 28 28 / 0.1), 0 8px 12px -6px rgb(28 28 28 / 0.1);
   }
+  :root[data-skin="daylight"] [data-routine-editor] {
+    --color-control: color-mix(in srgb, var(--color-ink) 4%, var(--color-menu));
+    --color-inset: color-mix(in srgb, var(--color-ink) 3%, var(--color-menu));
+    --color-raised: color-mix(in srgb, var(--color-ink) 7%, var(--color-menu));
+  }
   :root[data-skin="daylight"] .ui-modal-divider {
     background: color-mix(in srgb, var(--color-ink) 12%, transparent);
   }
@@ -3762,4 +3767,37 @@ button:disabled.bg-danger {
   @starting-style {
     [data-drawer-motion="in"] { margin-right: calc(-1 * var(--drawer-width)); translate: none; }
   }
+}
+
+.bot-mention {
+  --mention-hover: color-mix(in srgb, var(--mention-color) 12%, var(--color-raised));
+  padding: .12em .4em;
+  border-radius: .55em;
+  color: inherit;
+  font-weight: 600;
+  box-decoration-break: clone;
+}
+.bot-mention:hover,
+.bot-mention-mirror[data-hovered] { background: var(--mention-hover); }
+.bot-mention-icon {
+  display: inline-flex;
+  margin-inline-end: .2em;
+  vertical-align: -.15em;
+}
+.bot-mention-mirror {
+  /* Paint the extra weight and hover padding without changing textarea glyph advances. */
+  padding: 0;
+  font-weight: inherit;
+  -webkit-text-stroke: .022em currentColor;
+}
+.bot-mention-mirror[data-hovered] {
+  box-shadow: -.28em 0 0 .12em var(--mention-hover), .28em 0 0 .12em var(--mention-hover);
+}
+[data-mention-navigation]:has([data-mention-bot-id][data-hovered]) textarea { cursor: pointer; }
+.bot-mention-mirror .bot-mention-icon { display: inline; position: relative; margin: 0; vertical-align: baseline; }
+.bot-mention-mirror .bot-mention-icon > :last-child {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 50%;
+  transform: translateY(-50%);
 }

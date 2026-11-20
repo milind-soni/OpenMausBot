@@ -27,3 +27,48 @@ it("draws its words in the field's own type and padding, so the caret stays at t
   expect([mirror().fontSize, mirror().lineHeight, mirror().paddingLeft], "and follows the field when its classes change").toEqual(["15px", "24px", "4px"]);
   act(() => root.unmount());
 });
+
+it("moves the caret and selection across a bot mention as a unit", () => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  const inputRef = createRef<HTMLTextAreaElement>();
+  act(() => root.render(createElement(MentionTextarea, {
+    inputRef, value: "@Atlas hello", peers: [{ name: "Atlas", color: "purple" }], onChange: () => {},
+  })));
+  const input = inputRef.current!;
+  input.setSelectionRange(0, 0);
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+  expect([input.selectionStart, input.selectionEnd]).toEqual([6, 6]);
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", shiftKey: true, bubbles: true, cancelable: true }));
+  expect([input.selectionStart, input.selectionEnd]).toEqual([0, 6]);
+  act(() => root.unmount());
+});
+
+it("opens only the bot under the pointer and preserves drag selection", () => {
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  const inputRef = createRef<HTMLTextAreaElement>();
+  const onOpenBot = vi.fn();
+  act(() => root.render(createElement(MentionTextarea, {
+    inputRef, value: "@Atlas hello", peers: [{ id: "atlas", name: "Atlas", color: "purple" }], onOpenBot, onChange: () => {},
+  })));
+  const mention = host.querySelector<HTMLElement>("[data-bot-mention]")!;
+  vi.spyOn(mention, "getClientRects").mockReturnValue([new DOMRect(10, 10, 40, 20)] as unknown as DOMRectList);
+  const move = (clientX: number) => inputRef.current!.dispatchEvent(new MouseEvent("mousemove", { clientX, clientY: 20, bubbles: true }));
+  move(30);
+  expect(mention.hasAttribute("data-hovered")).toBe(true);
+  move(55);
+  expect(mention.hasAttribute("data-hovered")).toBe(false);
+  const click = (clientX: number) => inputRef.current!.dispatchEvent(new MouseEvent("click", { clientX, clientY: 20, detail: 1, bubbles: true }));
+  inputRef.current!.setSelectionRange(0, 6);
+  click(30);
+  expect(onOpenBot).not.toHaveBeenCalled();
+  inputRef.current!.setSelectionRange(0, 0);
+  click(55);
+  expect(onOpenBot).not.toHaveBeenCalled();
+  click(30);
+  expect(onOpenBot).toHaveBeenCalledExactlyOnceWith("atlas");
+  act(() => root.unmount());
+});

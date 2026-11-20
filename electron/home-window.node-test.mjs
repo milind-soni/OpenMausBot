@@ -461,7 +461,7 @@ test("My Cloud's page in the app is the Cloud's own page, never a remote client:
 });
 
 test("My Cloud's own page, once it is home, gets this app's chat links, diagnostics and its session renewal; any other server's page doesn't", async () => {
-  const keys = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder"];
+  const keys = ["home", "onChatLink", "onPackageInstall", "exportDiagnostics", "openLogsFolder", "currentLocation"];
   const home = preload(CLOUD, { home: true });
   for (const key of keys) assert.ok(home.bridge[key], key);
   assert.ok(home.synced.includes("home:page"));
@@ -536,6 +536,33 @@ function pageIpc(overrides = {}) {
   return { handlers, calls, context, account, localContents, localFrame, cloudContents, cloudFrame };
 }
 
+test("location requires the focused, unlocked workspace throughout the native request", async () => {
+  const location = { latitude: 1.35, longitude: 103.82 };
+  let focused = true;
+  let locked = false;
+  const fixes = [];
+  const ipc = pageIpc({
+    process: { platform: "darwin" },
+    powerMonitor: { getSystemIdleState: () => locked ? "locked" : "active" },
+    currentMacLocation: () => new Promise(resolve => fixes.push(resolve)),
+  });
+  ipc.context.mainWindow.isFocused = () => focused;
+  const current = ipc.handlers.get("location:current");
+  const event = { sender: ipc.cloudContents, senderFrame: ipc.cloudFrame };
+  await assert.rejects(current({ ...event, senderFrame: { url: CLOUD } }), /active Mac workspace/);
+  locked = true;
+  await assert.rejects(current(event), /active Mac workspace/);
+  assert.equal(fixes.length, 0);
+  locked = false;
+  const allowed = current(event);
+  fixes.shift()(location);
+  assert.deepEqual(await allowed, location);
+  const interrupted = current(event);
+  focused = false;
+  fixes.shift()(location);
+  await assert.rejects(interrupted, /active Mac workspace/);
+});
+
 test("no page gets a control over lending this computer: not My Cloud's, another Cloud's or this computer's own, and main handles none", async () => {
   for (const origin of [CLOUD, "https://omb-c-a.fly.dev", LOCAL]) {
     const page = preload(origin, { activation: true });
@@ -553,7 +580,7 @@ test("Settings on the person's own Cloud shows the plan read only, says when it 
   await assert.rejects(page.bridge.cloudPlan.manage(), /Choose Manage/);
   const ipc = pageIpc();
   const event = { sender: ipc.cloudContents, senderFrame: ipc.cloudFrame };
-  assert.deepEqual(Object.keys(Object.fromEntries(ipc.handlers)), ["cloud-plan:state", "cloud-plan:notice-seen", "cloud-plan:manage",
+  assert.deepEqual([...ipc.handlers.keys()].filter(channel => channel.startsWith("cloud-plan:")), ["cloud-plan:state", "cloud-plan:notice-seen", "cloud-plan:manage",
     "cloud-plan:upgrade-preview", "cloud-plan:upgrade", "cloud-plan:cancel", "cloud-plan:keep", "cloud-plan:room-not-now", "cloud-plan:restart-now"]);
   assert.deepEqual(plain(await ipc.handlers.get("cloud-plan:state")(event, { tier: "personal" })), { status: "paid", tier: "max" });
   ipc.context.homeWindow = { homePage: (asked) => asked === event };

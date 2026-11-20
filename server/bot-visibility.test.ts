@@ -559,11 +559,11 @@ it("lets a runtime use only the hidden conversation bound to its capability", ()
   expect(refusal("background-b", "background-a")).toBe("no such conversation");
 });
 
-it("preserves access to handoffs on shared servers while keeping routine execution private", () => {
+it("preserves access to handoffs while keeping routine execution private", () => {
   const bot = { id: "bot", threadId: "chat", tasks: [
     { threadId: "chat" }, { threadId: "handoff", openedBy: {} }, { threadId: "run", routineRunId: "routine" },
   ] };
-  const visible = new VisibleSet([bot], [], SEES_EVERYTHING, undefined, undefined, { showBotOpened: true });
+  const visible = new VisibleSet([bot], [], SEES_EVERYTHING);
   expect(visible.thread("handoff")).toBe(true);
   expect(visible.thread("run")).toBe(false);
 });

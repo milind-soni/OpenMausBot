@@ -1,6 +1,7 @@
 import { boatCapableEngine } from "@/lib/remote-desktop";
 import {
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -9,7 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import {
-  CheckCircle2, ChevronRight, CircleAlert, Clock3, Cloud, ExternalLink, FileText, Laptop, Loader2, Paperclip, Pause, Play, Repeat2, Search, Target, Trash2, UserRoundPlus, UsersRound, Video, X, XCircle,
+  CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Clock3, Cloud, ExternalLink, FileText, Laptop, Loader2, Paperclip, Pause, Play, Repeat2, Search, Target, Trash2, UserRoundPlus, UsersRound, Video, X, XCircle,
 } from "lucide-react";
 import { BotAvatar } from "@/components/Avatar";
 import { useBotEditor } from "./bot-settings/BotEditorContext";
@@ -61,6 +62,7 @@ import {
   type RoutineTarget,
 } from "@/lib/routines"; import { ROUTINE_GOAL_RUN_LIMIT_MINUTES, ROUTINE_RUN_LIMIT_MAX_MINUTES, ROUTINE_RUN_LIMIT_MINUTES } from "@/lib/routines";
 import { api, openBotThread, openThread, useStore, type Bot, type Group } from "@/state/store";
+import { RoutineDatePicker } from "./routines/RoutineDatePicker";
 import { RoutineScheduleNote } from "./RoutineScheduleNote";
 import { CalendarEventCard, HOUR_HEIGHT, statusState } from "./routines/CalendarEventCard";
 
@@ -222,14 +224,14 @@ function BotPicker({
   const [query, setQuery] = useState("");
   const filtered = bots.filter((bot) => `${bot.name} ${bot.title}`.toLowerCase().includes(query.toLowerCase()));
   return (
-    <div className="rounded-xl border border-hairline/50 bg-inset/60 p-2">
+    <div className="rounded-xl border border-hairline/40 bg-inset/40 p-1.5">
       {!locked && bots.length > 5 && (
         <label className="mb-2 flex items-center gap-2 rounded-lg border border-transparent bg-panel px-2.5 py-2 text-ink-secondary">
           <Search size={14} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("routines.findBot")} className="min-w-0 flex-1 bg-transparent text-[12px] text-ink outline-none placeholder:text-ink-tertiary" />
         </label>
       )}
-      <div className="grid max-h-48 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
+      <div className="grid max-h-44 grid-cols-1 gap-1 overflow-y-auto p-0.5 sm:grid-cols-2">
         {filtered.map((bot) => {
           const active = selected.includes(bot.id);
           return (
@@ -237,12 +239,13 @@ function BotPicker({
               key={bot.id}
               type="button"
               disabled={locked}
+              aria-pressed={active}
               onClick={() => onChange(multiple ? (active ? selected.filter((id) => id !== bot.id) : [...selected, bot.id]) : [bot.id])}
-              className={cn("flex min-w-0 items-center gap-2 rounded-lg px-2 py-2 text-left transition", active ? "bg-accent/12 ring-1 ring-accent/50" : "hover:bg-raised", locked && "cursor-default")}
+              className={cn("flex min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left motion-safe:transition-colors", active ? "bg-accent/10 ring-1 ring-inset ring-accent/25" : "hover:bg-raised", locked && "cursor-default")}
             >
-              <BotAvatar bot={bot} state={active ? "happy" : "idle"} size={32} animated={false} />
+              <BotAvatar bot={bot} state={active ? "happy" : "idle"} size={26} animated={false} />
               <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{bot.name}</span>
-              {active && <CheckCircle2 size={14} className="shrink-0 text-accent" />}
+              {active && <CheckCircle2 aria-hidden="true" size={14} className="shrink-0 text-accent" />}
             </button>
           );
         })}
@@ -537,7 +540,10 @@ export function EventEditor({
     || runOnStartup
     || overlap === "queue");
 
+  const moreId = useId();
   useModalDialog(dialogRef, onClose);
+
+  const fieldClass = "min-w-0 max-w-full rounded-lg border border-hairline/45 bg-control px-3 py-2 text-[13px] text-ink outline-none placeholder:text-ink-tertiary focus-visible:border-focus";
 
   const kindSwitchControl = canSwitchKind && (
             <div className={cn(advanced && "ml-10", "inline-flex rounded-lg bg-inset p-1")}>
@@ -569,13 +575,13 @@ export function EventEditor({
             </div>
           );
   const whenControls = recurrence !== "interval" && recurrence !== "limit_reset" && !isCronChoice(recurrence) && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {kind === "routine" && recurrence === "none" && <span className="text-[12px] font-medium text-ink-secondary">{t("routines.editor.starts")}</span>}
-                  {kind === "routine" && recurrence === "weekly" && <span className="text-[12px] font-medium text-ink-secondary">{t("routines.editor.on")}</span>}
-                  {(kind === "call" || recurrence === "none" || recurrence === "weekly") && <input type="date" value={date} onChange={(event) => setDate(event.target.value)} className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent [color-scheme:dark]" />}
-                  <input type="time" step={CALENDAR_SLOT_MINUTES * 60} value={startTime} onChange={(event) => setStartTime(event.target.value)} className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent [color-scheme:dark]" />
+                <div className="flex flex-wrap items-start gap-2">
+                  {advanced && kind === "routine" && recurrence === "none" && <span className="py-2 text-[12px] font-medium text-ink-secondary">{t("routines.editor.starts")}</span>}
+                  {advanced && kind === "routine" && recurrence === "weekly" && <span className="py-2 text-[12px] font-medium text-ink-secondary">{t("routines.editor.on")}</span>}
+                  {(kind === "call" || recurrence === "none" || recurrence === "weekly") && <RoutineDatePicker label={t("routines.miniCalendar.label")} value={date} onChange={setDate} />}
+                  <input type="time" aria-label={t("routines.cron.time")} step={CALENDAR_SLOT_MINUTES * 60} value={startTime} onChange={(event) => setStartTime(event.target.value)} className={cn(fieldClass, "h-9 py-0 [color-scheme:var(--code-color-scheme)]")} />
                   {kind === "call" && <>
-                    <span className="text-[12px] text-ink-secondary">{t("routines.editor.to")}</span>
+                    <span className="py-2 text-[12px] text-ink-secondary">{t("routines.editor.to")}</span>
                     <span className="rounded-lg border border-hairline/40 bg-inset/60 px-3 py-2 text-[13px] text-ink">{niceTime(endAt)}</span>
                     <Select aria-label={t("routines.editor.callDuration")} value={durationMinutes} onChange={(event) => setDurationMinutes(Number(event.target.value))}>
                       {EVENT_DURATION_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{durationLabel(minutes)}</option>)}
@@ -714,17 +720,19 @@ export function EventEditor({
                   {intervalWindow === "custom" && (
                     <div className="flex flex-wrap items-center gap-2 text-[12px] text-ink">
                       <span className="font-medium text-ink-secondary">{t("routines.interval.runBetween")}</span>
-                      <input aria-label={t("routines.interval.windowStart")} aria-invalid={intervalWindowInvalid} aria-describedby={intervalWindowInvalid ? "routine-interval-window-error" : undefined} type="time" step={CALENDAR_SLOT_MINUTES * 60} value={intervalWindowStart} onChange={(event) => setIntervalWindowStart(event.target.value)} className={cn("rounded-lg border bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent [color-scheme:dark]", intervalWindowInvalid ? "border-danger/70" : "border-hairline/50")} />
+                      <input aria-label={t("routines.interval.windowStart")} aria-invalid={intervalWindowInvalid} aria-describedby={intervalWindowInvalid ? "routine-interval-window-error" : undefined} type="time" step={CALENDAR_SLOT_MINUTES * 60} value={intervalWindowStart} onChange={(event) => setIntervalWindowStart(event.target.value)} className={cn("rounded-lg border bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent [color-scheme:var(--code-color-scheme)]", intervalWindowInvalid ? "border-danger/70" : "border-hairline/50")} />
                       <span className="text-ink-secondary">{t("routines.interval.and")}</span>
-                      <input aria-label={t("routines.interval.windowEnd")} aria-invalid={intervalWindowInvalid} aria-describedby={intervalWindowInvalid ? "routine-interval-window-error" : undefined} type="time" step={CALENDAR_SLOT_MINUTES * 60} value={intervalWindowEnd} onChange={(event) => setIntervalWindowEnd(event.target.value)} className={cn("rounded-lg border bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent [color-scheme:dark]", intervalWindowInvalid ? "border-danger/70" : "border-hairline/50")} />
+                      <input aria-label={t("routines.interval.windowEnd")} aria-invalid={intervalWindowInvalid} aria-describedby={intervalWindowInvalid ? "routine-interval-window-error" : undefined} type="time" step={CALENDAR_SLOT_MINUTES * 60} value={intervalWindowEnd} onChange={(event) => setIntervalWindowEnd(event.target.value)} className={cn("rounded-lg border bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent [color-scheme:var(--code-color-scheme)]", intervalWindowInvalid ? "border-danger/70" : "border-hairline/50")} />
                     </div>
                   )}
 
                   {intervalEnd === "on-date" && (
-                    <label className="flex flex-wrap items-center gap-2 text-[12px] text-ink">
-                      <span className="font-medium text-ink-secondary">{t("routines.interval.stopAfter")}</span>
-                      <input aria-label={t("routines.interval.endDate")} aria-invalid={intervalEndInvalid} aria-describedby={intervalEndInvalid ? "routine-interval-end-error" : undefined} type="date" min={toLocalDateInput(intervalEndMinimumAt)} value={intervalEndDate} onChange={(event) => setIntervalEndDate(event.target.value)} className={cn("rounded-lg border bg-inset px-3 py-2 text-[13px] text-ink outline-none focus:border-accent [color-scheme:dark]", intervalEndInvalid ? "border-danger/70" : "border-hairline/50")} />
-                    </label>
+                    <div className="flex flex-wrap items-start gap-2 text-[12px] text-ink">
+                      <span className="py-2 font-medium text-ink-secondary">{t("routines.interval.stopAfter")}</span>
+                      <RoutineDatePicker label={t("routines.interval.endDate")} invalid={intervalEndInvalid}
+                        describedBy={intervalEndInvalid ? "routine-interval-end-error" : undefined}
+                        min={toLocalDateInput(intervalEndMinimumAt)} value={intervalEndDate} onChange={setIntervalEndDate} />
+                    </div>
                   )}
 
                   {intervalInvalid && (
@@ -840,38 +848,33 @@ export function EventEditor({
   ] as const;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-3" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={t(existingRoutine || existingCall ? "routines.event.editLabel" : "routines.event.createLabel")} tabIndex={-1} className="max-h-[94vh] w-full max-w-[760px] overflow-y-auto rounded-2xl border border-hairline/60 bg-panel shadow-2xl">
-        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-hairline/40 bg-panel/95 px-5 py-3.5 backdrop-blur">
-          <div className="text-[15px] font-semibold text-ink">{headerTitle}</div>
-          <button onClick={onClose} className="rounded-full p-2 text-ink-secondary hover:bg-raised hover:text-ink" aria-label={t("common.close")}><X size={18} /></button>
+    <div className="fixed inset-0 z-50 flex items-center justify-center ui-scrim animate-none p-3 sm:p-6" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+      <div ref={dialogRef} data-routine-editor="" role="dialog" aria-modal="true" aria-label={t(existingRoutine || existingCall ? "routines.event.editLabel" : "routines.event.createLabel")} tabIndex={-1} className="ui-modal flex max-h-full w-full max-w-[600px] flex-col overflow-hidden shadow-float">
+        <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/40 px-4 py-3 sm:px-6">
+          <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-ink">{headerTitle}</h2>
+          <button type="button" onClick={onClose} className="grid size-8 shrink-0 place-items-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink" aria-label={t("common.close")}><X size={17} /></button>
         </div>
 
-        <div className="space-y-5 px-5 py-5 sm:px-8">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
           {advanced && kindSwitchControl}
 
           {advanced && routineTypeControl}
 
-          <div className="flex items-start gap-4">
-            <span className="mt-3 size-4 shrink-0 rounded bg-accent" />
-            <input autoFocus value={name} onChange={(event) => setName(event.target.value)} aria-label={t("routines.editor.titleLabel")} placeholder={kind === "routine" ? (advanced ? t("routines.event.addTitle") : t("routines.editor.titlePlaceholder")) : t("routines.event.addCallTitle")} className="min-w-0 flex-1 border-b border-hairline/60 bg-transparent px-1 pb-2 text-[22px] font-medium text-ink outline-none placeholder:text-ink-tertiary focus:border-accent" />
-          </div>
+          <input value={name} onChange={(event) => setName(event.target.value)} aria-label={t("routines.editor.titleLabel")}
+            placeholder={kind === "routine" ? (advanced ? t("routines.event.addTitle") : t("routines.editor.titlePlaceholder")) : t("routines.event.addCallTitle")}
+            className={cn(advanced ? fieldClass : "border-b border-hairline/55 bg-transparent pb-2 text-[22px] font-semibold tracking-[-0.01em] text-ink outline-none placeholder:text-ink-tertiary focus-visible:border-focus", "w-full")} />
 
-          {advanced ? (
-            <div className="flex items-start gap-4">
-              <Clock3 size={18} className="mt-2.5 shrink-0 text-ink-secondary" />
-              <div className="min-w-0 flex-1 space-y-3">
+          <div className={cn("grid items-start gap-4", !advanced && kind === "routine" && !isRoomGoal && "min-[600px]:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] min-[600px]:gap-5")}>
+            {advanced ? (
+              <div className="space-y-2">
                 {whenControls}
                 {repeatSelect}
                 {scheduleNote}
                 {repeatDetails}
                 {runLimitControls}
               </div>
-            </div>
-          ) : (
-            <div className="flex items-start gap-4">
-              <Clock3 size={18} className="mt-2.5 shrink-0 text-ink-secondary" />
-              <div className="min-w-0 flex-1 space-y-3">
+            ) : (
+              <div className="space-y-2">
                 <div className="text-[13px] font-medium text-ink">{t("routines.editor.when")}</div>
                 {whenControls}
                 <div role="group" aria-label={t("routines.editor.repeat")} className="flex flex-wrap gap-1.5">
@@ -881,7 +884,7 @@ export function EventEditor({
                       type="button"
                       aria-pressed={recurrence === choice}
                       onClick={() => selectRecurrence(choice)}
-                      className={cn("rounded-full border px-3 py-1.5 text-[12px] font-medium transition", recurrence === choice ? "border-accent-border bg-accent/15 text-accent-text" : "border-hairline/50 bg-inset text-ink-secondary hover:bg-raised hover:text-ink")}
+                      className={cn("min-h-7 whitespace-nowrap rounded-full border px-2.5 text-[12px] font-medium motion-safe:transition-colors", recurrence === choice ? "border-ink/40 bg-control text-ink" : "border-hairline/35 bg-inset text-ink-secondary hover:bg-raised hover:text-ink")}
                     >
                       {t(label)}
                     </button>
@@ -889,57 +892,65 @@ export function EventEditor({
                 </div>
                 {!repeatChoices.some(([choice]) => choice === recurrence) && <div className="text-[12px] text-ink-secondary">{t("routines.editor.customRepeat")}</div>}
               </div>
-            </div>
-          )}
+            )}
 
-          <div className="flex items-start gap-4">
-            {isRoomGoal ? <UsersRound size={18} className="mt-2.5 shrink-0 text-ink-secondary" /> : <UserRoundPlus size={18} className="mt-2.5 shrink-0 text-ink-secondary" />}
-            <div className="min-w-0 flex-1">
-              {isRoomGoal ? (
-                <div className="space-y-3">
-                  <div>
-                    <label htmlFor="routine-goal-room" className="mb-2 block text-[13px] font-medium text-ink">{t("routines.editor.goalWhere")}</label>
-                    <Select id="routine-goal-room" value={groupId} onChange={(event) => selectRoom(event.target.value)} className="w-full">
-                      {groupId && !selectedRoom && <option value={groupId} disabled>{t("routines.editor.roomMissing")}</option>}<option value="">{t("routines.editor.goalOneOnOne")}</option>
-                      {rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
-                    </Select>
+            <div className={cn("min-w-0", !advanced && kind === "routine" && !isRoomGoal && "min-[600px]:border-s min-[600px]:border-hairline/35 min-[600px]:ps-5")}>
+                {isRoomGoal ? (
+                  <div className="space-y-3">
+                    <div>
+                      <label htmlFor="routine-goal-room" className="mb-2 block text-[13px] font-medium text-ink">{t("routines.editor.goalWhere")}</label>
+                      <Select id="routine-goal-room" value={groupId} onChange={(event) => selectRoom(event.target.value)} className="w-full">
+                        {groupId && !selectedRoom && <option value={groupId} disabled>{t("routines.editor.roomMissing")}</option>}<option value="">{t("routines.editor.goalOneOnOne")}</option>
+                        {rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
+                      </Select>
+                    </div>
+                    <div>
+                      <div className="mb-2 text-[13px] font-medium text-ink">{selectedRoom ? t("routines.goal.chooseLead") : t("routines.editor.who")}</div>
+                      {roomMembers.length > 0 ? (
+                        <>
+                          <BotPicker bots={roomMembers} selected={botIds} multiple={false} onChange={selectBots} />
+                          <div className="mt-2 text-[12px] text-ink-secondary">{selectedRoom ? t("routines.goal.leadHelp", { name: selectedRoom.name }) : t("routines.editor.goalOneOnOneHelp")}</div>
+                        </>
+                      ) : (
+                        <div className="rounded-xl border border-warning/30 bg-warning/10 px-3.5 py-3 text-[12px] text-warning">{t("routines.goal.noMembers")}</div>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <div className="mb-2 text-[13px] font-medium text-ink">{selectedRoom ? t("routines.goal.chooseLead") : t("routines.editor.who")}</div>
-                    {roomMembers.length > 0 ? (
-                      <>
-                        <BotPicker bots={roomMembers} selected={botIds} multiple={false} onChange={selectBots} />
-                        <div className="mt-2 text-[12px] text-ink-secondary">{selectedRoom ? t("routines.goal.leadHelp", { name: selectedRoom.name }) : t("routines.editor.goalOneOnOneHelp")}</div>
-                      </>
-                    ) : (
-                      <div className="rounded-xl border border-warning/30 bg-warning/10 px-3.5 py-3 text-[12px] text-warning">{t("routines.goal.noMembers")}</div>
+                ) : (
+                  <>
+                    <div className="mb-2 text-[13px] font-medium text-ink">{kind === "routine" ? (advanced ? t("routines.event.assignBot") : t("routines.editor.who")) : t("routines.event.addGuests")}</div>
+                    {bots.length > 0 ? (
+                  <>
+                    {!advanced && kind === "routine" ? (
+                      <Select aria-label={t("routines.editor.who")} className="w-full [&_button]:w-full" value={botIds[0] ?? ""} disabled={Boolean(lockedBotId)}
+                        onChange={(event) => selectBots([event.target.value])}
+                        triggerContent={<span className="flex min-h-9 w-full min-w-0 items-center gap-2 rounded-lg border border-hairline/45 bg-control px-3 text-start text-[13px] text-ink hover:bg-raised">
+                          {selectedBots[0] && <BotAvatar bot={selectedBots[0]} size={24} state="idle" animated={false} />}
+                          <span className="min-w-0 flex-1 truncate">{selectedBots[0]?.name ?? t("routines.editor.who")}</span>
+                          <ChevronDown size={14} className="shrink-0 text-ink-secondary" aria-hidden="true" />
+                        </span>}>
+                        {bots.map(bot => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
+                      </Select>
+                    ) : <BotPicker bots={bots} selected={botIds} multiple={kind === "call"} locked={Boolean(lockedBotId)} onChange={selectBots} />}
+                    {(advanced || kind === "call") && <div className="mt-2 text-[12px] text-ink-secondary">{kind === "routine" ? t("routines.event.botOwnsRuns") : t(selectedBots.length === 0 ? "routines.event.invitedNone" : selectedBots.length === 1 ? "routines.event.invitedOne" : "routines.event.invitedMany", { count: selectedBots.length })}</div>}{kind === "routine" && <RoutineAudience team={state.config?.team} bot={selectedBots[0]} value={resultsThreadId} madeIn={existingRoutine?.sourceThreadId} />}
+                  </>
+                ) : (
+                  <button type="button" onClick={() => { dispatch({ type: "newBot" }); onClose(); }} className="w-full rounded-xl border border-dashed border-accent/45 bg-accent/[0.06] px-4 py-4 text-left hover:bg-accent/10">
+                    <div className="text-[13px] font-medium text-accent">{t("routines.event.createFirstBot")}</div>
+                    <div className="mt-1 text-[12px] text-ink-secondary">{t("routines.event.needsBot")}</div>
+                  </button>
                     )}
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="mb-2 text-[13px] font-medium text-ink">{kind === "routine" ? (advanced ? t("routines.event.assignBot") : t("routines.editor.who")) : t("routines.event.addGuests")}</div>
-                  {bots.length > 0 ? (
-                <>
-                  <BotPicker bots={bots} selected={botIds} multiple={kind === "call"} locked={Boolean(lockedBotId)} onChange={selectBots} />
-                  <div className="mt-2 text-[12px] text-ink-secondary">{kind === "routine" ? t("routines.event.botOwnsRuns") : t(selectedBots.length === 0 ? "routines.event.invitedNone" : selectedBots.length === 1 ? "routines.event.invitedOne" : "routines.event.invitedMany", { count: selectedBots.length })}</div>{kind === "routine" && <RoutineAudience team={state.config?.team} bot={selectedBots[0]} value={resultsThreadId} madeIn={existingRoutine?.sourceThreadId} />}
-                </>
-              ) : (
-                <button type="button" onClick={() => { dispatch({ type: "newBot" }); onClose(); }} className="w-full rounded-xl border border-dashed border-accent/45 bg-accent/[0.06] px-4 py-4 text-left hover:bg-accent/10">
-                  <div className="text-[13px] font-medium text-accent">{t("routines.event.createFirstBot")}</div>
-                  <div className="mt-1 text-[12px] text-ink-secondary">{t("routines.event.needsBot")}</div>
-                </button>
-                  )}
-                </>
-              )}
+                  </>
+                )}
             </div>
+
           </div>
 
           {advanced && resultsControl}
-          <div className="flex items-start gap-4">
-            <FileText size={18} className="mt-2.5 shrink-0 text-ink-secondary" />
-            <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={5} aria-label={t("routines.editor.descriptionLabel")} placeholder={isRoomGoal ? t("routines.goal.instructionsPlaceholder") : kind === "routine" ? (advanced ? t("routines.event.instructionsPlaceholder") : t("routines.editor.instructionsPlaceholder")) : t("routines.event.agendaPlaceholder")} className="min-w-0 flex-1 resize-y rounded-xl border border-hairline/50 bg-inset px-3.5 py-3 text-[13px] leading-relaxed text-ink outline-none placeholder:text-ink-tertiary focus:border-accent" />
-          </div>
+          <label className={cn("grid gap-1.5 text-[13px] font-medium text-ink", !advanced && "border-t border-hairline/35 pt-4")}>
+            {t("routines.editor.descriptionLabel")}
+            <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={4} aria-label={t("routines.editor.descriptionLabel")} placeholder={isRoomGoal ? t("routines.goal.instructionsPlaceholder") : kind === "routine" ? (advanced ? t("routines.event.instructionsPlaceholder") : t("routines.editor.instructionsPlaceholder")) : t("routines.event.agendaPlaceholder")} className={cn(fieldClass, "resize-y font-normal leading-relaxed")} />
+          </label>
           {continuityControl}
 
           {advanced && attachmentsRow}
@@ -951,15 +962,15 @@ export function EventEditor({
               <button
                 type="button"
                 aria-expanded={moreOpen}
-                aria-controls="routine-more-options"
+                aria-controls={moreId}
                 onClick={() => setMoreOpen((open) => !open)}
-                className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[13px] font-medium text-accent-text hover:bg-raised"
+                className="flex min-h-8 w-full items-center gap-2 rounded-lg px-2 text-start text-[13px] font-medium text-ink-secondary hover:bg-raised hover:text-ink"
               >
-                <ChevronRight size={14} className={cn("transition-transform", moreOpen && "rotate-90")} />
+                <ChevronRight size={14} className={cn("motion-safe:transition-transform", moreOpen && "rotate-90")} />
                 {t(moreOpen ? "routines.editor.fewer" : "routines.editor.more")}
               </button>
               {moreOpen && (
-                <div id="routine-more-options" className="mt-3 space-y-5 rounded-xl border border-hairline/40 bg-inset/30 p-4">
+                <div id={moreId} className="mt-3 space-y-5 rounded-xl border border-hairline/40 bg-inset/30 p-4">
                   {kindSwitchControl}
                   {routineTypeControl}
                   <div className="space-y-3">
@@ -976,13 +987,12 @@ export function EventEditor({
             </div>
           )}
 
-          {error && <div className="ml-10 flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2.5 text-[13px] text-danger"><CircleAlert size={15} className="mt-0.5 shrink-0" />{error}</div>}
+          {error && <div role="alert" className="flex items-start gap-2 rounded-xl border border-danger/30 bg-danger/10 px-3 py-2.5 text-[13px] text-danger"><CircleAlert size={15} className="mt-0.5 shrink-0" />{error}</div>}
         </div>
 
-
-        <div className="sticky bottom-0 flex items-center justify-end gap-2 border-t border-hairline/40 bg-panel/95 px-5 py-3.5 backdrop-blur">
-          <button onClick={onClose} className="rounded-lg px-4 py-2 text-[13px] text-ink-secondary hover:bg-raised hover:text-ink">{t("common.cancel")}</button>
-          <button onClick={save} disabled={saving || attachmentPending || !valid} className="flex items-center gap-2 rounded-lg bg-accent px-5 py-2 text-[13px] font-semibold text-white hover:brightness-110 disabled:opacity-40">{(saving || attachmentPending) && <Loader2 size={14} className="animate-spin" />}{attachmentPending ? t("routines.attachment.attaching") : existingRoutine || existingCall || (kind === "routine" && !isRoomGoal) ? t("automations.editor.app.save") : t(kind === "call" ? "routines.event.scheduleCall" : "routines.goal.schedule")}</button>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-hairline/40 px-4 py-3 sm:px-6">
+          <button type="button" onClick={onClose} className="ui-button">{t("common.cancel")}</button>
+          <button type="button" onClick={save} disabled={saving || attachmentPending || !valid} className="ui-button ui-button-primary">{(saving || attachmentPending) && <Loader2 size={14} className="motion-safe:animate-spin" />}{attachmentPending ? t("routines.attachment.attaching") : existingRoutine || existingCall || (kind === "routine" && !isRoomGoal) ? t("automations.editor.app.save") : t(kind === "call" ? "routines.event.scheduleCall" : "routines.goal.schedule")}</button>
         </div>
       </div>
     </div>

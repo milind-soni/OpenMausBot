@@ -1,3 +1,5 @@
+import { locationClientId } from "../lib/device-location";
+import { DEVICE_LOCATION_HEADER } from "../../shared/device-location";
 // The renderer's JSON request helper. A Cloud home that went to sleep is never woken by a background poll
 // (src/lib/cloud-power.ts), and a page out of sight sends none at all.
 import { asleepAnswer, BACKGROUND_HEADER, cloudAsleep, markCloudAsleep, markCloudAwake, pageHidden, pageShown } from "../lib/cloud-power";
@@ -33,6 +35,10 @@ export async function api<T = any>(path: string, init?: ApiInit): Promise<T> {
     markCloudAwake();
   }
   const sent = new Headers(headers ?? { "content-type": "application/json" });
+  if (rest.method === "POST" && /^\/api\/(?:bots|groups)\/[\w-]+\/messages$/.test(path)) {
+    const location = locationClientId();
+    if (location) sent.set(DEVICE_LOCATION_HEADER, location);
+  }
   if (background) sent.set(BACKGROUND_HEADER, "1");
   const res = await fetch(path, {
     ...rest,

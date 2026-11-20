@@ -334,6 +334,7 @@ export const CLIENT_ALLOW: ReadonlyArray<{ methods: readonly string[]; path: Reg
   { methods: ["GET"], path: /^\/api\/edition$/ },
   { methods: ["GET"], path: /^\/api\/brand$/ },
   { methods: ["GET"], path: /^\/api\/events$/ },
+  { methods: ["POST"], path: /^\/api\/device-location$/ },
   // reads that carry no secrets
   { methods: ["GET"], path: /^\/api\/bots$/ },
   { methods: ["GET"], path: /^\/api\/bots\/[\w-]+$/ },
