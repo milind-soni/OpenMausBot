@@ -269,15 +269,20 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     signedIn(selection.instanceId);
   };
 
-  function heldAtStart(bot: ThreadBot, selection: ModelSelection, recovering = false, chosen?: readonly ModelSelection[]): { scope: TakeoverScope; resetsAt?: number } | null {
+  function holdOn(selection: ModelSelection): { scope: TakeoverScope; resetsAt?: number } | null {
     const engineUntil = deps.blockedUntil(selection.instanceId, selection.model);
     const model = engineUntil === null ? modelHeld(selection) : null;
     const scope: TakeoverScope | null = engineUntil !== null ? "engine" : model ? model.scope : signedOutHeld(selection.instanceId) ? "signed-out" : null;
     if (!scope) return null;
-    const carries = (deps.enabled?.() ?? true) && backups(bot.id, selection, scope, approvalModeFor(bot), chosen).length > 0;
-    if (!carries && !(recovering && scope !== "signed-out")) return null;
     const resetsAt = scope === "engine" ? deps.resetAt?.(selection.instanceId, selection.model) ?? undefined : model?.resetsAt;
     return { scope, ...(resetsAt && resetsAt > now() ? { resetsAt } : {}) };
+  }
+
+  function heldAtStart(bot: ThreadBot, selection: ModelSelection, recovering = false, chosen?: readonly ModelSelection[]): { scope: TakeoverScope; resetsAt?: number } | null {
+    const held = holdOn(selection);
+    if (!held) return null;
+    const carries = (deps.enabled?.() ?? true) && backups(bot.id, selection, held.scope, approvalModeFor(bot), chosen).length > 0;
+    return carries || (recovering && held.scope !== "signed-out") ? held : null;
   }
 
   function carryOnRows(bot: Bot, from: ModelSelection, to: ModelSelection, facts: { scope: TakeoverScope; resetsAt?: number }): CarriedOnRow[] {
@@ -331,8 +336,8 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     /** Before a turn on `selection`: when what holds that AI is already known and one of `chosen` can take the turn, that
      * backup and what held it; the backups passed over are logged. Null when the turn goes to `selection` as usual. */
     takeoverAtStart(bot: ThreadBot, selection: ModelSelection, chosen: readonly ModelSelection[]): { to: ModelSelection; scope: TakeoverScope; resetsAt?: number } | null {
-      const held = heldAtStart(bot, selection, false, chosen);
-      if (!held) return null;
+      const held = holdOn(selection);
+      if (!held || !(deps.enabled?.() ?? true)) return null;
       const { backups: usable, skipped } = weighBackups(bot.id, selection, held.scope, approvalModeFor(bot), chosen);
       passedOver(bot, selection, held.scope, skipped);
       return usable[0] ? { to: usable[0], ...held } : null;

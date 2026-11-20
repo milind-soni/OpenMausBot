@@ -363,6 +363,10 @@ describe("a new conversation once an AI is known to be at its limit", () => {
     expect(instance.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), own), "nothing holds Claude yet").toBeNull();
     refused(clock, "t1", NOW + 5 * HOUR);
     expect(instance.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), []), "only the backups given, never the installation's").toBeNull();
+    const lines: string[] = [];
+    const logged = takeover({ blockedUntil: (id) => clock.blockedUntil(id), log: (line) => lines.push(line) }).instance;
+    expect(logged.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), [on("opencode", "go-gone")]), "none usable").toBeNull();
+    expect(lines, "still says why each was left out").toEqual([expect.stringContaining("passed over backup opencode/go-gone: unknown-model")]);
     expect(instance.heldAtStart(KAI, on("claude", "claude-opus-5-5"), false, []), "nothing to carry on with").toBeNull();
     const taken = instance.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), own);
     expect(taken).toEqual({ to: on("codex", "gpt-6"), scope: "engine", resetsAt: NOW + 5 * HOUR });
@@ -389,6 +393,7 @@ describe("a new conversation once an AI is known to be at its limit", () => {
     const off = takeover({ blockedUntil: (id) => clock.blockedUntil(id), enabled: () => false }).instance;
     expect(off.heldAtStart(KAI, on("claude", "claude-opus-5-5"))).toBeNull();
     expect(off.heldAtStart(KAI, on("claude", "claude-opus-5-5"), true)).toEqual({ scope: "engine" });
+    expect(off.takeoverAtStart(KAI, on("claude", "claude-opus-5-5"), [on("codex", "gpt-6")]), "a room member's own backup too").toBeNull();
   });
 
   it("keeps one model's own limit through a restart, and a turn that works on another model leaves it held", () => {
