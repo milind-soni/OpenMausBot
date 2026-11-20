@@ -131,7 +131,7 @@ describe("the Simple composer in a bot chat", () => {
     expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["attach", "goal", "teach"]);
     expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.textContent)).toEqual(["Attach files", "Work until done", "Teach a task"]);
     const row = menu()!.querySelector("[data-menu-key='attach']")!.className.split(" ");
-    expect(row).toEqual(expect.arrayContaining(["h-[34px]", "gap-2", "px-3", "text-[15px]"]));
+    expect(row).toEqual(expect.arrayContaining(["h-8", "gap-2", "px-2", "rounded-md", "text-[14px]", "leading-5"]));
     expect(menu()!.className.split(" ")).toEqual(expect.arrayContaining(["popover-surface", "rounded-[12px]", "w-max", "min-w-[200px]", "max-w-[280px]"]));
   });
 
@@ -173,7 +173,7 @@ describe("the Simple composer in a bot chat", () => {
   it("sets the composer on plain canvas from its top edge down, with no fade above it", () => {
     render({ bot });
     const backdrop = container.querySelector("[data-composer-backdrop]")!.className.split(" ");
-    expect(backdrop).toEqual(expect.arrayContaining(["bg-app", "top-0", "-bottom-4", "-left-5", "-right-5"]));
+    expect(backdrop).toEqual(expect.arrayContaining(["bg-app", "top-0", "-bottom-4", "-left-4", "-right-4"]));
     expect(backdrop.some((name) => /gradient|blur|^from-|^to-|^opacity/.test(name))).toBe(false);
   });
 

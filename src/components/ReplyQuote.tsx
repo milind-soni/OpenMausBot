@@ -22,7 +22,7 @@ export function ReplyQuote({
   const name = replyAuthor(message, fallbackName);
   const body = (
     <>
-      <Reply size={compact ? 14 : 15} strokeWidth={1.5} aria-hidden="true" className="shrink-0 rtl:-scale-x-100" />
+      <Reply size={compact ? 14 : 15} aria-hidden="true" className="shrink-0 rtl:-scale-x-100" />
       <span className="sr-only">{t("chat.reply.replyingTo", { name })}: </span>
       <span aria-hidden="true" className="shrink-0 font-medium text-ink">{name}</span>
       <span dir="auto" className="min-w-0 flex-1 truncate">{replySnippet(peerLine(message)?.body ?? message.text ?? "")}</span>
@@ -42,7 +42,7 @@ export function ReplyQuote({
       )}
       {onClear && (
         <button type="button" onClick={onClear} aria-label={t("chat.reply.cancel")} className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-          <X size={14} strokeWidth={1.5} aria-hidden="true" />
+          <X size={14} aria-hidden="true" />
         </button>
       )}
     </div>
@@ -68,7 +68,7 @@ export function ComposerReplyStrip({
       data-composer-reply=""
       className="mb-1 flex min-w-0 items-center gap-2 rounded-2xl bg-ink/[0.06] py-1.5 ps-3 pe-1.5 text-[13px] leading-5 text-ink-secondary"
     >
-      <Reply size={15} strokeWidth={1.5} aria-hidden="true" className="shrink-0 rtl:-scale-x-100" />
+      <Reply size={15} aria-hidden="true" className="shrink-0 rtl:-scale-x-100" />
       <span className="sr-only">{who}: </span>
       <span dir="auto" className="min-w-0 flex-1 truncate">{excerpt}</span>
       {onClear && (
@@ -79,7 +79,7 @@ export function ComposerReplyStrip({
           title={t("chat.reply.cancel")}
           className="inline-flex size-6 shrink-0 items-center justify-center rounded-full text-ink-tertiary hover:bg-ink/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
-          <X size={14} strokeWidth={1.5} aria-hidden="true" />
+          <X size={14} aria-hidden="true" />
         </button>
       )}
     </div>

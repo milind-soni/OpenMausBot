@@ -171,7 +171,7 @@ export function SidebarPhoneStatusButton({
         connected ? "text-success" : "text-ink-secondary hover:text-ink",
       )}
     >
-      <Smartphone size={18} strokeWidth={1.75} />
+      <Smartphone size={18} />
       {status.kind === "unpaired" && (
         <span
           aria-hidden="true"
