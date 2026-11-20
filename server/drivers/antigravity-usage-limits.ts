@@ -14,14 +14,14 @@ import { readFile, stat } from "node:fs/promises";
 
 import type { PlanExtra, PlanFetch, PlanModelUsage, PlanWindow, PlanWindows } from "../plan-usage.ts";
 import { antigravityTokenPath } from "./antigravity-acp.ts";
-import { createProxiedFetch, refreshAntigravityAccess } from "./antigravity-account.ts";
+import { refreshAntigravityAccess } from "./antigravity-account.ts";
 import { antigravityQuotaFamily } from "./antigravity-turn-outcome.ts";
 
 /** Whether Antigravity accounts are asked for their limits at all. Off, they have no row in the usage report. */
 export const ANTIGRAVITY_USAGE_LIMITS = true;
 
 export function antigravityUserAgent(platform: NodeJS.Platform, architecture: string): string {
-  return `antigravity/hub/2.24.0 (aidev_client; os_type=${platform}; arch=${architecture}; cl=963137146)`;
+  return `antigravity/hub/2.33.0 (aidev_client; os_type=${platform}; arch=${architecture}; cl=963137146)`;
 }
 
 const DAILY_ENDPOINT = "https://daily-cloudcode-pa.googleapis.com";
@@ -250,12 +250,7 @@ export interface AntigravityUsageDeps {
   fetch: PlanFetch;
   now?: () => number;
   timeoutMs?: number;
-}
-
-/** The usage reads of an instance with a proxy of its own go through it, as its engine's traffic does. */
-export function antigravityProxied(deps: AntigravityUsageDeps, environment: Record<string, string | undefined>): AntigravityUsageDeps {
-  const proxyUrl = environment.HTTPS_PROXY || environment.HTTP_PROXY;
-  return proxyUrl ? { ...deps, fetch: createProxiedFetch(proxyUrl) } : deps;
+  proxyUrl?: string;
 }
 
 /** `work`, or a rejection once `signal` aborts: a request that ignores its signal does not hold the others' answers. */
