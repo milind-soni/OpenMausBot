@@ -3326,7 +3326,7 @@
   "permissions.chief.make": "Tornar este bot o contato principal da equipe {section}.",
   "permissions.approval.title": "Nível de aprovação",
   "permissions.approval.draftHanded": "Padrão para as conversas, rotinas e trabalhos delegados ao novo bot.",
-  "permissions.approval.helpHanded": "Padrão para novas conversas, rotinas e trabalhos delegados ao bot. O acesso total também se aplica imediatamente a todas as conversas existentes. Use “Atualizar permissões” em uma conversa para aplicar o nível atual a ela.",
+  "permissions.approval.helpHanded": "Padrão para novas conversas, rotinas e trabalhos delegados ao bot. “Pedir aprovação” e “Acesso total” também se aplicam imediatamente a todas as conversas existentes.",
   "permissions.approval.applyFull": "Aplicar acesso total a todas as conversas",
   "permissions.outbound.title": "Enviar em seu nome",
   "permissions.outbound.help": "E-mails, mensagens, publicações, convites e pagamentos por apps conectados. Ler e redigir não contam como envio. Com acesso total, os envios não pedem confirmação, a menos que você defina uma regra aqui.",

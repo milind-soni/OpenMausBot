@@ -2431,7 +2431,7 @@
   "model.noProviders": "No hay proveedores de modelos disponibles.",
   "model.noMatch": "Nada coincide con «{query}»",
   "permissions.approval.draftHanded": "Predeterminado para los hilos y las rutinas del nuevo bot y para el trabajo que se le encargue.",
-  "permissions.approval.helpHanded": "Predeterminado para los hilos nuevos, las rutinas y el trabajo que se le encargue. Acceso completo también se aplica de inmediato a todos los hilos existentes. Usa «Actualizar permisos» en un hilo para aplicar el nivel actual a esa conversación.",
+  "permissions.approval.helpHanded": "Predeterminado para los hilos nuevos, las rutinas y el trabajo que se le encargue. «Pedir aprobación» y «Acceso total» también se aplican de inmediato a todos los hilos existentes.",
   "rename.aria": "Renombrar",
   "rename.named": "Renombrar {name}",
   "rename.agent": "Renombrar el agente",

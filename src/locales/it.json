@@ -2560,7 +2560,7 @@
   "permissions.chief.make": "Rendi questo bot il contatto principale del reparto {section}.",
   "permissions.approval.title": "Livello di approvazione",
   "permissions.approval.draftHanded": "Predefinito per le conversazioni e le routine del nuovo bot e per il lavoro che gli viene affidato.",
-  "permissions.approval.helpHanded": "Predefinito per le nuove conversazioni, le routine e il lavoro che gli viene affidato. Accesso completo si applica subito anche a ogni conversazione già presente. Usa «Aggiorna permessi» su una conversazione per applicarle il livello attuale.",
+  "permissions.approval.helpHanded": "Predefinito per le nuove conversazioni, le routine e il lavoro che gli viene affidato. «Chiedi approvazione» e «Accesso completo» si applicano subito anche a ogni conversazione già presente.",
   "permissions.approval.applyFull": "Applica Accesso completo a tutte le conversazioni",
   "permissions.outbound.title": "Invii per tuo conto",
   "permissions.outbound.ask": "Chiedi ogni volta",

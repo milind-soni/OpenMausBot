@@ -114,6 +114,11 @@ export function normalizeOutboundPolicy(value: unknown): OutboundPolicy | null {
 /** What a bot without a stored policy does: ask, every time. */
 export const DEFAULT_OUTBOUND_POLICY: OutboundPolicy = { policy: "ask" };
 
+/** The rule a bot's sends follow: its own, or without one, sending freely at Full access and asking otherwise. */
+export function effectiveOutboundPolicy(rule: OutboundPolicy | undefined, fullAccess: boolean): OutboundPolicy {
+  return rule ?? (fullAccess ? { policy: "allow" } : DEFAULT_OUTBOUND_POLICY);
+}
+
 /** Drops from a stored bot's rule what `normalizeOutboundPolicy` drops, so every copy of one rule reads the same; true
  * when it changed. A rule that is not one is left as it is, and asks. */
 export function trimOutboundPolicy(bot: { outbound?: OutboundPolicy }): boolean {

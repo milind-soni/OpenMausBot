@@ -1303,7 +1303,7 @@
   "model.noMatch": "Nichts passt zu „{query}“",
   "model.loadingModels": "{name}-Modelle werden geladen…",
   "permissions.approval.draftHanded": "Standard für Unterhaltungen und Routinen des neuen Bots und für Arbeit, die ihm übergeben wird.",
-  "permissions.approval.helpHanded": "Standard für neue Unterhaltungen, Routinen und Arbeit, die ihm übergeben wird. Vollzugriff gilt außerdem sofort für alle bestehenden Unterhaltungen. Mit „Berechtigungen aktualisieren“ in einer Unterhaltung wendest du die aktuelle Stufe darauf an.",
+  "permissions.approval.helpHanded": "Standard für neue Unterhaltungen, Routinen und Arbeit, die ihm übergeben wird. „Nach Freigabe fragen“ und „Voller Zugriff“ gelten außerdem sofort für alle bestehenden Unterhaltungen.",
   "rename.aria": "Umbenennen",
   "rename.named": "{name} umbenennen",
   "rename.agent": "Agent umbenennen",

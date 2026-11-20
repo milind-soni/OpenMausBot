@@ -2819,7 +2819,7 @@
   "permissions.chief.make": "이 봇을 {section} 부서의 대표 연락 창구로 지정해요.",
   "permissions.approval.title": "승인 수준",
   "permissions.approval.draftHanded": "새 봇의 스레드, 루틴, 이 봇에게 맡긴 작업에 쓰는 기본값이에요.",
-  "permissions.approval.helpHanded": "새 스레드, 루틴, 이 봇에게 맡긴 작업의 기본값이에요. 전체 접근은 기존 스레드 모두에도 바로 적용돼요. 스레드에서 권한 새로고침을 쓰면 그 대화에 현재 수준이 적용돼요.",
+  "permissions.approval.helpHanded": "새 스레드, 루틴, 이 봇에게 맡긴 작업의 기본값이에요. 승인 요청과 전체 접근은 기존 스레드 모두에도 바로 적용돼요.",
   "permissions.approval.applyFull": "모든 스레드에 전체 접근 적용",
   "permissions.outbound.title": "대신 보내기",
   "permissions.outbound.ask": "매번 묻기",

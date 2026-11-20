@@ -3515,7 +3515,7 @@
   "permissions.chief.make": "Make this bot the primary contact for the {section} department.",
   "permissions.approval.title": "Approval level",
   "permissions.approval.draftHanded": "Default for the new bot's threads, routines and work handed to it.",
-  "permissions.approval.helpHanded": "Default for new threads, routines and work handed to it. Full access also applies at once to every existing thread. Use Refresh permissions on a thread to apply the current level to that conversation.",
+  "permissions.approval.helpHanded": "Default for new threads, routines and work handed to it. Ask for approval and Full access also apply at once to every existing thread.",
   "permissions.approval.applyFull": "Apply Full access to all threads",
   "permissions.outbound.title": "Sending on your behalf",
   "permissions.outbound.help": "Emails, messages, posts, invites, and payments through connected apps. Reading and drafting don't count as sending. Full access sends without asking unless you set a rule here.",

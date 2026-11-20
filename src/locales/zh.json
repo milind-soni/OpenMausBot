@@ -3182,7 +3182,7 @@
   "permissions.chief.make": "将这个机器人设为 {section} 部门的主要联系人。",
   "permissions.approval.title": "批准层级",
   "permissions.approval.draftHanded": "新建机器人的对话、例行任务以及转交给它的工作的默认值。",
-  "permissions.approval.helpHanded": "新建对话、例行任务以及转交给它的工作的默认值。完全访问权限也会立即应用到所有现有对话。如需将当前层级应用到某段对话，请在对话中使用「刷新权限」。",
+  "permissions.approval.helpHanded": "新建对话、例行任务以及转交给它的工作的默认值。「请求批准」和「完全访问」也会立即应用到所有现有对话。",
   "permissions.approval.applyFull": "对所有对话应用完全访问权限",
   "permissions.outbound.title": "代你发送内容",
   "permissions.outbound.ask": "每次都询问",
