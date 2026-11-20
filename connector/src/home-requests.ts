@@ -77,6 +77,9 @@ export class RequestGate extends Transform {
       if (this.#body && this.#bodyBytes + rest.length <= MAX_RECORDED_BODY) {
         this.#body.push(rest);
         this.#bodyBytes += rest.length;
+      } else if (this.#body) {
+        // Too large to record: drop what was kept, so a cut-off (or gapped) body is never audited as the whole one.
+        this.#body = null;
       }
       this.push(rest);
       if (this.#remaining === 0) this.#ended();
