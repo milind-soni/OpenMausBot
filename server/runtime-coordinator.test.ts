@@ -183,6 +183,15 @@ describe("needsInputQuestion", () => {
     expect(needsInputQuestion("")).toBeUndefined();
     expect(needsInputQuestion("Done.")).toBeUndefined();
   });
+
+  it("reads a NEEDS INPUT line that only says there is nothing to ask, in any language, as no question", () => {
+    for (const none of ["无", "无。", "没有", "无需", "none", "None.", "N/A", "nothing", "nil", "-", "なし", "없음", "нет", "ninguna", "aucune", "keine"]) {
+      expect(needsInputQuestion(`Imported all 8 guides.\nNEEDS INPUT: ${none}`), none).toBeUndefined();
+    }
+    expect(needsInputQuestion("Imported all 8 guides.\nNEEDS INPUT: 无\nDefault: 结单")).toBeUndefined();
+    expect(needsInputQuestion("NEEDS INPUT: None of the regions work; which one should I try?")).toBe("None of the regions work; which one should I try?");
+    expect(needsInputQuestion("NEEDS INPUT: 无法登录，用哪个账号？")).toBe("无法登录，用哪个账号？");
+  });
 });
 
 describe("RuntimeCoordinator: the requesting turn and its tree", () => {
@@ -803,6 +812,18 @@ describe("RuntimeCoordinator: the run adapter", () => {
     expect(next).toContain('The person answered: "Use the staging account".');
     await flush();
     expect(w.coordinator.node(node.id)).toMatchObject({ status: "completed", result: "builder done" });
+  });
+
+  it("completes a turn whose NEEDS INPUT line says there is nothing to ask, and reports it once", async () => {
+    const w = world((node) => node.botId === "builder" ? { ok: true, text: "Imported all 8 guides.\nNEEDS INPUT: 无" } : undefined);
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Import the guides");
+    w.coordinator.tick(); await flush();
+    w.coordinator.tick(); await flush();
+    expect(w.host.parks).toHaveLength(0);
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "completed", result: "Imported all 8 guides.\nNEEDS INPUT: 无" });
+    expect(w.host.runs.filter(run => run.node.id === node.id)).toHaveLength(1);
+    expect(w.host.reports).toHaveLength(1);
+    expect(w.host.reports[0]).toMatchObject({ child: { id: node.id, status: "completed" } });
   });
 
   it("resumes the requester with a teammate's NEEDS INPUT question while its other teammate still works", async () => {

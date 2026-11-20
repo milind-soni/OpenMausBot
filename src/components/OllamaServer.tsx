@@ -3,7 +3,7 @@ import { Loader2 } from "lucide-react";
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { keySaved } from "@/lib/product-events";
-import { addedServers } from "@/lib/openai-compat-endpoints";
+import { addedServers, isAddedServer } from "@/lib/openai-compat-endpoints";
 import type { OllamaStatus } from "../../shared/local-model";
 import { KEY_FIELD } from "./keys/KeyRow";
 import { OllamaStatusLine } from "./OllamaStatusLine";
@@ -17,7 +17,7 @@ const sameBase = (a: string | undefined, b: string) => a?.trim().replace(/\/+$/,
 
 /** Finds Ollama on this computer, or at an address someone enters, and adds it in one click: no key, no URL to type. */
 export function OllamaServer({ visible }: { visible: boolean }) {
-  const { state, dispatch, refreshInstances } = useStore();
+  const { state, dispatch, refreshInstances, refreshModels } = useStore();
   const [address, setAddress] = useState("");
   const [status, setStatus] = useState<OllamaStatus | null>(null);
   const [checking, setChecking] = useState(false);
@@ -43,8 +43,21 @@ export function OllamaServer({ visible }: { visible: boolean }) {
     check("");
   }, [visible, check]);
 
+  // The added Ollama keeps the list it got when added; a model pulled since shows only in the check until that list reloads.
+  const compatUrl = state.config?.openaiCompat?.url;
+  const reloaded = useRef<OllamaStatus | null>(null);
+  useEffect(() => {
+    if (status?.state !== "ready" || reloaded.current === status) return;
+    reloaded.current = status;
+    const base = ollamaBaseUrl(status.url);
+    const stale = state.instances.filter((instance) =>
+      (isAddedServer(instance) ? instance.url === base : instance.instanceId === "openaiCompat" && sameBase(compatUrl, base))
+      && status.models.some((model) => !instance.models.options.some((option) => option.id === model.name)));
+    for (const instance of stale) void refreshModels(instance.instanceId).catch(() => {});
+  }, [status, state.instances, compatUrl, refreshModels]);
+
   const target = status ? ollamaBaseUrl(status.url) : null;
-  const present = Boolean(target && (addedServers(state.instances).some((server) => server.url === target) || sameBase(state.config?.openaiCompat?.url, target)));
+  const present = Boolean(target && (addedServers(state.instances).some((server) => server.url === target) || sameBase(compatUrl, target)));
   const canAdd = Boolean(target && !present && !busy && !checking && (status?.state === "ready" || status?.state === "no-models"));
 
   const add = () => {

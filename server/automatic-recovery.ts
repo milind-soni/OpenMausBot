@@ -12,6 +12,12 @@ export function startupBackups(bot: { fallback?: Backup[] }, recovery?: { enable
   return recovery?.enabled && recovery.backup ? [recovery.backup] : [];
 }
 
+/** Every backup a limited bot may be moved to: its own list, then the installation's one backup, which counts only
+ * while Automatic recovery is on (the backup stays saved while it is off). */
+export function chosenBackups(bot: { fallback?: Backup[] } | null | undefined, recovery?: { enabled: boolean; backup?: Backup }): Backup[] {
+  return [...(bot?.fallback ?? []), ...(recovery?.enabled && recovery.backup ? [recovery.backup] : [])];
+}
+
 /** An automatic switch must not strand the task without its tools or move its filesystem to another machine. A USB
  * phone is not one of those tools: only Codex and Pi drive one, Claude offers it on every desktop, and no Cloud has a
  * USB port, so counting it left a limited Claude bot with no backup but those two. */

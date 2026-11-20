@@ -7,6 +7,7 @@ import { join } from "node:path";
 import type { InstanceConfigMap } from "./contracts.ts";
 import { resolveClaudeConfigDir } from "./drivers/claude.ts";
 import { codexHome } from "./drivers/codex-identity.ts";
+import { codexHasCredits } from "./codex-credits.ts";
 import { antigravityPlanUsage } from "./drivers/antigravity-usage-limits.ts";
 import { harnessHome, sealedFixture } from "./env-path.ts";
 
@@ -47,19 +48,15 @@ export interface PlanWindows {
   weekly: PlanWindow;
   extra: PlanExtra[];
   models: PlanModelUsage[];
+  codexCredits?: true; // Codex only: the ChatGPT account has credits to spend past a full window, or has no limit
 }
 
-export interface PlanProviderRow {
+export interface PlanProviderRow extends PlanWindows {
   id: string;
   name: string;
   driver: string;
-  plan: string | null;
   ok: boolean;
   error: string | null;
-  fiveHour: PlanWindow;
-  weekly: PlanWindow;
-  extra: PlanExtra[];
-  models: PlanModelUsage[];
 }
 
 export interface PlanUsageReport {
@@ -203,7 +200,7 @@ export function parseCodexUsage(body: unknown): PlanWindows {
   const extra = [...assigned.extra];
   if (root) collectCodexNamedLimits(root, models, extra);
   sortModelWindows(models);
-  return { ...assigned, extra, models, plan: planLabel(root?.plan_type ?? root?.plan) };
+  return { ...assigned, extra, models, plan: planLabel(root?.plan_type ?? root?.plan), ...(codexHasCredits(root?.credits) ? { codexCredits: true as const } : {}) };
 }
 
 export function parseGrokUsage(credits: unknown, billing?: unknown, settings?: unknown): PlanWindows {
@@ -913,7 +910,7 @@ function okRow(account: PlanAccount, windows: PlanWindows): PlanProviderRow {
     fiveHour: windows.fiveHour,
     weekly: windows.weekly,
     extra: windows.extra,
-    models: windows.models,
+    models: windows.models, ...(windows.codexCredits ? { codexCredits: true as const } : {}),
   };
 }
 

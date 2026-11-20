@@ -9,6 +9,7 @@ import {
   connectorFileScope, localFileReferences, openBotFile, prepareConnectorFiles, stageConnectorFiles, withMissingFileHint,
   type BotFileScope, type FileStagingDeps,
 } from "./connector-files.ts";
+import { UploadServiceOutdatedError } from "./composio-files.ts";
 import { outboundCard } from "./outbound-requests.ts";
 
 const call = <A,>(name: string, args: A, id = 1) => ({ jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } });
@@ -140,6 +141,16 @@ describe("connected-app file arguments", () => {
     const staged = await stageConnectorFiles(multi({ tool_slug: "GOOGLEDRIVE_UPLOAD_FILE", arguments: { file_to_upload: "/tmp/report.pdf" } }), value);
     expect("refusal" in staged && staged.refusal).toContain("uploading report.pdf for Google Drive failed (connected-apps service answered HTTP 503)");
     expect("refusal" in staged && staged.refusal).toContain("do not keep retrying");
+  });
+
+  it("tells the bot not to retry when the connected-apps service is too old to take uploads", async () => {
+    const { value } = deps({ requestUpload: async () => { throw new UploadServiceOutdatedError(); } });
+    const staged = await stageConnectorFiles(multi({ tool_slug: "GOOGLEDRIVE_UPLOAD_FILE", arguments: { file_to_upload: "/tmp/report.pdf" } }), value);
+    const refusal = "refusal" in staged ? staged.refusal : "";
+    expect(refusal).toContain("uploading report.pdf for Google Drive failed: the connected-apps service is out of date");
+    expect(refusal).toContain("Nothing was written to Google Drive");
+    expect(refusal).toContain("Trying again will not help");
+    expect(refusal).not.toContain("try the call once more");
   });
 
   it("puts the bytes without following a redirect", async () => {

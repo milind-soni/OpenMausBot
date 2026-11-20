@@ -12,6 +12,8 @@ import { json, readBody } from "../harness/http.ts";
 import { IMPORTED_SKILLS_DIR, importedSkillsFor } from "../imported-skills.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { thisMachine } from "../setup-import.ts";
+import { Store } from "../store.ts";
+import { grokSlice } from "../testing/grok-cache.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { createSetupImportRoutes } from "./setup-import.ts";
 import { dispatchRoutes } from "./table.ts";
@@ -60,6 +62,7 @@ function fakeGrokMove(available = true) {
 async function serve({ local = true, home = fixtureHome(), dataDir, grokMove = fakeGrokMove(false).move }: { local?: boolean; home?: string; dataDir?: string; grokMove?: GrokMove } = {}) {
   const cfg = { mcpServers: {} } as Pick<AppConfig, "mcpServers" | "features">;
   const bot = { id: `bot-${randomUUID().slice(0, 8)}` };
+  const store = new Store(() => ({ instanceId: "fixture", model: "fixture-model" }));
   let busy = false;
   const routes = [createSetupImportRoutes({
     local,
@@ -67,6 +70,7 @@ async function serve({ local = true, home = fixtureHome(), dataDir, grokMove = f
     mcpConfigBusy: { get: () => busy, set: (value) => { busy = value; } },
     mcpPolicyRefusal: () => undefined,
     persistMcpServers: (next) => { cfg.mcpServers = next; },
+    store,
     machine: () => ({ ...thisMachine(), home, platform: "darwin", env: {} }),
     ...(dataDir ? { dataDir } : {}),
     grokMove,
@@ -86,7 +90,7 @@ async function serve({ local = true, home = fixtureHome(), dataDir, grokMove = f
     headers: { "x-test-auth": options.auth ?? "owner", ...(options.body === undefined ? {} : { "content-type": options.type ?? "application/json" }) },
     ...(options.body === undefined ? {} : { body: typeof options.body === "string" ? options.body : JSON.stringify(options.body) }),
   });
-  return { call, cfg, bot };
+  return { call, cfg, bot, store };
 }
 
 describe("the setup import routes", () => {
@@ -196,5 +200,72 @@ describe("the setup import routes", () => {
     expect((await call("POST", "/api/setup-import", { body: { skills: true, instructions: true } })).status).toBe(400);
     expect((await call("POST", "/api/setup-import", { body: { skills: "yes" } })).status).toBe(400);
     expect((await call("POST", "/api/setup-import", { body: "skills=true", type: "text/plain" })).status).toBe(415);
+  });
+});
+
+describe("a moved Bot's chat from the Grok Bot app", () => {
+  const HISTORY = "/api/setup-import/grok/history";
+  const TITLE = "Chat from Grok Bot";
+  const at = (minute: number) => Date.UTC(2026, 7, 11, 9, minute);
+  function grokHome(rows = [{ id: "d0bdfa13-0000-4000-8000-000000000003", name: "Drew" }]) {
+    const home = fixtureHome();
+    const put = (path: string, text: string) => {
+      mkdirSync(dirname(join(home, path)), { recursive: true });
+      writeFileSync(join(home, path), text);
+    };
+    put(grokSlice("roster.last-roster"), JSON.stringify({ schemaVersion: 1, value: { rows } }));
+    put(grokSlice(`transcript.replicas.${rows[0]!.id}`), JSON.stringify({ schemaVersion: 1, value: { entries: [
+      { kind: "message", seq: 1, id: "t1u", role: "user", content: "Draft the launch email", timestampMs: at(0) },
+      { kind: "send-message", seq: 3, id: "t1s1", message: { type: "text", content: "Here's a draft." }, timestampMs: at(1) },
+      { kind: "send-message", seq: 4, id: "t1s2", message: { type: "widget", widget: { prompt: "Send it?", options: [{ label: "Yes", value: "y" }] } }, respondedValue: "y", timestampMs: at(2) },
+    ] } }));
+    return home;
+  }
+  const threads = (store: Store, botId: string) => (store.bot(botId)?.tasks ?? []).filter((task) => task.title === TITLE);
+
+  it("brings it into one new thread on the bot, as a record that starts nothing, and a retry adds nothing", async () => {
+    const { call, store } = await serve({ home: grokHome() });
+    const bot = store.createBot({ name: "Drew" }, { seedMessages: false });
+    const first = await call("POST", HISTORY, { body: { botId: bot.id, grokName: "Drew" } });
+    expect(first.headers.get("cache-control")).toBe("no-store");
+    expect(await first.json()).toEqual({ messages: 3 });
+    const [thread] = threads(store, bot.id);
+    expect(thread).toMatchObject({ busy: false, activity: "idle", unread: false });
+    expect(store.messagesFor(thread!.threadId).map(({ role, text, at: when }) => [role, text, when])).toEqual([
+      ["user", "Draft the launch email", at(0)], ["bot", "Here's a draft.", at(1)], ["bot", "Send it?\nChoices: Yes\nAnswer: Yes", at(2)],
+    ]);
+
+    expect(await (await call("POST", HISTORY, { body: { botId: bot.id, grokName: "Drew" } })).json()).toEqual({ messages: 3 });
+    expect(threads(store, bot.id)).toHaveLength(1);
+    expect(store.messagesFor(thread!.threadId)).toHaveLength(3);
+  });
+
+  it("says why no chat came over, and makes no thread then", async () => {
+    const noApp = await serve();
+    const quiet = noApp.store.createBot({ name: "Drew" }, { seedMessages: false });
+    expect(await (await noApp.call("POST", HISTORY, { body: { botId: quiet.id, grokName: "Drew" } })).json()).toEqual({ reason: "noApp" });
+    expect(threads(noApp.store, quiet.id)).toEqual([]);
+
+    const twins = await serve({ home: grokHome([{ id: "1731b8e0-0000-4000-8000-000000000001", name: "New Bot" }, { id: "28ae2014-0000-4000-8000-000000000002", name: "New Bot" }]) });
+    const twin = twins.store.createBot({ name: "New Bot" }, { seedMessages: false });
+    expect(await (await twins.call("POST", HISTORY, { body: { botId: twin.id, grokName: "New Bot" } })).json()).toEqual({ reason: "ambiguous" });
+    expect(threads(twins.store, twin.id)).toEqual([]);
+    expect(await (await twins.call("POST", HISTORY, { body: { botId: twin.id, grokName: "New Bot 1731b8e0" } })).json()).toEqual({ messages: 3 });
+  });
+
+  it("answers only the owner's own loopback on the desktop app, and only a POST naming a bot that is here", async () => {
+    const local = await serve({ home: grokHome() });
+    const bot = local.store.createBot({ name: "Drew" }, { seedMessages: false });
+    const body = { botId: bot.id, grokName: "Drew" };
+    for (const auth of ["paired", "service"]) expect((await local.call("POST", HISTORY, { auth, body })).status, auth).toBe(403);
+    const hosted = await serve({ local: false, home: grokHome() });
+    const hostedBot = hosted.store.createBot({ name: "Drew" }, { seedMessages: false });
+    expect((await hosted.call("POST", HISTORY, { body: { ...body, botId: hostedBot.id } })).status).toBe(403);
+    expect((await local.call("GET", HISTORY)).status).toBe(405);
+    expect((await local.call("POST", HISTORY, { body: JSON.stringify(body), type: "text/plain" })).status).toBe(415);
+    for (const wrong of [{ botId: bot.id }, { ...body, grokName: "  " }, { ...body, extra: true }]) expect((await local.call("POST", HISTORY, { body: wrong })).status).toBe(400);
+    expect((await local.call("POST", HISTORY, { body: { ...body, botId: "no-such-bot" } })).status).toBe(404);
+    expect(threads(local.store, bot.id)).toEqual([]);
+    expect(threads(hosted.store, hostedBot.id)).toEqual([]);
   });
 });

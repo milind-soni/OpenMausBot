@@ -93,7 +93,7 @@ export function routeDirectTurn(
   bot: { replyStyle?: ReplyStyle; modelSelection: ModelSelection },
   task: { modelSelection?: ModelSelection; usage?: { context?: { tokens: number } } },
   path: readonly { role: string; kind?: string }[],
-  message: { text: string; images: readonly unknown[] },
+  message: { text: string; images: readonly unknown[]; videos?: readonly unknown[] },
   instance: { models?: ModelCatalog; quickModelsUsable?: () => boolean; adapter: { capabilities: { effortLevels?: readonly EffortLevel[] } } },
   automated: boolean,
   refused?: ReadonlySet<string>,
@@ -105,7 +105,7 @@ export function routeDirectTurn(
     automated,
     signals: {
       text: message.text,
-      attachments: message.images.length,
+      attachments: message.images.length + (message.videos?.length ?? 0),
       priorTurnUsedTools: lastAsk >= 0 && path.slice(lastAsk + 1).some((m) => m.kind === "activity"),
     },
     model: bot.modelSelection.model,

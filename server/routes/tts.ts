@@ -92,11 +92,13 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
         req.resume();
         return json(res, 400, { error: "content-type must be audio/wav" });
       }
-      // DeepSeek voice hears with DeepSeek alone; otherwise Fish Audio first, then the person's own ElevenLabs key
-      // (never the plan's included voice).
-      const deepseekKey = tts.voiceProvider(cfg) === "deepseek" ? (cfg.deepseek?.key ?? "") : null;
-      const key = deepseekKey === null ? cfg.tts?.fishKey : undefined;
-      const own = key || deepseekKey !== null ? null : voiceCredential(cfg.tts?.key);
+      // Scribe when the person chose it and their own ElevenLabs key is saved; else DeepSeek voice hears with DeepSeek
+      // alone; otherwise Fish Audio first, then the person's own ElevenLabs key (never the plan's included voice).
+      const ownEleven = voiceCredential(cfg.tts?.key);
+      const scribeChosen = cfg.tts?.hearWith === "elevenlabs" && ownEleven !== null && !ownEleven.included;
+      const deepseekKey = !scribeChosen && tts.voiceProvider(cfg) === "deepseek" ? (cfg.deepseek?.key ?? "") : null;
+      const key = deepseekKey === null && !scribeChosen ? cfg.tts?.fishKey : undefined;
+      const own = key || deepseekKey !== null ? null : ownEleven;
       const eleven = own?.included ? null : own;
       if (deepseekKey === "") {
         req.resume();
@@ -130,7 +132,7 @@ export function createTtsRoutes(deps: TtsRouteDeps): RouteHandler {
       try {
         const text = deepseekKey
           ? await deepseek.transcribe(audio, deepseekKey, controller.signal)
-          : key ? await fish.transcribe(audio, mime, key) : await elevenlabs.transcribe(audio, mime, eleven!.token, eleven!.api);
+          : key ? await fish.transcribe(audio, mime, key) : await elevenlabs.transcribe(audio, mime, eleven!.token, eleven!.api, scribeChosen ? cfg.tts?.hearLanguage : undefined);
         if (controller.signal.aborted) return;
         return json(res, 200, { text });
       } catch (e) {

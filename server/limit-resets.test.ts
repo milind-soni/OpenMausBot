@@ -113,6 +113,30 @@ describe("engineLimitFromUsage", () => {
     expect(engineLimitFromUsage(codex([10, NOW + HOUR], [97, NOW + 90 * HOUR]))).toMatchObject({ blocked: false, window: "weekly", usedPercent: 97 });
   });
 
+  it("does not hold Codex at a full window while its ChatGPT credits can pay for more", () => {
+    const withCredits = (credits: unknown) => row("codex", "codex", parseCodexUsage({
+      plan_type: "plus",
+      rate_limit: {
+        primary_window: { used_percent: 100, limit_window_seconds: 5 * 3600, reset_at: Math.floor((NOW + HOUR) / 1000) },
+        secondary_window: { used_percent: 50, limit_window_seconds: 7 * 86400, reset_at: Math.floor((NOW + 90 * HOUR) / 1000) },
+      },
+      ...(credits === undefined ? {} : { credits }),
+    }));
+    const resetsAt = Math.floor((NOW + HOUR) / 1000) * 1000;
+    expect(engineLimitFromUsage(withCredits({ has_credits: true, unlimited: false, balance: "12.50" }))).toMatchObject({ blocked: false, window: "5-hour", usedPercent: 100, resetsAt });
+    expect(engineLimitFromUsage(withCredits({ has_credits: false, unlimited: true, balance: null }))).toMatchObject({ blocked: false, usedPercent: 100 });
+    expect(engineLimitFromUsage(withCredits({ has_credits: false, unlimited: false, balance: "0" }))).toMatchObject({ blocked: true, resetsAt });
+    expect(engineLimitFromUsage(withCredits({ has_credits: true, unlimited: false, balance: "0" }))).toMatchObject({ blocked: true });
+    for (const odd of [undefined, null, "yes", 1, [], {}, { has_credits: "true", unlimited: 1 }, { has_credits: null, unlimited: null }]) {
+      expect(engineLimitFromUsage(withCredits(odd))).toMatchObject({ blocked: true, resetsAt });
+    }
+  });
+
+  it("holds Claude at a full window as before, whatever credits fields it carries", () => {
+    const claudeFull = row("claude", "claude", { ...parseClaudeUsage({ five_hour: { utilization: 100, resets_at: iso(NOW + 2 * HOUR) } }), codexCredits: true });
+    expect(engineLimitFromUsage(claudeFull)).toMatchObject({ blocked: true });
+  });
+
   it("has nothing to say for a row that could not be read, and no time for a row without windows", () => {
     expect(engineLimitFromUsage({ ...claude([1, NOW], [1, NOW]), ok: false, error: "Sign in again in Claude" })).toBeNull();
     expect(engineLimitFromUsage(row("claude", "claude", parseClaudeUsage({})))).toMatchObject({ usedPercent: null, resetsAt: null, blocked: false, windows: [] });

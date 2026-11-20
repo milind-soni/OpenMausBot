@@ -20,15 +20,20 @@ export interface AcpRequestSteer {
   supported(initializeResult: unknown): boolean;
 }
 
-/** A second `session/prompt` joins the running turn (Devin, Qwen Code). */
+/** A second `session/prompt` joins the running turn. */
 export interface AcpPromptSteer {
   kind: "prompt";
   /** Whether this process's `initialize` result says a second prompt joins the running turn. */
-  supported(initializeResult: unknown): boolean;
+  supported?(initializeResult: unknown): boolean;
+  capability?: string;
+  /** For an agent that does not announce the capability: whether this process's environment opts in. */
+  enabled?(env: Record<string, string | undefined>): boolean;
   /** False when the agent never answers the steer prompt (Qwen Code 1.0.0-preview.2): the turn ends with its own prompt. */
   answers?: false;
   /** The run a prompt reply ends; replies of one run report their usage once. */
   run?(response: unknown): string | undefined;
+  /** A steer reply that only reports its message was taken into the running turn; the turn's own reply is the outcome. */
+  folded?(response: unknown): boolean;
 }
 
 export type AcpSteerSupport = AcpCommandSteer | AcpRequestSteer | AcpPromptSteer;
@@ -167,11 +172,18 @@ export function acpPromptSteering(running: () => boolean, send: (text: string) =
   return steering;
 }
 
+/** The replies that decide a turn: its own, then each steer's, without those that only report the message was taken in. */
+export function turnAnswers(support: AcpSteerSupport | undefined, result: any, replies: readonly unknown[] = []): any[] {
+  const folded = support && "folded" in support ? support.folded : undefined;
+  return [result, ...replies.filter((reply) => !folded?.(reply))];
+}
+
 export interface AcpSteerIo {
   /** The turn's own prompt is out, nothing stopped it, and the session is live. */
   open(): boolean;
   commands(): ReadonlySet<string> | undefined;
   initializeResult(): any;
+  env: Record<string, string | undefined>;
   prompt(text: string): Promise<unknown>;
   extension(method: string, text: string): Promise<unknown>;
 }
@@ -182,7 +194,9 @@ export function turnSteering(support: AcpSteerSupport, io: AcpSteerIo): AcpTurnS
       (text) => io.extension(support.method, text));
   }
   if ("kind" in support && support.kind === "prompt") {
-    return acpPromptSteering(() => io.open() && support.supported(io.initializeResult()), io.prompt, support.answers !== false);
+    const enabled = () => support.enabled?.(io.env) ?? support.supported?.(io.initializeResult())
+      ?? (io.initializeResult()?.agentCapabilities?._meta?.[support.capability ?? ""] === true);
+    return acpPromptSteering(() => io.open() && enabled(), io.prompt, support.answers !== false);
   }
   return acpTurnSteering(support, () => io.open() && io.commands()?.has(support.command) === true, io.prompt);
 }

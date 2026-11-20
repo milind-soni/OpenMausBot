@@ -6,6 +6,7 @@ import type { Message } from "./store.ts";
 import type { DigestFiles, DigestTool, HookCoverage, TurnDigest } from "../shared/digest.ts";
 import { redactSecretsInText } from "../shared/redact.ts";
 import { toolIdentity } from "../shared/tool-name.ts";
+import { toolResultPrefix } from "./tool-results.ts";
 export type { DigestFiles, DigestTool, HookCoverage, TurnDigest } from "../shared/digest.ts";
 
 /** Evidence is observed, never inferred from a provider's brand. */
@@ -107,7 +108,7 @@ function firstSentence(reply: string): string {
   const flat = reply.replace(/\s+/g, " ").trim();
   const end = flat.search(/[.!?](\s|$)/);
   const sentence = end === -1 ? flat : flat.slice(0, end + 1);
-  return sentence.slice(0, REPLY_CHARS);
+  return toolResultPrefix(sentence, REPLY_CHARS);
 }
 
 export function renderDigest(d: TurnDigest): string {

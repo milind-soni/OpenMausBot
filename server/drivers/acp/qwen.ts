@@ -8,6 +8,7 @@ import { qualifiedModelLabel } from "../../contracts.ts";
 import { harnessHome } from "../../env-path.ts";
 import { parseQwenLogLine } from "./quiet-status.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
+import { acpBackgroundWork } from "./background.ts";
 import { createAcpDriver, type AcpConfig, type AcpSupport } from "./core.ts";
 import { discoverAcpModels } from "./custom-model-catalog.ts";
 import { execCli } from "../../procs.ts";
@@ -302,7 +303,7 @@ const support: AcpSupport = {
     // off, the subagent finishes inside the turn and its result reaches the chat.
     env.QWEN_ENABLE_AGENT_SESSIONS ??= "0";
   },
-  backgroundWork: { timeoutMs: 30_000 },
+  backgroundWork: (instanceId) => acpBackgroundWork(["qwenAgent", instanceId], 30_000),
   statusLog: { path: qwenDebugLogPath, parse: parseQwenLogLine },
   steer: QWEN_STEER,
 };

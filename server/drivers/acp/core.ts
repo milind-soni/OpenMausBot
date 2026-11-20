@@ -20,8 +20,8 @@ import { AcpBrowserAuth, acpBrowserAuthInstanceSurface, type AcpBrowserSignInSpe
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { boxAudienceKey, describeSpawnFailure, execCli, killCliTree, sharedBoxScope, spawnCli } from "../../procs.ts"; import { stopEngineTree, stopEngineTrees } from "../../engine-stop.ts";
-import { runAcpOneShot } from "./background-text.ts"; import { acpBackgroundWork } from "./background.ts";
-import { acpCapabilities } from "./capabilities.ts";
+import { runAcpOneShot } from "./background-text.ts"; import type { AcpBackgroundWork } from "./background-work.ts";
+import { acpCapabilities } from "./capabilities.ts"; import { readAcpMediaLinks } from "./media-links.ts";
 import { acpNativeLogMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import {
@@ -31,7 +31,7 @@ import {
 import { acpMissingSession } from "./rpc-error.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { promptTokenUsage } from "./prompt-usage.ts";
-import { advertisedCommands, turnSteering, type AcpSteerSupport } from "./steer.ts";
+import { advertisedCommands, turnAnswers, turnSteering, type AcpSteerSupport } from "./steer.ts";
 import { pickSessionModel, SessionModelControls, type AcpModelSelection } from "./session-model-controls.ts";
 import { notThisCli, versionFromProbe } from "./version-probe.ts"; import { engineHomes } from "../../engine-homes/engine-homes.ts"; import { apiKeyAccount } from "./api-key-account.ts";
 
@@ -160,7 +160,7 @@ export interface AcpSupport extends AcpDriverHooks {
   /** False when this engine cannot run memory upkeep's one-shot text call cleanly; oneShotFolder holds a one-shot's folder. */
   backgroundText?: false; oneShotFolder?(): Promise<string>;
   /** Work the agent goes on with after its turn: ended at Stop and when it wakes a turn between ours. */
-  backgroundWork?: { timeoutMs?: number };
+  backgroundWork?: AcpBackgroundWork | ((instanceId: string) => AcpBackgroundWork);
   /** Mutate the child env in place. `instanceEnvironment` tells a key put there on purpose from one
    *  riding along in the server's own env. */
   transformEnv?(
@@ -192,7 +192,7 @@ export interface AcpSupport extends AcpDriverHooks {
   resendsReasoningReply?: boolean;
   /** Threads with the same spawn contract run their sessions in one process (OpenCode 1.19: about 100 MB a session
    * instead of about 450 MB a process), up to SHARED_SESSIONS_MAX. */
-  shareProcess?: boolean;
+  shareProcess?: boolean; /** mistral-vibe 3.1.2 loads its live session as a second open copy, and both stream every reply. */ closeBeforeLiveLoad?: boolean;
   /** Route workspace file access through ACP so edits retain approval cards. */
   clientFileSystem?: boolean;
   /** Additional server-owned directories this turn may read; writes remain confined to cwd. */
@@ -342,7 +342,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
     async create(input: DriverCreateInput<AcpConfig>): Promise<ProviderInstance> {
       const { instanceId, config } = input;
-      const backgroundWork = support.backgroundWork && acpBackgroundWork([DRIVER_KIND, instanceId], support.backgroundWork.timeoutMs);
+      const backgroundWork = typeof support.backgroundWork === "function" ? support.backgroundWork(instanceId) : support.backgroundWork;
       const childEnv = (activeConfig = config) => {
         const env: Record<string, string | undefined> = {
           ...process.env,
@@ -416,7 +416,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const pending = backgroundEnds.get(threadId);
         if (pending) return pending;
         const ended = backgroundWork.end(threadId, session, (method, params, timeoutMs) => session.host.request(null, method, params, timeoutMs));
-        const cleanup = ended.finally(() => backgroundEnds.delete(threadId));
+        const cleanup = ended.then(async (complete) => {
+          if (complete === false) await endUncancelled(threadId, session);
+        }).finally(() => backgroundEnds.delete(threadId));
         backgroundEnds.set(threadId, cleanup);
         return cleanup;
       };
@@ -586,7 +588,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         for (const finish of current.asks.values()) finish("cancel", "system");
         session.acp.failAll(new Error("turn settled"));
       // Detach before the final events: a listener may start the next turn synchronously.
-        session.current = null;
+        session.current = null; session.settledAt = Date.now();
         active.delete(threadId); if (current.state.stopped) endBackground(threadId, session);
         const end = endTurn(current, ok, stopReason, support.displayName);
         if (end.error) emit({ ...base(threadId, current.turnId), type: "runtime.error", ...end.error });
@@ -787,7 +789,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             current.state.startupActivity = true; if (current.state.promptSent) current.acknowledge();
           }
           if (!current || !current.state.promptSent) {
-            if (backgroundWork?.wakes(p.update) && (!current || (session.sessionId && p.sessionId === session.sessionId && p.sessionId !== session.loadingSessionId))) {
+            if (backgroundWork?.wakes(p.update, Date.now() - (session.settledAt ?? 0)) && (!current
+              || (backgroundWork.wakesDuringSetup && session.sessionId && p.sessionId === session.sessionId && p.sessionId !== session.loadingSessionId))) {
               if (current) current.state.backgroundWoke = true;
               endBackground(threadId, session);
             }
@@ -900,7 +903,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         acp.inbound = {
           request: (msg) => {
             const current = session.current;
-            if (!current || (backgroundWork && !current.state.promptSent)) refuse(msg, send);
+            if (!current || (backgroundWork?.wakesDuringSetup && !current.state.promptSent)) refuse(msg, send);
             else handleServerRequest(msg, current);
           },
           notification: handleNotification,
@@ -1110,7 +1113,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           steering: support.steer && turnSteering(support.steer, {
             open: () => state.promptSent && !state.settled && !state.stopped && !session.closing && session.child.stdin.writable,
             commands: () => session.commands,
-            initializeResult: () => session.initResult,
+            initializeResult: () => session.initResult, env,
             prompt: (text) => request("session/prompt", { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, undefined, undefined, promptIdleTimeoutMs()),
             extension: (method, text) => request(method, { sessionId: session.sessionId, prompt: [{ type: "text", text }] }, STEER_REQUEST_TIMEOUT_MS),
           }),
@@ -1196,7 +1199,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
             await backgroundEnds.get(threadId);
             const cursor = turn.sessionReset ? null : backgroundWork
-              ? backgroundWork.resumeCursor(threadId, turn.resumeCursor, session.sessionId)
+              ? backgroundWork.resumeCursor(threadId, turn.resumeCursor, session.sessionId, session)
               : typeof turn.resumeCursor === "string" ? turn.resumeCursor : null;
             let promptTurn = turn;
             let rebuiltFromReplay = false;
@@ -1208,7 +1211,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               const selectionParams = narrowsNativeTools(turn.toolScope)
                 ? support.toolScopeSessionParams!(turn, init, mcpServers.length > 0, { config: turnConfig, env, cwd }) : {};
               let loaded = false;
-              if (cursor) {
+              if (cursor && (!support.closeBeforeLiveLoad || liveSessionId !== cursor || await request("session/close", { sessionId: cursor }, 30_000).then(() => { session.sessionId = session.sessionKey = null; return true; }, () => false))) {
                 session.loadingSessionId = cursor;
                 try {
                   await request(
@@ -1302,13 +1305,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 await support.configureSession({
                   request: async (method, params, timeoutMs) => {
                     const result = await request(method, params, timeoutMs ?? SESSION_CONFIG_TIMEOUT);
-                    if (method === "session/set_model" && params && typeof params === "object" &&
-                        "modelId" in params && typeof params.modelId === "string") {
-                      session.sessionConfigResult = {
-                        ...session.sessionConfigResult,
-                        models: { ...session.sessionConfigResult?.models, currentModelId: params.modelId },
-                      };
+                    if (method === "session/set_model" && params && typeof params === "object" && "modelId" in params && typeof params.modelId === "string") {
+                      session.sessionConfigResult = { ...session.sessionConfigResult, models: { ...session.sessionConfigResult?.models, currentModelId: params.modelId } };
                     }
+                    if (method === "session/set_config_option" && Array.isArray(result?.configOptions)) session.sessionConfigResult = { ...session.sessionConfigResult, configOptions: result.configOptions };
                     return result;
                   },
                   sessionId,
@@ -1375,7 +1375,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 : promptInput.text;
             const imageBlocks = support.images === true && runtimeAcceptsImages
               ? await readAcpImageBlocks(turn.images ?? [])
-              : [];
+              : []; const media = await readAcpMediaLinks(support.mediaLinks === true && !turn.guestConfined ? turn.text : "", imageBlocks.reduce((sum, block) => sum + Math.floor(block.data.length * 3 / 4), 0));
             if (support.modelVariants && !modelControls.confirms(cliTurn.model)) {
               throw new Error(`${support.displayName} changed model before the prompt`);
             }
@@ -1393,7 +1393,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             const quiet = startQuietWatch(threadId, session, current);
             const result = await request(
               "session/prompt",
-              { sessionId, prompt: [{ type: "text", text }, ...imageBlocks] },
+              { sessionId, prompt: [{ type: "text", text: text + media.note }, ...imageBlocks, ...media.blocks] },
               undefined,
               undefined,
               promptIdleMs,
@@ -1425,7 +1425,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 );
               }
             }
-            const answers = [result, ...(current.steering?.replies ?? [])];
+            const answers = turnAnswers(support.steer, result, current.steering?.replies);
             if (current.steering?.failure !== undefined && !state.stopped) throw current.steering.failure;
             const runOf = (answer: unknown) => support.steer && "run" in support.steer ? support.steer.run?.(answer) : undefined;
             for (const [index, answer] of answers.entries()) {
@@ -1446,7 +1446,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               });
               settle(threadId, session, false, reason ?? "failed");
             }
-          } catch (raw) { const e = signIn.asked(raw) ?? raw;
+          } catch (raw) { const e = signIn.asked(raw) ?? support.reportedFailure?.(raw) ?? raw;
             if (pendingSplitReceipt && state.promptSent && state.usageCompacted) {
               deletePromptSplitReceipt(DRIVER_KIND, pendingSplitReceipt.key);
             }

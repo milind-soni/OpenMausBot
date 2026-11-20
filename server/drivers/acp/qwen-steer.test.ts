@@ -9,6 +9,7 @@ import type { ProviderInstance } from "../../contracts.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { recordEvents, type EventRecorder } from "../../testing/events.ts";
 import { createAcpDriver } from "./core.ts";
+import { acpBackgroundWork } from "./background.ts";
 import { QwenAgentDriver, qwenSteers } from "./qwen.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
@@ -202,7 +203,8 @@ describe("Qwen background work", () => {
     let prompts = 0;
     const driver = createAcpDriver({
       driverKind: "qwenAgent", displayName: "Qwen", nativeSource: "qwen.acp", defaultCli: FAKE_CLI,
-      loginNote: "Fixture only", models: { default: "", options: [] }, spawnArgs: () => ["--acp"], backgroundWork: {},
+      loginNote: "Fixture only", models: { default: "", options: [] }, spawnArgs: () => ["--acp"],
+      backgroundWork: acpBackgroundWork(["qwen-background-during-setup"]),
       pickAuthMethod: () => null, authFailure: "continue", isAuthenticated: () => true,
       promptOutcome: async () => {
         if (++prompts === 2) await held;

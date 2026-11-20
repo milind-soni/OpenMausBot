@@ -5,13 +5,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ensureDirs, NATIVE_DIR } from "../config.ts";
+import { DATA_DIR, ensureDirs, NATIVE_DIR } from "../config.ts";
 import type { ProviderInstance, RuntimeEvent } from "../contracts.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { publishedMessages, replyProblems } from "../harness/text-items.testkit.ts";
 import { caseTokens, LIVE_REPLY_CASES, liveReplyScripts } from "../testing/live-reply-cases.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { encodeInjectId, localHost } from "./local-inject.ts";
+import { piSessionDir } from "./pi-session.ts";
 import { buildMcpServers } from "./pi-mcp-servers.ts";
 import {
   applyPiLocalCatalog,
@@ -404,7 +405,7 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(recorder.events.every((e) => e.turnId === turnId && e.provider === "piAgent")).toBe(true);
 
     const session = recorder.events.find((e) => e.type === "session.started")!;
-    expect((session as { sessionId: string }).sessionId).toMatch(/\/fake\/pi-session-\d+\.json/);
+    expect((session as { sessionId: string }).sessionId).toMatch(/pi-session-\d+-\d+\.json$/);
 
     const text = recorder.events.find(
       (e) => e.type === "item.completed" && (e as { itemType: string }).itemType === "assistant_text",
@@ -465,7 +466,7 @@ describe("PiDriver turns (fake CLI)", () => {
     const firstSession = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId) as
       | { sessionId: string }
       | undefined;
-    expect(firstSession?.sessionId).toMatch(/\/fake\/pi-session-\d+\.json/);
+    expect(firstSession?.sessionId).toMatch(/pi-session-\d+-\d+\.json$/);
 
     const second = await instance.adapter.sendTurn({
       threadId: "t-resume",
@@ -477,6 +478,59 @@ describe("PiDriver turns (fake CLI)", () => {
       | { sessionId: string }
       | undefined;
     expect(secondSession?.sessionId).toBe(firstSession?.sessionId);
+  });
+
+  it("starts conversation turns without --no-session and keeps catalog probes ephemeral", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-session-dir-"));
+    const dump = join(dir, "dump.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump });
+    const { turnId } = await instance.adapter.sendTurn({ threadId: "t-pi-session-dir", text: "hi" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+    const rows = readFileSync(dump, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { argv?: string[] });
+    const probes = rows.filter((row) => row.argv && !row.argv.includes("-e"));
+    const turns = rows.filter((row) => row.argv?.includes("-e"));
+    expect(probes.some((row) => row.argv!.join(" ") === "--mode rpc --no-session")).toBe(true);
+    expect(turns.length).toBeGreaterThan(0);
+    for (const row of turns) {
+      expect(row.argv).toEqual(["--mode", "rpc", "--session-dir", piSessionDir({ threadId: "t-pi-session-dir" }, "pi-test"), "-e", expect.any(String)]);
+      expect(row.argv).not.toContain("--no-session");
+    }
+    expect(piSessionDir({ threadId: "t-pi-session-dir" }, "pi-test")).toContain(join(DATA_DIR, "pi-sessions", "local"));
+  });
+
+  it("reads sessionFile from get_state when new_session omits it, then resumes with switch_session", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-pi-session-state-"));
+    const dump = join(dir, "dump.jsonl");
+    await create(undefined, { FAKE_PI_DUMP: dump, FAKE_PI_SESSION_FILE_IN_STATE_ONLY: "1" });
+    const first = await instance.adapter.sendTurn({ threadId: "t-pi-state-session", text: "first" });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId);
+    const firstSession = recorder.events.find((e) => e.type === "session.started" && e.turnId === first.turnId) as
+      | { sessionId: string }
+      | undefined;
+    expect(firstSession?.sessionId).toMatch(/pi-session-\d+-\d+\.json$/);
+
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-pi-state-session",
+      text: "second",
+      resumeCursor: firstSession!.sessionId,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    const secondSession = recorder.events.find((e) => e.type === "session.started" && e.turnId === second.turnId) as
+      | { sessionId: string }
+      | undefined;
+    expect(secondSession?.sessionId).toBe(firstSession?.sessionId);
+
+    const rpc = readFileSync(dump, "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as { rpc?: string; sessionPath?: string })
+      .filter((row) => row.rpc);
+    expect(rpc.map((row) => row.rpc)).toEqual(["new_session", "switch_session"]);
+    expect(rpc[1]?.sessionPath).toBe(firstSession?.sessionId);
   });
 
   it("delivers the full prompt once per session and rides volatile changes as notes", async () => {
@@ -662,6 +716,8 @@ describe("PiDriver turns (fake CLI)", () => {
     expect(recorder.events.find((e) => e.type === "runtime.error")).toMatchObject({
       message: "pi prompt failed",
     });
+    const rejectedSession = recorder.events.find((event) => event.type === "session.started" && event.turnId === turnId);
+    if (rejectedSession?.type !== "session.started") throw new Error("missing rejected session");
     recorder.stop();
     await instance.dispose();
     await create(undefined, { FAKE_PI_DUMP: dump });
@@ -671,7 +727,7 @@ describe("PiDriver turns (fake CLI)", () => {
       system: "Standing rules.\n\nMemory: likes quiet hours.",
       systemStable: "Standing rules.",
       systemVolatile: "Memory: likes quiet hours.",
-      resumeCursor: "/fake/pi-session-1.json",
+      resumeCursor: rejectedSession.sessionId,
     });
     await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
     const row = readFileSync(dump, "utf8").split("\n").filter(Boolean)

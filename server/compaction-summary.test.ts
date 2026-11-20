@@ -184,3 +184,22 @@ it("falls back to the excerpt summary, without failing the turn, when the helper
   expect(aborted).toBe(true);
   expect(hanging.booked).toEqual([]);
 });
+
+it("says it is summarizing from the start of a summary until it is written, failed or stopped", async () => {
+  const seen: boolean[] = [];
+  const onSummarizing = (active: boolean) => seen.push(active);
+  let finish: (text: string) => void = () => {};
+  const written = draftSummary(history, { signal: new AbortController().signal, onSummarizing, generateText: () => new Promise(resolve => { finish = resolve; }) });
+  await vi.waitFor(() => expect(seen).toEqual([true]));
+  finish("The person cancelled the deployment.");
+  await written;
+  expect(seen).toEqual([true, false]);
+  const controller = new AbortController();
+  const stopped = draftSummary(history, { signal: controller.signal, onSummarizing, generateText: () => new Promise(() => {}) });
+  await vi.waitFor(() => expect(seen).toEqual([true, false, true]));
+  controller.abort();
+  await expect(stopped).rejects.toBeDefined();
+  expect(seen).toEqual([true, false, true, false]);
+  await draftSummary(history, { signal: new AbortController().signal, onSummarizing, generateText: () => Promise.reject(new Error("helper down")) });
+  expect(seen).toEqual([true, false, true, false, true, false]);
+});

@@ -30,6 +30,7 @@ import {
   MANAGED_LABEL,
 } from "./container-computer.ts";
 import { PIDS_LIMIT } from "./container-limits.ts";
+import { ensureVpsSshMaster } from "./vps-ssh.ts";
 import type { AppConfig } from "./config.ts";
 import {
   VPS_CONTAINER_LABEL,
@@ -57,6 +58,7 @@ import {
   reuseVps,
   dockerCliInstallCommand,
   listManagedVpsComputers,
+  VpsHostUnreachableError,
   type VpsCommandRunner,
 } from "./vps-computer.ts";
 
@@ -1363,11 +1365,70 @@ describe("a missing Docker CLI", () => {
     const command = dockerCliInstallCommand(process.platform)!;
     const inventory = await listManagedVpsComputers(CONFIG, [], runner);
     expect(inventory.available).toBe(false);
+    expect(inventory.unreachable).toBeUndefined();
     expect(inventory.problem).toContain(command);
     expect(inventory.problem).not.toMatch(/ENOENT/);
 
     const status = await vpsComputerStatus(CONFIG, BOT_ID, runner);
     expect(status.problem).toContain(command);
     expect(status.problem).not.toMatch(/ENOENT/);
+  });
+});
+
+describe("a VPS inventory that fails", () => {
+  it("is unreachable only when the host gave no list at all", async () => {
+    const silent: VpsCommandRunner = async () => {
+      throw new VpsHostUnreachableError("ssh: connect to host fixture port 22: Connection timed out");
+    };
+    expect(await listManagedVpsComputers(CONFIG, [], silent)).toMatchObject({ available: false, unreachable: true });
+
+    // SSH got through and the daemon said no: the host is there, so its computers may be too.
+    const refused: VpsCommandRunner = async () => {
+      throw new Error("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock");
+    };
+    const refusal = await listManagedVpsComputers(CONFIG, [], refused);
+    expect(refusal.available).toBe(false);
+    expect(refusal.unreachable).toBeUndefined();
+
+    const garbled: VpsCommandRunner = async () => ({ stdout: "not-a-container-id\n", stderr: "" });
+    const unverified = await listManagedVpsComputers(CONFIG, [], garbled);
+    expect(unverified.available).toBe(false);
+    expect(unverified.unreachable).toBeUndefined();
+
+    const answers: VpsCommandRunner = async () => ({ stdout: "", stderr: "" });
+    const both = await listManagedVpsComputers(CONFIG, [], async (args, options) =>
+      args.includes("ssh://other") ? garbled(args, options) : silent(args, options), ["fixture", "other"]);
+    expect(both.available).toBe(false);
+    expect(both.unreachable).toBeUndefined();
+    expect((await listManagedVpsComputers(CONFIG, [], answers)).unreachable).toBeUndefined();
+  });
+
+  it("tells an SSH failure from a Docker refusal on the real command path", async () => {
+    try {
+      mockTransport(async () => {
+        throw new Error("error during connect: command [ssh -- production-vps docker system dial-stdio] has exited with exit status 255, stderr=ssh: Could not resolve hostname production-vps");
+      });
+      expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBe(true);
+
+      mockTransport(async () => {
+        throw new Error("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?");
+      });
+      const refused = await listManagedVpsComputers(CONFIG, []);
+      expect(refused.available).toBe(false);
+      expect(refused.unreachable).toBeUndefined();
+
+      // Windows has no shared SSH master to check first.
+      if (process.platform !== "win32") {
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(new Error("ssh: Could not resolve hostname production-vps"));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBe(true);
+        // The host answered with a changed key, or the local ssh never started: the host may still be up.
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(new Error("@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed."));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBeUndefined();
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(new Error("spawn ssh ENOENT"));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBeUndefined();
+        vi.mocked(ensureVpsSshMaster).mockRejectedValueOnce(Object.assign(new Error("VPS SSH initialization timed out"), { killed: true }));
+        expect((await listManagedVpsComputers(CONFIG, [])).unreachable).toBe(true);
+      }
+    } finally { spawnMock.mockReset(); }
   });
 });

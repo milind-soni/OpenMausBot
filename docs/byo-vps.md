@@ -107,7 +107,10 @@ cannot change while any computer it manages still exists: remove the computer fi
 Self-hosted VPS computers (or by hand: `docker -H ssh://old-server rm -f openmausbot-vps-<bot>-<hash>`). A server
 that cannot be reached never traps a bot: moving the bot to another server, switching its computer, or deleting
 it goes ahead, and the app says what may be left on that server and the command that removes it once the server
-is back. (Changing the default alias still waits until its server can be listed.) Any alias from your
+is back. Changing or clearing the default alias works the same way: the app lists the command that finds this
+installation's computers left on that server. Only a name lookup or connection failure that SSH reports, or a
+timeout, counts as not reached: a server that answers but refuses (a changed host key, a Docker error) keeps the
+alias until it can be listed. Any alias from your
 `~/.ssh/config`, host key already verified by hand, is all it takes. A new bot starts on the default server.
 
 ### A server that pauses when idle

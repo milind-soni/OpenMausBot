@@ -81,7 +81,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const conversations = orderedThreadList(threads.filter((task) => !isArchived(task) || task.threadId === bot.threadId));
   const archived = orderedThreadList(threads.filter((task) => isArchived(task) && task.threadId !== bot.threadId));
   const needle = query.trim();
-  const collapsed = conversations.filter((task, index) => index < CONVERSATIONS_SHOWN || task.threadId === bot.threadId);
+  const collapsed = conversations.filter((task, index) => index < CONVERSATIONS_SHOWN || task.threadId === bot.threadId || task.threadId === bot.mainThreadId);
   const recent = useRecentMessages(bot, [...(needle || expanded ? conversations : collapsed), ...(showArchived ? archived : [])]);
   const preview = (threadId: string) => {
     const messages = recent(threadId);
@@ -117,7 +117,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const row = (task: (typeof threads)[number]) => (
     <div role="listitem" key={task.threadId} data-conversation={task.threadId}>
       <SidebarThreadRow panel preview={preview(task.threadId)} task={task} ownerId={bot.id} current={task.threadId === bot.threadId}
-        folders={bot.projects} now={stampClock(threadRecency(task), now)} locale={activeLocale()} onSelect={select} {...actions} />
+        main={task.threadId === bot.mainThreadId} folders={bot.projects} now={stampClock(threadRecency(task), now)} locale={activeLocale()} onSelect={select} {...actions} />
     </div>
   );
 
