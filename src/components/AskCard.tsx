@@ -65,7 +65,7 @@ export function AskCard({
       data-tour={tour}
       data-ask-card="pending" data-look="ask-card"
       onKeyDown={onKeyDown}
-      className={cn("w-full max-w-[560px] rounded-[18px] px-4 pb-3.5 pt-3 text-start", stays ? `sticky top-[60px] bottom-[72px] z-10 ${ELEVATED_FLOAT}` : ELEVATED_CARD)}
+      className={cn("w-full max-w-[560px] rounded-[18px] px-4 pb-3.5 pt-3 text-start", stays ? `sticky top-[var(--glass-top,60px)] bottom-[72px] z-10 ${ELEVATED_FLOAT}` : ELEVATED_CARD)}
     >
       {header && <div className="mb-1.5 pe-6">{header}</div>}
       <div className="flex min-w-0 items-start gap-2">
