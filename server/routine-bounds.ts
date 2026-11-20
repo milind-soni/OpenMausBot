@@ -2,10 +2,11 @@
 // scheduled run queued behind its busy bot is given up after an hour, and stopping a turn never keeps the scheduler
 // from its other routines. Each ends with its reason on the run's row. The work and the busy wait are added up one
 // scheduler pass at a time, each step capped, so the hours a computer slept, or a clock that jumped, are in neither.
+import type { RoutineRunLimits } from "../shared/routines.ts";
 import { DUE_CLOCK_MS } from "./due-timer.ts";
 import { codedLine, type RoutineLine } from "./routine-lines.ts";
 import { ROUTINE_BUSY_WAIT_MS } from "./routine-recovery.ts";
-import { routineRunLimits, type RoutineRunLimits } from "./routine-run-limits.ts";
+import { routineRunLimits } from "./routine-run-limits.ts";
 import { activeMs } from "./routine-waits.ts";
 import type { RoutineManagerOptions, RoutineRun } from "./routines.ts";
 

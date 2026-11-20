@@ -5,8 +5,6 @@
 import { ROUTINE_GOAL_RUN_LIMIT_MINUTES, ROUTINE_RUN_LIMIT_MINUTES, type RoutineRunLimits } from "../shared/routines.ts";
 import { envWhole } from "./env-limits.ts";
 
-export type { RoutineRunLimits };
-
 /** The longest limit the environment may name, in hours: the longest a routine may set for itself (1,440 minutes). */
 export const RUN_LIMIT_HOURS_MAX = 24;
 
