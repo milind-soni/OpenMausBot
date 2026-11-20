@@ -289,7 +289,7 @@ export function createTeamSlackHost(deps: TeamSlackHostDeps) {
     }
     let receipt: DirectSendReceipt;
     try {
-      receipt = await deps.send({ botId: bot.id, threadId, text: input.text, sendId: input.id, sender: deps.sender(auth), trigger: deps.trigger(auth), personPresent: true, admin: deps.actor(auth).admin, followUp: "queue" });
+      receipt = await deps.send({ botId: bot.id, threadId, text: input.text, sendId: input.id, sender: deps.sender(auth), trigger: deps.trigger(auth), personPresent: true, admin: deps.actor(auth).admin, fromSlack: true });
     } catch (error) {
       if (created) { deps.discard(bot.id, threadId); messages.channel(threadId, false); }
       return sendRefused(error);

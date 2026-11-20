@@ -1,6 +1,6 @@
 // A skill past the very start of a message runs only from words a person typed. Everything else reaches the engine through
 // the same turn, so this drives the real server and reads what the engine was handed.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
@@ -107,15 +107,6 @@ it("calls a skill mid-message from what a person typed, never from a webhook, an
       await quiet();
     }
 
-    // Still the person's words after they waited their turn in the queue.
-    rmSync(gate);
-    await say("first-marker", person);
-    await reached("first-marker");
-    expect((await say("queued-marker please /standup the rest", person, { followUp: "queue" })).queued).toBe(true);
-    writeFileSync(gate, "finish");
-    await reached("queued-marker");
-    expect(prompt()).toMatch(CALLED);
-    await quiet();
   } finally {
     await fixture.close();
     await removeTempDir(gates);

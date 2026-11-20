@@ -325,10 +325,17 @@ export function markNotificationLogRead(ids: readonly string[], reader?: string)
 }
 export function forgetNotificationReader(person: string): void { db().prepare("UPDATE notification_log SET read_by = (SELECT json_group_array(value) FROM json_each(read_by) WHERE value <> ?1) WHERE EXISTS (SELECT 1 FROM json_each(coalesce(read_by, '[]')) WHERE value = ?1)").run(person); }
 
-export function saveChatFollowup(followup: Omit<ChatFollowup, "status">): void {
-  writeFollowups((connection) => connection.prepare(
-    "INSERT INTO chat_followups(id, kind, owner_id, thread_id, send_id, status, payload) VALUES (?, ?, ?, ?, ?, 'pending', ?)",
-  ).run(followup.id, followup.kind, followup.ownerId, followup.threadId, followup.payload.sendId ?? null, JSON.stringify(followup.payload)));
+export function saveChatFollowup(followup: Omit<ChatFollowup, "status">, message?: Message): void {
+  writeFollowups((connection) => {
+    if (message) {
+      insertMessage(followup.threadId, message);
+      setActiveLeaf(followup.threadId, message.id);
+    }
+    connection.prepare(
+      "INSERT INTO chat_followups(id, kind, owner_id, thread_id, send_id, status, payload) VALUES (?, ?, ?, ?, ?, 'pending', ?)",
+    ).run(followup.id, followup.kind, followup.ownerId, followup.threadId, followup.payload.sendId ?? null,
+      JSON.stringify(message ? { ...followup.payload, rowId: message.id } : followup.payload));
+  });
 }
 
 /** Cancellation tombstones remain so a retried sendId cannot resurrect a dispatch. */

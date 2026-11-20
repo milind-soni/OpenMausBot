@@ -1,7 +1,5 @@
-// Mid-turn sends wait here off the transcript (else they become the active leaf mid-turn) and survive Stop: stop-then-steer is the feature.
-
 import { newId } from "./contracts.ts";
-import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
+import { chatFollowups, saveChatFollowup, settleChatFollowups, type ChatFollowup } from "./message-db.ts";
 import { drainCoalesceHead } from "./admission.ts";
 import { spokenLineFields } from "./live-call-record.ts";
 import { workOriginSchema, type WorkOrigin } from "./peer-provenance.ts";
@@ -39,8 +37,7 @@ interface QueueEntry {
     fromApp?: Message["fromApp"];
     reaction?: string;
     relay?: Message["relay"];
-    /** The person's row already in the transcript, steered into a turn that was stopped before it read it: it runs as
-     * it is, never as a second copy. */
+    /** The message already recorded in the transcript. */
     rowId?: string;
     /** Bot ids picked from the @ list. */
     mentions?: string[];
@@ -103,13 +100,14 @@ export function onSteeredQueueChange(listener: () => void): () => void {
 
 export interface QueuedSteer {
   id: string;
+  message?: Message;
 }
 
 export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number; mentions?: string[]; aheadOfOthers?: string } = {},
+  options: { record?: (followup: Omit<ChatFollowup, "status">) => Message; prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string; fromApp?: Message["fromApp"]; relay?: Message["relay"]; rowId?: string; first?: boolean; queuedAt?: number; mentions?: string[]; aheadOfOthers?: string } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -135,16 +133,19 @@ export function queueSteeredMessage(
     ...(options.rowId ? { rowId: options.rowId } : {}),
     ...(options.mentions?.length ? { mentions: options.mentions } : {}),
   };
-  saveChatFollowup({ id, kind: "bot", ownerId: botId, threadId, payload: item });
+  const followup = { id, kind: "bot" as const, ownerId: botId, threadId, payload: item };
+  const message = options.record?.(followup);
+  if (!message) saveChatFollowup(followup);
   // `first`: ahead of everything queued but the person's own messages sent before it; with `aheadOfOthers` (the person
   // whose request runs, where several people write), ahead of everyone else's too.
+  const pending = message ? { ...item, rowId: message.id } : item;
   const ahead = options.first ? entry.items.findIndex((other) => other.peerAsk !== undefined || other.unattended === true || other.queuedAt > item.queuedAt
     || (options.aheadOfOthers !== undefined && other.sender?.id !== options.aheadOfOthers)) : -1;
-  if (ahead < 0) entry.items.push(item);
-  else entry.items.splice(ahead, 0, item);
+  if (ahead < 0) entry.items.push(pending);
+  else entry.items.splice(ahead, 0, pending);
   queues.set(threadId, entry);
   changed();
-  return { id };
+  return { id, message };
 }
 
 export function queuedThreadPosition(botId: string, threadId: string): number | null {
@@ -320,4 +321,8 @@ export function settleHeldSteeredQueue(held: HeldSteerQueue): void {
 
 export function _queuedCount(threadId: string): number {
   return queues.get(threadId)?.items.length ?? 0;
+}
+
+export function pendingSteerRows(threadId: string): Set<string> {
+  return new Set(queues.get(threadId)?.items.flatMap((item) => item.rowId ? [item.rowId] : []));
 }

@@ -87,7 +87,6 @@ describe("what the app may do", () => {
     ["POST", "/api/groups/room-1/messages"],
     ["POST", "/api/groups/room-1/interrupt"],
     ["DELETE", "/api/groups/room-1/queue/queue_1"],
-    ["POST", "/api/groups/room-1/queue/queue_1/steer"],
     ["POST", "/api/groups/room-1/read"],
     ["POST", "/api/groups/room-1/tasks"],
     ["POST", "/api/groups/room-1/tasks/th_1"],

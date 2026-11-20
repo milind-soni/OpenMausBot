@@ -863,25 +863,16 @@ allow, folders), where it runs, its department, whom it answers to or directs, c
 In a conversation more than one person reads (a bot's shared chats, a conversation opened from one, a group chat), a
 run belongs to the person whose own request it answers (`server/host/run-owner.ts`, the one place that decides):
 
-- **Someone else's line waits its turn.** Sent while Priya's request runs, Tom's line never reaches her run, never stops
-  it and never cuts it short to be answered first: it waits in the queue and runs after hers, as its own turn, with his
-  name on it. The send answers `{ queued: true, queueId }`. Lines from different people never join one turn; a run of
-  one person's lines does, as before. Priya adding to her own request is steered into it and, after a step has run a
-  minute with her line unread, answered first (`server/host/person-first.ts`), exactly as in a private chat; her own
-  line goes ahead of anyone else's waiting.
-- **Everyone there sees the queue.** Each waiting line carries its writer (`BotQueuedMessages[…].sender`) and the
-  conversation, while it works, the person whose request runs (`WireTask.askedBy`). The app's working line reads
-  "Working on Priya's request", with one quiet line under it, "Next: Tom's request" ("…, then 2 more" when more wait);
-  someone whose own message waits also sees its words there ("Yours: …") with a small remove control, which nobody else
-  sees; that chat shows no queue above the composer. A person is named as the People list names them: their name, or
-  for an address the part before the @ ("Dev's request" for dev@acme.test).
-  Only its writer removes a waiting line (`DELETE
-  /api/bots/<bot>/queue/<id>`; a line no person wrote, an Owner or Admin), and waiting lines join the running request
-  (`…/steer`) only when every one is the asker's own and the asker adds them; otherwise 403 in plain words.
+- **New messages appear in the conversation immediately.** While Priya's request runs, Tom's message appears with his
+  name and gets its own turn after hers. It cannot steer or stop her run. Priya's addition can steer her own request
+  and, if it goes unread, be answered first. When the engine cannot take the addition, a message from someone who may
+  stop the run can start a replacement turn.
+- **The working line names the requester.** It reads "Working on Priya's request". A person is named as the People
+  list names them, using the part before the @ when they haven't set a name.
 - **Only the asker, or an Owner or Admin, stops it.** Stop (`POST /api/bots/<bot>/interrupt`, a group chat's
   `/api/groups/<id>/interrupt`, a typed "stop", a guarded request's `/interrupt`) from anyone else answers 403 with
   `code: "stop_not_yours"` and *"Only Priya or an admin can stop this."*; their "@Scout stop" in a group chat is an
-  ordinary line there. Stop stays the only interrupt. The app shows Stop, and Retry on a stopped request, only to the
+  ordinary line there. The app shows Stop, and Retry on a stopped request, only to the
   asker and to Owners and Admins (and to everyone for a run no person asked for). The server holds Retry to the same
   rule: running someone else's request again (`POST /api/bots/<bot>/messages/<id>/edit`, with the same words or new
   ones) answers 403 with `code: "retry_not_yours"` and *"Only Priya or an admin can run this request again."* In a

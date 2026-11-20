@@ -1,12 +1,12 @@
 import { CachedChatImage } from "./CachedChatImage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { overlayPortal as createPortal } from "@/components/ModalPresence";
-import { ChevronLeft, ChevronRight, Download, ImageOff, LoaderCircle, RotateCcw, X } from "lucide-react";
+import { Download, ImageOff, LoaderCircle, RotateCcw } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { canonicalDownloadFilename } from "@/lib/download-filename";
 import { t } from "@/lib/i18n";
 import type { PreviewImage } from "./AttachmentPreview";
-import { previewKeyAction, usePreviewSwipe, nextImageIndex } from "./AttachmentPreviewNavigation";
+import { previewKeyAction, usePreviewGestures, nextImageIndex } from "./AttachmentPreviewNavigation";
 import { CopyImageButton } from "./CopyImageButton";
 import { useDismissMotion, useHeldMenuMotion } from "./MenuMotion";
 import { MENU_ITEM, MENU_SHEET } from "./menu-recipe";
@@ -51,7 +51,7 @@ export function AttachmentPreviewDialog({
     setMenu(null);
     setIndex((value) => nextImageIndex(value, step, items.length));
   }, [items.length, cancelPress]);
-  const { offset, handlers } = usePreviewSwipe(index, items.length, navigate);
+  const { drag, zoom, animateZoom, handlers, tapSurface, clearTap } = usePreviewGestures(index, items.length, navigate, motion.dismiss, cancelPress);
 
   useEffect(() => {
     if (!motion.open) return;
@@ -133,30 +133,26 @@ export function AttachmentPreviewDialog({
       aria-modal="true"
       aria-label={t("attach.previewAria", { name: current.name })}
       tabIndex={-1}
-      className="fixed inset-0 z-[70] flex touch-pan-y touch-pinch-zoom items-center justify-center overflow-hidden bg-black outline-none"
+      className="fixed inset-0 z-[70] flex touch-none items-center justify-center overflow-hidden bg-black outline-none"
       {...handlers}
       onClick={event => {
         if (menu && !menuRef.current?.contains(event.target as Node)) {
           if (menuRef.current?.contains(document.activeElement)) dialogRef.current?.focus();
           setMenu(null);
-        } else if (event.target === event.currentTarget) {
-          cancelPress();
-          motion.dismiss();
+        } else if (!menu) {
+          tapSurface(event);
         }
       }}
       onContextMenu={event => {
         event.preventDefault();
         event.stopPropagation();
         cancelPress();
+        clearTap();
         setMenu({ x: event.clientX, y: event.clientY });
       }}
     >
-      <button type="button" onClick={() => { cancelPress(); motion.dismiss(); }} aria-label={t("attach.close")}
-        className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-10 flex size-10 items-center justify-center rounded-full bg-black/55 text-white/80 hover:text-white">
-        <X size={20} />
-      </button>
-      <div className={cn("pointer-events-none absolute inset-0", offset === null && "motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out")}
-        style={{ transform: `translateX(calc(${-100 * index}% + ${offset ?? 0}px))` }}>
+      <div className={cn("pointer-events-none absolute inset-0", drag === null && "motion-safe:transition-transform motion-safe:duration-200 motion-safe:ease-out")}
+        style={{ transform: `translateX(calc(${-100 * index}% + ${drag?.x ?? 0}px)) translateY(${drag?.y ?? 0}px)` }}>
         {items.slice(Math.max(0, index - 1), index + 2).map((item, offset) => {
           const position = Math.max(0, index - 1) + offset;
           const active = position === index;
@@ -189,6 +185,8 @@ export function AttachmentPreviewDialog({
                   version={item.version}
                   alt={active ? item.name : ""}
                   draggable={false}
+                  data-preview-active-image={active ? "" : undefined}
+                  style={active ? { transform: `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.scale})` } : undefined}
                   onPointerDown={event => {
                     if (event.pointerType !== "touch") return;
                     cancelPress();
@@ -207,6 +205,7 @@ export function AttachmentPreviewDialog({
                   className={cn(
                     "pointer-events-auto block max-h-full max-w-full select-none object-contain [-webkit-touch-callout:none]",
                     active && !loaded && "opacity-0",
+                    active && animateZoom && "preview-zoom-transition",
                   )}
                 />
               )}
@@ -214,28 +213,6 @@ export function AttachmentPreviewDialog({
           );
         })}
       </div>
-      {items.length > 1 && (
-        <>
-          <button
-            type="button"
-            disabled={index === 0}
-            onClick={() => navigate(-1)}
-            aria-label={t("attach.previous")}
-            className="absolute left-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm disabled:invisible hover:bg-black/75 hover:text-white sm:left-4"
-          >
-            <ChevronLeft size={21} />
-          </button>
-          <button
-            type="button"
-            disabled={index === items.length - 1}
-            onClick={() => navigate(1)}
-            aria-label={t("attach.next")}
-            className="absolute right-2 top-1/2 flex size-10 -translate-y-1/2 items-center justify-center rounded-full bg-black/55 text-white/80 backdrop-blur-sm disabled:invisible hover:bg-black/75 hover:text-white sm:right-4"
-          >
-            <ChevronRight size={21} />
-          </button>
-        </>
-      )}
       {menuMotion.shown && menuMotion.value && (
         <div ref={menuRef} {...menuMotion.exitProps} data-overlay-fade={menuMotion.closing ? "out" : "in"} role="group" aria-label={current.name}
           className={cn("fixed z-20 w-52 max-w-[calc(100vw-16px)]", MENU_SHEET)}

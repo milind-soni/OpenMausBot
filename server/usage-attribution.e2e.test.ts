@@ -174,19 +174,17 @@ posixOnly("usage attribution e2e", () => {
     expect(csv).toContain(",Finance,");
   }, 40_000);
 
-  it("a queued message leaves the running turn with its starter, and its own turn is booked to its sender", async () => {
+  it("a replacement turn is booked to the follow-up’s sender", async () => {
     const bot = await newBot("acp", "fake-model");
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "owner's work" })).status).toBe(202);
     await waitFor(async () => (await getBot(bot.id)).busy === true, "the owner's turn to start");
     const asPaired = await asPerson();
-    const queued = await asPaired("POST", `/api/bots/${bot.id}/messages`, { text: "person's follow-up" });
-    expect(queued.body.queued).toBe(true);
-
-    await api("POST", `/api/bots/${bot.id}/interrupt`);
+    const receipt = await asPaired("POST", `/api/bots/${bot.id}/messages`, { text: "person's follow-up" });
+    expect(receipt.body.message.text).toBe("person's follow-up");
     await waitFor(() => ledger(bot.id).length === 1, "the owner's turn to be booked");
     expect(ledger(bot.id)[0].trigger).toEqual(owner);
 
-    await waitFor(async () => (await getBot(bot.id)).messages.some((m: any) => m.text === "person's follow-up"), "the queued turn to start");
+    await waitFor(async () => (await getBot(bot.id)).busy === true, "the replacement turn to start");
     await api("POST", `/api/bots/${bot.id}/interrupt`);
     await waitFor(() => ledger(bot.id).length === 2, "the queued turn to be booked");
     expect(ledger(bot.id)[1].trigger).toEqual(person);
@@ -224,17 +222,14 @@ posixOnly("usage attribution e2e", () => {
     await waitFor(async () => (await getBot(bot.id)).busy === false, "the second turn to settle");
   }, 40_000);
 
-  it("pressing Steer on a queued message does not re-book the running turn", async () => {
-    writeFileSync(codexSteerGate, "refuse live steers until the test clears this gate");
+  it("a sent message steered directly into a Codex turn does not re-book it", async () => {
+    rmSync(codexSteerGate, { force: true });
     const model = (await api("GET", "/api/instances")).body.instances.find((i: any) => i.instanceId === "codexRace").models.default;
     const bot = await newBot("codexRace", model);
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { text: "owner's codex turn" })).status).toBe(202);
     await waitFor(async () => (await getBot(bot.id)).messages.some((m: any) => m.card), "the question card");
     const asPaired = await asPerson();
-    const queued = await asPaired("POST", `/api/bots/${bot.id}/messages`, { text: "steer these words" });
-    expect(queued.body.queued).toBe(true);
-    rmSync(codexSteerGate, { force: true });
-    const steered = await asPaired("POST", `/api/bots/${bot.id}/queue/${queued.body.queueId}/steer`, { threadId: bot.threadId });
+    const steered = await asPaired("POST", `/api/bots/${bot.id}/messages`, { text: "steer these words" });
     expect(steered.body.steered).toBe(true);
 
     await api("POST", `/api/bots/${bot.id}/interrupt`);
@@ -242,7 +237,7 @@ posixOnly("usage attribution e2e", () => {
     expect(ledger(bot.id)[0].trigger).toEqual(owner);
   }, 40_000);
 
-  it("a room's queued message leaves the running room turn with its starter", async () => {
+  it("a room replacement is booked to the follow-up’s sender", async () => {
     const bot = await newBot("acp", "fake-model");
     const room = (await api("POST", "/api/groups", {
       name: "Attribution room",
@@ -253,9 +248,8 @@ posixOnly("usage attribution e2e", () => {
     expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "owner's room turn" })).status).toBe(202);
     await waitFor(async () => (await working())?.busyBotId === bot.id, "the room turn to start");
     const asPaired = await asPerson();
-    expect((await asPaired("POST", `/api/groups/${room.id}/messages`, { text: "person's room follow-up" })).body.queued).toBe(true);
-
-    await api("POST", `/api/groups/${room.id}/interrupt`, {});
+    const receipt = await asPaired("POST", `/api/groups/${room.id}/messages`, { text: "person's room follow-up" });
+    expect(receipt.body.message.text).toBe("person's room follow-up");
     await waitFor(() => ledger(bot.id).length >= 1, "the owner's room turn to be booked");
     expect(ledger(bot.id)[0].trigger).toEqual(owner);
     await waitFor(async () => (await working())?.messages.some((m: any) => m.text === "person's room follow-up"), "the queued room turn to start");

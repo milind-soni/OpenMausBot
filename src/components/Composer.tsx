@@ -14,14 +14,12 @@ import { uploadDraftImage } from "@/lib/composer-uploads";
 import { intakeFilesWithNotice } from "@/lib/attach-notice";
 import { activeLocale, t } from "@/lib/i18n";
 import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
-import { alternateSend, alternateSendLabel, useFollowUpDefault } from "@/lib/follow-up"; import { followUpChoices, resolveFollowUp, type FollowUp } from "../../shared/follow-up";
 import {
   draftRevision,
   appendDraftAttachments,
   changeDraftAttachmentPending,
   forgetFailedComposerSend,
   markDraftEdited,
-  prependComposerDraft,
   recoverFailedComposerSend,
   rememberFailedComposerSend,
   restoredSendId,
@@ -33,14 +31,14 @@ import {
   type ComposerSendSnapshot,
   type FailedComposerSend,
 } from "@/lib/drafts";
-import { DEVS_CHOICE, MentionMenu, teammateChoices, type MentionChoice } from "./MentionMenu"; import { useTeammates } from "@/state/team-people"; import { hiddenFromSidebar, useViewerEmail } from "@/lib/default-bot"; import { useMayAct } from "./SharedQueueLine";
+import { DEVS_CHOICE, MentionMenu, teammateChoices, type MentionChoice } from "./MentionMenu"; import { useTeammates } from "@/state/team-people"; import { hiddenFromSidebar, useViewerEmail } from "@/lib/default-bot"; import { useMayAct } from "./shared-run";
 import { SlashCommandMenu } from "./SlashCommandMenu";
 import { MentionTextarea } from "./MentionTextarea";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { PointedChips } from "./app/PointedChips"; import { SetupRequestChip, setupRequestPlaceholder } from "./SetupOffer";
 import { takePointedChips } from "@/lib/pointed-chips";
 import { openPageFor } from "@/lib/open-page";
-import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
+import type { CitationAttachment } from "@/lib/citations";
 import {
   appendPastedText,
   clipboardFilesToAttach,
@@ -62,7 +60,7 @@ import {
   type PasteAttachment,
 } from "@/lib/composer-attachments";
 import { goalCoordinatorForComposer, jevRoomRoutingOn, openTaskWorking, roomRouteForComposer } from "@/lib/group-routing";
-import { composerPlaceholder, sendLabels } from "./composer-simple"; import { ComposerSendButton } from "./ComposerSendButton"; import { ComposerContextMenu } from "./ComposerContextMenu";
+import { composerPlaceholder } from "./composer-simple"; import { ComposerSendButton } from "./ComposerSendButton"; import { ComposerContextMenu } from "./ComposerContextMenu";
 import { PendingApprovalActions, PendingApprovalPanel, pendingApprovals } from "./PendingApproval";
 import { CallButton } from "./CallView";
 import { PhonePlus } from "./PhonePlus";
@@ -71,13 +69,6 @@ import { useStackedField } from "./composer-wrap";
 import { ComposerReplyStrip } from "./ReplyQuote";
 import { escapeCancelsReply } from "@/lib/replies";
 import { useThreadRefs } from "./ThreadRefs";
-import {
-  QueuedComposerMessages,
-  composerCanSteerQueuedMessages,
-  doubleEnterSteerWindowExpiresAt,
-  doubleEnterSteersQueue,
-  roomSteersQueued,
-} from "./ComposerQueuedMessages";
 import { skillAuthoringEnabled } from "@/lib/feature-flags";
 import { mentionChoicesForQuery, mentionQueryAt } from "@/lib/mentions"; import { mentionPicksFor, restoreMentionPicks } from "@/lib/mention-picks";
 import { serializeThreadRefs, threadTokenFromPaste, threadTokenSpacing } from "@/lib/thread-refs";
@@ -123,13 +114,13 @@ export function Composer({
 }) {
   const bot = profile ? currentTaskBot(profile) : undefined;
   const locked = setupLocked || Boolean(bot?.awaitingThreadSnapshot);
-  const state = useStoreSelector((s) => ({ instances: s.instances, config: s.config, queued: s.pendingQueued[group?.threadId ?? bot?.threadId ?? ""] }), sameFields), dispatch = useStoreDispatch(), store = useStoreRef(), bots = useStoreSelector((s) => s.bots, sameDrawnBots);
+  const state = useStoreSelector((s) => ({ instances: s.instances, config: s.config }), sameFields), dispatch = useStoreDispatch(), store = useStoreRef(), bots = useStoreSelector((s) => s.bots, sameDrawnBots);
   const { threads, currentBotId } = useThreadRefs();
 
   // On a phone the composer is a dock: a round + (attach and every other tool), then one pill with the field, the mic and the voice button.
   const singleRow = useMediaQuery(PHONE_LAYOUT);
 
-  const sendKey = useSendKey(); const followUpDefault = useFollowUpDefault();
+  const sendKey = useSendKey();
   const sendLabel = sendKeyLabel(sendKey);
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const threadId = group?.threadId ?? bot?.threadId ?? "";
@@ -137,11 +128,6 @@ export function Composer({
   const groupBusyBotId = currentGroupTask?.busyBotId ?? (currentGroupTask?.working ? group?.busyBotId : (group?.threadId === threadId ? group?.busyBotId : null));
   const groupWorking = group ? openTaskWorking(group) : false;
   const busy = group ? Boolean(groupWorking || groupBusyBotId) : Boolean(bot?.busy);
-  const steerInstanceId = group
-    ? members?.find((member) => member.id === groupBusyBotId)?.modelSelection.instanceId
-    : bot?.modelSelection.instanceId;
-  const canSteer =
-    state.instances.find((i) => i.instanceId === steerInstanceId)?.capabilities?.queueing === true;
   const composerTask = profile?.tasks?.find((task) => task.threadId === threadId);
   // Visible branch only: an approval left on an abandoned branch must not block the composer.
   const approvals = pendingApprovals(group ? group.messages : bot ? visibleMessages(bot) : []);
@@ -226,8 +212,6 @@ export function Composer({
   const [dismissedSlashAt, setDismissedSlashAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const stacked = useStackedField(inputRef, !singleRow, text);
-  const draftIdRef = useRef(draftId);
-  draftIdRef.current = draftId;
   const caretRef = useRef(0);
   caretRef.current = caret;
   const refocusInput = useCallback(() => {
@@ -400,76 +384,10 @@ export function Composer({
   };
 
   const sharedChat = Boolean(state.config?.team && !group && profile?.tasks?.some((task) => task.threadId === threadId && !task.private));
-  const queuedMessages = sharedChat ? [] : state.queued ?? [];
-  const pendingCount = queuedMessages.length;
-  const canSteerQueued = composerCanSteerQueuedMessages(
-    busy,
-    locked,
-    pendingCount,
-    blocking,
-  );
-  const roomSteers = Boolean(group) && roomSteersQueued(canSteer, groupBusyBotId);
-  const [steering, setSteering] = useState(false);
   const interruptTurn = () => {
     if (group) dispatch({ type: "interruptGroup", groupId: group.id, threadId });
     else if (bot) dispatch({ type: "interrupt", botId: bot.id, threadId });
   };
-  const queueHeadId = queuedMessages[0]?.queueId;
-  const steerQueued = () => {
-    if (!queueHeadId) return;
-    setSteering(true);
-    const settle = () => setSteering(false);
-    if (group) {
-      if (roomSteers) dispatch({ type: "steerGroupQueued", groupId: group.id, threadId, queueId: queueHeadId, onError: settle, onSettled: settle });
-      else settle();
-    } else if (bot && canSteer) {
-      dispatch({ type: "steerQueued", botId: bot.id, threadId, queueId: queueHeadId, onError: settle, onSettled: settle });
-    } else if (bot) {
-      dispatch({ type: "interrupt", botId: bot.id, threadId, onError: settle });
-    }
-  };
-  useEffect(() => setSteering(false), [threadId, queueHeadId]);
-  // Only a confirmed removal hands the words back, so a message that already drained into a turn is never resent.
-  const editQueued = (queueId: string) => {
-    const queued = queuedMessages.find((item) => item.queueId === queueId);
-    if (!queued) return;
-    const targetDraftId = draftId;
-    const onCancelled = () => {
-      const cited = splitTranscriptCitations(queued.text);
-      if (cited.display) prependComposerDraft(targetDraftId, cited.display);
-      appendDraftAttachments(targetDraftId, cited.citations);
-      if (targetDraftId !== draftIdRef.current) return;
-      requestAnimationFrame(() => {
-        const input = inputRef.current;
-        if (!input) return;
-        input.focus();
-        input.setSelectionRange(cited.display.length, cited.display.length);
-      });
-    };
-    if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId, onCancelled });
-    else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, threadId, queueId, onCancelled });
-  };
-  const steerAgainUntilRef = useRef(0);
-  const prevPendingCountRef = useRef(pendingCount);
-  useEffect(() => {
-    const expiresAt = doubleEnterSteerWindowExpiresAt(
-      prevPendingCountRef.current,
-      pendingCount,
-      busy,
-      group ? roomSteers : canSteer,
-    );
-    if (expiresAt !== null) steerAgainUntilRef.current = expiresAt;
-    prevPendingCountRef.current = pendingCount;
-  }, [pendingCount, busy, canSteer, group, roomSteers]);
-  useEffect(() => {
-    if (!busy || pendingCount === 0) {
-      setSteering(false);
-      return;
-    }
-    if (!steering) return;
-    const timeout = window.setTimeout(() => setSteering(false), 20_000);
-    return () => window.clearTimeout(timeout);
-  }, [busy, pendingCount, steering]);
   const photoInput = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -505,10 +423,6 @@ export function Composer({
   const mayAct = useMayAct(), mayStop = !sharedChat || mayAct(profile?.tasks?.find((task) => task.threadId === threadId)?.askedBy);
 
 
-  // A one-to-one bot at work: Enter does the chosen follow-up and Ctrl/⌘ with it the other one. Rooms keep their own queue.
-  const followUpFor = (alternate: boolean) => resolveFollowUp({ running: busy && !group && Boolean(bot), alternate, preferred: followUpDefault, canSteer }) ?? undefined;
-  const steersNow = group ? canSteer : followUpFor(false) === "steer";
-  const sendNames = sendLabels({ busy, canSteer: steersNow, sendLabel });
   const retryFailedSend = (failed: FailedComposerSend) => {
     const failedMode = failed.channelMode ?? "chat";
     if (failed.requestText.includes("<attached-image ") && !imageTargetsSupport(failed.requestText, failedMode)) {
@@ -529,17 +443,16 @@ export function Composer({
           replyToId: failed.replyToId,
           threadId: failed.threadId, mentions: failed.mentions,
           channelMode: failed.channelMode,
-          followUp: failed.followUp,
         });
       },
     };
     if (group) {
       dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, mode: failedMode, followUp: failed.followUp, ...retry });
+      dispatch({ type: "send", botId: bot.id, mode: failedMode, ...retry });
     }
   };
-  const send = (followUp: FollowUp | undefined = followUpFor(false)) => {
+  const send = () => {
     if (locked || attachmentPending) return;
     if (
       attachments.some((attachment) => attachment.kind === "image") &&
@@ -563,7 +476,7 @@ export function Composer({
       reply: replyTo ?? null,
       replyToId: replyTo?.id,
       threadId,
-      channelMode: effectiveChannelMode, mentions: picks.ids(body), followUp,
+      channelMode: effectiveChannelMode, mentions: picks.ids(body),
     };
     if (group) {
       const points = effectiveChannelMode === "goal" ? null : takePointedChips(threadId);
@@ -578,16 +491,16 @@ export function Composer({
         ...(points ? { pointed: points.pointed } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
-      roomMessageSent(effectiveChannelMode, busy);
+      roomMessageSent(effectiveChannelMode, false);
     } else if (bot) {
       const points = effectiveChannelMode === "goal" ? null : takePointedChips(threadId);
       const page = effectiveChannelMode === "goal" ? undefined : openPageFor(threadId);
       dispatch({
         type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext, mode: effectiveChannelMode, mentions: sentDraft.mentions,
-        ...(points ? { pointed: points.pointed } : {}), ...(page ? { openPage: page } : {}), ...(followUp ? { followUp } : {}),
+        ...(points ? { pointed: points.pointed } : {}), ...(page ? { openPage: page } : {}),
         onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
-      directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && followUp !== "steer");
+      directMessageSent(state.instances, bot.modelSelection?.instanceId, false);
     }
     setText("");
     setAttachments([]); picks.clear();
@@ -765,21 +678,7 @@ export function Composer({
           onPendingChange={(pending) => changeDraftAttachmentPending(draftId, pending)}
           uploadImage={uploadImage}
         />
-        <QueuedComposerMessages
-          items={queuedMessages}
-          oneThreadPerBot={state.config?.cloudStarter === true}
-          onSeePlans={() => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" })}
-          onSteer={canSteerQueued && (!group || roomSteers) ? steerQueued : undefined}
-          steerInterrupts={!group && !canSteer}
-          held={Boolean(group) && busy && !roomSteers}
-          steerMode={group ? "next" : "all"}
-          steering={steering}
-          onCancel={(queueId) => {
-            if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId });
-            else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, threadId, queueId });
-          }}
-          onEdit={locked ? undefined : editQueued}
-        /><TeamAudienceLabel bot={bot} group={group} />
+        <TeamAudienceLabel bot={bot} group={group} />
         <div className="relative">
           {/* Plain canvas behind the composer and the strip below it, so the transcript ends at the composer
               with no fade. */}
@@ -881,15 +780,7 @@ export function Composer({
             }
             if (sendsMessage(e.nativeEvent, sendKey)) {
               e.preventDefault();
-              if (
-                (group ? roomSteers : canSteer) &&
-                doubleEnterSteersQueue(steerAgainUntilRef.current, Date.now(), pendingCount, hasContent)
-              ) {
-                steerAgainUntilRef.current = 0;
-                steerQueued();
-                return;
-              }
-              send(followUpFor(alternateSend(e.nativeEvent, sendKey)));
+              send();
             }
             if (e.key === "Escape" && recording) stopDictation();
           }}
@@ -899,7 +790,7 @@ export function Composer({
           aria-busy={bot?.awaitingThreadSnapshot || undefined}
           placeholder={composerPlaceholder({
             locked: setupLocked, approval: blocking, attaching: attachmentPending, listening: recording,
-            replying: Boolean(replyTo), busy, canSteer: steersNow, queued: pendingCount > 0, busyName, sendLabel, group, members: members ?? [],
+            replying: Boolean(replyTo), busy, busyName, sendLabel, group, members: members ?? [],
             jevOn: jevRoomRoutingOn(state.config), goal: channelMode === "goal", botName: bot?.name ?? "",
             setupHint: group ? null : setupRequestPlaceholder(bot, threadId),
           })}
@@ -936,9 +827,8 @@ export function Composer({
         ) : bot && !group && <CallButton bot={bot} placement="composer" inverse />)}
 
         {showSend && (
-          <ComposerSendButton waits={busy && !steersNow} label={sendNames.label} title={sendNames.title}
-            disabled={attachmentPending} onSend={(alternate) => send(followUpFor(alternate))} onChoose={send}
-            menu={followUpFor(false) && { choices: followUpChoices(followUpDefault, canSteer), name: busyName, sendKey: sendLabel, alternateKey: alternateSendLabel(sendKey) }} />
+          <ComposerSendButton label={t("composer.send.message")} title={`${t("chat.send")} (${sendLabel})`}
+            disabled={attachmentPending} onSend={send} />
           )}
           </div>
         </div>

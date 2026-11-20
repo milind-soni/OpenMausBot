@@ -183,7 +183,6 @@ describe("independent bot threads", () => {
       { type: "editMessage", botId: bot.id, messageId: "first-message", text: "Changed" },
       { type: "answerCard", botId: bot.id, messageId: "approval", answer: "Allow" },
       { type: "dismissCard", botId: bot.id, messageId: "approval" },
-      { type: "cancelQueued", botId: bot.id, queueId: "queued" },
     ];
     for (const action of actions) expect(pinBotThreadAction(action, [bot])).toMatchObject({ threadId: "first" });
     const pinned: Action = { type: "send", botId: bot.id, text: "Background", threadId: "second" };
@@ -323,14 +322,10 @@ describe("independent bot threads", () => {
     expect(currentTaskBot(state.bots[0]!).modelSelection.model).toBe("other-model");
   });
 
-  it("can start a new thread while another waits and cancels only the pinned queue", () => {
+  it("can start a new thread while another waits", () => {
     const opened = reducer(start(), { type: "newTask", botId: bot.id });
     expect(opened.selectedId).toBe(bot.id);
     expect(opened.bots[0]?.busy).toBe(true);
-    const queued = { ...opened, pendingQueued: { first: [{ queueId: "one", text: "First" }], second: [{ queueId: "two", text: "Second" }] } };
-    const cancelled = reducer(queued, { type: "cancelQueued", botId: bot.id, threadId: "second", queueId: "two" });
-    expect(cancelled.pendingQueued.first).toEqual(queued.pendingQueued.first);
-    expect(cancelled.pendingQueued.second).toBeUndefined();
   });
 
   it("waits for acknowledged folder writes and keeps them separate from every thread and bot default", () => {
@@ -2001,12 +1996,10 @@ describe("pending queued chip", () => {
     expect(reducer(drained, { type: "botQueues", queues }).pendingQueued).toEqual({});
   });
 
-  it.each(["drain", "cancel"])("does not resurrect an offscreen queue after an early SSE receipt and %s", (operation) => {
+  it("does not resurrect an offscreen queue after an early SSE receipt", () => {
     const queues = { sibling: [{ queueId: "early-q", text: "waiting" }] };
     const queued = reducer(reducer(initialState, { type: "botPatched", bot }), { type: "botQueues", queues });
-    const removed = reducer(queued, operation === "drain"
-      ? { type: "consumePendingQueued", threadId: "sibling", queueId: "early-q" }
-      : { type: "cancelQueued", botId: bot.id, threadId: "sibling", queueId: "early-q" });
+    const removed = reducer(queued, { type: "consumePendingQueued", threadId: "sibling", queueId: "early-q" });
     const snapshot = reducer(removed, { type: "botQueues", queues: {} });
     expect(reducer(snapshot, { type: "pendingQueued", threadId: "sibling", queueId: "early-q", text: "waiting" }).pendingQueued).toEqual({});
   });
@@ -2049,37 +2042,6 @@ describe("pending queued chip", () => {
     expect(late.consumedQueueIds["foreign-99"]).toBeUndefined();
   });
 
-  it("drops a cancelled pending chip without waiting for drain", () => {
-    const withBot = reducer(initialState, { type: "botPatched", bot });
-    const queued = reducer(withBot, {
-      type: "pendingQueued",
-      threadId: "t1",
-      queueId: "q-drop",
-      text: "never mind",
-    });
-    const cancelled = reducer(queued, {
-      type: "cancelQueued",
-      botId: "b1",
-      queueId: "q-drop",
-    });
-    expect(cancelled.pendingQueued).toEqual({});
-  });
-
-  it("drops a cancelled channel follow-up from its original task", () => {
-    const queued = reducer(initialState, {
-      type: "pendingQueued",
-      threadId: "room-task-1",
-      queueId: "q-room-drop",
-      text: "never mind",
-    });
-    const cancelled = reducer(queued, {
-      type: "cancelGroupQueued",
-      groupId: "room-1",
-      threadId: "room-task-1",
-      queueId: "q-room-drop",
-    });
-    expect(cancelled.pendingQueued).toEqual({});
-  });
 });
 
 describe("scrollback pages", () => {
@@ -2974,42 +2936,6 @@ describe("restoring the open conversation", () => {
       await settle();
       expect(seen.selectedId).toBe("bot-2");
       expect(stored.get(LAST_CONVERSATION_KEY)).toBe("bot-2");
-    });
-
-    it("a pressed Steer that stays queued says why: pictures anywhere, any held room steer, and a plain 1:1 queued answer stays quiet", async () => {
-      const { stream } = await boot();
-      stream.send(hello());
-      await settle();
-      const answers: Record<string, unknown> = {
-        "/api/bots/bot-1/queue/q-image/steer": { ok: true, queued: true, threadId: "bot-1-thread", blockedBy: "images" },
-        "/api/groups/room-1/queue/q-room/steer": { ok: true, queued: true, threadId: "room-thread", blockedBy: "images" },
-        "/api/groups/room-1/queue/q-room-plain/steer": { ok: true, queued: true, threadId: "room-thread" },
-        "/api/bots/bot-1/queue/q-plain/steer": { ok: true, queued: true, threadId: "bot-1-thread" },
-      };
-      vi.stubGlobal("fetch", (path: string) => Promise.resolve(new Response(JSON.stringify(answers[path.replace(/\?since=[^&]*$/, "")] ?? {}))));
-
-      const settled = vi.fn();
-      flushSync(() => dispatch({ type: "steerQueued", botId: "bot-1", queueId: "q-plain", onSettled: settled }));
-      await settle();
-      expect(settled).toHaveBeenCalledTimes(1);
-      expect(seen.notice).toBeNull();
-
-      flushSync(() => dispatch({ type: "steerQueued", botId: "bot-1", queueId: "q-image", onSettled: settled }));
-      await settle();
-      expect(settled).toHaveBeenCalledTimes(2);
-      expect(seen.notice).toEqual({ kind: "steer-images", botName: null });
-
-      flushSync(() => dispatch({ type: "notice", notice: null }));
-      flushSync(() => dispatch({ type: "steerGroupQueued", groupId: "room-1", queueId: "q-room", onSettled: settled }));
-      await settle();
-      expect(settled).toHaveBeenCalledTimes(3);
-      expect(seen.notice).toEqual({ kind: "steer-images", botName: null });
-
-      flushSync(() => dispatch({ type: "notice", notice: null }));
-      flushSync(() => dispatch({ type: "steerGroupQueued", groupId: "room-1", queueId: "q-room-plain", onSettled: settled }));
-      await settle();
-      expect(settled).toHaveBeenCalledTimes(4);
-      expect(seen.notice).toMatchObject({ kind: "note", text: expect.stringContaining("Nothing was stopped") });
     });
 
     it("the provider restores the conversation remembered on this device", async () => {

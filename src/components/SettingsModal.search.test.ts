@@ -62,9 +62,8 @@ const type = (value: string) => {
 };
 
 describe("Settings search", () => {
-  it("opens with the search field focused, and / or ⌘F come back to it from anywhere in Settings", () => {
-    expect(document.activeElement).toBe(search());
-    flushSync(() => dialog().focus());
+  it("focuses the dialog on open and lets / focus search", () => {
+    expect(document.activeElement).toBe(dialog());
     flushSync(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true })));
     expect(document.activeElement).toBe(search());
   });

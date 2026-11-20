@@ -114,19 +114,21 @@ it("tells two members' lines apart in the team's shared chat, each as their own 
   expect(bens.system).toContain("never ask another bot a question meant for a human");
 }, hostTimeout(120_000));
 
-it("keeps each person's name on lines that wait behind a running turn and start together", async () => {
+it("keeps each person's name on messages sent during another person's turn", async () => {
   const posted = await team.as(olive, "POST", `/api/bots/${support.id}/messages`, { text: "Hold on a moment", threadId: support.threadId });
   expect(posted.status, JSON.stringify(posted.body)).toBe(202);
   await expect.poll(async () => (await botAs(olive, support.id)).busy, { timeout: 30_000 }).toBe(true);
-  for (const [token, text] of [[olive, "QUEUED-OLIVE first"], [ben, "QUEUED-BEN second"]] as const) {
-    const queued = await team.as(token, "POST", `/api/bots/${support.id}/messages`, { text, threadId: support.threadId, followUp: "queue" });
+  for (const [token, text] of [[mira, "QUEUED-MIRA first"], [ben, "QUEUED-BEN second"]] as const) {
+    const queued = await team.as(token, "POST", `/api/bots/${support.id}/messages`, { text, threadId: support.threadId });
     expect(queued.status, JSON.stringify(queued.body)).toBe(202);
+    expect(queued.body).toMatchObject({ message: { text } });
+    expect(queued.body.queueId).toBeUndefined();
   }
   writeFileSync(gate(), "open");
   await expect.poll(async () => turns().filter((one) => one.planKey === "S-QUEUED").map(sent).join("\n"), { timeout: 60_000 }).toContain("QUEUED-BEN second");
   await expect.poll(settled, { timeout: 30_000 }).toBe(true);
   const read = turns().filter((one) => one.planKey === "S-QUEUED").map(sent).join("\n");
-  expect(read).toContain("[From Olive (person, Super admin) · message · their own request]\nQUEUED-OLIVE first");
+  expect(read).toContain("[From Mira (person) · message · their own request]\nQUEUED-MIRA first");
   expect(read).toContain("[From Ben (person) · message · their own request]\nQUEUED-BEN second");
 }, hostTimeout(120_000));
 

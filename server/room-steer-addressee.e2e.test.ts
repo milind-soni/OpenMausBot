@@ -7,7 +7,7 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 import { request } from "../scripts/mcp-server.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 
-it("with parallel room jobs off, an unnamed steer while a member works a handed job stays queued for the lead and stops nothing", async () => {
+it("with parallel room jobs off, an unnamed message is sent without steering or stopping another member’s handed job", async () => {
   const session = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const env = { OPENMAUSBOT_URL: session.info.url };
   const cli = (...args: string[]) => runControlOmb(args, { env }) as Promise<any>;
@@ -34,10 +34,11 @@ it("with parallel room jobs off, an unnamed steer while a member works a handed 
     await cli("send-channel", "--channel", room.id, "--text", "Split the work");
     await expect.poll(() => existsSync(ready), { timeout: 30_000 }).toBe(true);
 
-    const queued = await api(`/api/groups/${room.id}/messages`, { text: "Change of plan: drop the second part" });
-    expect(queued).toMatchObject({ ok: true, queued: true });
-    const steer = await api(`/api/groups/${room.id}/queue/${queued.queueId}/steer`, { threadId: room.threadId });
-    expect(steer).toMatchObject({ ok: true, queued: true, blockedBy: "addressee" });
+    const followup = { text: "Change of plan: drop the second part", sendId: "room-followup-retry" };
+    const sent = await api(`/api/groups/${room.id}/messages`, followup);
+    expect(sent).toMatchObject({ ok: true, message: { text: "Change of plan: drop the second part" } });
+    expect(sent.queueId).toBeUndefined();
+    expect((await api(`/api/groups/${room.id}/messages`, followup)).message.id).toBe(sent.message.id);
 
     writeFileSync(gate, "release");
     expect((await cli("wait", "--channel", room.id, "--timeout", "60")).status).toBe("settled");
@@ -47,7 +48,10 @@ it("with parallel room jobs off, an unnamed steer while a member works a handed 
 
     const messages = (await api(`/api/threads/${room.threadId}/messages`, undefined, "GET")).messages;
     expect(JSON.stringify(messages)).not.toContain("+ steered");
-    expect(messages.find((m: any) => m.text === "Change of plan: drop the second part")?.steered).toBeUndefined();
+    expect(messages.filter((m: any) => m.text === "Change of plan: drop the second part")).toEqual([
+      expect.objectContaining({ id: sent.message.id }),
+    ]);
+    expect(sent.message.steered).toBeUndefined();
     const turns = readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").map(line => JSON.parse(line));
     const tookIt = turns.find((t: any) => JSON.stringify(t.prompt ?? "").includes("Change of plan: drop the second part"));
     expect(tookIt?.botId).toBe(lead.id);

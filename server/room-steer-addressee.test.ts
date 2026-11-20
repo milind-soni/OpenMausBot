@@ -27,6 +27,12 @@ describe("steerMeantForSpeaker", () => {
     expect(steerMeantForSpeaker({ ...base, speakerId: "lead", speakerOnHandedWork: true })).toBe(true);
   });
 
+  it("routes a quoted reply to the quoted bot unless the text explicitly names another", () => {
+    expect(steerMeantForSpeaker({ ...base, replyBotId: "lead" })).toBe(false);
+    expect(steerMeantForSpeaker({ ...base, replyBotId: "worker" })).toBe(true);
+    expect(steerMeantForSpeaker({ ...base, replyBotId: "lead", mentioned: ["worker"] })).toBe(true);
+  });
+
   it("a named line steers only a bot it names", () => {
     expect(steerMeantForSpeaker({ ...base, mentioned: ["lead"] })).toBe(false);
     expect(steerMeantForSpeaker({ ...base, mentioned: ["worker"], speakerOnHandedWork: true })).toBe(true);

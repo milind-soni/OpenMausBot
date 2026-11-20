@@ -1,5 +1,4 @@
 // What a one-to-one send carries into acceptDirectSend (server/index.ts), and the receipt it answers with.
-import type { FollowUp } from "../shared/follow-up.ts";
 import type { ResolvedSender, SteerQueueReason } from "../shared/wire.ts";
 import type { DataContext } from "./data-context.ts";
 import type { Message } from "./store.ts";
@@ -18,8 +17,8 @@ export interface DirectSendInput {
   dataContext?: DataContext;
   personPresent: boolean;
   app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] };
-  /** Sent while the bot works: steer into the running turn, queue after it, or restart it (shared/follow-up.ts). */
-  followUp?: FollowUp;
+  typed?: boolean;
+  fromSlack?: boolean;
   /** Bot ids the person picked from the @ list. */
   mentions?: string[];
   /** The sender is the team's Owner or an Admin, so a typed stop may end someone else's run. */

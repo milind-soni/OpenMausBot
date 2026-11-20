@@ -1124,10 +1124,14 @@ export class Store {
     return null;
   }
 
-  appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }, command?: Command): Message {
+  appendMessage(threadId: string, message: Omit<Message, "id" | "at"> & { at?: number }, command?: Command, followup?: Omit<mdb.ChatFollowup, "status">): Message {
     const t = this.thread(threadId);
     const full: Message = { id: newId(), at: Date.now(), parentId: t.activeLeafId, ...redactBotAuthored(message) };
-    const persist = () => { mdb.appendMessage(threadId, full); return full; };
+    const persist = () => {
+      if (followup) mdb.saveChatFollowup(followup, full);
+      else mdb.appendMessage(threadId, full);
+      return full;
+    };
     const committed = command ? runCommand(command, persist) : persist();
     if (committed.id !== full.id) return committed;
     t.messages.push(full); this.threads.grew(threadId, full);

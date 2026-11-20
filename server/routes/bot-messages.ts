@@ -7,7 +7,6 @@ import { approvalModeFor } from "../../shared/approval-mode.ts";
 import { isPersistentQuestionCard } from "../../shared/ask-question.ts";
 import { normalizeReaction, reactionAnswer } from "../../shared/reactions.ts";
 import type { WidgetAction } from "../../shared/widget.ts";
-import { parseFollowUp } from "../../shared/follow-up.ts";
 import type { ResolvedSender } from "../../shared/wire.ts";
 import { admit } from "../admission.ts";
 import { dismissQuestionCard } from "../card-dismissal.ts";
@@ -207,11 +206,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (pointing && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can carry what the person pointed at" });
       const pageOpen = body.openPage !== undefined && body.openPage !== null;
       if (pageOpen && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can carry the page the person has open" });
-      const followUp = parseFollowUp(body.followUp);
-      if (followUp === null) return json(res, 400, { error: "followUp must be steer, queue or restart" });
       const mentions = parseMentionPicks(body.mentions);
       if (mentions === null) return json(res, 400, { error: "mentions must be a list of up to 20 bot ids" });
-      if (followUp && (guarded || pressed || fromAnApp)) return json(res, 400, { error: "only a typed message can choose how it meets the running turn" });
       // A distinct route, so an older server answers 404 instead of ignoring the safety preconditions.
       const guardedBody = guarded ? guardedSendSchema.safeParse(body) : null;
       if (guardedBody && !guardedBody.success) {
@@ -343,7 +339,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext, ...(app ? { app } : {}),
-          personPresent, admin: owners.admin(auth), ...(followUp ? { followUp } : {}),
+          personPresent, admin: owners.admin(auth), typed: (personPresent || Boolean(req.headers.origin)) && !guarded && !press && !appSent && !retried,
           ...(mentions?.length && !press && !appSent ? { mentions } : {}),
         }, guardedStart);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);

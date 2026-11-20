@@ -77,12 +77,6 @@ describe("ChatNotice", () => {
     expect(markup({ kind: "bot-gone", botName: null })).toContain('role="status"');
   });
 
-  it("says why a pressed Steer left pictures queued", () => {
-    const text = markup({ kind: "steer-images", botName: null });
-    expect(text).toContain("Pictures can&#x27;t be steered into this bot&#x27;s running turn. Your message will be sent as the next turn.");
-    expect(text).toContain('role="status"');
-  });
-
   it("shows the server's own words when a deletion went through with something left to tidy", () => {
     const text = markup({ kind: "note", botName: null, text: "Deleted. gone-vps could not be reached, so the bot's computer there was left as it was." });
     expect(text).toContain("Deleted. gone-vps could not be reached, so the bot&#x27;s computer there was left as it was.");

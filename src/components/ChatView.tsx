@@ -128,7 +128,7 @@ import { PinnedMessagesMenu, pinnedPreview } from "./PinnedMessagesMenu";
 import { highlightCitationSource } from "@/lib/citations-dom";
 import { useCanWriteIn, useReactor } from "@/lib/cloud-guest";
 import { formattedReplyWidth, isFormattedReply } from "@/lib/formatted-reply";
-import { otherSpeaker } from "@/lib/own-profile"; import { useSharedRun } from "./SharedQueueLine";
+import { otherSpeaker } from "@/lib/own-profile"; import { useSharedRun } from "./shared-run";
 import { latestFailure, latestReply, type TranscriptSnapshot } from "@/lib/transcript-announcer";
 import { pendingApprovals } from "./PendingApproval";
 import { TranscriptAnnouncer } from "./TranscriptAnnouncer";
@@ -1155,7 +1155,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
             seed={`${bot.id}:${bot.threadId ?? ""}:${busySince ?? ""}`}
             answering={popping !== null}
             since={busySince}
-          />{presenceVisible && sharedRun.line}
+          />
         </div>
       </div>
 

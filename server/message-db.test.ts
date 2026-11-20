@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
-import { closeMessageDb,
+import { chatFollowups, closeMessageDb,
   deleteThread,
   deleteThreads,
   indexMemoryFile,
@@ -29,6 +29,7 @@ import { closeMessageDb,
   readThread,
   readThreadTail,
   recallMessages,
+  saveChatFollowup,
   searchMessages,
   setActiveLeaf,
   updateMessage, describeMissingFts5 } from "./message-db.ts";
@@ -53,6 +54,19 @@ describe("message-db", () => {
     closeMessageDb();
     rmSync(DATA_DIR, { recursive: true, force: true });
     mkdirSync(DATA_DIR, { recursive: true });
+  });
+
+  it.each(["bot", "channel"] as const)("commits the visible message and %s follow-up together", (kind) => {
+    const followup = { id: "queue", kind, ownerId: "owner", threadId: "thread", payload: { text: "first" } };
+    saveChatFollowup(followup, msg("first", "first"));
+    expect(() => saveChatFollowup(followup, msg("duplicate", "duplicate"))).toThrow();
+
+    closeMessageDb();
+    expect(readThread("thread", legacy("thread"))).toMatchObject({
+      activeLeafId: "first",
+      messages: [expect.objectContaining({ id: "first" })],
+    });
+    expect(chatFollowups(kind)).toMatchObject([{ status: "pending", payload: { rowId: "first" } }]);
   });
 
   it("persists inserts, updates, and the active leaf across a reopen", () => {

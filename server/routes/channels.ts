@@ -2,17 +2,11 @@ import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import { routeRunOwners, type Actor, type RouteRunOwners } from "../host/run-owner.ts";
 import type { ResolvedSender, RoomTaskCreateResponse, RoomTaskUpdateResponse, RoomUpdateResponse, WireGroup } from "../../shared/wire.ts";
-import { admit } from "../admission.ts";
 import {
   cancelChannelMessage,
   channelQueueItem,
-  headChannelGroup,
-  holdChannelQueue,
   queueChannelMessage,
   queuedChannelMessage,
-  resolveHeldReplyTarget,
-  restoreHeldChannelQueue,
-  settleHeldChannelQueueHead,
 } from "../channel-queue.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import type { ProviderInstance, SteerOutcome } from "../contracts.ts";
@@ -29,7 +23,7 @@ import type { RoutineManager } from "../routines.ts";
 import { acceptedSendMatch, parseSendId, parseStopId, sendFingerprint, StopReceipts, type SendSequencer } from "../send-idempotency.ts";
 import type { SkillReview } from "../skill-review.ts";
 import { assertWithinBudget } from "../spend.ts";
-import { mentionedBots, type BotRecord, type GroupRecord, type GroupTaskPatch, type Message, type Store } from "../store.ts";
+import { roomResponders, type BotRecord, type GroupRecord, type GroupTaskPatch, type Message, type Store } from "../store.ts";
 import { roomLeadId, steerMeantForSpeaker } from "../room-steer-addressee.ts";
 import type { ThreadStarters } from "../thread-starters.ts";
 import { extractSteerImages } from "../turn-images.ts";
@@ -91,6 +85,7 @@ export interface ChannelRouteDeps {
   resolveReplyTarget(threadId: string, value: unknown): Message | undefined;
   runningTurnInstance(bot: BotRecord | null | undefined, threadId: string): ProviderInstance | null;
   engineSteersImages(instance: ProviderInstance | null | undefined): boolean;
+  roomReplyBotId(group: GroupRecord, reply: Message | undefined, members: BotRecord[]): string | undefined;
   startGroupTurn(
     groupId: string,
     text: string,
@@ -98,13 +93,12 @@ export interface ChannelRouteDeps {
     sendId: string | undefined,
     channelMode: "chat" | "goal",
     queueId: undefined,
-    options: { via?: "api"; sender?: ResolvedSender; trigger?: UsageTrigger; threadId?: string; mentions?: string[]; pointed?: RoomPick },
+    options: { via?: "api"; sender?: ResolvedSender; trigger?: UsageTrigger; threadId?: string; mentions?: string[]; pointed?: RoomPick; deferRunning?: boolean; replaceRunning?: boolean },
   ): Message;
   applyRoomHoldsFromMessage(groupId: string, text: string, mentions?: readonly string[]): void;
   cancelGroupTurnOperations(groupId: string, threadId: string): void;
   /** Whether this bot's live turn in the thread is a job another bot handed it. */
   speakerOnHandedWork(threadId: string, botId: string): boolean;
-  drainQueuedChannelSends(): void;
   clearTurnDigestState(threadId: string): void;
   closeOpenApprovals(threadId: string): void;
   revokeInternalCapabilitiesForThread(threadId: string): void;
@@ -122,7 +116,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
     groupSpeakers, groupTurnOperations, lastReply, cloudThreadRefusal, messageSender, usageTriggerFor, publicGroupState,
     groupWithThread, updateChannel, groupIsWorking, groupThreadIsWorking, readCursor, pageSize, messagePage,
     resolveReplyTarget, runningTurnInstance, startGroupTurn, engineSteersImages, applyRoomHoldsFromMessage, cancelGroupTurnOperations,
-    drainQueuedChannelSends, clearTurnDigestState, closeOpenApprovals, revokeInternalCapabilitiesForThread,
+    clearTurnDigestState, closeOpenApprovals, revokeInternalCapabilitiesForThread,
     stagedSkillCleanupsForThread, rejectDeletedThreadSkillStages, speakerOnHandedWork,
   } = deps; const owners = routeRunOwners(deps.runOwners, deps.runActor);
   const DESKTOP_MANAGED = deps.desktopManaged;
@@ -421,7 +415,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
               throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
             }
             if (accepted.kind === "match") {
-              return { ok: true as const, threadId, message: accepted.message };
+              return { ok: true as const, threadId, message: accepted.message, ...(accepted.message.steered ? { steered: true as const } : {}) };
             }
             const queued = queuedChannelMessage(group.id, threadId, sendId);
             if (queued) {
@@ -459,22 +453,46 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
           if (sameName) throw Object.assign(new Error(sameName), { status: 409 });
           if (channelMode === "chat" && !owners.stopRefusal(auth, threadId)) applyRoomHoldsFromMessage(current.id, text, mentions);
           if (sendId && !via) deps.bindLocationClient?.(req, auth, threadId, sendId);
-          const threadWorking = groupThreadIsWorking(current.id, threadId);
-          const decision = admit("room", {}, { roomWorking: threadWorking, threadWorking });
-          if (decision.action === "queue") {
-            const queued = queueChannelMessage(current.id, threadId, text, {
-              replyToId: replyTo?.id,
-              sendId,
-              mode: channelMode,
-              via,
-              sender: messageSender(auth),
-              trigger,
-              mentions,
-              ...(pick ? { pointed: pick } : {}),
-            });
-            return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+          const sender = messageSender(auth);
+          if (groupThreadIsWorking(current.id, threadId)) {
+            if (via) {
+              const queued = queueChannelMessage(current.id, threadId, text, {
+                replyToId: replyTo?.id, sendId, mode: channelMode, via, sender, trigger, mentions,
+                ...(pick ? { pointed: pick } : {}),
+              });
+              return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+            }
+            if (channelMode === "chat" && !pick && !owners.joinRefusal(auth, threadId, [sender])) {
+              const speakerId = groupSpeakers.get(threadId)?.botId ?? (threadId === current.threadId ? current.busyBotId : undefined);
+              const speaker = speakerId ? store.bot(speakerId) : null;
+              const instance = speaker ? runningTurnInstance(speaker, threadId) : undefined;
+              const input = instance?.adapter.steer ? extractSteerImages([text]) : null;
+              if (speaker && input && instance?.adapter.capabilities.queueing && instance.adapter.steer &&
+                (!input.images.length || engineSteersImages(instance)) &&
+                steerMeantForSpeaker({
+                  speakerId: speaker.id,
+                  mentioned: roomResponders(text, members, { kind: "mentions" }, mentions).map((bot) => bot.id),
+                  replyBotId: deps.roomReplyBotId(current, replyTo, members),
+                  leadId: roomLeadId(current.defaultResponder),
+                  speakerOnHandedWork: speakerOnHandedWork(threadId, speaker.id),
+                })) {
+                const prompt = promptWithReply(input.texts[0] ?? text, replyTo, deps.userName(threadId));
+                const outcome = await (input.images.length
+                  ? instance.adapter.steer(threadId, prompt, input.images)
+                  : instance.adapter.steer(threadId, prompt)).catch((): SteerOutcome => "indeterminate");
+                if (outcome !== "refused") {
+                  if (!store.groupTaskByThread(current.id, threadId) && store.group(current.id)?.threadId !== threadId) {
+                    throw Object.assign(new Error("no such thread in channel"), { status: 404 });
+                  }
+                  const message = store.appendMessage(threadId, {
+                    role: "user", kind: "text", text, replyToId: replyTo?.id, sendId, channelMode, sender, steered: true,
+                  });
+                  return { ok: true as const, steered: true as const, threadId, message };
+                }
+              }
+            }
           }
-          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender: messageSender(auth), trigger, threadId, mentions, ...(pick ? { pointed: pick } : {}) });
+          const message = startGroupTurn(current.id, text, replyTo, sendId, channelMode, undefined, { via, sender, trigger, threadId, mentions, deferRunning: !via, replaceRunning: !via && !owners.stopRefusal(auth, threadId), ...(pick ? { pointed: pick } : {}) });
           return { ok: true as const, threadId, message };
         },
       );
@@ -493,138 +511,6 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       return json(res, 200, { ok: true });
     }
 
-    // Steers the queued head into the running room turn without interrupting it; a driver that cannot steer keeps the queue.
-    m = path.match(/^\/api\/groups\/([\w-]+)\/queue\/([\w-]+)\/steer$/);
-    if (m && method === "POST") {
-      const body = await readBody(req);
-      if (body !== null && (typeof body !== "object" || Array.isArray(body))) {
-        return json(res, 400, { error: "body must be a JSON object" });
-      }
-      const threadId = typeof body?.threadId === "string" ? body.threadId : undefined;
-      if (threadId !== undefined && !/^[\w-]+$/.test(threadId)) {
-        return json(res, 400, { error: "threadId must be a task id" });
-      }
-      const group = store.group(m[1]);
-      if (!group) return json(res, 404, { error: "no such room" });
-      const targetThreadId = threadId ?? group.threadId;
-      const ownsThread = group.dm
-        ? group.threadId === targetThreadId
-        : Boolean(store.groupTaskByThread(group.id, targetThreadId));
-      if (!ownsThread) {
-        return json(res, 409, { error: "the channel switched tasks before it could receive the message" });
-      }
-      const current = store.group(group.id);
-      if (!current) return json(res, 404, { error: "no such room" });
-      const speakerBotId =
-        groupSpeakers.get(targetThreadId)?.botId ??
-        (targetThreadId === current.threadId ? current.busyBotId : undefined);
-      const speaker = speakerBotId ? store.bot(speakerBotId) : undefined;
-      const instance = speaker ? runningTurnInstance(speaker, targetThreadId) : undefined;
-      // Hold the queue atomically: the room's settle drains it or this request steers its head, never both.
-      const held = holdChannelQueue(current.id, targetThreadId, m[2]);
-      if (!held) return json(res, 404, { error: "no such queued message" });
-      const headGroup = headChannelGroup(held.items);
-      const [head] = headGroup;
-      const waitsItsTurn = owners.joinRefusal(auth, targetThreadId, headGroup.map((item) => item.sender));
-      if (waitsItsTurn) {
-        restoreHeldChannelQueue(held);
-        return json(res, 403, { error: waitsItsTurn, code: "waits_its_turn" });
-      }
-      const steerInput = extractSteerImages(headGroup.map((item) => item.text));
-      const members = current.memberIds.map((id) => store.bot(id)).filter((bot): bot is BotRecord => Boolean(bot));
-      const mentioned = [...new Set(headGroup.flatMap((item) => mentionedBots(item.text, members, item.mentions ?? []).map((bot) => bot.id)))];
-      const decision = admit("room-steer", {
-        speakerPresent: Boolean(speaker),
-        speakerAddressed: !speaker || steerMeantForSpeaker({
-          speakerId: speaker.id,
-          mentioned,
-          leadId: roomLeadId(current.defaultResponder),
-          speakerOnHandedWork: speakerOnHandedWork(targetThreadId, speaker.id),
-        }),
-        engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
-        carriesImages: !steerInput || steerInput.images.length > 0,
-        engineCanSteerImages: Boolean(steerInput) && engineSteersImages(instance),
-        isQueueHead: Boolean(head && head.id === m[2]),
-      });
-      if (decision.action === "refuse") {
-        restoreHeldChannelQueue(held);
-        return json(res, 409, { error: "only the first queued message can steer" });
-      }
-      if (decision.action === "queue" || !steerInput || headGroup.some((item) => item.pointed)) {
-        restoreHeldChannelQueue(held);
-        return json(res, 200, {
-          ok: true,
-          queued: true,
-          threadId: targetThreadId,
-          ...(decision.action === "queue" && decision.blockedBy ? { blockedBy: decision.blockedBy } : {}),
-        });
-      }
-      const replyTo = resolveHeldReplyTarget(held, resolveReplyTarget);
-      const speakerName = deps.userName(targetThreadId);
-      let foldedPrompt: string;
-      try {
-        foldedPrompt = headGroup
-          .map((item, index) =>
-            promptWithReply(
-              steerInput.texts[index] ?? item.text,
-              index === 0
-                ? replyTo
-                : item.replyToId
-                  ? resolveReplyTarget(targetThreadId, item.replyToId)
-                  : undefined,
-              speakerName,
-            ),
-          )
-          .join("\n\n");
-      } catch (error) {
-        restoreHeldChannelQueue(held);
-        throw error;
-      }
-      const steered: SteerOutcome = instance?.adapter.steer
-        ? await (steerInput.images.length > 0
-            ? instance.adapter.steer(targetThreadId, foldedPrompt, steerInput.images)
-            : instance.adapter.steer(targetThreadId, foldedPrompt))
-            .catch((): SteerOutcome => "indeterminate")
-        : "refused";
-      // The steer awaited adapter work: re-read every ownership invariant before writing anything.
-      const after = store.group(current.id);
-      const afterSpeakerBotId = after
-        ? groupSpeakers.get(targetThreadId)?.botId ??
-          (targetThreadId === after.threadId ? after.busyBotId : undefined)
-        : undefined;
-      // "indeterminate" never restores: the words may already be in the live turn, and a replay would run them twice.
-      const delivered = steered !== "refused";
-      if (after && delivered && (steered === "indeterminate" || afterSpeakerBotId === speakerBotId)) {
-        const messages = headGroup.map((item) => store.appendMessage(targetThreadId, {
-          role: "user",
-          kind: "text",
-          text: item.text,
-          replyToId: item.replyToId,
-          sendId: item.sendId,
-          channelMode: item.mode,
-          queueId: item.id,
-          via: item.via,
-          steered: true,
-          sender: item.sender,
-        }));
-        settleHeldChannelQueueHead(held);
-        return json(res, 200, {
-          ok: true,
-          steered: true,
-          threadId: targetThreadId,
-          messages,
-          queueIds: headGroup.map((item) => item.id),
-        });
-      }
-      if (steered === "indeterminate" && !after) {
-        // Settle the head so a restart cannot replay words the dead turn may have run.
-        settleHeldChannelQueueHead(held);
-        return json(res, 404, { error: "no such room" });
-      }
-      restoreHeldChannelQueue(held);
-      if (after && !groupThreadIsWorking(after.id, targetThreadId)) drainQueuedChannelSends();
-      return json(res, 200, { ok: true, queued: true, threadId: targetThreadId });
-    }
     m = path.match(/^\/api\/groups\/([\w-]+)\/members\/([\w-]+)\/compact$/);
     if (m && method === "POST") {
       const group = store.group(m[1]);

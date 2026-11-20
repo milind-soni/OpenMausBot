@@ -1,12 +1,8 @@
 // Purity is the contract: no IO, no store reads, no adapter calls. Callers gather state, call admit(), and apply the decision.
 
-import type { FollowUp } from "../shared/follow-up.ts";
-
 export type AdmissionSurface =
   | "direct-busy" // 1:1 send to a thread whose turn is live: steer-first
   | "direct" // 1:1 send on a settled thread: start now or park
-  | "room" // room send while the channel works: always queue
-  | "room-steer" // manual steer of a queued room message: head only
   | "guarded" // guarded external send: refuse when anything is busy
   | "unattended" // routines/webhooks: busy means a missed run
   | "peer" // delegations and resume drains: slot-aware admission
@@ -15,7 +11,7 @@ export type AdmissionSurface =
 
 export type AdmissionQueueReason = "capacity" | "group-turn";
 
-export type AdmissionRefusalCode = "guarded_busy" | "queue-head-only" | "busy" | "missing";
+export type AdmissionRefusalCode = "guarded_busy" | "busy" | "missing";
 
 export const DRAIN_COALESCE_WINDOW_MS = 120_000;
 
@@ -54,13 +50,6 @@ export interface AdmissionMessage {
   /** Steering into a turn waiting on a person's surface choice would race the choice. */
   pendingComputerSelection?: boolean;
   engineCanSteer?: boolean;
-  /** What the person chose for a message sent while the turn runs; absent means steer where the turn can take it. */
-  followUp?: FollowUp;
-  /** Room queues drain one item per turn, so only the head may jump into the live speaker's turn. */
-  isQueueHead?: boolean;
-  speakerPresent?: boolean;
-  /** A room line meant for another bot never folds into the speaker's turn. */
-  speakerAddressed?: boolean;
 }
 
 export interface AdmissionState {
@@ -71,15 +60,13 @@ export interface AdmissionState {
   atCapacity?: boolean;
   groupTurn?: boolean;
   parksBehindCoordination?: boolean;
-  roomWorking?: boolean;
-  threadWorking?: boolean;
 }
 
-export type AdmissionSteerBlock = "images" | "addressee";
+export type AdmissionSteerBlock = "images";
 
 export type AdmissionDecision =
   | { action: "steer" }
-  | { action: "queue"; reason?: AdmissionQueueReason; blockedBy?: AdmissionSteerBlock; chose?: Exclude<FollowUp, "steer"> }
+  | { action: "queue"; reason?: AdmissionQueueReason; blockedBy?: AdmissionSteerBlock }
   | { action: "start" }
   | { action: "refuse"; code: AdmissionRefusalCode };
 
@@ -100,10 +87,6 @@ export function admit(
 ): AdmissionDecision {
   switch (surface) {
     case "direct-busy": {
-      // Restart waits for the Stop it asks for. A chosen queue counts only where the turn could take steering: one that
-      // cannot queues anyway, as it always has (person-first may still stop it for the person's message).
-      if (message.followUp === "restart") return { action: "queue", chose: "restart" };
-      if (message.engineCanSteer === true && message.followUp === "queue") return { action: "queue", chose: "queue" };
       if (message.engineCanSteer !== true || message.pendingComputerSelection) return { action: "queue" };
       if (imagesBlockSteer(message)) return { action: "queue", blockedBy: "images" };
       return { action: "steer" };
@@ -116,19 +99,6 @@ export function admit(
         return { action: "queue", reason };
       }
       return { action: "start" };
-    }
-    case "room":
-      return (state.threadWorking ?? state.roomWorking) ? { action: "queue" } : { action: "start" };
-    case "room-steer": {
-      if (!message.speakerPresent || message.engineCanSteer !== true) {
-        return { action: "queue" };
-      }
-      if (message.speakerAddressed === false) return { action: "queue", blockedBy: "addressee" };
-      if (imagesBlockSteer(message)) return { action: "queue", blockedBy: "images" };
-      if (!message.isQueueHead) {
-        return { action: "refuse", code: "queue-head-only" };
-      }
-      return { action: "steer" };
     }
     case "guarded": {
       // A guarded send is an external contract: never queued, never steered, never started under stale permissions.

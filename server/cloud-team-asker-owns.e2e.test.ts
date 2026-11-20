@@ -1,3 +1,4 @@
+import { shownPersonName } from "../shared/bot-owner.ts";
 // Whoever asked owns the run, on a Team Cloud's shared chat. Priya's request holds in a long tool call (a CI poll) while
 // Tom and Sam write in the same chat: their lines wait their turn, in a queue everyone sees, and each runs after hers as
 // its own turn; neither steers nor stops her run, and only Priya or an admin can stop it. Priya adding to her own run, and
@@ -100,10 +101,9 @@ it("Tom's line during Priya's run waits its turn: it never reaches her run, nor 
   const sent = await send(tom, TOM_ASK);
   expect(sent.status, JSON.stringify(sent.body)).toBe(202);
   expect(sent.body.steered).toBeUndefined();
-  expect(sent.body.queued).toBe(true);
-  for (const viewer of [ada, priya, tom]) {
-    expect((await queue(viewer)).map((item) => [item.text, item.sender?.name])).toEqual([[TOM_ASK, "Tom"]]);
-  }
+  expect(sent.body).toMatchObject({ message: { text: TOM_ASK, sender: { name: "Tom" } } });
+  expect(sent.body.queueId).toBeUndefined();
+  expect(await queue(priya)).toEqual([]);
   await pastPersonFirst();
   expect(await busy()).toBe(true);
   expect(await personFirstStops()).toBe(stopsBefore);
@@ -115,7 +115,7 @@ it("Tom's line during Priya's run waits its turn: it never reaches her run, nor 
   const tomAnswer = rows.findIndex((row) => row.role === "bot" && row.text?.includes(ANSWERS[TOM_ASK]));
   expect(priyaAnswer).toBeGreaterThan(-1);
   expect(rows[priyaAnswer].text, "Priya's run never read Tom's words").not.toContain(TOM_ASK);
-  expect(priyaAnswer).toBeLessThan(tomLine);
+  expect(tomLine).toBeLessThan(priyaAnswer);
   expect(tomLine).toBeLessThan(tomAnswer);
   expect(rows[tomLine].steered).toBeUndefined();
   expect(rows[tomLine].sender?.name).toBe("Tom");
@@ -195,31 +195,19 @@ it("Priya adding to her own run in the shared chat is steered into it, and perso
   await expect.poll(() => busy(), { timeout: hostTimeout(30_000), interval: 100 }).toBe(false);
 }, hostTimeout(120_000));
 
-it("three people: everyone sees whose lines wait, in order; each removes only their own; nobody else's waits steer her run", async () => {
+it("shows messages from multiple writers immediately and keeps the current owner's run", async () => {
   await priyaRuns();
   const stopsBefore = await personFirstStops();
-  expect((await send(tom, TOM_ASK)).body.queued).toBe(true);
-  expect((await send(sam, SAM_ASK)).body.queued).toBe(true);
-  const waiting = await queue(priya);
-  expect(waiting.map((item) => item.sender?.name)).toEqual(["Tom", "Sam"]);
-  expect((await queue(sam)).map((item) => item.sender?.name)).toEqual(["Tom", "Sam"]);
-  const [tomQueued, samQueued] = waiting;
-
-  const notHis = await team.as(sam, "DELETE", `/api/bots/${botId}/queue/${tomQueued.queueId}`, { threadId: shared });
-  expect(notHis.status, JSON.stringify(notHis.body)).toBe(403);
-  const steerIn = await team.as(tom, "POST", `/api/bots/${botId}/queue/${tomQueued.queueId}/steer`, { threadId: shared });
-  expect(steerIn.status, JSON.stringify(steerIn.body)).toBe(403);
-  const priyaSteers = await team.as(priya, "POST", `/api/bots/${botId}/queue/${tomQueued.queueId}/steer`, { threadId: shared });
-  expect(priyaSteers.status, JSON.stringify(priyaSteers.body)).toBe(403);
-  const own = await team.as(sam, "DELETE", `/api/bots/${botId}/queue/${samQueued.queueId}`, { threadId: shared });
-  expect(own.status, JSON.stringify(own.body)).toBe(200);
-  expect((await queue(tom)).map((item) => item.sender?.name)).toEqual(["Tom"]);
-
+  expect((await send(tom, TOM_ASK)).body).toMatchObject({ message: { text: TOM_ASK, sender: { name: "Tom" } } });
+  expect((await send(sam, SAM_ASK)).body).toMatchObject({ message: { text: SAM_ASK, sender: { name: "Sam" } } });
+  expect(await queue(priya)).toEqual([]);
+  const visible = await transcript(priya);
+  expect(visible.map((row) => row.text)).toEqual(expect.arrayContaining([TOM_ASK, SAM_ASK]));
   await pastPersonFirst();
   expect(await personFirstStops()).toBe(stopsBefore);
   await release();
-  expect(await answered(ANSWERS[TOM_ASK])).toBe(true);
-  expect((await transcript(ada)).some((row) => row.role === "user" && row.text === SAM_ASK)).toBe(false);
+  await expect.poll(() => answered(ANSWERS[TOM_ASK]), { timeout: hostTimeout(60_000) }).toBe(true);
+  await expect.poll(() => answered(ANSWERS[SAM_ASK]), { timeout: hostTimeout(60_000) }).toBe(true);
 }, hostTimeout(120_000));
 
 it("her private chat is unchanged: her line is steered into her run and answered first", async () => {
@@ -240,7 +228,7 @@ it("a routine run started mid-run neither steers nor stops her run, and Tom's li
   expect(routine.status, JSON.stringify(routine.body)).toBe(201);
   await priyaRuns();
   const stopsBefore = await personFirstStops();
-  expect((await send(tom, TOM_ASK)).body.queued).toBe(true);
+  expect((await send(tom, TOM_ASK)).body.message.text).toBe(TOM_ASK);
   const ran = await team.as(ada, "POST", `/api/routines/${routine.body.routine.id}/run`);
   expect(ran.status, JSON.stringify(ran.body)).toBe(201);
   await pastPersonFirst();
@@ -254,15 +242,16 @@ it("a routine run started mid-run neither steers nor stops her run, and Tom's li
   const rows = await transcript(ada);
   const last = (text: string) => rows.findLastIndex((row) => row.text?.includes(text));
   expect(rows[last(ANSWERS[PRIYA_ASK])].text, "the routine never reached her run").not.toContain("pay runs");
-  expect(last(ANSWERS[PRIYA_ASK])).toBeLessThan(last(TOM_ASK));
+  expect(last(ANSWERS[PRIYA_ASK])).toBeLessThan(last(ANSWERS[TOM_ASK]));
   expect(last(TOM_ASK)).toBeLessThan(last(ANSWERS[TOM_ASK]));
   expect(rows.some((row) => row.role === "user" && row.text?.includes("pay runs")), "the routine ran in its own conversation").toBe(false);
 }, hostTimeout(180_000));
 
-it("a person with no name set is named as the People list names them, in the queue and in the refusal", async () => {
+it("a person with no name set is named as the People list names them, on the message and in the refusal", async () => {
   await priyaRuns();
-  expect((await send(dev, TOM_ASK)).body.queued).toBe(true);
-  expect((await queue(priya)).map((item) => item.sender?.name)).toEqual(["Dev"]);
+  const sent = await send(dev, TOM_ASK);
+  expect(sent.body.message.text).toBe(TOM_ASK);
+  expect(shownPersonName(sent.body.message.sender.name)).toBe("Dev");
   await release();
   writeFileSync(home("tool-calls.json"), JSON.stringify([POLL]));
   rmSync(home("release"), { force: true });

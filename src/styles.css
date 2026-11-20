@@ -3719,6 +3719,53 @@ button:disabled.bg-danger {
 
 :root[data-reduced-motion="true"] :is([data-modal-motion] > *, [data-overlay-fade], [data-side-panel-motion], [data-look="sidebar"], [data-sidebar-drawer-scrim]) { transition: none; }
 
+@media (width < 768px) {
+  [data-bot-list-stage]:has([data-bot-list-chat]) [data-look="sidebar"] {
+    z-index: 20;
+    translate: none;
+    transition: none;
+    touch-action: pan-y pinch-zoom;
+  }
+
+  [data-bot-list-stage]:has([data-bot-list-chat]) [data-sidebar-drawer-scrim] {
+    display: none;
+  }
+
+  [data-bot-list-chat] {
+    position: relative;
+    z-index: 25;
+    background: var(--color-app);
+    touch-action: pan-y pinch-zoom;
+  }
+
+  [data-bot-list-stage="open"]:has([data-bot-list-chat]) :is([data-bot-list-chat], [data-bot-list-trigger]) {
+    translate: 100vw 0;
+  }
+
+  [data-bot-list-stage="open"]:dir(rtl):has([data-bot-list-chat]) :is([data-bot-list-chat], [data-bot-list-trigger]) {
+    translate: -100vw 0;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    :root:not([data-reduced-motion="true"]) [data-bot-list-stage]:has([data-bot-list-chat])
+      :is([data-bot-list-chat], [data-bot-list-trigger]) {
+      transition: translate 200ms ease;
+    }
+  }
+
+  [data-bot-list-stage][data-drawer-dragging]:has([data-bot-list-chat])
+    :is([data-bot-list-chat], [data-bot-list-trigger]) {
+    translate: var(--drawer-offset) 0;
+    transition: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion="true"]) .preview-zoom-transition {
+    transition: transform 220ms ease-out;
+  }
+}
+
 [data-phone-model-sheet] {
   height: var(--sheet-height, auto);
 }

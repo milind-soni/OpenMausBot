@@ -15,9 +15,7 @@ import {
   _queuedChannelCount,
   drainChannelMessages,
   headChannelGroup,
-  holdChannelQueue,
   queueChannelMessage,
-  settleHeldChannelQueueHead,
 } from "./channel-queue.ts";
 import type { BotRecord, Message } from "./store.ts";
 
@@ -260,20 +258,4 @@ describe("drain coalescing golden (M2)", () => {
     expect(_queuedChannelCount(thread)).toBe(0);
   });
 
-  it("a room's manual head-steer folds and settles the whole head group as one", () => {
-    const group = "gd-group-steer";
-    const thread = "gd-room-steer";
-    const headOne = queueChannelMessage(group, thread, "head one");
-    const headTwo = queueChannelMessage(group, thread, "head two");
-    const other = queueChannelMessage(group, thread, "someone else", { sender: { name: "Priya", id: "p_priya" } });
-
-    const held = holdChannelQueue(group, thread, headOne.id)!;
-    expect(headChannelGroup(held.items).map((item) => item.id)).toEqual([headOne.id, headTwo.id]);
-    settleHeldChannelQueueHead(held);
-    expect(_queuedChannelCount(thread)).toBe(1);
-    const run = vi.fn();
-    drainChannelMessages(() => false, run);
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(run.mock.calls[0][0].items.map((item: { id: string }) => item.id)).toEqual([other.id]);
-  });
 });

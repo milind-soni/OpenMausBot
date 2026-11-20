@@ -58,7 +58,7 @@ import { NewMessagesDivider } from "../NewMessagesDivider";
 import { LiveCallBar } from "../LiveCallBar";
 import { CallOverlay } from "../CallView";
 import { FailedTurnRow } from "../ChatView";
-import { useSharedRun } from "../SharedQueueLine";
+import { useSharedRun } from "../shared-run";
 import { SetupOffer } from "../SetupOffer";
 import { ReplyQuote } from "../ReplyQuote";
 import { TurnPresence, useRotatingPhrase } from "../TurnPresence";

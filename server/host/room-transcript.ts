@@ -28,17 +28,19 @@ export function isRoomContextMessage(m: Pick<Message, "kind" | "text" | "digest"
 
 export interface RoomTranscriptDeps {
   store: Pick<Store, "messagesFor">;
+  pendingRows?(threadId: string): ReadonlySet<string>;
   teammateReportContext(requestId: string, readerBotId?: string): string;
 }
 
-export function createRoomTranscript({ store, teammateReportContext }: RoomTranscriptDeps) {
+export function createRoomTranscript({ store, teammateReportContext, pendingRows }: RoomTranscriptDeps) {
   function window(
     threadId: string,
     userName: PersonName,
     textOverrides?: ReadonlyArray<{ messageId: string; text: string }>,
     readerBotId?: string,
   ): RoomWindow {
-    const messages = store.messagesFor(threadId);
+    const pending = pendingRows?.(threadId);
+    const messages = store.messagesFor(threadId).filter((message) => !pending?.has(message.id));
     const messagesById = new Map(messages.map((message) => [message.id, message]));
     const overrides = new Map(textOverrides?.map((override) => [override.messageId, override.text]));
     const narration = roomTurnNarrationIds(messages);

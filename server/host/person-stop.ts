@@ -1,5 +1,5 @@
 // What a person's Stop does to a direct thread: the Stop button (POST /api/bots/:id/interrupt), a typed "stop"
-// while the bot works (acceptDirectSend), and "Restart turn" from the send menu. A stop ends what the request handed out too.
+// while the bot works (acceptDirectSend). A stop ends what the request handed out too.
 import type { Handoffs } from "../delta-context.ts";
 import { addressesEveryone, isStopCommand } from "../room-holds.ts";
 import type { RoutineManager } from "../routines.ts";
@@ -82,13 +82,5 @@ export function createPersonStop(deps: PersonStopDeps) {
     return { ok: true as const, threadId, message };
   }
 
-  /** "Restart turn": the message already waits in the queue, ahead of all but the person's own earlier messages, and the
-   * queue survives Stop, so stopping the running turn starts it over with that message. Like a typed stop, only a
-   * person's own send may end the turn. */
-  async function restartForPerson(botId: string, threadId: string, trigger: UsageTrigger): Promise<void> {
-    if (trigger.kind !== "user" && trigger.kind !== "owner") return;
-    await stopThreadForPerson(botId, threadId);
-  }
-
-  return { stopThreadForPerson, stopOnTypedCommand, restartForPerson };
+  return { stopThreadForPerson, stopOnTypedCommand };
 }

@@ -99,9 +99,7 @@ export function SettingsWindow() {
     const dialog = dialogRef.current;
     if (!dialog || dialog.closest("[inert]")) return;
     const previousFocus = keyboardFocusTarget();
-    const search = dialog?.querySelector<HTMLInputElement>("[data-settings-search]");
-    if (search?.checkVisibility()) search.focus({ preventScroll: true });
-    else dialog?.focus();
+    dialog.focus({ preventScroll: true });
     const onKey = (event: KeyboardEvent) => {
       if (!isTop() || dialog.closest("[inert]")) return;
       if (event.defaultPrevented || [...dialog.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]')].some((child) => child.getClientRects().length)) return;
@@ -119,7 +117,7 @@ export function SettingsWindow() {
       const focusable = [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((element) => element.checkVisibility());
       if (focusable.length === 0) { event.preventDefault(); dialog.focus(); return; }
       const first = focusable[0]!, last = focusable[focusable.length - 1]!;
-      if (event.shiftKey && (document.activeElement === first || !dialog.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
+      if (event.shiftKey && (document.activeElement === dialog || document.activeElement === first || !dialog.contains(document.activeElement))) { event.preventDefault(); last.focus(); }
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
     };
     window.addEventListener("keydown", onKey);

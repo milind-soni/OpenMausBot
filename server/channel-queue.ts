@@ -1,11 +1,9 @@
-// Follow-ups sent while a channel works stay off the transcript until it settles, so the current responder cannot appear
-// to answer words it never saw.
-
 import { newId } from "./contracts.ts";
-import { chatFollowups, saveChatFollowup, settleChatFollowups } from "./message-db.ts";
+import { chatFollowups, saveChatFollowup, settleChatFollowups, type ChatFollowup } from "./message-db.ts";
 import { drainCoalesceHead, DRAIN_COALESCE_MAX_ITEMS } from "./admission.ts";
 import type { ResolvedSender } from "../shared/wire.ts";
 import type { UsageTrigger } from "./usage-ledger.ts";
+import type { Message } from "./store.ts";
 import type { RoomPick } from "./room-pointed.ts";
 
 export interface ChannelQueueItem {
@@ -23,6 +21,7 @@ export interface ChannelQueueItem {
   /** What the person pointed at in a member's page; only that page's bot reads it. */
   pointed?: RoomPick;
   queuedAt: number;
+  rowId?: string;
 }
 
 interface ChannelQueueEntry {
@@ -53,6 +52,7 @@ export function restoreChannelMessages(): void {
 
 export interface QueuedChannelMessage {
   id: string;
+  message?: Message;
 }
 
 export function queueChannelMessage(
@@ -60,6 +60,7 @@ export function queueChannelMessage(
   threadId: string,
   text: string,
   options: {
+    record?: (followup: Omit<ChatFollowup, "status">) => Message;
     replyToId?: string;
     sendId?: string;
     mode?: "chat" | "goal";
@@ -87,10 +88,12 @@ export function queueChannelMessage(
     ...(options.pointed ? { pointed: options.pointed } : {}),
     queuedAt: Date.now(),
   };
-  saveChatFollowup({ id: item.id, kind: "channel", ownerId: groupId, threadId, payload: item });
-  entry.items.push(item);
+  const followup = { id: item.id, kind: "channel" as const, ownerId: groupId, threadId, payload: item };
+  const message = options.record?.(followup);
+  if (!message) saveChatFollowup(followup);
+  entry.items.push(message ? { ...item, rowId: message.id } : item);
   queues.set(threadId, entry);
-  return { id: item.id };
+  return { id: item.id, message };
 }
 
 export function queuedChannelMessage(
@@ -123,60 +126,6 @@ export function cancelChannelMessage(groupId: string, queueId: string): boolean 
     return true;
   }
   return false;
-}
-
-export interface HeldChannelQueue {
-  groupId: string;
-  threadId: string;
-  items: ChannelQueueItem[];
-}
-
-/** The entry leaves first, so a room settling meanwhile can never also drain the same words. Only the head group can be
- * lifted, and the caller must either restore the held queue or settle its head group. */
-export function holdChannelQueue(groupId: string, threadId: string, queueId: string): HeldChannelQueue | null {
-  const entry = queues.get(threadId);
-  if (!entry || entry.groupId !== groupId || entry.items[0]?.id !== queueId) return null;
-  queues.delete(threadId);
-  return { groupId, threadId, items: entry.items };
-}
-
-/** Words queued while the hold was open keep their place behind the restored items. */
-export function restoreHeldChannelQueue(held: HeldChannelQueue): void {
-  const existing = queues.get(held.threadId);
-  if (existing && existing.groupId !== held.groupId) throw new Error("queued task belongs to another channel");
-  queues.set(held.threadId, {
-    groupId: held.groupId,
-    items: existing ? [...held.items, ...existing.items] : held.items,
-  });
-}
-
-/** The queue is already lifted, so restore first, then let the error reach the request. */
-export function resolveHeldReplyTarget<T>(
-  held: HeldChannelQueue,
-  resolve: (threadId: string, replyToId: string) => T,
-): T | undefined {
-  const head = held.items[0];
-  if (!head?.replyToId) return undefined;
-  try {
-    return resolve(held.threadId, head.replyToId);
-  } catch (error) {
-    restoreHeldChannelQueue(held);
-    throw error;
-  }
-}
-
-/** A restart must not replay the steered words as a fresh follow-up. */
-export function settleHeldChannelQueueHead(held: HeldChannelQueue): void {
-  const head = headChannelGroup(held.items);
-  const rest = held.items.slice(head.length);
-  settleChatFollowups(head.map((item) => item.id), null);
-  if (rest.length === 0) return;
-  const existing = queues.get(held.threadId);
-  if (existing && existing.groupId !== held.groupId) throw new Error("queued task belongs to another channel");
-  queues.set(held.threadId, {
-    groupId: held.groupId,
-    items: existing ? [...rest, ...existing.items] : rest,
-  });
 }
 
 /** Removing first makes repeated settle notifications harmless. */
@@ -223,3 +172,7 @@ export function queuedChannelSends(threadId: string): number {
 }
 
 export const _queuedChannelCount = queuedChannelSends;
+
+export function pendingChannelRows(threadId: string): Set<string> {
+  return new Set(queues.get(threadId)?.items.flatMap((item) => item.rowId ? [item.rowId] : []));
+}

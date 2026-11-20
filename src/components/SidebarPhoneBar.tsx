@@ -69,7 +69,7 @@ export function SidebarPhoneBar({ onInboxOpened }: { onInboxOpened: () => void }
           triggerClassName="flex shrink-0 rounded-full"
           triggerTitle={t("sidebar.tools")}
           renderTrigger={({ open }) => (
-            <span className={`relative flex size-11 items-center justify-center rounded-full border border-hairline text-ink ${open ? "bg-raised" : "bg-transparent"}`}>
+            <span className={`relative flex size-11 items-center justify-center rounded-full border border-hairline text-ink-secondary ${open ? "bg-raised" : "bg-transparent"}`}>
               <LayoutGrid size={19} aria-hidden="true" />
               {automationsNeedYou && <span aria-hidden className="absolute right-1 top-1 size-2.5 rounded-full bg-danger ring-2 ring-app" />}
             </span>

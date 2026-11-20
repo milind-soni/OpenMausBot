@@ -237,7 +237,7 @@ import { createOneOnOneGoals } from "./host/one-on-one-goals.ts";
 
 import { BUILT_IN_DRIVERS } from "./drivers/builtIn.ts";
 import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./drivers/acp/opencode-go.ts";
-import { forgetNotificationReader, liveAppRows, openCardRows, readMessageText, recallMessages, recentMessages, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing, logNotification, lastRowAt, threadsWithCardsSince } from "./message-db.ts";
+import { forgetNotificationReader, liveAppRows, openCardRows, readMessageText, recallMessages, recentMessages, closeMessageSearch, closeMessageDb, chatFollowups, type ChatFollowup, cancelledChatFollowup, settleChatFollowups, threadsReferencing, logNotification, lastRowAt, threadsWithCardsSince } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
 import { createChiefNotices } from "./host/chief-notices.ts"; import { sessionHolds } from "./routine-recovery.ts"; import { dismissLeftoverPeerCards } from "./host/leftover-peer-cards.ts";
@@ -253,6 +253,7 @@ import {
   hasQueuedPersonMessage, hasQueuedSteeredMessages,
   isSteeredMessageQueued,
   onSteeredQueueChange,
+  pendingSteerRows,
   queuedSteerSnapshot,
   queuedSteeredMessage,
   queuedThreadPosition,
@@ -261,6 +262,8 @@ import {
 } from "./steer-queue.ts"; import { createDoneNotice } from "./done-notice.ts";
 import {
   drainChannelMessages,
+  pendingChannelRows,
+  queueChannelMessage,
   restoreChannelMessages,
   type ChannelQueueItem,
 } from "./channel-queue.ts"; import { copyRoomPick, pointedResponders, roomPickBots, takeRoomPick, undeliveredPickBots, type RoomPick } from "./room-pointed.ts";
@@ -2795,7 +2798,7 @@ const { cloudLendingTurn, cloudLendingRefusalNotice, cloudLendingRefusalForBot, 
 const teamAway = createTeamAwayHost({ cloudHome: CLOUD_HOME, dataDir: DATA_DIR, here: (person) => [...sseClients].some((client) => client.ask.person === person), people: () => teamOwners.people?.everyone() ?? [], language: personLanguages.forLine, audienceOf: teamHost.audienceOf, store, unseen: (person) => teamMessages.inbox.unseen(person), readUpTo: (key, person) => personRooms.reads?.readUpTo(key, person), session: (auth) => (auth.kind === "session" ? auth.session : null) }); const actingPeople = createActingPeople({ store, direct: (threadId) => directRequestOwners.get(threadId), roomRun, handed: new HandedPeople(join(DATA_DIR, HANDED_PEOPLE_FILE)) }); const lendingLifts = lendingMemory ? createLendingLifts({ store, stopped: (threadId) => directRequestOwners.get(threadId)?.stopped === true, threadBusy, queued: hasQueuedSteeredMessages, continueRequest: (botId, text, opts) => startTurn(botId, text, { ...opts, continuesRun: true }), notify, language: (threadId) => threadLanguage(threadId), device: () => deviceWord(sharedComputers.known(CLOUD_HOME_LENDER)[0]?.platform), decide: (row) => appendDecision(DATA_DIR, row), words: changedWords, ownersAnswer: (card) => cloudProvenOwnerPerson(cloudCardAnswerer(card)), memory: { info: (botId) => lendingMemory.reviewInfo(botId), accept: (botId, token) => lendingMemory.review(botId, foreignTurnRunning(botId), token).ok } }) : null;
 const computerAsks = CLOUD_PERSONAL ? createComputerAsksHost({ store, notify, lending: sharedComputers, principal: CLOUD_HOME_LENDER, threadBusy, queued: hasQueuedSteeredMessages, continueRequest: (botId, text, opts) => startTurn(botId, text, { ...opts, continuesRun: true }),
   refusal: (turn) => sharedComputerPrincipal(turn) ? null : cloudLendingRefusalForBot(turn) ?? "This conversation can't use your computer.", request: (threadId) => directRequestOwners.get(threadId), active: (turn) => internalCapabilityIsActive(turn as InternalCapability) }) : null;
-const { stopThreadForPerson, stopOnTypedCommand, restartForPerson } = createPersonStop({
+const { stopThreadForPerson, stopOnTypedCommand } = createPersonStop({
   store, routines: () => routines, handoffs: () => handoffs, interruptDirectThread, stopping: (botId, threadId) => idleThreads.stopping(botId, threadId), clearUnattended,
   stopGoal: (threadId) => oneOnOneGoals.stop(threadId), markStopped: (threadId, by) => personStops.stop(threadId, liveTurns.running(threadId), directTurnDispatchClaims.has(threadId), by), working: (botId, threadId) => threadBusy(botId, threadId) || coordinator.activeDirect(threadId), asking: (threadId) => coordinator.awaitingAnswer(threadId) || Boolean(openPersonCard(threadId)), language: threadLanguage, stopRefusal: (threadId, by) => runOwners.stopRefusal(threadId, by),
 }); const teamMessages = createTeamMessages({ place: CLOUD_TEAM ? null : createPlaceInbox({ dataDir: DATA_DIR, store, openCards: openCardRows, live: (threadId, requestId) => askMessageByRequest.has(`${threadId}:${requestId}`), waiting: () => personWaits.waiting(), send: (notification) => { broadcast({ kind: "notify", notification: logNotification(notification) }); }, sees: (auth, threadId) => visibleTo(viewerFor(auth)).thread(threadId), mayAnswer: (auth, threadId, requestId) => cardAnswerRefusal(auth, threadId, requestId, "allow") === null, viewer: (auth) => placeInboxViewer(auth, { personal: CLOUD_PERSONAL, owner: cloudOwnerSession, personOf: personKey }), guestOf: (threadId) => { if (!CLOUD_PERSONAL || !cloudGuestDriven(threadId)) return null; const person = [...cloudThreadStarters(threadId), threadPersonKey(threadId)].find((one) => one && one !== CLOUD_OUTSIDE_KEY && !cloudOwnerPerson(one)); return person ?? null; }, guestName: (threadId) => guestNameIn(store.messagesFor(threadId)), handedBy: (threadId) => { const from = delegatorOf(threadId); return from && from.threadId !== threadId ? from.botId ?? store.botByThread(from.threadId)?.id ?? null : null; } }), team: CLOUD_TEAM, dataDir: DATA_DIR, store, confined: (threadId) => cloudGuestDriven(threadId), people: teamOwners.people, personName: teamHost.personName, audienceOf: teamHost.audienceOf, starters: threadStarters, notify, sees: (person) => visibleTo(person.role === "member" ? { kind: "member", email: person.email } : { kind: "all", email: person.email }), inbox: { askedPerson: teamOwners.routing.askedPerson, delivered: (item, delivery) => teamAway.delivered(item, delivery), changed: (threadId) => { const bot = store.botByThread(threadId); if (bot) broadcast({ kind: "bot", bot: wireBot(bot) }); }, ensureOwnBot: (email) => { ensureDefaultBot(store, { dataDir: DATA_DIR, person: email, team: CLOUD_TEAM?.name ?? null, opened: (made) => void mausbotOwnChat.claim(made) }); }, handedFrom: (threadId) => { const from = delegatorOf(threadId); return from && from.threadId !== threadId ? from.threadId : null; }, continueTurn: relayedTurn({ store, startTurn, state: (botId, threadId) => ({ atCapacity: botAtThreadCapacity(botId, threadId), threadBusy: threadBusy(botId, threadId), groupTurn: roomTurnHolds(activeGroupTurnForBot(botId), threadId, false), parksBehindCoordination: parksBehindCoordination(botId, threadId) }) }), representative: { generate: async (botId, prompt) => (await sideJobs.text("representative", botId)?.generateText(prompt, { timeoutMs: 60_000 })) ?? null, busy: createPersonCalendar({ access: (person) => teamConnections.personApps().includes("googlecalendar") ? teamConnections.people.appsAccess(person) : null, connected: async (access) => (await composio.connectedServices(...teamConnections.via(access))).googlecalendar?.connected === true, relay: (payload, session, signal, access) => composio.relayMcp(teamConnections.via(access)[0], payload as never, session, undefined, signal, teamConnections.via(access)[1]) }).busy } } });
@@ -3518,7 +3521,7 @@ const roomMemberContexts = new RoomContextTracker({
 const roomMemberLock = new RoomMemberLock();
 
 function groupThreadIsWorking(groupId: string, threadId: string): boolean {
-  if (groupSpeakers.has(threadId)) return true;
+  if (roomSendStops.has(threadId) || groupSpeakers.has(threadId)) return true;
   const activeOps = groupTurnOperations.get(groupId);
   if (activeOps) {
     for (const op of activeOps) {
@@ -3734,6 +3737,7 @@ const channelTaskBlocked = (group: GroupRecord) =>
 
 // Load coordination state before registering store listeners or recovering routines: recovery can emit room changes synchronously.
 const groupQueues = threadMaps.track(new Map<string, Promise<void>>());
+const roomSendStops = new Set<string>();
 const personalReach = createPersonalReach({ privateTo: (threadId) => teamHost.privateTo(threadId), personKey: (email) => personKey({ id: "", email }), personBehind: (botId, threadId) => teammatePrompts.personBehind(botId, threadId), actingFor: (threadId, generation) => actingPeople.requester(threadId, generation), level: (bot, email) => { const role = (teamOwners.people?.list() ?? []).find((one) => one.email === email)?.role; return visibleTo(role === "owner" || role === "admin" ? { kind: "all", email } : { kind: "member", email }).level(bot.id); } }); const { roomRootProblem, roomHandoffProblem, roomHandoffTarget, roomSetupPending, roomTalks, laneRoomThread } = createRoomAccess({ store, privateTo: (threadId) => teamHost.privateTo(threadId), personalReach: () => personalReach, lookedAfterBy: (bot) => (CLOUD_TEAM ? lookedAfterBy(bot, teamHost.personName) : null) });
 const roomJobs = createRoomJobs({ store, coordinator: { active: () => coordinator.active() }, cfg, laneRoomThread,
   operations: groupId => groupTurnOperations.get(groupId) ?? [], speakerOf: threadId => groupSpeakers.get(threadId)?.botId });
@@ -7157,7 +7161,7 @@ function drainQueuedSendsNow() {
   );
 }
 
-async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }, mentions?: string[]) {
+async function startOrQueueDirectMessage(botId: string, threadId: string, text: string, replyTo?: ReplyTarget, sendId?: string, sender?: ResolvedSender, trigger?: UsageTrigger, via?: "call", callId?: string, dataContext?: DataContext, app?: { context?: string; fromApp?: Message["fromApp"]; pointed?: Message["pointed"] }, mentions?: string[], typed = false) {
   const decision = admit("direct", {}, {
     atCapacity: botAtThreadCapacity(botId, threadId),
     threadBusy: threadBusy(botId, threadId),
@@ -7165,11 +7169,19 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
     parksBehindCoordination: parksBehindCoordination(botId, threadId),
   });
   if (decision.action === "queue") {
+    const record = typed ? (followup: Omit<ChatFollowup, "status">) => store.appendMessage(threadId, {
+      role: "user", kind: "text", text,
+      replyToId: replyTo?.id, reaction: replyTo?.reactedWith, sendId, sender, dataContext,
+      ...spokenLineFields(via, callId),
+      ...(app?.fromApp ? { fromApp: app.fromApp } : {}),
+      ...(app?.pointed ? { pointed: app.pointed } : {}),
+    }, undefined, followup) : undefined;
     const queued = queueSteeredMessage(botId, threadId, text, {
       replyToId: replyTo?.id,
       sendId,
       dataContext, fromApp: app?.fromApp, mentions,
       reason: decision.reason,
+      record,
       prompt: (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId))),
       sender,
       trigger,
@@ -7177,6 +7189,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
       callId,
       reaction: replyTo?.reactedWith,
     });
+    if (queued.message) return { ok: true as const, threadId, message: queued.message };
     return { ok: true as const, queued: true as const, queueId: queued.id, threadId, reason: decision.reason, why: waitWords.queued(threadId, decision.reason) };
   }
   const message = await startTurn(botId, text, { threadId, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions, allowRoomTurnElsewhere: true });
@@ -7209,7 +7222,7 @@ async function acceptDirectSend(
   input: DirectSendInput,
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
-  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent, app, followUp, mentions, admin } = input;
+  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent, app, typed, fromSlack, mentions, admin } = input;
   const refused = directSendRefusal(botId, threadId);
   if (refused) throw refused;
   return sendSequencer.run(
@@ -7263,7 +7276,9 @@ async function acceptDirectSend(
       const typedStop = await stopOnTypedCommand({ botId, threadId, text, trigger, personPresent, fromApp: Boolean(app), busy: currentAtStart.busy === true, row: { replyToId: replyTo?.id, sendId, sender, ...spokenLineFields(via, callId) }, by: { ...(sender?.id ? { person: sender.id } : {}), admin: admin === true } });
       if (typedStop) return typedStop;
       if (currentAtStart.busy) {
-        const personsOwn = personPresent && !app && (trigger.kind === "user" || trigger.kind === "owner"), queuedPrompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId))); if (runOwners.arrival(threadId, sender, personPresent && Boolean(sender?.id)) === "queue") return { ok: true as const, queued: true as const, threadId, queueId: queueSteeredMessage(currentAtStart.id, threadId, text, { replyToId: replyTo?.id, sendId, dataContext, fromApp: app?.fromApp, mentions, prompt: queuedPrompt, sender, trigger, via, callId, first: personPresent && Boolean(sender?.id) }).id };
+        const personsOwn = personPresent && !app && (trigger.kind === "user" || trigger.kind === "owner");
+        const queuedPrompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(text, dataContext), replyTo, userNameFor(threadId)));
+        const maySteer = !fromSlack && runOwners.arrival(threadId, sender, personPresent && Boolean(sender?.id)) !== "queue";
         const instance = runningTurnInstance(currentAtStart, threadId);
         let steered: SteerOutcome = "refused";
         const steerInput = extractTurnImages(text);
@@ -7273,11 +7288,8 @@ async function acceptDirectSend(
           carriesImages,
           engineCanSteerImages: engineSteersImages(instance),
           pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
-          engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer && !asksForCurrentLocation(text)),
-          followUp,
+          engineCanSteer: Boolean(maySteer && instance?.adapter.capabilities.queueing && instance.adapter.steer && !asksForCurrentLocation(text)),
         });
-        // A chosen wait (queue, or restart's Stop) is never cut short by person-first.
-        const chose = busyAdmission.action === "queue" ? busyAdmission.chose : undefined;
         if (busyAdmission.action === "steer" && instance?.adapter.steer) {
           const prompt = (app?.context ?? "") + personPrompt(threadId, sender, promptWithReply(promptWithDataContext(steerInput.text, dataContext), replyTo, userNameFor(threadId)));
           steered = await (steerInput.images.length > 0
@@ -7291,6 +7303,16 @@ async function acceptDirectSend(
         if (!store.taskByThread(botId, threadId)) {
           throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
         }
+        const record = (steered: boolean, followup?: Omit<ChatFollowup, "status">) => store.appendMessage(threadId, {
+          role: "user", kind: "text", text,
+          replyToId: replyTo?.id,
+          sendId,
+          ...(dataContext ? { dataContext } : {}), ...(app?.fromApp ? { fromApp: app.fromApp } : {}),
+          ...(steered ? { steered: true } : {}),
+          ...(app?.pointed ? { pointed: app.pointed } : {}),
+          sender,
+          ...spokenLineFields(via, callId),
+        }, undefined, followup);
         const delivered = steered !== "refused";
         if (delivered) {
           if (steered === "steered" && !current.busy) {
@@ -7301,17 +7323,7 @@ async function acceptDirectSend(
           }
           // "indeterminate" is recorded too: the words may already be in a turn, and a resend could run them twice.
           if (personPresent) clearUnattended(threadId);
-          const message = store.appendMessage(threadId, {
-            role: "user",
-            kind: "text",
-            text,
-            replyToId: replyTo?.id,
-            sendId,
-            ...(dataContext ? { dataContext } : {}), ...(app?.fromApp ? { fromApp: app.fromApp } : {}),
-            steered: true,
-            sender,
-            ...spokenLineFields(via, callId),
-          });
+          const message = record(true);
           store.setTaskAskedAt(botId, threadId, message.at);
           handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
           signInSettle.answerInChat(botId, threadId);
@@ -7319,7 +7331,7 @@ async function acceptDirectSend(
           return { ok: true as const, steered: true as const, threadId, message };
         }
         if (!current.busy) {
-          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions);
+          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions, typed);
         }
         const queued = queueSteeredMessage(current.id, threadId, text, {
           replyToId: replyTo?.id,
@@ -7330,13 +7342,22 @@ async function acceptDirectSend(
           trigger,
           via,
           callId,
-          first: personsOwn || chose === "restart", aheadOfOthers: runOwners.askerFirst(threadId),
+          record: typed ? (followup) => record(false, followup) : undefined,
+          first: personsOwn, aheadOfOthers: runOwners.askerFirst(threadId),
         });
-        if (personsOwn && !chose) personFirst.wait(threadId, {});
-        if (chose === "restart") await restartForPerson(botId, threadId, trigger);
+        if (queued.message) {
+          if (personsOwn) clearUnattended(threadId);
+          if (personsOwn && !runOwners.stopRefusal(threadId, { person: sender?.id, admin: admin === true })) {
+            void stopThreadForPerson(botId, threadId, sender).catch((error) => {
+              console.warn("could not interrupt the running turn for a sent message", error);
+            });
+          }
+          return { ok: true as const, threadId, message: queued.message };
+        }
+        if (personsOwn && maySteer) personFirst.wait(threadId, {});
         return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
       }
-      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions);
+      return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext, app, mentions, typed);
     },
   );
 }
@@ -7645,7 +7666,8 @@ async function beginTurn(
   const instanceId = instance.instanceId;
   const automated = commsDepth > 0 || opts?.automationSource !== undefined
     || Boolean(opts?.unattended || opts?.cardContinuation || opts?.peerAsk || opts?.coordination || opts?.compactOnly || opts?.computerSelectionContinuation);
-  const route = routeDirectTurn(bot, task, store.activePath(threadId), resolvedImages, instance, automated, quickFallback.refused(instance.instanceId));
+  const pendingRows = pendingSteerRows(threadId);
+  const route = routeDirectTurn(bot, task, store.activePath(threadId).filter((row) => !pendingRows.has(row.id)), resolvedImages, instance, automated, quickFallback.refused(instance.instanceId));
   const { model, effort, variant } = route;
   assertModelVariantSupported({ variant, effort }, instance.adapter.capabilities);
   if (effort && !instance.adapter.capabilities.effortLevels?.includes(effort)) {
@@ -7780,7 +7802,7 @@ async function beginTurn(
       await warmSummaries.beforeTurn(threadId, () => directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId));
       if (usesNativeImageInput && !opts?.compactOnly) turnImages.push(...await videoFramesWithin(turnImages.length, resolvedImages.videos));
       await compactConversation({ bot, threadId, generation: dispatchClaimId, instance, model,
-        excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]), manual: opts?.compactOnly === true });
+        excludedIds: new Set([userMessage.id, ...(opts?.excludeMessageIds ?? []), ...pendingSteerRows(threadId)]), manual: opts?.compactOnly === true });
       if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) throw new DirectTurnSetupCancelled("turn stopped during context setup");
       if (opts?.compactOnly) {
         clearDirectTurnDispatch(threadId, dispatchClaimId);
@@ -7794,7 +7816,8 @@ async function beginTurn(
         return;
       }
       const skipTranscript = new Set<string>([userMessage.id, ...(opts?.excludeMessageIds ?? [])]);
-      const activeMessages = sinceFreshStart(store.activePath(threadId));
+      const pending = pendingSteerRows(threadId);
+      const activeMessages = sinceFreshStart(store.activePath(threadId)).filter((row) => !pending.has(row.id));
       const coordinationChildren = opts?.coordination?.resumed
         ? new Set(coordinator.children(opts.coordination.id).map((child) => child.id)) : undefined;
       for (const m of activeMessages) {
@@ -9499,7 +9522,7 @@ function teammateReportContext(requestId: string, readerBotId?: string): string 
   return `${reportNote(bot ?? "Teammate")}\n${JSON.stringify({ bot, task: escapeNotes(node.text), status: node.status, result: escapeNotes(node.result) })}`;
 }
 
-const roomTranscript = createRoomTranscript({ store, teammateReportContext });
+const roomTranscript = createRoomTranscript({ store, teammateReportContext, pendingRows: pendingChannelRows });
 
 const roomPostBudgets = new Map<string, RoomPostBudget>();
 const ROOM_POST_MAX_CHARS = 4_000;
@@ -9674,8 +9697,9 @@ async function runClaimedGroupMemberTurn(
   if (instance.adapter.capabilities.hooks === true && hooksEnabled()) {
     integrations.hooks = hooksIntegration(bot.id, threadId, internalGeneration);
   }
-  const latestUser = [...store.activePath(threadId)].reverse().find(
-    (message) => message.role === "user" && message.kind === "text" && message.text,
+  const pendingRows = pendingChannelRows(threadId);
+  const latestUser = store.activePath(threadId).findLast(
+    (message) => message.role === "user" && message.kind === "text" && message.text && !pendingRows.has(message.id),
   );
   const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
   // A drained burst runs as one turn: recover its lines by queueId, not position.
@@ -10636,8 +10660,16 @@ type StartGroupTurnOptions = {
   via?: "api";
   sender?: ResolvedSender;
   trigger?: UsageTrigger;
+  deferRunning?: boolean;
+  replaceRunning?: boolean;
   queuedGroup?: ChannelQueueItem[]; /** What the person pointed at in a member's page: the page's bot reads it on its turn, and the line shows the chips. */ pointed?: RoomPick;
 };
+
+function roomReplyBot(group: GroupRecord, replyTo: ReplyTarget | undefined, routableMembers: readonly BotRecord[]) {
+  if (!group.dm && group.defaultResponder.kind === "auto" && replyTo?.role === "bot") {
+    return routableMembers.find((member) => member.id === replyTo.from?.botId);
+  }
+}
 
 function startGroupTurn(
   groupId: string,
@@ -10672,46 +10704,75 @@ function startGroupTurn(
     throw Object.assign(new Error("the selected goal coordinator is not an active room member"), { status: 409 });
   }
   // Read the room before this message is appended just below.
-  const replyBot = !group.dm && channelMode === "chat" && group.defaultResponder.kind === "auto" && replyTo?.role === "bot" ? routableMembers.find((member) => member.id === replyTo.from?.botId) : undefined;
+  const replyBot = channelMode === "chat" ? roomReplyBot(group, replyTo, routableMembers) : undefined;
   const autoCandidate = !replyBot && !group.dm && channelMode === "chat" && group.defaultResponder.kind === "auto" && deciderReady(cfg, "roomRouting");
+  const pageBots = channelMode === "chat" ? pointedResponders(options.pointed, availableMembers, () => roomResponders(text, availableMembers, { kind: "mentions" }, options.mentions)) : [];
+  let responders = pageBots.length ? pageBots : roomResponders(text, members, !group.dm && channelMode === "chat" ? autoRoomDefault(group.defaultResponder, routableMembers, replyBot) : group.defaultResponder, options.mentions);
+  const heldResponders = group.dm ? [] : responders.filter(isHeld);
+  if (!group.dm) responders = responders.filter((responder) => !isHeld(responder));
+  const explicitlyMentionedLead = roomResponders(text, goalMembers, { kind: "mentions" }, options.mentions)[0];
+  const goalCoordinator = channelMode === "goal"
+    ? requestedGoalCoordinator ?? explicitlyMentionedLead ?? selectGroupGoalCoordinator(goalMembers, group.defaultResponder)
+    : null;
+  if (!responders.length && group.dm) {
+    const lastSpeakerId = [...store.messagesFor(threadId)]
+      .reverse()
+      .find((msg) => msg.kind === "text" && msg.from)?.from?.botId;
+    const last = availableMembers.find((b) => b.id === lastSpeakerId) ?? availableMembers[0];
+    responders = last ? [last] : [];
+  }
+  // Auto's responders are a fallback until the decision model answers; the append and the return stay synchronous.
+  const autoRoute = autoCandidate && !goalCoordinator && !pageBots.length && routableMembers.length > 1 &&
+    roomResponders(text, availableMembers, { kind: "mentions" }, options.mentions).length === 0;
+
+  if (options.deferRunning && groupThreadIsWorking(groupId, threadId) && (responders.length || goalCoordinator || autoRoute)) {
+    const { message } = queueChannelMessage(groupId, threadId, text, {
+      replyToId: replyTo?.id, reaction: replyTo?.reactedWith, sendId, mode: channelMode,
+      sender: options.sender, trigger: options.trigger, mentions: options.mentions, pointed: options.pointed,
+      record: (followup) => store.appendMessage(threadId, {
+        role: "user", kind: "text", text, replyToId: replyTo?.id, reaction: replyTo?.reactedWith,
+        sendId, channelMode, queueId: followup.id, sender: options.sender, ...(options.pointed ? { pointed: options.pointed.refs } : {}),
+      }, undefined, followup),
+    });
+    const active = [...(groupTurnOperations.get(groupId) ?? [])].filter((op) => op.threadId === threadId && !op.cancelled);
+    if (options.replaceRunning && active.length === 1 && !coordinator.runningIn(threadId).some((node) => node.parentId !== undefined)) {
+      const speakerId = groupSpeakers.get(threadId)?.botId ?? (threadId === group.threadId ? group.busyBotId : undefined);
+      const instance = speakerId ? runningTurnInstance(store.bot(speakerId), threadId) : undefined;
+      const previous = groupQueues.get(threadId);
+      roomSendStops.add(threadId);
+      cancelGroupTurnOperations(groupId, threadId);
+      revokeInternalCapabilitiesForThread(threadId);
+      closeOpenApprovals(threadId);
+      void Promise.allSettled([previous, instance?.adapter.interruptTurn(threadId)]).then(([, interrupted]) => {
+        if (interrupted?.status === "rejected") console.warn("could not interrupt the room turn for a sent message", interrupted.reason);
+        roomSendStops.delete(threadId);
+        drainQueuedChannelSends();
+      });
+    }
+    return message!;
+  }
+
   const historyBeforeSend = autoCandidate
     ? (() => {
-        const before = store.messagesFor(threadId);
+        const excluded = pendingChannelRows(threadId);
+        for (const item of options.queuedGroup ?? []) {
+          if (item.rowId) excluded.add(item.rowId);
+        }
+        const before = store.messagesFor(threadId).filter((row) => !excluded.has(row.id));
         const narration = roomTurnNarrationIds(before);
         return before.filter((m) => m.kind === "text" && m.text && !narration.has(m.id)).slice(-GROUP_CONTEXT_MESSAGES);
       })()
     : [];
   const queuedGroup = options.queuedGroup;
-  const message = queuedGroup && queuedGroup.length > 0
-    ? (() => {
-        for (const item of queuedGroup.slice(0, -1)) {
-          store.appendMessage(threadId, {
-            role: "user",
-            kind: "text",
-            text: item.text,
-            replyToId: item.replyToId,
-            reaction: item.reaction,
-            sendId: item.sendId,
-            channelMode: item.mode,
-            queueId: item.id,
-            via: item.via,
-            sender: item.sender, ...(item.pointed ? { pointed: item.pointed.refs } : {}),
-          });
-        }
-        const last = queuedGroup[queuedGroup.length - 1]!;
-        return store.appendMessage(threadId, {
-          role: "user",
-          kind: "text",
-          text: last.text,
-          replyToId: replyTo?.id,
-          reaction: last.reaction,
-          sendId: last.sendId,
-          channelMode: last.mode,
-          queueId: last.id,
-          via: last.via,
-          sender: last.sender, ...(last.pointed ? { pointed: last.pointed.refs } : {}),
+  const message = queuedGroup?.length
+    ? queuedGroup.map((item) => {
+        const recorded = item.rowId && store.messagesFor(threadId).find((row) => row.id === item.rowId);
+        return recorded || store.appendMessage(threadId, {
+          role: "user", kind: "text", text: item.text, replyToId: item.replyToId, reaction: item.reaction,
+          sendId: item.sendId, channelMode: item.mode, queueId: item.id, via: item.via, sender: item.sender,
+          ...(item.pointed ? { pointed: item.pointed.refs } : {}),
         });
-      })()
+      }).at(-1)!
     : store.appendMessage(threadId, {
         role: "user",
         kind: "text",
@@ -10724,7 +10785,6 @@ function startGroupTurn(
         via: options.via,
         sender: options.sender, ...(options.pointed ? { pointed: options.pointed.refs } : {}),
       });
-  if (options.trigger) turnTriggers.set(threadId, options.trigger);
   const titled = group.dm ? null : store.titleGroupTaskFromFirstMessage(group.id, text, threadId);
   const snippet = titled?.title;
 
@@ -10740,27 +10800,11 @@ function startGroupTurn(
       },
     });
   }
-  const pageBots = channelMode === "chat" ? pointedResponders(options.pointed, availableMembers, () => roomResponders(text, availableMembers, { kind: "mentions" }, options.mentions)) : [];
-  let responders = pageBots.length ? pageBots : roomResponders(text, members, !group.dm && channelMode === "chat" ? autoRoomDefault(group.defaultResponder, routableMembers, replyBot) : group.defaultResponder, options.mentions);
-  if (!group.dm) {
-    const addressed = stopWordPlacement(text) === "adjacent" ? undefined : message.id;
-    for (const held of responders.filter(isHeld)) noteHeldSkip(group.id, threadId, held, addressed);
-    responders = responders.filter((responder) => !isHeld(responder));
-  } const unsentPick = undeliveredPickBots(options.pointed, responders), notePickNotSent = (id: string) => store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(threadId), "server.rooms.pickNotSent", { bot: store.bot(id)?.name ?? id }), ok: false } }); for (const id of unsentPick) notePickNotSent(id);
-  const explicitlyMentionedLead = roomResponders(text, goalMembers, { kind: "mentions" }, options.mentions)[0];
-  const goalCoordinator = channelMode === "goal"
-    ? requestedGoalCoordinator ?? explicitlyMentionedLead ?? selectGroupGoalCoordinator(goalMembers, group.defaultResponder)
-    : null;
-  if (!responders.length && group.dm) {
-    const lastSpeakerId = [...store.messagesFor(threadId)]
-      .reverse()
-      .find((msg) => msg.kind === "text" && msg.from)?.from?.botId;
-    const last = availableMembers.find((b) => b.id === lastSpeakerId) ?? availableMembers[0];
-    responders = last ? [last] : [];
-  }
-  // Auto's responders are a fallback until the decision model answers; the append and the return stay synchronous.
-  const autoRoute = autoCandidate && !goalCoordinator && !pageBots.length && routableMembers.length > 1 &&
-    roomResponders(text, availableMembers, { kind: "mentions" }, options.mentions).length === 0;
+  const addressed = stopWordPlacement(text) === "adjacent" ? undefined : message.id;
+  for (const held of heldResponders) noteHeldSkip(group.id, threadId, held, addressed);
+  const unsentPick = undeliveredPickBots(options.pointed, responders);
+  const notePickNotSent = (id: string) => store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: serverLine(threadLanguage(threadId), "server.rooms.pickNotSent", { bot: store.bot(id)?.name ?? id }), ok: false } });
+  for (const id of unsentPick) notePickNotSent(id);
 
   if (!responders.length && !goalCoordinator && !autoRoute) {
     const defaultArchivedId = group.defaultResponder.kind === "member" ? group.defaultResponder.botId : undefined;
@@ -10826,6 +10870,7 @@ function startGroupTurn(
       });
       return;
     }
+      if (options.trigger) turnTriggers.set(threadId, options.trigger);
     if (goalCoordinator) {
       await runGroupGoalOperation({ groupId, threadId, coordinator: goalCoordinator, members, operation });
     } else {
@@ -10921,7 +10966,7 @@ function drainQueuedChannelSendsNow(): void {
         });
       } catch (error) {
         for (const item of items) {
-          if (!store.messagesFor(threadId).some((message) => message.queueId === item.id && message.role === "user")) {
+          if (!store.messagesFor(threadId).some((message) => (message.id === item.rowId || message.queueId === item.id) && message.role === "user")) {
             store.appendMessage(threadId, { role: "user", kind: "text", text: item.text, replyToId: item.replyToId, sendId: item.sendId, channelMode: item.mode, queueId: item.id, via: item.via, sender: item.sender });
           }
         }
@@ -12169,9 +12214,10 @@ ROUTES.push(createChannelRoutes({
   resolveReplyTarget,
   runningTurnInstance,
   startGroupTurn, engineSteersImages,
+  roomReplyBotId: (group, reply, members) => roomReplyBot(group, reply,
+    roomTurnMembers(members, (member) => roomHeld(group, member.id), (member) => botHolds.held(member.id)).routableMembers)?.id,
   applyRoomHoldsFromMessage,
   cancelGroupTurnOperations,
-  drainQueuedChannelSends,
   clearTurnDigestState,
   closeOpenApprovals,
   revokeInternalCapabilitiesForThread,
@@ -15219,7 +15265,7 @@ for (const row of chatFollowups()) {
   if (!owned) { settleChatFollowups([row.id], "cancelled"); continue; }
   settleChatFollowups([row.id], "interrupted");
   const messages = store.messagesFor(row.threadId);
-  const recovered = messages.find((message) => message.queueId === row.id && message.role === "user") ?? store.appendMessage(row.threadId, {
+  const recovered = messages.find((message) => (message.id === row.payload.rowId || message.queueId === row.id) && message.role === "user") ?? store.appendMessage(row.threadId, {
     role: "user", kind: "text", text: row.payload.text, replyToId: row.payload.replyToId,
     sendId: row.payload.sendId, queueId: row.id, sender: row.payload.sender,
     ...(row.kind === "channel" ? { channelMode: row.payload.mode, via: row.payload.via } : {}),

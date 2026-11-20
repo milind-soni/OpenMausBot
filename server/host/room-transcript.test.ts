@@ -64,6 +64,19 @@ const GOLDEN = [
 ].join("\n");
 
 describe("the room transcript", () => {
+  it("keeps an already visible follow-up out of the room context until dispatch", () => {
+    const messages = [row("running", { text: "Current request" }), row("waiting", { text: "Next request" })];
+    const pending = new Set(["waiting"]);
+    const room = createRoomTranscript({
+      store: { messagesFor: () => messages },
+      teammateReportContext: () => "",
+      pendingRows: () => pending,
+    });
+    expect(room.window("room", "Omkar").order).toEqual(["running"]);
+    pending.clear();
+    expect(room.window("room", "Omkar").order).toEqual(["running", "waiting"]);
+  });
+
   it("renders the last window of a room as one member reads it", () => {
     const { text } = transcript(thread()).window("room", "Omkar", [{ messageId: "latest", text: "Use this frame" }], "editor");
     expect(text).toBe(GOLDEN);

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState, useSyncExternalStore, type SetStateAction } from "react";
-import type { FollowUp } from "../../shared/follow-up.js";
 import type { MausColor, WireMessage } from "../../shared/wire.ts";
 import { isAttachment, type Attachment } from "./composer-attachments.js";
 
@@ -31,7 +30,6 @@ export interface FailedComposerSend {
   channelMode?: "chat" | "goal";
   /** Bot ids picked from the @ list. */
   mentions?: string[];
-  followUp?: FollowUp;
 }
 type FailedComposerSendInput = Omit<FailedComposerSend, "id">;
 export interface ComposerSendSnapshot extends FailedComposerSendInput {
@@ -435,7 +433,6 @@ export function recoverFailedComposerSend(sent: ComposerSendSnapshot): "restored
       threadId: sent.threadId,
       channelMode: sent.channelMode,
       mentions: sent.mentions,
-      followUp: sent.followUp,
     });
     return "outbox";
   }

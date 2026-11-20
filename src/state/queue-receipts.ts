@@ -1,4 +1,4 @@
-// Queued-message chips and their receipts: a queued send shows as a chip until
+// Pending background work and its receipts: a send stays pending until
 // its message lands, and a consumed id keeps a slower POST from adding it back.
 import type { AppState, Message } from "./store";
 

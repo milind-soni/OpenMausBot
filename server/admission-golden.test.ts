@@ -12,13 +12,7 @@ describe("admission golden tables", () => {
     expect(admit("direct-busy", { ...plain, pendingComputerSelection: true })).toEqual({ action: "queue" });
     expect(admit("direct-busy", { ...plain, engineCanSteer: false })).toEqual({ action: "queue" });
     expect(admit("direct-busy", {})).toEqual({ action: "queue" });
-    expect(admit("direct-busy", { ...plain, followUp: "steer" })).toEqual({ action: "steer" });
-    expect(admit("direct-busy", { ...plain, followUp: "queue" })).toEqual({ action: "queue", chose: "queue" });
-    expect(admit("direct-busy", { ...plain, followUp: "restart" })).toEqual({ action: "queue", chose: "restart" });
     // A turn that cannot be steered queues whatever was asked; only restart still ends it.
-    expect(admit("direct-busy", { ...plain, engineCanSteer: false, followUp: "steer" })).toEqual({ action: "queue" });
-    expect(admit("direct-busy", { ...plain, engineCanSteer: false, followUp: "queue" })).toEqual({ action: "queue" });
-    expect(admit("direct-busy", { ...plain, engineCanSteer: false, followUp: "restart" })).toEqual({ action: "queue", chose: "restart" });
   });
 
   it("direct-busy: attachments steer into an engine that takes images mid-turn", () => {
@@ -59,38 +53,6 @@ describe("admission golden tables", () => {
     expect(admit("direct", {}, { ...elsewhere, parksBehindCoordination: true })).toEqual({ action: "queue" });
     expect(admit("direct", {}, { groupTurn: roomTurnHolds({ threadId: "room-thread" }, "room-thread", true) }))
       .toEqual({ action: "queue", reason: "group-turn" });
-  });
-
-  it("room: a working channel always queues; it never auto-steers", () => {
-    expect(admit("room", {}, { roomWorking: true })).toEqual({ action: "queue" });
-    expect(admit("room", {}, { roomWorking: false })).toEqual({ action: "start" });
-    expect(admit("room", {}, { roomWorking: true, threadWorking: false })).toEqual({ action: "start" });
-    expect(admit("room", {}, { roomWorking: true, threadWorking: true })).toEqual({ action: "queue" });
-  });
-
-  it("room-steer: only the head of a capable room's queue steers", () => {
-    const head = { speakerPresent: true, engineCanSteer: true, isQueueHead: true };
-    expect(admit("room-steer", head)).toEqual({ action: "steer" });
-    expect(admit("room-steer", { ...head, speakerPresent: false })).toEqual({ action: "queue" });
-    expect(admit("room-steer", { ...head, engineCanSteer: false })).toEqual({ action: "queue" });
-    expect(admit("room-steer", { ...head, isQueueHead: false })).toEqual({ action: "refuse", code: "queue-head-only" });
-    expect(admit("room-steer", { speakerPresent: false, engineCanSteer: false, isQueueHead: false })).toEqual({ action: "queue" });
-  });
-
-  it("room-steer: a line meant for another bot stays queued instead of folding into the speaker", () => {
-    const head = { speakerPresent: true, engineCanSteer: true, isQueueHead: true };
-    expect(admit("room-steer", { ...head, speakerAddressed: true })).toEqual({ action: "steer" });
-    expect(admit("room-steer", { ...head, speakerAddressed: false })).toEqual({ action: "queue", blockedBy: "addressee" });
-    expect(admit("room-steer", { ...head, speakerAddressed: false, isQueueHead: false })).toEqual({ action: "queue", blockedBy: "addressee" });
-  });
-
-  it("room-steer: an attachment head steers only into a speaker that takes images mid-turn", () => {
-    const head = { speakerPresent: true, engineCanSteer: true, isQueueHead: true, carriesImages: true };
-    expect(admit("room-steer", { ...head, engineCanSteerImages: true })).toEqual({ action: "steer" });
-    expect(admit("room-steer", head)).toEqual({ action: "queue", blockedBy: "images" });
-    expect(admit("room-steer", { ...head, isQueueHead: false })).toEqual({ action: "queue", blockedBy: "images" });
-    expect(admit("room-steer", { ...head, engineCanSteerImages: true, isQueueHead: false })).toEqual({ action: "refuse", code: "queue-head-only" });
-    expect(admit("room-steer", { ...head, engineCanSteer: false })).toEqual({ action: "queue" });
   });
 
   it("guarded: any busy shape refuses guarded_busy; it never queues or steers", () => {

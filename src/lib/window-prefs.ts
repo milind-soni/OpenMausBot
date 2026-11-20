@@ -8,7 +8,6 @@ import { applyChatWidth, readChatWidth } from "./chat-width";
 import { companionBridge, pageIsThisComputer } from "./companion-bridge";
 import type { CompanionRoute } from "./companion-types";
 import { applyFont, readFont } from "./fonts";
-import { readFollowUpDefault, setFollowUpDefault } from "./follow-up";
 import { finishedNotificationsEnabled, notificationFeedEnabled, notificationSoundsEnabled, setFinishedNotifications, setNotificationFeed, setNotificationSounds } from "./notification-preferences";
 import { requestNotificationPermission } from "./notify";
 import { choosePlaceColor } from "./place-look";
@@ -71,7 +70,6 @@ const PREFS: { [I in WindowPrefId]: Pref<I> } = {
     },
     write: (swatch) => choosePlaceColor(swatch === "none" ? null : swatch),
   },
-  "general.followUp": { read: () => readFollowUpDefault(), write: (choice) => setFollowUpDefault(choice) },
   "general.finishedNotifications": {
     read: () => finishedNotificationsEnabled(),
     // As the row does: turning it on asks the system for permission first.

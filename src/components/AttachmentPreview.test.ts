@@ -350,29 +350,100 @@ describe("full-screen image actions", () => {
     return { button, dialog, onClose, openMenu, close: async () => { await act(() => root.unmount()); container.remove(); } };
   }
 
-  it("tracks the finger before release, rebounds on a short drag and advances on a long drag", async () => {
+  it.each(["touch", "mouse"])("tracks a %s drag, rebounds on short drags and advances on longer ones", async pointerType => {
     const next = { ...image, src: "/next.png", name: "next.png" };
-    const { dialog, close } = await openPreview([image, next]);
+    const { dialog, onClose, close } = await openPreview([image, next]);
     const track = dialog.querySelector<HTMLElement>("[style*=translateX]")!;
-    const touch = (type: string, x: number) => act(() => {
-      const point = { clientX: x, clientY: 10 };
-      dialog.dispatchEvent(Object.assign(new Event(type, { bubbles: true }), {
-        touches: type === "touchend" ? [] : [point], changedTouches: [point],
+    Object.assign(dialog, { setPointerCapture: vi.fn() });
+    const pointer = (type: string, x: number) => act(() => {
+      dialog.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, pointerId: 1, pointerType, isPrimary: true, clientX: x, clientY: 10,
       }));
     });
     try {
-      await touch("touchstart", 120);
-      await touch("touchmove", 94);
+      await pointer("pointerdown", 120);
+      await pointer("pointermove", 94);
       expect(track.style.transform).toContain("-26px");
-      await touch("touchend", 94);
+      await pointer("pointerup", 94);
       expect(track.style.transform).toContain("0% + 0px");
-      await touch("touchstart", 120);
-      await touch("touchmove", 40);
+      await act(() => dialog.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+      expect(onClose).not.toHaveBeenCalled();
+      await pointer("pointerdown", 120);
+      await pointer("pointermove", 40);
       expect(track.style.transform).toContain("-80px");
-      await touch("touchend", 40);
+      await pointer("pointercancel", 40);
+      expect(track.style.transform).toContain("0% + 0px");
+      await pointer("pointerdown", 120);
+      await pointer("pointermove", 40);
+      await pointer("pointerup", 40);
       expect(track.style.transform).toContain("-100% + 0px");
+      await pointer("pointerdown", 40);
+      await pointer("pointermove", 120);
+      expect(track.style.transform).toContain("-100% + 80px");
+      await pointer("pointerup", 120);
+      expect(track.style.transform).toContain("0% + 0px");
     } finally {
       await close();
+    }
+  });
+
+  it("has no navigation icons, toggles zoom on double click and dismisses on a single image click", async () => {
+    vi.useFakeTimers();
+    const { dialog, onClose, close } = await openPreview([image, { ...image, src: "/next.png" }]);
+    const active = dialog.querySelector<HTMLImageElement>("[data-preview-active-image]")!;
+    const click = () => act(() => active.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+    try {
+      expect(dialog.querySelector("button")).toBeNull();
+      await click();
+      await click();
+      expect(active.style.transform).toContain("scale(2.5)");
+      expect(active.classList.contains("preview-zoom-transition")).toBe(true);
+      expect(dialog.getAttribute("data-overlay-fade")).toBe("in");
+      await click();
+      await click();
+      expect(active.style.transform).toContain("scale(1)");
+      await click();
+      await act(() => { vi.advanceTimersByTime(300); });
+      expect(dialog.getAttribute("data-overlay-fade")).toBe("out");
+      await act(() => { vi.advanceTimersByTime(MENU_MOTION_MS); });
+      expect(onClose).toHaveBeenCalledOnce();
+    } finally {
+      await close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("zooms in and out with two touches and follows a downward dismissal drag", async () => {
+    vi.useFakeTimers();
+    const { dialog, onClose, close } = await openPreview();
+    const active = dialog.querySelector<HTMLImageElement>("[data-preview-active-image]")!;
+    const track = dialog.querySelector<HTMLElement>("[style*=translateX]")!;
+    Object.assign(dialog, { setPointerCapture: vi.fn() });
+    const pointer = (type: string, id: number, x: number, y: number) => act(() => {
+      dialog.dispatchEvent(new PointerEvent(type, {
+        bubbles: true, pointerId: id, pointerType: "touch", isPrimary: id === 1, clientX: x, clientY: y,
+      }));
+    });
+    try {
+      await pointer("pointerdown", 1, 100, 100);
+      await pointer("pointerdown", 2, 150, 100);
+      await pointer("pointermove", 2, 200, 100);
+      expect(active.style.transform).toContain("scale(2)");
+      expect(active.classList.contains("preview-zoom-transition")).toBe(false);
+      await pointer("pointermove", 2, 150, 100);
+      expect(active.style.transform).toContain("scale(1)");
+      await pointer("pointerup", 2, 150, 100);
+      await pointer("pointerup", 1, 100, 100);
+      await pointer("pointerdown", 1, 100, 100);
+      await pointer("pointermove", 1, 100, 225);
+      expect(track.style.transform).toContain("translateY(125px)");
+      await pointer("pointerup", 1, 100, 225);
+      expect(dialog.getAttribute("data-overlay-fade")).toBe("out");
+      await act(() => { vi.runAllTimers(); });
+      expect(onClose).toHaveBeenCalledOnce();
+    } finally {
+      await close();
+      vi.useRealTimers();
     }
   });
 

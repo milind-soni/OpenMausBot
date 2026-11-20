@@ -15,15 +15,6 @@ import { setLocale } from "./i18n";
 afterEach(() => setLocale("en"));
 
 describe("keyboard-shortcuts", () => {
-  it("localizes the follow-up shortcut without changing its English description", () => {
-    const items = SHORTCUT_GROUPS.flatMap((group) => group.items);
-    const followUp = items.find((item) => item.id === "send-follow-up")!;
-    expect(shortcutDescription(followUp)).toBe(followUp.description);
-    setLocale("pt-br");
-    expect(shortcutDescription(followUp)).toBe("Enquanto um bot trabalha: colocar na fila em vez de enviar agora, ou o contrário");
-    expect(shortcutDescription(items.find((item) => item.id === "toggle-sidebar")!)).toBe("Recolher ou expandir a barra lateral");
-  });
-
   it("keeps an uncatalogued shortcut's own description", () => {
     setLocale("pt-br");
     expect(shortcutDescription({ id: "future-shortcut", description: "Future action", macKeys: [], winKeys: [] })).toBe("Future action");
@@ -102,10 +93,6 @@ describe("keyboard-shortcuts", () => {
     const mod = shortcutGroupsFor("mod-enter");
     expect(row(mod, "send-message")).toMatchObject({ macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] });
     expect(row(mod, "new-line")).toMatchObject({ macKeys: ["Return"], winKeys: ["Enter"] });
-    // The other of steer and queue: Ctrl/⌘ with the send key, so Shift joins it when Ctrl/⌘+Enter already sends.
-    expect(row(SHORTCUT_GROUPS, "send-follow-up")).toMatchObject({ macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] });
-    expect(row(shift, "send-follow-up")).toMatchObject({ macKeys: ["⌘", "Return"], winKeys: ["Ctrl", "Enter"] });
-    expect(row(mod, "send-follow-up")).toMatchObject({ macKeys: ["⌘", "⇧", "Return"], winKeys: ["Ctrl", "Shift", "Enter"] });
     for (const groups of [shift, mod]) {
       expect(row(groups, "save-bulletin")).toBe(row(SHORTCUT_GROUPS, "save-bulletin"));
       expect(row(groups, "send-message").description).toBe("Send message");

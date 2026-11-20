@@ -562,7 +562,7 @@ export interface AppState {
   connected: boolean;
   hydrated?: true;
   error: string | null;
-  notice: { kind: "thread-gone" | "bot-gone" | "steer-images" | "note"; botName: string | null; text?: string } | null;
+  notice: { kind: "thread-gone" | "bot-gone" | "note"; botName: string | null; text?: string } | null;
   revealThread: { threadId: string; nonce: number } | null;
   mascotMotion: {
     botId: string;
@@ -672,14 +672,10 @@ export type Action =
       replyToId?: string;
       threadId?: string;
       dataContext?: import("../../shared/data-context").DataContext; pointed?: import("../../shared/app-frame/point").PointedElement[]; openPage?: import("../lib/open-page").OpenPage; mode?: "chat" | "goal";
-      followUp?: import("../../shared/follow-up").FollowUp; mentions?: string[]; onError?: () => void;
+      mentions?: string[]; onError?: () => void;
     }
   | { type: "pendingQueued"; threadId: string; queueId: string; text: string; reason?: SteerQueueReason }
   | { type: "consumePendingQueued"; threadId: string; queueId: string }
-  | { type: "cancelQueued"; botId: string; queueId: string; threadId?: string; onCancelled?: () => void }
-  | { type: "steerQueued"; botId: string; queueId: string; threadId?: string; onError?: () => void; onSettled?: () => void }
-  | { type: "cancelGroupQueued"; groupId: string; threadId: string; queueId: string; onCancelled?: () => void }
-  | { type: "steerGroupQueued"; groupId: string; queueId: string; threadId?: string; onError?: () => void; onSettled?: () => void }
   | { type: "editMessage"; botId: string; messageId: string; text: string; threadId?: string; sendId?: string }
   | { type: "switchBranch"; botId: string; messageId: string; threadId?: string }
   | { type: "threadActive"; threadId: string; activeLeafId: string }
@@ -775,7 +771,7 @@ function reconcileModelVariantSessions(state: AppState): AppState {
 
 export function pinBotThreadAction(action: Action, bots: Bot[]): Action {
   if (!("botId" in action) || ("threadId" in action && action.threadId) ||
-      !["send", "interrupt", "editMessage", "switchBranch", "answerCard", "dismissCard", "cancelQueued", "steerQueued"].includes(action.type)) return action;
+      !["send", "interrupt", "editMessage", "switchBranch", "answerCard", "dismissCard"].includes(action.type)) return action;
   const botId = action.botId;
   const threadId = bots.find((bot) => bot.id === botId)?.threadId;
   return { ...action, threadId } as Action;
@@ -1585,28 +1581,6 @@ export function reducer(state: AppState, action: Action): AppState {
       else delete pendingQueued[action.threadId];
       return { ...state, pendingQueued, consumedQueueIds: rememberConsumedQueueId(state.consumedQueueIds, action.queueId) };
     }
-    case "cancelQueued": {
-      const bot = state.bots.find((candidate) => candidate.id === action.botId);
-      if (!bot) return state;
-      const threadId = action.threadId ?? bot.threadId;
-      const prev = state.pendingQueued[threadId] ?? [];
-      const rest = prev.filter((entry) => entry.queueId !== action.queueId);
-      const pendingQueued = { ...state.pendingQueued };
-      if (rest.length) pendingQueued[threadId] = rest;
-      else delete pendingQueued[threadId];
-      return { ...state, pendingQueued, consumedQueueIds: rememberConsumedQueueId(state.consumedQueueIds, action.queueId) };
-    }
-    case "steerQueued":
-      return state;
-    case "cancelGroupQueued": {
-      const prev = state.pendingQueued[action.threadId] ?? [];
-      const rest = prev.filter((entry) => entry.queueId !== action.queueId);
-      if (rest.length === prev.length) return state;
-      const pendingQueued = { ...state.pendingQueued };
-      if (rest.length) pendingQueued[action.threadId] = rest;
-      else delete pendingQueued[action.threadId];
-      return { ...state, pendingQueued };
-    }
     case "send": {
       const animated = addForkOptimistic(withMascotMotion(
         dismissOnboardingCard(state, action.botId),
@@ -1721,7 +1695,6 @@ export function reducer(state: AppState, action: Action): AppState {
     case "deleteGroup":
     case "interruptGroup":
     case "setGroupHold":
-    case "steerGroupQueued":
     case "createRoutine":
     case "updateRoutine":
     case "deleteRoutine":
@@ -2236,8 +2209,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         return botBeforeSend ? openOnboardingCard(botBeforeSend) : undefined;
       })();
       if (
-        action.type !== "cancelQueued" &&
-        action.type !== "cancelGroupQueued" &&
         action.type !== "deleteBot"
       ) rawDispatch(action);
       switch (action.type) {
@@ -2282,65 +2253,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "markAllRoutineRunsSeen":
           api("/api/routine-runs/seen-all", { method: "POST" }).catch(showError);
           break;
-        case "cancelQueued":
-          void api(`/api/bots/${action.botId}/queue/${action.queueId}`, { method: "DELETE", body: JSON.stringify({ threadId: action.threadId }) })
-            .then(() => {
-              rawDispatch(action);
-              action.onCancelled?.();
-            })
-            .catch(showError);
-          break;
-        case "steerQueued":
-          void api(`/api/bots/${action.botId}/queue/${action.queueId}/steer`, { method: "POST", body: JSON.stringify({ threadId: action.threadId }) })
-            .then((body) => {
-              if (body?.steered === true && Array.isArray(body.messages) && typeof body.threadId === "string") {
-                for (const message of body.messages) {
-                  rawDispatch({ type: "messageAdded", threadId: body.threadId, message });
-                }
-                for (const queueId of body.queueIds ?? []) {
-                  rawDispatch({ type: "consumePendingQueued", threadId: body.threadId, queueId });
-                }
-              } else if (body?.queued === true && body.blockedBy === "images") {
-                wrapped({ type: "notice", notice: { kind: "steer-images", botName: null } });
-              }
-              action.onSettled?.();
-            })
-            .catch((error) => {
-              showError(error);
-              action.onError?.();
-            });
-          break;
-        case "cancelGroupQueued":
-          void api(`/api/groups/${action.groupId}/queue/${action.queueId}`, { method: "DELETE" })
-            .then(() => {
-              rawDispatch(action);
-              action.onCancelled?.();
-            })
-            .catch(showError);
-          break;
-        case "steerGroupQueued":
-          void api(`/api/groups/${action.groupId}/queue/${action.queueId}/steer`, {
-            method: "POST",
-            body: JSON.stringify({ threadId: action.threadId }),
-          })
-            .then((body) => {
-              if (body?.steered === true && Array.isArray(body.messages) && typeof body.threadId === "string") {
-                for (const message of body.messages) {
-                  rawDispatch({ type: "messageAdded", threadId: body.threadId, message });
-                }
-                for (const queueId of body.queueIds ?? []) {
-                  rawDispatch({ type: "consumePendingQueued", threadId: body.threadId, queueId });
-                }
-              } else if (body?.queued === true) {
-                wrapped({ type: "notice", notice: body.blockedBy === "images" ? { kind: "steer-images", botName: null } : { kind: "note", botName: null, text: t("composer.queued.roomSteerHeld") } });
-              }
-              action.onSettled?.();
-            })
-            .catch((error) => {
-              showError(error);
-              action.onError?.();
-            });
-          break;
         case "send": {
           if (quizBeforeSend) persistCard(action.botId, quizBeforeSend.id, { dismissed: true });
           const threadId =
@@ -2354,7 +2266,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           void waitForExecutionSettings(botBeforeSend ? [botBeforeSend] : [], threadId)
             .then(() => sendReconciled(() => api(`/api/bots/${action.botId}/messages`, {
                 method: "POST",
-                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, ...(action.dataContext ? { dataContext: action.dataContext } : {}), ...(action.pointed?.length ? { pointed: action.pointed } : {}), ...(action.openPage ? { openPage: action.openPage } : {}), ...(action.mode === "goal" ? { mode: "goal" } : {}), ...(action.followUp ? { followUp: action.followUp } : {}), ...(action.mentions?.length ? { mentions: action.mentions } : {}) }),
+                body: JSON.stringify({ text: action.text, replyToId: action.replyToId, threadId, sendId, ...(action.dataContext ? { dataContext: action.dataContext } : {}), ...(action.pointed?.length ? { pointed: action.pointed } : {}), ...(action.openPage ? { openPage: action.openPage } : {}), ...(action.mode === "goal" ? { mode: "goal" } : {}), ...(action.mentions?.length ? { mentions: action.mentions } : {}) }),
               }), arrived))
             .then((sent) => {
               if (!("body" in sent)) return;

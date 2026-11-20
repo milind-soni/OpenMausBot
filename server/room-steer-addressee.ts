@@ -11,9 +11,11 @@ export function roomLeadId(defaultResponder: GroupDefaultResponder): string | un
 export function steerMeantForSpeaker(input: {
   speakerId: string;
   mentioned: readonly string[];
+  replyBotId?: string;
   leadId: string | undefined;
   speakerOnHandedWork: boolean;
 }): boolean {
   if (input.mentioned.length > 0) return input.mentioned.includes(input.speakerId);
+  if (input.replyBotId) return input.speakerId === input.replyBotId;
   return !input.speakerOnHandedWork || input.leadId === input.speakerId;
 }

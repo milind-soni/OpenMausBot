@@ -277,16 +277,14 @@ question stayed unanswered for 30 s and the test failed.
 ## Several people in one shared chat
 
 ```sh
-pnpm exec vitest run server/cloud-team-asker-owns.e2e.test.ts server/host/run-owner.test.ts src/components/SharedQueueLine.test.ts
+pnpm exec vitest run server/cloud-team-asker-owns.e2e.test.ts server/host/run-owner.test.ts src/components/shared-run.test.ts
 ```
 
 On a Team Cloud, whoever asked owns the run ([team-cloud.md](../team-cloud.md#whoever-asked-owns-the-run)). The
 e2e test pairs an Owner and three members, holds Priya's request in the same scripted CI poll, and checks with
-`OMB_PERSON_FIRST_MS=1500`: Tom's line is queued (never steered, never cut short to be answered first) and runs after
-hers as his own turn; everyone sees the waiting lines with their writers, in order; only a line's writer removes it
-and nobody joins someone else's run; Tom's Stop and typed stop answer 403 "Only Priya or an admin can stop this.",
-while Priya and the Owner stop it; Priya's own addition is steered and answered first, in the shared chat and in her
-private chat; and a routine run started mid-run leaves its report between her answer and Tom's line.
+`OMB_PERSON_FIRST_MS=1500`: Tom's message appears immediately with his name and runs after Priya's as its own turn.
+Tom's Stop and typed stop answer 403 "Only Priya or an admin can stop this." Priya and the Owner can stop it, and Priya's
+own addition can steer her current turn in both shared and private chats.
 
 ## Threads of one bot at the same time
 
@@ -298,7 +296,7 @@ saved; work a bot's own turn started goes through, so a turn can never wait on a
 the test releases, as a desktop, personal Cloud and Team Cloud server, on the Claude CLI, ACP and OpenAI-compatible
 engines. What stays one at a time, and what the person sees:
 
-- One thread's own turns stay in order: a later send queues or steers.
+- A later message appears immediately and either joins the current turn or starts its own.
 - One bot's browser: a call from another thread waits, the row says who has it, and a holder quiet for a minute gives it
   to the waiter. The holder's next call is refused once, so nothing lands on a page it did not open.
 - One computer: a turn takes it at its first screen call, not when it starts, and keeps it until it ends.
