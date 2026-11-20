@@ -881,7 +881,7 @@ export function Composer({
             }
             if (micShown && isDictationToggle(e.nativeEvent)) {
               e.preventDefault();
-              toggleMic();
+              if (!e.nativeEvent.repeat) toggleMic();
               return;
             }
             if (onClearReply && escapeCancelsReply(e.nativeEvent, { replying: Boolean(replyTo), recording })) {

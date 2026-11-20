@@ -129,6 +129,20 @@ describe("native dictation in the real composer", () => {
     expect(button(t("composer.dictation.stop"))).not.toBeNull();
   });
 
+  it("ignores the repeats of a held dictation shortcut", () => {
+    const press = (repeat: boolean) => {
+      const event = new KeyboardEvent("keydown", { key: "d", code: "KeyD", repeat, bubbles: true, cancelable: true, ...(isMacPlatform() ? { metaKey: true } : { ctrlKey: true }) });
+      flushSync(() => input().dispatchEvent(event));
+      return event;
+    };
+    press(false);
+    expect(speechStop).toHaveBeenCalledOnce();
+    expect(press(true).defaultPrevented).toBe(true);
+    expect(press(true).defaultPrevented).toBe(true);
+    expect(speechStart).toHaveBeenCalledOnce();
+    expect(button(t("composer.dictation.start"))).not.toBeNull();
+  });
+
   it("accepts multiple recognition results before React paints", () => {
     flushSync(() => {
       transcript({ text: "一", partial: true });
