@@ -4,8 +4,7 @@ import { requestMessageFile, useLocalFileSave, type MessageAttachmentContext } f
 import { TableDialog } from "./RichTable";
 import { readTableResponse } from "./TableFilePreview";
 import { t } from "@/lib/i18n";
-
-export const HTML_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
+import { PREVIEW_MAX_BYTES } from "../../shared/upload-limits";
 
 /** Security: the frame may draw what the file carries inline, and fetch nothing at all. */
 export const HTML_PREVIEW_CSP = "default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; media-src data:";
@@ -130,7 +129,7 @@ function HtmlFileContent({ path, name, message }: { path: string; name: string; 
       try {
         const response = await requestMessageFile(path, message, controller.signal);
         answered = true;
-        const text = await readTableResponse(response, controller.signal, HTML_PREVIEW_MAX_BYTES);
+        const text = await readTableResponse(response, controller.signal, PREVIEW_MAX_BYTES);
         if (!controller.signal.aborted) setSource(text);
       } catch (reason) {
         if (controller.signal.aborted) return;
@@ -141,7 +140,7 @@ function HtmlFileContent({ path, name, message }: { path: string; name: string; 
     })();
     return () => controller.abort();
   }, [path, message.threadId, message.messageId, attempt]);
-  if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{typeof error === "object" ? t("html.refused", { reason: error.reason }) : t(error === "size" ? "html.tooLarge" : "html.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>;
+  if (error) return <div className="p-8 text-center text-sm"><p role="alert" className="mb-3 text-ink-secondary">{typeof error === "object" ? t("html.refused", { reason: error.reason }) : t(error === "size" ? "attach.fileTooLarge" : "html.loadFailed")}</p><button type="button" className="rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button></div>;
   if (source === null) return <div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("html.loading")}</div>;
   return <div className="flex flex-col gap-2">
     <div className="flex items-center justify-end gap-1">
