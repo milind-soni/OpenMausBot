@@ -161,8 +161,9 @@ const TECHNICAL = /[\d._/\\@=]|^-|\p{Ll}\p{Lu}/u;
 export function textDirection(value: string): "rtl" | "ltr" {
   const text = value.replace(ADDRESS, " ");
   let rtl = 0, ltr = 0, first: "rtl" | "ltr" | null = null;
-  for (const word of text.split(/\s+/)) {
-    const direction = RTL_LETTER.test(word) ? "rtl"
+  for (const raw of text.split(/\s+/)) {
+    const word = raw.replace(/[.,;:!?]+$/u, "");
+    const direction = [...word].some((char) => RTL_LETTER.test(char) && /\p{Letter}/u.test(char)) ? "rtl"
       : /\p{Letter}/u.test(word) && !TECHNICAL.test(word) ? "ltr"
       : null;
     if (!direction) continue;

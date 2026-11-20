@@ -1316,6 +1316,18 @@ describe("bidi: message content carries its own direction", () => {
     expect(textDirection("Set process.env.NODE_ENV in config.ts for مرحبا")).toBe("ltr");
   });
 
+  it("counts a word that ends a sentence, and still skips a dotted technical token", () => {
+    expect(textDirection("Hello. Welcome. مرحبا")).toBe("ltr");
+    expect(textDirection("Done! Thanks, really? مرحبا بك")).toBe("ltr");
+    expect(textDirection("افتح config.ts. ثم احفظ")).toBe("rtl");
+  });
+
+  it("does not count digits as words, Arabic-Indic ones included", () => {
+    expect(textDirection("١٢٣ hello")).toBe("ltr");
+    expect(textDirection("١٢٣ مرحبا")).toBe("rtl");
+    expect(textDirection("٤٥٦ ٧٨٩ hello world")).toBe("ltr");
+  });
+
   it("does not let an address swallow the RTL text glued to it", () => {
     expect(textDirection("API https://x.io/aوالتفاصيل هنا")).toBe("rtl");
     expect(textDirection("التوثيق (https://pnpm.io/installation) فيه كل التفاصيل")).toBe("rtl");
