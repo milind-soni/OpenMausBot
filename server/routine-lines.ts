@@ -144,3 +144,8 @@ export function clipRunOutput(text: string, max: number): string {
   const room = max - tail.length - 3;
   return room > 0 ? `${text.slice(0, room).trimEnd()}\n…\n${tail}` : tail;
 }
+
+/** A run's reply, kept: a later item that says nothing does not erase the report the run already delivered. */
+export function keptRunOutput(delivered: string | undefined, text: string, max: number): string | undefined {
+  return clipRunOutput(text, max) || delivered;
+}
