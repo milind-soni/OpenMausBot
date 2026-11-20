@@ -16,7 +16,7 @@ start_dockerd() {
   [ "$(id -u)" = 0 ] || { echo "Docker-in-Docker needs root (user: \"0:0\"); starting without it." >&2; return 1; }
   mkdir -p /var/lib/docker /var/run /data/.openmausbot
   chown maus:maus /data/.openmausbot
-  if [ -x /usr/sbin/iptables-legacy ]; then
+  if [ -x /usr/sbin/iptables-legacy ] && iptables-legacy -t nat -L -n >/dev/null 2>&1; then
     update-alternatives --set iptables /usr/sbin/iptables-legacy || true
     update-alternatives --set ip6tables /usr/sbin/ip6tables-legacy || true
   fi
