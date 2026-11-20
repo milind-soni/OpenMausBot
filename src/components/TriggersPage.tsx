@@ -11,6 +11,7 @@ import { type Bot } from "@/state/store";
 import { useBotsApartFromTurns } from "@/state/apart-from-turns";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useAppTriggers } from "@/lib/app-triggers";
+import { useMinuteTick } from "@/lib/minute-tick";
 import { AppEventEditor } from "./automations/AppEventEditor";
 import { useAllAutomationActions } from "./automations/app-actions";
 import { AutomationPanel } from "./automations/AutomationPanel";
@@ -36,6 +37,7 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
     routinesUnreadable: s.config?.routinesUnreadable, routinesLoadState: s.routinesLoadState, hydrated: s.hydrated,
   }), sameFields), bots = useBotsApartFromTurns(), dispatch = useStoreDispatch();
   const actions = useAllAutomationActions();
+  useMinuteTick();
   const appTriggers = useAppTriggers();
   const backButtonRef = useRef<HTMLButtonElement>(null);
   const focus = state.routinesFocus;

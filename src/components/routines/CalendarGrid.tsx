@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from "react";
 
 import { useStableCallback } from "@/hooks/use-stable-callback";
+import { useMinuteTick } from "@/lib/minute-tick";
 import { cn } from "@/lib/cn";
 import { activeLocale, intlLocale, t } from "@/lib/i18n";
 import type { ResetMarker } from "@/lib/limit-resets";
@@ -48,6 +49,7 @@ export function CalendarGrid({
   })), [anchor, days, items]);
   const [selection, setSelection] = useState<{ day: number; start: number; end: number } | null>(null);
   const [dragPreview, setDragPreview] = useState<{ day: number; at: number } | null>(null);
+  useMinuteTick();
   const today = startOfDay(Date.now());
   const starts = Array.from({ length: days }, (_, index) => addDays(anchor, index));
   const minDayWidth = days === 7 ? 64 : days === 3 ? 180 : 280;

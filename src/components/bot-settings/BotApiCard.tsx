@@ -10,6 +10,7 @@ import { BOT_API_KEY_PLACEHOLDER, BOT_API_UPGRADE, botApiCurl } from "../../../s
 import { NoteLine, useCloudUsage, useUpgrade } from "../CloudUsageMeter";
 import { Switch } from "../SettingsPrimitives";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useMinuteTick } from "@/lib/minute-tick";
 
 export interface BotApiCall {
   id: string;
@@ -96,6 +97,7 @@ export function BotApiCard(props: { bot: Bot; webhooksLink?: boolean; className?
 
 function BotApiSection({ bot, webhooksLink = false, className }: { bot: Bot; webhooksLink?: boolean; className?: string }) {
   const state = useStoreSelector((s) => ({ webhooks: s.webhooks }), sameFields), dispatch = useStoreDispatch();
+  useMinuteTick();
   const [view, setView] = useState<BotApiView | null>(null);
   const [freshKey, setFreshKey] = useState<string | null>(null);
   const [confirmingNewKey, setConfirmingNewKey] = useState(false);
