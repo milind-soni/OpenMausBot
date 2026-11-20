@@ -1,9 +1,10 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
-export function handoffDir(): string {
-  return resolve(process.env.OMB_DATA_DIR || join(homedir(), ".openmausbot"), "handoffs");
+import { defaultDataDir, type DataHomes } from "./data-dir.ts";
+
+export function handoffDir(env: Record<string, string | undefined> = process.env, homes: DataHomes = {}): string {
+  return resolve(defaultDataDir(env, homes.under, homes.realHome), "handoffs");
 }
 
 export interface HandoffInput {
