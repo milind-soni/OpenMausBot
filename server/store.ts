@@ -1506,7 +1506,7 @@ export class Store {
       // New authority goes live only after its durable save succeeds.
       this.saveBots(this.bots.map((candidate) => candidate === bot ? { ...bot, toolScope: nextToolScope } : candidate));
       bot.toolScope = nextToolScope;
-    } else this.saveBots();
+    } else this.saveBotThread(id, undefined, "now");
     this.emit({ type: "bot", botId: id });
     return bot;
   }
