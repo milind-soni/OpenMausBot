@@ -3,11 +3,11 @@
 // and, on a bot that asks before acting, a call that stops at the approval nobody outside may give.
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, onTestFinished } from "vitest";
 
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { botApiCurl } from "../shared/bot-api.ts";
@@ -264,7 +264,9 @@ it("says it is still working when the reply takes longer than the caller will wa
 }, hostTimeout(60_000));
 
 it("a Retry in the app on a caller's line runs it again as the call: the caller's line, framed and fenced, and the status reads the retried turn", async () => {
-  const replyState = join(mkdtempSync(join(tmpdir(), "omb-bot-api-retry-")), "replies");
+  const replies = mkdtempSync(join(tmpdir(), "omb-bot-api-retry-"));
+  onTestFinished(() => rmSync(replies, { recursive: true, force: true }));
+  const replyState = join(replies, "replies");
   fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_VERSION: "2.1.284", FAKE_CLAUDE_REPLIES: JSON.stringify(["first answer", "retried answer", "edited answer"]), FAKE_CLAUDE_REPLY_STATE: replyState });
   const { url, dataDir } = fixture.info;
   const api = appApi(url);

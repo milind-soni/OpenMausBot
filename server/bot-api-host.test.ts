@@ -616,7 +616,7 @@ describe("Retry in the app on a line a caller sent", () => {
     expect(h.turns.at(-1)!.prompt).not.toContain("on their behalf at your level");
   });
 
-  it("puts the conversation back on the branch the person was reading when the turn is refused", async () => {
+  it("puts the conversation back on the branch the person was reading when the turn is refused, and the status answers the refused line with no reply", async () => {
     const h = await harness(replies("Done"));
     const key = (await h.app("POST", "/api/bots/b1/bot-api", { enabled: true })).body.key as string;
     const threadId = (await h.call("b1", key, { message: "Hi" })).body.thread as string;
@@ -627,5 +627,7 @@ describe("Retry in the app on a line a caller sent", () => {
       hooksBaseUrl: () => "https://bots.example.test", manageRefusal: () => null });
     await expect(refusing.retry("b1", threadId, sent)).rejects.toBe(refused);
     expect(h.fake.store.activeLeaf(threadId)).toBe(leaf);
+    expect(h.fake.bots.get("b1")!.tasks[0]!).not.toHaveProperty("rewound", true);
+    expect(await h.call("b1", key, undefined, { method: "GET", query: `?thread=${threadId}` })).toEqual({ status: 200, body: { reply: "", thread: threadId } });
   });
 });

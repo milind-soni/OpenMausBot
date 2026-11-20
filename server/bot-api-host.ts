@@ -223,7 +223,7 @@ export function createBotApiHost(deps: BotApiHostDeps) {
     // Never upgraded: a thread opened as the owner's work runs as theirs only while the key still acts as the owner.
     const owned = task.botApiAsOwner === true && asOwner(botId);
     const message = source.text.trim();
-    const leafBefore = store.activeLeaf(threadId);
+    const leafBefore = store.activeLeaf(threadId), rewoundBefore = task.rewound;
     const userMessage = store.branchMessage(threadId, source.id, message, sendId, undefined, undefined, { via: "api", ...(owned ? { apiAsOwner: true as const } : {}) });
     if (!userMessage) return null;
     store.patchTask(botId, threadId, { rewound: true });
@@ -235,9 +235,11 @@ export function createBotApiHost(deps: BotApiHostDeps) {
         onDispatchError: () => markRunning(botId, threadId, false),
       });
     } catch (error) {
-      // A turn that never started leaves the conversation on the branch the person was reading.
+      // A turn that never started leaves the conversation on the branch the person was reading. The line stays, as a
+      // refused call's does, so a status read answers it with no reply.
       markRunning(botId, threadId, false);
       if (leafBefore) store.setActiveLeaf(threadId, leafBefore);
+      store.patchTask(botId, threadId, { rewound: rewoundBefore });
       throw error;
     }
     return userMessage;
