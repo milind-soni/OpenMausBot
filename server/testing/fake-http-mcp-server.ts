@@ -63,6 +63,8 @@ export interface FakeHttpMcpOptions {
   resources?: FakeHttpMcpResource[];
   /** serverInfo.title in the initialize answer */
   serverTitle?: string;
+  /** the protocolVersion the initialize answer echoes (default the offered "2025-06-18") */
+  protocolVersion?: string;
   /** answer only at the server's own path (/mcp; /sse and /messages for SSE) and 404 anywhere else, as a Cloudflare
    * Worker's McpAgent serves /mcp and not /mcp/ */
   exactPath?: boolean;
@@ -183,7 +185,7 @@ export async function startFakeHttpMcp(options: FakeHttpMcpOptions = {}): Promis
         jsonrpc: "2.0",
         id: frame.id,
         result: {
-          protocolVersion: "2025-06-18", capabilities: { tools: {}, ...(options.resources ? { resources: {} } : {}) },
+          protocolVersion: options.protocolVersion ?? "2025-06-18", capabilities: { tools: {}, ...(options.resources ? { resources: {} } : {}) },
           serverInfo: { name: "fake-http-mcp", version: "1", ...(options.serverTitle ? { title: options.serverTitle } : {}) },
           ...(options.instructions === undefined ? {} : { instructions: options.instructions }),
         },
