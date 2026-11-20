@@ -46,3 +46,16 @@ describe("time zones in plain words", () => {
     expect(plainClock("00:15")).toBe("0:15");
   });
 });
+
+describe("weekdays in the order they were given", () => {
+  it("prints them Monday first whatever order the caller kept", () => {
+    expect(plainWeekdays([3, 1])).toBe("Monday, Wednesday");
+    expect(plainWeekdays([6, 0, 3])).toBe("Sunday, Wednesday, Saturday");
+  });
+
+  it("says a day once when the list repeats it", () => {
+    expect(plainWeekdays([1, 1, 2])).toBe("Monday, Tuesday");
+    expect(plainWeekdays([5, 5, 1, 2, 3, 4])).toBe("weekdays");
+    expect(plainWeekdays([0, 1, 2, 3, 4, 5, 6, 0])).toBe("every day");
+  });
+});

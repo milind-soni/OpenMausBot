@@ -56,6 +56,23 @@ describe("TOTP (RFC 6238)", () => {
     expect(totpCode(key, 30_000)).toBe(totpCode(key, 59_999));
     expect(totpCode(key, 60_000)).not.toBe(totpCode(key, 59_999));
   });
+  it.each([
+    ["JBSWY3DPEHPK3PXPA", "48656c6c6f21deadbeef"],
+    ["JBSWY3DPEHPK3PXPAAA", "48656c6c6f21deadbeef00"],
+    ["JBSWY3DPEHPK3PXPAAAAAA", "48656c6c6f21deadbeef000000"],
+  ])("preserves the decoded bytes of an existing saved key (%s)", (secret, hex) => {
+    const key = { secret, algorithm: "SHA1" as const, digits: 6, period: 30 };
+    const bytes = Buffer.from(hex, "hex");
+    expect(parseTotpKey(secret)).toBeNull();
+    expect(totpCode(key, 59_000)).toBe(hotp(bytes, 1, 6));
+    expect(totpCode(key, 120_000)).toBe(hotp(bytes, 4, 6));
+  });
+
+  it("refuses invalid characters in an existing saved key", () => {
+    const key = { secret: "JBSWY3DPEHPK3PXP0", algorithm: "SHA1" as const, digits: 6, period: 30 };
+    expect(() => totpCode(key, 59_000)).toThrow("not valid base32");
+  });
+
 });
 
 describe("2FA setup keys", () => {
@@ -67,6 +84,25 @@ describe("2FA setup keys", () => {
 
   it("reads a bare secret with the usual defaults", () => {
     expect(parseTotpKey(" jbsw y3dp ehpk 3pxp ")).toEqual({ secret: "JBSWY3DPEHPK3PXP", algorithm: "SHA1", digits: 6, period: 30 });
+  });
+
+  it.each(["A", "AAA", "AAAAAA"])("refuses a setup key ending in an incomplete base32 group (%s)", (suffix) => {
+    const secret = `JBSWY3DPEHPK3PXP${suffix}`;
+    expect(decodeBase32(secret)).toBeNull();
+    expect(parseTotpKey(secret)).toBeNull();
+    expect(parseTotpKey(`otpauth://totp/Example?secret=${secret}`)).toBeNull();
+  });
+
+  it.each([
+    ["MY", "f"],
+    ["MZXQ", "fo"],
+    ["MZXW6", "foo"],
+    ["MZXW6YQ", "foob"],
+    ["MZXW6YTB", "fooba"],
+    ["MZXW6YTBOI", "foobar"],
+  ])("decodes the complete base32 encoding %s with and without padding", (encoded, decoded) => {
+    expect(decodeBase32(encoded)?.toString("ascii")).toBe(decoded);
+    expect(decodeBase32(encoded.padEnd(Math.ceil(encoded.length / 8) * 8, "="))?.toString("ascii")).toBe(decoded);
   });
 
   it("reads an otpauth:// address with its parameters", () => {
