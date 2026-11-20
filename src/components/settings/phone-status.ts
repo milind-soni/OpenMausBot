@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { api, useStore } from "@/state/store";
 import { companionBridge } from "@/lib/companion-bridge";
 import { readMembership } from "@/lib/membership";
-import { isOwnerOrAdmin, readSessionState } from "@/lib/session";
+import { isOwnerOrAdmin } from "@/lib/session";
+import { readSharedSessionState } from "@/lib/shared-session";
 import { useSidebarPhoneStatus } from "../SidebarPhoneButton";
 
 export type PhonePlaceState =
@@ -14,6 +15,24 @@ export type PhonePlaceState =
   | { kind: "chat-only" }
   | { kind: "portal" };
 
+let lookup: Promise<PhonePlaceState> | null = null;
+
+/** What the server says of its paired phones. The nav and the page ask as they mount: both get the one lookup under way. */
+function serverPhoneState(): Promise<PhonePlaceState> {
+  if (lookup) return lookup;
+  const asked: Promise<PhonePlaceState> = readSharedSessionState().then(async (session): Promise<PhonePlaceState> => {
+    const config: unknown = await api("/api/config").catch(() => null);
+    const codes = readMembership(config).pairingCodes;
+    if (!isOwnerOrAdmin(session) && !(session.kind === "session" && session.team)) return { kind: codes ? "chat-only" : "portal" };
+    if (!codes) return { kind: "portal" };
+    const body = await api("/api/auth/sessions").catch(() => null) as { sessions?: unknown[]; current?: string } | null;
+    const count = Array.isArray(body?.sessions) ? body.sessions.length - (body?.current ? 1 : 0) : 0;
+    return count > 0 ? { kind: "paired", count, connected: false } : { kind: "none" };
+  }).catch((): PhonePlaceState => ({ kind: "none" })).finally(() => { if (lookup === asked) lookup = null; });
+  lookup = asked;
+  return asked;
+}
+
 /** Phones paired with the place on screen, as the outer menu and the nav say it in a few words. */
 export function usePhonePlaceState(enabled = true): PhonePlaceState {
   const { state } = useStore();
@@ -24,18 +43,7 @@ export function usePhonePlaceState(enabled = true): PhonePlaceState {
   useEffect(() => {
     if (here || !enabled) return;
     let alive = true;
-    void readSessionState().then(async (session) => {
-      const config: unknown = await api("/api/config").catch(() => null);
-      const codes = readMembership(config).pairingCodes;
-      if (!isOwnerOrAdmin(session) && !(session.kind === "session" && session.team)) {
-        if (alive) setServer({ kind: codes ? "chat-only" : "portal" });
-        return;
-      }
-      if (!codes) { if (alive) setServer({ kind: "portal" }); return; }
-      const body = await api("/api/auth/sessions").catch(() => null) as { sessions?: unknown[]; current?: string } | null;
-      const count = Array.isArray(body?.sessions) ? body.sessions.length - (body?.current ? 1 : 0) : 0;
-      if (alive) setServer(count > 0 ? { kind: "paired", count, connected: false } : { kind: "none" });
-    }).catch(() => { if (alive) setServer({ kind: "none" }); });
+    void serverPhoneState().then((next) => { if (alive) setServer(next); });
     return () => { alive = false; };
   }, [here, enabled]);
   if (policy?.remoteAccess === false) return { kind: "managed", organization: policy.organizationName };

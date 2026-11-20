@@ -4,7 +4,7 @@ import { loadOlderPage, MESSAGE_PAGE_SIZE, reduceOlderMessages, reduceTrimHeldMe
 export { MESSAGE_PAGE_SIZE } from "./message-history";
 import { addForkOptimistic, reduceForkPanel, removeForkOptimistic, runForkEffect, type ForkPanelAction, type ForkPanelState } from "./fork-panel";
 import { use, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { createAppStore } from "./app-store"; import { readOneBot } from "./bot-read"; import { StoreContext, StoreSourceContext } from "./store-context";
+import { createAppStore } from "./app-store"; import { readOneBot } from "./bot-read"; import { sameJson } from "./same-json"; import { forgetSharedSession } from "@/lib/session-reuse"; import { StoreContext, StoreSourceContext } from "./store-context";
 import { flushSync } from "react-dom";
 import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, ResolvedSender, SteerQueueReason, WireBot, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire"; import type { InstanceEndpointInfo } from "../../shared/claude-endpoint";
 import { movesThreadToTop } from "../../shared/wire"; import type { DefaultBotFields } from "../../shared/default-bot";
@@ -1016,7 +1016,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case "instances":
       return { ...state, instances: action.instances };
     case "configStatus":
-      return { ...state, config: action.config };
+      return sameJson(state.config, action.config) ? state : { ...state, config: action.config };
     case "liveCall":
       return { ...state, liveCall: action.call, liveCallVersion: state.liveCallVersion + 1 };
     case "liveCallLookup":
@@ -2886,7 +2886,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         key: "instances",
         request: async () => {
           const answer = await unlessRefused<{ instances: InstanceInfo[] } | null>("/api/instances", async () => snapshotArrays<{ instances: InstanceInfo[] }>(await api("/api/instances"), "instances"), null);
-          return () => { if (answer) rawDispatch({ type: "instances", instances: answer.instances }); };
+          return () => { if (answer && !sameJson(store.getState().instances, answer.instances)) rawDispatch({ type: "instances", instances: answer.instances }); };
         },
       },
       {
@@ -3185,7 +3185,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
         case "window-pref": applyWindowPref(frame); break;
         case "theme": applyThemeFrame(frame); break; case "apps-catalog": appCatalogAnnounced(); break;
-        case "config":
+        case "config": forgetSharedSession();
           rawDispatch({
             type: "configStatus",
             config: configStatusFromFrame(frame as unknown as ConfigStatusFrame),
@@ -3202,10 +3202,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     };
     const stopLive = openLiveEvents({
-      onOpen: () => rawDispatch({ type: "connected", value: true }),
-      onError: () => rawDispatch({ type: "connected", value: false }),
+      onOpen: () => { forgetSharedSession(); rawDispatch({ type: "connected", value: true }); },
+      onError: () => { forgetSharedSession(); rawDispatch({ type: "connected", value: false }); },
       onSnapshotRequired: () => {
-        store.flushFrames(); // the old stream's waiting frames go first, so forgetLiveTurns() below has the last word
+        forgetSharedSession(); store.flushFrames(); // the old stream's waiting frames go first, so forgetLiveTurns() below has the last word
         clearTimeout(hydrationFallback);
         publishMissedFrames();
         // Frames buffered before a non-resumable stream belong to an abandoned generation, and so do the turns they named.

@@ -1,8 +1,8 @@
 // `openmausbot doctor --data [--fix] [--data-dir DIR] [--json]`: the doctor on this computer's data folder, without the
 // server. It reports; with --fix it applies the safe repairs, only while no server uses the folder.
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 
-import { dataHome } from "../data-dir.ts";
+import { defaultDataDir } from "../data-dir.ts";
 import { serverVersion } from "../environment.ts";
 import { EXIT, flag } from "../headless/args.ts";
 import type { VerbContext, VerbOutcome } from "../headless/context.ts";
@@ -29,6 +29,6 @@ export function dataDoctorOutcome(report: DoctorReport): VerbOutcome {
 }
 
 export async function dataDoctor(ctx: VerbContext): Promise<VerbOutcome> {
-  const dataDir = resolve(flag(ctx.flags, "data-dir") ?? (ctx.env.OMB_DATA_DIR || join(dataHome(), ".openmausbot")));
+  const dataDir = resolve(flag(ctx.flags, "data-dir") ?? defaultDataDir(ctx.env));
   return dataDoctorOutcome(runDoctor({ dataDir, version: serverVersion(), mode: "command", fix: ctx.flags.fix === true }));
 }
