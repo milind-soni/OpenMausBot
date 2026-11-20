@@ -748,7 +748,8 @@ describe("CursorAgentDriver", () => {
         await instance.adapter.sendTurn({ threadId, text: "go" });
         const done = await recorder.until((e) => e.type === "turn.completed");
         const replies = recorder.events.flatMap((e) => e.type === "item.completed" && e.itemType === "assistant_text" ? [e.text] : []);
-        return { done, replies, errors: recorder.events.filter((e) => e.type === "runtime.error") };
+        const streamed = recorder.events.flatMap((e) => e.type === "content.delta" && e.streamKind === "assistant_text" ? [e.delta] : []).join("");
+        return { done, replies, streamed, errors: recorder.events.filter((e) => e.type === "runtime.error") };
       } finally {
         recorder.stop();
         await instance.dispose();
@@ -761,17 +762,19 @@ describe("CursorAgentDriver", () => {
       { sessionUpdate: "tool_call_update", toolCallId: "watch-1", status: "completed" },
     ];
 
-    it("fails the turn when a tool call follows the failure line, and never sends the line as a reply", async () => {
-      const { done, replies, errors } = await scripted("t-cursor-503-watching", [text("\n\nError: RetriableError: [unavailable] HTTP 503"), ...watching]);
+    it("fails the turn when a tool call follows the failure line, and never streams or sends the line as a reply", async () => {
+      const { done, replies, streamed, errors } = await scripted("t-cursor-503-watching", [text("\n\nError: RetriableError: [unavailable] HTTP 503"), ...watching]);
       expect(done).toMatchObject({ ok: false, stopReason: "rpc_error" });
       expect(replies.some((reply) => reply.includes("RetriableError"))).toBe(false);
+      expect(streamed).not.toContain("RetriableError");
       expect(errors).toEqual([expect.objectContaining({ message: expect.stringMatching(/^Cursor had a temporary server problem \(HTTP 503/) })]);
     });
 
     it("puts the line back in the reply when the agent goes on writing after it", async () => {
       const line = "\n\nError: RetriableError: [unavailable] HTTP 503";
-      const { done, replies, errors } = await scripted("t-cursor-503-went-on", [text(line), ...watching, text(" Retried, and it went through.")]);
+      const { done, replies, streamed, errors } = await scripted("t-cursor-503-went-on", [text(line), ...watching, text(" Retried, and it went through.")]);
       expect(done).toMatchObject({ ok: true, stopReason: null });
+      expect(streamed.endsWith(`${line} Retried, and it went through.`)).toBe(true);
       expect(replies.at(-1)).toBe("Error: RetriableError: [unavailable] HTTP 503 Retried, and it went through.");
       expect(errors).toEqual([]);
     });

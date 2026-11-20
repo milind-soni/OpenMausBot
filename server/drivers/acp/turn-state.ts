@@ -82,13 +82,15 @@ export function trackRunningTool(current: AcpTurn, update: { toolCallId?: unknow
   else if (status === "pending" || status === "in_progress") current.runningTools.add(update.toolCallId);
 }
 
-/** Adds a text chunk to the unsent reply. A chunk `read` names a failed model call is held back instead, so no flush
- * sends it; later words return it to the reply, as it was not the agent's last. */
-export function receiveText(state: AcpTurn["state"], delta: string, read: AcpDriverHooks["replyFailure"]): void {
-  if (state.failedChunk) state.text += state.failedChunk.chunk;
+/** Adds a text chunk to the unsent reply and gives the text to stream. A chunk `read` names a failed model call is held
+ * back from both, so no flush sends it; later words return it ahead of themselves, as it was not the agent's last. */
+export function receiveText(state: AcpTurn["state"], delta: string, read: AcpDriverHooks["replyFailure"]): string {
+  const released = state.failedChunk?.chunk ?? "";
   const failure = read?.(delta) ?? null;
   state.failedChunk = failure === null ? null : { chunk: delta, failure };
-  if (failure === null) state.text += delta;
+  const received = failure === null ? released + delta : released;
+  state.text += received;
+  return received;
 }
 
 export interface AcpTurnEnd {

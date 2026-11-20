@@ -842,12 +842,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 if (support.resendsReasoningReply && messageId && messageId === current.state.textMessageId
                     && isHermesReasoningReplay(delta, current.state.text)) break;
                 current.state.textMessageId = messageId;
-                receiveText(current.state, delta, support.replyFailure);
+                const streamed = receiveText(current.state, delta, support.replyFailure);
                 const trimmed = current.state.text.trimStart();
-                if (!trimmed.startsWith("<SYSTEM_MESSAGE") &&
+                if (streamed && !trimmed.startsWith("<SYSTEM_MESSAGE") &&
                     !trimmed.startsWith("The following is a <SYSTEM_MESSAGE") &&
                     !trimmed.startsWith("<SYSTEM_NOTIFICATION")) {
-                  emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "assistant_text", delta });
+                  emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "assistant_text", delta: streamed });
                 }
               }
               break;
