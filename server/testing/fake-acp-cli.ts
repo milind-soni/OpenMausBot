@@ -7,7 +7,7 @@
 //   FAKE_ACP_CACHED_LIVE_LOAD  a live session/load is acknowledged but keeps the old MCP credentials, like Qwen
 //   FAKE_ACP_COPY_LIVE_LOAD=1  a session/load of a session still open adds a second copy, and each open copy streams
 //     FAKE_ACP_TEXT_REPLY again, like mistral-vibe 3.1.2; session/close ends every copy
-//   FAKE_ACP_TEXT_REPLY  answer every session/prompt with only this text
+//   FAKE_ACP_TEXT_REPLY  answer every session/prompt with FAKE_ACP_UPDATES_FILE's updates, then only this text
 //   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (stream-script.ts)
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | crash-in-prompt
 //     | abort-in-prompt (a sign-in link, then a TCMalloc CHECK line on stderr, then exit 134 as bubblewrap reports SIGABRT) | hang
@@ -1216,6 +1216,7 @@ function handle(msg: any) {
         return;
       }
       if (process.env.FAKE_ACP_TEXT_REPLY !== undefined) {
+        emitSessionReports();
         for (let copy = openCopies.get(String(msg.params?.sessionId)) ?? 1; copy > 0; copy -= 1) {
           out({ jsonrpc: "2.0", method: "session/update", params: { sessionId: msg.params?.sessionId, update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: process.env.FAKE_ACP_TEXT_REPLY } } } });
         }

@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,10 +9,12 @@ import type { RuntimeEvent } from "../../contracts.ts";
 import { ensureDirs } from "../../config.ts";
 import { recordEvents } from "../../testing/events.ts";
 import { removeTempDir } from "../../testing/cleanup.ts";
+import { classifyRoutineFailure } from "../../routine-recovery.ts";
 import {
   classifyCursorError,
   createCursorAgentDriver,
   cursorCatalogFromSession,
+  cursorReplyFailure,
   CursorAgentDriver,
   decodeCursorAuthStatus,
   decodeCursorAuthText,
@@ -130,6 +133,21 @@ describe("classifyCursorError", () => {
     expect(classifyCursorError(new Error("not logged in"))).toBe("invalid_credentials");
     expect(classifyCursorError(new Error("upgrade your subscription"))).toBe("inactive_subscription");
     expect(classifyCursorError(new Error("model not found"))).toBeUndefined();
+  });
+});
+
+describe("cursorReplyFailure", () => {
+  it("reads the chunk Cursor sends for a failed model call", () => {
+    expect(cursorReplyFailure("\n\nError: RetriableError: [unavailable] HTTP 503")).toBe("[unavailable] HTTP 503");
+    expect(cursorReplyFailure("\n\nError: NonRetriableError: model not available\n")).toBe("model not available");
+    expect(cursorReplyFailure("\n\nError: [unauthenticated] Backend rejected authentication.")).toBe("[unauthenticated] Backend rejected authentication.");
+  });
+
+  it("leaves a chunk that carries the model's own words", () => {
+    expect(cursorReplyFailure("The log ended with:\n\nError: RetriableError: [unavailable] HTTP 503")).toBeNull();
+    expect(cursorReplyFailure("Error: RetriableError: [unavailable] HTTP 503")).toBeNull();
+    expect(cursorReplyFailure("\n\nError: RetriableError: [unavailable] HTTP 503\n\nIt recovered.")).toBeNull();
+    expect(cursorReplyFailure("\n\nError: ")).toBeNull();
   });
 });
 
@@ -625,6 +643,101 @@ describe("CursorAgentDriver", () => {
       await instance.adapter.respondToRequest("t-cursor-ask-no-timeout", opened.requestId!, { behavior: "answer", message: "Blue" });
       await recorder.until((e) => e.type === "turn.completed");
       expect(reply()).toEqual({ result: { outcome: { outcome: "answered", answers: [{ questionId: "color", selectedOptionIds: ["blue-id"] }] } } });
+    });
+  });
+
+  // cursor-agent 2026.10.22's session/prompt catches a failed model call, sends `\n\nError: ${String(error)}` as one
+  // message chunk and still answers end_turn.
+  describe("a failed model call Cursor sends as its last chunk", () => {
+    const turn = async (threadId: string, last: string, before: string[] = []) => {
+      ensureDirs();
+      chmodSync(FAKE_CLI, 0o755);
+      const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-reply-failure-"));
+      scratchDirs.push(scratch);
+      process.env.FAKE_ACP_UPDATES_FILE = join(scratch, "updates.json");
+      writeFileSync(process.env.FAKE_ACP_UPDATES_FILE, JSON.stringify(before.map((text) => ({
+        update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+      }))));
+      process.env.FAKE_ACP_TEXT_REPLY = last;
+      const instance = await CursorAgentDriver.create({
+        instanceId: "cursor-reply-failure", displayName: "Cursor", environment: {}, enabled: true, config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      const recorder = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId, text: "go" });
+        const done = await recorder.until((e) => e.type === "turn.completed");
+        const replies = recorder.events.flatMap((e) => e.type === "item.completed" && e.itemType === "assistant_text" ? [e.text] : []);
+        const errors = recorder.events.flatMap((e) => e.type === "runtime.error" ? [e] : []);
+        return { done, replies, errors };
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+        delete process.env.FAKE_ACP_TEXT_REPLY;
+        delete process.env.FAKE_ACP_UPDATES_FILE;
+      }
+    };
+
+    it("fails the turn on a 503, so a routine run is retried as a temporary AI error", async () => {
+      const { done, replies, errors } = await turn("t-cursor-503", "\n\nError: RetriableError: [unavailable] HTTP 503");
+      expect(done).toMatchObject({ ok: false, stopReason: "rpc_error" });
+      expect(replies).toEqual([]);
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toMatch(/^Cursor had a temporary server problem \(HTTP 503/);
+      expect(classifyRoutineFailure(errors[0]!.message, { stopReason: "rpc_error" })).toEqual({ kind: "retry", cause: "provider" });
+    });
+
+    it("fails the turn on a dropped stream and keeps what was said before it", async () => {
+      const dropped = "Stream ended without turnEnded — connection likely dropped mid-stream";
+      const { done, replies, errors } = await turn("t-cursor-dropped", `\n\nError: RetriableError: ${dropped}`, ["Checking the queue now."]);
+      expect(done).toMatchObject({ ok: false, stopReason: "rpc_error" });
+      expect(replies).toEqual(["Checking the queue now."]);
+      expect(errors).toEqual([expect.objectContaining({ message: dropped })]);
+      expect(classifyRoutineFailure(errors[0]!.message, { stopReason: "rpc_error" }).kind).toBe("retry");
+    });
+
+    it("asks for Cursor's sign-in when the backend rejected its authentication", async () => {
+      const { done, errors } = await turn("t-cursor-unauthenticated", "\n\nError: [unauthenticated] Backend rejected authentication.");
+      expect(done).toMatchObject({ ok: false, stopReason: "auth_required" });
+      expect(errors).toEqual([expect.objectContaining({ setup: true })]);
+    });
+
+    it("sends the stable instructions again on the next turn, as the failed call may not be in Cursor's history", async () => {
+      ensureDirs();
+      chmodSync(FAKE_CLI, 0o755);
+      const scratch = mkdtempSync(join(tmpdir(), "omb-cursor-reply-receipt-"));
+      scratchDirs.push(scratch);
+      const updates = join(scratch, "updates.json");
+      const dump = join(scratch, "dump.json");
+      Object.assign(process.env, { FAKE_ACP_UPDATES_FILE: updates, FAKE_ACP_DUMP: dump, FAKE_ACP_DUMP_PROMPT: "1" });
+      writeFileSync(updates, JSON.stringify([{ update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "\n\nError: RetriableError: [unavailable] HTTP 503" } } }]));
+      const instance = await CursorAgentDriver.create({
+        instanceId: "cursor-reply-receipt", displayName: "Cursor", environment: {}, enabled: true, config: { cli: FAKE_CLI, fullAuto: false },
+      });
+      const recorder = recordEvents(instance.adapter);
+      const input = { threadId: `t-cursor-reply-receipt-${randomUUID()}`, text: "go", system: "STABLE RULES\n\ntoday", systemStable: "STABLE RULES", systemVolatile: "today" };
+      const sentPrompt = () => JSON.stringify(JSON.parse(readFileSync(`${dump}.prompt.json`, "utf8")));
+      try {
+        const first = await instance.adapter.sendTurn(input);
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === first.turnId)).toMatchObject({ ok: false });
+        expect(sentPrompt()).toContain("STABLE RULES");
+        writeFileSync(updates, "[]");
+        const second = await instance.adapter.sendTurn(input);
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId)).toMatchObject({ ok: true });
+        expect(sentPrompt()).toContain("STABLE RULES");
+      } finally {
+        recorder.stop();
+        await instance.dispose();
+        delete process.env.FAKE_ACP_UPDATES_FILE;
+        delete process.env.FAKE_ACP_DUMP_PROMPT;
+      }
+    });
+
+    it("keeps a reply whose own words end by quoting such a line", async () => {
+      const quoted = "The log ended with:\n\nError: RetriableError: [unavailable] HTTP 503";
+      const { done, replies, errors } = await turn("t-cursor-quoted", quoted);
+      expect(done).toMatchObject({ ok: true, stopReason: null });
+      expect(replies).toEqual([quoted]);
+      expect(errors).toEqual([]);
     });
   });
 

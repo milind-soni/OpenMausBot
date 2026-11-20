@@ -88,6 +88,24 @@ export function deletePromptSplitReceipt(scope: string, key: string): void {
   } catch {}
 }
 
+export interface PendingPromptSplitReceipt { key: string; receipt: PromptSplitReceipt; previous: PromptSplitReceipt | null }
+
+/** Records a prompt the agent accepted, with the context use its turn last reported; after a compaction nothing is
+ * recorded, so the next turn sends the whole prompt again. */
+export function commitPromptSplitReceipt(
+  scope: string,
+  pending: PendingPromptSplitReceipt,
+  usage: { compacted: boolean; last: number | null; peak: number | null },
+): void {
+  if (usage.compacted) return deletePromptSplitReceipt(scope, pending.key);
+  const lastUsed = usage.last ?? (typeof pending.previous?.lastUsed === "number" ? pending.previous.lastUsed : undefined);
+  writePromptSplitReceipt(scope, pending.key, {
+    ...pending.receipt,
+    ...(lastUsed === undefined ? {} : { lastUsed }),
+    ...(usage.peak === null ? {} : { peakUsed: usage.peak }),
+  });
+}
+
 /** reAnchorAfterTurns re-sends the full prompt after that many bare turns, for history rewrites no event reports. */
 export function splitSessionPrompt(
   stable: string,

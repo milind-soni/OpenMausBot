@@ -5,6 +5,7 @@ import type { spawnCli } from "../../procs.ts";
 import { noticeFailure } from "../../chat-notices.ts";
 import { errorReplyFailure, type ErrorReplyFailure } from "../engine-errors.ts";
 import type { AcpConfig } from "./core.ts";
+import type { AcpDriverHooks } from "./driver-hooks.ts";
 import type { AcpHost, AcpLink } from "./host.ts";
 import type { AcpTurnSteering } from "./steer.ts";
 
@@ -25,6 +26,8 @@ export interface AcpTurn {
     usagePeak: number | null;
     usageLast: number | null;
     usageCompacted: boolean;
+    /** The last text chunk received; it may since have been sent with `text`. */
+    lastText: string;
     /** Stop went unanswered: only the cancel timeout settles the turn, once its session is closed or its process gone. */
     cancelling: boolean;
   };
@@ -77,6 +80,19 @@ export function trackRunningTool(current: AcpTurn, update: { toolCallId?: unknow
   const status = update.status ?? defaultStatus;
   if (status === "completed" || status === "failed") current.runningTools.delete(update.toolCallId);
   else if (status === "pending" || status === "in_progress") current.runningTools.add(update.toolCallId);
+}
+
+/** The failure `read` finds in the turn's last text chunk while that chunk still ends the unsent reply; null otherwise. */
+export function replyFailureOf(current: AcpTurn, read: AcpDriverHooks["replyFailure"]): string | null {
+  const { text, lastText } = current.state;
+  return lastText && text.endsWith(lastText) ? read?.(lastText) ?? null : null;
+}
+
+/** Sends the reply before the failed chunk, never the chunk itself, and gives the error that fails the turn. */
+export function dropFailedChunk(current: AcpTurn, failure: string): Error {
+  current.state.text = current.state.text.slice(0, -current.state.lastText.length);
+  current.flushAssistantText();
+  return new Error(failure);
 }
 
 export interface AcpTurnEnd {
