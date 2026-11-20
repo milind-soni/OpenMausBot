@@ -1042,6 +1042,7 @@ export function GroupView({ group, inForkPanel = false }: { group: Group; inFork
 
       <div
         ref={scrollRef}
+        data-bot-list-scroll=""
         className="glass-scroller h-full overflow-x-hidden overflow-y-auto px-5 [overflow-anchor:none]"
         {...scrollHandlers}
       >

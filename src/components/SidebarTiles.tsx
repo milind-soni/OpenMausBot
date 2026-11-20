@@ -83,7 +83,7 @@ export const SidebarBotTile = memo(function SidebarBotTile({ primary = false, dr
         pinnedCircleDragClass({ drag, dragging, drop }),
       )}
     >
-      <span className="relative flex">
+      <span data-launch-chief={(primary && bot.chiefOfStaff) || undefined} className="relative flex">
         <BotAvatar
           bot={bot}
           state={stateForBot(bot)}

@@ -1,7 +1,8 @@
 import { setWebPushSession, syncWebPush, usesWebPush } from "./lib/web-push";
 import { finishedNotificationsEnabled } from "./lib/notification-preferences";
 import { ChatCacheScope, setChatCacheScope } from "./lib/chat-cache";
-import { StrictMode } from "react";
+import { beginLaunch, revealWhenReady, withLaunchTimeout } from "./launch";
+import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import {
   previewBrowserSignIn, readSessionState, rememberTeamSignIn, takeBrowserSignInFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation,
@@ -28,6 +29,7 @@ applyFont(readFont());
 applySoftwareRendering();
 applyChatWidth(readChatWidth());
 startTheme();
+beginLaunch();
 const pageLanguage = loadPageLanguage();
 
 // The app is its own chunk, so these pages don't parse it. Everywhere else its fetch starts now, alongside the session
@@ -88,6 +90,14 @@ async function chooseRoot(): Promise<React.ReactNode> {
 
 // The window is named before the brand file is asked for: the answer only ever renames it.
 document.title = productName();
-void Promise.all([bootstrapBrand(), chooseRoot(), pageLanguage]).then(([, root]) => {
-  createRoot(document.getElementById("root")!).render(<StrictMode><PageBoundary>{root}</PageBoundary></StrictMode>);
+function LaunchReady() {
+  useEffect(revealWhenReady, []);
+  return null;
+}
+
+void withLaunchTimeout(Promise.all([bootstrapBrand(), chooseRoot(), pageLanguage])).then(([, root]) => {
+  createRoot(document.getElementById("root")!).render(<StrictMode><LaunchReady /><PageBoundary>{root}</PageBoundary></StrictMode>);
+}).catch(error => {
+  function StartupError(): never { throw error; }
+  createRoot(document.getElementById("root")!).render(<><LaunchReady /><PageBoundary><StartupError /></PageBoundary></>);
 });

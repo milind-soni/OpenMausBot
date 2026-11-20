@@ -43,7 +43,7 @@ export function LiveConnectionStrip({ connected, hydrated }: { connected: boolea
   return <div role="status" data-live-connection={notice} className="flex flex-wrap items-center justify-center gap-2 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
     {notice === "offline" ? <CloudOff size={14} className="shrink-0" aria-hidden="true" /> : <Loader2 size={14} className="shrink-0 animate-spin" aria-hidden="true" />}
     <span>{t(notice === "offline" ? "liveConnection.offline" : help ? "liveConnection.help" : "liveConnection.reconnecting")}</span>
-    {notice === "reconnecting" && help && <button type="button" onClick={retryLiveEvents} className="shrink-0 rounded px-2 py-1 text-ink underline underline-offset-2 interaction:bg-raised/50 focus-visible:outline-2 focus-visible:outline-offset-2">
+    {notice === "reconnecting" && help && <button type="button" data-live-connection-retry="" onClick={retryLiveEvents} className="shrink-0 rounded px-2 py-1 text-ink underline underline-offset-2 interaction:bg-raised/50 focus-visible:outline-2 focus-visible:outline-offset-2">
       {t("liveConnection.retry")}
     </button>}
   </div>;

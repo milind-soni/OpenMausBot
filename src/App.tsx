@@ -1,4 +1,4 @@
-import { useHorizontalDrag } from "@/hooks/use-horizontal-drag";
+import { useBotListSwipe } from "@/hooks/use-bot-list-swipe";
 import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import { useMenuMotion } from "@/components/MenuMotion";
 import { ModalPresence } from "@/components/ModalPresence";
@@ -18,13 +18,13 @@ import { GuidedTour } from "@/components/onboarding/GuidedTour";
 import { LiveCallHost } from "@/components/LiveCallHost";
 import { ThreadRefsProvider } from "@/components/ThreadRefs";
 import { initAnalytics } from "@/lib/analytics";
-import { useAppLoadSignal } from "@/lib/app-load";
+import { showLaunchChief } from "./launch";
+import { loadWaitingFor, useAppLoadSignal } from "@/lib/app-load";
 import { cloudAccountBridge, openCloudOnWeb } from "@/lib/cloud-add-web";
 import { parseComputerHelp } from "@/lib/computer-control";
 import { viewerClosedRelease } from "@/components/computer-takeover";
 import { Sidebar } from "@/components/Sidebar";
 import { ChatV2 } from "@/components/chat-v2/ChatV2";
-import { ChatView } from "@/components/ChatView";
 import { GroupView } from "@/components/GroupView";
 import { ForkPanel } from "@/components/ForkPanel";
 import { SIDEBAR_AND_PANEL_FIT, SIDEBAR_INLINE, TWO_SIDE_PANELS_FIT, useMediaQuery } from "@/lib/use-media-query";
@@ -97,9 +97,10 @@ import { usePhoneViewport } from "@/hooks/use-phone-viewport";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
-  const { chatV2, phoneLayout } = state;
+  const chief = state.bots.find(bot => bot.chiefOfStaff && !bot.hidden);
+  useLayoutEffect(() => { if (chief) showLaunchChief(chief); }, [chief]);
+  const { phoneLayout } = state;
   usePhoneViewport(Boolean(phoneLayout));
-  const setChatV2 = (v2: boolean) => dispatch({ type: "chatView", v2 });
   useTeamChats(state.config);
   const needsYou = needsYouVersion(state.bots, state.groups, state.notifications);
   useTeamPeopleLoader(state.config, needsYou);
@@ -194,7 +195,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       duration: 180, easing: "ease-out",
     });
     return () => animation.cancel();
-  }, [chatOwnerId, chatThreadId, chatV2, state.activeView]);
+  }, [chatOwnerId, chatThreadId, state.activeView]);
 
   const { open: drawerOpen, show: openDrawer, hide: hideDrawer, noteAction: noteDrawerAction } = useBotListDrawer({ selectedId: state.selectedId, botThread: bot?.threadId, groupThread: group?.threadId,
     view: state.activeView, pluginsOpen: state.pluginsOpen, settingsOpen: state.settingsOpen });
@@ -202,35 +203,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     hideDrawer();
     requestAnimationFrame(() => menuButtonRef.current?.focus({ preventScroll: true }));
   }, [hideDrawer]);
-  const drawerDirection = useRef(1);
-  const drawerGesture = useHorizontalDrag(event => {
-    if (!phoneLayout || !(event.target instanceof Element)) return false;
-    if (!event.currentTarget.querySelector("[data-bot-list-chat]")) return false;
-    const surface = event.target.closest(drawerOpen ? "[data-sidebar]" : "[data-bot-list-chat]");
-    if (!surface) return false;
-    drawerDirection.current = getComputedStyle(surface).direction === "rtl" ? -1 : 1;
-    if (event.target.closest('input, textarea, select, [contenteditable="true"]')) return false;
-    if (event.pointerType === "mouse" && event.target.closest('[draggable="true"]')) return false;
-    if (drawerOpen) return true;
-    const bounds = surface.getBoundingClientRect();
-    const leading = drawerDirection.current === 1 ? event.clientX - bounds.left : bounds.right - event.clientX;
-    return leading <= 24;
-  }, (stage, dx) => {
-    if (dx === null) {
-      stage.style.removeProperty("--drawer-offset");
-      stage.removeAttribute("data-drawer-dragging");
-      return;
-    }
-    const width = window.innerWidth;
-    const distance = (drawerOpen ? width : 0) + dx * drawerDirection.current;
-    const offset = Math.min(width, Math.max(0, distance)) * drawerDirection.current;
-    stage.style.setProperty("--drawer-offset", `${offset}px`);
-    stage.setAttribute("data-drawer-dragging", "");
-  }, dx => {
-    const distance = dx * drawerDirection.current;
-    if (drawerOpen && distance <= -56) closeDrawer();
-    if (!drawerOpen && distance >= 56) openDrawer();
-  });
+  const drawerGesture = useBotListSwipe(Boolean(phoneLayout), drawerOpen, openDrawer, closeDrawer);
   const notificationFeed = useNotificationFeed() && !remoteClient;
 
   const notificationsMotion = useMenuMotion(notificationFeed && state.notificationsOpen);
@@ -406,7 +379,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
     <CliLoginCard />
   </>;
   return (
-    <div data-look="app" className={cn("flex h-full min-w-0 flex-col max-md:overflow-x-clip", framed && "bg-frame")} onClickCapture={drawerOpen ? noteDrawerAction : undefined} onKeyDownCapture={drawerOpen ? noteDrawerAction : undefined}>
+    <div data-launch-waiting={loadWaitingFor(state) ?? undefined} data-look="app" className={cn("flex h-full min-w-0 flex-col max-md:overflow-x-clip", framed && "bg-frame")} onClickCapture={drawerOpen ? noteDrawerAction : undefined} onKeyDownCapture={drawerOpen ? noteDrawerAction : undefined}>
       <WindowFrameBar notifications={notificationFeed} />
       <BotLimitPopup />
       <ConversationShareDialogs />
@@ -414,19 +387,21 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       <div data-bot-list-stage={drawerOpen ? "open" : "closed"}
         className="relative flex min-h-0 min-w-0 flex-1"
         {...drawerGesture}>
-      <button
-        type="button"
-        ref={menuButtonRef}
-        data-bot-list-trigger=""
-        inert={phoneLayout && drawerOpen}
-        aria-label={t("app.openBotList")}
-        aria-expanded={drawerOpen}
-        onClick={openDrawer}
-        className="absolute start-2 top-2.5 z-30 rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink max-md:flex max-md:size-11 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-edge max-md:bg-composer max-md:p-0 max-md:text-ink md:hidden"
-      >
-        <Menu size={18} className="max-md:hidden" />
-        <ChevronLeft size={20} aria-hidden="true" className="hidden max-md:block rtl:-scale-x-100" />
-      </button>
+      <div data-bot-list-trigger-layer="" className="pointer-events-none absolute inset-0 z-30 md:hidden">
+        <button
+          type="button"
+          ref={menuButtonRef}
+          data-bot-list-trigger=""
+          inert={phoneLayout && drawerOpen}
+          aria-label={t("app.openBotList")}
+          aria-expanded={drawerOpen}
+          onClick={openDrawer}
+          className="pointer-events-auto absolute start-2 top-2.5 rounded-md p-1.5 text-ink-secondary interaction:bg-raised/50 hover:text-ink max-md:flex max-md:size-11 max-md:items-center max-md:justify-center max-md:rounded-full max-md:border max-md:border-edge max-md:bg-composer max-md:p-0 max-md:text-ink md:hidden"
+        >
+          <Menu size={18} className="max-md:hidden" />
+          <ChevronLeft size={20} aria-hidden="true" className="hidden max-md:block rtl:-scale-x-100" />
+        </button>
+      </div>
 
         <div
           aria-hidden
@@ -483,10 +458,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <div data-bot-list-chat="" inert={phoneLayout && drawerOpen}
           className="flex h-full min-w-0 flex-1 max-md:max-w-full max-md:overflow-x-clip">
           <div ref={chatPane} className="flex h-full min-w-0 flex-1">
-          {group ? <GroupView key={group.id} group={group} /> : bot && (
-            chatV2 ? <ChatV2 key={bot.threadId} profile={bot} phoneLayout={phoneLayout} onClose={() => setChatV2(false)} />
-              : <ChatView bot={bot} onOpenV2={() => setChatV2(true)} />
-          )}
+          {group ? <GroupView key={group.id} group={group} /> : bot && <ChatV2 key={bot.threadId} profile={bot} phoneLayout={phoneLayout} />}
           </div>
         </div>
       ) : noEngines ? (

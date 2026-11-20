@@ -312,7 +312,7 @@ function CarvedAvatarComponent(
             </mask>
           )}
         </defs>
-        <g ref={group} transform={initial.body}>
+        <g ref={group} data-mascot-body-motion="" transform={initial.body}>
           <g mask={cutFace ? `url(#carved-face-${uid})` : undefined}>
             {body.parts.map((part, i) => <path key={i} d={part.d} fill={resolve(part.fill)} />)}
           </g>

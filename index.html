@@ -13,7 +13,20 @@
     <title>MausBot</title>
   </head>
   <body>
-    <div id="root"></div>
+    <style>
+      #launch { position: fixed; inset: 0; z-index: 2147483647; display: grid; place-items: center; isolation: isolate }
+      #launch::before { content: ""; position: absolute; inset: 0; z-index: -1; background: var(--color-app, #121212); opacity: var(--launch-backdrop, 1); transition: opacity 640ms ease }
+      #launch-face, #launch-face > img { width: 96px; height: 96px }
+      #launch-face svg { overflow: visible }
+      @media (prefers-reduced-motion: no-preference) {
+        #launch-face [data-mascot-body-motion] { transition: transform 150ms cubic-bezier(.2,.65,.35,1) }
+      }
+      #launch-face > img { display: block; animation: launch-hop 560ms ease-in-out infinite alternate }
+      @keyframes launch-hop { to { transform: translateY(-8px) rotate(-2deg) } }
+      @media (prefers-reduced-motion: reduce) { #launch-face > img { animation: none } #launch::before { transition-duration: 160ms } }
+    </style>
+    <div id="root" inert></div>
+    <div id="launch" aria-hidden="true"><div id="launch-face"><img src="/src/assets/mausbot-steel/cursor-192.webp" alt="" /></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

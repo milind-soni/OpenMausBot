@@ -24,8 +24,6 @@
 .v2-model > div > button { height:var(--v2-control-height); max-width:100%; }
 .v2-controls { justify-self:end; }
 .v2-identity-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:15px; font-weight:500; }
-.v2-controls > button { padding:7px 10px; border-radius:10px; background:var(--color-panel); color:var(--color-ink-secondary); font-size:12px; white-space:nowrap; }
-.v2-controls [aria-pressed=true] { background:var(--color-ink); color:var(--color-app); }
 .v2-scroll { isolation:isolate; grid-row:2; padding-inline:1.25rem; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; overflow-anchor:none;
   mask-image: linear-gradient(to bottom,
     transparent, #000 var(--v2-fade-height,56px),
@@ -82,8 +80,6 @@
 @container (max-width:28rem) {
   .v2-floating { inset-inline:8px; gap:4px; }
   .v2-identity { padding-inline:8px; }
-  .v2-controls { gap:2px; }
-  .v2-controls > button { padding-inline:5px; }
 }
 
 .v2-bubble-row { display:flex; align-items:flex-end; gap:6px; max-width:100%; min-width:0; }

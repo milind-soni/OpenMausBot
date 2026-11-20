@@ -70,7 +70,7 @@ function expectReceipts(container: HTMLElement) {
 describe("a Data receipt in the transcript", () => {
   it.each(["classic", "v2"])("renders the result chip in %s chat whatever the result is called", layout => {
     vi.stubGlobal("fetch", () => new Promise(() => {}));
-    const mounted = mount(layout === "v2" ? createElement(ChatV2, { profile: bot, onClose: () => {} }) : createElement(ChatView, { bot }));
+    const mounted = mount(layout === "v2" ? createElement(ChatV2, { profile: bot }) : createElement(ChatView, { bot }));
     try {
       expectReceipts(mounted.container);
     } finally {

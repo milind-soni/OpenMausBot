@@ -45,7 +45,7 @@ let dispatch!: Dispatch<Action>;
 function Probe() {
   ({ state, dispatch } = useStore());
   const active = state.bots.find(bot => bot.id === state.selectedId);
-  return state.chatV2 && active ? createElement(ChatV2, { key: active.threadId, profile: active, onClose: () => {} }) : null;
+  return state.chatV2 && active ? createElement(ChatV2, { key: active.threadId, profile: active }) : null;
 }
 let root: Root;
 let container: HTMLDivElement;

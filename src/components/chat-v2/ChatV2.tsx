@@ -225,7 +225,7 @@ function ChatWork({ item, focusedId, children }: {
   </div>;
 }
 
-export function ChatV2({ profile, phoneLayout = false, onClose }: { profile: Bot; phoneLayout?: boolean; onClose: () => void }) {
+export function ChatV2({ profile, phoneLayout = false }: { profile: Bot; phoneLayout?: boolean }) {
   const bot = useMemo(() => {
     if (!profile.switchingTo || profile.switchingTo === profile.threadId) return currentTaskBot(profile);
     return { ...currentTaskBot(profile, profile.switchingTo), threadId: profile.switchingTo,
@@ -314,13 +314,14 @@ export function ChatV2({ profile, phoneLayout = false, onClose }: { profile: Bot
         dispatch({ type: "toggleComputer" });
       }}><BotAvatar bot={bot} size={24} state={stateForBot(bot)} animated={botButtonHovered} /><span className="v2-identity-name">{bot.name}</span><span className="v2-identity-arrow" aria-hidden="true"><ChevronRight size={16} /></span></button>
       <div className="v2-controls">
-        {!phoneLayout && <button aria-pressed="true" onClick={onClose}>Chat V2</button>}<ChatHeaderMenu bot={bot} history={history} openOnHover={false} /></div>
+        <ChatHeaderMenu bot={bot} history={history} openOnHover={false} />
+      </div>
     </div>
     {(findOpen || error) && <div className="v2-banners">
       {findOpen && <ChatFindBar threadId={bot.threadId} inForkPanel={false} onClose={() => setFindOpen(false)} />}
       <ChatErrorBanner message={error} onDismiss={() => dispatch({ type: "error", message: null })} />
     </div>}
-    <div className="v2-scroll" ref={viewport.scrollRef} {...viewport.scrollHandlers}>
+    <div data-bot-list-scroll="" className="v2-scroll" ref={viewport.scrollRef} {...viewport.scrollHandlers}>
       <div ref={viewport.transcriptRef} className="v2-paper chat-column" role="log" aria-label={t("chat.conversationWith", { name: bot.name })}>
         {viewport.hasEarlier && <div ref={viewport.topSentinelRef} aria-hidden="true" className="h-px w-full" />}
         {(viewport.olderPending || ((bot.switchingTo || bot.awaitingThreadSnapshot) && !messages.length)) && (

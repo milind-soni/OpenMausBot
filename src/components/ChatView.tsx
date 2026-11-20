@@ -771,7 +771,7 @@ const MessagesList = memo(function MessagesList({
 
 const CHATHEAD_PILL = `flex min-w-0 items-center gap-2 rounded-full py-0.5 pl-1.5 text-ink ${ELEVATED_FLOAT}`;
 
-export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = false, onOpenV2 }: { bot: Bot; inForkPanel?: boolean; onOpenV2?: () => void }) {
+export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = false }: { bot: Bot; inForkPanel?: boolean }) {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const state = useStoreSelector((s) => ({ computerStart: s.computerStarts[profile.id], mascotMotion: s.mascotMotion?.botId === profile.id ? s.mascotMotion : null, instances: s.instances, config: s.config, focusMessage: s.focusMessage, forkPanelOpen: s.forkPanel !== null, settingsOpen: s.settingsOpen, computerOpen: s.computerOpen, error: s.error, notice: s.notice }), sameFields), dispatch = useStoreDispatch(), store = useStoreRef();
   const showThreads = useShowThreads();
@@ -1028,7 +1028,6 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
               <span className="@max-4xl/chathead:hidden">{t("chat.stop")}</span>
             </button>
           )}
-          {onOpenV2 && <button type="button" aria-pressed={false} style={headerNoDragStyle} onClick={onOpenV2} className="rounded-full border border-hairline px-2 py-1 text-xs">Chat V2</button>}
           <ThreadContextWarning bot={bot} messages={messages} />
           {phone && <UsageAlert engine={bot.modelSelection?.instanceId} />}
           {/* The model and the bot's computer stay in view in both modes; Simple mode moves only ⋯ into the bot panel. */}

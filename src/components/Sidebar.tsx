@@ -1203,7 +1203,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       <TeamSideSwitch compact={density === "icons"} listOnly={phone} />
       {universalPins && pinnedBots.length > 0 && !simpleDesk && (
         <div
-          data-sidebar-universal-pins=""
+          data-sidebar-universal-pins="" data-bot-list-scroll=""
           // vh, not %: a percentage has no height to resolve against inside the glass head.
           className="max-h-[min(40vh,280px)] shrink-0 overflow-y-auto border-b border-hairline/40 px-2 pb-2"
         >
@@ -1249,7 +1249,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
       {!collapseToIcons && !phone && <SidebarResizeHandle sizing={sizing} sidebarRef={sidebarRef} avatars={density === "icons"} avatarsWidth={rail ? 92 : 80}
         onAvatars={(avatars) => setSidebarDensity(avatars ? "icons" : "comfortable")} style={windowNoDragStyle} />}
 
-      <GlassScroller className={rail ? "[scrollbar-gutter:stable_both-edges]" : simpleDesk ? "px-3" : "px-2"}>
+      <GlassScroller data-bot-list-scroll="" className={rail ? "[scrollbar-gutter:stable_both-edges]" : simpleDesk ? "px-3" : "px-2"}>
         <div className={cn("flex flex-col", simpleDesk ? cn("gap-0.5 pb-2", !tiles && "pt-2") :  "gap-1 pb-2 pt-2")}>
           <NeedsYouButton compact={rail} /><SidebarPeople compact={rail} onOpened={phone ? onClose : undefined} />
           {unsectionedChief && (phone ? (

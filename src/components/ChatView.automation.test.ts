@@ -46,7 +46,7 @@ async function draw(messages: Message[], chatV2 = false) {
     instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test", snapshot: { state: "available" } } as InstanceInfo],
   };
   const value = { state, dispatch, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
-  const chat = chatV2 ? createElement(ChatV2, { profile: bot, onClose: vi.fn() }) : createElement(ChatView, { bot });
+  const chat = chatV2 ? createElement(ChatV2, { profile: bot }) : createElement(ChatView, { bot });
   flushSync(() => root.render(createElement(BotEditorStore, { value, children: chat })));
   await settle();
 }
