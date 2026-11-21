@@ -21,10 +21,25 @@ export function applyOneShotEnv(
   const selection = support.selectModel;
   const requestedModel = selection ? options.model ?? options.fallback?.model : undefined;
   const model = requestedModel && requestedModel !== selection?.agentDefault
-    ? support.resolveTurnModel?.(requestedModel, env, models) ?? requestedModel
+    ? resolveOneShotModel(support, requestedModel, env, models)
     : undefined;
   support.applyTurnEnv?.(env, { ...(model ? { model, requestedModel } : {}), ...ctx });
   return model && selection ? { configId: selection.configId, id: model } : undefined;
+}
+
+/** A model the engine can no longer route (e.g. a deleted Qwen provider entry) leaves the session's default to run, as an
+ * unoffered one does. */
+function resolveOneShotModel(
+  support: Pick<AcpSupport, "resolveTurnModel">,
+  requestedModel: string,
+  env: Record<string, string | undefined>,
+  models: ModelCatalog,
+): string | undefined {
+  try {
+    return support.resolveTurnModel?.(requestedModel, env, models) ?? requestedModel;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface AcpOneShotInput {
@@ -195,7 +210,10 @@ export function runAcpOneShot(input: AcpOneShotInput): Promise<string> {
       const offered = wanted ? acpModelOption(session, wanted.configId) : undefined;
       if (wanted && offered?.configId && offered.options.some(({ id }) => id === wanted.id)) {
         if (offered.currentValue !== wanted.id) {
-          await request("session/set_config_option", { sessionId, configId: offered.configId, value: wanted.id });
+          const reply = await request("session/set_config_option", { sessionId, configId: offered.configId, value: wanted.id });
+          // Some engines confirm a switch with an empty reply; one that names another model did not switch.
+          const now = acpModelOption(reply, offered.configId)?.currentValue;
+          if (now !== undefined && now !== wanted.id) throw new Error(`${name} background call did not switch to ${wanted.id} (still ${now})`);
         }
         model = wanted.id;
       }
