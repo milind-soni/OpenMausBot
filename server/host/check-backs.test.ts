@@ -39,6 +39,19 @@ function harness(over: Partial<CheckBackDeps> = {}, dir = mkdtempSync(join(tmpdi
   return { h, manager };
 }
 
+/** A due check-back as a server finds it on disk after `tries` refused starts, so a test near the limit does not spend them one save at a time. */
+function storedWithTries(tries: number, over: Partial<CheckBackDeps> = {}) {
+  const first = harness();
+  first.manager.create(asked());
+  const file = join(first.h.dir, CHECK_BACK_FILE);
+  const saved = JSON.parse(readFileSync(file, "utf8"));
+  saved.checkBacks[0].tries = tries;
+  writeFileSync(file, JSON.stringify(saved));
+  const again = harness(over, first.h.dir);
+  again.h.clock = T0 + 5 * MIN;
+  return again;
+}
+
 const asked = (over: Partial<NewCheckBack> = {}): NewCheckBack => ({
   botId: "scout", threadId: "t1", note: "see if CI passed", dueAt: T0 + 5 * MIN, zone: "Europe/Berlin",
   origin: { kind: "user", request: "fix the build and tell me when CI is green", person: "p_aaaaaaaaaaaaaaaaaaaaaa" }, ...over,
@@ -180,31 +193,34 @@ describe("check-backs", () => {
     await manager.tick();
     expect(h.started).toHaveLength(1);
 
-    expect(manager.create(asked({ dueAt: h.clock + 5 * MIN })).ok).toBe(true);
-    h.refuseStart = "This bot is paused.";
-    h.clock += 5 * MIN;
-    for (let i = 0; i < START_TRIES; i++) {
-      h.clock += START_RETRY_MS;
-      await manager.tick();
-    }
-    expect([...h.lines.values()].at(-1)).toMatchObject({ status: "failed", why: "This bot is paused." });
-    expect(manager.nextDueAt()).toBeNull();
+    // The count of refusals is stored, so a restart two short of giving up needs two more, not all of them.
+    const stored = storedWithTries(START_TRIES - 2);
+    stored.h.refuseStart = "This bot is paused.";
+    stored.h.clock += START_RETRY_MS;
+    await stored.manager.tick();
+    expect(stored.manager.nextDueAt()).not.toBeNull();
+    expect([...stored.h.lines.values()]).toEqual([]);
+    stored.h.clock += START_RETRY_MS;
+    await stored.manager.tick();
+    expect([...stored.h.lines.values()].at(-1)).toMatchObject({ status: "failed", why: "This bot is paused." });
+    expect(stored.manager.nextDueAt()).toBeNull();
   });
 
   it("waits out a paused bot without using up its tries", async () => {
-    const { h, manager } = harness({ paused: (error) => (error as { code?: string }).code === "bot_paused" });
-    manager.create(asked());
-    h.clock += 5 * MIN;
-    const paused = Object.assign(new Error("Scout is paused."), { code: "bot_paused" });
-    const start = async () => { throw paused; };
-    const held = harness({ paused: (error) => (error as { code?: string }).code === "bot_paused", start }, h.dir);
-    held.h.clock = h.clock;
-    for (let i = 0; i < START_TRIES + 5; i++) {
+    let refusal: Error = Object.assign(new Error("Scout is paused."), { code: "bot_paused" });
+    // One refusal short of giving up: a pause that counted as a try would end it at the first tick.
+    const held = storedWithTries(START_TRIES - 1, { paused: (error) => (error as { code?: string }).code === "bot_paused", start: async () => { throw refusal; } });
+    for (let i = 0; i < 5; i++) {
       held.h.clock += START_RETRY_MS;
       await held.manager.tick();
     }
     expect(held.manager.nextDueAt()).not.toBeNull();
-    expect([...held.h.lines.values()].some((line) => line.status === "failed")).toBe(false);
+    expect([...held.h.lines.values()]).toEqual([]);
+    // The count stood one short all along: the next refusal that is no pause is the last.
+    refusal = new Error("Under maintenance.");
+    held.h.clock += START_RETRY_MS;
+    await held.manager.tick();
+    expect([...held.h.lines.values()].at(-1)).toMatchObject({ status: "failed", why: "Under maintenance." });
   });
 
   it("names the soonest one to wake a sleeping Cloud", () => {

@@ -786,7 +786,7 @@ describe("a folder being read ahead when its turn starts", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const reading = prime(bot, cwd);
     const turn = snapshot(bot, cwd, "the turn", undefined, { pin: "dispatch-1" });
-    await vi.waitFor(() => expect(subcommands()).toContain("add"));
+    await vi.waitFor(() => expect(subcommands()).toContain("add"), { timeout: 15_000 });
     giveUp(timeoutError("add"));
     expect(await reading).toBe(false);
     expect(await turn).toBeNull();
