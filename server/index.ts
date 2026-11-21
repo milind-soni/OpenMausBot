@@ -47,7 +47,7 @@ import { escapeAttribute } from "../src/lib/composer-attachments.ts";
 import { isPendingSignInRequest, normalizeSignInSite, signInCardWaits, signInOutcome, signInResumePrompt } from "../shared/sign-in-request.ts";
 
 import { createRoomTurnLevels } from "./room-turn-level.ts";
-import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createNoTerminal } from "./host/no-terminal.ts"; import { placeMoveForBot, placeMoveLine } from "./host/place-move.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { conversationLanguage, serverLine, setConversationLanguage } from "./server-lines.ts";
+import { createSignInSettle } from "./host/sign-in-settle.ts"; import { createNoTerminal } from "./host/no-terminal.ts"; import { createPlaceMoves, type ComputerSelection } from "./host/place-move.ts"; import { createPersonLanguages, THIS_COMPUTER } from "./host/person-languages.ts"; import "./server-line-packs.ts"; import { conversationLanguage, serverLine, setConversationLanguage } from "./server-lines.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
 import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { readsOwnFiles } from "./own-file-reads.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
@@ -1610,16 +1610,7 @@ const internalCapabilities = new Map<string, InternalCapability>(); const lateTo
 const activeInternalGenerationByThread = new Map<string, string>();
 const turnCallSignals = createTurnCallSignals(internalCapabilityIsActive);
 const internalGenerationByProviderTurn = new ProviderTurnGenerationRegistry();
-const computerSelectionTurns = new Map<string, {
-  generation: string;
-  botId: string;
-  source?: Message; // none for a teammate's hand-off, which moves only to the browser and continues with `handoff.opts`
-  text: string;
-  dataContext?: DataContext; handoff?: { opts: Parameters<typeof startTurn>[2]; outcome?: DirectTurnOutcome };
-  mounted?: Surface;
-  selected?: Surface; /** The switch creates the cloud computer it moves to. */ fresh?: boolean;
-  previousSurface?: Surface;
-}>();
+const computerSelectionTurns = new Map<string, ComputerSelection<Parameters<typeof startTurn>[2], DirectTurnOutcome, Message, DataContext>>();
 // Standing bearer tokens for bots running outside this server (external-runtimes.json, mode 600): peer comms on one thread only; missing bindings fail closed.
 const EXTERNAL_RUNTIME_GENERATION = "external-runtime";
 const EXTERNAL_RUNTIMES_FILE = join(DATA_DIR, "external-runtimes.json");
@@ -5542,7 +5533,14 @@ function isUnattended(botId?: string | null, threadId?: string): boolean {
   return true;
 }
 
-const reviewAnswerThreads = new Set<string>(); const firstHourHooks = createFirstHourHooks({ dataDir: DATA_DIR, personal: Boolean(CLOUD_PERSONAL) }); const noTerminal = createNoTerminal({ cloudHome: CLOUD_PERSONAL, lines: (threadId) => store.messagesFor(threadId), run: (runId) => routines?.listRuns().find((run) => run.id === runId), engine: (selection) => { const instance = registry.get(selection.instanceId); return instance ? { model: cloudEngine(instance, selection.model).name, shell: supportsWorkspaceFiles(instance.driverKind) } : undefined; }, bot: (botId) => store.bot(botId) ?? undefined, routines: (botId) => routines?.listRoutines().filter((routine) => routine.botId === botId) ?? [], language: threadLanguage, notice: (threadId, text) => store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ok: true } }) });
+const reviewAnswerThreads = new Set<string>(); const firstHourHooks = createFirstHourHooks({ dataDir: DATA_DIR, personal: Boolean(CLOUD_PERSONAL) });
+// What a turn on My Cloud can run commands on, said by the app (host/no-terminal.ts), and what a move to the cloud desktop leaves behind (host/place-move.ts).
+const noTerminal = createNoTerminal({ cloudHome: CLOUD_PERSONAL, lines: (threadId) => store.messagesFor(threadId), run: (runId) => routines?.listRuns().find((run) => run.id === runId), language: threadLanguage, notice: activityNotice,
+  cloudDesktop: (bot: BotRecord) => bot.computer !== "off" && bot.cloudBackend !== "vps" && boat.boatConfigured(cfg) && canWorkOnCloud(cloudEngine(registry.get(bot.modelSelection.instanceId))) && !computerPlaceRefusal("box") && !cloudPlaceRefusal(cloudEngine(registry.get(bot.modelSelection.instanceId), bot.modelSelection.model), "works-on", bot.name) && !computerToolsRefusal(toolScopeForTurn(bot.id), "works-on", bot.name),
+  lentTerminal: () => sharedComputers.known(CLOUD_HOME_LENDER).some((lent) => lent.lent && lent.scopes.terminal), noComputer: (botId, threadId) => { const bot = store.bot(botId), place = bot && turnSurfacePlan(bot, undefined, threadId).computer; return Boolean(bot) && place !== "cloud" && !(place === undefined && bot!.cloudBackend === "vps") && !inheritedTeamComputer(bot!); },
+  engine: (selection) => { const instance = registry.get(selection.instanceId); return instance ? { model: cloudEngine(instance, selection.model).name, shell: supportsWorkspaceFiles(instance.driverKind) } : undefined; }, bot: (botId) => store.bot(botId) ?? undefined, routines: (botId) => routines?.listRoutines().filter((routine) => routine.botId === botId) ?? [] });
+const placeMoves = createPlaceMoves({ home: CLOUD_PERSONAL ? "my-cloud" : CLOUD_HOME ? "team-cloud" : null, folder: (botId, threadId) => messageFileRootsForThread(botId, threadId)[0], vps: (botId) => store.bot(botId)?.cloudBackend === "vps", language: threadLanguage, notice: activityNotice });
+function activityNotice(threadId: string, text: string) { store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${text}`, ok: true } }); }
 let routines: RoutineManager | null = null;
 const automationReports = createAutomationReports({ store, routines: () => routines, busy: threadBusy, wrote: markTaskContextExternallyUpdated, brief: (run, turnId) => proactive.runSettled(run, turnId), threadLanguage, notes: noTerminal.notes,
   notify: (kind, bot, threadId, detail) => notify(buildNotification(kind, bot, threadId, detail, { avatarUrl: bot.avatarUrl }), { routine: true }) });
@@ -6076,8 +6074,8 @@ function continueComputerSelection(threadId: string, generation: string | undefi
     if (hasQueuedSteeredMessages(bot.id, threadId)) { giveUp(); drainQueuedSends(); return; }
     if (selection.source && store.activePath(threadId).findLast(message => message.role === "user" && message.kind === "text")?.id !== selection.source.id) return;
     store.patchTask(bot.id, threadId, { surface, surfaceSource: "auto" });
-    const move = { from: selection.mounted, to: surface, home: CLOUD_PERSONAL ? "my-cloud" as const : CLOUD_HOME ? "team-cloud" as const : "desktop" as const, fresh: selection.fresh, folder: messageFileRootsForThread(bot.id, threadId)[0] }, line = placeMoveLine({ ...move, bot: bot.name }, threadLanguage(threadId)); if (line) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: `notice: ${line}`, ok: true } }); const text = `The computer selection is now ${surfaceLabel(surface)}.${placeMoveForBot(move)} Continue the ${selection.handoff ? "handed-off" : "user's original"} request using the tools mounted for this turn; verify the result before claiming success.\n\n${selection.text}`;
-    if (selection.handoff) directCoordinationSettlers.delete(generation!); /* the continuing turn owns the hand-off's result */ void startTurn(bot.id, text, selection.handoff ? { ...selection.handoff.opts, threadId, computerSelectionContinuation: true } : { threadId, userMessage: selection.source, computerSelectionContinuation: true, dataContext: selection.dataContext }).catch(error => {
+    const text = `The computer selection is now ${surfaceLabel(surface)}.${placeMoves.forBot(bot.id, threadId, selection.mounted, surface, selection.fresh)} Continue the ${selection.handoff ? "handed-off" : "user's original"} request using the tools mounted for this turn; verify the result before claiming success.\n\n${selection.text}`;
+    if (selection.handoff) directCoordinationSettlers.delete(generation!); /* the continuing turn owns the hand-off's result */ void startTurn(bot.id, text, selection.handoff ? { ...selection.handoff.opts, threadId, computerSelectionContinuation: true } : { threadId, userMessage: selection.source, computerSelectionContinuation: true, dataContext: selection.dataContext }).then(() => placeMoves.continued(bot, threadId, selection.mounted, surface, selection.fresh)).catch(error => {
       const why = `Could not continue on ${surfaceLabel(surface)}: ${error instanceof Error ? error.message : String(error)}`; selection.handoff?.opts?.coordination?.settle({ ok: false, text: why });
       if (store.taskByThread(bot.id, threadId)) store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: why, ok: false } }); });
   });
@@ -8274,7 +8272,7 @@ async function beginTurn(
         }) },
         { id: "files", label: "File locations", text: worksInWorkspace ? workspaceLocationsPrompt(bot.id, cwd, liveBot?.cwd ?? bot.cwd, { attachFile: Boolean(integrations.agents) && !CLOUD_HOME && !HOSTED_WORKSPACE }) + teamFilesHost.promptLine(bot.id) : "" },
         { id: "shell", label: "Long-running commands", text: worksInWorkspace ? longCommandsPrompt(computerPromptKind) : "" },
-        { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) + noTerminal.turn(threadId, { ownShell: worksInWorkspace, computerMounted: computerKind !== null, lentTerminal: Boolean(CLOUD_HOME && integrations.agents && lendingEnabled() && sharedComputers.known(CLOUD_HOME_LENDER).some((lent) => lent.online && lent.lent && lent.scopes.terminal)) }, { bot: bot.name, model: cloudEngine(instance, bot.modelSelection.model).name, cloudComputer: boat.boatConfigured(cfg) && canWorkOnCloud(cloudEngine(instance)), routine: opts?.automationSource !== undefined }) },
+        { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) + noTerminal.turn(threadId, bot, { ownShell: worksInWorkspace, computerMounted: computerKind !== null, sharedTools: Boolean(integrations.agents && lendingEnabled()), canSelect: Boolean(computerSelectionTurns.get(threadId) && !computerSelectionTurns.get(threadId)?.handoff) }, { model: cloudEngine(instance, bot.modelSelection.model).name, routine: opts?.automationSource !== undefined }) },
         { id: "team-computer", label: "Team computer", text: teamComputerPrompt(teamComputer) },
         { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note + vpsUnavailableNote + vmUpdateNote + (computerSkipped && plan.computer !== "off" ? computerSkippedNote(redactSecretsInText(computerSkipped)) : "") + (computerSelectionTurns.get(threadId)?.handoff && !integrations.browser ? HANDOFF_BROWSER_NOTE : ""), canSelect: computerSelectionTurns.has(threadId) && !computerSelectionTurns.get(threadId)?.handoff, selectionRules: !selectionRulesStable, cloudHome: Boolean(CLOUD_HOME), botOpened: plan.botOpened, ownComputer: CLOUD_HOME && integrations.agents && lendingEnabled() ? sharedComputers.known(CLOUD_HOME_LENDER) : undefined, thisComputer: !CLOUD_HOME && bot.computer !== "off" && !inheritedTeamComputer(bot) && shouldMountLocalComputer({ requested: "local", providerSupportsLocal: instance.adapter.capabilities.localComputerMcp === true }) ? { bot: bot.name, botId: bot.id, platform: process.platform } : undefined }) }, { id: "computer-selection", label: "Choosing a computer", text: selectionRulesStable ? computerSelectionPrompt({ cloudHome: Boolean(CLOUD_HOME) }) : "" },
         { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled(), syncedFolders(DATA_DIR), sharedComputers.known(CLOUD_HOME_LENDER), CLOUD_PERSONAL) + firstHourHooks.prompt(bot.id, threadId) : "" }, phoneLinkPart(),
@@ -12031,14 +12029,14 @@ ROUTES.push(createBotCreateRoutes({
 }), createTeamOwnerRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, presence: teamPresence.of, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }), sees: (auth, botId) => visibleTo(viewerFor(auth)).bot(botId), publicBot,
   profileOf: (email) => teamHost.people.profile(personKey({ id: "", email })) }));
 ROUTES.push(createBotSettingsRoutes({
-  store, cfg, registry, commandAllowlist, commandAllowlistDrivers: COMMAND_ALLOWLIST_DRIVERS, modelSwitched: (...args) => noTerminal.modelSwitched(...args),
+  store, cfg, registry, commandAllowlist, commandAllowlistDrivers: COMMAND_ALLOWLIST_DRIVERS, modelSwitched: noTerminal.modelSwitched,
   cloudHome: Boolean(CLOUD_HOME), cloudOwnerProfileFields: CLOUD_OWNER_PROFILE_FIELDS,
   hostedModels, supportsApprovalMode, directTurnBots, broadcast, notificationListed, wireBot, cloudOwnerSession, storedAvatarExists,
   requestedTaskBot, threadBusy, activeGroupTurnForBot, checkedModelSelection, engineSwitchNeedsAsk, readCursor,
   canManageCommandAllowlist, commandAllowlistResponse, cardAnswerRefusal, threadRead: teamMessages.seen, levelOf, personMarkThread: personRooms.personMarkThread,
 }));
 const botOrderRoutes = createBotOrderRoutes({ store, visibleFor: (auth) => visibleTo(viewerFor(auth)), ...(botOrders ? { own: { person: botOrders.personOf, order: botOrders, told: (person, botIds) => broadcast({ kind: "bots.order", botIds }, { person }) } } : {}) }); ROUTES.push(createGroupOrderRoutes({ store, visibleFor: (auth) => visibleTo(viewerFor(auth)) }), botOrderRoutes, createBotAccessRoutes({ team: CLOUD_TEAM, people: teamOwners.people, store, levelOf, wireBot, publicGroupState, broadcast, audienceChanged, record: (auth, row) => appendAdminAction(DATA_DIR, { ...row, actor: decisionActorFor(auth) }), shared: createShareNotice({ people: () => teamOwners.people?.list() ?? [], profileName: (email) => teamHost.people.profile(personKey({ id: "", email })).name, store: () => store, inbox: () => teamMessages.inbox }) }), accessRequests.routes);
-const botPatchRoutes = createBotPatchRoutes({ turnBots: directTurnBots, modelSwitched: (...args) => noTerminal.modelSwitched(...args),
+const botPatchRoutes = createBotPatchRoutes({ turnBots: directTurnBots, modelSwitched: noTerminal.modelSwitched,
   store, cfg, registry, sessions, browserRuntime, browserLive, memoryUpkeep, cacheKeepWarm, hostedModels, supportsApprovalMode,
   routines: () => routines, activeVpsThreads,
   hostedWorkspace: HOSTED_WORKSPACE, hostedFullAccessRefusal: HOSTED_FULL_ACCESS_REFUSAL, desktopManaged: DESKTOP_MANAGED,
@@ -12153,7 +12151,7 @@ ROUTES.push(createChannelRoutes({
   rejectDeletedThreadSkillStages,
 }));
 const taskRoutes = createTaskRoutes({
-  store, threadRead: teamMessages.seen, modelSwitched: (...args) => noTerminal.modelSwitched(...args),
+  store, threadRead: teamMessages.seen, modelSwitched: noTerminal.modelSwitched,
   cloudHome: Boolean(CLOUD_HOME),
   desktopManaged: DESKTOP_MANAGED,
   hostedWorkspace: HOSTED_WORKSPACE,

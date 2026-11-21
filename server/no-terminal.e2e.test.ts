@@ -18,7 +18,9 @@ import { isTitleCall } from "./testing/title-call.ts";
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const HOST = "omb-t-0123456789ab.fly.dev";
 const secret = randomBytes(32).toString("base64url");
-const NO_TERMINAL = "You cannot run commands this turn. You are on My Cloud, where this model (fixture-model) has no terminal of its own";
+const NO_TERMINAL = "You can't run commands this turn: on My Cloud this model (fixture-model) has no terminal of its own, and no cloud desktop is in use.";
+const SELECT_CLOUD = "This turn has no terminal: on My Cloud this model (fixture-model) can't run commands itself. To run one, call select_computer with surface \"cloud\"";
+const SENTENCE = "This run couldn't run commands: fixture-model has no terminal on My Cloud. To run them, this routine needs a model with a terminal, such as Claude or Codex, or to run on the cloud desktop.";
 const BOT_SAID = "No execution environment was mounted, so sync.py did not run.";
 let home = "", base = "", log = "", owner = "", claudeDump = "";
 let child: ChildProcess;
@@ -29,7 +31,7 @@ let looked: string | undefined;
 type ChatRequest = { messages: Array<{ role: string; content?: unknown }>; tools?: Array<{ function: { name: string } }> };
 const requests: ChatRequest[] = [];
 const frame = (delta: unknown, finish_reason: string | null) => `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\n\n`;
-const said = (request: ChatRequest, role: string) => request.messages.filter((message) => message.role === role).map((message) => JSON.stringify(message.content)).join("\n");
+const said = (request: ChatRequest, role: string) => request.messages.filter((message) => message.role === role).map((message) => (typeof message.content === "string" ? message.content : JSON.stringify(message.content))).join("\n");
 
 async function api(method: string, path: string, options: { body?: unknown; token?: string } = {}) {
   const response = await fetch(`${base}${path}`, {
@@ -106,6 +108,8 @@ beforeAll(async () => {
       HOME: dataDir, USERPROFILE: dataDir, OMB_DATA_DIR: dataDir, OMB_TEST_MEMORY_GATE: "1", OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1),
       OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "3f9c2a4e-8b1d-4c6e-9a7f-2d5e8c1b0a93", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
       OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${HOST}`,
+      // A cloud desktop is set up (the Admin's relay; nothing here starts one), so the app may offer it.
+      OMB_CLOUD_BOAT_URL: "http://127.0.0.1:9/relay/api/box/v1", OMB_CLOUD_BOAT_TOKEN: "fixture-included",
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -156,6 +160,13 @@ it("switching a bot with a routine from Claude to a chat-only model says once, i
   // Back to Claude, which has a terminal: nothing more.
   expect((await api("PATCH", `/api/bots/${bot.id}`, { token: owner, body: { modelSelection: { instanceId: "claude", model: "claude-sonnet-5" } } })).status).toBe(200);
   expect(await notices()).toHaveLength(1);
+  // Must-fix 2: a bot that works on the cloud desktop keeps exec there, so its switch says nothing.
+  const desk = await newBot("Desk", "claude", "claude-sonnet-5");
+  await routineFor(desk.id, "Run sync.py from the project folder.");
+  const onDesk = await api("PATCH", `/api/bots/${desk.id}`, { token: owner, body: { computer: "cloud" } });
+  expect(onDesk.status, JSON.stringify(onDesk.body)).toBe(200);
+  expect((await api("PATCH", `/api/bots/${desk.id}`, { token: owner, body: { modelSelection: { instanceId: "openaiCompat", model: "fixture-model" } } })).status).toBe(200);
+  expect((await chat(desk.threadId)).filter((line) => line.tool?.name.startsWith("notice: "))).toEqual([]);
   // A bot with nothing to run moving between chat-only models: nothing either.
   const plain = await newBot("Notes", "openaiCompat", "fixture-model");
   expect((await api("PATCH", `/api/bots/${plain.id}`, { token: owner, body: { modelSelection: { instanceId: "openaiCompat", model: "other-model" } } })).status).toBe(200);
@@ -170,8 +181,8 @@ it("Case A: the chat-only bot's routine is told it can't run commands, tries, an
   expect(synced.status, `no terminal alone never fails a run: ${synced.error}\n${JSON.stringify(await chat(bot.threadId))}`).toBe("completed");
   const system = said(requests[0]!, "system");
   expect(system).toContain(NO_TERMINAL);
-  expect(system).toContain("This is a routine run: do the parts that need no command");
-  expect(system, "no cloud computer is set up here, so the app never offers one").not.toContain("cloud computer, or");
+  expect(system).toContain("Do the parts that need no command and say which step was not done, without giving a reason for it.");
+  expect(system, "a run may not move, so it is never told to").not.toContain("select_computer with surface");
   let line: string | undefined;
   await expect.poll(async () => (line = (await chat(bot.threadId)).find((message) => message.automation?.routineId === sync)?.text), { timeout: hostTimeout(15_000) }).toBeTruthy();
   // The run went on after the refusal with a call that worked, as the bot did, so it ended completed.
@@ -179,14 +190,18 @@ it("Case A: the chat-only bot's routine is told it can't run commands, tries, an
   const answers = requests.flatMap((request) => request.messages.filter((message) => message.role === "tool").map((message) => String(message.content)));
   expect(answers.some((answer) => answer.includes("not advertised for this turn")), JSON.stringify(answers)).toBe(true);
   expect(answers.some((answer) => answer.startsWith("{\"ok\":true")), JSON.stringify(answers)).toBe(true);
-  expect(line).toBe(`${BOT_SAID}\n\nSyncer couldn't run commands in this run: fixture-model has no terminal on My Cloud. To let its routines run commands, switch Syncer to a model with a terminal, such as Claude or Codex.`);
+  expect(line).toBe(`${BOT_SAID}\n\n${SENTENCE}`);
+  // Should-fix 4: the same routine on the same model says it once; its next run's line is the bot's alone.
+  expect((await runNow(sync)).status).toBe("completed");
+  await expect.poll(async () => (await chat(bot.threadId)).filter((message) => message.automation?.routineId === sync).map((message) => message.text), { timeout: hostTimeout(15_000) })
+    .toEqual([`${BOT_SAID}\n\n${SENTENCE}`, BOT_SAID]);
 
-  // A run that stops on the refused call fails as before (the bot's reply is no proof, and the failed step shows the
-  // error); the app's line goes under replies only (automation-reports.ts notes), so this one is unchanged.
+  // Should-fix 3: a run that stops on the refused call fails as before (the bot's reply is no proof), and the line saying
+  // so carries the real reason too.
   const lint = await routineFor(bot.id, "Run lint.py from the project folder.");
   expect((await runNow(lint)).status).toBe("failed");
   await expect.poll(async () => (await chat(bot.threadId)).find((message) => message.automation?.routineId === lint)?.text, { timeout: hostTimeout(15_000) })
-    .toBe("This run was partly done: Stopped because the tool call “exec” failed. The bot's reply isn't proof the work was done; the failed step shows the error.");
+    .toBe(`This run was partly done: Stopped because the tool call “exec” failed. The bot's reply isn't proof the work was done; the failed step shows the error.\n\n${SENTENCE}`);
 
   // A routine that needs no command, on the same bot: the bot's words alone.
   const invoices = await routineFor(bot.id, "File the new invoices.");
@@ -194,11 +209,31 @@ it("Case A: the chat-only bot's routine is told it can't run commands, tries, an
   await expect.poll(async () => (await chat(bot.threadId)).find((message) => message.automation?.routineId === invoices)?.text, { timeout: hostTimeout(15_000) }).toBe("Filed three invoices.");
 }, hostTimeout(90_000));
 
+it("must-fix 1: the person's own chat, which may move, is told to select the cloud desktop; with Computer access Off it is not offered", async () => {
+  const bot = await newBot("Chatter", "openaiCompat", "fixture-model");
+  const ask = async (text: string) => {
+    requests.length = 0;
+    expect((await api("POST", `/api/bots/${bot.id}/messages`, { token: owner, body: { text, threadId: bot.threadId } })).status).toBe(202);
+    await expect.poll(() => requests.some((request) => said(request, "user").includes(text)), { timeout: hostTimeout(20_000) }).toBe(true);
+    await expect.poll(async () => (await api("GET", "/api/bots", { token: owner })).body.bots.find((one: { id: string }) => one.id === bot.id)?.busy, { timeout: hostTimeout(20_000) }).toBe(false);
+    return said(requests.find((request) => said(request, "user").includes(text))!, "system");
+  };
+  const open = await ask("Run the build.");
+  expect(open).toContain(SELECT_CLOUD);
+  expect(open).not.toContain("don't try another way");
+  expect((await api("PATCH", `/api/bots/${bot.id}`, { token: owner, body: { computer: "off" } })).status).toBe(200);
+  const off = await ask("Run the tests.");
+  expect(off).toContain(NO_TERMINAL);
+  expect(off).not.toContain("select_computer with surface \"cloud\"");
+  expect(off).not.toContain("or the cloud desktop");
+}, hostTimeout(60_000));
+
 it("a bot on Claude, which runs commands itself, is told nothing of the kind", async () => {
   const bot = await newBot("Builder", "claude", "claude-sonnet-5");
   expect((await api("POST", `/api/bots/${bot.id}/messages`, { token: owner, body: { text: "Run the build.", threadId: bot.threadId } })).status).toBe(202);
   let dump: { systemPrompt?: string } | undefined;
   await expect.poll(() => { try { dump = JSON.parse(readFileSync(claudeDump, "utf8")); return typeof dump?.systemPrompt === "string"; } catch { return false; } }, { timeout: hostTimeout(20_000) }).toBe(true);
   expect(dump!.systemPrompt).toContain("My Cloud");
-  expect(dump!.systemPrompt).not.toContain("You cannot run commands this turn");
+  expect(dump!.systemPrompt).not.toContain("You can't run commands this turn");
+  expect(dump!.systemPrompt).not.toContain("This turn has no terminal");
 }, hostTimeout(60_000));
