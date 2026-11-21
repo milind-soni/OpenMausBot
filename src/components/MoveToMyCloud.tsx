@@ -58,7 +58,7 @@ export function MoveChooser({ onClose }: { onClose: () => void }) {
     <div ref={root} role="dialog" aria-modal="true" aria-labelledby="move-chooser-title" data-move-chooser=""
       className="ui-modal relative flex max-h-[min(640px,calc(100dvh-32px))] w-[min(440px,calc(100vw-32px))] flex-col border-0 p-5 text-ink">
       <h2 id="move-chooser-title" className="pe-8 text-[17px] font-semibold">{t("cloudSend.choose.title")}</h2>
-      <p className="mt-1 text-[14px] leading-5 text-ink-secondary">{t("cloudSend.choose.line")}</p>
+      <p className="mt-1 text-[14px] leading-5 text-ink-secondary">{t("cloudSend.choose.line")} {t("cloudSend.dataStays")}</p>
       <button type="button" disabled={busy} data-move-everything="" className={`${PRIMARY_BUTTON} mt-4 w-full justify-center`}
         onClick={() => go(page?.moveEverything)}>{t("cloudSend.choose.everything")}</button>
       <div className="mt-4 flex items-center gap-2">
@@ -131,7 +131,7 @@ export function useMoveToMyCloud() {
     },
     dialog: <ConfirmDialog open={asked !== null} tone="neutral" icon={<Cloud size={18} />} title={t("cloudSend.botMove.confirmTitle", names)}
       body={<span className="flex flex-col gap-2" data-bot-move-confirm="">
-        <span>{t("cloudSend.botMove.confirmBody", names)}</span>
+        <span>{t("cloudSend.botMove.confirmBody", names)} {t("cloudSend.botMove.dataStays", names)}</span>
         {error && <span role="alert" className="text-danger">{error}</span>}
       </span>}
       confirmLabel={t("cloudSend.botMove.confirm")} pending={busy} onCancel={() => setAsked(null)} onConfirm={confirm} />,
