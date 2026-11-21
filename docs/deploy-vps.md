@@ -708,7 +708,7 @@ Read this before putting anything else in front of the server.
 
 - The server only ever listens on loopback (`127.0.0.1:8799`). Never publish that port yourself. The tunnel, Caddy and Tailscale each reach it from the same machine; path B's Caddy, in its own container, reaches it over a Unix socket (`OMB_TUNNEL_SOCKET`), and a request on that socket always counts as a remote one.
 - A request that arrives through a proxy or the tunnel is treated as remote and needs a session, whatever headers it carries. A proxy of your own (nginx, Traefik, Cloudflare Tunnel) must forward the real `Host` and add `X-Forwarded-For` and `X-Forwarded-Proto`, must not buffer the event stream, and must **not** rewrite `Host` to `127.0.0.1`.
-- Pairing is the login. Want a second wall in front of it? Path B's `Caddyfile` has a commented `basic_auth` block for a shared password.
+- Pairing is the login. Caddy adds no password: a `basic_auth` block would need variables neither Compose file passes to Caddy, the installer rewrites its `Caddyfile` on every run, and a password at Caddy would also refuse clients that send their own `Authorization` header. For a second wall, use path C or a firewall.
 - The session cookie is marked `Secure`; do not serve this over plain HTTP on the public internet.
 - The one thing a stranger can read is `/.well-known/openmausbot/environment` (the server's id, label, version, capabilities) and `/api/health` (only the app name). Everything else answers "pair this device".
 

@@ -2,6 +2,7 @@
 // of kind "widget". Node names and props follow ChatKit's widget components.
 // Model input is normalised here once; every renderer reads canonical trees only.
 import type { JsonValue } from "./json.ts";
+import { childNodes, nodeTypeProblem } from "./widget-input.ts";
 import { readWidgetText } from "./widget-text.ts";
 import { buttonStyle } from "./widget-button-style.ts";
 
@@ -510,7 +511,7 @@ function normalize(input: unknown, path: string, depth: number, slot: "root" | "
   if (!isRecord(input)) return fail(path, "must be an object with a type");
   let raw = input;
   let type = typeOf(raw);
-  if (!Object.hasOwn(SPECS, type)) return fail(path, `unknown type ${JSON.stringify(raw.type)}; use one of ${WIDGET_NODE_TYPES.join(", ")}`);
+  if (!Object.hasOwn(SPECS, type)) return fail(path, nodeTypeProblem(raw, WIDGET_NODE_TYPES.join(", ")));
   if (slot === "items" && type !== "ListViewItem") [raw, type] = [{ type: "ListViewItem", children: [raw] }, "ListViewItem"];
   if (slot === "cells" && type !== "Table.Cell") [raw, type] = [{ type: "Table.Cell", children: [raw] }, "Table.Cell"];
   if (slot === "rows" && type !== "Table.Row") return fail(path, "a Table takes Table.Row children");
@@ -562,7 +563,7 @@ function normalize(input: unknown, path: string, depth: number, slot: "root" | "
   }
 
   if (spec.children) {
-    const list = raw.children === undefined || raw.children === null ? [] : Array.isArray(raw.children) ? raw.children : [raw.children];
+    const list = childNodes(raw);
     const kept = spec.children === "one" ? list.slice(0, 1) : list;
     if (type === "ListView" && kept.length > WIDGET_LIMITS.listItems) return fail(`${path}.children`, `a list takes at most ${WIDGET_LIMITS.listItems} items`);
     if (type === "Table" && kept.length > WIDGET_LIMITS.tableRows) return fail(`${path}.children`, `a table takes at most ${WIDGET_LIMITS.tableRows} rows`);

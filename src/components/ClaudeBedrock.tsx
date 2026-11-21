@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 
-import { api, useStore, type InstanceInfo } from "@/state/store";
+import { api, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { KEY_FIELD } from "./keys/KeyRow";
 import { PresetProviderMark } from "./ProviderIcons";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 const INPUT = cn(KEY_FIELD, "font-sans");
 const TIER_PLACEHOLDER = {
@@ -53,7 +54,7 @@ const TIER_LABEL: Record<Tier, "claudeBedrock.opus" | "claudeBedrock.sonnet" | "
 };
 
 function BedrockForm({ instance, onDone }: { instance?: InstanceInfo; onDone: () => void }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [draft, setDraft] = useState<Draft>(instance ? draftOf(instance) : EMPTY);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,13 +134,13 @@ function BedrockForm({ instance, onDone }: { instance?: InstanceInfo; onDone: ()
 }
 
 function BedrockRow({ instance, onEdit }: { instance: InstanceInfo; onEdit: () => void }) {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [confirming, setConfirming] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const usedBy = state.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId
+  const usedBy = useStoreSelector((s) => s.bots.filter((bot) => bot.modelSelection.instanceId === instance.instanceId
     || bot.fallback?.some((candidate) => candidate.instanceId === instance.instanceId)
-    || bot.tasks?.some((task) => task.modelSelection?.instanceId === instance.instanceId)).length;
+    || bot.tasks?.some((task) => task.modelSelection?.instanceId === instance.instanceId)).length);
   const bedrock = instance.claudeBedrock;
   const remove = async () => {
     setConfirming(false);
@@ -181,7 +182,7 @@ function BedrockRow({ instance, onEdit }: { instance: InstanceInfo; onEdit: () =
 }
 
 export function ClaudeBedrockEndpoints() {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
   const instances = state.instances.filter((instance) => instance.claudeBedrock);
   const [open, setOpen] = useState<string | null>(null);
   return (

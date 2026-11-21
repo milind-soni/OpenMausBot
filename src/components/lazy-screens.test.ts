@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, sep } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createElement, useState } from "react";
 import { flushSync } from "react-dom";
@@ -9,8 +9,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const screens = await import("./lazy-screens");
 const { lazyScreen, preloadScreens } = screens;
+/** A screen is a function, or a memo object when it draws from its props alone. */
+const isScreen = (value: unknown): value is ReturnType<typeof lazyScreen> =>
+  (typeof value === "function" || (typeof value === "object" && value !== null)) && "preload" in value;
 const stubPreloads = () => Object.values(screens)
-  .filter((value): value is ReturnType<typeof lazyScreen> => typeof value === "function" && "preload" in value)
+  .filter(isScreen)
   .map((screen) => vi.spyOn(screen, "preload").mockResolvedValue(() => null));
 
 let root: Root | null = null;
@@ -155,7 +158,7 @@ describe("preloadScreens", () => {
   it("a page on this machine fetches nothing ahead: each screen loads when it opens", () => {
     vi.useFakeTimers();
     const preloads = stubPreloads();
-    expect(preloads.length).toBe(24);
+    expect(preloads.length).toBe(31);
     for (const host of ["127.0.0.1", "localhost", "[::1]"]) preloadScreens(host);
     vi.runAllTimers();
     for (const preload of preloads) expect(preload).not.toHaveBeenCalled();
@@ -201,7 +204,7 @@ describe("preloadScreens", () => {
     for (const preload of preloads) expect(preload).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(60_000);
     const rarelyOpened = [screens.CloudAddDialog, screens.GrokMoveDialog, screens.PhoneAppDialog, screens.ShareDepartmentDialog, screens.ImportDialog, screens.TeamLibraryPanel, screens.TeamFilesPage, screens.AnnouncementsPage];
-    const stubbed = Object.values(screens).filter((value): value is ReturnType<typeof lazyScreen> => typeof value === "function" && "preload" in value);
+    const stubbed = Object.values(screens).filter(isScreen);
     for (const screen of stubbed) expect(screen.preload).toHaveBeenCalledTimes(rarelyOpened.includes(screen as never) ? 0 : 1);
     expect(preloads.length).toBe(stubbed.length);
   });
@@ -253,7 +256,7 @@ describe("launch bundle", () => {
       }
     }
     // join() writes backslashes on Windows.
-    return new Set([...seen].map((file) => file.slice(srcRoot.length + 1).split(sep).join("/")));
+    return new Set([...seen].map((file) => relative(srcRoot, file).split(sep).join("/")));
   };
 
   it("leaves the on-request screens out of it", () => {
@@ -264,9 +267,12 @@ describe("launch bundle", () => {
       "ActivityPanel", "BotSettingsDialog", "CloudAddDialog", "ComputerPanel", "InspectorPanel", "KeyboardShortcutsModal",
       "LocalVmWorkspace", "NewBotDialog", "PhoneAppDialog", "PhoneSetupFlow", "PluginsPanel", "published-apps/PublishedAppsPage", "RemoteAgentSettingsPanel", "remote-desktop-panel", "RoutineCalendarPage",
       "RoutinesPage", "SettingsModal", "ShareDepartmentDialog", "ImportDialog", "TeamLibraryPanel", "TeamMapPage", "team-files/TeamFilesPage", "TriggersPage", "WebhookTrigger", "room-panel/RoomPanel",
+      "inbox/InboxPanel", "TeamDialog", "TeamSettingsDialog", "VoiceSetupDialog", "usage/TraceView", "bot-access/ShareBotDialog", "CommandAllowlistDialog", "WorkspaceBackupSettings",
     ].map((name) => `components/${name}.tsx`);
     expect(deferred.filter((file) => reached.has(file))).toEqual([]);
     expect(reached.has("lib/template-details.ts"), "the team library brings the YAML parser in").toBe(false);
+    expect(reached.has("../shared/browser-mates.ts")).toBe(true);
+    expect(reached.has("../shared/logins.ts"), "saved logins bring the public-suffix list in").toBe(false);
   });
 
   it("the sign-in and home pages leave the app out", () => {

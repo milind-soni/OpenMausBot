@@ -2,7 +2,7 @@ export const TRANSCRIPT_WINDOW_SIZE = 120;
 /** The most rows drawn at once while the reader is away from the end: one step past it unloads rows at the far edge. */
 export const TRANSCRIPT_WINDOW_MAX = 2 * TRANSCRIPT_WINDOW_SIZE;
 /** Rows one scroll step draws at a window edge: small enough to mount without a long frame. */
-export const TRANSCRIPT_WINDOW_STEP = 30;
+export const TRANSCRIPT_WINDOW_STEP = 20;
 /** The most rows drawn while a text selection holds rows the reader has scrolled away from; past it the selection is set aside. */
 export const SELECTION_HOLD_MAX = 2 * TRANSCRIPT_WINDOW_MAX;
 

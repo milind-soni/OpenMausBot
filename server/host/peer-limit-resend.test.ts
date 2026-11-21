@@ -47,7 +47,7 @@ function fixture(rows: Message[] = [], overrides: Partial<PeerLimitResendDeps<Op
       activePath: () => rows, appendMessage: (_threadId: string, row: Message) => { appended.push(row); return row; }, switchTaskModel,
     },
     registry: { get: (id: string) => id === "codex" ? engine("codex", "codex") : engine("claude", "claude") },
-    takeover: () => ({ backups: () => [{ instanceId: "codex", model: "gpt" }], carriedOn: () => [{ name: "recovery: Claude is at its limit, Codex carries on", ok: true }] }),
+    takeover: () => ({ weighBackups: () => ({ backups: [{ instanceId: "codex", model: "gpt" }], skipped: [] }), passedOver: () => {}, carriedOn: () => [{ name: "recovery: Claude is at its limit, Codex carries on", ok: true }] }),
     turnStops: { read: () => ({ error: `Claude says: ${LIMIT}`, flags: { limit: "engine" } }), failureCause: () => `Claude says: ${LIMIT}` },
     hostedModels: null,
     providerConfigs: () => ({}),
@@ -127,7 +127,7 @@ describe("peer limit resend", () => {
   });
 
   it("reports the held failure as before when no backup can take it or a newer turn took the thread", async () => {
-    const none = fixture([ask, failure], { takeover: () => ({ backups: () => [], carriedOn: () => [] }) } as never);
+    const none = fixture([ask, failure], { takeover: () => ({ weighBackups: () => ({ backups: [], skipped: [] }), passedOver: () => {}, carriedOn: () => [] }) } as never);
     none.resend.track({ generation: "gen-1", botId: "helper", threadId: "t1", text: "x", opts: peerOpts, userMessage: ask });
     none.resend.ended(none.failed, "gen-1", false);
     none.resend.hold("gen-1", { ok: false, text: "limit" });

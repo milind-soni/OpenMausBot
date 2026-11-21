@@ -3,7 +3,7 @@ import { modelLabel, modelProvider } from "@/lib/model-label";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, KeyRound, Loader2, RefreshCw, X } from "lucide-react";
-import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store"; import { sameFields, useStoreActions, useStoreSelector } from "@/state/store-select";
+import { currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store"; import { sameFields, useStoreActions, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import type { EffortLevel } from "../../shared/wire";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, modelsAwaitEngine, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
@@ -66,7 +66,7 @@ export function EffortRow({
   label?: ReactNode;
   compact?: boolean;
 }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields), dispatch = useStoreDispatch();
   const selection = bot.modelSelection;
   const instance = state.instances.find((candidate) => candidate.instanceId === selection.instanceId);
   if (instance?.capabilities?.modelVariants) {
@@ -127,7 +127,7 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
   wide?: boolean;
   quiet?: boolean;
 }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances, modelVariantSessions: s.modelVariantSessions }), sameFields), dispatch = useStoreDispatch();
   const selection = bot.modelSelection;
   const choices = variantChoices(state, selection, threadId ?? bot.threadId);
   if (!choices) return null;
@@ -313,7 +313,7 @@ export function ModelPicker({
   // never local models.
   const hasOfficialModels = Boolean(railInstance?.snapshot.chatgptPlan || railInstance?.models.options.some((option) => !option.custom));
   const customOnly = isCustomOnly(railInstance);
-  const { pane, setPane, loading: loadingList } = usePickerPane({ instanceId: displayedInstanceId, railId, hasOfficialModels, customOnly,
+  const { pane, setPane, loading: loadingList } = usePickerPane({ instanceId: displayedInstanceId, railId, hasOfficialModels, customOnly: customOnly && !hasOfficialModels,
     reading: open && (loadingInstances || refreshingId !== null),
     selectedIsCustom: Boolean(railInstance?.models.options.some((option) => option.id === selection.model && option.custom)) }, () => resetList());
 
@@ -368,7 +368,7 @@ export function ModelPicker({
     const selectedIsCustom = instance?.models.options.some(
       (option) => option.id === selection.model && option.custom,
     );
-    setPane(selectedIsCustom || isCustomOnly(instance) || (official.length === 0 && !instance?.snapshot.chatgptPlan) ? "custom" : "main");
+    setPane(selectedIsCustom || (official.length === 0 && !instance?.snapshot.chatgptPlan) ? "custom" : "main");
     resetList();
   };
 
@@ -405,7 +405,7 @@ export function ModelPicker({
     if (signInFamily(instance) === "openai") lastOpenaiIdRef.current = instance.instanceId;
     setRailId(instance.instanceId);
     const official = instance.models.options.filter((option) => !option.custom);
-    setPane(isCustomOnly(instance) || (official.length === 0 && !instance.snapshot.chatgptPlan) ? "custom" : "main");
+    setPane(official.length === 0 && !instance.snapshot.chatgptPlan ? "custom" : "main");
     resetList();
   };
 
@@ -513,7 +513,7 @@ export function ModelPicker({
       : needsCli(railInstance) || needsSignIn(railInstance)
     : false;
   const canOpenCustom = Boolean(railInstance && !needsCli(railInstance));
-  const canReturnToOfficial = official.length > 0 && !isCustomOnly(railInstance);
+  const canReturnToOfficial = official.length > 0;
   const lookingForLocal = Boolean(railInstance && probing.has(railInstance.instanceId));
   const lookingForLocalStatus = (
     <div role="status" className={cn(MENU_LINE, "justify-center text-ink-tertiary")}>

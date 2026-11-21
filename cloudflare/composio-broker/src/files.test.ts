@@ -75,12 +75,27 @@ describe("file uploads for connected-app tools", () => {
     const refused = await worker.fetch(post(upload), env() as never, ctx as never);
     expect(refused.status).toBe(502);
     await expect(refused.json()).resolves.toEqual({ error: "Toolkit not found" });
-    for (const link of ["http://storage.composio.dev/put", "https://169.254.169.254/latest", "https://attacker.example/put", "https://storage.composio.dev.attacker.example/put"]) {
+    const r2 = `temp.${"0123456789abcdef".repeat(2)}.r2.cloudflarestorage.com`;
+    for (const link of [
+      "http://storage.composio.dev/put",
+      "https://169.254.169.254/latest",
+      "https://attacker.example/put",
+      "https://storage.composio.dev.attacker.example/put",
+      `http://${r2}/put`,
+      `https://user:pass@${r2}/put`,
+      `https://${r2}:444/put`,
+      `https://${r2}.attacker.example/put`,
+    ]) {
       vi.stubGlobal("fetch", composio({ key: "k", new_presigned_url: link }));
       expect((await worker.fetch(post(upload), env() as never, ctx as never)).status, link).toBe(502);
     }
     vi.stubGlobal("fetch", composio({ key: "k", new_presigned_url: "https://composio-files.s3.us-east-1.amazonaws.com/k?X-Amz-Signature=1" }));
     expect((await worker.fetch(post(upload), env() as never, ctx as never)).status).toBe(200);
+    const r2Link = `https://${r2}/k?X-Amz-Signature=1`;
+    vi.stubGlobal("fetch", composio({ key: "k", new_presigned_url: r2Link }));
+    const uploaded = await worker.fetch(post(upload), env() as never, ctx as never);
+    expect(uploaded.status).toBe(200);
+    await expect(uploaded.json()).resolves.toEqual({ key: "k", url: r2Link });
   });
 
   it("hands out no link for a toolkit the installation has no working connection to", async () => {

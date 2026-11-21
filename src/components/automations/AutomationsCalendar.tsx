@@ -5,16 +5,20 @@ import { CalendarSidebar } from "@/components/routines/CalendarSidebar";
 import type { CalendarCall } from "@/lib/calendar-calls";
 import { cn } from "@/lib/cn";
 import { botInDepartment } from "@/lib/department-filter";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import { addDays, calendarRangeLabel, projectCalls, projectedRoutineItems, scheduleAt, startOfDay, startOfWeek } from "@/lib/routine-calendar";
 import { resetMarkers, useEngineLimits, type ResetMarker } from "@/lib/limit-resets";
 import { automationsFrom, automationStatus } from "@/lib/automations";
 import type { RoutineRun } from "@/lib/routines";
-import { api, useStore } from "@/state/store";
+import { api, type Bot } from "@/state/store";
+import { useBotsApartFromTurns, useGroupsApartFromTurns } from "@/state/apart-from-turns";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useRoutineRunsFrom } from "@/state/older-routine-runs";
 import { schedulableBots, useTeamPeople } from "@/state/team-people";
 import { CalendarGrid, EventDetails, EventEditor, QuickComposer, type CalendarEventItem, type EventKind, type EventSeed } from "../RoutineCalendarPage";
 import type { ResetDrop } from "../routines/LimitResetMarkers";
+
+const NO_BOTS: Bot[] = [];
 
 /** The schedules (and scheduled calls) on a week or day grid. An automation opens the same panel as the list; a call
  * keeps its own details. */
@@ -25,7 +29,8 @@ export function AutomationsCalendar({ botFilter, department = "all", selectedAut
   onOpenAutomation: (id: string) => void;
   onOpenRoom: (id: string) => void;
 }) {
-  const { state, dispatch } = useStore();
+  const routines = useStoreSelector((state) => state.routines), routineRuns = useStoreSelector((state) => state.routineRuns);
+  const bots = useBotsApartFromTurns(), groups = useGroupsApartFromTurns(), dispatch = useStoreDispatch();
   const routinesOnly = window.ogb?.remoteClient?.active === true;
   const [days, setDays] = useState<1 | 7>(() => (window.innerWidth < 640 ? 1 : 7));
   const [anchor, setAnchor] = useState(() => startOfDay(Date.now()));
@@ -34,8 +39,10 @@ export function AutomationsCalendar({ botFilter, department = "all", selectedAut
   const [editor, setEditor] = useState<EventSeed | null>(null);
   const [selected, setSelected] = useState<CalendarEventItem | null>(null);
   const [error, setError] = useState("");
-  const visibleBots = state.bots.filter((bot) => !bot.hidden);
-  const routineBots = schedulableBots(visibleBots, useTeamPeople(), editor?.botIds[0]);
+  const visibleBots = useMemo(() => bots.filter((bot) => !bot.hidden), [bots]);
+  // The details and the editors read each bot's threads, so while one is open the calendar follows every change to the bots.
+  const liveBots = useStoreSelector((state) => selected || quick || editor ? state.bots : NO_BOTS);
+  const routineBots = schedulableBots(liveBots.filter((bot) => !bot.hidden), useTeamPeople(), editor?.botIds[0]);
   const rangeStart = days === 7 ? startOfWeek(anchor) : startOfDay(anchor);
   const rangeEnd = addDays(rangeStart, days);
   useRoutineRunsFrom(rangeStart);
@@ -48,20 +55,20 @@ export function AutomationsCalendar({ botFilter, department = "all", selectedAut
   useEffect(() => { if (!routinesOnly) void loadCalls(); }, [loadCalls, routinesOnly]);
 
   const items = useMemo<CalendarEventItem[]>(() => {
-    const botIds = new Set(state.bots.map((bot) => bot.id));
-    const routines = state.routines.filter((routine) => botIds.has(routine.botId));
-    const needsYou = new Set(automationsFrom({ routines, webhooks: [], runs: state.routineRuns }).filter((automation) => automationStatus(automation).state === "needs-you").map((automation) => automation.id));
-    const routineItems = projectedRoutineItems(routines, state.routineRuns.filter((run) => botIds.has(run.botId)), rangeStart, rangeEnd)
+    const botIds = new Set(bots.map((bot) => bot.id));
+    const owned = routines.filter((routine) => botIds.has(routine.botId));
+    const needsYou = new Set(automationsFrom({ routines: owned, webhooks: [], runs: routineRuns }).filter((automation) => automationStatus(automation).state === "needs-you").map((automation) => automation.id));
+    const routineItems = projectedRoutineItems(owned, routineRuns.filter((run) => botIds.has(run.botId)), rangeStart, rangeEnd)
       .map((item) => ({ ...item, kind: "routine" as const, needsYou: Boolean(item.routine && !item.run && needsYou.has(item.routine.id)) }));
     const callItems = projectCalls(calls, rangeStart, rangeEnd).map((item) => ({ ...item, kind: "call" as const }));
-    const botOf = (id: string | undefined) => state.bots.find((bot) => bot.id === id);
+    const botOf = (id: string | undefined) => bots.find((bot) => bot.id === id);
     return [...routineItems, ...callItems]
       .filter((item) => item.kind === "call"
         ? item.call.botIds.some((id) => botInDepartment(botOf(id), department))
         : botInDepartment(botOf(item.routine?.botId ?? item.run?.botId), department))
       .filter((item) => botFilter === "all" || (item.kind === "call" ? item.call.botIds.includes(botFilter) : (item.routine?.botId ?? item.run?.botId) === botFilter))
       .sort((left, right) => left.at - right.at);
-  }, [state.routines, state.routineRuns, state.bots, calls, rangeStart, rangeEnd, botFilter, department]);
+  }, [routines, routineRuns, bots, calls, rangeStart, rangeEnd, botFilter, department]);
 
   const liveSelected = selected?.kind === "call"
     ? (() => { const call = calls.find((candidate) => candidate.id === selected.call.id); return call ? { ...selected, call } : null; })()
@@ -79,7 +86,7 @@ export function AutomationsCalendar({ botFilter, department = "all", selectedAut
     if (nextAt === dragged.at) return;
     try {
       if (dragged.kind === "routine") {
-        const routine = state.routines.find((candidate) => candidate.id === dragged.id);
+        const routine = routines.find((candidate) => candidate.id === dragged.id);
         if (!routine) return;
         if (routine.schedule.type === "cron") throw new Error(t("automations.calendar.cronMove"));
         if (routine.schedule.type !== "once" && !window.confirm(t("automations.calendar.moveSeries"))) return;
@@ -130,6 +137,7 @@ export function AutomationsCalendar({ botFilter, department = "all", selectedAut
     setEditor({ kind: "call", at: liveSelected.at, durationMinutes: liveSelected.call.durationMinutes, botIds: liveSelected.call.botIds, call: liveSelected.call });
     setSelected(null);
   };
+  const selectDate = useCallback((at: number) => setAnchor(startOfDay(at)), []);
   const segment = (active: boolean) => cn("rounded-md px-3 py-1 text-[12px] font-medium", active ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink");
 
   return (
@@ -146,15 +154,15 @@ export function AutomationsCalendar({ botFilter, department = "all", selectedAut
         {error && <button type="button" onClick={() => setError("")} className="w-full text-left text-[12px] text-danger">{error}</button>}
       </div>
       <div className="relative flex min-h-0 flex-1">
-        {!liveSelected && <div className="hidden shrink-0 @min-[1040px]/routines:block"><CalendarSidebar bots={visibleBots} anchor={anchor} onSelectDate={(at) => setAnchor(startOfDay(at))} /></div>}
-        <CalendarGrid anchor={rangeStart} days={days} items={items} bots={state.bots} groups={state.groups} selectedId={selectedId}
+        {!liveSelected && <div className="hidden shrink-0 @min-[1040px]/routines:block"><CalendarSidebar bots={visibleBots} anchor={anchor} onSelectDate={selectDate} locale={activeLocale()} /></div>}
+        <CalendarGrid anchor={rangeStart} days={days} items={items} bots={bots} groups={groups} selectedId={selectedId}
           onOpen={openItem}
           onCreate={(seed) => { setSelected(null); setQuick(seed); }}
           onMove={(item, at) => void moveEvent(item, at)} onResize={(item, duration) => void resizeEvent(item, duration)}
           markers={markers} onDropOnReset={(drop, marker) => void dropOnReset(drop, marker)} />
         {liveSelected && (
           <div className="absolute inset-y-0 right-0 z-30 flex shadow-2xl @min-[760px]/routines:static @min-[760px]/routines:shadow-none">
-            <EventDetails key={`${liveSelected.kind}:${liveSelected.id}`} item={liveSelected} bots={state.bots} onClose={() => setSelected(null)} onEdit={editSelected} onOpenRun={openRun}
+            <EventDetails key={`${liveSelected.kind}:${liveSelected.id}`} item={liveSelected} bots={liveBots} onClose={() => setSelected(null)} onEdit={editSelected} onOpenRun={openRun}
               onCallChanged={(id) => { if (id) setCalls((current) => current.filter((call) => call.id !== id)); else void loadCalls(); }} onOpenRoom={onOpenRoom} />
           </div>
         )}

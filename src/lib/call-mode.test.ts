@@ -36,6 +36,14 @@ describe("call mode", () => {
     expect(callModeHint("turns", { config: chosen })).toBe(t("call.mode.turnsHint"));
   });
 
+  it("says listening stays on a Windows computer unless a saved Fish Audio key does the hearing", () => {
+    const dictation = { available: true, engine: "windows-speech", onDevice: true } as const;
+    cacheDesktopCapabilities({ ...initialDesktopCapabilities(), dictation });
+    expect(callModeHint("turns", { config: null })).toBe(t("call.mode.turnsHint"));
+    const savedFish = { savedKeys: { fishAudioKey: { configured: true } } } as unknown as ConfigStatus;
+    expect(callModeHint("turns", { config: savedFish })).toBe(t("call.mode.turnsHintFish"));
+  });
+
   it("says the OpenAI key stays on the Cloud when the chat is on the person's Cloud", () => {
     const live = callModeHint("live", { cloudHome: true });
     expect(live).toContain("A Live call sends your voice to OpenAI, along with the chat's recent messages, the bot's answers and the details of any approval it asks for. The OpenAI key stays in the Cloud.");

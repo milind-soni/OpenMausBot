@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import type { StarterAwake } from "./starter-awake.ts";
 import { createStarterCaps, STARTER_RUNNING_TURNS, STARTER_WAITING_HANDOFFS } from "./starter-caps.ts";
+import { PAUSED_RUN_ROUTINE_TURNS_ONLY } from "./starter-routine-wake.ts";
 
-const awake = (paused: string[]): StarterAwake => ({ limit: () => 5, paused: () => paused, isPaused: (id) => paused.includes(id), choose: () => ({ ok: true }) });
+const awake = (paused: string[]): StarterAwake => ({
+  limit: () => 5, paused: () => paused, isPaused: (id) => paused.includes(id), choose: () => ({ ok: true }), wakeForRoutine: () => ({ kind: "awake" }), useRoutines: () => {},
+});
 
-function caps(options: { starter?: boolean; paused?: string[] } = {}) {
+function caps(options: { starter?: boolean; paused?: string[]; routineThreads?: Record<string, string> } = {}) {
   let refused = 0, clock = 1_000;
   const made = createStarterCaps({
     starter: () => options.starter ?? true, awake: awake(options.paused ?? []), waitsOnOthers: () => false, botName: (id) => id,
+    routineThread: (botId, threadId) => options.routineThreads?.[threadId] === botId,
     pausedLine: (language, limit) => `${language ?? "en"}: paused, ${limit} awake`, now: () => clock, refused: () => { refused++; },
   });
   return { made, refusals: () => refused, advance: (ms: number) => { clock += ms; } };
@@ -37,6 +41,19 @@ describe("how much work a Starter Cloud runs at once", () => {
     expect([counted, made.status()?.refused]).toEqual([false, "paused"]);
     expect(made.pausedText("sleepy", "de")).toBe("de: paused, 5 awake");
     expect(made.pausedText("awake", "de")).toBeNull();
+  });
+
+  it("lets a limit-paused bot's turn through only in the conversation of its own routine run under way", () => {
+    const { made } = caps({ paused: ["sleepy"], routineThreads: { "run-thread": "sleepy", "other-run": "someone" } });
+    expect(made.pausedText("sleepy", "de", "run-thread", true)).toBeNull();
+    // A turn there that is not the routine's own (a person's new message) passes only without option A.
+    expect(made.pausedText("sleepy", "de", "run-thread")).toBe(PAUSED_RUN_ROUTINE_TURNS_ONLY ? "de: paused, 5 awake" : null);
+    expect(made.pausedText("sleepy", "de", "main-thread", true)).toBe("de: paused, 5 awake");
+    expect(made.pausedText("sleepy", "de", "main-thread")).toBe("de: paused, 5 awake");
+    expect(made.pausedText("sleepy", "de", "other-run")).toBe("de: paused, 5 awake");
+    expect(made.pausedText("sleepy", "de")).toBe("de: paused, 5 awake");
+    // Hand-offs to it are still refused: a routine is no way round the limit for other work.
+    expect(made.handoffs.refusal("sleepy", () => 0)).toMatch(/^@sleepy is paused/);
   });
 
   it("tells a bot that made a paused one, without refusing anything or opening the popup", () => {

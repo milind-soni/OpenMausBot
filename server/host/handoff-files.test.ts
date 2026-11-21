@@ -347,7 +347,7 @@ describe("receiving", () => {
     expect(targets).toContain(cwd);
     expect(targets.some((target) => target === work || target === folderOf("ana", "t-ana") || target === ATTACHMENTS_DIR)).toBe(false);
     expect(text).toContain(join(cwd, "inbox", "ana", "a1", "report.pdf"));
-    const boxed = attachmentsForBox(text, cwd, true, DATA, ATTACHMENTS_DIR);
+    const boxed = attachmentsForBox(text, cwd, undefined, true, DATA, ATTACHMENTS_DIR);
     const shown = join(boxUploadsDir(DATA, "ben", "t-ben"), basename(staged.files[0]!.path));
     expect(boxed).toContain(`<attached-image path="${shown}" name="chart.png" />`);
     expect(readFileSync(shown).equals(PNG)).toBe(true);

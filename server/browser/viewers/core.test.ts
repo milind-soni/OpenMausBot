@@ -138,6 +138,39 @@ describe("the page fills the panel", () => {
     expect(chrome().window.height).toBeLessThanOrEqual(757 + 143);
   });
 
+  it("fits the window to the page's own size once a tall panel's emulation ends, though the page reports the emulated size a moment longer", async () => {
+    const { watch, chrome, page } = await setup({ pageLimit: { width: 1440, height: 757 } });
+    const { viewer } = await watch({ size: { width: 1600, height: 1000 } });
+    await viewer.input({ type: "resize", width: 400, height: 750 });
+    expect(page().emulated).toEqual({ width: 1280, height: 2400 });
+    chrome().lateClears = 2;
+    const before = chrome().sent.length;
+    await viewer.input({ type: "resize", width: 1280, height: 700 });
+    expect(page().emulated).toBeNull();
+    expect(chrome().viewport).toEqual({ width: 1280, height: 700 });
+    // One resize, from the window's own page: a measure of the emulated 2400 would ask for a window of no height.
+    expect(chrome().sent.slice(before).filter((sent) => sent.method === "Browser.setWindowBounds").map((sent) => sent.params.bounds)).toEqual([{ width: 1280, height: 843 }]);
+  });
+
+  it("applies a tall panel's emulation again when the window's resize lands after it and the frames show the window's size", async () => {
+    const { watch, chrome, page } = await setup({ pageLimit: { width: 1440, height: 757 } });
+    const { viewer, outputs } = await watch({ size: { width: 1600, height: 1000 } });
+    await viewer.input({ type: "resize", width: 400, height: 750 });
+    const drawn = () => { const frame = outputs.filter((output) => output.type === "frame" && !output.still).at(-1); return frame?.type === "frame" ? [frame.metadata.deviceWidth, frame.metadata.deviceHeight] : null; };
+    chrome().paint(page());
+    await until(drawn, same([1280, 2400]));
+    const emulations = () => chrome().sentTo(page()).filter((sent) => sent.method === "Emulation.setDeviceMetricsOverride").length;
+    const before = emulations();
+    chrome().landResize();
+    // The page still reports 1280x2400 and is drawn 1280x757: only its frames show it.
+    await until(() => page().viewLost, same(false));
+    expect(emulations()).toBe(before + 1);
+    expect(page().emulated).toEqual({ width: 1280, height: 2400 });
+    chrome().paint(page());
+    await until(drawn, same([1280, 2400]));
+    expect(emulations()).toBe(before + 1);
+  });
+
   it("resizes the real window, so a page narrower than any window comes from a preset only, emulated", async () => {
     const { watch, chrome, page } = await setup();
     const { viewer } = await watch({ size: { width: 1600, height: 1000 } });

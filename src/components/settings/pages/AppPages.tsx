@@ -3,7 +3,7 @@ import { Plus } from "lucide-react";
 import { productName } from "@/lib/brand";
 import { FEEDBACK_URL, HELP_CENTER_URL, desktopAppVersion, openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
-import { useStore } from "@/state/store";
+import { useStoreDispatch } from "@/state/store-select";
 import { AboutDialog } from "../../AboutDialog";
 import { AnalyticsRow } from "../../AnalyticsRow";
 import { ChatWidthRow, FontRow, SidebarToolsLayoutRow } from "../../AppearanceSelectRows";
@@ -36,7 +36,7 @@ const elsewhere = (bridge: unknown, ctx: { desktop: boolean; here: boolean; home
 
 export function AppPage() {
   const { ctx } = useSettingsShell();
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [about, setAbout] = useState(false);
   const desk = ctx.desktop && !ctx.client;
   const computer = useSwitchToComputer();

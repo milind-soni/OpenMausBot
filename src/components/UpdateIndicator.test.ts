@@ -3,6 +3,8 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { botButtonTone } from "@/lib/bot-button";
+import { setAdvancedMode } from "@/lib/interface-mode";
 import type { UpdaterState } from "@/lib/updater";
 import { UpdateIndicator, updateIndicatorLabel, updateIndicatorShown } from "./UpdateIndicator";
 import { updateHasButton } from "./SidebarProfileMenu";
@@ -35,6 +37,7 @@ beforeEach(async () => {
       getState: async () => ({ status: "idle" }),
     },
   };
+  setAdvancedMode(true);
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -65,6 +68,25 @@ describe("the update button", () => {
     expect(updateHasButton("downloading")).toBe(true);
     expect(updateHasButton("error")).toBe(false);
     expect(updateHasButton("handed-off")).toBe(false);
+  });
+
+  it("in Simple is a round blue button the height of the Connect apps pill, its white arrow pulsing while it downloads", async () => {
+    expect(botButtonTone("blue").ink, "white on a blue bot's own send-button fill").toBe("#ffffff");
+    await act(async () => setAdvancedMode(false));
+    expect(button(), "nothing while there is no update").toBeNull();
+    await emit({ status: "downloading", version: "0.2.0", percent: 10 });
+    const classes = () => button()!.className.split(" ");
+    expect(classes()).toEqual(expect.arrayContaining(["bot-button", "size-9", "rounded-full", "animate-pulse", "motion-reduce:animate-none"]));
+    expect(classes()).not.toContain("bg-white");
+    expect(button()!.style.getPropertyValue("--bot-button")).toBe(botButtonTone("blue").fill);
+    expect(button()!.style.getPropertyValue("--bot-button-ink")).toBe("#ffffff");
+    await emit({ status: "downloaded", version: "0.2.0" });
+    expect(classes(), "still once it is ready").not.toContain("animate-pulse");
+    await act(async () => button()!.click());
+    expect(card(), "it opens the update card").not.toBeNull();
+    await emit({ status: "idle" });
+    expect(button(), "gone once the app has updated").toBeNull();
+    expect(card()).toBeNull();
   });
 
   it("appears when an update arrives and goes when there is none", async () => {

@@ -5,12 +5,15 @@ import type { ServerResponse } from "node:http";
 import { promisify } from "node:util";
 import type { PageSize } from "./browser-page-size.ts";
 import { attachesToChrome, browserRuntimeEnv, type BrowserRuntime } from "./browser-runtime.ts";
-import { requestedSize } from "./browser/viewers/viewport.ts";
 import { closeBrowserSession } from "./browser-engine.ts";
 import { DialogWatch, localDevToolsUrl } from "./browser-dialogs.ts";
 import type { Cdp, CdpListeners } from "./browser-sites.ts";
 import { relay } from "./browser-relay.ts";
 import { HOLD_LIMITS, HoldClock, type HoldLimits } from "./browser/hold.ts";
+import { BrowserLiveError, INPUT_BATCH_LIMIT, integer, number, object, parseBrowserLiveAction, RequestOnce, text, type ObjectValue } from "./browser/live-action.ts";
+import { EngineProgress, engineDaemonAlive, statusReadMs } from "./browser/live-start.ts";
+import { activeTargetOf, keyEvent, LivePage, pressChord, pressedAtOnce, type OpenSelect } from "./browser/live-page.ts";
+import type { PersonReason } from "./browser/input-log.ts";
 import { BROWSER_HELD_ELSEWHERE } from "../shared/browser-held.ts";
 
 const execute = promisify(execFile);
@@ -20,35 +23,28 @@ const MAX_FRAME = 4 * 1024 * 1024;
 const MAX_BUFFER = 8 * 1024 * 1024;
 const HEARTBEAT_MS = 10_000;
 const COMMAND_TIMEOUT_MS = 30_000;
-const STATUS_PROBE_MS = 10_000;
 const BUSY_RETRY_MS = [1_000, 2_000, 5_000];
 const BUSY_LIMIT_MS = 10 * 60_000;
-// agent-browser's native press resolver supplies the virtual key codes and Enter/Tab text its raw input_keyboard relay omits.
-const DISCRETE_KEYS = new Set(["Backspace", "Enter", "Tab", "Escape", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"]);
 const RESTART_NEEDED = "A browser action was interrupted. Choose Restart browser… in the browser menu before continuing.";
 const restartedNote = (keepsSignIns: boolean) => `The page stopped responding, so the browser was restarted. ${keepsSignIns ? "Your sign-ins are kept; open" : "It is a temporary browser, so its sign-ins are gone; open"} the page again.`;
 const INPUT_RELAY = { timeoutMs: 30_000, maxBytes: 65_536 };
 /** Frames a view may have on its way without acknowledging them: over a slow link one acknowledgement round trip per frame
  * held a Cloud's panel to a few frames a second. */
 const FRAME_WINDOW = 2;
-/** Inputs one request may carry, so a remote panel's typing does not wait a round trip per key. */
-export const INPUT_BATCH_LIMIT = 64;
 const ENDED_PROBE = { timeoutMs: 5_000, maxBytes: 65_536 };
 /** What a view hears when its browser closed unused: it stops, where reconnecting would start the browser again. */
 export const BROWSER_ASLEEP_ERROR = { type: "error", retryable: false, asleep: true, message: "This browser closed after it sat unused, to save memory. Reconnect to open it again." };
 /** What a view hears while its browser cannot show it yet; it keeps waiting. */
 export const BROWSER_WAITING = { type: "waiting", reason: "busy" };
-
-export class BrowserLiveError extends Error {
-  readonly status: number;
-  constructor(message: string, status = 400) { super(message); this.name = "BrowserLiveError"; this.status = status; }
-}
+/** What a view hears while its browser is slow to start: it keeps waiting, and is not told a bot is busy. */
+const BROWSER_STARTING = { type: "waiting", reason: "starting" };
+export { BrowserLiveError, INPUT_BATCH_LIMIT, parseBrowserLiveAction } from "./browser/live-action.ts";
 
 export class BrowserActionFailedError extends BrowserLiveError {
   readonly settled = true;
   constructor(args: readonly string[]) {
     const opening = args[0] === "open" || (args[0] === "tab" && args[1] === "new" && args.length > 2);
-    super(opening ? "This page could not be opened. Check the address and try again." : "The browser could not do that. Try again.", 422);
+    super(opening ? "This page could not be opened. Check the address and try again." : "The browser could not do that. Try again.", 422, "action_failed");
     this.name = "BrowserActionFailedError";
   }
 }
@@ -56,9 +52,12 @@ export class BrowserActionFailedError extends BrowserLiveError {
 /** Another command, usually the bot's own, holds the session; not a missing engine. */
 export class BrowserBusyError extends BrowserLiveError {
   constructor(message = "The browser is busy with another action and did not answer in time. Try again shortly.") {
-    super(message, 503); this.name = "BrowserBusyError";
+    super(message, 503, "busy"); this.name = "BrowserBusyError";
   }
 }
+
+/** The engine left a status read unanswered while still starting or making progress: the view waits for it. */
+class BrowserStartingError extends BrowserBusyError {}
 
 /** The engine left a status read unanswered with no bot or person working in it: it hung, and its session is being reset. */
 class BrowserUnresponsiveError extends BrowserLiveError {
@@ -68,7 +67,7 @@ class BrowserUnresponsiveError extends BrowserLiveError {
 /** A person's input or command went unanswered, but the engine answered a read queued behind it, so it has ended. */
 export class BrowserSlowActionError extends BrowserLiveError {
   readonly settled = true;
-  constructor() { super("The browser was slow to take that. Check the page before you repeat it.", 409); this.name = "BrowserSlowActionError"; }
+  constructor() { super("The browser was slow to take that. Check the page before you repeat it.", 409, "slow"); this.name = "BrowserSlowActionError"; }
 }
 
 /** The browser answered that it did not take an input, which therefore had no effect. */
@@ -77,7 +76,7 @@ const INPUT_REFUSED = "The page did not take some of your input. Check the page,
 
 /** An input, or the release of a key or button, the browser never confirmed: its state in the page is unknown. */
 class BrowserInputUnconfirmedError extends BrowserLiveError {
-  constructor() { super("The browser could not confirm this input. Choose Restart browser… in the browser menu before continuing.", 503); this.name = "BrowserInputUnconfirmedError"; }
+  constructor() { super("The browser could not confirm this input. Choose Restart browser… in the browser menu before continuing.", 503, "unconfirmed"); this.name = "BrowserInputUnconfirmedError"; }
 }
 
 /** execFile's own timeout killed a command that had not exited (not a missing binary, a failure, an abort or an overflow). */
@@ -85,18 +84,6 @@ function timedOut(error: unknown): boolean {
   const failure = error as { killed?: unknown; signal?: unknown; code?: unknown } | null;
   return failure?.killed === true && failure.signal === "SIGKILL" && failure.code == null;
 }
-
-type ObjectValue = Record<string, unknown>;
-function object(value: unknown): ObjectValue | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value) ? value as ObjectValue : null;
-}
-function number(value: unknown, min: number, max: number): value is number {
-  return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
-}
-function integer(value: unknown, min: number, max: number): value is number {
-  return number(value, min, max) && Number.isSafeInteger(value);
-}
-function text(value: unknown, max: number): value is string { return typeof value === "string" && value.length <= max; }
 
 function displayUrl(value: unknown): string {
   if (!text(value, 8192)) return "";
@@ -171,83 +158,6 @@ export function browserRestartRefusal(interrupted: boolean, busyBots: ReadonlyAr
   return !interrupted && busyBots.some((bot) => !bot.waitingOnBrowser) ? "Stop every bot using this profile before restarting its browser." : null;
 }
 
-type Action = { type: "take" | "release" | "restart" } | { type: "ack"; seq: number }
-  | { type: "command"; args: string[] } | { type: "input"; message: ObjectValue } | { type: "inputs"; messages: ObjectValue[] }
-  | { type: "dialog"; accept: boolean; promptText?: string }
-  /** The panel's size in CSS pixels, which the page fills; null for a collapsed panel, which leaves the page as it is. */
-  | { type: "resize"; size: PageSize | null };
-
-/** A move the next one replaces changes nothing the page keeps. */
-function withoutReplacedMoves(messages: ObjectValue[]): ObjectValue[] {
-  return messages.filter((message, at) => {
-    const next = messages[at + 1];
-    return !(message.eventType === "mouseMoved" && next?.eventType === "mouseMoved" && next.button === message.button && next.modifiers === message.modifiers);
-  });
-}
-
-/** HTTP bodies can select a fixed action, never a CLI command, flag, port or CDP method. */
-export function parseBrowserLiveAction(value: unknown): Action {
-  const body = object(value);
-  const invalid = () => new BrowserLiveError("Invalid browser action.");
-  if (!body) throw invalid();
-  if (body.type === "take" || body.type === "release" || body.type === "restart") return { type: body.type };
-  if (body.type === "ack" && integer(body.seq, 1, Number.MAX_SAFE_INTEGER)) return { type: "ack", seq: body.seq };
-  if (body.type === "resize") {
-    if (!number(body.width, 0, 100_000) || !number(body.height, 0, 100_000)) throw invalid();
-    return { type: "resize", size: requestedSize(body.width, body.height) };
-  }
-  if (body.type === "dialog") {
-    if (typeof body.accept !== "boolean" || (body.promptText !== undefined && !text(body.promptText, 4096))) throw invalid();
-    return { type: "dialog", accept: body.accept, ...(body.promptText === undefined ? {} : { promptText: body.promptText }) };
-  }
-  if (body.type === "input_batch") {
-    if (!Array.isArray(body.events) || !body.events.length || body.events.length > INPUT_BATCH_LIMIT) throw invalid();
-    const messages = body.events.map((event: unknown) => {
-      const parsed = parseBrowserLiveAction(event);
-      if (parsed.type !== "input") throw invalid();
-      return parsed.message;
-    });
-    return { type: "inputs", messages: withoutReplacedMoves(messages) };
-  }
-  if (body.type === "back" || body.type === "forward" || body.type === "reload") return { type: "command", args: [body.type] };
-  if (body.type === "navigate" || body.type === "tab-new") {
-    if (body.type === "tab-new" && body.url === undefined) return { type: "command", args: ["tab", "new"] };
-    // eslint-disable-next-line no-control-regex -- Reject control characters before URL parsing normalizes them.
-    if (!text(body.url, 8192) || !body.url || /[\u0000-\u0020\u007f\\]/u.test(body.url)) throw invalid();
-    let url: URL;
-    try { url = new URL(body.url); } catch { throw invalid(); }
-    if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password) throw invalid();
-    return { type: "command", args: body.type === "navigate" ? ["open", url.href] : ["tab", "new", url.href] };
-  }
-  if (body.type === "tab-select" || body.type === "tab-close") {
-    if (typeof body.tabId !== "string" || !/^t[1-9]\d{0,8}$/.test(body.tabId)) throw invalid();
-    return { type: "command", args: body.type === "tab-select" ? ["tab", body.tabId] : ["tab", "close", body.tabId] };
-  }
-  if (body.type === "input_mouse") {
-    if (!["mouseMoved", "mousePressed", "mouseReleased", "mouseWheel"].includes(String(body.eventType))
-        || !number(body.x, 0, 8192) || !number(body.y, 0, 8192)) throw invalid();
-    const button = body.button ?? "none";
-    const clickCount = body.clickCount ?? 0, modifiers = body.modifiers ?? 0;
-    const deltaX = body.deltaX ?? 0, deltaY = body.deltaY ?? 0;
-    if (!["none", "left", "middle", "right"].includes(String(button)) || !integer(clickCount, 0, 3)
-        || !integer(modifiers, 0, 15) || !number(deltaX, -10000, 10000) || !number(deltaY, -10000, 10000)) throw invalid();
-    return { type: "input", message: { type: "input_mouse", eventType: body.eventType, x: body.x, y: body.y, button, clickCount, modifiers, deltaX, deltaY } };
-  }
-  if (body.type === "input_keyboard") {
-    if (body.eventType === "char") {
-      if (!text(body.text, 4096) || !body.text) throw invalid();
-      return { type: "input", message: { type: "input_keyboard", eventType: "char", text: body.text } };
-    }
-    if (!["keyDown", "keyUp"].includes(String(body.eventType)) || !text(body.key, 64) || !body.key) throw invalid();
-    const modifiers = body.modifiers ?? 0, keyCode = body.windowsVirtualKeyCode ?? 0;
-    if (!integer(modifiers, 0, 15) || !integer(keyCode, 0, 255)
-        || (body.code !== undefined && !text(body.code, 64)) || (body.text !== undefined && !text(body.text, 4096))) throw invalid();
-    return { type: "input", message: { type: "input_keyboard", eventType: body.eventType, key: body.key,
-      modifiers, windowsVirtualKeyCode: keyCode, ...(body.code === undefined ? {} : { code: body.code }), ...(body.text === undefined ? {} : { text: body.text }) } };
-  }
-  throw invalid();
-}
-
 interface OpenOptions {
   botId: string;
   session: string;
@@ -262,6 +172,8 @@ interface OpenOptions {
   resume?: string | null;
   /** The panel's size in CSS pixels, which the page fills from the start. */
   size?: PageSize | null;
+  /** The view draws a page's dropdown lists itself (selectPopup, select_choose); an older one leaves the press to the page. */
+  drawsSelects?: boolean;
 }
 interface Viewer extends OpenOptions {
   id: string;
@@ -291,6 +203,11 @@ interface Viewer extends OpenOptions {
   idle?: () => void;
   /** The panel size this view asked for last, and when, among all views. */
   requested?: PageSize & { order: number };
+  page: LivePage;
+  /** The active tab's target, from the stream's tab list. */
+  target: string | null;
+  /** The dropdown list this view drew for its last press on one; that press's release never reaches the page. */
+  select?: OpenSelect & { releasing: boolean };
 }
 /** The view a person's hold was used from, gone with its stream dropped. Its late hand-back still counts, and the view of
  * theirs that carries on with the hold waits until what it pressed is let go. */
@@ -320,9 +237,18 @@ export class BrowserLive {
   /** Each watched browser's page dialogs, and the views that watch them. */
   private readonly dialogs = new Map<string, { watch: DialogWatch; views: Set<string> }>();
   private readonly devTools?: BrowserLiveDevTools;
+  private readonly requests = new RequestOnce();
+  private readonly progress: EngineProgress;
+  private readonly engineAlive: (env: NodeJS.ProcessEnv) => boolean;
+  private readonly statusReadMs: () => number;
   private order = 0;
-  constructor({ runtime, devTools, holdLimits = HOLD_LIMITS }: { runtime: BrowserRuntime; devTools?: BrowserLiveDevTools; holdLimits?: HoldLimits }) {
+  constructor({ runtime, devTools, holdLimits = HOLD_LIMITS, engine = {} }: { runtime: BrowserRuntime; devTools?: BrowserLiveDevTools; holdLimits?: HoldLimits;
+    /** How a slow engine is told from a hung one: the clock, whether its daemon still runs, and the status read's limit. */
+    engine?: { now?: () => number; alive?: (env: NodeJS.ProcessEnv) => boolean; statusReadMs?: () => number } }) {
     this.runtime = runtime;
+    this.progress = new EngineProgress(engine.now);
+    this.engineAlive = engine.alive ?? engineDaemonAlive;
+    this.statusReadMs = engine.statusReadMs ?? statusReadMs;
     this.devTools = devTools;
     this.holdLimits = holdLimits;
     runtime.onIdleClose((session) => this.asleep(session));
@@ -431,6 +357,7 @@ export class BrowserLive {
     viewer.abort.abort();
     viewer.unwatch();
     this.viewers.delete(viewer.id);
+    this.requests.forget(viewer.id);
     if (viewer.requested) this.fit(viewer.session);
     clearTimeout(viewer.heartbeat); clearTimeout(viewer.drainTimer);
     viewer.socket?.close();
@@ -545,7 +472,8 @@ export class BrowserLive {
     await this.runtime.withHumanAction(viewer.session, viewer.person, async () => {
       const unconfirmed = () => new BrowserInputUnconfirmedError();
       for (const [code, key] of viewer.pressedKeys) {
-        if (!await this.sendInput(viewer, port, { action: "input_keyboard", type: "keyUp", key, ...(code === key ? {} : { code }) }, true)) throw unconfirmed();
+        const fields = { key, ...(code === key ? {} : { code }) };
+        if (!await this.sendInput(viewer, port, { action: "input_keyboard", type: "keyUp", ...fields }, true, [keyEvent("keyUp", fields)])) throw unconfirmed();
         viewer.pressedKeys.delete(code);
       }
       for (const button of viewer.pressedButtons) {
@@ -570,6 +498,7 @@ export class BrowserLive {
         signal: viewer.abort.signal,
       });
       if (!this.current(viewer)) throw new Error("stale viewer");
+      this.progress.answered(viewer.session);
       const result = object(JSON.parse(stdout));
       const data = object(result?.data);
       if (result?.success !== true || !data) {
@@ -613,12 +542,18 @@ export class BrowserLive {
       throw new BrowserLiveError(error instanceof Error ? error.message : "The browser is not ready yet.", 503);
     });
     let status: ObjectValue;
-    try { status = await this.command(viewer, ["stream", "status"], STATUS_PROBE_MS); }
+    try { status = await this.command(viewer, ["stream", "status"], this.statusReadMs()); }
     catch (error) {
-      // Only a bot call or a person's action can hold the engine past this read; with neither, it has hung.
+      // A bot call or a person's action can hold the engine past this read; with neither, it is starting, slow or hung.
       if (!(error instanceof BrowserBusyError) || this.runtime.working(viewer.session)) throw error;
+      const env = browserRuntimeEnv({ ...viewer.spec.env, AGENT_BROWSER_SESSION: viewer.session });
+      if (this.progress.verdict(viewer.session, { alive: this.engineAlive(env), held: Boolean(this.runtime.heldBy(viewer.session)) }) === "slow") throw new BrowserStartingError();
+      this.progress.forget(viewer.session);
+      const restarting = new BrowserUnresponsiveError();
+      // Every other view of it, its holder's included, hears why before its stream ends.
+      for (const other of this.viewers.values()) if (other !== viewer && other.session === viewer.session) this.send(other, { type: "error", retryable: true, message: restarting.message, ...userErrorFields(restarting) });
       this.resetSession(viewer, "a status read the browser never answered");
-      throw new BrowserUnresponsiveError();
+      throw restarting;
     }
     if (status.enabled !== true) {
       try { status = await this.command(viewer, ["stream", "enable"]); }
@@ -637,14 +572,16 @@ export class BrowserLive {
   private async connectWhenFree(viewer: Viewer): Promise<number> {
     const deadline = Date.now() + BUSY_LIMIT_MS;
     for (let attempt = 0; ; attempt++) {
+      let starting = false;
       try { return await this.connect(viewer); }
       catch (error) {
         if (!(error instanceof BrowserBusyError) || !this.current(viewer)) throw error;
         if (Date.now() >= deadline) throw new BrowserBusyError("The bot is still using this browser. Reconnect when it has finished.");
+        starting = error instanceof BrowserStartingError;
       }
       viewer.waiting = true;
       this.startEvents(viewer);
-      this.send(viewer, BROWSER_WAITING);
+      this.send(viewer, starting ? BROWSER_STARTING : BROWSER_WAITING);
       await new Promise<void>((resolve) => {
         const done = () => { clearTimeout(timer); viewer.abort.signal.removeEventListener("abort", done); resolve(); };
         const timer = setTimeout(done, BUSY_RETRY_MS[Math.min(attempt, BUSY_RETRY_MS.length - 1)]);
@@ -662,32 +599,37 @@ export class BrowserLive {
   }
 
   private async input(viewer: Viewer, message: ObjectValue): Promise<void> {
-    if (!viewer.port) throw new BrowserLiveError("The browser stream is not connected.", 409);
+    if (!viewer.port) throw new BrowserLiveError("The browser stream is not connected.", 409, "stream_not_connected");
     let command: ObjectValue;
+    let keys: ObjectValue[] | undefined;
     const { type, eventType, ...fields } = message;
     const key = String(fields.code || fields.key);
-    const shortcut = Number(fields.modifiers) > 0 && !["Alt", "Control", "Meta", "Shift"].includes(String(fields.key))
-      && !(fields.modifiers === 8 && text(fields.key, 64) && [...fields.key].length === 1);
     // press already released the key: match raw held keys, not keyUp modifiers, which may have changed or be zero after blur.
     if (type === "input_keyboard" && eventType === "keyUp" && !viewer.pressedKeys.has(key)) return;
+    if (type === "input_mouse" && await this.selectPress(viewer, String(eventType), fields)) return;
+    const fieldsOfKey = fields as { key: string };
     if (type === "input_mouse") command = { action: "input_mouse", type: eventType, ...fields };
     else if (eventType === "char") command = { action: "keyboard", subaction: "insertText", text: fields.text };
-    else if (eventType === "keyDown" && (shortcut || DISCRETE_KEYS.has(String(fields.key)))) {
+    else if (eventType === "keyDown" && pressedAtOnce(fieldsOfKey)) {
       // press resolves virtual key codes, text and modifiers, and acknowledges the whole key-down/up pair before hand-back.
-      const modifiers = fields.modifiers as number;
-      const chord = [[1, "Alt"], [2, "Control"], [4, "Meta"], [8, "Shift"]] as const;
-      command = { action: "press", key: [...chord.filter(([bit]) => modifiers & bit).map(([, key]) => key), fields.key].join("+") };
-    } else command = { action: "input_keyboard", type: eventType, key: fields.key,
-      ...(fields.code === undefined ? {} : { code: fields.code }), ...(fields.text === undefined ? {} : { text: fields.text }) };
+      command = { action: "press", key: pressChord(fieldsOfKey) };
+      keys = [keyEvent("keyDown", fieldsOfKey), keyEvent("keyUp", fieldsOfKey)];
+    } else {
+      command = { action: "input_keyboard", type: eventType, key: fields.key,
+        ...(fields.code === undefined ? {} : { code: fields.code }), ...(fields.text === undefined ? {} : { text: fields.text }) };
+      keys = [keyEvent(eventType === "keyUp" ? "keyUp" : "keyDown", fieldsOfKey)];
+    }
+    // A key with no code to give a page goes as the engine sends it.
+    if (keys?.some((event) => !event.windowsVirtualKeyCode)) keys = undefined;
     if (command.action === "input_keyboard" && eventType === "keyDown") {
-      if (viewer.pressedKeys.size >= 64 && !viewer.pressedKeys.has(key)) throw new BrowserLiveError("Too many keys are held. Restart the browser before continuing.", 409);
+      if (viewer.pressedKeys.size >= 64 && !viewer.pressedKeys.has(key)) throw new BrowserLiveError("Too many keys are held. Restart the browser before continuing.", 409, "too_many_keys");
       viewer.pressedKeys.set(key, String(fields.key));
     }
     if (type === "input_mouse") viewer.pointer = { x: fields.x as number, y: fields.y as number };
     if (type === "input_mouse" && eventType === "mousePressed") viewer.pressedButtons.add(String(fields.button));
     const releases = (command.action === "input_keyboard" && eventType === "keyUp") || (type === "input_mouse" && eventType === "mouseReleased");
     let confirmed: boolean;
-    try { confirmed = await this.sendInput(viewer, viewer.port, command, releases); }
+    try { confirmed = await this.sendInput(viewer, viewer.port, command, releases, keys); }
     catch (error) {
       if (error instanceof BrowserInputRefusedError) {
         if (command.action === "input_keyboard" && eventType === "keyDown") viewer.pressedKeys.delete(key);
@@ -700,11 +642,24 @@ export class BrowserLive {
     if (type === "input_mouse" && eventType === "mouseReleased") viewer.pressedButtons.delete(String(fields.button));
   }
 
+  /** A left press on a dropdown list shows the view's own list of its options: neither it nor its release reaches the page. */
+  private async selectPress(viewer: Viewer, eventType: string, fields: ObjectValue): Promise<boolean> {
+    // A page's own question holds every probe until it is answered.
+    if (fields.button !== "left" || !viewer.drawsSelects || this.dialogs.get(viewer.session)?.watch.dialog) return false;
+    if (eventType === "mouseReleased" && viewer.select?.releasing) { viewer.select.releasing = false; return true; }
+    if (eventType !== "mousePressed" || fields.clickCount !== 1) return false;
+    const found = await viewer.page.selectAt(Number(fields.x), Number(fields.y), randomUUID()).catch(() => null);
+    if (!found) return false;
+    viewer.select = { ...found.select, releasing: true };
+    this.send(viewer, { type: "selectPopup", id: found.select.id, ...found.popup });
+    return true;
+  }
+
   /** The relay awaits the daemon's CDP reply; a WS send is only an enqueue and cannot serve as the hand-back barrier. A single CDP
    * event the daemon refused had no effect, and a release may repeat, so each is sent once more; a press is two events. Chrome
    * holds an input that opened the page's own question until it is answered, then delivers it. */
-  private async sendInput(viewer: Viewer, port: number, command: ObjectValue, releases: boolean): Promise<boolean> {
-    const send = () => relay(port, command, INPUT_RELAY).then((answer) => answer.success);
+  private async sendInput(viewer: Viewer, port: number, command: ObjectValue, releases: boolean, keys?: ObjectValue[]): Promise<boolean> {
+    const send = async () => (keys && await viewer.page.keys(keys)) ?? relay(port, command, INPUT_RELAY).then((answer) => answer.success);
     const watch = this.dialogs.get(viewer.session)?.watch;
     const before = watch?.opened ?? 0;
     const asked = () => !!watch && (watch.dialog !== null || watch.opened !== before);
@@ -712,7 +667,7 @@ export class BrowserLive {
     try {
       if (await send()) return true;
       if (asked()) return await answered();
-      if (command.action !== "press" && await send()) return true;
+      if (command.action !== "press" && (keys?.length ?? 0) < 2 && await send()) return true;
     } catch {
       if (asked()) return await answered();
       if (!await this.ended(port)) return false;
@@ -779,7 +734,8 @@ export class BrowserLive {
     if (this.viewers.size >= 8 || [...this.viewers.values()].filter((v) => v.session === options.session).length >= 2) {
       throw new BrowserLiveError("Too many browser views are open. Close another browser panel first.", 429);
     }
-    const viewer: Viewer = { ...options, id: randomUUID(), person: options.person ?? options.owner, closed: false, blocked: false, pendingActions: 0, restarting: false, pressedKeys: new Map(), pressedButtons: new Set(), pointer: { x: 0, y: 0 }, unacked: new Map(), waiting: false, abort: new AbortController(), unwatch: () => {} };
+    const viewer: Viewer = { ...options, id: randomUUID(), person: options.person ?? options.owner, closed: false, blocked: false, pendingActions: 0, restarting: false, pressedKeys: new Map(), pressedButtons: new Set(), pointer: { x: 0, y: 0 }, unacked: new Map(), waiting: false, abort: new AbortController(), unwatch: () => {}, target: null,
+      page: new LivePage(() => this.dialogs.get(options.session)?.watch, () => viewer.target) };
     if (!this.current(viewer)) throw new BrowserLiveError("This browser view is no longer available.", 409);
     // A view that opens while another holds the browser leaves the holder's page as it is.
     if (options.size && !this.runtime.heldBy(options.session)) viewer.requested = { ...options.size, order: ++this.order };
@@ -810,6 +766,9 @@ export class BrowserLive {
         let message: ObjectValue | null;
         let raw: ObjectValue | null;
         try { raw = object(JSON.parse(event.data)); message = normalizeBrowserLiveMessage(raw); } catch { this.close(viewer); return; }
+        this.progress.answered(viewer.session);
+        const target = activeTargetOf(raw);
+        if (target !== undefined) viewer.target = target;
         if (!message) { if (raw?.type === "frame") this.close(viewer); return; }
         const heldBy = this.runtime.heldBy(viewer.session);
         if (heldBy && heldBy !== viewer.person && ["tabs", "url"].includes(String(message.type))) return;
@@ -848,7 +807,12 @@ export class BrowserLive {
     }
   }
 
-  async action({ viewerId, botId, owner, body }: { viewerId: string; botId: string; owner: string; body: unknown }): Promise<unknown> {
+  action(request: { viewerId: string; botId: string; owner: string; body: unknown }): Promise<unknown> {
+    if (!this.viewers.has(request.viewerId)) return this.act(request);
+    return this.requests.run(request.viewerId, request.body, () => this.act(request));
+  }
+
+  private async act({ viewerId, botId, owner, body }: { viewerId: string; botId: string; owner: string; body: unknown }): Promise<unknown> {
     const viewer = this.viewers.get(viewerId);
     if (!viewer || viewer.botId !== botId || viewer.owner !== owner || !this.current(viewer)) {
       if (viewer && viewer.botId === botId && viewer.owner === owner) this.close(viewer, true, true);
@@ -858,7 +822,7 @@ export class BrowserLive {
         this.end(left.viewer.session, left.viewer.person);
         return { ok: true };
       }
-      throw new BrowserLiveError("This browser view is no longer available. Reopen the browser panel.", 404);
+      throw new BrowserLiveError("This browser view is no longer available. Reopen the browser panel.", 404, "view_gone");
     }
     const action = parseBrowserLiveAction(body);
     if (action.type === "restart") {
@@ -904,7 +868,7 @@ export class BrowserLive {
         const before = this.viewers.get(this.drivers.get(viewer.session) ?? "");
         if (before && before !== viewer) await this.releaseHeld(before);
         await this.left.get(viewer.session)?.settled;
-        if (!this.current(viewer)) { this.close(viewer, true, true); throw new BrowserLiveError("This browser view closed.", 409); }
+        if (!this.current(viewer)) { this.close(viewer, true, true); throw new BrowserLiveError("This browser view closed.", 409, "view_gone"); }
         if (this.ownedBy(viewer)) {
           this.drivers.set(viewer.session, viewer.id);
           this.left.delete(viewer.session);
@@ -912,7 +876,7 @@ export class BrowserLive {
           this.clock(viewer.session).watched(true);
         }
         return { ok: true, waited: waited === true };
-      } catch { throw this.refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly."); }
+      } catch { throw this.refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly.", "take_refused"); }
       finally { this.control(viewer.session); }
     }
     if (!this.controlling(viewer)) throw this.refusal(viewer, "Browser control changed. Try again.");
@@ -923,18 +887,23 @@ export class BrowserLive {
       if (!await watch.answer(action.accept, action.promptText)) throw new BrowserLiveError("The page did not take that answer. Try again.", 503);
       return { ok: true };
     }
-    if (viewer.pendingActions >= 32) throw new BrowserLiveError("Too many browser actions are pending. Try again shortly.", 429);
+    if (viewer.pendingActions >= 32) throw new BrowserLiveError("Too many browser actions are pending. Try again shortly.", 429, "too_many_pending");
     viewer.pendingActions += 1;
     let refused = false;
     try {
       await this.runtime.withHumanAction(viewer.session, viewer.person, async () => {
-        if (!this.current(viewer)) throw new BrowserLiveError("This browser view closed.", 409);
+        if (!this.current(viewer)) throw new BrowserLiveError("This browser view closed.", 409, "view_gone");
         const take = async (message: ObjectValue) => {
           try { await this.input(viewer, message); }
           catch (error) { if (!(error instanceof BrowserInputRefusedError)) throw error; refused = true; }
         };
         if (action.type === "input") await take(action.message);
         else if (action.type === "inputs") { for (const message of action.messages) await take(message); }
+        else if (action.type === "select") {
+          const open = viewer.select;
+          viewer.select = undefined;
+          refused = open?.id !== action.id || !await viewer.page.choose(open, action.index);
+        }
         else if (action.type === "command") await this.command(viewer, action.args, COMMAND_TIMEOUT_MS, true).catch(async (error: unknown) => {
           throw error instanceof BrowserBusyError && viewer.port && await this.ended(viewer.port) ? new BrowserSlowActionError() : error;
         });
@@ -942,7 +911,7 @@ export class BrowserLive {
       return refused ? { ok: true, notice: INPUT_REFUSED } : { ok: true };
     } catch (error) {
       if (error instanceof BrowserInputUnconfirmedError && viewer.pendingActions === 1 && await this.restartUnresponsive(viewer)) {
-        throw new BrowserLiveError(restartedNote(viewer.spec.env?.AGENT_BROWSER_RESTORE_SAVE !== "never"), 503);
+        throw new BrowserLiveError(restartedNote(viewer.spec.env?.AGENT_BROWSER_RESTORE_SAVE !== "never"), 503, "browser_restarted");
       }
       throw error instanceof BrowserLiveError ? error : this.refusal(viewer, "Browser control changed. Try again.");
     }
@@ -953,10 +922,10 @@ export class BrowserLive {
     }
   }
 
-  private refusal(viewer: Viewer, otherwise: string): BrowserLiveError {
+  private refusal(viewer: Viewer, otherwise: string, reason: PersonReason = "not_controlling"): BrowserLiveError {
     const holder = this.runtime.heldBy(viewer.session);
-    if (holder && holder !== viewer.person) return new BrowserLiveError(BROWSER_HELD_ELSEWHERE, 409);
-    return new BrowserLiveError(this.runtime.interrupted(viewer.session) ? RESTART_NEEDED : otherwise, 409);
+    if (holder && holder !== viewer.person) return new BrowserLiveError(BROWSER_HELD_ELSEWHERE, 409, "held_elsewhere");
+    return this.runtime.interrupted(viewer.session) ? new BrowserLiveError(RESTART_NEEDED, 409, "restart_needed") : new BrowserLiveError(otherwise, 409, reason);
   }
 
   /** Done on a sign-in card, from any window or device: whoever holds this browser hands it back. */

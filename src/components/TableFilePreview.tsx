@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, Table2 } from "lucide-react";
 import { requestMessageFile, type MessageAttachmentContext } from "./AttachmentPreview";
 import { RichTable, TableDialog } from "./RichTable";
+import { useFileBesideChat } from "@/lib/file-preview";
 import { TABLE_FILE_MAX_BYTES, tableDelimiter, type TextTable } from "@/lib/table-data";
 import { t } from "@/lib/i18n";
 
@@ -38,15 +39,19 @@ export async function readTableResponse(response: Response, signal: AbortSignal,
 export function TableFileButton({ path, name, message }: { path: string; name: string; message: MessageAttachmentContext }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const beside = useFileBesideChat();
   const delimiter = tableDelimiter(name) ?? tableDelimiter(path);
   if (!delimiter) return null;
+  const show = () => {
+    if (!beside({ kind: "table", path, name, message, opener: trigger.current })) setOpen(true);
+  };
   return <>
-    <button ref={trigger} type="button" className="table-action" title={t("table.preview", { name })} aria-label={t("table.preview", { name })} onClick={() => setOpen(true)}><Table2 size={14} /></button>
+    <button ref={trigger} type="button" className="table-action" title={t("table.preview", { name })} aria-label={t("table.preview", { name })} onClick={show}><Table2 size={14} /></button>
     {open && <TableDialog title={name} returnFocus={trigger.current} onClose={() => setOpen(false)}><TableFileContent key={`${message.threadId}:${message.messageId}:${path}`} path={path} name={name} message={message} delimiter={delimiter} /></TableDialog>}
   </>;
 }
 
-function TableFileContent({ path, name, message, delimiter }: {
+export function TableFileContent({ path, name, message, delimiter }: {
   path: string; name: string; message: MessageAttachmentContext; delimiter: "," | "\t";
 }) {
   const [attempt, setAttempt] = useState(0);

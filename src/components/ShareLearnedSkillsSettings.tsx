@@ -2,9 +2,10 @@ import { useState } from "react";
 
 import { shareLearnedSkillsMode, skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { SkillReviewSettings } from "./SkillReviewSettings";
 import { MoreText, Segmented, SettingRow } from "./SettingsPrimitives";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 const MODES = [
   { value: "off", label: "settings.experimental.shareSkillsOff" },
@@ -13,7 +14,7 @@ const MODES = [
 ] as const;
 
 export function ShareLearnedSkillsSettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   if (!skillsLibraryEnabled(state.config)) return null;

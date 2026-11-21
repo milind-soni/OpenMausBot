@@ -211,9 +211,7 @@ export async function newChannel(ctx: VerbContext): Promise<VerbOutcome> {
 
 export async function setModel(ctx: VerbContext): Promise<VerbOutcome> {
   const selection = modelArgs(ctx, true);
-  const explicit = flag(ctx.flags, "bot")?.trim();
-  const target = explicit ? { type: "bot" as const, id: explicit, ...(flag(ctx.flags, "task") ? { taskId: flag(ctx.flags, "task")!.trim() } : {}) }
-    : await resolveTarget(ctx, ctx.positionals[0], "bot");
+  const target = await resolveTarget(ctx, ctx.positionals[0], "bot");
   const args = { bot_id: target.id, ...(target.taskId ? { task_id: target.taskId } : {}), ...selection };
   const preview = dryRun(ctx, "set_bot_model", args);
   if (preview) return preview;
@@ -222,13 +220,14 @@ export async function setModel(ctx: VerbContext): Promise<VerbOutcome> {
 }
 
 export async function edit(ctx: VerbContext): Promise<VerbOutcome> {
-  const explicit = flag(ctx.flags, "bot")?.trim();
+  const named = Boolean(flag(ctx.flags, "bot") ?? flag(ctx.flags, "channel") ?? flag(ctx.flags, "thread"));
   const [first, second] = ctx.positionals;
-  const target: Target | undefined = explicit ? { type: "bot", id: explicit, ...(flag(ctx.flags, "task") ? { taskId: flag(ctx.flags, "task")!.trim() } : {}) } : undefined;
-  if (!target && !first) throw usageError("a bot is required", "openmausbot edit BOT --message ID TEXT, or --bot ID");
+  if (named && second !== undefined) throw usageError("edit with a named target takes at most one message argument",
+    "openmausbot edit --thread ID --message ID TEXT, or edit BOT --message ID TEXT");
+  if (!named && !first) throw usageError("a bot is required", "openmausbot edit BOT --message ID TEXT, or --bot ID or --thread ID");
   const messageId = requiredFlag(ctx.flags, "message");
-  const text = await readMessage(ctx, target ? first : second);
-  const resolved = target ?? await resolveTarget(ctx, first, "bot");
+  const text = await readMessage(ctx, named ? first : second);
+  const resolved = await resolveTarget(ctx, named ? undefined : first, "bot");
   const args = { bot_id: resolved.id, message_id: messageId, text, ...(resolved.taskId ? { task_id: resolved.taskId } : {}) };
   const preview = dryRun(ctx, "edit_bot_message", args);
   if (preview) return preview;

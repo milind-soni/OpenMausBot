@@ -14,6 +14,8 @@ makes a PR easy to merge. Read it once before opening anything; it's short on pu
 - **Keep it green.** `pnpm typecheck && pnpm test` must pass. Server changes need tests (see below).
 - **UI changes follow [`DESIGN.md`](DESIGN.md).** Tokens, type, spacing, components, words and
   states. Before/after screenshots in Midnight and Daylight go in the PR body; video for anything animated.
+  With `pnpm dev` running, `pnpm shots '/room-card-preview.html?state=memory' --name before` saves them at
+  390, 768 and 1440 wide in both skins to `shots/`.
 
 ## Dev setup
 

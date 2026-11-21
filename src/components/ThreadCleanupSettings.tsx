@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { SETTINGS_INLINE_INPUT, SettingRow, SettingsGroup, SettingsRows, Switch } from "./SettingsPrimitives";
 import { cn } from "@/lib/cn";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 /** Server bounds from server/config.ts, mirrored to reject out-of-range input before the round trip. */
 const MIN_RETENTION_DAYS = 1;
@@ -35,7 +36,7 @@ function mibText(bytes: number): string {
 type Knob = "retention" | "cap";
 
 export function ThreadCleanupSettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const confirmedRetentionDays = state.config?.threads?.eventLogRetentionDays ?? null;
   const confirmedCapBytes = state.config?.threads?.eventLogMaxBytes ?? null;
   const [retentionDraft, setRetentionDraft] = useState<string | null>(null);

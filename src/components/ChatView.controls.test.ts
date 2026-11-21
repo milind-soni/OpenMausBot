@@ -81,7 +81,7 @@ describe("the header's right side", () => {
       expect(controls).toContain("data-test-model-control");
       expect(fixture.model).toMatchObject({ threadId: "selected" });
       const computer = controls.match(/<button[^>]*data-tour="computer"[^>]*>/)?.[0] ?? "";
-      expect(computer.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "size-9"]));
+      expect(computer.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "size-9", "shadow-(--shadow-float)"]));
       expect(markup).not.toContain('data-testid="chat-more"');
       expect(fixture.menus.find((menu) => menu.ariaLabel === "More")).toBeUndefined();
       expect(markup).toContain("data-chathead-pill");
@@ -154,7 +154,7 @@ describe("the Simple header", () => {
       expect(identity.replace(pill[0], "").replace(/<span role="status"[^>]*>[^<]*<\/span>/, "")).not.toMatch(/<(button|a|span)[\s>]/);
       expect(pill[1]).toContain(">Pepper</span>");
       expect(pill[1]).toContain('data-chathead-elsewhere="true"');
-      expect(pill[0].match(/class="([^"]*)"/)![1]!.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-composer", "ring-[0.5px]", "py-[7.5px]", "pr-[13.5px]"]));
+      expect(pill[0].match(/class="([^"]*)"/)![1]!.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)", "py-[7.5px]", "pr-[13.5px]"]));
       // Away from the bot's main conversation, the pill names the one on screen.
       expect(pill[1]).toContain("data-chathead-conversation");
       for (const gone of ["data-chathead-role", "data-background-activity", "data-chathead-back", 'data-testid="chat-more"']) {

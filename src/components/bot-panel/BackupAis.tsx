@@ -10,13 +10,14 @@ import { pickerPlacement, type PickerPlacement } from "@/lib/picker-placement";
 import { shortModelLabel } from "@/lib/model-friendly";
 import { modelName, providerName, simpleModelMenu } from "@/lib/simple-model-menu";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
-import { useStore, type Bot, type InstanceInfo } from "@/state/store";
+import { type Bot, type InstanceInfo } from "@/state/store";
 import { useMenuMotion } from "../MenuMotion";
 import { modelMenuKey, modelMenuPointerMove } from "../model-menu-keys";
 import { SIMPLE_POPOVER_WIDTH } from "../ModelPicker";
 import { InstanceProviderMark } from "../ProviderIcons";
 import { SimpleModelMenu } from "../SimpleModelMenu";
 import { buttonCls, Card, ColRow, RowIcon, RowText, TrashButton } from "./rows";
+import { sameFields, useStoreActions, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 type Backup = NonNullable<Bot["fallback"]>[number];
 
@@ -40,7 +41,7 @@ function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef,
   children: ReactNode;
   "data-panel-action"?: string;
 }) {
-  const { state, dispatch, refreshInstances, refreshModels } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields), dispatch = useStoreDispatch(), { refreshInstances, refreshModels } = useStoreActions();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
@@ -216,7 +217,7 @@ function BackupChooser({ bot, current, exclude, onPick, label, title, buttonRef,
 }
 
 export function BackupAis({ bot, onChange }: { bot: Bot; onChange: (fallback: Backup[]) => void }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
   const chain = bot.fallback ?? [];
   const addRef = useRef<HTMLButtonElement>(null);
   const others = (except: number | null) => new Set([bot.modelSelection, ...chain.filter((_, index) => index !== except)]

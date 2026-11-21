@@ -18,10 +18,8 @@ export function pinnedThreadRows(bots: readonly Bot[], groups: readonly Group[],
     .sort((a, b) => threadRecency(b.task) - threadRecency(a.task));
 }
 
-export function PinnedThreads({ bots, groups, queued, now, current, onOpen, onUnpin }: {
-  bots: readonly Bot[];
-  groups: readonly Group[];
-  queued: Record<string, unknown[]>;
+export function PinnedThreads({ rows, now, current, onOpen, onUnpin }: {
+  rows: readonly AttentionThread[];
   /** The clock each row's last-activity label is relative to. */
   now: number;
   /** The conversation the chat window has open, marked like a selected sidebar row. */
@@ -29,7 +27,6 @@ export function PinnedThreads({ bots, groups, queued, now, current, onOpen, onUn
   onOpen(row: AttentionThread): void;
   onUnpin(row: AttentionThread): void;
 }) {
-  const rows = pinnedThreadRows(bots, groups, queued);
   if (!rows.length) return null;
   return (
     <section data-inbox-pinned aria-label={t("sidebar.pinnedThreads.title")} className="border-b border-hairline/40 px-1.5 py-1.5">

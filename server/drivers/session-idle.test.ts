@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { forgetPresence, personAsks, sawThread, seenWithin } from "../thread-presence.ts";
 import {
-  armedIdleCount, armIdleClose, engineIdleMs, idleEnginesAllowed, keepWarm, PRESTART_IDLE_MS, PRESTART_MOST, prestartAllowed, sessionIdlePolicy, SMALL_BOX_BYTES, SMALL_BOX_IDLE_MS, stopIdleClose, sweepIdleEngines,
+  armedIdleCount, armIdleClose, engineIdleMs, idleEngineCap, idleEnginesAllowed, keepWarm, PRESTART_IDLE_MS, PRESTART_MOST, prestartAllowed, sessionIdlePolicy, SMALL_BOX_BYTES,
+  SMALL_BOX_IDLE_ENGINES, SMALL_BOX_IDLE_MS, stopIdleClose, sweepIdleEngines,
   UNWATCHED_IDLE_MS, warmEngineKeys, type WarmEngine,
 } from "./session-idle.ts";
 
@@ -136,11 +137,11 @@ describe("idle engines on a small box", () => {
     expect(warmEngineKeys()).toEqual(["c"]);
   });
 
-  it("keeps every idle engine on a large box, and forgets one once it closes or works again", () => {
+  it("keeps every idle engine on a large box up to the cap, and forgets one once it closes or works again", () => {
     const [a, b] = [engine(), engine()];
-    keepWarm("a", a.warm, { bytes: DESKTOP }, () => 0, () => Infinity);
-    keepWarm("b", b.warm, { bytes: DESKTOP }, () => 0, () => Infinity);
-    expect([a.state.closed, b.state.closed, warmEngineKeys()]).toEqual([0, 0, []]);
+    keepWarm("a", a.warm, { bytes: DESKTOP }, () => 0, () => Infinity, () => 8);
+    keepWarm("b", b.warm, { bytes: DESKTOP }, () => 0, () => Infinity, () => 8);
+    expect([a.state.closed, b.state.closed, warmEngineKeys()]).toEqual([0, 0, ["a", "b"]]);
     keepWarm("a", a.warm, small, () => 0.6 * GB);
     stopIdleClose("a", null);
     keepWarm("b", b.warm, small, () => 0.1 * GB);
@@ -208,6 +209,91 @@ describe("idle engines on a small box", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("the cap on idle engines", () => {
+  const engine = (threadId: string, busy = false) => {
+    const state = { busy, closed: 0 };
+    return { state, warm: { threadId, idle: () => !state.busy, close: () => { state.closed += 1; } } as WarmEngine };
+  };
+  const capped = (most: number) => (key: string, warm: WarmEngine) => keepWarm(key, warm, { bytes: DESKTOP }, () => 8 * GB, () => Infinity, () => most);
+  afterEach(() => {
+    for (const key of warmEngineKeys()) stopIdleClose(key, null);
+    forgetPresence();
+  });
+
+  it("is one idle engine per 2 GB between four and eight, two on a small box, or OMB_IDLE_ENGINES_MAX", () => {
+    expect(idleEngineCap({}, 4 * GB)).toBe(4);
+    expect(idleEngineCap({}, 8 * GB)).toBe(4);
+    expect(idleEngineCap({}, 12 * GB)).toBe(6);
+    expect(idleEngineCap({}, DESKTOP)).toBe(8);
+    expect(idleEngineCap({}, 64 * GB)).toBe(8);
+    expect(idleEngineCap({}, SMALL_BOX_BYTES)).toBe(SMALL_BOX_IDLE_ENGINES);
+    expect(idleEngineCap({ OMB_IDLE_ENGINES_MAX: "12" }, DESKTOP)).toBe(12);
+    expect(idleEngineCap({ OMB_IDLE_ENGINES_MAX: "1" }, GB)).toBe(1);
+    for (const unusable of ["0", "-2", "2.5", "many", ""]) expect(idleEngineCap({ OMB_IDLE_ENGINES_MAX: unusable }, DESKTOP)).toBe(8);
+  });
+
+  it("closes the least recently used idle engines past the cap, on a box with room to spare", () => {
+    const engines = ["a", "b", "c", "d", "e", "f"].map((id) => [id, engine(id)] as const);
+    for (const [id, { warm }] of engines) capped(3)(id, warm);
+    expect(engines.map(([, { state }]) => state.closed)).toEqual([1, 1, 1, 0, 0, 0]);
+    expect(warmEngineKeys()).toEqual(["d", "e", "f"]);
+  });
+
+  it("never closes or counts an engine with a turn running", () => {
+    const [busy, b, c, d] = [engine("busy"), engine("b"), engine("c"), engine("d")];
+    capped(2)("busy", busy.warm);
+    busy.state.busy = true;
+    capped(2)("b", b.warm);
+    capped(2)("c", c.warm);
+    expect([busy.state.closed, b.state.closed, c.state.closed]).toEqual([0, 0, 0]);
+    capped(2)("d", d.warm);
+    expect([busy.state.closed, b.state.closed, c.state.closed, d.state.closed]).toEqual([0, 1, 0, 0]);
+  });
+
+  it("counts an engine as used again when it goes idle after a turn or a person opens its conversation", () => {
+    const [a, b, c, d, e] = [engine("a"), engine("b"), engine("c"), engine("d"), engine("e")];
+    for (const id of ["a", "b", "c", "d", "e"]) sawThread(id);
+    capped(3)("a", a.warm);
+    capped(3)("b", b.warm);
+    capped(3)("c", c.warm);
+    sawThread("a");
+    capped(3)("d", d.warm);
+    expect([a.state.closed, b.state.closed]).toEqual([0, 1]);
+    capped(3)("c", c.warm);
+    capped(3)("e", e.warm);
+    expect([a.state.closed, c.state.closed, d.state.closed]).toEqual([1, 0, 0]);
+    expect(warmEngineKeys()).toEqual(["d", "c", "e"]);
+  });
+
+  it("closes an engine no person has had in front of them before one they have", () => {
+    const [mine, routine, next] = [engine("mine"), engine("routine"), engine("next")];
+    sawThread("mine");
+    capped(2)("mine", mine.warm);
+    capped(2)("routine", routine.warm);
+    capped(2)("next", next.warm);
+    expect([mine.state.closed, routine.state.closed, next.state.closed]).toEqual([0, 1, 0]);
+  });
+
+  it("never closes the engine that is going idle, even one no person has in front of them", () => {
+    const [mine, theirs, routine] = [engine("mine"), engine("theirs"), engine("routine")];
+    sawThread("mine");
+    sawThread("theirs");
+    capped(2)("mine", mine.warm);
+    capped(2)("theirs", theirs.warm);
+    capped(2)("routine", routine.warm);
+    expect([mine.state.closed, theirs.state.closed, routine.state.closed]).toEqual([1, 0, 0]);
+    expect(warmEngineKeys()).toEqual(["theirs", "routine"]);
+  });
+
+  it("keeps an engine started ahead of a first message as the most recent, and never closes a held one", () => {
+    const [used, held, spare] = [engine("used"), engine("held"), engine("spare")];
+    capped(1)("held", { ...held.warm, held: () => true });
+    capped(1)("used", used.warm);
+    capped(1)("spare", { ...spare.warm, spare: () => true });
+    expect([used.state.closed, held.state.closed, spare.state.closed]).toEqual([1, 0, 0]);
   });
 });
 
