@@ -715,7 +715,8 @@ test("a bot's scroll never reads as the person's", async () => {
     for (const type of ["mouseWheel", "mouseWheel", "gestureScrollBegin", "gestureScrollUpdate"]) contents.emit("input-event", {}, { type, x: 200, y: 300 });
     finish({});
     await tick();
-    advance(100);
+    // Measured: every echo at most 1 ms after the answer.
+    advance(1);
     contents.emit("input-event", {}, { type: "gestureScrollEnd", x: 200, y: 300 });
     advance(1_000);
   }

@@ -56,11 +56,11 @@ test("a bot's wheel is its own with everything Electron reports for it, and a pe
   let clock = 0;
   const echoes = createEchoes(() => clock);
   const done = echoes.expect("Input.dispatchMouseEvent", { type: "mouseWheel", x: 200, y: 300, deltaX: 0, deltaY: 400 });
-  // Measured on Electron 43: two mouseWheel events and the scroll gesture, its end after the command answered.
+  // Measured on Electron 43: two mouseWheel events and the scroll gesture, its end at most 1 ms after the answer.
   for (const type of ["mouseWheel", "mouseWheel", "gestureScrollBegin", "gestureScrollUpdate"]) assert.equal(echoes.take({ type, x: 200, y: 300 }), true, type);
   clock += 4;
   done();
-  clock += 120;
+  clock += 1;
   assert.equal(echoes.take({ type: "gestureScrollUpdate" }), true);
   assert.equal(echoes.take({ type: "gestureScrollEnd" }), true);
   clock += 400;
@@ -75,21 +75,26 @@ test("a person's wheel once the bot's two wheels are in is the person's, though 
   // Electron 43's wheel events carry no point.
   for (const type of ["mouseWheel", "gestureScrollBegin", "gestureScrollUpdate"]) assert.equal(echoes.take({ type }), true, type);
   done();
-  clock += 20;
+  clock += 1;
   assert.equal(echoes.take({ type: "mouseWheel" }), true);
   assert.equal(echoes.take({ type: "gestureScrollEnd" }), true);
-  clock += 30;
+  clock += 2;
   assert.equal(echoes.take({ type: "mouseWheel" }), false);
 });
 
-test("the documented residual: a person's wheel before the bot's second one arrives counts as the bot's", () => {
+test("the window is 20 ms: within it a person's wheel before the bot's second one counts as the bot's, after it the person's", () => {
   let clock = 0;
   const echoes = createEchoes(() => clock);
   const done = echoes.expect("Input.dispatchMouseEvent", { type: "mouseWheel", x: 200, y: 300, deltaX: 0, deltaY: 400 });
   assert.equal(echoes.take({ type: "mouseWheel" }), true);
   done();
-  clock += 100;
+  clock += 15;
   assert.equal(echoes.take({ type: "mouseWheel" }), true);
-  clock += 250;
+  const again = echoes.expect("Input.dispatchMouseEvent", { type: "mouseWheel", x: 200, y: 300, deltaX: 0, deltaY: 400 });
+  assert.equal(echoes.take({ type: "mouseWheel" }), true);
+  again();
+  clock += 25;
+  // The bot's second wheel never came in time: a person's wheel 25 ms after is the person's.
   assert.equal(echoes.take({ type: "mouseWheel" }), false);
+  assert.equal(echoes.take({ type: "gestureScrollBegin" }), false);
 });

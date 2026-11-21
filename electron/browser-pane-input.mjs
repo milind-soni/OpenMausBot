@@ -6,13 +6,13 @@
 /** Slack after a command answers, for an event Electron reports late. */
 export const ECHO_SLACK_MS = 8;
 /**
- * A wheel's scroll gesture outlives its command: one dispatched wheel is reported as exactly two mouseWheel events and
- * a gestureScrollBegin, Update and End (measured on Electron 43: 50 wheels for 25 dispatched), the end once Chromium
- * decides the scroll is over. Electron's wheel events carry no point, so they are matched by count and time: once both
- * of a bot's wheels are seen, the next is the person's. Known residual: a person's wheel within this long after a bot
- * scroll, before the bot's second wheel arrives, counts as the bot's.
+ * One dispatched wheel is reported as exactly two mouseWheel events and a gestureScrollBegin, Update and End (measured
+ * on Electron 43: 50 wheels for 25 dispatched, every one at most 1 ms after the command answered). Electron's wheel
+ * events carry no point, so they are matched by count and time: once both of a bot's wheels are seen, the next is the
+ * person's. Known residual: a person's wheel within this long after a bot scroll, before the bot's second wheel
+ * arrives, counts as the bot's.
  */
-export const SCROLL_SLACK_MS = 300;
+export const SCROLL_SLACK_MS = 20;
 const SCROLL_GESTURES = ["gestureScrollBegin", "gestureScrollUpdate", "gestureScrollEnd", "gestureFlingStart", "gestureFlingCancel"];
 /** How far apart a dispatched point and its reported event may be, in CSS pixels. */
 const POSITION_SLACK = 2;
