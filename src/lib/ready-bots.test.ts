@@ -135,6 +135,7 @@ describe("the checked-work pair", () => {
     for (const line of [
       "Change only what the task names. Never alter a fact, event, name, number, date, description or quote you were not asked to change",
       "list every change you made",
+      "in a new folder named checks/<a short name for the task> in your working folder, never beside the person's own files",
       "request.md with the person's request word for word, source.md with the original text exactly as given",
       "When the person attached the source, pass their file instead of copying it into source.md.",
       "pick the teammate whose role is Checker",
