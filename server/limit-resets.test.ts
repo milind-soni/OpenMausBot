@@ -263,6 +263,58 @@ describe("LimitResetClock", () => {
     expect(fixture.limit("claude")).toMatchObject({ usedPercent: 91, resetsAt: NOW + 5 * HOUR });
   });
 
+  it("keeps the last reading through a failed read, for an hour at most and only until one of its windows resets", async () => {
+    const failed: PlanProviderRow = { ...claude([0, null], [0, null]), ok: false, error: "Claude's usage could not be reached",
+      fiveHour: { available: false, remainingPercent: null, usedPercent: null, resetsAt: null }, weekly: { available: false, remainingPercent: null, usedPercent: null, resetsAt: null } };
+    let next = report(claude([38, NOW + 3 * HOUR], [12, NOW + 90 * HOUR]));
+    const { instance, at } = clock({ loadUsage: async () => next });
+    await instance.refresh(true);
+    expect(instance.limit("claude")).toMatchObject({ usedPercent: 38 });
+    expect(instance.limit("claude")?.checkedAt).toBeUndefined();
+
+    next = report(failed);
+    at(NOW + 10 * 60_000);
+    await instance.refresh(true);
+    expect(instance.report().checkedAt).toBe(NOW + 10 * 60_000);
+    expect(instance.limit("claude")).toMatchObject({ usedPercent: 38, window: "5-hour", checkedAt: NOW, windows: [
+      { window: "5-hour", usedPercent: 38, resetsAt: NOW + 3 * HOUR }, { window: "weekly", usedPercent: 12, resetsAt: NOW + 90 * HOUR },
+    ] });
+    at(NOW + HOUR);
+    await instance.refresh(true);
+    expect(instance.limit("claude")).toMatchObject({ usedPercent: 38, checkedAt: NOW });
+    at(NOW + HOUR + 60_000);
+    await instance.refresh(true);
+    expect(instance.report().engines).toEqual([]);
+
+    next = report(claude([100, NOW + 2 * HOUR], [12, NOW + 90 * HOUR]));
+    await instance.refresh(true);
+    expect(instance.limit("claude")).toMatchObject({ usedPercent: 100, blocked: true });
+    expect(instance.blockedUntil("claude")).toBe(NOW + 2 * HOUR);
+    next = report(failed);
+    await instance.refresh(true);
+    expect(instance.limit("claude")).toMatchObject({ usedPercent: 100, blocked: false, checkedAt: NOW + HOUR + 60_000 });
+    // Shown only: a kept reading never holds the engine, as before.
+    expect(instance.blockedUntil("claude")).toBeNull();
+    next = report(failed);
+    at(NOW + 2 * HOUR);
+    await instance.refresh(true);
+    expect(instance.report().engines).toEqual([]);
+  });
+
+  it("drops an engine whose account is no longer read, failed read or not", async () => {
+    let current: Array<(typeof accounts)[number] & { noUsage?: true }> = accounts;
+    let next = report(claude([38, NOW + 3 * HOUR], [12, NOW + 90 * HOUR]));
+    const instance = new LimitResetClock({ accounts: () => current, now: () => NOW, loadUsage: async () => next });
+    await instance.refresh(true);
+    next = report();
+    await instance.refresh(true);
+    expect(instance.report().engines).toEqual([]);
+    next = report(claude([38, NOW + 3 * HOUR], [12, NOW + 90 * HOUR]));
+    await instance.refresh(true);
+    current = [{ ...accounts[0]!, noUsage: true }];
+    expect(instance.report().engines).toEqual([]);
+  });
+
   it("reads usage once an account is added after a refresh that had none", async () => {
     const load = vi.fn(async () => report(claude([50, NOW + HOUR], [5, NOW + 90 * HOUR])));
     let current: typeof accounts = [];
