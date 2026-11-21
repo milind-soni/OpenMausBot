@@ -38,7 +38,7 @@ type Sums = { server: Record<CapPeriod, Used>; bots: Map<string, Record<CapPerio
 /** One month file as far as it was read: running sums for its month and for `day`, and how many bytes they cover. The
  * ledger only grows by whole lines, so a later look reads just what was appended, and only when the file changed. */
 type Read = {
-  at: number; day: string; month: string; size: number; mtimeMs: number; sums: Sums;
+  at: number; day: string; month: string; size: number; mtimeMs: number; fileId: string; sums: Sums;
   /** Every row counted, by ledger key. */
   keys: Set<string>;
   /** Rows counted from memory when their append landed, which the file has not yet been read past. */
@@ -97,22 +97,24 @@ function countLines(read: Read, bytes: Buffer): number {
   return end;
 }
 
-function statOf(file: string): { size: number; mtimeMs: number } {
+function statOf(file: string): { size: number; mtimeMs: number; fileId: string } {
   try {
-    const { size, mtimeMs } = statSync(file);
-    return { size, mtimeMs };
+    const { size, mtimeMs, dev, ino } = statSync(file);
+    return { size, mtimeMs, fileId: `${dev}:${ino}` };
   } catch {
-    return { size: 0, mtimeMs: 0 };
+    return { size: 0, mtimeMs: 0, fileId: "" };
   }
 }
 
 /** Reads the month file from the start. */
 function readMonth(dataDir: string, now: Date): Read {
-  const read: Read = { at: now.getTime(), day: dayKey(now), month: monthKeyOf(now), size: 0, mtimeMs: 0, sums: { server: zero(), bots: new Map() }, keys: new Set(), fromMemory: new Set() };
+  const read: Read = { at: now.getTime(), day: dayKey(now), month: monthKeyOf(now), size: 0, mtimeMs: 0, fileId: "", sums: { server: zero(), bots: new Map() }, keys: new Set(), fromMemory: new Set() };
   const file = usageFileFor(dataDir, now);
   let bytes: Buffer;
   try { bytes = readFileSync(file); } catch { return read; }
-  read.mtimeMs = statOf(file).mtimeMs;
+  const { mtimeMs, fileId } = statOf(file);
+  read.mtimeMs = mtimeMs;
+  read.fileId = fileId;
   read.size = countLines(read, bytes);
   return read;
 }
@@ -120,10 +122,10 @@ function readMonth(dataDir: string, now: Date): Read {
 /** Brings a read up to date: nothing when the file is as it was, the appended bytes when it grew, all of it otherwise. */
 function refresh(dataDir: string, read: Read, now: Date): Read {
   const file = usageFileFor(dataDir, now);
-  const { size, mtimeMs } = statOf(file);
+  const { size, mtimeMs, fileId } = statOf(file);
   read.at = now.getTime();
-  if (size === read.size && mtimeMs === read.mtimeMs) return read;
-  if (size < read.size) return readMonth(dataDir, now);
+  if (size === read.size && mtimeMs === read.mtimeMs && fileId === read.fileId) return read;
+  if (size <= read.size || fileId !== read.fileId) return readMonth(dataDir, now);
   let fd: number | undefined;
   try {
     fd = openSync(file, "r");
