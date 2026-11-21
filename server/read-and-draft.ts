@@ -44,7 +44,7 @@ const ROUTES: ReadonlySet<string> = new Set([
 /** Composio's meta tools that only describe tools; connecting an account waits for a person, so it is not here. */
 const DISCOVERY: ReadonlySet<string> = new Set(["COMPOSIO_SEARCH_TOOLS", "COMPOSIO_GET_TOOL_SCHEMAS"]);
 /** A read verb does not make a tool safe here: a read on another app can take a URL and carry the run's text to it. */
-const READ_APPS = ["GMAIL_", "GOOGLECALENDAR_"] as const;
+const READ_APPS = ["GMAIL_", "OUTLOOK_", "GOOGLECALENDAR_"] as const;
 export const DRAFT_TOOL = "GMAIL_CREATE_EMAIL_DRAFT";
 /** Fields of a draft that would add someone the reply is not to. */
 const OTHER_RECIPIENTS = ["cc", "bcc", "extra_recipients", "recipients"] as const;
