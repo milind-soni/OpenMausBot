@@ -440,15 +440,15 @@ function grokContractArgs(args: string[], turn: SendTurnInput): string[] {
   return args.map((arg, index) => index > 0 && (args[index - 1] === "-m" || args[index - 1] === "--reasoning-effort") ? "set" : arg);
 }
 
-/** grok 1.0.x can leave session/load unanswered once it has replayed the history, which it streams from its own session
- * files with no pause between updates: two seconds without one means the replay is over. */
+/** grok 1.0.x can leave session/load unanswered once it has replayed the history. The replay is taken to be one burst
+ * from its own session files, so two seconds without an update ends it. */
 const GROK_LOAD_REPLAY_QUIET_MS = 2_000;
 
 /** grok 1.0.41 reports effort as the `reasoning_effort` select (category `thought_level`) of session/new's and
  * session/load's configOptions, and session/set_config_option answers with the whole updated list. A load that went
  * quiet reported no options, so the documented id is tried. */
 async function setGrokEffort(
-  request: (method: string, params: unknown) => Promise<any>,
+  request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>,
   sessionId: string,
   effort: string,
   configOptions: ReadonlyArray<{ id?: unknown; category?: unknown }>,
@@ -457,7 +457,7 @@ async function setGrokEffort(
   const configId = typeof offered === "string" ? offered : "reasoning_effort";
   let reply: { configOptions?: Array<{ id?: unknown; currentValue?: unknown }> } | undefined;
   try {
-    reply = await request("session/set_config_option", { sessionId, configId, value: effort });
+    reply = await request("session/set_config_option", { sessionId, configId, value: effort }, 15_000);
   } catch (e) {
     throw new LiveSwitchRefused(`Grok rejected effort "${effort}": ${(e as Error).message}`);
   }

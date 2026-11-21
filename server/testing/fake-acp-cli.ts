@@ -56,7 +56,8 @@
 //   FAKE_ACP_GROK_EFFORT=1  sessions report grok 1.0.41's `reasoning_effort` select (starting on --reasoning-effort, else
 //     high) and session/set_config_option changes it; =refuse answers that set with -32602
 //   FAKE_ACP_GROK_LOGIN  what `models` says of the login, as grok 1.0.25 prints it: signed-in | signed-out | refreshes (signed
-//     out once, then signed in, as a token refreshed by the first call) | hang; FAKE_ACP_GROK_LOGIN_COUNT counts the calls
+//     out once, then signed in, as a token refreshed by the first call) | hang | signed-out-hang (says signed out, then hangs
+//     as a slow token refresh would); FAKE_ACP_GROK_LOGIN_COUNT counts the calls
 //   FAKE_ACP_MODELS  model ids: opencode-shaped configOptions and set_config_option (-32602 for others);
 //     a new session starts on AGY_ACP_DEFAULT_MODEL when set, taken unchecked as agy_acp_server 1.1.1 does
 //   FAKE_ACP_MODELS_FILE  the same list, read once at startup, as `opencode acp` never re-reads a login
@@ -415,13 +416,15 @@ if (argv[0] === "models" && grokLogin) {
   const countFile = process.env.FAKE_ACP_GROK_LOGIN_COUNT;
   const calls = countFile && existsSync(countFile) ? Number(readFileSync(countFile, "utf8")) || 0 : 0;
   if (countFile) writeFileSync(countFile, String(calls + 1));
-  if (grokLogin === "hang") setInterval(() => {}, 1_000);
-  else {
-    const signedIn = grokLogin === "signed-in" || (grokLogin === "refreshes" && calls > 0);
-    console.log([signedIn ? "You are logged in with grok.com." : "You are not authenticated.",
-      "Default model: grok-4.5", "Available models:", "  - grok-4.5 (default)"].join("\n"));
-    process.exit(0);
+  if (grokLogin === "hang" || grokLogin === "signed-out-hang") {
+    if (grokLogin === "signed-out-hang") console.log("You are not authenticated.");
+    setInterval(() => {}, 1_000);
+    await new Promise(() => {});
   }
+  const signedIn = grokLogin === "signed-in" || (grokLogin === "refreshes" && calls > 0);
+  console.log([signedIn ? "You are logged in with grok.com." : "You are not authenticated.",
+    "Default model: grok-4.5", "Available models:", "  - grok-4.5 (default)"].join("\n"));
+  process.exit(0);
 }
 const catalogLock = process.env.FAKE_ACP_MODELS_LOCK;
 if (catalogLock && (argv[0] === "models" || argv[0] === "acp") && !argv.includes("--refresh") && process.env.OPENCODE_DISABLE_MODELS_FETCH !== "1") {

@@ -38,6 +38,7 @@ describe("reading `grok models`", () => {
     ["Not logged in. Run `grok login`.", "signed-out"],
     ["Your auth token is invalid or expired. Run `grok login` to re-authenticate.", "signed-out"],
     ["Token expired. Run `grok login` to re-authenticate.", "signed-out"],
+    ["\u001b[32m  You are logged in with grok.com.\u001b[0m", "signed-in"],
     ["Available models:\n  - grok-4.5 (default)", "unknown"],
     ["", "unknown"],
   ])("%j is %s", (output, login) => {
@@ -64,12 +65,13 @@ describe("the Grok sign-in check", () => {
     expect(calls()).toBe(2);
   });
 
-  it("keeps the file's answer when Grok does not answer in time", async () => {
-    const { env, authFile } = home("hang");
+  it.each(["hang", "signed-out-hang"])("keeps the file's answer when `grok models` does not finish in time (%s)", async (login) => {
+    const { env, authFile, calls } = home(login);
     const startedAt = Date.now();
-    expect(await grokLoginCheck({ timeoutMs: 1_500 })(FAKE_CLI, env, authFile)).toBe(true);
-    expect(Date.now() - startedAt).toBeLessThan(15_000);
-  });
+    expect(await grokLoginCheck({ timeoutMs: 2_000 })(FAKE_CLI, env, authFile)).toBe(true);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(1_000);
+    expect(calls()).toBe(1);
+  }, 30_000);
 
   it("is signed out without auth.json, and never asks", async () => {
     const { env, authFile, calls } = home("signed-in", false);

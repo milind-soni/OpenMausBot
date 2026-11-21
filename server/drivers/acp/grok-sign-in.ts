@@ -11,8 +11,8 @@ interface Probe { stamp: string; at: number; login: Promise<GrokLogin>; settled?
  * deployment key." or "You are not authenticated.", and exits 0 either way; its errors say "Not logged in. Run `grok login`.",
  * "Token expired. …" or "Your auth token is invalid or expired. …". */
 export function readGrokModelsLogin(output: string): GrokLogin {
-  if (/^You are (?:logged in|using XAI_API_KEY|authenticated via)\b/im.test(output)) return "signed-in";
-  if (/^You are not authenticated\b|\bnot logged in\b|\btoken (?:is invalid or )?expired\b/im.test(output)) return "signed-out";
+  if (/\bYou are (?:logged in|using XAI_API_KEY|authenticated via)\b/i.test(output)) return "signed-in";
+  if (/\bYou are not authenticated\b|\bnot logged in\b|\btoken (?:is invalid or )?expired\b/i.test(output)) return "signed-out";
   return "unknown";
 }
 

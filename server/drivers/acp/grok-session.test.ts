@@ -147,12 +147,14 @@ describe("Grok changes model and effort inside the running session", () => {
     }
   });
 
-  it("starts a new process when a narrowed tool profile names the model", async () => {
-    const { instance, recorder, processes, ask } = await start("grok-live-narrowed", { FAKE_ACP_GROK_VERSION: "1.0.41" });
+  it("keeps the model in the process contract when a narrowed tool profile names it", async () => {
+    const { instance, recorder, processes, ask } = await start("grok-live-narrowed", {
+      FAKE_ACP_GROK_VERSION: "1.0.41", FAKE_ACP_SESSION_MODELS: "grok-4.5|Grok 4.5,grok-4.6|Grok 4.6",
+    });
     const threadId = "t-grok-live-narrowed";
     try {
       const toolScope = { allow: ["native:read_file"] };
-      await ask({ threadId, model: "grok-4.5", toolScope });
+      expect(await ask({ threadId, model: "grok-4.5", toolScope })).toMatchObject({ ok: true });
       await ask({ threadId, model: "grok-4.6", toolScope, resumeCursor: "fake-acp-session" });
       expect(processes()).toBe(2);
     } finally {
