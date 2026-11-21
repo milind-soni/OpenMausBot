@@ -148,7 +148,7 @@ describe("switching a bot to a model with no terminal says so once, only when it
     host.modelSwitched("b1", "t1", { instanceId: "claude", model: "sonnet" }, { instanceId: "compat", model: "gpt-5-mini" }, true);
     expect(notices).toEqual([["t1", "gpt-5-mini can't run commands on My Cloud by itself. Ledger has 2 routines; they will only be able to do work that needs no commands."]]);
     host.modelSwitched("b1", "t2", { instanceId: "compat", model: "gpt-5-mini" }, { instanceId: "claude", model: "sonnet" }, true);
-    host.modelSwitched("b1", "t3", { instanceId: "compat", model: "gpt-5-mini" }, { instanceId: "compat", model: "gpt-5-mini" }, true);
+    host.modelSwitched("b1", "t-same", { instanceId: "compat", model: "gpt-5-mini" }, { instanceId: "compat", model: "gpt-5-mini" }, true);
     expect(notices, "back to a terminal, or no change at all").toHaveLength(1);
     host.modelSwitched("b1", "t4", { instanceId: "claude", model: "sonnet" }, { instanceId: "compat", model: "gpt-5-mini" }, false);
     expect(notices[1], "a conversation's own model: its routines keep the bot's").toEqual(["t4", "gpt-5-mini can't run commands on My Cloud by itself, so Ledger can't run scripts or programs here anymore."]);
