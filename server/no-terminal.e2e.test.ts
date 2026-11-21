@@ -79,7 +79,7 @@ beforeAll(async () => {
       return res.end(frame({ tool_calls: [call] }, "tool_calls") + "data: [DONE]\n\n");
     }
     if (user.includes("Run sync.py") && tools === 1) {
-      const names = (request.tools ?? []).map((tool) => tool.function.name), direct = names.find((name) => /list_bots$/u.test(name)), bridge = names.find((name) => /use_tool$/u.test(name));
+      const names = (request.tools ?? []).map((tool) => tool.function.name), direct = names.find((name) => name.endsWith("list_bots")), bridge = names.find((name) => name.endsWith("use_tool"));
       const call = { index: 0, id: "look-call", type: "function", function: direct ? { name: direct, arguments: "{}" } : { name: bridge, arguments: JSON.stringify({ name: "list_bots", arguments: {} }) } };
       return res.end(frame({ tool_calls: [call] }, "tool_calls") + "data: [DONE]\n\n");
     }
