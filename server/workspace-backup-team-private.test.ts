@@ -46,6 +46,8 @@ function teamData(root: string): void {
   file(join(root, "task-workspaces", "bot", "main", "plan.md"), "shared plan");
   file(join(root, "task-workspaces", "bot", "bob-chat", "draft.md"), "Bob's draft");
   file(join(root, "people", BOB, "about.json"), "{\"aboutMe\":\"interviewing elsewhere\"}");
+  file(join(root, "bots", "bot", "data.duckdb"), "team tables");
+  file(join(root, "bots", "bobs-own", "data.duckdb"), "Bob's own tables");
   const db = new DatabaseSync(join(root, "messages.db"));
   db.exec("CREATE TABLE messages(thread_id TEXT, id TEXT, at INTEGER, role TEXT, kind TEXT, text TEXT, json TEXT, PRIMARY KEY(thread_id,id)); CREATE TABLE thread_state(thread_id TEXT PRIMARY KEY, active_leaf_id TEXT);"
     + " CREATE TABLE chat_followups(id TEXT PRIMARY KEY, kind TEXT, owner_id TEXT, thread_id TEXT, send_id TEXT, status TEXT, payload TEXT);"
@@ -102,6 +104,9 @@ describe("what a Team Cloud's export leaves out (the private sentence: not the O
     expect(omittedAsTeamPrivate("task-workspaces/bot/bob-chat/draft.md", privacy)).toBe(true);
     expect(omittedAsTeamPrivate("task-workspaces/bot/main/plan.md", privacy)).toBe(false);
     expect(omittedAsTeamPrivate(`people/${BOB}/about.json`, privacy)).toBe(true);
+    // A member's own bot's Data tables are theirs; the team's bot's go with the team.
+    expect(omittedAsTeamPrivate("bots/bobs-own/data.duckdb", privacy)).toBe(true);
+    expect(omittedAsTeamPrivate("bots/bot/data.duckdb", privacy)).toBe(false);
     expect(omittedAsTeamPrivate("peoplesoft/x", privacy)).toBe(false);
     for (const kept of ["events/bob-chat.ndjson", "native/bob-chat.ndjson", `memory-journal/bot--member-${BOB}.ndjson`]) expect(omittedAsTeamPrivate(kept, privacy), kept).toBe(true);
     for (const shared of ["events/main.ndjson", "native/main.ndjson", "memory-journal/bot.ndjson", "memory-journal/bot--room-room.ndjson"]) expect(omittedAsTeamPrivate(shared, privacy), shared).toBe(false);
@@ -160,6 +165,8 @@ describe("what a Team Cloud's export leaves out (the private sentence: not the O
     expect(existsSync(join(team.data, "attachments", "both.png"))).toBe(true);
     expect(existsSync(join(team.data, "attachments", "avatar.png"))).toBe(true);
     expect(existsSync(join(team.data, "workspaces", "bobs-own"))).toBe(false);
+    expect(textOf(join(team.data, "bots", "bot", "data.duckdb"))).toBe("team tables");
+    expect(existsSync(join(team.data, "bots", "bobs-own"))).toBe(false);
     expect(table(join(team.data, "messages.db"), "SELECT thread_id AS id FROM messages").map((row) => row.id).sort()).toEqual(["main", "outside-thread", "room-thread"]);
     expect(table(join(team.data, "runtime.db"), "SELECT id FROM assignments").map((row) => row.id)).toEqual(["as-team"]);
     expect(textOf(join(team.data, "messages.db")).toLowerCase()).not.toContain("secret");

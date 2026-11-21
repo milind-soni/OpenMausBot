@@ -79,6 +79,9 @@ export interface DataEngine {
   onInstalledChange(listener: () => void): void;
   forBot(botId: string): Promise<BotDatabase>;
   deleteBot(botId: string): Promise<void>;
+  /** Closes every bot's database, its WAL written into the file, so its files are at rest until its next statement (a
+   * full backup copies them then). Returns the bots whose database a statement that did not stop still holds. */
+  release(): Promise<string[]>;
   closeAll(): Promise<void>;
 }
 
