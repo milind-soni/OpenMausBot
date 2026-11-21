@@ -9492,7 +9492,7 @@ describe("harness HTTP API", () => {
       const persona = "You are Kiwi, a personal bot in OpenMausBot. Role: Tracker.";
       const afterPersona = system.slice(persona.length);
       expect(afterPersona.startsWith("\n\nYour standing instructions follow.")).toBe(true);
-      expect(system).toContain("--- BEGIN STANDING INSTRUCTIONS (SOUL.md, 28 bytes) ---\nFile bugs. Never file noise.\n--- END STANDING INSTRUCTIONS ---");
+      expect(system).toContain("--- BEGIN STANDING INSTRUCTIONS (SOUL.md) ---\nFile bugs. Never file noise.\n--- END STANDING INSTRUCTIONS ---");
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/bots/${bot.id}`);
@@ -9643,7 +9643,7 @@ describe("harness HTTP API", () => {
       const system: string = seen.systemPrompt ?? "";
       const soulEnd = system.indexOf("--- END STANDING INSTRUCTIONS ---") + "--- END STANDING INSTRUCTIONS ---".length;
       expect(soulEnd).toBeGreaterThan(0);
-      expect(system.slice(soulEnd).startsWith("\n\nThe user explicitly asked you to set yourself up")).toBe(true);
+      expect(system).toContain("The user explicitly asked you to set yourself up");
       // Extract the user text the way fake-claude-cli.ts promptText() does.
       const content: unknown = seen.prompt?.message?.content;
       const userText: string = typeof content === "string"

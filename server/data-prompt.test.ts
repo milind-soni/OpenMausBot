@@ -32,13 +32,13 @@ describe("the Data section of the prompt", () => {
     expect(botHasData("charted", at)).toBe(true);
   });
 
-  it("is the guide where Data is in use and a one-line pointer elsewhere, chosen on a conversation's first turn and kept", () => {
+  it("keeps a constant pointer across conversations to avoid prefix split", () => {
     const prompt = dataPrompts({ hasData: (botId) => botId === "user-of-data" });
     expect(prompt("fresh", "t1", "Say hi.")).toBe(DATA_TOOLS_POINTER);
     expect(prompt("fresh", "t1", "Load q3.csv"), "a warm engine is not relaunched by it").toBe(DATA_TOOLS_POINTER);
-    expect(prompt("fresh", "t2", "Load q3.csv")).toBe(BUILT_IN_DATA_SYSTEM_PROMPT);
-    expect(prompt("fresh", "t2", "Thanks.")).toBe(BUILT_IN_DATA_SYSTEM_PROMPT);
-    expect(prompt("user-of-data", "t3", "Say hi.")).toBe(BUILT_IN_DATA_SYSTEM_PROMPT);
+    expect(prompt("fresh", "t2", "Load q3.csv")).toBe(DATA_TOOLS_POINTER);
+    expect(prompt("fresh", "t2", "Thanks.")).toBe(DATA_TOOLS_POINTER);
+    expect(prompt("user-of-data", "t3", "Say hi.")).toBe(DATA_TOOLS_POINTER);
     // the pointer names every tool the guide does, in far fewer bytes
     for (const tool of ["data_load", "data_describe", "data_sql", "data_show", "data_export"]) expect(DATA_TOOLS_POINTER).toContain(tool);
     expect(Buffer.byteLength(DATA_TOOLS_POINTER)).toBeLessThan(Buffer.byteLength(BUILT_IN_DATA_SYSTEM_PROMPT) / 5);

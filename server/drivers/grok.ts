@@ -46,6 +46,7 @@ export const GrokDriver: ProviderDriver<GrokConfig> = {
       apiKey,
       apiUrl: config.url,
       tools: config.tools,
+      headers: (threadId?: string): Record<string, string> => (threadId ? { "x-grok-conv-id": threadId } : {}),
       models: () => MODELS,
       requestBody: (model, messages, stream) => ({ model, messages, stream }),
       httpErrorLabel: "xAI",

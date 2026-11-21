@@ -689,7 +689,7 @@ describe("Chat MCP session", () => {
       const f = bigFixture();
       const folder = workFolder();
       const elsewhere = workFolder();
-      symlinkSync(elsewhere, join(folder, SAVED_RESULTS_FOLDER));
+      symlinkSync(elsewhere, join(folder, SAVED_RESULTS_FOLDER), process.platform === "win32" ? "junction" : undefined);
       const result = await (await f.mount(false, false, undefined, folder)).execute("audit_write", { value: "test" }, f.controller.signal);
       expect(readdirSync(elsewhere)).toEqual([]);
       expect(result.text).toContain("[MCP result truncated at 50KB; request less output.]");
@@ -1667,5 +1667,29 @@ describe("Chat MCP servers starting in the background", () => {
       expect(names(session)).toContain("slow_write");
       expect(await session.join()).toBeUndefined();
     }
+  });
+
+  it("preserves tool definitions order and ensures joinLateChatTools preserves prefix order", async () => {
+    const multi = fixture(`if (message.method === "tools/list") {
+      reply(message, { tools: [
+        { name: "zebra", description: "Z", inputSchema: schema },
+        { name: "apple", description: "A", inputSchema: schema },
+        { name: "mango", description: "M", inputSchema: schema },
+      ] });
+      continue;
+    }`);
+    const session = await mountChatTools({ custom: { zoo: multi.server } }, multi.controller.signal);
+    sessions.push(session);
+    expect(names(session)).toEqual(["zoo_zebra", "zoo_apple", "zoo_mango"]);
+
+    const ask: ChatToolDefinition = {
+      type: "function",
+      function: { name: "ask_user", description: "ask", parameters: { type: "object" } },
+    };
+    session.definitions.push(ask);
+    expect(names(session)).toEqual(["zoo_zebra", "zoo_apple", "zoo_mango", "ask_user"]);
+    await joinLateChatTools(session, [ask]);
+    expect(names(session).slice(0, 3)).toEqual(["zoo_zebra", "zoo_apple", "zoo_mango"]);
+    expect(names(session).at(-1)).toBe("ask_user");
   });
 });

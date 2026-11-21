@@ -62,7 +62,8 @@ const PI_MODEL_UPDATE_ARGS = ["update", "--models", "--no-approve"];
 /** omp's RPC transport caps a frame at 1 MiB and chunks bigger ones only after the client
  *  negotiates protocol 2. Vanilla pi has no handshake frame to wait for. */
 const PI_NEGOTIATE_FRAME = { id: "negotiate", type: "negotiate_protocol", protocolVersion: 2 };
-const PI_PROMPT_RE_ANCHOR_TURNS = 8;
+/** Only genuine compaction drops the receipt to trigger re-anchoring; blind periodic re-anchoring is disabled. */
+const PI_PROMPT_RE_ANCHOR_TURNS = 0;
 /** How long to wait after a finished turn_end for agent_end, which some runtimes never send. */
 const PI_AGENT_END_GRACE_MS = 60_000;
 /** A prompt sent before pi answers new_session or switch_session runs on a session pi then replaces, so the turn waits

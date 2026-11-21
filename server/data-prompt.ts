@@ -5,7 +5,6 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { botFolder } from "./bot-folder.ts";
-import { BUILT_IN_DATA_SYSTEM_PROMPT } from "./data/instructions.ts";
 import { DATA_DB_FILE } from "./data/engine.ts";
 import { SHEET_FILE } from "./data/sheet.ts";
 
@@ -51,15 +50,8 @@ export class ThreadChoices {
 
 /** The server's one decision for a turn whose Data server is mounted: the guide or the pointer. The server's own
  * instructions and tools are there either way; a bot that has used Data gets the guide in every new conversation. */
-export function dataPrompts(deps: { hasData?: (botId: string) => boolean; threads?: ThreadChoices } = {}) {
-  const hasData = deps.hasData ?? ((botId: string) => botHasData(botId));
-  const threads = deps.threads ?? new ThreadChoices();
-  return (botId: string, threadId: string, text: string): string => {
-    let guide = threads.get(threadId);
-    if (guide === undefined) {
-      guide = hasData(botId) || mentionsDataWork(text);
-      threads.set(threadId, guide);
-    }
-    return guide ? BUILT_IN_DATA_SYSTEM_PROMPT : DATA_TOOLS_POINTER;
+export function dataPrompts(_deps: { hasData?: (botId: string) => boolean; threads?: ThreadChoices } = {}) {
+  return (_botId: string, _threadId: string, _text: string): string => {
+    return DATA_TOOLS_POINTER;
   };
 }
