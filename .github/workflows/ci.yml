@@ -750,11 +750,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Let Chrome build its sandbox on this runner, and give it a display
         # Ubuntu 24.04 restricts unprivileged user namespaces; Chrome's own
-        # documented fix for 23.10+. The sandbox itself stays on.
+        # documented fix for 23.10+. The sandbox itself stays on. Xvnc and
+        # bubblewrap run the desktop view's suite (server/browser/desktop): its
+        # own private displays, and Chrome's lock-down policy for each display's
+        # Chrome alone, which the suite proves from Chrome's own address bar.
         if: runner.os == 'Linux'
         run: |
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-          sudo apt-get update && sudo apt-get install -y xvfb
+          sudo apt-get update && sudo apt-get install -y xvfb tigervnc-standalone-server bubblewrap
       - name: Keep the runner's Google Chrome as it is for the whole run
         # The macOS image's Chrome is older than Google's release, and about
         # 30 s after Chrome first runs it starts its bundled GoogleUpdater,
@@ -772,7 +775,7 @@ jobs:
           OMB_CDP_E2E: "1"
         shell: bash
         run: |
-          run=(pnpm exec vitest run server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e --reporter=verbose --silent=false --reporter=github-actions)
+          run=(pnpm exec vitest run server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e server/browser/desktop/desktop.e2e --reporter=verbose --silent=false --reporter=github-actions)
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a "${run[@]}"; else "${run[@]}"; fi
       - name: The runner's Google Chrome did not change during the run
         if: ${{ !cancelled() && runner.os == 'macOS' }}
