@@ -10123,6 +10123,7 @@
   "server.reach.placeMoved": "{bot} 現在在{to}上工作，這是與{from}不同的機器。它在{from}上的檔案仍然在那裡，沒有遺失任何東西。",
   "server.reach.placeMovedNew": "{bot} 現在在{to}上工作，這是一台新的、從空白開始的機器。它在{from}上的檔案仍然在那裡，沒有遺失任何東西。",
   "server.reach.place.myCloud": "My Cloud",
+  "server.reach.place.thisCloud": "這個 Cloud",
   "server.reach.place.thisComputer": "這台電腦",
   "server.reach.place.cloudComputer": "雲端電腦",
   "server.reach.place.localVm": "本機虛擬機器",

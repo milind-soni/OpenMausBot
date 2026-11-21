@@ -10660,6 +10660,7 @@
   "server.reach.placeMoved": "{bot} now works on {to}, a different machine from {from}. Its files on {from} are still there; nothing was lost.",
   "server.reach.placeMovedNew": "{bot} now works on {to}, a new one that starts empty. Its files on {from} are still there; nothing was lost.",
   "server.reach.place.myCloud": "My Cloud",
+  "server.reach.place.thisCloud": "this Cloud",
   "server.reach.place.thisComputer": "this computer",
   "server.reach.place.cloudComputer": "the cloud computer",
   "server.reach.place.localVm": "the Local VM",

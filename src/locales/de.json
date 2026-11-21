@@ -4027,6 +4027,7 @@
   "server.reach.placeMoved": "{bot} arbeitet jetzt auf {to}, einer anderen Maschine als {from}. Seine Dateien auf {from} sind noch da; nichts ging verloren.",
   "server.reach.placeMovedNew": "{bot} arbeitet jetzt auf {to}, einem neuen, der leer beginnt. Seine Dateien auf {from} sind noch da; nichts ging verloren.",
   "server.reach.place.myCloud": "My Cloud",
+  "server.reach.place.thisCloud": "dieser Cloud",
   "server.reach.place.thisComputer": "diesem Computer",
   "server.reach.place.cloudComputer": "dem Cloud-Computer",
   "server.reach.place.localVm": "der lokalen VM",

@@ -10064,6 +10064,7 @@
   "server.reach.placeMoved": "{bot} 现在在{to}上工作，这是与{from}不同的机器。它在{from}上的文件仍然在那里，没有丢失任何东西。",
   "server.reach.placeMovedNew": "{bot} 现在在{to}上工作，这是一台新的、从空白开始的机器。它在{from}上的文件仍然在那里，没有丢失任何东西。",
   "server.reach.place.myCloud": "My Cloud",
+  "server.reach.place.thisCloud": "这个 Cloud",
   "server.reach.place.thisComputer": "这台电脑",
   "server.reach.place.cloudComputer": "云电脑",
   "server.reach.place.localVm": "本地虚拟机",

@@ -28,42 +28,41 @@ describe("which turns can't run commands (server/host/no-terminal.ts)", () => {
   });
 });
 
+const REFUSED = "{\"ok\":false,\"result\":\"The requested tool was not advertised for this turn\"}";
+
 describe("the rule for the app's sentence on a routine run", () => {
-  it("counts a failed call to a command tool, by any of its names, or to select_computer", () => {
-    for (const name of ["exec", "bash", "computer_exec", "mcp__computer__exec", "vm_exec", "run_command", "shell", "python"]) {
-      expect(triedCommand({ name, ok: false }), name).toBe(true);
+  it("counts a shell tool, by any of its names, refused because this turn has none, and a refused move off this machine", () => {
+    for (const name of ["exec", "bash", "computer_exec", "mcp__computer__exec", "vm_exec", "agents_vm_exec", "run_command", "shell", "python"]) {
+      expect(triedCommand({ name, ok: false, output: REFUSED }), name).toBe(true);
     }
-    expect(triedCommand({ name: "agents_select_computer", ok: false })).toBe(true);
-    expect(triedCommand({ name: "agents_use_tool", ok: false, input: "{\"name\":\"vm_exec\",\"arguments\":{}}" })).toBe(true);
+    expect(triedCommand({ name: "agents_select_computer", ok: false, input: "{\"surface\":\"cloud\"}" })).toBe(true);
   });
-  it("never counts a call that worked, one still running, or a failed call that was not a command", () => {
-    expect(triedCommand({ name: "exec", ok: true })).toBe(false);
+  it("never counts a call that worked, one still running, an app's tool that shares a name and failed for its own reason, or a move to the browser", () => {
+    expect(triedCommand({ name: "exec", ok: true, output: "{}" })).toBe(false);
     expect(triedCommand({ name: "exec" })).toBe(false);
-    for (const name of ["agents_list_routines", "gmail.search_emails", "composio_search_tools", "shared_computer", "data_load", "agents_use_tool"]) {
-      expect(triedCommand({ name, ok: false }), name).toBe(false);
+    expect(triedCommand({ name: "exec", ok: false, output: "{\"ok\":false,\"result\":\"exit code 1\"}" }), "a shell that ran and failed").toBe(false);
+    for (const name of ["agents_list_routines", "gmail.search_emails", "composio_search_tools", "shared_computer", "data_load", "postgres_execute", "x_command"]) {
+      expect(triedCommand({ name, ok: false, output: REFUSED }), name).toBe(false);
     }
-    expect(triedCommand({ name: "agents_use_tool", ok: false, input: "{\"name\":\"gmail.read_email\"}" })).toBe(false);
+    expect(triedCommand({ name: "agents_select_computer", ok: false, input: "{\"surface\":\"browser\"}" })).toBe(false);
   });
 });
 
 describe("a routine run's line ends with the app's sentence", () => {
   const T0 = 1_000_000;
-  function fixture(lines: Array<{ kind: string; at: number; tool?: { name: string; ok?: boolean } }>, cloudComputer = false, cloudHome = true) {
-    const host = createNoTerminal({
-      cloudHome, lines: () => lines, who: () => ({ bot: "Ledger", model: "gpt-5-mini" }), cloudComputer: () => cloudComputer,
-    });
-    return host;
+  function fixture(lines: Array<{ kind: string; at: number; tool?: { name: string; ok?: boolean; output?: string } }>, cloudHome = true) {
+    return createNoTerminal({ cloudHome, lines: () => lines });
   }
   const run = { id: "run_1", botId: "b1", threadId: "t1", startedAt: T0, status: "completed" };
   const prompt = { bot: "Ledger", model: "gpt-5-mini", cloudComputer: false, routine: true };
   const reach = { ownShell: false, computerMounted: false, lentTerminal: false };
 
   it("Case A: a run with no terminal whose bot tried to run its script", () => {
-    const host = fixture([{ kind: "text", at: T0 + 1 }, { kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false } }]);
+    const host = fixture([{ kind: "text", at: T0 + 1 }, { kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false, output: REFUSED } }]);
     expect(host.turn("t1", reach, prompt, T0 + 1)).toContain("You cannot run commands this turn");
     expect(host.runNote(run, undefined)).toBe("Ledger couldn't run commands in this run: gpt-5-mini has no terminal on My Cloud. To let its routines run commands, switch Ledger to a model with a terminal, such as Claude or Codex.");
-    const cloud = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false } }], true);
-    cloud.turn("t1", reach, prompt, T0 + 1);
+    const cloud = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false, output: REFUSED } }]);
+    cloud.turn("t1", reach, { ...prompt, cloudComputer: true }, T0 + 1);
     expect(cloud.runNote(run, undefined)).toMatch(/, or set this routine to run on the Cloud desktop\.$/u);
   });
 
@@ -71,22 +70,28 @@ describe("a routine run's line ends with the app's sentence", () => {
     const quiet = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "gmail.search_emails", ok: true } }]);
     quiet.turn("t1", reach, prompt, T0 + 1);
     expect(quiet.runNote(run, undefined), "a run that needed no command").toBeNull();
-    const shell = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false } }]);
+    const shell = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false, output: REFUSED } }]);
     expect(shell.turn("t1", { ...reach, ownShell: true }, prompt, T0 + 1)).toBe("");
     expect(shell.runNote(run, undefined), "an engine with its own shell").toBeNull();
-    const desktop = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false } }], false, false);
+    const desktop = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false, output: REFUSED } }], false);
     expect(desktop.turn("t1", reach, prompt, T0 + 1)).toBe("");
     expect(desktop.runNote(run, undefined), "the desktop app").toBeNull();
-    const earlier = fixture([{ kind: "activity", at: T0 - 5, tool: { name: "exec", ok: false } }]);
+    const earlier = fixture([{ kind: "activity", at: T0 - 5, tool: { name: "exec", ok: false, output: REFUSED } }]);
     earlier.turn("t1", reach, prompt, T0 + 1);
     expect(earlier.runNote(run, undefined), "an earlier run's call in the same conversation").toBeNull();
-    const stale = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false } }]);
+    const stale = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false, output: REFUSED } }]);
     stale.turn("t1", reach, prompt, T0 - 10);
     expect(stale.runNote(run, undefined), "a flag from a turn before this run").toBeNull();
   });
 
+  it("names the model the run's own turn ran on, not one the bot was given after", () => {
+    const host = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false, output: REFUSED } }]);
+    host.turn("t1", reach, { ...prompt, model: "routine-own-model" }, T0 + 1);
+    expect(host.runNote(run, undefined)).toContain("routine-own-model has no terminal on My Cloud");
+  });
+
   it("a later turn that can run commands clears it", () => {
-    const host = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false } }]);
+    const host = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false, output: REFUSED } }]);
     host.turn("t1", reach, prompt, T0 + 1);
     host.turn("t1", { ...reach, computerMounted: true }, prompt, T0 + 3);
     expect(host.runNote(run, undefined)).toBeNull();
@@ -94,7 +99,7 @@ describe("a routine run's line ends with the app's sentence", () => {
 
   it("reads in the language of the chat it reports to", () => {
     addServerLinePacks({ xx: { "server.reach.runNoTerminal": "{bot} · {model}" } });
-    const host = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false } }]);
+    const host = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false, output: REFUSED } }]);
     host.turn("t1", reach, prompt, T0 + 1);
     expect(host.runNote(run, "xx")).toBe("Ledger · gpt-5-mini");
   });
@@ -122,7 +127,7 @@ describe("switching a bot to a model with no terminal says so once, only when it
     const notices: Array<[string, string]> = [];
     const engines: Record<string, { model: string; shell: boolean }> = { claude: { model: "Claude", shell: true }, compat: { model: "gpt-5-mini", shell: false } };
     const host = createNoTerminal({
-      cloudHome: true, lines: () => [], who: () => undefined, cloudComputer: () => false,
+      cloudHome: true, lines: () => [],
       engine: (selection) => engines[selection.instanceId], bot: () => ({ name: "Ledger" }),
       routines: () => [{ runOn: "maus" }, { runOn: "cloud" }, { runOn: "maus", modelSelection: { instanceId: "claude" } }, {}],
       notice: (threadId, text) => notices.push([threadId, text]),

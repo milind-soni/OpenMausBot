@@ -34,34 +34,33 @@ export function noTerminalPrompt(input: { bot: string; model: string; cloudCompu
     + (input.routine ? " This is a routine run: do the parts that need no command, then say plainly which step was not done and why, in those words." : "");
 }
 
-/** A tool call that tries to run a command: a shell tool by any of the names models reach for, with or without its
- * server's prefix (mcp__computer__exec, computer_exec, agents_use_tool's vm_exec). */
-const COMMAND_TOOL = /^(?:[a-z]+_)?(?:exec|vm_exec|bash|sh|zsh|shell|terminal|run_command|run_shell|run_script|execute|execute_command|command|cmd|python3?|powershell|subprocess)$/iu;
+/** A shell tool by the names models reach for, bare or behind the prefix of the server that has one (computer_exec,
+ * mcp__computer__exec, agents_vm_exec). */
+const COMMAND_TOOL = /^(?:computer_|agents_|vm_)?(?:exec|vm_exec|bash|sh|zsh|shell|terminal|run_command|run_shell|run_script|execute_command|python3?|powershell)$/iu;
 const SELECT_COMPUTER = /(?:^|_)select_computer$/iu;
+/** What the chat runtime answers a call to a tool this turn was not given (drivers/chat-mcp-tools.ts). */
+const NOT_OFFERED = "not advertised for this turn";
 const lastPart = (name: string) => name.trim().split(/__|\.|\s/u).filter(Boolean).at(-1) ?? "";
 
-/** The rule for the app's sentence: a call that ran no command because none can run here. It is a failed call either
- * to a command tool (one not offered here, or refused) or to select_computer, which a routine run may not use to move. */
-export function triedCommand(tool: { name?: string; ok?: boolean; input?: string } | undefined): boolean {
+/** The rule for the app's sentence: the bot tried to run a command and nothing here could. It is either a call to a
+ * shell tool that was refused because this turn has none (the runtime's own "not advertised" answer, so an app's tool
+ * that merely shares a name and failed for its own reason never counts), or a refused select_computer asking to move
+ * somewhere other than the built-in browser, which a routine run may not do. */
+export function triedCommand(tool: { name?: string; ok?: boolean; input?: string; output?: string } | undefined): boolean {
   if (!tool?.name || tool.ok !== false) return false;
   const name = lastPart(tool.name);
-  if (SELECT_COMPUTER.test(name)) return true;
-  if (COMMAND_TOOL.test(name)) return true;
-  // A command asked for through the tool directory (use_tool / agents_use_tool with {"name":"vm_exec"}).
-  return /use_tool$/iu.test(name) && typeof tool.input === "string" && COMMAND_TOOL.test(/"name"\s*:\s*"([^"]+)"/u.exec(tool.input)?.[1] ?? "");
+  if (SELECT_COMPUTER.test(name)) return !/browser/iu.test(tool.input ?? "");
+  return COMMAND_TOOL.test(name) && (tool.output ?? "").includes(NOT_OFFERED);
 }
 
-type Activity = { kind?: string; at?: number; tool?: { name?: string; ok?: boolean; input?: string } };
-type Run = { id: string; botId: string; threadId?: string; startedAt?: number; status: string };
+type Activity = { kind?: string; at?: number; tool?: { name?: string; ok?: boolean; input?: string; output?: string } };
+type Run = { threadId?: string; startedAt?: number };
 
 export interface NoTerminalDeps {
+  /** A personal Cloud home (My Cloud); a team's Cloud and the desktop app are left as they are. */
   cloudHome: boolean;
   /** The lines of a conversation, oldest first. */
   lines(threadId: string): readonly Activity[];
-  /** The name of the bot and the model it runs on now. */
-  who(botId: string): { bot: string; model: string } | undefined;
-  /** The bot has a cloud computer it could work on (its model can, and one is set up). */
-  cloudComputer(botId: string): boolean;
   /** For a model switch: the engine a selection runs on (its model's name, and whether it has a shell of its own). */
   engine?(selection: Selection): { model: string; shell: boolean } | undefined;
   /** The bot's name and the folder it was set to work in, if any. */
@@ -78,14 +77,15 @@ type Selection = { instanceId: string; model?: string };
 const FLAGS_KEPT = 2_000;
 
 export function createNoTerminal(deps: NoTerminalDeps) {
-  /** Conversations whose latest turn started with no way to run commands, and when. */
-  const flagged = new Map<string, number>();
+  /** Conversations whose latest turn started with no way to run commands: when, and the bot and model that turn ran
+   * (a routine or a conversation can have a model of its own, so never the bot's default read later). */
+  const flagged = new Map<string, { at: number; bot: string; model: string; cloudComputer: boolean }>();
   return {
     /** A turn is starting: its context line, empty when it can run commands. */
     turn(threadId: string, reach: Omit<TurnReach, "cloudHome">, prompt: { bot: string; model: string; cloudComputer: boolean; routine: boolean }, now = Date.now()): string {
       if (!cannotRunCommands({ ...reach, cloudHome: deps.cloudHome })) { flagged.delete(threadId); return ""; }
       flagged.delete(threadId);
-      flagged.set(threadId, now);
+      flagged.set(threadId, { at: now, bot: prompt.bot, model: prompt.model, cloudComputer: prompt.cloudComputer });
       // Newest last: the oldest conversations' flags go first, long after any run of theirs was reported.
       for (const oldest of flagged.keys()) { if (flagged.size <= FLAGS_KEPT) break; flagged.delete(oldest); }
       return noTerminalPrompt(prompt);
@@ -94,13 +94,11 @@ export function createNoTerminal(deps: NoTerminalDeps) {
      * of this run had no way to run commands and the bot then tried to run one (triedCommand). */
     runNote(run: Run, language: string | undefined): string | null {
       if (!run.threadId) return null;
-      const since = flagged.get(run.threadId);
+      const turn = flagged.get(run.threadId);
       const started = run.startedAt ?? 0;
-      if (since === undefined || since < started) return null;
+      if (!turn || turn.at < started) return null;
       if (!deps.lines(run.threadId).some((line) => line.kind === "activity" && (line.at ?? Number.POSITIVE_INFINITY) >= started && triedCommand(line.tool))) return null;
-      const who = deps.who(run.botId);
-      if (!who) return null;
-      return serverLine(language, deps.cloudComputer(run.botId) ? "server.reach.runNoTerminalCloud" : "server.reach.runNoTerminal", who);
+      return serverLine(language, turn.cloudComputer ? "server.reach.runNoTerminalCloud" : "server.reach.runNoTerminal", { bot: turn.bot, model: turn.model });
     },
     forget(threadId: string): void { flagged.delete(threadId); },
     /** A model switch, from `before` to `after`, seen in `threadId`: says there, once, what it takes away. `routinesFollow`:

@@ -23,6 +23,8 @@ const BOT_SAID = "No execution environment was mounted, so sync.py did not run."
 let home = "", base = "", log = "", owner = "", claudeDump = "";
 let child: ChildProcess;
 let upstream: Server;
+/** The tool the Case A run looked at after its refused command. */
+let looked: string | undefined;
 
 type ChatRequest = { messages: Array<{ role: string; content?: unknown }>; tools?: Array<{ function: { name: string } }> };
 const requests: ChatRequest[] = [];
@@ -80,6 +82,7 @@ beforeAll(async () => {
     }
     if (user.includes("Run sync.py") && tools === 1) {
       const names = (request.tools ?? []).map((tool) => tool.function.name), direct = names.find((name) => name.endsWith("list_bots")), bridge = names.find((name) => name.endsWith("use_tool"));
+      looked = direct ?? bridge;
       const call = { index: 0, id: "look-call", type: "function", function: direct ? { name: direct, arguments: "{}" } : { name: bridge, arguments: JSON.stringify({ name: "list_bots", arguments: {} }) } };
       return res.end(frame({ tool_calls: [call] }, "tool_calls") + "data: [DONE]\n\n");
     }
@@ -171,6 +174,11 @@ it("Case A: the chat-only bot's routine is told it can't run commands, tries, an
   expect(system, "no cloud computer is set up here, so the app never offers one").not.toContain("cloud computer, or");
   let line: string | undefined;
   await expect.poll(async () => (line = (await chat(bot.threadId)).find((message) => message.automation?.routineId === sync)?.text), { timeout: hostTimeout(15_000) }).toBeTruthy();
+  // The run went on after the refusal with a call that worked, as the bot did, so it ended completed.
+  expect(looked).toBeTruthy();
+  const answers = requests.flatMap((request) => request.messages.filter((message) => message.role === "tool").map((message) => String(message.content)));
+  expect(answers.some((answer) => answer.includes("not advertised for this turn")), JSON.stringify(answers)).toBe(true);
+  expect(answers.some((answer) => answer.startsWith("{\"ok\":true")), JSON.stringify(answers)).toBe(true);
   expect(line).toBe(`${BOT_SAID}\n\nSyncer couldn't run commands in this run: fixture-model has no terminal on My Cloud. To let its routines run commands, switch Syncer to a model with a terminal, such as Claude or Codex.`);
 
   // A run that stops on the refused call fails as before (the bot's reply is no proof), and its line carries the reason too.
