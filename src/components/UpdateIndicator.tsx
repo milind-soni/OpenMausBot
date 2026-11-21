@@ -99,7 +99,7 @@ export function UpdateIndicator({ className, bar }: { className?: string; bar?: 
           "relative flex size-7 shrink-0 items-center justify-center rounded-full bg-white text-neutral-900 shadow-sm ring-1 ring-black/10 transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
         )}
       >
-        <ArrowDown size={16} strokeWidth={2.25} aria-hidden className={cn(!ready && "animate-pulse motion-reduce:animate-none")} />
+        <ArrowDown size={16} strokeWidth={2.25} aria-hidden className={cn(!ready && "animate-pulse")} />
       </button>
       {open && <UpdateCard state={state} onClose={() => setOpen(false)} returnFocusRef={buttonRef} />}
     </div>
