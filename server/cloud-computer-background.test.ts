@@ -218,6 +218,30 @@ describe.each([
     expect(calls.filter(call => call.method === "POST" && call.path.endsWith("/commands"))).toHaveLength(1);
   });
 
+  it("keeps the process ID when saving completion tracking fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const hooks = tools.commandHandoff({
+        node: () => undefined, trackBackground: () => { throw new Error("fixture storage failure"); },
+        observeBackground: () => false,
+      }, { botId: "fixture-bot", threadId: "fixture-thread" }, "assignment", () => {});
+      const result = json(await call("exec", { command: "synthetic fixture", background: true }, BOX, undefined, hooks).done);
+      expect(result).toMatchObject({ status: "running", processId: expect.stringMatching(new RegExp(background.PROCESS_ID_PATTERN)) });
+      expect(result.next).toContain("use exec_status with wait_seconds in this turn");
+      expect(result.next).toContain("do not start another copy blindly");
+      expect(calls.filter(call => call.method === "POST" && call.path.endsWith("/commands"))).toHaveLength(1);
+    } finally { warn.mockRestore(); }
+  });
+
+  it("propagates revoked turn access rather than returning a process ID", async () => {
+    const trackBackground = vi.fn(() => true);
+    const hooks = tools.commandHandoff({
+      node: () => undefined, trackBackground, observeBackground: () => false,
+    }, { botId: "fixture-bot", threadId: "fixture-thread" }, "assignment", () => { throw new Error("fixture turn ended"); });
+    await expect(call("exec", { command: "synthetic fixture", background: true }, BOX, undefined, hooks).done).rejects.toThrow("fixture turn ended");
+    expect(trackBackground).not.toHaveBeenCalled();
+  });
+
   it("starts a command detached, through the gate, and answers at once with a process id", async () => {
     const started = call("exec", { command: "python3 job.py > out.csv", background: true });
     const result = await started.done;

@@ -19,13 +19,18 @@ import {
   CLOUD_COMPUTER_STILL_WAKING, CLOUD_COMPUTER_UNREACHABLE,
 } from "../shared/cloud-computer-recovery.ts";
 
-export function commandHandoff(coordinator: Coordinator, source: RoomAddress & Pick<BackgroundCommand, "teamComputerId">, id: string, assertActive: () => void): BackgroundCommandHooks {
+export function commandHandoff(coordinator: Pick<Coordinator, "node" | "trackBackground" | "observeBackground">, source: RoomAddress & Pick<BackgroundCommand, "teamComputerId">, id: string, assertActive: () => void): BackgroundCommandHooks {
   const address = { ...source, groupId: source.groupId ?? coordinator.node(id)?.groupId };
   return {
     started: (boxId, processId) => {
       assertActive();
-      return coordinator.trackBackground(address, id, { boxId, processId, expiresAt: Date.now() + BACKGROUND_KEEPS_AWAKE_MS,
-        ...(source.teamComputerId ? { teamComputerId: source.teamComputerId } : {}) });
+      try {
+        return coordinator.trackBackground(address, id, { boxId, processId, expiresAt: Date.now() + BACKGROUND_KEEPS_AWAKE_MS,
+          ...(source.teamComputerId ? { teamComputerId: source.teamComputerId } : {}) });
+      } catch {
+        console.warn("Could not register detached command completion; returning the process ID for manual status checks.");
+        return false;
+      }
     },
     observed: (boxId, processId, result) => {
       assertActive();
