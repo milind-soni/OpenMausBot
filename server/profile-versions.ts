@@ -163,9 +163,10 @@ const CHANGE_ACTOR = { user: "person", bot: "bot", file: "person", import: "impo
 export function soulChanges(botId: string, rows: readonly HistoryRow[]) {
   return rows.filter((row) => row.field === "soul").map((row) => {
     const diff = unifiedDiff(row.before ?? "", row.after ?? "", SOUL_FILE);
+    const via = typeof row.via === "string" ? row.via : "";
     return {
       id: row.id, at: row.at, botId, path: SOUL_FILE, actor: CHANGE_ACTOR[row.actor] ?? "person",
-      via: row.actor === "file" ? "disk" : row.via === "rollback" || row.via.startsWith("undo:") ? "revert" : row.via,
+      via: row.actor === "file" ? "disk" : via === "rollback" || via.startsWith("undo:") ? "revert" : via,
       kind: "edited" as const, beforeHash: null, afterHash: null, diff: diff.text, added: diff.added, removed: diff.removed,
       canRevert: row.canRestore === true, ...(row.restoreUnavailableReason ? { revertUnavailableReason: row.restoreUnavailableReason } : {}),
     };

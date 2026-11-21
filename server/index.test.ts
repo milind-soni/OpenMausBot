@@ -9239,7 +9239,7 @@ describe("harness HTTP API", () => {
     await api("PUT", "/api/config", { rooms: { turnTimeoutMinutes: 5 } });
   });
 
-  it("cards asks when Claude's reviewer never started and remembers an exact configured MCP read", async () => {
+  it("cards asks when Claude's reviewer never started and remembers exact non-send MCP tools", async () => {
     // Haiku 4.5: the CLI takes `auto` but runs Manual and asks about everything.
     const bot = (await api("POST", "/api/bots", { name: "Quill" })).body.bot;
     const conns: Socket[] = [];
@@ -9334,9 +9334,25 @@ describe("harness HTTP API", () => {
       const linearWrite = raise("ask-linear-create", "create KAT issue", { team: "KAT" }, "mcp__linear__create_issue");
       await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "create KAT issue")?.card?.title).toBe("Approval needed");
       const writeCard = (await messages()).find((m) => m.card?.subtitle === "create KAT issue")!.card!;
-      expect(writeCard.allowKey).toBeUndefined();
+      expect(writeCard.allowKey).toMatch(/^provider-tool:claude:linear:create_issue:/);
       expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: writeCard.requestId, behavior: "deny" })).status).toBe(200);
       await expect(linearWrite).resolves.toMatchObject({ behavior: "deny" });
+
+      const batchTool = "mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL";
+      const firstBatch = raise("ask-batch-1", "read mail batch", { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }] }, batchTool);
+      await expect.poll(async () => (await messages()).find(m => m.card?.subtitle === "read mail batch")?.card?.allowKey).toBeTruthy();
+      const batchCard = (await messages()).find(m => m.card?.subtitle === "read mail batch")!.card!;
+      expect((await api("POST", `/api/bots/${bot.id}/always-allow`, { threadId: bot.threadId, allowKey: batchCard.allowKey })).status).toBe(200);
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: batchCard.requestId, behavior: "allow" })).status).toBe(200);
+      await expect(firstBatch).resolves.toMatchObject({ behavior: "allow" });
+      await expect(raise("ask-batch-2", "read mail batch again", {}, batchTool)).resolves.toMatchObject({ behavior: "allow" });
+      expect((await messages()).some(m => m.card?.subtitle === "read mail batch again")).toBe(false);
+      const send = raise("ask-send-after-grant", "send mail still asks", {}, "mcp__composio__GMAIL_SEND_EMAIL");
+      await expect.poll(async () => (await messages()).find(m => m.card?.subtitle === "send mail still asks")?.card).toBeTruthy();
+      const sendCard = (await messages()).find(m => m.card?.subtitle === "send mail still asks")!.card!;
+      expect(sendCard.allowKey).toBeUndefined();
+      expect((await api("POST", `/api/bots/${bot.id}/respond`, { requestId: sendCard.requestId, behavior: "deny" })).status).toBe(200);
+      await expect(send).resolves.toMatchObject({ behavior: "deny" });
 
       const widen = raise("ask-widen", "ls /", { dangerouslyDisableSandbox: true });
       await expect.poll(async () => (await messages()).find((m) => m.card?.subtitle === "ls /")?.card?.title).toBe("Approval needed");
@@ -13415,7 +13431,7 @@ describe("bot memory API", () => {
         body: JSON.stringify({ command: "ls" }),
       });
       expect(exec.status).toBe(409);
-      expect(((await exec.json()) as { error: string }).error).toContain("no Local VM desktop");
+      expect(((await exec.json()) as { error: string }).error).toContain("no Local VM or Self-hosted VPS desktop");
 
       for (let count = 2; count < 10; count += 1) expect((await attach({ path: "song.mp3" })).status).toBe(200);
       const flooded = await attach({ path: "song.mp3" });

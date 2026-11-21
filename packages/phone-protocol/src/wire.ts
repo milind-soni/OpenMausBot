@@ -1,7 +1,7 @@
 /** The client-visible wire model for tasks, bots, messages and rooms. A field
  * here is one the server emits in every response and SSE frame that carries
  * the shape. */
-import type { PresenceFrame } from "./team-presence.ts";
+import type { PresenceFrame } from "./team-presence.ts"; import type { HandoffCardFields } from "./sign-in-request.ts";
 import type { DataBroadcast } from "./data-surface.ts";
 import type { ApprovalMode } from "./approval-mode.ts";
 import type { ToolScope } from "./tool-scope.ts"; import type { ToolGroup } from "./tool-groups.ts";
@@ -380,9 +380,9 @@ export interface WireBot extends DefaultBotFields, BotAccessFields {
    * MEMORY.md and topic files, adds facts about the person to About me and
    * tidies nightly. On unless explicitly false. */
   memoryUpkeep?: boolean;
-  /** Prompt-cache keep-warm for this bot's Claude threads: true or false
-   * overrides the workspace setting; absent follows it. */
+  /** Prompt-cache keep-warm for this bot's Claude threads: true or false overrides the workspace setting; absent follows it. */
   cacheKeepWarm?: boolean;
+  checkWork?: import("./check-work.ts").CheckWork;
   /** false: the workspace's helper model never writes this bot's background texts. Absent or true: allowed. */
   helperModel?: boolean;
   /** Which of the app-wide MCP servers this bot mounts, by name. */
@@ -753,7 +753,7 @@ export interface SecretRequestCardData {
 /** A bot asked the person to sign in to a website themselves: they type the
  * password into the page, or save a login the server fills for the bot. The
  * bot never sees the password either way. */
-export interface SignInRequestCardData {
+export interface SignInRequestCardData extends HandoffCardFields {
   /** The page to open, an http(s) address. */
   url: string;
   /** Its host, the card's headline. */
@@ -783,7 +783,7 @@ export interface SignInRequestCardData {
 
 /** The open sign-in request a bot's computer plea stands for, so whichever
  * panel shows the plea can settle that card. */
-export interface ComputerHelpRef {
+export interface ComputerHelpRef extends Pick<HandoffCardFields, "instruction"> {
   /** The asking bot: a team computer's plea reaches every member's panel. */
   botId: string;
   threadId: string;

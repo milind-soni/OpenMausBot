@@ -2,9 +2,8 @@ import type { ApprovalMode } from "../../shared/approval-mode.ts";
 import type { ModelSelection, RuntimeEvent } from "../contracts.ts";
 import { turnLimitScope } from "../quota-switch.ts";
 import type { Store } from "../store.ts";
-import type { TurnStops } from "../turn-outcome.ts";
+import { nothingRan, type TurnStops } from "../turn-outcome.ts";
 import type { LimitTakeover } from "./limit-takeover.ts";
-import { nothingRan } from "./peer-limit-resend.ts";
 
 /** A room member: only the backups the bot has of its own carry it on, since Automatic recovery leaves channels out. */
 type Member = { id: string; name: string; modelSelection: ModelSelection; fallback?: ModelSelection[] };

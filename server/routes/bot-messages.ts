@@ -35,6 +35,7 @@ import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { extractSteerImages } from "../turn-images.ts";
 import { followupFacts, helperFollowup, helperFollowupBody, mayFollowUp } from "../helper-followup.ts";
 import type { UsageTrigger } from "../usage-ledger.ts";
+import { forgetSendingSession, noteSendingSession } from "../sending-sessions.ts";
 import { noteTypedSend } from "../typed-sends.ts";
 import { engineSessionOutdated, startFresh } from "../fresh-start.ts";
 import { parseMentionPicks } from "../../shared/room-mentions.ts";
@@ -341,6 +342,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       // paired session or the desktop capability proves a person and lifts the webhook block.
       const personPresent = auth.kind === "session" || DESKTOP_MANAGED;
       if (personPresent && sendId && !guarded && !press && !appSent) noteTypedSend(threadId, sendId, text);
+      const notedSession = auth.kind === "session" && sendId ? noteSendingSession(threadId, sendId, auth.session.id) : false;
       if (pressKey) pressesInFlight.set(pressKey, sendId);
       try {
         const receipt = await acceptDirectSend({
@@ -354,6 +356,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         return json(res, 202, receipt);
       } catch (error) {
         slot?.release();
+        if (notedSession) forgetSendingSession(threadId, sendId!);
         if (error instanceof DirectSendRefused) return json(res, error.status, error.body);
         throw error;
       } finally {

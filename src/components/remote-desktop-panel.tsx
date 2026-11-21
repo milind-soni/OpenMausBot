@@ -87,7 +87,7 @@ export function RemoteDesktopPanel({ bot }: { bot: Bot }) {
   useEffect(() => {
     if (!requestedSignIn || requestedSignIn.consumed) return;
     setView(requestedSignIn.place === "browser" ? "browser" : "desktop");
-    if (requestedSignIn.place === "browser") setSignIn({ url: requestedSignIn.url, site: requestedSignIn.site, nonce: requestedSignIn.requestId });
+    if (requestedSignIn.place === "browser") setSignIn({ url: requestedSignIn.url, site: requestedSignIn.site, nonce: requestedSignIn.requestId, ...(requestedSignIn.expand ? { expand: true } : {}) });
     dispatch({ type: "signInFocusConsumed", requestId: requestedSignIn.requestId });
   }, [dispatch, requestedSignIn]);
   const botRoutines = state.routines

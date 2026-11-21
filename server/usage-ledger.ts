@@ -1,6 +1,6 @@
 // Append-only usage rows under <data>/usage/ (0600): bookkeeping never fails the turn, and rows never carry message text.
 import { personOf } from "./usage-attribution.ts";
-import { closeSync, fstatSync, openSync, readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readdirSync, readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { TraceParent, TraceStatus, TraceUsageStatus } from "../shared/usage-trace.ts";
@@ -200,12 +200,13 @@ function parseMonth(text: string): ParsedFile["rows"] {
 
 /** The file's valid rows in file order, parsed again only when its size, times or identity changed. Callers share the
  * row objects and must not change them. */
-function monthRows(file: string): ParsedFile["rows"] {
+function monthRows(file: string, requireReadable: boolean): ParsedFile["rows"] {
   let fd: number;
   try {
     fd = openSync(file, "r");
-  } catch {
+  } catch (error) {
     parsedFiles.delete(file);
+    if (requireReadable && (error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     return [];
   }
   try {
@@ -219,24 +220,50 @@ function monthRows(file: string): ParsedFile["rows"] {
     parsedFiles.set(file, { stamp, rows });
     if (parsedFiles.size > PARSED_FILES_KEPT) parsedFiles.delete(parsedFiles.keys().next().value!);
     return rows;
-  } catch {
+  } catch (error) {
     parsedFiles.delete(file);
+    if (requireReadable) throw error;
     return [];
   } finally {
     closeSync(fd);
   }
 }
 
-export function readUsage(dataDir: string, range: { from: Date; to: Date }): UsageRow[] {
+export function readUsage(dataDir: string, range: { from: Date; to: Date }, { requireReadable = false } = {}): UsageRow[] {
   const rows: UsageRow[] = [];
   const from = range.from.getTime();
   const to = range.to.getTime();
   for (const key of monthsBetween(range.from, range.to)) {
-    for (const { at, row } of monthRows(join(dataDir, DIR, `${key}.jsonl`))) {
+    for (const { at, row } of monthRows(join(dataDir, DIR, `${key}.jsonl`), requireReadable)) {
       if (at >= from && at <= to) rows.push(row);
     }
   }
   return rows;
+}
+
+export function readLatestUsage(dataDir: string, now: Date, matches: (row: UsageRow) => boolean): UsageRow | undefined {
+  const directory = join(dataDir, DIR);
+  const current = `${monthKey(now)}.jsonl`;
+  const before = now.getTime();
+  const latestIn = (file: string) => {
+    let latestAt = -Infinity;
+    let latest: UsageRow | undefined;
+    for (const { at, row } of monthRows(join(directory, file), false)) {
+      if (at <= before && at >= latestAt && matches(row)) {
+        latestAt = at;
+        latest = row;
+      }
+    }
+    return latest;
+  };
+  const latest = latestIn(current);
+  if (latest) return latest;
+  let files: string[];
+  try { files = readdirSync(directory); } catch { return undefined; }
+  for (const file of files.filter((name) => /^\d{4}-\d{2}\.jsonl$/.test(name) && name < current).sort().reverse()) {
+    const row = latestIn(file);
+    if (row) return row;
+  }
 }
 
 export function parseUsageRange(from: string | null | undefined, to: string | null | undefined, now = new Date()): { from: Date; to: Date } | null {

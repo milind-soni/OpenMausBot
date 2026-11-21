@@ -37,6 +37,7 @@ const CLOCK_SKEW_MS = 5 * MINUTE;
 const IMPORTANT_DAYS_MS = 7 * DAY;
 const DISMISSED_MS = 14 * DAY;
 const MAX_ROWS = 60;
+const EARLIER_CARDS = 14;
 /** A watch run still sorting the night's mail at the morning time gets this long before the brief goes without it. */
 const MORNING_WAIT_MIN = 20;
 /** A sleeping Cloud wakes this early, so the watch reads the night's mail before the brief. */
@@ -60,6 +61,8 @@ const stateSchema = z.object({
   /** The day the first brief was posted: that day's card says what it does. */
   introducedOn: z.string().max(10).optional(),
   card: z.object({ day: z.string().max(10), botId: id, threadId: id, messageId: id, postedAt: at }).optional(),
+  /** Earlier days' cards: their Dismiss presses are still the brief's own. */
+  earlier: z.array(z.object({ threadId: id, messageId: id })).max(EARLIER_CARDS).optional(),
   important: z.array(z.object({ messageId: id, threadId: id, at, judgedAt: at, needsReply: z.boolean() })).max(MAX_ROWS),
   dismissed: z.array(z.object({ messageId: id, from: z.string().max(320), at })).max(MAX_ROWS),
   preps: z.array(z.object({ key: id, at })).max(MAX_ROWS),
@@ -369,6 +372,7 @@ export function createBrief(deps: BriefDeps) {
       if (!shown) return null;
       written = { messageId: shown, json };
       if (!existing) {
+        if (state.card) state.earlier = [...(state.earlier ?? []), { threadId: state.card.threadId, messageId: state.card.messageId }].slice(-EARLIER_CARDS);
         state.card = { day: today(), botId: bot.id, threadId, messageId: shown, postedAt: now() };
         state.introducedOn ??= state.card.day;
       }
@@ -536,10 +540,8 @@ export function createBrief(deps: BriefDeps) {
     return next - MORNING_WAKE_EARLY_MS;
   }
 
-  const briefRow = (threadId: string, messageId: string): boolean => {
-    const card = state.card;
-    return card !== undefined && card.threadId === threadId && card.messageId === messageId;
-  };
+  const briefRow = (threadId: string, messageId: string): boolean =>
+    [state.card, ...(state.earlier ?? [])].some((card) => card?.threadId === threadId && card.messageId === messageId);
 
   /** Security invariant: only the owner or an admin dismisses, only on the brief card itself, and the press starts no
    * turn. Null for any other press, which goes to the bot as usual. */

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Message } from "../store.ts";
-import { createPeerLimitResend, nothingRan, type PeerLimitResendDeps, type PeerTurnOpts } from "./peer-limit-resend.ts";
+import { nothingRan } from "../turn-outcome.ts";
+import { createPeerLimitResend, type PeerLimitResendDeps, type PeerTurnOpts } from "./peer-limit-resend.ts";
 
 type Outcome = { ok: boolean; text: string };
 type Opts = PeerTurnOpts<Outcome> & { origin?: { kind: string } };
@@ -17,6 +18,8 @@ describe("nothingRan", () => {
     expect(nothingRan([ask, failure], 100, "turn-1")).toBe(true);
     // Some engines send the limit sentence as reply text.
     expect(nothingRan([{ ...reply, text: LIMIT }], 100, "turn-1", LIMIT)).toBe(true);
+    expect(nothingRan([{ ...reply, kind: "compaction", text: undefined }, failure], 100, "turn-1"), "a summary of earlier context").toBe(true);
+    expect(nothingRan([{ ...reply, kind: "screen", text: undefined, turnId: undefined, png: "iVBORw0KGgo=", mime: "image/png" }, failure], 100, "turn-1"), "the screen captured as the turn settled").toBe(true);
     expect(nothingRan([toolCall, failure], 100, "turn-1")).toBe(false);
     expect(nothingRan([reply, failure], 100, "turn-1")).toBe(false);
     expect(nothingRan([{ ...reply, kind: "widget" } as Message], 100, "turn-1")).toBe(false);
