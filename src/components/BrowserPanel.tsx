@@ -26,6 +26,8 @@ import { CookieImportDialog, cookieImportAvailable, siteOfAddress } from "./brow
 const BrowserDesktop = lazy(() => import("./browser/BrowserDesktop").then((module) => ({ default: module.BrowserDesktop })));
 
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed";
+const TAKE_TRIES = 3;
+const TAKE_RETRY_MS = 800;
 const NO_NAV: BrowserNav = { url: "", loading: false, canGoBack: false, canGoForward: false };
 
 /** `expand`: open the browser full size, as a handoff's Take over does. */
@@ -241,10 +243,18 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     }
     signInHandled.current = signIn.nonce;
     signInPage.current = signIn.url || null;
-    if (signIn.expand) setMaximized(true);
+    if (signIn.expand) { setMaximized(true); setTakeTries(TAKE_TRIES); }
     latest.current.takeControl();
     latest.current.openSignInPage();
   }, [signIn, connected, asleep]);
+  // A take made as the view grew to full size can land while its stream reconnects: it is asked again, a few times.
+  const [takeTries, setTakeTries] = useState(0);
+  useEffect(() => {
+    if (!takeTries || !maximized || control?.controller === "you") { if (takeTries && control?.controller === "you") setTakeTries(0); return; }
+    if (!connected || takeStatus === "pending" || takeStatus === "slow") return;
+    const timer = setTimeout(() => { setTakeTries((left) => left - 1); latest.current.takeControl(); }, TAKE_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [takeTries, maximized, connected, control, takeStatus]);
 
   // A new tab, so whatever the bot has open stays as it was; a sleeping browser is woken first.
   useEffect(() => {
