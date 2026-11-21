@@ -448,6 +448,8 @@ export class PhoneSession {
   /** Sends what is queued (a GoAway last), then closes; nothing new is sent or read meanwhile. */
   #closeAfterSending(code: number): void {
     this.#state = "closing";
+    // The planned close wins: a ping that times out meanwhile must not cut the GoAway short.
+    if (this.#pongTimer) clearTimeout(this.#pongTimer);
     this.#sending.then(() => this.close(code));
   }
 
