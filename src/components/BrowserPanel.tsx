@@ -291,6 +291,9 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const paneMode = stream && state.config?.browserEngine?.pane === true && Boolean(window.ogb?.browserPane);
   const obscured = useNativeViewObscured(showProfiles || showTyping, paneMode);
   const paneVisible = paneMode && shown && connected && !asleep && !heldElsewhere && !gone && !starting && !obscured;
+  const paneShown = useRef(paneVisible);
+  const placePane = useRef<() => void>(() => {});
+  paneShown.current = paneVisible;
   useEffect(() => {
     const bridge = window.ogb?.browserPane;
     if (!paneMode || !bridge) return;
@@ -299,18 +302,20 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       const rect = pageArea.current?.getBoundingClientRect();
       const bounds = rect && rect.width >= 1 && rect.height >= 1
         ? { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) } : null;
-      void bridge.show({ botId: bot.id, threadId, bounds, visible: paneVisible && bounds !== null }).catch(() => undefined);
+      void bridge.show({ botId: bot.id, threadId, bounds, visible: paneShown.current && bounds !== null }).catch(() => undefined);
     };
-    place();
+    placePane.current = place;
     const observer = new ResizeObserver(place);
     if (pageArea.current) observer.observe(pageArea.current);
     window.addEventListener("resize", place);
     return () => {
+      placePane.current = () => {};
       observer.disconnect();
       window.removeEventListener("resize", place);
       void bridge.show({ botId: bot.id, threadId, bounds: null, visible: false }).catch(() => undefined);
     };
-  }, [paneMode, paneVisible, bot.id, scopedThread]);
+  }, [paneMode, bot.id, scopedThread]);
+  useEffect(() => { placePane.current(); }, [paneVisible, paneMode, bot.id, scopedThread]);
   const pipSupported = stream && supportsBrowserPictureInPicture();
   const passkeyWall = passkeyWallAt(nav.url);
   return <div ref={panel} className={maximized
