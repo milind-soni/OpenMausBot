@@ -1,3 +1,4 @@
+import { useDialogResize } from "@/hooks/use-dialog-resize";
 import { useMenuMotion } from "./MenuMotion";
 import { useEffect, useId, useRef, type RefObject } from "react";
 import { overlayPortal as createPortal } from "@/components/ModalPresence";
@@ -39,6 +40,7 @@ export function VoiceSetupDialog({
   const showThreads = useShowThreads();
   const { patch } = useBotSettingsDerived(bot);
   const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogResize(dialogRef, open);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const titleId = useId();
@@ -156,9 +158,11 @@ export function VoiceSetupDialog({
         <div role="status" aria-live="polite">
           {ready && (
             <div className="mx-6 mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-success/30 bg-success/10 px-4 py-3 sm:mx-7">
-              <CheckCircle2 size={17} className="shrink-0 text-success" aria-hidden="true" />
-              <span className="min-w-0 flex-1 text-[13px] font-medium text-ink">
-                {t("call.voiceSetup.ready", { name: callName })}
+              <span className="flex min-w-0 max-w-full flex-auto items-start gap-3">
+                <CheckCircle2 size={17} className="mt-0.5 shrink-0 text-success" aria-hidden="true" />
+                <span className="min-w-0 [overflow-wrap:anywhere] text-[13px] font-medium text-ink">
+                  {t("call.voiceSetup.ready", { name: callName })}
+                </span>
               </span>
               <button
                 type="button"
