@@ -181,11 +181,12 @@ it("Case A: the chat-only bot's routine is told it can't run commands, tries, an
   expect(answers.some((answer) => answer.startsWith("{\"ok\":true")), JSON.stringify(answers)).toBe(true);
   expect(line).toBe(`${BOT_SAID}\n\nSyncer couldn't run commands in this run: fixture-model has no terminal on My Cloud. To let its routines run commands, switch Syncer to a model with a terminal, such as Claude or Codex.`);
 
-  // A run that stops on the refused call fails as before (the bot's reply is no proof), and its line carries the reason too.
+  // A run that stops on the refused call fails as before (the bot's reply is no proof, and the failed step shows the
+  // error); the app's line goes under replies only (automation-reports.ts notes), so this one is unchanged.
   const lint = await routineFor(bot.id, "Run lint.py from the project folder.");
   expect((await runNow(lint)).status).toBe("failed");
   await expect.poll(async () => (await chat(bot.threadId)).find((message) => message.automation?.routineId === lint)?.text, { timeout: hostTimeout(15_000) })
-    .toBe("This run was partly done: Stopped because the tool call “exec” failed. The bot's reply isn't proof the work was done; the failed step shows the error.\n\nSyncer couldn't run commands in this run: fixture-model has no terminal on My Cloud. To let its routines run commands, switch Syncer to a model with a terminal, such as Claude or Codex.");
+    .toBe("This run was partly done: Stopped because the tool call “exec” failed. The bot's reply isn't proof the work was done; the failed step shows the error.");
 
   // A routine that needs no command, on the same bot: the bot's words alone.
   const invoices = await routineFor(bot.id, "File the new invoices.");

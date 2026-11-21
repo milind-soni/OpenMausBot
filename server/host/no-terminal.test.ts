@@ -97,6 +97,19 @@ describe("a routine run's line ends with the app's sentence", () => {
     expect(host.runNote(run, undefined)).toBeNull();
   });
 
+  it("hands automation-reports.ts its line through notes, taken once, for the run asked about only", () => {
+    const lines = [{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false, output: REFUSED } }];
+    const runs = new Map([["run_1", run], ["run_2", { threadId: "t2", startedAt: T0 }]]);
+    const host = createNoTerminal({ cloudHome: true, lines: () => lines, run: (id) => runs.get(id) });
+    host.turn("t1", reach, prompt, T0 + 1);
+    expect(host.notes.has("run_2"), "another run's conversation").toBe(false);
+    expect(host.notes.has("run_1")).toBe(true);
+    expect(host.notes.take("run_1", undefined)).toContain("Ledger couldn't run commands in this run");
+    expect(host.notes.has("run_1"), "taken once").toBe(false);
+    expect(host.notes.take("run_1", undefined)).toBeNull();
+    expect(host.notes.take("run_unknown", undefined)).toBeNull();
+  });
+
   it("reads in the language of the chat it reports to", () => {
     addServerLinePacks({ xx: { "server.reach.runNoTerminal": "{bot} · {model}" } });
     const host = fixture([{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false, output: REFUSED } }]);

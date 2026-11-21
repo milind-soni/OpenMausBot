@@ -61,6 +61,8 @@ export interface NoTerminalDeps {
   cloudHome: boolean;
   /** The lines of a conversation, oldest first. */
   lines(threadId: string): readonly Activity[];
+  /** A routine run by its id: the conversation it works in, and when its current attempt started. */
+  run?(runId: string): Run | undefined;
   /** For a model switch: the engine a selection runs on (its model's name, and whether it has a shell of its own). */
   engine?(selection: Selection): { model: string; shell: boolean } | undefined;
   /** The bot's name and the folder it was set to work in, if any. */
@@ -80,7 +82,7 @@ export function createNoTerminal(deps: NoTerminalDeps) {
   /** Conversations whose latest turn started with no way to run commands: when, and the bot and model that turn ran
    * (a routine or a conversation can have a model of its own, so never the bot's default read later). */
   const flagged = new Map<string, { at: number; bot: string; model: string; cloudComputer: boolean }>();
-  return {
+  const host = {
     /** A turn is starting: its context line, empty when it can run commands. */
     turn(threadId: string, reach: Omit<TurnReach, "cloudHome">, prompt: { bot: string; model: string; cloudComputer: boolean; routine: boolean }, now = Date.now()): string {
       if (!cannotRunCommands({ ...reach, cloudHome: deps.cloudHome })) { flagged.delete(threadId); return ""; }
@@ -101,6 +103,18 @@ export function createNoTerminal(deps: NoTerminalDeps) {
       return serverLine(language, turn.cloudComputer ? "server.reach.runNoTerminalCloud" : "server.reach.runNoTerminal", { bot: turn.bot, model: turn.model });
     },
     forget(threadId: string): void { flagged.delete(threadId); },
+    /** The app's line under a run's reply, as automation-reports.ts takes it: taken once, whatever the bot wrote. */
+    notes: {
+      has(runId: string): boolean {
+        const run = deps.run?.(runId);
+        return Boolean(run && host.runNote(run, undefined));
+      },
+      take(runId: string, language: string | undefined): string | null {
+        const run = deps.run?.(runId), note = run ? host.runNote(run, language) : null;
+        if (note && run?.threadId) flagged.delete(run.threadId);
+        return note;
+      },
+    },
     /** A model switch, from `before` to `after`, seen in `threadId`: says there, once, what it takes away. `routinesFollow`:
      * the bot's own model changed, so its routines run on the new one. */
     modelSwitched(botId: string, threadId: string, before: Selection, after: Selection, routinesFollow: boolean): void {
@@ -114,6 +128,7 @@ export function createNoTerminal(deps: NoTerminalDeps) {
       if (text) deps.notice?.(threadId, text);
     },
   };
+  return host;
 }
 
 export type NoTerminal = ReturnType<typeof createNoTerminal>;
