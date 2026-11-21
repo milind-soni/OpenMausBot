@@ -67,6 +67,8 @@ const MULTI_CLICK_MS = 500;
 const MULTI_CLICK_SLOP_PX = 4;
 const WHEEL_LINE_PX = 16;
 const NOTICE_LIMIT = 3;
+/** How long a press made before the view can place it (no frame, page size or control yet) waits to be sent. */
+const EARLY_PRESS_MS = 2_000;
 
 type MouseInput = Extract<PreviewStreamInput, { type: "mouse" }>;
 type WheelInput = Extract<PreviewStreamInput, { type: "wheel" }>;
@@ -96,6 +98,18 @@ interface TouchProbe {
   answered: boolean;
   /** The tap ended before the answer arrived. */
   tapped: boolean;
+}
+
+/** A press made before the view could place it on the page, and whether it was let go meanwhile. */
+interface EarlyPress {
+  readonly pointerId: number;
+  readonly clientX: number;
+  readonly clientY: number;
+  readonly button: number;
+  readonly buttons: number;
+  readonly modifiers: number;
+  readonly at: number;
+  released: boolean;
 }
 
 interface SelectState {
@@ -220,6 +234,7 @@ export function StreamSurface(props: {
   const mouseClicksRef = useRef({ left: 1, middle: 1, right: 1, none: 1 });
   const lastClickRef = useRef<{ button: PreviewStreamMouseButton; time: number; x: number; y: number; count: number } | null>(null);
   const touchRef = useRef<TouchGesture | null>(null);
+  const earlyPressRef = useRef<EarlyPress | null>(null);
   const probeRef = useRef<TouchProbe | null>(null);
   const lastProbeRef = useRef<{ x: number; y: number; editable: boolean; at: number } | null>(null);
   // Frame cap in device px. It grows with the surface and never shrinks; the stream opens once the first one is known.
@@ -244,6 +259,7 @@ export function StreamSurface(props: {
     mouseClicksRef.current = { left: 1, middle: 1, right: 1, none: 1 };
     lastClickRef.current = null;
     touchRef.current = probeRef.current = lastProbeRef.current = null;
+    earlyPressRef.current = null;
     keySentRef.current = false;
     if (inputRef.current) inputRef.current.value = INPUT_SENTINEL;
   }, []);
@@ -285,6 +301,27 @@ export function StreamSurface(props: {
   };
 
   const focusInput = () => inputRef.current?.focus({ preventScroll: true });
+
+  /** Sends the press made before the view could place it, once it can: if it is recent and lands on the picture, as a
+   * click (or a held button) there; a press on the bands beside the picture, or one too old, is dropped. */
+  const sendEarlyPress = useCallback(() => {
+    const press = earlyPressRef.current;
+    const canvas = canvasRef.current;
+    const viewport = viewportRef.current;
+    if (!press || !canvas || !viewport || !hasFrameRef.current || controlRef.current === null) return;
+    earlyPressRef.current = null;
+    if (performance.now() - press.at > EARLY_PRESS_MS || !operable(controlRef.current)) return;
+    const point = mapToPage(canvas.getBoundingClientRect(), canvas, viewport, press.clientX, press.clientY, false);
+    if (!point) return;
+    const at = { x: point.x, y: point.y, modifiers: press.modifiers };
+    const button = buttonOf(press.button);
+    const clickCount = countClick(button, press.clientX, press.clientY, press.at);
+    focusInput();
+    mouseButtonsRef.current = press.released ? 0 : press.buttons & 7;
+    send({ type: "mouse", action: "move", ...at, button: "none", buttons: 0, clickCount: 0 });
+    send({ type: "mouse", action: "down", ...at, button, buttons: press.buttons, clickCount });
+    if (press.released) send({ type: "mouse", action: "up", ...at, button, buttons: 0, clickCount });
+  }, [send]);
 
   useImperativeHandle(ref, () => ({
     canvas: () => (hasFrameRef.current ? canvasRef.current : null),
@@ -350,6 +387,7 @@ export function StreamSurface(props: {
       hasFrameRef.current = true;
       setPainted(true);
       propsRef.current.onFirstFrame?.();
+      sendEarlyPress();
     });
     const setControlState = (next: PreviewStreamControl | null) => {
       const previous = controlRef.current;
@@ -363,9 +401,13 @@ export function StreamSurface(props: {
         clientRef.current?.send({ type: "resize", ...sizeRef.current });
       }
       if (!operable(next)) {
+        // Control not known yet: a press made meanwhile still waits for it.
+        const early = next === null ? earlyPressRef.current : null;
         clearInput();
+        earlyPressRef.current = early;
         inputRef.current?.blur();
       }
+      sendEarlyPress();
     };
     const client = connect(
       { maxWidth: cap.width, maxHeight: cap.height, width: size.width, height: size.height },
@@ -399,7 +441,7 @@ export function StreamSurface(props: {
         onDownload: (download) => notify({ kind: "download", download }),
         onPopup: () => undefined,
         onFileChooser: setFileChooser,
-        onViewport: (viewport) => { viewportRef.current = viewport; },
+        onViewport: (viewport) => { viewportRef.current = viewport; sendEarlyPress(); },
         onControl: setControlState,
         onMessage: (message) => {
           if (message.type === "selectPopup" && typeof message.id === "string" && Array.isArray(message.options)) {
@@ -443,7 +485,7 @@ export function StreamSurface(props: {
       setAgentCursor(null);
       clearInput();
     };
-  }, [capKnown, clearInput, connect, hostSetup, notify]);
+  }, [capKnown, clearInput, connect, hostSetup, notify, sendEarlyPress]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -465,6 +507,10 @@ export function StreamSurface(props: {
   }, []);
 
   const handlePointer = (event: PointerEvent<HTMLCanvasElement>) => {
+    if (!hasFrameRef.current || !viewportRef.current || controlRef.current === null) {
+      keepEarlyPress(event);
+      return;
+    }
     if (!operable(controlRef.current)) return;
     const { type, pointerId, clientX, clientY } = event;
     const cancelled = type === "pointercancel";
@@ -549,6 +595,17 @@ export function StreamSurface(props: {
       if (cancelled) return;
       pendingMoveRef.current = { type: "mouse", action: "move", ...at, button: pressedButtonOf(event.buttons), buttons: event.buttons, clickCount: 0 };
       scheduleFlush();
+    }
+  };
+
+  /** Before the view can place a press, its first one waits, briefly, with whether it was let go. */
+  const keepEarlyPress = (event: PointerEvent<HTMLCanvasElement>) => {
+    const early = earlyPressRef.current;
+    if (event.type === "pointerdown" && (event.isPrimary || event.pointerType !== "touch") && !early) {
+      earlyPressRef.current = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, button: event.pointerType === "touch" ? 0 : event.button, buttons: event.pointerType === "touch" ? 1 : event.buttons, modifiers: previewStreamModifiers(event), at: event.timeStamp || performance.now(), released: false };
+    } else if ((event.type === "pointerup" || event.type === "pointercancel") && early?.pointerId === event.pointerId) {
+      if (event.type === "pointercancel") earlyPressRef.current = null;
+      else early.released = true;
     }
   };
 

@@ -37,6 +37,7 @@ export function liveAction(input: PreviewStreamInput): LiveActionBody | LiveActi
     case "tabClose": return { type: "tab-close", tabId: input.tabId };
     case "tabNew": return input.url ? { type: "tab-new", url: input.url } : { type: "tab-new" };
     case "restart": return { type: "restart" };
+    case "selectChoose": return { type: "select_choose", id: input.id.slice(0, 64), index: Math.round(clamp(input.index, 0, 499)) };
     case "dialog": return { type: "dialog", accept: input.accept, ...(input.promptText !== undefined ? { promptText: input.promptText.slice(0, 4_096) } : {}) };
     default: return null;
   }

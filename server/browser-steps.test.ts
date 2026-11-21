@@ -192,6 +192,37 @@ describe("around every bot's browser call", () => {
     expect(lines.join("\n")).not.toContain("ada");
   });
 
+  it("calls a click on a disabled target, and a fill or type whose text is not in its target, an error, as the engine does not", async () => {
+    const lines: string[] = [];
+    const { daemon, run } = await setup({ inputLog: createBrowserInputLog((line) => lines.push(line)) });
+    daemon.geometry.typed = true;
+    daemon.elements = {
+      "#off": { enabled: false }, "#go": {}, "@e2": { value: "" }, "#plain": { text: "Plain text" },
+      "#phone": { value: "(555) 123-4567" }, "#short": { value: "ada@ex" }, "#rich": { text: "Hello Ada" }, "#name": { value: "Ada Lovelace" },
+    };
+    const said = (out: { parts: Array<{ text: string }>; failed?: true }) => ({ failed: out.failed === true, text: out.parts.map((part) => part.text).join(" ") });
+    expect(said(await run("click", { selector: "#off" }))).toEqual({ failed: true, text: expect.stringContaining("its target was disabled") });
+    expect(said(await run("fill", { selector: "@e2", text: "eve" }))).toEqual({ failed: true, text: expect.stringContaining("does not hold the text") });
+    expect(said(await run("type", { selector: "#plain", text: "zzz" }))).toEqual({ failed: true, text: expect.stringContaining("Take a new snapshot") });
+    expect(lines.map((line) => line.split(" ").slice(3, 6).join(" "))).toEqual([
+      "click dropped reason=target_not_actionable", "fill dropped reason=typed_not_landed", "type dropped reason=typed_not_landed",
+    ]);
+    // What a field formats, cuts to its length, or adds to, and rich text, all hold the text.
+    for (const [selector, text] of [["#phone", "5551234567"], ["#short", "ada@example.com"], ["#rich", "Ada"], ["#name", "Lovelace"]]) {
+      expect(said(await run("fill", { selector, text }))).toEqual({ failed: false, text: "" });
+    }
+    expect(said(await run("click", { selector: "#go" }))).toEqual({ failed: false, text: "" });
+    // A line submitted, or a page left, may clear the field: nothing is claimed.
+    expect(said(await run("type", { selector: "@e2", text: "hello\n" }))).toEqual({ failed: false, text: "" });
+    expect(said(await run("fill", { selector: "@e2", text: "eve" }, () => { daemon.geometry.url = "https://app.example.com/next"; }))).toEqual({ failed: false, text: "" });
+    // An element the engine cannot read, a refused action, or a fill with no target: nothing is claimed.
+    expect(said(await run("fill", { selector: "#gone", text: "x" }))).toEqual({ failed: false, text: "" });
+    expect(said(await run("click", { selector: "#off" }, undefined, { isError: true, content: [] }))).toEqual({ failed: false, text: "" });
+    expect(said(await run("type", { text: "x" }))).toEqual({ failed: false, text: "" });
+    expect(lines).toHaveLength(3);
+    expect(lines.join("\n")).not.toMatch(/eve|zzz|#off|@e2/);
+  });
+
   it("tells every bot what its action made the page report, from the engine's lists, and records nothing", async () => {
     const { daemon, run } = await setup();
     daemon.console = [{ type: "error", text: "left over from before" }];

@@ -26,14 +26,35 @@ const run = enabled ? it : it.skip;
 const PAGE = `<!doctype html><title>Input fixture</title><body style="margin:0;font:16px sans-serif">
 <button id="press" style="position:absolute;left:40px;top:40px;width:200px;height:40px">Press</button>
 <input id="name" aria-label="Name" style="position:absolute;left:40px;top:100px;width:200px;height:30px">
+<div id="rich" contenteditable="true" style="position:absolute;left:40px;top:160px;width:200px;height:30px"></div>
+<select id="pick" style="position:absolute;left:40px;top:220px;width:200px;height:30px"><option>Alpha</option><option>Beta</option><option>Gamma</option></select>
+<button id="off" disabled style="position:absolute;left:300px;top:40px">Closed</button>
+<div id="plain" style="position:absolute;left:300px;top:100px">Plain text</div>
+<button id="swap" style="position:absolute;left:300px;top:160px">Swap</button>
 <script>
-const say = (what) => fetch("/seen?" + new URLSearchParams({ what }));
+let order = 0;
+const say = (what) => fetch("/seen?" + new URLSearchParams({ what, order: String(order++) }));
 document.getElementById("press").addEventListener("click", (event) => say("click:" + event.isTrusted));
 document.getElementById("name").addEventListener("input", (event) => say("input:" + event.target.value));
+document.getElementById("rich").addEventListener("input", (event) => say("rich:" + event.target.textContent));
+document.getElementById("pick").addEventListener("change", (event) => say("pick:" + event.target.selectedIndex));
+document.getElementById("off").addEventListener("click", () => say("off-click"));
+document.getElementById("swap").addEventListener("click", () => {
+  const fresh = document.createElement("input");
+  fresh.setAttribute("aria-label", "Name");
+  fresh.addEventListener("input", (event) => say("fresh:" + event.target.value));
+  document.getElementById("name").replaceWith(fresh);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Tab" || event.metaKey) event.preventDefault();
+  say(["keydown", event.key, event.code, event.keyCode, +event.ctrlKey, +event.shiftKey, +event.altKey, +event.metaKey].join(" "));
+}, true);
 say("load");
 </script>`;
 const PRESS = { x: 140, y: 60 };
 const NAME = { x: 140, y: 115 };
+const RICH = { x: 140, y: 175 };
+const PICK = { x: 140, y: 235 };
 
 type Body = Record<string, unknown>;
 type Answer = { status: number; body: any };
@@ -84,7 +105,7 @@ describe("input to a page on the default browser engine", () => {
     binary = browser.binary;
     pages = createServer((req, res) => {
       const at = new URL(req.url ?? "/", "http://fixture.invalid");
-      if (at.pathname === "/seen") { seen.push(at.searchParams.get("what") ?? ""); res.writeHead(204); res.end(); return; }
+      if (at.pathname === "/seen") { seen[Number(at.searchParams.get("order"))] = at.searchParams.get("what") ?? ""; res.writeHead(204); res.end(); return; }
       res.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" });
       res.end(PAGE);
     });
@@ -111,9 +132,10 @@ describe("input to a page on the default browser engine", () => {
   async function connectView() {
     const abort = new AbortController();
     closers.push(() => abort.abort());
-    const stream = await fetch(`${url}/api/bots/${bot.id}/browser/live`, { headers: { origin: url, accept: "text/event-stream" }, signal: abort.signal });
+    // As the panel opens it: a view that draws the page's dropdown lists.
+    const stream = await fetch(`${url}/api/bots/${bot.id}/browser/live?selects=1`, { headers: { origin: url, accept: "text/event-stream" }, signal: abort.signal });
     expect(stream.status).toBe(200);
-    const view = { viewerId: "", inputBatch: 1, frames: 0, ended: false, error: "", retryable: false };
+    const view = { viewerId: "", inputBatch: 1, frames: 0, ended: false, error: "", retryable: false, selectPopups: [] as Array<{ id: string; options: Array<{ label: string }>; selectedIndex: number }> };
     const post = (body: Body) => api("POST", `/api/bots/${bot.id}/browser/action`, { ...body, viewerId: view.viewerId });
     void (async () => {
       const decoder = new TextDecoder();
@@ -129,6 +151,7 @@ describe("input to a page on the default browser engine", () => {
           if (name === "ready") { view.viewerId = data.viewerId; view.inputBatch = Number(data.inputBatch) || 1; }
           if (name === "frame") { view.frames += 1; void post({ type: "ack", seq: data.seq }).catch(() => undefined); }
           if (name === "error") { view.error = String(data.message); view.retryable = data.retryable === true; }
+          if (name === "selectPopup") view.selectPopups.push(data);
         }
       }
     })().catch(() => undefined).finally(() => { view.ended = true; });
@@ -198,5 +221,118 @@ describe("input to a page on the default browser engine", () => {
       await post({ type: "release" }).catch(() => undefined);
       close();
     }
+  }, 300_000);
+
+  /** A view holding the browser on a fresh copy of the fixture page. */
+  async function holdPage() {
+    const opened = await openView();
+    expect(await opened.post({ type: "take" })).toMatchObject({ status: 200, body: { ok: true } });
+    seen.length = 0;
+    expect(await opened.post(action({ type: "navigate", url: `${base}/?at=${Date.now()}` }))).toEqual({ status: 200, body: { ok: true } });
+    await expect.poll(() => seen.includes("load"), { timeout: 30_000, interval: 100 }).toBe(true);
+    const click = async (at: { x: number; y: number }) => {
+      for (const kind of ["move", "down", "up"] as const) expect(await opened.post(mouse(kind, at))).toEqual({ status: 200, body: { ok: true } });
+    };
+    return { ...opened, click };
+  }
+
+  run("a person's keys reach the page with their key, code, key code and modifiers, in a field and in rich text", async () => {
+    showServerLog();
+    const { post, click, close } = await holdPage();
+    try {
+      type Key = { key: string; code: string; keyCode: number; modifiers?: number; text?: string };
+      const press = async (keys: Key[]) => {
+        for (const key of keys) expect(await post(action({ type: "key", action: "down", modifiers: 0, ...key }))).toEqual({ status: 200, body: { ok: true } });
+        for (const key of [...keys].reverse()) expect(await post(action({ type: "key", action: "up", key: key.key, code: key.code, keyCode: key.keyCode, modifiers: 0 }))).toEqual({ status: 200, body: { ok: true } });
+      };
+      const shift = { key: "Shift", code: "ShiftLeft", keyCode: 16, modifiers: 8 };
+      await click(NAME);
+      seen.length = 0;
+      await press([{ key: "a", code: "KeyA", keyCode: 65, text: "a" }]);
+      await press([shift, { key: "B", code: "KeyB", keyCode: 66, modifiers: 8, text: "B" }]);
+      await press([{ key: "ArrowLeft", code: "ArrowLeft", keyCode: 37 }]);
+      await press([{ key: "Backspace", code: "Backspace", keyCode: 8 }]);
+      await press([{ key: "Escape", code: "Escape", keyCode: 27 }]);
+      await press([{ key: "Control", code: "ControlLeft", keyCode: 17, modifiers: 2 }, { key: "a", code: "KeyA", keyCode: 65, modifiers: 2 }]);
+      await press([{ key: "Meta", code: "MetaLeft", keyCode: 91, modifiers: 4 }, { key: "k", code: "KeyK", keyCode: 75, modifiers: 4 }]);
+      await press([{ key: "F2", code: "F2", keyCode: 113 }]);
+      await press([{ key: "Tab", code: "Tab", keyCode: 9 }]);
+      const downs = () => seen.filter((entry) => entry?.startsWith("keydown "));
+      // key, code, keyCode, then Control, Shift, Alt and Meta held.
+      await expect.poll(downs, { timeout: 15_000, interval: 100 }).toEqual([
+        "keydown a KeyA 65 0 0 0 0", "keydown Shift ShiftLeft 16 0 1 0 0", "keydown B KeyB 66 0 1 0 0", "keydown ArrowLeft ArrowLeft 37 0 0 0 0",
+        "keydown Backspace Backspace 8 0 0 0 0", "keydown Escape Escape 27 0 0 0 0", "keydown Control ControlLeft 17 1 0 0 0", "keydown a KeyA 65 1 0 0 0",
+        "keydown Meta MetaLeft 91 0 0 0 1", "keydown k KeyK 75 0 0 0 1", "keydown F2 F2 113 0 0 0 0", "keydown Tab Tab 9 0 0 0 0",
+      ]);
+      // "aB", then Backspace after ArrowLeft took the "a".
+      expect(seen.filter((entry) => entry?.startsWith("input:"))).toEqual(["input:a", "input:aB", "input:B"]);
+      await click(RICH);
+      seen.length = 0;
+      await press([{ key: "h", code: "KeyH", keyCode: 72, text: "h" }]);
+      await press([shift, { key: "I", code: "KeyI", keyCode: 73, modifiers: 8, text: "I" }]);
+      await expect.poll(() => seen.filter((entry) => entry?.startsWith("rich:")), { timeout: 15_000, interval: 100 }).toEqual(["rich:h", "rich:hI"]);
+      expect(downs()).toEqual(["keydown h KeyH 72 0 0 0 0", "keydown Shift ShiftLeft 16 0 1 0 0", "keydown I KeyI 73 0 1 0 0"]);
+    } finally {
+      await post({ type: "release" }).catch(() => undefined);
+      close();
+    }
+  }, 300_000);
+
+  run("a person's press on a dropdown list shows its options in the view, and the option chosen reaches the page", async () => {
+    showServerLog();
+    const { view, post, click, close } = await holdPage();
+    try {
+      for (const index of [2, 1]) {
+        const before = view.selectPopups.length;
+        seen.length = 0;
+        await click(PICK);
+        await expect.poll(() => view.selectPopups.length, { timeout: 15_000, interval: 100 }).toBe(before + 1);
+        const popup = view.selectPopups.at(-1)!;
+        expect(popup.options.map((option) => option.label)).toEqual(["Alpha", "Beta", "Gamma"]);
+        // The press opened the view's list, not the page's own: the page saw no click.
+        expect(seen.filter((entry) => entry?.startsWith("pick:"))).toEqual([]);
+        expect(await post(action({ type: "selectChoose", id: popup.id, index }))).toEqual({ status: 200, body: { ok: true } });
+        await expect.poll(() => seen.filter((entry) => entry?.startsWith("pick:")), { timeout: 15_000, interval: 100 }).toEqual([`pick:${index}`]);
+      }
+      expect(view.selectPopups.at(-1)!.selectedIndex).toBe(2);
+    } finally {
+      await post({ type: "release" }).catch(() => undefined);
+      close();
+    }
+  }, 300_000);
+
+  run("the bot hears an error for a click on a disabled button and for a fill or type that did not land in its target", async () => {
+    showServerLog();
+    const planPath = join(fixture.info.dataDir, "room-plan.json");
+    const evidence = () => { try { return readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)); } catch { return []; } };
+    const before = evidence().length;
+    seen.length = 0;
+    const step = (tool: string, args: Record<string, unknown>, expectError = false) => ({ server: "browser", tool: `agent_browser_${tool}`, arguments: args, ...(expectError ? { expectError: true } : {}) });
+    // The scripted bot takes the plan's turn at the index of the turns it already took.
+    const earlier = Array.from({ length: evidence().filter((turn: any) => turn.botId === bot.id).length }, () => ({ steps: [], reply: "Done." }));
+    writeFileSync(planPath, JSON.stringify({ [bot.id]: { turns: [...earlier, { timeoutMs: 180_000, steps: [
+      step("open", { url: `${base}/?bot=${Date.now()}` }),
+      step("click", { selector: "#off" }, true),
+      step("click", { selector: "#name" }),
+      step("fill", { selector: "#plain", text: "zzz" }, true),
+      step("type", { selector: "#plain", text: "yyy" }, true),
+      step("snapshot", {}),
+      step("click", { selector: "#swap" }),
+      // The snapshot's ref for the Name field now names a field the page replaced.
+      step("fill", { selector: "@e2", text: "eve" }, true),
+    ], reply: "Done." }] } }));
+    await runControlOmb(["send", "--bot", bot.id, "--task", bot.threadId, "--text", "Use the page.", "--url", url]);
+    const answers = () => evidence().slice(before).flatMap((turn: any) => turn.evidence).filter((entry: any) => entry.step?.server === "browser");
+    await expect.poll(() => answers().length, { timeout: 180_000, interval: 200 }).toBe(8);
+    const errors = answers().map((entry: any) => `${entry.step.tool.replace("agent_browser_", "")}:${entry.response.result.isError === true}`);
+    expect(errors).toEqual(["open:false", "click:true", "click:false", "fill:true", "type:true", "snapshot:false", "click:false", "fill:true"]);
+    const text = (at: number) => answers()[at].response.result.content.map((part: any) => part.text).join(" ");
+    // Our own check's words on the pinned engine; agent-browser 0.39.2 and later refuse it themselves.
+    expect(text(1)).toMatch(/disabled/);
+    expect(text(3)).toContain("does not hold the text");
+    expect(text(5)).toMatch(/textbox "Name" \[ref=e2\]/);
+    // Later engines refuse a ref the page replaced themselves.
+    expect(text(7)).toMatch(/Take a new snapshot|Unknown ref/);
+    expect(seen).not.toContain("off-click");
   }, 300_000);
 });
