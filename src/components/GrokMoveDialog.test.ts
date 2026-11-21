@@ -136,7 +136,7 @@ describe("Move from Grok Bot", () => {
     await open();
     await paste(QUIET);
     const plan = (await import("@/lib/grok-move")).previewGrokMove;
-    const { plans } = plan(JSON.parse(QUIET).bots.map((bot: object) => ({ ...bot, title: "", description: "", memories: [], userFacts: [], skills: [], routines: [], apps: [] })), { bots: [], servers: new Set(), timeZone: "UTC" });
+    const { plans } = plan(JSON.parse(QUIET).bots.map((bot: object) => ({ ...bot, title: "", description: "", memories: [], userFacts: [], skills: [], routines: [], apps: [], handover: "" })), { bots: [], servers: new Set(), timeZone: "UTC" });
     f.state = { config: {}, bots: [{ id: "here-Quiet", name: "Quiet", installedPackage: { id: plans[0]!.packageId, name: "Quiet" } }] };
     await act(async () => root.unmount());
     root = createRoot(host);

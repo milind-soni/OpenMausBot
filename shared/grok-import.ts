@@ -38,6 +38,7 @@ Write one JSON document with exactly this shape, then save it as grok-bot-export
       "instructions": "your full role, job description and lasting rules, verbatim where you can",
       "memories": ["each thing you remember about the work, one string per fact"],
       "user_facts": ["each fact you know about me (name, time zone, preferences), one per string"],
+      "handover": "your handover note, so your next home knows where things stand: for each project or ongoing piece of work, what it is, where it stands, the next steps, open questions, decisions made, and the files it uses (each file's name and what it holds). Plain text, under 100 lines",
       "skills": [
         {"name": "skill name", "description": "when to use it",
          "instructions": "the COMPLETE skill text, every step, rule and output format, verbatim"}
@@ -58,7 +59,7 @@ Write one JSON document with exactly this shape, then save it as grok-bot-export
   ]
 }
 
-Rules: include EVERY routine you own (paused ones too) and EVERY skill enabled for you, with full text, not summaries. If you cannot read something (a routine's schedule, a skill's text), leave it out and tell me in your reply what you left out; never guess or fill it in from memory. Never include passwords, API keys, tokens, webhook keys, cookies or card numbers: leave those out entirely. Output valid JSON only (no comments).
+Rules: include EVERY routine you own (paused ones too) and EVERY skill enabled for you, with full text, not summaries. Write the handover note yourself, from what you know of your work. If you cannot read something (a routine's schedule, a skill's text), leave it out and tell me in your reply what you left out; never guess or fill it in from memory. Never include passwords, API keys, tokens, webhook keys, cookies or card numbers: leave those out entirely. Output valid JSON only (no comments).
 If it is too long for one message or file, split it: send several documents, each complete and valid in this same shape with the same bot name, each holding the part the others do not. They are imported together.
 `;
 
@@ -95,6 +96,8 @@ export interface GrokApp { name: string; mcpUrl: string; transport: string; head
 export interface GrokBot {
   name: string; title: string; description: string; instructions: string;
   memories: string[]; userFacts: string[]; skills: GrokSkill[]; routines: GrokRoutine[]; apps: GrokApp[];
+  /** Where its work stands, as the Bot wrote it when it moved; empty when it wrote none. */
+  handover: string;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -189,7 +192,7 @@ function bracedObjects(text: string): string[] {
 const isExportDocument = (value: unknown): value is Record<string, unknown> =>
   isRecord(value) && (value.format === GROK_EXPORT_FORMAT || value.format === OLD_EXPORT_FORMAT || Array.isArray(value.bots));
 const looksLikeBot = (value: unknown): value is Record<string, unknown> =>
-  isRecord(value) && Boolean(str(value.name)) && ["instructions", "memories", "user_facts", "skills", "routines", "apps"].some((key) => key in value);
+  isRecord(value) && Boolean(str(value.name)) && ["instructions", "memories", "user_facts", "skills", "routines", "apps", "handover"].some((key) => key in value);
 
 /** Inside a reply only export-shaped objects count: an example list of routines is not a Bot. A file that is nothing but
  * JSON may also be a bare Bot or a bare list of Bots. Repairs run only once the text as written has found nothing. */
@@ -246,6 +249,7 @@ function readBot(bot: Record<string, unknown>): GrokBot {
       details: first(routine.trigger_details, routine.details),
     }] : [])),
     apps: list(bot.apps ?? bot.plugins ?? bot.integrations).flatMap(readApp),
+    handover: strings(Array.isArray(bot.handover) ? bot.handover : [bot.handover]).join("\n"),
   };
 }
 
@@ -278,6 +282,7 @@ export function mergeGrokBots(bots: readonly GrokBot[]): GrokBot[] {
       skills: union(into.skills, bot.skills),
       routines: union(into.routines, bot.routines),
       apps: union(into.apps, bot.apps),
+      handover: bot.handover || into.handover,
     });
   }
   return [...merged.values()];
@@ -306,7 +311,7 @@ export function grokExportDocument(bots: readonly GrokBot[]): Record<string, unk
     version: 1,
     bots: bots.map((bot) => ({
       name: bot.name, title: bot.title, description: bot.description, instructions: bot.instructions,
-      memories: bot.memories, user_facts: bot.userFacts, skills: bot.skills,
+      memories: bot.memories, user_facts: bot.userFacts, handover: bot.handover, skills: bot.skills,
       routines: bot.routines.map((routine) => ({
         name: routine.name, instruction: routine.instruction, trigger: routine.trigger, schedule_cron: routine.cron,
         schedule_text: routine.when, timezone: routine.timeZone, paused: routine.paused, skills: routine.skills,
@@ -402,6 +407,37 @@ function serverAddress(raw: string): string | null {
 const VALID_HEADER = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/;
 /** Where a Bot's event routines are kept for rebuilding: a topic of the new bot's memory. */
 export const GROK_NOTES_FILE = "memory/grok-bot-event-routines.md";
+/** Where a Bot's whole handover note is kept when MEMORY.md has room for only its start. */
+export const GROK_HANDOVER_FILE = "memory/grok-bot-handover.md";
+const HANDOVER_MAX_LINES = 100;
+const HANDOVER_MAX_BYTES = 12_000;
+const HANDOVER_START = "<!-- Handover from Grok Bot. Moving the Bot again replaces this section. -->";
+const HANDOVER_END = "<!-- End of the handover from Grok Bot. -->";
+
+/** A Bot's handover note as memory: `section` opens MEMORY.md and, when it holds only the note's start, `whole` is the
+ * whole note for GROK_HANDOVER_FILE. */
+export interface GrokHandover { section: string; whole: string | null }
+
+function grokHandover(note: string): GrokHandover | null {
+  const text = note.replaceAll(HANDOVER_START, "").replaceAll(HANDOVER_END, "").trim();
+  if (!text) return null;
+  const start = fitBytes(text.split("\n").slice(0, HANDOVER_MAX_LINES).join("\n"), HANDOVER_MAX_BYTES).trimEnd();
+  const clipped = start !== text;
+  return {
+    section: `${HANDOVER_START}\n## Where things stand\n\n${clipped ? `${start}\n\nThe rest of this note is in ${GROK_HANDOVER_FILE}.` : text}\n${HANDOVER_END}\n`,
+    whole: clipped ? fitBytes(`# Where things stand\n\nThe whole handover note from Grok Bot.\n\n${text}\n`, SEED_FILE_MAX_BYTES) : null,
+  };
+}
+
+/** `memory` with `section` in place of the handover section it has, or first when it has none. Nothing else in it
+ * changes, so writing the same note again changes nothing. */
+export function withGrokHandover(memory: string, section: string): string {
+  const start = memory.indexOf(HANDOVER_START);
+  const end = start < 0 ? -1 : memory.indexOf(HANDOVER_END, start);
+  if (end < 0) return memory ? `${section}\n${memory}` : section;
+  const after = end + HANDOVER_END.length;
+  return memory.slice(0, start) + section + memory.slice(memory[after] === "\n" ? after + 1 : after);
+}
 
 export interface GrokMovePlan {
   name: string;
@@ -415,6 +451,8 @@ export interface GrokMovePlan {
   memories: number;
   /** Apps to connect again here: all but those whose server name is already here. */
   apps: number;
+  /** The Bot's handover note as the new bot's memory has it; null when it wrote none. */
+  handover: GrokHandover | null;
 }
 
 const sameFact = (value: string) => value.replace(/\s+/g, " ").trim().toLowerCase();
@@ -499,8 +537,12 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
   }
 
   const memory = memoryNotes(bot);
+  const handover = grokHandover(bot.handover);
+  const full = handover ? withGrokHandover(memory.text ?? "", handover.section) : memory.text;
+  const index = full && utf8Bytes(full) <= SEED_FILE_MAX_BYTES ? full : handover?.section;
   const seed: Record<string, string> = {};
-  if (memory.text && utf8Bytes(memory.text) <= SEED_FILE_MAX_BYTES) seed["MEMORY.md"] = memory.text;
+  if (index) seed["MEMORY.md"] = index;
+  if (handover?.whole) seed[GROK_HANDOVER_FILE] = handover.whole;
   if (unscheduled.length) {
     const notes = eventNotes(name, unscheduled);
     if (utf8Bytes(notes) <= SEED_FILE_MAX_BYTES) seed[GROK_NOTES_FILE] = notes;
@@ -569,7 +611,8 @@ export function grokMovePlan(bot: GrokBot, options: { timeZone?: string; takenSe
   return {
     name, packageId, document, skills: planned, routines: routines.length,
     notes: seed[GROK_NOTES_FILE] ? unscheduled.length : 0,
-    memories: seed["MEMORY.md"] ? memory.count : 0,
+    memories: index === full ? memory.count : 0,
     apps,
+    handover,
   };
 }
