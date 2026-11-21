@@ -136,6 +136,7 @@ export function useBotHistory(bot: Bot, active: boolean) {
 
   const load = useCallback(() => {
     const readFor = bot.id;
+    if (readFor !== ownerId.current) return Promise.resolve();
     const current = ++request.current;
     setError(false);
     return flushBotPatches(bot.id)
