@@ -2,12 +2,14 @@
 // HTTP requests do: the upgrade request and the frames are plain stream bytes (README section 8), so the browser's own
 // WebSocket, which can only dial a URL, cannot be used here.
 import { concat, utf8 } from "./bytes.ts";
-import { ByteReader, CRLF2, HttpError, MAX_HEAD, TOKEN, headStart, parseHead } from "./http.ts";
+import { ByteReader, CRLF2, HttpError, MAX_HEAD, TOKEN, headStart, latin1, parseHead } from "./http.ts";
 import type { E2EStream } from "./session.ts";
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 /** Largest message put together when the caller sets no maxMessage. */
 export const MAX_MESSAGE = 16 * 1024 * 1024;
+/** How long close() waits for the computer's close before resetting the stream, as the ws package waits. */
+export const CLOSE_TIMEOUT_MS = 30_000;
 const OP = { continuation: 0, text: 1, binary: 2, close: 8, ping: 9, pong: 10 } as const;
 const OPCODES = new Set<number>(Object.values(OP));
 const EMPTY = new Uint8Array(0);
@@ -27,6 +29,8 @@ export interface StreamSocketOptions {
   /** Aborts the opening handshake; close() ends an open socket. */
   signal?: AbortSignal;
   maxMessage?: number;
+  /** Default CLOSE_TIMEOUT_MS. */
+  closeTimeoutMs?: number;
   /** Each whole message: text as a string, binary as bytes. Given up front so no message can arrive before it is set. */
   onMessage(data: string | Uint8Array): void;
   /** Called once, however the socket ends. */
@@ -85,6 +89,7 @@ export class StreamWebSocket {
   readonly #maxMessage: number;
   #state: "open" | "closing" | "closed" = "open";
   #sending: Promise<void> = Promise.resolve();
+  #closeTimer: ReturnType<typeof setTimeout> | undefined;
 
   constructor(stream: E2EStream, reader: ByteReader, protocol: string, options: StreamSocketOptions) {
     this.#stream = stream;
@@ -114,6 +119,8 @@ export class StreamWebSocket {
     if (this.#state !== "open") return;
     this.#state = "closing";
     this.#control(OP.close, code === undefined ? EMPTY : closePayload(code, why));
+    // A computer that never answers would hold the stream: reset it, and the read loop reports 1006.
+    this.#closeTimer = setTimeout(() => this.#stream.reset(), this.#options.closeTimeoutMs ?? CLOSE_TIMEOUT_MS);
   }
 
   /** Frames go out in call order; a failed write leaves the chain rejected, so later sends fail too. */
@@ -160,7 +167,8 @@ export class StreamWebSocket {
   /** Reads frames until the closing handshake; throws a Failure for a protocol error, anything else when the stream ends. */
   async #frames(): Promise<void> {
     let kind: number = OP.continuation;
-    let parts: Uint8Array[] = [];
+    /** The fragments so far, copied into one buffer that grows by doubling; empty ones take no room. */
+    let buffer = EMPTY;
     let size = 0;
     for (;;) {
       const head = await this.#need(2);
@@ -184,21 +192,29 @@ export class StreamWebSocket {
       const payload = length ? await this.#need(length) : EMPTY;
 
       if (op === OP.ping) {
-        if (this.#state === "open") this.#control(OP.pong, payload);
+        // Answered while closing too: only a close from the computer ends the need for a pong (RFC 6455 section 5.5.2).
+        this.#control(OP.pong, payload);
         continue;
       }
       if (op === OP.pong) continue;
-      if (op === OP.close) return this.#closeFrame(payload);
+      if (op === OP.close) return await this.#closeFrame(payload);
 
       if (op === OP.continuation ? kind === OP.continuation : kind !== OP.continuation) throw new Failure(1002, op === OP.continuation ? "a continuation with no message" : "a new message inside a fragmented one");
       if (op !== OP.continuation) kind = op;
-      parts.push(payload);
-      size += length;
-      if (!fin) continue;
-      const whole = parts.length === 1 ? parts[0] : concat(...parts);
+      if (!fin || size) {
+        if (size + length > buffer.length) {
+          const grown = new Uint8Array(Math.min(this.#maxMessage, Math.max(size + length, buffer.length * 2)));
+          grown.set(buffer.subarray(0, size));
+          buffer = grown;
+        }
+        buffer.set(payload, size);
+        size += length;
+        if (!fin) continue;
+      }
+      const whole = size === 0 ? payload : size === buffer.length ? buffer : buffer.slice(0, size);
       const message = kind === OP.text ? decodeText(whole, "a text message") : whole;
       kind = OP.continuation;
-      parts = [];
+      buffer = EMPTY;
       size = 0;
       try {
         this.#options.onMessage(message);
@@ -217,27 +233,37 @@ export class StreamWebSocket {
     return bytes;
   }
 
-  #closeFrame(payload: Uint8Array): void {
+  async #closeFrame(payload: Uint8Array): Promise<void> {
     if (payload.length === 1) throw new Failure(1002, "a close frame with a one-byte body");
     const code = payload.length ? (payload[0] << 8) | payload[1] : 1005;
     if (payload.length && !wireCode(code)) throw new Failure(1002, `close code ${code} is not allowed on the wire`);
     const reason = decodeText(payload.subarray(2), "the close reason");
     // Answer the computer's close with its code, unless this side already sent one.
     if (this.#state === "open") this.#control(OP.close, payload.length ? closePayload(code, EMPTY) : EMPTY);
-    this.#end();
+    this.#state = "closing";
+    // Clean only once every frame, the answer included, is handed to the session; a reset meanwhile is a 1006.
+    try {
+      await this.#sending;
+    } catch {
+      this.#stream.reset();
+      return this.#finish({ code: 1006, reason: "", wasClean: false });
+    }
+    this.#stream.end();
     this.#finish({ code, reason, wasClean: true });
   }
 
   #finish(event: StreamSocketClose): void {
     if (this.#state === "closed") return;
     this.#state = "closed";
+    clearTimeout(this.#closeTimer);
     this.#options.onClose(event);
   }
 }
 
 /** Opens a WebSocket on a fresh stream from `open`. Resolves once the computer switched protocols. */
 export async function streamWebSocket(open: () => E2EStream, options: StreamSocketOptions): Promise<StreamWebSocket> {
-  const protocols = options.protocols ?? [];
+  // A copy: the reply is checked against the list that was sent, whatever the caller does to its array meanwhile.
+  const protocols = [...(options.protocols ?? [])];
   if (protocols.some((protocol) => !TOKEN.test(protocol)) || new Set(protocols).size !== protocols.length) throw new TypeError("e2e websocket: bad subprotocol list");
   const key = base64(crypto.getRandomValues(new Uint8Array(16)));
   let head = headStart("GET", options.path, new Headers(options.headers));
@@ -253,7 +279,7 @@ export async function streamWebSocket(open: () => E2EStream, options: StreamSock
   const abort = () => stream.reset();
   signal?.addEventListener("abort", abort, { once: true });
   try {
-    const [, reply] = await Promise.all([stream.write(utf8(head)), reader.until(CRLF2, MAX_HEAD, "reply head").then(parseHead)]);
+    const [, reply] = await Promise.all([stream.write(latin1(head)), reader.until(CRLF2, MAX_HEAD, "reply head").then(parseHead)]);
     if (reply.status !== 101) throw new HttpError(`the computer answered ${reply.status} instead of switching to WebSocket`);
     const connection = (reply.headers.get("connection") ?? "").toLowerCase().split(",");
     if (reply.headers.get("upgrade")?.toLowerCase() !== "websocket" || !connection.some((token) => token.trim() === "upgrade")) throw new HttpError("the switch is not to WebSocket");

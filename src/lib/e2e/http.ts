@@ -117,7 +117,7 @@ function indexOf(bytes: Uint8Array, delimiter: number[], from: number): number {
 }
 
 /** Head characters as bytes, the way fetch writes header values: one character, one byte (Headers holds only 0-255). */
-const latin1 = (text: string): Uint8Array => Uint8Array.from(text, (char) => char.charCodeAt(0));
+export const latin1 = (text: string): Uint8Array => Uint8Array.from(text, (char) => char.charCodeAt(0));
 
 /** Header bytes as fetch reads them: one byte, one character. */
 const byteString = (bytes: Uint8Array): string => {

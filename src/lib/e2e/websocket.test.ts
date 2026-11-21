@@ -260,6 +260,69 @@ describe("StreamWebSocket frames", () => {
     expect(socket.readyState).toBe("open");
   });
 
+  it("answers a ping that comes while waiting for the computer's close", async () => {
+    const fake = fakeComputer();
+    const { socket } = await switched(fake);
+    socket.close(1000);
+    fake.push(serverFrame(9, "p"));
+    await vi.waitFor(() => expect(fake.frames().map(({ op, payload }) => [op, new TextDecoder().decode(op === 8 ? payload.subarray(2) : payload)])).toEqual([[8, ""], [10, "p"]]));
+  });
+
+  it("resets the stream and reports 1006 when the computer never answers close() in time", async () => {
+    const fake = fakeComputer();
+    const { socket, page } = await switched(fake, { closeTimeoutMs: 50 });
+    socket.close(1000);
+    await vi.waitFor(() => expect(page.closes).toEqual([{ code: 1006, reason: "", wasClean: false }]));
+    expect(fake.state.reset).toBe(true);
+  });
+
+  it("puts a message of 300,000 one-byte fragments back together, empty fragments between them, and an all-empty one", async () => {
+    const fake = fakeComputer();
+    const { page } = await switched(fake);
+    const count = 300_000;
+    const wire = new Uint8Array(count * 3 + 2 * 1000 + 2 + 2);
+    let at = 0;
+    const put = (frame: Uint8Array) => (wire.set(frame, at), (at += frame.length));
+    for (let i = 0; i < count; i++) {
+      put(serverFrame(i === 0 ? 2 : 0, Uint8Array.of(i % 251), { fin: i === count - 1 }));
+      if (i === 1) for (let j = 0; j < 1000; j++) put(serverFrame(0, new Uint8Array(0), { fin: false }));
+    }
+    put(serverFrame(2, new Uint8Array(0), { fin: false }));
+    put(serverFrame(0, new Uint8Array(0)));
+    fake.push(wire.subarray(0, at));
+    await vi.waitFor(() => expect(page.messages).toHaveLength(2), { timeout: 10_000 });
+    expect(page.messages[0]).toEqual(Uint8Array.from({ length: count }, (_, i) => i % 251));
+    expect(page.messages[1]).toEqual(new Uint8Array(0));
+    expect(page.closes).toEqual([]);
+  });
+
+  it("reports a clean close only once its close answer is handed to the session", async () => {
+    const fake = fakeComputer();
+    const { page } = await switched(fake);
+    const stream = fake.open();
+    const write = stream.write;
+    let fail!: (error: Error) => void;
+    stream.write = (bytes) => (bytes.length === 2 + 4 + 2 ? new Promise<void>((_, reject) => (fail = reject)) : write(bytes));
+    fake.push(serverFrame(8, Uint8Array.of(0x03, 0xe8)));
+    await vi.waitFor(() => expect(fail).toBeDefined());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(page.closes).toEqual([]);
+    fail(new Error("stream reset"));
+    await vi.waitFor(() => expect(page.closes).toEqual([{ code: 1006, reason: "", wasClean: false }]));
+    expect(fake.state.reset).toBe(true);
+  });
+
+  it("checks the chosen subprotocol against the list it sent, even if the caller's array changes meanwhile", async () => {
+    const fake = fakeComputer();
+    const protocols = ["a"];
+    const opening = streamWebSocket(fake.open, { path: "/ws", ...listener(), protocols, headers: { "X-Label": "é" } });
+    const { key } = await request(fake);
+    expect([...fake.written[0]]).toContain(0xe9);
+    protocols[0] = "b";
+    fake.push(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${acceptFor(key)}\r\nSec-WebSocket-Protocol: b\r\n\r\n`);
+    await expect(opening).rejects.toThrow("was not offered");
+  });
+
   it("reports 1006 and resets when the stream ends without a closing handshake", async () => {
     const fake = fakeComputer();
     const { socket, page } = await switched(fake);
