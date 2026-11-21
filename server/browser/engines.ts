@@ -122,6 +122,12 @@ export class ChromeEngine {
     return { command: CHROME_ENGINE, args: [key], env: {} };
   }
 
+  /** Whether a session's browser runs as desktop panes now. */
+  onPane(spec: { command: string; args?: readonly string[] }): boolean {
+    const key = spec.command === CHROME_ENGINE ? spec.args?.[0] : undefined;
+    return key !== undefined && this.service.profiles().some((profile) => profile.key === key && profile.run?.opened.surface === "pane");
+  }
+
   target(session: string): BrowserTarget | null {
     const key = this.#targets.get(session);
     return key ? { session, key } : null;

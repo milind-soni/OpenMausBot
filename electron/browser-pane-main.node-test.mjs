@@ -4,7 +4,6 @@ import path from "node:path";
 import test from "node:test";
 
 import { createBrowserPanes } from "./browser-pane-main.mjs";
-import { paneUserAgent } from "./browser-pane-wire.mjs";
 
 const PARTITION = "persist:omb-pane-0123456789abcdef01234567";
 const MSG = "openmausbot:browser-pane";
@@ -43,6 +42,8 @@ function fakeElectron() {
       close() { this.closed = true; },
       devtoolsClosed: 0,
       closeDevTools() { this.devtoolsClosed++; },
+      agent: null,
+      setUserAgent(agent) { this.agent = agent; },
     });
     let attached = false;
     contents.debugger = Object.assign(debuggerEvents, {
@@ -79,13 +80,26 @@ function fakeElectron() {
     }
     return sessions.get(name);
   };
-  return { views, sessions, window, createView, fromPartition };
+  const popups = [];
+  const createPopup = (options) => {
+    const contents = options.webContents ?? new EventEmitter();
+    const popup = Object.assign(new EventEmitter(), {
+      options, focused: 0, destroyed: false, title: "",
+      focus() { this.focused++; }, isDestroyed() { return this.destroyed; }, close() { this.destroyed = true; this.emit("closed"); }, setTitle(title) { this.title = title; },
+    });
+    // The window's contents get the same fake surface a view's would.
+    popup.webContents = createView({ webContents: contents, webPreferences: options.webPreferences }).webContents;
+    views.pop();
+    popups.push(popup);
+    return popup;
+  };
+  return { views, sessions, window, createView, createPopup, popups, fromPartition };
 }
 
 function setup({ captureMs } = {}) {
   const electron = fakeElectron();
   let clock = 0;
-  const panes = createBrowserPanes({ createView: electron.createView, fromPartition: electron.fromPartition, owner: () => (electron.window.destroyed ? null : electron.window), chromeVersion: "146.0.7680.0", now: () => clock, ...(captureMs ? { captureMs } : {}) });
+  const panes = createBrowserPanes({ createView: electron.createView, createPopup: electron.createPopup, fromPartition: electron.fromPartition, owner: () => (electron.window.destroyed ? null : electron.window), chromeVersion: "146.0.7680.0", now: () => clock, ...(captureMs ? { captureMs } : {}) });
   const posted = [];
   const server = { postMessage: (message) => posted.push(message) };
   panes.attach(server);
@@ -105,13 +119,13 @@ test("says hello to the server it starts, again when that server asks, and ignor
   assert.equal(panes.receive({}, { type: "something-else" }), false);
 });
 
-test("opens a profile on its partition, behind its egress gate, with Electron's and the app's tokens out of the user agent", async () => {
+test("opens a profile on its partition, behind its egress gate, as Electron's own Chromium without the app's token", async () => {
   const { send, last, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   const opened = last("opened");
   assert.equal(opened.version, "146.0.7680.0");
-  assert.equal(opened.userAgent, "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.0 Safari/537.36");
+  assert.equal(opened.userAgent, "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.0 Electron/43.7.9 Safari/537.36");
   const session = electron.sessions.get(PARTITION);
   assert.deepEqual(session.proxy, { proxyRules: "socks5://127.0.0.1:41000", proxyBypassRules: "<-loopback>" });
   let granted = null;
@@ -119,22 +133,38 @@ test("opens a profile on its partition, behind its egress gate, with Electron's 
   assert.equal(granted, false);
   assert.equal(session.check(null, "fullscreen"), true);
   assert.equal(session.check(null, "notifications"), false);
-  let sent = null;
-  session.headers({ url: "https://accounts.example/", requestHeaders: { "User-Agent": opened.userAgent, Accept: "*/*" } }, (answer) => { sent = answer; });
-  assert.deepEqual(sent.requestHeaders, { "User-Agent": opened.userAgent, Accept: "*/*" });
+  const headers = (url, requestHeaders) => {
+    let sent = null;
+    session.headers({ url, referrer: "", resourceType: "mainFrame", requestHeaders }, (answer) => { sent = answer; });
+    return sent.requestHeaders;
+  };
+  const hints = { "sec-ch-ua": '"Chromium";v="146", "Not-A.Brand";v="24"', "sec-ch-ua-platform": '"macOS"' };
+  assert.deepEqual(headers("https://example.com/", { "User-Agent": opened.userAgent, ...hints }), { "User-Agent": opened.userAgent, ...hints });
+  // Teams' request header alone drops Electron's token; Chromium's client hints are never touched.
+  assert.deepEqual(headers("https://teams.microsoft.com/v2/", { "user-agent": opened.userAgent, ...hints }), {
+    "user-agent": "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.0 Safari/537.36", ...hints,
+  });
 });
 
-test("can give one host Electron's own user agent, and every other the stripped one", () => {
-  const electronAgent = "Mozilla/5.0 Chrome/146.0.7680.0 Electron/43.7.9 OpenMausBot/0.1.175 Safari/537.36";
-  const hosts = new Map([["accounts.example", "electron"]]);
-  assert.equal(paneUserAgent(electronAgent, "Accounts.Example", hosts), electronAgent);
-  assert.equal(paneUserAgent(electronAgent, "example.com", hosts), "Mozilla/5.0 Chrome/146.0.7680.0 Safari/537.36");
-  assert.equal(paneUserAgent(electronAgent), "Mozilla/5.0 Chrome/146.0.7680.0 Safari/537.36");
+test("cleaned identity on request: Electron's token off everywhere but Google's sign-in, which keeps Electron's own UA", async () => {
+  const { send, last, electron } = setup();
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "cleaned" });
+  await tick();
+  assert.equal(last("opened").userAgent, "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.0 Safari/537.36");
+  const session = electron.sessions.get(PARTITION);
+  let sent = null;
+  session.headers({ url: "https://accounts.google.com/v3/signin/identifier", referrer: "", resourceType: "mainFrame", requestHeaders: { "User-Agent": last("opened").userAgent } }, (answer) => { sent = answer; });
+  assert.equal(sent.requestHeaders["User-Agent"], "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.0 Electron/43.7.9 Safari/537.36");
+  // Opened again as native, the same partition goes back to Electron's token.
+  send({ op: "close", browser: "bot:a" });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
+  await tick();
+  assert.match(last("opened").userAgent, / Electron\/43\.7\.9 /);
 });
 
 test("refuses a partition outside the pane pattern, and a profile without an egress gate", async () => {
   const { send, posted, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: "persist:openmausbot-app", egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:a", partition: "persist:openmausbot-app", egress: 41000, downloads: DOWNLOADS, identity: "native" });
   send({ op: "open", browser: "bot:a", partition: PARTITION });
   await tick();
   assert.equal(posted.length, 1);
@@ -143,7 +173,7 @@ test("refuses a partition outside the pane pattern, and a profile without an egr
 
 test("creates a sandboxed view per tab, attaches its debugger and relays its CDP both ways", async () => {
   const { send, last, electron, posted } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "https://example.com/" });
   await tick();
@@ -179,7 +209,7 @@ test("creates a sandboxed view per tab, attaches its debugger and relays its CDP
 
 test("shows the bot's tab in front over the panel's rectangle and hides it under an overlay", async () => {
   const { send, panes, posted, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   send({ op: "create", browser: "bot:a", req: 2, url: "about:blank", background: true });
@@ -206,7 +236,7 @@ test("shows the bot's tab in front over the panel's rectangle and hides it under
 
 test("makes a page's popup another tab of the same profile, with its opener", async () => {
   const { send, last, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   await tick();
@@ -225,7 +255,7 @@ test("makes a page's popup another tab of the same profile, with its opener", as
 
 test("tells the server when the person uses a pane, at most four times a second", async () => {
   const { send, posted, electron, advance } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   await tick();
@@ -242,7 +272,7 @@ test("tells the server when the person uses a pane, at most four times a second"
 
 test("draws a hidden pane for a screenshot, then hides it again", async () => {
   const { send, last, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   await tick();
@@ -255,7 +285,7 @@ test("draws a hidden pane for a screenshot, then hides it again", async () => {
 
 test("closes a profile's views, detaches their debuggers, erases a partition and drops everything for a new server", async () => {
   const { send, panes, last, electron, posted } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   await tick();
@@ -270,7 +300,7 @@ test("closes a profile's views, detaches their debuggers, erases a partition and
   await tick();
   assert.equal(electron.sessions.get(PARTITION).erased, 1);
 
-  send({ op: "open", browser: "bot:b", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:b", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   send({ op: "create", browser: "bot:b", req: 2, url: "about:blank" });
   await tick();
@@ -282,7 +312,7 @@ test("closes a profile's views, detaches their debuggers, erases a partition and
 
 test("a crashed page or a detached debugger is a tab gone", async () => {
   const { send, last, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   await tick();
@@ -292,7 +322,7 @@ test("a crashed page or a detached debugger is a tab gone", async () => {
 
 test("hides the shown pane when the app's page reloads or its renderer crashes", async () => {
   const { send, panes, posted, electron } = setup();
-  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   await tick();
@@ -306,7 +336,7 @@ test("hides the shown pane when the app's page reloads or its renderer crashes",
 
 async function opened(options) {
   const context = setup(options);
-  context.send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  context.send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   context.send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
   await tick();
@@ -316,7 +346,7 @@ async function opened(options) {
 test("says no window can host a pane while the app window is closed", async () => {
   const { send, last, electron } = setup();
   electron.window.destroyed = true;
-  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   assert.deepEqual(last("failed"), { type: MSG, op: "failed", browser: "bot:a", error: "The app window is closed.", reason: "no-window" });
   assert.equal(electron.sessions.size, 0);
@@ -396,7 +426,7 @@ test("asks again which browser a panel shows: after no answer, when a browser op
   assert.equal(whiches().length, 2);
   send({ op: "resolved", req: whiches().at(-1).req, browser: "bot:a" });
   await again;
-  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS });
+  send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
   await tick();
   assert.equal(whiches().length, 3);
   send({ op: "resolved", req: whiches().at(-1).req, browser: "bot:a" });
@@ -413,4 +443,62 @@ test("closes every pane when the app window closes", async () => {
   panes.closeAll();
   assert.equal(electron.views[0].webContents.closed, true);
   assert.equal(last("closed").browser, "bot:a");
+});
+
+test("a tab on a site with a page-level rule reports that site's UA in the page too, and its own UA again after", async () => {
+  const { electron } = await opened();
+  const contents = electron.views[0].webContents;
+  contents.emit("did-start-navigation", {}, "https://www.chase.com/", false, true);
+  assert.equal(contents.agent, "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.0 Safari/537.36");
+  contents.emit("did-start-navigation", {}, "https://example.com/", false, true);
+  assert.equal(contents.agent, "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.0 Electron/43.7.9 Safari/537.36");
+});
+
+test("a sign-in popup the person opened is a real child window on the pane's session, its opener kept, one per opener", async () => {
+  const { posted, electron, advance } = await opened();
+  advance(5_000);
+  const opener = electron.views[0].webContents;
+  opener.emit("input-event", {}, { type: "mouseDown" });
+  opener.debugger.emit("message", {}, "Page.windowOpen", { url: "https://accounts.example/o/oauth2", windowName: "", windowFeatures: [], userGesture: true }, "");
+  const answer = opener.openHandler({ url: "https://accounts.example/o/oauth2", disposition: "new-window" });
+  assert.equal(answer.action, "allow");
+  const guest = new EventEmitter();
+  // Electron makes the guest the opener's child before createWindow: adopting it is what keeps window.opener.
+  assert.equal(answer.createWindow({ webContents: guest, webPreferences: {} }), guest);
+  const [popup] = electron.popups;
+  assert.equal(popup.options.parent, electron.window);
+  assert.equal(popup.options.webContents, guest);
+  assert.equal(popup.options.webPreferences.partition, PARTITION);
+  assert.equal(popup.options.webPreferences.sandbox, true);
+  await tick();
+  const tab = posted.filter((message) => message.op === "tab").at(-1);
+  assert.deepEqual({ tab: tab.tab, opener: tab.opener }, { tab: "p2", opener: "p1" });
+  assert.equal(electron.window.children.includes(popup), false);
+  guest.url = "https://accounts.example/o/oauth2";
+  popup.emit("page-title-updated", { preventDefault() {} }, "Sign in");
+  assert.equal(popup.title, "https://accounts.example");
+
+  opener.debugger.emit("message", {}, "Page.windowOpen", { url: "https://accounts.example/again", userGesture: true }, "");
+  assert.deepEqual(opener.openHandler({ url: "https://accounts.example/again" }), { action: "deny" });
+  assert.equal(popup.focused, 1);
+  popup.close();
+  assert.equal(posted.filter((message) => message.op === "tab-gone").at(-1).tab, "p2");
+});
+
+test("a popup the bot's click opened stays a tab, its opener kept", async () => {
+  const { send, posted, electron, advance } = await opened();
+  advance(5_000);
+  const opener = electron.views[0].webContents;
+  let finish;
+  opener.debugger.sendCommand = (method) => (method === "Input.dispatchMouseEvent" ? new Promise((resolve) => { finish = resolve; }) : Promise.resolve({ frameTree: { frame: { id: "FRAME9" } } }));
+  send({ op: "cdp", browser: "bot:a", req: 2, tab: "p1", method: "Input.dispatchMouseEvent", params: { type: "mousePressed", x: 1, y: 1 } });
+  opener.debugger.emit("message", {}, "Page.windowOpen", { url: "https://accounts.example/o/oauth2", userGesture: true }, "");
+  const answer = opener.openHandler({ url: "https://accounts.example/o/oauth2" });
+  const guest = new EventEmitter();
+  answer.createWindow({ webContents: guest });
+  finish({});
+  await tick();
+  assert.equal(electron.popups.length, 0);
+  assert.equal(electron.views.at(-1).options.webContents, guest);
+  assert.equal(posted.filter((message) => message.op === "tab").at(-1).opener, "p1");
 });

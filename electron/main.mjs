@@ -156,7 +156,7 @@ cloudEntry.fromLaunch(process.argv); const teamLinks = installTeamJoin({ argv: p
 let pendingPackageInstallUrl = pendingOrganizationEntry ? null : packageUrlFromCommandLine(process.argv);
 let pendingChatLink = pendingOrganizationEntry ? null : chatLinkFromCommandLine(process.argv);
 let organizationEntryReady = false;
-let mainWindow = null; const browserPanes = createBrowserPanes({ createView: (options) => new WebContentsView(options), fromPartition: (name) => session.fromPartition(name), owner: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null), chromeVersion: process.versions.chrome, log: (line) => slog(line) });
+let mainWindow = null; const browserPanes = createBrowserPanes({ createView: (options) => new WebContentsView(options), createPopup: (options) => new BrowserWindow(options), fromPartition: (name) => session.fromPartition(name), owner: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null), chromeVersion: process.versions.chrome, log: (line) => slog(line) });
 const serverUnavailableWindows = new WeakSet();
 let unreadCount = 0;
 let unreadOverlayIcon;

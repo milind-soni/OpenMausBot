@@ -11,6 +11,7 @@ import { FakeBackend, FakeChrome, type FakeDocument } from "../testing/fake-chro
 import { PaneBackend, panePartition } from "./backend.ts";
 import { PaneEndpoint, PERSON_HOLDS_TAB, type PaneChannel } from "./endpoint.ts";
 import { PaneLink } from "./link.ts";
+import { withPasskeyNotice } from "../passkey-notice.ts";
 import { FakeMain } from "./testing/fake-main.ts";
 
 const FORM: FakeDocument = {
@@ -36,7 +37,7 @@ function setup({ quietMs = 1_000, linkOptions = {} }: { quietMs?: number; linkOp
   folders.push(dataDir);
   const main = new FakeMain(documents);
   const link = new PaneLink(main, { quietMs, maxHoldMs: 2_000, ...linkOptions });
-  const backend = new PaneBackend(link, dataDir, async () => 41_000, "darwin");
+  const backend = new PaneBackend(link, dataDir, async () => 41_000, { platform: "darwin" });
   const service = new BrowserService({ dataDir, backend: () => backend, maxRunning: 4, idleMs: () => 600_000, takeoverMs: 200 });
   services.push(service);
   const target = { session: "bot-a", key: "bot:a" };
@@ -277,6 +278,93 @@ describe("deleting a bot's browser with the pane", () => {
     backend.erase("bot:a");
     expect(main.toMain.filter((message) => message.op === "erase")).toEqual([{ type: "openmausbot:browser-pane", op: "erase", partition: main.partitions[0] }]);
     expect(backend.used("bot:a")).toBe(false);
+  });
+});
+
+describe("the pane's identity", () => {
+  it("is Electron's Chromium as it is: the driver sends no user agent, client hint, automation switch or main-world script", async () => {
+    const { main, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    await call("agent_browser_fill", { selector: "#name", text: "Ada" });
+    await call("agent_browser_click", { selector: "#go" });
+    await call("agent_browser_open", { url: "https://example.com/b", tab: "new" });
+    expect(main.toMain.filter((message) => message.op === "open").map((message) => (message as { identity: string }).identity)).toEqual(["native"]);
+    const sent = main.commands;
+    expect(sent.filter((command) => /UserAgentOverride|setDeviceMetricsOverride|setAutomationOverride/.test(command.method))).toEqual([]);
+    expect(sent.filter((command) => command.method === "Page.addScriptToEvaluateOnNewDocument" && !command.params.worldName)).toEqual([]);
+    expect(sent.filter((command) => (command.method === "Runtime.evaluate" || command.method === "Runtime.callFunctionOn") && command.params.contextId === undefined && command.params.objectId === undefined)).toEqual([]);
+    expect(JSON.stringify(sent)).not.toMatch(/Firefox|webdriver|AutomationControlled|Google Chrome/);
+    FORM.elements[1]!.value = "";
+  });
+
+  it("refuses a user agent override that would blank Chromium's client hints", async () => {
+    const { main, service, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/a" });
+    const page = service.profiles()[0]!.run!.browser.activePage!;
+    await expect(page.session.send("Emulation.setUserAgentOverride", { userAgent: "Mozilla/5.0 Chrome/146.0.0.0" })).rejects.toThrow(/needs userAgentMetadata/);
+    await expect(page.session.send("Network.setUserAgentOverride", { userAgent: "x" })).rejects.toThrow(/needs userAgentMetadata/);
+    expect(main.commands.some((command) => command.method.endsWith("UserAgentOverride"))).toBe(false);
+  });
+
+  it("passes the cleaned identity to the app when the config asks for it", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-browser-pane-"));
+    folders.push(dataDir);
+    const main = new FakeMain(documents);
+    const link = new PaneLink(main);
+    await sleep(5);
+    const backend = new PaneBackend(link, dataDir, async () => 41_000, { identity: () => "cleaned" });
+    const opened = await backend.open({ key: "bot:c", mode: "headless", fresh: false, viewport: { width: 1280, height: 720 }, downloadDir: dataDir });
+    expect(main.toMain.find((message) => message.op === "open")).toMatchObject({ identity: "cleaned" });
+    await opened.close();
+  });
+
+  it("turns a passkey request down at once instead of leaving the page waiting for a sheet Electron never draws", async () => {
+    const { main, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/a" });
+    expect(main.commands.filter((command) => command.method.startsWith("WebAuthn.")).map((command) => command.method)).toEqual(["WebAuthn.enable", "WebAuthn.addVirtualAuthenticator"]);
+  });
+});
+
+describe("the pane's debugger and its frames", () => {
+  it("never leaves a frame waiting: auto-attach never pauses, and a frame that arrives paused is run at once", async () => {
+    const sent: Array<{ tab: string; method: string; params: Record<string, unknown>; session?: string }> = [];
+    const endpoint = new PaneEndpoint({
+      version: "146", userAgent: "ua", create: async () => ({ tab: "p9", target: "F9", url: "", title: "" }),
+      command: async (tab, method, params, session) => { sent.push({ tab, method, params, ...(session ? { session } : {}) }); return {}; },
+      front: () => {}, closeTab: () => {}, cancelDownload: () => {}, close: () => {},
+    }, [{ tab: "p1", target: "F1", url: "https://a.test/", title: "A" }]);
+    const connection = new CdpConnection(endpoint);
+    await connection.root.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
+    endpoint.pageEvent("p1", "Target.attachedToTarget", { sessionId: "IFR", targetInfo: { targetId: "X", type: "iframe", url: "https://accounts.google.com/", title: "" }, waitingForDebugger: true });
+    await sleep(1);
+    expect(sent).toContainEqual({ tab: "p1", method: "Runtime.runIfWaitingForDebugger", params: {}, session: "IFR" });
+    await connection.session("pane-p1:IFR")!.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
+    expect(sent.at(-1)).toEqual({ tab: "p1", method: "Target.setAutoAttach", params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, session: "IFR" });
+    connection.close();
+  });
+});
+
+describe("a site turning the pane away", () => {
+  it("is reported when Google refuses sign-in or asks for a passkey, and the bot is told to use My Chrome", async () => {
+    const { main, service, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/a" });
+    const run = service.profiles()[0]!.run!;
+    const refusals: Array<{ kind: string; url: string }> = [];
+    run.opened.onSiteRefusal!((refusal) => refusals.push({ kind: refusal.kind, url: refusal.url }));
+    const frame = (url: string) => main.post({ op: "event", browser: "bot:a", tab: "p1", method: "Page.frameNavigated", params: { frame: { id: run.browser.activePage!.targetId, url, loaderId: "L" } } });
+    frame("https://accounts.google.com/v3/signin/rejected?continue=x");
+    frame("https://accounts.google.com/v3/signin/challenge/pk?TL=1");
+    frame("https://accounts.google.com/v3/signin/identifier");
+    await sleep(5);
+    expect(refusals).toEqual([
+      { kind: "google-rejected", url: "https://accounts.google.com/v3/signin/rejected?continue=x" },
+      { kind: "passkey", url: "https://accounts.google.com/v3/signin/challenge/pk?TL=1" },
+    ]);
+    const told = withPasskeyNotice({ content: [{ type: "text", text: "Opened https://accounts.google.com/v3/signin/rejected in t1." }] }, "pane") as { content: Array<{ text: string }> };
+    expect(told.content.at(-1)!.text).toContain("My Chrome");
+    expect(told.content.at(-1)!.text).toContain("this app's built-in browser");
+    const passkey = withPasskeyNotice({ content: [{ type: "text", text: "https://accounts.google.com/v3/signin/challenge/pk" }] }, "pane") as { content: Array<{ text: string }> };
+    expect(passkey.content.at(-1)!.text).toContain("My Chrome");
   });
 });
 

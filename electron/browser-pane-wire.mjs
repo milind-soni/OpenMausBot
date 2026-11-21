@@ -36,7 +36,8 @@ function fieldsValid(message) {
   if ("params" in message && !isObject(message.params)) return false;
   if ("partition" in message && !text(message.partition, PANE_PARTITION)) return false;
   switch (op) {
-    case "open": return text(message.partition, PANE_PARTITION) && Number.isInteger(message.egress) && message.egress > 0 && message.egress < 65_536 && text(message.downloads, ABSOLUTE);
+    case "open": return text(message.partition, PANE_PARTITION) && Number.isInteger(message.egress) && message.egress > 0 && message.egress < 65_536 && text(message.downloads, ABSOLUTE)
+      && (message.identity === "native" || message.identity === "cleaned");
     case "failed": return typeof message.error === "string" && (message.reason === undefined || message.reason === "no-window");
     case "cancel-download": return text(message.guid, GUID);
     case "download": return text(message.tab, TAB) && text(message.guid, GUID) && DOWNLOAD_STATES.has(message.state)
@@ -68,17 +69,4 @@ export function paneMessageToMain(raw) {
 /** A message for the server, or null when it is not one or is malformed. */
 export function paneMessageToServer(raw) {
   return read(raw, TO_SERVER);
-}
-
-/**
- * Hosts that get Electron's own user agent instead of the stripped one. Known open risk: sign-in walls (Google's
- * "this browser may not be secure", Cloudflare Turnstile) judge embedded browsers by it, and which choice passes is not
- * settled; a host goes here only after a live test in the app.
- */
-export const PANE_UA_HOSTS = new Map();
-
-/** The user agent a pane sends to `host`: Electron's with the app's tokens taken out, so sites see the Chromium it is. */
-export function paneUserAgent(userAgent, host = "", hosts = PANE_UA_HOSTS) {
-  if (hosts.get(String(host).toLowerCase()) === "electron") return String(userAgent);
-  return String(userAgent).replace(/\s(?:Electron|OpenMausBot|openmausbot)\/\S+/g, "").replace(/\s{2,}/g, " ").trim();
 }

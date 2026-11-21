@@ -5,8 +5,9 @@ type Base = { type: "openmausbot:browser-pane" };
 export type PaneToMain = Base & (
   | { op: "hello" }
   /** `egress`: the loopback port of the profile's egress gate; every request of its panes goes through it.
-   * `downloads`: the folder every download of its panes is saved in, never asked of the person. */
-  | { op: "open"; browser: string; partition: string; egress: number; downloads: string }
+   * `downloads`: the folder every download of its panes is saved in, never asked of the person.
+   * `identity`: browserEngine.paneIdentity, the user agent its panes present. */
+  | { op: "open"; browser: string; partition: string; egress: number; downloads: string; identity: "native" | "cleaned" }
   | { op: "cancel-download"; browser: string; guid: string }
   | { op: "create"; browser: string; req: number; url: string; background?: boolean }
   | { op: "cdp"; browser: string; req: number; tab: string; method: string; params: CdpParams; session?: string }
@@ -38,5 +39,4 @@ export declare const PANE_TABS_PER_BROWSER: number;
 export declare const PANE_PARTITION: RegExp;
 export declare function paneMessageToMain(raw: unknown): PaneToMain | null;
 export declare function paneMessageToServer(raw: unknown): PaneToServer | null;
-export declare const PANE_UA_HOSTS: Map<string, "electron">;
-export declare function paneUserAgent(userAgent: string, host?: string, hosts?: ReadonlyMap<string, "electron">): string;
+
