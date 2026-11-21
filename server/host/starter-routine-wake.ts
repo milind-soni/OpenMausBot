@@ -7,9 +7,17 @@ import { conversationLanguage, serverLine, type ServerLineKey } from "../server-
 import type { Store } from "../store.ts";
 import type { StarterAwake } from "./starter-awake.ts";
 
+/** The owner's choice (off): while a routine's bot stays paused, only the routine's own turns pass in its conversation, not
+ * a person's new message there (starter-caps.ts), and a run started by hand of a switched-off routine or trigger is refused
+ * with the paused line. */
+export const PAUSED_RUN_ROUTINE_TURNS_ONLY = false;
+
 /** A routine, webhook or app trigger, as much of it as the rule reads. A webhook that only posts its event to a chat or a
  * room (`delivery: "post"`) starts no turn, so it does not count. */
-export interface RoutineLike { botId: string; name: string; enabled: boolean; target?: string; delivery?: string }
+export interface RoutineLike { id?: string; botId: string; name: string; enabled: boolean; target?: string; delivery?: string }
+
+/** A run as much as `refusal` reads: a webhook's or app event's (and a wait's follow-up) has trigger source "webhook". */
+export interface RunLike { botId: string; routineId: string; manual: boolean; byPerson?: true; triggerSource?: string }
 
 export interface StarterRoutineWake {
   /** A run of `name` for this bot starts now. */
@@ -18,6 +26,8 @@ export interface StarterRoutineWake {
   saved(item: RoutineLike | null | undefined): void;
   /** What the routine, webhook and app-trigger managers emit: a saved one is `saved`. */
   emitted(payload: { kind?: unknown; routine?: unknown; webhook?: unknown; trigger?: unknown; [other: string]: unknown }): void;
+  /** The paused line a run of a bot the plan's limit paused is refused with under the owner's options; null: it runs. */
+  refusal(run: RunLike): string | null;
 }
 
 /** It starts a turn of the bot itself when it runs: enabled, aimed at the bot (a room goal runs through the room), and not a
@@ -51,14 +61,17 @@ export function workInFlight(deps: {
 
 export function createStarterRoutineWake(deps: {
   awake: StarterAwake;
-  /** Every routine, webhook and app trigger there is. */
-  items(): Iterable<RoutineLike>;
+  /** Every routine there is. */
+  routines(): Iterable<RoutineLike>;
+  /** Every webhook and app trigger there is. */
+  triggers(): Iterable<RoutineLike>;
   busy(botId: string): boolean;
   /** The person paused this bot (bot-holds.ts). */
   held(botId: string): boolean;
   store: Pick<Store, "bot" | "appendMessage">;
 }): StarterRoutineWake {
-  deps.awake.useRoutines({ routineBots: () => routineBots(deps.items()), busy: deps.busy, held: deps.held });
+  const counted = (): RoutineLike[] => [...deps.routines(), ...(PAUSED_RUN_SCHEDULES_ONLY ? [] : deps.triggers())];
+  deps.awake.useRoutines({ routineBots: () => routineBots(counted()), busy: deps.busy, held: deps.held });
   /** One quiet line in the bot's own chat, in its language. */
   const tell = (botId: string, key: ServerLineKey, params: Record<string, string | number>) => {
     const bot = deps.store.bot(botId);
@@ -79,8 +92,21 @@ export function createStarterRoutineWake(deps: {
     running: (botId, routine) => apply(botId, routine, true),
     saved,
     emitted(payload) {
-      const item = payload.kind === "routine" ? payload.routine : payload.kind === "webhook" ? payload.webhook : payload.kind === "app-trigger" ? payload.trigger : null;
+      const item = payload.kind === "routine" ? payload.routine : PAUSED_RUN_SCHEDULES_ONLY ? null
+        : payload.kind === "webhook" ? payload.webhook : payload.kind === "app-trigger" ? payload.trigger : null;
       if (item && typeof item === "object") saved(item as RoutineLike);
+    },
+    refusal(run) {
+      if (deps.held(run.botId) || !deps.awake.isPaused(run.botId)) return null;
+      const bot = deps.store.bot(run.botId), line = () => serverLine(conversationLanguage(bot?.threadId ?? ""), "server.botPaused", { limit: deps.awake.limit() ?? 0 });
+      if (PAUSED_RUN_SCHEDULES_ONLY && run.triggerSource === "webhook") return line();
+      const item = [...deps.routines(), ...deps.triggers()].find((each) => each.id === run.routineId);
+      if (PAUSED_RUN_ROUTINE_TURNS_ONLY && (run.manual || run.byPerson) && !(item && runsTheBot(item))) return line();
+      return null;
     },
   };
 }
+
+/** The owner's choice (off): only scheduled runs and Run now get priority; a webhook, app-event or wait follow-up run for a
+ * bot the limit paused is refused with the paused line as before, and webhooks and app triggers wake no bot. */
+export const PAUSED_RUN_SCHEDULES_ONLY = false;

@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCoordinator, type CoordinatorHost, type HandoffView, type HostTurnResult } from "../coordinator.ts";
 import { Store } from "../store.ts";
 import { createStarterAwake } from "./starter-awake.ts";
-import { createStarterRoutineWake, routineBots, workInFlight, type RoutineLike } from "./starter-routine-wake.ts";
+import { createStarterRoutineWake, PAUSED_RUN_ROUTINE_TURNS_ONLY, PAUSED_RUN_SCHEDULES_ONLY, routineBots, workInFlight, type RoutineLike } from "./starter-routine-wake.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -20,11 +20,11 @@ function cloud(options: { starter?: boolean; held?: number } = {}) {
   const bots = () => made.map((bot, n) => ({ ...store.bot(bot.id)!, createdAt: n * 60_000, tasks: [] }));
   const awake = createStarterAwake({ dataDir: dir, starter: () => options.starter ?? true, bots });
   awake.paused();
-  const items: RoutineLike[] = [];
-  const wake = createStarterRoutineWake({ awake, store, items: () => items, busy: () => false, held: (botId) => options.held !== undefined && made[options.held]?.id === botId });
+  const items: RoutineLike[] = [], triggers: RoutineLike[] = [];
+  const wake = createStarterRoutineWake({ awake, store, routines: () => items, triggers: () => triggers, busy: () => false, held: (botId) => options.held !== undefined && made[options.held]?.id === botId });
   const id = (n: number) => made[n]!.id;
   const notices = (n: number) => store.messagesFor(made[n]!.threadId).filter((row) => row.kind === "activity").map((row) => row.tool?.name);
-  return { store, awake, wake, items, id, notices };
+  return { store, awake, wake, items, triggers, id, notices };
 }
 
 describe("a routine's bot on a Starter Cloud", () => {
@@ -42,20 +42,20 @@ describe("a routine's bot on a Starter Cloud", () => {
     expect([awake.paused(), notices(0).length]).toEqual([[id(1), id(2)], 1]);
   });
 
-  it("wakes a bot for its webhook and app trigger too, and leaves a switched-off one, a room goal, a webhook that only posts, or another frame alone", () => {
-    const { awake, wake, items, id } = cloud();
+  it("wakes a bot for its webhook and app trigger too (not with option B), and leaves a switched-off one, a room goal, a webhook that only posts, or another frame alone", () => {
+    const { awake, wake, triggers, id } = cloud();
     const posts = { botId: id(0), name: "Post it", enabled: true, delivery: "post" };
-    items.push(posts);
+    triggers.push(posts);
     wake.emitted({ kind: "routine", routine: { botId: id(0), name: "Off", enabled: false } });
     wake.emitted({ kind: "routine", routine: { botId: id(0), name: "Goal", enabled: true, target: "room-goal" } });
     wake.emitted({ kind: "webhook", webhook: posts });
     wake.emitted({ kind: "webhook.attempt", webhook: { botId: id(0), name: "Lead", enabled: true } });
     expect(awake.paused()).toEqual([id(0), id(1)]);
     const hook = { botId: id(0), name: "New lead", enabled: true }, app = { botId: id(1), name: "New email", enabled: true };
-    items.push(hook, app);
+    triggers.push(hook, app);
     wake.emitted({ kind: "webhook", webhook: hook });
     wake.emitted({ kind: "app-trigger", botId: id(1), trigger: app });
-    expect(awake.paused()).toEqual([id(2), id(3)]);
+    expect(awake.paused()).toEqual(PAUSED_RUN_SCHEDULES_ONLY ? [id(0), id(1)] : [id(2), id(3)]);
   });
 
   it("tells once that a routine ran while its bot stayed paused, when nothing awake can make room", () => {
@@ -81,6 +81,23 @@ describe("a routine's bot on a Starter Cloud", () => {
     off.wake.saved(off.items[0]);
     off.wake.running(off.id(0), "Report");
     expect([off.awake.paused(), off.notices(0)]).toEqual([[], []]);
+  });
+
+  it("refuses a run of a bot the limit paused only as the owner's options say, in the paused line", () => {
+    const { wake, items, triggers, id } = cloud();
+    items.push({ id: "off", botId: id(0), name: "Switched off", enabled: false }, { id: "on", botId: id(0), name: "Switched on", enabled: true });
+    triggers.push({ id: "hook", botId: id(1), name: "New lead", enabled: true }, { id: "hook-off", botId: id(1), name: "Old lead", enabled: false });
+    const paused = "Paused: Starter keeps 5 bots awake. Upgrade to wake it, or swap which bots are awake.";
+    // Option A: Run now of a switched-off routine, or a person's test of a switched-off trigger.
+    expect(wake.refusal({ botId: id(0), routineId: "off", manual: true })).toBe(PAUSED_RUN_ROUTINE_TURNS_ONLY ? paused : null);
+    // Option B: any webhook, app-event or wait run.
+    expect(wake.refusal({ botId: id(1), routineId: "hook", manual: false, triggerSource: "webhook" })).toBe(PAUSED_RUN_SCHEDULES_ONLY ? paused : null);
+    expect(wake.refusal({ botId: id(1), routineId: "hook-off", manual: false, byPerson: true, triggerSource: "webhook" }))
+      .toBe(PAUSED_RUN_ROUTINE_TURNS_ONLY || PAUSED_RUN_SCHEDULES_ONLY ? paused : null);
+    // Never: Run now of an enabled routine, a scheduled run, or any run of an awake bot.
+    expect(wake.refusal({ botId: id(0), routineId: "on", manual: true })).toBeNull();
+    expect(wake.refusal({ botId: id(0), routineId: "off", manual: false, triggerSource: "schedule" })).toBeNull();
+    expect(wake.refusal({ botId: id(6), routineId: "off", manual: true })).toBeNull();
   });
 
   it("counts only enabled routines and triggers that run the bot itself", () => {

@@ -92,8 +92,8 @@ it("on Starter, a routine for a bot the plan paused runs: it waits for one of th
   f.free(8 * GB);
   for (const busy of [one, two]) await f.cli("send", "--bot", busy.id, "--task", busy.activeTaskId, "--text", "Keep busy.");
   await expect.poll(async () => (await f.api("/api/bots?messages=0", undefined, "GET")).bots.filter((bot: any) => [one.id, two.id].includes(bot.id) && bot.busy).length, { timeout: 30_000 }).toBe(2);
-  // Switched off and run by hand: nothing is swapped, and the run goes ahead anyway.
-  const routine = (await f.api("/api/routines", { name: "Inbox", prompt: "Check the inbox.", botId: asleep.id, enabled: false, schedule: { type: "interval", everyMinutes: 180, anchorAt: Date.now() + 3 * 3_600_000 } })).routine;
+  // Every awake bot was used moments ago, so nothing is swapped, and the run goes ahead anyway.
+  const routine = (await f.api("/api/routines", { name: "Inbox", prompt: "Check the inbox.", botId: asleep.id, enabled: true, schedule: { type: "interval", everyMinutes: 180, anchorAt: Date.now() + 3 * 3_600_000 } })).routine;
   const run = (await f.api(`/api/routines/${routine.id}/run`, {})).run;
   const current = async () => ((await f.api("/api/routines", undefined, "GET")).runs as any[]).find((each) => each.id === run.id);
   await expect.poll(async () => { const now = await current(); return now?.threadId ? (await f.messages(now.threadId)).some((message: any) => message.tool?.name?.includes("Starter runs 2 tasks at once")) : false; }, { timeout: 30_000 }).toBe(true);
