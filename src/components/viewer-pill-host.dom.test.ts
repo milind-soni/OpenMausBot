@@ -56,8 +56,17 @@ it("during a request, I'm done answers it, lets the pane go and folds the viewer
   expect(onCollapse).toHaveBeenCalledOnce();
 });
 
-it("folds back into the chat from its own control", async () => {
-  const onCollapse = await show({});
-  await act(async () => button("Back to the chat")!.click());
-  expect(onCollapse).toHaveBeenCalledOnce();
+it("gives the pane back to the bot when the request ends anywhere else, as on the card or by expiry", async () => {
+  function Holder({ open }: { open: boolean }) {
+    const pane = usePaneHold("scout", null, true, open);
+    return createElement("button", { onClick: () => pane.set(true) }, pane.held ? "held" : "free");
+  }
+  const value = { state: initialState, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+  const render = (open: boolean) => act(async () => root.render(createElement(StoreContext.Provider, { value }, createElement(Holder, { open }))));
+  await render(true);
+  await act(async () => container.querySelector("button")!.click()); await settle();
+  expect(container.textContent).toBe("held");
+  await render(false); await settle();
+  expect(hold).toHaveBeenLastCalledWith({ botId: "scout", threadId: null, held: false });
+  expect(container.textContent).toBe("free");
 });

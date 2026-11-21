@@ -7119,7 +7119,5 @@
   "imageGen.higgsfield.help": "{app} tworzy obrazy na koncie Higgsfield, na które logujesz się w sekcji Wtyczki. Każdy obraz zużywa kredyty z tego konta.",
   "imageGen.higgsfield.open": "Otwórz Wtyczki",
   "inbox.settled.title": "Zakończone",
-  "inbox.settled.read": "Przeczytane",
-  "server.notify.handoff": "{who} czeka na Ciebie",
-  "serverError.signIn.expired": "Ta prośba już wygasła"
+  "inbox.settled.read": "Przeczytane"
 }

@@ -219,7 +219,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   }, []);
 
   useEffect(() => { browserControl.current?.keep(kept || signInOpen); }, [kept, signInOpen]);
-  const paneHold = usePaneHold(bot.id, scopedThread ?? null, paneMode);
+  const paneHold = usePaneHold(bot.id, scopedThread ?? null, paneMode, signInOpen);
   const takeControl = () => { setKept(true); browserControl.current?.keep(true); browserControl.current?.takeControl(); paneHold.set(true); };
   const handBack = () => { setKept(false); browserControl.current?.handBack(); paneHold.set(false); };
   const openSignInPage = () => {
@@ -380,6 +380,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       profileName={profileName}
       fullscreen={fullscreen}
       maximized={maximized}
+      pillBelow={maximized}
       onCommand={interact}
       onAddress={(text) => {
         const url = resolveAddressBarInput(text);

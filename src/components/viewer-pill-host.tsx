@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Minimize2 } from "lucide-react";
 
 import { signInWaits } from "../../shared/sign-in-request";
 import type { ComputerHelpRef } from "../../shared/wire";
 import { viewerPillState } from "@/lib/handoff";
-import { t } from "@/lib/i18n";
 import { answerSignIn } from "@/lib/sign-in";
 import type { Bot } from "@/state/store";
 import { useStoreSelector } from "@/state/store-select";
@@ -39,9 +37,10 @@ function useDone(help: ComputerHelpRef | null, onCollapse: () => void) {
  * The person's hold on the tab the desktop app's native pane shows: while held, the bot may only read it. Taken and
  * handed back through the app, which names the tab; a hold this view took goes back when the view goes.
  */
-export function usePaneHold(botId: string, threadId: string | null, enabled: boolean) {
+export function usePaneHold(botId: string, threadId: string | null, enabled: boolean, requestOpen = false) {
   const [held, setHeld] = useState(false);
   const mine = useRef(false);
+  const wasOpen = useRef(requestOpen);
   const set = useCallback((want: boolean) => {
     const bridge = window.ogb?.browserPane;
     if (!enabled || !bridge?.hold) return;
@@ -51,11 +50,16 @@ export function usePaneHold(botId: string, threadId: string | null, enabled: boo
     if (mine.current) void window.ogb?.browserPane?.hold?.({ botId, threadId, held: false }).catch(() => undefined);
     mine.current = false;
   }, [botId, threadId]);
+  // However the request ended (on the card, Skip, expiry, an answer in the chat, Connect), the bot gets its tab back.
+  useEffect(() => {
+    if (wasOpen.current && !requestOpen && mine.current) set(false);
+    wasOpen.current = requestOpen;
+  }, [requestOpen, set]);
   return { held: enabled && held, set };
 }
 
-/** Under a full-size browser: the one pill, centred, and the control that folds it back into the chat. It sits below the
- * page rather than over it, since the desktop app's native pane draws above anything laid over the page. */
+/** Under a full-size browser: the one pill, centred. It sits below the page rather than over it, since the desktop app's
+ * native pane draws above anything laid over the page; the browser's own Restore folds the viewer. */
 export function BrowserViewerPill({ bot, you, pending, onTake, onStop, onCollapse, onDone }: {
   bot: Pick<Bot, "id">;
   /** This person drives the browser now. */
@@ -73,10 +77,6 @@ export function BrowserViewerPill({ bot, you, pending, onTake, onStop, onCollaps
   return (
     <div data-viewer-pill-row="" className="relative flex shrink-0 items-center justify-center border-t border-hairline/30 px-4 py-2.5">
       <ViewerPill state={viewerPillState({ inControl: you, requestPending: help !== null })} busy={busy || pending} onTake={onTake} onStop={onStop} onDone={done} />
-      <button type="button" onClick={onCollapse} aria-label={t("viewer.collapse")} title={t("viewer.collapse")}
-        className="absolute end-4 flex size-8 items-center justify-center rounded-full text-ink-secondary hover:bg-ink/[0.07] hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
-        <Minimize2 size={15} aria-hidden="true" />
-      </button>
     </div>
   );
 }

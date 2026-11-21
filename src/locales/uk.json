@@ -4098,7 +4098,5 @@
   "imageGen.higgsfield.help": "{app} створює зображення через акаунт Higgsfield, у який ви входите в розділі «Плагіни». Кожне зображення витрачає кредити цього акаунта.",
   "imageGen.higgsfield.open": "Відкрити «Плагіни»",
   "inbox.settled.title": "Завершено",
-  "inbox.settled.read": "Прочитано",
-  "server.notify.handoff": "{who} чекає на вас",
-  "serverError.signIn.expired": "Термін дії цього запиту вже минув"
+  "inbox.settled.read": "Прочитано"
 }

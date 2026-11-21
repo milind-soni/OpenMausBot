@@ -10107,7 +10107,5 @@
   "imageGen.higgsfield.connected": "已连接到你的 Higgsfield 账号",
   "imageGen.higgsfield.notConnected": "未连接，或登录已失效",
   "imageGen.higgsfield.help": "{app} 使用你在“插件”中登录的 Higgsfield 账号生成图片。每张图片都会消耗该账号的额度。",
-  "imageGen.higgsfield.open": "打开插件",
-  "server.notify.handoff": "{who} 在等你",
-  "serverError.signIn.expired": "此请求已过期"
+  "imageGen.higgsfield.open": "打开插件"
 }

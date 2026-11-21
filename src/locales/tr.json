@@ -5918,7 +5918,5 @@
   "imageGen.higgsfield.help": "{app}, Eklentiler bölümünde oturum açtığınız Higgsfield hesabıyla görsel oluşturur. Her görsel o hesaptan kredi harcar.",
   "imageGen.higgsfield.open": "Eklentileri aç",
   "inbox.settled.title": "Tamamlandı",
-  "inbox.settled.read": "Okundu",
-  "server.notify.handoff": "{who} sizi bekliyor",
-  "serverError.signIn.expired": "Bu isteğin süresi zaten doldu"
+  "inbox.settled.read": "Okundu"
 }

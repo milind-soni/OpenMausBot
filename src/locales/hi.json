@@ -3678,7 +3678,5 @@
   "imageGen.higgsfield.help": "{app} उस Higgsfield खाते से तस्वीरें बनाता है जिससे आप प्लगइन में साइन इन करते हैं। हर तस्वीर उस खाते के क्रेडिट खर्च करती है।",
   "imageGen.higgsfield.open": "प्लगइन खोलें",
   "inbox.settled.title": "पूर्ण",
-  "inbox.settled.read": "पढ़ा गया",
-  "server.notify.handoff": "{who} आपका इंतज़ार कर रहा है",
-  "serverError.signIn.expired": "यह अनुरोध पहले ही समाप्त हो चुका है"
+  "inbox.settled.read": "पढ़ा गया"
 }
