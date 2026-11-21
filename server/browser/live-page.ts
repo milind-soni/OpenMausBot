@@ -37,7 +37,8 @@ function keyCodeOf(key: string): number {
   return key === " " ? 32 : 0;
 }
 
-/** Chrome's `Input.dispatchKeyEvent` for a view's key: a key-down with text types it, one without is raw, as in Puppeteer. */
+/** Chrome's `Input.dispatchKeyEvent` for a view's key: a key-down with text types it, one without is raw, as in Puppeteer. No
+ * native key code: a Windows code given as macOS's native one repeats the key-down there (vercel-labs/agent-browser#2112). */
 export function keyEvent(type: "keyDown" | "keyUp", fields: KeyFields): ObjectValue {
   const key = String(fields.key);
   const code = typeof fields.code === "string" ? fields.code : "";
@@ -46,7 +47,7 @@ export function keyEvent(type: "keyDown" | "keyUp", fields: KeyFields): ObjectVa
   const location = /(?:Left|Right)$/u.test(code) && MODIFIER_KEYS.has(key) ? (code.endsWith("Left") ? 1 : 2) : code.startsWith("Numpad") ? 3 : 0;
   return {
     type: type === "keyUp" ? "keyUp" : text ? "keyDown" : "rawKeyDown", key, code,
-    windowsVirtualKeyCode: keyCode, nativeVirtualKeyCode: keyCode, modifiers: Number(fields.modifiers) || 0,
+    windowsVirtualKeyCode: keyCode, modifiers: Number(fields.modifiers) || 0,
     ...(location ? { location } : {}), ...(text ? { text, unmodifiedText: text } : {}),
   };
 }

@@ -843,7 +843,7 @@ describe("authenticated browser viewer relay", () => {
       await a.action({ type: "take" });
       return a;
     }
-    const keyEvents = (tools: ReturnType<typeof devTools>) => tools.sent.filter((call) => call.method === "Input.dispatchKeyEvent").map((call) => ({ ...call.params, sessionId: call.sessionId }));
+    const keyEvents = (tools: ReturnType<typeof devTools>) => tools.sent.filter((call) => call.method === "Input.dispatchKeyEvent").map((call) => ({ ...call.params, sessionId: call.sessionId }) as Record<string, unknown>);
 
     it("sends a person's keys to the page with their key code, modifiers and location, each one confirmed", async () => {
       const tools = devTools();
@@ -856,14 +856,14 @@ describe("authenticated browser viewer relay", () => {
       await a.action({ type: "input_keyboard", eventType: "keyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2 });
       await a.action({ type: "input_keyboard", eventType: "keyDown", key: "F2", code: "F2", windowsVirtualKeyCode: 113 });
       expect(keyEvents(tools)).toEqual([
-        { type: "rawKeyDown", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, nativeVirtualKeyCode: 16, modifiers: 8, location: 1, sessionId: "page-1" },
-        { type: "keyDown", key: "Z", code: "KeyZ", windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90, modifiers: 8, text: "Z", unmodifiedText: "Z", sessionId: "page-1" },
-        { type: "keyUp", key: "Z", code: "KeyZ", windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90, modifiers: 8, sessionId: "page-1" },
-        { type: "keyUp", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, nativeVirtualKeyCode: 16, modifiers: 0, location: 1, sessionId: "page-1" },
+        { type: "rawKeyDown", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, modifiers: 8, location: 1, sessionId: "page-1" },
+        { type: "keyDown", key: "Z", code: "KeyZ", windowsVirtualKeyCode: 90, modifiers: 8, text: "Z", unmodifiedText: "Z", sessionId: "page-1" },
+        { type: "keyUp", key: "Z", code: "KeyZ", windowsVirtualKeyCode: 90, modifiers: 8, sessionId: "page-1" },
+        { type: "keyUp", key: "Shift", code: "ShiftLeft", windowsVirtualKeyCode: 16, modifiers: 0, location: 1, sessionId: "page-1" },
         // A shortcut is pressed and let go at once, as macOS sends no key-up under Cmd.
-        { type: "rawKeyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65, modifiers: 2, sessionId: "page-1" },
-        { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, nativeVirtualKeyCode: 65, modifiers: 2, sessionId: "page-1" },
-        { type: "rawKeyDown", key: "F2", code: "F2", windowsVirtualKeyCode: 113, nativeVirtualKeyCode: 113, modifiers: 0, sessionId: "page-1" },
+        { type: "rawKeyDown", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2, sessionId: "page-1" },
+        { type: "keyUp", key: "a", code: "KeyA", windowsVirtualKeyCode: 65, modifiers: 2, sessionId: "page-1" },
+        { type: "rawKeyDown", key: "F2", code: "F2", windowsVirtualKeyCode: 113, modifiers: 0, sessionId: "page-1" },
       ]);
       expect(nativeInput).not.toHaveBeenCalled();
       await a.action({ type: "input_keyboard", eventType: "keyUp", key: "F2", code: "F2", windowsVirtualKeyCode: 113 });

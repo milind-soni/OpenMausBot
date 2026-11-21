@@ -5,7 +5,7 @@ import { activeTargetOf, keyEvent, pressedAtOnce } from "./live-page.ts";
 describe("a view's key as Chrome's key event", () => {
   it("fills a letter's or digit's code from its key when the view sent none, and types only on a key-down", () => {
     expect(keyEvent("keyDown", { key: "q", code: "KeyQ", text: "q" })).toMatchObject({ type: "keyDown", windowsVirtualKeyCode: 81, text: "q", unmodifiedText: "q" });
-    expect(keyEvent("keyUp", { key: "7", code: "Digit7", text: "7" })).toEqual({ type: "keyUp", key: "7", code: "Digit7", windowsVirtualKeyCode: 55, nativeVirtualKeyCode: 55, modifiers: 0 });
+    expect(keyEvent("keyUp", { key: "7", code: "Digit7", text: "7" })).toEqual({ type: "keyUp", key: "7", code: "Digit7", windowsVirtualKeyCode: 55, modifiers: 0 });
   });
   it("places right-hand modifiers and the number pad", () => {
     expect(keyEvent("keyDown", { key: "Control", code: "ControlRight", windowsVirtualKeyCode: 17, modifiers: 2 })).toMatchObject({ type: "rawKeyDown", location: 2 });
