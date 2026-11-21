@@ -240,6 +240,18 @@ describe("handing on for the desktop app's own window", () => {
     expect(people.handedOrigin(userOrigin(), "lends")).toMatchObject({ person: ADA, lends: true });
   });
 
+  it("records nobody when another person's words joined the turn, or its line was steered in", () => {
+    const joined = world({ threads: { own: [{ id: "m1", at: 1, role: "user" }, said("m2", 2, BEN)] }, direct: { own: request("g1", { messageId: "m1" }) } });
+    joined.people.handOn({ threadId: "own", generation: "g1" }, { id: "n", rootId: "r" }, true, ADA);
+    expect(joined.handed.get("n")).toBeUndefined();
+    const named = world({ threads: { ada: [said("m1", 1, ADA), said("m2", 2, BEN)] }, direct: { ada: request("g1", { messageId: "m1" }) } });
+    named.people.handOn({ threadId: "ada", generation: "g1" }, { id: "n", rootId: "r" }, true, ADA);
+    expect(named.handed.get("n")).toBeUndefined();
+    const steered = world({ threads: { own: [{ id: "m1", at: 1, role: "user", steered: true }] }, direct: { own: request("g1", { messageId: "m1" }) } });
+    steered.people.handOn({ threadId: "own", generation: "g1" }, { id: "n", rootId: "r" }, true, ADA);
+    expect(steered.handed.get("n")).toBeUndefined();
+  });
+
   it("keeps the person whose own line started the turn over the lender", () => {
     const { people, handed } = world({ threads: { ada: [said("m1", 1, ADA)] }, direct: { ada: request("g1", { messageId: "m1" }) } });
     people.handOn({ threadId: "ada", generation: "g1" }, { id: "n", rootId: "r" }, true, BEN);
