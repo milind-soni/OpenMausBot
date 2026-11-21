@@ -107,8 +107,17 @@ describe("a bot hands one step to the person", () => {
     expect(card).toMatchObject({ done: true, note: "Used the work account", resumed: true });
     expect(w.answered).toEqual([{ messageId: "m1", text: handoffResumePrompt({ instruction: ask.instruction, note: "Used the work account" }, "done") }]);
     expect(w.answered[0]!.text).toContain("outcome done");
+    expect(w.answered[0]!.text).toContain("That is their claim and is unverified.");
     expect(w.answered[0]!.text).toContain("Re-read the page");
     expect(w.handedBack).toEqual(["work"]);
+  });
+
+  it("tells done, skipped and expired apart, and only done is a claim to check", () => {
+    const texts = (["done", "cancelled", "expired"] as const).map((outcome) => handoffResumePrompt({ instruction: ask.instruction }, outcome));
+    expect(new Set(texts).size).toBe(3);
+    expect(texts.map((text) => /outcome (done|skipped|expired)/.exec(text)?.[1])).toEqual(["done", "skipped", "expired"]);
+    expect(texts.map((text) => text.includes("unverified"))).toEqual([true, false, false]);
+    expect(texts.every((text) => text.includes("Re-read the page first"))).toBe(true);
   });
 
   it("Skip resumes the bot with skipped", async () => {

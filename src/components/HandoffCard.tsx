@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { Check, Globe, Hand, Loader2, LockKeyhole, Monitor, RefreshCw } from "lucide-react";
+import { Check, Globe, Hand, KeyRound, Loader2, LockKeyhole, Monitor, RefreshCw } from "lucide-react";
 
 import { HANDOFF_NOTE_MAX } from "../../shared/sign-in-request";
 import type { Surface } from "../../shared/wire";
@@ -11,8 +11,9 @@ import type { Bot, Message } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { ASK_DARK_PRIMARY, ASK_QUIET_BUTTON, ASK_SECONDARY_BUTTON, AskCard, AskError, returnFocusToComposer } from "./AskCard";
 import { ELEVATED_CARD } from "./elevated";
+import { CookieImportDialog } from "./browser/CookieImportDialog";
 import { HandoffPreview } from "./HandoffPreview";
-import { HandoffSuggestion, useSuggestedApp } from "./HandoffSuggestion";
+import { HandoffSuggestion, useSignInImport, useSuggestedApp } from "./HandoffSuggestion";
 
 export const placeIcon = (place: Surface) => place === "browser" ? <Globe /> : <Monitor />;
 
@@ -58,6 +59,8 @@ export function HandoffCard({ botId, botName, color: _color, threadId, message, 
   const [note, setNote] = useState("");
   const [explained, setExplained] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const importFor = useSignInImport(botId, threadId, !end && card.place === "browser" && card.need === "sign_in" ? card.site : "");
   const ref = { botId, threadId, messageId: message.id, place: card.place };
   const instruction = card.instruction ?? "";
   const placeLabel = handoffPlaceLabel(card.place);
@@ -144,8 +147,19 @@ export function HandoffCard({ botId, botName, color: _color, threadId, message, 
             <LockKeyhole size={11} aria-hidden="true" /> {t("handoff.private")}
           </p>
         )}
+        {importFor && (
+          <button type="button" onClick={() => setImporting(true)} disabled={pending !== null} data-handoff-import=""
+            className={cn(ASK_QUIET_BUTTON, "-ms-2 mt-2")}>
+            <KeyRound size={14} aria-hidden="true" />{t("handoff.importSignIn")}
+          </button>
+        )}
         {localError && <AskError>{localError}</AskError>}
       </AskCard>
+      {importFor && (
+        <CookieImportDialog open={importing} botId={botId} botName={botName} threadId={importFor.threadId} site={importFor.site}
+          onClose={() => setImporting(false)}
+          onImported={(imported) => void answerSignIn(ref, "done", `imported the person's sign-in for ${imported.site} from their own ${imported.browser}`).catch(() => undefined)} />
+      )}
       {suggested && (
         <HandoffSuggestion app={suggested.card} status={suggested.status} request={ref} botName={botName} />
       )}

@@ -30,10 +30,10 @@ const handoff = (fields: Partial<SignInRequestCardData> = {}): SignInRequestCard
 });
 const row = (id: string, signIn: SignInRequestCardData): Message => ({ id, at: 1, role: "bot", kind: "signin", text: signIn.instruction ?? "", signIn } as Message);
 
-async function show(messages: Message[], index = messages.length - 1) {
+async function show(messages: Message[], index = messages.length - 1, config?: unknown) {
   const dispatch = vi.fn();
   const bot = { id: "scout", name: "Scout", color: "teal", threadId: "t1", messages, tasks: [] } as unknown as Bot;
-  const state: AppState = { ...initialState, bots: [bot], selectedId: bot.id, connected: true };
+  const state = { ...initialState, bots: [bot], selectedId: bot.id, connected: true, ...(config ? { config } : {}) } as AppState;
   const value = { state, dispatch, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   await act(async () => root.render(createElement(StoreContext.Provider, { value },
     createElement(SignInRequestCard, { botId: "scout", botName: "Scout", threadId: "t1", message: messages[index]! }))));
@@ -103,6 +103,27 @@ describe("a step the bot handed to the person", () => {
     expect(container.querySelector("[data-handoff-suggestion]")?.textContent).toContain("Connect GitHub so Scout can work with it directly");
     await show([row("m2", handoff({ need: "captcha", site: "github.com", url: "https://github.com/" }))]);
     expect(container.querySelector("[data-handoff-suggestion]")).toBeNull();
+  });
+
+  it("offers the person's own sign-in from their browser when the app can import one for the site, and answers done once it did", async () => {
+    const offer = vi.fn(async () => ({ offered: true }));
+    const importIt = vi.fn(async () => ({ ok: true, site: "github.com", imported: 4, sessionOnly: 0, skipped: {} }));
+    (window as unknown as { ogb: unknown }).ogb = { browserCookies: { offer, sources: async () => [{ id: "chrome", name: "Chrome", engine: "chromium", profiles: [{ id: "Default", name: "Person 1" }] }], import: importIt } };
+    try {
+      await show([row("m1", handoff({ need: "sign_in", site: "github.com", url: "https://github.com/" }))], 0, { browserEngine: { cookieImport: true } });
+      expect(offer).toHaveBeenCalledWith({ botId: "scout", threadId: null, site: "github.com" });
+      await act(async () => button("Use my sign-in from my own browser")!.click());
+      await act(async () => { await new Promise((done) => setTimeout(done, 0)); });
+      await act(async () => { container.querySelector<HTMLFormElement>('dialog form')!.requestSubmit(); await new Promise((done) => setTimeout(done, 0)); });
+      expect(importIt).toHaveBeenCalledWith({ botId: "scout", threadId: null, site: "github.com", source: "chrome", profile: "Default" });
+      expect(calls.find((call) => call.url.endsWith("/sign-in-cards/m1/done"))?.body).toEqual({ threadId: "t1", note: "imported the person's sign-in for github.com from their own Chrome" });
+      offer.mockClear();
+      await show([row("m2", handoff({ need: "captcha", site: "github.com", url: "https://github.com/" }))], 0, { browserEngine: { cookieImport: true } });
+      expect(offer).not.toHaveBeenCalled();
+      expect(button("Use my sign-in from my own browser")).toBeUndefined();
+    } finally {
+      delete (window as unknown as { ogb?: unknown }).ogb;
+    }
   });
 
   it("leaves a site sign-in without an instruction on its own card", async () => {

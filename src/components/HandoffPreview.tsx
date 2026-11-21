@@ -35,17 +35,20 @@ export function HandoffPreview({ botId, threadId, place, label, onOpen, disabled
   const canvas = useRef<HTMLCanvasElement>(null);
   const [phase, setPhase] = useState<PreviewPhase>(still ? "frame" : "connecting");
   const [frame, setFrame] = useState<string | null>(still ?? null);
-  const live = still === undefined && place === "browser" && streams && visible;
+  const live = still === undefined && place === "browser" && streams;
+  // The Browser panel open on this bot has its own stream: the card keeps its last picture rather than open a second.
+  const panelOpen = useStoreSelector((state) => state.computerOpen && state.selectedId === botId);
+  const streaming = live && visible && !panelOpen;
 
   useEffect(() => {
-    if (!live || !canvas.current) return;
+    if (!streaming || !canvas.current) return;
     const painter = createPreviewFramePainter(canvas.current, () => setPhase("live"));
     const client = createPreviewStreamClient(
       { access: browserStreamAccess(botId, window.location, browserScope(team, threadId)), maxWidth: 1120, maxHeight: 700, interactive: false },
       { onFrame: (jpeg) => painter.paint(jpeg), onViewport: () => undefined, onConnectedChange: () => undefined, onUnauthorized: () => setPhase((now) => (now === "live" ? now : "none")) },
     );
     return () => { client.stop(); painter.stop(); };
-  }, [live, botId, threadId, team]);
+  }, [streaming, botId, threadId, team]);
 
   const seen = useStoreSelector((state) => {
     const row = state.bots.find((bot) => bot.id === botId)?.messages.findLast((one) => one.kind === "screen" && one.png);

@@ -14,6 +14,8 @@ import { t } from "@/lib/i18n";
 import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { answerSignIn } from "@/lib/sign-in";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
+import { browserScope } from "@/lib/team-browser";
+import { cookieImportAvailable } from "./browser/CookieImportDialog";
 import { api } from "@/state/store";
 import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { ASK_DARK_PRIMARY, ASK_QUIET_BUTTON } from "./AskCard";
@@ -52,6 +54,23 @@ export function useSuggestedApp(site: string, botId: string): { card: ToolkitCar
   }, [slug]);
   if (!slug || found?.card.slug !== slug || !bot) return null;
   return found.status?.connected && botAppScope(bot, found.card.slug) !== null ? null : found;
+}
+
+/** Whether the desktop app offers to bring the person's own sign-in for this site into the bot's browser (never for
+ * Google, never into a temporary browser); the scope the import names. */
+export function useSignInImport(botId: string, threadId: string, site: string): { site: string; threadId: string | null } | null {
+  const ready = useStoreSelector((state) => cookieImportAvailable(state.config) && state.bots.find((bot) => bot.id === botId)?.browserProfile !== "guest");
+  const scope = useStoreSelector((state) => browserScope(state.config?.team, threadId).threadId ?? null);
+  const [offered, setOffered] = useState<string | null>(null);
+  useEffect(() => {
+    setOffered(null);
+    const bridge = window.ogb?.browserCookies;
+    if (!ready || !site || !bridge) return;
+    let live = true;
+    void bridge.offer({ botId, threadId: scope, site }).then((answer) => { if (live && answer.offered) setOffered(site); }, () => undefined);
+    return () => { live = false; };
+  }, [ready, site, botId, scope]);
+  return offered && offered === site ? { site, threadId: scope } : null;
 }
 
 /**
