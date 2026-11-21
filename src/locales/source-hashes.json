@@ -4096,7 +4096,9 @@
       "server.reach.place.thisCloud": "9d7319debd5cbf68bbf4d9455f9c4f78d9168a490f936d60f455ca673fa0e3da",
       "server.reach.place.cloudDesktop": "f5720ce8c1477b72dd219523d39dfe814771b693627de08bca13ef631370d579",
       "server.notify.handoff": "9e45c29c7a067fc2b830ef5647b7dcd0962f2dbb438a62792c3a09f1d7d48ddb",
-      "serverError.signIn.expired": "a3b5091baeded57a62e8410a1e0e9df538f73161f3613c3a879a3bf386c2d169"
+      "serverError.signIn.expired": "a3b5091baeded57a62e8410a1e0e9df538f73161f3613c3a879a3bf386c2d169",
+      "canvas.browsing": "0f1a3ec05e7e49adea27744079a47abad8ad05f33dfaebe5077748f2f42d4668",
+      "canvas.browsingOpen": "ce2b41152c3ec5c7f35705900da7ca358ab7aa9b5948de7b16d8c7280bbf718f"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37473,7 +37475,9 @@
       "viewer.stop": "cae7d57bc067a514b8e34c9589631a95c7dc051638ddd2a190773269279a99df",
       "sidebar.preview.waitingFor": "bb64342e2466a9319496bbb378b4711b661425abeb68b009163078d4c49524b6",
       "handoff.importSignIn": "6472eeb450eea0fc019b9f5d7e02adbb926cfdff1d9c4e43de7a2aaf9b081fd5",
-      "handoff.inPanel": "8ffda3f9407104c180c4fe7b48fa2b6903ca43c9eeea2b1b6ec83befed353a86"
+      "handoff.inPanel": "8ffda3f9407104c180c4fe7b48fa2b6903ca43c9eeea2b1b6ec83befed353a86",
+      "canvas.browsing": "0f1a3ec05e7e49adea27744079a47abad8ad05f33dfaebe5077748f2f42d4668",
+      "canvas.browsingOpen": "ce2b41152c3ec5c7f35705900da7ca358ab7aa9b5948de7b16d8c7280bbf718f"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
