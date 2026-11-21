@@ -3163,6 +3163,7 @@
   "signIn.settled.saved": "{site}의 로그인 정보 저장됨",
   "browser.live.botBusy": "{name}이(가) 이 브라우저를 쓰고 있어요. 끝나면 실시간 화면이 열려요…",
   "browser.input.tooSlow": "브라우저가 입력을 따라가지 못해서 브라우저 입력이 멈췄어요(브라우저가 멈췄거나 연결이 느릴 수 있어요). 다시 입력하기 전에 화면을 다시 연결하세요. 계속 멈춰 있으면 브라우저를 다시 시작하세요.",
+  "browser.input.notReaching": "클릭과 입력이 페이지에 전달되지 않고 있어요. 다시 연결해서 다시 시도하세요.",
   "browser.profiles.heldElsewhere": "다른 창이 이 브라우저를 쓰고 있어요. 끝나면 프로필을 바꾸세요.",
   "browser.profiles.busy": "현재 브라우저 작업이 끝나면 프로필을 바꿀 수 있어요.",
   "browser.viewport.keysHint": "페이지를 클릭하거나 입력하면 키 입력이 페이지로 가요. 그 전에는 Tab으로 다음으로 이동해요. 브라우저 주소창으로 돌아가려면 Shift+Escape를 누르세요.",

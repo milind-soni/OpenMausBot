@@ -3529,6 +3529,7 @@
   "signIn.settled.saved": "已保存 {site} 的登录信息",
   "browser.live.botBusy": "{name} 正在使用这个浏览器。空闲时会打开实时视图…",
   "browser.input.tooSlow": "浏览器跟不上输入，因此已停止发送输入（浏览器可能卡住，或连接较慢）。请重新连接视图后再输入。如果仍然卡住，请重启浏览器。",
+  "browser.input.notReaching": "你的点击和输入没有传到页面。请重新连接后再试。",
   "browser.profiles.heldElsewhere": "另一个窗口正在使用这个浏览器。等它用完后再切换配置。",
   "browser.profiles.busy": "当前的浏览器操作完成后即可切换配置。",
   "browser.viewport.keysHint": "在页面中点击或输入后，按键会发送到页面；在此之前，按 Tab 会移到下一项。按 Shift+Escape 可回到浏览器地址栏。",
