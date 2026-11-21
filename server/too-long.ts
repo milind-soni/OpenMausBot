@@ -29,3 +29,10 @@ export function coordinateTooLong(issues: readonly Issue[]): string | undefined 
   });
   return refusals.length && refusals.every(Boolean) ? refusals.join(" ") : undefined;
 }
+
+/** A start_thread brief that reports back travels as a hand-off, so it has a hand-off's limit; undefined when it fits. */
+export function reportBackTooLong(message: string): string | undefined {
+  return message.length > coordinateMessageMax
+    ? tooLongRefusal("message", coordinateMessageMax, "Put only what the thread needs to start in the message, save the long detail to a file and name its full path, then call start_thread again.")
+    : undefined;
+}
