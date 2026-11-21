@@ -58,8 +58,8 @@ export interface OpenedBrowser {
   /** Where the person uses the page directly: called as they press, type or scroll in it. */
   onPersonInput?(listener: () => void): () => void;
   /** Where the person uses the page directly: holds the bot's input to a tab while the person has it (refs drop on
-   * release), and says who acted last in it. */
-  personControl?: { hold(targetId: string, held: boolean): void; owner(targetId: string): "person" | "bot" | null; held(targetId: string): boolean };
+   * release), says who acted last in it, whether it holds a tab, and whether the person holds any tab. */
+  personControl?: { hold(targetId: string, held: boolean): void; owner(targetId: string): "person" | "bot" | null; held(targetId: string): boolean; holding(): boolean };
   /** The private display its window is on, which a person sees as a remote desktop; absent when it runs headless. */
   readonly display?: DesktopDisplay | null;
 }

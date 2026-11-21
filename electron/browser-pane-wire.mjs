@@ -24,8 +24,8 @@ const SAME_SITE = new Set(["unspecified", "no_restriction", "lax", "strict"]);
 const COOKIE_BYTES = 4096;
 const MAX_COOKIES = 2000;
 
-const TO_MAIN = new Set(["hello", "open", "create", "cdp", "front", "close-tab", "close", "erase", "resolved", "cancel-download", "set-cookies", "cookie-sources-result", "cookie-import-result", "cookie-offer-result"]);
-const TO_SERVER = new Set(["hello", "opened", "failed", "created", "answer", "event", "tab", "tab-gone", "closed", "input", "which", "download", "cookies-set", "cookie-sources", "cookie-import", "cookie-offer"]);
+const TO_MAIN = new Set(["hello", "open", "create", "cdp", "front", "close-tab", "close", "erase", "resolved", "cancel-download", "set-cookies", "cookie-sources-result", "cookie-import-result", "cookie-offer-result", "hold-result"]);
+const TO_SERVER = new Set(["hello", "opened", "failed", "created", "answer", "event", "tab", "tab-gone", "closed", "input", "which", "download", "cookies-set", "cookie-sources", "cookie-import", "cookie-offer", "hold", "let-go"]);
 
 const isObject = (value) => Object.prototype.toString.call(value) === "[object Object]";
 const text = (value, pattern) => typeof value === "string" && pattern.test(value);
@@ -82,6 +82,9 @@ function fieldsValid(message) {
       return count(message.req) && text(message.botId, BOT) && (message.threadId === null || text(message.threadId, BOT)) && short(message.site, 2048)
         && (message.op === "cookie-offer" || (text(message.source, SOURCE) && short(message.profile, 512) && message.profile.length > 0));
     case "cookie-import-result": return count(message.req) && isObject(message.result) && typeof message.result.ok === "boolean";
+    case "hold": return count(message.req) && text(message.botId, BOT) && (message.threadId === null || text(message.threadId, BOT)) && text(message.browser, BROWSER) && text(message.tab, TAB) && typeof message.held === "boolean";
+    case "hold-result": return count(message.req) && typeof message.held === "boolean";
+    case "let-go": return true;
     case "cookie-offer-result": return count(message.req) && typeof message.offered === "boolean" && (message.reason === undefined || short(message.reason, 32));
     default: return true;
   }

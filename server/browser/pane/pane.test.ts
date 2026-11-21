@@ -147,6 +147,93 @@ describe("the bots' browser as desktop panes", () => {
     expect(control.owner(targetId)).toBe("person");
   });
 
+  it("takes a hold from the app's panel only for the tab that panel shows, and ends every hold when the window goes", async () => {
+    const { main, link, service, call, text } = setup({ quietMs: 0 });
+    link.resolveWith((botId) => (botId === "a" ? "bot:a" : null));
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const control = service.profiles()[0]!.run!.opened.personControl!;
+    const answered = async (fields: Record<string, unknown>) => {
+      const req = 900 + main.toMain.length;
+      main.post({ op: "hold", req, threadId: null, tab: "p1", ...fields });
+      await sleep(5);
+      return main.toMain.find((message) => message.op === "hold-result" && (message as { req: number }).req === req) as { held: boolean } | undefined;
+    };
+    // Another bot's panel cannot hold this browser's tab.
+    expect(await answered({ botId: "b", browser: "bot:a", held: true })).toMatchObject({ held: false });
+    expect(control.holding()).toBe(false);
+    expect(await answered({ botId: "a", browser: "bot:a", held: true })).toMatchObject({ held: true });
+    expect(text(await call("agent_browser_click", { selector: "#go" }))).toContain("The person is using this tab.");
+    main.post({ op: "let-go" });
+    await sleep(5);
+    expect(control.holding()).toBe(false);
+    expect((await call("agent_browser_click", { selector: "#go" })).isError).toBeUndefined();
+  });
+
+  it("holds the tab the HTTP route names, not the bot's active one", async () => {
+    const { service, target, call, text } = setup({ quietMs: 0 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    expect(service.holdTab(target.session, "t1", true)).toBe("t1");
+    expect(text(await call("agent_browser_click", { selector: "#go" }))).toContain("The person is using this tab.");
+    // The bot's tab opened behind the person's is the bot's active one; the person's hold stays on theirs.
+    await call("agent_browser_tabs", { action: "new" });
+    expect(text(await call("agent_browser_click", { selector: "#go", tab: "t1" }))).toContain("The person is using this tab.");
+    expect(service.holdTab(target.session, "t1", false)).toBe("t1");
+    expect(text(await call("agent_browser_click", { ref: "e2", tab: "t1" }))).toContain("Take a fresh snapshot");
+    expect(service.holdTab(target.session, "t9", true)).toBe(null);
+    expect(service.holdTab("no-such-session", "t1", true)).toBe(null);
+  });
+
+  it("answers the page's dialog at once, never behind input waiting for the person to finish", async () => {
+    const { main, service, call } = setup({ quietMs: 1_500 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const page = service.profiles()[0]!.run!.browser.activePage!;
+    main.personInput("bot:a", "p1");
+    await sleep(5);
+    void page.session.send("Input.dispatchKeyEvent", { type: "keyDown", key: "a" }).catch(() => undefined);
+    main.commands.length = 0;
+    const started = Date.now();
+    await page.session.send("Page.handleJavaScriptDialog", { accept: false });
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(main.commands.map((command) => command.method)).toEqual(["Page.handleJavaScriptDialog"]);
+  });
+
+  it("never holds the bot's navigate behind a turn's preview of a page under an alert, with the panel watching", async () => {
+    const { main, service, target, call, text } = setup({ quietMs: 0 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 730, maxHeight: 1156 }, (output) => { if (output.type === "frame") output.ack(); });
+    await sleep(20);
+    main.post({ op: "event", browser: "bot:a", tab: "p1", method: "Page.javascriptDialogOpening", params: { type: "alert", message: "hello alert", url: "https://example.com/form" } });
+    await sleep(5);
+    // Under the alert the page answers no screencast change, script, read or capture, as Electron's did live.
+    let open = true;
+    main.hang = (command) => {
+      if (command.method === "Page.handleJavaScriptDialog") open = false;
+      return open && /^(?:Page\.(?:startScreencast|stopScreencast|getLayoutMetrics|captureScreenshot)|Runtime\.|DOM\.|Accessibility\.)/.test(command.method);
+    };
+    const preview = service.previewFrame("bot-a").then(() => "pictured", (error: Error) => error.message);
+    const started = Date.now();
+    const result = await call("agent_browser_open", { url: "https://example.com/next" });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(text(result)).toContain("Dismissed the page's open alert dialog");
+    expect(await preview).toMatch(/dialog/);
+    await viewer.close();
+  });
+
+  it("dismisses the alert a page left open when the bot navigates away, and says so", async () => {
+    const { main, call, text } = setup({ quietMs: 0 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    main.post({ op: "event", browser: "bot:a", tab: "p1", method: "Page.javascriptDialogOpening", params: { type: "alert", message: "Saved!", url: "https://example.com/form" } });
+    await sleep(5);
+    main.commands.length = 0;
+    const result = await call("agent_browser_navigate", { url: "https://example.com/next" });
+    expect(result.isError, text(result)).toBeUndefined();
+    expect(text(result)).toContain(`Dismissed the page's open alert dialog "Saved!" to leave the page.`);
+    const methods = main.commands.map((command) => command.method);
+    expect(methods.indexOf("Page.handleJavaScriptDialog")).toBeGreaterThanOrEqual(0);
+    expect(methods.indexOf("Page.handleJavaScriptDialog")).toBeLessThan(methods.indexOf("Page.navigate"));
+    expect(main.commands.find((command) => command.method === "Page.handleJavaScriptDialog")!.params).toEqual({ accept: false });
+  });
+
   it("keeps every pane emulating focus, so a pane the person is not in still takes the bot's keys", async () => {
     const { main, call } = setup();
     await call("agent_browser_open", { url: "https://example.com/a" });
@@ -190,7 +277,8 @@ describe("what a held pane lets the bot do", () => {
     await expect(page.send("Page.handleJavaScriptDialog", { accept: true })).rejects.toThrow(PERSON_HOLDS_TAB);
     await expect(page.send("DOM.scrollIntoViewIfNeeded", { backendNodeId: 1 })).rejects.toThrow(PERSON_HOLDS_TAB);
     await expect(connection.root.send("Target.activateTarget", { targetId: second!.targetId })).rejects.toThrow(PERSON_HOLDS_TAB);
-    await expect(second!.session.send("Page.bringToFront")).rejects.toThrow(PERSON_HOLDS_TAB);
+    // The driver's own fronting before a navigation leaves the page behind the person's.
+    await second!.session.send("Page.bringToFront");
     // A frame of the held page is held too.
     main.post({ op: "event", browser: "bot:a", tab: "p1", method: "Target.attachedToTarget", params: { sessionId: "IFRAME1", targetInfo: { targetId: "F", type: "iframe", url: "", title: "" }, waitingForDebugger: false } });
     await sleep(5);
@@ -221,13 +309,23 @@ describe("what a held pane lets the bot do", () => {
     expect(main.commands).toEqual([]);
   });
 
-  it("opens a bot's new tab behind the one the person holds", async () => {
-    const { main, service, call } = setup({ quietMs: 0 });
+  it("opens a bot's new tab behind the one the person holds, and says so", async () => {
+    const { main, service, call, text } = setup({ quietMs: 0 });
     await call("agent_browser_open", { url: "https://example.com/a" });
     const run = service.profiles()[0]!.run!;
-    run.opened.personControl!.hold(run.browser.activePage!.targetId, true);
-    await call("agent_browser_open", { url: "https://example.com/b", tab: "new" });
+    const held = run.browser.activePage!.targetId;
+    run.opened.personControl!.hold(held, true);
+    const opened = await call("agent_browser_open", { url: "https://example.com/b", tab: "new" });
+    expect(opened.isError, text(opened)).toBeUndefined();
     expect(main.toMain.filter((message) => message.op === "create").map((message) => (message as { background?: boolean }).background)).toEqual([undefined, true]);
+    expect(main.commands.some((command) => command.tab === "p2" && command.method === "Page.navigate")).toBe(true);
+    const listed = text(await call("agent_browser_tabs", { action: "new", url: "https://example.com/c" }));
+    expect(listed).toContain("behind the tab the person is using");
+    expect(listed).not.toContain("in front");
+    expect(text(await call("agent_browser_tabs", { action: "switch", tab: "t2" }))).toContain("stays behind it");
+    expect(main.toMain.filter((message) => message.op === "front").map((message) => (message as { tab: string }).tab).filter((tab) => tab !== "p1")).toEqual([]);
+    run.opened.personControl!.hold(held, false);
+    expect(text(await call("agent_browser_tabs", { action: "new" }))).toContain("It is in front");
   });
 });
 

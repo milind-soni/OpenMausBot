@@ -255,6 +255,17 @@ export class PaneLink {
         void this.#answer(message.req, async () => ({ op: "cookie-import-result", req: message.req, result: await this.#cookies!.import(message) }),
           () => ({ op: "cookie-import-result", req: message.req, result: { ok: false, reason: "unreadable" } }));
         return;
+      case "hold": {
+        // The tab must be one of the browser this server shows for that bot and conversation.
+        const shown = this.#resolver?.(message.botId, message.threadId) ?? null;
+        const shownOpen = shown === message.browser ? this.#browsers.get(shown) : undefined;
+        const target = shownOpen?.endpoint.holdTab(message.tab, message.held) ?? null;
+        this.#post({ op: "hold-result", req: message.req, held: target !== null && message.held });
+        return;
+      }
+      case "let-go":
+        for (const open of this.#browsers.values()) open.endpoint.releaseAll();
+        return;
     }
     const open = this.#browsers.get(message.browser);
     if (!open) return;

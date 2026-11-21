@@ -2,8 +2,9 @@
 // phone apps speak, and its contract is frozen. v2 (GET …/browser/stream, a WebSocket) is the desktop panel's and the
 // web UI's, on the new engine only: a page's file picker is answered by POST …/browser/upload and a finished download
 // is fetched from GET …/browser/download/:id. GET …/browser/desktop (a WebSocket) is the remote-desktop view of a browser
-// whose window is on a private display, beside the v2 stream. Never mix login frames into the general events feed, which
-// every device reads.
+// whose window is on a private display, beside the v2 stream. In the desktop app, POST …/browser/hold takes a pane tab,
+// named by its id, from the bot or hands it back. Never mix login frames into the general events feed, which every device
+// reads.
 import { createReadStream, rmSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { dirname, join } from "node:path";
@@ -25,6 +26,8 @@ const LIVE = /^\/api\/bots\/([\w-]+)\/browser\/(live|action)$/;
 const STREAM = /^\/api\/bots\/([\w-]+)\/browser\/(stream|desktop)$/;
 const UPLOAD = /^\/api\/bots\/([\w-]+)\/browser\/upload$/;
 const DOWNLOAD = /^\/api\/bots\/([\w-]+)\/browser\/download\/([\w-]{1,64})$/;
+const HOLD = /^\/api\/bots\/([\w-]+)\/browser\/hold$/;
+const TAB_ID = /^t\d{1,9}$/;
 const CHOOSER = /^[\w-]{1,64}$/;
 const UPLOAD_MAX_FILES = 20;
 const PICKER_CLOSED = "The page's file picker is no longer open.";
@@ -34,7 +37,7 @@ type Failure = { status: number; error: string };
 
 export interface BrowserViewerRouteDeps {
   upgrades: Upgrades;
-  viewers: Pick<LiveRouter, "open" | "action" | "stream" | "desktop" | "fileChooserOffered" | "answerFileChooser" | "download">;
+  viewers: Pick<LiveRouter, "open" | "action" | "stream" | "desktop" | "fileChooserOffered" | "answerFileChooser" | "download"> & Partial<Pick<LiveRouter, "hold">>;
   /** Who is watching, as a hold of the browser knows them: every view and device of one person shares their hold. */
   person(auth: RequestAuth): string;
   /** Whose browser of the bot this person's view shows (`threadId` names the conversation they look at); null when
@@ -115,7 +118,8 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
     const stream = live ? null : STREAM.exec(path);
     const upload = live || stream ? null : UPLOAD.exec(path);
     const download = live || stream || upload ? null : DOWNLOAD.exec(path);
-    const botId = (live ?? stream ?? upload ?? download)?.[1];
+    const hold = live || stream || upload || download ? null : HOLD.exec(path);
+    const botId = (live ?? stream ?? upload ?? download ?? hold)?.[1];
     if (!botId) return PASS;
     res.setHeader("cache-control", "no-store");
     const pending = stream ? deps.upgrades.pending(req) : undefined;
@@ -196,6 +200,16 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       if (!opened) return json(res, 409, { error: "This browser shows in the live view only." });
       res.detachSocket(pending.socket);
       return;
+    }
+
+    if (hold) {
+      if (method !== "POST") return json(res, 405, { error: "method not allowed" });
+      const body = await readBody(req, 1_024);
+      if (typeof body?.held !== "boolean" || typeof body.tab !== "string" || !TAB_ID.test(body.tab)) return json(res, 400, { error: "Pass held and the tab, as t1." });
+      if (!isCurrent()) return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
+      const tab = deps.viewers.hold?.(browser, body.tab, body.held) ?? null;
+      if (!tab) return json(res, 409, { error: "Only a browser shown in the desktop app's panel can be held." });
+      return json(res, 200, { tab, held: body.held });
     }
 
     if (upload) {

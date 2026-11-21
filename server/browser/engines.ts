@@ -207,7 +207,7 @@ export class ChromeEngine {
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = null;
     this.live.closeAll();
-    this.stream.closeAll();
+    this.stream.closeAll({ stopping: true });
     this.desktop.closeAll();
     await this.service.closeAll();
     await this.displays.closeAll();
@@ -423,6 +423,11 @@ export class LiveRouter {
     return chromeTarget(session, spec) ? this.#chrome.service.answerFileChooser(session, owner, chooserId, paths) : Promise.resolve(false);
   }
 
+  /** The person takes a tab of a desktop pane from the bot, or hands it back; null where there is no such pane tab. */
+  hold({ session, spec }: SessionSpec, tab: string, held: boolean): string | null {
+    return chromeTarget(session, spec) ? this.#chrome.service.holdTab(session, tab, held) : null;
+  }
+
   download({ session, spec }: SessionSpec, id: string): Download | undefined {
     return chromeTarget(session, spec) ? this.#chrome.service.download(session, id) : undefined;
   }
@@ -431,7 +436,8 @@ export class LiveRouter {
   closeForSession(session: string): void { this.#chrome.live.closeForSession(session); this.#chrome.stream.closeForSession(session); this.#chrome.desktop.closeForSession(session); this.#old.closeForSession(session); }
   closeForOwner(owner: string): void { this.#chrome.live.closeForOwner(owner); this.#chrome.stream.closeForOwner(owner); this.#chrome.desktop.closeForOwner(owner); this.#old.closeForOwner(owner); }
   closeForBot(botId: string): void { this.#chrome.live.closeForBot(botId); this.#chrome.stream.closeForBot(botId); this.#chrome.desktop.closeForBot(botId); this.#old.closeForBot(botId); }
-  closeAll(): void { this.#chrome.live.closeAll(); this.#chrome.stream.closeAll(); this.#chrome.desktop.closeAll(); this.#old.closeAll(); }
+  /** `stopping`: the server is stopping, and the panels' streams reconnect to the one that starts next. */
+  closeAll({ stopping = false }: { stopping?: boolean } = {}): void { this.#chrome.live.closeAll(); this.#chrome.stream.closeAll({ stopping }); this.#chrome.desktop.closeAll(); this.#old.closeAll(); }
   /** Who may see what changed: every v2 or desktop view that no longer shows its browser to a person allowed to see it closes now. */
   recheck(): void { this.#chrome.stream.recheck(); this.#chrome.desktop.recheck(); }
 }

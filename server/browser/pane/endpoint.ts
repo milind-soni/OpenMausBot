@@ -106,6 +106,7 @@ export class PaneEndpoint implements CdpTransport {
   readonly #maxHoldMs: number;
   readonly #primeMs: number;
   readonly #refusals = new Set<(refusal: SiteRefusal) => void>();
+  readonly #holds = new Set<(targetId: string, held: boolean) => void>();
   #autoAttach = false;
   #viewerCount = 0;
   #lastInput = 0;
@@ -238,7 +239,38 @@ export class PaneEndpoint implements CdpTransport {
 
   /** While held, the bot may only read that tab, and may not bring another tab to the front. */
   hold(targetId: string, held: boolean): void {
-    for (const tab of this.#tabs.values()) if (tab.target === targetId) tab.held = held;
+    for (const tab of this.#tabs.values()) if (tab.target === targetId) this.#setHeld(tab, held);
+  }
+
+  /** `hold` by the app's own name for the tab; the tab's target, or null when it is not one of these panes. */
+  holdTab(tab: string, held: boolean): string | null {
+    const state = this.#tabs.get(tab);
+    if (!state) return null;
+    this.#setHeld(state, held);
+    return state.target;
+  }
+
+  /** Every hold ends: the app window the person held them from has gone. */
+  releaseAll(): void {
+    for (const tab of this.#tabs.values()) if (tab.held) this.#setHeld(tab, false);
+  }
+
+  /** Called as a tab is held or handed back. */
+  onHold(listener: (targetId: string, held: boolean) => void): () => void {
+    this.#holds.add(listener);
+    return () => this.#holds.delete(listener);
+  }
+
+  #setHeld(tab: TabState, held: boolean): void {
+    tab.held = held;
+    for (const listener of this.#holds) {
+      try { listener(tab.target, held); } catch {}
+    }
+  }
+
+  /** Whether the person holds any tab: the bot's tabs then stay behind it. */
+  holding(): boolean {
+    return this.#anyHeld();
   }
 
   /** The person holds this tab now. */
@@ -361,9 +393,9 @@ export class PaneEndpoint implements CdpTransport {
   }
 
   async #page(tab: TabState, method: string, params: Params): Promise<Params> {
+    // The driver fronts a page before it navigates; while the person holds another tab, the page loads behind it.
     if (method === "Page.bringToFront") {
-      this.#refuseFront(tab);
-      this.#channel.front(tab.tab);
+      if (!this.#heldOtherThan(tab)) this.#channel.front(tab.tab);
       return {};
     }
     if (method === "Page.close") {
@@ -371,6 +403,8 @@ export class PaneEndpoint implements CdpTransport {
       return {};
     }
     if (method === "Emulation.setDeviceMetricsOverride") throw new Refusal("A desktop pane is sized by the app window.");
+    // An answer to the page's dialog waits on nothing: what is under way on the page may be waiting on that dialog.
+    if (method === "Page.handleJavaScriptDialog") return this.#channel.command(tab.tab, method, params);
     const ahead = tab.gate;
     const input = method.startsWith("Input.");
     if (input) {
@@ -430,9 +464,14 @@ export class PaneEndpoint implements CdpTransport {
     return false;
   }
 
+  #heldOtherThan(tab: TabState): boolean {
+    for (const other of this.#tabs.values()) if (other.held && other !== tab) return true;
+    return false;
+  }
+
   /** Bringing a tab to the front while the person holds another would take the page they use away from them. */
   #refuseFront(tab: TabState): void {
-    for (const other of this.#tabs.values()) if (other.held && other !== tab) throw new Refusal(PERSON_HOLDS_TAB);
+    if (this.#heldOtherThan(tab)) throw new Refusal(PERSON_HOLDS_TAB);
   }
 
   #tab(targetId: string): TabState {

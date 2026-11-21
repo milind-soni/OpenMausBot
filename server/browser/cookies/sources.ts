@@ -280,6 +280,23 @@ export function systemKeyStore(env: BrowserFiles["env"], run: Run = runProgram):
   };
 }
 
+/** Live tests set it to a fixture profile's Safe Storage password; the packaged app never passes it to its server. */
+export const TEST_COOKIE_KEY_ENV = "OMB_TEST_COOKIE_KEY";
+
+/**
+ * The key store an import uses: the system's, or, for a live test of a fixture profile, one that answers every
+ * Chromium browser's password with `OMB_TEST_COOKIE_KEY` and never reaches the Keychain, DPAPI or a keyring.
+ */
+export function keyStoreFor(env: BrowserFiles["env"], run: Run = runProgram): KeyStore {
+  const fixture = env[TEST_COOKIE_KEY_ENV];
+  if (fixture === undefined || fixture === "") return systemKeyStore(env, run);
+  return {
+    macPassword: async () => fixture,
+    windowsUnprotect: async () => { throw new Error("A test key store unwraps no DPAPI blob."); },
+    linuxPassword: async () => fixture,
+  };
+}
+
 /** This computer as the person's own account sees it: only ever read once the person asked for an import. */
 export function systemFiles(): BrowserFiles {
   return {

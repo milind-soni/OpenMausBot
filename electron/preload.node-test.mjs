@@ -182,3 +182,10 @@ test("a Cloud link arriving before React subscriptions is delivered exactly once
   assert.deepEqual(calls, ["cloud"], "later subscriptions must not reopen Settings");
   late();
 });
+
+test("the browser pane bridge asks main over its own channels with only the panel's input", async () => {
+  const before = invocations.length;
+  const input = { botId: "a", threadId: null, held: true };
+  await exposed.api.browserPane.hold(input);
+  assert.deepEqual(invocations.slice(before), [["browser-pane:hold", input]]);
+});
