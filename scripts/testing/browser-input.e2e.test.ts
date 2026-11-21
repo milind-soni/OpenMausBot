@@ -28,6 +28,9 @@ const PAGE = `<!doctype html><title>Input fixture</title><body style="margin:0;f
 <input id="name" aria-label="Name" style="position:absolute;left:40px;top:100px;width:200px;height:30px">
 <div id="rich" contenteditable="true" style="position:absolute;left:40px;top:160px;width:200px;height:30px"></div>
 <select id="pick" style="position:absolute;left:40px;top:220px;width:200px;height:30px"><option>Alpha</option><option>Beta</option><option>Gamma</option></select>
+<button id="off" disabled style="position:absolute;left:300px;top:40px">Closed</button>
+<div id="plain" style="position:absolute;left:300px;top:100px">Plain text</div>
+<button id="swap" style="position:absolute;left:300px;top:160px">Swap</button>
 <script>
 let order = 0;
 const say = (what) => fetch("/seen?" + new URLSearchParams({ what, order: String(order++) }));
@@ -35,6 +38,13 @@ document.getElementById("press").addEventListener("click", (event) => say("click
 document.getElementById("name").addEventListener("input", (event) => say("input:" + event.target.value));
 document.getElementById("rich").addEventListener("input", (event) => say("rich:" + event.target.textContent));
 document.getElementById("pick").addEventListener("change", (event) => say("pick:" + event.target.selectedIndex));
+document.getElementById("off").addEventListener("click", () => say("off-click"));
+document.getElementById("swap").addEventListener("click", () => {
+  const fresh = document.createElement("input");
+  fresh.setAttribute("aria-label", "Name");
+  fresh.addEventListener("input", (event) => say("fresh:" + event.target.value));
+  document.getElementById("name").replaceWith(fresh);
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Tab" || event.metaKey) event.preventDefault();
   say(["keydown", event.key, event.code, event.keyCode, +event.ctrlKey, +event.shiftKey, +event.altKey, +event.metaKey].join(" "));
@@ -288,5 +298,36 @@ describe("input to a page on the default browser engine", () => {
       await post({ type: "release" }).catch(() => undefined);
       close();
     }
+  }, 300_000);
+
+  run("the bot hears an error for a click on a disabled button and for a fill or type that did not land in its target", async () => {
+    showServerLog();
+    const planPath = join(fixture.info.dataDir, "room-plan.json");
+    const evidence = () => { try { return readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)); } catch { return []; } };
+    const before = evidence().length;
+    seen.length = 0;
+    const step = (tool: string, args: Record<string, unknown>, expectError = false) => ({ server: "browser", tool: `agent_browser_${tool}`, arguments: args, ...(expectError ? { expectError: true } : {}) });
+    writeFileSync(planPath, JSON.stringify({ [bot.id]: { turns: [{ timeoutMs: 180_000, steps: [
+      step("open", { url: `${base}/?bot=${Date.now()}` }),
+      step("click", { selector: "#off" }, true),
+      step("click", { selector: "#name" }),
+      step("fill", { selector: "#plain", text: "zzz" }, true),
+      step("type", { selector: "#plain", text: "yyy" }, true),
+      step("snapshot", {}),
+      step("click", { selector: "#swap" }),
+      // The snapshot's ref for the Name field now names a field the page replaced.
+      step("fill", { selector: "@e2", text: "eve" }, true),
+    ], reply: "Done." }] } }));
+    await runControlOmb(["send", "--bot", bot.id, "--task", bot.threadId, "--text", "Use the page.", "--url", url]);
+    const answers = () => evidence().slice(before).flatMap((turn: any) => turn.evidence).filter((entry: any) => entry.step?.server === "browser");
+    await expect.poll(() => answers().length, { timeout: 180_000, interval: 200 }).toBe(8);
+    const errors = answers().map((entry: any) => `${entry.step.tool.replace("agent_browser_", "")}:${entry.response.result.isError === true}`);
+    expect(errors).toEqual(["open:false", "click:true", "click:false", "fill:true", "type:true", "snapshot:false", "click:false", "fill:true"]);
+    const text = (at: number) => answers()[at].response.result.content.map((part: any) => part.text).join(" ");
+    expect(text(1)).toContain("its target was disabled");
+    expect(text(3)).toContain("does not hold the text");
+    expect(text(7)).toContain("Take a new snapshot");
+    expect(text(5)).toMatch(/textbox "Name" \[ref=e2\]/);
+    expect(seen).not.toContain("off-click");
   }, 300_000);
 });
