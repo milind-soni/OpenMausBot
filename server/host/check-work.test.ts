@@ -64,6 +64,7 @@ function fixture(options: { checkWork?: CheckWorkBot["checkWork"]; checkerReplie
     },
     interrupt: (_botId, threadId) => { interrupted.push(threadId); },
     done: (_botId, _threadId, text) => done.push(text),
+    exists: (place) => place.threadId === "chat",
     changed: (botId) => changed.push(botId),
     saved: { read: () => saved, write: (list) => { saved = list; } },
     turn: { ownChat: () => true, internal: () => false, unattended: () => false, routine: () => false, awaitingTeammates: () => false, stopped: () => false,
@@ -238,8 +239,8 @@ describe("check before done", () => {
     expect([f.posted, f.done]).toEqual([[], []]);
   });
 
-  it("after a restart, ends a check it cut short with a line and the held notice, once the app has started", async () => {
-    const f = fixture({ saved: [{ botId: "w", threadId: "chat", answer: "The answer." }] });
+  it("after a restart, ends a check it cut short with a line and the held notice, once the app has started, and only where the conversation is still there", async () => {
+    const f = fixture({ saved: [{ botId: "w", threadId: "chat", answer: "The answer." }, { botId: "w", threadId: "gone", answer: "x" }, { botId: "nobody", threadId: "chat", answer: "x" }] });
     expect([f.posted, f.done]).toEqual([[], []]);
     expect(f.saved()).toEqual([]);
     await f.settle();

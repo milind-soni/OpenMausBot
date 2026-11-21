@@ -54,8 +54,11 @@ export interface CheckWorkDeps {
   /** Starts a harness turn that is no person's message: usage caps and thread limits apply; it throws when refused. */
   run(botId: string, threadId: string, text: string, kind: "check" | "fix", settled: (outcome: HostTurnResult) => void): Promise<unknown>;
   interrupt(botId: string, threadId: string): Promise<void> | void;
-  /** The job is done: the notice and unread mark the first answer's end held back, once. */
-  done(botId: string, threadId: string, text: string): void;
+  /** The job is done: the notice and unread mark the first answer's end held back, once. `restarted`: the app restarted
+   * since it held them, so nothing is held any more and the notice goes out regardless. */
+  done(botId: string, threadId: string, text: string, restarted?: boolean): void;
+  /** The conversation is still one of the bot's. */
+  exists(place: Place): boolean;
   /** The conversation's checking state changed, for its "teammates working" status and Stop. */
   changed(botId: string): void;
   /** Checks under way, kept so one the app's restart cut short still ends with a line. */
@@ -127,7 +130,10 @@ const RULES = [
 export function checkWorkFile(path: string): CheckWorkDeps["saved"] {
   return {
     read: () => {
-      try { return existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Array<Place & { answer: string }>) : []; } catch { return []; }
+      let parsed: unknown;
+      try { parsed = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : []; } catch { return []; }
+      return Array.isArray(parsed) ? parsed.filter((entry): entry is Place & { answer: string } => Boolean(entry) && typeof entry.botId === "string"
+        && typeof entry.threadId === "string" && typeof entry.answer === "string") : [];
     },
     write: (list) => { if (list.length || existsSync(path)) writeFileAtomic(path, JSON.stringify(list)); },
   };
@@ -282,9 +288,9 @@ export function createCheckWork(deps: CheckWorkDeps) {
   deps.saved.write([]);
   if (cutShort.length) deps.timer(() => {
     for (const left of cutShort) {
-      if (!deps.bot(left.botId)) continue;
+      if (!deps.bot(left.botId) || !deps.exists(left)) continue;
       deps.post(left.threadId, { name: deps.line(left.threadId, "server.checkWork.notChecked", { reason: deps.line(left.threadId, "server.checkWork.restarted") }), ok: false, input: "", output: "" });
-      deps.done(left.botId, left.threadId, left.answer);
+      deps.done(left.botId, left.threadId, left.answer, true);
     }
   }, 0);
 
