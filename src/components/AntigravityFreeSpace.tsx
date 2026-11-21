@@ -60,9 +60,10 @@ export function AntigravityFreeSpace({ instance, initial = { kind: "idle" } }: {
   return (
     <section className="mt-3 rounded-xl border border-hairline/40 px-3 py-2.5" aria-label={t("engines.freeSpace.title")}>
       <div className="flex flex-wrap items-center gap-2">
-        <HardDrive size={13} aria-hidden="true" className="shrink-0 text-ink-secondary" />
-        <span className="text-[12px] font-medium text-ink">{t("engines.freeSpace.title")}</span>
-        <span className="flex-1" />
+        <span className="mr-auto flex min-w-0 max-w-full items-start gap-2">
+          <HardDrive size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-ink-secondary" />
+          <span className="min-w-0 [overflow-wrap:anywhere] text-[12px] font-medium text-ink">{t("engines.freeSpace.title")}</span>
+        </span>
         {(phase.kind === "idle" || phase.kind === "none" || phase.kind === "done" || busy) && (
           <button
             type="button"

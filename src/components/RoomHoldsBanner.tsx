@@ -10,8 +10,10 @@ export function RoomHoldsBanner({ group, members }: { group: Group; members: Bot
   return (
     <div className="w-full px-5">
       <div data-testid="room-holds" className="mb-1 flex flex-wrap items-center gap-1.5 px-2 text-[12px] text-ink-secondary">
-        <Pause size={12} aria-hidden="true" />
-        <span>{t("room.holds.banner", { names: held.map((member) => member.name).join(", ") })}</span>
+        <span className="flex min-w-0 max-w-full items-start gap-2">
+          <Pause size={12} aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span className="min-w-0 [overflow-wrap:anywhere]">{t("room.holds.banner", { names: held.map((member) => member.name).join(", ") })}</span>
+        </span>
         {held.map((member) => (
           <button
             key={member.id}

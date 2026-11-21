@@ -10,8 +10,10 @@ export function NewConversationInstead({ bot, room = false, onNew }: { bot?: Pic
   if (bot?.yourAccess === "view") {
     return (
       <div className="pointer-events-auto mx-5 mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-hairline/60 bg-raised px-4 py-3" data-testid="view-only-composer">
-        <Eye size={16} aria-hidden="true" className="shrink-0 text-ink-secondary" />
-        <p className="min-w-0 flex-1 text-[13px] text-ink-secondary">{t(room ? "botAccess.viewOnlyRoom" : "botAccess.viewOnly", { bot: bot.name })}</p>
+        <div className="flex min-w-0 max-w-full flex-auto items-start gap-3">
+          <Eye size={16} aria-hidden="true" className="mt-0.5 shrink-0 text-ink-secondary" />
+          <p className="min-w-0 [overflow-wrap:anywhere] text-[13px] text-ink-secondary">{t(room ? "botAccess.viewOnlyRoom" : "botAccess.viewOnly", { bot: bot.name })}</p>
+        </div>
         <AskToChat bot={bot} />
       </div>
     );

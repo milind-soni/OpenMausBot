@@ -270,10 +270,14 @@ export function PageNotes({ version, point, share, save, room, className }: Pick
   if (share.url) {
     rows.push(
       <div key="link" data-page-link className="flex min-w-0 flex-wrap items-center gap-2 rounded-2xl bg-inset px-3 py-2 text-[13px]">
-        <Globe size={14} className="shrink-0 text-ink-tertiary" aria-hidden="true" />
-        <span className="shrink-0 font-medium text-ink">{share.again ? t("chat.preview.updatedLink") : t("chat.preview.published")}</span>
-        <a href={share.url} dir="ltr" onClick={(event) => { event.preventDefault(); void openExternalLink(share.url!); }}
-          className="min-w-0 flex-1 truncate text-accent-text hover:underline">{share.url}</a>
+        <span className="flex min-w-0 max-w-full flex-[1_1_12rem] items-start gap-2">
+          <Globe size={14} className="mt-0.5 shrink-0 text-ink-tertiary" aria-hidden="true" />
+          <span className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2">
+            <span className="min-w-0 [overflow-wrap:anywhere] font-medium text-ink">{share.again ? t("chat.preview.updatedLink") : t("chat.preview.published")}</span>
+            <a href={share.url} dir="ltr" onClick={(event) => { event.preventDefault(); void openExternalLink(share.url!); }}
+              className="min-w-0 flex-[1_1_8rem] truncate text-accent-text hover:underline">{share.url}</a>
+          </span>
+        </span>
         <button type="button" onClick={copy} className={cn(ASK_CHIP, ASK_CHIP_IDLE)}>
           {copied === "copied" ? <Check size={14} /> : <Copy size={14} />}{t(copied === "copied" ? "chat.page.copied" : "chat.page.copyLink")}
         </button>

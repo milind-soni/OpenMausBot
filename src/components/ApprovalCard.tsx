@@ -286,13 +286,15 @@ function AppliedChangeLine({
   return (
     <div className="w-full max-w-[840px] text-[13px] text-ink-tertiary" data-applied-change={name}>
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 leading-5">
-        {undone ? <Undo2 size={13} className="shrink-0 self-center" /> : <Check size={13} className="shrink-0 self-center text-success/80" />}
-        <span className="min-w-0 break-words">
-          {summary.line}
-          {shared && !undone && (
-            <span> · {sharedNames.length ? t("approval.applied.sharedSkill", { names: sharedNames.join(", ") }) : t("approval.applied.sharedSkillNobody")}</span>
-          )}
-          {undone && !cancels && <span> · {t("approval.applied.undone")}</span>}
+        <span className="flex min-w-0 max-w-full items-start gap-2">
+          {undone ? <Undo2 size={13} aria-hidden="true" className="mt-[3.5px] shrink-0" /> : <Check size={13} aria-hidden="true" className="mt-[3.5px] shrink-0 text-success/80" />}
+          <span className="min-w-0 [overflow-wrap:anywhere]">
+            {summary.line}
+            {shared && !undone && (
+              <span> · {sharedNames.length ? t("approval.applied.sharedSkill", { names: sharedNames.join(", ") }) : t("approval.applied.sharedSkillNobody")}</span>
+            )}
+            {undone && !cancels && <span> · {t("approval.applied.undone")}</span>}
+          </span>
         </span>
         {!undone && canUndo && threadId && (
           <button
@@ -405,15 +407,17 @@ function CompactApprovalRow({
       className={cn("w-full max-w-[840px] text-[13px]", waiting ? "text-ink-secondary" : "text-ink-tertiary")}
     >
       <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 leading-5">
-        {waiting
-          ? <ShieldCheck size={14} className="shrink-0 self-center text-accent" aria-hidden="true" />
-          : allowed
-            ? <Check size={14} className="shrink-0 self-center text-success" aria-hidden="true" />
-            : expired
-              ? <Clock3 size={14} className="shrink-0 self-center" aria-hidden="true" />
-              : <X size={14} className="shrink-0 self-center" aria-hidden="true" />}
-        <span className={cn("min-w-0 break-words", waiting && "text-ink")}>{header}</span>
-        {summary && <span className="min-w-0 break-words">{waiting ? summary : `· ${summary}`}</span>}
+        <span className="flex min-w-0 max-w-full items-start gap-2">
+          {waiting
+            ? <ShieldCheck size={14} className="mt-[3px] shrink-0 text-accent" aria-hidden="true" />
+            : allowed
+              ? <Check size={14} className="mt-[3px] shrink-0 text-success" aria-hidden="true" />
+              : expired
+                ? <Clock3 size={14} className="mt-[3px] shrink-0" aria-hidden="true" />
+                : <X size={14} className="mt-[3px] shrink-0" aria-hidden="true" />}
+          <span className={cn("min-w-0 [overflow-wrap:anywhere]", waiting && "text-ink")}>{header}</span>
+        </span>
+        {summary && <span className="min-w-0 [overflow-wrap:anywhere]">{waiting ? summary : `· ${summary}`}</span>}
         {detail && showDetailInline && (
           <span role="group" aria-label={t("approval.aria.details")} className="min-w-0 max-w-full">
             <button
