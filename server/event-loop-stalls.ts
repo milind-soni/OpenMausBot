@@ -6,6 +6,10 @@ import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 export const STALL_MS = 2_000;
 const SAMPLE_MS = 5_000;
 const KEEP_MS = 2 * 60 * 60_000;
+/** How often the histogram's timer fires; each firing wakes an idle server, so it is far coarser than a stall. The
+ * histogram's longest interval includes this, so a stall of D ms reads as between D and D plus this: a coarser timer can
+ * only take a shorter hold-up (over 1.5 s) for a stall, never miss one, and then no computer is set aside on that probe. */
+export const LOOP_TIMER_MS = 500;
 
 export interface EventLoopStalls {
   /** The loop stalled at some point between `from` and `to` (by `now`). */
@@ -14,7 +18,7 @@ export interface EventLoopStalls {
 }
 
 export function createEventLoopStalls(now: () => number = Date.now, { sampleMs = SAMPLE_MS, stallMs = STALL_MS } = {}): EventLoopStalls {
-  const histogram = monitorEventLoopDelay({ resolution: 20 });
+  const histogram = monitorEventLoopDelay({ resolution: LOOP_TIMER_MS });
   histogram.enable();
   /** The end of each sample whose longest delay was a stall, and that delay. */
   const stalls: Array<{ at: number; delayMs: number }> = [];

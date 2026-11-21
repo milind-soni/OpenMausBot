@@ -98,7 +98,10 @@ export function stallStats(minutes: readonly Minute[]): StallStats | null {
 const sum = (tallies: readonly Tally[]): Tally => tallies.reduce((all, tally) => ({ n: all.n + tally.n, ms: all.ms + tally.ms, maxMs: Math.max(all.maxMs, tally.maxMs) }), zero());
 const rounded = (tally: Tally): Tally => ({ n: tally.n, ms: Math.round(tally.ms), maxMs: Math.round(tally.maxMs * 10) / 10 });
 
-export const STALL_RESOLUTION_MS = 20;
+/** How often the histogram's timer fires. Each firing wakes an idle server: at 20 ms that was most of an idle Cloud's CPU
+ * (about 0.2% of a core on a Fly shared vCPU, 1% under gVisor), every hour of the day. A stall of D ms reads as between
+ * D minus this and D, so a delay over 1 s still counts as one; only the 100-200 ms band can read low. */
+export const STALL_RESOLUTION_MS = 100;
 export const MINUTE_MS = 60_000;
 const MINUTES_KEPT = 60;
 

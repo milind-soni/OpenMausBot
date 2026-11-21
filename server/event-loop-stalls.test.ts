@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createEventLoopStalls, type EventLoopStalls } from "./event-loop-stalls.ts";
+import { createEventLoopStalls, LOOP_TIMER_MS, STALL_MS, type EventLoopStalls } from "./event-loop-stalls.ts";
 
 let watch: EventLoopStalls | null = null;
 afterEach(() => { watch?.close(); watch = null; });
@@ -16,5 +16,12 @@ describe("this process's event loop stalls", () => {
     await pause(200);
     expect(watch.stalledBetween(before, Date.now())).toBe(true);
     expect(watch.stalledBetween(before - 10_000, before - 5_000)).toBe(false);
+  });
+
+  it("wakes an idle server only a couple of times a second, and still sees every stall", () => {
+    // The longest interval read includes the timer's own, so any timer shorter than a stall sees it; one longer would
+    // read every quiet interval as a stall.
+    expect(LOOP_TIMER_MS).toBeGreaterThanOrEqual(250);
+    expect(LOOP_TIMER_MS).toBeLessThan(STALL_MS);
   });
 });
