@@ -694,6 +694,29 @@ describe("a new engine that never comes up", () => {
     expect(s.memory.stoppedForRoom("t1", 1000)).toBe(false);
     expect(s.memory.stoppedForRoom("t1")).toBe(false);
   });
+  it("admits each engine at its own size: a Grok start waits where an engine of the usual size fits", async () => {
+    // Under pids.max 256, 120 and a busy engine's 44 running: one more of the usual 60 reaches the 224 below the margin,
+    // Grok's runtime threads pass it.
+    const send = async (driverKind: string) => {
+      const s = server({ pids: 256, turns: 100 });
+      s.state.base = 120;
+      expect(await s.start("busy")).toBe(true);
+      // Its processes are all there by now, so nothing more is held for it.
+      s.advance(6_000);
+      const decorated = withEngineMemory(fakeInstance(driverKind).instance, s.memory), notices: string[] = [];
+      decorated.adapter.onEvent((event) => { if (event.type === "runtime.notice") notices.push(event.message); });
+      return { decorated, notices, turn: decorated.adapter.sendTurn({ threadId: "t1", text: "hi" } as SendTurnInput) };
+    };
+    const usual = await send("claudeAgent");
+    expect(await usual.turn).toEqual({ turnId: "turn-t1" });
+    expect(usual.notices).toEqual([]);
+    const grok = await send("grokAgent");
+    const caught = grok.turn.catch((error: unknown) => error);
+    await settle();
+    expect(grok.notices).toHaveLength(1);
+    await grok.decorated.adapter.interruptTurn("t1", "turn-t1");
+    expect(await caught).toBeInstanceOf(TurnNotStartedError);
+  });
 });
 
 describe("a spawn refused during a turn", () => {

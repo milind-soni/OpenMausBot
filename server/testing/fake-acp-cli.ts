@@ -105,7 +105,7 @@
 //     notification {sessionId, promptId: the prompt's _meta.promptId, stopReason: FAKE_ACP_COMPLETE_STOP (end_turn),
 //     agentResult: FAKE_ACP_COMPLETE_RESULT (null)}, then answers per FAKE_ACP_COMPLETE_REPLY: "after" (default) at once
 //     with that stopReason and usage, "never", "late" after FAKE_ACP_COMPLETE_REPLY_MS (3500) with "late words" and usage,
-//     or "rate-limit-error" (JSON-RPC -32003). FAKE_ACP_COMPLETE_NAMES (own) lists the prompts the notifications name:
+//     "late-bare" the same reply with no words, or "rate-limit-error" (JSON-RPC -32003). FAKE_ACP_COMPLETE_NAMES (own) lists the prompts the notifications name:
 //     own, none (no promptId), task (a background task's task-completed-… id), other-session.
 //   FAKE_ACP_START_FAILURE  this line on stderr at startup, then exit 1 before reading anything, as grok 1.0.x does when it
 //     cannot start its threads
@@ -801,7 +801,10 @@ function grokCompletePrompt(msg: any) {
   switch (process.env.FAKE_ACP_COMPLETE_REPLY ?? "after") {
     case "after": result(msg.id, { stopReason, _meta: usage }); break;
     case "never": hangKeepAlive = setInterval(() => {}, 1_000); break;
-    case "late": setTimeout(() => { say(" late words"); result(msg.id, { stopReason, _meta: usage }); }, Number(process.env.FAKE_ACP_COMPLETE_REPLY_MS ?? 3_500)); break;
+    case "late": case "late-bare": setTimeout(() => {
+      if (process.env.FAKE_ACP_COMPLETE_REPLY === "late") say(" late words");
+      result(msg.id, { stopReason, _meta: usage });
+    }, Number(process.env.FAKE_ACP_COMPLETE_REPLY_MS ?? 3_500)); break;
     case "rate-limit-error": out({ jsonrpc: "2.0", id: msg.id, error: { code: -32003, message: "Rate limited", data: { message: process.env.FAKE_ACP_COMPLETE_RESULT ?? "Rate limited" } } }); break;
   }
 }

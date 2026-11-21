@@ -61,7 +61,7 @@ describe("Grok's prompt_complete", () => {
     expect(of(events, "turn.completed")).toEqual([expect.objectContaining({ ok: true, stopReason: null })]);
     expect(of(events, "thread.token-usage.updated")).toEqual([expect.objectContaining({ input: 20, output: 7 })]);
     const prompt = calls().find((call) => call.method === "session/prompt")!;
-    expect(prompt.meta).toEqual({ promptId: expect.stringMatching(/^omb-prompt-\d+$/), requestId: prompt.meta?.promptId });
+    expect(prompt.meta).toEqual({ promptId: expect.stringMatching(/^omb-prompt-[\w-]+$/), requestId: prompt.meta?.promptId });
   });
 
   it("ends the turn on the notification alone when no reply comes", async () => {
@@ -69,6 +69,18 @@ describe("Grok's prompt_complete", () => {
     const events = await ask();
     expect(of(events, "turn.completed")).toEqual([expect.objectContaining({ ok: true, stopReason: null })]);
     expect(replyText(events)).toBe("answered");
+  });
+
+  it("ends the turn once when the prompt's reply comes after the notification already ended it, and the thread goes on", async () => {
+    const { ask, calls, recorder } = await start({ FAKE_ACP_MODE: "grok-complete", FAKE_ACP_COMPLETE_REPLY: "late-bare", FAKE_ACP_COMPLETE_REPLY_MS: "3000" });
+    const [firstEnd] = of(await ask(), "turn.completed");
+    expect(firstEnd).toMatchObject({ ok: true });
+    // The second turn starts as the first ends and itself waits out the notification's grace, past the first reply's arrival.
+    const second = await ask("and now?");
+    expect(of(second, "turn.completed")).toEqual([expect.objectContaining({ ok: true })]);
+    expect(replyText(second)).toBe("answered");
+    expect(of(recorder.events, "turn.completed").map((event) => event.turnId)).toEqual([firstEnd!.turnId, second[0]!.turnId]);
+    expect(new Set(calls().filter((call) => call.method === "session/prompt").map((call) => call.meta?.promptId)).size).toBe(2);
   });
 
   it("takes a notification that names no prompt for its session's one prompt out", async () => {
@@ -101,11 +113,10 @@ describe("Grok's rate-limit stop", () => {
     expect(error!.message).toMatch(/^This Grok account has reached its usage limit/);
   };
 
-  it("is the account's usage limit, so another AI can carry on: from the notification, the error reply or the reply's own stop", async () => {
-    usageLimit(await (await start({ FAKE_ACP_MODE: "grok-complete", FAKE_ACP_COMPLETE_STOP: "rate_limit", FAKE_ACP_COMPLETE_REPLY: "never" })).ask());
-    usageLimit(await (await start({ FAKE_ACP_MODE: "grok-complete", FAKE_ACP_COMPLETE_STOP: "rate_limit", FAKE_ACP_COMPLETE_REPLY: "rate-limit-error" })).ask());
-    usageLimit(await (await start({ FAKE_ACP_MODE: "grok-complete", FAKE_ACP_COMPLETE_STOP: "rate_limit", FAKE_ACP_COMPLETE_REPLY: "after" })).ask());
-  });
+  it.each([["the notification alone", "never"], ["the JSON-RPC error reply", "rate-limit-error"], ["the reply's own stop", "after"]])(
+    "is the account's usage limit, so another AI can carry on: from %s", async (_from, reply) => {
+      usageLimit(await (await start({ FAKE_ACP_MODE: "grok-complete", FAKE_ACP_COMPLETE_STOP: "rate_limit", FAKE_ACP_COMPLETE_REPLY: reply })).ask());
+    });
 
   it("keeps its own words when they name another cause, such as the service being down", async () => {
     const events = await (await start({ FAKE_ACP_MODE: "grok-complete", FAKE_ACP_COMPLETE_STOP: "rate_limit", FAKE_ACP_COMPLETE_REPLY: "never",

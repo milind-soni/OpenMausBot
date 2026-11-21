@@ -2,6 +2,7 @@
 // sessions in one process (ACP keys every session request and update by sessionId), so a sharing driver links many
 // threads to one host; every other driver links exactly one.
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
 import { engineMemory } from "../../engine-memory.ts";
 import { engineOwners } from "../../engine-owners.ts";
@@ -255,7 +256,7 @@ export class AcpHost {
       const id = this.#nextId++;
       if (method === "_x.ai/mcp/list") this.#privateResponses.add(id);
       const completion = method === "session/prompt" ? this.options.promptCompletion : undefined;
-      const prompt = completion ? { id: `omb-prompt-${id}`, sessionId: (params as { sessionId?: unknown } | null)?.sessionId } : null;
+      const prompt = completion ? { id: `omb-prompt-${randomUUID()}`, sessionId: (params as { sessionId?: unknown } | null)?.sessionId } : null;
       if (completion && prompt) params = { ...params as object, _meta: { ...(params as { _meta?: object } | null)?._meta, ...completion.meta(prompt.id) } };
       let timer: ReturnType<typeof setTimeout> | null = null;
       if (timeoutMs) {
