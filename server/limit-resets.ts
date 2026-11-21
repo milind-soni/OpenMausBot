@@ -91,6 +91,7 @@ export interface LimitClockOptions {
   waiting?: () => boolean;
   /** The known reset times changed. */
   onChange?: () => void;
+  onCodexRecovery?: (engine: string, reset: number) => void;
   now?: () => number;
   /** Where the refusals' holds are kept across restarts; none in tests that need no file. */
   file?: string;
@@ -246,6 +247,7 @@ export class LimitResetClock {
     const next = new Map<string, EngineLimit>();
     const fetchedAt = Date.parse(report.fetchedAt);
     let released = false;
+    const recovered: Array<{ engine: string; reset: number }> = [];
     for (const row of report.providers) {
       const limit = engineLimitFromUsage(row);
       if (!limit) {
@@ -255,15 +257,20 @@ export class LimitResetClock {
       }
       next.set(limit.engine, limit);
       this.readAt.set(limit.engine, this.now());
-      if (meterHoldsEngine(row.driver) && fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && holdGone(row, limit, this.refusals.get(limit.engine), this.guessed.has(limit.engine))) {
+      const reset = this.refusals.get(limit.engine);
+      if (reset !== undefined && meterHoldsEngine(row.driver) && fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && holdGone(row, limit, reset, this.guessed.has(limit.engine))) {
         this.refusals.delete(limit.engine);
         this.heldAt.delete(limit.engine);
         released = true;
+        if (row.driver === "codex" && this.options.accounts().some((account) => account.id === limit.engine && account.driver === "codex" && !account.noUsage)) {
+          recovered.push({ engine: limit.engine, reset });
+        }
       }
     }
     if (released) this.saveHolds();
     this.usage = next;
     this.checkedAt = this.now();
+    for (const { engine, reset } of recovered) this.options.onCodexRecovery?.(engine, reset);
     this.options.onChange?.();
   }
 

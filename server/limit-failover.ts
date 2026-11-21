@@ -66,6 +66,7 @@ export interface LimitFailover {
   why?: "signed-out";
   /** Only the usage meter held `from`, not a refusal: the conversation goes back once the meter no longer holds it. */
   meter?: true;
+  engineRefusal?: "waiting" | "recovered";
 }
 
 /** With no reset time known, a conversation tries its own engine again no sooner than this. */
@@ -78,6 +79,7 @@ export interface LimitFailoverDeps {
   blockedUntil: (engine: string, model?: string) => number | null;
   /** This engine refused a turn because it is signed out, and has not been signed in again since. */
   signedOut?: (engine: string) => boolean;
+  modelHeld?: (selection: ModelSelection) => boolean;
   /** The thread's model now, or null when the thread is gone. */
   threadModel: (botId: string, threadId: string) => ModelSelection | null;
   /** Switches the thread back; false when that is not allowed now (a busy thread, a permission change). */
@@ -92,7 +94,8 @@ function load(file: string): LimitFailover[] {
     const rows = JSON.parse(readFileSync(file, "utf8")) as unknown;
     return Array.isArray(rows) ? rows.filter((row): row is LimitFailover => typeof row?.botId === "string" && typeof row?.threadId === "string" &&
       typeof row?.from?.instanceId === "string" && typeof row?.to?.instanceId === "string" && (row.resetsAt === null || Number.isFinite(row.resetsAt)) &&
-      Number.isFinite(row.at) && (row.why === undefined || row.why === "signed-out") && (row.meter === undefined || row.meter === true)) : [];
+      Number.isFinite(row.at) && (row.why === undefined || row.why === "signed-out") && (row.meter === undefined || row.meter === true) &&
+      (row.engineRefusal === undefined || row.engineRefusal === "waiting" || row.engineRefusal === "recovered")) : [];
   } catch {
     return [];
   }
@@ -111,10 +114,14 @@ export class LimitFailovers {
   record(failover: LimitFailover): void {
     const earlier = this.rows.find((row) => row.threadId === failover.threadId);
     // A second failover keeps the engine the conversation started on, so it still goes back there.
-    const from = earlier && sameModelSelection(earlier.to, failover.from) ? earlier.from : failover.from;
+    const chained = earlier && sameModelSelection(earlier.to, failover.from);
+    const from = chained ? earlier.from : failover.from;
     // A reset already past when the limit refused names no time: the engine's own hold decides when it goes back.
     const resetsAt = failover.resetsAt !== null && failover.resetsAt > failover.at ? failover.resetsAt : null;
-    this.rows = [...this.rows.filter((row) => row.threadId !== failover.threadId), { ...failover, from, resetsAt }].slice(-500);
+    const { engineRefusal, ...row } = failover;
+    this.rows = [...this.rows.filter((candidate) => candidate.threadId !== failover.threadId), {
+      ...row, from, resetsAt, ...(!chained && resetsAt !== null && engineRefusal === "waiting" ? { engineRefusal } : {}),
+    }].slice(-500);
     this.save();
   }
 
@@ -128,12 +135,23 @@ export class LimitFailovers {
     if (!current || !sameModelSelection(current, row.to)) return this.forget(threadId);
     const blocked = this.deps.blockedUntil(row.from.instanceId, row.from.model) !== null;
     const waitUntil = row.why === "signed-out" ? row.at : row.meter ? row.at : row.resetsAt ?? row.at + UNKNOWN_RESET_WAIT_MS;
-    if (waitUntil > now || blocked) return false;
+    const recovered = row.engineRefusal === "recovered" && !this.deps.signedOut?.(row.from.instanceId);
+    if (blocked || (waitUntil > now && !recovered) || this.deps.modelHeld?.(row.from)) return false;
     if (row.why === "signed-out" && this.deps.signedOut?.(row.from.instanceId)) return false;
     if (!this.deps.switchBack(row)) return false;
     this.forget(threadId);
     this.deps.note(threadId, backLine(this.deps.engineName(row.from.instanceId), row.why), row.why === "signed-out" ? { key: "chat.notice.failoverSignedInAgain", params: { engine: this.deps.engineName(row.from.instanceId) } } : undefined);
     return true;
+  }
+
+  usageRecovered(engine: string, reset: number): void {
+    let changed = false;
+    this.rows = this.rows.map((row) => {
+      if (row.engineRefusal !== "waiting" || row.from.instanceId !== engine || row.resetsAt !== reset || row.why || row.meter) return row;
+      changed = true;
+      return { ...row, engineRefusal: "recovered" };
+    });
+    if (changed) this.save();
   }
 
   forget(threadId: string): false {

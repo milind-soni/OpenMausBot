@@ -255,8 +255,9 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
   /** A conversation of `botId` moved from `from` to `to` because `from` was limited or signed out; it goes back once
    * that ends. */
   const moved = (botId: string, threadId: string, from: ModelSelection, to: ModelSelection, resetsAt?: number, scope?: TakeoverScope): void => {
-    deps.record({ botId, threadId, from, to, resetsAt: resetsAt ?? null, at: now(), ...(scope === "signed-out" ? { why: "signed-out" as const } : {}),
-      ...(scope === "engine" && deps.meterOnly?.(from.instanceId, from.model) ? { meter: true as const } : {}) });
+    const meter = scope === "engine" && deps.meterOnly?.(from.instanceId, from.model);
+    deps.record({ botId, threadId, from, to, resetsAt: resetsAt ?? null, at: now(), ...(scope === "signed-out" ? { why: "signed-out" } : {}),
+      ...(meter ? { meter: true } : {}), ...(scope === "engine" && !meter && resetsAt !== undefined ? { engineRefusal: "waiting" } : {}) });
   };
 
   /** A turn on `selection` worked for this bot: its engine's next limit is a new stretch, and it is plainly signed in. */
