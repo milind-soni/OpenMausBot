@@ -66,7 +66,7 @@ export interface NoTerminalDeps {
   engine?(selection: Selection): { model: string; shell: boolean } | undefined;
   /** The bot's name and the folder it was set to work in, if any. */
   bot?(botId: string): { name: string; cwd?: string } | undefined;
-  /** The bot's enabled routines. */
+  /** The bot's routines, paused ones too: each runs on this model once it runs. */
   routines?(botId: string): ReadonlyArray<{ runOn?: string; modelSelection?: Selection }>;
   language?(threadId: string): string | undefined;
   /** Writes the app's own one line into a conversation. */

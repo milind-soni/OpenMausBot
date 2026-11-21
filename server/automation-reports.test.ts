@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { ROUTINE_HANDOFF_WAIT, type RoutineRunReport } from "../shared/routines.ts";
 import "./server-line-packs.ts";
 import { clipRunOutput } from "./routine-lines.ts";
-import { automationContextText, createAutomationReports, newestAutomationLines, readRunReply, recoveredText, routineRunNeedsReview } from "./automation-reports.ts";
+import { automationContextText, createAutomationReports, newestAutomationLines, readRunReply, recoveredText, routineRunNeedsReview, type AutomationReportDeps } from "./automation-reports.ts";
+import { createNoTerminal } from "./host/no-terminal.ts";
 import { DATA_DIR } from "./config.ts";
 import type { RoutineRun } from "./routines.ts";
 import { Store, type BotRecord, type Message } from "./store.ts";
@@ -79,7 +80,7 @@ describe("what the chat's own session reads", () => {
 });
 
 /** A real Store; the routine runs live in a stand-in for the RoutineManager, which keeps their report states. */
-function fixture(options: { threadLanguage?: (threadId: string) => string | undefined } = {}) {
+function fixture(options: { threadLanguage?: (threadId: string) => string | undefined; appNote?: AutomationReportDeps["appNote"] } = {}) {
   const store = new Store(selection);
   const bot = store.createBot({ name: "Pepper" });
   const main = bot.threadId;
@@ -107,6 +108,7 @@ function fixture(options: { threadLanguage?: (threadId: string) => string | unde
     wrote: (_bot: BotRecord, threadId) => wrote.push(threadId),
     notify: (kind, _bot, threadId, detail) => notified.push({ kind, threadId, detail }),
     ...(options.threadLanguage ? { threadLanguage: options.threadLanguage } : {}),
+    ...(options.appNote ? { appNote: options.appNote } : {}),
   });
   const reports = create();
   let serial = 0;
@@ -260,6 +262,24 @@ describe("automation reports", () => {
     f.reports.runSettled(quietly, `turn-${quietly.id}`);
     expect(f.lines()).toHaveLength(1);
     expect(f.notified.map((entry) => entry.threadId)).toEqual([f.main, nowhere.threadId]);
+  });
+
+  it("ends a run's line with the app's own sentence when a turn of it could run no command and its bot tried one (host/no-terminal.ts)", () => {
+    let host: ReturnType<typeof createNoTerminal> | undefined;
+    const f = fixture({ appNote: (run, language) => host!.runNote(run, language) });
+    host = createNoTerminal({ cloudHome: true, lines: (threadId) => f.store.messagesFor(threadId), who: () => ({ bot: "Pepper", model: "gpt-5-mini" }), cloudComputer: () => false });
+    const reach = { ownShell: false, computerMounted: false, lentTerminal: false }, prompt = { bot: "Pepper", model: "gpt-5-mini", cloudComputer: false, routine: true };
+    const tried = f.finished("No execution environment was mounted, so the script did not run.", "Nightly sync", { startedAt: Date.now() - 1000 });
+    host.turn(tried.threadId!, reach, prompt, Date.now() - 500);
+    f.store.appendMessage(tried.threadId!, { role: "bot", kind: "activity", tool: { name: "exec", ok: false, output: "The requested tool was not advertised for this turn" } });
+    f.reports.runSettled(tried, `turn-${tried.id}`);
+    expect(f.lines().at(-1)?.text).toBe("No execution environment was mounted, so the script did not run.\n\nPepper couldn't run commands in this run: gpt-5-mini has no terminal on My Cloud. To let its routines run commands, switch Pepper to a model with a terminal, such as Claude or Codex.");
+    expect(f.runs.get(tried.id)!.status, "a run with no terminal is not failed for it").toBe("completed");
+    // The same no-terminal turn, with no command tried: the bot's words alone.
+    const fine = f.finished("Three new invoices, filed.", "Invoices", { startedAt: Date.now() - 1000 });
+    host.turn(fine.threadId!, reach, prompt, Date.now() - 500);
+    f.reports.runSettled(fine, `turn-${fine.id}`);
+    expect(f.lines().at(-1)?.text).toBe("Three new invoices, filed.");
   });
 
   it("says a run whose reply came back but a step failed was partly done, not that it didn't finish", () => {
