@@ -99,7 +99,7 @@ describe("a routine run's line ends with the app's sentence", () => {
 
   it("hands automation-reports.ts its line through notes, taken once, for the run asked about only", () => {
     const lines = [{ kind: "activity", at: T0 + 2, tool: { name: "exec", ok: false, output: REFUSED } }];
-    const runs = new Map([["run_1", run], ["run_2", { threadId: "t2", startedAt: T0 }]]);
+    const runs = new Map<string, { threadId?: string; startedAt?: number }>([["run_1", run], ["run_2", { threadId: "t2", startedAt: T0 }]]);
     const host = createNoTerminal({ cloudHome: true, lines: () => lines, run: (id) => runs.get(id) });
     host.turn("t1", reach, prompt, T0 + 1);
     expect(host.notes.has("run_2"), "another run's conversation").toBe(false);
