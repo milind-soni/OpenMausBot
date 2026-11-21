@@ -31,6 +31,8 @@ export const browserEngineConfigSchema = z.object({
   /** On a Linux server with Xvnc, the new engine's Chrome runs with its window on a private display that the browser panel
    * shows and a person drives as a remote desktop. Off by default. */
   cloudDisplay: z.boolean().optional(),
+  /** The user agent the desktop pane presents: Electron's own ("native", the default) or without its Electron token ("cleaned"). */
+  paneIdentity: z.enum(["native", "cleaned"]).optional(),
 });
 
 export interface BrowserEngineConfig {
@@ -40,6 +42,7 @@ export interface BrowserEngineConfig {
   engine?: BrowserEngineKind;
   surface?: "stream" | "pane";
   cloudDisplay?: boolean;
+  paneIdentity?: "native" | "cleaned";
 }
 
 export function browserEngineKind(cfg: { browserEngine?: BrowserEngineConfig }): BrowserEngineKind {

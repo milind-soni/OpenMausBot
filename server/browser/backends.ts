@@ -25,6 +25,12 @@ export interface BackendCaps {
   botPasskeys: boolean;
 }
 
+export interface SiteRefusal {
+  kind: "google-rejected" | "passkey";
+  url: string;
+  targetId: string;
+}
+
 export interface OpenRequest {
   key: string;
   mode: BrowserMode;
@@ -44,11 +50,16 @@ export interface OpenedBrowser {
   readonly exited: Promise<void>;
   /** Chrome's own quit: session restore keeps the tabs and session cookies. */
   close(): Promise<void>;
+  /** "pane" for the desktop app's native panes. */
+  readonly surface?: "pane";
+  /** A site turned this browser away (Google's refused sign-in, a passkey it cannot serve): the person's own Chrome is the
+   * way on. Google sign-ins are never imported, so an import is no answer to Google's refusal. */
+  onSiteRefusal?(listener: (refusal: SiteRefusal) => void): () => void;
   /** Where the person uses the page directly: called as they press, type or scroll in it. */
   onPersonInput?(listener: () => void): () => void;
   /** Where the person uses the page directly: holds the bot's input to a tab while the person has it (refs drop on
-   * release), and says who acted last in it. */
-  personControl?: { hold(targetId: string, held: boolean): void; owner(targetId: string): "person" | "bot" | null; held(targetId: string): boolean };
+   * release), says who acted last in it, whether it holds a tab, and whether the person holds any tab. */
+  personControl?: { hold(targetId: string, held: boolean): void; owner(targetId: string): "person" | "bot" | null; held(targetId: string): boolean; holding(): boolean };
   /** The private display its window is on, which a person sees as a remote desktop; absent when it runs headless. */
   readonly display?: DesktopDisplay | null;
 }

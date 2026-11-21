@@ -24,7 +24,7 @@ import type { HoldLimits } from "../hold.ts";
 import type { Tab } from "../tabs.ts";
 import { ACCEPT_OF, chooseOption, cursorAt, editableAt, selectAt, type SelectPopup } from "./popups.ts";
 import { DrawnView, type FrameMetadata } from "./drawn-view.ts";
-import { ViewerHold } from "./hold.ts";
+import { ViewerHold } from "./hold.ts"; import { covered } from "./cover.ts";
 import { fitsScreen, MIN_WINDOW_WIDTH, requestedSize, VIEWPORT_PRESETS, viewportFor, ZOOM_LIMITS, zoomedLayout, type ViewportSetting } from "./viewport.ts";
 
 /** Chromium keeps three frames unacknowledged, so acking 100 ms after arrival caps a viewer near 30 fps. */
@@ -533,7 +533,7 @@ export class ViewerHub {
       await this.host.running();
       if (viewer.closed) return viewer;
       await this.#hold.carryOn(viewer);
-      await viewer.hide(this.#hold.hides(viewer));
+      await viewer.hide(this.#hold.hides(viewer) || covered(viewer));
       void this.#resizeForViewers().catch(() => undefined);
       viewer.push(this.controlFor(viewer));
       viewer.push({ type: "viewport", ...(this.#shown ?? { ...zoomedLayout(this.viewport(), this.zoom), zoom: this.zoom }), setting: this.setting });
@@ -589,7 +589,7 @@ export class ViewerHub {
 
   broadcastControl(): void {
     for (const viewer of this.viewers) {
-      void viewer.hide(this.#hold.hides(viewer));
+      void viewer.hide(this.#hold.hides(viewer) || covered(viewer));
       viewer.push(this.controlFor(viewer));
     }
     void this.offerFileChooser();

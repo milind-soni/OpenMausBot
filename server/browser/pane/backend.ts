@@ -7,6 +7,8 @@ import { PANE_TABS_PER_BROWSER } from "../../../electron/browser-pane-wire.mjs";
 import type { Backend, BackendCaps, OpenedBrowser, OpenRequest } from "../backends.ts";
 import { CdpBrowser } from "../cdp/browser.ts";
 import { browserRoot, profileHash, profileKind, workspaceId } from "../chrome/profile.ts";
+import type { CookieSink } from "../cookies/importer.ts";
+import { paneSink } from "../cookies/sinks.ts";
 import { PaneUnavailable, type OpenedPanes, type PaneLink } from "./link.ts";
 
 const PANE_CAPS: BackendCaps = { persistentProfile: true, window: true, egressGate: true, identityOverride: false, ownsAllTabs: true, downloads: "local", uploads: "path", botPasskeys: false };
@@ -29,14 +31,20 @@ export class PaneBackend implements Backend {
   readonly #dataDir: string;
   readonly #egressPort: (key: string) => Promise<number>;
   readonly #platform: NodeJS.Platform;
+  readonly #identity: () => "native" | "cleaned";
   #fallback: Backend | null = null;
 
-  /** `egressPort`: the profile's egress gate, which the panes' partition is proxied through as a launched Chrome is. */
-  constructor(link: PaneLink, dataDir: string, egressPort: (key: string) => Promise<number>, platform: NodeJS.Platform = process.platform) {
+  /**
+   * `egressPort`: the profile's egress gate, which the panes' partition is proxied through as a launched Chrome is.
+   * `identity`: browserEngine.paneIdentity. The driver applies no identity of its own to a pane: no user agent or client
+   * hint override, no automation flags; the pane is Electron's Chromium as it is.
+   */
+  constructor(link: PaneLink, dataDir: string, egressPort: (key: string) => Promise<number>, { platform = process.platform, identity = () => "native" }: { platform?: NodeJS.Platform; identity?: () => "native" | "cleaned" } = {}) {
     this.#link = link;
     this.#dataDir = dataDir;
     this.#egressPort = egressPort;
     this.#platform = platform;
+    this.#identity = identity;
   }
 
   get available(): boolean {
@@ -58,15 +66,12 @@ export class PaneBackend implements Backend {
     const partition = panePartition(this.#dataDir, request.key);
     let opened: OpenedPanes;
     try {
-      opened = await this.#link.open(request.key, partition, await this.#egressPort(request.key), request.downloadDir);
+      opened = await this.#link.open(request.key, partition, await this.#egressPort(request.key), request.downloadDir, this.#identity());
     } catch (error) {
       if (error instanceof PaneUnavailable && this.#fallback) return this.#fallback.open(request);
       throw error;
     }
-    if (profileKind(request.key) !== "temp") {
-      mkdirSync(marksDir(this.#dataDir), { recursive: true, mode: 0o700 });
-      writeFileSync(join(marksDir(this.#dataDir), profileHash(workspaceId(this.#dataDir), request.key)), "");
-    }
+    this.#mark(request.key);
     let browser: CdpBrowser;
     try {
       browser = await CdpBrowser.connect(opened.endpoint, { identity: null, headless: false, permissions: false, downloadDir: request.downloadDir, viewport: null, platform: this.#platform, maxPages: PANE_TABS_PER_BROWSER, handleAuth: true });
@@ -79,27 +84,43 @@ export class PaneBackend implements Backend {
     const offInput = opened.onPersonInput(() => {
       for (const page of browser.pages()) page.refs.invalidateAll();
     });
-    const exited = new Promise<void>((resolve) => { browser.connection.onClose(() => { offInput(); resolve(); }); });
+    // A tab the person hands back may have changed under the bot's refs.
+    const offHold = opened.endpoint.onHold((targetId, held) => { if (!held) browser.page(targetId)?.refs.invalidateAll(); });
+    const exited = new Promise<void>((resolve) => { browser.connection.onClose(() => { offInput(); offHold(); resolve(); }); });
     return {
       browser,
       pageLimit: null,
       pid: null,
       version: opened.version,
       exited,
+      surface: "pane",
+      onSiteRefusal: (listener) => opened.endpoint.onRefusal(listener),
       onPersonInput: (listener) => opened.onPersonInput(listener),
       personControl: {
-        hold: (targetId, held) => {
-          opened.endpoint.hold(targetId, held);
-          if (!held) browser.page(targetId)?.refs.invalidateAll();
-        },
+        hold: (targetId, held) => opened.endpoint.hold(targetId, held),
         owner: (targetId) => opened.endpoint.owner(targetId),
         held: (targetId) => opened.endpoint.held(targetId),
+        holding: () => opened.endpoint.holding(),
       },
       close: async () => {
         await browser.close();
         this.#link.close(request.key);
       },
     };
+  }
+
+  #mark(key: string): void {
+    if (profileKind(key) === "temp") return;
+    mkdirSync(marksDir(this.#dataDir), { recursive: true, mode: 0o700 });
+    writeFileSync(join(marksDir(this.#dataDir), profileHash(workspaceId(this.#dataDir), key)), "");
+  }
+
+  /** An imported sign-in, into the profile's partition; marked, so deleting the bot erases it as well. */
+  cookieSink(key: string): CookieSink {
+    return paneSink(async (cookies) => {
+      this.#mark(key);
+      return this.#link.setCookies(panePartition(this.#dataDir, key), cookies);
+    });
   }
 
   /** A deleted bot's or profile's pane sign-ins, when its panes ever opened here. */

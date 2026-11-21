@@ -228,6 +228,8 @@ export interface BrowserEngineSummary {
   /** browserEngine.cloudDisplay is on and this server can run it: the panel shows the browser's window as a remote
    * desktop (GET /api/bots/:id/browser/desktop), and falls back to the picture view when that closes with 4415. */
   desktopView?: true;
+  /** The person can import a site's sign-in from their own browsers into a bot's (the desktop app, Chrome engine). */
+  cookieImport?: true;
   /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
    * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
   serverSites?: boolean;

@@ -530,6 +530,7 @@ export class BrowserService {
       secretOnPage: (tab) => this.#holds.refuses(profile.session, async () => tab.page.url(), tab.page.targetId),
       saveScreenshot: (data, pageUrl) => this.#saveScreenshot(profile, data, pageUrl),
       downloads: () => run.browser.downloads?.list() ?? [],
+      personHolds: () => run.opened.personControl?.holding() ?? false,
     };
   }
 
@@ -608,7 +609,10 @@ export class BrowserService {
     if (!profile || !tab) throw new Error("the browser has no open page to picture");
     if (profile.control.agents > 0 || this.#lanes.held(profile.key)) throw new Error("The browser is busy with an agent action.");
     if (profile.control.owner !== null) throw new Error("a person holds the browser");
+    // A page under a dialog answers no screencast pause or capture, and the bot's next call would wait behind this one.
+    if (tab.page.dialogs.pending) throw new Error("a dialog is open on the page");
     return profile.control.agent(tab, async () => {
+      if (tab.page.dialogs.pending) throw new Error("a dialog is open on the page");
       if (await tab.page.secrets.present(tab.page.frames)) throw new Error("a filled secret is on the page");
       const shot = await profile.hub.paused(tab, () => tab.page.screenshot({ format: "jpeg", quality: 80 }));
       return { png: shot.data.toString("base64"), format: "jpeg" as const };
@@ -692,6 +696,19 @@ export class BrowserService {
   /** A person's files for the page's open picker, which their view was offered as `chooserId`. */
   answerFileChooser(session: string, owner: string, chooserId: string, paths: readonly string[]): Promise<boolean> {
     return this.#bySession(session)?.hub.answerFileChooser(owner, chooserId, paths) ?? Promise.resolve(false);
+  }
+
+  /**
+   * The person takes `tab` of this session's desktop pane from the bot, or hands it back. It is named, since the bot's
+   * active tab can be one opened behind the person's. The tab held, or null where there is no such pane tab.
+   */
+  holdTab(session: string, tab: string, held: boolean): string | null {
+    const profile = this.#bySession(session);
+    const control = profile?.run?.opened.personControl;
+    const chosen = profile?.tabs.get(tab);
+    if (!control || !chosen) return null;
+    control.hold(chosen.page.targetId, held);
+    return chosen.id;
   }
 
   /** A file this session's browser finished downloading. */

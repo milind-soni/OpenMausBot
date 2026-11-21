@@ -23,6 +23,9 @@ describe("the desktop pane setting", () => {
     expect(browserPaneWanted({ browserEngine: { engine: "chrome", surface: "stream" } })).toBe(false);
     expect(browserPaneWanted({ browserEngine: { engine: "chrome", surface: "pane" } })).toBe(true);
     expect(browserEngineConfigSchema.safeParse({ surface: "window" }).success).toBe(false);
+    expect(browserEngineConfigSchema.parse({ paneIdentity: "cleaned" }).paneIdentity).toBe("cleaned");
+    expect(browserEngineConfigSchema.parse({}).paneIdentity).toBeUndefined();
+    expect(browserEngineConfigSchema.safeParse({ paneIdentity: "firefox" }).success).toBe(false);
   });
 });
 

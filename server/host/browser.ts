@@ -49,6 +49,9 @@ import { boxMemory } from "../box-memory.ts";
 import { CHROME_BROWSER_SYSTEM_PROMPT } from "../browser/prompt.ts";
 import { PaneBackend } from "../browser/pane/backend.ts";
 import { desktopPaneLink } from "../browser/pane/link.ts";
+import { cookieRequests } from "../browser/cookies/requests.ts";
+import { keyStoreFor, systemFiles } from "../browser/cookies/sources.ts";
+import { sweep as sweepCookieCopies } from "../browser/cookies/snapshot.ts";
 import { passkeyAnnotation } from "../browser/passkey-notice.ts";
 import { LentChromeDoors, lentChromeGuidance, type ChromeLender } from "../browser/lent-chrome.ts";
 import type { ChromeRoute } from "../device-links.ts";
@@ -172,7 +175,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const chromeEngine = new ChromeEngine({
     dataDir: DATA_DIR,
     host,
-    ...(paneLink ? { pane: { backend: new PaneBackend(paneLink, DATA_DIR, (key) => browserEgress.open(key)), wanted: () => browserPaneWanted(cfg) } } : {}),
+    ...(paneLink ? { pane: { backend: new PaneBackend(paneLink, DATA_DIR, (key) => browserEgress.open(key), { identity: () => cfg.browserEngine?.paneIdentity ?? "native" }), wanted: () => browserPaneWanted(cfg) } } : {}),
     egressPort: (key) => browserEgress.open(key),
     egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs,
@@ -237,7 +240,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       if (!lender) return lentChromeGuidance("not-lent", null);
       return lender.online ? null : lentChromeGuidance("offline", lender);
     },
-    annotate: passkeyAnnotation(CLOUD_HOME ? "cloud" : DESKTOP_MANAGED ? "desktop" : "server"),
+    annotate: (spec, result) => passkeyAnnotation(chromeEngine.onPane(spec) ? "pane" : CLOUD_HOME ? "cloud" : DESKTOP_MANAGED ? "desktop" : "server")(spec, result),
     // agent-browser's own error names only the CDP connection; the door knows what went wrong on the way.
     afterCall: (session, spec, answer) => {
       const result = withCeilingNote(session, answer);
@@ -453,6 +456,24 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const { session, spec } = chromeSpec(botId, bot.browserProfile, browserAudience(threadId ?? undefined));
     return chromeTarget(session, spec)?.key ?? null;
   });
+  // A person's sign-in import, from their own browsers into a bot's. agent-browser keeps its profiles in its own encrypted
+  // saved state, which only its running daemon writes: it takes none, and neither do temporary browsers or My Chrome.
+  const cookieScratch = join(DATA_DIR, "browser", "cookie-import");
+  // A copy an import left when the server stopped mid-read holds another browser's cookies in plain text.
+  if (paneLink) void sweepCookieCopies(cookieScratch);
+  paneLink?.answerCookieRequests(cookieRequests({
+    files: systemFiles,
+    keys: () => keyStoreFor(process.env),
+    scratch: cookieScratch,
+    destination: (botId, threadId) => {
+      const bot = store.bot(botId);
+      if (!bot || bot.browser === false || bot.browserProfile === "guest" || !onChrome(bot.browserProfile)) return null;
+      const { session, spec } = chromeSpec(botId, bot.browserProfile, browserAudience(threadId ?? undefined));
+      const target = chromeTarget(session, spec);
+      return target ? chromeEngine.cookieSink(target) : null;
+    },
+    log: (line) => console.warn(line),
+  }));
   /** Chrome for the new engine, the installed agent-browser otherwise. */
   function browserReady(profile: string | undefined): boolean {
     return onChrome(profile) ? chromeEngine.summary().kind === "engine" : browserEngineStatus().kind === "ready";
@@ -705,7 +726,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return { binaryPath: engine.binaryPath, session, env: browserSessionSpec(engine.binaryPath, session, profile, await browserEgress.open(session)).env, encryptionKey: browserEngineEncryptionKey() };
   }
   /** What Settings shows of the engine that runs bots' browsers here; My Chrome stays on agent-browser. */
-  function engineSummary<T extends { kind: "engine" | "unavailable"; myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; pane?: true; noChrome?: true; serverSites?: boolean; proxyConfigured?: boolean; proxySaved?: boolean } {
+  function engineSummary<T extends { kind: "engine" | "unavailable"; myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; pane?: true; cookieImport?: true; noChrome?: true; serverSites?: boolean; proxyConfigured?: boolean; proxySaved?: boolean } {
     const serverSites = sitesSwitch ? { serverSites: cfg.browserEngine?.egress?.localNetwork === true } : {};
     const engine = browserEngineKind(cfg);
     const proxyValue = cfg.browserEngine?.egress?.proxy;
@@ -714,6 +735,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return {
       ...(engine === "chrome" ? { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), engine } : { ...agentBrowser, engine }),
       ...(paneLink?.available && browserPaneWanted(cfg) ? { pane: true as const } : {}),
+      ...(paneLink?.available && engine === "chrome" ? { cookieImport: true as const } : {}),
       ...(engine !== "chrome" && agentBrowser.kind === "engine" && chromeLauncher.runsShellForWantOfChrome() ? { noChrome: true as const } : {}),
       ...serverSites,
       ...(proxyConfigured ? { proxyConfigured: true } : {}),
