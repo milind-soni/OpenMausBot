@@ -126,9 +126,13 @@ it("paints the latest position once per frame and discards pending updates on re
   const otherLayers = Array.from(stage.querySelectorAll<HTMLElement>("aside, [data-bot-list-trigger-layer]"));
   for (const layer of otherLayers) expect(layer.style.getPropertyValue("--drawer-progress")).toBe("0.25");
 
+  const measure = vi.spyOn(chat, "getBoundingClientRect");
   pointer(stage, "pointermove", 110, 300);
   pointer(stage, "pointerup", 208, 500);
+  expect(measure).not.toHaveBeenCalled();
+  expect(write).toHaveBeenCalledTimes(1);
   expect(stage.dataset.open).toBe("true");
+  expect(stage.hasAttribute("data-drawer-dragging")).toBe(false);
   vi.advanceTimersToNextFrame();
   for (const layer of [chat, ...otherLayers]) expect(layer.style.getPropertyValue("--drawer-progress")).toBe("");
 });

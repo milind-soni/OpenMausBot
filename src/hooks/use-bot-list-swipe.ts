@@ -1,5 +1,4 @@
-import { useEffect, useRef, type DragEvent, type MouseEvent, type PointerEvent } from "react";
-import { flushSync } from "react-dom";
+import { useEffect, useLayoutEffect, useRef, type DragEvent, type MouseEvent, type PointerEvent } from "react";
 
 type StagePointer = PointerEvent<HTMLDivElement>;
 type Swipe = {
@@ -30,8 +29,20 @@ function draw(drag: Swipe) {
   for (const layer of drag.layers) layer.style.setProperty(DRAWER_PROGRESS, progress);
 }
 
+function settle(stage: HTMLElement, layers: HTMLElement[]) {
+  stage.removeAttribute("data-drawer-dragging");
+  for (const layer of layers) layer.style.removeProperty(DRAWER_PROGRESS);
+}
+
 export function useBotListSwipe(enabled: boolean, open: boolean, show: () => void, hide: () => void) {
   const swipe = useRef<Swipe | null>(null);
+  const released = useRef<{ stage: HTMLElement; layers: HTMLElement[] } | null>(null);
+  useLayoutEffect(() => {
+    const drag = released.current;
+    if (!drag) return;
+    released.current = null;
+    settle(drag.stage, drag.layers);
+  }, [open, enabled]);
   const suppressClick = useRef(false);
   const frame = useRef<number | null>(null);
   useEffect(() => () => {
@@ -58,19 +69,21 @@ export function useBotListSwipe(enabled: boolean, open: boolean, show: () => voi
       cancelAnimationFrame(frame.current);
       frame.current = null;
     }
+    let next = open;
     if (commit) {
       track(event, drag);
-      draw(drag);
       const distance = (event.clientX - drag.x) * drag.direction;
       const flick = Math.abs(distance) >= FLICK_DISTANCE &&
         event.timeStamp - drag.sampleAt <= FLICK_AGE && Math.abs(drag.velocity) >= FLICK_SPEED;
-      const next = flick ? drag.velocity > 0 : drag.position > drag.width / 2;
-      if (next !== open) flushSync(next ? show : hide);
+      next = flick ? drag.velocity > 0 : drag.position > drag.width / 2;
     }
-    drag.chat.getBoundingClientRect();
-    stage.removeAttribute("data-drawer-dragging");
-    for (const layer of drag.layers) layer.style.removeProperty(DRAWER_PROGRESS);
     if (stage.hasPointerCapture(drag.id)) stage.releasePointerCapture(drag.id);
+    if (next === open) {
+      settle(stage, drag.layers);
+    } else {
+      released.current = { stage, layers: drag.layers };
+      (next ? show : hide)();
+    }
   }
 
   return {
