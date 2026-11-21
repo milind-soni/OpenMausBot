@@ -1,3 +1,4 @@
+import { useDialogResize } from "@/hooks/use-dialog-resize";
 import { OverlayPresence } from "@/components/ModalPresence";
 // A shareable template of a bot or a department: its card (in the chat and in the department's Share), what it brings
 // (the Details sheet, also Import's preview), and the card's actions.
@@ -296,6 +297,7 @@ export function TemplateModal({ title, onClose, children, footer, labelledBy }: 
 }) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   useModalDialog(dialogRef, onClose);
+  useDialogResize(dialogRef);
   return createPortal(
     <div className="ui-scrim fixed inset-0 z-[60] flex items-center justify-center p-4" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={labelledBy} tabIndex={-1}

@@ -367,8 +367,8 @@ const Bubble = memo(function Bubble({
   const attachments = user && !webhookView ? splitTranscriptAttachments(cited?.display ?? text) : null;
   const visibleText = webhookView?.task ?? attachments?.display ?? text;
   const hasAttachments = Boolean(cited?.citations.length || (attachments && (attachments.images.length || attachments.files.length)));
-  const attachmentsOnly = !webhookView && !replyTarget && !visibleText.trim() &&
-    (user ? hasAttachments : generatedPaths.length + linkedFiles.length > 0);
+  const attachmentsOnly = !webhookView && !message.replyToId && !visibleText.trim() &&
+    (user ? hasAttachments : generatedPaths.length + linkedFiles.length + voiceNotes.length > 0);
   const collapsible =
     user && !webhookView && !expanded && (visibleText.length > USER_COLLAPSE_CHARS || visibleText.split("\n").length > USER_COLLAPSE_LINES);
   useEffect(() => {
@@ -427,7 +427,7 @@ const Bubble = memo(function Bubble({
           </MessageActions>
         )}
         <div
-          data-chat-bubble="" data-look={user ? "user-bubble" : "bot-bubble"}
+          data-chat-bubble={attachmentsOnly ? undefined : ""} data-look={attachmentsOnly ? undefined : user ? "user-bubble" : "bot-bubble"}
           className={cn(
             "w-fit",
             "max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl text-[15px] leading-relaxed",

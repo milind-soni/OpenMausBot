@@ -1,3 +1,4 @@
+import { useDialogResize } from "@/hooks/use-dialog-resize";
 import { OverlayPresence } from "@/components/ModalPresence";
 import { useEffect, useRef, useState } from "react";
 import { overlayPortal as createPortal } from "@/components/ModalPresence";
@@ -80,6 +81,7 @@ export function CloudCancelSheet({ renewal, actions, onClose }: { renewal: Cloud
   const [state, setState] = useState<Step>({ step: "ask" });
   const [busy, setBusy] = useState(false), [failed, setFailed] = useState(false);
   const changed = useRef(false), dialog = useRef<HTMLDivElement>(null);
+  useDialogResize(dialog);
   const close = () => { if (!busy) onClose(changed.current); };
   useEffect(() => {
     const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;

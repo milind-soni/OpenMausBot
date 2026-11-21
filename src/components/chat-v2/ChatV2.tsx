@@ -150,9 +150,10 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
   const attached = legacy && splitMessageAttachments(m.attachments);
   const images = legacy && attached && [...legacy.images, ...attached.images];
   const files = legacy && attached && [...legacy.files, ...attached.files];
-  const imageOnly = !m.replyToId && !m.attachments?.some(a => a.kind === "audio") &&
-    (!text.trim() ? Boolean(images?.length || m.attachments?.some(a => a.kind === "image" || !a.kind))
-      : !raw && isImageOnlyMarkdown(text));
+  const voiceNotes = m.attachments?.filter(a => a.kind === "audio");
+  const attachmentsOnly = !m.replyToId && !text.trim() &&
+    Boolean(images?.length || files?.length || m.attachments?.length);
+  const bare = attachmentsOnly || (!m.replyToId && !voiceNotes?.length && !raw && isImageOnlyMarkdown(text));
   const attachmentContext = { threadId, messageId: m.id };
   if (!text && !m.attachments?.length && !images?.length && !files?.length) return null;
   return <article className="v2-message" data-own={own || undefined}>
@@ -162,9 +163,9 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
     {images && files && <AttachmentGallery images={images}
       files={[...files, ...collectMessageFiles(text, [...images.map(image => typeof image === "string" ? image : image.path), ...files.map(file => file.path)])]}
       originals={attached?.originals} message={attachmentContext} photoStrip="square" />}
-    {(text || m.replyToId || !own || m.attachments?.some(a => a.kind === "audio")) &&
-    <div className={imageOnly ? "v2-body v2-body-image" : own ? "v2-body user-bubble-colored" : "v2-body"} dir="auto"
-      style={own && !imageOnly ? ownBubbleStyle : undefined} data-chat-bubble="" data-look={own && !imageOnly ? "user-bubble" : undefined}
+    {((text && !attachmentsOnly) || m.replyToId || !own || voiceNotes?.length) &&
+    <div className={bare ? "v2-body v2-body-bare" : own ? "v2-body user-bubble-colored" : "v2-body"} dir="auto"
+      style={own && !bare ? ownBubbleStyle : undefined} data-chat-bubble={attachmentsOnly ? undefined : ""} data-look={own && !bare ? "user-bubble" : undefined}
       tabIndex={digest ? 0 : undefined}
       onKeyDown={digest ? event => {
         if (event.target === event.currentTarget && event.key === "Enter") setShowTrace(true);
@@ -180,11 +181,11 @@ export const Row = memo(function Row({ message: m, botId, botName, color, thread
         <ReplyQuote message={quoted} fallbackName={botName} compact onJump={() => jumpTo(quoted.id, true)} />
       </div> : m.replyToId && <UnloadedReplyQuote key={m.replyToId} threadId={threadId} messageId={m.replyToId}
         botName={botName} inverse={false} canJump={canLoadQuote} pending={loadingQuote} onJump={() => jumpTo(m.replyToId!, false)} />}
-      {!own && <MessageAttachmentGallery text={text} attachments={m.attachments} message={attachmentContext} />}
-      {m.attachments?.map(a => a.kind === "audio" && <VoiceNoteBubble key={a.path} attachment={a} />)}
-      {raw ? <pre className="whitespace-pre-wrap">{text}</pre> : <StreamingReplyContext value={isLiveReply(m)}>
+      {!own && <MessageAttachmentGallery text={text} attachments={m.attachments} message={attachmentContext} className={attachmentsOnly ? "mb-0" : undefined} />}
+      {voiceNotes?.map(a => <VoiceNoteBubble key={a.path} attachment={a} />)}
+      {!attachmentsOnly && (raw ? <pre className="whitespace-pre-wrap">{text}</pre> : <StreamingReplyContext value={isLiveReply(m)}>
         <ChatMarkdown text={text} mentionPeers={mentionPeers} userImages={own} message={{ threadId: threadId, messageId: m.id }} />
-      </StreamingReplyContext>}
+      </StreamingReplyContext>)}
       {!own && Boolean(m.reactions?.length) && <div className="v2-reaction-badge">
         <ReactionChips threadId={threadId} message={m} canReact={Boolean(reply) && !peer} badgeOnly />
       </div>}

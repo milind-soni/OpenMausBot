@@ -127,6 +127,18 @@ describe("room message actions", () => {
     expect(html).not.toContain("Show raw markdown");
   });
 
+  it("shows standalone files without a chat bubble for both senders", () => {
+    const userFile = text("u", "user", '<attached-file path="/store/input.zip" name="input.zip" />');
+    const botFile: Message = {
+      ...text("a", "bot", ""),
+      attachments: [{ kind: "file", path: "/store/output.zip", name: "output.zip", mime: "application/zip" }],
+    };
+    const html = markup([userFile, botFile]);
+    expect(html).toContain("input.zip");
+    expect(html).toContain("output.zip");
+    expect(html).not.toContain("data-chat-bubble");
+  });
+
   it("keeps delivered files beneath the reply alongside its quiet actions", () => {
     const reply: Message = {
       ...text("a", "bot", "See [notes.md](/work/notes.md). The report is attached."),
