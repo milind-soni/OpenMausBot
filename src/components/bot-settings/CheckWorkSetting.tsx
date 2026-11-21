@@ -17,7 +17,7 @@ export function CheckWorkSetting({ bot }: { bot: Bot }) {
   const on = Boolean(bot.checkWork);
   const set = (checkWork: Bot["checkWork"]) => dispatch({ type: "updateBot", botId: bot.id, patch: { checkWork } });
   const toggle = () => set(on ? null : {});
-  const help = t("botSettings.checkWork.help", { rounds: CHECK_WORK_ROUNDS });
+  const help = t("botSettings.checkWork.help", { checks: CHECK_WORK_ROUNDS, fixes: CHECK_WORK_ROUNDS - 1 });
   const picker = on && (
     <label htmlFor={pickerId} className="mt-3 flex items-center gap-3 text-[13px] text-ink-secondary">
       <span className="shrink-0">{t("botSettings.checkWork.checker")}</span>
