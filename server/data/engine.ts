@@ -699,8 +699,12 @@ FROM ${from} AS omb_source, omb_range WHERE ${finite} GROUP BY bin ORDER BY bin`
     void this.state.then((open) => open.lanes[connection].interrupt(), () => undefined);
   }
 
+  async close(): Promise<void> {
+    await this.shut();
+  }
+
   /** False when a statement that did not stop still holds the database open. */
-  async close(): Promise<boolean> {
+  async shut(): Promise<boolean> {
     if (this.idleTimer) {
       clearTimeout(this.idleTimer);
       this.idleTimer = null;
@@ -820,7 +824,7 @@ class Engine implements DataEngine {
   /** Every bot's database closed and kept, to open again on its next statement; the bots a running statement still holds. */
   async release(): Promise<string[]> {
     const open = [...this.databases.values()];
-    const closed = await Promise.all(open.map((db) => db.close()));
+    const closed = await Promise.all(open.map((db) => db.shut()));
     return open.filter((_, i) => !closed[i]).map((db) => db.botId);
   }
 
