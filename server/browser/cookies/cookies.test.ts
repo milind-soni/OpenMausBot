@@ -247,6 +247,8 @@ describe("importing one site", () => {
     const sink = new RecordingSink();
     expect(await importCookies(request(folder, "darwin", fakeKeys({}), { source: "safari", profile: "default", sink }))).toMatchObject({ ok: true, imported: 1 });
     expect(sink.written).toEqual([{ url: "https://example.com/", name: "safari", value: "apple", domain: ".example.com", path: "/", secure: true, httpOnly: true, sameSite: "unspecified", expirationDate: LATER }]);
+    // Windows has no mode bits that refuse the file's owner, and Safari's file only exists on a Mac.
+    if (process.platform === "win32") return;
     chmodSync(file, 0o000);
     try {
       expect(await importCookies(request(folder, "darwin", fakeKeys({}), { source: "safari", profile: "default" }))).toEqual({ ok: false, reason: "full-disk-access" });
