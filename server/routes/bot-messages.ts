@@ -345,7 +345,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (personPresent && sendId && !guarded && !press && !appSent) noteTypedSend(threadId, sendId, text);
       const notedSession = auth.kind === "session" && sendId ? noteSendingSession(threadId, sendId, auth.session.id) : false;
       // The desktop app's own window: in the desktop app a loopback change needs its private capability.
-      if (DESKTOP_MANAGED && auth.kind === "loopback" && !auth.companionDevice && sendId && !guarded && !press && !appSent) noteOwnWindowSend(threadId, sendId, text);
+      // Only a new line the send itself adds: a repeat or a collision must not lend the proof to a line already there.
+      const ownWindowSend = DESKTOP_MANAGED && auth.kind === "loopback" && !auth.companionDevice && sendId && !guarded && !press && !appSent
+        && !store.messagesFor(threadId).some((line) => line.sendId === sendId);
       if (pressKey) pressesInFlight.set(pressKey, sendId);
       try {
         const receipt = await acceptDirectSend({
@@ -353,6 +355,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           personPresent, admin: owners.admin(auth), ...(followUp ? { followUp } : {}),
           ...(mentions?.length && !press && !appSent ? { mentions } : {}),
         }, guardedStart);
+        if (ownWindowSend) noteOwnWindowSend(threadId, sendId, text);
         press?.settle("queueId" in receipt ? receipt.queueId : undefined);
         appContext?.deliver();
         if (relayed && target && onBehalfOf) relayedReaction(threadId, target.id, onBehalfOf, relayed);

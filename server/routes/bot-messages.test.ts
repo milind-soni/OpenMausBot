@@ -769,6 +769,20 @@ describe("POST /api/bots/:id/messages from the desktop app's own window", () => 
     expect(ownWindowLine(threadId, relayed.body.message)).toBe(false);
   });
 
+  it("notes no proof for a send that only repeats or collides with a press already in the thread", async () => {
+    const { threadId, post, show } = await fixture();
+    const widgetId = show("routineForm");
+    const pressed = await post({ threadId, sendId: SEND, widgetAction: { messageId: widgetId, ref: "confirm", values: { days: "mon,tue,wed,thu,fri,sat,sun", report: "discord:releases" } } });
+    expect(pressed.status, JSON.stringify(pressed.body)).toBe(202);
+    const line = pressed.body.message;
+    expect((await post({ threadId, sendId: SEND, text: line.text })).status).toBe(409);
+    expect(ownWindowLine(threadId, line)).toBe(false);
+    const repeat = await post({ threadId, sendId: SEND, text: line.text, replyToId: widgetId });
+    expect(repeat.status, JSON.stringify(repeat.body)).toBe(202);
+    expect(repeat.body.message.id).toBe(line.id);
+    expect(ownWindowLine(threadId, line)).toBe(false);
+  });
+
   it("does not note a bare loopback send on a headless server, where it may be a bot's shell", async () => {
     const { threadId, post } = await fixture({}, false);
     const plain = await post({ threadId, sendId: SEND, text: words });
