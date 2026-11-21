@@ -1,0 +1,252 @@
+// HTTP/1.1 over one E2E stream, the bytes the computer's origin listener reads (README section 8: the E2E layer never
+// parses them). One request per stream with Connection: close: a stream costs one frame to open, so nothing is pooled.
+import { concat, utf8 } from "./bytes.ts";
+import type { E2EStream } from "./session.ts";
+
+/** Status line plus headers of one reply, the same ceiling Node's HTTP server puts on a request head. */
+export const MAX_HEAD = 16 * 1024;
+const MAX_CHUNK_LINE = 1024;
+const TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
+/** Framing and connection headers this client writes itself; a caller's own would contradict them. */
+const OWN = new Set(["host", "connection", "content-length", "transfer-encoding", "upgrade", "keep-alive", "te", "trailer", "accept-encoding"]);
+/** Statuses whose Response must have a null body. */
+const NULL_BODY = new Set([204, 205, 304]);
+const CRLF2 = [13, 10, 13, 10];
+
+export class HttpError extends Error {
+  constructor(message: string) {
+    super(`e2e http: ${message}`);
+    this.name = "HttpError";
+  }
+}
+
+export interface StreamRequest {
+  /** Default GET. */
+  method?: string;
+  /** Origin form: "/api/bots?x=1". */
+  path: string;
+  headers?: HeadersInit;
+  body?: Uint8Array | string | null;
+  signal?: AbortSignal;
+}
+
+/** The request head, refused before anything is sent when a part could split or reframe the request. */
+export function requestHead(method: string, path: string, headers: Headers, length: number | null): string {
+  if (!TOKEN.test(method)) throw new TypeError(`e2e http: bad method ${JSON.stringify(method)}`);
+  if (!path.startsWith("/") || [...path].some((char) => char <= " " || char === "\x7f")) throw new TypeError("e2e http: path must be origin-form with no spaces or controls");
+  let head = `${method} ${path} HTTP/1.1\r\nHost: companion\r\n`;
+  // Headers already refuses names that are not tokens and values with CR, LF or NUL.
+  for (const [name, value] of headers) {
+    if (OWN.has(name)) throw new TypeError(`e2e http: ${name} is set by the stream client`);
+    head += `${name}: ${value}\r\n`;
+  }
+  if (length !== null) head += `Content-Length: ${length}\r\n`;
+  return `${head}Connection: close\r\n\r\n`;
+}
+
+/** Reads a stream's bytes with the leftover of the last read kept for the next parse. */
+class ByteReader {
+  readonly #reader: ReadableStreamDefaultReader<Uint8Array>;
+  #held: Uint8Array = new Uint8Array(0);
+
+  constructor(readable: ReadableStream<Uint8Array>) {
+    this.#reader = readable.getReader();
+  }
+
+  /** False at the end of the stream. */
+  async #more(): Promise<boolean> {
+    const { done, value } = await this.#reader.read();
+    if (done) return false;
+    this.#held = this.#held.length ? concat(this.#held, value) : value;
+    return true;
+  }
+
+  /** Bytes up to and without the delimiter, which is consumed. */
+  async until(delimiter: number[], max: number, what: string): Promise<Uint8Array> {
+    let from = 0;
+    for (;;) {
+      const at = indexOf(this.#held, delimiter, from);
+      if (at !== -1 && at <= max) {
+        const line = this.#held.subarray(0, at);
+        this.#held = this.#held.subarray(at + delimiter.length);
+        return line;
+      }
+      if (this.#held.length > max + delimiter.length) throw new HttpError(`${what} is over ${max} bytes`);
+      from = Math.max(0, this.#held.length - delimiter.length + 1);
+      if (!(await this.#more())) throw new HttpError(`the stream ended inside the ${what}`);
+    }
+  }
+
+  /** Up to `max` bytes, or null at the end of the stream. */
+  async some(max: number): Promise<Uint8Array | null> {
+    if (!this.#held.length && !(await this.#more())) return null;
+    const part = this.#held.subarray(0, max);
+    this.#held = this.#held.subarray(part.length);
+    return part;
+  }
+
+  release(): void {
+    this.#reader.releaseLock();
+  }
+}
+
+function indexOf(bytes: Uint8Array, delimiter: number[], from: number): number {
+  outer: for (let i = from; i + delimiter.length <= bytes.length; i++) {
+    for (let j = 0; j < delimiter.length; j++) if (bytes[i + j] !== delimiter[j]) continue outer;
+    return i;
+  }
+  return -1;
+}
+
+/** Header bytes as fetch reads them: one byte, one character. */
+const byteString = (bytes: Uint8Array): string => {
+  let text = "";
+  for (let i = 0; i < bytes.length; i += 8192) text += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  return text;
+};
+
+interface Head {
+  status: number;
+  statusText: string;
+  headers: Headers;
+}
+
+function parseHead(bytes: Uint8Array): Head {
+  const [statusLine, ...lines] = byteString(bytes).split("\r\n");
+  const status = /^HTTP\/1\.[01] ([1-5]\d\d)(?: ([^\r\n]*))?$/.exec(statusLine);
+  if (!status) throw new HttpError("bad status line");
+  const headers = new Headers();
+  for (const line of lines) {
+    const colon = line.indexOf(":");
+    const name = line.slice(0, colon);
+    if (colon < 1 || !TOKEN.test(name)) throw new HttpError("bad header line");
+    try {
+      headers.append(name, line.slice(colon + 1).trim());
+    } catch {
+      throw new HttpError(`bad value for ${name}`);
+    }
+  }
+  return { status: Number(status[1]), statusText: status[2] ?? "", headers };
+}
+
+type Framing = { kind: "none" } | { kind: "length"; left: number } | { kind: "chunked" } | { kind: "close" };
+
+function framing(method: string, head: Head): Framing {
+  if (method === "HEAD" || NULL_BODY.has(head.status)) return { kind: "none" };
+  const coding = head.headers.get("transfer-encoding");
+  if (coding !== null) {
+    if (coding.trim().toLowerCase() !== "chunked") throw new HttpError(`unsupported transfer-encoding ${coding}`);
+    return { kind: "chunked" };
+  }
+  const length = head.headers.get("content-length");
+  if (length === null) return { kind: "close" };
+  const values = new Set(length.split(",").map((value) => value.trim()));
+  const [only] = values;
+  if (values.size !== 1 || !/^\d{1,15}$/.test(only)) throw new HttpError("bad content-length");
+  return { kind: "length", left: Number(only) };
+}
+
+async function chunkSize(reader: ByteReader): Promise<number> {
+  const line = byteString(await reader.until([13, 10], MAX_CHUNK_LINE, "chunk size line"));
+  const size = /^([0-9A-Fa-f]{1,12})[ \t]*(?:;.*)?$/.exec(line);
+  if (!size) throw new HttpError("bad chunk size");
+  return parseInt(size[1], 16);
+}
+
+/** One request on a fresh stream from `open`. Resolves with the reply once its head is in; the body streams after. */
+export async function streamFetch(open: () => E2EStream, request: StreamRequest): Promise<Response> {
+  const method = (request.method ?? "GET").toUpperCase();
+  const body = typeof request.body === "string" ? utf8(request.body) : request.body ?? null;
+  const head = requestHead(method, request.path, new Headers(request.headers), body ? body.length : method === "POST" || method === "PUT" || method === "PATCH" ? 0 : null);
+  const signal = request.signal;
+  signal?.throwIfAborted();
+
+  const stream = open();
+  const reader = new ByteReader(stream.readable);
+  let finished = false;
+  const abort = () => {
+    if (!finished) stream.reset();
+  };
+  signal?.addEventListener("abort", abort, { once: true });
+  const done = () => {
+    finished = true;
+    signal?.removeEventListener("abort", abort);
+    reader.release();
+    stream.end();
+  };
+  const failed = (error: unknown): unknown => {
+    finished = true;
+    signal?.removeEventListener("abort", abort);
+    stream.reset();
+    return signal?.aborted ? signal.reason : error;
+  };
+
+  let reply: Head;
+  let frame: Framing;
+  try {
+    // No FIN after the request: Node's HTTP server cuts a reply short when the client half-closes first.
+    const sent = (async () => {
+      await stream.write(utf8(head));
+      if (body?.length) await stream.write(Uint8Array.from(body));
+    })();
+    const received = (async () => {
+      for (;;) {
+        const next = parseHead(await reader.until(CRLF2, MAX_HEAD, "reply head"));
+        if (next.status === 101) throw new HttpError("the computer switched protocols on a plain request");
+        if (next.status >= 200) return next;
+      }
+    })();
+    [, reply] = await Promise.all([sent, received]);
+    frame = framing(method, reply);
+  } catch (error) {
+    throw failed(error);
+  }
+
+  if (frame.kind === "none") {
+    done();
+    return new Response(null, reply);
+  }
+  let chunkLeft = 0;
+  const readable = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        for (;;) {
+          if (frame.kind === "length") {
+            if (frame.left === 0) break;
+            const part = await reader.some(frame.left);
+            if (!part) throw new HttpError("the reply ended before its content-length");
+            frame.left -= part.length;
+            return controller.enqueue(Uint8Array.from(part));
+          }
+          if (frame.kind === "close") {
+            const part = await reader.some(64 * 1024);
+            if (!part) break;
+            return controller.enqueue(Uint8Array.from(part));
+          }
+          if (chunkLeft === 0) {
+            chunkLeft = await chunkSize(reader);
+            if (chunkLeft === 0) {
+              // Trailers are read and dropped, up to the blank line that ends the reply.
+              while ((await reader.until([13, 10], MAX_HEAD, "trailer")).length) { /* next trailer line */ }
+              break;
+            }
+          }
+          const part = await reader.some(chunkLeft);
+          if (!part) throw new HttpError("the reply ended inside a chunk");
+          chunkLeft -= part.length;
+          if (chunkLeft === 0 && (await reader.until([13, 10], 0, "chunk end")).length) throw new HttpError("bad chunk end");
+          return controller.enqueue(Uint8Array.from(part));
+        }
+        frame = { kind: "none" };
+        done();
+        controller.close();
+      } catch (error) {
+        controller.error(failed(error));
+      }
+    },
+    cancel() {
+      failed(null);
+    },
+  });
+  return new Response(readable, reply);
+}
