@@ -43,6 +43,10 @@ function composeUp() {
   // `repairable`: it crashes until its doctor has repaired the data (`doctor --data --fix`, below).
   const crashes = wanted.behaviour === "crashes" || (wanted.behaviour === "repairable" && !state.repaired);
   state.containers.omb = { id: `omb-${++state.serial}`, image: wanted.id, status: crashes ? "restarting" : "running", restarts: crashes ? 5 : 0, started: `start-${state.serial}` };
+  // `exits`: it stops as it starts, and Podman removes the container (--rm): it is listed once, then gone before anyone
+  // inspects it. Its unit's log keeps its last words.
+  if (wanted.behaviour === "exits") Object.assign(state.containers.omb, { status: "exited", vanishes: true });
+  state.lastImage = wanted.id;
   state.containers.caddy = { id: `caddy-${state.serial}`, status: wanted.behaviour === "no-caddy" ? "exited" : "running" };
   // A server that starts writes to its data, as a new version's migrations do.
   if (!crashes) appendFileSync(join(volume(state.dataVolume), "started-by.txt"), `${wanted.version}\n`);
@@ -53,7 +57,10 @@ function compose(rest) {
   const omb = state.containers.omb;
   if (verb === "version") return out("Docker Compose version v2.40.0");
   if (verb === "config") return out(`services:\n  omb:\n    image: ${composeImage()}`);
-  if (verb === "ps" && more.includes("-aq")) return omb ? out(omb.id) : undefined;
+  if (verb === "ps" && more.includes("-aq")) {
+    if (omb?.vanishes) delete state.containers.omb;
+    return omb ? out(omb.id) : undefined;
+  }
   if (verb === "ps") return Object.entries(state.containers).filter(([, container]) => container?.status === "running").forEach(([name]) => out(name));
   if (verb === "stop") {
     if (state.failStop) fail("Error response from daemon: cannot stop container: permission denied");
@@ -61,7 +68,7 @@ function compose(rest) {
     return;
   }
   if (verb === "up") return composeUp();
-  if (verb === "logs") return out(image(omb?.image)?.lastWords ?? "");
+  if (verb === "logs") return out(image(omb?.image ?? state.lastImage)?.lastWords ?? "");
   if (more.includes("doctor") && more.includes("--fix")) return doctor(verb, omb);
   if (verb === "exec") {
     // As the real one does: `docker compose exec` forwards its standard input to the container, so it takes whatever is

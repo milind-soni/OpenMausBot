@@ -75,6 +75,9 @@ jobs:
         env:
           OUT: ${{ runner.temp }}/server-installer
           OMB_INSTALL_IMAGE: ${{ steps.image.outputs.image }}
+          # The installer's lookup of the newest release, authenticated: unauthenticated, api.github.com refuses this
+          # runner's shared address once others have used up its hourly reads. A person's install sends no token.
+          OMB_INSTALL_GITHUB_TOKEN: ${{ github.token }}
         run: bash deploy/e2e/run.sh
       - name: Keep the evidence
         if: always()
