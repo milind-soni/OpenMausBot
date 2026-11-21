@@ -69,6 +69,10 @@ export function useBotListSwipe(enabled: boolean, open: boolean, show: () => voi
       cancelAnimationFrame(frame.current);
       frame.current = null;
     }
+    // CSS transitions need a resolved starting style even when the pointer
+    // goes down, moves and releases before the browser paints a frame.
+    void getComputedStyle(drag.chat).transform;
+
     let next = open;
     if (commit) {
       track(event, drag);
@@ -114,7 +118,8 @@ export function useBotListSwipe(enabled: boolean, open: boolean, show: () => voi
     onPointerMove(event: StagePointer) {
       const drag = swipe.current;
       if (!drag || drag.id !== event.pointerId) return;
-      if (!drag.dragging) {
+      const starting = !drag.dragging;
+      if (starting) {
         const dx = event.clientX - drag.x;
         const dy = event.clientY - drag.y;
         if (Math.max(Math.abs(dx), Math.abs(dy)) <= SLOP) return;
@@ -130,6 +135,10 @@ export function useBotListSwipe(enabled: boolean, open: boolean, show: () => voi
         stage.setAttribute("data-drawer-dragging", "");
       }
       track(event, drag);
+      if (starting) {
+        draw(drag);
+        return;
+      }
       if (frame.current !== null) return;
       frame.current = requestAnimationFrame(() => {
         frame.current = null;

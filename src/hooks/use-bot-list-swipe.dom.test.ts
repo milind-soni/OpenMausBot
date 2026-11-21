@@ -118,6 +118,9 @@ it("paints the latest position once per frame and discards pending updates on re
   const stageWrite = vi.spyOn(stage.style, "setProperty");
   pointer(chat, "pointerdown", 8, 100);
   pointer(stage, "pointermove", 44, 160);
+  expect(progress()).toBe(0.1);
+  write.mockClear();
+  pointer(stage, "pointermove", 75, 180);
   pointer(stage, "pointermove", 98, 200);
   expect(write).not.toHaveBeenCalled();
   vi.advanceTimersToNextFrame();
@@ -135,4 +138,17 @@ it("paints the latest position once per frame and discards pending updates on re
   expect(stage.hasAttribute("data-drawer-dragging")).toBe(false);
   vi.advanceTimersToNextFrame();
   for (const layer of [chat, ...otherLayers]) expect(layer.style.getPropertyValue("--drawer-progress")).toBe("");
+});
+
+it("establishes the drag position before releasing in the first frame", () => {
+  mount();
+  const readStyle = vi.spyOn(globalThis, "getComputedStyle");
+  pointer(chat, "pointerdown", 8, 100, 80, "touch");
+  pointer(stage, "pointermove", 215, 160, 80, "touch");
+  expect(progress()).toBe(207 / 360);
+  pointer(stage, "pointerup", 225, 170, 80, "touch");
+  expect(readStyle).toHaveBeenLastCalledWith(chat);
+  expect(stage.dataset.open).toBe("true");
+  expect(chat.style.getPropertyValue("--drawer-progress")).toBe("");
+  readStyle.mockRestore();
 });
