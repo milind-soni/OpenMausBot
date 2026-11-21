@@ -131,6 +131,7 @@ export function useBotHistory(bot: Bot, active: boolean) {
     setRevision(null);
     setError(false);
     setRollbackTarget(null);
+    setRollingBack(false);
   }, [bot.id]);
 
   const load = useCallback(() => {
@@ -157,6 +158,7 @@ export function useBotHistory(bot: Bot, active: boolean) {
 
   const rollback = async (target: { id: string; expectedRevision: string }) => {
     if (rollingBack) return;
+    const rollbackFor = bot.id;
     setRollbackTarget(null);
     setRollingBack(true);
     try {
@@ -168,7 +170,7 @@ export function useBotHistory(bot: Bot, active: boolean) {
     } catch (e: unknown) {
       dispatch({ type: "error", message: e instanceof Error ? e.message : t("botOverview.undoFailed") });
     } finally {
-      await load();
+      if (rollbackFor === ownerId.current) await load();
       setRollingBack(false);
     }
   };
