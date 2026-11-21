@@ -34,7 +34,9 @@ export interface StreamRequest {
  * the request. The caller adds its own framing and connection lines and the blank line. */
 export function headStart(method: string, path: string, headers: Headers): string {
   if (!TOKEN.test(method)) throw new TypeError(`e2e http: bad method ${JSON.stringify(method)}`);
-  if (!path.startsWith("/") || [...path].some((char) => char <= " " || char === "\x7f")) throw new TypeError("e2e http: path must be origin-form with no spaces or controls");
+  if (!path.startsWith("/") || [...path].some((char) => char <= " " || char === "\x7f" || char === "#")) {
+    throw new TypeError("e2e http: path must be origin-form with no spaces, controls or fragment");
+  }
   let head = `${method} ${path} HTTP/1.1\r\nHost: companion\r\n`;
   // Headers already refuses names that are not tokens and values with CR, LF or NUL.
   for (const [name, value] of headers) {
@@ -125,21 +127,25 @@ export interface Head {
   headers: Headers;
 }
 
+/** One `name: value` line of a head or the trailers. */
+function appendField(headers: Headers, line: string): void {
+  const colon = line.indexOf(":");
+  const name = line.slice(0, colon);
+  if (colon < 1 || !TOKEN.test(name)) throw new HttpError("bad header line");
+  try {
+    headers.append(name, line.slice(colon + 1).trim());
+  } catch {
+    throw new HttpError(`bad value for ${name}`);
+  }
+}
+
 export function parseHead(bytes: Uint8Array): Head {
   const [statusLine, ...lines] = byteString(bytes).split("\r\n");
-  const status = /^HTTP\/1\.[01] ([1-5]\d\d)(?: ([^\r\n]*))?$/.exec(statusLine);
+  // The reason phrase as Response takes it: tab, space, visible and obs-text bytes.
+  const status = /^HTTP\/1\.[01] ([1-5]\d\d)(?: ([\t\x20-\x7e\x80-\xff]*))?$/.exec(statusLine);
   if (!status) throw new HttpError("bad status line");
   const headers = new Headers();
-  for (const line of lines) {
-    const colon = line.indexOf(":");
-    const name = line.slice(0, colon);
-    if (colon < 1 || !TOKEN.test(name)) throw new HttpError("bad header line");
-    try {
-      headers.append(name, line.slice(colon + 1).trim());
-    } catch {
-      throw new HttpError(`bad value for ${name}`);
-    }
-  }
+  for (const line of lines) appendField(headers, line);
   return { status: Number(status[1]), statusText: status[2] ?? "", headers };
 }
 
@@ -147,17 +153,17 @@ type Framing = { kind: "none" } | { kind: "length"; left: number } | { kind: "ch
 
 function framing(method: string, head: Head): Framing {
   if (method === "HEAD" || NULL_BODY.has(head.status)) return { kind: "none" };
+  // Checked even beside chunked: lengths that disagree mean the reply's framing can't be trusted.
+  const length = head.headers.get("content-length");
+  const values = new Set(length?.split(",").map((value) => value.trim()));
+  const [only] = values;
+  if (length !== null && (values.size !== 1 || !/^\d{1,15}$/.test(only))) throw new HttpError("bad content-length");
   const coding = head.headers.get("transfer-encoding");
   if (coding !== null) {
     if (coding.trim().toLowerCase() !== "chunked") throw new HttpError(`unsupported transfer-encoding ${coding}`);
     return { kind: "chunked" };
   }
-  const length = head.headers.get("content-length");
-  if (length === null) return { kind: "close" };
-  const values = new Set(length.split(",").map((value) => value.trim()));
-  const [only] = values;
-  if (values.size !== 1 || !/^\d{1,15}$/.test(only)) throw new HttpError("bad content-length");
-  return { kind: "length", left: Number(only) };
+  return length === null ? { kind: "close" } : { kind: "length", left: Number(only) };
 }
 
 async function chunkSize(reader: ByteReader): Promise<number> {
@@ -178,10 +184,8 @@ export async function streamFetch(open: () => E2EStream, request: StreamRequest)
   const stream = open();
   const reader = new ByteReader(stream.readable);
   let finished = false;
-  const abort = () => {
-    if (!finished) stream.reset();
-  };
-  signal?.addEventListener("abort", abort, { once: true });
+  /** The reply body's controller, once the head is in. */
+  let output: ReadableStreamDefaultController<Uint8Array> | null = null;
   const done = () => {
     finished = true;
     signal?.removeEventListener("abort", abort);
@@ -194,15 +198,18 @@ export async function streamFetch(open: () => E2EStream, request: StreamRequest)
     stream.reset();
     return signal?.aborted ? signal.reason : error;
   };
+  /** Resets the stream; a body already given out errors at once, bytes held for it or not. */
+  const fail = (error: unknown) => {
+    if (finished) return;
+    const reason = failed(error);
+    output?.error(reason);
+  };
+  const abort = () => fail(null);
+  signal?.addEventListener("abort", abort, { once: true });
 
-  let reply: Head;
-  let frame: Framing;
+  // No FIN after the request: Node's HTTP server cuts a reply short when the client half-closes first.
+  const sent = Promise.all([stream.write(utf8(head)), body?.length ? stream.write(Uint8Array.from(body)) : undefined]);
   try {
-    // No FIN after the request: Node's HTTP server cuts a reply short when the client half-closes first.
-    const sent = (async () => {
-      await stream.write(utf8(head));
-      if (body?.length) await stream.write(Uint8Array.from(body));
-    })();
     const received = (async () => {
       for (;;) {
         const next = parseHead(await reader.until(CRLF2, MAX_HEAD, "reply head"));
@@ -210,57 +217,68 @@ export async function streamFetch(open: () => E2EStream, request: StreamRequest)
         if (next.status >= 200) return next;
       }
     })();
-    [, reply] = await Promise.all([sent, received]);
-    frame = framing(method, reply);
+    // The reply is given once its head is in, upload or not: a computer that answers as it reads (an echo) waits on
+    // this side reading. An upload that fails before the head fails the request; one that fails after errors the body.
+    const reply = await Promise.race([received, sent.then(() => received)]);
+    sent.catch(fail);
+    let frame = framing(method, reply);
+    if (frame.kind === "none") {
+      const response = new Response(null, reply);
+      done();
+      return response;
+    }
+    let chunkLeft = 0;
+    const readable = new ReadableStream<Uint8Array>({
+      start(controller) {
+        output = controller;
+      },
+      async pull(controller) {
+        try {
+          for (;;) {
+            if (frame.kind === "length") {
+              if (frame.left === 0) break;
+              const part = await reader.some(frame.left);
+              if (!part) throw new HttpError("the reply ended before its content-length");
+              frame.left -= part.length;
+              return controller.enqueue(Uint8Array.from(part));
+            }
+            if (frame.kind === "close") {
+              const part = await reader.some(64 * 1024);
+              if (!part) break;
+              return controller.enqueue(Uint8Array.from(part));
+            }
+            if (chunkLeft === 0) {
+              chunkLeft = await chunkSize(reader);
+              if (chunkLeft === 0) {
+                // Trailers are checked and dropped, up to the blank line that ends the reply.
+                const trailers = new Headers();
+                for (;;) {
+                  const line = await reader.until([13, 10], MAX_HEAD, "trailer");
+                  if (!line.length) break;
+                  appendField(trailers, byteString(line));
+                }
+                break;
+              }
+            }
+            const part = await reader.some(chunkLeft);
+            if (!part) throw new HttpError("the reply ended inside a chunk");
+            chunkLeft -= part.length;
+            if (chunkLeft === 0 && (await reader.until([13, 10], 0, "chunk end")).length) throw new HttpError("bad chunk end");
+            return controller.enqueue(Uint8Array.from(part));
+          }
+          frame = { kind: "none" };
+          done();
+          controller.close();
+        } catch (error) {
+          controller.error(failed(error));
+        }
+      },
+      cancel() {
+        failed(null);
+      },
+    });
+    return new Response(readable, reply);
   } catch (error) {
     throw failed(error);
   }
-
-  if (frame.kind === "none") {
-    done();
-    return new Response(null, reply);
-  }
-  let chunkLeft = 0;
-  const readable = new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        for (;;) {
-          if (frame.kind === "length") {
-            if (frame.left === 0) break;
-            const part = await reader.some(frame.left);
-            if (!part) throw new HttpError("the reply ended before its content-length");
-            frame.left -= part.length;
-            return controller.enqueue(Uint8Array.from(part));
-          }
-          if (frame.kind === "close") {
-            const part = await reader.some(64 * 1024);
-            if (!part) break;
-            return controller.enqueue(Uint8Array.from(part));
-          }
-          if (chunkLeft === 0) {
-            chunkLeft = await chunkSize(reader);
-            if (chunkLeft === 0) {
-              // Trailers are read and dropped, up to the blank line that ends the reply.
-              while ((await reader.until([13, 10], MAX_HEAD, "trailer")).length) { /* next trailer line */ }
-              break;
-            }
-          }
-          const part = await reader.some(chunkLeft);
-          if (!part) throw new HttpError("the reply ended inside a chunk");
-          chunkLeft -= part.length;
-          if (chunkLeft === 0 && (await reader.until([13, 10], 0, "chunk end")).length) throw new HttpError("bad chunk end");
-          return controller.enqueue(Uint8Array.from(part));
-        }
-        frame = { kind: "none" };
-        done();
-        controller.close();
-      } catch (error) {
-        controller.error(failed(error));
-      }
-    },
-    cancel() {
-      failed(null);
-    },
-  });
-  return new Response(readable, reply);
 }

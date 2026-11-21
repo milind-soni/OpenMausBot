@@ -251,6 +251,7 @@ export class Mux {
       return;
     }
     if (frame.type === TYPE.goAway) {
+      if (this.role === "computer" && frame.length === GO_AWAY.removed) throw new YamuxError("phone_removed");
       this.#peerGoneAway = true;
       this.#events.goAway?.(frame.length);
       return;
@@ -313,9 +314,9 @@ export class Mux {
       this.#events.reset(streamId);
       return;
     }
+    if (stream.remoteFin && (frame.type === TYPE.data || frame.flags & FLAG.fin)) throw new YamuxError("data_after_fin");
     if (frame.type === TYPE.data) {
       if (this.role === "phone" && !stream.established) throw new YamuxError("data_before_ack");
-      if (stream.remoteFin) throw new YamuxError("data_after_fin");
       if (frame.length > stream.receiveWindow) throw new YamuxError("window_exceeded");
       stream.receiveWindow -= frame.length;
       if (frame.length > 0) this.#events.data(streamId, frame.data as Uint8Array);
@@ -325,7 +326,6 @@ export class Mux {
     }
     if (!this.#isCurrentStream(streamId, stream)) return;
     if (frame.flags & FLAG.fin) {
-      if (stream.remoteFin) throw new YamuxError("data_after_fin");
       stream.remoteFin = true;
       this.#events.ended(streamId);
       this.#closeIfDone(streamId, stream);

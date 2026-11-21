@@ -107,7 +107,9 @@ describe("streamFetch over a real session (interop computer)", () => {
     const abort = new AbortController();
     const res = await fetchOver({ path: "/hang", signal: abort.signal });
     const reader = res.body!.getReader();
-    expect(new TextDecoder().decode((await reader.read()).value)).toContain("start");
+    // Chunk edges need not match events: read until the first whole one is in.
+    let seen = "";
+    while (!seen.includes("data: start\n\n")) seen += new TextDecoder().decode((await reader.read()).value);
     const pending = reader.read();
     abort.abort(new Error("left the page"));
     await expect(pending).rejects.toThrow("left the page");
@@ -160,6 +162,8 @@ describe("streamFetch framing (fake computer)", () => {
     ["a bad status line", ["HTTP/2 200\r\n\r\n"], "bad status line"],
     ["an unknown transfer coding", ["HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip, chunked\r\n\r\n"], "unsupported transfer-encoding"],
     ["two different lengths", ["HTTP/1.1 200 OK\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n"], "bad content-length"],
+    ["chunked with two different lengths", ["HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nContent-Length: 1\r\nContent-Length: 2\r\n\r\n"], "bad content-length"],
+    ["a NUL in the reason phrase", ["HTTP/1.1 200 O\0K\r\nContent-Length: 0\r\n\r\n"], "bad status line"],
     ["a switch of protocols", ["HTTP/1.1 101 Switching Protocols\r\n\r\n"], "switched protocols"],
     ["a stream that ends inside the head", ["HTTP/1.1 200 OK\r\n"], "ended inside the reply head"],
   ])("refuses %s and resets the stream", async (_what, reply, message) => {
@@ -173,11 +177,64 @@ describe("streamFetch framing (fake computer)", () => {
     [{ path: "/", headers: { "Content-Length": "5" } }, "content-length is set by the stream client"],
     [{ path: "/a b" }, "origin-form"],
     [{ path: "http://x/" }, "origin-form"],
+    [{ path: "/a#b" }, "origin-form"],
     [{ method: "GE T", path: "/" }, "bad method"],
   ])("refuses a request that could split or reframe, before opening a stream (%#)", async (request, message) => {
     let opened = false;
     await expect(streamFetch(() => ((opened = true), fakeStream([]).open()), request)).rejects.toThrow(message);
     expect(opened).toBe(false);
+  });
+
+  it("keeps %23 and the query in the path", async () => {
+    const fake = fakeStream(["HTTP/1.1 204 No Content\r\n\r\n"]);
+    await streamFetch(fake.open, { path: "/a%23b?q=%23&r=1" });
+    expect(fake.sent().startsWith("GET /a%23b?q=%23&r=1 HTTP/1.1\r\n")).toBe(true);
+  });
+
+  it.each([
+    ["a trailer with no colon", "0\r\nno colon\r\n\r\n"],
+    ["a trailer with a NUL", "0\r\nX-T: a\0b\r\n\r\n"],
+  ])("errors the body on %s, and resets the stream", async (_what, end) => {
+    const fake = fakeStream([`HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nhi\r\n${end}`]);
+    const res = await streamFetch(fake.open, { path: "/" });
+    await expect(res.text()).rejects.toThrow(HttpError);
+    expect(fake.state.reset).toBe(true);
+  });
+
+  it("errors the body with the abort reason, even for bytes already read past the head", async () => {
+    const fake = fakeStream(["HTTP/1.1 200 OK\r\n\r\nabc"], { endAfter: false });
+    const abort = new AbortController();
+    const res = await streamFetch(fake.open, { path: "/", signal: abort.signal });
+    abort.abort(new Error("gone"));
+    await expect(res.body!.getReader().read()).rejects.toThrow("gone");
+    expect(fake.state.reset).toBe(true);
+  });
+
+  it("gives the reply once its head is in, while the upload waits for the reply to be read (an echo past both windows)", async () => {
+    // The computer takes no more upload until this side reads what it echoed: waiting for the upload first never ends.
+    const fake = fakeStream(["HTTP/1.1 200 OK\r\n\r\n", "echo"]);
+    let taken!: () => void;
+    const upload = new Promise<void>((resolve) => (taken = resolve));
+    const open = () => ({ ...fake.open(), write: (bytes: Uint8Array) => (bytes.length === 4 ? upload : Promise.resolve()) });
+    const tooLate = new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_000));
+    const res = await Promise.race([streamFetch(open, { method: "POST", path: "/echo", body: "abcd" }), tooLate]);
+    expect(res).not.toBeNull();
+    const reader = res!.body!.getReader();
+    expect(new TextDecoder().decode((await reader.read()).value)).toBe("echo");
+    taken();
+    expect((await reader.read()).done).toBe(true);
+    expect(fake.state.reset).toBe(false);
+  });
+
+  it("errors the body when the upload fails after the head is in", async () => {
+    const fake = fakeStream(["HTTP/1.1 200 OK\r\n\r\n"], { endAfter: false });
+    let failUpload!: (error: Error) => void;
+    const open = () => ({ ...fake.open(), write: (bytes: Uint8Array) => (bytes.length === 3 ? new Promise<void>((_, reject) => (failUpload = reject)) : Promise.resolve()) });
+    const res = await streamFetch(open, { method: "POST", path: "/", body: "abc" });
+    expect(res.status).toBe(200);
+    failUpload(new Error("stream reset"));
+    await expect(res.text()).rejects.toThrow("stream reset");
+    expect(fake.state.reset).toBe(true);
   });
 
   it("rejects with the abort reason when aborted before the head arrives", async () => {
