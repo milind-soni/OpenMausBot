@@ -108,6 +108,21 @@ it("keeps the existing engine, model, sign-in and switch checks on the next turn
   expect(f.failovers.restore("bot", "t")).toBe(true);
 });
 
+it("does not restore a held model after the original reset time", async () => {
+  const f = fixture();
+  f.clock.noteRefusal(codex.instanceId, RESET);
+  f.record("t");
+  f.advance(AT + 60_000);
+  await f.clock.refresh(true);
+  expect(f.failovers.list()[0]?.engineRefusal).toBe("recovered");
+  f.advance(RESET + 1);
+  f.state.modelHeld = true;
+  expect(f.failovers.restore("bot", "t")).toBe(false);
+  expect(f.switchBack).not.toHaveBeenCalled();
+  f.state.modelHeld = false;
+  expect(f.failovers.restore("bot", "t")).toBe(true);
+});
+
 it("does not accelerate from stale, failed, full or unchanged-window usage, or a manual release", async () => {
   const f = fixture();
   f.clock.noteRefusal(codex.instanceId, RESET);

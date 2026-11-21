@@ -135,8 +135,8 @@ export class LimitFailovers {
     if (!current || !sameModelSelection(current, row.to)) return this.forget(threadId);
     const blocked = this.deps.blockedUntil(row.from.instanceId, row.from.model) !== null;
     const waitUntil = row.why === "signed-out" ? row.at : row.meter ? row.at : row.resetsAt ?? row.at + UNKNOWN_RESET_WAIT_MS;
-    const recovered = row.engineRefusal === "recovered" && !this.deps.signedOut?.(row.from.instanceId) && !this.deps.modelHeld?.(row.from);
-    if (blocked || (waitUntil > now && !recovered)) return false;
+    const recovered = row.engineRefusal === "recovered" && !this.deps.signedOut?.(row.from.instanceId);
+    if (blocked || (waitUntil > now && !recovered) || this.deps.modelHeld?.(row.from)) return false;
     if (row.why === "signed-out" && this.deps.signedOut?.(row.from.instanceId)) return false;
     if (!this.deps.switchBack(row)) return false;
     this.forget(threadId);
