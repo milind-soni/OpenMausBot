@@ -73,7 +73,7 @@ describe("the browser panel's native pane", () => {
     flushSync(() => root.render(createElement(LiveBrowser, { bot })));
     await settle();
     expect(pageArea()).not.toBeNull();
-    expect(show).toHaveBeenLastCalledWith({ botId: "scout", threadId: null, bounds: { x: 300, y: 120, width: 900, height: 700 }, visible: true });
+    expect(show).toHaveBeenLastCalledWith({ botId: "scout", threadId: null, profile: null, bounds: { x: 300, y: 120, width: 900, height: 700 }, visible: true });
 
     const overlay = document.createElement("div");
     overlay.setAttribute("role", "menu");
@@ -86,7 +86,7 @@ describe("the browser panel's native pane", () => {
     expect(show.mock.calls.at(-1)?.[0]).toMatchObject({ visible: true });
 
     flushSync(() => root.unmount());
-    expect(show.mock.calls.at(-1)?.[0]).toEqual({ botId: "scout", threadId: null, bounds: null, visible: false });
+    expect(show.mock.calls.at(-1)?.[0]).toEqual({ botId: "scout", threadId: null, profile: null, bounds: null, visible: false });
     root = createRoot(host);
   });
 });

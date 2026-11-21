@@ -298,11 +298,12 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     const bridge = window.ogb?.browserPane;
     if (!paneMode || !bridge) return;
     const threadId = scopedThread ?? null;
+    const profile = bot.browserProfile ?? null;
     const place = () => {
       const rect = pageArea.current?.getBoundingClientRect();
       const bounds = rect && rect.width >= 1 && rect.height >= 1
         ? { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) } : null;
-      void bridge.show({ botId: bot.id, threadId, bounds, visible: paneShown.current && bounds !== null }).catch(() => undefined);
+      void bridge.show({ botId: bot.id, threadId, profile, bounds, visible: paneShown.current && bounds !== null }).catch(() => undefined);
     };
     placePane.current = place;
     const observer = new ResizeObserver(place);
@@ -312,10 +313,10 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       placePane.current = () => {};
       observer.disconnect();
       window.removeEventListener("resize", place);
-      void bridge.show({ botId: bot.id, threadId, bounds: null, visible: false }).catch(() => undefined);
+      void bridge.show({ botId: bot.id, threadId, profile, bounds: null, visible: false }).catch(() => undefined);
     };
-  }, [paneMode, bot.id, scopedThread]);
-  useEffect(() => { placePane.current(); }, [paneVisible, paneMode, bot.id, scopedThread]);
+  }, [paneMode, bot.id, bot.browserProfile, scopedThread]);
+  useEffect(() => { placePane.current(); }, [paneVisible, paneMode, bot.id, bot.browserProfile, scopedThread]);
   const pipSupported = stream && supportsBrowserPictureInPicture();
   const passkeyWall = passkeyWallAt(nav.url);
   return <div ref={panel} className={maximized

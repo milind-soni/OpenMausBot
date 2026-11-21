@@ -445,7 +445,7 @@ const __APP_VERSION__: string;
       /** A bot's browser as a native view over its Browser panel (browserEngine.surface "pane"). The main process asks
        * the server which browser the bot's panel shows; the page never names one. */
       browserPane?: {
-        show(input: { botId: string; threadId: string | null; bounds: DesktopWorkspaceBounds | null; visible: boolean }): Promise<{ shown: boolean }>;
+        show(input: { botId: string; threadId: string | null; profile: string | null; bounds: DesktopWorkspaceBounds | null; visible: boolean }): Promise<{ shown: boolean }>;
       };
       /** Native folder picker; resolves null when the user cancels. */
       pickFolder?(current?: string): Promise<string | null>;
