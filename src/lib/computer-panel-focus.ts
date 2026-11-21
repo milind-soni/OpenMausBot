@@ -105,6 +105,6 @@ export function releaseComputerPanelFocus(root: HTMLElement | null, botId: strin
   const target = opener?.botId === botId && opener.element?.isConnected ? opener.element
     : document.querySelector<HTMLElement>('[data-tour="computer"]')
       ?? sidebarBotRow(botId)
-      ?? document.querySelector<HTMLElement>('[data-tour="composer"] textarea');
+      ?? document.querySelector<HTMLElement>('[data-tour="composer"] :is([role=textbox], textarea)');
   target?.focus();
 }

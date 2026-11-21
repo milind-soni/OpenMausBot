@@ -1,6 +1,4 @@
 {
-  "composer.markdown.preview": "预览 Markdown",
-  "composer.markdown.edit": "编辑 Markdown",
   "chat.v2.sent": "已发送给 {names}",
   "chat.v2.received": "收到来自 {names} 的消息",
   "chat.v2.bots": "{count} 个 Bot",

@@ -69,7 +69,7 @@ it.skipIf(!ready)("sets one up from chat and from + New, shows its sentence and 
   await page.getByText("Scout", { exact: true }).first().click();
 
   // 1. From chat.
-  const composer = page.locator("textarea").last();
+  const composer = page.locator(".composer-editor");
   await composer.fill("When I get an email from Acme, draft a reply.");
   await composer.press("Enter");
   if (await skipTour.isVisible().catch(() => false)) await skipTour.click();

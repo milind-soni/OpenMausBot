@@ -144,7 +144,7 @@ export function usePagePoint(args: { frame(): HTMLIFrameElement | null | undefin
     if (next || !pickedAny.current) return;
     pickedAny.current = false;
     latest.current.picked();
-    requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-tour=\"composer\"] textarea")?.focus());
+    requestAnimationFrame(() => document.querySelector<HTMLElement>("[data-tour=\"composer\"] [role=textbox]")?.focus());
   }, [say]);
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {

@@ -252,7 +252,7 @@ function harness(get: () => { world: HomeWorld; shots: string }) {
     await shown(`profile:${workId()}`);
     if (!(await bots()).length) await page("fetch('/api/bots', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Chief', modelSelection: { instanceId: 'claude', model: 'claude-sonnet-5' } }) })");
     await world.window.loadURL(`${world.localOrigin}/`);
-    const composer = "textarea[aria-label^=\"Message\"]";
+    const composer = "[role=textbox][aria-label^=\"Message\"]";
     await until(() => page<boolean>(`Boolean(document.querySelector('${composer}'))`), Boolean, 60_000, "Work's composer");
     rmSync(gate, { force: true });
     await page(`document.querySelector('${composer}').focus()`);

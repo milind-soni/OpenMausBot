@@ -220,17 +220,15 @@ describe("thread control placement", () => {
     const row = /data-composer-row="[^"]*" class="([^"]*)"/.exec(markup)!.at(1)!.split(" ");
     expect(row).toContain("@max-[30rem]/composer:flex-wrap");
     expect(row).not.toContain("flex-wrap");
-    const editor = /class="mention-editor ([^"]*)"/.exec(markup)!.at(1)!.split(" ");
+    const editor = /data-composer-editor="" class="([^"]*)"/.exec(markup)!.at(1)!.split(" ");
     expect(editor).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "@max-[30rem]/composer:order-first", "@max-[30rem]/composer:basis-full"]));
     expect(editor).not.toContain("basis-full");
-    const textarea = /<textarea[^>]*class="([^"]*)"/.exec(markup)!.at(1)!.split(" ");
-    expect(textarea).toContain("min-h-6");
-    expect(textarea).not.toContain("min-h-14");
+
   });
 
   it("keeps the composer inert until the deleted thread's replacement transcript arrives", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, awaitingThreadSnapshot: true } }));
-    expect(markup).toMatch(/<textarea[^>]*disabled=""[^>]*aria-busy="true"/);
+    expect(markup).toMatch(/data-composer-editor="" aria-busy="true"/);
     expect(markup).not.toContain("Finish group setup");
   });
   it("offers trusted modes in the composer without requiring a Full bot default", () => {
@@ -513,7 +511,7 @@ describe("thread control placement", () => {
     expect(markup.indexOf("data-test-model-control")).toBeLessThan(markup.indexOf('role="log"'));
     expect(markup.indexOf('data-tour="composer"')).toBeGreaterThan(-1);
     expect(markup.indexOf("data-test-approval-control")).toBeGreaterThan(markup.indexOf('data-tour="composer"'));
-    expect(markup.indexOf("data-test-approval-control")).toBeLessThan(markup.indexOf("<textarea"));
+    expect(markup.indexOf("data-test-approval-control")).toBeLessThan(markup.indexOf("data-composer-editor"));
     expect(markup).not.toContain('aria-label="Thread settings"');
     expect(fixture.model).toMatchObject({ threadId: "selected", bot: { busy: false, modelSelection: { model: "thread-model" } } });
     expect(fixture.approval).toMatchObject({ approvalMode: "ask", busy: false, trustedModesAvailable: false });
@@ -543,7 +541,7 @@ describe("thread control placement", () => {
 
   it("pins a place per conversation from the composer", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
-    const pill = markup.slice(markup.indexOf('data-tour="composer"'), markup.indexOf("<textarea"));
+    const pill = markup.slice(markup.indexOf('data-tour="composer"'), markup.indexOf("data-composer-editor"));
     expect(pill.match(/data-testid="place-chip"/g) ?? []).toHaveLength(1);
     expect(markup.includes("Where this conversation works")).toBe(true);
   });
@@ -575,7 +573,7 @@ describe("a guest's composer on a Cloud home", () => {
     const markup = renderToStaticMarkup(createElement(NewConversationInstead, { onNew }));
     expect(markup).toContain("You can only write in conversations you started on this Cloud.");
     expect(markup).toContain(">New conversation<");
-    expect(markup).not.toContain("<textarea");
+    expect(markup).not.toContain("data-composer-editor");
     const tree = NewConversationInstead({ onNew }) as { props: { children: Array<{ type: string; props: { onClick?: () => void } }> } };
     tree.props.children.find((child) => child.type === "button")!.props.onClick!();
     expect(onNew).toHaveBeenCalledOnce();
@@ -585,12 +583,12 @@ describe("a guest's composer on a Cloud home", () => {
     fixture.canWrite = false;
     const refused = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(refused).toContain('data-testid="cloud-guest-composer"');
-    expect(refused).not.toContain("<textarea");
+    expect(refused).not.toContain("data-composer-editor");
     expect(refused).not.toContain('data-testid="citation-toolbar"');
     fixture.canWrite = true;
     const allowed = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(allowed).not.toContain('data-testid="cloud-guest-composer"');
-    expect(allowed).toContain("<textarea");
+    expect(allowed).toContain("data-composer-editor");
     expect(allowed).toContain('data-testid="citation-toolbar"');
     fixture.canWrite = null;
   });

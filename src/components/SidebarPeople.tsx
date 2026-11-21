@@ -32,7 +32,7 @@ function openComposer(state: Pick<AppState, "activeView" | "selectedId" | "group
   return bot ? `bot:${bot.id}:${bot.threadId}` : null;
 }
 
-const focusComposer = () => requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea')?.focus());
+const focusComposer = () => requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-tour="composer"] [role=textbox]')?.focus());
 
 /** You first, then whoever is here now, then everyone else, each by name. */
 export function peopleInOrder(people: readonly TeamPerson[]): TeamPerson[] {

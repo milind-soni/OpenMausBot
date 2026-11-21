@@ -26,7 +26,7 @@ function place(element: HTMLElement, point: Point): void {
 }
 
 function focusComposer(): void {
-  requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea')?.focus());
+  requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-tour="composer"] [role=textbox]')?.focus());
 }
 
 function CitationEditor({
@@ -49,7 +49,7 @@ function CitationEditor({
     const update = () => {
       const editor = ref.current;
       if (!editor) return;
-      const input = point ? null : document.querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea');
+      const input = point ? null : document.querySelector<HTMLElement>('[data-tour="composer"] [role=textbox]');
       const rect = input?.getBoundingClientRect();
       place(editor, point ?? {
         left: rect ? rect.left + (rect.width - editor.offsetWidth) / 2 : 8,

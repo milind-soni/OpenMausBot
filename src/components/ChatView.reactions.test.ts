@@ -64,11 +64,11 @@ describe("a 👍 that answered a bot's question, in the chat", () => {
   });
 
   it("leaves the person's last typed message as the one ArrowUp edits", async () => {
-    const composer = document.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${t("composer.placeholder.bot", { name: "Pepper" })}"]`)!;
-    expect(composer.value).toBe("");
+    const composer = document.querySelector<HTMLElement>(`[role="textbox"][aria-label="${t("composer.placeholder.bot", { name: "Pepper" })}"]`)!;
+    expect(composer.textContent).toBe("");
     flushSync(() => composer.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true })));
     await settle();
-    const editors = [...document.querySelectorAll<HTMLTextAreaElement>("textarea")].filter((area) => area !== composer);
+    const editors = [...document.querySelectorAll<HTMLTextAreaElement>("textarea")];
     expect(editors.map((area) => area.value)).toEqual(["Draft an email to Sam."]);
   });
 });

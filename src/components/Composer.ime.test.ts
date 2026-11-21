@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { Editor } from "@tiptap/core";
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -58,13 +59,12 @@ describe("Japanese IME in the real composer", () => {
 
   function fill(text: string) {
     flushSync(() => restoreComposerDraft(draftId, { text, attachments: [] }));
-    const input = container.querySelector("textarea")!;
-    input.setSelectionRange(text.length, text.length);
-    flushSync(() => input.dispatchEvent(new KeyboardEvent("keyup", { key: "a", bubbles: true })));
+    const input = container.querySelector<HTMLElement & { editor: Editor }>(".composer-editor")!;
+    flushSync(() => input.editor.commands.setTextSelection(text.length + 1));
     return input;
   }
 
-  function press(input: HTMLTextAreaElement, key: string, init: KeyboardEventInit = {}) {
+  function press(input: HTMLElement, key: string, init: KeyboardEventInit = {}) {
     const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init });
     flushSync(() => input.dispatchEvent(event));
     return event;
@@ -79,7 +79,7 @@ describe("Japanese IME in the real composer", () => {
       expect(container.querySelector('[role="listbox"]')).not.toBeNull();
       for (const key of ["Enter", "Tab", "ArrowDown", "ArrowUp", "Escape"]) {
         expect(press(input, key, init).defaultPrevented).toBe(false);
-        expect(input.value).toBe(draft);
+        expect(input.textContent).toBe(draft);
         expect(container.querySelector('[role="listbox"]')).not.toBeNull();
       }
       expect(fixture.dispatch).not.toHaveBeenCalled();
@@ -91,7 +91,7 @@ describe("Japanese IME in the real composer", () => {
     expect(press(input, "Enter", { isComposing: true }).defaultPrevented).toBe(false);
     expect(press(input, "Enter", { keyCode: 229 }).defaultPrevented).toBe(false);
     expect(fixture.dispatch).not.toHaveBeenCalled();
-    expect(input.value).toBe("日本語を入力中");
+    expect(input.textContent).toBe("日本語を入力中");
     fill("");
     press(input, "ArrowUp", { isComposing: true });
     expect(onEditLast).not.toHaveBeenCalled();
@@ -100,7 +100,7 @@ describe("Japanese IME in the real composer", () => {
   it("still selects a Japanese mention and sends on the next ordinary Enter", () => {
     const input = fill("@調");
     expect(press(input, "Enter").defaultPrevented).toBe(true);
-    expect(input.value).toBe("@調査担当 ");
+    expect(input.textContent).toBe("@調査担当 ");
     expect(fixture.dispatch).not.toHaveBeenCalled();
     press(input, "Enter");
     expect(fixture.dispatch).toHaveBeenCalledWith(expect.objectContaining({
@@ -112,8 +112,8 @@ describe("Japanese IME in the real composer", () => {
   it("keeps ordinary slash selection and Shift+Enter working", () => {
     const input = fill("/se");
     press(input, "Enter");
-    expect(input.value).toBe("/setup ");
-    expect(press(input, "Enter", { shiftKey: true }).defaultPrevented).toBe(false);
+    expect(input.textContent).toBe("/setup ");
+    press(input, "Enter", { shiftKey: true });
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 });

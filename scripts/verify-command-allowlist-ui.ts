@@ -60,7 +60,7 @@ assert.equal(await activeLabel(), trigger);
 await click(trigger);
 await click("Command allowlist");
 await visible("No commands saved yet.");
-await evaluate(`document.querySelector("[data-tour=composer] textarea")?.focus()`);
+await evaluate(`document.querySelector("[data-tour=composer] [role=textbox]")?.focus()`);
 await press("Escape");
 await poll(dialogOpen, false, "Escape closes the allowlist when focus is outside it");
 assert.equal(await activeLabel(), trigger);

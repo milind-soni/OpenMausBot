@@ -1,11 +1,10 @@
+import type { Editor } from "@tiptap/core";
 import { openBot } from "@/state/thread-navigation";
 import { directMessageSent, roomMessageSent } from "@/lib/product-events";
 import { TeamAudienceLabel } from "./TeamSideSwitch";
 import { useComposerDictation } from "@/lib/use-composer-dictation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type SetStateAction } from "react";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { Eye, Mic, Pencil, Square, X } from "lucide-react";
+import { Mic, Square, X } from "lucide-react";
 import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { visibleMessages, currentTaskBot, type Bot, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { cn } from "@/lib/cn";
@@ -15,7 +14,7 @@ import { ELEVATED_CARD, ELEVATED_FLOAT } from "./elevated";
 import { uploadDraftImage } from "@/lib/composer-uploads";
 import { intakeFilesWithNotice } from "@/lib/attach-notice";
 import { activeLocale, t } from "@/lib/i18n";
-import { imeComposing, sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
+import { sendKeyLabel, sendsMessage, useSendKey } from "@/lib/send-key";
 import {
   draftRevision,
   appendDraftAttachments,
@@ -35,7 +34,7 @@ import {
 } from "@/lib/drafts";
 import { DEVS_CHOICE, MentionMenu, teammateChoices, type MentionChoice } from "./MentionMenu"; import { useTeammates } from "@/state/team-people"; import { hiddenFromSidebar, useViewerEmail } from "@/lib/default-bot"; import { useMayAct } from "./shared-run";
 import { SlashCommandMenu } from "./SlashCommandMenu";
-import { MentionTextarea } from "./MentionTextarea";
+import { ComposerEditor, composerSelection, focusComposer } from "./ComposerEditor";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
 import { PointedChips } from "./app/PointedChips"; import { SetupRequestChip, setupRequestPlaceholder } from "./SetupOffer";
 import { takePointedChips } from "@/lib/pointed-chips";
@@ -116,7 +115,7 @@ export function Composer({
   onRestoreReply?: (message: Message, threadId: string) => void;
   locked?: boolean;
   smoothHeight?: boolean;
-  onSendFrom?: (sendId: string, input: HTMLTextAreaElement) => void;
+  onSendFrom?: (sendId: string, input: HTMLElement) => void;
 }) {
   const bot = profile ? currentTaskBot(profile) : undefined;
   const locked = setupLocked || Boolean(bot?.awaitingThreadSnapshot);
@@ -127,7 +126,8 @@ export function Composer({
   const singleRow = useMediaQuery(PHONE_LAYOUT);
 
   const sendKey = useSendKey();
-  const sendLabel = sendKeyLabel(sendKey);
+  const [inList, setInList] = useState(false);
+  const sendLabel = sendKeyLabel(inList && sendKey === "enter" ? "mod-enter" : sendKey);
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const threadId = group?.threadId ?? bot?.threadId ?? "";
   const currentGroupTask = group?.tasks?.find((task) => task.threadId === threadId);
@@ -155,7 +155,6 @@ export function Composer({
     draftId,
     !group && bot && !state.config?.team ? `bot:${bot.id}` : undefined,
   );
-  const [previewDraft, setPreviewDraft] = useState<string | null>(null);
   const attachmentPending = useDraftAttachmentPending(draftId);
   const failedSends = useFailedComposerSends(draftId); const picks = mentionPicksFor(draftId);
   const [channelMode, setChannelMode] = useComposerChannelMode(draftId);
@@ -201,12 +200,7 @@ export function Composer({
       editAttachments((prev) => prev.filter((a) => a.id !== attachment.id));
       setCaret(nextText.length);
       setDismissedAt(null);
-      requestAnimationFrame(() => {
-        const input = inputRef.current;
-        if (!input) return;
-        input.focus();
-        input.setSelectionRange(nextText.length, nextText.length);
-      });
+      requestAnimationFrame(() => focusComposer(editorRef.current));
     },
     [text, editText, editAttachments],
   );
@@ -230,17 +224,14 @@ export function Composer({
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
   const [dismissedSlashAt, setDismissedSlashAt] = useState<number | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useRef<HTMLElement>(null);
+  const editorRef = useRef<Editor>(null);
   const stacked = useStackedField(inputRef, !singleRow, text);
-  const caretRef = useRef(0);
-  caretRef.current = caret;
   const refocusInput = useCallback(() => {
     requestAnimationFrame(() => {
       const input = inputRef.current;
-      if (!input || input.disabled || !composerShouldRefocus(document.activeElement, input)) return;
-      const at = Math.min(caretRef.current, input.value.length);
-      input.focus();
-      input.setSelectionRange(at, at);
+      const editor = editorRef.current;
+      if (input && editor?.isEditable && composerShouldRefocus(document.activeElement, input)) editor.commands.focus();
     });
   }, []);
   // Touch screens are skipped: focusing there pops the on-screen keyboard over the conversation.
@@ -248,9 +239,7 @@ export function Composer({
     if (window.matchMedia?.("(hover: none) and (pointer: coarse)").matches) return;
     const frame = requestAnimationFrame(() => {
       const input = inputRef.current;
-      if (!input || input.disabled || !composerTakesFocusOnOpen(document.activeElement, input)) return;
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
+      if (input && composerTakesFocusOnOpen(document.activeElement, input)) focusComposer(editorRef.current);
     });
     return () => cancelAnimationFrame(frame);
   }, []);
@@ -263,9 +252,7 @@ export function Composer({
     if (window.matchMedia?.("(hover: none) and (pointer: coarse)").matches) return;
     const frame = requestAnimationFrame(() => {
       const input = inputRef.current;
-      if (!input || input.disabled || !composerTakesFocusOnOpen(document.activeElement, input)) return;
-      input.focus();
-      input.setSelectionRange(input.value.length, input.value.length);
+      if (input && composerTakesFocusOnOpen(document.activeElement, input)) focusComposer(editorRef.current);
     });
     return () => cancelAnimationFrame(frame);
   }, [replyToId]);
@@ -322,8 +309,7 @@ export function Composer({
     available.push(...skillSlashCommands(slashSkills));
     return available.filter((command) => slashCommandMatches(command, slash.query));
   }, [slash, dismissedSlashAt, group, bot, canLearn, state.instances, locale, slashSkills]);
-  const preview = previewDraft === draftId && Boolean(text.trim());
-  const commandPickerOpen = !preview && commandCandidates.length > 0;
+  const commandPickerOpen = commandCandidates.length > 0;
 
   const mention = mentionQueryAt(text, caret); const teammates = useTeammates(); const viewer = useViewerEmail();
   const candidates = useMemo(() => {
@@ -339,7 +325,7 @@ export function Composer({
     return mentionChoicesForQuery([...pool, ...teammateChoices(teammates.people), DEVS_CHOICE], mention.query);
   }, [mention, dismissedAt, bots, bot?.id, group, members, teammates, viewer]);
   const mentionEveryoneCount = (members ?? []).filter((member) => !member.hidden).length;
-  const mentionPickerOpen = !preview && candidates.length > 0;
+  const mentionPickerOpen = candidates.length > 0;
   const commandMotion = useMenuMotion(commandPickerOpen);
   const mentionMotion = useMenuMotion(mentionPickerOpen);
 
@@ -375,10 +361,7 @@ export function Composer({
     const newCaret = mention.start + peer.name.length + 2;
     setCaret(newCaret);
     setDismissedAt(mention.start);
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(newCaret, newCaret);
-    });
+    requestAnimationFrame(() => focusComposer(editorRef.current, newCaret));
   };
 
   const pickCommand = (command: ComposerSlashCommand | undefined) => {
@@ -391,17 +374,14 @@ export function Composer({
     setCaret(next.caret);
     setDismissedSlashAt(slash.start);
     setChannelMode(command.kind === "command" && command.id === "goal" ? "goal" : "chat");
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(next.caret, next.caret);
-    });
+    requestAnimationFrame(() => focusComposer(editorRef.current, next.caret));
   };
   const teachTask = () => {
     const learn = "/learn ";
     editText(learn + text.replace(/^\/learn\s*/, "").trimStart());
     setCaret(learn.length);
     setChannelMode("chat");
-    requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.setSelectionRange(learn.length, learn.length); });
+    requestAnimationFrame(() => focusComposer(editorRef.current, learn.length));
   };
 
   const sharedChat = Boolean(state.config?.team && !group && profile?.tasks?.some((task) => task.threadId === threadId && !task.private));
@@ -524,14 +504,14 @@ export function Composer({
       });
       directMessageSent(state.instances, bot.modelSelection?.instanceId, false);
     }
-    setPreviewDraft(null);
     setText("");
     setAttachments([]); picks.clear();
     onConsumeReply?.();
     setChannelMode("chat");
   };
 
-  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+  const handlePaste = (e: ClipboardEvent, editor: Editor) => {
+    if (!e.clipboardData) return;
     const pastedFiles = clipboardFilesToAttach(e.clipboardData);
     if (pastedFiles.length > 0) {
       e.preventDefault();
@@ -575,27 +555,21 @@ export function Composer({
     const reference = threadTokenFromPaste(pasted, threads, currentBotId);
     if (reference) {
       e.preventDefault();
-      const start = e.currentTarget.selectionStart ?? text.length;
-      const end = e.currentTarget.selectionEnd ?? start;
+      const { start, end } = composerSelection(editor);
       const { lead, trail } = threadTokenSpacing(text, start, end);
-      const token = lead + reference.token + trail;
-      editText(text.slice(0, start) + token + text.slice(end));
-      const at = start + token.length;
-      setCaret(at);
-      requestAnimationFrame(() => {
-        inputRef.current?.focus();
-        inputRef.current?.setSelectionRange(at, at);
-      });
+      const token = reference.token.startsWith("[")
+        ? editor.markdown?.parse(reference.token).content?.[0]?.content
+        : undefined;
+      editor.commands.insertContent(token ? [
+        ...(lead ? [{ type: "text", text: lead }] : []),
+        ...token,
+        ...(trail ? [{ type: "text", text: trail }] : []),
+      ] : { type: "text", text: lead + reference.token + trail });
       return;
     }
     if (!isLongPaste(pasted)) return;
     e.preventDefault();
-    const start = e.currentTarget.selectionStart;
-    const end = e.currentTarget.selectionEnd;
-    if (start !== end) {
-      editText(`${text.slice(0, start)}${text.slice(end)}`);
-      setCaret(start);
-    }
+    editor.commands.deleteSelection();
     editAttachments((prev) => [...prev, pasteAttachment(pasted)]);
   };
 
@@ -606,10 +580,7 @@ export function Composer({
       editText(typedGoalText);
       setCaret(nextCaret);
       setChannelMode("chat");
-      requestAnimationFrame(() => {
-        inputRef.current?.focus();
-        inputRef.current?.setSelectionRange(nextCaret, nextCaret);
-      });
+      requestAnimationFrame(() => focusComposer(editorRef.current, nextCaret));
       return;
     }
     setChannelMode((current) => current === "goal" ? "chat" : "goal");
@@ -727,40 +698,30 @@ export function Composer({
             onChange={onPickFiles}
           />
           {!singleRow && toolsMenu}
-          {preview && <div data-composer-markdown-preview tabIndex={0} aria-label={t("composer.markdown.preview")} dir="auto"
-            className="chat-md max-h-36 min-w-0 flex-1 overflow-auto px-1 py-1 text-[15px] [overflow-wrap:anywhere] [&>*+*]:mt-2">
-            <Markdown remarkPlugins={[remarkGfm]} skipHtml components={{
-              a: ({ children }) => <span>{children}</span>,
-              img: ({ alt }) => <span>{alt}</span>,
-            }}>{text}</Markdown>
-          </div>}
-          <MentionTextarea
+          <ComposerEditor key={draftId}
           smoothHeight={smoothHeight && singleRow}
-          singleLinePlaceholder={singleRow}
-          wrapperClassName={cn(preview && "hidden", !singleRow && cn("@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full", stacked && "order-first basis-full"))}
+          wrapperClassName={singleRow ? undefined : cn("@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full", stacked && "order-first basis-full")}
           inputRef={inputRef}
+          editorRef={editorRef}
           onOpenBot={(id) => {
             const mentioned = store.state().bots.find(candidate => candidate.id === id && !candidate.hidden);
             if (mentioned) openBot(dispatch, mentioned, false);
           }}
           peers={[...(group ? members ?? [] : bots.filter((member) => member.id !== bot?.id)), ...teammates.peers]}
           everyone={Boolean(group && !group.dm)}
-          dir="auto"
-          rows={1}
           value={text}
-          onChange={(e) => {
+          onChange={(value) => {
             if (recording) stopDictation();
-            editText(e.target.value);
-            setCaret(e.target.selectionStart ?? e.target.value.length);
+            editText(value);
             setDismissedAt(null);
             setDismissedSlashAt(null);
           }}
           onPaste={handlePaste}
-          onKeyUp={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
-          onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
-          onKeyDown={(e) => {
-            // An input method's confirming Enter and arrows pick its own candidates, not a mention or command.
-            if (imeComposing(e.nativeEvent)) return;
+          onSelection={(position, insideList) => {
+            setCaret(position);
+            setInList(insideList);
+          }}
+          onKeyDown={(e, inList) => {
             if (commandPickerOpen) {
               if (e.key === "ArrowDown" || e.key === "ArrowUp") {
                 e.preventDefault();
@@ -770,7 +731,7 @@ export function Composer({
                 );
                 return;
               }
-              if (e.key === "Enter" || e.key === "Tab") {
+              if ((e.key === "Enter" && !e.ctrlKey && !e.metaKey) || e.key === "Tab") {
                 e.preventDefault();
                 pickCommand(commandCandidates[highlight]);
                 return;
@@ -788,7 +749,7 @@ export function Composer({
                 setHighlight((h) => (h + delta + candidates.length) % candidates.length);
                 return;
               }
-              if (e.key === "Enter" || e.key === "Tab") {
+              if ((e.key === "Enter" && !e.ctrlKey && !e.metaKey) || e.key === "Tab") {
                 e.preventDefault();
                 pickMention(candidates[highlight]);
                 return;
@@ -799,7 +760,7 @@ export function Composer({
                 return;
               }
             }
-            if (onClearReply && escapeCancelsReply(e.nativeEvent, { replying: Boolean(replyTo), recording })) {
+            if (onClearReply && escapeCancelsReply(e, { replying: Boolean(replyTo), recording })) {
               e.preventDefault();
               onClearReply();
               return;
@@ -809,7 +770,7 @@ export function Composer({
               onEditLast();
               return;
             }
-            if (sendsMessage(e.nativeEvent, sendKey)) {
+            if (sendsMessage(e, sendKey) && (!inList || e.ctrlKey || e.metaKey || e.shiftKey)) {
               e.preventDefault();
               send();
             }
@@ -818,32 +779,16 @@ export function Composer({
           // Not disabled during an upload: a disabled element drops keyboard focus for good. send() refuses while one
           // is pending.
           disabled={blocking || locked}
-          aria-busy={bot?.awaitingThreadSnapshot || undefined}
+          busy={bot?.awaitingThreadSnapshot || undefined}
           placeholder={composerPlaceholder({
             locked: setupLocked, approval: blocking, attaching: attachmentPending, listening: recording,
             replying: Boolean(replyTo), busy, busyName, sendLabel, group, members: members ?? [],
             jevOn: jevRoomRoutingOn(state.config), goal: channelMode === "goal", botName: bot?.name ?? "",
             setupHint: group ? null : setupRequestPlaceholder(bot, threadId),
           })}
-          aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
-            className={cn(
-              "block max-h-[9rem] w-full resize-none overflow-x-hidden overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden bg-transparent placeholder:text-ink-tertiary focus:outline-none",
-              "px-1 text-[15px]",
-              "min-h-6 py-1 leading-6",
-            )}
+          label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
           />
           <div data-composer-actions className={cn("flex items-center", "gap-1", !singleRow && "@max-[30rem]/composer:ml-auto", stacked && "ml-auto")}>
-        {!locked && Boolean(text.trim()) && (
-          <button type="button" aria-label={t(preview ? "composer.markdown.edit" : "composer.markdown.preview")}
-            title={t(preview ? "composer.markdown.edit" : "composer.markdown.preview")}
-            className="flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary interaction:bg-raised/50 hover:text-ink"
-            onClick={() => {
-              setPreviewDraft(preview ? null : draftId);
-              if (preview) requestAnimationFrame(() => inputRef.current?.focus());
-            }}>
-            {preview ? <Pencil size={16} aria-hidden="true" /> : <Eye size={16} aria-hidden="true" />}
-          </button>
-        )}
         {!locked && <ComposerContextMenu bot={bot} group={group} members={members} className={cn("size-8", "text-ink-secondary interaction:bg-raised/50 hover:text-ink")} />}
         {!locked && !busy && micReady && (
           <button

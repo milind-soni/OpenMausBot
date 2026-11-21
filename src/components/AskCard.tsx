@@ -308,7 +308,7 @@ export const ASK_FIELD =
 
 export function returnFocusToComposer(): void {
   if (typeof requestAnimationFrame !== "function") return;
-  requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('[data-tour="composer"] textarea')?.focus());
+  requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-tour="composer"] [role=textbox]')?.focus());
 }
 
 export function moveChoiceFocus(event: KeyboardEvent<HTMLElement>): void {

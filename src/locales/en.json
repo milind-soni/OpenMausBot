@@ -1,6 +1,4 @@
 {
-  "composer.markdown.preview": "Preview Markdown",
-  "composer.markdown.edit": "Edit Markdown",
   "chat.v2.sent": "Sent to {names}",
   "chat.v2.received": "Received from {names}",
   "chat.v2.bots": "{count} bots",

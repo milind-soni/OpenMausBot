@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { Editor } from "@tiptap/core";
 // Picking a bot from the @ list sends its id with the words, so the bot picked is the one reached even when another
 // bot has the same name. Typed names carry no ids. The desktop app and the web app share this composer.
 import { createElement } from "react";
@@ -60,11 +61,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-const input = () => container.querySelector("textarea")!;
+const input = () => container.querySelector<HTMLElement & { editor: Editor }>(".composer-editor")!;
 function type(draftId: string, text: string) {
   flushSync(() => restoreComposerDraft(draftId, { text, attachments: [] }));
-  input().setSelectionRange(text.length, text.length);
-  flushSync(() => input().dispatchEvent(new KeyboardEvent("keyup", { key: "a", bubbles: true })));
 }
 const options = () => [...container.querySelectorAll<HTMLElement>('[role="option"]')];
 function pick(name: string, role: string) {
@@ -80,25 +79,73 @@ const sent = () => fixture.dispatch.mock.calls.map(([action]) => action).filter(
 describe("a room's @ list", () => {
   beforeEach(() => flushSync(() => root.render(createElement(Composer, { group: room, members: [scout, analyst, chief] }))));
 
-  it("previews Markdown and sends the original draft", () => {
-    const markdown = "- **bold**\n- `console.log(123)`\n\n![remote](https://example.com/image.png)";
-    type(drafts[0]!, markdown);
-    flushSync(() => container.querySelector<HTMLButtonElement>('[aria-label="Preview Markdown"]')!.click());
-    const preview = container.querySelector("[data-composer-markdown-preview]")!;
-    expect(preview.querySelector("ul strong")?.textContent).toBe("bold");
-    expect(preview.querySelector("ul code")?.textContent).toBe("console.log(123)");
-    expect(preview.querySelector("img")).toBeNull();
-    flushSync(() => container.querySelector<HTMLButtonElement>('[aria-label="Edit Markdown"]')!.click());
-    expect(input().value).toBe(markdown);
+  it("continues a numbered list on Enter and sends its Markdown on Ctrl+Enter", () => {
+    const markdown = "2. **bold** and `release`";
+    flushSync(() => restoreComposerDraft(drafts[0]!, { text: markdown, attachments: [] }));
+    const { editor } = input();
+    expect(input().querySelector("ol")?.start).toBe(2);
+    expect(input().querySelector("strong")?.textContent).toBe("bold");
+    expect(input().querySelector("code")?.textContent).toBe("release");
     send();
-    expect(sent()).toEqual([expect.objectContaining({ text: markdown })]);
+    expect(sent()).toEqual([]);
+    expect(input().querySelectorAll("li")).toHaveLength(2);
+    expect(input().hasAttribute("data-empty")).toBe(false);
+    expect(editor.state.selection.$from.parentOffset).toBe(0);
+    flushSync(() => editor.commands.insertContent("next"));
+    flushSync(() => input().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true })));
+    expect(sent()).toEqual([expect.objectContaining({ text: markdown + "\n3. next" })]);
+    expect(editor.isEmpty).toBe(true);
+    expect(input().hasAttribute("data-empty")).toBe(true);
+  });
+
+  it("recognizes bold after a soft break and combined emphasis", () => {
+    type(drafts[0]!, "hello");
+    const field = input();
+    const { view } = field.editor;
+    flushSync(() => field.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "Enter", shiftKey: true, bubbles: true, cancelable: true,
+    })));
+    for (const char of "**n** ***both***") {
+      flushSync(() => {
+        const { from, to } = view.state.selection;
+        const insert = () => view.state.tr.insertText(char, from, to);
+        if (!view.someProp("handleTextInput", handle => handle(view, from, to, char, insert))) view.dispatch(insert());
+      });
+    }
+    expect(field.querySelector("br + strong")?.textContent).toBe("n");
+    expect(field.querySelector("strong em, em strong")?.textContent).toBe("both");
+  });
+
+  it("restores CommonMark, GFM and math as document nodes and marks", () => {
+    const markdown = [
+      "# Title",
+      "> **bold** and *emphasis* with ~~deleted~~ and `code`",
+      "- [x] reviewed",
+      "| Name | Count |\n| --- | ---: |\n| item | 1 |",
+      "[link](https://example.com) ![photo](https://example.com/remote.png)",
+      "A note[^check] and $x^2$.",
+      "$$\ny^2\n$$",
+      "[^check]: Note body",
+      "```ts\nconst value = 1\n```",
+      "---",
+    ].join("\n\n");
+    flushSync(() => restoreComposerDraft(drafts[0]!, { text: markdown, attachments: [] }));
+    const field = input();
+    for (const selector of [
+      "h1", "blockquote strong", "em", "s", "code", 'li[data-checked="true"]',
+      "table th", "tbody td", "a[href]", "[data-draft-image]", "[data-footnote-ref]",
+      "[data-footnote-definition]", '[data-type="inline-math"]', '[data-type="block-math"]', "pre code", "hr",
+    ]) expect(field.querySelector(selector), selector).not.toBeNull();
+    expect(field.querySelector("img[src]")).toBeNull();
+    const restored = field.editor.markdown!.parse(field.editor.getMarkdown());
+    expect(field.editor.schema.nodeFromJSON(restored).eq(field.editor.state.doc)).toBe(true);
   });
 
   it("shows each Quill by its role, and sends the picked one's id", () => {
     type(drafts[0]!, "@Qu");
     expect(options().map((one) => one.textContent)).toEqual([expect.stringContaining("Analyst"), expect.stringContaining("Chief of Staff")]);
     pick("Quill", "Chief of Staff");
-    expect(input().value).toBe("@Quill ");
+    expect(input().textContent).toBe("@Quill ");
     send();
     expect(sent()).toEqual([expect.objectContaining({ type: "sendGroup", groupId: room.id, text: "@Quill", mentions: [chief.id] })]);
   });
@@ -117,7 +164,7 @@ describe("a room's @ list", () => {
     pick("Quill", "Chief of Staff");
     send();
     flushSync(() => sent()[0]!.onError());
-    expect(input().value).toBe("@Quill ");
+    expect(input().textContent).toBe("@Quill ");
     send();
     expect(sent().map((action) => action.mentions)).toEqual([[chief.id], [chief.id]]);
   });

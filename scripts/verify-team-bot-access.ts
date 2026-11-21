@@ -274,7 +274,7 @@ try {
     } },
     { name: "ask-allowed-bob", who: "bob", query: "mode=simple", act: async () => {
       await openPayroll();
-      await page.until("!document.querySelector('[data-testid=view-only-composer]') && Boolean(document.querySelector('textarea'))", "Bob's composer");
+      await page.until("!document.querySelector('[data-testid=view-only-composer]') && Boolean(document.querySelector('.composer-editor'))", "Bob's composer");
     } },
     { name: "share-dialog-many-people", who: "ada", query: "mode=simple", act: async () => {
       await crowd();

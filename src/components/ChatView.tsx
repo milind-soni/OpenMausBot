@@ -1172,7 +1172,7 @@ export const ChatView = memo(function ChatView({ bot: profile, inForkPanel = fal
             onDismiss={() => setRunDismissed((current) => new Map(current).set(transcriptKey, lastRunStep.id))}
             onSave={() => {
               appendComposerDraft(`bot:${bot.id}:${bot.threadId}`, skillPrompt(recordedRun, askText(messages)));
-              composerDockRef.current?.querySelector("textarea")?.focus();
+              composerDockRef.current?.querySelector<HTMLElement>('[role="textbox"]')?.focus();
             }}
           />
         </div>

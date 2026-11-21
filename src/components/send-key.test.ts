@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { Editor } from "@tiptap/core";
 import { createElement, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -64,11 +65,12 @@ let root: Root;
 const render = (element: ReactElement) => flushSync(() => root.render(element));
 const textarea = (selector = "textarea") => host.querySelector<HTMLTextAreaElement>(selector)!;
 
-function type(input: HTMLTextAreaElement, value: string) {
-  const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+const composer = () => host.querySelector<HTMLElement & { editor: Editor }>(".composer-editor")!;
+function typeComposer(value: string) {
+  const { editor } = composer();
   flushSync(() => {
-    setValue.call(input, value);
-    input.dispatchEvent(new Event("input", { bubbles: true }));
+    editor.commands.setContent(value, { contentType: "markdown" });
+    editor.commands.setTextSelection(editor.state.doc.content.size);
   });
 }
 
@@ -81,7 +83,7 @@ function press(input: Element, init: KeyboardEventInit & { keyCode?: number } = 
 
 const sends = () => fixture.dispatch.mock.calls.map(([action]) => action).filter((action) => ["send", "sendGroup", "editMessage"].includes(action.type));
 
-function expectSendKey(mode: SendKey, input: () => HTMLTextAreaElement, sent: () => number) {
+function expectSendKey(mode: SendKey, input: () => HTMLElement, sent: () => number) {
   const ime = [{ isComposing: true }, { keyCode: 229 }, { isComposing: true, shiftKey: true }, { keyCode: 229, shiftKey: true }, { isComposing: true, ctrlKey: true }, { keyCode: 229, metaKey: true }];
   for (const init of ime) {
     expect(press(input(), init).defaultPrevented, JSON.stringify(init)).toBe(false);
@@ -89,7 +91,8 @@ function expectSendKey(mode: SendKey, input: () => HTMLTextAreaElement, sent: ()
   expect(sent()).toBe(0);
   const newLines = mode === "enter" ? [{ shiftKey: true }] : mode === "shift-enter" ? [{}] : [{}, { shiftKey: true }];
   for (const init of newLines) {
-    expect(press(input(), init).defaultPrevented, JSON.stringify(init)).toBe(false);
+    const event = press(input(), init);
+    if (input() instanceof HTMLTextAreaElement) expect(event.defaultPrevented, JSON.stringify(init)).toBe(false);
   }
   expect(sent()).toBe(0);
   const send = mode === "enter" ? {} : mode === "shift-enter" ? { shiftKey: true } : { ctrlKey: true };
@@ -121,21 +124,21 @@ describe.each(SEND_KEYS)("in %s mode", (mode) => {
 
   it("the 1:1 composer sends on its key, and Ctrl/⌘+Enter always", () => {
     render(createElement(Composer, { bot }));
-    type(textarea(), "first");
-    expectSendKey(mode, textarea, () => sends().length);
+    typeComposer("first");
+    expectSendKey(mode, composer, () => sends().length);
     expect(sends()).toEqual([expect.objectContaining({ type: "send", botId: "bot", text: "first" })]);
-    type(textarea(), "second");
-    expect(press(textarea(), { metaKey: true }).defaultPrevented).toBe(true);
+    typeComposer("second");
+    expect(press(composer(), { metaKey: true }).defaultPrevented).toBe(true);
     expect(sends().at(-1)).toEqual(expect.objectContaining({ type: "send", text: "second" }));
-    type(textarea(), "third");
-    expect(press(textarea(), { ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(true);
+    typeComposer("third");
+    expect(press(composer(), { ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(true);
     expect(sends().at(-1)).toEqual(expect.objectContaining({ type: "send", text: "third" }));
   });
 
   it("a room's composer follows the same key", () => {
     render(createElement(Composer, { group: room, members: [bot] }));
-    type(textarea(), "hello room");
-    expectSendKey(mode, textarea, () => sends().length);
+    typeComposer("hello room");
+    expectSendKey(mode, composer, () => sends().length);
     expect(sends()).toEqual([expect.objectContaining({ type: "sendGroup", groupId: "room", text: "hello room" })]);
   });
 
@@ -181,27 +184,27 @@ describe("an input method in the composer's menus", () => {
 
   it("leaves the Enter that confirms 山田 to the input method, not the mention menu", () => {
     render(createElement(Composer, { group: room, members: [{ ...bot, name: "山田" }] }));
-    type(textarea(), "@山田");
+    typeComposer("@山田");
     for (const init of ime) {
       for (const key of ["Enter", "Tab", "ArrowDown"]) {
-        expect(press(textarea(), { ...init, key }).defaultPrevented, JSON.stringify({ ...init, key })).toBe(false);
+        expect(press(composer(), { ...init, key }).defaultPrevented, JSON.stringify({ ...init, key })).toBe(false);
       }
-      expect(textarea().value).toBe("@山田");
+      expect(composer().textContent).toBe("@山田");
     }
-    expect(press(textarea()).defaultPrevented).toBe(true);
-    expect(textarea().value).toBe("@山田 ");
+    expect(press(composer()).defaultPrevented).toBe(true);
+    expect(composer().textContent).toBe("@山田 ");
     expect(sends()).toEqual([]);
   });
 
   it("leaves it to the input method in the command menu too", () => {
     render(createElement(Composer, { group: room, members: [bot] }));
-    type(textarea(), "/go");
+    typeComposer("/go");
     for (const init of ime) {
-      expect(press(textarea(), init).defaultPrevented, JSON.stringify(init)).toBe(false);
-      expect(textarea().value).toBe("/go");
+      expect(press(composer(), init).defaultPrevented, JSON.stringify(init)).toBe(false);
+      expect(composer().textContent).toBe("/go");
     }
-    expect(press(textarea()).defaultPrevented).toBe(true);
-    expect(textarea().value).toBe("");
+    expect(press(composer()).defaultPrevented).toBe(true);
+    expect(composer().textContent).toBe("");
     expect(sends()).toEqual([]);
   });
 });
@@ -210,18 +213,18 @@ describe("the send key in hints", () => {
   it("names the key on the send button and in the busy composer", () => {
     fixture.instances = [{ instanceId: "test", driverKind: "codex", displayName: "Test", capabilities: { queueing: true } } as unknown as InstanceInfo];
     render(createElement(Composer, { bot }));
-    type(textarea(), "hi");
+    typeComposer("hi");
     expect(host.querySelector('button[aria-label="Send message"]')?.getAttribute("title")).toBe("Send (Enter)");
     flushSync(() => setSendKey("shift-enter"));
     expect(host.querySelector('button[aria-label="Send message"]')?.getAttribute("title")).toBe("Send (Shift+Enter)");
     flushSync(() => setSendKey("mod-enter"));
     expect(host.querySelector('button[aria-label="Send message"]')?.getAttribute("title")).toBe("Send (Ctrl+Enter)");
 
-    type(textarea(), "");
+    typeComposer("");
     render(createElement(Composer, { bot: { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] } }));
-    expect(textarea().placeholder).toBe("Pepper is working. Ctrl+Enter sends your message");
+    expect(composer().getAttribute("aria-placeholder")).toBe("Pepper is working. Ctrl+Enter sends your message");
     render(createElement(Composer, { group: { ...room, busyBotId: "bot" }, members: [{ ...bot, modelSelection: { instanceId: "none", model: "x" } }] }));
-    expect(textarea().placeholder).toBe("Pepper is working. Ctrl+Enter sends your message");
+    expect(composer().getAttribute("aria-placeholder")).toBe("Pepper is working. Ctrl+Enter sends your message");
   });
 
   it("names the key in Japanese hints too", () => {
@@ -230,7 +233,7 @@ describe("the send key in hints", () => {
     setLocale("ja");
     try {
       render(createElement(Composer, { bot: { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] } }));
-      expect(textarea().placeholder).toBe("Pepper が作業中です — Ctrl+Enter でメッセージを送ります");
+      expect(composer().getAttribute("aria-placeholder")).toBe("Pepper が作業中です — Ctrl+Enter でメッセージを送ります");
     } finally {
       setLocale("en");
     }
@@ -260,11 +263,11 @@ describe("sending while working", () => {
     fixture.instances = [{ instanceId: "test", driverKind: "codex", displayName: "Test", capabilities: { queueing } } as unknown as InstanceInfo];
     render(createElement(Composer, { bot: working }));
     for (const key of [{}, { ctrlKey: true }, { metaKey: true }]) {
-      type(textarea(), "follow up");
-      expect(press(textarea(), key).defaultPrevented).toBe(true);
+      typeComposer("follow up");
+      expect(press(composer(), key).defaultPrevented).toBe(true);
       expect(sends().at(-1)).toMatchObject({ type: "send", text: "follow up" });
     }
-    type(textarea(), "clicked");
+    typeComposer("clicked");
     const button = host.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')!;
     flushSync(() => button.click());
     expect(sends().at(-1)).toMatchObject({ type: "send", text: "clicked" });
@@ -272,8 +275,8 @@ describe("sending while working", () => {
 
   it("sends a room message normally while a member is working", () => {
     render(createElement(Composer, { group: { ...room, busyBotId: bot.id }, members: [bot] }));
-    type(textarea(), "room follow up");
-    expect(press(textarea()).defaultPrevented).toBe(true);
+    typeComposer("room follow up");
+    expect(press(composer()).defaultPrevented).toBe(true);
     expect(fixture.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "sendGroup", text: "room follow up" }));
   });
 });

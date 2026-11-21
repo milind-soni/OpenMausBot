@@ -377,7 +377,7 @@ export function ChatV2({ profile, phoneLayout = false }: { profile: Bot; phoneLa
         const keyboard = event.detail === 0;
         if (!computerOpen) {
           const composer = event.currentTarget.closest("[data-chat-v2]")
-            ?.querySelector<HTMLElement>('[data-tour="composer"] textarea');
+            ?.querySelector<HTMLElement>('[data-tour="composer"] [role=textbox]');
           rememberComputerPanelOpen({ botId: bot.id, opener: keyboard ? event.currentTarget : composer ?? null, tabs: keyboard });
         }
         if (!keyboard) event.currentTarget.blur();

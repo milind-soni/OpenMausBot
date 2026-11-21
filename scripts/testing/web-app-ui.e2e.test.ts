@@ -85,28 +85,22 @@ async function connect(url: string) {
     await request("Emulation.setTouchEmulationEnabled", { enabled: true, maxTouchPoints: 1 });
     await request("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     await request("Page.navigate", { url });
-    await expect.poll(() => evaluate("document.querySelector('textarea[aria-label^=\"Message\"]') !== null"), { timeout: 20_000 }).toBe(true);
-    // iOS automatically zooms small form text on focus, leaving a standalone
-    // window shifted after the keyboard closes. Keep the mention mirror aligned.
-    const touchText = await evaluate(`(() => {
-      const input = document.querySelector('textarea[aria-label^="Message"]');
-      return { input: parseFloat(getComputedStyle(input).fontSize),
-        mirror: parseFloat(getComputedStyle(document.querySelector('.mention-editor-mirror')).fontSize) };
-    })()`);
-    expect(touchText.input).toBeGreaterThanOrEqual(16);
-    expect(touchText.mirror).toBe(touchText.input);
+    await expect.poll(() => evaluate("document.querySelector('[role=textbox][aria-label^=\"Message\"]') !== null"), { timeout: 20_000 }).toBe(true);
+    // iOS zooms an editable field with small text when it receives focus.
+    const touchTextSize = await evaluate("parseFloat(getComputedStyle(document.querySelector('.composer-editor')).fontSize)");
+    expect(touchTextSize).toBeGreaterThanOrEqual(16);
     const parsed = await request("Page.getAppManifest");
     expect(parsed.url).toBe(`${url}/manifest.webmanifest`);
     expect(parsed.errors).toEqual([]);
     const installability = await request("Page.getInstallabilityErrors");
     expect(installability.installabilityErrors).toEqual([]);
-    await expect.poll(() => evaluate("document.querySelector('textarea[aria-label^=\"Message\"]') !== null"), { timeout: 20_000 }).toBe(true);
+    await expect.poll(() => evaluate("document.querySelector('[role=textbox][aria-label^=\"Message\"]') !== null"), { timeout: 20_000 }).toBe(true);
     for (const [width, height, insets] of [[390, 844, { top: 44, bottom: 34, left: 0, right: 0 }],
       [844, 390, { top: 0, bottom: 21, left: 44, right: 44 }]] as const) {
       await request("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: true });
       await request("Emulation.setSafeAreaInsetsOverride", { insets });
       const box = await evaluate(`(() => { const root=document.getElementById('root').getBoundingClientRect();
-        const input=document.querySelector('textarea[aria-label^="Message"]').getBoundingClientRect();
+        const input=document.querySelector('[role=textbox][aria-label^="Message"]').getBoundingClientRect();
         return {overflow:document.documentElement.scrollWidth>innerWidth, top:input.top, bottom:input.bottom, left:input.left, right:input.right, height:root.height}; })()`);
       expect(box.overflow).toBe(false);
       expect(box.top).toBeGreaterThanOrEqual(insets.top);
@@ -116,7 +110,7 @@ async function connect(url: string) {
       const shot = await request("Page.captureScreenshot", { format: "png" });
       writeFileSync(`${logPath}.web-app-${width}.png`, Buffer.from(shot.data, "base64"));
     }
-    await evaluate("document.querySelector('textarea[aria-label^=\"Message\"]').focus()");
+    await evaluate("document.querySelector('[role=textbox][aria-label^=\"Message\"]').focus()");
     await request("Input.insertText", { text: "Phone web app fixture message" });
     await request("Input.dispatchKeyEvent", { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });
     await request("Input.dispatchKeyEvent", { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 });

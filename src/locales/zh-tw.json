@@ -1,6 +1,4 @@
 {
-  "composer.markdown.preview": "預覽 Markdown",
-  "composer.markdown.edit": "編輯 Markdown",
   "chat.v2.sent": "已傳送給 {names}",
   "chat.v2.received": "收到來自 {names} 的訊息",
   "chat.v2.bots": "{count} 個 Bot",

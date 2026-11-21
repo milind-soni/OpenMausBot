@@ -64,7 +64,7 @@ if (!enabled) console.log("skipping usage details UI: set OMB_UI_E2E=1 to instal
       const layout = await evaluate(`(() => {
         const rect = selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width }; };
         return { viewport: innerWidth, scroll: document.documentElement.scrollWidth,
-          menu: rect('[role=menu][aria-label=More]'), editor: rect('.mention-editor'),
+          menu: rect('[role=menu][aria-label=More]'), editor: rect('[data-composer-editor]'),
           row: rect('[data-composer-row]'), controls: rect('[data-composer-actions]'),
           wraps: getComputedStyle(document.querySelector('[data-composer-row]')).flexWrap === 'wrap' };
       })()`);

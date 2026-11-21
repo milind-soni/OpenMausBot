@@ -5,7 +5,7 @@ import { useLayoutEffect, useState, type RefObject } from "react";
  * between them. `wrapAt` is the length at which the one-row field wrapped; the field goes back beside the buttons
  * only below it, so wider text on its own line cannot flip back and forth.
  */
-export function useStackedField(inputRef: RefObject<HTMLTextAreaElement | null>, on: boolean, text: string): boolean {
+export function useStackedField(inputRef: RefObject<HTMLElement | null>, on: boolean, text: string): boolean {
   const [wrapAt, setWrapAt] = useState<number | null>(null);
   const stacked = on && (text.includes("\n") || (wrapAt !== null && text.length >= wrapAt));
   // Width changes (a resized window, a panel opening) can wrap the one-row field too, so watch its size, not just the text.
@@ -14,11 +14,11 @@ export function useStackedField(inputRef: RefObject<HTMLTextAreaElement | null>,
     if (!on || stacked || !input || typeof ResizeObserver === "undefined") return;
     const measure = () => {
       // An empty field's height is its placeholder's, which may wrap; that is not a message. The next message measures afresh.
-      if (!input.value) return setWrapAt(null);
+      if (!text) return setWrapAt(null);
       const style = getComputedStyle(input);
       const line = parseFloat(style.lineHeight) || 24;
       const content = input.scrollHeight - (parseFloat(style.paddingTop) || 0) - (parseFloat(style.paddingBottom) || 0);
-      if (content > line * 1.5) setWrapAt(input.value.length);
+      if (content > line * 1.5) setWrapAt(text.length);
     };
     measure();
     const observer = new ResizeObserver(measure);

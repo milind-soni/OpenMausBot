@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { Editor } from "@tiptap/core";
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -47,7 +48,7 @@ describe("native dictation in the real composer", () => {
   let speechStop: ReturnType<typeof vi.fn>;
   let speechStart: ReturnType<typeof vi.fn>;
 
-  const input = () => container.querySelector("textarea")!;
+  const input = () => container.querySelector<HTMLElement & { editor: Editor }>(".composer-editor")!;
   const button = (label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
   const click = (label: string) => flushSync(() => button(label)!.click());
   const hear = (text: string) => flushSync(() => transcript({ text, partial: true }));
@@ -85,9 +86,9 @@ describe("native dictation in the real composer", () => {
   it("does not erase dictated text on empty partial/final callbacks", () => {
     hear("ここまで入力した文章。");
     hear("");
-    expect(input().value).toBe("ここまで入力した文章。");
+    expect(input().textContent).toBe("ここまで入力した文章。");
     flushSync(() => transcript({ text: "", partial: false }));
-    expect(input().value).toBe("ここまで入力した文章。");
+    expect(input().textContent).toBe("ここまで入力した文章。");
   });
 
   it("stops synchronously on Send and rejects both late speech and end events", () => {
@@ -95,21 +96,21 @@ describe("native dictation in the real composer", () => {
     click(t("composer.send.message"));
     expect(speechStop).toHaveBeenCalled();
     expect(fixture.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "send", text: "送信する文章。" }));
-    expect(input().value).toBe("");
+    expect(input().textContent).toBe("");
     hear("送信する文章。");
     hear("送った後の独り言。");
     flushSync(() => end({ code: 1, reason: "recognition-error" }));
-    expect(input().value).toBe("");
+    expect(input().textContent).toBe("");
     expect(button(t("composer.dictation.start"))).not.toBeNull();
     expect(container.textContent).not.toContain(t("composer.dictation.failed"));
   });
 
   it("also stops on keyboard Send", () => {
     hear("Enterで送信。");
-    flushSync(() => input().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    flushSync(() => input().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
     expect(speechStop).toHaveBeenCalled();
     hear("遅れた結果。");
-    expect(input().value).toBe("");
+    expect(input().textContent).toBe("");
   });
 
   it("accepts multiple recognition results before React paints", () => {
@@ -117,7 +118,7 @@ describe("native dictation in the real composer", () => {
       transcript({ text: "一", partial: true });
       transcript({ text: "一度に届いた文章。", partial: true });
     });
-    expect(input().value).toBe("一度に届いた文章。");
+    expect(input().textContent).toBe("一度に届いた文章。");
     expect(speechStop).not.toHaveBeenCalled();
   });
 
@@ -128,16 +129,16 @@ describe("native dictation in the real composer", () => {
     const late = transcript;
     click(t("composer.dictation.start"));
     flushSync(() => late({ text: "古いセッション", partial: true }));
-    expect(input().value).toBe("最初の文章。");
+    expect(input().textContent).toBe("最初の文章。");
     hear("追加の文章。");
-    expect(input().value).toBe("最初の文章。 追加の文章。");
+    expect(input().textContent).toBe("最初の文章。 追加の文章。");
   });
 
   it("does not overwrite a manual draft edit", () => {
     hear("音声の文章。");
     flushSync(() => restoreComposerDraft(draftId, { text: "手で訂正した文章。", attachments: [] }));
     hear("音声の文章。古い追記。");
-    expect(input().value).toBe("手で訂正した文章。");
+    expect(input().textContent).toBe("手で訂正した文章。");
     expect(speechStop).toHaveBeenCalled();
   });
 
@@ -145,18 +146,18 @@ describe("native dictation in the real composer", () => {
     hear("元スレッドの文章。");
     const previous = transcript;
     flushSync(() => root.render(createElement(Composer, { bot: { ...bot, threadId: "other-thread" } })));
-    await expect.poll(() => input().value).toBe("");
+    await expect.poll(() => input().textContent).toBe("");
     flushSync(() => previous({ text: "元スレッドの遅い結果。", partial: true }));
-    expect(input().value).toBe("");
+    expect(input().textContent).toBe("");
     expect(speechStart).toHaveBeenCalledOnce();
     flushSync(() => root.render(createElement(Composer, { bot })));
-    await expect.poll(() => input().value).toBe("元スレッドの文章。");
+    await expect.poll(() => input().textContent).toBe("元スレッドの文章。");
   });
 
   it("retains text when recognition ends in an error", () => {
     hear("失敗しても残す文章。");
     flushSync(() => end({ code: 1, reason: "recognition-error" }));
     hear("");
-    expect(input().value).toBe("失敗しても残す文章。");
+    expect(input().textContent).toBe("失敗しても残す文章。");
   });
 });

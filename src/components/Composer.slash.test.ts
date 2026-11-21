@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { Editor } from "@tiptap/core";
 // The / menu in the real composer: skills can be picked anywhere in a message, built-in commands only at its start.
 import { createElement } from "react";
 import { flushSync } from "react-dom";
@@ -58,9 +59,8 @@ describe("the / menu in the composer", () => {
 
   function fill(text: string, caret = text.length) {
     flushSync(() => restoreComposerDraft(draftId, { text, attachments: [] }));
-    const input = container.querySelector("textarea")!;
-    input.setSelectionRange(caret, caret);
-    flushSync(() => input.dispatchEvent(new KeyboardEvent("keyup", { key: "/", bubbles: true })));
+    const input = container.querySelector<HTMLElement & { editor: Editor }>(".composer-editor")!;
+    flushSync(() => input.editor.commands.setTextSelection(caret + 1));
     return input;
   }
   const options = () => [...document.body.querySelectorAll<HTMLElement>('[role="option"]')];
@@ -75,13 +75,13 @@ describe("the / menu in the composer", () => {
     const input = fill("write it up with /");
     expect(labels()).toEqual(["/standup"]);
     flushSync(() => options()[0]!.click());
-    expect(input.value).toBe("write it up with /standup ");
+    expect(input.textContent).toBe("write it up with /standup ");
   });
 
   it("adds no second space when text already follows the pick", () => {
     const input = fill("use /st later", "use /st".length);
     flushSync(() => options()[0]!.click());
-    expect(input.value).toBe("use /standup later");
+    expect(input.textContent).toBe("use /standup later");
   });
 
   it("opens nothing inside a path or link", () => {

@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import type { Editor } from "@tiptap/core";
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -90,11 +91,11 @@ afterEach(() => {
 describe("the composer after Set me up", () => {
   it("asks for the job and shows a chip to stop it while the conversation waits, and neither once it does not", () => {
     render({ bot: { ...bot, tasks: [{ threadId: bot.threadId, title: "New thread", createdAt: 1, setupRequest: { at: 2 } }] } });
-    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Tell Atlas what you'd like help with");
+    expect(container.querySelector<HTMLElement & { editor: Editor }>(".composer-editor")!.getAttribute("aria-placeholder")).toBe("Tell Atlas what you'd like help with");
     expect(container.querySelector("[data-setup-request]")?.textContent).toContain("Atlas is ready to be set up");
     expect(container.querySelector(`[aria-label="Stop setting up Atlas"]`)).not.toBeNull();
     render({ bot: { ...bot, tasks: [{ threadId: bot.threadId, title: "New thread", createdAt: 1 }] } });
-    expect(container.querySelector("textarea")!.getAttribute("placeholder")).toBe("Message Atlas");
+    expect(container.querySelector<HTMLElement & { editor: Editor }>(".composer-editor")!.getAttribute("aria-placeholder")).toBe("Message Atlas");
     expect(container.querySelector("[data-setup-request]")).toBeNull();
   });
 });
@@ -118,7 +119,7 @@ describe("the composer", () => {
     const teach = document.querySelector<HTMLButtonElement>('[data-menu-key="teach"]');
     expect(teach).not.toBeNull();
     click(teach);
-    expect(container.querySelector("textarea")!.value).toBe("/learn how I file expenses");
+    expect(container.querySelector<HTMLElement & { editor: Editor }>(".composer-editor")!.textContent).toBe("/learn how I file expenses");
   });
 
   it("leaves Teach a task out when skill authoring is off", () => {
@@ -155,23 +156,20 @@ describe("the composer", () => {
 
   describe("with a message longer than one line", () => {
     const type = (value: string) => {
-      const field = container.querySelector("textarea")!;
-      flushSync(() => {
-        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, value);
-        field.dispatchEvent(new Event("input", { bubbles: true }));
-      });
+      const field = container.querySelector<HTMLElement & { editor: Editor }>(".composer-editor")!;
+      flushSync(() => field.editor.commands.setContent(value, { contentType: "markdown" }));
     };
     const classes = (selector: string) => container.querySelector(selector)!.className.split(" ");
-    const stacked = () => classes(".mention-editor").includes("basis-full");
+    const stacked = () => classes("[data-composer-editor]").includes("basis-full");
     /** A field 20 characters wide: longer text wraps onto a second 24px line. */
-    const wrapPast20 = () => vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get")
-      .mockImplementation(function (this: HTMLTextAreaElement) { return this.value.length > 20 ? 48 : 24; });
+    const wrapPast20 = () => vi.spyOn(HTMLElement.prototype, "scrollHeight", "get")
+      .mockImplementation(function (this: HTMLElement) { return (this.textContent?.length ?? 0) > 20 ? 48 : 24; });
 
     it("gives the text the full width above the buttons, and puts it back beside them on one line", () => {
       render({ bot });
       expect(stacked()).toBe(false);
       type("Okay I have done my outreach.\nAnother line of text.");
-      expect(classes(".mention-editor")).toEqual(expect.arrayContaining(["order-first", "basis-full"]));
+      expect(classes("[data-composer-editor]")).toEqual(expect.arrayContaining(["order-first", "basis-full"]));
       expect(classes("[data-composer-row]")).toContain("flex-wrap");
       expect(classes("[data-composer-actions]")).toContain("ml-auto");
       type("Okay I have done my outreach.");
@@ -200,13 +198,13 @@ describe("the composer", () => {
       expect(stacked()).toBe(true);
       type("");
       // Wider now: 30 characters fit on the one row.
-      wrap.mockImplementation(function (this: HTMLTextAreaElement) { return this.value.length > 40 ? 48 : 24; });
+      wrap.mockImplementation(function (this: HTMLElement) { return (this.textContent?.length ?? 0) > 40 ? 48 : 24; });
       type("a".repeat(30));
       expect(stacked()).toBe(false);
     });
 
     it("never stacks an empty field, even when its placeholder wraps", () => {
-      vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get").mockReturnValue(48);
+      vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(48);
       render({ bot });
       expect(stacked()).toBe(false);
     });
