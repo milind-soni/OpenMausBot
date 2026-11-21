@@ -49,7 +49,7 @@ export function createRefusedLending(deps: RefusedLendingDeps) {
         if (id !== runId && (status === undefined || !NOT_FINISHED.has(status))) refused.delete(id);
       }
       const before = refused.get(runId);
-      refused.set(runId, { name, device, used: used || (before?.startedAt === run.startedAt && before.used === true), startedAt: run.startedAt });
+      refused.set(runId, { name, device, used: used || (before !== undefined && before.startedAt === run.startedAt && before.used), startedAt: run.startedAt });
     },
     /** The run in this conversation got the lent computer: what it was refused before no longer holds. */
     allowed(threadId: string): void {
