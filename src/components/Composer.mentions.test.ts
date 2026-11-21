@@ -146,6 +146,9 @@ describe("a room's @ list", () => {
     expect(options().map((one) => one.textContent)).toEqual([expect.stringContaining("Analyst"), expect.stringContaining("Chief of Staff")]);
     pick("Quill", "Chief of Staff");
     expect(input().textContent).toBe("@Quill ");
+    expect(input().querySelector(".composer-mention-trigger")?.textContent).toBe("@");
+    expect(input().querySelector(".composer-mention-icon")?.getAttribute("aria-hidden")).toBe("true");
+    expect(input().querySelector(".bot-mention")?.textContent).toBe("Quill");
     send();
     expect(sent()).toEqual([expect.objectContaining({ type: "sendGroup", groupId: room.id, text: "@Quill", mentions: [chief.id] })]);
   });

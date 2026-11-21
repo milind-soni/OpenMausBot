@@ -3945,6 +3945,9 @@ button:disabled.bg-danger {
   margin-inline-end: .2em;
   vertical-align: -.15em;
 }
+.composer-mention-trigger { font-size: 0; }
+.composer-mention-icon { inline-size: 13px; }
+.bot-mention.composer-mention-name { padding: 0; }
 .bot-mention-mirror {
   /* Paint the extra weight and hover padding without changing textarea glyph advances. */
   padding: 0;

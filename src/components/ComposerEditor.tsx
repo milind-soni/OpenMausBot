@@ -6,10 +6,12 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import StarterKit from "@tiptap/starter-kit";
 import { Marked, type marked } from "marked";
 import { useLayoutEffect, useRef, type RefObject } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { cn } from "@/lib/cn";
 import { imeComposing } from "@/lib/send-key";
 import { mentionClassName, mentionRanges, type MentionPeer } from "@/lib/mentions";
 
+import { BotAvatar } from "./Avatar";
 import { normalizeMathDelimiters } from "./ChatMarkdown";
 import { composerMarkdownExtensions } from "./composer-markdown";
 
@@ -124,6 +126,7 @@ export function ComposerEditor(props: Props) {
 
   useLayoutEffect(() => {
     const { inputRef, editorRef } = latest.current;
+    const avatars = new WeakMap<globalThis.Node, Root>();
     const mentions = Extension.create({
       name: "composerMentions",
       addProseMirrorPlugins() {
@@ -138,10 +141,36 @@ export function ComposerEditor(props: Props) {
                   const start = pos + 1 + range.start;
                   const end = pos + 1 + range.end;
                   if (state.doc.rangeHasMark(start, end, state.schema.marks.code!)) continue;
+                  const bot = range.bot;
+                  if (bot) {
+                    const id = bot.id ? { "data-mention-bot-id": bot.id } : {};
+                    marks.push(
+                      Decoration.inline(start, start + 1, { class: "composer-mention-trigger" }),
+                      Decoration.inline(start + 1, end, { class: "bot-mention composer-mention-name", ...id }),
+                      Decoration.widget(start + 1, (view) => {
+                        const icon = view.dom.ownerDocument.createElement("span");
+                        icon.className = "bot-mention-icon composer-mention-icon";
+                        icon.setAttribute("aria-hidden", "true");
+                        if (bot.id) icon.dataset.mentionBotId = bot.id;
+                        const root = createRoot(icon);
+                        avatars.set(icon, root);
+                        root.render(<BotAvatar bot={bot} size={13} animated={false} />);
+                        return icon;
+                      }, {
+                        side: -1,
+                        key: JSON.stringify([bot.id, bot.name, bot.color, bot.mascotBody, bot.mascotFaceColor, bot.avatarUrl, bot.avatarCrop, bot.avatarZoom, bot.avatarFocusX, bot.avatarFocusY]),
+                        destroy: (icon) => {
+                          const root = avatars.get(icon);
+                          avatars.delete(icon);
+                          queueMicrotask(() => root?.unmount());
+                        },
+                      }),
+                    );
+                    continue;
+                  }
                   marks.push(Decoration.inline(start, end, {
                     class: mentionClassName(range),
                     ...(range.color ? { style: `--mention-color: ${range.color}` } : {}),
-                    ...(range.bot?.id ? { "data-mention-bot-id": range.bot.id } : {}),
                   }));
                 }
               });
