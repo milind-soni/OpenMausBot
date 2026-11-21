@@ -1936,7 +1936,7 @@ describe("ACP turns (fake CLI)", () => {
     process.env.FAKE_ACP_ALLOW_ALWAYS = "1";
     const answer = join(scratch, "permission-answer.txt");
     process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
-    await create(GrokAgentDriver, "permission");
+    await create(GeminiAgentDriver, "permission");
     await instance.adapter.sendTurn({ threadId: "t-always-native", text: "go", approvalMode: "ask" });
     const opened = await recorder.until((e) => e.type === "request.opened");
     expect(opened).toHaveProperty("allowSession", true);

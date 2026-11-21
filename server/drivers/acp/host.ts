@@ -64,6 +64,8 @@ export interface AcpHostOptions {
 export class AcpLink implements AcpConnection {
   sessionId: string | null = null;
   inbound: AcpInbound | null = null;
+  /** Hears every `session/update` routed to this link, replayed history included, before the thread reads it. */
+  onUpdate: ((params: any) => void) | null = null;
   closed = false;
   #lastInboundAt = Date.now();
   readonly host: AcpHost;
@@ -306,6 +308,7 @@ export class AcpHost {
       if (link?.inbound && !link.closed) link.inbound.request(msg);
       else this.options.unrouted(msg, (obj) => this.write(obj, link?.threadId ?? null));
     } else if (msg.method && link && !link.closed) {
+      if (msg.method === "session/update") link.onUpdate?.(msg.params);
       link.inbound?.notification(msg);
     }
   }

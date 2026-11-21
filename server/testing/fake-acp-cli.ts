@@ -50,6 +50,13 @@
 //   FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT  emit text and a tool result before failing
 //   FAKE_ACP_RPC_FAILURE_AFTER_USAGE  emit the scripted usage updates and FAKE_ACP_UPDATES_FILE's before failing
 //   FAKE_ACP_LOAD_ERROR  JSON-RPC error returned by session/load
+//   FAKE_ACP_LOAD_REPLAY  session/load first replays this many history updates of the session (REPLAYED-USER-<n>,
+//     REPLAYED-AGENT-<n>), marked _meta.isReplay with FAKE_ACP_LOAD_REPLAY_MARKED=1; FAKE_ACP_LOAD_UNANSWERED=1 then leaves
+//     the load unanswered, as grok 1.0.x can
+//   FAKE_ACP_GROK_EFFORT=1  sessions report grok 1.0.41's `reasoning_effort` select (starting on --reasoning-effort, else
+//     high) and session/set_config_option changes it; =refuse answers that set with -32602
+//   FAKE_ACP_GROK_LOGIN  what `models` says of the login, as grok 1.0.25 prints it: signed-in | signed-out | refreshes (signed
+//     out once, then signed in, as a token refreshed by the first call) | hang; FAKE_ACP_GROK_LOGIN_COUNT counts the calls
 //   FAKE_ACP_MODELS  model ids: opencode-shaped configOptions and set_config_option (-32602 for others);
 //     a new session starts on AGY_ACP_DEFAULT_MODEL when set, taken unchecked as agy_acp_server 1.1.1 does
 //   FAKE_ACP_MODELS_FILE  the same list, read once at startup, as `opencode acp` never re-reads a login
@@ -196,6 +203,8 @@ const variantValues = (entries: any[]): string[] => entries.flatMap((entry) => (
 const modes = (process.env.FAKE_ACP_MODES ?? "").split(",").filter(Boolean);
 let currentMode: string | null = modes[0] ?? null;
 let currentFast: string | null = null;
+const grokEffort = process.env.FAKE_ACP_GROK_EFFORT;
+let currentEffort = process.argv.includes("--reasoning-effort") ? process.argv[process.argv.indexOf("--reasoning-effort") + 1]! : "high";
 const taskIdFile = process.env.FAKE_ACP_TASKID_FILE ?? "";
 const peerIdOf = (list: string): string => /id: ([\w-]+)/.exec(list)?.[1] ?? "";
 function handoffCall(message: string, options: { consult?: boolean; reason?: string; doneWhen?: string } = {}): { name: string; args: (list: string) => object } {
@@ -262,6 +271,14 @@ const configOptions = () => {
       type: "select",
       currentValue: currentMode,
       options: modes.map((value) => ({ value, name: value })),
+    }] : []),
+    ...(grokEffort ? [{
+      id: "reasoning_effort",
+      name: "Reasoning Effort",
+      category: "thought_level",
+      type: "select",
+      currentValue: currentEffort,
+      options: ["high", "medium", "low"].map((value) => ({ value, name: value })),
     }] : []),
     ...(currentFast ? [{
       id: "fast",
@@ -392,6 +409,19 @@ if (argv[0] === "status" || argv[0] === "whoami") {
   const authenticated = process.env.FAKE_ACP_AUTH !== "0";
   console.log(JSON.stringify({ isAuthenticated: authenticated }));
   process.exit(0);
+}
+const grokLogin = process.env.FAKE_ACP_GROK_LOGIN;
+if (argv[0] === "models" && grokLogin) {
+  const countFile = process.env.FAKE_ACP_GROK_LOGIN_COUNT;
+  const calls = countFile && existsSync(countFile) ? Number(readFileSync(countFile, "utf8")) || 0 : 0;
+  if (countFile) writeFileSync(countFile, String(calls + 1));
+  if (grokLogin === "hang") setInterval(() => {}, 1_000);
+  else {
+    const signedIn = grokLogin === "signed-in" || (grokLogin === "refreshes" && calls > 0);
+    console.log([signedIn ? "You are logged in with grok.com." : "You are not authenticated.",
+      "Default model: grok-4.5", "Available models:", "  - grok-4.5 (default)"].join("\n"));
+    process.exit(0);
+  }
 }
 const catalogLock = process.env.FAKE_ACP_MODELS_LOCK;
 if (catalogLock && (argv[0] === "models" || argv[0] === "acp") && !argv.includes("--refresh") && process.env.OPENCODE_DISABLE_MODELS_FETCH !== "1") {
@@ -1057,6 +1087,15 @@ function handle(msg: any) {
       detachedSessions.delete(String(msg.params?.sessionId));
       const copies = openCopies.get(String(msg.params?.sessionId)) ?? 0;
       openCopies.set(String(msg.params?.sessionId), process.env.FAKE_ACP_COPY_LIVE_LOAD === "1" ? copies + 1 : 1);
+      for (let turn = 1; turn <= Number(process.env.FAKE_ACP_LOAD_REPLAY ?? 0); turn++) {
+        for (const [sessionUpdate, text] of [["user_message_chunk", `REPLAYED-USER-${turn}`], ["agent_message_chunk", `REPLAYED-AGENT-${turn}`]]) {
+          out({ jsonrpc: "2.0", method: "session/update", params: {
+            sessionId: msg.params.sessionId, ...(process.env.FAKE_ACP_LOAD_REPLAY_MARKED === "1" ? { _meta: { isReplay: true } } : {}),
+            update: { sessionUpdate, content: { type: "text", text } },
+          } });
+        }
+      }
+      if (process.env.FAKE_ACP_LOAD_UNANSWERED === "1") break;
       resultAndConfigUpdates(msg.id, { ...(opts ? { configOptions: opts } : {}), ...(mdls ? { models: mdls } : {}) }, "session/load", msg.params.sessionId);
       if (mode === "hermes-steer") advertiseHermesCommands(msg.params.sessionId);
       break;
@@ -1116,6 +1155,19 @@ function handle(msg: any) {
           writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
         }
         resultAndConfigUpdates(msg.id, process.env.FAKE_ACP_EMPTY_VARIANT_ACK ? {} : { configOptions: configOptions() }, "effort", msg.params.sessionId);
+        break;
+      }
+      if (configId === "reasoning_effort" && grokEffort && ["high", "medium", "low"].includes(value)) {
+        if (grokEffort === "refuse") {
+          out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "Invalid params: reasoning_effort" } });
+          break;
+        }
+        currentEffort = value;
+        configCalls.push({ method: msg.method, params: msg.params });
+        if (process.env.FAKE_ACP_DUMP) {
+          writeFileSync(`${process.env.FAKE_ACP_DUMP}.config.json`, JSON.stringify(configCalls, null, 2));
+        }
+        result(msg.id, { configOptions: configOptions() });
         break;
       }
       if (configId === "fast" && currentFast && (value === "true" || value === "false")) {

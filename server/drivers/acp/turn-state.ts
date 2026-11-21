@@ -73,6 +73,8 @@ export interface AcpSession {
   commands?: ReadonlySet<string>;
   fallbackNotice?: string;
   launchModel?: string;
+  /** The effort the session runs: its process's launch argv's, or the last one configureSession applied. */
+  effort?: SendTurnInput["effort"];
 }
 
 /** A `tool_call` without a status is pending (ACP's default); a `tool_call_update` without one leaves the call as it was. */

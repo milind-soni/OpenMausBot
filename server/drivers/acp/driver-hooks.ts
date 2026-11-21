@@ -2,6 +2,8 @@
 // changes behaviour.
 import type { ChildProcess } from "node:child_process";
 
+import type { SendTurnInput } from "../../contracts.ts";
+import type { AcpConfig } from "./core.ts";
 import type { AcpHost } from "./host.ts";
 
 export interface AcpDriverHooks {
@@ -29,7 +31,16 @@ export interface AcpDriverHooks {
   /** The failure a turn's thrown error stands for, in the person's words (a usage limit with its reset), or undefined to
    * keep the error as it is. Must not throw. */
   reportedFailure?(error: unknown): Error | undefined;
+  /** For an agent that can leave session/load unanswered after replaying the history: how long the replay must go quiet
+   * before the load counts as done. Undefined waits for the answer. */
+  loadReplayQuietMs?(turn: SendTurnInput): number | undefined;
+  /** The part of spawnArgs a running process must match for a turn to reuse it. What it leaves out, configureSession
+   * changes inside the live session, throwing LiveSwitchRefused when the agent refuses; a reused session then restarts. */
+  spawnContractArgs?(config: AcpConfig, turn: SendTurnInput): string[];
 }
+
+/** configureSession could not change a running session's model or effort in place. */
+export class LiveSwitchRefused extends Error {}
 
 const MAX_LINE_CHARS = 64 * 1024;
 
