@@ -173,9 +173,12 @@ posixOnly("work digest e2e (every fake engine)", () => {
 
     // no message yet: the folder is read into the bot's checkpoint, and no snapshot is taken
     const shadows = join(home, ".openmausbot", "checkpoints", created.id);
-    const shadow = () => (existsSync(shadows) ? readdirSync(shadows) : []).map((name) => join(shadows, name, ".git")).find((dir) => existsSync(join(dir, "index")));
-    await waitFor(async () => shadow() !== undefined, "the project to be read ahead of the first message");
+    const shadow = () => (existsSync(shadows) ? readdirSync(shadows) : [])
+      .filter((name) => !name.endsWith(".new"))
+      .map((name) => join(shadows, name, ".git"))
+      .find((dir) => existsSync(join(dir, "index")));
     const shadowGit = (...args: string[]) => execFileSync("git", args, { encoding: "utf8", env: { ...process.env, GIT_DIR: shadow()! } }).trim();
+    await waitFor(async () => shadow() !== undefined && shadowGit("ls-files") !== "", "the project files to be staged ahead of the first message");
     expect(shadowGit("ls-files")).toBe("README.md");
     expect(shadowGit("log", "--format=%s")).toBe("checkpoint base");
 
