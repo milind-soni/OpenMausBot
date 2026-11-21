@@ -98,6 +98,8 @@ describe("what a Team Cloud's export leaves out (the private sentence: not the O
     expect([...attachments].sort()).toEqual(["bobs.png", "unsent.png"]);
     expect(omittedAsTeamPrivate("attachments/bobs.png", { ...privacy, attachments })).toBe(true);
     expect(omittedAsTeamPrivate("attachments/both.png", { ...privacy, attachments })).toBe(false);
+    expect(omittedAsTeamPrivate("attachment-originals/bobs.png", { ...privacy, attachments })).toBe(true);
+    expect(omittedAsTeamPrivate("attachment-originals/both.png", { ...privacy, attachments })).toBe(false);
     expect(omittedAsTeamPrivate(`workspaces/bot--member-${BOB}/MEMORY.md`, privacy)).toBe(true);
     expect(omittedAsTeamPrivate("workspaces/bot--room-room/MEMORY.md", privacy)).toBe(false);
     expect(omittedAsTeamPrivate("workspaces/bot/MEMORY.md", privacy)).toBe(false);
