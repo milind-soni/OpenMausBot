@@ -154,7 +154,7 @@ export function usageTotals(dataDir: string, now = new Date()): UsageTotals {
 }
 
 /** Counts a booked row from memory until its append lands, so the next cap check already sees it. */
-export function noteUsage(dataDir: string, row: Pick<UsageRow, "at" | "threadId" | "botId" | "costUsd" | "input" | "output" | "cachedInput">, written: Promise<boolean>): void {
+export function noteUsage(dataDir: string, row: Pick<UsageRow, "at" | "threadId" | "botId" | "turnId" | "costUsd" | "input" | "output" | "cachedInput">, written: Promise<boolean>): void {
   const entry = entryOf(row);
   if (!entry.usd && !entry.tokens) return;
   const key = usageRowKey(row);

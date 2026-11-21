@@ -74,6 +74,24 @@ describe("what has been used", () => {
     expect(usageTotals(dataDir, at(64)).server).toEqual({ day: { usd: 0.25, tokens: 1_500 }, month: { usd: 0.25, tokens: 1_500 } });
   });
 
+  it("counts distinct turns on one thread that finish in the same millisecond", async () => {
+    usageTotals(dataDir, now);
+    const first = { ...row("2026-09-15T11:59:00.000Z", "a", 1), turnId: "turn-one" };
+    const second = { ...row("2026-09-15T11:59:00.000Z", "a", 2), turnId: "turn-two" };
+    noteUsage(dataDir, first, appendUsage(dataDir, first));
+    noteUsage(dataDir, second, appendUsage(dataDir, second));
+    try {
+      expect(usageTotals(dataDir, now).server.day).toEqual({ usd: 3, tokens: 3_000 });
+      await flushUsageLedger(dataDir);
+      await Promise.resolve();
+      expect(usageTotals(dataDir, now).bots.get("a")!.day).toEqual({ usd: 3, tokens: 3_000 });
+      expect(reachedCap({ server: { dailyUsd: 2.5 } }, dataDir, { botId: "a", personWaiting: false }, now, NO_ENV)).not.toBeNull();
+      expect(usageTotals(dataDir, new Date(now.getTime() + 16_000)).server.day).toEqual({ usd: 3, tokens: 3_000 });
+    } finally {
+      await flushUsageLedger(dataDir);
+    }
+  });
+
   it("sets no cap at all until one is asked for, and reads 0 as no cap", () => {
     expect(capStates(undefined, dataDir, now, NO_ENV)).toEqual([]);
     expect(capStates({ server: { dailyUsd: 0 }, bots: { a: {} } }, dataDir, now, NO_ENV)).toEqual([]);

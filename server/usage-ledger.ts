@@ -108,8 +108,8 @@ export function usageFileFor(dataDir: string, at: Date): string {
   return join(dataDir, DIR, `${monthKey(at)}.jsonl`);
 }
 
-export function usageRowKey(row: Pick<UsageRow, "at" | "threadId" | "botId">): string {
-  return `${row.at}|${row.threadId}|${row.botId}`;
+export function usageRowKey(row: Pick<UsageRow, "at" | "threadId" | "botId" | "turnId">): string {
+  return `${row.at}|${row.threadId}|${row.botId}${row.turnId ? `|turn:${row.turnId}` : ""}`;
 }
 
 export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: string }): Promise<boolean> {
