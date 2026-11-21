@@ -195,6 +195,35 @@ describe("killCliTree", () => {
     }
   }, 20_000);
 
+  it.runIf(process.platform === "linux")("leaves running a child the gateway started before its exec, even when recorded first", async () => {
+    // Recorded while the gateway still looked like its launcher, the child then sits in the gateway's session.
+    const parent = spawnCli(process.execPath, ["-e", `
+      const c = require('node:child_process').spawn('/bin/sh', ['-c', '"$0" -e "$2" & echo $!; read go; exec env HERMES_GATEWAY_DETACHED=1 "$0" -e "$1" gateway run', process.execPath, ${JSON.stringify(GATEWAY)}, ${JSON.stringify(IDLE)}], {
+        detached: true, stdio: ['pipe', 'pipe', 'ignore'],
+      });
+      process.stdout.write(c.pid + ' ');
+      process.stdin.once('data', () => c.stdin.write('go\\n'));
+      c.stdout.pipe(process.stdout);
+      ${IDLE};
+    `], { stdio: ["pipe", "pipe", "pipe"] });
+    let output = "";
+    parent.stdout!.on("data", (chunk) => { output += String(chunk); });
+    const pids = () => output.trim().split(/\s+/).filter(Boolean).map(Number);
+    try {
+      await vi.waitFor(() => expect(pids()).toHaveLength(2), 5_000);
+      captureCliTree(parent);
+      parent.stdin!.write("go\n");
+      await vi.waitFor(() => expect(pids()).toHaveLength(4), 5_000);
+      const [gateway, early, reported, late] = pids();
+      expect(reported).toBe(gateway);
+      await expect(killCliTree(parent, 80)).resolves.toBe(true);
+      expect([gateway, early, late].map(alive)).toEqual([true, true, true]);
+    } finally {
+      await killCliTree(parent, 0);
+      if (pids()[0]) try { process.kill(-pids()[0], "SIGKILL"); } catch {}
+    }
+  }, 20_000);
+
   it.skipIf(process.platform === "win32")("escalates ignored TERM and shares concurrent stop attempts", async () => {
     const child = spawnCli(process.execPath, ["-e", STUBBORN], { stdio: ["pipe", "pipe", "pipe"] });
     try {

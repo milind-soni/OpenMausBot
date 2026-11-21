@@ -144,13 +144,26 @@ function outlivesLauncher({ pid, session }: LinuxProcess): boolean {
   }
 }
 
+/** Such a daemon, or a process in its session: its own children, even one recorded before the daemon's exec. */
+function leftRunning(current: LinuxProcess): boolean {
+  if (process.platform !== "linux") return false;
+  const { session } = current;
+  if (session === undefined || session === current.pid) return outlivesLauncher(current);
+  try {
+    const leader = linuxProcess(session);
+    return leader !== null && outlivesLauncher(leader);
+  } catch {
+    return false;
+  }
+}
+
 /** A child recorded between its fork and its exec still showed its launcher's command line and environment, so a
- * gateway can already be in the tree: forget it before walking the tree. */
+ * gateway and its children can already be in the tree: forget them before walking the tree. */
 function forgetOutliving(tree: Map<number, string>): void {
   for (const [pid, start] of tree) {
     let current: LinuxProcess | null;
     try { current = linuxProcess(pid); } catch { continue; }
-    if (current?.start === start && outlivesLauncher(current)) tree.delete(pid);
+    if (current?.start === start && leftRunning(current)) tree.delete(pid);
   }
 }
 
@@ -187,7 +200,7 @@ function addLinuxDescendants(tree: Map<number, string>): boolean {
       let current: LinuxProcess | null;
       try { current = linuxProcess(pid); } catch { return false; }
       if (!current || current.parent !== parent) return false;
-      if (tree.get(pid) === current.start || outlivesLauncher(current)) continue;
+      if (tree.get(pid) === current.start || leftRunning(current)) continue;
       tree.set(pid, current.start);
       queue.push([pid, current.start]);
     }
@@ -216,7 +229,7 @@ function addDescendantsFromEveryProcess(tree: Map<number, string>): void {
     discovered = false;
     for (const current of snapshot.values()) {
       if (current.pid === process.pid || !parents.has(current.parent) || tree.get(current.pid) === current.start) continue;
-      if (outlivesLauncher(current)) continue;
+      if (leftRunning(current)) continue;
       tree.set(current.pid, current.start);
       parents.add(current.pid);
       discovered = true;
@@ -231,7 +244,7 @@ function linuxDescendantsStopped(child: ChildProcess): boolean {
   for (const [pid, start] of tree) {
     try {
       const current = read(pid);
-      if (current?.start === start && current.state !== "Z" && current.state !== "X" && !outlivesLauncher(current)) return false;
+      if (current?.start === start && current.state !== "Z" && current.state !== "X" && !leftRunning(current)) return false;
     } catch { return false; }
   }
   return true;
@@ -272,7 +285,7 @@ function signalLinuxDescendants(child: ChildProcess, value: NodeJS.Signals): voi
   for (const [pid, start] of tree) {
     try {
       const current = read(pid);
-      if (current?.start === start && current.state !== "Z" && current.state !== "X") process.kill(pid, value);
+      if (current?.start === start && current.state !== "Z" && current.state !== "X" && !leftRunning(current)) process.kill(pid, value);
     } catch {}
   }
 }
