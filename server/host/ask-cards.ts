@@ -34,6 +34,8 @@ export interface AskCardsDeps {
   notify(notification: Notification | null): void;
   /** On a Team Cloud: what `botId` asks in `threadId` reaches the inbox conversation `inboxThreadId` as a copy. */
   copiedInto(inboxThreadId: string, botId: string, threadId: string): boolean;
+  /** `threadId` is private to someone other than the person `parentThreadId` belongs to: its details stay out of it. */
+  keptPrivate(threadId: string, parentThreadId: string): boolean;
   /** The bot's turn in `threadId` waits on this card's live request. */
   live(threadId: string, requestId: string): boolean;
   /** The parked node's next turn carries the person's answer. */
@@ -110,7 +112,7 @@ export function createAskCards(deps: AskCardsDeps) {
     }
   }
 
-  const waitingCardChips = new Map<string, { threadId: string; messageId: string; name: string }>();
+  const waitingCardChips = new Map<string, { threadId: string; messageId: string; name: string; tool: NonNullable<Message["tool"]>; settled: boolean }>();
 
   /** A sign-in, password, connect or review card left open in handed-off work: the conversation that handed it on links to
    * it, as it does for a question or approval. Keyed by the card, so it shows once. */
@@ -119,27 +121,38 @@ export function createAskCards(deps: AskCardsDeps) {
     const id = `${threadId}:${wait.messageId}`;
     if (!key || waitingCardChips.has(id)) return;
     const delegator = delegatorOf(threadId);
-    if (!delegator || delegator.threadId === threadId || deps.copiedInto(delegator.threadId, asker.id, threadId)) return;
+    if (!delegator || delegator.threadId === threadId || deps.copiedInto(delegator.threadId, asker.id, threadId) || deps.keptPrivate(threadId, delegator.threadId)) return;
+    const tool = noticeTool(key, { name: asker.name, label: wait.label }, {});
     const chip = store.appendMessage(delegator.threadId, { role: "bot", kind: "activity",
       from: { botId: asker.id, name: asker.name, color: asker.color },
-      tool: noticeTool(key, { name: asker.name, label: wait.label }, {}),
+      tool,
       threadRef: { botId: asker.id, threadId, title: store.taskByThread(asker.id, threadId)?.title ?? asker.name },
     });
-    waitingCardChips.set(id, { threadId: delegator.threadId, messageId: chip.id, name: asker.name });
+    waitingCardChips.set(id, { threadId: delegator.threadId, messageId: chip.id, name: asker.name, tool, settled: false });
   }
 
   /** The card was saved, declined, replaced or stopped: its chip says the work no longer waits. */
   function settleWaitingOnCardChip(threadId: string, cardMessageId: string) {
-    const id = `${threadId}:${cardMessageId}`;
-    const chip = waitingCardChips.get(id);
-    if (!chip) return;
-    waitingCardChips.delete(id);
+    const chip = waitingCardChips.get(`${threadId}:${cardMessageId}`);
+    if (!chip || chip.settled) return;
+    chip.settled = true;
     const existing = store.messagesFor(chip.threadId).find((message) => message.id === chip.messageId);
     if (!existing?.tool) return;
     const { nameCode: _code, nameParams: _params, ...tool } = existing.tool;
     store.patchMessage(chip.threadId, chip.messageId, {
       tool: { ...tool, name: serverLine(conversationLanguage(chip.threadId), "server.teammates.noLongerWaiting", { who: `@${chip.name}` }), ok: true },
     });
+  }
+
+  /** The same card waits again (the person went back to its branch): its chip says so again, on the same line. */
+  function reopenWaitingOnCardChip(threadId: string, cardMessageId: string) {
+    const chip = waitingCardChips.get(`${threadId}:${cardMessageId}`);
+    if (!chip?.settled) return;
+    chip.settled = false;
+    const existing = store.messagesFor(chip.threadId).find((message) => message.id === chip.messageId);
+    if (!existing?.tool) return;
+    const { ok: _ok, ...tool } = existing.tool;
+    store.patchMessage(chip.threadId, chip.messageId, { tool: { ...tool, ...chip.tool } });
   }
 
   /** In a room only the asking member's own lines. */
@@ -318,5 +331,5 @@ export function createAskCards(deps: AskCardsDeps) {
     questionCard({ id: `${botId}-${turnId}`, threadId, botId, executions: 1, createdAt: reply.at, startedAt: reply.at } as HandoffView, question);
   }
 
-  return { park, remind, decided, closed, askedAgain, answerParked, answeredInWords, typed, ownQuestion, showWaitingOnPersonChip, settleWaitingOnPersonChips, showWaitingOnCardChip, settleWaitingOnCardChip };
+  return { park, remind, decided, closed, askedAgain, answerParked, answeredInWords, typed, ownQuestion, showWaitingOnPersonChip, settleWaitingOnPersonChips, showWaitingOnCardChip, settleWaitingOnCardChip, reopenWaitingOnCardChip };
 }
