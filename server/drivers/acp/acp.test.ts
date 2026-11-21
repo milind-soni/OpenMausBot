@@ -1299,6 +1299,35 @@ describe("ACP turns (fake CLI)", () => {
     for (const name of ["NO_PROXY", "no_proxy"]) expect(env[name]!.split(",")).toEqual(expect.arrayContaining(["127.0.0.1", "localhost", "::1"]));
   });
 
+  it.each([
+    { advertised: "http", setting: undefined, form: "url" },
+    { advertised: undefined, setting: undefined, form: "stdio" },
+    { advertised: "http", setting: "0", form: "stdio" },
+  ])("gives Grok OpenMausBot's own servers by URL in its first session when its initialize says it takes them (advertised=$advertised, OMB_OWN_MCP_HTTP=$setting)", async ({ advertised, setting, form }) => {
+    if (advertised) process.env.FAKE_ACP_MCP_TRANSPORTS = advertised;
+    if (setting) vi.stubEnv("OMB_OWN_MCP_HTTP", setting);
+    try {
+      await create(GrokAgentDriver);
+      const dump = join(scratch, "grok-own-http.json");
+      process.env.FAKE_ACP_DUMP = dump;
+      const harness = "http://127.0.0.1:8799";
+      const browser = { command: process.execPath, args: ["/app/dist-server/harness-mcp-proxy.js", "browser"], env: { OMB_HARNESS_URL: harness, OMB_MCP_TOKEN_BROWSER: "synthetic-browser-capability" } };
+      const notes = { command: process.execPath, args: ["/tmp/notes-mcp.js"], env: {} };
+      await instance.adapter.sendTurn({ threadId: "t-grok-own-http", text: "go", integrations: { browser, custom: { notes } } });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const sent = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8"));
+      expect(sent[1]).toEqual({ name: "notes", command: process.execPath, args: ["/tmp/notes-mcp.js"], env: [] });
+      expect(sent[0]).toEqual(form === "url"
+        ? { type: "http", name: "browser", url: `${harness}/api/internal/mcp-http/browser`, headers: [{ name: "authorization", value: "Bearer synthetic-browser-capability" }] }
+        : { name: "browser", command: process.execPath, args: browser.args, env: [{ name: "OMB_HARNESS_URL", value: harness }, { name: "OMB_MCP_TOKEN_BROWSER", value: "synthetic-browser-capability" }] });
+      const { env } = JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> };
+      if (setting !== "0") for (const name of ["NO_PROXY", "no_proxy"]) expect(env[name]!.split(",")).toEqual(expect.arrayContaining(["127.0.0.1", "localhost", "::1"]));
+    } finally {
+      delete process.env.FAKE_ACP_MCP_TRANSPORTS;
+      vi.unstubAllEnvs();
+    }
+  });
+
   it.each([false, true])("mounts Data through the existing stdio transport unless excluded (excluded=%s)", async (excluded) => {
     await create();
     const dump = join(scratch, "data.json");
@@ -1961,7 +1990,7 @@ describe("ACP turns (fake CLI)", () => {
     process.env.FAKE_ACP_ALLOW_ALWAYS = "1";
     const answer = join(scratch, "permission-answer.txt");
     process.env.FAKE_ACP_PERMISSION_ANSWER = answer;
-    await create(GrokAgentDriver, "permission");
+    await create(GeminiAgentDriver, "permission");
     await instance.adapter.sendTurn({ threadId: "t-always-native", text: "go", approvalMode: "ask" });
     const opened = await recorder.until((e) => e.type === "request.opened");
     expect(opened).toHaveProperty("allowSession", true);

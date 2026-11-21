@@ -10,10 +10,21 @@
 export type HostFault = "process_start" | "out_of_room" | "disk_full" | "tool_server" | "signed_out" | "bot_memory";
 
 const EXHAUSTED = String.raw`(?:EAGAIN|EMFILE|ENFILE)`;
+/** An engine that started but could not start its own threads, which counts against the same pids limit: grok 1.0.x's
+ * "grok: failed to start tokio runtime: blocking pool pre-warm stalled after 14 of 16 threads", Rust's "failed to spawn
+ * thread: Os { code: 11, kind: WouldBlock, … }", glibc's and Go's pthread_create or new-OS-thread failure with EAGAIN. */
+const THREAD_START = new RegExp(
+  String.raw`\bblocking pool pre-warm stalled\b` +
+  String.raw`|\b(?:failed to start tokio runtime|failed to (?:spawn|create) (?:a |new )?(?:OS )?thread|pthread_create)\b[^\n]*` +
+  String.raw`(?:\bresource temporarily unavailable\b|\bos error 11\b|\berrno=11\b|\bEAGAIN\b|\bWouldBlock\b)`, "i");
 const PROCESS_START = new RegExp(
   String.raw`\b(?:posix_)?spawn(?:Sync)?\b[^\n]*\b${EXHAUSTED}\b|\b${EXHAUSTED}\b[^\n]*\b(?:posix_)?spawn\b` +
   String.raw`|\bfork\b[^\n]*\bresource temporarily unavailable\b|\btoo many open files\b` +
-  String.raw`|^There is no room to start another program \(${EXHAUSTED}\)`, "i");
+  String.raw`|^There is no room to start another program \(${EXHAUSTED}\)|${THREAD_START.source}`, "i");
+
+/** Whether a line an engine wrote says it could not start its threads for want of room (the pids limit or RLIMIT_NPROC),
+ * as a refused spawn's EAGAIN does. */
+export const threadsRefused = (line: string): boolean => THREAD_START.test(line);
 const OUT_OF_ROOM = new RegExp(
   String.raw`\bENOMEM\b|\bcannot allocate memory\b|^There is no room to start another program \(ENOMEM\)` +
   String.raw`|^Ran out of room, so I (?:closed the browser|stopped this task)\b|\bran out of memory\b|\bout of memory\b|\bOOM[- ]kill` +

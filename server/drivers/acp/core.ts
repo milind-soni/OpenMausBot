@@ -6,9 +6,9 @@ import { type ServerText } from "../../../shared/server-text.ts";
 // `allow`-kind option approves, and option order is never a security contract.
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { resolveAcpClientPath } from "./client-path.ts";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { answerClientFileRequest } from "./client-file-request.ts"; import { loadUntilReplayQuiet } from "./load-replay.ts";
 import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
@@ -65,7 +65,7 @@ import { acpSessionOperationKey, acpShellRequest, answersAlone, permissionLaunch
 import { openQuestionRequest, questionRequestFor, type AcpQuestionRequest } from "./question-requests.ts";
 import { commandSummary, toolDetailPreview } from "../../tool-summary.ts";
 import { acpToolEndEvents } from "./tool-items.ts";
-import { AcpHost } from "./host.ts"; import { SignInRequests, type AcpDriverHooks } from "./driver-hooks.ts";
+import { AcpHost } from "./host.ts"; import { LiveSwitchRefused, SignInRequests, type AcpDriverHooks } from "./driver-hooks.ts";
 import { exitBeforeResult } from "./exit-report.ts"; import { readNodeVersion } from "./node-version.ts";
 import { decodeAcpConfig } from "./config-decode.ts";
 import { endTurn, trackAssistantImage, trackAssistantWords, trackThoughtAfterTool, trackRunningTool, trackToolEndShown, type AcpAskFinish, type AcpSession, type AcpTurn } from "./turn-state.ts";
@@ -76,7 +76,7 @@ import { startupFailureRecoverable } from "./startup-recovery.ts";
 import { engineFailure, engineFailureKind } from "../engine-errors.ts";
 import { acpRuntimeFailure, acpStopFailure } from "./failure-words.ts";
 import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
-import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpOwnMcpOverHttp, loopbackUnproxied, noteAcpMcpHttp } from "../own-mcp-http.ts"; import { acpToolOutput, acpToolProgress } from "../tool-progress.ts";
+import { acpMcpServers, type AcpMcpServer } from "../turn-mcp.ts"; import { acpOwnMcpTransport, acpSessionMcpServers, loopbackUnproxied } from "../own-mcp-http.ts"; import { acpToolOutput, acpToolProgress } from "../tool-progress.ts";
 import { learnedToolCountLimit, mcpToolBudget, retryUnderToolLimit } from "../../tool-count-limit.ts"; import { instanceEnvNames } from "../../bot-box/env.ts";
 
 /** Failures fixed on the provider account, not by retrying; the reporting process stays pooled. */
@@ -198,8 +198,8 @@ export interface AcpSupport extends AcpDriverHooks {
   clientCapabilitiesMeta?: Record<string, unknown>;
   /** Made once per process: rewrites a session/update before the turn reads it, or drops it by returning null. */
   updateFilter?(): (update: Record<string, any>) => Record<string, any> | null; /** Rewrites a session/request_permission's params (its options and tool call) before the card is built. */ permissionRequest?(params: Record<string, any>): Record<string, any>;
-  /** The agent reaches MCP servers by URL: OpenMausBot's own servers are this server's endpoints, no process each. */
-  ownMcpOverHttp?: boolean;
+  /** OpenMausBot's own MCP servers as this server's endpoints, no process each: always, or in each session whose agent's `initialize` says it reaches MCP servers by URL. */
+  ownMcpOverHttp?: boolean | "advertised";
   /** How many tools the agent lists of its own beside the MCP servers', counted against a provider's tool limit. */
   engineTools?: number;
   /** The agent's own debug log, read while a prompt is quiet: a new line proves it alive and `parse`
@@ -260,6 +260,7 @@ export interface AcpSupport extends AcpDriverHooks {
     sessionModels: Array<{ modelId?: string; name?: string }>;
     /** Last model acknowledged by session/new/load/set_model, preserved for pooled turns. */
     currentModelId?: string;
+    /** The session's effort, and where a live change to it is recorded. */ currentEffort?: EffortLevel; effortApplied?(effort: EffortLevel | undefined): void;
     /** session/new's or session/load's `configOptions`, verbatim. */
     configOptions: Array<{ id?: unknown; currentValue?: unknown }>;
     /** Tell the person the session runs another model than the one picked. */
@@ -293,7 +294,6 @@ function nextUnkeyedToolId(current: AcpTurn): string {
   current.unkeyedToolIds.push(id);
   return id;
 }
-const CLIENT_FILE_MAX_BYTES = 8 * 1024 * 1024;
 
 async function readAcpImageBlocks(images: readonly TurnImageInput[]) {
   return Promise.all(images.map(async (image) => ({
@@ -597,7 +597,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const running = sharedHost(hostKey, threadId, cwd);
         if (running) return running;
         const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env), botThreads: hostKey !== null, ro: launch.ro } }, "bot");
-        const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, unrouted: refuse });
+        const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, unrouted: refuse, promptCompletion: support.promptCompletion });
         hosts.add(host); signIn.watch(host);
         child.once("close", () => hosts.delete(host));
         child.once("error", () => hosts.delete(host));
@@ -618,52 +618,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const acp = host.link(threadId, cwd);
         const send = (obj: unknown) => acp.send(obj); const nodeVersion = support.minNodeVersion ? readNodeVersion(env) : undefined;
 
-        const handleClientFileRequest = async (msg: any, current: AcpTurn): Promise<void> => {
-          const fail = (error: unknown) => send({
-            jsonrpc: "2.0",
-            id: msg.id,
-            error: { code: -32602, message: error instanceof Error ? error.message : String(error) },
-          });
-          try {
-            if (!support.clientFileSystem) throw new Error("Client file access is disabled.");
-            const params = msg.params ?? {};
-            const path = await resolveAcpClientPath(params.path, cwd, msg.method === "fs/read_text_file" ? support.clientReadRoots?.(current.turn) : undefined);
-            if (msg.method === "fs/read_text_file") {
-              const info = await stat(path);
-              if (!info.isFile() || info.size > CLIENT_FILE_MAX_BYTES) {
-                throw new Error(`ACP can only read text files under ${CLIENT_FILE_MAX_BYTES} bytes.`);
-              }
-              const content = await readFile(path, "utf8");
-              if (params.line == null && params.limit == null) {
-                send({ jsonrpc: "2.0", id: msg.id, result: { content } });
-                return;
-              }
-              const line = typeof params.line === "number" && Number.isInteger(params.line) && params.line > 0 ? params.line : 1;
-              const limit = typeof params.limit === "number" && Number.isInteger(params.limit) && params.limit >= 0 ? params.limit : undefined;
-              const lines = content.split("\n");
-              const start = line - 1;
-              send({
-                jsonrpc: "2.0",
-                id: msg.id,
-                result: { content: lines.slice(start, limit === undefined ? undefined : start + limit).join("\n") },
-              });
-              return;
-            }
-            if (typeof params.content !== "string" || Buffer.byteLength(params.content) > CLIENT_FILE_MAX_BYTES) {
-              throw new Error(`ACP can only write text files under ${CLIENT_FILE_MAX_BYTES} bytes.`);
-            }
-            await mkdir(dirname(path), { recursive: true });
-            await writeFile(path, params.content, "utf8");
-            send({ jsonrpc: "2.0", id: msg.id, result: {} });
-          } catch (error) {
-            fail(error);
-          }
-        };
-
         const handleServerRequest = (msg: any, current: AcpTurn) => {
           current.state.startupActivity = true; if (current.state.promptSent) current.acknowledge();
           if (msg.method === "fs/read_text_file" || msg.method === "fs/write_text_file") {
-            void handleClientFileRequest(msg, current);
+            void answerClientFileRequest(msg, { send, cwd, enabled: support.clientFileSystem === true, readRoots: () => support.clientReadRoots?.(current.turn) });
             return;
           }
           const question = questionRequestFor(support.questionRequests, msg.method);
@@ -938,7 +896,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (current?.state.cancelling) return;
             if (current) {
               if (!current.state.stopped) emit({ ...base(threadId, current.turnId), type: "runtime.error",
-                ...exitBeforeResult(support.displayName, code, signal, session.stderr, support.minNodeVersion, found) });
+                ...exitBeforeResult(support.displayName, code, signal, session.stderr, support.minNodeVersion, found, session.host.startRefused) });
               settle(threadId, session, current.state.stopped, current.state.stopped ? "cancelled" : "exit_before_result");
             } else if (sessions.get(threadId) === session) {
               // The identity check keeps an old child's exit from unlinking its replacement.
@@ -986,7 +944,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         const resolvedModel = support.resolveTurnModel?.(turn.model, env, catalog.models);
         const toolLimitKey = JSON.stringify([instanceId, resolvedModel ?? null]);
-        const mcpServers = acpMcpServers(turn, { http: loopbackUnproxied(env, support.ownMcpOverHttp === true || acpOwnMcpOverHttp(instanceId, support.mcpServersFromLaunch === true)), engine: support.driverKind,
+        const ownMcp = acpOwnMcpTransport(support), mcpServers = acpMcpServers(turn, { http: loopbackUnproxied(env, ownMcp !== "stdio") && ownMcp === "http", engine: support.driverKind,
           toolBudget: mcpToolBudget(learnedToolCountLimit(toolLimitKey), support.engineTools ?? 32) });
         support.applyTurnEnv?.(env, {
           model: resolvedModel, requestedModel: turn.model, fullAuto: turnConfig.fullAuto === true, botId: turn.botId, cwd, toolScope: turn.toolScope,
@@ -1021,7 +979,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const envFingerprint = createHash("sha256").update(JSON.stringify(spawnEnv)).digest("hex").slice(0, 16);
         const inheritedScopeFingerprint = narrowsNativeTools(turn.toolScope) && support.toolScopeCacheKey
           ? createHash("sha256").update(support.toolScopeCacheKey({ config: turnConfig, env, cwd })).digest("hex") : null;
-        const processContract = [launch.command, launch.args ?? [], spawnArgs,
+        const processContract = [launch.command, launch.args ?? [], support.spawnContractArgs?.(turnConfig, cliTurn) ?? spawnArgs,
           support.sessionScopedApproval ? null : turnConfig.fullAuto === true, envFingerprint,
           support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null, launch.ro ?? [], boxAudienceKey(cwd)];
         const contractKey = JSON.stringify([...processContract, cwd, turn.toolScope ?? null, inheritedScopeFingerprint]);
@@ -1035,7 +993,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const hostKey = support.shareProcess && inheritedScopeFingerprint === null ? JSON.stringify([...processContract, launchModel ?? null, engineHomes.scope(), sharedBoxScope(cwd)]) : null;
         const launchSession = () => {
           const opened = openSession(threadId, launch, [...(launch.args ?? []), ...spawnArgs], launchEnv, cwd, contractKey, hostKey);
-          opened.launchModel = launchModel;
+          opened.launchModel = launchModel; opened.effort = cliTurn.effort;
           launchedThisTurn = true;
           return opened;
         };
@@ -1132,7 +1090,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const interrupt = () => {
           state.stopped = true;
           if (session.sessionId) {
-            session.acp.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: session.sessionId } });
+            session.acp.send({ jsonrpc: "2.0", method: "session/cancel", params: { sessionId: session.sessionId, ...(support.cancelMeta ? { _meta: support.cancelMeta } : {}) } });
             if (current.interruptTimer) clearTimeout(current.interruptTimer);
             current.interruptTimer = setTimeout(() => {
               state.cancelling = true;
@@ -1164,7 +1122,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 session.initResult = await session.host.once("initialize", () => request(
                   "initialize",
                   {
-                    protocolVersion: 1,
+                    protocolVersion: 1, ...(support.initializeMeta ? { _meta: support.initializeMeta } : {}),
                     clientInfo: support.clientInfo?.(instanceId) ?? { name: "openmausbot", version: "0.0.0" },
                     clientCapabilities: {
                       fs: {
@@ -1176,7 +1134,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     },
                   },
                   INIT_TIMEOUT,
-                )); noteAcpMcpHttp(instanceId, session.initResult);
+                ));
               }
               if (!skipSubscriptionAuthForLocalInject(turn.model) && !session.authenticated) {
                 const methods: Array<{ id?: string }> = Array.isArray(session.initResult?.authMethods)
@@ -1220,11 +1178,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               let loaded = false;
               if (cursor && (!support.closeBeforeLiveLoad || liveSessionId !== cursor || await request("session/close", { sessionId: cursor }, 30_000).then(() => { session.sessionId = session.sessionKey = null; return true; }, () => false))) {
                 try {
-                  await request(
-                    support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                    { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams, ...support.sessionSetupParams?.(init) },
-                    LOAD_SESSION_TIMEOUT,
-                    (result) => {
+                  await loadUntilReplayQuiet({
+                    link: session.acp, sessionId: cursor, quietMs: support.loadReplayQuietMs?.(turn), replayed: () => session.sessionConfigResult ?? {},
+                    send: (receive) => request(
+                      support.resumeMethod === "resume" ? "session/resume" : "session/load",
+                      { sessionId: cursor, cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init), ...selectionParams, ...support.sessionSetupParams?.(init) },
+                      LOAD_SESSION_TIMEOUT, receive),
+                    receive: (result) => {
                       if (result) {
                         loaded = true;
                         session.sessionId = cursor;
@@ -1232,7 +1192,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                         receiveModelVariants(result, true);
                       }
                     },
-                  );
+                  });
                 } catch (error) {
                   const classification = support.classifyError?.(error);
                   // OpenCode sends invalidParams with only the rejected sessionId. Cursor puts the id in the
@@ -1265,7 +1225,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : mcpServers, ...selectionParams, ...support.sessionSetupParams?.(init) }, NEW_SESSION_TIMEOUT, (result) => {
+              await request("session/new", { cwd, mcpServers: support.mcpServersFromLaunch ? [] : acpSessionMcpServers(mcpServers, ownMcp, init), ...selectionParams, ...support.sessionSetupParams?.(init) }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result, true);
@@ -1322,7 +1282,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   sessionModels: Array.isArray(session.sessionConfigResult?.models?.availableModels)
                     ? session.sessionConfigResult.models.availableModels
                     : [],
-                  currentModelId: session.sessionConfigResult?.models?.currentModelId,
+                  currentModelId: session.sessionConfigResult?.models?.currentModelId, currentEffort: session.effort, effortApplied: (effort) => { session.effort = effort; },
                   configOptions: Array.isArray(session.sessionConfigResult?.configOptions)
                     ? session.sessionConfigResult.configOptions
                     : [],
@@ -1351,6 +1311,13 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             } catch (error) {
               // session.started is the only place the resume cursor is recorded.
               emitSessionStarted();
+              if (error instanceof LiveSwitchRefused && !launchedThisTurn && retryOf === undefined && !state.stopped && !session.closing) {
+                acknowledge(); state.settled = true; session.current = null; active.delete(threadId); closeSession(threadId, "contract");
+                return void sendTurn({ ...turn, startupRecovery: undefined, sessionReset: undefined, resumeCursor: sessionId }, turnId).catch((failure) => {
+                  emit({ ...base(threadId, turnId), type: "runtime.error", message: failure instanceof Error ? failure.message : String(failure) });
+                  emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "rpc_error", cost: null });
+                });
+              }
               throw error;
             }
             emitSessionStarted();
