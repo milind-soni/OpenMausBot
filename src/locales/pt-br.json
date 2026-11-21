@@ -2852,6 +2852,7 @@
   "composer.dictation.permission": "O ditado precisa de acesso ao Microfone e ao Reconhecimento de Fala. Ative os dois em Ajustes do Sistema → Privacidade e Segurança.",
   "composer.dictation.disabled": "Ligue o Ditado em Ajustes do Sistema → Teclado e tente novamente.",
   "composer.dictation.failed": "Não foi possível iniciar o ditado. Tente novamente.",
+  "composer.dictation.cutOff": "A gravação parou antes do fim. O que foi capturado está no seu rascunho.",
   "composer.dictation.unavailable": "O ditado não está disponível nesta versão.",
   "composer.dictation.start": "Iniciar o ditado",
   "composer.dictation.stop": "Parar o ditado",
