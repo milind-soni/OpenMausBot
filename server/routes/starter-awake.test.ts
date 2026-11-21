@@ -69,7 +69,7 @@ describe("the person's choice after a routine woke a bot", () => {
       const list = Array.from({ length: 7 }, (_, n) => ({ id: `b${n}`, createdAt: 0, tasks: [{ updatedAt: n * 60_000 }] }));
       const awake = createStarterAwake({ dataDir: dir, starter: () => true, bots: () => list });
       awake.paused();
-      awake.useRoutines({ routineBots: () => new Set(["b0"]), busy: () => false });
+      awake.useRoutines({ routineBots: () => new Set(["b0"]), busy: () => false, held: () => false });
       expect(awake.wakeForRoutine("b0", true)).toEqual({ kind: "woke", out: "b2" });
       const url = await serve(awake);
       const back = await post(url, { awake: ["b2", "b3", "b4", "b5", "b6"] });

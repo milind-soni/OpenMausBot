@@ -1188,25 +1188,29 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   the five starts paused and never pushes out one the person was using: `POST /api/bots`
   answers it with `"paused": true`, and the app opens **Keep these awake** with the new bot
   chosen in place of the least recently active one that isn't working (`POST /api/starter/awake`).
-  A Chief's `create_bot` answers with a `paused` line for the person. A restore or a move into a
-  Cloud that never wrote a set down wakes the most recently active; a place freed later (a chosen
-  bot deleted) goes to a bot with an enabled routine first. A paused bot's turn answers `409` `{"code":"bot_paused"}`, a hand-off to it is
-  refused, and its daily memory upkeep waits.
+  A Chief's `create_bot` answers with a `paused` line for the person. Places filled without a
+  choice (a restore or a move into a Cloud that never wrote a set down, or a chosen bot deleted) go
+  to the most recently active, except that once the routines are loaded a bot with an enabled
+  routine comes first. A paused bot's turn answers `409` `{"code":"bot_paused"}`, a hand-off to it
+  is refused, and its daily memory upkeep waits. Every bot wakes as soon as the Admin tells the
+  home its new plan, with no restart. An older server refuses a sixth bot with `409`
+  `{"code":"bot_limit"}`; the app still shows its upgrade popup for that. Every plan holds at most
+  100 bots (`MAX_WORKSPACE_BOTS`), counted on `POST /api/bots`, a package import and a Chief's
+  setup.
 - **A routine gets priority for its bot.** The limit never fails a routine, webhook, app-event or
-  Run now run. When a routine (or trigger) is made or switched on, or runs, for a bot only the
-  limit paused, that bot takes the place of the awake bot that has no enabled routine, isn't
-  working, and was idle longest; the swap is written down like a choice, so **Keep these awake**
-  shows it and the person can swap back, and one quiet line in the woken bot's chat says which
-  routine woke it and which bot was paused for it. A routine bot the person left paused in their
-  own last choice stays paused, and so does one no awake bot can make room for (every awake bot
-  has a routine or is working), and a run of a switched-off routine swaps nothing: in each case
-  the run still goes ahead in its own conversation (the rest of the bot stays paused), and the
-  bot's chat says so once. The two turns at once below still apply: such a run waits for a place
-  like any turn. A bot the person paused (`paused-bots.json`) is never woken by a routine
-  (`server/host/starter-routine-wake.ts`). Every bot wakes as soon as the Admin tells the home its new
-  plan, with no restart. An older server refuses a sixth bot with `409` `{"code":"bot_limit"}`;
-  the app still shows its upgrade popup for that. Every plan holds at most 100 bots
-  (`MAX_WORKSPACE_BOTS`), counted on `POST /api/bots`, a package import and a Chief's setup.
+  Run now run (`server/host/starter-routine-wake.ts`). When a routine (or a trigger that runs the
+  bot; a webhook that only posts doesn't count) is made or switched on, or runs, for a bot only the
+  limit paused, that bot takes the place of the awake bot that has no enabled routine, has nothing
+  in flight and waits on nobody (no turn, queued message, hand-off, question card, check-back or
+  wait), wasn't paused by the person, and has been idle longest, at least an hour
+  (`STARTER_SWAP_MIN_IDLE_MS`). The swap is written down like a choice, so **Keep these awake**
+  shows it and the person can swap back, and one quiet line in the woken bot's chat says what woke
+  it and which bot was paused for it. A routine bot the person left paused in their own last
+  choice stays paused, so does one no awake bot can make room for, and a run of a switched-off
+  routine swaps nothing: in each case the run still goes ahead in its own conversation (the rest of
+  the bot stays paused), and the bot's chat says so once. Such a routine's next run counts as due,
+  so a sleeping home is woken for it. The two turns at once below still apply: the run waits for a
+  place like any turn. A bot the person paused (`paused-bots.json`) is never woken by a routine.
 - **How much a Starter Cloud runs at once.** Two turns Cloud-wide, and four hand-offs waiting
   beyond them; past that a new hand-off is refused (`server/host/starter-caps.ts`).
 - **Who goes first.** The gate only changes the order, never how much it lets in. A

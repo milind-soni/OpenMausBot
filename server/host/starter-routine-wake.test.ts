@@ -1,11 +1,12 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createCoordinator, type CoordinatorHost, type HandoffView, type HostTurnResult } from "../coordinator.ts";
 import { Store } from "../store.ts";
 import { createStarterAwake } from "./starter-awake.ts";
-import { createStarterRoutineWake, routineBots, type RoutineLike } from "./starter-routine-wake.ts";
+import { createStarterRoutineWake, routineBots, workInFlight, type RoutineLike } from "./starter-routine-wake.ts";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -34,17 +35,20 @@ describe("a routine's bot on a Starter Cloud", () => {
     items.push(routine);
     wake.emitted({ kind: "routine", routine });
     expect(awake.paused()).toEqual([id(1), id(2)]);
-    expect(notices(0)).toEqual(["notice: Woke @Bot 0 for its routine “Morning report”: this Cloud's Starter plan keeps 5 bots awake, so @Bot 2 is paused to make room. To swap them back, send @Bot 2 a message and choose which bots stay awake."]);
+    expect(notices(0)).toEqual(["notice: Woke @Bot 0 for “Morning report”: this Cloud's Starter plan keeps 5 bots awake, so @Bot 2, idle for a while, is paused to make room. To swap them back, send @Bot 2 a message and choose which bots stay awake."]);
     // Its runs and later saves change nothing more and say nothing more.
     wake.emitted({ kind: "routine", routine });
     wake.running(id(0), "Morning report");
     expect([awake.paused(), notices(0).length]).toEqual([[id(1), id(2)], 1]);
   });
 
-  it("wakes a bot for its webhook and app trigger too, and leaves a switched-off one, a room goal, or another frame alone", () => {
+  it("wakes a bot for its webhook and app trigger too, and leaves a switched-off one, a room goal, a webhook that only posts, or another frame alone", () => {
     const { awake, wake, items, id } = cloud();
+    const posts = { botId: id(0), name: "Post it", enabled: true, delivery: "post" };
+    items.push(posts);
     wake.emitted({ kind: "routine", routine: { botId: id(0), name: "Off", enabled: false } });
     wake.emitted({ kind: "routine", routine: { botId: id(0), name: "Goal", enabled: true, target: "room-goal" } });
+    wake.emitted({ kind: "webhook", webhook: posts });
     wake.emitted({ kind: "webhook.attempt", webhook: { botId: id(0), name: "Lead", enabled: true } });
     expect(awake.paused()).toEqual([id(0), id(1)]);
     const hook = { botId: id(0), name: "New lead", enabled: true }, app = { botId: id(1), name: "New email", enabled: true };
@@ -61,7 +65,7 @@ describe("a routine's bot on a Starter Cloud", () => {
     expect(notices(0)).toEqual([]);
     wake.running(id(0), "Routine 0");
     wake.running(id(0), "Routine 0");
-    expect(notices(0)).toEqual(["notice: Ran the routine “Routine 0” for @Bot 0, which stays paused: this Cloud's Starter plan keeps 5 bots awake. Its routines still run; to chat with it, send it a message and choose which bots stay awake."]);
+    expect(notices(0)).toEqual(["notice: @Bot 0 is taking care of “Routine 0” and otherwise stays paused: this Cloud's Starter plan keeps 5 bots awake. Its routines and triggers still run; to chat with it, send it a message and choose which bots stay awake."]);
     expect(awake.paused()).toEqual([id(0), id(1)]);
   });
 
@@ -79,7 +83,64 @@ describe("a routine's bot on a Starter Cloud", () => {
     expect([off.awake.paused(), off.notices(0)]).toEqual([[], []]);
   });
 
-  it("counts only enabled routines aimed at the bot itself", () => {
-    expect([...routineBots([{ botId: "a", name: "x", enabled: true }, { botId: "b", name: "x", enabled: false }, { botId: "c", name: "x", enabled: true, target: "room-goal" }, { botId: "d", name: "x", enabled: true, target: "bot" }])]).toEqual(["a", "d"]);
+  it("counts only enabled routines and triggers that run the bot itself", () => {
+    expect([...routineBots([{ botId: "a", name: "x", enabled: true }, { botId: "b", name: "x", enabled: false }, { botId: "c", name: "x", enabled: true, target: "room-goal" },
+      { botId: "d", name: "x", enabled: true, target: "bot" }, { botId: "e", name: "x", enabled: true, delivery: "post" }, { botId: "f", name: "x", enabled: true, delivery: "run" }])]).toEqual(["a", "d", "f"]);
+  });
+});
+
+const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+describe("which awake bot a routine may not pause, with the real coordinator", () => {
+  type Ask = "outstandingFor" | "activeDirect" | "parkedFor";
+  /** A coordinator whose turns answer with `answer(node)`, and `busy` reading it through `asks` only (all by default), so each
+   * of its answers is shown to count on its own. */
+  function coordinated(answer: (node: HandoffView) => HostTurnResult) {
+    const host: CoordinatorHost = {
+      validate: vi.fn(() => undefined), busy: vi.fn(() => false), run: vi.fn(async (node: HandoffView) => answer(node)), report: vi.fn(), changed: vi.fn(),
+      names: vi.fn((node: HandoffView) => ({ requester: "Chief", assignee: node.botId })), park: vi.fn(), levelOf: vi.fn(() => ({ level: "ask" as const })), chiefOf: vi.fn(() => false),
+    };
+    const coordinator = createCoordinator({ dataDir: ":memory:", host, log: () => {} });
+    const extra = { checkBacks: new Map<string, number>(), waits: new Map<string, number>() };
+    const busy = (botId: string, asks: Ask[] = ["outstandingFor", "activeDirect", "parkedFor"]) => workInFlight({
+      conversations: (id) => [`${id}-chat`], turnActive: () => false, conversationBusy: () => false,
+      coordinator: {
+        outstandingFor: (threadId) => (asks.includes("outstandingFor") ? coordinator.outstandingFor(threadId) : []),
+        activeDirect: (threadId) => asks.includes("activeDirect") && coordinator.activeDirect(threadId),
+        parkedFor: (id) => (asks.includes("parkedFor") ? coordinator.parkedFor(id) : []),
+      },
+      checkBacks: (_botId, threadId) => extra.checkBacks.get(threadId) ?? 0, waits: (id) => extra.waits.get(id) ?? 0,
+    })(botId);
+    return { coordinator, busy, extra };
+  }
+  const address = (botId: string) => ({ botId, threadId: `${botId}-chat` });
+
+  it("keeps a bot whose own conversation is parked on a question card for the person", () => {
+    const { coordinator, busy } = coordinated(() => ({ ok: true, text: "" }));
+    coordinator.beginTurn({ id: "gen-b", address: address("b"), brief: "Pick a plan", level: "ask", origin: { kind: "user", request: "Pick a plan" } });
+    coordinator.endTurn("gen-b", { ok: true, text: "", cards: { question: "Which option?", ids: ["card-1"] } });
+    expect(coordinator.outstandingFor("b-chat")).toEqual([]);
+    expect([busy("b"), busy("b", ["activeDirect"]), busy("b", ["outstandingFor"]), busy("idle")]).toEqual([true, true, false, false]);
+  });
+
+  it("keeps a bot whose handed-off work waits on the person, and one that waits on work it handed out", async () => {
+    const { coordinator, busy } = coordinated((node) => (node.botId === "b" ? { ok: true, text: "NEEDS INPUT: CSV or Excel?" } : { ok: true, text: "" }));
+    coordinator.beginTurn({ id: "gen-chief", address: address("chief"), brief: "Export", level: "ask", origin: { kind: "user", request: "Export" } });
+    coordinator.enqueue(address("chief"), "gen-chief", undefined, address("b"), "Export the report");
+    coordinator.endTurn("gen-chief", { ok: true, text: "" });
+    coordinator.tick(); await flush();
+    expect(coordinator.parkedFor("b")).toHaveLength(1);
+    expect([busy("b"), busy("b", ["parkedFor"]), busy("chief"), busy("chief", ["outstandingFor"])]).toEqual([true, true, true, true]);
+    expect([busy("b", ["outstandingFor"]), busy("chief", ["parkedFor"])]).toEqual([false, false]);
+  });
+
+  it("keeps a bot with a check-back or a wait, and lets an idle one go", () => {
+    const { busy, extra } = coordinated(() => ({ ok: true, text: "" }));
+    expect(busy("b")).toBe(false);
+    extra.checkBacks.set("b-chat", 1);
+    expect(busy("b")).toBe(true);
+    extra.checkBacks.clear();
+    extra.waits.set("b", 1);
+    expect(busy("b")).toBe(true);
   });
 });

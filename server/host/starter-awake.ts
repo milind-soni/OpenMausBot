@@ -1,14 +1,16 @@
 // Which of a Starter Cloud's bots stay awake. Starter makes as many bots as the person likes, but only this many take turns;
 // the rest are paused until the person swaps them in or upgrades. The awake set is written down while every bot still fits,
 // so a bot made past the limit starts paused and never pushes out one the person was using, and a paused bot that receives
-// a message never does either. A restore or a move into a Cloud that never wrote one down wakes the most recently active. A
-// place freed later (a chosen bot was deleted) goes to a bot with an enabled routine first, then to the most recently active.
+// a message never does either. When places are filled (a restore or a move into a Cloud that never wrote a set down, or a
+// chosen bot deleted) they go to the most recently active, except that once the routines are known (useRoutines) a bot
+// with an enabled routine comes first.
 //
 // A routine gets priority for its bot (wakeForRoutine): the limit is the plan's, the routine is the person's, so a routine
-// never fails because its bot is paused for the limit. A bot with an enabled routine (or trigger) that is paused takes the
-// place of the awake bot that has none, is not working, and was idle longest. That is written down like any choice, so the
-// picker shows it and the person can swap back. A routine bot the person left paused in their own last choice stays paused,
-// and so does one no awake bot can make room for; their routines run anyway without changing who is awake (starter-caps.ts
+// never fails because its bot is paused for the limit. A bot with an enabled routine (or trigger that runs it) that is
+// paused takes the place of the awake bot that has none, has no work in flight and waits on nobody, was not paused by the
+// person, and was idle longest, at least STARTER_SWAP_MIN_IDLE_MS. That is written down like any choice, so the picker
+// shows it and the person can swap back. A routine bot the person left paused in their own last choice stays paused, and
+// so does one no awake bot can make room for; their routines run anyway without changing who is awake (starter-caps.ts
 // lets the run's own conversation through). A bot the PERSON paused (bot-holds.ts) is another thing: nothing here wakes it.
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -20,6 +22,9 @@ import { writeFileAtomic } from "../atomic.ts";
 /** How many bots a Starter Cloud keeps awake, not counting its MausBot or chief of staff. The one number to change. */
 export const STARTER_AWAKE_LIMIT = 5;
 export const STARTER_AWAKE_FILE = "starter-awake.json";
+/** A routine takes the place only of a bot idle at least this long: one used a moment ago may be about to hear from the
+ * person, whose next message would then meet the picker. */
+export const STARTER_SWAP_MIN_IDLE_MS = 60 * 60_000;
 const botIds = z.array(z.string().min(1).max(200));
 /** `left`: bots with a routine the person left paused in their own last choice. `told`: bots already told once that their
  * routine ran while they stayed paused. */
@@ -39,8 +44,10 @@ export type RoutineWake = { kind: "awake" } | { kind: "woke"; out: string } | { 
 export interface RoutineSource {
   /** Bots with at least one enabled routine or trigger. */
   routineBots(): ReadonlySet<string>;
-  /** The bot has work in flight: a turn, a queued message, a hand-off it waits on, or a routine run. */
+  /** The bot has work in flight or waits on the person (starter-routine-wake.ts `workInFlight`). */
   busy(botId: string): boolean;
+  /** The person paused it (bot-holds.ts): it keeps its place for when they resume it. */
+  held(botId: string): boolean;
 }
 
 export interface StarterAwake {
@@ -60,7 +67,8 @@ export interface StarterAwake {
 /** A bot's latest activity: its newest thread's last message, or when it was made. */
 const lastActive = (bot: AwakeBot) => Math.max(bot.createdAt ?? 0, ...(bot.tasks ?? []).map((task) => task.updatedAt ?? 0));
 
-export function createStarterAwake(deps: { dataDir: string; starter(): boolean; bots(): readonly AwakeBot[]; changed?: () => void }): StarterAwake {
+export function createStarterAwake(deps: { dataDir: string; starter(): boolean; bots(): readonly AwakeBot[]; changed?: () => void; now?: () => number }): StarterAwake {
+  const now = deps.now ?? Date.now;
   const file = join(deps.dataDir, STARTER_AWAKE_FILE);
   let chosen: string[] | null = null, left: string[] = [], told: string[] = [], routines: RoutineSource | null = null;
   try {
@@ -123,7 +131,8 @@ export function createStarterAwake(deps: { dataDir: string; starter(): boolean; 
       if (!keep || keep.has(botId) || !candidates().some((bot) => bot.id === botId)) return { kind: "awake" };
       const first = routineBots(), byId = new Map(candidates().map((bot) => [bot.id, bot]));
       const out = !first.has(botId) || left.includes(botId) ? undefined
-        : [...keep].filter((id) => !first.has(id) && !routines?.busy(id)).sort((a, b) => lastActive(byId.get(a)!) - lastActive(byId.get(b)!))[0];
+        : [...keep].filter((id) => !first.has(id) && !routines?.busy(id) && !routines?.held(id) && now() - lastActive(byId.get(id)!) >= STARTER_SWAP_MIN_IDLE_MS)
+          .sort((a, b) => lastActive(byId.get(a)!) - lastActive(byId.get(b)!))[0];
       if (out !== undefined) {
         save(chosen!.map((id) => (id === out ? botId : id)));
         deps.changed?.();
