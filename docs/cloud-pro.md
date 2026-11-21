@@ -1258,13 +1258,18 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   server is -800 and Caddy -900, so the health check is the last to go, and
   the root supervisor that restarts them is -1000, never picked. When memory
   runs out the kernel takes a bot's process, never the workspace.
-- **OpenCode reaches OpenMausBot's own tools over HTTP.** The agents,
-  browser, computer, Data, Email and phone servers are endpoints of this server
-  (`/api/internal/mcp-http/<name>`, `server/routes/own-mcp-http.ts`) with the
-  turn's capability in the Authorization header, instead of a Node proxy
-  process each (about 20–30 MB PSS apiece) in every OpenCode session. A server
-  behind a tool selection keeps its stdio gate; the person's own servers are
-  unchanged.
+- **OpenCode, Cursor, omp and Grok reach OpenMausBot's own tools over HTTP.**
+  The agents, browser, computer, Data, Email and phone servers are endpoints of
+  this server (`/api/internal/mcp-http/<name>`, `server/routes/own-mcp-http.ts`)
+  with the turn's capability in the Authorization header, instead of a Node
+  proxy process each (about 20–30 MB PSS and 7 threads apiece, all counted
+  against the pids limit) in every session. Grok gets this in each session whose
+  `initialize` answer says `mcpCapabilities.http`; otherwise it keeps the stdio
+  proxies. In the bot box the engine reaches the endpoint the way its proxies
+  did, through the box's bridge to the harness gate. A server behind a tool
+  selection keeps its stdio gate; the person's own servers and the connected
+  apps' connector are unchanged. `OMB_OWN_MCP_HTTP=0` puts every engine back on
+  the stdio proxies.
 - **The reason is said, in one line.** A turn whose engine was stopped for
   memory, by the home or by the kernel (a SIGKILL while `/proc/vmstat`'s
   `oom_kill` rose), ends with "Ran out of room, so I closed the browser to
