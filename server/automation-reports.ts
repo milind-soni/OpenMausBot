@@ -114,8 +114,8 @@ export interface AutomationReportDeps {
   brief?(run: RoutineRun, turnId?: string): void;
   /** The language a line in this conversation is written in (server/server-lines.ts); absent, English. */
   threadLanguage?(threadId: string): string | undefined;
-  /** A line the app adds under a completed run's reply, in the language of the chat it reports to, taken once
-   * (host/refused-lending.ts): it is said even when the bot's reply is quiet. */
+  /** A line the app adds under a run's reply or its failure line, in the language of the chat it reports to, taken once
+   * (host/refused-lending.ts, host/no-terminal.ts): it is said even when the bot's reply is quiet. */
   notes?: { has(runId: string): boolean; take(runId: string, language: string | undefined): string | null };
 }
 
@@ -241,7 +241,7 @@ export function createAutomationReports(deps: AutomationReportDeps) {
     const source = line.kind === "reply" ? replyOf(run, line.messageId) : undefined;
     const language = deps.threadLanguage?.(target.threadId);
     const said: RunReply = line.kind === "reply" ? withNote(read(run, source), deps.notes?.take(run.id, language) ?? null)
-      : { quiet: false, text: line.detail ? serverLine(language, run.partial ? "server.runs.partlyDoneWhy" : "server.runs.didNotFinishWhy", { detail: line.detail }) : serverLine(language, "server.runs.didNotFinish") };
+      : withNote({ quiet: false, text: line.detail ? serverLine(language, run.partial ? "server.runs.partlyDoneWhy" : "server.runs.didNotFinishWhy", { detail: line.detail }) : serverLine(language, "server.runs.didNotFinish") }, deps.notes?.take(run.id, language) ?? null);
     const recovered = said.quiet && lastSaidFailed(run, target.threadId);
     if (said.quiet && !recovered) {
       deps.routines()?.noteReport(run.id, { state: "quiet" });

@@ -8,6 +8,9 @@ export type PasskeyWall = "google" | "microsoft";
 /** Google's passkey (pk) and security key (sk) challenges, under /v3/signin/challenge/… and /signin/v2/challenge/…. */
 const GOOGLE_CHALLENGE = /^\/(?:v\d+\/)?signin\/(?:v\d+\/)?challenge\/(?:pk|sk)(?:\/|$)/u;
 
+/** Google's refusal of a browser it will not let sign in ("Couldn't sign you in: this browser or app may not be secure"). */
+export const GOOGLE_REJECTED = /https:\/\/accounts\.google\.com\/(?:v\d+\/)?signin\/(?:v\d+\/)?rejected\b/u;
+
 /** The address of Google's passkey step, as a browser view or a page change names it. */
 export function passkeyWallAt(address: string): PasskeyWall | null {
   let url: URL;

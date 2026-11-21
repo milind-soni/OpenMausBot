@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { MAUS_COLORS } from "./mascot";
-import { CLASSIC_ROLE_IDS, READY_BOT_CATEGORIES, READY_BOTS, matchesReadyBot, readyBot, readyBotCopy, readyBotTemplate } from "./ready-bots";
+import { CLASSIC_ROLE_IDS, READY_BOT_CATEGORIES, READY_BOTS, checkerTemplate, matchesReadyBot, readyBot, readyBotCopy, readyBotTemplate } from "./ready-bots";
 import { setLocale } from "./i18n";
 import en from "@/locales/en.json";
 import { MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
@@ -118,5 +118,57 @@ describe("the social media manager", () => {
     expect(template.profile.approvalMode).toBe("ask");
     expect(template.memory["memory/social.md"]).toContain("title: Social media");
     expect(template.memory["MEMORY.md"]).toContain("memory/social.md");
+  });
+});
+
+describe("the checked-work pair", () => {
+  const editor = readyBot("editor")!, checker = readyBot("checker")!;
+
+  it("names each other, and only the checker asks for another provider's AI", () => {
+    expect(editor).toMatchObject({ title: "Writer and editor", partner: "checker" });
+    expect(checker).toMatchObject({ title: "Checker", partner: "editor", checker: true });
+    expect(READY_BOTS.filter((bot) => bot.checker).map((bot) => bot.id)).toEqual(["checker"]);
+    for (const bot of READY_BOTS) if (bot.partner) expect(readyBot(bot.partner)?.partner).toBe(bot.id);
+  });
+
+  it("has the worker change only what it was asked, list each change, and hand the request and source to the checker as files", () => {
+    for (const line of [
+      "Change only what the task names. Never alter a fact, event, name, number, date, description or quote you were not asked to change",
+      "list every change you made",
+      "in a new folder named checks/<a short name for the task> in your working folder, never beside the person's own files",
+      "request.md with the person's request word for word, source.md with the original text exactly as given",
+      "When the person attached the source, pass their file instead of source.md and name it as sent.",
+      "pick the teammate whose role is Checker",
+      "coordinate_bots (files, thread \"new\", a short title)",
+      "Never paste the long text into the message.",
+      "on a model from another provider than yours",
+      "a draft or an edit of a document, have it checked; a quick answer needs no check",
+      "When a brief asks you to check work, you are the checker: follow the brief and skip these steps.",
+      "While a check runs, end your turn with one short line saying the work is being checked; don't show the result yet.",
+      "rework true to the thread id from the first receipt, passing result.md, the source and request.md with files again on every round",
+      "Stop after 3 check rounds",
+      "what is still open, with the checker's last report",
+      "\"Not checked:\" and the reason",
+    ]) expect(editor.soul).toContain(line);
+  });
+
+  it("has the checker compare with both the source and the request, report every kind of issue, and pass only with none", () => {
+    for (const line of [
+      "against the original request and the source",
+      "you never hand work on to anyone",
+      "Changed fact:", "Added detail:", "Unmet instruction:", "Regression:", "Unlisted change:",
+      "\"pass\" when there are no issues, or \"issues: N\" otherwise",
+      "Never pass with an issue open",
+      "answer \"cannot check\", never pass",
+      "only your last message reaches whoever asked",
+    ]) expect(checker.soul).toContain(line);
+  });
+
+  it("starts the checker on another provider's AI only when the server found one, and keeps everything else", () => {
+    const template = readyBotTemplate(defaults(), checker);
+    const other = { instanceId: "codex", model: "codex-default" };
+    expect(checkerTemplate(template, other).profile).toMatchObject({ name: "Vera", modelSelection: other, approvalMode: "ask", cwd: "/work/site" });
+    for (const none of [null, undefined]) expect(checkerTemplate(template, none)).toBe(template);
+    expect(template.profile.modelSelection).toEqual({ instanceId: "claude", model: "opus" });
   });
 });

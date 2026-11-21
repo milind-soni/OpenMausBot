@@ -134,9 +134,11 @@ export function exitDetail(code: number | null, signal: NodeJS.Signals | null, t
 }
 
 /** Why an engine stopped before its reply: on a Node.js (`found`) older than it needs (`needed`), that, in the
- * person's language; otherwise its exit in words, with its last output. */
+ * person's language; for one that could not start its threads (`startRefused`), the server's own notice for a
+ * spawn it had no room for; otherwise its exit in words, with its last output. */
 export function exitBeforeResult(provider: string, code: number | null, signal: NodeJS.Signals | null, tail: string,
-  needed?: string, found?: string | null): { message: string; text?: ServerText } {
+  needed?: string, found?: string | null, startRefused = false): { message: string; text?: ServerText } {
   if (needed && found && nodeOlderThan(found, needed)) return noticeFailure("chat.notice.acpNodeTooOld", { provider, needed, found });
+  if (startRefused) return noticeFailure("chat.notice.outOfProcesses", { code: "EAGAIN" });
   return { message: `${provider} exited ${code ?? signal ?? "unexpectedly"} before the prompt result${exitDetail(code, signal, tail)}` };
 }

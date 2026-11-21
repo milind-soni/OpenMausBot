@@ -54,6 +54,15 @@ describe("Chrome's command line", () => {
     expect(chromeArgs({ userDataDir: "/p", mode: "headless", host: "desktop", viewport: { width: 1280, height: 800 } })).toContain("--window-size=1280,943");
   });
 
+  it("fills a private display with a window at its corner, and only a window", () => {
+    const filled = chromeArgs({ userDataDir: "/p", mode: "window", host: "container", fillScreen: { width: 1280, height: 800 }, viewport: { width: 1000, height: 700 } });
+    expect(filled).toEqual(expect.arrayContaining(["--window-size=1280,800", "--window-position=0,0", "--start-maximized"]));
+    expect(filled.some((flag) => flag.startsWith("--headless") || flag.startsWith("--screen-info"))).toBe(false);
+    const headlessFill = chromeArgs({ userDataDir: "/p", mode: "headless", host: "container", fillScreen: { width: 1280, height: 800 } });
+    expect(headlessFill).toContain("--window-size=1280,863");
+    expect(headlessFill).not.toContain("--start-maximized");
+  });
+
   it("keeps a headless window within its screen, and a page that must shrink keeps its shape", () => {
     expect(pageLimit({ width: 1512, height: 982, deviceScaleFactor: 2 }, "darwin")).toEqual({ width: 1512, height: 839 });
     expect(pageLimit(SERVER_SCREEN, "linux")).toEqual({ width: 1920, height: 937 });

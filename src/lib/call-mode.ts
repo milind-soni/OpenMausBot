@@ -4,7 +4,7 @@ import type { LiveProvider, LiveSettings } from "../../shared/wire";
 import type { ConfigStatus } from "@/state/store";
 import { desktopCapabilitiesNow } from "./desktop";
 import { t } from "./i18n";
-import { scribeChosen } from "./speech";
+import { pageRecords, scribeChosen } from "./speech";
 
 export type CallMode = "turns" | "live";
 export const CALL_MODE_KEY = "openmausbot.callMode.v1";
@@ -52,9 +52,9 @@ export function liveKeyFormKey(live: Partial<Pick<LiveSettings, "provider" | "az
 
 export function callModeHint(mode: CallMode, where: { cloudHome?: boolean; config?: ConfigStatus | null } = {}): string {
   if (mode === "live") return `${t("call.mode.liveHint")} ${liveDisclosure(where)}`;
-  const { dictation } = desktopCapabilitiesNow();
-  if (dictation.available && scribeChosen(where.config)) return t("call.mode.turnsHintEleven");
-  return t(dictation.engine === "fish-audio" ? "call.mode.turnsHintFish" : "call.mode.turnsHint");
+  const capabilities = desktopCapabilitiesNow();
+  if (capabilities.dictation.available && scribeChosen(where.config)) return t("call.mode.turnsHintEleven");
+  return t(pageRecords(capabilities, where.config) ? "call.mode.turnsHintFish" : "call.mode.turnsHint");
 }
 
 export function effectiveCallMode(stored: CallMode, { turnsHere, canLive }: { turnsHere: boolean; canLive: boolean }): CallMode {

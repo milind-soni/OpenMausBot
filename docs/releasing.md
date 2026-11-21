@@ -47,6 +47,10 @@ Configure the optional Vercel hook below to rebuild the docs immediately after
 publication; otherwise the live cache or the next normal docs deployment
 refreshes it.
 
+Once a release is published, add its notes to the Announcements page's list with
+`node scripts/release-notes-feed.mjs <version> <notes.md> --date <publishedAt>`
+and merge that change ([Announcements](announcements.md#what-each-release-brought)).
+
 ## Data format and rollback
 
 Each release records the data-folder formats it writes and reads:

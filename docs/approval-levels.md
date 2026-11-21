@@ -5,7 +5,7 @@ when that provider resumes an existing native thread. You can also change one
 while the bot is working (see below). Each level is one of the
 provider's own permission modes, passed through. A native tool request that
 reaches you is one the provider left for you. OpenMausBot only answers from an
-explicit grant: Full Access, a saved exact command or MCP read-shaped tool,
+explicit grant: Full Access, a saved exact command or MCP tool that sends nothing,
 the narrow built-in web-search allowance under Approve for me, or a bot reading
 its own files. In Full Access, OMB also applies its own configuration tools
 without another approval.
@@ -261,19 +261,25 @@ another server, and a bridge into a VM or a Boat is new each turn) for the
 rest of the conversation, in memory until the server restarts. Another bot in
 the same room asks again.
 
-For a read-shaped tool from a configured custom MCP server, the card also
-offers **Always allow**. This is an explicit standing grant for that exact bot,
-provider instance, MCP server, tool name, and current server configuration. A
+For an MCP tool that sends nothing, from a configured custom MCP server or one
+of OpenMausBot's own bridges (apps, browser, data, email, the phone app's
+tools), the card also offers **Always allow**, on Claude, ACP agents and API
+models alike. This is an explicit standing grant for that exact bot,
+provider instance, MCP server, tool name, and current server configuration;
+an own bridge is named, never the token it is started with for one turn. A
 different tool still asks; editing the server command, arguments, variables,
 URL or headers invalidates the grant. A key kept in the Vault is part of that
 configuration by its reference, not its value, so giving the Vault item a new
 value keeps the grant, and so does restarting the server. Switching the bot to
 Full access leaves its grants saved, unused, for when it goes back to Ask. It
-is not offered for create/update/delete
-tools, computer control, a sandbox change, an unconfigured server, or a guest's
-turn. A custom MCP server controls its own tool names, so only remember tools
+is not offered for a tool that sends a message, posts or moves money, for
+control of a computer or a phone (the computer tools, a USB phone, a shared
+computer), a sandbox change, an action the provider marks as needing explicit
+approval, an unconfigured server, or a guest's turn. A remembered apps batch
+or workbench call still holds each send inside it for its own approval. A custom MCP server controls its own tool names, so only remember tools
 from a server you trust. The grant applies to the bot's current and future
-conversations, including newly delegated work. Saved entries are visible and
+conversations, including newly delegated work and a conversation opened before
+the grant was saved or set back to Ask since. Saved entries are visible and
 revocable in the bot's Access settings; removing one there takes it from every
 conversation of the bot at once, a running turn included.
 
@@ -293,10 +299,10 @@ mode is unavailable to the session, starts in Manual without an error. On
 Claude Code 2.1.266 that is the case for Claude Haiku 4.5 and Sonnet 4.5,
 and for any organization that set `disableAutoMode`. In that session the bot
 asks before each action unless you have explicitly remembered that exact MCP
-read tool. The Claude driver reads the mode the session actually runs in from
+tool. The Claude driver reads the mode the session actually runs in from
 the CLI's `init` frame; when Approve for me was requested and the session runs
 Manual, the chat shows one notice per session naming the model. Choose a model
-the reviewer supports, remember the MCP reads you trust, or use Full access to
+the reviewer supports, remember the MCP tools you trust, or use Full access to
 stop the prompts.
 
 ### Changing a bot's engine

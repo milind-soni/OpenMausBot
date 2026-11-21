@@ -71,6 +71,8 @@ export interface ChromeFlagsInput {
   startUrl?: string | null;
   /** A window only: where it opens, e.g. parked off-screen. */
   windowPosition?: { x: number; y: number } | null;
+  /** A window only: it fills this display from its top left corner, with no window manager to place it. */
+  fillScreen?: { width: number; height: number } | null;
 }
 
 const LOCALE = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/;
@@ -87,6 +89,11 @@ export function screenInfo(screen: ScreenSpec): string {
   return `{${parts.join(" ")}}`;
 }
 
+function fillsScreen(input: ChromeFlagsInput): string | null {
+  const screen = input.mode === "window" ? input.fillScreen : null;
+  return screen ? `${Math.round(screen.width)},${Math.round(screen.height)}` : null;
+}
+
 export function chromeArgs(input: ChromeFlagsInput): string[] {
   const platform = input.platform ?? process.platform;
   const headless = input.mode === "headless";
@@ -97,13 +104,14 @@ export function chromeArgs(input: ChromeFlagsInput): string[] {
     "--no-first-run",
     "--no-default-browser-check",
     "--disable-blink-features=AutomationControlled",
-    `--window-size=${input.viewport ? `${Math.round(input.viewport.width)},${Math.round(input.viewport.height) + HEADLESS_CHROME_HEIGHT}` : WINDOW_SIZE}`,
+    `--window-size=${fillsScreen(input) ?? (input.viewport ? `${Math.round(input.viewport.width)},${Math.round(input.viewport.height) + HEADLESS_CHROME_HEIGHT}` : WINDOW_SIZE)}`,
   ];
   if (headless && input.userAgent) {
     if (/[\r\n\0]/.test(input.userAgent)) throw new Error("The user agent holds a line break.");
     args.push(`--user-agent=${input.userAgent}`);
   }
   if (headless) args.push(`--screen-info=${screenInfo(input.screen ?? SERVER_SCREEN)}`);
+  else if (fillsScreen(input)) args.push("--window-position=0,0", "--start-maximized", "--hide-crash-restore-bubble", "--disable-search-engine-choice-screen");
   else if (input.windowPosition) args.push(`--window-position=${Math.round(input.windowPosition.x)},${Math.round(input.windowPosition.y)}`);
   if (input.locale && LOCALE.test(input.locale)) args.push(`--lang=${input.locale}`);
   if (input.egressPort !== undefined && input.egressPort !== null) {

@@ -28,6 +28,8 @@ export interface AutoVmClaimSlot {
   lazy?: boolean;
   label?: string;
   localVm?: boolean;
+  /** A Self-hosted VPS desktop: where vm_exec runs its commands once the claim holds it. */
+  vps?: { sshAlias: string; container: string };
   pendingReason?: string;
   boxId?: string;
   startsComputer?: true;
