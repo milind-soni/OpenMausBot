@@ -154,7 +154,7 @@ const tools = (app = productName()) => [
   },
   {
     name: "send_export",
-    description: `Send one Bot's setup to ${app}. \`document\` is a ${GROK_EXPORT_FORMAT} document: {"format": "${GROK_EXPORT_FORMAT}", "version": 1, "bots": [{name, title, instructions, memories, user_facts, skills, routines, apps}]}. Send one Bot per call, with every skill and routine in full. Never include passwords, API keys, tokens or cookies: a document that has them is refused. A document over 4 MB is refused: split it into several documents with the same bot name. The person sees what arrived in ${app} and chooses what to import; nothing changes where the Bot came from.`,
+    description: `Send one Bot's setup to ${app}. \`document\` is a ${GROK_EXPORT_FORMAT} document: {"format": "${GROK_EXPORT_FORMAT}", "version": 1, "bots": [{name, title, instructions, memories, user_facts, handover, skills, routines, apps}]}. Send one Bot per call, with every skill and routine in full. \`handover\` is the Bot's handover note, so the bot in ${app} knows where things stand and reads it in every conversation: for each project or ongoing piece of work, what it is, where it stands, the next steps, open questions, decisions made, and the files it uses (each file's name and what it holds). Write it as plain text, under 100 lines. Never include passwords, API keys, tokens or cookies: a document that has them is refused. A document over 4 MB is refused: split it into several documents with the same bot name. The person sees what arrived in ${app} and chooses what to import; nothing changes where the Bot came from.`,
     inputSchema: {
       type: "object",
       properties: { document: { type: "object", description: `The ${GROK_EXPORT_FORMAT} document.` } },
@@ -244,8 +244,9 @@ function received(bot: GrokBot): string {
   const left = [
     skills < bot.skills.length ? `${plural(bot.skills.length - skills, "skill")} without instructions` : "",
     routines < bot.routines.length ? `${plural(bot.routines.length - routines, "routine")} without an instruction` : "",
+    bot.handover ? "" : "its handover note",
   ].filter(Boolean);
-  return `${bot.name}: ${plural(skills, "skill")}, ${plural(routines, "routine")}, ${plural(bot.memories.length + bot.userFacts.length, "memory", "memories")}.`
+  return `${bot.name}: ${plural(skills, "skill")}, ${plural(routines, "routine")}, ${plural(bot.memories.length + bot.userFacts.length, "memory", "memories")}${bot.handover ? ", its handover note" : ""}.`
     + (left.length ? ` Left out: ${left.join(" and ")}. Send those again with their full text if the Bot has it.` : "");
 }
 
@@ -336,7 +337,7 @@ function moveStatus(link: MoveLink): ToolResult {
   const bots = link.host.bots();
   const roster = bots.slice(0, ROSTER_MAX).map((bot) => (bot.job ? `${bot.name} (${bot.job})` : bot.name)).join("; ");
   const pages = link.inbox.assets.filter((asset) => asset.kind === "page").length;
-  return said(`Connected to ${app}. ${plural(names.size, "Bot")}, ${plural(pages, "page")} and ${plural(link.inbox.assets.length - pages, "file")} received so far and waiting for the person to import. This link stays on until the person turns it off, and its address never changes. To move a Bot, send it in this order: its setup with send_export, one Bot per call; then each of its pages with send_page; then each of its files with send_file. To have ${app} do something, call hand_off_task.`
+  return said(`Connected to ${app}. ${plural(names.size, "Bot")}, ${plural(pages, "page")} and ${plural(link.inbox.assets.length - pages, "file")} received so far and waiting for the person to import. This link stays on until the person turns it off, and its address never changes. To move a Bot, send it in this order: its setup with send_export, one Bot per call, with its handover note; then each of its pages with send_page; then each of its files with send_file. To have ${app} do something, call hand_off_task.`
     + (roster ? ` ${app}'s bots: ${roster}${bots.length > ROSTER_MAX ? `; and ${bots.length - ROSTER_MAX} more` : ""}.` : ""));
 }
 

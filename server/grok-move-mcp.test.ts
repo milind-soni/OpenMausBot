@@ -64,6 +64,16 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
     expect(tools.map((tool) => tool.inputSchema.required)).toEqual([undefined, ["document"], ["bot", "title", "page"], ["bot", "path"], ["task"], ["task_id"]]);
   });
 
+  it("asks for each Bot's handover note, keeps it, and says when one came and when one did not", async () => {
+    const tools = ((await moveMcp(rpc("tools/list"), link())).body as { result: { tools: Array<{ name: string; description: string }> } }).result.tools;
+    expect(tools.find((tool) => tool.name === "send_export")!.description).toMatch(/\{name, title, instructions, memories, user_facts, handover, skills, routines, apps\}.*`handover` is the Bot's handover note.*for each project or ongoing piece of work, what it is, where it stands, the next steps, open questions, decisions made, and the files it uses.*under 100 lines/);
+    const to = link();
+    expect((await call(to, "send_export", { document: document("Tango", { instructions: "Dance.", handover: `Renewals: waiting on legal. Key ${TOKEN}` }) })).text)
+      .toBe("Arrived in MausBot. Tango: 0 skills, 0 routines, 0 memories, its handover note. The person can now import it in MausBot, under Settings → Import & export.");
+    expect(parseGrokExport(to.inbox.arrivals[0]!.text)[0]!.handover).toMatch(/^Renewals: waiting on legal\. Key (?!sk-abcdefghij)/);
+    expect((await call(to, "send_export", { document: document("Maus", { instructions: "Squeak." }) })).text).toContain("Maus: 0 skills, 0 routines, 0 memories. Left out: its handover note.");
+  });
+
   it("hands the hosted address the handshake and the tool list it gives itself, and words for when it isn't there", async () => {
     const manifest = moveManifest();
     const listed = (await moveMcp(rpc("tools/list"), link())).body as { result: unknown };
@@ -79,7 +89,7 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
 
   it("keeps a sent Bot as the importer reads it, whether it came as an object or as JSON text, and counts it in the status", async () => {
     const to = link();
-    expect((await call(to, "move_status")).text).toBe("Connected to MausBot. 0 Bots, 0 pages and 0 files received so far and waiting for the person to import. This link stays on until the person turns it off, and its address never changes. To move a Bot, send it in this order: its setup with send_export, one Bot per call; then each of its pages with send_page; then each of its files with send_file. To have MausBot do something, call hand_off_task.");
+    expect((await call(to, "move_status")).text).toBe("Connected to MausBot. 0 Bots, 0 pages and 0 files received so far and waiting for the person to import. This link stays on until the person turns it off, and its address never changes. To move a Bot, send it in this order: its setup with send_export, one Bot per call, with its handover note; then each of its pages with send_page; then each of its files with send_file. To have MausBot do something, call hand_off_task.");
     expect((await call(link(place().host), "move_status")).text).toContain("MausBot's bots: MausBot (Chief of Staff); Scout.");
     const crowd: MoveHost = { ...place().host, bots: () => Array.from({ length: 34 }, (_, index) => ({ name: `Bot ${index}` })) };
     expect((await call(link(crowd), "move_status")).text).toMatch(/Bot 29; and 4 more\.$/);
@@ -87,7 +97,7 @@ describe("the move MCP a Bot in Grok Bot talks to", () => {
       ...document("Tango", { memories: ["likes cheese", `the key is ${TOKEN}`], skills: [{ name: "Greet", instructions: "Say hello." }, { name: "Empty" }], extra: { anything: 1 } }),
       stray: "x",
     } });
-    expect(sent).toEqual({ refused: false, text: "Arrived in MausBot. Tango: 1 skill, 0 routines, 2 memories. Left out: 1 skill without instructions. Send those again with their full text if the Bot has it. The person can now import it in MausBot, under Settings → Import & export." });
+    expect(sent).toEqual({ refused: false, text: "Arrived in MausBot. Tango: 1 skill, 0 routines, 2 memories. Left out: 1 skill without instructions and its handover note. Send those again with their full text if the Bot has it. The person can now import it in MausBot, under Settings → Import & export." });
     expect((await call(to, "send_export", { document: JSON.stringify(document("Maus")) })).refused).toBe(false);
     expect((await call(to, "send_export", { document: document("tango", { memories: ["more"] }) })).refused).toBe(false);
 
