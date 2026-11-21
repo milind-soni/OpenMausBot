@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, liveDataEnginePath, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
+import { dataEngineSpillPath, ephemeralWorkspaceTokenPath, excludedWorkspaceAuthPath, portableWorkspaceConfig, redownloadedOrgLibraryPath, restoredWorkspaceConfig } from "./workspace-backup-policy.ts";
 
 describe("workspace backup data boundary", () => {
   it("exports ordinary settings only and retains destination connection sections unchanged", () => {
@@ -89,13 +89,13 @@ describe("workspace backup data boundary", () => {
     }
   });
 
-  it("leaves out a bot's live DuckDB database, WAL and spill directory, and nothing else in its folder", () => {
-    for (const path of ["bots/b1/data.duckdb", "bots/b1/data.duckdb.wal", "bots/b1/data-tmp", "bots/b1/data-tmp/duckdb_temp_storage-0.tmp"]) {
-      expect(liveDataEnginePath(path)).toBe(true);
+  it("leaves out a bot's DuckDB spill directory, and nothing else in its folder: its Data tables go", () => {
+    for (const path of ["bots/b1/data-tmp", "bots/b1/data-tmp/duckdb_temp_storage-0.tmp"]) {
+      expect(dataEngineSpillPath(path)).toBe(true);
     }
-    for (const path of ["bots/b1/SOUL.md", "bots/b1/sheet.json", "bots/b1/data.duckdb.bak", "bots/b1/data-tmp.zip", "bots/data.duckdb", "data.duckdb",
+    for (const path of ["bots/b1/data.duckdb", "bots/b1/data.duckdb.wal", "bots/b1/SOUL.md", "bots/b1/sheet.json", "bots/b1/data.duckdb.bak", "bots/b1/data-tmp.zip", "bots/data.duckdb", "data.duckdb",
       "workspaces/bot/data.duckdb", "bots/b1/exports/data.duckdb", "attachments/data-tmp/x"]) {
-      expect(liveDataEnginePath(path)).toBe(false);
+      expect(dataEngineSpillPath(path)).toBe(false);
     }
   });
 

@@ -2162,7 +2162,8 @@ describe("ACP turns (fake CLI)", () => {
     process.env.FAKE_ACP_RPC_DUMP = rpc;
     await create(GrokAgentDriver, "hang");
     await instance.adapter.sendTurn({ threadId: "t-stop-end-turn", text: "go" });
-    await vi.waitFor(() => expect(JSON.parse(readFileSync(rpc, "utf8"))).toContain("session/prompt"));
+    // The fake CLI starts as a new process and shakes hands before the prompt: the file's other waits on it allow 10 s.
+    await vi.waitFor(() => expect(JSON.parse(readFileSync(rpc, "utf8"))).toContain("session/prompt"), { timeout: 10_000 });
     await instance.adapter.interruptTurn("t-stop-end-turn");
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true, stopReason: "cancelled" });
@@ -2903,7 +2904,7 @@ describe("ACP turns (fake CLI)", () => {
         const kill = vi.spyOn(procs, "killCliTree");
         const pending = instance.adapter.sendTurn({ threadId: "unreached", text: "go", startupRecovery: true });
         const settled = acknowledged(pending);
-        await vi.waitFor(() => expect(readFileSync(process.env.FAKE_ACP_RPC_DUMP!, "utf8")).toContain("session/prompt"));
+        await vi.waitFor(() => expect(readFileSync(process.env.FAKE_ACP_RPC_DUMP!, "utf8")).toContain("session/prompt"), { timeout: 10_000 });
         await new Promise((resolve) => setTimeout(resolve, 50));
         expect(settled()).toBe(false);
         releaseFailure();
