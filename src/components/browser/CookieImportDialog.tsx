@@ -52,13 +52,15 @@ export function cookieImportAvailable(config: { browserEngine?: { cookieImport?:
  * A site's sign-in from one of the person's own browsers into a bot's: they pick the browser, its profile and the
  * site, and confirm a sentence naming all three and the bot. Security: only counts and a reason come back.
  */
-export function CookieImportDialog({ open, botId, botName, threadId, site: initialSite, onClose }: {
+export function CookieImportDialog({ open, botId, botName, threadId, site: initialSite, onClose, onImported }: {
   open: boolean;
   botId: string;
   botName: string;
   threadId: string | null;
   site: string;
   onClose: () => void;
+  /** The import went through: the site it took and the browser it came from. */
+  onImported?: (imported: { site: string; browser: string }) => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const opening = useRef(initialSite);
@@ -102,6 +104,7 @@ export function CookieImportDialog({ open, botId, botName, threadId, site: initi
     try {
       const done = await bridge.import({ botId, threadId, site: site.trim(), source: source.id, profile: profile.id });
       const unread = done.ok ? (done.skipped.protected ?? 0) + (done.skipped.failed ?? 0) : 0;
+      if (done.ok && done.imported > 0) onImported?.({ site: done.site, browser: source.name });
       setResult(done.ok
         ? { tone: "ok", text: t(done.imported === 1 ? "browser.cookieImport.doneOne" : "browser.cookieImport.done", { count: done.imported, site: done.site })
           + (unread ? ` ${t("browser.cookieImport.partial", { count: unread, browser: source.name })}` : "") }
