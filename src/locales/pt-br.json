@@ -7474,7 +7474,7 @@
   "readyBots.pausedRoutine": "Inclui uma rotina pausada",
   "readyBots.pairsWith": "Trabalha com {name}, {title}",
   "readyBots.checker.otherAi": "{name} confere usando {model}, uma IA diferente da dos seus outros bots: um modelo raramente percebe os próprios erros.",
-  "readyBots.checker.sameAi": "Só uma IA está conectada, então {name} confere com a mesma IA dos seus outros bots. Conecte outra em Configurações → IA para uma conferência mais independente.",
+  "readyBots.checker.sameAi": "Nenhuma outra IA está pronta, então {name} confere com a mesma IA dos seus outros bots. Conecte ou entre em outra em Configurações → IA para uma conferência mais independente.",
   "templates.subtitle": "Comece com um playbook completo ou traga o seu próprio.",
   "templates.back": "Voltar para os modelos",
   "templates.close": "Fechar modelos",

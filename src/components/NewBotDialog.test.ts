@@ -31,7 +31,7 @@ vi.mock("@/state/store", async importOriginal => {
   const store = await importOriginal<typeof import("@/state/store")>();
   return { ...store, api: fixture.api, BotEditorStore: () => null, useStore: () => ({ state: { ...store.initialState, appSettingsOpen: fixture.appSettingsOpen, ...(fixture.teamName ? { config: { team: { id: "acme", name: fixture.teamName } } } : {}) }, dispatch: fixture.dispatch }) };
 });
-import { NewBotDialog } from "./NewBotDialog";
+import { CheckerModelLine, NewBotDialog } from "./NewBotDialog";
 import { setTeamChats } from "@/state/team-chats";
 import { setTeamPeople } from "@/state/team-people";
 import { Select } from "./Select";
@@ -187,6 +187,15 @@ describe("bot draft dialog", () => {
     expect(fixture.api).toHaveBeenCalledExactlyOnceWith("/api/bot-defaults");
     await vi.waitFor(() => expect(fixture.setDraft).toHaveBeenCalledOnce());
     expect(fixture.setDraft.mock.calls[0]![0].bot).toMatchObject({ name: "Nib", modelSelection: answer.modelSelection });
+  });
+
+  it("says which AI the Checker checks on only while the review is on the model it started on", () => {
+    const start = { instanceId: "codex", model: "codex-default" };
+    const line = (other: typeof start | null, modelSelection: typeof start) => renderToStaticMarkup(createElement(CheckerModelLine,
+      { bot: { name: "Vera", modelSelection } as never, other, start, instances: [] }));
+    expect(line(start, start)).toContain("Vera checks on codex-default, a different AI from your other bots");
+    expect(line(null, start)).toContain("No other AI is ready, so Vera checks on the same AI as your other bots.");
+    for (const other of [start, null]) expect(line(other, { instanceId: "claude", model: "opus" })).toBe("");
   });
 
   it("can cancel a loading draft without creating or deleting a bot", () => {

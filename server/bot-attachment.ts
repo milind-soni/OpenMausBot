@@ -4,7 +4,7 @@ import { createHash, createHmac, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { basename, dirname, join, posix } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { DATA_DIR } from "./config.ts";
 import { openInboxFile, type InboxRead } from "./host/handoff-inbox.ts";
 import {
@@ -70,8 +70,9 @@ export interface SaveBotAttachmentInput {
   /** The conversation's inbox of files other bots passed it: a place the bot may also send from, read without
    * following any link (server/host/handoff-inbox.ts). */
   inbox?: InboxRead;
-  /** Stored files attached to this conversation (server/conversation-attachments.ts): each may be sent by its exact path. */
-  attached?: readonly ConversationAttachment[];
+  /** Stored files attached to this conversation (server/conversation-attachments.ts): each may be sent by its exact path.
+   * Read only when a path is outside every other place a bot may send from. */
+  attached?: () => readonly ConversationAttachment[];
 }
 
 let nameKey: Buffer | undefined;
@@ -110,7 +111,7 @@ async function sha256Of(file: OpenedMessageFile): Promise<string> {
 /** Only the roots' outside_workspace refusal falls through, so a missing or oversized file in the folder says exactly that.
  * Opened at the store's limit, not the preview one: the copy streams, and a person may send the same size. A path the
  * roots do not hold is tried in the conversation's inbox before anything else. */
-async function openSource(path: string, roots: readonly string[], savedThisTurn: SaveBotAttachmentInput["savedThisTurn"], inbox: InboxRead | undefined, attached?: readonly ConversationAttachment[]): Promise<OpenedMessageFile> {
+async function openSource(path: string, roots: readonly string[], savedThisTurn: SaveBotAttachmentInput["savedThisTurn"], inbox: InboxRead | undefined, attached?: () => readonly ConversationAttachment[]): Promise<OpenedMessageFile> {
   const href = sourceFileLink(path);
   try {
     return await openMessageFile(href, roots, FILE_MAX_BYTES);
@@ -127,10 +128,14 @@ async function openSource(path: string, roots: readonly string[], savedThisTurn:
 
 /** Opened under the name it was attached with, since the store names its files by an id. Security: only a file directly
  * in the attachment store; a tag naming anything else on disk opens nothing. */
-async function openAttached(path: string, attached: readonly ConversationAttachment[] | undefined): Promise<OpenedMessageFile | null> {
-  if (!attached?.length) return null;
-  const [wanted, store] = await Promise.all([realpath(path).catch(() => null), realpath(ATTACHMENTS_DIR).catch(() => null)]);
+async function openAttached(path: string, list: (() => readonly ConversationAttachment[]) | undefined): Promise<OpenedMessageFile | null> {
+  let local = path;
+  if (/^file:/i.test(path)) {
+    try { local = fileURLToPath(path); } catch { return null; }
+  }
+  const [wanted, store] = await Promise.all([realpath(local).catch(() => null), realpath(ATTACHMENTS_DIR).catch(() => null)]);
   if (!wanted || !store || dirname(wanted) !== store) return null;
+  const attached = list?.() ?? [];
   const listed = await Promise.all(attached.map((one) => realpath(one.path).catch(() => null)));
   const index = listed.indexOf(wanted);
   if (index < 0) return null;

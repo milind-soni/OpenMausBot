@@ -79,7 +79,7 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
   const dialog = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-  const [checkerModel, setCheckerModel] = useState<ModelSelection | null | undefined>(undefined);
+  const [checkerModel, setCheckerModel] = useState<{ other: ModelSelection | null; start: ModelSelection } | undefined>(undefined);
   useEffect(() => {
     let cancelled = false;
     const ready = defaultsMode || !readyBotId ? undefined : readyBot(readyBotId);
@@ -88,9 +88,10 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
         if (cancelled) return;
         const defaults = startingTemplate(result, !defaultsMode);
         const template = ready ? readyBotTemplate(defaults, ready) : defaults;
-        const next = new BotCreationDraft(ready?.checker ? checkerTemplate(template, result.checkerModelSelection) : template, () => render(value => value + 1));
+        const start = ready?.checker ? checkerTemplate(template, result.checkerModelSelection) : template;
+        const next = new BotCreationDraft(start, () => render(value => value + 1));
         if (ready) next.role = ready.id;
-        if (ready?.checker) setCheckerModel(result.checkerModelSelection);
+        if (ready?.checker && start.profile.modelSelection) setCheckerModel({ other: result.checkerModelSelection ?? null, start: start.profile.modelSelection });
         setDraft(next);
         setReady(true);
       }).catch(cause => { if (!cancelled) setError(String(cause)); });
@@ -169,7 +170,7 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
         <button type="button" onClick={() => closeRef.current()} aria-label={t("common.close")}
           className="flex size-8 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-ink disabled:opacity-40"><X size={18} className="pointer-events-none" /></button>
       </div>
-        {ready && checkerModel !== undefined && <CheckerModelLine bot={bot} other={checkerModel} instances={parent.state.instances} />}
+        {ready && checkerModel !== undefined && <CheckerModelLine bot={bot} {...checkerModel} instances={parent.state.instances} />}
         {team && !defaultsMode && teamName && <WhoCanUse team={teamName} everyone={everyone} disabled={saving} onChange={setEveryone} />}
         {choosesVisibility && (
           <div className="flex flex-wrap items-center gap-2 px-5 pt-3 text-[13px] text-ink-secondary" data-new-bot-visibility>
@@ -225,10 +226,11 @@ function NewBotEditor({ defaultsMode = false, onClose, onCreated, readyBotId }: 
   </div>;
 }
 
-/** Which AI a checker from Templates checks on: another provider's, or, with only one connected, the same one. */
-function CheckerModelLine({ bot, other, instances }: { bot: Bot; other: ModelSelection | null; instances: readonly InstanceInfo[] }) {
+/** Which AI a checker from Templates checks on: another provider's, or, with no other ready, the same one. Only while the
+ * review is still on the model it started on: once the person picks another, the picker says which. */
+export function CheckerModelLine({ bot, other, start, instances }: { bot: Bot; other: ModelSelection | null; start: ModelSelection; instances: readonly InstanceInfo[] }) {
   const selection = bot.modelSelection;
-  if (other && (selection.instanceId !== other.instanceId || selection.model !== other.model)) return null;
+  if (selection.instanceId !== start.instanceId || selection.model !== start.model) return null;
   const model = modelName(instances.find(instance => instance.instanceId === selection.instanceId), selection.model);
   return <p data-new-bot-checker-model={other ? "other" : "same"} className="px-5 pt-3 text-[13px] text-ink-secondary">
     {other ? t("readyBots.checker.otherAi", { name: bot.name, model }) : t("readyBots.checker.sameAi", { name: bot.name })}
