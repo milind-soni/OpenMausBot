@@ -3,6 +3,7 @@
 import { agentsCallMember, resolveAgentsCall } from "../../shared/agents-tool-names.ts";
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
 import { rankSkills } from "../../shared/skill-fit.ts";
+import { isSkillAssignmentAction } from "../../shared/skill-assignment.ts";
 import { isSkillSwitchAction, skillSwitchVerb } from "../../shared/skill-request.ts";
 import { EMAIL_CREDENTIAL } from "../../shared/email.ts";
 import { noCloudComputerNote } from "../../shared/team-setup.ts";
@@ -15,6 +16,7 @@ import { harnessClientFromEnv } from "./agents-client.ts";
 import type { HarnessClient, Json } from "./agents-client.ts";
 import { memorySearchText } from "./memory-search-text.ts";
 import { apiAnswer, boundedAgentResult } from "./agents-result.ts";
+import { callSkillAssignment, callSkillAssignmentList } from "./agents-skill-assignments.ts";
 import { argumentNames, outOfBounds } from "./agents-schema.ts";
 import { dropBlankArguments } from "./agents-blank-arguments.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
@@ -862,6 +864,8 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
   }
   if (name === "skills_list") {
     const query = new URLSearchParams({ fromBotId: BOT_ID, fromThreadId: THREAD_ID });
+    const assignmentList = await callSkillAssignmentList(args, context);
+    if (assignmentList) return assignmentList;
     const r = await api(`/api/internal/skills?${query.toString()}`);
     const skills = Array.isArray(r.skills) ? r.skills : [];
     const staged = Array.isArray(r.staged) ? r.staged : [];
@@ -889,6 +893,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
     return { text: `Imported skills:\n${live}\n\nStaged (waiting for the user's decision):\n${pending}` };
   }
   if (name === "skill_manage") {
+    if (isSkillAssignmentAction(args.action)) return callSkillAssignment(args.action, args, context);
     if (isSkillSwitchAction(args.action)) {
       const skillName = typeof args.skill_name === "string" ? args.skill_name.trim() : "";
       const verb = skillSwitchVerb(args.action);
@@ -904,7 +909,7 @@ export async function callTool(called: string, input: Json, context: ToolCallCon
       };
     }
     if (args.action !== "create" && args.action !== "update" && args.action !== "import") {
-      return { text: `skill_manage action must be "create", "update", "import", "enable", "disable" or "delete". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
+      return { text: `skill_manage action must be "create", "update", "import", "enable", "disable", "delete", "share", "assign" or "unassign". It takes ${argumentNames(fullInputSchema(name))}.`, isError: true };
     }
     const skillMd = typeof args.skill_md === "string" ? args.skill_md : "";
     if (!skillMd.trim() && args.action !== "import") {

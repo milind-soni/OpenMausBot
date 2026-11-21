@@ -2,8 +2,11 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { skillCalls, skillCommandTurnText } from "../../shared/skill-command.ts";
+import type { SkillAssignmentAction } from "../../shared/skill-assignment.ts";
+import { isSkillName } from "../../shared/skill-md.ts";
 import { isSkillSwitchAction, type SkillRequestCardData, type SkillShareRecord } from "../../shared/skill-request.ts";
 import { narrowestAudience, intersectAudience } from "../bot-visibility.ts";
+import { chiefLevel } from "../chief-level.ts";
 import { DATA_DIR, type AppConfig } from "../config.ts";
 import { appendDecision } from "../decision-log.ts";
 import { UNDO_STALE, type DirectApply } from "../direct-apply.ts";
@@ -13,9 +16,10 @@ import {
 } from "../imported-skills.ts";
 import { isNativeSkillEnabled } from "../native-skill-choices.ts";
 import { nativeSkillListing, nativeSkills, projectSkillListing, projectSkills, projectSkillsPrompt, readNativeSkillFile, type NativeSkill } from "../native-skills.ts";
+import { canManage } from "../peer-roster.ts";
 import { redactSecretsInText } from "../redact.ts";
 import { readSectionContext } from "../section-context.ts";
-import { librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
+import { assignedSkillsSchema, librarySkillOptOuts, listLibrarySkills, readLibrarySkillFile, readSkillLibraryIndex, skillsLibraryEnabled } from "../skill-library.ts";
 import { librarySkillFiles, ownSkillFiles, type StoredSkillFiles } from "../skill-side-files.ts";
 import {
   conversationAssignedSkills,
@@ -33,6 +37,7 @@ import type { BotRecord, Message, Store } from "../store.ts";
 import { claudeUserSkillsEnabled, settingsTurnFields } from "../turn-settings.ts";
 import { typedWords } from "../typed-sends.ts";
 import { supportsWorkspaceFiles, TASK_WORKSPACES_DIR } from "../workspace.ts";
+import { changeSkillAssignment, listSkillAssignments, type AssignmentDeps } from "./skill-assignment.ts";
 
 type ReceiptArgs = {
   botId: string;
@@ -289,7 +294,41 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     return { name: change.name, summary: `Shared skill ${change.name} updated.`, shared: summaryLine(updated.share) };
   }
 
+  const assignments: AssignmentDeps = {
+    resolveTarget(fromId, targetId) {
+      const from = store.bot(fromId), target = store.bot(targetId);
+      return from && !from.hidden && chiefLevel(from) && target && !target.hidden &&
+        (from.id === target.id || canManage(from, target)) ? target : null;
+    },
+    bot: (id) => store.bot(id) ?? null,
+    listLibrary: () => {
+      const entries = readSkillLibraryIndex();
+      return listLibrarySkills().map((skill) => ({ ...skill, filesSha256: entries[skill.name]?.filesSha256 }));
+    },
+    ownNames: (id) => new Set(listSkills(id).map((skill) => skill.name)),
+    optedOut: librarySkillOptOuts,
+    save: (id, assignedSkills) => store.patchBotProfile(id, { assignedSkills }),
+    validAssignments: (names) => assignedSkillsSchema.safeParse(names).success,
+  };
+
   return {
+    manageAssignment(fromId: string, threadId: string, action: SkillAssignmentAction, body: Record<string, unknown>, direct: DirectApply | null):
+      [number, Record<string, unknown>] {
+      if (!skillsLibraryEnabled(cfg)) return [404, { error: "Skills library is not enabled." }];
+      if (!direct) return [403, { error: "This conversation cannot apply a skill assignment directly." }];
+      const name = typeof body.skill_name === "string" ? body.skill_name.trim() : "";
+      const target = typeof body.target_bot_id === "string" ? body.target_bot_id.trim() : "";
+      const revision = typeof body.base_revision === "string" ? body.base_revision.trim() : "";
+      if (!isSkillName(name) || !target || !/^[a-f0-9]{64}$/.test(revision)) {
+        return [400, { error: "Pass a valid skill_name, target_bot_id and the target's management_revision as base_revision." }];
+      }
+      const changed = changeSkillAssignment(assignments, fromId, target, action, name, revision);
+      if ("error" in changed) return [changed.status, { error: changed.error }];
+      appendDecision(DATA_DIR, { threadId, requestId: randomUUID(), botId: fromId, tool: "skill_manage",
+        summary: `${action} ${name} for ${target}`, decision: "auto-approved", source: direct });
+      return [200, { state: "applied", result: changed.result }];
+    },
+
     listBotSkills,
     readBotSkillFile,
     readBotSkillFiles,
@@ -403,11 +442,17 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
       return [201, { state: "applied", name: updated.name, action: "update", summary: updated.summary, shared: updated.shared }];
     },
 
-    harnessListing(botId: string, skills: SkillListing[]): Array<SkillListing & { revision?: string }> {
-      if (mode() === "off") return skills;
-      return skills.map((skill) => !skill.editable && editable(botId, skill.name)
+    harnessListing(from: BotRecord, threadId: string, search: URLSearchParams, staged: () => unknown[]): [number, Record<string, unknown>] {
+      const target = search.get("target_bot_id")?.trim();
+      if (target) {
+        if (!skillsLibraryEnabled(cfg)) return [404, { error: "Skills library is not enabled." }];
+        const listing = listSkillAssignments(assignments, from.id, target, (search.get("query") ?? "").trim().slice(0, 300));
+        return listing ? [200, listing] : [403, { error: "Only a current Chief can manage a visible target in their authorized scope." }];
+      }
+      const skills = listBotSkills(from, threadId).map((skill) => mode() !== "off" && !skill.editable && editable(from.id, skill.name)
         ? { ...skill, editable: true, revision: skill.sha256.slice(0, SHARED_REVISION_CHARS) }
         : skill);
+      return [200, { skills, staged: staged() }];
     },
 
     /** A settlement still pending keeps its stage bound to the private copy, so it waits for the receipt's Share button. */
