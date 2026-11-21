@@ -63,8 +63,13 @@ describe("bot setup and tools in the real renderer", () => {
     const openApps = async () => {
       await openPanel();
       // The panel is a lazy chunk; its gear opens Bot settings once it has painted.
-      await expect.poll(() => evaluate("(() => { const gear = document.querySelector('[data-panel-gear]'); gear?.click(); return Boolean(gear); })()"), { timeout: 10_000 }).toBe(true);
-      await expect.poll(() => evaluate("Boolean(document.querySelector('[data-panel-page=\"apps\"]'))"), { timeout: 10_000 }).toBe(true);
+      await expect.poll(() => evaluate(`(() => {
+        const gear = document.querySelector('[data-panel-gear]');
+        if (!gear) return false;
+        if (!document.querySelector('[data-panel-page-view="settings"]')) gear.click();
+        return Boolean(document.querySelector('[data-panel-page-view="settings"]'));
+      })()`), { timeout: 15_000 }).toBe(true);
+      await expect.poll(() => evaluate("Boolean(document.querySelector('[data-panel-page=\"apps\"]'))"), { timeout: 15_000 }).toBe(true);
       await evaluate("document.querySelector('[data-panel-page=\"apps\"]').click(); true");
       await expect.poll(snapshot, { timeout: 10_000 }).toContain("Connect another app");
     };

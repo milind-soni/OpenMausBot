@@ -141,9 +141,16 @@ export function BotSettingsDialog({ bot, overlay = false }: {
       case "slack":
         return slackUrl ? <SlackSection managementUrl={slackUrl} /> : null;
       case "skills":
-        return <SkillsSection bot={bot} />;
+        return <SkillsSection key={bot.id} bot={bot} />;
       case "memory":
-        return <MemorySection bot={bot} active={!collapsed && section === "memory"} onToggle={(enabled) => derived.patch({ memoryEnabled: enabled })} />;
+        return (
+          <MemorySection
+            key={bot.id}
+            bot={bot}
+            active={!collapsed && section === "memory"}
+            onToggle={(enabled) => derived.patch({ memoryEnabled: enabled })}
+          />
+        );
       case "library":
         return <LibraryTab bot={bot} onOpen={(page) => dispatch({ type: "toggleSettings", open: true, section: LIBRARY_LINKS[page] ?? "overview" })} />;
       case "routines":

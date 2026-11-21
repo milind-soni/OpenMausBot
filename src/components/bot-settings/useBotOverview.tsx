@@ -20,6 +20,15 @@ export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: bool
   const [overviewError, setOverviewError] = useState(false);
   const [prompt, setPrompt] = useState<PromptPreviewData | null>(null);
   const [promptError, setPromptError] = useState(false);
+  const ownerId = useRef(bot.id);
+
+  useEffect(() => {
+    ownerId.current = bot.id;
+    setOverview(null);
+    setPrompt(null);
+    setOverviewError(false);
+    setPromptError(false);
+  }, [bot.id]);
 
   const factsSignature = useMemo(
     () =>
@@ -68,29 +77,30 @@ export function useBotOverview(bot: Bot, want: { overview: boolean; prompt: bool
   useEffect(() => {
     if (!want.overview && !want.prompt) return;
     let cancelled = false;
+    const readFor = bot.id;
     const fetchOverviewAndPrompt = async () => {
       await flushBotPatches(bot.id);
-      if (cancelled) return;
+      if (cancelled || readFor !== ownerId.current) return;
       if (want.overview) {
         void api(`/api/bots/${bot.id}/overview`)
           .then((data: BotOverview) => {
-            if (cancelled) return;
+            if (cancelled || readFor !== ownerId.current) return;
             setOverview(data);
             setOverviewError(false);
           })
           .catch(() => {
-            if (!cancelled) setOverviewError(true);
+            if (!cancelled && readFor === ownerId.current) setOverviewError(true);
           });
       }
       if (want.prompt) {
         void api(`/api/bots/${bot.id}/system-prompt`)
           .then((data: PromptPreviewData) => {
-            if (cancelled) return;
+            if (cancelled || readFor !== ownerId.current) return;
             setPrompt(data);
             setPromptError(false);
           })
           .catch(() => {
-            if (!cancelled) setPromptError(true);
+            if (!cancelled && readFor === ownerId.current) setPromptError(true);
           });
       }
     };
@@ -110,21 +120,32 @@ export function useBotHistory(bot: Bot, active: boolean) {
   const [error, setError] = useState(false);
   const [revision, setRevision] = useState<string | null>(null);
   const request = useRef(0);
+  const ownerId = useRef(bot.id);
   const [rollingBack, setRollingBack] = useState(false);
   const [rollbackTarget, setRollbackTarget] = useState<{ id: string; expectedRevision: string } | null>(null);
 
+  useEffect(() => {
+    ownerId.current = bot.id;
+    request.current++;
+    setRows(null);
+    setRevision(null);
+    setError(false);
+    setRollbackTarget(null);
+  }, [bot.id]);
+
   const load = useCallback(() => {
+    const readFor = bot.id;
     const current = ++request.current;
     setError(false);
     return flushBotPatches(bot.id)
       .then(() => api(`/api/bots/${bot.id}/history?limit=100`))
       .then((data: { rows: HistoryRow[]; revision: string }) => {
-        if (current !== request.current) return;
+        if (current !== request.current || readFor !== ownerId.current) return;
         setRows(data.rows);
         setRevision(data.revision);
       })
       .catch(() => {
-        if (current === request.current) setError(true);
+        if (current === request.current && readFor === ownerId.current) setError(true);
       });
   }, [bot.id, flushBotPatches]);
 
