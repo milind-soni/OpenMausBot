@@ -778,10 +778,20 @@ jobs:
         # The headed-identity case needs a display, which Linux runners get from Xvfb.
         env:
           OMB_CDP_E2E: "1"
+          # The desktop view's suite keeps pictures of its private display here; a failed run uploads them.
+          DESKTOP_E2E_SHOTS: ${{ runner.temp }}/desktop-e2e-pictures
         shell: bash
         run: |
           run=(pnpm exec vitest run server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e server/browser/desktop/desktop.e2e --reporter=verbose --silent=false --reporter=github-actions)
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a "${run[@]}"; else "${run[@]}"; fi
+      - name: Upload the desktop view's pictures on failure
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() && runner.os == 'Linux'
+        with:
+          name: desktop-e2e-pictures-${{ matrix.os }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/desktop-e2e-pictures/
+          if-no-files-found: warn
+          retention-days: 7
       - name: The runner's Google Chrome did not change during the run
         if: ${{ !cancelled() && runner.os == 'macOS' }}
         run: test "$(defaults read "/Applications/Google Chrome.app/Contents/Info.plist" CFBundleShortVersionString)" = "$(cat "$RUNNER_TEMP/chrome-version")"
