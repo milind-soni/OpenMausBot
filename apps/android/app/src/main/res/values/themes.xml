@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.OpenMausBot" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowBackground">#0B0D10</item>
+    </style>
+
+    <!-- The scanner runs on its own, without the app's Compose tree. -->
+    <style name="Theme.OpenMausBot.Capture" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#000000</item>
+    </style>
+</resources>
