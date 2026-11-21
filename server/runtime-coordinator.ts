@@ -6,11 +6,12 @@ import { composeEnvelope, composeQuestion, composeReport, composeResume, compose
 import { handoffLimits } from "./runtime/handoff-limits.ts";
 import { Runtime } from "./runtime/runtime.ts";
 import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolver } from "./runtime/import-legacy.ts";
+import { queueLimits } from "./runtime/queue-limits.ts";
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
 import { personOnly, requesterDecides, withDefault } from "./runtime/questions.ts";
 import { isStatusOnly, mayBeStatusOnly, statusReplyPrompt } from "./runtime/status-reply.ts";
 import { answersSender, childrenSince, clip, isTerminal, ownThread, path } from "./runtime/tree.ts";
-import type { Answerer, Assignee, Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
+import type { Answerer, Assignee, Assignment, EndResult, Limits, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
 import { sameRequest } from "./same-request.ts";
 
 const NOT_RUNNING = "The originating room task is no longer running";
@@ -146,6 +147,13 @@ const crossed = (asker: string, request: Assignment): string => `@${asker} is al
 const JOIN_POLL_MS = 1_000;
 const JOINED_NOTE = "Another teammate asked this a moment ago, so it was answered once, for both of you:";
 
+/** The limits the coordinator runs the runtime with: the host's own numbers, then the deployment's, then what the
+ * caller asked for. */
+export function runtimeLimits(env: NodeJS.ProcessEnv = process.env, overrides?: Partial<Limits>): Partial<Limits> {
+  return { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS,
+    inputWaitMs: PARKED_LIMIT_MS, inputRemindMs: PARKED_REMIND_MS, ...handoffLimits(env), ...queueLimits(env), ...overrides };
+}
+
 export class RuntimeCoordinator implements Coordinator {
   private readonly host: CoordinatorHost;
   private readonly handoffLimit: HandoffLimit | undefined;
@@ -175,7 +183,7 @@ export class RuntimeCoordinator implements Coordinator {
     this.store = options.wrote ? announcingWrites(store, options.wrote) : store;
     this.runtime = new Runtime(this.store, this.runner(), {
       clock: { now: () => this.now(), monotonic: () => performance.now() },
-      limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, inputWaitMs: PARKED_LIMIT_MS, inputRemindMs: PARKED_REMIND_MS, ...handoffLimits(), ...options.runtimeLimits },
+      limits: runtimeLimits(process.env, options.runtimeLimits),
       ...(options.log ? { log: options.log } : {}),
     });
   }

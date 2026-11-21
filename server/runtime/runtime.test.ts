@@ -1647,3 +1647,40 @@ describe("Runtime: turns a restart cut start again a few at a time", () => {
     expect(store.get(newer.id)?.status).toBe("running");
   });
 });
+
+describe("Runtime: the queue window", () => {
+  it("expires a queue entry that never started after half an hour, not after a day", () => {
+    const w = world();
+    w.runner.canStartAnswer = false;
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+
+    w.clock.advance(30 * 60_000 - 1);
+    w.runtime.tick();
+    expect(w.store.get(child.id)).toMatchObject({ status: "queued" });
+
+    w.clock.advance(2);
+    w.runtime.tick();
+    expect(w.store.get(child.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "never started" });
+    expect(w.store.get(child.id)?.executions).toBe(0);
+    invariants(w);
+  });
+
+  it("holds a queue entry for the window a deployment asks for", () => {
+    const w = world(undefined, { queueMs: 5 * 60_000 });
+    w.runner.canStartAnswer = false;
+    const root = w.runtime.begin(beginReq());
+    const child = ok(w.runtime.enqueue(toBot("builder", root.id)));
+    w.runtime.tick();
+
+    w.clock.advance(5 * 60_000 - 1);
+    w.runtime.tick();
+    expect(w.store.get(child.id)).toMatchObject({ status: "queued" });
+
+    w.clock.advance(2);
+    w.runtime.tick();
+    expect(w.store.get(child.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "never started" });
+    invariants(w);
+  });
+});
