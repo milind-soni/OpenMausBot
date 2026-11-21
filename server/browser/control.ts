@@ -1,6 +1,7 @@
-// Who may act in a bot's browser. A person holding any tab holds the whole profile: every bot call, reads included,
-// is refused, because the person may be typing a password. Underneath, each tab keeps T3 Code's SessionControl, so a
-// takeover drains running work, interrupts queued bot work and revokes refs.
+// Who may act in a bot's browser. A person holding any tab holds the whole profile: every bot call that changes a page
+// or the tab in front is refused, and a read of the tab in front runs beside the person's input without queueing behind
+// it. Underneath, each tab keeps T3 Code's SessionControl, so a takeover drains running work, interrupts queued bot work
+// and revokes refs.
 import { BROWSER_CONTROL_REFUSAL } from "../browser-runtime.ts";
 import { BrowserControlInterrupted, type SessionControl } from "./session-control.ts";
 
@@ -55,8 +56,10 @@ export class ProfileControl<T extends ControlledTab = ControlledTab> {
     }
   }
 
-  /** Bot work, on a tab or the whole browser. A person's takeover during it turns its answer into the refusal. */
-  async agent<R>(tab: ControlledTab | null, run: () => Promise<R>): Promise<R> {
+  /** Bot work, on a tab or the whole browser. A person's takeover during it turns its answer into the refusal. `read`:
+   * it only reads, so while a person holds the browser it runs anyway, beside their input. */
+  async agent<R>(tab: ControlledTab | null, run: () => Promise<R>, { read = false }: { read?: boolean } = {}): Promise<R> {
+    if (this.owner !== null && read && !this.closing) return tab ? tab.control.observe(run) : run();
     if (this.owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
     if (this.closing) throw new Error("The browser is closing. Try again shortly.");
     this.agents++;

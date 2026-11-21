@@ -16,6 +16,7 @@ import type { Download } from "../browser/cdp/downloads.ts";
 import type { BrowserService } from "../browser/service.ts";
 import type { Viewer, ViewerOptions, ViewerOutput } from "../browser/viewers/core.ts";
 import { STREAM_CLOSE, StreamV2 } from "../browser/viewers/stream-v2.ts";
+import { DESKTOP_CLOSE, DesktopViews, type DesktopRequest } from "../browser/desktop/views.ts";
 import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -64,6 +65,8 @@ interface Fixture {
   /** The last v1 view's check that it still shows the browser it opened on. */
   isCurrent: () => boolean;
   dataDir: string;
+  /** The desktop views opened, as the route asked for them. */
+  desktops: Array<Omit<DesktopRequest, "target" | "req" | "socket" | "head">>;
 }
 
 const servers: Server[] = [];
@@ -74,7 +77,8 @@ afterEach(async () => {
   for (const folder of folders.splice(0)) await removeTempDir(folder);
 });
 
-async function serve({ attach, current = () => true, download, audience = () => "team", action = async () => ({ ok: true }), inputLog }: {
+async function serve({ attach, current = () => true, download, audience = () => "team", action = async () => ({ ok: true }), inputLog, desktopView = true }: {
+  desktopView?: boolean;
   attach?: (options: ViewerOptions, push: (output: ViewerOutput) => void) => Promise<Viewer>;
   current?: () => boolean;
   download?: (id: string) => Download | undefined;
@@ -82,7 +86,7 @@ async function serve({ attach, current = () => true, download, audience = () => 
   action?: (body: unknown) => Promise<unknown>;
   inputLog?: BrowserInputLog;
 } = {}): Promise<Fixture> {
-  const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, resumes: [], people: [], sizes: [], opened: [], checked: [], dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
+  const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, resumes: [], people: [], sizes: [], opened: [], checked: [], desktops: [], dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
   folders.push(fixture.dataDir);
   const viewer = { id: "viewer", input: async (message: unknown) => { fixture.inputs.push(message); }, close: async () => {} } as unknown as Viewer;
   const service = {
@@ -94,6 +98,7 @@ async function serve({ attach, current = () => true, download, audience = () => 
   } as unknown as BrowserService;
   const stream = new StreamV2({ service });
   fixture.stream = stream;
+  const desktops = new DesktopViews({ desktop: async () => "pictures" });
   const upgrades = createUpgrades();
   const deps: BrowserViewerRouteDeps = {
     upgrades,
@@ -110,6 +115,13 @@ async function serve({ attach, current = () => true, download, audience = () => 
       action: async ({ body }) => action(body),
       stream: ({ session, spec: _spec, ...request }) => {
         stream.open({ ...request, target: { session, key: "bot:pepper" } });
+        return true;
+      },
+      desktop: ({ session, spec: _spec, ...request }) => {
+        if (!desktopView) return false;
+        const { req: _req, socket: _socket, head: _head, ...asked } = request;
+        fixture.desktops.push(asked);
+        desktops.open({ ...request, target: { session, key: "bot:pepper" } });
         return true;
       },
       fileChooserOffered: (_browser, _owner, chooser) => {
@@ -220,6 +232,15 @@ describe("the v2 stream", () => {
       owner: "local-owner", person: "local-owner", canOperate: interactive, maxWidth: 1280, maxHeight: 800, quality: 70, pace: "hi", authPrompts: true, pagePopups: true,
       ...(interactive ? { size: { width: 1600, height: 1000 } } : {}),
     }]);
+  });
+
+  it("opens a view without pictures for a panel that shows the browser's window on a remote desktop", async () => {
+    const fixture = await serve();
+    const socket = new WebSocket(`ws://${fixture.origin}/api/bots/pepper/browser/stream?frames=0`);
+    await new Promise((resolve) => socket.addEventListener("open", resolve));
+    await until(() => fixture.attachments.length === 1);
+    expect(fixture.attachments[0]).toMatchObject({ frames: false });
+    socket.close();
   });
 
   it("refuses an upgrade from another origin, and a plain request, before attaching a viewer", async () => {
@@ -500,5 +521,41 @@ describe("whose browser a view shows on a Team Cloud", () => {
     expect(fixture.isCurrent(), "an open view stops showing a conversation the person no longer sees").toBe(false);
     expect(await act()).toBe(404);
     expect(fixture.opened).toEqual(["member:p_ada", "member:p_ada"]);
+  });
+});
+
+describe("the desktop view", () => {
+  const closeCode = (url: string, headers?: Record<string, string>) => new Promise<number>((resolve) => {
+    const socket = new WebSocket(url, headers ? { headers } as unknown as string[] : undefined);
+    socket.addEventListener("close", (event) => resolve(event.code));
+  });
+
+  it("opens for the person allowed to see the browser, read-only when asked", async () => {
+    const fixture = await serve();
+    expect(await closeCode(`ws://${fixture.origin}/api/bots/pepper/browser/desktop`)).toBe(DESKTOP_CLOSE.pictures);
+    expect(await closeCode(`ws://${fixture.origin}/api/bots/pepper/browser/desktop?interactive=false&threadId=t1`)).toBe(DESKTOP_CLOSE.pictures);
+    expect(fixture.desktops.map(({ owner, person, canOperate, botId }) => ({ owner, person, canOperate, botId }))).toEqual([
+      { owner: "local-owner", person: "local-owner", canOperate: true, botId: "pepper" },
+      { owner: "local-owner", person: "local-owner", canOperate: false, botId: "pepper" },
+    ]);
+    expect(fixture.desktops[0]!.isCurrent()).toBe(true);
+  });
+
+  it("refuses another origin, a plain request, a hidden conversation and a stale view before opening", async () => {
+    const hidden = await serve({ audience: () => null });
+    expect(await closeCode(`ws://${hidden.origin}/api/bots/pepper/browser/desktop`)).toBe(1006);
+    expect(hidden.desktops).toEqual([]);
+    const fixture = await serve();
+    expect(await closeCode(`ws://${fixture.origin}/api/bots/pepper/browser/desktop`, { origin: "https://attacker.invalid" })).toBe(1006);
+    expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/desktop`)).status).toBe(426);
+    const stale = await serve({ current: () => false });
+    expect(await closeCode(`ws://${stale.origin}/api/bots/pepper/browser/desktop`)).toBe(1006);
+    expect([fixture.desktops, stale.desktops]).toEqual([[], []]);
+  });
+
+  it("is refused where the browser has no desktop view", async () => {
+    const fixture = await serve({ desktopView: false });
+    expect(await closeCode(`ws://${fixture.origin}/api/bots/pepper/browser/desktop`)).toBe(1006);
+    expect(fixture.desktops).toEqual([]);
   });
 });

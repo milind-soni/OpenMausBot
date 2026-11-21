@@ -15,6 +15,8 @@ export interface LaunchOptions extends ChromeFlagsInput, Omit<ChromeEnvInput, "h
   /** A first launch on a fresh machine can take half a minute (font caches, a virus scan of the binary). */
   handshakeTimeoutMs?: number;
   registry?: ProcessRegistry | null;
+  /** A command Chrome starts under, its own command line following, such as a private mount namespace. */
+  wrap?: { command: string; args: readonly string[] } | null;
 }
 
 export interface BrowserVersion {
@@ -106,7 +108,8 @@ export async function launchChrome(options: LaunchOptions): Promise<ChromeProces
     sandboxHelper: options.sandboxHelper ?? null,
     profileMarker: options.profileMarker ?? null,
   });
-  const child = spawnBotWork(() => spawn(options.executablePath, argv, { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"], env, windowsHide: true }));
+  const [command, args] = options.wrap ? [options.wrap.command, [...options.wrap.args, options.executablePath, ...argv]] : [options.executablePath, argv];
+  const child = spawnBotWork(() => spawn(command, args, { stdio: ["ignore", "pipe", "pipe", "pipe", "pipe"], env, windowsHide: true }));
   let output = "";
   const keep = (chunk: Buffer) => {
     output = (output + chunk.toString("utf8")).slice(-OUTPUT_LIMIT);

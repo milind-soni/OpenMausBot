@@ -39,7 +39,7 @@ import type { BrowserSitesRef } from "../routes/browser-sites.ts";
 import { chromeLauncher } from "../browser/chrome/launcher.ts";
 import { LAUNCHER_SECCOMP_FD, browserLanguage, type LauncherBox } from "../browser/chrome/wrapper.ts";
 import type { HostKind } from "../browser/chrome/flags.ts";
-import { browserEngineKind, browserPaneWanted, type BrowserEngineKind } from "../browser/config.ts";
+import { browserEngineKind, browserPaneWanted, cloudDisplayWanted, type BrowserEngineKind } from "../browser/config.ts";
 import { parseSocks5Proxy } from "../browser/egress/policy.ts";
 import { ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter } from "../browser/engines.ts";
 import { CEILING_TICK_MS, ceilingLines, createBrowserCeiling } from "../browser/memory-ceiling.ts";
@@ -177,6 +177,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs,
     language: deps.language,
+    cloudDisplay: () => cloudDisplayWanted(cfg, host),
     held: (session) => !turnResources.free(`browser:${session}`),
     log: (line) => console.warn(line),
   });

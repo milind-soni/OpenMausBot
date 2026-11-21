@@ -225,6 +225,9 @@ export interface BrowserEngineSummary {
   engine?: "agent-browser" | "chrome";
   /** The desktop app shows the Chrome engine's browsers as panes the person uses directly (browserEngine.surface "pane"). */
   pane?: true;
+  /** browserEngine.cloudDisplay is on and this server can run it: the panel shows the browser's window as a remote
+   * desktop (GET /api/bots/:id/browser/desktop), and falls back to the picture view when that closes with 4415. */
+  desktopView?: true;
   /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
    * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
   serverSites?: boolean;
