@@ -519,7 +519,15 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           if (models.length && defaultModel && !models.includes(defaultModel)) {
             return json(res, 409, { ...userError("serverError.instance.defaultModelRemoved", { model: defaultModel }) });
           }
-          entry.config = models.length ? { ...rest, managedModels: models } : rest;
+          const { model: serverDefault, ...others } = rest;
+          const keeps = !models.length || typeof serverDefault !== "string" || models.includes(serverDefault);
+          entry.config = models.length ? { ...(keeps ? rest : others), managedModels: models } : rest;
+        }
+        if (body.model !== undefined) {
+          if (entry.driver !== "openai-compat") return json(res, 400, { ...userError("serverError.instance.modelUnsupported") });
+          const managed = (entry.config as { managedModels?: unknown } | undefined)?.managedModels;
+          if (Array.isArray(managed) && !managed.includes(body.model)) return json(res, 400, { ...userError("serverError.instance.modelNotListed") });
+          entry.config = { ...(entry.config ?? {}) as Record<string, unknown>, model: body.model };
         }
         if (body.url !== undefined || body.apiKey !== undefined) {
           if (!ownerOrAdmin(auth)) return json(res, 403, { error: "Only the owner or an admin can change a server's address or key." });

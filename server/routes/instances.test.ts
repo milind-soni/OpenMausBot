@@ -358,3 +358,47 @@ describe("looking for Ollama", () => {
     expect((await fetch(`${hosted.base}/api/instances/ollama`)).status).toBe(403);
   });
 });
+
+describe("a server's default model", () => {
+  it("saves the model for an OpenAI-compatible server and refuses other engines or bad values", async () => {
+    const persisted: Array<Record<string, { driver: string; config?: Record<string, unknown> }>> = [];
+    const cfg = { instances: { a: { driver: "fake" }, "openai-compat-1": { driver: "openai-compat", config: { url: "https://example.com/v1", key: "k" } },
+      "openai-compat-2": { driver: "openai-compat", config: { url: "https://example.com/v1", key: "k", managedModels: ["glm-4.6", "glm-5"] } } } };
+    const { call, base } = await serve({
+      cfg: cfg as unknown as AppConfig,
+      persistProviderInstance: async (_id: string, instances: typeof persisted[number]) => {
+        persisted.push(structuredClone(instances));
+        (cfg as { instances: unknown }).instances = instances;
+      },
+    });
+    await call("PATCH", "/api/instances/openai-compat-1", { model: " deepseek-v4.1-flash " });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toEqual({ url: "https://example.com/v1", key: "k", model: "deepseek-v4.1-flash" });
+    const status = async (id: string, body: unknown) => (await fetch(`${base}/api/instances/${id}`, {
+      method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    })).status;
+    expect(await status("a", { model: "glm-5" })).toBe(400);
+    expect(await status("openai-compat-2", { model: "deepseek-v4.1-flash" })).toBe(400);
+    await call("PATCH", "/api/instances/openai-compat-2", { model: "glm-5" });
+    expect(persisted.at(-1)!["openai-compat-2"]!.config).toMatchObject({ model: "glm-5" });
+    for (const bad of ["", " ", "a\nb", "x".repeat(201), 5, null]) expect(await status("openai-compat-1", { model: bad })).toBe(400);
+    expect(persisted).toHaveLength(2);
+  });
+
+  it("forgets a server's default model that an edited model list no longer holds", async () => {
+    const persisted: Array<Record<string, { driver: string; config?: Record<string, unknown> }>> = [];
+    const cfg = { instances: { "openai-compat-1": { driver: "openai-compat", config: { url: "https://example.com/v1", key: "k", model: "glm-5" } } } };
+    const { call } = await serve({
+      cfg: cfg as unknown as AppConfig,
+      persistProviderInstance: async (_id: string, instances: typeof persisted[number]) => {
+        persisted.push(structuredClone(instances));
+        (cfg as { instances: unknown }).instances = instances;
+      },
+    });
+    await call("PATCH", "/api/instances/openai-compat-1", { models: ["glm-5", "qwen3"] });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toMatchObject({ model: "glm-5", managedModels: ["glm-5", "qwen3"] });
+    await call("PATCH", "/api/instances/openai-compat-1", { models: ["qwen3"], model: "qwen3" });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toEqual({ url: "https://example.com/v1", key: "k", managedModels: ["qwen3"], model: "qwen3" });
+    await call("PATCH", "/api/instances/openai-compat-1", { models: ["glm-4.6"] });
+    expect(persisted.at(-1)!["openai-compat-1"]!.config).toEqual({ url: "https://example.com/v1", key: "k", managedModels: ["glm-4.6"] });
+  });
+});
