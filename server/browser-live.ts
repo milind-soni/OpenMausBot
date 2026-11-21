@@ -11,6 +11,7 @@ import { DialogWatch, localDevToolsUrl } from "./browser-dialogs.ts";
 import type { Cdp, CdpListeners } from "./browser-sites.ts";
 import { relay } from "./browser-relay.ts";
 import { HOLD_LIMITS, HoldClock, type HoldLimits } from "./browser/hold.ts";
+import type { PersonReason } from "./browser/input-log.ts";
 import { BROWSER_HELD_ELSEWHERE } from "../shared/browser-held.ts";
 
 const execute = promisify(execFile);
@@ -40,15 +41,15 @@ export const BROWSER_ASLEEP_ERROR = { type: "error", retryable: false, asleep: t
 export const BROWSER_WAITING = { type: "waiting", reason: "busy" };
 
 export class BrowserLiveError extends Error {
-  readonly status: number;
-  constructor(message: string, status = 400) { super(message); this.name = "BrowserLiveError"; this.status = status; }
+  readonly status: number; readonly reason: PersonReason | undefined;
+  constructor(message: string, status = 400, reason?: PersonReason) { super(message); this.name = "BrowserLiveError"; this.status = status; this.reason = reason; }
 }
 
 export class BrowserActionFailedError extends BrowserLiveError {
   readonly settled = true;
   constructor(args: readonly string[]) {
     const opening = args[0] === "open" || (args[0] === "tab" && args[1] === "new" && args.length > 2);
-    super(opening ? "This page could not be opened. Check the address and try again." : "The browser could not do that. Try again.", 422);
+    super(opening ? "This page could not be opened. Check the address and try again." : "The browser could not do that. Try again.", 422, "action_failed");
     this.name = "BrowserActionFailedError";
   }
 }
@@ -56,7 +57,7 @@ export class BrowserActionFailedError extends BrowserLiveError {
 /** Another command, usually the bot's own, holds the session; not a missing engine. */
 export class BrowserBusyError extends BrowserLiveError {
   constructor(message = "The browser is busy with another action and did not answer in time. Try again shortly.") {
-    super(message, 503); this.name = "BrowserBusyError";
+    super(message, 503, "busy"); this.name = "BrowserBusyError";
   }
 }
 
@@ -68,7 +69,7 @@ class BrowserUnresponsiveError extends BrowserLiveError {
 /** A person's input or command went unanswered, but the engine answered a read queued behind it, so it has ended. */
 export class BrowserSlowActionError extends BrowserLiveError {
   readonly settled = true;
-  constructor() { super("The browser was slow to take that. Check the page before you repeat it.", 409); this.name = "BrowserSlowActionError"; }
+  constructor() { super("The browser was slow to take that. Check the page before you repeat it.", 409, "slow"); this.name = "BrowserSlowActionError"; }
 }
 
 /** The browser answered that it did not take an input, which therefore had no effect. */
@@ -77,7 +78,7 @@ const INPUT_REFUSED = "The page did not take some of your input. Check the page,
 
 /** An input, or the release of a key or button, the browser never confirmed: its state in the page is unknown. */
 class BrowserInputUnconfirmedError extends BrowserLiveError {
-  constructor() { super("The browser could not confirm this input. Choose Restart browser… in the browser menu before continuing.", 503); this.name = "BrowserInputUnconfirmedError"; }
+  constructor() { super("The browser could not confirm this input. Choose Restart browser… in the browser menu before continuing.", 503, "unconfirmed"); this.name = "BrowserInputUnconfirmedError"; }
 }
 
 /** execFile's own timeout killed a command that had not exited (not a missing binary, a failure, an abort or an overflow). */
@@ -188,7 +189,7 @@ function withoutReplacedMoves(messages: ObjectValue[]): ObjectValue[] {
 /** HTTP bodies can select a fixed action, never a CLI command, flag, port or CDP method. */
 export function parseBrowserLiveAction(value: unknown): Action {
   const body = object(value);
-  const invalid = () => new BrowserLiveError("Invalid browser action.");
+  const invalid = () => new BrowserLiveError("Invalid browser action.", 400, "invalid_action");
   if (!body) throw invalid();
   if (body.type === "take" || body.type === "release" || body.type === "restart") return { type: body.type };
   if (body.type === "ack" && integer(body.seq, 1, Number.MAX_SAFE_INTEGER)) return { type: "ack", seq: body.seq };
@@ -662,7 +663,7 @@ export class BrowserLive {
   }
 
   private async input(viewer: Viewer, message: ObjectValue): Promise<void> {
-    if (!viewer.port) throw new BrowserLiveError("The browser stream is not connected.", 409);
+    if (!viewer.port) throw new BrowserLiveError("The browser stream is not connected.", 409, "stream_not_connected");
     let command: ObjectValue;
     const { type, eventType, ...fields } = message;
     const key = String(fields.code || fields.key);
@@ -680,7 +681,7 @@ export class BrowserLive {
     } else command = { action: "input_keyboard", type: eventType, key: fields.key,
       ...(fields.code === undefined ? {} : { code: fields.code }), ...(fields.text === undefined ? {} : { text: fields.text }) };
     if (command.action === "input_keyboard" && eventType === "keyDown") {
-      if (viewer.pressedKeys.size >= 64 && !viewer.pressedKeys.has(key)) throw new BrowserLiveError("Too many keys are held. Restart the browser before continuing.", 409);
+      if (viewer.pressedKeys.size >= 64 && !viewer.pressedKeys.has(key)) throw new BrowserLiveError("Too many keys are held. Restart the browser before continuing.", 409, "too_many_keys");
       viewer.pressedKeys.set(key, String(fields.key));
     }
     if (type === "input_mouse") viewer.pointer = { x: fields.x as number, y: fields.y as number };
@@ -858,7 +859,7 @@ export class BrowserLive {
         this.end(left.viewer.session, left.viewer.person);
         return { ok: true };
       }
-      throw new BrowserLiveError("This browser view is no longer available. Reopen the browser panel.", 404);
+      throw new BrowserLiveError("This browser view is no longer available. Reopen the browser panel.", 404, "view_gone");
     }
     const action = parseBrowserLiveAction(body);
     if (action.type === "restart") {
@@ -904,7 +905,7 @@ export class BrowserLive {
         const before = this.viewers.get(this.drivers.get(viewer.session) ?? "");
         if (before && before !== viewer) await this.releaseHeld(before);
         await this.left.get(viewer.session)?.settled;
-        if (!this.current(viewer)) { this.close(viewer, true, true); throw new BrowserLiveError("This browser view closed.", 409); }
+        if (!this.current(viewer)) { this.close(viewer, true, true); throw new BrowserLiveError("This browser view closed.", 409, "view_gone"); }
         if (this.ownedBy(viewer)) {
           this.drivers.set(viewer.session, viewer.id);
           this.left.delete(viewer.session);
@@ -912,7 +913,7 @@ export class BrowserLive {
           this.clock(viewer.session).watched(true);
         }
         return { ok: true, waited: waited === true };
-      } catch { throw this.refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly."); }
+      } catch { throw this.refusal(viewer, "Another browser view or bot action is using this browser. Try again shortly.", "take_refused"); }
       finally { this.control(viewer.session); }
     }
     if (!this.controlling(viewer)) throw this.refusal(viewer, "Browser control changed. Try again.");
@@ -923,12 +924,12 @@ export class BrowserLive {
       if (!await watch.answer(action.accept, action.promptText)) throw new BrowserLiveError("The page did not take that answer. Try again.", 503);
       return { ok: true };
     }
-    if (viewer.pendingActions >= 32) throw new BrowserLiveError("Too many browser actions are pending. Try again shortly.", 429);
+    if (viewer.pendingActions >= 32) throw new BrowserLiveError("Too many browser actions are pending. Try again shortly.", 429, "too_many_pending");
     viewer.pendingActions += 1;
     let refused = false;
     try {
       await this.runtime.withHumanAction(viewer.session, viewer.person, async () => {
-        if (!this.current(viewer)) throw new BrowserLiveError("This browser view closed.", 409);
+        if (!this.current(viewer)) throw new BrowserLiveError("This browser view closed.", 409, "view_gone");
         const take = async (message: ObjectValue) => {
           try { await this.input(viewer, message); }
           catch (error) { if (!(error instanceof BrowserInputRefusedError)) throw error; refused = true; }
@@ -942,7 +943,7 @@ export class BrowserLive {
       return refused ? { ok: true, notice: INPUT_REFUSED } : { ok: true };
     } catch (error) {
       if (error instanceof BrowserInputUnconfirmedError && viewer.pendingActions === 1 && await this.restartUnresponsive(viewer)) {
-        throw new BrowserLiveError(restartedNote(viewer.spec.env?.AGENT_BROWSER_RESTORE_SAVE !== "never"), 503);
+        throw new BrowserLiveError(restartedNote(viewer.spec.env?.AGENT_BROWSER_RESTORE_SAVE !== "never"), 503, "browser_restarted");
       }
       throw error instanceof BrowserLiveError ? error : this.refusal(viewer, "Browser control changed. Try again.");
     }
@@ -953,10 +954,10 @@ export class BrowserLive {
     }
   }
 
-  private refusal(viewer: Viewer, otherwise: string): BrowserLiveError {
+  private refusal(viewer: Viewer, otherwise: string, reason: PersonReason = "not_controlling"): BrowserLiveError {
     const holder = this.runtime.heldBy(viewer.session);
-    if (holder && holder !== viewer.person) return new BrowserLiveError(BROWSER_HELD_ELSEWHERE, 409);
-    return new BrowserLiveError(this.runtime.interrupted(viewer.session) ? RESTART_NEEDED : otherwise, 409);
+    if (holder && holder !== viewer.person) return new BrowserLiveError(BROWSER_HELD_ELSEWHERE, 409, "held_elsewhere");
+    return this.runtime.interrupted(viewer.session) ? new BrowserLiveError(RESTART_NEEDED, 409, "restart_needed") : new BrowserLiveError(otherwise, 409, reason);
   }
 
   /** Done on a sign-in card, from any window or device: whoever holds this browser hands it back. */

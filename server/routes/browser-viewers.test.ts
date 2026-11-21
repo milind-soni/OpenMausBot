@@ -9,6 +9,8 @@ import { basename, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BrowserHostError } from "../browser/chrome/host-setup.ts";
+import { createBrowserInputLog, type BrowserInputLog } from "../browser/input-log.ts";
+import { BrowserLiveError } from "../browser-live.ts";
 import type { Audience } from "../audience.ts";
 import type { Download } from "../browser/cdp/downloads.ts";
 import type { BrowserService } from "../browser/service.ts";
@@ -72,11 +74,13 @@ afterEach(async () => {
   for (const folder of folders.splice(0)) await removeTempDir(folder);
 });
 
-async function serve({ attach, current = () => true, download, audience = () => "team" }: {
+async function serve({ attach, current = () => true, download, audience = () => "team", action = async () => ({ ok: true }), inputLog }: {
   attach?: (options: ViewerOptions, push: (output: ViewerOutput) => void) => Promise<Viewer>;
   current?: () => boolean;
   download?: (id: string) => Download | undefined;
   audience?: (threadId: string | null) => Audience | null;
+  action?: (body: unknown) => Promise<unknown>;
+  inputLog?: BrowserInputLog;
 } = {}): Promise<Fixture> {
   const fixture = { origin: "", attachments: [], inputs: [], answers: [], pickerChecks: 0, resumes: [], people: [], sizes: [], opened: [], checked: [], dataDir: mkdtempSync(join(tmpdir(), "omb-browser-viewers-")) } as unknown as Fixture;
   folders.push(fixture.dataDir);
@@ -103,7 +107,7 @@ async function serve({ attach, current = () => true, download, audience = () => 
         fixture.isCurrent = options.isCurrent;
         options.res.writeHead(204).end();
       },
-      action: async () => ({ ok: true }),
+      action: async ({ body }) => action(body),
       stream: ({ session, spec: _spec, ...request }) => {
         stream.open({ ...request, target: { session, key: "bot:pepper" } });
         return true;
@@ -126,11 +130,16 @@ async function serve({ attach, current = () => true, download, audience = () => 
     authorize: async () => null,
     current: (_botId, _session, _auth, checked) => { fixture.checked.push(checked); return current(); },
     restartRefusal: () => null,
+    ...(inputLog ? { inputLog } : {}),
   };
   const route = createBrowserViewerRoutes(deps);
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url ?? "/", "http://localhost");
-    if (!await dispatchRoutes([route], { req, res, url, path: url.pathname, method: req.method ?? "GET", auth: LOOPBACK, json, readBody })) json(res, 404, { error: "no route" });
+    try {
+      if (!await dispatchRoutes([route], { req, res, url, path: url.pathname, method: req.method ?? "GET", auth: LOOPBACK, json, readBody })) json(res, 404, { error: "no route" });
+    } catch (error) {
+      json(res, (error as { status?: number }).status ?? 500, { error: error instanceof Error ? error.message : "failed" });
+    }
   };
   const server = createServer((req, res) => void handle(req, res));
   upgrades.attach(server, handle);
@@ -321,6 +330,58 @@ describe("the v2 stream", () => {
 });
 
 describe("the v1 live view", () => {
+  const act = (fixture: Fixture, body: Record<string, unknown>) => fetch(`http://${fixture.origin}/api/bots/pepper/browser/action`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  it("logs one line with a reason code for each action it refuses, and none for one it took", async () => {
+    const lines: string[] = [];
+    const inputLog = createBrowserInputLog((line) => lines.push(line));
+    let current = true;
+    const fixture = await serve({ inputLog, current: () => current, action: async (body) => {
+      const { type, text } = body as { type: string; text?: string };
+      if (type === "take") throw new BrowserLiveError("Another browser view or bot action is using this browser. Try again shortly.", 409, "take_refused");
+      if (type === "input_keyboard" && text === "secret typed text") throw new BrowserLiveError("Too many browser actions are pending. Try again shortly.", 429);
+      if (type === "input_mouse") return { ok: true, notice: "The page did not take some of your input." };
+      if (type === "ack") throw new BrowserLiveError("This browser view is no longer available. Reopen the browser panel.", 404, "view_gone");
+      return { ok: true };
+    } });
+    expect((await act(fixture, { type: "take", viewerId: "v1" })).status).toBe(409);
+    expect((await act(fixture, { type: "input_keyboard", eventType: "char", text: "secret typed text", viewerId: "v1" })).status).toBe(429);
+    expect((await act(fixture, { type: "input_mouse", eventType: "mousePressed", x: 1, y: 2, viewerId: "v1" })).status).toBe(200);
+    expect((await act(fixture, { type: "ack", seq: 3, viewerId: "v1" })).status).toBe(404);
+    expect((await act(fixture, { type: "navigate", url: "https://example.com/?token=abc", viewerId: "v1" })).status).toBe(200);
+    current = false;
+    expect((await act(fixture, { type: "navigate", url: "https://example.com/?token=abc", viewerId: "v1" })).status).toBe(409);
+    expect(lines).toEqual([
+      "browser input: person take dropped reason=take_refused engine=chrome transport=v1 session=bot-pepper",
+      "browser input: person input_keyboard dropped reason=too_many_pending engine=chrome transport=v1 session=bot-pepper",
+      "browser input: person input_mouse dropped reason=page_refused engine=chrome transport=v1 session=bot-pepper",
+      "browser input: person navigate dropped reason=session_changed engine=chrome transport=v1 session=bot-pepper",
+    ]);
+    expect(lines.join("\n")).not.toMatch(/secret|token|example/);
+  });
+
+  it("counts what the app's view says it dropped before sending, by known reason only, without reaching the browser", async () => {
+    const lines: string[] = [];
+    const inputLog = createBrowserInputLog((line) => lines.push(line));
+    const actions: unknown[] = [];
+    const fixture = await serve({ inputLog, action: async (body) => { actions.push(body); return { ok: true }; } });
+    const answer = await act(fixture, { type: "client_drops", counts: { stale_after_wait: 2, queue_halted: 1, "made up": 9, send_failed: "many", queue_full: -1 }, viewerId: "v1" });
+    expect(answer.status).toBe(200);
+    expect(actions).toEqual([]);
+    expect(lines).toEqual([
+      "browser input: app input dropped reason=stale_after_wait engine=chrome transport=v1 session=bot-pepper times=2",
+      "browser input: app input dropped reason=queue_halted engine=chrome transport=v1 session=bot-pepper",
+    ]);
+  });
+
+  it("says when the own-driver v1 view answered a page question's answer it does not apply", async () => {
+    const lines: string[] = [];
+    const fixture = await serve({ inputLog: createBrowserInputLog((line) => lines.push(line)) });
+    expect((await act(fixture, { type: "dialog", accept: true, viewerId: "v1" })).status).toBe(200);
+    expect((await act(fixture, { type: "input_batch", events: [], viewerId: "v1" })).status).toBe(200);
+    expect(lines).toEqual(["browser input: person dialog dropped reason=not_handled engine=chrome transport=v1 session=bot-pepper"]);
+  });
+
   it("passes on the view a reconnecting panel had, and the person watching, whose hold every view of theirs shares", async () => {
     const fixture = await serve();
     expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/live?resume=old-viewer`)).status).toBe(204);
