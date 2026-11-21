@@ -330,8 +330,9 @@ describe("input to a page on the default browser engine", () => {
     // Our own check's words on the pinned engine; agent-browser 0.39.2 and later refuse it themselves.
     expect(text(1)).toMatch(/disabled/);
     expect(text(3)).toContain("does not hold the text");
-    expect(text(7)).toContain("Take a new snapshot");
     expect(text(5)).toMatch(/textbox "Name" \[ref=e2\]/);
+    // Later engines refuse a ref the page replaced themselves.
+    expect(text(7)).toMatch(/Take a new snapshot|Unknown ref/);
     expect(seen).not.toContain("off-click");
   }, 300_000);
 });
