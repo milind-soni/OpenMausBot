@@ -102,7 +102,7 @@ export const USER_ERROR = {
   "serverError.backup.recursiveLink": "Cannot back up a symbolic link to the folder that contains it: {path}",
   "serverError.backup.dataQueryRunning": "{bot}'s Data query is still running and did not stop when asked. Fully quit and reopen OpenMausBot (or restart the hosted server) to stop it, then try again.",
   "serverError.backup.dataCloseFailed": "{bot}'s Data tables could not be closed for the backup ({detail}). Fully quit and reopen OpenMausBot (or restart the hosted server), then try again.",
-  "serverError.backup.tooLargeData": "The workspace exceeds the 10 GB backup limit; {size} of it is bots' Data tables.",
+  "serverError.backup.tooLargeData": "This installation exceeds the 10 GB backup limit; {size} of it is bots' Data tables.",
   "serverError.backup.legacyBursts": "This backup's burst records (bursts.db) are damaged, so nothing was restored and nothing here changed. Make a new backup where it came from.",
   "serverError.setup.noTools": "This bot's AI can't set it up by itself. Tell the bot what you'd like it to do instead.",
   "serverError.setup.missingConversation": "There is no such conversation.",

@@ -283,7 +283,7 @@ describe("the 10 GB limit", () => {
     expect(tooLargeError(11 * 1024 ** 3, 3 * 1024 ** 3).message).toBe("The workspace exceeds the 10 GB backup limit.");
     const data = tooLargeError(11 * 1024 ** 3, 7.4 * 1024 ** 3);
     expect(data).toMatchObject({ errorKey: "serverError.backup.tooLargeData", errorParams: { size: "7.4 GB" } });
-    expect(data.message).toBe("The workspace exceeds the 10 GB backup limit; 7.4 GB of it is bots' Data tables.");
+    expect(data.message).toBe("This installation exceeds the 10 GB backup limit; 7.4 GB of it is bots' Data tables.");
   });
 });
 

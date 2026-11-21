@@ -9847,7 +9847,7 @@
   "serverError.backup.recursiveLink": "Não é possível incluir no backup um link simbólico para a pasta que o contém: {path}",
   "serverError.backup.dataQueryRunning": "A consulta de Dados de {bot} ainda está em execução e não parou quando pedido. Feche totalmente e abra de novo o OpenMausBot (ou reinicie o servidor hospedado) para pará-la e tente de novo.",
   "serverError.backup.dataCloseFailed": "Não foi possível fechar as tabelas de Dados de {bot} para o backup ({detail}). Feche totalmente e abra de novo o OpenMausBot (ou reinicie o servidor hospedado) e tente de novo.",
-  "serverError.backup.tooLargeData": "O espaço de trabalho passa do limite de 10 GB do backup; {size} disso são tabelas de Dados dos bots.",
+  "serverError.backup.tooLargeData": "Esta instalação passa do limite de 10 GB do backup; {size} disso são tabelas de Dados dos bots.",
   "serverError.backup.legacyBursts": "Os registros de bursts deste backup (bursts.db) estão danificados, então nada foi restaurado e nada mudou aqui. Faça um novo backup onde ele foi criado.",
   "chat.notice.exportedGoal.working": "{before}[Objetivo: em andamento]{content}",
   "chat.notice.exportedGoal.completed": "{before}[Objetivo: concluído]{content}",
