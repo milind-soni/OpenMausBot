@@ -136,3 +136,18 @@ describe("the bot's model in Bot settings", () => {
     expect(render(true)).not.toContain(hint);
   });
 });
+
+describe("the reasoning hint in Bot settings", () => {
+  const words = "Higher levels are slower and cost more, and usually make fewer mistakes on careful work.";
+  const leveled = { ...engine("primary", "Primary", ["p"]), capabilities: { effortLevels: ["low", "medium", "high"] } } as unknown as InstanceInfo;
+  const at = (effort?: string) => renderToStaticMarkup(createElement(ModelSection, { bot: { ...bot(undefined), modelSelection: { instanceId: "primary", model: "p", ...(effort ? { effort } : {}) } } as Bot }));
+
+  it("says once, quietly, when the level is low or unset on a model that offers more, and nothing otherwise", () => {
+    instances.splice(0, 1, leveled);
+    expect(at("low")).toContain(`Reasoning: Low. ${words}`);
+    expect(at()).toContain(`Reasoning: Default. ${words}`);
+    for (const effort of ["medium", "high"]) expect(at(effort)).not.toContain(words);
+    instances.splice(0, 1, engine("primary", "Primary", ["p"]));
+    expect(at("low")).not.toContain(words);
+  });
+});

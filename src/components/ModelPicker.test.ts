@@ -308,14 +308,17 @@ describe("ModelPicker trigger", () => {
     expect(markup).toContain("Codex · GPT-5.6 · High effort");
   });
 
-  it("says nothing about effort when the bot sends no level", () => {
+  it("says Default where the bot sends no level, so an unset level never passes for a chosen one", () => {
     const markup = renderTrigger();
 
     expect(markup).toContain("GPT-5.6");
-    expect(effortChip(markup)).toBeUndefined();
-    expect(markup).not.toContain("effort");
-    expect(markup).toContain("@max-4xl/chathead:size-9");
-    expect(markup).not.toContain("data-model-account-compact");
+    expect(effortChip(markup)).toBe("· Default");
+    expect(markup).toContain("Default effort");
+    fixture.instances = [engine()];
+    expect(effortChip(renderToStaticMarkup(createElement(ModelPicker, { bot: bot() })))).toBeUndefined();
+    const markupWithLevels = renderTrigger();
+    expect(markupWithLevels).toContain("@max-4xl/chathead:size-9");
+    expect(markupWithLevels).not.toContain("data-model-account-compact");
   });
 
   it("visibly identifies the selected account when Claude has multiple instances", () => {

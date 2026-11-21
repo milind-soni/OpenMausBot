@@ -5,6 +5,7 @@ import { type Bot, type InstanceInfo } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
 import { ProposalStatus } from "./ProposalStatus";
 import { CheckWorkSetting } from "./CheckWorkSetting";
+import { ReasoningHint } from "./ReasoningHint";
 import { ThreadModelsLine } from "../ThreadModelsLine";
 import { t } from "@/lib/i18n";
 import { Select } from "../Select";
@@ -49,6 +50,7 @@ export function ModelSection({ bot }: { bot: Bot }) {
           </div>
         }
       />
+      <ReasoningHint bot={bot} className="-mt-2 px-4 text-[13px] text-ink-secondary" />
       {!draft && <CheckWorkSetting bot={bot} />}
       {!draft && <FallbackChain bot={bot} onChange={(fallback) => dispatch({ type: "updateBot", botId: bot.id, patch: { fallback } })} />}
       {!draft && state.config?.cacheKeepWarm && (

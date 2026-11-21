@@ -1,12 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { outsideRoomNote, sentRow } from "./handoff-sent.ts";
+import { modelWords, outsideRoomNote, sentRow } from "./handoff-sent.ts";
 
 const sender = { id: "chief", name: "Chief", color: "blue" };
 const recipient = { id: "buyer", name: "Buyer Research", color: "green" };
 const sales = { id: "sales", name: "Sales", here: true };
 
 describe("sentRow", () => {
+  it("names the model the work runs on and its reasoning level after the row's words, and none on a thread of its own", () => {
+    expect(modelWords("en", { instanceId: "claude", model: "claude-opus-5", effort: "high" }, "Opus 5")).toBe("Opus 5 · high reasoning");
+    expect(modelWords("en", { instanceId: "claude", model: "claude-opus-5" })).toBe("claude-opus-5 · default reasoning");
+    const row = sentRow({ sender, recipient, threadId: "buyer-work", via: "direct", model: "Opus 5 · high reasoning" });
+    expect(row.tool).toMatchObject({ name: "Sent to Buyer Research", summary: "Opus 5 · high reasoning" });
+    expect(sentRow({ sender, recipient: sender, threadId: "own", title: "Review", via: "direct", model: "Opus 5 · high reasoning" }).tool).not.toHaveProperty("summary");
+  });
+
+
   it("carries the files passed with the hand-off, for the line's chips", () => {
     const report = { kind: "file" as const, path: "/data/attachments/1f0c.pdf", mime: "application/pdf", name: "report.pdf" };
     expect(sentRow({ sender, recipient, threadId: "buyer-work", via: "direct", attachments: [report] }).attachments).toEqual([report]);

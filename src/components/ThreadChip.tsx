@@ -29,7 +29,7 @@ export function ThreadChip({ message, threadId }: { message: Message; threadId?:
         className={cn("ui-pill", tool.ok === false && "text-danger")}
       >
         {bot ? <BotAvatar bot={bot} state="happy" size={16} animated={false} /> : <MessagesSquare size={13} aria-hidden="true" />}
-        <span className="max-w-[480px] truncate">{label}</span>
+        <span className="max-w-[480px] truncate">{tool.summary ? `${label} · ${tool.summary}` : label}</span>
         <ChevronRight size={13} />
       </button>
       {message.handoff && <HandoffStatusChip line={message.handoff} />}
