@@ -43,7 +43,7 @@ export interface QuotaSwitchDeps {
   registry: { instances(): QuotaSwitchEngine[] };
   turnStops: Pick<TurnStops, "failureCause"> & Partial<Pick<TurnStops, "read">>;
   /** Which AIs carry on while one is limited or signed out, and the one notice for each stretch of either. */
-  takeover?: Pick<LimitTakeover, "weighBackups" | "passedOver" | "tell" | "moved">;
+  takeover?: Pick<LimitTakeover, "weighBackups" | "passedOver" | "tell" | "moved"> & Partial<Pick<LimitTakeover, "observeNamedRefusal">>;
   /** A custom endpoint brings its own credential, so its sign-in state does not count. */
   access?: (instanceId: string) => EngineAccess | undefined;
   refusal?: (engine: QuotaSwitchEngine) => string | undefined;
@@ -170,6 +170,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     const current = before && engines.find((candidate) => candidate.instanceId === before.modelSelection.instanceId);
     if (!before || !sameModelSelection(before.modelSelection, build.from)) return { why: "conversation-changed" };
     if (!engine || !current) return { why: "not-configured" };
+    const observed = scope === "engine" && resetsAt !== undefined ? deps.takeover?.observeNamedRefusal?.(before.modelSelection.instanceId) : undefined;
     const ready = engine.instanceId === current.instanceId ? selection : await takeover(engine, before, current);
     if (typeof ready === "string") return { why: ready };
     const bot = store.projectBotForTask(botId, threadId);
@@ -183,7 +184,7 @@ export function createQuotaSwitch(deps: QuotaSwitchDeps): QuotaSwitch {
     } catch (error) {
       return { why: "switch-refused", detail: error instanceof Error ? error.message : String(error) };
     }
-    deps.takeover?.moved(botId, threadId, before.modelSelection, checked.selection, resetsAt, scope);
+    deps.takeover?.moved(botId, threadId, before.modelSelection, checked.selection, resetsAt, scope, observed);
     const name = engine.instanceId === current.instanceId ? `${nameOf(engine)} ${checked.selection.model}` : nameOf(engine);
     const why = scope === "signed-out" ? `while ${nameOf(current)} is signed out` : "after hitting the usage limit";
     const held = heldBy(botId, threadId, rootOf(threadId, request)) ?? (build.ran ? "ran" : null);
