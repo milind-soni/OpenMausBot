@@ -75,9 +75,10 @@ function save(record: StallRecord): void {
     try { const kept = JSON.parse(readFileSync(data.file, "utf8")) as { records?: StallRecord[] }; records = Array.isArray(kept.records) ? kept.records : []; } catch {}
     records = [...records, record].slice(-data.keep);
     const tmp = join(data.dataDir, `.perf-stalls.${process.pid}.tmp`);
-    writeFileSync(tmp, JSON.stringify({ v: 1, records }));
-    const fd = openSync(tmp, "r");
-    try { fsyncSync(fd); } finally { closeSync(fd); }
+    // Written and flushed through one descriptor (Windows flushes only a file open for writing); a flush that fails still
+    // leaves the record, as a crash before it would.
+    const fd = openSync(tmp, "w");
+    try { writeFileSync(fd, JSON.stringify({ v: 1, records })); try { fsyncSync(fd); } catch {} } finally { closeSync(fd); }
     renameSync(tmp, data.file);
   } catch {}
   // Straight to the descriptor: a worker's console goes through the main thread, which is stuck.
