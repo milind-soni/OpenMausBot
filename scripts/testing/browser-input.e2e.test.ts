@@ -69,9 +69,11 @@ describe("input to a page on the default browser engine", () => {
     return { status: response.status, body: await response.json().catch(() => null) };
   };
   const serverLog = () => readFileSync(fixture.info.logPath, "utf8");
-  /** A failure's own evidence: the server's lines about its browser, which go with the fixture otherwise. */
-  const showBrowserLog = () => onTestFailed(() => {
-    console.log(`server log, browser lines:\n${serverLog().split("\n").filter((line) => /browser/i.test(line)).slice(-40).join("\n")}`);
+  /** A failure's own evidence: the end of the server's log, which goes with the fixture otherwise. */
+  const showServerLog = () => onTestFailed(() => {
+    let log = "(the server log could not be read)";
+    try { log = serverLog().split("\n").slice(-60).join("\n"); } catch {}
+    console.log(`server log, last lines:\n${log}`);
   });
   /** The server's lines about input that did not reach the page, without each browser's own session id. */
   const dropLines = () => serverLog().split("\n").filter((line) => line.startsWith("browser input:")).map((line) => line.replace(/ session=\S+/, ""));
@@ -148,7 +150,7 @@ describe("input to a page on the default browser engine", () => {
   }
 
   run("the bot's click and fill tools change the page, and a missing target is an error the server logs", async () => {
-    showBrowserLog();
+    showServerLog();
     const planPath = join(fixture.info.dataDir, "room-plan.json");
     const evidence = () => { try { return readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)); } catch { return []; } };
     seen.length = 0;
@@ -167,7 +169,7 @@ describe("input to a page on the default browser engine", () => {
   }, 300_000);
 
   run("a person takes control, clicks a button and types a word, and the page sees both", async () => {
-    showBrowserLog();
+    showServerLog();
     const { view, post, close } = await openView();
     // A failure here must not leave the browser held for whatever runs next.
     try {
