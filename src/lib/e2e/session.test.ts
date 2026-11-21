@@ -400,6 +400,38 @@ const GO_AWAY_PROTOCOL = [0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
 const COMPUTER_OPEN = [0, 1, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0];
 
 describe("PhoneSession records and closes", () => {
+  it("keeps a GoAway(3) still being opened when the socket closes 4001 and the pong deadline passes meanwhile", async () => {
+    let release!: () => void;
+    let opened = 0;
+    const socket = {
+      bufferedAmount: 0,
+      send: () => {},
+      close: () => {},
+      onmessage: null as ((event: MessageEvent) => void) | null,
+      onclose: null as ((event: CloseEvent) => void) | null,
+    };
+    const keys = {
+      send: { seal: async (plaintext: Bytes) => plaintext },
+      receive: {
+        open: (record: Bytes) => {
+          opened += 1;
+          return new Promise<Bytes>((resolve) => (release = () => resolve(record)));
+        },
+      },
+    } as unknown as SessionKeys;
+    const session = new PhoneSession(socket as unknown as WebSocket, keys, { pingIntervalMs: 10, pingTimeoutMs: 20 });
+    // The ping is out and its deadline is running when the removal record and the close arrive.
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    session.receive({ data: Uint8Array.from(GO_AWAY_REMOVED).buffer } as MessageEvent);
+    socket.onclose!({ code: 4001 } as CloseEvent);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(session.state).toBe("open");
+    expect(opened).toBe(1);
+    release();
+    expect(await session.closed).toBe(4001);
+    expect(session.removed).toBe(true);
+  });
+
   it("reads a GoAway(3) still being opened before the 4001 close behind it ends the session", async () => {
     const { session, record, remoteClose } = fakeSession();
     record(...GO_AWAY_REMOVED);
