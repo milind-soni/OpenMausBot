@@ -41,7 +41,8 @@ export function createSpawnLevel(deps: SpawnLevelDeps) {
     if (runs !== chosen) return "ask";
     // Custom is one Codex configuration the desktop alone may grant: never copied, and nothing above it comes in its place.
     const level: ApprovalMode = chosen === "custom" && (own !== "custom" || from.botId !== target.id) ? "ask" : chosen;
-    if (level === own) return ownCarries;
+    // A thread of a bot on Custom keeps the configuration the person wrote, as a Chief's level leaves it (delegated-level.ts).
+    if (level === own || own === "custom") return ownCarries;
     if (!levelWithin(level, own) && !deps.mayRaise(from.threadId)) return ownCarries;
     return needsAsk(level, view.modelSelection, selection) ? "ask" : { from: level };
   };

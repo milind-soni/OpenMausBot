@@ -560,6 +560,30 @@ it("a turn that may use the Mac finds only the owner's own conversations with th
   expect(threads).not.toContain("Guest kumquat notes");
 }, 60_000);
 
+it("a thread opened from a conversation a guest left behind starts at Ask, whatever that chat and its bot are set to; the owner's own chat raises", async () => {
+  const bot = await newBot("Opens threads", "held");
+  const guests = await guestThread(bot, "Guest's job");
+  const mine = await newThread(bot);
+  // The owner put both conversations on Full access in their composers.
+  for (const thread of [guests, mine]) {
+    const set = await api("PATCH", `/api/bots/${bot.id}/tasks/${thread}`, { token: owner, body: { approvalMode: "full" } });
+    expect(set.status, JSON.stringify(set.body)).toBe(200);
+  }
+  const opened = async (from: string, title: string) => {
+    const tools = await toolsFor(() => say(owner, bot, "Open a job for this.", from));
+    expect((await tools("start_thread", { title, message: "Do the job." })).isError).toBeFalsy();
+    await stopRunningTurns();
+    const tasks = (await api("GET", "/api/bots", { token: owner })).body.bots.find((candidate: any) => candidate.id === bot.id).tasks as any[];
+    return tasks.find((task) => task.title === title)?.approvalMode;
+  };
+  // The bot is at Full access too, yet a turn there runs at Ask, and so does what it opens.
+  expect(await opened(guests, "Guest's, bot at Full")).toBe("ask");
+  // Saved at Ask, the bot's threads open at the level of the owner's chat, never of the guest's.
+  expect((await api("PATCH", `/api/bots/${bot.id}`, { token: owner, body: { approvalMode: "ask" } })).status).toBe(200);
+  expect(await opened(guests, "Guest's, bot at Ask")).toBe("ask");
+  expect(await opened(mine, "Mine, bot at Ask")).toBe("full");
+}, 120_000);
+
 it("only the owner changes how a bot asks for approval in a conversation a guest left behind, not a process on the Cloud", async () => {
   const bot = await newBot("Approvals", "held");
   const guests = await guestThread(bot);

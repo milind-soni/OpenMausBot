@@ -34,7 +34,8 @@ from the operator's dedicated policy.
 when the conversation has one of its own that differs from the bot's: its own
 `start_thread` (with `report_back` too), a burst's parts, and a teammate's new
 thread or work thread opened by a hand-off (`coordinate_bots`, `start_thread`
-on a teammate). It works both ways: a chat set to Full access in its composer
+on a teammate). A consultation (`consult: true`) acts on nothing, so its
+thread starts at the teammate's own level. It works both ways: a chat set to Full access in its composer
 opens Full access threads even on a bot saved at Ask, and a chat at Ask opens
 Ask threads even on a bot at Full access, so nothing a bot opens runs above
 what the person chose in that chat. The level is saved on the new thread, which
@@ -227,10 +228,13 @@ nearest Chief conversation (`server/host/delegated-level.ts`). The level is
 computed once when the assignment is written and recorded on it
 (docs/runtime-contract.md §3); the turn runs with exactly that level.
 
-It only ever raises: a teammate already on a higher level keeps it, a teammate
-on Custom keeps its own configuration, and a Chief handing work out from an
-Ask conversation passes nothing on this way (a new thread it opens still takes
-that conversation's Ask, like any bot's, above). Every engine runs Full access, so only
+The flow-down only ever raises: a thread already on a higher level keeps it, a
+teammate on Custom keeps its own configuration, and a Chief handing work out
+from an Ask conversation passes nothing on this way. A new thread the hand-off
+opens is different: it starts at the Chief conversation's own level, like a
+thread any conversation opens (above), so a Chief chat on Approve for me opens
+a teammate's new thread at Approve for me even when that teammate is saved at
+Full access, and one on Ask opens it at Ask. Every engine runs Full access, so only
 Auto-accept edits can be capped: a teammate on an engine without it (Codex,
 whose Ask already writes the workspace) stays on its own level. The teammate's
 own default and its other conversations do not change. An ordinary bot's

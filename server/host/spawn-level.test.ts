@@ -133,7 +133,7 @@ describe("a thread a bot opens from a conversation takes that conversation's lev
     expect(h.own.levelFor(h.store.bot(teammate.id)!, undefined, { botId: opener.id, threadId: confirming })).toBeUndefined();
   });
 
-  it("never copies Custom: a thread opened from a Custom chat starts at Ask unless its bot is on Custom too", () => {
+  it("never copies Custom, and never replaces it: a Custom chat opens Ask threads, a Custom bot's threads keep Custom", () => {
     const h = host();
     const opener = h.store.createBot();
     h.store.patchBot(opener.id, { name: "Codex bot", modelSelection: codex, approvalMode: "full" });
@@ -141,6 +141,12 @@ describe("a thread a bot opens from a conversation takes that conversation's lev
     expect(h.own.inherited(opener.id, custom).approvalMode).toEqual({ from: "ask" });
     h.store.patchBot(opener.id, { approvalMode: "custom" });
     expect(h.own.inherited(opener.id, custom).approvalMode).toBeUndefined();
+
+    // A teammate on Custom keeps its own configuration whatever the chat handing it work is set to.
+    const sender = botAt(h.store, "ask", "Sender");
+    for (const mode of ["full", "auto", "ask"] as const) {
+      expect(h.own.levelFor(h.store.bot(opener.id)!, undefined, { botId: sender.id, threadId: chatAt(h.store, sender, mode) })).toBeUndefined();
+    }
   });
 
   it("lets no guest or non-owner raise a level: a guest-driven chat opens Ask threads, and anyone else's at most the bot's", () => {
