@@ -211,7 +211,7 @@ function MakeHomeRow({ place, onStarted }: { place: RailPlace; onStarted: () => 
       {busy ? <Loader2 size={15} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin motion-reduce:animate-none" /> : <House size={15} aria-hidden="true" className="mt-0.5 shrink-0" />}
       <span className="flex min-w-0 flex-col text-start">
         <span className="text-[13px] text-ink">{t("rail.makeHome", { name: place.name })}</span>
-        <span className="text-[12px] leading-snug text-ink-secondary">{t("rail.makeHomeSub", { name: place.name })}</span>
+        <span className="text-[12px] leading-snug text-ink-secondary">{t("rail.makeHomeSub", { name: place.name })} {t("rail.makeHomeDataStays", { name: place.name })}</span>
       </span>
     </button>
     {said && <p role="alert" className="px-1.5 pb-1 text-[12px] text-danger">{said}</p>}

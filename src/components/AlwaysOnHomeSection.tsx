@@ -184,7 +184,7 @@ function AddedComputer({ server, status, offered }: { server: SavedServer; statu
       {said && <p role="alert" className="text-[12px] leading-4 text-danger">{said}</p>}
       <ul className="flex list-disc flex-col gap-1 pl-4 text-[12px] leading-4 text-ink-secondary">
         <li>{t("alwaysOn.added.sidebar", { name: server.name })}</li>
-        {offered && <li>{t("alwaysOn.added.keepRunning", { name: server.name })}</li>}
+        {offered && <li>{t("alwaysOn.added.keepRunning", { name: server.name })} {t("rail.makeHomeDataStays", { name: server.name })}</li>}
         <li>{t("alwaysOn.added.screen", { app: productName() })}</li>
       </ul>
     </div>
