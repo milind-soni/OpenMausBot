@@ -21,12 +21,12 @@ it("gives a Grok turn OpenMausBot's own tools by URL, no proxy process each, eve
   };
   const dump = join(dataDir, "grok-launch.json");
   const calls = join(dataDir, "grok-calls.json");
-  const engine = (mode: string) => {
-    const wrapper = join(dataDir, `grok-${mode}.mjs`);
+  const engine = (mode: string, http = true) => {
+    const wrapper = join(dataDir, `grok-${mode}-${http ? "http" : "stdio"}.mjs`);
     writeFileSync(wrapper, [
       "#!/usr/bin/env node",
       `process.env.FAKE_ACP_MODE = ${JSON.stringify(mode)};`,
-      'process.env.FAKE_ACP_MCP_TRANSPORTS = "http";',
+      ...(http ? ['process.env.FAKE_ACP_MCP_TRANSPORTS = "http";'] : []),
       `process.env.FAKE_ACP_DUMP = ${JSON.stringify(dump)};`,
       `process.env.FAKE_ACP_MCP_CALLS_FILE = ${JSON.stringify(calls)};`,
       `await import(${JSON.stringify(new URL("./testing/fake-acp-cli.ts", import.meta.url).href)});`,
@@ -35,7 +35,6 @@ it("gives a Grok turn OpenMausBot's own tools by URL, no proxy process each, eve
   };
   try {
     expect((await cli("doctor")).ok).toBe(true);
-    await engine("mcp-tools");
     const bot = (await cli("new-bot", "--name", "Grok tools")).bot;
     const threadId = bot.activeTaskId ?? bot.threadId;
     await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "grok", model: "fake-model" } });
@@ -46,18 +45,29 @@ it("gives a Grok turn OpenMausBot's own tools by URL, no proxy process each, eve
       return messages.filter((message) => message.role === "bot" && !message.text?.startsWith("[digest]")).at(-1)?.text ?? "";
     };
 
-    const listed = await turn("List your tools.");
-    const sent = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8")) as Array<{ name: string; type?: string; url?: string; command?: string }>;
-    evidence.push({ sent: sent.map(({ name, type, url, command }) => ({ name, type, url, command })) });
+    type Sent = Array<{ name: string; type?: string; url?: string; command?: string; args?: string[] }>;
+    const ownProxy = (server: Sent[number]) => (server.args ?? []).some((arg) => /(?:agents-proxy|harness-mcp-proxy)\.[jt]s$/.test(arg));
+    const lists = (text: string) => Object.fromEntries(text.trim().split("\n").map((line) => line.split(": "))
+      .map(([name, tools]) => [name, tools!.split(",").sort()])) as Record<string, string[]>;
+
+    // The same bot over the stdio proxies, as an agent that does not take MCP servers by URL gets them.
+    await engine("mcp-tools", false);
+    const overStdio = lists(await turn("List your tools."));
+    const stdioSent = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8")) as Sent;
+    expect(stdioSent.filter(ownProxy).map((server) => server.name)).toEqual(expect.arrayContaining(["agents", "data"]));
+
+    await engine("mcp-tools");
+    const overUrl = lists(await turn("List your tools."));
+    const sent = JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8")) as Sent;
+    evidence.push({ stdioSent: stdioSent.map(({ name, type, command }) => ({ name, type, command })), sent: sent.map(({ name, type, url, command }) => ({ name, type, url, command })) });
+    // None of OpenMausBot's own servers is a process any more: each is this server's endpoint, with every tool it listed before.
+    expect(sent.filter(ownProxy)).toEqual([]);
     const own = sent.filter((server) => server.type === "http");
-    // Every server this fixture's turn has is OpenMausBot's own, and none is a process.
-    expect(own.map((server) => server.name)).toEqual(expect.arrayContaining(["agents", "data"]));
-    expect(sent.filter((server) => server.command !== undefined)).toEqual([]);
+    expect(own.map((server) => server.name).sort()).toEqual(stdioSent.filter(ownProxy).map((server) => server.name).sort());
     for (const server of own) expect(server.url).toBe(`${url}/api/internal/mcp-http/${server.name}`);
-    const lists = Object.fromEntries(listed.trim().split("\n").map((line) => line.split(": ")).map(([name, tools]) => [name, tools!.split(",")]));
-    expect(Object.keys(lists).sort()).toEqual(own.map((server) => server.name).sort());
-    expect(lists.agents).toEqual(expect.arrayContaining(["list_bots"]));
-    expect(lists.data).toEqual(expect.arrayContaining(["data_sql"]));
+    for (const server of own) expect(overUrl[server.name], server.name).toEqual(overStdio[server.name]);
+    expect(overUrl.agents).toEqual(expect.arrayContaining(["list_bots"]));
+    expect(overUrl.data).toEqual(expect.arrayContaining(["data_sql"]));
 
     await engine("mcp-calls");
     writeFileSync(calls, JSON.stringify([
@@ -67,7 +77,7 @@ it("gives a Grok turn OpenMausBot's own tools by URL, no proxy process each, eve
     const called = await turn("Call them.");
     expect(called).toContain("list_bots: ");
     expect(called).toMatch(/data_sql: .*42/s);
-    expect(JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8")).every((server: { type?: string }) => server.type === "http")).toBe(true);
+    expect((JSON.parse(readFileSync(`${dump}.mcp.json`, "utf8")) as Sent).filter(ownProxy)).toEqual([]);
     evidence.push({ called });
   } finally {
     const evidencePath = `${logPath}.grok-own-mcp.json`;

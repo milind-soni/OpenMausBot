@@ -109,9 +109,14 @@ describe("an ACP engine", () => {
 
   it("sends a session its own servers by URL only when that session's agent said it takes them, the person's as they were", () => {
     const pairs = (record: Record<string, string>) => Object.entries(record).map(([name, value]) => ({ name, value }));
+    const harnessServer = (kind: string) => ({ name: kind, command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, kind],
+      env: pairs({ OMB_HARNESS_URL: HARNESS, [`OMB_MCP_TOKEN_${kind.toUpperCase()}`]: `${kind}-capability` }) });
     const servers: AcpMcpServer[] = [
       { name: "agents", command: agents.command, args: agents.args, env: pairs(agents.env) },
       { name: "browser", command: browser.command, args: browser.args, env: pairs(browser.env) },
+      ...["computer", "data", "email", "device"].map(harnessServer),
+      { name: "phone", command: phone.command, args: phone.args, env: pairs(phone.env) },
+      { name: "ogb", command: ogb.command, args: ogb.args, env: [] },
       { name: "notes", command: "npx", args: ["notes"], env: [] },
     ];
     const http = { agentCapabilities: { mcpCapabilities: { http: true, sse: false } } };
@@ -120,7 +125,12 @@ describe("an ACP engine", () => {
     expect(acpSessionMcpServers(servers, "stdio", http)).toBe(servers);
     const sent = acpSessionMcpServers(servers, "advertised", http);
     expect(sent.map((server) => "type" in server ? `${server.name}:${server.url}` : server.name)).toEqual([
-      `agents:${HARNESS}/api/internal/mcp-http/agents`, `browser:${HARNESS}/api/internal/mcp-http/browser`, "notes"]);
+      ...["agents", "browser", "computer", "data", "email", "device"].map((name) => `${name}:${HARNESS}/api/internal/mcp-http/${name}`),
+      "phone", "ogb", "notes"]);
+    expect(sent.slice(6)).toEqual(servers.slice(6));
+    for (const kind of ["computer", "data", "email", "device"]) {
+      expect((sent.find((server) => server.name === kind) as Extract<AcpMcpServer, { type: "http" }>).headers).toEqual([{ name: "authorization", value: `Bearer ${kind}-capability` }]);
+    }
     const own = sent[1] as Extract<AcpMcpServer, { type: "http" }>;
     expect(own.headers).toEqual([{ name: "authorization", value: "Bearer browse" }, { name: "x-omb-tool-limit", value: "12" }]);
     const agentsHeaders = Object.fromEntries((sent[0] as Extract<AcpMcpServer, { type: "http" }>).headers.map(({ name, value }) => [name, value]));
