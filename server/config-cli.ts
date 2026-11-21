@@ -1,7 +1,7 @@
-import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 
 import { listConfigBackups, restoreConfigBackup } from "./config-backup.ts";
+import { defaultDataDir, type DataHomes } from "./data-dir.ts";
 import { parseStoredConfig } from "./config.ts";
 import { parseJson } from "./schema.ts";
 
@@ -47,12 +47,12 @@ function settingsProblem(text: string): string | null {
   }
 }
 
-export function parseConfigArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): ConfigCliArgs | ConfigCliError {
+export function parseConfigArgs(argv: string[], env: NodeJS.ProcessEnv = process.env, homes: DataHomes = {}): ConfigCliArgs | ConfigCliError {
   const json = argv.includes("--json");
   const help = argv.includes("--help") || argv.includes("-h");
   const dryRun = argv.includes("--dry-run");
   const fail = (error: string): ConfigCliError => ({ error, json });
-  let dataDir = env.OMB_DATA_DIR || join(homedir(), ".openmausbot");
+  let dataDir = argv.includes("--data-dir") ? "" : defaultDataDir(env, homes.under, homes.realHome);
   let name: string | undefined;
   const words = argv.filter((arg) => arg !== "--json" && arg !== "--help" && arg !== "-h" && arg !== "--dry-run");
   const command = words[0];

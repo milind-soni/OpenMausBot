@@ -288,6 +288,8 @@ describe("OpenRouter failures in plain words", () => {
       await recorder.until((event) => event.type === "turn.completed" && event.threadId === "free");
       expect(errorFor("paid")).toBe(OPENROUTER_FAILURES.credits);
       expect(errorFor("free")).toBe(OPENROUTER_FAILURES.freeLimit);
+      // The 402 is terminal, so the paid model is sent once; the free turn's 429 is a transient
+      // rate limit, so the free model is retried up to the gate's three attempts.
       expect(bodies.map((body) => body.model)).toEqual(["deepseek/deepseek-v4.1-flash-1017", PREFERRED, PREFERRED, PREFERRED]);
     } finally {
       recorder.stop();

@@ -20,6 +20,8 @@ process.env.OMB_DISABLE_MODEL_MANIFEST_FETCH = "1";
 delete process.env.HERMES_HOME;
 // A ChatGPT-plan turn links the person's Codex home ($CODEX_HOME or ~/.codex) into its own: keep it in the throwaway home.
 delete process.env.CODEX_HOME;
+// Pi turns copy from the person's Pi agent folder ($PI_CODING_AGENT_DIR or ~/.pi/agent): keep it in the throwaway home.
+delete process.env.PI_CODING_AGENT_DIR;
 // No server in a test downloads the project's announcement cards; its tests hand the store a fake fetch.
 process.env.OMB_DISABLE_ANNOUNCEMENTS = "1";
 // Named explicitly although homedir() already covers it: the device tests delete this directory wholesale.

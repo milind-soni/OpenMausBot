@@ -88,6 +88,49 @@ describe("readCodexModelCatalog", () => {
     });
   });
 
+  it("sends a model_catalog_json listing to the provider that serves it", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const home = scratchHome({
+      "config.toml": [
+        'model = "gpt-fake-default"',
+        'model_provider = "gw"',
+        "model_catalog_json = 'gw-models.json'",
+        "",
+        "[model_providers.gw]",
+        'name = "My gateway"',
+        'base_url = "http://127.0.0.1:9/v1"',
+        "",
+      ].join("\n"),
+    });
+
+    const catalog = await readCodexModelCatalog({ HOME: home, PATH: process.env.PATH, FAKE_CODEX_TIERS: "1" }, fetch, FAKE_CLI);
+
+    expect(catalog.default).toBe("gw::gpt-fake-default");
+    expect(catalog.options.map((option) => option.id)).toEqual(["gw::gpt-fake-default", "gw::gpt-page-two"]);
+    expect(catalog.options.every((option) => option.custom)).toBe(true);
+    expect(catalog.options.map((option) => decodeCodexSelection(option.id).modelProvider)).toEqual(["gw", "gw"]);
+  });
+
+  it("keeps a model_catalog_json listing on OpenAI when OpenAI serves it", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const home = scratchHome({ "config.toml": "model_catalog_json = 'models.json'\n" });
+
+    const catalog = await readCodexModelCatalog({ HOME: home, PATH: process.env.PATH }, fetch, FAKE_CLI);
+
+    expect(catalog.options.map((option) => option.id)).toEqual(["gpt-fake-default", "gpt-page-two"]);
+  });
+
+  it("keeps OpenAI's listing beside a local provider that has no model_catalog_json", async () => {
+    chmodSync(FAKE_CLI, 0o755);
+    const home = scratchHome({
+      "config.toml": 'model = "local-model"\nmodel_provider = "gw"\n\n[model_providers.gw]\nname = "My gateway"\nbase_url = "http://127.0.0.1:9/v1"\n',
+    });
+
+    const catalog = await readCodexModelCatalog({ HOME: home, PATH: process.env.PATH }, fetch, FAKE_CLI);
+
+    expect(catalog.options.map((option) => option.id)).toEqual(["gpt-fake-default", "gpt-page-two", "gw::local-model"]);
+  });
+
   it("adds a Fast row after each model that offers Fast and does not already run on it", async () => {
     chmodSync(FAKE_CLI, 0o755);
     const catalog = await readCodexModelCatalog(

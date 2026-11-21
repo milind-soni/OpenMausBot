@@ -2,7 +2,7 @@
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, admin: true as boolean | null, team: false, state: {} as Record<string, unknown> }));
+const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, admin: true as boolean | null, team: false, state: {} as Record<string, unknown>, dispatch: vi.fn() }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {
@@ -37,7 +37,7 @@ vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => false, setAdvanc
 vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: { ...original.initialState, ...fixture.team ? { config: { team: { id: "acme", name: "Acme" } } } : {}, ...fixture.state }, dispatch: vi.fn() }) };
+  return { ...original, useStore: () => ({ state: { ...original.initialState, ...fixture.team ? { config: { team: { id: "acme", name: "Acme" } } } : {}, ...fixture.state }, dispatch: fixture.dispatch }) };
 });
 
 import { Sidebar } from "./Sidebar";
@@ -106,6 +106,12 @@ describe("the sidebar's + menu with a long bot name (simple mode)", () => {
     expect(style({ inspectorOpen: true })["--sidebar-max"]).toBe("280px");
     expect(style({})["--sidebar-max"]).toBe("calc(100vw - 320px)");
     expect(root({ computerOpen: true }).props.className).toContain("md:max-w-[var(--sidebar-max)]");
+  });
+
+  it("starts a blank conversation with the open bot and makes nothing itself", () => {
+    fixture.dispatch.mockClear();
+    withLongBot().filter((node) => node.props.role === "menuitem")[0]!.props.onClick!();
+    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "newTask", botId: "long" }]]);
   });
 
   it("truncates the bot's name in New conversation with … and keeps the full name on hover", () => {

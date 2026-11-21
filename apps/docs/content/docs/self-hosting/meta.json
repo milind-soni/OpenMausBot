@@ -6,6 +6,7 @@
     "deploy-vps",
     "networking",
     "data-and-backups",
+    "redundancy",
     "connected-servers"
   ]
 }

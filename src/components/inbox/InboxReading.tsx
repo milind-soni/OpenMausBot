@@ -11,7 +11,7 @@ import { InboxAnswer } from "./InboxAnswer";
 import { answerKindOf, headlineOf, singleQuestion } from "./inbox-answer";
 import { askOf, closeResponse, senderLabel, textOf } from "./inbox-view";
 import { useAskContext } from "./use-ask-context";
-import { useInboxActions } from "./use-inbox-actions";
+import { useInboxActions, useInboxAsker } from "./use-inbox-actions";
 
 const NAV_BUTTON = "flex size-7 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-raised hover:text-ink disabled:pointer-events-none disabled:opacity-35 pointer-coarse:size-9";
 
@@ -43,8 +43,8 @@ export function InboxReading({ view, row, now, position, onStep }: {
   position: { index: number; count: number } | null;
   onStep(by: -1 | 1): void;
 }) {
-  const { answer, openInChat, run, askerOf } = useInboxActions(view);
-  const asker = askerOf(row);
+  const { answer, openInChat, run } = useInboxActions(view);
+  const asker = useInboxAsker(row);
   const context = useAskContext(row);
   const kind = answerKindOf(row);
   const headline = headlineOf(row);

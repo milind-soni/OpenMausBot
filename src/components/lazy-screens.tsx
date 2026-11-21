@@ -1,4 +1,5 @@
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { createElement, memo, useEffect, useState, type ComponentType, type MemoExoticComponent, type ReactNode } from "react";
+import { useActiveLocale } from "@/lib/use-active-locale";
 import { createPortal } from "react-dom";
 import { t } from "@/lib/i18n";
 
@@ -6,13 +7,13 @@ import { t } from "@/lib/i18n";
 // up to 300 ms) and rethrows a failed import on every render. Chromium keeps a failed import() in its module map and
 // rejects every later import of it without refetching.
 
-export type LazyScreen<P> = ((props: P) => ReactNode) & {
+export type LazyScreen<P> = (((props: P) => ReactNode) | MemoExoticComponent<(props: P) => ReactNode>) & {
   preload: () => Promise<ComponentType<P>>;
 };
 
 export function lazyScreen<Props>(
   name: string,
-  load: () => Promise<(props: Props) => ReactNode>,
+  load: () => Promise<((props: Props) => ReactNode) | MemoExoticComponent<(props: Props) => ReactNode>>,
 ): LazyScreen<NonNullable<Props>> {
   type P = NonNullable<Props>;
   let ready: ComponentType<P> | undefined;
@@ -45,6 +46,16 @@ export function lazyScreen<Props>(
   return Object.assign(Screen, { preload });
 }
 
+/** For a screen drawn only from its props, its own store selections and the page's language: App drawing again passes
+ * it by. */
+function pureScreen<Props>(screen: LazyScreen<Props>): LazyScreen<Props> {
+  function PureScreen(props: Props) {
+    useActiveLocale();
+    return createElement(screen as ComponentType<Props & object>, props as Props & object);
+  }
+  return Object.assign(memo(PureScreen), { preload: screen.preload }) as LazyScreen<Props>;
+}
+
 function ScreenUnavailable() {
   return createPortal(
     <div
@@ -66,7 +77,7 @@ function ScreenUnavailable() {
 }
 
 export const ActivityPanel = lazyScreen("ActivityPanel", async () => (await import("./ActivityPanel")).ActivityPanel);
-export const BotSettingsDialog = lazyScreen("BotSettingsDialog", async () => (await import("./BotSettingsDialog")).BotSettingsDialog);
+export const BotSettingsDialog = pureScreen(lazyScreen("BotSettingsDialog", async () => (await import("./BotSettingsDialog")).BotSettingsDialog));
 export const ComputerPanel = lazyScreen("ComputerPanel", async () => (await import("./ComputerPanel")).ComputerPanel);
 export const FilesView = lazyScreen("FilesView", async () => (await import("./FilesView")).FilesView);
 export const InspectorPanel = lazyScreen("InspectorPanel", async () => (await import("./InspectorPanel")).InspectorPanel);
@@ -77,11 +88,18 @@ export const PluginsPanel = lazyScreen("PluginsPanel", async () => (await import
 export const RemoteAgentSettingsPanel = lazyScreen("RemoteAgentSettingsPanel", async () => (await import("./RemoteAgentSettingsPanel")).RemoteAgentSettingsPanel);
 export const RoomPanel = lazyScreen("RoomPanel", async () => (await import("./room-panel/RoomPanel")).RoomPanel);
 export const RemoteDesktopPanel = lazyScreen("RemoteDesktopPanel", async () => (await import("./remote-desktop-panel")).RemoteDesktopPanel);
-export const TriggersPage = lazyScreen("TriggersPage", async () => (await import("./TriggersPage")).TriggersPage);
-export const SettingsModal = lazyScreen("SettingsModal", async () => (await import("./SettingsModal")).SettingsModal);
+export const TriggersPage = pureScreen(lazyScreen("TriggersPage", async () => (await import("./TriggersPage")).TriggersPage));
+export const SettingsModal = pureScreen(lazyScreen("SettingsModal", async () => (await import("./SettingsModal")).SettingsModal));
 export const TeamMapPage = lazyScreen("TeamMapPage", async () => (await import("./TeamMapPage")).TeamMapPage);
 export const PublishedAppsPage = lazyScreen("PublishedAppsPage", async () => (await import("./published-apps/PublishedAppsPage")).PublishedAppsPage);
 export const AnnouncementsPage = lazyScreen("AnnouncementsPage", async () => (await import("./announcements/AnnouncementsPage")).AnnouncementsPage);
+export const InboxPanel = lazyScreen("InboxPanel", async () => (await import("./inbox/InboxPanel")).InboxPanel);
+export const TeamDialog = lazyScreen("TeamDialog", async () => (await import("./TeamDialog")).TeamDialog);
+export const TeamSettingsDialog = lazyScreen("TeamSettingsDialog", async () => (await import("./TeamSettingsDialog")).TeamSettingsDialog);
+export const VoiceSetupDialog = lazyScreen("VoiceSetupDialog", async () => (await import("./VoiceSetupDialog")).VoiceSetupDialog);
+export const TraceDialog = lazyScreen("TraceDialog", async () => (await import("./usage/TraceView")).TraceDialog);
+export const ShareBotDialog = lazyScreen("ShareBotDialog", async () => (await import("./bot-access/ShareBotDialog")).ShareBotDialog);
+export const CommandAllowlistDialog = lazyScreen("CommandAllowlistDialog", async () => (await import("./CommandAllowlistDialog")).CommandAllowlistDialog);
 
 // Rarely opened, so never fetched ahead. The team library is what brings the YAML parser in.
 export const CloudAddDialog = lazyScreen("CloudAddDialog", async () => (await import("./CloudAddDialog")).CloudAddDialog);
@@ -96,7 +114,8 @@ export const TeamFilesPage = lazyScreen("TeamFilesPage", async () => (await impo
 // Most opened first: a Cloud page fetches these in this order.
 const SCREENS = [
   SettingsModal, BotSettingsDialog, PluginsPanel, ComputerPanel, TriggersPage, ActivityPanel, FilesView, InspectorPanel, KeyboardShortcutsModal,
-  LocalVmWorkspace, NewBotDialog, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, TeamMapPage, PublishedAppsPage,
+  LocalVmWorkspace, NewBotDialog, RemoteAgentSettingsPanel, RemoteDesktopPanel, RoomPanel, TeamMapPage, PublishedAppsPage, InboxPanel,
+  TeamSettingsDialog, TeamDialog, VoiceSetupDialog, TraceDialog, ShareBotDialog, CommandAllowlistDialog,
 ];
 
 if (typeof location !== "undefined" && new URLSearchParams(location.search).has("desktop-settings")) {

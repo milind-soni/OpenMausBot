@@ -55,7 +55,12 @@ async function start(source: string, more: Record<string, unknown> = {}) {
     ...more,
   }) as { unmount(): void } | null;
   if (root) roots.push(root);
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  // React renders on its own schedule: wait until the page shows something, its content or a problem, not for a fixed time.
+  if (root) {
+    await vi.waitFor(() => {
+      if (!document.getElementById("mausbot-root")!.hasChildNodes() && !document.querySelector("[data-page-problem]")) throw new Error("the page has not rendered yet");
+    }, { timeout: 10_000 });
+  }
   return { problems, loads, overlay: document.querySelector<HTMLElement>("[data-page-problem]"), rendered: document.getElementById("mausbot-root")! };
 }
 
@@ -79,8 +84,8 @@ describe("a jsx page in the shell", () => {
     expect([...rendered.querySelectorAll("h2")].map((heading) => heading.textContent)).toEqual(["Starter", "Pro"]);
     expect(rendered.querySelectorAll("svg")).toHaveLength(2);
     rendered.querySelectorAll("button")[1]!.click();
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(rendered.querySelector("#picked")?.textContent).toBe("Pro");
+    // React applies the click's state on its own schedule: wait for the change, not for a fixed time.
+    await vi.waitFor(() => expect(rendered.querySelector("#picked")?.textContent).toBe("Pro"), { timeout: 10_000 });
   });
 
   it("shows a syntax error as a readable overlay with the line, and tells the bot through the page's context", async () => {
@@ -129,7 +134,12 @@ export default function Page() { const theme = useTheme(); return <div><p id="th
     expect(loads).toContain("echarts");
     expect(rendered.querySelector("#theme")?.textContent).toBe("dark");
     expect(rendered.querySelector("[role=img]")?.getAttribute("aria-label")).toBe("Sales");
+    // The chart is drawn in an effect after the render: wait for it, not for a fixed time.
+    await vi.waitFor(() => expect(fakeEcharts.made).toHaveLength(1), { timeout: 10_000 });
     expect(fakeEcharts.made[0]).toMatchObject({ theme: "dark", options: [{ backgroundColor: "transparent", series: [{ type: "bar", data: [1, 2] }] }] });
+    // An error in the chart's effect shows only after it ran.
+    expect(problems).toEqual([]);
+    expect(document.querySelector("[data-page-problem]")).toBeNull();
   });
 
   it("runs a published page's transpiled code without loading the compiler", async () => {

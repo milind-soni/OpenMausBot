@@ -6,15 +6,17 @@ import { t } from "@/lib/i18n";
 import type { Place } from "@/lib/place";
 import { placeHasIssue, worksOnSimpleLabel } from "@/lib/place-view";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, type Bot } from "@/state/store";
 import { BotAvatar } from "../Avatar";
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { LocalComputerAutoWarning } from "../LocalComputerAutoWarning";
 import { usePlaceViews } from "../PlaceChip";
 import { screenFramePreview } from "../ScreenFrame";
+import { CloudPreference } from "../bot-settings/AccessSection";
 import type { BotPatch, useBotSettingsDerived } from "../bot-settings/useBotSettingsDerived";
 import type { SimplePageId } from "./page-registry";
 import { Card, NavRow, RadioRow } from "./rows";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 type PlaceChoice = "auto" | Place | "off";
@@ -29,7 +31,7 @@ interface PlaceOption {
 const OFF_LABEL = () => t("place.off");
 
 export function useOpenComputer(bot: Pick<Bot, "id">) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   return (view: ComputerPanelView = "computer") => {
     writeComputerPanelView(bot.id, view);
     dispatch({ type: "toggleSettings", open: false });
@@ -52,7 +54,7 @@ function useSignedInCount(bot: Pick<Bot, "id">, enabled: boolean): number | null
 }
 
 function usePlaceChoices(bot: Bot) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const { capabilities } = useDesktopCapabilities();
   const platform = capabilities.host?.platform ?? "other";
   const placeViews = usePlaceViews(bot);
@@ -81,7 +83,7 @@ function usePlaceChoices(bot: Bot) {
 }
 
 export function WherePage({ bot, derived }: { bot: Bot; derived: Derived }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const { options, current, usingNow } = usePlaceChoices(bot);
   const [localAutoWarning, setLocalAutoWarning] = useState<{ botId: string; patch: BotPatch } | null>(null);
   const { patch, approvalMode } = derived;
@@ -111,6 +113,7 @@ export function WherePage({ bot, derived }: { bot: Bot; derived: Derived }) {
           ))}
         </div>
       </Card>
+      <CloudPreference bot={bot} patch={patch} />
       {usingNow && <p data-panel-using-now className="mx-1 text-[13px] text-ink-secondary">{t("computer.simple.usingNow", { place: usingNow })}</p>}
       <LocalComputerAutoWarning
         open={localAutoWarning !== null}

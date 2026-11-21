@@ -53,6 +53,17 @@ linux("an audience's engine home", () => {
     expect(other.env.CODEX_HOME!.slice(owner.length)).toBe(homed.env.CODEX_HOME!.slice(bob.length));
   });
 
+  it("follows a Pi agent folder the environment names, with its login, and keeps ~/.pi/agent's otherwise", () => {
+    expect(homedSpawn({ HOME: serverHome }, { dataDir, serverHome, home: bob }).shared)
+      .toContainEqual({ source: "/data/.pi/agent/auth.json", target: `${bob}/.pi/agent/auth.json` });
+    const own = join(dataDir, "providers", "pi-own", "abc", "agent");
+    const homed = homedSpawn({ HOME: serverHome, PI_CODING_AGENT_DIR: own }, { dataDir, serverHome, home: bob });
+    expect(homed.env.PI_CODING_AGENT_DIR).toMatch(new RegExp(`^${bob}/\\.omb-folders/PI_CODING_AGENT_DIR-[0-9a-f]{12}$`));
+    expect(homed.folders).toContain(homed.env.PI_CODING_AGENT_DIR);
+    expect(homed.shared).toContainEqual({ source: `${own}/auth.json`, target: `${homed.env.PI_CODING_AGENT_DIR}/auth.json` });
+    expect(homedSpawn({ HOME: serverHome, PI_CODING_AGENT_DIR: "/data/.pi-work" }, { dataDir, serverHome, home: bob }).env.PI_CODING_AGENT_DIR).toBe(`${bob}/.pi-work`);
+  });
+
   it("an environment already in an engine home is the server's again, so nothing is moved twice", () => {
     const once = homedSpawn({ HOME: serverHome, CLAUDE_CONFIG_DIR: "/data/.claude-work" }, { dataDir, serverHome, home: bob });
     const twice = homedSpawn(once.env, { dataDir, serverHome, home: bob });

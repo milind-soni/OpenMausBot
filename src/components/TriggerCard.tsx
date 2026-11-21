@@ -9,6 +9,7 @@ import { saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-cre
 import { api, ApiError, useStore, type OptionCardData } from "@/state/store";
 import { appWaitingLine } from "@/lib/app-automations";
 import { useAppTriggers } from "@/lib/app-triggers";
+import { useMinuteTick } from "@/lib/minute-tick";
 import { useAllAutomationActions } from "./automations/app-actions";
 
 // The editors live with the Automations page; a chat only loads one when Edit is pressed.
@@ -22,6 +23,7 @@ const ACTION = "rounded-md px-1.5 py-0.5 font-medium hover:bg-inset focus-visibl
 export function TriggerCard({ card, threadId }: { card: OptionCardData; threadId?: string }) {
   const { state, dispatch } = useStore();
   const actions = useAllAutomationActions();
+  useMinuteTick();
   const appTriggers = useAppTriggers();
   const [editing, setEditing] = useState(false);
   const [undoing, setUndoing] = useState(false);

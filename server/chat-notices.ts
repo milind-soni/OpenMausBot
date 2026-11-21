@@ -88,6 +88,7 @@ export const CHAT_NOTICE = {
   "chat.notice.phone.write.PHONE_SEND_MESSAGE": "Send message on {phone}",
   "chat.notice.phone.write.PHONE_SEND_WHATSAPP": "Send whatsapp on {phone}",
   "chat.notice.acpEmpty": "{provider} finished without replying.",
+  "chat.notice.acpEndedAfterTools": "{provider} thought right past the last tool, then finished the turn without a last reply. Ask it to continue or summarize what it did.",
   "chat.notice.acpNoReason": "{provider} stopped without saying why.",
   "chat.notice.acpNodeTooOld": "{provider} needs Node.js {needed} or newer, but this computer has Node.js {found}. Update Node.js from nodejs.org, then send your message again.",
   "chat.notice.acpMcpAppsFailed": "Connected apps couldn't be set up, so {provider} couldn't start this reply. Try again, or switch this bot to another AI.",
@@ -155,6 +156,8 @@ export const CHAT_NOTICE = {
     "{bot} used more memory than this computer allows for one bot ({used} MB of {cap} MB) while memory was running short, so I stopped this task to keep the other bots running. Send the message again to start over; if it keeps happening, give this task less to do at once, or give this computer more memory.",
   "chat.notice.memoryReclaimedBrowserDetail": "Ran out of room, so I closed the browser to keep everything else running. ({detail})",
   "chat.notice.memoryReclaimedTaskDetail": "Ran out of room, so I stopped this task to keep everything else running. ({detail})",
+  "chat.notice.memoryReclaimedOnly": "Ran out of room, so I stopped this task to keep everything here from freezing.",
+  "chat.notice.memoryReclaimedOnlyDetail": "Ran out of room, so I stopped this task to keep everything here from freezing. ({detail})",
   "chat.notice.outOfProcesses": "There is no room to start another program ({code}), so this task could not run. Nothing was sent to the AI. It starts again by itself when there is room.",
 } as const;
 

@@ -116,7 +116,7 @@ describe("Claude Code section", () => {
     expect(entry.config.endpointModels).toEqual(["deepseek-chat"]);
 
     const text = section("### Claude Code");
-    expect(text).toContain("add a **custom endpoint** in Settings → Engines, in the Claude card");
+    expect(text).toContain("add a **custom endpoint** in Settings → AI → Providers, in the Claude card");
     expect(text).toContain("It never reads or writes this computer's `~/.claude`, and the Claude Code on this computer keeps its own sign-in.");
     expect(text).toContain("Each bot can choose a different model from the endpoint's catalog.");
     expect(text).toContain("The token is saved in MausBot's own `config.json` and sent only to the base URL you enter. Removing an endpoint removes only that entry.");

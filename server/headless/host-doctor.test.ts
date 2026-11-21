@@ -1,3 +1,4 @@
+import { join, posix } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { VerbContext } from "./context.ts";
@@ -166,6 +167,12 @@ describe("doctor --host", () => {
     const flagged = await hostDoctor(ctx({ host: true, "data-dir": "/srv/mausbot", port: "9000", domain: "Maus.Example.com" }), probe({
       freeBytes: (path) => { seen.push(path); return 412 * GB; }, files: { "/proc/net/tcp": tcp(443, 9000) } }));
     expect(seen).toEqual(["/srv/from-env", "/srv/mausbot"]);
+    const homes = { under: () => "/fake-account/person", realHome: () => "/fake-account/person" };
+    await hostDoctor(ctx({ host: true }), watching, homes);
+    expect(seen.at(-1)).toBe(posix.resolve(join("/fake-account/person", ".openmausbot")));
+    await expect(hostDoctor(ctx({ host: true }, { NODE_ENV: "test" }), watching, homes)).rejects.toThrow(/refusing to use the real data folder/);
+    await hostDoctor(ctx({ host: true, "data-dir": "/srv/given" }, { NODE_ENV: "test" }), watching, homes);
+    expect(seen.at(-1)).toBe("/srv/given");
     expect((flagged.result as { checks: HostCheck[] }).checks.filter((check) => check.status === "FAIL").map((check) => check.message))
       .toEqual(["Port 9000 is taken by another program", "Port 443 is taken, and --domain maus.example.com needs 80 and 443"]);
     await expect(hostDoctor(ctx({ host: true, port: "99999" }), probe())).rejects.toMatchObject({ exitCode: 2 });

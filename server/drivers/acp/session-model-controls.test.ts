@@ -20,6 +20,24 @@ function fixture(model = "two") {
 }
 
 describe("ACP session model controls", () => {
+  it.each([
+    { acknowledged: "wire-model", shared: undefined, expected: ["local::picker-model"] },
+    { acknowledged: "wire-model", shared: ["wire-model", "other"], expected: ["local::picker-model", "other"] },
+    { acknowledged: "fallback", shared: undefined, expected: ["fallback"] },
+  ])("names the acknowledged model in usage limits without losing picker ids: $acknowledged, $shared", ({ acknowledged, shared, expected }) => {
+    let state = modern("wire-model");
+    const controls = new SessionModelControls({
+      selection: { configId: "model" }, variants: false, displayName: "Agent",
+      model: () => "wire-model", reportedModel: () => "local::picker-model",
+      state: () => state, store: (value) => { state = value; }, report: () => {},
+    });
+    controls.receive(modern(acknowledged), true);
+    expect(controls.usageLimit((model) => model === acknowledged
+      ? { limit: "model", ...(shared ? { limitModels: shared } : {}) } : { limit: "engine" }))
+      .toEqual({ limit: "model", limitModels: expected });
+    expect(controls.usageLimit(() => ({ limit: "engine" }))).toEqual({ limit: "engine" });
+  });
+
   it("keeps a confirmed notification when the modern setter replies with an empty acknowledgement", async () => {
     const { controls } = fixture();
     controls.receive(modern("one"), true);

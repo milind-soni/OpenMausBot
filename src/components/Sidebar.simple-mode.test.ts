@@ -167,6 +167,21 @@ describe("bot-first sidebar", () => {
     expect(markup).toMatch(/data-bot-actions="atlas"[^>]*class="[^"]*end-\[3px\] top-1\.5 size-6 translate-y-0\b/);
   });
 
+  it("shows a Simple row's engine mark only while the row is hovered, focused or on a touch screen, and Advanced's always", () => {
+    fixture.showThreads = false;
+    fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };
+    const candidate = { ...bot, tasks: [], projects: [], messages: [{ id: "m", role: "bot", kind: "text", text: "Done.", at: 1 }] } as Bot;
+    const badgeClass = (markup: string) => /<span data-testid="model-badge"[^>]*class="([^"]*)"/.exec(markup)?.[1]?.split(" ") ?? [];
+    const simple = badgeClass(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate))));
+    expect(simple).toEqual(expect.arrayContaining(["opacity-0", "group-hover:opacity-100", "group-focus-within:opacity-100", "touch:opacity-100", "motion-reduce:transition-none"]));
+    // The row it reveals on is the hover group, so focus anywhere in the row (its ⋯ too) shows the mark.
+    expect(renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)))).toMatch(/^<div class="group relative/);
+    fixture.advanced = true;
+    const advanced = renderToStaticMarkup(createElement(BotListItem, rowProps("comfortable", candidate)));
+    expect(advanced).toContain('data-testid="model-badge"');
+    expect(badgeClass(advanced)).not.toContain("opacity-0");
+  });
+
   it("fades the collapsed rail's engine badge in both modes", () => {
     fixture.showThreads = false;
     fixture.state = { ...fixture.state, instances: [{ instanceId: "fake", driverKind: "claudeAgent", displayName: "Claude" }] as unknown as AppState["instances"] };

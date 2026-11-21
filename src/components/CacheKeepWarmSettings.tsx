@@ -1,9 +1,10 @@
 import { useRef, useState } from "react";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { SettingRow, Switch } from "./SettingsPrimitives";
 import { productName } from "@/lib/brand";
 import { Select } from "./Select";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 type KeepWarm = NonNullable<ConfigStatus["cacheKeepWarm"]>;
 
@@ -11,7 +12,7 @@ type KeepWarm = NonNullable<ConfigStatus["cacheKeepWarm"]>;
 export const KEEP_WARM_WINDOWS = [60, 120, 180, 360, 720] as const;
 
 export function CacheKeepWarmSettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const inFlight = useRef(false);

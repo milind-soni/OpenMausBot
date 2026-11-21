@@ -38,7 +38,14 @@ export function webSocketTransport(socket: WebSocket): RecordTransport {
     // The built-in client has no drain event.
     onceDrained(listener) {
       const check = () => {
-        if (socket.readyState !== WebSocket.OPEN || socket.bufferedAmount <= SEND_BUFFER_HIGH / 4) listener();
+        if (socket.readyState !== WebSocket.OPEN) {
+          // A closing socket never drains. Answer on a later turn: calling back
+          // synchronously lets the queued writer re-enter here and recurse until the
+          // stack overflows, and the close event needs a turn to arrive too.
+          setTimeout(listener, DRAIN_POLL_MS);
+          return;
+        }
+        if (socket.bufferedAmount <= SEND_BUFFER_HIGH / 4) listener();
         else setTimeout(check, DRAIN_POLL_MS);
       };
       check();

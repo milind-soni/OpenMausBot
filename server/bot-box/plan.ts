@@ -165,7 +165,7 @@ export function argvPaths(args: readonly string[]): string[] {
 }
 
 /** Environment values that name folders the engine writes: its own config and caches. */
-export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "GROK_HOME", "OPENCODE_HOME", "HERMES_HOME", "GEMINI_HOME", "TMPDIR"] as const;
+export const PATH_ENV_NAMES = ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "GROK_HOME", "OPENCODE_HOME", "HERMES_HOME", "GEMINI_HOME", "PI_CODING_AGENT_DIR", "TMPDIR"] as const;
 
 /** The only part of /sys the box has: how many CPUs the machine has. Programs built with TCMalloc (Google's Antigravity
  * runtime) read `possible` at start and stop themselves (SIGABRT, exit 134) when it is missing. */

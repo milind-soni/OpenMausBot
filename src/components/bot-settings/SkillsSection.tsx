@@ -4,7 +4,7 @@ import { skillImportLines } from "@/lib/skill-import";
 import type { SkillImportSummary } from "../../../shared/skill-import";
 import { useEffect, useRef, useState } from "react";
 
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import { useBotEditor } from "./BotEditorContext";
 import { skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
 import { Switch } from "../SettingsPrimitives";
@@ -12,6 +12,7 @@ import { inputCls } from "./field";
 import { OrgSkillsCard } from "./OrgSkillsCard";
 import { WriteCommandCard } from "./WriteCommandCard";
 import { Select } from "../Select";
+import { sameFields, useStoreSelector } from "@/state/store-select";
 
 export interface ManagedSkill {
   name: string;
@@ -287,7 +288,7 @@ export function SkillReviewDialog({
 
 export function SkillsSection({ bot }: { bot: Bot }) {
   const { request: api } = useBotEditor();
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const featureEnabled = skillAuthoringEnabled(state.config);
   const libraryOn = skillsLibraryEnabled(state.config);
   const {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
@@ -9,6 +9,7 @@ import { saveCredential } from "./keys/key-save";
 import { LearnMore, SETTINGS_INLINE_INPUT, SETTINGS_INPUT, SettingRow, SettingsField, SettingsGroup, SettingsRows, StatusDot } from "./SettingsPrimitives";
 import { Select } from "./Select";
 import { productName } from "@/lib/brand";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 const PROVIDER_LABEL: Record<ImageProvider, string> = {
   openai: "OpenAI", xai: "Grok (xAI)", gemini: "Gemini", openrouter: "OpenRouter", higgsfield: "Higgsfield", custom: "Custom",
@@ -58,7 +59,7 @@ function keyConfigured(status: ImageGenStatus | undefined, provider: ImageProvid
 }
 
 export function ImageGenerationSettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const status = state.config?.imageGen;
   const primary = status?.primary ?? { provider: status?.provider ?? "openai", model: status?.model ?? IMAGE_DEFAULT_MODELS.openai, configured: status?.configured === true };
   const fallback = status?.fallback ?? null;
@@ -260,7 +261,7 @@ function ModelRow({ slot, slotLabel, provider, model, openrouterModels, disabled
 }
 
 function HiggsfieldCard({ connected }: { connected: boolean }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   return (
     <SettingsGroup label={PROVIDER_LABEL.higgsfield} block="images-higgsfield">
       <SettingsRows>
@@ -282,7 +283,7 @@ function HiggsfieldCard({ connected }: { connected: boolean }) {
 }
 
 function ProviderKeyCard({ provider, status }: { provider: ImageProvider; status: ImageGenStatus | undefined }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [value, setValue] = useState("");
   const [url, setUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);

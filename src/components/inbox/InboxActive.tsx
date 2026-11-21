@@ -3,7 +3,9 @@
 import { Pin, PinOff } from "lucide-react";
 import type { InboxView } from "../../../shared/inbox";
 import { t } from "@/lib/i18n";
-import { useStore, type AppState } from "@/state/store";
+import { type AppState } from "@/state/store";
+import { sameJson } from "@/state/same-json";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useTeamPeople } from "@/state/team-people";
 import { AttentionThreadRows, attentionJumpAction, crossBotAttentionThreads, type AttentionThread, type OpenThread } from "../SidebarBotActivity";
 import { NeedsYouLine } from "../TeamOwner";
@@ -62,10 +64,10 @@ export function InboxActive({ view, current, exclude }: {
   /** Conversations the pinned section at the top already shows: these lists leave them out so none appears twice. */
   exclude?: ReadonlySet<string>;
 }) {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const team = useTeamPeople();
   const pinned = useAttentionPinned();
-  const entries = inboxAttentionEntries(state, view).filter((entry) => !exclude?.has(entry.task.threadId));
+  const entries = useStoreSelector((state) => inboxAttentionEntries(state, view).filter((entry) => !exclude?.has(entry.task.threadId)), sameJson);
   const fixes = inboxFixes(team?.needsYou, view);
   return (
     <>

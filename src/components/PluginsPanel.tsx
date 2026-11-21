@@ -44,6 +44,7 @@ import { AppGrantPrompt, botsForApps, useAppGrants } from "./AppGrantPrompt";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { ServiceIcon, type ToolkitCard } from "./ServiceIcon"; import { AppsSection } from "./AppsSection";
 import { AppTile, tileStanding, useTileActions } from "./AppTile";
+import { useAppTileWindow } from "./app-tile-window";
 import { appCatalogMemory, loadAppCatalog, onAppCatalog, type AppCatalog, type CatalogPagination, type ConnectorSetup } from "@/lib/app-catalog-cache";
 export { ServiceIcon, type ToolkitCard } from "./ServiceIcon";
 
@@ -460,6 +461,7 @@ export function PluginsPanel() {
     disconnect: setDisconnecting,
     openBotApps: (botId) => { close(); openBotSettings(dispatch, "access", { botId, page: "apps" }); },
   });
+  const tileWindow = useAppTileWindow(allShown, filter !== "mcp" && allShown.length > APPS_PREVIEW_COUNT, aliasSlug);
   const pickCategory = (next: string | null) => {
     setCategory(next);
     setTab("marketplace");
@@ -552,17 +554,6 @@ export function PluginsPanel() {
                 className="min-w-0 flex-1 bg-transparent text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
               />
             </label>
-            <button
-              type="button"
-              data-apps-filter="mcp"
-              aria-pressed={filter === "mcp"}
-              onClick={() => chooseFilter(filter === "mcp" ? "all" : "mcp")}
-              className={cn(pill, "h-9 border border-hairline/40 px-3.5", filter === "mcp" ? "bg-ink text-app" : "text-ink hover:bg-raised")}
-            >
-              <Server size={14} aria-hidden="true" />
-              <span className="hidden sm:inline">{t("apps.filter.mcp")}</span>
-              <span className="sr-only sm:hidden">{t("apps.filter.mcp")}</span>
-            </button>
           </div>
           <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t("apps.categoriesAria")}>
             <button
@@ -598,10 +589,20 @@ export function PluginsPanel() {
                 )}
               />
             )}
+            <button
+              type="button"
+              data-apps-filter="mcp"
+              aria-pressed={filter === "mcp"}
+              onClick={() => chooseFilter(filter === "mcp" ? "all" : "mcp")}
+              className={cn(pill, pillTone(filter === "mcp"))}
+            >
+              <Server size={14} aria-hidden="true" />
+              {t("apps.filter.mcp")}
+            </button>
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-7 sm:px-7">
+        <div ref={tileWindow.scrollRef} className="min-h-0 flex-1 overflow-y-auto px-5 pb-7 sm:px-7">
           {stale ? (
             <div className="mb-3 flex items-start gap-2 rounded-xl bg-warning/10 px-3 py-2 text-[13px] text-warning">
               <TriangleAlert size={14} className="mt-px shrink-0" />
@@ -678,6 +679,7 @@ export function PluginsPanel() {
               ))}
               <AppsSection
                 id="apps-grid-title"
+                gridRef={tileWindow.gridRef}
                 title={listTitle}
                 note={filter === "all" && !search && category === null && pagination
                   && (pagination.stalled || (pagination.totalItems !== undefined && pagination.items < pagination.totalItems))
@@ -737,7 +739,7 @@ export function PluginsPanel() {
                 <div data-native-card="x" className={showX && !inCategoryView ? "contents" : "hidden"}><XCard refreshKey={cardsRefresh} onConnection={setXConnected} /></div>
                 <div data-native-card="email" className={showEmail && !inCategoryView ? "contents" : "hidden"}><EmailCard refreshKey={cardsRefresh} onConnection={setEmailConnected} /></div>
                 <div data-native-card="postiz" className={postizHere ? "contents" : "hidden"}><PostizCard refreshKey={cardsRefresh} onConnection={setPostizConnected} /></div>
-                {allShown.map((card) => renderTile(card))}
+                {tileWindow.render(renderTile)}
               </AppsSection>
             </div>
           )}
