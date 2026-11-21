@@ -1,5 +1,5 @@
 import { botOwner } from "../shared/bot-owner.ts";
-import { sameAudience } from "./bot-visibility.ts"; import type { DefaultBotFields } from "../shared/default-bot.ts";
+import { audienceWithin, sameAudience } from "./bot-visibility.ts"; import type { DefaultBotFields } from "../shared/default-bot.ts";
 import type { BotActivity } from "./store.ts";
 
 export interface RosterMember extends Pick<DefaultBotFields, "defaultBot"> {
@@ -75,9 +75,10 @@ export function hasAuthority(from: RosterMember, target: RosterMember): boolean 
   return hasTeamAuthority(from, target.section);
 }
 
-/** May change `target`'s setup, automations or threads: authority, and never past what reach allows. */
+/** May change `target`'s setup, automations or threads: authority, within the same audience. Reaching a wider teammate
+ * one way never lets a narrower bot manage it. */
 export function canManage(from: RosterMember, target: RosterMember): boolean {
-  return canReach(from, target) && hasAuthority(from, target);
+  return canReach(from, target) && sameAudience(from.visibility, target.visibility) && hasAuthority(from, target);
 }
 
 /** Why `from` may not manage `target` when the department rule alone decided; otherwise null. */
@@ -115,11 +116,14 @@ export function peerStatusWords(status: PeerStatus): string {
   return PEER_STATUS_WORDS[status];
 }
 
-/** Same audience only: a teammate others can see would carry this bot's words to people who cannot see it. */
+/** Security: a bot reaches only teammates everyone who sees it can also see, so a result never carries a teammate's
+ * words to someone who cannot see that teammate; a bot shared with more people never reaches a narrower one. A
+ * person's own MausBot reaches, and is reached, past the same audience only through personal reach. */
 export const peerAllowed = (
-  from: { visibility?: unknown },
-  target: string | { id: string; visibility?: unknown },
-): boolean => typeof target === "string" || sameAudience(from.visibility, target.visibility);
+  from: { visibility?: unknown } & Pick<DefaultBotFields, "defaultBot">,
+  target: string | ({ id: string; visibility?: unknown } & Pick<DefaultBotFields, "defaultBot">),
+): boolean => typeof target === "string" || sameAudience(from.visibility, target.visibility) ||
+  (!from.defaultBot && !target.defaultBot && audienceWithin(from.visibility, target.visibility));
 
 /** Departments are folders, not walls: any bot reaches any other visible bot, a Chief someone owns included. Only the
  * bots' audiences narrow it, and reaching a bot grants no authority over it. */
@@ -133,7 +137,7 @@ export type LookedAfterBy = (bot: RosterMember) => string | null;
 /** Why `from` cannot reach `target`, in words for the bot: null when it can. */
 export function reachRefusal(from: RosterMember, target: RosterMember, lookedAfterBy?: LookedAfterBy): string | null {
   if (canReach(from, target)) return null;
-  if (!target.hidden && !sameAudience(from.visibility, target.visibility)) {
+  if (!target.hidden && !peerAllowed(from, target)) {
     const name = peerName(target.name);
     const who = lookedAfterBy?.(target);
     const ask = who ? `ask ${peerName(who)}, who looks after it` : "ask an admin";
@@ -228,7 +232,7 @@ export function resolveTeammate<T extends RosterMember>(
   }
   const near = reachable.filter(bot => loose(bot.name) === loose(wanted));
   if (near.length === 1) return { id: near[0]!.id, byName: true };
-  const apart = bots.find(bot => bot.id !== from.id && !bot.hidden && !bot.defaultBot && !wider?.hides(bot) && !sameAudience(from.visibility, bot.visibility) && (fold(bot.name) === name || loose(bot.name) === loose(wanted)));
+  const apart = bots.find(bot => bot.id !== from.id && !bot.hidden && !bot.defaultBot && !wider?.hides(bot) && !peerAllowed(from, bot) && (fold(bot.name) === name || loose(bot.name) === loose(wanted)));
   if (apart) return { error: wider?.refusal(apart) ?? reachRefusal(from, apart, lookedAfterBy)! };
   const away = bots.some(bot => !wider?.hides(bot) && (fold(bot.name) === name || loose(bot.name) === loose(wanted))) ? null : elsewhere(wanted);
   if (away && "where" in away) return { error: away.where };

@@ -619,18 +619,17 @@ posixOnly("per-bot visibility on a shared workspace", () => {
     expect(lines?.map((line: any) => [line.reaction, line.sender?.name]), JSON.stringify(thread.map((m: any) => [m.role, m.kind, m.text?.slice(0, 60), m.reaction]))).toEqual([["👍", "Ada"], ["👍", "Bob"], ["👎", "Ada"]]);
   }, 90_000);
 
-  it("keeps bots with different audiences from reaching each other", async () => {
-    // Payroll (Ada), Benefits (Ada) and Board (admins) share a team. Only the
-    // two with the same audience are teammates to each other.
+  it("lets a bot reach only teammates everyone who sees it can also see", async () => {
     const benefits = await makeBot("Benefits Lynx", "People");
     expect((await api("PATCH", `/api/bots/${benefits.id}`, { visibility: { people: [ADA] } }, BOSS)).status).toBe(200);
     const roster = async (id: string) => JSON.stringify((await api("GET", `/api/bots/${id}/system-prompt`, undefined, BOSS)).body);
     const hr = await roster(ids.hr);
     expect(hr).toContain("Benefits Lynx");
     expect(hr).not.toContain("Board Heron");
-    expect(await roster(ids.board)).not.toContain("Payroll Zebra");
+    expect(await roster(ids.board)).toContain("Payroll Zebra");
     expect((await api("PATCH", `/api/bots/${ids.board}`, { visibility: "everyone" }, BOSS)).status).toBe(200);
-    expect(await roster(ids.hr)).not.toContain("Board Heron");
+    expect(await roster(ids.hr)).toContain("Board Heron");
+    expect(await roster(ids.board)).not.toContain("Payroll Zebra");
     expect((await api("PATCH", `/api/bots/${ids.board}`, { visibility: "admins" }, BOSS)).status).toBe(200);
   });
 

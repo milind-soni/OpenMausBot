@@ -481,9 +481,11 @@ describe("start_thread on another model, reporting back", () => {
   }, 60_000);
   it("lets the opener answer its own thread's question, and that thread carries on with the answer", async () => {
     const pm = await createBot("Pam", "gated");
+    const others = (await bots()).filter((bot) => bot.id !== pm.id);
     try {
       // With no teammates the brief is the end of the prompt, so the echoing engine's reply ends on its question.
       expect((await api("PATCH", `/api/bots/${pm.id}`, { visibility: { people: ["pam-alone@example.test"] } })).status).toBe(200);
+      for (const bot of others) expect((await api("PATCH", `/api/bots/${bot.id}`, { visibility: { people: ["not-pam@example.test"] } })).status).toBe(200);
       const token = await heldTurn(pm, "Get a second opinion on the wording.");
       const opened = await api("POST", "/api/internal/threads",
         { title: "Review: wording", message: "Check the wording. [[gate:own-ask]]\nNEEDS INPUT: Formal or casual?", reportBack: true }, token);
@@ -504,6 +506,7 @@ describe("start_thread on another model, reporting back", () => {
       release(pm.threadId);
       await expect.poll(async () => (await botState(pm.id))?.busy, { timeout: 15_000 }).toBe(false);
     } finally {
+      for (const bot of others) await api("PATCH", `/api/bots/${bot.id}`, { visibility: bot.visibility ?? "everyone" });
       await cleanup([pm.id]);
     }
   }, 60_000);

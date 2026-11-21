@@ -1,8 +1,8 @@
 // Who may see a bot on a shared workspace: absent/"everyone", "admins", or { people: [...] } plus admins. Access control,
 // not an approval gate; the owner, a session-less local service and admin sessions see every bot (on a Team Cloud an
 // admin still sees only their own private chats, never another person's: audience.ts). A member sees a room
-// only when they can see every bot in it, and bots reach each other only with the same audience (sameAudience): a room
-// transcript or a delegation would otherwise carry a restricted bot's words to people who cannot see it.
+// only when they can see every bot in it, and a bot reaches only teammates (and rooms) everyone who sees it can also see:
+// a room transcript or a delegation would otherwise carry a restricted bot's words to people who cannot see it.
 import { z } from "zod";
 
 import { accessFromVisibility, entryMatches, higherLevel, sharedLevel, type BotAccess, type BotAccessLevel } from "../shared/bot-access.ts";
