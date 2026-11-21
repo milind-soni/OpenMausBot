@@ -58,7 +58,7 @@ export function RoutineList({ routines, runs, bots, pausedBots, heldBots, loadin
         {routine.weekRuns && <p className="mt-2 text-[12px] text-ink-secondary">{t(routine.weekRuns.total === 1 ? "routines.weekRunsOne" : "routines.weekRuns", routine.weekRuns)}</p>}
         {routine.warning && <p className="mt-2 text-[12px] leading-relaxed text-warning">{routine.warning}</p>}
         {routine.enabled && pausedBots?.includes(routine.botId) && <p className="mt-2 text-[12px] leading-relaxed text-warning" data-routine-bot-paused="">
-          {t("routines.botPaused")}{" "}
+          {t("routines.botPausedRuns")}{" "}
           <button type="button" className="cursor-pointer text-accent hover:underline" onClick={() => showBotLimit("paused")}>{t("routines.botPausedSwap")}</button>
         </p>}
         {routine.enabled && heldBots?.includes(routine.botId) && <p className="mt-2 text-[12px] leading-relaxed text-warning" data-routine-bot-held="">{t("routines.botHeld")}</p>}

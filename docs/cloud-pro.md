@@ -1189,10 +1189,21 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   answers it with `"paused": true`, and the app opens **Keep these awake** with the new bot
   chosen in place of the least recently active one that isn't working (`POST /api/starter/awake`).
   A Chief's `create_bot` answers with a `paused` line for the person. A restore or a move into a
-  Cloud that never wrote a set down wakes the most recently active. A paused bot's turn answers
-  `409` `{"code":"bot_paused"}`, a hand-off to it is refused, a routine or webhook run for it
-  fails at once with that line (no conversation is made, and it never wakes a sleeping Cloud),
-  and its daily memory upkeep waits. Every bot wakes as soon as the Admin tells the home its new
+  Cloud that never wrote a set down wakes the bots with an enabled routine first, then the most
+  recently active. A paused bot's turn answers `409` `{"code":"bot_paused"}`, a hand-off to it is
+  refused, and its daily memory upkeep waits.
+- **A routine gets priority for its bot.** The limit never fails a routine, webhook, app-event or
+  Run now run. When a routine (or trigger) is made or switched on, or runs, for a bot only the
+  limit paused, that bot takes the place of the awake bot that has no enabled routine, isn't
+  working, and was idle longest; the swap is written down like a choice, so **Keep these awake**
+  shows it and the person can swap back, and one quiet line in the woken bot's chat says which
+  routine woke it and which bot was paused for it. A routine bot the person left paused in their
+  own last choice stays paused, and so does one no awake bot can make room for (every awake bot
+  has a routine or is working), and a run of a switched-off routine swaps nothing: in each case
+  the run still goes ahead in its own conversation (the rest of the bot stays paused), and the
+  bot's chat says so once. The two turns at once below still apply: such a run waits for a place
+  like any turn. A bot the person paused (`paused-bots.json`) is never woken by a routine
+  (`server/host/starter-routine-wake.ts`). Every bot wakes as soon as the Admin tells the home its new
   plan, with no restart. An older server refuses a sixth bot with `409` `{"code":"bot_limit"}`;
   the app still shows its upgrade popup for that. Every plan holds at most 100 bots
   (`MAX_WORKSPACE_BOTS`), counted on `POST /api/bots`, a package import and a Chief's setup.

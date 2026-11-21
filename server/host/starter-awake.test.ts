@@ -93,3 +93,87 @@ describe("which of a Starter Cloud's bots stay awake", () => {
     expect(awake.paused()).toEqual([]);
   });
 });
+
+describe("a routine's bot on a Starter Cloud", () => {
+  /** Seven bots: b2–b6 awake (written down before any routine), b0 and b1 paused; `routines` have an enabled routine and
+   * `busy` are working. */
+  const seven = (dir = dataDir(), routines: string[] = ["b0"], busy: string[] = []) => {
+    const awake = createStarterAwake({ dataDir: dir, starter: () => true, bots: () => bots(7) });
+    awake.paused();
+    awake.useRoutines({ routineBots: () => new Set(routines), busy: (id) => busy.includes(id) });
+    return awake;
+  };
+  const written = (dir: string) => JSON.parse(readFileSync(join(dir, STARTER_AWAKE_FILE), "utf8"));
+
+  it("wakes it in place of the awake bot with no routine that was idle longest, written down so the picker and a restart see it", () => {
+    const dir = dataDir(), awake = seven(dir);
+    expect(awake.paused()).toEqual(["b0", "b1"]);
+    expect(awake.wakeForRoutine("b0", true)).toEqual({ kind: "woke", out: "b2" });
+    expect(awake.paused()).toEqual(["b1", "b2"]);
+    expect(written(dir).awake).toEqual(expect.arrayContaining(["b0", "b3", "b4", "b5", "b6"]));
+    expect(createStarterAwake({ dataDir: dir, starter: () => true, bots: () => bots(7) }).paused()).toEqual(["b1", "b2"]);
+    // Awake now: its next run changes nothing.
+    expect(awake.wakeForRoutine("b0", true)).toEqual({ kind: "awake" });
+  });
+
+  it("never pauses a bot that is working or has a routine of its own to make room", () => {
+    const awake = seven(dataDir(), ["b0", "b2"], ["b3"]);
+    expect(awake.wakeForRoutine("b0", true)).toEqual({ kind: "woke", out: "b4" });
+    expect(awake.paused()).toEqual(["b1", "b4"]);
+  });
+
+  it("runs the routine without changing who is awake when every awake bot has a routine or is working, telling once, across a restart", () => {
+    const dir = dataDir(), all = ["b0", "b1", "b2", "b3", "b4", "b5", "b6"];
+    const awake = seven(dir, all);
+    expect(awake.wakeForRoutine("b0", false)).toEqual({ kind: "ran", why: "full", first: false });
+    expect(awake.wakeForRoutine("b0", true)).toEqual({ kind: "ran", why: "full", first: true });
+    expect(awake.wakeForRoutine("b0", true)).toEqual({ kind: "ran", why: "full", first: false });
+    expect(awake.wakeForRoutine("b1", true)).toEqual({ kind: "ran", why: "full", first: true });
+    expect(seven(dir, all).wakeForRoutine("b0", true)).toEqual({ kind: "ran", why: "full", first: false });
+    expect(awake.paused()).toEqual(["b0", "b1"]);
+    expect(seven(dataDir(), ["b0"], ["b2", "b3", "b4", "b5", "b6"]).wakeForRoutine("b0", true)).toMatchObject({ kind: "ran", why: "full" });
+  });
+
+  it("keeps the person's later choice: a routine bot they leave paused stays paused and its routine still runs", () => {
+    const dir = dataDir(), routines = ["b0"], awake = seven(dir, routines);
+    expect(awake.wakeForRoutine("b0", true)).toEqual({ kind: "woke", out: "b2" });
+    expect(awake.choose(["b2", "b3", "b4", "b5", "b6"])).toEqual({ ok: true });
+    expect(awake.wakeForRoutine("b0", true)).toEqual({ kind: "ran", why: "chosen", first: true });
+    expect(awake.wakeForRoutine("b0", true)).toEqual({ kind: "ran", why: "chosen", first: false });
+    expect(awake.paused()).toEqual(["b0", "b1"]);
+    // Across a restart too.
+    expect(seven(dir, routines).wakeForRoutine("b0", true)).toEqual({ kind: "ran", why: "chosen", first: false });
+    // b1 had no routine when they chose, so a routine made for it later wakes it.
+    routines.push("b1");
+    expect(awake.wakeForRoutine("b1", false)).toEqual({ kind: "woke", out: "b2" });
+    // Choosing b0 again lets it be woken later.
+    expect(awake.choose(["b0", "b1", "b4", "b5", "b6"])).toEqual({ ok: true });
+    expect(written(dir).left).toBeUndefined();
+  });
+
+  it("swaps nothing for a bot with no enabled routine, as when one switched off is run by hand", () => {
+    const awake = seven(dataDir(), []);
+    expect(awake.wakeForRoutine("b0", true)).toEqual({ kind: "ran", why: "off", first: true });
+    expect(awake.paused()).toEqual(["b0", "b1"]);
+  });
+
+  it("gives a freed place, or a first choice, to a paused bot with a routine before a more recently active one", () => {
+    const list = bots(7), awake = createStarterAwake({ dataDir: dataDir(), starter: () => true, bots: () => list });
+    expect(awake.paused()).toEqual(["b0", "b1"]);
+    awake.useRoutines({ routineBots: () => new Set(["b0"]), busy: () => false });
+    list.splice(list.findIndex((bot) => bot.id === "b4"), 1);
+    expect(awake.paused()).toEqual(["b1"]);
+    const fresh = createStarterAwake({ dataDir: dataDir(), starter: () => true, bots: () => bots(7) });
+    fresh.useRoutines({ routineBots: () => new Set(["b0"]), busy: () => false });
+    expect(fresh.paused()).toEqual(["b1", "b2"]);
+  });
+
+  it("changes nothing off Starter, within the limit, or for a bot the limit does not count", () => {
+    const off = createStarterAwake({ dataDir: dataDir(), starter: () => false, bots: () => bots(9) });
+    off.useRoutines({ routineBots: () => new Set(["b0"]), busy: () => false });
+    expect([off.wakeForRoutine("b0", true), off.paused()]).toEqual([{ kind: "awake" }, []]);
+    const few = createStarterAwake({ dataDir: dataDir(), starter: () => true, bots: () => bots(5) });
+    expect(few.wakeForRoutine("b0", true)).toEqual({ kind: "awake" });
+    expect(seven().wakeForRoutine("chief", true)).toEqual({ kind: "awake" });
+  });
+});
