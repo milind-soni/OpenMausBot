@@ -48,6 +48,29 @@ describe("the process sweep", () => {
     expect(strays({ processes, registered, root, alive }).map((listed) => listed.pid)).toEqual([11, 12, 16]);
   });
 
+  it("leaves a wrapped launch's Chrome to the server that registered its wrapper, and sweeps it once that server is gone", () => {
+    // A Chrome on a private display starts under bubblewrap: the launch registers bwrap's pid, whose argv carries
+    // Chrome's own, and Chrome is bwrap's child.
+    const root = "/data/browser", dir = "/data/browser/profiles/a";
+    const chromeArgv = ["/opt/chrome/chrome", "--remote-debugging-pipe", `--user-data-dir=${dir}`];
+    const wrapperArgv = ["/usr/bin/bwrap", "--dev-bind", "/", "/", "--die-with-parent", "--", ...chromeArgv];
+    const tree = (wrapper: number): ListedProcess[] => [
+      { pid: wrapper, ppid: 23, startTime: "t", args: wrapperArgv.join(" "), argv: wrapperArgv },
+      { pid: wrapper + 1, ppid: wrapper, startTime: "t", args: chromeArgv.join(" "), argv: chromeArgv },
+      { pid: wrapper + 2, ppid: wrapper + 1, startTime: "t", args: `${chromeArgv.join(" ")} --type=zygote`, argv: [...chromeArgv, "--type=zygote"] },
+    ];
+    const registered = (wrapper: number, ownerPid: number) => ({ pid: wrapper, startTime: null, userDataDir: dir, ownerPid, launchedAt: "" });
+    const alive = (pid: number) => pid === 500;
+    expect(strays({ processes: tree(235), registered: [registered(235, 500)], root, alive })).toEqual([]);
+    // The server that launched it is gone: its wrapper and its Chrome are both left behind.
+    expect(strays({ processes: tree(235), registered: [registered(235, 501)], root, alive }).map((listed) => listed.pid)).toEqual([235, 236]);
+    // Nobody registered it at all.
+    expect(strays({ processes: tree(235), registered: [], root, alive }).map((listed) => listed.pid)).toEqual([235, 236]);
+    // A live server's wrapper covers only its own Chrome: a Chrome under it on another profile is still a stray.
+    const other = tree(300).map((listed) => listed.pid === 301 ? { ...listed, args: listed.args.replace(dir, "/data/browser/profiles/b"), argv: listed.argv!.map((arg) => arg.replace(dir, "/data/browser/profiles/b")) } : listed);
+    expect(strays({ processes: other, registered: [registered(300, 500)], root, alive }).map((listed) => listed.pid)).toEqual([301]);
+  });
+
   it("clears a stale lock, deletes unused temporary profiles and forgets processes that are gone", async () => {
     const root = scratch();
     const busy = join(root, "profiles", "busy");

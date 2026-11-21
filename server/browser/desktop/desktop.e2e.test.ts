@@ -2,6 +2,7 @@
 // route sees the window, its clicks and keys reach the page only while the person holds the browser, and the bot's own
 // clicks and typing still work on the same page once it is handed back. Runs where OMB_CDP_CHROME (or OMB_CDP_E2E=1) names
 // a Chrome and Xvnc is installed; skipped elsewhere. OMB_DESKTOP_MEASURE=1 also prints memory and CPU against headless.
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { connect, type AddressInfo, type Socket } from "node:net";
@@ -13,6 +14,8 @@ import { WebSocket } from "ws";
 import { hostTimeout } from "../../testing/host-timeout.ts";
 import { FixtureServer } from "../cdp/testing/fixtures.ts";
 import { CHROME } from "../cdp/testing/real-chrome.ts";
+import { listProcesses, isBrowserProcess, sweep, userDataDirOf } from "../chrome/processes.ts";
+import { browserRoot, profileDir } from "../chrome/profile.ts";
 import { BROWSER_CONTROL_REFUSAL } from "../control.ts";
 import type { BrowserTarget } from "../service.ts";
 import { startService, until, type RealService } from "../testing/real-service.ts";
@@ -218,6 +221,20 @@ async function shownState(profile: { run: { browser: { connection: { root: { sen
   return JSON.stringify({ targets, page });
 }
 
+/** The browser processes (no renderers or helpers) on one profile: a display's launch is bubblewrap with Chrome under
+ * it, both carrying the profile. */
+async function browsersOn(dataDir: string, key: string): Promise<number[]> {
+  const dir = profileDir(dataDir, key);
+  return ((await listProcesses()) ?? []).filter((listed) => isBrowserProcess(listed) && userDataDirOf(listed) === dir).map((listed) => listed.pid).sort((a, b) => a - b);
+}
+
+/** A pid nothing runs as any more. */
+function deadPid(): number {
+  const pid = spawnSync("true").pid;
+  if (!pid) throw new Error("could not start true");
+  return pid;
+}
+
 const xvncPid = (socket: string) => readdirSync("/proc").filter((entry) => /^\d+$/.test(entry)).map(Number).find((pid) => {
   try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").includes(socket); } catch { return false; }
 });
@@ -250,6 +267,7 @@ suite("a bot's browser on a private display", () => {
     real = await startService({
       display: (key) => displays.acquire(key, DESKTOP_SIZE, key === filesTarget.key ? [workspace] : []),
       displayFailed: (reason) => { displayFailures.push(reason); },
+      registry: true,
     });
     views = new DesktopViews({ desktop: (asked) => real.service.desktop(asked) });
     server = createServer();
@@ -463,6 +481,66 @@ suite("a bot's browser on a private display", () => {
       desk.close();
     }
   }, hostTimeout(180_000));
+
+  it("keeps its Chrome through the engine's minute sweep while a person watches and holds it", async () => {
+    expect((await real.call(target, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
+    const profile = real.service.profiles().find((candidate) => candidate.key === target.key)!;
+    const launched = await browsersOn(real.dataDir, target.key);
+    // bubblewrap, which the launch registered, and the Chrome it started.
+    expect(launched).toHaveLength(2);
+    expect(launched).toContain(profile.run!.opened.pid);
+    const desk = await RfbClient.connect(url());
+    await desk.picture();
+    await profile.control.take(person);
+    for (let tick = 1; tick <= 3; tick++) {
+      const report = await sweep({ root: browserRoot(real.dataDir), registry: real.registry! });
+      expect(report.killed, `sweep ${tick}`).toEqual([]);
+    }
+    expect(await browsersOn(real.dataDir, target.key)).toEqual(launched);
+    expect(profile.control.owner).toBe(person);
+    const button = await onScreen(200, 140);
+    const clicks = Number(await read<string | undefined>("document.body.dataset.clicks") ?? 0);
+    desk.click(button.x, button.y);
+    expect(await until(() => read<string | undefined>("document.body.dataset.clicks"), (value) => value === String(clicks + 1))).toBe(String(clicks + 1));
+    desk.close();
+  }, hostTimeout(120_000));
+
+  it("ends the person's hold when its Chrome is swept after its server is gone, and leaves nothing of it running", async () => {
+    expect((await real.call(target, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
+    const profile = real.service.profiles().find((candidate) => candidate.key === target.key)!;
+    const shown = profile.run!.opened.display!;
+    const launched = await browsersOn(real.dataDir, target.key);
+    await profile.control.take(person);
+    // The registry now says the server that launched it is gone, as after a crash of the server.
+    const gone = deadPid();
+    for (const entry of real.registry!.list()) if (entry.userDataDir === profileDir(real.dataDir, target.key)) real.registry!.add({ ...entry, ownerPid: gone });
+    const report = await sweep({ root: browserRoot(real.dataDir), registry: real.registry! });
+    expect([...report.killed].sort((a, b) => a - b)).toEqual(launched);
+    await until(() => profile.run, (run) => run === null);
+    expect(profile.control.owner).toBeNull();
+    await Promise.race([shown.exited, new Promise((_, reject) => setTimeout(() => reject(new Error("its display is still running")), 10_000))]);
+    expect(xvncPid(shown.socket)).toBeUndefined();
+    expect(await browsersOn(real.dataDir, target.key)).toEqual([]);
+    // The bot's next call starts it again, and nothing refuses it for a hold of the browser that died.
+    const again = await real.call(target, "agent_browser_status");
+    expect(again.isError).toBeUndefined();
+    expect(real.text(again)).toContain("stopped unexpectedly");
+  }, hostTimeout(120_000));
+
+  it("shows the page with no bar over it, and keeps navigator.webdriver false", async () => {
+    // A fresh launch: Chrome's startup bars go on its first tab.
+    const bars: BrowserTarget = { session: "bars", key: "bot:bars" };
+    expect((await real.call(bars, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
+    const first = await real.peek<number>(bars, "outerHeight - innerHeight");
+    expect(await real.peek<boolean>(bars, "navigator.webdriver")).toBe(false);
+    expect((await real.call(bars, "agent_browser_tabs", { action: "new", url: page })).isError).toBeUndefined();
+    // A later tab never has them: the window's own top is all there is above the page.
+    expect(await real.peek<number>(bars, "outerHeight - innerHeight")).toBe(first);
+    await real.service.close(bars.session);
+  }, hostTimeout(120_000));
 
   it.runIf(process.env.OMB_DESKTOP_MEASURE === "1")("spends this much CPU on a picture stream under the desktop view, and none without one", async () => {
     const animated = fx.page("/spin", `<!doctype html><style>@keyframes spin{to{transform:rotate(360deg)}}#s{width:300px;height:300px;background:#36c;animation:spin 1s linear infinite}</style><div id="s"></div>`);

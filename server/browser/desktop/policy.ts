@@ -30,6 +30,9 @@ export function desktopPolicy(fileRoots: readonly string[] = []): Record<string,
     // page a person sees on the display, as no headless Chrome shows them.
     PrivacySandboxPromptEnabled: false,
     PromotionsEnabled: false,
+    // The bar over the page that calls --disable-blink-features=AutomationControlled unsupported: without that flag a
+    // windowed Chrome on a DevTools pipe shows its pages navigator.webdriver === true.
+    CommandLineFlagSecurityWarningsEnabled: false,
   };
 }
 
