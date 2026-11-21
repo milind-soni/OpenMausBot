@@ -203,6 +203,27 @@ describe("the bots' browser tools", () => {
     expect(await status()).toBeNull();
   });
 
+  it("tells the address of the tab in front, and nothing for a browser that is not running", async () => {
+    const { service, call } = setup();
+    expect(service.pageUrl("bot-a")).toBeNull();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    await call("agent_browser_tabs", { action: "new", url: "https://example.com/two" });
+    expect(service.pageUrl("bot-a")).toBe("https://example.com/two");
+    expect(service.pageUrl("bot-b")).toBeNull();
+    const closing = service.closeAll();
+    expect(service.pageUrl("bot-a")).toBeNull();
+    await closing;
+    expect(service.pageUrl("bot-a")).toBeNull();
+  });
+
+  it("tells no address once the connection to the browser is gone", async () => {
+    const { service, target, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const run = await service.running(service.profile(target));
+    run.browser.disconnect();
+    expect(service.pageUrl("bot-a")).toBeNull();
+  });
+
   it("keeps eight tabs in one browser at most", async () => {
     const { call, text } = setup();
     await call("agent_browser_open", { url: "https://example.com/1" });

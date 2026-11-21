@@ -71,6 +71,12 @@ describe("team map projection", () => {
       tone: "warning",
     });
   });
+
+  it("puts the site a working bot is browsing into its one status line", () => {
+    expect(teamMapStatus(bots[0], "example.com")).toEqual({ label: "Browsing example.com", tone: "success", browsing: "example.com" });
+    expect(teamMapStatus({ id: "x", name: "X", busy: true, activity: "waiting-on-you" }, "example.com")).toEqual({ label: "Waiting for you", tone: "warning" });
+    expect(teamMapStatus({ id: "x", name: "X" }, "example.com")).toEqual({ label: "Ready", tone: "idle" });
+  });
 });
 
 describe("team map header", () => {

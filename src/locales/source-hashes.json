@@ -4057,7 +4057,10 @@
       "voice.hearWithEleven.help": "fb2aab6844f1ecd9bbbb92b589062d6317fbfa2c1384b4c3ceb4e9f88f49c53a",
       "voice.hearLanguage": "e0e77e5c6f38efbd4bbb93e7b7641c5de9f88214c48133d6582fd0149cf8cbef",
       "voice.hearLanguage.help": "4047e2f61649a10025e8c030a9d3c0ba5a7f8af7704cf8ecad42ab589549c39e",
-      "voice.hearLanguage.auto": "836e5a7f8e818a97ddea1777b429755700ce1fc997f931e980501fa271b17d8f"
+      "voice.hearLanguage.auto": "836e5a7f8e818a97ddea1777b429755700ce1fc997f931e980501fa271b17d8f",
+      "server.runs.lentComputerUnconfirmed": "1e3890ae479bf06665656bc77dbe8b5128fc2a79ff579feb66b3e8203e325617",
+      "canvas.browsing": "0f1a3ec05e7e49adea27744079a47abad8ad05f33dfaebe5077748f2f42d4668",
+      "canvas.browsingOpen": "ce2b41152c3ec5c7f35705900da7ca358ab7aa9b5948de7b16d8c7280bbf718f"
     },
     "es": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -37241,7 +37244,18 @@
       "settings.browser.noChrome": "79df31876d29f282b89f4f664f7c2cf3580ea4d34a8d62246c7457e36a008a70",
       "settings.browser.noChromeFix": "2dca5c1c139e89d04a910e2750801dc2bed77c9c4ab065edce7a4504ebad37eb",
       "settings.browser.noChromeMyChrome": "a928b4b926cd680e9822770795ab28cdee79a2614db0bcf66fefb554fa02ef39",
-      "settings.import.grokLineChats": "06062ac8d134d1797b3dd29c879e19eb50dbe93ec64fc9f24f25f75cd36f2047"
+      "settings.import.grokLineChats": "06062ac8d134d1797b3dd29c879e19eb50dbe93ec64fc9f24f25f75cd36f2047",
+      "server.runs.lentComputerUnconfirmed": "1e3890ae479bf06665656bc77dbe8b5128fc2a79ff579feb66b3e8203e325617",
+      "rail.makeHomeDataStays": "5674f7b8425f7a22d2fbbc90af3aeeb87d7f8426321960440307eb62c01b46b7",
+      "cloudSend.dataStays": "cd496182d5c1b8ca853ea48a1c57870e81adc58646e2049817c6c1dd6436967f",
+      "cloudSend.botMove.dataStays": "ac2394f2667c01fa362e1b25b5e8327116911ea2792da0db3345e346cec0aa7f",
+      "canvas.browsing": "0f1a3ec05e7e49adea27744079a47abad8ad05f33dfaebe5077748f2f42d4668",
+      "canvas.browsingOpen": "ce2b41152c3ec5c7f35705900da7ca358ab7aa9b5948de7b16d8c7280bbf718f",
+      "teamMove.dataStays": "96d2a93069871c6951bca2ece664d471960cbf9fc2009624da380d93b14f085a",
+      "serverError.backup.dataQueryRunning": "b412ac7ec19b026c4677d0f5697a2e1e74256a2f51cbeacd2b109c30bc696faf",
+      "serverError.backup.dataCloseFailed": "de031917c6f9b852e0941933ab277d9be4a7a677d04c5dfcff17501f1fe71d5e",
+      "serverError.backup.tooLargeData": "71d051039603fac5c541ff4c7eefbe1defdfc96948efc52860a7e59ba84f8752",
+      "serverError.backup.legacyBursts": "3cad10f97da5ce398204d1e6e483537605b1e874f4147a7e92e1e7263b5ae830"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",
@@ -47328,7 +47342,8 @@
       "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
       "limits.meterName": "a25792ee3e79653e7fab405aa3978dfb80e750457c34818fb4d206e20ce68311",
       "limits.meterFiveHour": "654ad2c2573ecd336361026d1ca43f0e148d768e54e8194586a492b5f481e8a1",
-      "limits.meterWeekly": "ba6adfc3f42f97022c47349057ffabf5e864bf93c8fab30cfe4513cf33ff984c"
+      "limits.meterWeekly": "ba6adfc3f42f97022c47349057ffabf5e864bf93c8fab30cfe4513cf33ff984c",
+      "server.runs.lentComputerUnconfirmed": "1e3890ae479bf06665656bc77dbe8b5128fc2a79ff579feb66b3e8203e325617"
     },
     "zh-tw": {
       "whop.description": "1a07cf04ef17029448d3781415cbac16d54e66b821907a40d94e0e6349710e70",
@@ -57514,7 +57529,8 @@
       "inbox.settled.read": "9b9a8d05a7ec353bda84f9c1bb3178c299de3001b5e970508ddc889c487f92ca",
       "limits.meterName": "a25792ee3e79653e7fab405aa3978dfb80e750457c34818fb4d206e20ce68311",
       "limits.meterFiveHour": "654ad2c2573ecd336361026d1ca43f0e148d768e54e8194586a492b5f481e8a1",
-      "limits.meterWeekly": "ba6adfc3f42f97022c47349057ffabf5e864bf93c8fab30cfe4513cf33ff984c"
+      "limits.meterWeekly": "ba6adfc3f42f97022c47349057ffabf5e864bf93c8fab30cfe4513cf33ff984c",
+      "server.runs.lentComputerUnconfirmed": "1e3890ae479bf06665656bc77dbe8b5128fc2a79ff579feb66b3e8203e325617"
     },
     "uk": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

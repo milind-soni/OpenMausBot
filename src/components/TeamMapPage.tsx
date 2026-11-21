@@ -22,6 +22,7 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { intlLocale, t } from "@/lib/i18n";
 import { CanvasComputers } from "./CanvasComputers";
 import { useMapComputers, useShowComputers } from "@/lib/map-computers";
+import { useMapBrowsing } from "@/lib/map-browsing";
 import { MapComposer } from "./MapComposer";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { openBotSettings } from "./bot-panel/panel-link";
@@ -297,6 +298,8 @@ export function TeamMapPage() {
   const anyComputer = bots.some((bot) => bot.computer === "cloud" && bot.cloudBackend !== "vps") || computers.some((computer) => computer.section !== null);
   const { show: showComputers, loaded: computersChoiceLoaded, choose: setShowComputers } = useShowComputers(anyComputer);
   const mapComputers = useMapComputers(!remoteClient && computersChoiceLoaded && showComputers);
+  const busyBotIds = bots.filter((bot) => bot.busy).map((bot) => bot.id).join(" ");
+  const browsingSites = useMapBrowsing(!remoteClient && admin === true && busyBotIds !== "", busyBotIds);
   const [taggedBotIds, setTaggedBotIds] = useState<string[]>([]);
   const [sent, setSent] = useState<{ botIds: string[]; key: number } | null>(null);
   const sentTimer = useRef<number | undefined>(undefined);
@@ -389,7 +392,7 @@ export function TeamMapPage() {
       </div>}
       <div className="relative flex min-h-0 flex-1">
       <div className="relative flex min-h-0 min-w-0 flex-1">
-      <TeamCanvas sections={sections} canManage={!remoteClient && admin !== false} onMove={requestMove} taggedBotIds={taggedBotIds} sent={sent} bottomInset={bots.length ? 96 : 0}
+      <TeamCanvas sections={sections} canManage={!remoteClient && admin !== false} onMove={requestMove} taggedBotIds={taggedBotIds} browsingSites={browsingSites} sent={sent} bottomInset={bots.length ? 96 : 0}
         settling={!remoteClient && (!computersChoiceLoaded || (showComputers && !mapComputers.answered))}
         connectedBotIds={state.settingsOpen ? edges.flatMap((edge) => edge.sourceBotId === state.selectedId ? [edge.targetBotId] : edge.targetBotId === state.selectedId ? [edge.sourceBotId] : []) : []}
         onComputer={(bot) => openBotSettings(dispatch, "access", { botId: bot.id })}

@@ -6542,6 +6542,8 @@
   "canvas.botCountOne": "1 bot",
   "canvas.editBot": "Edit {name}",
   "canvas.bot": "Bot",
+  "canvas.browsing": "Browsing {site}",
+  "canvas.browsingOpen": "{name} is browsing {site}. Open its browser",
   "canvas.openChat": "Open chat",
   "canvas.openBotChat": "Open chat with {name}",
   "canvas.region": "Team canvas",

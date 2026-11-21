@@ -9,6 +9,7 @@ import { teamMapStatus, type TeamMapSection } from "@/lib/team-map";
 import { COMPUTER_DRAG_TYPE, fitTeams, layoutTeams, orderBots, parseBotOrders, parsePositions, reorderBot, teamSize, zoomAt, type Point, type View } from "@/lib/team-canvas";
 import { bestColumns, polylinePath, teamGeometry, type TeamGeometry } from "@/lib/team-canvas-computers";
 import { teamComputersFor, type ShownFrame } from "@/lib/map-computers";
+import { browsingSiteOf, openBotBrowser } from "@/lib/map-browsing";
 import { activityPreview, botEngine } from "@/lib/failed-turn";
 import { computerStepLine } from "@/lib/computer-step";
 import type { MapComputer, MapComputerState } from "../../shared/map-computer";
@@ -28,7 +29,7 @@ type Gesture = {
 const iconButton = "flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent";
 const menuButton = "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] text-ink-secondary hover:bg-control hover:text-ink";
 
-function BotCard({ bot, selected, moving, connected, tagged = false, sent, onComputer, onArrange }: {
+function BotCard({ bot, selected, moving, connected, tagged = false, sent, browsing, onComputer, onArrange }: {
   bot: Bot;
   selected: boolean;
   moving: boolean;
@@ -36,12 +37,14 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, onCom
   tagged?: boolean;
   /** Set while a message just sent from the map acknowledges this card; a new value restarts it. */
   sent?: number;
+  /** The site the bot's built-in browser shows while it works; it takes the card's status line. */
+  browsing?: string;
   onComputer?: (bot: Bot) => void;
   onArrange?: (bot: Bot, delta: number) => void;
 }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
-  const status = teamMapStatus(bot);
+  const status = teamMapStatus(bot, browsing);
   const name = teamBotName(bot, useTeamPeople());
   const instance = state.instances.find((item) => item.instanceId === bot.modelSelection.instanceId);
   const model = instance?.models.options.find((item) => item.id === bot.modelSelection.model)?.label ?? bot.modelSelection.model;
@@ -67,10 +70,17 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, onCom
     <div className="flex h-[43px] items-center gap-1 border-t border-hairline/30 px-2">
       <button className={cn(iconButton, "size-8")} aria-label={t("canvas.openBotChat", { name: bot.name })} title={t("canvas.openChat")}
         onClick={() => openBot(dispatch, bot, showThreads)}><MessageCircle size={13} /></button>
-      {status.tone !== "idle" && <span className="flex items-center gap-1.5 text-[10px] text-ink-secondary" title={status.label}>
-        <span className={cn("size-1.5 rounded-full", status.tone === "success" ? "bg-success" : status.tone === "warning" ? "bg-warning" : status.tone === "danger" ? "bg-danger" : "bg-ink-secondary/35")} />
-        {status.label}
-      </span>}
+      {status.browsing
+        ? <button data-browsing-status aria-label={t("canvas.browsingOpen", { name, site: status.browsing })} title={t("canvas.browsingOpen", { name, site: status.browsing })}
+          onClick={(event) => openBotBrowser(dispatch, bot, showThreads, event.currentTarget, event.detail === 0)}
+          className="flex h-8 min-w-0 items-center gap-1.5 rounded-md px-1 text-[10px] text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
+          <span className="size-1.5 shrink-0 rounded-full bg-success" />
+          <span className="truncate">{status.label}</span>
+        </button>
+        : status.tone !== "idle" && <span className="flex items-center gap-1.5 text-[10px] text-ink-secondary" title={status.label}>
+          <span className={cn("size-1.5 rounded-full", status.tone === "success" ? "bg-success" : status.tone === "warning" ? "bg-warning" : status.tone === "danger" ? "bg-danger" : "bg-ink-secondary/35")} />
+          {status.label}
+        </span>}
       {selected && onComputer && <button className={cn(iconButton, "size-8")} aria-label={t("canvas.botComputer", { name: bot.name })} title={t("computer.tab.computer")}
         onClick={() => onComputer(bot)}><Monitor size={13} /></button>}
       <button aria-label={t("canvas.changeModel", { name: bot.name })} title={`${t("canvas.defaultModel")}: ${model}`}
@@ -98,7 +108,7 @@ function currentActivity(bot: Bot | undefined, instances: ReturnType<typeof useS
   return bot.tasks?.find((task) => task.busy && task.threadId !== bot.threadId && task.title.trim())?.title;
 }
 
-export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [], computers = NO_COMPUTERS, computerFrames = {}, onOpenComputer, taggedBotIds = [], sent, bottomInset = 0, settling = false }: {
+export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [], computers = NO_COMPUTERS, computerFrames = {}, onOpenComputer, taggedBotIds = [], browsingSites = {}, sent, bottomInset = 0, settling = false }: {
   sections: TeamMapSection<Bot>[];
   canManage: boolean;
   onMove: (bot: Bot, destination: string) => Promise<boolean | void>;
@@ -118,6 +128,8 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
   onOpenComputer?: (computer: MapComputer) => void;
   /** Bots a message being typed on the map will go to. */
   taggedBotIds?: string[];
+  /** Bot id to the site its built-in browser shows. */
+  browsingSites?: Readonly<Record<string, string>>;
   /** Bots a message from the map just went to; `key` changes with every send. */
   sent?: { botIds: string[]; key: number } | null;
   /** Height covered at the bottom (the map composer): fitting keeps the teams above it. */
@@ -434,7 +446,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
         const renderBot = (bot: Bot) => <div key={bot.id} className="relative">
           {insertion?.botId === bot.id && <div className={cn("pointer-events-none absolute inset-x-1 h-0.5 rounded bg-accent", insertion.after ? "-bottom-[9px]" : "-top-[9px]")} />}
           <BotCard bot={bot} selected={state.selectedId === bot.id && state.settingsOpen} moving={dragged?.bot.id === bot.id || moving === bot.id}
-            connected={connectedBotIds.includes(bot.id)} tagged={taggedBotIds.includes(bot.id)} sent={sent?.botIds.includes(bot.id) ? sent.key : undefined} onComputer={onComputer} onArrange={layoutLoaded ? arrangeBot : undefined} />
+            connected={connectedBotIds.includes(bot.id)} tagged={taggedBotIds.includes(bot.id)} sent={sent?.botIds.includes(bot.id) ? sent.key : undefined} browsing={browsingSiteOf(bot, browsingSites)} onComputer={onComputer} onArrange={layoutLoaded ? arrangeBot : undefined} />
         </div>;
         return <section key={section.key} data-team-key={section.key} aria-label={t("canvas.teamRegion", { name: section.name })}
           className={cn("absolute rounded-2xl border bg-panel/90 shadow-sm has-[details[open]]:z-20 data-[computer-dropping=true]:border-accent data-[computer-dropping=true]:ring-2 data-[computer-dropping=true]:ring-accent/25", dropping ? "border-accent ring-2 ring-accent/25" : "border-hairline/50")}

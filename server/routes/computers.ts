@@ -28,6 +28,7 @@ import * as vps from "../vps-computer.ts";
 import { vpsAliasesInPlay } from "../vps-hosts.ts";
 import type { BusyFlag, RemoteComputerProvider } from "./config.ts";
 import { createCloudComputerRecoveryRoutes, type CloudComputerRecoveryRouteDeps } from "./cloud-computer-recovery.ts";
+import { createComputerBrowsingRoutes, type ComputerBrowsingRouteDeps } from "./computer-browsing.ts";
 import { createComputerFramesRoutes } from "./computer-frames.ts";
 import { createComputerUsageRoutes } from "./computer-usage.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -84,6 +85,7 @@ export interface ComputerRouteDeps {
   boatRecovery: CloudComputerRecoveryRouteDeps["boatRecovery"];
   /** Whose cloud computer a bot uses: its own id, or its team computer's key. */
   cloudComputerOwner(bot: BotRecord): string;
+  browserPageUrl: ComputerBrowsingRouteDeps["browserPageUrl"];
 }
 
 export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
@@ -101,10 +103,12 @@ export function createComputerRoutes(deps: ComputerRouteDeps): RouteHandler {
   // A map owner is a bot id or a team computer's key; a bot's hold may sit on the shared desktop's key.
   const frames = createComputerFramesRoutes({ ...deps, computerControl: { snapshot: botComputerControlSnapshot } });
   const recovery = createCloudComputerRecoveryRoutes({ ...deps, botComputerControlKey: deps.cloudComputerOwner });
+  const browsing = createComputerBrowsingRoutes(deps);
   return async (context) => {
     if (await usage(context) !== PASS) return;
     if (await frames(context) !== PASS) return;
     if (await recovery(context) !== PASS) return;
+    if (await browsing(context) !== PASS) return;
     const { req, res, url, path, method, auth, json, readBody } = context;
     const routines = deps.routines();
     let m: RegExpMatchArray | null = null;
