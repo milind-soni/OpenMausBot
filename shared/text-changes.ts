@@ -225,7 +225,27 @@ export function wordParts(before: string, after: string): WordPart[] {
   }
   while (i < n) push("del", x[i++]!);
   while (j < m) push("add", y[j++]!);
-  return parts;
+  return joinedRuns(parts);
+}
+
+/** Changes separated only by spaces read as one: "[-The train was late-]{+Blame the train+}", not word by word. */
+function joinedRuns(parts: WordPart[]): WordPart[] {
+  const out: WordPart[] = [];
+  for (let k = 0; k < parts.length;) {
+    if (parts[k]!.op === "same") { out.push(parts[k++]!); continue; }
+    let before = "", after = "", end = k;
+    for (let at = k; at < parts.length; at++) {
+      const part = parts[at]!;
+      if (part.op === "same" && (part.text.trim() || parts[at + 1]?.op === "same" || at + 1 === parts.length)) break;
+      if (part.op !== "add") before += part.text;
+      if (part.op !== "del") after += part.text;
+      end = at + 1;
+    }
+    if (before) out.push({ op: "del", text: before });
+    if (after) out.push({ op: "add", text: after });
+    k = end;
+  }
+  return out;
 }
 
 type Step = { kind: "removed"; a: number } | { kind: "added"; b: number } | { kind: "changed"; a: number; b: number };

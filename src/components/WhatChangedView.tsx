@@ -121,7 +121,7 @@ export default function WhatChangedContent({ original, edited, fill = false }: {
   return <div className={cn("flex flex-col gap-2", fill && "min-h-0 flex-1")}>
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <div className="min-w-0 flex-1 text-[13px] text-ink-secondary">
-        <p role="status" className="text-ink">{total ? t("changes.summary", { changed: counts.changed, added: counts.added, removed: counts.removed, moved: counts.moved }) : t("changes.none")}</p>
+        <p role="status" className="text-ink">{total ? (["changed", "added", "removed", "moved"] as const).filter((kind) => counts[kind]).map((kind) => t(`changes.${kind}`, { count: counts[kind] })).join(" · ") : t("changes.none")}</p>
         <p dir="auto" className="truncate">{t("changes.against", { name: original.name })}</p>
       </div>
       {total > 0 && <div className="flex items-center gap-1">

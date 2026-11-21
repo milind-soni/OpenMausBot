@@ -12,7 +12,7 @@ import { DATA_DIR } from "./config.ts";
  */
 export const keptOriginalsDir = (dataDir: string) => join(dataDir, "attachment-originals");
 export const KEPT_ORIGINALS_DIR = keptOriginalsDir(DATA_DIR);
-export const KEEP_MAX_BYTES = 10 * 1024 * 1024;
+export const KEEP_MAX_BYTES = 4 * 1024 * 1024;
 export const KEPT_TOTAL_MAX_BYTES = 256 * 1024 * 1024;
 
 const TAG = /<attached-file[\t ]+path="([^"\r\n]*)"/g;

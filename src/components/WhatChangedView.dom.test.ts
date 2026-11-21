@@ -49,7 +49,7 @@ describe("What changed view", () => {
       { url: "/api/threads/t/messages/u1/file", path: SOURCE },
       { url: "/api/threads/t/messages/b1/file", path: RESULT },
     ]);
-    expect(host.querySelector("[role=status]")?.textContent).toBe("Changed 1 · Added 1 · Removed 0 · Moved 0");
+    expect(host.querySelector("[role=status]")?.textContent).toBe("Changed 1 · Added 1");
     expect([...host.querySelectorAll("del")].map((node) => node.textContent)).toEqual(["walked"]);
     expect([...host.querySelectorAll("ins")].map((node) => node.textContent)).toEqual(["ran", "A stranger watched."]);
     // The unchanged middle is folded away beyond one paragraph of context on each side.
@@ -91,6 +91,12 @@ describe("the What changed control", () => {
   it("sits beside a returned edit of the person's file, and nowhere else", async () => {
     await act(async () => root.render(createElement(StoreContext.Provider, { value: state([person, returned]) }, gallery())));
     expect(labels()).toContain("What changed");
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => new Response(JSON.parse(String(init.body)).path === SOURCE ? ORIGINAL : EDITED)));
+    await act(async () => [...host.querySelectorAll("button")].find((button) => button.textContent === "What changed")!.click());
+    await settle();
+    await settle();
+    expect(document.querySelector("dialog h2")?.textContent).toBe("What changed in chapter-edited.md");
+    expect(document.querySelector("dialog [role=status]")?.textContent).toBe("Changed 1 · Added 1");
     await act(async () => root.render(createElement(StoreContext.Provider, { value: state([{ ...person, text: "Improve the dialogue" }, returned]) }, gallery())));
     expect(labels()).not.toContain("What changed");
     await act(async () => root.render(gallery()));
