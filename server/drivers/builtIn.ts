@@ -29,6 +29,7 @@ import { GreenferenceDriver } from "./greenference.ts";
 import { ModelgoDriver } from "./modelgo.ts";
 import { MetaDriver } from "./meta.ts";
 import { MuseCodeDriver } from "./muse-code.ts";
+import { T3CodeDriver } from "./t3code.ts";
 import { MinimaxDriver } from "./minimax.ts";
 
 export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
@@ -62,5 +63,6 @@ export const BUILT_IN_DRIVERS: readonly AnyProviderDriver[] = [
   ModelgoDriver,
   MetaDriver,
   MuseCodeDriver,
+  T3CodeDriver,
   DeepSeekAgentDriver,
 ];

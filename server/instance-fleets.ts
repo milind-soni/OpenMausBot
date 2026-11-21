@@ -48,6 +48,7 @@ export const DEFAULT_FLEET: InstanceConfigMap = {
   meta: { driver: "meta" },
   deepseek: { driver: "deepseekAgent" },
   museCode: { driver: "museCode" },
+  t3code: { driver: "t3codeAgent" },
   ...API_KEY_FLEET,
   qwen: { driver: "qwenAgent" },
   hermes: { driver: "hermesAgent" },
@@ -82,6 +83,7 @@ export const PRODUCT_FLEET_ADDITIONS = {
   meta: { driver: "meta" },
   deepseek: { driver: "deepseekAgent" },
   museCode: { driver: "museCode" },
+  t3code: { driver: "t3codeAgent" },
   ...API_KEY_FLEET,
   ...CUSTOM_ONLY,
 } as const;

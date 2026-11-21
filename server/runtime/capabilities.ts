@@ -27,6 +27,7 @@ const ENGINES: Readonly<Record<string, EngineRow>> = {
   droidAgent: { resume: true },
   cursorAgent: { resume: true },
   museCode: { resume: true },
+  t3codeAgent: { resume: true },
   opencodeGo: { resume: true },
   qwenAgent: { resume: true },
   hermesAgent: { resume: true },

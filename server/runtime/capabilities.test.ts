@@ -32,6 +32,7 @@ const EXPECTED: Record<string, EngineCapabilities> = {
   commandCodeAgent: bare,
   kiroAgent: bare,
   devinAgent: bare,
+  t3codeAgent: bare,
   customAcp: bare,
   "openai-compat": chat,
   grok: chat,

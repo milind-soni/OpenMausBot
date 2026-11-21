@@ -20,6 +20,7 @@ MausBot does not proxy every message through its own model account. It starts su
 | Command Code | `cmd login`, or `COMMAND_CODE_API_KEY` | ACP driver with the account's live models and their effort levels |
 | Kiro | `kiro-cli login`, or `KIRO_API_KEY` | ACP driver with the account's live models and their effort levels |
 | Devin | `devin auth login`, or `WINDSURF_API_KEY` | ACP driver with the account's live models |
+| T3 Code | The engines signed in inside T3 Code | Runs each turn in a T3 Code thread through the `t3` CLI |
 | Kimi | Kimi CLI login | ACP integration |
 | Droid | Factory Droid CLI login | ACP integration |
 | Antigravity | Google account through the official ACP server | Managed install, isolated accounts, live models, and approval cards |
@@ -39,6 +40,8 @@ Command Code runs the official Command Code CLI (`npm install -g command-code`, 
 Kiro runs the official Kiro CLI (`curl -fsSL https://cli.kiro.dev/install | bash` on macOS and Linux) in its ACP mode with its V3 engine (`kiro-cli acp --agent-engine=v3`) and bills the Kiro account `kiro-cli login` signed in, or the Kiro Pro key in `KIRO_API_KEY`. Its picker lists every model the account offers, plus **Kiro default**, which keeps the model picked in Kiro itself. Ask turns Kiro's Autopilot off, so each write or command waits for approval in the app; Full access turns Autopilot on.
 
 Devin runs the official Devin CLI (`curl -fsSL https://cli.devin.ai/install.sh | bash` on macOS and Linux, `irm https://static.devin.ai/cli/setup.ps1 | iex` in Windows PowerShell) in its ACP mode (`devin acp`) and bills the Devin account `devin auth login` signed in, or the key in `WINDSURF_API_KEY`. Its picker lists every model the account offers, plus **Devin default**, which keeps the model set in Devin itself. Full access runs Devin's Bypass Permissions mode. Every other level runs its Code mode, the strictest one Devin offers over ACP that can still edit: Devin applies workspace edits on its own there, including a command it reads as one, and other commands wait for approval in the app. Approving for the session is the longest grant MausBot gives: Devin's project-wide, all-projects and switch-to-bypass choices are never offered.
+
+T3 Code runs each turn in a thread of the T3 Code app on this computer, through its `t3` CLI (`t3 thread start` and `t3 thread send`). T3 Code must be open, or `t3 serve` running. The agent is whichever engine T3 Code runs it on, with T3 Code's own sign-ins: model ids are `<T3 provider>/<model>`, such as `claudeAgent/claude-sonnet-5-5`. The bot's working folder becomes a T3 Code project the first time it is used, and the conversation keeps its T3 thread, so you can open it in T3 Code too. T3 Code applies its own access level, so this engine runs only at Full access. The reply arrives whole at the end of the turn, and Stop ends the wait here while T3 Code may still finish the turn.
 
 OMP runs the official Oh My Pi CLI (`npm install -g @oh-my-pi/pi-coding-agent`) through `omp acp`. Run `omp login` or configure providers in `~/.omp/agent/models.yml`; OMP keeps its own credentials. The picker lists OMP's advertised models and their thinking choices, plus **OMP default (configured)**, which leaves the model selected in OMP itself. Threads resume their native OMP sessions, and permission prompts use MausBot's approval cards.
 
