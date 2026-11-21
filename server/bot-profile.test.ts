@@ -105,7 +105,7 @@ describe("mascotBody", () => {
     });
   });
 
-  it.each(["pumpkin", "laddu"])("accepts the festival body %s", (mascotBody) => {
+  it.each(["pumpkin", "laddu", "obj-mug"])("accepts the festival or object body %s", (mascotBody) => {
     expect(parseBotProfilePatch({ mascotBody } as never, true)).toEqual({
       ok: true,
       patch: { mascotBody },
@@ -118,7 +118,10 @@ describe("mascotBody", () => {
       error:
         "mascotBody must be cursor, blob, circle, squircle, capsule, drop, shield, hexagon, diamond, star, " +
         "pumpkin, ghost, witch, bat, cat, skull, monster, mummy, vampire, spider, " +
-        "rocket, anaar, chakri, sparkler, bomb, laddu, chakli, jalebi, katli, or karanji",
+        "rocket, anaar, chakri, sparkler, bomb, laddu, chakli, jalebi, katli, karanji, " +
+        "obj-controller, obj-barbell, obj-mug, obj-lightbulb, obj-chat, obj-sprout, obj-watering-can, obj-book, " +
+        "obj-brain, obj-bull, obj-bunny, obj-camera, obj-cat, obj-cloud, obj-egg, obj-ghost, obj-magnifier, " +
+        "obj-paint-brush, obj-palette, obj-rocket, obj-shield, obj-star, or obj-witch-hat",
     });
   });
 });
