@@ -8,8 +8,7 @@ import type { LocaleKey } from "@/locales";
 import { colorSwatch, MAUS_COLOR_LABEL, MAUS_COLOR_NAMES, PICKABLE_STATES, type MausState } from "@/lib/mascot";
 import { type Bot } from "@/state/store";
 import { mayRename, useTeamPeople } from "@/state/team-people";
-import { MASCOT_BODY_IDS } from "../../../shared/mascot-bodies";
-import { FESTIVAL_IDS, FESTIVALS, isCarvedBody, type BotBodyId } from "../../../shared/bot-body";
+import { EVERYDAY_BODY_IDS, FESTIVAL_IDS, FESTIVALS, isCarvedBody, type BotBodyId } from "../../../shared/bot-body";
 import { useFestivalDress, wornBody } from "@/lib/festival-dress";
 import { MausAvatar } from "../Avatar";
 import { AvatarImageGenerator } from "../AvatarImageGenerator";
@@ -142,7 +141,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
         {tab === "bot" && (
           <>
             <div className="grid grid-cols-5 gap-1.5">
-              {MASCOT_BODY_IDS.map((id) => bodyButton(id, bodyName(id)))}
+              {EVERYDAY_BODY_IDS.map((id) => bodyButton(id, bodyName(id)))}
             </div>
             {!showsImage && othersToMatch.length > 0 && (
               <button

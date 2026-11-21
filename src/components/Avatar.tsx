@@ -14,10 +14,11 @@ import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { ACTIVE_STATES } from "./mascot-motion";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotFaceInk, type BotAvatarCrop, type MascotFaceColor } from "../../shared/bot-avatar";
 import { DEFAULT_MASCOT_BODY, MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
-import { isCarvedBody, type BotBodyId } from "../../shared/bot-body";
+import { isCarvedBody, isObjectBody, type BotBodyId } from "../../shared/bot-body";
 import { useFestivalDress, wornBody } from "@/lib/festival-dress";
 import { t } from "@/lib/i18n";
 import { CarvedAvatar, vivid } from "./CarvedAvatar";
+import { ObjectAvatar } from "./ObjectAvatar";
 import { steelBodyImage } from "@/lib/steel-body";
 
 export const EYE_SCALE = 1.12;
@@ -129,6 +130,21 @@ function MausAvatarComponent(props: MausAvatarProps, ref: React.Ref<MausAvatarHa
         motion={motion}
         motionKey={motionKey}
         gaze={gaze}
+        trackPointer={trackPointer}
+        animated={animated}
+        label={label}
+        kind={kind}
+      />
+    );
+  }
+  if (isObjectBody(bodyId)) {
+    return (
+      <ObjectAvatar
+        body={bodyId}
+        color={color}
+        faceColor={props.faceColor}
+        size={size}
+        state={state}
         trackPointer={trackPointer}
         animated={animated}
         label={label}

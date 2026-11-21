@@ -123,10 +123,11 @@ describe("BotAvatar's two avatar outcomes", () => {
 });
 
 describe("theme hooks on faces", () => {
-  it("marks a bot's picture, its gradient mascot and its carved mascot, and leaves a decorative mascot unmarked", () => {
+  it("marks a bot's picture, its gradient, carved and object mascots, and leaves a decorative mascot unmarked", () => {
     expect(renderBot({ avatarUrl: "/api/attachments/a.png", avatarCrop: "circle" })).toMatch(/<span data-avatar="picture" data-avatar-kind="bot"/);
     expect(renderBot({})).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
     expect(renderBot({ mascotBody: "ghost" })).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
+    expect(renderBot({ mascotBody: "obj-ghost" })).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
     expect(render({})).not.toContain("data-avatar");
   });
 
