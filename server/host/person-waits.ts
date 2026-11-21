@@ -19,6 +19,8 @@ export interface PersonWaitsDeps {
   waitingElsewhere?(threadId: string, wait: PersonWait, asker: BotRecord): void;
   /** That card no longer waits on the person. */
   waitSettled?(threadId: string, cardMessageId: string): void;
+  /** That card waits on the person again. */
+  waitResumed?(threadId: string, cardMessageId: string): void;
 }
 
 const NOTIFIED_ELSEWHERE: ReadonlySet<PersonWait["kind"]> = new Set(["question", "approval"]);
@@ -58,6 +60,7 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
     if (wait) resting.set(threadId, wait);
     else resting.delete(threadId);
     if (before && before.messageId !== wait?.messageId) deps.waitSettled?.(threadId, before.messageId);
+    if (wait && wait.messageId !== before?.messageId) deps.waitResumed?.(threadId, wait.messageId);
     show(threadId, wait);
   }
 

@@ -9,7 +9,7 @@ import { askToolName, createAskCards, type AskCardsDeps } from "./ask-cards.ts";
 const AUTH = { kind: "session", scopes: ["client"], session: { id: "s", email: "cleo@acme.test" } } as unknown as RequestAuth;
 const QUESTION = "What wording should the new footer text use?";
 
-function world(options: { inboxThread?: string; live?: string[] } = {}) {
+function world(options: { inboxThread?: string; live?: string[]; privateThreads?: string[] } = {}) {
   const threads = new Map<string, Message[]>();
   let ids = 0;
   const bots = [
@@ -50,6 +50,7 @@ function world(options: { inboxThread?: string; live?: string[] } = {}) {
     delegatorOf: (threadId) => (threadId === "work" ? { threadId: "inbox", botId: "scout" } : undefined),
     notify: (notification) => { if (notification) notified.push(notification); },
     copiedInto: (inboxThreadId) => inboxThreadId === options.inboxThread,
+    keptPrivate: (threadId) => (options.privateThreads ?? []).includes(threadId),
     live: (_threadId, requestId) => (options.live ?? []).includes(requestId),
     answerCard: vi.fn(async (input) => {
       if (refuse) return { ok: false as const, ...refuse };
@@ -412,6 +413,37 @@ describe("the chip in the conversation that handed the work on", () => {
     expect(settled?.tool?.nameCode).toBeUndefined();
     expect(settled?.threadRef).toMatchObject({ threadId: "work" });
     expect(open?.tool?.name).toBe("Waiting on you to connect Gmail in @Ledger");
+  });
+
+  it("says the same line waits again when the card waits again, without a second line", () => {
+    const desk = world();
+    desk.cards.reopenWaitingOnCardChip("work", "c1");
+    expect(desk.rows("inbox")).toEqual([]);
+    desk.cards.showWaitingOnCardChip("work", { kind: "sign-in", messageId: "c1", label: "example.com" }, asker);
+    desk.cards.settleWaitingOnCardChip("work", "c1");
+    desk.cards.reopenWaitingOnCardChip("work", "c1");
+    const rows = desk.rows("inbox");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.tool).toMatchObject({ name: "Waiting on you to sign in to example.com in @Ledger", nameCode: "chat.notice.waitingSignInElsewhere" });
+    expect(rows[0]!.tool?.ok).toBeUndefined();
+    desk.cards.settleWaitingOnCardChip("work", "c1");
+    expect(desk.rows("inbox")[0]!.tool).toMatchObject({ name: "@Ledger no longer waits on you", ok: true });
+  });
+
+  it("keeps a private conversation's card, site and title out of a conversation that belongs to someone else", () => {
+    const team = world({ privateThreads: ["work"] });
+    team.cards.showWaitingOnCardChip("work", { kind: "sign-in", messageId: "c1", label: "example.com" }, asker);
+    expect(team.rows("inbox")).toEqual([]);
+  });
+
+  it("leaves a settled chip settled when its conversation has since become private to someone else", () => {
+    const privateThreads: string[] = [];
+    const team = world({ privateThreads });
+    team.cards.showWaitingOnCardChip("work", { kind: "sign-in", messageId: "c1", label: "example.com" }, asker);
+    team.cards.settleWaitingOnCardChip("work", "c1");
+    privateThreads.push("work");
+    team.cards.reopenWaitingOnCardChip("work", "c1");
+    expect(team.rows("inbox")[0]!.tool).toMatchObject({ name: "@Ledger no longer waits on you", ok: true });
   });
 
   it("leaves a card's chip out of the person's inbox, which has the card, and out of work nobody handed on", () => {
