@@ -41,6 +41,13 @@ export const BOT_TURN_GIVES_WAY_MS = 5 * 60_000;
 /** A minute counts as stalled on memory when every task that could run waited on memory this much of ten seconds (the
  * kernel's `full avg10`, in percent). */
 const STALL_PERCENT = 20;
+/** Every task stalled on memory this much of the time, with room below the floor: the machine is thrashing. A Cloud home
+ * that does stops answering, and its Admin restarts it within minutes, every turn with it (Nov 2026: 75 of 112 restarts
+ * on Fly in a week, 58 of them 2 GB homes without swap, memory available 7 MB and the stall 70% at the median). */
+const THRASH_PERCENT = 40;
+/** After a busy engine is stopped for room, no other busy one is for this long, nor while that stop or its browser's
+ * close is still under way: what it frees takes a moment to show. */
+const BUSY_STOP_GAP_MS = 2 * RELIEF_COOLDOWN_MS;
 const MINUTE_MS = 60_000, DAY_MINUTES = 24 * 60;
 /** Engines that run each thread's turns in processes of their own. */
 export const ENGINE_PROCESS_KINDS: ReadonlySet<string> = new Set(["claudeAgent", "codex", "opencodeGo", "grokAgent", "geminiAgent", "kimiAgent",
@@ -49,7 +56,12 @@ export const ENGINE_PROCESS_KINDS: ReadonlySet<string> = new Set(["claudeAgent",
 /** Chat-runtime engines (openai-chat.ts) have no process of their own, but each turn starts its MCP servers, each a Node process. */
 export const CHAT_RUNTIME_KINDS: ReadonlySet<string> = new Set(["openai-compat", "cerebras", "greenference", "grok", "groq", "meta", "minimax", "mistral", "modelgo"]);
 
-export interface HostMemory { totalBytes: number; availableBytes: number; swapFreeBytes: number; oomKills: number | null; fullStall10: number | null }
+export interface HostMemory {
+  totalBytes: number; availableBytes: number; swapFreeBytes: number; oomKills: number | null; fullStall10: number | null;
+  /** "host": `fullStall10` is the whole machine's, read for a cgroup that has no stall of its own (cgroup v1), not this
+   * server's. Absent: its own. */
+  stallScope?: "host";
+}
 
 const procText = (path: string) => readFileSync(path, "utf8");
 
@@ -63,7 +75,7 @@ export function readHostMemory(read: (path: string) => string = procText): HostM
   const cgroup = readCgroupMemory((path) => { try { return read(path); } catch { return null; } });
   if (!cgroup || cgroup.limitBytes >= host.totalBytes) return host;
   return { totalBytes: cgroup.limitBytes, availableBytes: Math.max(0, Math.min(host.availableBytes, cgroup.limitBytes - cgroup.usedBytes)), swapFreeBytes: 0,
-    oomKills: cgroup.oomKills ?? host.oomKills, fullStall10: cgroup.fullStall10 ?? host.fullStall10 };
+    oomKills: cgroup.oomKills ?? host.oomKills, fullStall10: cgroup.fullStall10 ?? host.fullStall10, ...(cgroup.fullStall10 === null && host.fullStall10 !== null ? { stallScope: "host" as const } : {}) };
 }
 
 function readMachineMemory(read: (path: string) => string): HostMemory | null {
@@ -109,13 +121,17 @@ export function processGroupBytes(list: () => string[] = () => readdirSync("/pro
 
 const tasks = (count: number) => `${count} ${count === 1 ? "task" : "tasks"}`;
 const running = (count: number) => `${tasks(count)} ${count === 1 ? "is" : "are"} running on this Cloud`;
-const memoryStopKey = (browser: boolean, detail = false) => detail
-  ? browser ? "chat.notice.memoryReclaimedBrowserDetail" : "chat.notice.memoryReclaimedTaskDetail"
-  : browser ? "chat.notice.memoryReclaimedBrowser" : "chat.notice.memoryReclaimedTask";
+/** `only`: it was the one task running (stopped as the machine thrashed): nothing else was kept running by it. */
+const memoryStopKey = (browser: boolean, detail = false, only = false) => only
+  ? detail ? "chat.notice.memoryReclaimedOnlyDetail" : "chat.notice.memoryReclaimedOnly"
+  : detail
+    ? browser ? "chat.notice.memoryReclaimedBrowserDetail" : "chat.notice.memoryReclaimedTaskDetail"
+    : browser ? "chat.notice.memoryReclaimedBrowser" : "chat.notice.memoryReclaimedTask";
 /** The one line a turn stopped for memory ends with: what was closed to keep everything else running. */
-export const memoryStopText = (browser: boolean) => chatNotice(memoryStopKey(browser));
+export const memoryStopText = (browser: boolean, only = false) => chatNotice(memoryStopKey(browser, false, only));
 /** Whether a failed turn's cause is `memoryStopText`'s: such a run is started again once there is room. */
-export const memoryStopped = (cause: string) => /^Ran out of room, so I (closed the browser|stopped this task) to keep everything else running\./.test(cause);
+export const memoryStopped = (cause: string) =>
+  /^Ran out of room, so I (closed the browser|stopped this task) to keep (everything else running|everything here from freezing)\./.test(cause);
 export const memoryWaitText = (count: number) => `Waiting for memory: ${running(count)}, and one more could run it out of memory. `
   + "This one starts by itself when there is room.";
 export const memoryStillWaitingText = (count: number) => `Still waiting for memory: ${running(count)}.`;
@@ -168,8 +184,15 @@ export interface EngineBrowsers {
   which?(threadId: string): string | undefined;
   /** Whether this thread's bot's browser is running now. */
   running(threadId: string): boolean;
-  /** This thread's engine was stopped for memory: its browser can close too once no turn holds it. */
-  stopped(threadId: string): void;
+  /** This thread's engine was stopped for memory: its browser can close too once no turn holds it. Resolves once it has
+   * closed, or given up. */
+  stopped(threadId: string): void | Promise<unknown>;
+  /** Closes running browsers no turn holds and no call runs in, before their idle time is up; how many it asked to close.
+   * `thrashing`: the machine thrashes, and a browser a person watches, one of a running turn that hasn't used it yet, or
+   * one whose close loses its sign-ins goes too. `busy`: the threads with a turn running (host/browser-reclaim.ts). */
+  reclaimUnused?(pressure: { thrashing: boolean; busy: readonly string[] }): number;
+  /** Whether any bot's browser runs now: memory is watched while one does, engine or not. */
+  anyRunning?(): boolean;
 }
 
 /** A plan's limit on how many turns run at once, whatever memory allows. */
@@ -220,7 +243,7 @@ export class EngineMemory {
   private readonly reserved = new Map<string, { at: number; start: "process" | "session"; browser: boolean; browserSince?: number }>();
   private readonly queue: Waiter[] = [];
   /** Threads whose engine was stopped for memory: how many tasks ran then, and whether their browser was running. */
-  private readonly stops = new Map<string, { count: number; browser: boolean }>();
+  private readonly stops = new Map<string, { count: number; browser: boolean; only?: true }>();
   /** Threads whose turn could not run its engine for want of room: the code its failure names, and whether the engine's own
    * spawn was refused (a later spawn in the same turn that works clears that) or the engine was stopped as silent. */
   private readonly starved = new Map<string, { code: ShortageCode; why: "refused" | "silent" }>();
@@ -239,6 +262,11 @@ export class EngineMemory {
   /** Tasks waiting for memory now, and since when. */
   private readonly waitingSince = new Map<Waiter, number>();
   private lastRelief = -Infinity;
+  private lastBrowserRelief = -Infinity;
+  private lastBusyStop = -Infinity;
+  private busyStopping = false;
+  /** Since when every reading has thrashed, the home's own stall (not a host's) with memory below the critical line. */
+  private thrashingSince: number | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
   private browsers: EngineBrowsers | null = null;
   private personsOwn: (threadId: string) => boolean = () => false;
@@ -558,7 +586,7 @@ export class EngineMemory {
     const starved = this.starved.get(threadId);
     if (starved !== undefined && !interrupted && (detail === undefined || !namesOwnCause(detail))) return noticeFailure("chat.notice.outOfProcesses", { code: starved.code });
     const stop = this.stops.get(threadId);
-    return stop === undefined ? null : noticeFailure(memoryStopKey(stop.browser, detail !== undefined), detail === undefined ? undefined : { detail });
+    return stop === undefined ? null : noticeFailure(memoryStopKey(stop.browser, detail !== undefined, stop.only === true), detail === undefined ? undefined : { detail });
   }
 
   /** A stalled turn's cause, saying so when memory ran short while it ran. */
@@ -570,8 +598,11 @@ export class EngineMemory {
   /** The last day's memory pressure, for the Admin's health check (cloud-health.ts): times only, never what ran. */
   dayPressure(): RoomReport { return this.ledger.read(this.now(), this.waitingSince.values()); }
 
-  /** Every couple of seconds while engines run: notes short memory against the running turns, and stops an engine before
-   * the machine runs out: an idle one first, else the newest of two or more busy ones. */
+  /** Every couple of seconds while an engine or a bot's browser runs: notes short memory against the running turns, and
+   * makes room before the machine runs out: an idle engine first (and, thrashing, the unused browsers with it), then the
+   * browsers no turn is using, then one of two or more busy engines (a bot's own work before a person's, then the
+   * newest), one at a time; the only busy one only once the machine has thrashed on its own stall for a cooldown with
+   * memory below the critical line, when the Admin's restart that follows would stop it and everything else. */
   tick(): void {
     try { this.idleSweep?.(); } catch (error) { this.log(`idle sweep failed: ${error instanceof Error ? error.message : String(error)}`); }
     const memory = this.read();
@@ -581,18 +612,52 @@ export class EngineMemory {
     if (this.kernelKilled(memory.oomKills)) return;
     const free = this.free(memory), count = this.busy();
     if (free < this.floor(memory)) for (const threadId of this.active) this.pressure.set(threadId, Math.max(this.pressure.get(threadId) ?? 1, count));
-    const critical = free < Math.max(160 * MB, memory.totalBytes * 0.04) || ((memory.fullStall10 ?? 0) >= 40 && free < this.floor(memory));
+    // Short memory is noted against the running turns above on every look. Relief, and the watch itself, only while an
+    // engine or a bot's browser runs; with neither, the next engine starts the watch again.
+    if (!this.engines.size && !this.browsersRunning()) { if (this.timer) { clearInterval(this.timer); this.timer = null; } return; }
+    // Memory available, not counting swap: a home with gigabytes of swap free thrashes all the same (Nov 2026: memory
+    // available 0–100 MB, the stall at 40–98%, with 1.8–3.9 GB of swap free).
+    const thrashing = (memory.fullStall10 ?? 0) >= THRASH_PERCENT && memory.availableBytes < this.floor(memory);
+    const criticalLine = Math.max(160 * MB, memory.totalBytes * 0.04);
+    // The only busy engine goes only on this server's own stall, with memory itself below the critical line, read so on
+    // two looks at least a cooldown apart: a burst (an install, a build) that passes does not end a turn.
+    const severe = thrashing && memory.stallScope !== "host" && memory.availableBytes < criticalLine;
+    this.thrashingSince = severe ? this.thrashingSince ?? this.now() : null;
+    const critical = free < criticalLine || thrashing;
     if (!critical || this.now() - this.lastRelief < RELIEF_COOLDOWN_MS) return;
+    const pressure = { thrashing, busy: [...this.active] };
+    const reclaimBrowsers = () => {
+      if (this.now() - this.lastBrowserRelief < 2 * RELIEF_COOLDOWN_MS) return 0;
+      let asked = 0;
+      try { asked = this.browsers?.reclaimUnused?.(pressure) ?? 0; } catch {}
+      if (asked > 0) this.lastBrowserRelief = this.now();
+      return asked;
+    };
     const idle = this.idle();
-    const newest = [...this.engines.values()].filter((engine) => !engine.stopping && this.working(engine).length).sort((a, b) => b.startedAt - a.startedAt);
-    const victim = idle ?? (newest.length >= 2 ? newest[0]! : null);
+    if (idle) {
+      this.lastRelief = this.now();
+      void this.stop(idle, "idle");
+      // Thrashing, the browsers no task uses go in the same look: one idle engine at a time is too slow.
+      if (thrashing) reclaimBrowsers();
+      return;
+    }
+    // A browser no turn is using goes before any turn does: its idle time may be minutes away. Once per two cooldowns:
+    // if memory is still short after that, a busy engine goes, whatever the browsers say.
+    if (reclaimBrowsers() > 0) { this.lastRelief = this.now(); return; }
+    if (this.busyStopping || this.now() - this.lastBusyStop < BUSY_STOP_GAP_MS) return;
+    // A bot's own work goes before a turn a person started, then the newest.
+    const own = (engine: Engine) => this.working(engine).some((threadId) => this.personsOwn(threadId));
+    const busy = [...this.engines.values()].filter((engine) => !engine.stopping && this.working(engine).length)
+      .sort((a, b) => Number(own(a)) - Number(own(b)) || b.startedAt - a.startedAt);
+    const only = busy.length === 1;
+    const victim = busy.length >= 2 || (only && this.thrashingSince !== null && this.now() - this.thrashingSince >= RELIEF_COOLDOWN_MS) ? busy[0]! : null;
     if (!victim) return;
-    this.lastRelief = this.now();
-    if (idle) { void this.stop(victim, "idle"); return; }
+    this.lastRelief = this.lastBusyStop = this.now();
+    this.busyStopping = true;
     const stopped = this.working(victim);
-    this.noteStops(stopped, () => count);
+    this.noteStops(stopped, () => count, only);
     this.noteRoomStopped(victim);
-    void this.stop(victim, "relief").then(() => this.closeBrowsers(stopped));
+    void this.stop(victim, "relief").then(() => this.closeBrowsers(stopped)).finally(() => { this.busyStopping = false; this.lastBusyStop = this.now(); });
   }
 
   /** How much of an idle engine's keep-alive memory allows: 1 with half the machine free above the floor, down to a tenth
@@ -693,7 +758,11 @@ export class EngineMemory {
 
   private browserStarts(threadId: string): boolean { return this.browsers?.starts(threadId) === true; }
 
-  private closeBrowsers(threadIds: string[]): void { for (const threadId of threadIds) this.browsers?.stopped(threadId); }
+  private browsersRunning(): boolean { try { return this.browsers?.anyRunning?.() === true; } catch { return false; } }
+
+  private closeBrowsers(threadIds: string[]): Promise<unknown> {
+    return Promise.all(threadIds.map((threadId) => { try { return this.browsers?.stopped(threadId); } catch { return undefined; } }));
+  }
 
   private async stop(engine: Engine, why: "idle" | "relief"): Promise<void> {
     const pid = engine.child.pid!, gone = () => engine.child.exitCode !== null || engine.child.signalCode !== null;
@@ -717,7 +786,7 @@ export class EngineMemory {
       this.log(`the kernel stopped an engine (pid ${pid}) for memory`);
       this.closeBrowsers(working);
     }
-    if (!this.engines.size && this.timer) { clearInterval(this.timer); this.timer = null; }
+    if (!this.engines.size && !this.browsersRunning() && this.timer) { clearInterval(this.timer); this.timer = null; }
     this.wake();
   }
 
@@ -730,10 +799,10 @@ export class EngineMemory {
   }
 
   /** These threads' turns were stopped for memory, with how many tasks ran then: each says whether its browser was closed. */
-  private noteStops(threadIds: string[], count: (threadId: string) => number): void {
+  private noteStops(threadIds: string[], count: (threadId: string) => number, only = false): void {
     for (const threadId of threadIds) {
       if (!this.stops.has(threadId)) this.ledger.note(this.now(), "stopped");
-      this.stops.set(threadId, { count: count(threadId), browser: this.browsers?.running(threadId) === true });
+      this.stops.set(threadId, { count: count(threadId), browser: this.browsers?.running(threadId) === true, ...(only ? { only: true as const } : {}) });
     }
   }
 

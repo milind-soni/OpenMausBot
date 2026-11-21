@@ -60,7 +60,8 @@ const memberLayer = (id: string): boolean => isLayerId(id) && layerAudience(id).
 export function omittedAsTeamPrivate(path: string, privacy: TeamPrivacy): boolean {
   if (/^(?:people(?:\/|$)|person-inbox\.json)/.test(path)) return true;
   if (/^bots\/[^/]+\/data\.duckdb(?:\.wal)?$/.test(path)) return true;
-  const attachment = /^attachments\/([^/]+)$/.exec(path)?.[1];
+  // A kept copy of an upload (attachment-originals.ts) is as private as the upload.
+  const attachment = /^(?:attachments|attachment-originals)\/([^/]+)$/.exec(path)?.[1];
   if (attachment && privacy.attachments.has(attachment)) return true;
   return path.split("/").some((part) => {
     const name = part.replace(/\.[^-]*$/, "");
