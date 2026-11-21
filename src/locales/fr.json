@@ -3826,5 +3826,7 @@
   "imageGen.higgsfield.help": "{app} crée des images avec le compte Higgsfield auquel vous vous connectez sous Plugins. Chaque image consomme des crédits de ce compte.",
   "imageGen.higgsfield.open": "Ouvrir Plugins",
   "inbox.settled.title": "Terminé",
-  "inbox.settled.read": "Lu"
+  "inbox.settled.read": "Lu",
+  "server.notify.handoff": "{who} vous attend",
+  "serverError.signIn.expired": "Cette demande a déjà expiré"
 }

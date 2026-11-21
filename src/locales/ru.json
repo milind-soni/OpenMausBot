@@ -7173,5 +7173,7 @@
   "imageGen.higgsfield.help": "{app} создаёт изображения через аккаунт Higgsfield, в который вы входите в разделе «Плагины». Каждое изображение расходует кредиты этого аккаунта.",
   "imageGen.higgsfield.open": "Открыть «Плагины»",
   "inbox.settled.title": "Завершено",
-  "inbox.settled.read": "Прочитано"
+  "inbox.settled.read": "Прочитано",
+  "server.notify.handoff": "{who} ждёт вас",
+  "serverError.signIn.expired": "Срок действия этого запроса уже истёк"
 }

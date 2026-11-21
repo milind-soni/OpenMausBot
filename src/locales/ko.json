@@ -7649,5 +7649,7 @@
   "imageGen.higgsfield.help": "{app}은(는) 플러그인에서 로그인한 Higgsfield 계정으로 이미지를 만듭니다. 이미지마다 그 계정의 크레딧이 소모됩니다.",
   "imageGen.higgsfield.open": "플러그인 열기",
   "inbox.settled.title": "완료됨",
-  "inbox.settled.read": "읽음"
+  "inbox.settled.read": "읽음",
+  "server.notify.handoff": "{who}이(가) 기다리고 있어요",
+  "serverError.signIn.expired": "이 요청은 이미 만료되었어요"
 }

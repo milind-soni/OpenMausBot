@@ -5918,5 +5918,7 @@
   "imageGen.higgsfield.help": "{app} tạo ảnh bằng tài khoản Higgsfield mà bạn đăng nhập trong Plugin. Mỗi ảnh tốn tín dụng của tài khoản đó.",
   "imageGen.higgsfield.open": "Mở Plugin",
   "inbox.settled.title": "Đã xong",
-  "inbox.settled.read": "Đã đọc"
+  "inbox.settled.read": "Đã đọc",
+  "server.notify.handoff": "{who} đang chờ bạn",
+  "serverError.signIn.expired": "Yêu cầu này đã hết hạn"
 }

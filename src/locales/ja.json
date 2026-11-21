@@ -7956,5 +7956,7 @@
   "imageGen.higgsfield.help": "{app} は、プラグインでサインインした Higgsfield アカウントで画像を作ります。画像 1 枚ごとにそのアカウントのクレジットを消費します。",
   "imageGen.higgsfield.open": "プラグインを開く",
   "inbox.settled.title": "完了",
-  "inbox.settled.read": "既読"
+  "inbox.settled.read": "既読",
+  "server.notify.handoff": "{who} があなたを待っています",
+  "serverError.signIn.expired": "このリクエストはすでに期限切れです"
 }
