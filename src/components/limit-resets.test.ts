@@ -277,6 +277,11 @@ describe("the bars", () => {
     expect(mount(createElement(UsageRows, { limit: windows(38, 80) })).querySelector("[data-usage-checked]")?.textContent).toBe("checked 3 min ago");
   });
 
+  it("say when the usage shown was read, when the latest read failed and kept the one before", () => {
+    limits.rememberLimits({ checkedAt: NOW, engines: [{ ...windows(38, 80), checkedAt: NOW - 12 * 60_000 }] });
+    expect(mount(createElement(UsageRows, { limit: { ...windows(38, 80), checkedAt: NOW - 12 * 60_000 } })).querySelector("[data-usage-checked]")?.textContent).toBe("checked 12 min ago");
+  });
+
   it("read limits on their own as a background poll, so a sleeping Cloud home stays asleep", async () => {
     fixture.api.mockClear();
     mount(createElement(UsageBars, { engine: "claude" }));

@@ -5,7 +5,8 @@ import type { BotRecord } from "../store.ts";
 import { createDelegatedLevel, type DelegatedLevelDeps, type Hop } from "./delegated-level.ts";
 
 // Clive (a Chief) handed work to Ada, and Ada's turn hands work on: the chain is the hand-off nodes' parents.
-function world(levels: Record<string, ApprovalMode>, nodes: Record<string, Hop>, guest = new Set<string>(), outside = new Set<string>()) {
+function world(levels: Record<string, ApprovalMode>, nodes: Record<string, Hop>, guest = new Set<string>(), outside = new Set<string>(),
+  saved: Record<string, ApprovalMode> = {}) {
   const bots: Record<string, Partial<BotRecord>> = {
     clive: { id: "clive", name: "Clive", chiefOfStaff: true }, ada: { id: "ada", name: "Ada" }, bea: { id: "bea", name: "Bea" }, ola: { id: "ola", name: "Ola" },
   };
@@ -14,7 +15,7 @@ function world(levels: Record<string, ApprovalMode>, nodes: Record<string, Hop>,
   const store = {
     bot: (id: string) => bots[id],
     projectBotForTask: () => undefined,
-    taskByThread: () => undefined,
+    taskByThread: (_botId: string, threadId: string) => saved[threadId] ? { approvalMode: saved[threadId] } : undefined,
     patchTask: (botId: string, threadId: string, patch: { approvalMode?: ApprovalMode }) => { patched.push({ botId, threadId, ...patch }); },
     appendMessage: (_threadId: string, message: { tool?: { name: string } }) => { lines.push(message.tool!.name); },
   } as unknown as DelegatedLevelDeps["store"];
@@ -75,6 +76,19 @@ describe("a Chief's level, every hop down", () => {
       "Approve for me — handed on by Clive, a Chief of Staff on Approve for me",
       "Approve for me — handed on by Ada, from Clive, a Chief of Staff on Approve for me",
     ]);
+  });
+
+  it("raises a thread a hand-off just opened from its bot's own level, announces it, and never lowers what it opened at", () => {
+    // Ada is saved at Ask; each new thread already took the level of the conversation that opened it (spawn-level.ts).
+    const opened = (at: ApprovalMode) => {
+      const w = world({ "clive:clive-chat": "auto" }, chain, new Set(), new Set(), { "ada-new": at });
+      w.apply(w.bot("clive"), "clive-chat", "root", w.bot("ada"), "ada-new", true);
+      return { patched: w.patched.map((patch) => patch.approvalMode), lines: w.lines };
+    };
+    const said = ["Approve for me — handed on by Clive, a Chief of Staff on Approve for me"];
+    expect(opened("auto")).toEqual({ patched: ["auto"], lines: said });
+    expect(opened("edits")).toEqual({ patched: ["auto"], lines: said });
+    expect(opened("full")).toEqual({ patched: [], lines: [] });
   });
 
   it("brings nothing down from work that came in from outside: the teammate keeps its own level", () => {

@@ -102,6 +102,16 @@ describe("the model button's usage bars", () => {
     });
   }
 
+  it("show in Advanced's composer footer, where the model now sits, outside the narrow header's hiding", () => {
+    fixture.advanced = true;
+    flushSync(() => root.render(createElement(ModelPicker, { bot: scout, threadId: scout.threadId, quiet: true })));
+    const bars = chip().querySelector("[data-usage-bars]");
+    expect(bars?.getAttribute("data-usage-bars")).toBe("fine");
+    expect(bars?.querySelector("[data-usage-glyph]")?.getAttribute("data-usage-glyph")).toBe("3");
+    expect(chip().closest("[class*='@container/chathead']")).toBeNull();
+    expect(chip().textContent).toContain("Claude: 38% used, resets 3:40 PM");
+  });
+
   it("draw nothing for an engine that reports no usage", () => {
     remember([{ ...usage(0), usedPercent: null, window: null, resetsAt: null, windows: [] }]);
     render();
