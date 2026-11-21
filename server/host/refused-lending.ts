@@ -1,11 +1,20 @@
 // A routine's run refused the computer the person lends My Cloud, only because the routine isn't confirmed as theirs.
 // The bot hears why and is told to say it, but may say anything after (that nothing was there to use, that files are
-// gone), so the run keeps the refusal and ends saying it in the app's own words, instead of "completed": the line in the
-// chat it reports to and the routine's failed notification carry the sentence, whatever the bot wrote.
+// gone), so the app says it itself, every run it applies to, until the person saves the routine:
+// - a run that tried to use the computer and was refused, and never got it after, fails with the sentence (it reads
+//   "didn't finish", it is said on every run, and it never spaces the routine out: only saving it helps);
+// - a run that only listed the computers ends as it would, its reply posted as usual with the sentence under it.
+// A call that gets the computer later in the same run (the person saved it meanwhile) forgets the refusal.
 import { serverLine } from "../server-lines.ts";
+import type { RefusedRunLine } from "../routine-recovery.ts";
 import type { RoutineRunStatus } from "../../shared/routines.ts";
 
 type Device = "PC" | "Mac" | "computer";
+type Refusal = { name: string; device: Device; used: boolean; startedAt?: number };
+
+/** What fits in a failed run's error (routines.ts keeps 500 characters): a long name gives way, never the instruction. */
+const ERROR_ROOM = 500;
+const NAME_ROOM = 80;
 
 export interface RefusedLendingDeps {
   /** The run this conversation is, when it is one; `startedAt` tells a retry of it from the attempt that was refused. */
@@ -21,10 +30,17 @@ export interface RefusedLendingDeps {
 const NOT_FINISHED: ReadonlySet<RoutineRunStatus> = new Set<RoutineRunStatus>(["queued", "running", "waiting"]);
 
 export function createRefusedLending(deps: RefusedLendingDeps) {
-  const refused = new Map<string, { name: string; device: Device; startedAt?: number }>();
+  const refused = new Map<string, Refusal>();
+  /** Runs that completed after only listing: the line their report carries, by run id. */
+  const notes = new Map<string, Omit<Refusal, "used" | "startedAt">>();
+
+  const sentence = (language: string | undefined, { name, device }: Pick<Refusal, "name" | "device">) =>
+    serverLine(language, "server.runs.lentComputerUnconfirmed", { name: name.length > NAME_ROOM ? `${name.slice(0, NAME_ROOM - 1).trimEnd()}…` : name, device });
+
   return {
-    /** The run `runId`, in this conversation, was refused the lent computer for the routine `name`. */
-    refused(threadId: string, runId: string, name: string): void {
+    /** The run `runId`, in this conversation, was refused the lent computer for the routine `name`: `used` when it tried
+     * to use it (a call, or asking for it), not only to list it. */
+    refused(threadId: string, runId: string, name: string, used: boolean): void {
       const device = deps.lentDevice(), run = deps.runOf(threadId);
       if (!device || run?.id !== runId) return;
       // A run that has ended never takes its own, so it keeps none.
@@ -32,16 +48,38 @@ export function createRefusedLending(deps: RefusedLendingDeps) {
         const status = id === runId ? undefined : deps.statusOf(id);
         if (id !== runId && (status === undefined || !NOT_FINISHED.has(status))) refused.delete(id);
       }
-      refused.set(runId, { name, device, startedAt: run.startedAt });
+      const before = refused.get(runId);
+      refused.set(runId, { name, device, used: used || (before?.startedAt === run.startedAt && before.used === true), startedAt: run.startedAt });
     },
-    /** The run in this conversation is ending well: what it must say instead, once; null when it was never refused. */
-    take(threadId: string): string | null {
+    /** The run in this conversation got the lent computer: what it was refused before no longer holds. */
+    allowed(threadId: string): void {
+      const run = deps.runOf(threadId);
+      if (run) refused.delete(run.id);
+    },
+    /** The run in this conversation is ending well, after `handoff` (a refused hand-off's words, or null): what it must
+     * fail with instead, or null to end as it would; a run that only listed keeps its line for its report. */
+    ending(threadId: string, handoff: string | null): string | RefusedRunLine | null {
       const run = deps.runOf(threadId), seen = run && refused.get(run.id);
-      if (!run || !seen) return null;
-      refused.delete(run.id);
+      if (run) refused.delete(run.id);
       // A retry starts afresh: the attempt that was refused is not the one ending now.
-      if (seen.startedAt !== run.startedAt) return null;
-      return serverLine(deps.language(threadId), "server.runs.lentComputerUnconfirmed", { name: seen.name, device: seen.device });
+      if (!run || !seen || seen.startedAt !== run.startedAt) return handoff;
+      const said = sentence(deps.language(threadId), seen);
+      if (!seen.used && !handoff) {
+        if (notes.size >= 500) notes.delete(notes.keys().next().value!);
+        notes.set(run.id, { name: seen.name, device: seen.device });
+        return null;
+      }
+      const text = handoff ? `${said} ${handoff}`.slice(0, ERROR_ROOM) : said;
+      return seen.used ? { text, partial: false, lendingRefused: true } : { text, partial: false };
+    },
+    /** The line a completed run's report carries under its reply, once (automation-reports.ts `notes`). */
+    notes: {
+      has: (runId: string): boolean => notes.has(runId),
+      take(runId: string, language: string | undefined): string | null {
+        const note = notes.get(runId);
+        notes.delete(runId);
+        return note ? sentence(language, note) : null;
+      },
     },
   };
 }

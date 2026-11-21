@@ -33,8 +33,9 @@ export interface CloudLendingTurnsDeps {
   lifts?: () => Pick<ReturnType<typeof createLendingLifts>, "raise" | "declined" | "outsideAllowed"> | null;
   /** Work a bot handed into this conversation since `since`: made, or run, after then. Not the conversation's own turns, nor what they hand on. */
   handedSince?(threadId: string, since: number): boolean;
-  /** A routine's run was refused the lent computer only because its routine isn't confirmed as the owner's (host/refused-lending.ts). */
-  routineRefused?(threadId: string, runId: string, routineName: string): void;
+  /** A routine's run was refused the lent computer only because its routine isn't confirmed as the owner's
+   * (host/refused-lending.ts): `used` when it tried to use the computer, not only to list it. */
+  routineRefused?(threadId: string, runId: string, routineName: string, used: boolean): void;
 }
 
 export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
@@ -116,12 +117,13 @@ export function createCloudLendingTurns(deps: CloudLendingTurnsDeps) {
       botOpened: others.length === 0 && cloudBotOpened(capability.threadId), outside: others.length === 0 && thread.some(cloudReportFromOthers), memoryChanged, onCard: liftable(capability, shut) !== null, device: deviceWord(deps.lentPlatform()) });
   }
 
-  /** What a refused call answers: the notice, then that the bot should stop. Where the owner can lift it, the card goes up here. */
-  function cloudLendingRefusalForBot(capability: Turn): string | null {
+  /** What a refused call answers: the notice, then that the bot should stop. Where the owner can lift it, the card goes up
+   * here. `used`: the call tried to use the computer (or asked for it), not only to list it. */
+  function cloudLendingRefusalForBot(capability: Turn, used = true): string | null {
     const notice = cloudLendingRefusalNotice(capability);
     if (!notice || deps.team) return notice;
     const shut = gates(capability), changed = changedRoutineOnly(capability, shut);
-    if (changed) deps.routineRefused?.(capability.threadId, changed.runId, changed.name);
+    if (changed) deps.routineRefused?.(capability.threadId, changed.runId, changed.name, used);
     const lift = liftable(capability, shut);
     if (lift) deps.lifts?.()?.raise({ botId: capability.botId, threadId: capability.threadId, ...lift });
     return `${notice} ${lift ? ON_THE_CARD : ONLY_THE_PERSON}`;

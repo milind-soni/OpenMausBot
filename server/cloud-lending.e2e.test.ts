@@ -640,7 +640,7 @@ it("paused, the PC still hears a bot that needs it: one card in the chat, the ap
   rmSync(pcHome, { recursive: true, force: true });
 }, hostTimeout(90_000));
 
-it("a routine the bot changes in the owner's own chat keeps the lent computer on its next scheduled run, as does one its own run changes; one remade beside an old report is refused, and its run ends saying so in the app's words", async () => {
+it("a routine the bot changes in the owner's own chat keeps the lent computer on its next scheduled run, as does one its own run changes; one remade beside an old report is refused, and the app says why on every run until it is saved", async () => {
   const device = ({ win32: "PC", darwin: "Mac" } as Record<string, string>)[process.platform] ?? "computer";
   const folderPath = realpathSync(mkdtempSync(join(tmpdir(), "omb-cloud-lent-routines-")));
   writeFileSync(join(folderPath, "plan.md"), "from the computer");
@@ -650,6 +650,7 @@ it("a routine the bot changes in the owner's own chat keeps the lent computer on
   connector = lend(env);
   await connector.saveCloud(env, { folders: [{ id: randomUUID(), name: "Plans", path: folderPath, write: false }], screen: false });
   await expect.poll(() => connector!.cloudState(env).connected, { timeout: 8000 }).toBe(true);
+  const [computer] = (await api("GET", "/api/shared-computers", { token: owner })).body.computers;
   const authors = () => JSON.parse(readFileSync(join(home, ".openmausbot", "lending-routines.json"), "utf8"));
   const lent = (listing: any) => JSON.parse(listing.content[0].text);
   const applied = (result: unknown) => { const text = JSON.stringify(result); expect(text).not.toContain("isError\":true"); return text; };
@@ -660,38 +661,45 @@ it("a routine the bot changes in the owner's own chat keeps the lent computer on
     expect((await api("POST", `/api/bots/${bot.id}/messages`, { token: owner, body: { text, threadId: bot.threadId } })).status).toBe(202);
   }, bot.id, bot.threadId);
   const stop = async () => expect((await api("POST", `/api/bots/${bot.id}/interrupt`, { token: owner, body: { threadId: bot.threadId } })).status).toBe(200);
-  const runs = async () => (await api("GET", "/api/routines", { token: owner })).body.runs as Array<{ id: string; routineId: string; status: string; threadId?: string; triggerSource?: string; error?: string }>;
-  /** A run started by Run now, or with `scheduled` by its schedule alone: its tools, the dump that ends it, and its row once ended. */
-  const runOf = async (routineId: string, scheduled = false) => {
-    const call = await proxyFor(async () => {
-      if (!scheduled) expect((await api("POST", `/api/routines/${routineId}/run`, { token: owner })).status).toBe(201);
-    }, bot.id);
+  const runs = async () => (await api("GET", "/api/routines", { token: owner })).body.runs as Array<{ id: string; routineId: string; status: string; threadId?: string; triggerSource?: string; error?: string; partial?: boolean }>;
+  /** A run `start` begins (Run now by default; a schedule, after what `start` does): its tools, and its row once its turn ends well. */
+  const runOf = async (routineId: string, start = async () => { expect((await api("POST", `/api/routines/${routineId}/run`, { token: owner })).status).toBe(201); }) => {
+    const call = await proxyFor(start, bot.id);
     const dump = turnDump, threadId = turn.mcpConfig.mcpServers.agents.env.OMB_THREAD_ID;
     // The turn these tools belong to is this run's own.
     const started = (await runs()).find((run) => run.routineId === routineId && run.threadId === threadId && ["running", "waiting"].includes(run.status));
     expect(started).toBeTruthy();
     const runId = started!.id;
-    return { call, trigger: started!.triggerSource, ended: async () => {
+    return { call, runId, trigger: started!.triggerSource, ended: async () => {
       finish(dump);
       let row: Awaited<ReturnType<typeof runs>>[number] | undefined;
       await expect.poll(async () => (row = (await runs()).find((run) => run.id === runId))?.status, { timeout: hostTimeout(20_000) }).toMatch(/^(completed|failed)$/u);
       return row!;
     } };
   };
+  /** What the run said in the chat it reports to. */
+  const reported = async (runId: string) => {
+    let line: any;
+    await expect.poll(async () => (line = (await chat()).find((message) => message.automation?.runId === runId && !message.automation.copyOf)) !== undefined, { timeout: hostTimeout(15_000) }).toBe(true);
+    return line as { text: string; automation: { failed?: boolean; partial?: boolean } };
+  };
+  const use = (call: Awaited<ReturnType<typeof proxyFor>>) => call("shared_computer", { computer_id: computer.id, folder_id: computer.scopes.folders[0].id, action: "read_file", path: "plan.md" });
 
   // The person asks in their own chat; the bot makes the routine, then rewrites it there and sets it to run in a moment.
   let call = await ownerAsks("Every morning, read plan.md from my computer.");
   const morning = made(await call("create_trigger", { when: "schedule", name: "Morning plan", instructions: "Read plan.md from my computer.", schedule: { type: "interval", every_minutes: 60 } }));
   expect(morning).not.toBe("");
-  applied(await call("manage_trigger", { trigger_id: morning, action: "update", changes: { instructions: "Read plan.md from my computer, as I said it may today.", schedule: { type: "once", at: new Date(Date.now() + 8_000).toISOString() } } }));
-  expect(authors().routines[morning]).toMatch(/^[a-f0-9]{64}$/u);
-  await stop();
-  // Its next run starts on its schedule, with nobody pressing Run now, and has the computer.
-  const scheduled = await runOf(morning, true);
+  // Its next run starts on its schedule, with nobody pressing Run now, and has the computer. The turns already started are
+  // taken before the run is set, so a fast schedule can't start it first.
+  const scheduled = await runOf(morning, async () => {
+    applied(await call("manage_trigger", { trigger_id: morning, action: "update", changes: { instructions: "Read plan.md from my computer, as I said it may today.", schedule: { type: "once", at: new Date(Date.now() + 8_000).toISOString() } } }));
+    expect(authors().routines[morning]).toMatch(/^[a-f0-9]{64}$/u);
+    await stop();
+  });
   expect(scheduled.trigger).toBe("schedule");
   expect(lent(await scheduled.call("list_shared_computers")).computers).toHaveLength(1);
   expect((await scheduled.ended()).status).toBe("completed");
-  await expect.poll(async () => (await chat()).some((line) => line.automation?.routineId === morning), { timeout: hostTimeout(15_000) }).toBe(true);
+  await reported(scheduled.runId);
 
   // A run of the owner's routine that changes the routine itself keeps it theirs (cloud-personal.e2e.test.ts pins the fingerprint).
   call = await ownerAsks("Read plan.md from my computer every hour.");
@@ -714,18 +722,38 @@ it("a routine the bot changes in the owner's own chat keeps the lent computer on
   const again = made(await call("create_trigger", { when: "schedule", name: "Morning plan again", instructions: "Read plan.md from my computer.", schedule: { type: "interval", every_minutes: 60 } }));
   expect(authors().routines[again]).toBeUndefined();
   await stop();
-  const refused = await runOf(again);
   const said = `"Morning plan again" can't use your ${device} because it isn't confirmed as yours: it was last changed or made outside your own chats. Open it and save it to make it yours again.`;
-  const listing = lent(await refused.call("list_shared_computers"));
+
+  // A run that only lists the computers ends as it would: its reply reaches the chat, with the app's sentence under it.
+  const listed = await runOf(again);
+  const listing = lent(await listed.call("list_shared_computers"));
   expect(listing.computers).toEqual([]);
   expect(listing.say).toBe(said);
-  // Whatever the bot says after, the run is not a success, and the chat it reports to reads the app's own sentence.
-  const row = await refused.ended();
-  expect(row.status).toBe("failed");
-  expect(row.error).toBe(said);
-  await expect.poll(async () => (await chat()).find((line) => line.automation?.routineId === again && line.automation.failed)?.text, { timeout: hostTimeout(15_000) }).toContain(said);
+  expect((await listed.ended()).status).toBe("completed");
+  const listedLine = await reported(listed.runId);
+  expect(listedLine.text).toBe(`fixture turn completed\n\n${said}`);
+  expect(listedLine.automation.failed).toBeUndefined();
+
+  // A run refused the computer it tried to use fails, whatever the bot said after: "didn't finish", on every run.
+  for (const attempt of [1, 2]) {
+    const used = await runOf(again);
+    const refusedUse = await use(used.call);
+    expect(refusedUse.isError).toBe(true);
+    expect(refusedUse.content[0].text).toContain(said);
+    const row = await used.ended();
+    expect([row.status, row.error, row.partial], `run ${attempt}`).toEqual(["failed", said, undefined]);
+    expect(await reported(used.runId), `run ${attempt}`).toMatchObject({ text: `This run didn't finish: ${said}`, automation: { failed: true } });
+  }
+
+  // Refused, then saved by the person while the run works: its next call gets the computer, and nothing is said.
+  const saved = await runOf(again);
+  expect((await use(saved.call)).isError).toBe(true);
+  expect((await api("PATCH", `/api/routines/${again}`, { token: owner, body: { prompt: "Read plan.md from my computer." } })).status).toBe(200);
+  expect(JSON.parse((await use(saved.call)).content[0].text).content).toBe("from the computer");
+  expect((await saved.ended()).status).toBe("completed");
+  expect((await reported(saved.runId)).text).toBe("fixture turn completed");
   connector.close();
   connector = undefined;
   rmSync(join(home, "desktop-profile"), { recursive: true, force: true });
   rmSync(folderPath, { recursive: true, force: true });
-}, hostTimeout(150_000));
+}, hostTimeout(180_000));
