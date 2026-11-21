@@ -32,7 +32,8 @@ const PAGE = `<!doctype html><title>desk</title><style>body{margin:0}</style>
 <button id="b" style="position:absolute;left:100px;top:100px;width:200px;height:80px" onclick="document.body.dataset.clicks=String(Number(document.body.dataset.clicks||0)+1)">B</button>
 <input id="f" aria-label="Field" style="position:absolute;left:100px;top:250px;width:300px;height:40px">
 <select id="s" aria-label="Choice" style="position:absolute;left:100px;top:350px;width:200px;height:30px"><option>one</option><option>two</option><option>three</option></select>
-<input id="up" type="file" aria-label="Upload" style="position:absolute;left:100px;top:420px;width:300px;height:40px">`;
+<input id="up" type="file" aria-label="Upload" style="position:absolute;left:100px;top:420px;width:300px;height:40px">
+<script>addEventListener("keydown", (event) => { document.body.dataset.keys = (document.body.dataset.keys ?? "") + event.key; });</script>`;
 
 /** A minimal RFB 3.8 client over the desktop route: the handshake, then raw messages. */
 class RfbClient {
@@ -103,6 +104,25 @@ class RfbClient {
 
   send(bytes: Buffer): void {
     this.#ws.send(bytes);
+  }
+
+  /** The display's colour at one point as "r,g,b", read with raw pixels in the server's own format (Xvnc: 32 bits, red
+   * at bit 16). Xvnc answers a full request with the screen layout first when the client takes it, so this asks again. */
+  async pixel(x: number, y: number): Promise<string> {
+    this.#buffer = Buffer.alloc(0);
+    const ask = (incremental: number) => { const m = Buffer.alloc(10); m[0] = 3; m[1] = incremental; m.writeUInt16BE(x, 2); m.writeUInt16BE(y, 4); m.writeUInt16BE(1, 6); m.writeUInt16BE(1, 8); this.send(m); };
+    ask(0);
+    for (let updates = 0; updates < 5; updates++) {
+      const head = await this.read(4);
+      for (let rect = 0; rect < head.readUInt16BE(2); rect++) {
+        const r = await this.read(12);
+        const [w, h, encoding] = [r.readUInt16BE(4), r.readUInt16BE(6), r.readInt32BE(8)];
+        if (encoding === 0) { const data = await this.read(w * h * 4); return `${data[2]},${data[1]},${data[0]}`; }
+        if (encoding === -308) await this.read(16 * (await this.read(4))[0]!);
+      }
+      ask(1);
+    }
+    return "no picture";
   }
 
   click(x: number, y: number): void {
@@ -215,7 +235,27 @@ function usedMemory(): number {
 }
 
 /** What a display's browser shows besides the page, for a failure message: its targets, and the page's focus and size. */
-async function shownState(profile: { run: { browser: { connection: { root: { send<T>(method: string): Promise<T> } } } } | null; active(): { page: { evaluate(expression: string, options: { world: "page" }): Promise<unknown> } } | null }): Promise<string> {
+type Shown = { run: { browser: { connection: { root: { send<T>(method: string, params?: Record<string, unknown>): Promise<T> }; session(id: string): { send<T>(method: string, params?: Record<string, unknown>): Promise<T> } | undefined } } } | null; active(): { page: { evaluate(expression: string, options: { world: "page" }): Promise<unknown> } } | null };
+
+/** What sits at a point of the display, for a failure message: the display's own pixel there, what the page has there,
+ * and whether Chrome's address bar dropdown (a window of its own over the page) is showing. */
+async function coveredAt(profile: Shown, desk: RfbClient, onDisplay: { x: number; y: number }, onPage: { x: number; y: number }): Promise<string> {
+  const shown = await desk.pixel(onDisplay.x, onDisplay.y).catch((error: unknown) => String(error));
+  const page = await profile.active()?.page.evaluate(`(() => { const at = document.elementFromPoint(${onPage.x}, ${onPage.y}); return at ? at.id + " " + getComputedStyle(at).backgroundColor : "nothing"; })()`, { world: "page" }).catch((error: unknown) => String(error));
+  const connection = profile.run?.browser.connection;
+  const all = await connection?.root.send<{ targetInfos: Array<{ targetId: string; type: string; url: string }> }>("Target.getTargets", { filter: [{}] }).catch(() => null);
+  const popups: string[] = [];
+  for (const info of all?.targetInfos.filter((target) => target.url.startsWith("chrome://omnibox-popup")) ?? []) {
+    const attached = await connection!.root.send<{ sessionId: string }>("Target.attachToTarget", { targetId: info.targetId, flatten: true }).catch(() => null);
+    const session = attached ? connection!.session(attached.sessionId) : undefined;
+    const seen = await session?.send<{ result: { value?: string } }>("Runtime.evaluate", { expression: "JSON.stringify({ visibility: document.visibilityState, size: [innerWidth, innerHeight], at: [screenX, screenY] })", returnByValue: true }).then((answer) => answer.result.value, (error: unknown) => String(error));
+    popups.push(`${info.type} ${info.url} ${seen ?? "not attached"}`);
+    if (attached) await connection!.root.send("Target.detachFromTarget", { sessionId: attached.sessionId }).catch(() => undefined);
+  }
+  return JSON.stringify({ displayPixel: shown, pageThere: page, targets: all?.targetInfos.map((target) => `${target.type} ${target.url}`), omniboxPopups: popups });
+}
+
+async function shownState(profile: Shown): Promise<string> {
   const targets = await profile.run?.browser.connection.root.send<{ targetInfos: Array<{ type: string; url: string; title: string }> }>("Target.getTargets").then((answer) => answer.targetInfos.map((info) => `${info.type} ${info.url} "${info.title}"`), (error: unknown) => [String(error)]);
   const page = await profile.active()?.page.evaluate("JSON.stringify({ focus: document.hasFocus(), visibility: document.visibilityState, inner: [innerWidth, innerHeight], outer: [outerWidth, outerHeight], screen: [screenX, screenY] })", { world: "page" }).catch((error: unknown) => String(error));
   return JSON.stringify({ targets, page });
@@ -330,7 +370,7 @@ suite("a bot's browser on a private display", () => {
     expect(real.text(await real.call(target, "agent_browser_snapshot"))).toContain('button "B"');
     desk.click(button.x, button.y);
     expect(await until(() => read<string | undefined>("document.body.dataset.clicks"), (value) => value === "1").catch(async (error: unknown) => {
-      throw new Error(`${error instanceof Error ? error.message : String(error)}; what the display's browser showed: ${await shownState(profile)}`);
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; what the display's browser showed: ${await shownState(profile)}; at the click: ${await coveredAt(profile, desk, button, { x: 200, y: 140 })}`);
     })).toBe("1");
     const field = await onScreen(250, 270);
     desk.click(field.x, field.y);
@@ -540,6 +580,22 @@ suite("a bot's browser on a private display", () => {
     // A later tab never has them: the window's own top is all there is above the page.
     expect(await real.peek<number>(bars, "outerHeight - innerHeight")).toBe(first);
     await real.service.close(bars.session);
+  }, hostTimeout(120_000));
+
+  it("gives the page the bot opened the keyboard, not Chrome's address bar, so a person's keys go to the page", async () => {
+    // A first start: Chrome puts a new window's keyboard in the address bar of its blank tab.
+    await real.service.erase(target.key);
+    expect((await real.call(target, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
+    const profile = real.service.profiles().find((candidate) => candidate.key === target.key)!;
+    const desk = await RfbClient.connect(url());
+    await desk.picture();
+    await profile.control.take(person);
+    desk.type("k");
+    expect(await until(() => read<string | undefined>("document.body.dataset.keys"), (value) => value === "k").catch(async (error: unknown) => {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; the bot's view of it: ${JSON.stringify(await real.call(target, "agent_browser_status").then((result) => real.text(result).split("\n")[0]))}`);
+    })).toBe("k");
+    desk.close();
   }, hostTimeout(120_000));
 
   it.runIf(process.env.OMB_DESKTOP_MEASURE === "1")("spends this much CPU on a picture stream under the desktop view, and none without one", async () => {
