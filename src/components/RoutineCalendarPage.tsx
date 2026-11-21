@@ -590,9 +590,9 @@ export function EventEditor({
                 </div>
               );
   const repeatSelect = (
-              <div className="flex flex-wrap items-center gap-2">
-                <Repeat2 size={14} className="text-ink-secondary" />
-                <Select aria-label={t("routines.editor.repeat")} value={recurrence} onChange={(event) => selectRecurrence(event.target.value as RecurrenceChoice)}>
+              <div className="flex min-w-0 items-center gap-2">
+                <Repeat2 size={14} className="shrink-0 text-ink-secondary" aria-hidden="true" />
+                <Select className="min-w-0" aria-label={t("routines.editor.repeat")} value={recurrence} onChange={(event) => selectRecurrence(event.target.value as RecurrenceChoice)}>
                   <option value="none">{t("routines.repeat.none")}</option>
                   {kind === "routine" && <option value="interval">{t("routines.repeat.interval")}</option>}
                   <option value="daily">{t("routines.repeat.dailyOption")}</option>

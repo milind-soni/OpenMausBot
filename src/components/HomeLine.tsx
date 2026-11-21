@@ -62,8 +62,10 @@ export function HomeLine() {
   const aiMissing = line.kind !== "left" && !state.instances.some((instance) => engineReady(instance) && !freeFallback(instance));
   if (!words && !aiMissing) return null;
   return <div role="status" data-home-line={line.kind} className={`relative flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-hairline/40 bg-panel ${informational ? "px-8" : "px-3"} py-1.5 text-[13px] text-ink-secondary`}>
-    {line.kind === "clean" ? <Cloud size={14} aria-hidden="true" /> : line.kind === "profile" ? <Laptop size={14} aria-hidden="true" /> : <Users size={14} aria-hidden="true" />}
-    {words && <span dir="auto">{homeLineText(line)}</span>}
+    <span className="flex min-w-0 max-w-full items-start gap-3">
+      {line.kind === "clean" ? <Cloud size={14} aria-hidden="true" className="mt-0.5 shrink-0" /> : line.kind === "profile" ? <Laptop size={14} aria-hidden="true" className="mt-0.5 shrink-0" /> : <Users size={14} aria-hidden="true" className="mt-0.5 shrink-0" />}
+      {words && <span dir="auto" className="min-w-0 [overflow-wrap:anywhere]">{homeLineText(line)}</span>}
+    </span>
     {aiMissing && <ConnectAiLink />}
     {informational && words && <button type="button" data-home-line-close aria-label={t("common.close")} title={t("common.close")}
       className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 interaction:bg-raised/50 hover:text-ink" onClick={() => { setClosed(true); save(hintSeenPatch(record, HOME_LINE_NOTICE)); }}>

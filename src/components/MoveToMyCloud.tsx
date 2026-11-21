@@ -158,8 +158,10 @@ export function BotMoveLine({ move, onChange }: { move: BotMoveView; onChange(ne
   const line = botMoveLine(move);
   const link = "font-medium text-accent-text underline underline-offset-2 hover:text-ink";
   return <div role="status" data-cloud-send-strip={line.kind} data-bot-move-line={move.phase} className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b border-hairline/40 bg-panel px-3 py-1.5 text-[13px] text-ink-secondary">
-    {line.kind === "sending" ? <Loader2 size={14} aria-hidden="true" className="animate-spin" /> : <ArrowRightLeft size={14} aria-hidden="true" />}
-    <span dir="auto" data-cloud-send-strip-line>{line.text}</span>
+    <span className="flex min-w-0 max-w-full items-start gap-2">
+      {line.kind === "sending" ? <Loader2 size={14} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin" /> : <ArrowRightLeft size={14} aria-hidden="true" className="mt-0.5 shrink-0" />}
+      <span className="min-w-0 [overflow-wrap:anywhere]" dir="auto" data-cloud-send-strip-line>{line.text}</span>
+    </span>
     {line.kind === "done" && page?.openMyCloud && <button type="button" className={link} onClick={() => { void page.openMyCloud!().catch(() => {}); }}>{t("cloudSend.botMove.open")}</button>}
     {line.kind === "failed" && page?.botMoveRetry && <button type="button" className={link} onClick={() => { void page.botMoveRetry!().then(onChange).catch(() => {}); }}>{t("cloudSend.strip.retry")}</button>}
     {line.kind !== "sending" && <button type="button" className="hover:text-ink" onClick={() => { void page?.dismiss("bot-move").then(() => onChange(null)).catch(() => {}); }}>{t("cloudSend.strip.close")}</button>}

@@ -1,3 +1,4 @@
+import { useDialogResize } from "@/hooks/use-dialog-resize";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { Brain, Check, Loader2, Pin, Plus, Trash2, X } from "lucide-react";
@@ -35,6 +36,7 @@ const KINDS: Array<{ kind: Kind; titleKey: LocaleKey; hintKey: LocaleKey }> = [
 
 export function TeamMemoryDialog({ section, label, onClose, open = true }: { section: string; label: string; onClose: () => void; open?: boolean }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogResize(dialogRef, open);
   const [entries, setEntries] = useState<Entry[] | null>(null);
   const [loadedIds, setLoadedIds] = useState<string[]>([]);
   const [unsaved, setUnsaved] = useState<Record<string, { name: string; text: string }>>({});

@@ -39,8 +39,10 @@ export function LimitWarnings({ botFilter = "all" }: { botFilter?: string }) {
         return (
           <div key={limit.engine} data-limit-warning={limit.engine} role="status"
             className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-xl border border-warning/40 bg-warning/10 px-3.5 py-2.5 text-[13px] text-ink">
-            <Hourglass size={15} className="shrink-0 text-warning" aria-hidden="true" />
-            <span className="font-medium tabular-nums">{limitLine(limit)}</span>
+            <span className="flex min-w-0 max-w-full items-start gap-2.5">
+              <Hourglass size={15} className="mt-0.5 shrink-0 text-warning" aria-hidden="true" />
+              <span className="min-w-0 [overflow-wrap:anywhere] font-medium tabular-nums">{limitLine(limit)}</span>
+            </span>
             {due.length > 0 ? (
               <>
                 <span className="text-ink-secondary">{t(due.length === 1 ? "limits.dueOne" : "limits.dueMany", { count: due.length })}</span>
