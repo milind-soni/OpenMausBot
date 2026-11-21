@@ -7,7 +7,7 @@ import { setAttentionPinned, useAttentionPinned } from "./inbox/attention-pinned
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
 import { overlayPortal as createPortal } from "@/components/ModalPresence";
-import { Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderInput, FolderPlus, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, PanelLeft, Pencil, Phone, Plus, TextQuote, Trash2, Users, X } from "lucide-react";
+import { Bot as BotIcon, Check, ChevronRight, ClipboardCopy, Crown, FolderInput, FolderPlus, LayoutTemplate, Loader2, MessageSquarePlus, MoreHorizontal, PanelLeft, Pencil, Phone, Pin, Plus, TextQuote, Trash2, Users, X } from "lucide-react";
 import { sidebarState } from "./sidebar-state"; import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select"; import { useStoreRef } from "@/state/store-ref"; import { sameDrawnBots } from "@/lib/drawn-bots";
 import { api, formatTime, visibleMessages, currentTaskBot, openBot, openThread, type Action, type AppState, type Bot, type BotProject, type Group, type InstanceInfo, type Message } from "@/state/store";
 import { approvalModeFor } from "../../shared/approval-mode";
@@ -41,7 +41,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { folderUnreadThreadIds, markFolderRead } from "@/lib/folder-read";
 import { HelperThreadGroup, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow, useRevealedThreadRow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
-import { SIDEBAR_MIN_WIDTH, setSidebarDensity, useSidebarDensity, usePinnedCircles, useSidebarShowAllThreads, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
+import { SIDEBAR_MIN_WIDTH, setSidebarDensity, useSidebarDensity, usePinnedCircles, usePinnedCircleOrder, useSidebarShowAllThreads, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
 import {
   ATTENTION_SECTION_ID,
   BOT_CHATS_SECTION_ID,
@@ -84,6 +84,7 @@ import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { useBotUnread } from "./unread-notice";
 import { attentionJumpAction, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, sidebarBotActivityTasks, sidebarBotStatus } from "./SidebarBotActivity";
+import { rankPinnedCircles } from "@/lib/pinned-circle-order";
 import { SidebarNoBots, SidebarTileGrid } from "./SidebarTiles";
 import { BotContextMenu } from "./SidebarBotMenu";
 export { BotContextMenu };
@@ -768,6 +769,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
               className="truncate"
               inputClassName="w-full rounded bg-inset px-1 py-0.5 text-inherit font-medium"
             />
+            {bot.pinned && !props.phoneHome && !iconOnly && !renaming && <Pin size={12} className="shrink-0 text-ink-secondary" role="img" aria-label={t("sidebar.section.pinned")} />}
             {onLiveCall && !iconOnly && !renaming && (
               <Phone className="size-3 shrink-0 text-success" role="img" aria-label={t("call.live.badge")} data-testid="live-call-badge">
                 <title>{t("call.live.badge")}</title>
@@ -1047,7 +1049,9 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const layout = sections.arrange(naturalSectionIds);
   const sectionIds = layout.sectionIds;
   const showPinnedCircleThreads = !simpleDesk && pinnedCircleThreadListVisible(pinnedCircles, density, pinnedBots.length);
-  const tiles = simpleDesk && (primary !== null || pinnedBots.length > 0);
+  const pinOrder = usePinnedCircleOrder();
+  const desktopPinnedRows = simpleDesk ? rankPinnedCircles(pinnedBots, pinOrder) : [];
+  const tiles = simpleDesk && primary !== null;
   const { interactive: layoutInteractive, collapsed: sectionCollapsed, toggle: toggleSection } = sections;
   const archivedBots = state.bots.filter((bot) => bot.hidden && !bot.movedTo);
   const archivedEntry = remoteClient ? undefined : { count: archivedBots.length, open: () => setArchivedBotsOpen(true) };
@@ -1242,8 +1246,8 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
           onToggle={layoutInteractive ? () => toggleSection(PINNED_THREADS_SECTION_ID) : undefined}
         />
       )}
-      {tiles && <SidebarTileGrid primary={primary} pinned={pinnedBots} row={botRow} corner={corner} />}
-      {simpleDesk && !tiles && <SidebarNoBots />}
+      {tiles && <SidebarTileGrid primary={primary} row={botRow} corner={corner} />}
+      {simpleDesk && !tiles && !desktopPinnedRows.length && <SidebarNoBots />}
       </GlassBar>
 
       {!collapseToIcons && !phone && <SidebarResizeHandle sizing={sizing} sidebarRef={sidebarRef} avatars={density === "icons"} avatarsWidth={rail ? 92 : 80}
@@ -1259,6 +1263,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
               <BotListItem {...botRow(unsectionedChief)} />
             </div>
           ))}
+          {desktopPinnedRows.map((bot) => <BotListItem key={bot.id} {...botRow(bot)} />)}
           {sectionIds.map((id, index) => {
             const sectionName = userSectionName(id);
             const sectionChiefItems = sectionName

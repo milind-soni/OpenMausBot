@@ -2,7 +2,6 @@ import { Children, createElement, isValidElement, type KeyboardEvent, type MemoE
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { setPinnedCircleOrder } from "@/lib/sidebar-preferences";
 import { initialState, type Bot } from "@/state/store";
 
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({}) }));
@@ -104,48 +103,19 @@ describe("a tile with a dot", () => {
   });
 });
 
-describe("the tile grid", () => {
-  const main = bot({ chiefOfStaff: true });
-  const pins = (count: number) => Array.from({ length: count }, (_, index) => bot({ id: `pin${index}`, name: `Pin ${index}`, pinned: true }));
-  const grid = (primary: Bot | null, pinned: Bot[]) => {
-    const bots = [...(primary ? [primary] : []), ...pinned];
-    const row = (candidate: Bot) => botRowProps({ ...initialState, bots, selectedId: "", activeView: "chat" }, dispatch, candidate, { density: "comfortable", onMenu });
-    return renderToStaticMarkup(createElement(SidebarTileGrid, { primary, pinned, row }));
-  };
-  const tiles = (html: string) => [...html.matchAll(/data-sidebar-bot-row="([^"]+)" data-sidebar-tile="([^"]+)" draggable="(true|false)"/g)]
-    .map(([, id, kind, draggable]) => `${kind}:${id}${draggable === "true" ? ":drag" : ""}`);
+it("shows the pin after the name on a desktop bot row", () => {
+  const pinned = props(bot({ pinned: true }));
+  const desktop = renderToStaticMarkup(createElement(BotListItem, pinned));
+  const phone = renderToStaticMarkup(createElement(BotListItem, { ...pinned, phoneHome: true }));
+  expect(desktop).toMatch(/MausBot<\/[^>]+><svg[^>]+aria-label="Pinned"/);
+  expect(phone).not.toContain('aria-label="Pinned"');
+});
 
-  afterEach(() => setPinnedCircleOrder([]));
-
-  it.each([0, 1, 2, 3, 5])("puts the main bot first, then %i pinned bots, as same-size tiles in one centred, wrapping grid", (count) => {
-    const html = grid(main, pins(count));
-    const drag = count > 1 ? ":drag" : "";
-    expect(tiles(html)).toEqual(["primary:mausbot", ...pins(count).map((pin) => `pinned:${pin.id}${drag}`)]);
-    expect(html).toMatch(/^<div data-sidebar-tiles="" class="flex max-h-\[40vh\] flex-wrap justify-center gap-1 overflow-y-auto /);
-    expect(html.match(/\bh-\[92px\] w-\[78px\]/g)).toHaveLength(count + 1);
-    expect(html.match(/width="56px" height="56px"/g)).toHaveLength(count + 1);
-    expect(html.match(/data-testid="chief-badge"/g)).toHaveLength(1);
-  });
-
-  it("follows the saved pinned order after the main bot, which never moves", () => {
-    setPinnedCircleOrder(["pin2", "pin0", "mausbot"]);
-    expect(tiles(grid(main, pins(3)))).toEqual(["primary:mausbot", "pinned:pin2:drag", "pinned:pin0:drag", "pinned:pin1:drag"]);
-  });
-
-  it("shows the pinned tiles alone when there is no main bot, and nothing when there is neither", () => {
-    expect(tiles(grid(null, pins(2)))).toEqual(["pinned:pin0:drag", "pinned:pin1:drag"]);
-    expect(grid(null, [])).toBe("");
-  });
-
-  // A grid taller than its 40vh cap scrolls, and its 8px scrollbar takes from the room.
-  it.each([[280, 3], [360, 4]])("fits %ipx of sidebar to %i tiles across, with or without a scrollbar", (width, columns) => {
-    const html = grid(main, pins(5));
-    const tile = Number(/data-sidebar-tile="primary"[^>]*class="[^"]*\bw-\[(\d+)px\]/.exec(html)![1]);
-    const gridClass = /data-sidebar-tiles="" class="([^"]*)"/.exec(html)![1]!;
-    const gap = 4 * Number(/\bgap-(\d+)\b/.exec(gridClass)![1]);
-    const gutters = 2 * 4 * Number(/\bpx-(\d+)\b/.exec(gridClass)![1]);
-    const across = (room: number) => Math.floor((room + gap) / (tile + gap));
-    expect(across(width - gutters)).toBe(columns);
-    expect(across(width - gutters - 8)).toBe(columns);
+describe("the primary tile container", () => {
+  it("shows the Chief tile when a primary bot exists", () => {
+    const primary = bot({ chiefOfStaff: true });
+    const row = (candidate: Bot) => botRowProps({ ...initialState, bots: [primary], selectedId: "", activeView: "chat" }, dispatch, candidate, { density: "comfortable", onMenu });
+    expect(renderToStaticMarkup(createElement(SidebarTileGrid, { primary, row }))).toContain('data-sidebar-tile="primary"');
+    expect(renderToStaticMarkup(createElement(SidebarTileGrid, { primary: null, row }))).toBe("");
   });
 });
