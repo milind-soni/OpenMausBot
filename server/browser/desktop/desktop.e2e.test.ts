@@ -7,7 +7,7 @@ import { createServer, type Server } from "node:http";
 import { connect, type AddressInfo, type Socket } from "node:net";
 import { dirname, join } from "node:path";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 
 import { hostTimeout } from "../../testing/host-timeout.ts";
@@ -49,10 +49,14 @@ class RfbClient {
     ws.on("close", (code) => { this.closed = code; this.#waiting?.(); });
   }
 
+  /** Every client a case opened, closed after it whatever happened. */
+  static readonly open = new Set<RfbClient>();
+
   static async connect(url: string): Promise<RfbClient> {
     const ws = new WebSocket(url);
     // Listening before the handshake ends: the display's first bytes can come in the same packet as the upgrade.
     const client = new RfbClient(ws);
+    RfbClient.open.add(client);
     await new Promise((resolve, reject) => { ws.once("open", resolve); ws.once("error", reject); });
     expect((await client.read(12)).toString("latin1")).toBe("RFB 003.008\n");
     client.send(Buffer.from("RFB 003.008\n", "latin1"));
@@ -132,6 +136,7 @@ class RfbClient {
   }
 
   close(): void {
+    RfbClient.open.delete(this);
     this.#ws.close();
   }
 }
@@ -206,6 +211,13 @@ function usedMemory(): number {
   return Math.round((field("MemTotal") - field("MemAvailable")) / 1024);
 }
 
+/** What a display's browser shows besides the page, for a failure message: its targets, and the page's focus and size. */
+async function shownState(profile: { run: { browser: { connection: { root: { send<T>(method: string): Promise<T> } } } } | null; active(): { page: { evaluate(expression: string, options: { world: "page" }): Promise<unknown> } } | null }): Promise<string> {
+  const targets = await profile.run?.browser.connection.root.send<{ targetInfos: Array<{ type: string; url: string; title: string }> }>("Target.getTargets").then((answer) => answer.targetInfos.map((info) => `${info.type} ${info.url} "${info.title}"`), (error: unknown) => [String(error)]);
+  const page = await profile.active()?.page.evaluate("JSON.stringify({ focus: document.hasFocus(), visibility: document.visibilityState, inner: [innerWidth, innerHeight], outer: [outerWidth, outerHeight], screen: [screenX, screenY] })", { world: "page" }).catch((error: unknown) => String(error));
+  return JSON.stringify({ targets, page });
+}
+
 const xvncPid = (socket: string) => readdirSync("/proc").filter((entry) => /^\d+$/.test(entry)).map(Number).find((pid) => {
   try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").includes(socket); } catch { return false; }
 });
@@ -247,6 +259,15 @@ suite("a bot's browser on a private display", () => {
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   }, hostTimeout(240_000));
+
+  // A case that fails part-way never leaves its hold or its view to the next one.
+  afterEach(async () => {
+    for (const client of RfbClient.open) client.close();
+    for (const profile of real?.service.profiles() ?? []) {
+      const owner = profile.control.owner;
+      if (owner !== null) await profile.control.release(owner, async () => true).catch(() => undefined);
+    }
+  });
 
   afterAll(async () => {
     views?.closeAll();
@@ -290,7 +311,9 @@ suite("a bot's browser on a private display", () => {
     await expect(real.call(target, "agent_browser_click", { selector: "#b" })).rejects.toThrow(BROWSER_CONTROL_REFUSAL);
     expect(real.text(await real.call(target, "agent_browser_snapshot"))).toContain('button "B"');
     desk.click(button.x, button.y);
-    expect(await until(() => read<string | undefined>("document.body.dataset.clicks"), (value) => value === "1")).toBe("1");
+    expect(await until(() => read<string | undefined>("document.body.dataset.clicks"), (value) => value === "1").catch(async (error: unknown) => {
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; what the display's browser showed: ${await shownState(profile)}`);
+    })).toBe("1");
     const field = await onScreen(250, 270);
     desk.click(field.x, field.y);
     desk.type("hi");
