@@ -4,9 +4,19 @@ import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import type { Bot } from "@/state/store";
 import { BotAvatar } from "./Avatar";
 
+const slotFor = (density: SidebarDensity, large: boolean) => density === "icons" ? "size-12" : large ? "size-9" : "size-8";
+
+export function RoomMark({ density, large = false }: { density: SidebarDensity; large?: boolean }) {
+  return (
+    <div data-room-mark="" className={cn("flex shrink-0 items-center justify-center", slotFor(density, large))}>
+      <Users aria-hidden="true" size={16} className="text-ink-secondary" />
+    </div>
+  );
+}
+
 export function StackedMauses({ members, density, large = false }: { members: Bot[]; density: SidebarDensity; large?: boolean }) {
   const iconOnly = density === "icons";
-  const slotSize = iconOnly ? "size-12" : large ? "size-9" : "size-8";
+  const slotSize = slotFor(density, large);
   const singleSize = iconOnly ? 44 : large ? 36 : 32;
   if (members.length <= 1) {
     const b = members[0];

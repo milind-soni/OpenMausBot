@@ -21,18 +21,12 @@ const APPROVAL_MODE_KEYS: ReadonlyArray<{
   { mode: "custom", labelKey: "approvalMode.custom.label", chipKey: "approvalMode.custom.chip", descriptionKey: "approvalMode.custom.desc", Icon: Settings },
 ];
 
-const SIMPLE_NAME_KEYS: Record<ApprovalMode, LocaleKey> = {
-  ask: "botSettings.simple.ask",
-  edits: "approvalMode.edits.label",
-  auto: "botSettings.simple.decide",
-  full: "botSettings.simple.justDoIt",
-  custom: "botSettings.simple.custom",
-};
-
-/** Simple mode's name for a level, the one the bot panel uses. Antigravity's full-access grant shows as Auto, as it
- * does in Advanced. */
+/** Simple mode's name for a level: the label Advanced mode's selector shows, so a level has one name in both modes.
+ * Custom drops the config file Advanced names. Antigravity's full-access grant shows as Auto, as it does in Advanced. */
 export function simpleApprovalName(mode: ApprovalMode, driverKind?: string): string {
-  return t(SIMPLE_NAME_KEYS[driverKind === "antigravityAgent" && mode === "full" ? "auto" : mode]);
+  if (mode === "custom") return t("botSettings.simple.custom");
+  if (driverKind === "antigravityAgent" && mode === "full") return t("approvalMode.antigravity.label");
+  return t(APPROVAL_MODE_KEYS.find((entry) => entry.mode === mode)!.labelKey);
 }
 
 export interface ApprovalModeOption {

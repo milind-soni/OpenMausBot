@@ -60,7 +60,7 @@ describe("the person's message goes first", () => {
     await h.advance(0);
     expect(h.stops).toEqual(["Stopped a step that had run for 9 min, to answer you first"]);
     expect(h.requeued).toEqual([stoppedNote("Bash: gh run view 42; sleep 30", 9 * MIN)]);
-    expect(h.requeued[0]).toContain("do not wait inside a command again: check it once, then use wait_until or a one-time trigger");
+    expect(h.requeued[0]).toContain("do not wait inside a command again: check it once, then use check_back or wait_until");
   });
 
   it("gives a young tool call the rest of its minute, and leaves the turn alone when it returns and the bot answers", async () => {

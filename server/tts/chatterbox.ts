@@ -89,6 +89,7 @@ export async function synthesizeChatterbox(
   voiceId: string,
   baseUrl: string,
   model?: string,
+  signal?: AbortSignal,
 ): Promise<Audio> {
   const res = await request(
     `${apiRoot(baseUrl)}/audio/speech`,
@@ -96,7 +97,7 @@ export async function synthesizeChatterbox(
       method: "POST",
       headers: { "content-type": "application/json", accept: "audio/wav" },
       body: JSON.stringify({ model: model?.trim() || DEFAULT_MODEL, input: text, voice: voiceId, response_format: "wav" }),
-      signal: AbortSignal.timeout(60_000),
+      signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(signal ? [signal] : [])]),
     },
     "speaking",
     baseUrl,

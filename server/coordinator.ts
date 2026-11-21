@@ -3,6 +3,7 @@ import type { WorkOrigin } from "./peer-provenance.ts";
 import type { LegacyThreadResolver } from "./runtime/import-legacy.ts";
 import type { Answerer, Assignment, BackgroundCommand, EnvelopeNames, Level, Limits, Mode, Origin, Outcome, Owner, Reply, Requester, StatusView, TurnEvidence } from "./runtime/types.ts";
 import type { ModelSelection } from "../shared/wire.ts";
+import type { PassedFile } from "./host/handoff-files.ts";
 
 /** One coordinate_bots call, as the internal route hands it to the server. */
 export type CoordinateBotsCall = {
@@ -22,8 +23,12 @@ export type CoordinateBotsCall = {
   projectId?: string;
   /** The assignment whose question the message answers, instead of new work. */
   answers?: string;
+  /** Files that travel with the work, already in the attachment store (server/host/handoff-files.ts). */
+  files?: readonly PassedFile[];
   /** start_thread's report_back: the one target is the sender's own new thread, run on this model. */
   ownThread?: { modelSelection?: ModelSelection; approvalMode?: "ask" };
+  /** post_to_thread: one message into this existing thread; wake starts a run there, else it waits for the next one. */
+  post?: { deliveryId: string; wake: boolean };
 };
 
 export type { LegacyThreadResolver };
@@ -41,13 +46,14 @@ export interface HandoffView {
   text: string;
   createdAt: number;
   requestBatchKey?: string;
+  /** Its reply only acknowledged (runtime/status-reply.ts). */
+  statusOnly?: boolean;
   status: HandoffStatus;
   result: string;
   reported: boolean;
   executions: number;
   startedAt?: number;
   lastProgressAt?: number;
-  approvalGranted: boolean;
   kind: "work" | "assignment";
   origin?: WorkOrigin;
   restarts: number;
@@ -90,9 +96,13 @@ export interface HostTurnResult {
   cards?: { question: string; ids: string[] };
   /** The question it ends on stayed in one person's private chat: only that person can answer it. */
   privateQuestion?: boolean;
+  /** An approval this turn asked for went unanswered: handed-off work a person started parks on this question. Never a grant. */
+  approvalAsk?: string;
   /** The host's stall watchdog stopped the turn, including a room turn a stall ended during setup, before it had an
    * outcome: it failed as `stalled`, not as a provider error. */
   stalled?: boolean;
+  /** A failed turn's cause in the system's own words and the engine's stop reason, apart from anything the bot said. */
+  failure?: { text: string; stopReason?: string | null };
 }
 
 export interface HandoffOpener {
@@ -104,9 +114,10 @@ export interface HandoffOptions {
   mode?: Mode;
   reply?: Reply;
   thread?: "standing" | "new";
-  approvalGranted?: boolean;
   rework?: boolean;
   requestBatchKey?: string;
+  /** One call handing the same work to several teammates: it counts once against the request budget. */
+  fanOut?: string;
   doneWhen?: string;
   /** The target is a new thread of the requester's own bot (start_thread with report_back). */
   ownThread?: boolean;
@@ -119,6 +130,7 @@ export interface ComposedTurn {
   text: string;
   note: string;
   restartNote: string;
+  background?: boolean;
   turn: "first" | "resume" | "rerun" | "answered" | "continued";
 }
 
@@ -132,7 +144,7 @@ export interface LiveHandoffEdge {
 
 /** Every method may throw; the runtime logs a throw and reads it as "not now". */
 export interface CoordinatorHost {
-  backgroundStatus?(command: BackgroundCommand, signal: AbortSignal): Promise<string | undefined>;
+  backgroundStatus?(node: HandoffView, command: BackgroundCommand, signal: AbortSignal): Promise<string | undefined>;
   validateBackground?(node: HandoffView, command: BackgroundCommand): string | undefined;
   /** Recheck addresses and route permission immediately before every dispatch. */
   validate(node: HandoffView, parent?: HandoffView): string | undefined;
@@ -146,6 +158,8 @@ export interface CoordinatorHost {
   names(node: HandoffView, parent?: HandoffView): EnvelopeNames;
   /** `restored` shows the question again only if the first showing never happened; a root parked on its own cards shows nothing more. */
   park(node: HandoffView, question: string, restored?: boolean): void;
+  /** Handed-off work has waited a day on the person; it closes at `closesAt` if nobody answers. Called once for each wait. */
+  remind?(node: HandoffView, closesAt: number): void;
   /** The level the target thread will really run with, so the envelope states the truth, and, when that came down a Chief's
    * chain, the Chief conversation's level. A Chief's level flows into a room with the hand-off, never onto the shared thread,
    * so it resolves from `source`, the requester's node, whose parents lead up the chain. */
@@ -153,6 +167,8 @@ export interface CoordinatorHost {
   chiefOf(address: RoomAddress): boolean;
   /** What the cut turn already did outward (sent, posted, paid): a turn that acted outward is not run again. */
   outward?(node: HandoffView): string[];
+  /** The node's bot lives in a place that cannot be reached now: its queued work waits without a clock (runtime `away`). */
+  away?(node: HandoffView): boolean;
   /** Whether `joiner`'s requester may read the answer `first` gives its own (the same people see both conversations),
    * so the same request from two teammates is answered once. Absent: never. */
   shareAnswer?(first: HandoffView, joiner: HandoffView): boolean;
@@ -172,7 +188,13 @@ export interface Coordinator {
    * with reply none outside rooms. */
   answersTo(id: string): { botId: string; threadId: string } | undefined;
   has(id: string): boolean;
+  /** Every row of the last thirty days, parsed: for tests and one-off tools, never for a path a turn takes. */
   all(): HandoffView[];
+  /** The newest of the roots `ids` whose turn happens in this thread; reads those rows by id. */
+  newestRoot(threadId: string, ids: Iterable<string>): HandoffView | undefined;
+  /** Assignments whose turn happens in this thread, oldest first: `open` keeps the unfinished ones, `since` those not
+   * finished before that time. Reads only that thread's rows. */
+  inThread(threadId: string, filter?: { open?: boolean; since?: number }): HandoffView[];
   active(): HandoffView[];
   children(id: string): HandoffView[];
   /** A generation with no root is refused; throws an Error whose message is the typed refusal shown to the model. */
@@ -229,8 +251,8 @@ export interface Coordinator {
 /** A plan's limit on handing out work. */
 export interface HandoffLimit {
   /** Why handing work to this bot is refused now, in words for the model that asked; null when it may go. `open` counts the
-   * hand-offs not yet ended. */
-  refusal(botId: string, open: () => number): string | null;
+   * hand-offs not yet ended; `origin` is whether the work traces to a person's own typed line. */
+  refusal(botId: string, open: () => number, origin?: "user" | "outside"): string | null;
 }
 
 export interface CoordinatorOptions {

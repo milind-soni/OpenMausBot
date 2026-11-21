@@ -9,6 +9,7 @@ import { chmodSync, closeSync, constants, fsyncSync, lstatSync, mkdirSync, openS
 import { join } from "node:path";
 
 import { SECRET_VALUE_MAX_BYTES } from "../shared/vault.ts";
+import { vaultPointer } from "./vault/mcp-keys.ts";
 import { secretForms } from "./vault-store.ts";
 import { HELD_SECRET_MASK } from "./redact.ts";
 import { inSecretFolder, SECRET_FOLDER } from "./secret-folder.ts";
@@ -36,9 +37,10 @@ export interface SecretFileHome {
 
 export type SavedSecret = { ref: string } | { file: string };
 
-type RefEntry = { owner: SecretOwner; label: string; value: string; expiresAt: number };
+type RefEntry = { owner: SecretOwner; label: string; value: string; expiresAt: number; pointer?: { item: string; text: string } };
 
-export type RedeemResult<T> = { ok: true; value: T; commit(): void } | { ok: false; error: string };
+/** `pointers`: the Vault items the redeemed text now points at instead of holding their values. */
+export type RedeemResult<T> = { ok: true; value: T; pointers: string[]; commit(): void } | { ok: false; error: string };
 
 function sameOwner(a: SecretOwner, b: SecretOwner): boolean {
   return a.botId === b.botId && a.threadId === b.threadId;
@@ -87,20 +89,21 @@ export class SecretVault {
     this.now = now;
   }
 
-  /** The card's value behind a new one-use ref; the same card saved again keeps its first ref. */
-  saveRef(owner: SecretOwner, messageId: string, label: string, value: string): string {
+  /** The card's value behind a new one-use ref; the same card saved again keeps its first ref. `item`: the Vault item
+   * it is kept as, which a redeemed ref points at instead of copying the value. */
+  saveRef(owner: SecretOwner, messageId: string, label: string, value: string, item?: string): string {
     const existing = this.savedFor(messageId);
     if (existing && "ref" in existing) return existing.ref;
-    const ref = this.mintRef(owner, label, value);
+    const ref = this.mintRef(owner, label, value, item);
     this.byCard.set(messageId, { ref });
     return ref;
   }
 
-  /** A new one-use ref with no card behind it, for a value the Vault holds. */
-  mintRef(owner: SecretOwner, label: string, value: string): string {
+  /** A new one-use ref with no card behind it, for a value the Vault holds; `item`: its id there. */
+  mintRef(owner: SecretOwner, label: string, value: string, item?: string): string {
     const ref = `secret-ref:${randomBytes(16).toString("hex")}`;
     const now = this.now();
-    this.refs.set(ref, { owner: { ...owner }, label, value, expiresAt: now + SECRET_REF_TTL_MS });
+    this.refs.set(ref, { owner: { ...owner }, label, value, expiresAt: now + SECRET_REF_TTL_MS, ...(item ? { pointer: { item, text: vaultPointer(item) } } : {}) });
     this.hold(value, now + SECRET_FILE_TTL_MS);
     return ref;
   }
@@ -156,8 +159,9 @@ export class SecretVault {
     return saved.until > this.now() ? { file: saved.file } : null;
   }
 
-  /** Swaps every secretRef in `input` for its value: in a string ("Bearer secret-ref:…") or as {"secretRef": "…"}, and
-   * only where `allowed(path)` says. Nothing is spent until `commit`, so a refused save can be retried. */
+  /** Swaps every secretRef in `input` for its value, or for a `vault:<id>` pointer when the value is kept in the Vault
+   * (config.json never gets it): in a string ("Bearer secret-ref:…") or as {"secretRef": "…"}, and only where
+   * `allowed(path)` says. Nothing is spent until `commit`, so a refused save can be retried. */
   redeem<T>(input: T, owner: SecretOwner, allowed: (path: readonly string[]) => boolean, where: string): RedeemResult<T> {
     const wanted = new Set<string>();
     let refusal: string | null = null;
@@ -185,6 +189,7 @@ export class SecretVault {
     if (refusal) return { ok: false, error: refusal };
     const now = this.now();
     const values = new Map<string, string>();
+    const pointers = new Set<string>();
     for (const ref of wanted) {
       const entry = this.refs.get(ref);
       if (!entry) return { ok: false, error: refText(ref, this.used.has(ref) ? "used" : "unknown") };
@@ -193,7 +198,8 @@ export class SecretVault {
         return { ok: false, error: refText(ref, "expired") };
       }
       if (!sameOwner(entry.owner, owner)) return { ok: false, error: refText(ref, "owner") };
-      values.set(ref, entry.value);
+      values.set(ref, entry.pointer?.text ?? entry.value);
+      if (entry.pointer) pointers.add(entry.pointer.item);
     }
     const swap = (value: unknown): unknown => {
       if (typeof value === "string") return value.replace(REF, (ref) => values.get(ref) ?? ref);
@@ -206,6 +212,7 @@ export class SecretVault {
     return {
       ok: true,
       value: (values.size ? swap(input) : input) as T,
+      pointers: [...pointers],
       commit: () => {
         for (const ref of values.keys()) {
           this.refs.delete(ref);

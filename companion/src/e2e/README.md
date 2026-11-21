@@ -228,7 +228,7 @@ This uses the yamux wire format (`hashicorp/yamux` spec): a 12-byte header of `v
 | Dir | Message | Meaning |
 |---|---|---|
 | host→relay | `{"t":"auth","v":1,"token":"<relay token>"}` | First message. Sent again to refresh before `exp`. Must keep the same `hid` |
-| relay→host | `{"t":"hello","v":1,"node":"relay1","sessionsMax":16}` | Auth accepted |
+| relay→host | `{"t":"hello","v":1,"node":"relay1","sessionsMax":16}` | Auth accepted. Every later `auth` on the same socket is acknowledged with `hello` too, which the host uses as a liveness check |
 | host→relay | `{"t":"admit","set":["<b64u SHA256(adm)>",…]}` | The full replacement admission set, at most 32 entries. Required within 5 s of `hello`, and again on every pair, revoke, restriction change, or pairing window open or close. Sessions whose `adm` leaves the set are closed with 4404 |
 | relay→host | `{"t":"open","sid":"<b64u 16 bytes>"}` | A phone is waiting. The host must open a data socket within 10 s |
 | relay→host | `{"t":"restarting","reconnectInMs":0,"tryForMs":15000}` | Deploy or shutdown. Reconnect after `reconnectInMs + random(0, tryForMs)` |
@@ -284,7 +284,10 @@ own the `sid`, and a `sid` is single-use with a 10 s life. The relay then splice
 | yamux ping | Every 20 s; dead if no answer in 10 s |
 | Relay WebSocket ping (to every socket it owns) | Every 20 s; dead if no pong in 10 s |
 | Phone direct attempt timeout / relay attempt timeout | 5 s / 10 s |
-| Host reconnect after loss | Immediate, then 1, 2, 4 … 60 s with ±20% jitter |
+| Host reconnect after loss | Immediate, then 1, 2, 4 … 60 s with ±20% jitter. The count resets only after a control socket has stayed connected 30 s, so a relay that accepts and then drops the socket at once is not redialled in a loop. After 4429, at least 30 s |
+| Host waits for `hello` | 15 s after dialling; then the socket is dropped and the next node dialled with the backoff above |
+| Host liveness check | Every 2 min ±20% while connected, and when the network changes: an `auth` with the current token, answered by `hello` within 10 s, or the socket is dropped and dialled again with the backoff above, after at least a random 0–5 s |
+| Host on a network change while not connected | After a failed or silent dial, dial now (the backoff count stays). A wait the relay asked for (4429, 4503, `restarting`) or a wait for a token is kept |
 | Host reconnect after `restarting` / 4503 | `reconnectInMs + random(0, tryForMs)`; default random 1–15 s |
 | Sleep detection (desktop) | A wall-clock jump of more than 5 s against the monotonic clock, checked every 2 s, or Electron `powerMonitor` `resume`: redial now |
 | Host returns to its first node | While on a later node, try the first every 10 min ±2 min. Move when it accepts: open the new control socket, then close the old one |

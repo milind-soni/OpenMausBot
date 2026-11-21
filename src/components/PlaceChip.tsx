@@ -7,16 +7,17 @@ import { t } from "@/lib/i18n";
 import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable, pageOnRemoteServer } from "@/lib/local-computer";
 import { effectivePlace, personPin, PLACES, placeLabelKey, placeOffered, type Place } from "@/lib/place";
 import { placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat } from "@/lib/place-view";
-import { useStore, type Bot, type Task } from "@/state/store";
+import { type Bot, type Task } from "@/state/store";
 import type { PlaceView } from "../../shared/place-view";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { PlaceIcon } from "./PlaceIcon";
 import type { SidebarMenuItem } from "./SidebarPopoverMenu";
+import { sameFields, useStoreSelector } from "@/state/store-select";
 
 export type PlaceAvailability = Record<Place, boolean>;
 
 export function usePlaceViews(bot: Bot): Record<Place, { view: PlaceView; reachable: boolean; policy: boolean; listed: boolean }> {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config, instances: s.instances }), sameFields);
   const { capabilities } = useDesktopCapabilities();
   const seat = usePlaceSeat(state.config, capabilities);
   const backend = bot.cloudBackend === "vps" ? "vps" : "box";

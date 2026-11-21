@@ -49,9 +49,15 @@ it("Remove from list shows only where the Admin says so and the app can; a Cloud
   await mount(offline);
   expect(host.querySelector("[role='status'] span"), "no spinner going on for ever").toBeNull();
   const retried = offline.retry.mock.calls.length;
+  expect(retried, "it looks again as it opens").toBeGreaterThan(0);
+  await act(async () => { window.dispatchEvent(new Event("focus")); window.dispatchEvent(new Event("online")); });
+  await settle();
+  const looks = offline.retry.mock.calls.length;
   await click("[data-home-action='retry']");
   expect(host.querySelector("[data-home-action='retry']")?.textContent).toBe("Try again");
-  expect(offline.retry.mock.calls.length).toBe(retried + 1);
+  expect(offline.retry.mock.calls.length).toBe(looks + 1);
+  // Only the press says so: the looks (opening, focus, back online) never clear the wait for the next sign-in code.
+  expect(offline.retry.mock.calls.map((call: unknown[]) => call[0] === true)).toEqual([...Array(looks).fill(false), true]);
 });
 
 it("a checkout that wasn't finished continues where this app keeps its page, else on the Cloud page", async () => {
@@ -63,4 +69,24 @@ it("a checkout that wasn't finished continues where this app keeps its page, els
   reopen.mockResolvedValue(true);
   await click("[data-home-action='continue']");
   expect([reopen.mock.calls.length, manage.mock.calls.length]).toEqual([2, 1]);
+});
+
+it("Try again is pressed once at a time: off while its look runs, so a held key or fast clicks never stack looks", async () => {
+  const offline = bridgeOf({ screen: "offline" });
+  await mount(offline);
+  let finish: (view: HomeView) => void = () => {};
+  offline.retry.mockImplementation(() => new Promise<HomeView>((resolve) => { finish = resolve; }));
+  const before = offline.retry.mock.calls.length;
+  const button = () => host.querySelector<HTMLButtonElement>("[data-home-action='retry']")!;
+  await act(async () => { button().click(); button().click(); });
+  await settle();
+  expect(offline.retry.mock.calls.length).toBe(before + 1);
+  expect(button().disabled).toBe(true);
+  await click("[data-home-action='retry']");
+  expect(offline.retry.mock.calls.length, "a press while it runs does nothing").toBe(before + 1);
+  await act(async () => { finish({ screen: "offline" }); });
+  await settle();
+  expect(button().disabled).toBe(false);
+  await click("[data-home-action='retry']");
+  expect(offline.retry.mock.calls.length).toBe(before + 2);
 });

@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { isTitleCall } from "./testing/title-call.ts";
 
 // The fixture can only append to one fixed file in the launcher's disposable home: provider arguments cannot select a path.
 const MCP_FIXTURE = `
@@ -42,6 +43,7 @@ it("applies a level picked while the bot is working to its next tool call, and l
     let text = "";
     for await (const chunk of req) text += chunk;
     const body = JSON.parse(text) as { messages: Array<{ role: string }>; tools?: Array<{ function: { name: string; description?: string } }> };
+    if (isTitleCall(body)) { res.writeHead(500).end(); return; }
     const first = !body.messages.some((message) => message.role === "tool");
     if (first) await new Promise<void>((resolve) => { release = resolve; held = true; });
     const name = body.tools?.find((tool) => tool.function.description?.includes("level fixture artifact"))?.function.name;

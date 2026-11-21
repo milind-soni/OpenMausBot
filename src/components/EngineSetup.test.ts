@@ -98,7 +98,7 @@ describe("engines set up with a key in Settings", () => {
     };
     const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: engine })));
     expect(markup).toContain("Other (OpenAI-compatible) needs an API key");
-    expect(markup).toContain("Open API keys");
+    expect(markup).toContain("Open AI › Other services");
     expect(markup).not.toContain("Open install in Terminal");
     expect(markup).not.toContain("config.json");
   });
@@ -218,7 +218,7 @@ describe("install from Settings on the server", () => {
     const markup = render(appCopy({ state: "available", authenticated: false, version: "1.19.4" }));
     expect(markup).toContain("OpenCode is installed");
     expect(markup).toContain("free models");
-    expect(markup).toContain("Open API keys");
+    expect(markup).toContain("Open AI › Other services");
     expect(markup).toContain("Check again");
     for (const line of ["Terminal", "terminal", "one-line installer", "npm install", "Install and sign in on the computer", "Sign in to OpenCode"]) {
       expect(markup).not.toContain(line);
@@ -227,7 +227,7 @@ describe("install from Settings on the server", () => {
     vi.stubGlobal("window", { ogb: { platform: "linux", remoteClient: { active: true } } });
     const remote = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: appCopy({ state: "available", authenticated: false, version: "1.19.4" }) })));
     expect(remote).toContain("on the computer running MausBot");
-    expect(remote).not.toContain("Open API keys");
+    expect(remote).not.toContain("Open AI › Other services");
     // Missing or broken, the app's copy is installed again from here.
     expect(render(appCopy({ state: "unavailable", reason: "`opencode` version check failed." }))).toContain("Install OpenCode here");
   });
@@ -323,7 +323,7 @@ describe("API-key engine setup", () => {
     expect(html).toContain("Grok (API) needs an API key");
     expect(html).toContain("Paste it here. It saves and checks itself");
     expect(html).toContain('data-key-row="xai"');
-    expect(html).not.toContain("Open API keys");
+    expect(html).not.toContain("Open AI › Other services");
     expect(html).not.toContain("config.json");
   });
 
@@ -336,17 +336,46 @@ describe("API-key engine setup", () => {
 
   it("still sends an engine with no key row of its own to Settings → API keys", () => {
     const html = render(keyEngine("openai-compat", { state: "unavailable" }));
-    expect(html).toContain("Open API keys");
+    expect(html).toContain("Open AI › Other services");
     expect(html).not.toContain("data-key-row");
   });
 
   it("has no button on a remote client, whose settings hide the keys", () => {
     const html = render(keyEngine("openai-compat", { state: "unavailable" }), { platform: "darwin", remoteClient: { active: true } });
     expect(html).toContain("on the computer running MausBot");
-    expect(html).not.toContain("Open API keys");
+    expect(html).not.toContain("Open AI › Other services");
   });
 
   it("leaves CLI engines on their install card", () => {
     expect(render(instance({ state: "unavailable", reason: "`kimi` CLI not found" }))).not.toContain("data-engine-setup-api-key");
+  });
+});
+
+describe("Ollama setup", () => {
+  it("says why Ollama can't answer instead of asking for an API key", () => {
+    vi.stubGlobal("window", { ogb: { platform: "darwin" } });
+    const reason = "Ollama isn't running at http://127.0.0.1:11434. Open the Ollama app or run `ollama serve`.";
+    const ollama: InstanceInfo = {
+      instanceId: "openaiCompat", driverKind: "openai-compat", displayName: "Ollama", access: "api", serverKind: "ollama",
+      models: { default: "", options: [] }, snapshot: { state: "unavailable", reason },
+      install: { docsUrl: "https://openrouter.ai/keys", settings: "connections", signInCommand: "Save an OpenAI-compatible API key." },
+    };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: ollama })));
+    expect(markup).toContain("Ollama isn&#x27;t running at http://127.0.0.1:11434");
+    expect(markup).not.toContain("API key");
+  });
+
+  it("says it in the app's own words when the engine names the problem, with the command to run", () => {
+    vi.stubGlobal("window", { ogb: { platform: "darwin" } });
+    const ollama: InstanceInfo = {
+      instanceId: "openaiCompat", driverKind: "openai-compat", displayName: "Ollama", access: "api", serverKind: "ollama",
+      models: { default: "", options: [] },
+      snapshot: { state: "unavailable", reason: "Ollama has no models yet.", ollama: { state: "no-models", url: "http://127.0.0.1:11434" } },
+    };
+    const markup = renderToStaticMarkup(createElement(StoreProvider, null, createElement(EngineSetup, { instance: ollama })));
+    expect(markup).toContain('data-ollama-state="no-models"');
+    expect(markup).toContain("ollama pull llama3.2");
+    expect(markup).toContain("Check again");
+    expect(markup).not.toContain("Ollama has no models yet.");
   });
 });

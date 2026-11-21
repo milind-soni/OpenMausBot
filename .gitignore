@@ -16,6 +16,7 @@ electron/resources/OpenMausBot Speech.app
 electron/resources/OpenMausBot Recorder.app
 release
 .omb-scratch
+/shots/
 .wrangler/
 .dev.vars
 .dev.vars.*
@@ -36,6 +37,8 @@ cloudflare/control-plane/worker-configuration.d.ts
 
 # per-tenant deploy settings (see deploy/.env.example)
 deploy/.env
+# update.sh's journal, log and the settings it keeps for a rollback
+deploy/.update/
 deploy/podman/.env
 deploy/podman/.env.*
 !deploy/podman/.env.example

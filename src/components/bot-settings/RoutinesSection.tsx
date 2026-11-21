@@ -1,13 +1,14 @@
 import { CalendarClock, ChevronRight, FileText, Plus } from "lucide-react";
 import { useState } from "react";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import type { Routine, RoutineRun, RoutineRunOn } from "@/lib/routines";
 import { t } from "@/lib/i18n";
 import { RoutineEditor } from "../RoutinesPage";
 import { RoutineList } from "../routines/RoutineList";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export function RoutinesSection({ bot, routines, runs, defaultRunOn }: { bot: Bot; routines: Routine[]; runs: RoutineRun[]; defaultRunOn?: RoutineRunOn }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config, routinesLoadState: s.routinesLoadState }), sameFields), dispatch = useStoreDispatch();
   const [editing, setEditing] = useState<Routine | "new" | null>(null);
   return <div className="flex flex-col gap-4">
     <div className="rounded-xl bg-card p-4">
@@ -17,7 +18,7 @@ export function RoutinesSection({ bot, routines, runs, defaultRunOn }: { bot: Bo
         <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "logs", botId: bot.id })} className="flex items-center gap-1.5 rounded-lg bg-control px-3 py-2 text-[12px] text-ink hover:bg-raised-hover"><FileText size={13} />{t("routines.logs")}</button>
       </div>
     </div>
-    <RoutineList routines={routines} runs={runs} loading={state.routinesLoadState === "loading" && routines.length === 0} error={state.routinesLoadState === "error"} onOpen={setEditing} onLogs={(routine) => dispatch({ type: "showRoutines", section: "logs", botId: bot.id, routineId: routine.id })} onToggle={(routine) => dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: !routine.enabled } })} />
+    <RoutineList routines={routines} runs={runs} pausedBots={state.config?.pausedBots} heldBots={state.config?.heldBots} loading={state.routinesLoadState === "loading" && routines.length === 0} error={state.routinesLoadState === "error"} unreadable={state.config?.routinesUnreadable} onOpen={setEditing} onLogs={(routine) => dispatch({ type: "showRoutines", section: "logs", botId: bot.id, routineId: routine.id })} onToggle={(routine) => dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: !routine.enabled } })} />
     <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "schedule", view: "list", botId: bot.id })} className="self-start text-[12px] text-accent hover:underline">{t("computer.routines.openTitle")} <ChevronRight size={14} aria-hidden="true" className="inline align-[-2px] rtl:-scale-x-100" /></button>
     {editing && <RoutineEditor key={bot.id} routine={editing === "new" ? undefined : editing} bots={[bot]} lockedBotId={bot.id} defaultRunOn={defaultRunOn} onClose={() => setEditing(null)} />}
   </div>;

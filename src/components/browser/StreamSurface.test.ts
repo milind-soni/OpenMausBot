@@ -315,5 +315,10 @@ describe("a host that cannot run the browser yet", () => {
     await act(async () => events().onHostSetup?.({ need: "libraries", command: PREVIEW_STREAM_LIBRARIES_COMMAND }));
     expect(host.querySelector("code")?.textContent).toBe(PREVIEW_STREAM_LIBRARIES_COMMAND);
     expect(host.querySelector("a")).toBeNull();
+    await act(async () => button("Try again").click());
+    await act(async () => events().onHostSetup?.({ need: "container", command: "OMB_BROWSER_SANDBOX=0" }));
+    expect(host.querySelector("[role=alert]")?.textContent).toBe("Chrome's sandbox can't start in this server's container. Its operator can set this to run the browser without it and rely on the container's isolation, then restart OpenMausBot:");
+    expect(host.querySelector("code")?.textContent).toBe("OMB_BROWSER_SANDBOX=0");
+    expect(host.querySelector("a")).toBeNull();
   });
 });

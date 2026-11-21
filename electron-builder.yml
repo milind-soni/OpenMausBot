@@ -136,6 +136,9 @@ mac:
     NSMicrophoneUsageDescription: OpenMausBot uses the microphone for voice dictation into the composer.
     NSSpeechRecognitionUsageDescription: OpenMausBot transcribes your voice on-device to type messages for you.
     NSAccessibilityUsageDescription: OpenMausBot uses Accessibility when you let a bot control this Mac.
+    NSLocalNetworkUsageDescription: OpenMausBot connects to your phones and your other computers on this network and on Tailscale.
+    NSBonjourServices:
+      - _openmausbot._tcp
     NSScreenCaptureUsageDescription: OpenMausBot uses Screen Recording so bots can see this Mac before acting.
     NSDownloadsFolderUsageDescription: OpenMausBot looks in Downloads for the file your Grok Bot saved when you move it here.
   # Notarization runs manually after the build (notarytool + staple),
@@ -206,6 +209,8 @@ linux:
       arch: x64
     - target: deb
       arch: x64
+    - target: rpm
+      arch: x64
   # Keep the vector source in the freedesktop scalable icon hierarchy. A
   # lone 1024px PNG is not indexed by GNOME's hicolor theme on Ubuntu 24.04.
   icon: build/icon.svg
@@ -243,6 +248,23 @@ deb:
   fpm: ["--depends", "apparmor"]
   # dpkg can preserve legacy directory modes during an upgrade. This
   # idempotent hook repairs only the exact package-owned CUA path.
+  afterInstall: build/linux-after-install.sh
+  afterRemove: build/linux-after-remove.sh
+
+# Fedora (other RPM distributions are untested). The same hooks as the DEB
+# secure the package directories and the Chromium sandbox; the browser policy
+# step only acts on hosts that have AppArmor, so no apparmor dependency here.
+rpm:
+  # Own the install folder as well, so removing the package leaves no empty directories.
+  # No /usr/lib/.build-id links: another RPM bundling the same Electron binary
+  # would own the same link paths and the install would fail with a file conflict.
+  fpm: ["--directories", "/opt/OpenMausBot", "--rpm-rpmbuild-define", "_build_id_links none"]
+  afterInstall: build/linux-after-install.sh
+  afterRemove: build/linux-after-remove.sh
+
+pacman:
+  packageCategory: utils
+  fpm: ["--depends", "fuse3", "--depends", "gtk3", "--depends", "nss", "--depends", "alsa-lib", "--depends", "libcups", "--depends", "mesa"]
   afterInstall: build/linux-after-install.sh
   afterRemove: build/linux-after-remove.sh
 

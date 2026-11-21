@@ -1,12 +1,14 @@
+import { FIELD_EDGE } from "./SettingsPrimitives";
 import { useEffect, useSyncExternalStore } from "react";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { createAboutMeDraft } from "./about-me-draft";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 const drafts = new WeakMap<object, ReturnType<typeof createAboutMeDraft>>();
 
 export function EveryBotRules() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const confirmed = state.config?.everyBotRules;
   let controller = drafts.get(dispatch);
   if (!controller) {
@@ -24,15 +26,15 @@ export function EveryBotRules() {
   if (confirmed === undefined) return null;
 
   return (
-    <div className="flex flex-col gap-2">
-      <label htmlFor="profile-every-bot-rules" className="text-[14px] text-ink">{t("settings.profile.everyBotRules")}</label>
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor="profile-every-bot-rules" className="text-[13px] font-medium leading-[18px] text-ink">{t("settings.profile.everyBotRules")}</label>
       <textarea id="profile-every-bot-rules" value={value} rows={4} maxLength={24_000}
         placeholder={t("settings.profile.everyBotRulesPlaceholder")}
         onChange={(event) => edit(event.target.value)}
         onBlur={() => void flush()}
-        className="min-h-[96px] w-full resize-y rounded-lg border border-hairline/40 bg-inset px-3 py-2 text-[14px] text-ink placeholder:text-ink-secondary focus:outline-none"
+        className={`min-h-[96px] w-full resize-none rounded-lg ${FIELD_EDGE} bg-app px-2 py-1.5 text-[13px] leading-5 text-ink placeholder:text-ink-tertiary focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-focus`}
       />
-      <div className="min-h-4 text-[12px]" role="status">
+      <div className="text-[12px] leading-4 empty:hidden" role="status">
         {status === "saving" && <span className="text-ink-secondary">{t("settings.profile.saving")}</span>}
         {status === "saved" && <span className="text-success">{t("settings.profile.saved")}</span>}
         {status === "error" && <span className="text-danger">{t("settings.profile.saveError")} {" "}

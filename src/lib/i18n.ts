@@ -35,8 +35,10 @@ export async function loadLocale(tag: string | undefined): Promise<string> {
 }
 
 function show(resolved: string): string {
+  const changed = resolved !== active || (locales[resolved] ?? en) !== activePack;
   activePack = locales[resolved] ?? en;
   active = resolved;
+  if (changed) for (const listener of localeListeners) listener();
   // Screen readers choose pronunciation from <html lang>, and index.html ships "en".
   const root = typeof document === "undefined" ? undefined : document?.documentElement;
   if (root) {
@@ -62,6 +64,14 @@ export function documentLanguage(code: string): string {
 /** React cannot see the module variable t() reads, so memoized subtrees take this as a prop. */
 export function activeLocale(): string {
   return active;
+}
+
+const localeListeners = new Set<() => void>();
+
+/** Calls `listener` each time the page shows another language; for useActiveLocale. */
+export function subscribeLocale(listener: () => void): () => void {
+  localeListeners.add(listener);
+  return () => { localeListeners.delete(listener); };
 }
 
 export function intlLocale(system: string | undefined = globalThis.navigator?.language): string {

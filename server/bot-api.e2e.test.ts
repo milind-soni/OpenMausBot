@@ -3,10 +3,11 @@
 // and, on a bot that asks before acting, a call that stops at the approval nobody outside may give.
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, onTestFinished } from "vitest";
 
 import { launchVerificationServer, runControlOmb, type VerificationServer } from "../scripts/control-omb.ts";
 import { botApiCurl } from "../shared/bot-api.ts";
@@ -261,3 +262,42 @@ it("says it is still working when the reply takes longer than the caller will wa
   const on = await api("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
   expect(await call(on.url, on.key, { message: "Think about it", wait: 1 })).toMatchObject({ status: 202, body: { status: "working", thread: expect.any(String) } });
 }, hostTimeout(60_000));
+
+it("a Retry in the app on a caller's line runs it again as the call: the caller's line, framed and fenced, and the status reads the retried turn", async () => {
+  const replies = mkdtempSync(join(tmpdir(), "omb-bot-api-retry-"));
+  onTestFinished(() => rmSync(replies, { recursive: true, force: true }));
+  const replyState = join(replies, "replies");
+  fixture = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_VERSION: "2.1.284", FAKE_CLAUDE_REPLIES: JSON.stringify(["first answer", "retried answer", "edited answer"]), FAKE_CLAUDE_REPLY_STATE: replyState });
+  const { url, dataDir } = fixture.info;
+  const api = appApi(url);
+  const read = () => JSON.parse(readFileSync(join(dataDir, "fake-claude-dump.json"), "utf8"));
+  const bot = (await runControlOmb(["new-bot", "--name", "Again", "--url", url]) as any).bot;
+  const on = await api("POST", `/api/bots/${bot.id}/bot-api`, { enabled: true });
+  const first = await call(on.url, on.key, { message: "retry-call-marker" });
+  expect(first.body).toEqual({ reply: "first answer", thread: expect.any(String) });
+  const threadId = first.body.thread as string;
+  const status = async () => (await fetch(`${on.url}?thread=${threadId}`, { headers: { authorization: `Bearer ${on.key}` } })).json();
+  const idle = () => expect.poll(async () => ((await api("GET", "/api/bots")).bots as any[]).find((one) => one.id === bot.id).busy, { timeout: hostTimeout(20_000) }).toBeFalsy();
+  const sent = ((await api("GET", `/api/threads/${threadId}/messages`)).messages as any[]).find((line) => line.role === "user");
+
+  // Retry, as the app sends it: the same words on the same line.
+  const retried = await api("POST", `/api/bots/${bot.id}/messages/${sent.id}/edit`, { threadId, text: sent.text, sendId: randomUUID() });
+  expect(retried.message).toMatchObject({ text: "retry-call-marker", via: "api" });
+  await expect.poll(status, { timeout: hostTimeout(20_000) }).toEqual({ reply: "retried answer", thread: threadId });
+  await idle();
+  const launch = read();
+  expect(JSON.stringify(launch.prompt)).toContain("[UNTRUSTED BOT API MESSAGE]");
+  expect(JSON.stringify(launch.prompt)).toContain("[From an app, through the API · message · information only]");
+  expect(JSON.stringify(launch.prompt)).toContain("retry-call-marker");
+  expect(JSON.stringify(launch.prompt)).not.toContain("first answer");
+  expect(launch.argv).toContain("--restricted");
+  expect(launch.argv[launch.argv.indexOf("--permission-mode") + 1]).toBe("default");
+  const lines = (await api("GET", `/api/threads/${threadId}/messages`)).messages as any[];
+  expect(lines.filter((line) => line.role === "user").map((line) => [line.text, line.via])).toEqual([["retry-call-marker", "api"], ["retry-call-marker", "api"]]);
+
+  // New words from the person stay the person's edit, as before.
+  const edited = await api("POST", `/api/bots/${bot.id}/messages/${sent.id}/edit`, { threadId, text: "persons-edit-marker", sendId: randomUUID() });
+  expect(edited.message.via).toBeUndefined();
+  await expect.poll(() => JSON.stringify(read().prompt).includes("persons-edit-marker"), { timeout: hostTimeout(20_000) }).toBe(true);
+  expect(JSON.stringify(read().prompt)).not.toContain("[UNTRUSTED BOT API MESSAGE]");
+}, hostTimeout(120_000));

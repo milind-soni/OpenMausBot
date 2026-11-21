@@ -34,6 +34,7 @@ Choose one Ubuntu 24.04 x86_64 package from the latest release:
 
 - [Debian package (`OpenMausBot-amd64.deb`)](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-amd64.deb) — recommended; APT installs its desktop dependencies and configures the bundled bot browser's sandbox.
 - [Portable AppImage (`OpenMausBot.AppImage`)](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.AppImage) — does not install system files.
+- [RPM package (`OpenMausBot-x86_64.rpm`)](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-x86_64.rpm) — for Fedora; see [below](#fedora-and-other-rpm-distributions).
 - [SHA-256 checksums](https://github.com/milind-soni/OpenMausBot/releases/latest/download/SHA256SUMS-ubuntu-x64.txt)
 
 Versioned packages and previous releases remain available on the
@@ -58,6 +59,7 @@ pnpm package:linux
 The build creates:
 
 - `release/OpenMausBot-<version>-amd64.deb`
+- `release/OpenMausBot-<version>-x86_64.rpm`
 - `release/OpenMausBot-<version>-x86_64.AppImage`
 
 The AppImage uses a static runtime and does not require the legacy `libfuse2` package.
@@ -85,10 +87,37 @@ chmod +x release/OpenMausBot-*-x86_64.AppImage
 
 For a downloaded release AppImage, use `OpenMausBot.AppImage` in place of the versioned path above.
 
-### Arch Linux and EndeavourOS (AppImage)
+### Fedora and other RPM distributions
 
-Arch-based distributions are not an official target, but the release AppImage runs there. A minimal Arch
-install lacks the FUSE helper and some desktop libraries the AppImage needs, so install them first:
+The `.rpm` is community-supported: every release builds and checks it, but it is not tested on Fedora the way the
+`.deb` is on Ubuntu. Install it with the package manager so its desktop dependencies are resolved:
+
+```sh
+sudo dnf install ./OpenMausBot-x86_64.rpm
+```
+
+Remove it with `sudo dnf remove openmausbot`. Updates are downloaded by the app, which then copies the `rpm` install
+command and opens a terminal for you to run it. Other RPM distributions (RHEL, openSUSE) and image-based Fedora
+editions such as Silverblue are untested; use the AppImage there.
+
+### Arch Linux and EndeavourOS
+
+Arch-based distributions are not an official target. The release AppImage runs there, or you can build a native
+`.pacman` package yourself.
+
+#### Native pacman package
+Releases and CI do not build this package and nothing tests it. Removing it cleans up the launcher and browser
+profile; whether a pacman upgrade re-applies the install steps has not been verified. Build it from source:
+
+```sh
+pnpm package:arch
+sudo pacman -U release/OpenMausBot-<version>-x64.pacman
+```
+
+Replace `<version>` with the built version (for example, `0.1.149`). Then launch `openmausbot` from the application launcher or command line.
+
+#### Portable AppImage
+A minimal Arch install lacks the FUSE helper and some desktop libraries the AppImage needs, so install them first:
 
 ```sh
 sudo pacman -S --needed fuse3 gtk3 nss alsa-lib libcups mesa

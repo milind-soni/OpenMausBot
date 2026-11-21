@@ -84,3 +84,42 @@ describe("POST /api/bots/<bot>/secret-cards/<card>/save", () => {
     expect(JSON.stringify(vi.mocked(ctx.json).mock.calls)).not.toContain("sk_live_canary");
   });
 });
+
+describe("Use a saved one: GET .../saved and POST .../use", () => {
+  const BASE = "/api/bots/atlas/secret-cards/card-1";
+  function route(over: Partial<{ visible: boolean; context: SecretAnswerContext }> = {}) {
+    const savedChoices = vi.fn(() => [{ id: "s1", name: "Stripe secret key" }]);
+    const useSavedSecret = vi.fn(async () => ({ status: 200, body: { provided: true, resumed: true } }));
+    const cards = { secretMessage: vi.fn(() => ({ id: "card-1" })), savedChoices, useSavedSecret } as unknown as SecretCards;
+    const handler = createSecretCardRoutes({
+      cards, phoneSecretSubmissions: { has: () => false }, threadVisible: () => over.visible ?? true, answerContext: () => over.context ?? team(null, "p:boss"),
+    });
+    return { handler, savedChoices, useSavedSecret };
+  }
+  const context = (method: "GET" | "POST", end: string, body: unknown = {}, contentType = "application/json"): RouteContext => ({
+    req: { headers: { "content-type": contentType } } as unknown as IncomingMessage, res: { setHeader: vi.fn() } as unknown as ServerResponse,
+    path: `${BASE}/${end}`, method, url: new URL(`${BASE}/${end}?threadId=thread-1`, "http://fixture.invalid"), auth: ADMIN,
+    readBody: vi.fn(async () => body), json: vi.fn(),
+  });
+
+  it("names the choices and uses the one picked", async () => {
+    const { handler, useSavedSecret } = route();
+    const list = context("GET", "saved");
+    await handler(list);
+    expect(list.json).toHaveBeenCalledExactlyOnceWith(list.res, 200, { choices: [{ id: "s1", name: "Stripe secret key" }] });
+    const use = context("POST", "use", { threadId: "thread-1", itemId: "s1" });
+    await handler(use);
+    expect(useSavedSecret).toHaveBeenCalledExactlyOnceWith("atlas", "thread-1", "card-1", "s1");
+    expect(use.json).toHaveBeenCalledExactlyOnceWith(use.res, 200, { provided: true, resumed: true });
+  });
+
+  it("refuses a form post, a hidden conversation and someone else's card before anything is used", async () => {
+    for (const [over, contentType, status] of [[{}, "text/plain", 415], [{ visible: false }, "application/json", 404], [{ context: team("p:ada", "p:bob") }, "application/json", 403]] as const) {
+      const { handler, useSavedSecret } = route(over);
+      const use = context("POST", "use", { threadId: "thread-1", itemId: "s1" }, contentType);
+      await handler(use);
+      expect(useSavedSecret).not.toHaveBeenCalled();
+      expect(vi.mocked(use.json).mock.calls[0]?.[1]).toBe(status);
+    }
+  });
+});

@@ -5,11 +5,11 @@ import { en, type LocaleKey } from "@/locales";
 import { toolStepLabel } from "@/lib/tool-step-label";
 import { formatUsd, hasFiniteCost, usdText } from "@/lib/usage";
 import type {
-  TraceDetail, TraceGroup, TraceList, TraceNode, TraceStep, TraceTokens, TraceTool, TraceTurn,
+  TraceDetail, TraceGroup, TraceList, TraceNode, TraceRootSummary, TraceStep, TraceTokens, TraceTool, TraceTurn,
 } from "../../shared/usage-trace.ts";
 
-export type UsagePeriod = "today" | "week" | "month" | "lastMonth" | "days30";
-export const USAGE_PERIODS: readonly UsagePeriod[] = ["today", "week", "month", "lastMonth", "days30"];
+export type UsagePeriod = "today" | "week" | "month" | "lastMonth" | "days30" | "days90";
+export const USAGE_PERIODS: readonly UsagePeriod[] = ["today", "week", "month", "lastMonth", "days30", "days90"];
 
 const DAY_MS = 24 * 60 * 60_000;
 const day = (date: Date) => date.toISOString().slice(0, 10);
@@ -21,7 +21,13 @@ export function usagePeriodRange(period: UsagePeriod, now = new Date()): { from:
   if (period === "week") return { from: day(new Date(now.getTime() - 6 * DAY_MS)), to: day(now) };
   if (period === "month") return { from: day(new Date(Date.UTC(year, month, 1))), to: day(now) };
   if (period === "lastMonth") return { from: day(new Date(Date.UTC(year, month - 1, 1))), to: day(new Date(Date.UTC(year, month, 0))) };
+  if (period === "days90") return { from: day(new Date(now.getTime() - 89 * DAY_MS)), to: day(now) };
   return { from: day(new Date(now.getTime() - 29 * DAY_MS)), to: day(now) };
+}
+
+export function localPeriodRange(period: UsagePeriod, now = new Date()): { from: string; to: string } {
+  const shifted = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 12));
+  return usagePeriodRange(period, shifted);
 }
 
 /** A cost as the trace prints it: a sliver of a cent reads "<$0.001", never "$0.000". */
@@ -253,4 +259,17 @@ export function threadsOf(turns: readonly TraceTurn[]): Set<string> {
 
 export function isStep(node: TraceNode): node is TraceStep {
   return node.kind === "step";
+}
+
+type NamedBot = { id: string; name: string };
+
+/** Usage rows keep the name a bot had when they were booked; a bot that still exists shows under its current name. */
+export function currentBotName(bots: readonly NamedBot[], id: string, booked: string): string {
+  return bots.find((bot) => bot.id === id)?.name ?? booked;
+}
+
+/** A run's title: its own, or "A message to <first bot>" under that bot's current name. */
+export function runTitle(root: TraceRootSummary, bots: readonly NamedBot[]): string {
+  const first = root.bots[0];
+  return root.title || t(`trace.source.${root.source}`, { bot: first ? currentBotName(bots, first.id, first.name) : "" });
 }

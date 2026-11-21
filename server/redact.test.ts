@@ -181,6 +181,28 @@ describe("redactSecretsInText", () => {
     }
   });
 
+  it("masks Notion integration tokens", () => {
+    // ntn_ plus 46 letters and digits, assembled at runtime like the cases above.
+    const token = `${"nt" + "n_"}${"0123456789A"}${"bcdefghijklmnopqrstuvwxyzABCDEFGHIJ"}`;
+    expect(redactSecretsInText(`notion ${token} connected`)).toBe(`notion «redacted ${token.length} chars» connected`);
+    expect(holdsCredential(`header Notion ${token}`)).toBe(true);
+    for (const ordinary of ["ntn_example", `${"nt" + "n_"}${"a".repeat(39)}`, `example_${"nt" + "n_"}${"a".repeat(46)}`]) {
+      expect(redactSecretsInText(ordinary)).toBe(ordinary);
+      expect(holdsCredential(ordinary)).toBe(false);
+    }
+  });
+
+  it("masks Perplexity API keys", () => {
+    // pplx- plus 48 letters and digits, assembled at runtime like the cases above.
+    const key = `${"pp" + "lx-"}${"0123456789ABCDEFGHIJKLMN"}${"opqrstuvwxyzabcdefghijkl"}`;
+    expect(redactSecretsInText(`perplexity ${key} search`)).toBe(`perplexity «redacted ${key.length} chars» search`);
+    expect(holdsCredential(`search via ${key}`)).toBe(true);
+    for (const ordinary of ["perplexity/pplx-decider-v1.1-27b", `${"pp" + "lx-"}${"a".repeat(47)}`, `${"pp" + "lx-"}${"a".repeat(49)}`, `example_${"pp" + "lx-"}${"a".repeat(48)}`]) {
+      expect(redactSecretsInText(ordinary)).toBe(ordinary);
+      expect(holdsCredential(ordinary)).toBe(false);
+    }
+  });
+
   it.each([
     ["xai-", 20],
     ["gsk_", 40],

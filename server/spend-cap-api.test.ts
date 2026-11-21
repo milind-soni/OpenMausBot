@@ -229,6 +229,34 @@ describe("spend cap and prices through real turns", () => {
     expect(usage.budget.exceeded).toBe(true);
   }, 150_000);
 
+  it("sends no automatic title call once the workspace is at its spend cap", async () => {
+    await session.close();
+    const routes = join(layerDir, "title-replies.json");
+    const log = join(layerDir, "one-shots.jsonl");
+    writeFileSync(routes, JSON.stringify({ "Reply with only a short title": "Fixture title" }));
+    session = await launchVerificationServer({ ...process.env, FAKE_CLAUDE_TEXT_ROUTES: routes, FAKE_CLAUDE_TEXT_LOG: log },
+      undefined, undefined, undefined, { dir: layerDir, licenseKey: "fixture-key" });
+    const logged = () => { try { return readFileSync(log, "utf8"); } catch { return ""; } };
+    const titleCalls = (text: string) => logged().split("\n").filter((line) => line.includes("short title") && line.includes(text));
+    const json = (body: unknown): RequestInit => ({ method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await put({ budgets: { monthlyUsd: 0.01 } })).status).toBe(200);
+    const { bot } = await control(["new-bot", "--name", "Cap title probe"]);
+    expect((await send(bot.id, "Plan the spring offsite")).status).toBeLessThan(300);
+    await control(["wait", "--bot", bot.id, "--timeout", "30"]);
+    // Under the cap, the first message is named by the engine; the turn's $0.01 then reaches the cap.
+    await expect.poll(() => titleCalls("Plan the spring offsite").length, { timeout: 15_000 }).toBe(1);
+
+    const task = await api(`/api/bots/${bot.id}/tasks`, json({}));
+    const { threadId } = (await task.json() as any).task;
+    expect((await api(`/api/bots/${bot.id}/messages`, json({ text: "Draft the venue shortlist", threadId }))).status).toBe(409);
+    const room = await api("/api/groups", json({ name: "Capped room", memberIds: [bot.id], setup: { bulletin: "", defaultResponder: { kind: "everyone" } } }));
+    expect(room.status).toBe(201);
+    const { group } = await room.json() as { group: { id: string } };
+    expect((await api(`/api/groups/${encodeURIComponent(group.id)}/messages`, json({ text: "Book the venue for the team" }))).status).toBe(409);
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    expect([...titleCalls("Draft the venue shortlist"), ...titleCalls("Book the venue for the team")]).toEqual([]);
+  }, 150_000);
+
   it("refuses the next room member at execution time once the cap is reached", async () => {
     const edition = (await (await api("/api/edition")).json()) as { edition: string; features: string[] };
     expect(edition).toMatchObject({ edition: "enterprise", features: ["billing", "budgets"] });

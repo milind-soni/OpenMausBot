@@ -26,14 +26,17 @@ export function createImageDailyCap(dataDir: string, options: { cap?: number; no
   const now = options.now ?? (() => new Date());
   const file = join(dataDir, IMAGE_DAY_FILE);
   let held = 0;
+  let countedDay = "";
+  let count = 0;
   const madeToday = (): number => {
+    const today = localDay(now());
+    if (countedDay !== today) { countedDay = today; count = 0; }
     try {
       const saved = JSON.parse(readFileSync(file, "utf8")) as { day?: unknown; count?: unknown } | null;
-      const count = saved?.count;
-      return saved?.day === localDay(now()) && typeof count === "number" && Number.isInteger(count) && count > 0 ? count : 0;
-    } catch {
-      return 0;
-    }
+      const savedCount = saved?.count;
+      if (saved?.day === today && typeof savedCount === "number" && Number.isInteger(savedCount) && savedCount > count) count = savedCount;
+    } catch {}
+    return count;
   };
   return {
     cap,
@@ -45,8 +48,9 @@ export function createImageDailyCap(dataDir: string, options: { cap?: number; no
     settle(made) {
       held = Math.max(0, held - 1);
       if (!made) return;
+      count = madeToday() + 1;
       try {
-        writeFileAtomic(file, `${JSON.stringify({ day: localDay(now()), count: madeToday() + 1 })}\n`, { mode: 0o600 });
+        writeFileAtomic(file, `${JSON.stringify({ day: countedDay, count })}\n`, { mode: 0o600 });
       } catch (error) {
         console.warn(`image generation: could not count today's image in ${file}: ${error instanceof Error ? error.message : String(error)}`);
       }

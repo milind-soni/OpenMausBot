@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { acceptedSendMatch, parseSendId, sendFingerprint, SendSequencer } from "./send-idempotency.ts";
+import { acceptedSendMatch, parseSendId, parseStopId, sendFingerprint, SendSequencer, StopReceipts } from "./send-idempotency.ts";
 import type { Message } from "./store.ts";
 
 function userMessage(overrides: Partial<Message> = {}): Message {
@@ -108,5 +108,47 @@ describe("send idempotency", () => {
     expect(secondWork).not.toHaveBeenCalled();
 
     await expect(sequencer.run("same-error", "one", secondWork)).resolves.toBe(2);
+  });
+});
+
+describe("stop receipts", () => {
+  it("reads a stopId like a sendId, and refuses a malformed one", () => {
+    expect(parseStopId(undefined)).toBeUndefined();
+    expect(parseStopId("stop_1234567890123456")).toBe("stop_1234567890123456");
+    expect(parseStopId("short")).toBeNull();
+    expect(parseStopId(42)).toBeNull();
+  });
+
+  it("stops once per key and gives every resend the first answer, while running and after", async () => {
+    const receipts = new StopReceipts<{ status: number }>();
+    let release!: () => void;
+    const stop = vi.fn(() => new Promise<{ status: number }>((resolve) => { release = () => resolve({ status: 200 }); }));
+    const first = receipts.run("room:stop_1", stop);
+    const resent = receipts.run("room:stop_1", stop);
+    release();
+    expect(await first).toEqual({ status: 200 });
+    expect(await resent).toEqual({ status: 200 });
+    expect(await receipts.run("room:stop_1", stop)).toEqual({ status: 200 });
+    expect(stop).toHaveBeenCalledTimes(1);
+    const unkeyed = vi.fn(async () => ({ status: 200 }));
+    await receipts.run("room:stop_2", unkeyed);
+    await receipts.run(undefined, unkeyed);
+    await receipts.run(undefined, unkeyed);
+    expect(unkeyed).toHaveBeenCalledTimes(3);
+  });
+
+  it("forgets an answer after keepMs, past max, and when the stop threw", async () => {
+    let now = 0;
+    const receipts = new StopReceipts<number>({ keepMs: 1_000, max: 2, now: () => now });
+    let calls = 0;
+    const stop = async () => ++calls;
+    expect(await receipts.run("a", stop)).toBe(1);
+    now = 1_000;
+    expect(await receipts.run("a", stop)).toBe(2);
+    await receipts.run("b", stop);
+    await receipts.run("c", stop);
+    expect(await receipts.run("a", stop)).toBe(5);
+    await expect(receipts.run("d", async () => { throw new Error("offline"); })).rejects.toThrow("offline");
+    expect(await receipts.run("d", stop)).toBe(6);
   });
 });

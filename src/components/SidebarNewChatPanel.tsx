@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { Plus, Users, X } from "lucide-react";
 import { openBot, useStore, type Bot } from "@/state/store";
 import { rankByName } from "@/lib/palette-rank";
+import { imeComposing } from "@/lib/send-key";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { t } from "@/lib/i18n";
@@ -105,7 +106,8 @@ export function SidebarNewChatPanel({
   };
 
   const onKeyDown = (event: React.KeyboardEvent) => {
-    if (event.nativeEvent.isComposing) return;
+    // Enter and Escape that pick or cancel an input-method candidate belong to the IME, not to this list or the panel.
+    if (imeComposing(event.nativeEvent)) { event.stopPropagation(); return; }
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setCursor(selected < 0 ? 0 : (selected + 1) % count);

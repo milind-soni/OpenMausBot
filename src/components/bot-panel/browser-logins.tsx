@@ -2,24 +2,25 @@ import { Plus } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import { SignedInSites } from "../SignedInSites";
 import { Card, ColRow, LinkRow, NoteRow } from "./rows";
+import { sameFields, sameItems, useStoreSelector } from "@/state/store-select";
 
 export function BrowserLogins({ bot, browserEnabled, onOpenBrowser }: {
   bot: Bot;
   browserEnabled: boolean;
   onOpenBrowser: () => void;
 }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const ownerOrAdmin = useOwnerOrAdmin();
   const profileId = bot.browserProfile ?? "";
   const profile = (state.config?.browserProfiles ?? []).find((candidate) => candidate.id === profileId);
   const temporary = profileId === "guest";
   const ownChrome = profile?.browser === "chrome" && state.config?.browserEngine?.myChrome === true;
-  const sharedBy = profileId && !temporary
-    ? state.bots.filter((candidate) => candidate.browserProfile === profileId).map((candidate) => candidate.name)
-    : [bot.name];
+  const sharedBy = useStoreSelector((s) => profileId && !temporary
+    ? s.bots.filter((candidate) => candidate.browserProfile === profileId).map((candidate) => candidate.name)
+    : [bot.name], sameItems);
 
   return (
     <Card anchor="logins">

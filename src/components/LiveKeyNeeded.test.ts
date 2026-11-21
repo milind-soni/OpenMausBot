@@ -21,8 +21,8 @@ const nodes = (value: ReactNode): Node[] => !isValidElement(value) ? [] : [value
 it("says one plain thing, names OpenAI, and offers only the way to Settings → API keys", () => {
   const html = renderToStaticMarkup(createElement(LiveKeyNeeded));
   expect(html).toContain('<h2 id="live-key-title"');
-  expect(html).toContain("Live calls use your own OpenAI key. Add it in Settings → API keys.");
-  expect(html).toContain(">Open API keys</button>");
+  expect(html).toContain("Live calls use your own OpenAI key. Add it in Settings → AI → Other services.");
+  expect(html).toContain(">Open AI › Other services</button>");
   expect(html.match(/<button/g)).toHaveLength(1);
   expect(html).toContain("The OpenAI key stays on your computer.");
   for (const gone of ["Pro", "plan", "<input", "$15"]) expect(html).not.toContain(gone);
@@ -50,7 +50,7 @@ it("with Azure chosen, asks for the endpoint, deployment and resource key in pla
   expect(html).toContain('placeholder="gpt-live-1"');
   expect(html).toContain('aria-label="Azure OpenAI key for Live calls"');
   expect(html).toContain("The Azure key stays on your computer.");
-  expect(html).not.toContain("Open API keys");
+  expect(html).not.toContain("Open AI › Other services");
   expect(html).not.toContain("OpenAI key stays");
 });
 
@@ -59,4 +59,15 @@ it("with Azure chosen and no endpoint yet, asks for the endpoint first: a key is
   const html = renderToStaticMarkup(createElement(LiveKeyNeeded));
   expect(html).toContain('placeholder="https://my-resource.openai.azure.com"');
   expect(html).not.toContain('aria-label="Azure OpenAI key for Live calls"');
+});
+
+it("starts a new key form when the endpoint changes, so a key typed for one address is never saved for another", () => {
+  const formKey = (customEndpoint: string) => {
+    f.live = { configured: false, provider: "custom", customEndpoint, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    return nodes(LiveKeyNeeded()).find((node) => typeof node.type === "function" && node.type.name === "ProviderAndKey")?.props as { formKey?: string } | undefined;
+  };
+  const first = formKey("https://a.example.com/v1")?.formKey;
+  expect(first).toBeTruthy();
+  expect(formKey("https://b.example.com/v1")?.formKey).not.toBe(first);
+  expect(formKey("https://a.example.com/v1")?.formKey).toBe(first);
 });

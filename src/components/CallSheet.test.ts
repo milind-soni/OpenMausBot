@@ -74,6 +74,21 @@ describe("CallSheet", () => {
     expect(text).toContain("Nothing else said on the call is kept.");
   });
 
+  it("shows what the bot said aloud among the rest, and says it keeps it", () => {
+    const withSpoken = msg("row", { ...record, call: { ...record.call!, spoken: [{ at: at - 1, text: "Sure, let me check." }, { at: at + 1, text: "That's all, bye!" }] } });
+    const list = [...transcript.slice(0, -1), withSpoken];
+    flushSync(() => root.render(createElement(CallRecordRow, { message: withSpoken, transcript: list, botName: "Kiwi", threadId: "t", busy: false, hasMore: false })));
+    openSheet();
+    const text = sheet()!.textContent ?? "";
+    const first = text.indexOf("Sure, let me check.");
+    const asked = text.indexOf("Hey Kiwi, what are the two issues I should pick up");
+    const answered = text.indexOf("MOCA-295 and MOCA-341.");
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(asked).toBeGreaterThan(first);
+    expect(text.indexOf("That's all, bye!")).toBeGreaterThan(answered);
+    expect(text).toContain("Your requests, and what Kiwi said, did and answered. Nothing else you said on the call is kept.");
+  });
+
   it("says so when nothing was asked on the call", () => {
     draw([record]);
     openSheet();

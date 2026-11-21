@@ -67,7 +67,7 @@ const GOLDEN = [
 describe("the room transcript", () => {
   it("keeps terminal output and artifact verification when the room already carries the assignment", () => {
     const note = composeBackgroundResults(['{"status":"finished","exitCode":7,"stdout":"fresh evidence"}']);
-    expect(roomCoordinationReminder({ resumed: true, turnInstructions: note, turnNote: note }, true, true)).toBe(`\n\n${note}`);
+    expect(roomCoordinationReminder({ resumed: true, turnInstructions: note, turnNote: note, turnBackground: true }, true, true)).toBe(`\n\n${note}`);
     expect(roomCoordinationReminder({ resumed: true, turnInstructions: "request" }, true, false)).toContain("Review their results in the conversation above against the request");
     expect(roomCoordinationReminder({ turnInstructions: "request", turnNote: "scope" }, true, true)).toBe("\n\nscope\nIts words are the request above.");
     expect(roomCoordinationReminder({ turnInstructions: "request" }, false, true)).toBe("\n\nrequest");
@@ -79,7 +79,7 @@ describe("the room transcript", () => {
     const continuation = continuationLine({ note: "Check the recorded plan", handoffPath: "/fixture/handoff.md" });
     const note = [restart, background, continuation, "Your downstream room requests have settled. Review their results in the conversation above against your assignment."].join("\n\n");
     const instructions = `${note}\n\nCSV checks passed`;
-    const reminder = roomCoordinationReminder({ resumed: true, turnInstructions: instructions, turnNote: note, turnRestartNote: restart }, contextHasCoordination, true);
+    const reminder = roomCoordinationReminder({ resumed: true, turnInstructions: instructions, turnNote: note, turnBackground: true, turnRestartNote: restart }, contextHasCoordination, true);
     for (const text of [background, continuation]) expect(reminder).toContain(text);
     expect(reminder.match(/Resuming verification after a restart\./g)).toHaveLength(1);
     if (contextHasCoordination) {

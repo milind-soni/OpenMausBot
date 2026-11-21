@@ -3,12 +3,14 @@ import { applyD1Migrations, type D1Migration } from "cloudflare:test";
 import { afterEach, beforeAll } from "vitest";
 
 import { readConfig } from "../src/config";
-import { forgetCachedCapacity } from "../src/tunnel-capacity";
+import { forgetCachedCapacity, forgetReclaimPreview } from "../src/tunnel-capacity";
+import { forgetTunnelRelease } from "../src/tunnel-release";
 
 declare global {
   namespace Cloudflare {
     interface Env {
       MIGRATION_DB: D1Database;
+      PUSH_MIGRATION_DB: D1Database;
       TEST_MIGRATIONS: D1Migration[];
       /** wrangler.jsonc's CLOUDFLARE_ENDPOINT_ACCOUNTS, as JSON. */
       TEST_PRODUCTION_ENDPOINT_ACCOUNTS: string;
@@ -22,6 +24,8 @@ beforeAll(async () => {
 
 afterEach(async () => {
   await forgetCachedCapacity(readConfig(env));
+  forgetTunnelRelease();
+  forgetReclaimPreview();
   await env.DB.batch([
     env.DB.prepare("DELETE FROM otp_recipient_rate_limits"),
     env.DB.prepare("DELETE FROM control_action_rate_limits"),
@@ -30,6 +34,7 @@ afterEach(async () => {
     env.DB.prepare("DELETE FROM installation_push_devices"),
     // A missing row reads as an empty snapshot (never scanned, never refused).
     env.DB.prepare("DELETE FROM managed_endpoint_account_capacity"),
+    env.DB.prepare("DELETE FROM managed_endpoint_reclaim_preview"),
     env.DB.prepare("DELETE FROM installation_credentials"),
     env.DB.prepare("DELETE FROM installations"),
     env.DB.prepare('DELETE FROM "session"'),

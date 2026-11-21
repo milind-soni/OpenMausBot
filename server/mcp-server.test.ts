@@ -744,6 +744,16 @@ describe("connection security and discovery", () => {
     }, "http://127.0.0.1:8799")).rejects.toThrow("paired session token");
   });
 
+  it("says a shared server refused, not a desktop app, when the server says so", async () => {
+    globalThis.fetch = vi.fn(async () => jsonResponse(
+      { error: "forbidden: on this shared server a local request without a session may only use the service routes; sign in to change settings, people or access" },
+      { ok: false, status: 403, statusText: "Forbidden" },
+    )) as any;
+    const refused = request("/api/instances", {}, "http://127.0.0.1:8799");
+    await expect(refused).rejects.toThrow("This is a shared server, so a program on it without a paired session token may only check its health");
+    await expect(refused).rejects.not.toThrow("desktop app");
+  });
+
   it("requires an explicit destination before sending a bearer token", async () => {
     process.env.OPENMAUSBOT_TOKEN = "proxy-token";
     await expect(resolveBaseUrl()).rejects.toThrow("OPENMAUSBOT_URL or OMB_PORT");

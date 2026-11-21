@@ -10,6 +10,7 @@ import { capThreadLog, currentThreadLogCap } from "../thread-log-rotation.ts";
 import { newId, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener } from "../contracts.ts";
 import { LiveSteps } from "./live-steps.ts";
 import { ProgressGate } from "./progress-gate.ts";
+import { TextItems } from "./text-items.ts";
 
 const INCOMPLETE_LOG_MESSAGE =
   "Canonical event history is incomplete: OpenMausBot could not write one or more events to disk. Live updates will continue.";
@@ -72,6 +73,7 @@ export class EventBus {
   });
 
   private readonly gate?: (event: RuntimeEvent) => boolean;
+  private readonly textItems = new TextItems();
 
   /** `gate` sees each adapter event first; true means it took the event and publishes what it chooses. */
   constructor(appendLog: EventLogAppend = defaultAppend, gate?: (event: RuntimeEvent) => boolean) {
@@ -96,7 +98,10 @@ export class EventBus {
     }
   }
 
-  publish(raw: RuntimeEvent) {
+  publish(unstamped: RuntimeEvent) {
+    // Reply text is keyed by its message from here on: the delta merge below and every listener see the same id.
+    const raw = this.textItems.stamp(unstamped);
+    if (!raw) return;
     if (raw.type === "turn.progress") {
       this.progress.offer(this.steps.progress(raw));
       return;

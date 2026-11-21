@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ASK_USER_TOOL_DEFINITION } from "../../shared/ask-question.ts";
 import { recordEvents } from "../testing/events.ts";
@@ -11,6 +14,14 @@ const create = (config = {}) => MistralDriver.create({
 });
 
 describe("Mistral provider", () => {
+  it.each([undefined, true, false])("advertises computer capabilities according to tools=%s", async (tools) => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [] })));
+    const instance = await create({ tools });
+    try {
+      expect(instance.adapter.capabilities).toMatchObject({ computerMcp: tools !== false, localComputerMcp: tools !== false });
+    } finally { await instance.dispose(); }
+  });
+
   it("rejects invalid tools flags and non-TLS remote endpoints", () => {
     expect(() => MistralDriver.decodeConfig({ tools: "false" })).toThrow();
     expect(() => MistralDriver.decodeConfig({ url: "http://example.com/v1" })).toThrow("HTTPS");
@@ -24,6 +35,17 @@ describe("Mistral provider", () => {
     const instance = await MistralDriver.create({ instanceId: "empty", displayName: "Mistral", enabled: true,
       config: MistralDriver.defaultConfig(), environment: {} });
     expect(await instance.snapshot()).toMatchObject({ state: "unavailable", reason: expect.stringContaining("Mistral API key") });
+    expect(fetcher).not.toHaveBeenCalled();
+    await instance.dispose();
+  });
+
+  it("keeps the desktop store's workspace key away from an instance with its own URL", async () => {
+    vi.stubEnv("OMB_DESKTOP_PARENT", "1");
+    vi.stubEnv("MISTRAL_API_KEY", "fixture-workspace-key");
+    const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
+    const instance = await MistralDriver.create({ instanceId: "own-url", displayName: "Mine", enabled: true,
+      config: MistralDriver.decodeConfig({ url: "https://mine.example.test/v1" }), environment: {} });
+    expect(await instance.snapshot()).toMatchObject({ state: "unavailable" });
     expect(fetcher).not.toHaveBeenCalled();
     await instance.dispose();
   });
@@ -58,6 +80,57 @@ describe("Mistral provider", () => {
     expect(instance.models.default).toBe("private-finetune");
     expect(instance.models.options.map((row) => row.id)).toEqual(["private-finetune", "listed"]);
     await instance.dispose();
+  });
+
+  it("sends images on loopback only for catalog vision models and aliases, retaining flags after failed refreshes", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "mistral-images-"));
+    const path = join(directory, "input.png");
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jBv0AAAAASUVORK5CYII=";
+    writeFileSync(path, Buffer.from(png, "base64"));
+    const catalog = { data: [
+      { id: "vision", aliases: ["vision-latest"], capabilities: { completion_chat: true, vision: true } },
+      { id: "text", capabilities: { vision: false } }, { id: "unspecified" },
+    ] };
+    let data: unknown = catalog;
+    let request: RequestInit | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      if (String(url).endsWith("/models")) return Response.json(data);
+      request = init;
+      return new Response('data: {"choices":[{"delta":{"content":"Seen"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+        { headers: { "content-type": "text/event-stream" } });
+    }));
+    const instance = await create({ url: "http://127.0.0.1:1234/v1", model: "custom" });
+    try {
+      const cases = [
+        { data: catalog, model: "vision", sees: true },
+        { data: catalog, model: "vision-latest", sees: true },
+        { data: catalog, model: "text", sees: false },
+        { data: catalog, model: "unspecified", sees: false },
+        { data: catalog, model: "custom", sees: false },
+        { data: { error: "offline" }, model: "vision-latest", sees: true },
+        { data: { data: [] }, model: "vision", sees: true },
+        { data: { data: [{ id: "vision", aliases: ["vision-latest"], capabilities: { vision: false } }] }, model: "vision-latest", sees: false },
+      ];
+      for (const [index, entry] of cases.entries()) {
+        data = entry.data;
+        await instance.refreshModels?.();
+        const recorder = recordEvents(instance.adapter);
+        try {
+          await instance.adapter.sendTurn({ threadId: `image-${index}`, text: "Describe", model: entry.model,
+            images: [{ path, mime: "image/png", bytes: Buffer.from(png, "base64").length }] });
+          expect(await recorder.until(event => event.type === "turn.completed")).toMatchObject({ ok: true });
+          const body = JSON.parse(String(request?.body));
+          expect(body.model).toBe(entry.model);
+          expect(body.messages[0].content).toEqual(entry.sees ? [
+            { type: "text", text: "Describe" }, { type: "image_url", image_url: { url: `data:image/png;base64,${png}` } },
+          ] : expect.stringContaining("Describe\n\n"));
+          if (entry.sees) expect(request?.redirect).toBe("error");
+        } finally { recorder.stop(); }
+      }
+    } finally {
+      await instance.dispose();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it.each([undefined, true, false])("streams text and usage with only supported request fields (tools=%s)", async (tools) => {

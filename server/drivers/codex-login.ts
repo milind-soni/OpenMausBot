@@ -24,12 +24,25 @@ export function codexReportsLogin(said: string): boolean {
   return /^(?:logged in|api key configured)\b/im.test(said);
 }
 
-export function codexLoginStatus(cli: string, env: Env): Promise<"signed-in" | "signed-out" | "unknown"> {
+/** 0.160.1 says "Logged in using an API key - …", 0.165.0 "API key configured - …": a key, not a ChatGPT sign-in. */
+const API_KEY_LOGIN = /^(?:api key configured|logged in using an api key)\b/im;
+
+export type CodexLoginStatus = "signed-in" | "signed-out" | "unknown";
+
+/** `apiKey` is true for an API-key login, which `codex logout` as a ChatGPT sign-out cannot confirm. */
+export function readCodexLogin(cli: string, env: Env): Promise<{ status: CodexLoginStatus; apiKey: boolean }> {
   return new Promise((resolve) => execCli(cli, ["login", "status"], { timeout: 8000, env }, (err, stdout, stderr) => {
     const said = `${stdout}\n${stderr ?? ""}`;
-    resolve(!err && codexReportsLogin(said) ? "signed-in"
-      : err && /^(?:not logged in|error checking login status)\b/im.test(said) ? "signed-out" : "unknown");
+    const signedIn = !err && codexReportsLogin(said);
+    resolve({
+      status: signedIn ? "signed-in" : err && /^(?:not logged in|error checking login status)\b/im.test(said) ? "signed-out" : "unknown",
+      apiKey: signedIn && API_KEY_LOGIN.test(said),
+    });
   }));
+}
+
+export async function codexLoginStatus(cli: string, env: Env): Promise<CodexLoginStatus> {
+  return (await readCodexLogin(cli, env)).status;
 }
 
 /** Without a login Codex still runs a turn and fails only after a minute of reconnects. Only Codex's own "not

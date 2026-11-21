@@ -20,10 +20,16 @@
 # ...) and OpenMausBot's own state (~/.openmausbot) persist across container
 # restarts.
 #
-# A plain `docker run` of either image wants `--init --shm-size=512m`, as the
-# compose files set: the bots' browsers leave exited processes for an init to
-# collect, and Chrome needs shared memory (docs/browser-packaging.md, "Process
-# hygiene"). On Fly Machines (the Cloud home) Fly's own init is PID 1.
+# The bots' browsers, engines and shells leave exited processes for an init to
+# collect (docs/browser-packaging.md, "Process hygiene"). The server image
+# brings its own, tini, as its entrypoint: a container platform runs an image
+# with no `--init`, and Node as PID 1 waits only for its own children, so the
+# rest stay as zombies until the container's pids limit refuses every spawn.
+# The compose files' `init: true` on top of it is harmless. The Cloud home
+# image has the same entrypoint: a host that starts it with a plain
+# `docker run` gives it no init, and under Fly's own init tini collects as a
+# subreaper. Chrome keeps its shared memory out of a small /dev/shm by itself
+# (server/browser/chrome/shm.ts).
 
 FROM caddy:2.10.2 AS edge
 # Official Caddy carries a privileged-port file capability. The Cloud home's
@@ -58,8 +64,10 @@ COPY cloudflare/control-plane/package.json ./cloudflare/control-plane/package.js
 COPY scripts/install-git-hooks.mjs ./scripts/install-git-hooks.mjs
 RUN pnpm install --frozen-lockfile
 COPY . .
-# The Cloud home runs these as root, so nobody else may write them.
-RUN pnpm build:server && pnpm exec vite build && chmod -R go-w dist dist-server skills
+# The Cloud home runs these as root, so nobody else may write them. The web app's
+# build needs more heap than Node gives itself on a 4 GB server, where it ran out
+# of memory: a fixed limit, which such a server meets with swap (docs/deploy-vps.md).
+RUN pnpm build:server && NODE_OPTIONS=--max-old-space-size=6144 pnpm exec vite build && chmod -R go-w dist dist-server skills
 # The Data engine's native modules (server/data/engine.ts), staged like the
 # desktop app's extraResources for the image's CPU (amd64 -> x64, arm64), into
 # one tree the runtime stages copy. pnpm installed both CPUs' packages
@@ -72,9 +80,10 @@ RUN arch=x64 && if [ "$TARGETARCH" = arm64 ]; then arch=arm64; fi \
 FROM node:24-bookworm-slim AS runtime
 # Install Chrome's Bookworm libraries directly: agent-browser --with-deps
 # invokes sudo even as root, and this image deliberately does not ship sudo.
-# git + curl: agent CLIs shell out to git; curl backs the healthcheck
+# git + curl: agent CLIs shell out to git; curl backs the healthcheck. tini is
+# the server image's init, and what its launcher falls back to as PID 1.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates curl git \
+  && apt-get install -y --no-install-recommends ca-certificates curl git tini \
     libxcb-shm0 libx11-xcb1 libx11-6 libxcb1 libxext6 libxrandr2 \
     libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxi6 libgtk-3-0 \
     libpangocairo-1.0-0 libpango-1.0-0 libatk1.0-0 libcairo-gobject2 \
@@ -174,11 +183,27 @@ RUN if [ -n "$GROK_VERSION" ]; then \
 # Engine CLIs baked into the image (space-separated npm packages). The publish
 # job passes each one's current version, or names only and today's date as
 # ENGINES_CACHE_TAG when it cannot look them up. Build-time CLI caches must
-# not end up in the image or a customer's volume.
+# not end up in the image or a customer's volume. npm can leave out an engine's
+# platform package when its download fails and still succeed, and a Cloud's
+# /usr/local is read-only, so nobody can repair it there: each engine CLI must
+# start, else the install runs once more, else the build fails.
 ARG CLOUD_HOME_ENGINES="@anthropic-ai/claude-code @openai/codex"
 ARG ENGINES_CACHE_TAG=""
 RUN echo "engines: ${CLOUD_HOME_ENGINES:-none} ${ENGINES_CACHE_TAG}" \
-  && if [ -n "$CLOUD_HOME_ENGINES" ]; then HOME=/tmp/omb-build-home npm install -g $CLOUD_HOME_ENGINES; fi \
+  && engines_start() { \
+       for package in $CLOUD_HOME_ENGINES; do \
+         case "$package" in \
+           @anthropic-ai/claude-code|@anthropic-ai/claude-code@*) cli=claude ;; \
+           @openai/codex|@openai/codex@*) cli=codex ;; \
+           *) continue ;; \
+         esac; \
+         HOME=/tmp/omb-build-home "$cli" --version || { echo "$package installed, but $cli does not start" >&2; return 1; }; \
+       done; \
+     } \
+  && if [ -n "$CLOUD_HOME_ENGINES" ]; then \
+       HOME=/tmp/omb-build-home npm install -g $CLOUD_HOME_ENGINES \
+       && { engines_start || { HOME=/tmp/omb-build-home npm install -g $CLOUD_HOME_ENGINES && engines_start; }; }; \
+     fi \
   && rm -rf /tmp/omb-build-home /tmp/node-compile-cache
 COPY deploy/fly/Caddyfile deploy/fly/Caddyfile.tls deploy/fly/Caddyfile.tunnel deploy/fly/edge-routes.caddy /app/cloud/
 # The root supervisor runs /app's code and hands the server its secrets, so
@@ -197,6 +222,7 @@ RUN export HOME=/tmp/omb-build-home \
  && cloudflared version \
  && OMB_CLOUD_PUBLIC_HOST=validate.fly.dev caddy validate --config /app/cloud/Caddyfile --adapter caddyfile \
  && OMB_CLOUD_PUBLIC_HOST=validate.example.com OMB_CLOUD_EDGE_STORAGE=/tmp/omb-build-home/edge caddy validate --config /app/cloud/Caddyfile.tls --adapter caddyfile \
+ && OMB_CLOUD_PUBLIC_HOST=validate.example.com OMB_CLOUD_EDGE_STORAGE=/tmp/omb-build-home/edge OMB_CLOUD_EDGE_CERT_ISSUERS="$(OMB_CLOUD_EDGE_ACME_EMAIL=validate@example.com node --input-type=module -e 'import { edgeCertIssuers } from "/app/dist-server/cloud-home-start.js"; process.stdout.write(edgeCertIssuers(process.env));')" caddy validate --config /app/cloud/Caddyfile.tls --adapter caddyfile \
  && OMB_CLOUD_PUBLIC_HOST=validate.example.com caddy validate --config /app/cloud/Caddyfile.tunnel --adapter caddyfile \
  && test -f /app/dist-server/cloud-home-start.js \
  && untrusted="$(find /app /usr/local/bin/caddy /usr/local/bin/cloudflared \( ! -user root -o ! -type l -perm /022 \) -print)" \
@@ -213,6 +239,12 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=5 \
 # environment `maus` could read (server/cloud-home-start.ts). It runs only
 # root's code from the image, never anything on the volume.
 USER root
+# tini is PID 1 where the host gives the container no init, and collects the
+# orphans of everything beneath it: the server's, the edge's and the bots'.
+# It passes signals on to the supervisor and exits with its code. -s: under
+# Fly's init, or `docker run --init`, it is not PID 1 and collects as a
+# subreaper instead of warning.
+ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "/app/dist-server/cloud-home-start.js"]
 
 # The self-hosted server, last so a plain `docker build .` builds it.
@@ -235,4 +267,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 # The launcher runs dist-server/index.js and starts it again when it asks to
 # (a copied workspace committing, server/restart.ts), so the container, and a
 # Caddy sharing its network, stays up through that restart.
+# -s: under `docker run --init` or compose's `init: true` tini is not PID 1,
+# and collects the server's orphans as a subreaper instead of warning.
+ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
 CMD ["node", "dist-server/server-launcher.js"]

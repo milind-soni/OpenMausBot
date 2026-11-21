@@ -3,10 +3,11 @@ import { useRef, useState } from "react";
 import { threadsOnOwnModel } from "../../shared/thread-model";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
+import { useStoreDispatch } from "@/state/store-select";
 
 export function ThreadModelsLine({ bot, className }: { bot: Bot; className?: string }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [busy, setBusy] = useState(0);
   const latestRequest = useRef(0);
   const count = threadsOnOwnModel(bot.modelSelection, bot.tasks ?? []).length;

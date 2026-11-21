@@ -31,4 +31,17 @@ describe("the people a Team Cloud bot can report to", () => {
     reread.seen("bob@acme.test", "member");
     expect([reread.has("bob@acme.test"), reread.gone("bob@acme.test")]).toEqual([true, false]);
   });
+
+  it("say who joined, changed role or left, not each pairing", () => {
+    const people = createTeamPeople(dir());
+    const changes: string[] = [];
+    people.onChange((email, change) => changes.push(`${email} ${change}`));
+    people.seen("ada@acme.test", "member");
+    people.seen("ada@acme.test", "member");
+    people.seen("ada@acme.test", "admin");
+    people.left("ada@acme.test");
+    people.left("ada@acme.test");
+    people.seen("ada@acme.test", "admin");
+    expect(changes).toEqual(["ada@acme.test joined", "ada@acme.test role", "ada@acme.test left", "ada@acme.test joined"]);
+  });
 });

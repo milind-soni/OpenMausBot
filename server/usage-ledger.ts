@@ -1,6 +1,6 @@
 // Append-only usage rows under <data>/usage/ (0600): bookkeeping never fails the turn, and rows never carry message text.
 import { personOf } from "./usage-attribution.ts";
-import { readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { TraceParent, TraceStatus, TraceUsageStatus } from "../shared/usage-trace.ts";
@@ -56,6 +56,10 @@ export interface UsageRow {
 export type UsageGroupBy = "bot" | "model" | "user" | "day" | "engine" | "routine" | "department";
 export const USAGE_GROUPINGS: readonly UsageGroupBy[] = ["bot", "model", "user", "day", "engine", "routine", "department"];
 
+/** The dimensions a group can be broken down by inside one bar; each has few enough values to stack. */
+export type UsageSplitBy = "model";
+export const USAGE_SPLITS: readonly UsageSplitBy[] = ["model"];
+
 export interface UsageGroup {
   key: string;
   label: string;
@@ -67,6 +71,10 @@ export interface UsageGroup {
   estimatedUsd: number | null;
   unpriced: number;
   billableUsd: number | null;
+  /** The additive tokens the bar shows: fresh input plus output, summed row by row. */
+  barTokens?: number;
+  /** The group broken down by the requested split, largest first. */
+  segments?: UsageGroup[];
 }
 
 export interface UsageSummary {
@@ -134,7 +142,12 @@ export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: 
 
 async function write(dataDir: string, record: UsageRow): Promise<void> {
   await mkdir(join(dataDir, DIR), { recursive: true, mode: 0o700 });
-  await appendFile(usageFileFor(dataDir, new Date(record.at)), JSON.stringify(record) + "\n", { mode: 0o600 });
+  const file = usageFileFor(dataDir, new Date(record.at));
+  try {
+    await appendFile(file, JSON.stringify(record) + "\n", { mode: 0o600 });
+  } finally {
+    parsedFiles.delete(file);
+  }
 }
 
 export async function flushUsageLedger(dataDir: string): Promise<void> {
@@ -164,26 +177,63 @@ export function monthsBetween(from: Date, to: Date): string[] {
   return keys;
 }
 
+interface ParsedFile { stamp: string; rows: Array<{ at: number; row: UsageRow }> }
+/** A month file's rows as last parsed, kept while the file's stamp stays the same. A year of months for two data folders. */
+const parsedFiles = new Map<string, ParsedFile>();
+const PARSED_FILES_KEPT = 26;
+let parses = 0;
+/** How many times a month file has been parsed in this process. */
+export const usageLedgerParses = (): number => parses;
+
+function parseMonth(text: string): ParsedFile["rows"] {
+  const rows: ParsedFile["rows"] = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    try {
+      const value: unknown = JSON.parse(line);
+      if (isUsageRow(value)) rows.push({ at: Date.parse(value.at), row: value });
+    } catch {
+    }
+  }
+  return rows;
+}
+
+/** The file's valid rows in file order, parsed again only when its size, times or identity changed. Callers share the
+ * row objects and must not change them. */
+function monthRows(file: string): ParsedFile["rows"] {
+  let fd: number;
+  try {
+    fd = openSync(file, "r");
+  } catch {
+    parsedFiles.delete(file);
+    return [];
+  }
+  try {
+    const stat = fstatSync(fd);
+    const stamp = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
+    const held = parsedFiles.get(file);
+    if (held?.stamp === stamp) return held.rows;
+    const rows = parseMonth(readFileSync(fd, "utf8"));
+    parses += 1;
+    parsedFiles.delete(file);
+    parsedFiles.set(file, { stamp, rows });
+    if (parsedFiles.size > PARSED_FILES_KEPT) parsedFiles.delete(parsedFiles.keys().next().value!);
+    return rows;
+  } catch {
+    parsedFiles.delete(file);
+    return [];
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function readUsage(dataDir: string, range: { from: Date; to: Date }): UsageRow[] {
   const rows: UsageRow[] = [];
   const from = range.from.getTime();
   const to = range.to.getTime();
   for (const key of monthsBetween(range.from, range.to)) {
-    let text: string;
-    try {
-      text = readFileSync(join(dataDir, DIR, `${key}.jsonl`), "utf8");
-    } catch {
-      continue;
-    }
-    for (const line of text.split("\n")) {
-      if (!line) continue;
-      try {
-        const value: unknown = JSON.parse(line);
-        if (!isUsageRow(value)) continue;
-        const at = Date.parse(value.at);
-        if (at >= from && at <= to) rows.push(value);
-      } catch {
-      }
+    for (const { at, row } of monthRows(join(dataDir, DIR, `${key}.jsonl`))) {
+      if (at >= from && at <= to) rows.push(row);
     }
   }
   return rows;
@@ -217,6 +267,10 @@ export function queuedTurnTrigger(item: { trigger?: UsageTrigger; sender?: Resol
   return item.sender ? { kind: "user", label: item.sender.name } : { kind: "owner" };
 }
 
+/** On a Team Cloud, every routine in someone else's private chat as anyone else reads it (host/private-records.ts): one
+ * line with no name and no id. */
+export const PRIVATE_ROUTINE = { routineId: "private", label: "Private routine" } as const;
+
 export function triggerKey(trigger: UsageTrigger): string {
   switch (trigger.kind) {
     case "user":
@@ -239,7 +293,7 @@ export function triggerLabel(trigger: UsageTrigger): string {
     case "owner":
       return "This computer";
     case "routine":
-      return `Routine: ${trigger.label ?? trigger.routineId ?? "unknown"}`;
+      return trigger.routineId === PRIVATE_ROUTINE.routineId ? PRIVATE_ROUTINE.label : `Routine: ${trigger.label ?? trigger.routineId ?? "unknown"}`;
     case "helper":
       return "Helper model";
     default:
@@ -247,7 +301,7 @@ export function triggerLabel(trigger: UsageTrigger): string {
   }
 }
 
-function groupOf(row: UsageRow, groupBy: UsageGroupBy): { key: string; label: string } {
+export function usageGroupOf(row: UsageRow, groupBy: UsageGroupBy): { key: string; label: string } {
   switch (groupBy) {
     case "bot":
       return { key: `bot:${row.botId}`, label: row.botName || row.botId };
@@ -272,8 +326,9 @@ function groupOf(row: UsageRow, groupBy: UsageGroupBy): { key: string; label: st
   }
 }
 
+/** An empty group before any ledger row is booked into it. */
 function emptyGroup(key: string, label: string): UsageGroup {
-  return { key, label, turns: 0, input: 0, output: 0, cachedInput: 0, costUsd: null, estimatedUsd: null, unpriced: 0, billableUsd: null };
+  return { key, label, turns: 0, input: 0, output: 0, cachedInput: 0, costUsd: null, estimatedUsd: null, unpriced: 0, billableUsd: null, barTokens: 0 };
 }
 
 export function costSourceOf(row: Pick<UsageRow, "costUsd" | "costSource">): CostSource | null {
@@ -281,11 +336,16 @@ export function costSourceOf(row: Pick<UsageRow, "costUsd" | "costSource">): Cos
   return row.costSource === "estimated" ? "estimated" : "reported";
 }
 
+/** Books one row into a group, keeping its raw aggregates and its additive bar total. */
 function add(group: UsageGroup, row: UsageRow, prices: PriceList | null): void {
+  const input = clean(row.input);
+  const output = clean(row.output);
+  const cachedInput = clean(row.cachedInput);
   group.turns += 1;
-  group.input += clean(row.input);
-  group.output += clean(row.output);
-  group.cachedInput += clean(row.cachedInput);
+  group.input += input;
+  group.output += output;
+  group.cachedInput += cachedInput;
+  group.barTokens = (group.barTokens ?? 0) + Math.max(0, input - Math.min(cachedInput, input)) + output;
   const cost = finiteOrNull(row.costUsd);
   if (cost === null) group.unpriced += 1;
   else {
@@ -296,11 +356,24 @@ function add(group: UsageGroup, row: UsageRow, prices: PriceList | null): void {
   if (billable !== null) group.billableUsd = (group.billableUsd ?? 0) + billable;
 }
 
-export function summarizeUsage(rows: UsageRow[], groupBy: UsageGroupBy, prices: PriceList | null = null): UsageSummary {
+/** The tokens a bar shows: the row-by-row sum when the ledger has it, or the old aggregate for older callers. */
+function barTokensOf(group: UsageGroup): number {
+  return group.barTokens ?? Math.max(0, group.input - Math.min(group.cachedInput, group.input)) + group.output;
+}
+
+/** Groups ledger rows by `groupBy`; when `splitBy` differs, each group also carries its pieces, largest first. */
+export function summarizeUsage(
+  rows: UsageRow[],
+  groupBy: UsageGroupBy,
+  prices: PriceList | null = null,
+  splitBy: UsageSplitBy | null = null,
+): UsageSummary {
   const groups = new Map<string, UsageGroup>();
   const total = emptyGroup("total", "total");
+  const splits = new Map<string, Map<string, UsageGroup>>();
+  const split = splitBy && splitBy !== groupBy ? splitBy : null;
   for (const row of rows) {
-    const { key, label } = groupOf(row, groupBy);
+    const { key, label } = usageGroupOf(row, groupBy);
     let group = groups.get(key);
     if (!group) {
       group = emptyGroup(key, label);
@@ -308,6 +381,22 @@ export function summarizeUsage(rows: UsageRow[], groupBy: UsageGroupBy, prices: 
     }
     add(group, row, prices);
     add(total, row, prices);
+    if (!split) continue;
+    let inside = splits.get(key);
+    if (!inside) {
+      inside = new Map();
+      splits.set(key, inside);
+    }
+    const pieceOf = usageGroupOf(row, split);
+    let piece = inside.get(pieceOf.key);
+    if (!piece) {
+      piece = emptyGroup(pieceOf.key, pieceOf.label);
+      inside.set(pieceOf.key, piece);
+    }
+    add(piece, row, prices);
+  }
+  for (const [key, inside] of splits) {
+    groups.get(key)!.segments = [...inside.values()].sort((a, b) => barTokensOf(b) - barTokensOf(a));
   }
   const ordered = [...groups.values()];
   if (groupBy === "day") ordered.sort((a, b) => a.key.localeCompare(b.key));

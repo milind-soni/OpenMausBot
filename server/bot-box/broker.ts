@@ -8,6 +8,9 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import { request as httpsRequest } from "node:https";
 import type { Socket } from "node:net";
 
+import { MAX_REFUSABLE_CALL_BYTES, refusedCallAnswer } from "./broker-mcp-refusal.ts";
+import type { McpServerApp } from "../mcp-server-app.ts";
+
 export const BROKER_TOKEN_PREFIX = "omb_t0_";
 /** A token minted for a process lives this long at most; the process's exit ends it sooner. */
 export const BROKER_PROCESS_TTL_MS = 24 * 60 * 60_000;
@@ -21,6 +24,10 @@ export interface BrokerGrant {
   upstream: string;
   /** Headers the broker adds (the real key); the same names from the client are dropped. */
   headers: Record<string, string>;
+  /** On an MCP server's grant for a turn: its name, so a tool call it refuses with HTTP 401 is answered in words (broker-mcp-refusal.ts). */
+  mcpServer?: string;
+  /** With `mcpServer`: the connected app that refusal points the bot to instead. */
+  mcpApp?: McpServerApp;
 }
 
 export interface BrokerToken {
@@ -94,7 +101,7 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
     for (const name of Object.keys(input.grants)) if (!GRANT.test(name)) throw new Error(`Not a grant name: ${name.slice(0, 40)}`);
     const token = `${BROKER_TOKEN_PREFIX}${randomBytes(24).toString("hex")}`;
     const expiresAt = now() + (input.ttlMs ?? (bound === "process" ? BROKER_PROCESS_TTL_MS : BROKER_THREAD_TTL_MS));
-    const grants = Object.fromEntries(Object.entries(input.grants).map(([name, grant]) => [name, { upstream: grant.upstream, headers: { ...grant.headers } }]));
+    const grants = Object.fromEntries(Object.entries(input.grants).map(([name, grant]) => [name, { upstream: grant.upstream, headers: { ...grant.headers }, ...(grant.mcpServer ? { mcpServer: grant.mcpServer } : {}), ...(grant.mcpApp ? { mcpApp: { ...grant.mcpApp } } : {}) }]));
     tokens.set(hashToken(token).toString("hex"), { hash: hashToken(token), botId: input.botId ?? null, threadId: input.threadId ?? null, expiresAt, grants, bound });
     return { token, botId: input.botId ?? null, threadId: input.threadId ?? null, expiresAt, grants };
   };
@@ -124,11 +131,26 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
     for (const [name, value] of Object.entries(verdict.grant.headers)) headers[name.toLowerCase()] = value;
     headers.host = upstream.host;
     const send = requestFn ?? (upstream.protocol === "https:" ? httpsRequest : httpRequest);
-    const forwarded = send({ protocol: upstream.protocol, host: upstream.hostname, port: upstream.port || (upstream.protocol === "https:" ? 443 : 80), method: req.method, path: `${upstream.pathname}${upstream.search}`, headers }, (answer) => {
+    const relay = (answer: IncomingMessage) => {
       const out: Record<string, string | string[]> = {};
       for (const [name, value] of Object.entries(answer.headers)) if (value !== undefined && !HOP_BY_HOP.has(name)) out[name] = value;
       res.writeHead(answer.statusCode ?? 502, out);
       answer.pipe(res);
+    };
+    const mcpServer = req.method === "POST" ? verdict.grant.mcpServer : undefined;
+    const sent: Buffer[] = [];
+    let sentBytes = 0;
+    if (mcpServer) req.on("data", (chunk: Buffer) => { sentBytes += chunk.length; if (sentBytes <= MAX_REFUSABLE_CALL_BYTES) sent.push(chunk); });
+    const forwarded = send({ protocol: upstream.protocol, host: upstream.hostname, port: upstream.port || (upstream.protocol === "https:" ? 443 : 80), method: req.method, path: `${upstream.pathname}${upstream.search}`, headers }, (answer) => {
+      if (!mcpServer || answer.statusCode !== 401) return relay(answer);
+      const decide = () => {
+        const sentCredentials = Object.values(verdict.grant.headers).some((value) => value !== "");
+        const refusal = sentBytes <= MAX_REFUSABLE_CALL_BYTES ? refusedCallAnswer(mcpServer, sentCredentials, Buffer.concat(sent).toString("utf8"), verdict.grant.mcpApp) : null;
+        if (refusal === null) return relay(answer);
+        answer.resume();
+        res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" }).end(refusal);
+      };
+      if (req.readableEnded) decide(); else req.once("end", decide);
     });
     stats.forwarded += 1;
     forwarded.on("error", () => { if (!res.headersSent) res.writeHead(502, { "content-type": "application/json" }).end(JSON.stringify({ error: "upstream_unreachable" })); else res.destroy(); });

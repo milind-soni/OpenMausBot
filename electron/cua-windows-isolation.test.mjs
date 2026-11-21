@@ -10,7 +10,9 @@ vi.mock("electron", () => ({
 }));
 vi.mock("@trycua/cua-driver/embedded", () => ({
   EmbeddedCuaDriverHost: class {
-    constructor(binary, bundleId) { this.binary = binary; this.bundleId = bundleId; fixture.hosts.push(this); }
+    constructor(options) { this.binary = options.binaryPath; this.bundleId = options.hostBundleId; this.options = options; fixture.hosts.push(this); }
+    static withOptions(options) { return new this(options); }
+    waitForExit() { return new Promise(() => {}); }
     start(options) { return fixture.start(options); }
     stop = vi.fn(async () => {});
     uniffiDestroy = vi.fn();

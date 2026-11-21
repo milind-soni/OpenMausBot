@@ -10,6 +10,7 @@ export function signedOutHint(services: readonly string[]): string {
   const target = services.length ? `with toolkits ${JSON.stringify(services)}` : "for that app";
   return `OpenMausBot note: ${apps} is signed out (its sign-in expired or was revoked), so this call did not run. ` +
     `Call COMPOSIO_MANAGE_CONNECTIONS ${target} to show the person a card that reconnects it, then end this turn. ` +
+    "If no card can be shown, tell the person to open Connected apps, go to the Connected tab and choose Reconnect on the app. " +
     "Do not retry this call before they reconnect.";
 }
 

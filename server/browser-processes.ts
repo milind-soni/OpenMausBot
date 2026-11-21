@@ -96,10 +96,7 @@ async function processEnvironment(pid: number): Promise<Map<string, string> | nu
     if (listing === null) return null;
     entries = listing.trim().split(/\s+/);
   }
-  return new Map(entries.flatMap((entry) => {
-    const match = /^([A-Z_][A-Z0-9_]*)=(.*)$/.exec(entry);
-    return match ? [[match[1]!, match[2]!] as const] : [];
-  }));
+  return environmentEntries(entries);
 }
 
 async function imageOf(pid: number): Promise<string | null> {
@@ -107,21 +104,44 @@ async function imageOf(pid: number): Promise<string | null> {
   return row === null ? null : /^"([^"]*)"/.exec(row.trim())?.[1]?.toLowerCase() ?? "";
 }
 
-/** agent-browser starts a daemon through the binary's resolved path with AGENT_BROWSER_DAEMON=1 and the session's name, so a
- * pid now running another program, command or session is not it. Read before the close: afterwards Chrome is re-parented. */
-export async function browserProcessTree(binaryPath: string, daemon: number, session: string): Promise<BrowserProcessTree | null> {
-  if (!Number.isInteger(daemon) || daemon <= 1 || daemon === process.pid || !processAlive(daemon)) return null;
+/** The paths a daemon of `binaryPath` runs as: the path given and, where it resolves elsewhere, the resolved one. */
+export function daemonPaths(binaryPath: string): Set<string> {
   const paths = new Set([binaryPath]);
   try { paths.add(realpathSync(binaryPath)); } catch {}
+  return paths;
+}
+
+/** agent-browser starts a daemon through the binary's resolved path with AGENT_BROWSER_DAEMON=1 and the session's name, so a
+ * pid now running another program, command or session is not it. Unread arguments or environment: not it. */
+export function isBrowserDaemon(paths: ReadonlySet<string>, command: string | null, env: ReadonlyMap<string, string> | null, session: string): boolean {
+  if (!command || ![...paths].some((path) => command === path || command.startsWith(`${path} `))) return false;
+  return env?.get("AGENT_BROWSER_DAEMON") === "1" && env.get("AGENT_BROWSER_SESSION") === session;
+}
+
+/** An environment as /proc/<pid>/environ or `ps -E` lists it: NAME=value entries. */
+export function environmentEntries(entries: readonly string[]): Map<string, string> {
+  return new Map(entries.flatMap((entry) => {
+    const match = /^([A-Z_][A-Z0-9_]*)=(.*)$/.exec(entry);
+    return match ? [[match[1]!, match[2]!] as const] : [];
+  }));
+}
+
+/** Whether `daemon` runs agent-browser's daemon for `session` now (POSIX): its arguments and environment are read again. */
+export async function browserDaemonRuns(binaryPath: string, daemon: number, session: string): Promise<boolean> {
+  if (process.platform === "win32" || !Number.isInteger(daemon) || daemon <= 1 || daemon === process.pid || !processAlive(daemon)) return false;
+  return isBrowserDaemon(daemonPaths(binaryPath), await processArgs(daemon), await processEnvironment(daemon), session);
+}
+
+/** Read before the close: afterwards Chrome is re-parented. */
+export async function browserProcessTree(binaryPath: string, daemon: number, session: string): Promise<BrowserProcessTree | null> {
+  if (!Number.isInteger(daemon) || daemon <= 1 || daemon === process.pid || !processAlive(daemon)) return null;
+  const paths = daemonPaths(binaryPath);
   if (process.platform === "win32") {
     // Windows shows no environments, trees or start times: the image tells the daemon from a later program, and taskkill /T walks the tree.
     const image = await imageOf(daemon);
     return image && [...paths].some((path) => basename(path).toLowerCase() === image) ? { daemon, members: new Map([[daemon, ""]]), groups: [], image } : null;
   }
-  const command = await processArgs(daemon);
-  if (!command || ![...paths].some((path) => command === path || command.startsWith(`${path} `))) return null;
-  const env = await processEnvironment(daemon);
-  if (env?.get("AGENT_BROWSER_DAEMON") !== "1" || env.get("AGENT_BROWSER_SESSION") !== session) return null;
+  if (!isBrowserDaemon(paths, await processArgs(daemon), await processEnvironment(daemon), session)) return null;
   const table = await processTable();
   if (!table?.has(daemon)) return null;
   const children = new Map<number, number[]>();
@@ -187,6 +207,23 @@ async function daemonOf(pid: number, table: Map<number, ListedProcess>): Promise
     if ((await processEnvironment(parent))?.get("AGENT_BROWSER_DAEMON") === "1") return parent;
   }
   return null;
+}
+
+export async function browserProfileProcessTrees(dir: string | undefined, binaryPath: string, session: string): Promise<BrowserProcessTree[] | null> {
+  if (!dir || process.platform === "win32") return [];
+  const table = await processTable(true);
+  if (!table) return null;
+  const daemons = new Set<number>();
+  const trees: BrowserProcessTree[] = [];
+  for (const [pid, entry] of table) {
+    if (entry.zombie || !namesProfile(entry.args ?? "", dir) || /(?:^|\s)--type=/.test(entry.args ?? "")) continue;
+    const daemon = await daemonOf(pid, table);
+    if (daemon === null || daemons.has(daemon)) continue;
+    daemons.add(daemon);
+    const tree = await browserProcessTree(binaryPath, daemon, session);
+    if (tree) trees.push(tree);
+  }
+  return trees;
 }
 
 /** POSIX Chrome locks its profile with a SingletonLock symlink to `<host>-<pid>`. A later launch on the profile hands itself

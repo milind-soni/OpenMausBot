@@ -22,8 +22,10 @@ export interface DirectSendInput {
   followUp?: FollowUp;
   /** Bot ids the person picked from the @ list. */
   mentions?: string[];
+  /** The sender is the team's Owner or an Admin, so a typed stop may end someone else's run. */
+  admin?: boolean;
 }
 
 export type DirectSendReceipt =
   | { ok: true; threadId: string; message: Message; steered?: true }
-  | { ok: true; queued: true; queueId: string; threadId: string; reason?: SteerQueueReason; why?: string };
+  | { ok: true; queued: true; queueId: string; threadId: string; reason?: SteerQueueReason; why?: string; blockedBy?: "images" };

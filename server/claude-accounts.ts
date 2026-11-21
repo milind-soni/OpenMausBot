@@ -23,6 +23,10 @@ export const instanceSettingsSchema = z.object({
   replyWaitMinutes: z.number().int().min(1).max(60).nullable().optional(),
   /** An added OpenAI-compatible server's model IDs; [] goes back to its /models list. */
   models: addEndpointSchema.shape.models,
+  /** An added OpenAI-compatible server's base URL, changed in place. */
+  url: addEndpointSchema.shape.url.optional(),
+  /** Its new API key; omitted keeps the saved one, unless the URL's host changes. */
+  apiKey: addEndpointSchema.shape.key.optional(),
 }).strict().refine((value) => Object.keys(value).length > 0, "No settings supplied");
 
 function rawConfig(entry: InstanceConfig): Record<string, unknown> {

@@ -94,6 +94,35 @@ afterEach(() => {
 });
 
 describe("a bot's conversations in its panel", () => {
+  it("offers the public web conversation link alongside the app link and copies its exact address", async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const previous = fixture.api.getMockImplementation()!;
+    fixture.api.mockImplementation((path: string) => path === "/api/settings/custom-domain"
+      ? Promise.resolve({ publicUrl: "https://chat.example/" }) : previous(path));
+    try {
+      render(research());
+      click(host.querySelector('[aria-label="Actions for Translate the launch post"]'));
+      await vi.waitFor(() => expect(document.querySelector("[data-thread-overlay]")?.textContent).toContain("Copy link (HTTPS)"));
+      const buttons = [...document.querySelector("[data-thread-overlay]")!.querySelectorAll("button")];
+      expect(buttons.some((button) => button.textContent === "Copy link")).toBe(true);
+      click(buttons.find((button) => button.textContent === "Copy link (HTTPS)")!);
+      expect(writeText).toHaveBeenCalledWith("https://chat.example/?thread=launch&bot=research");
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it("keeps the app link available when the public-address request fails", async () => {
+    const previous = fixture.api.getMockImplementation()!;
+    fixture.api.mockImplementation((path: string) => path === "/api/settings/custom-domain"
+      ? Promise.reject(new Error("not permitted")) : previous(path));
+    render(research());
+    click(host.querySelector('[aria-label="Actions for Translate the launch post"]'));
+    await Promise.resolve();
+    const menu = document.querySelector("[data-thread-overlay]")!;
+    expect([...menu.querySelectorAll("button")].some((button) => button.textContent === "Copy link")).toBe(true);
+    expect(menu.textContent).not.toContain("Copy link (HTTPS)");
+  });
+
   it("lists three, newest first, with the open one marked, and Show N more opens the rest", () => {
     render(research());
     expect(CONVERSATIONS_SHOWN).toBe(3);
@@ -114,6 +143,13 @@ describe("a bot's conversations in its panel", () => {
   it("keeps the open conversation listed when it is older than the first three", () => {
     render(research({ threadId: "gift", messages: [] }));
     expect(listed()).toEqual(["hiring", "launch", "who", "gift"]);
+    expect(more()!.textContent).toBe("Show 6 more");
+  });
+
+  it("keeps the main thread listed, with its star, when it is older than the first three", () => {
+    render(research({ mainThreadId: "gift" }));
+    expect(listed()).toEqual(["hiring", "launch", "who", "gift"]);
+    expect(row("gift").querySelector('[aria-label="Main thread"]')).not.toBeNull();
     expect(more()!.textContent).toBe("Show 6 more");
   });
 
@@ -156,6 +192,19 @@ describe("a bot's conversations in its panel", () => {
     click(more());
     expect(row("pricing").querySelector("[data-thread-working]")!.textContent).toMatch(/^Working·1m 1[23]s$/);
     expect(host.querySelectorAll("[data-thread-working]")).toHaveLength(1);
+  });
+
+  it("marks the bot's main thread with the same star as the sidebar's thread list, and no other row", () => {
+    render(research({ mainThreadId: "launch" }));
+    const star = row("launch").querySelector('[role="img"][aria-label="Main thread"]');
+    expect(star?.getAttribute("title")).toBe("Main thread");
+    expect(star?.querySelector("svg")).not.toBeNull();
+    expect(row("who").querySelector('[aria-label="Main thread"]')).toBeNull();
+    render(research({ mainThreadId: "who" }));
+    expect(row("who").querySelector('[aria-label="Main thread"]')).not.toBeNull();
+    expect(row("launch").querySelector('[aria-label="Main thread"]')).toBeNull();
+    render(research());
+    expect(host.querySelector('[aria-label="Main thread"]')).toBeNull();
   });
 
   it("shows each listed conversation's last line, fetching only the listed ones that are not open", async () => {

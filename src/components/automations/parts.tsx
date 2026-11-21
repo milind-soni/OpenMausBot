@@ -1,10 +1,10 @@
 import { Check, TriangleAlert } from "lucide-react";
 
-import { AUTOMATION_FIX_LABEL, type Automation, type AutomationStatus } from "@/lib/automations";
+import { AUTOMATION_FIX_LABEL, runAwaitingAnswer, type Automation, type AutomationStatus } from "@/lib/automations";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { useStore } from "@/state/store";
 import type { useAllAutomationActions } from "./app-actions";
+import { useStoreDispatch } from "@/state/store-select";
 
 /** A coloured dot for Working and Paused; a warning sign for Needs you; a quiet check for Done. */
 export function StatusMark({ status, className }: { status: AutomationStatus; className?: string }) {
@@ -21,10 +21,10 @@ export function FixButton({ automation, status, actions, onEdit, className }: {
   onEdit: () => void;
   className?: string;
 }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   if (status.state !== "needs-you" || !status.fix) return null;
   const fix = status.fix;
-  const waiting = fix === "answer" ? automation.runs.find((run) => run.status === "waiting") : undefined;
+  const waiting = fix === "answer" ? runAwaitingAnswer(automation.runs) : undefined;
   const onClick = () => {
     if (fix === "answer") actions.openRun(automation, waiting);
     else if (fix === "sign-in") actions.openRun(automation, automation.runs.find((run) => run.status !== "queued"));

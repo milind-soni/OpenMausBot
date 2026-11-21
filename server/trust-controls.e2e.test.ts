@@ -1,12 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchVerificationServer, verificationServerEnvironment, type VerificationServer } from "../scripts/control-omb.ts";
 import { SessionRegistry } from "./sessions.ts";
 import { waitForExit } from "./testing/cleanup.ts";
+import { readRegistry, writeRegistry } from "./testing/registry.ts";
 
 const key = "isolated-trust-capability";
 let fixture: VerificationServer;
@@ -19,9 +20,12 @@ let draftBot: any;
 let draftHelper: any;
 let outboundPolicyBot: any;
 let noRuleBot: any;
+let sandboxBot: any;
 const gmailDrafts = new Map<string, Record<string, unknown>>();
 let brokerOrigin = "";
 const relayed: unknown[] = [];
+/** Files put to the fixture's upload links: what a connected-app call's local file sent to Composio's storage. */
+const uploads: Array<{ request: unknown; bytes?: string }> = [];
 const evidence: unknown[] = [];
 let blockSession: (() => void) | undefined;
 let sessionEntered = false;
@@ -64,8 +68,17 @@ beforeAll(async () => {
   broker = createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
+    const put = req.method === "PUT" ? /^\/upload\/(\d+)$/.exec(req.url ?? "") : null;
+    if (put) {
+      uploads[Number(put[1]) - 1]!.bytes = raw;
+      return res.end();
+    }
     const body = raw ? JSON.parse(raw) : {};
     res.setHeader("content-type", "application/json");
+    if (req.url === "/api/files/upload/request") {
+      uploads.push({ request: body });
+      return res.end(JSON.stringify({ key: `fixture-files/${uploads.length}`, new_presigned_url: `${brokerOrigin}/upload/${uploads.length}` }));
+    }
     if (req.url === "/v1/connectors/connected") return res.end(JSON.stringify({ services: { gmail: { connected: true }, slack: { connected: true } } }));
     if (req.url === "/api/tool_router/session/fixture-session") {
       if (blockSession) {
@@ -73,7 +86,7 @@ beforeAll(async () => {
         await new Promise<void>(resolve => { blockSession = resolve; });
       }
       return res.end(JSON.stringify({ session_id: "fixture-session", mcp: { type: "http", url: brokerOrigin + "/mcp" },
-        config: { user_id: "fixture-user", multi_account: { enable: true, max_accounts_per_toolkit: 5, require_explicit_selection: true } } }));
+        config: { user_id: "fixture-user", multi_account: { enable: true, max_accounts_per_toolkit: 10, require_explicit_selection: true } } }));
     }
     if (req.url === "/mcp") {
       relayed.push(body);
@@ -112,18 +125,20 @@ beforeAll(async () => {
   const noRuleCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full no sending rule fixture" }) });
   expect(noRuleCreated.status).toBe(201);
   noRuleBot = (await noRuleCreated.json() as any).bot;
+  const sandboxCreated = await fetch(fixture.info.url + "/api/bots", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "Full sandbox fixture" }) });
+  expect(sandboxCreated.status).toBe(201);
+  sandboxBot = (await sandboxCreated.json() as any).bot;
   await waitForExit(fixture.child, { signal: "SIGTERM" });
-  const botsFile = join(fixture.info.dataDir, "bots.json");
-  const bots = JSON.parse(readFileSync(botsFile, "utf8"));
+  const bots = readRegistry(fixture.info.dataDir).bots;
   const saved = bots.find((row: any) => row.id === fullBot.id);
-  for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot, noRuleBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
+  for (const full of [saved, ...[draftBot, draftHelper, outboundPolicyBot, noRuleBot, sandboxBot].map(bot => bots.find((row: any) => row.id === bot.id))]) {
     full.approvalMode = "full";
     full.autoApprove = false;
     for (const task of full.tasks) { task.approvalMode = "full"; task.autoApprove = false; }
   }
   // Full access asks only for a bot someone set a sending rule on. These rules carry the daily cap older apps stored.
   for (const bot of [fullBot, draftBot, draftHelper, outboundPolicyBot]) bots.find((row: any) => row.id === bot.id).outbound = { policy: "ask", dailyCap: 100 };
-  writeFileSync(botsFile, JSON.stringify(bots));
+  writeRegistry(fixture.info.dataDir, { bots });
   const configFile = join(fixture.info.dataDir, "config.json");
   const config = JSON.parse(readFileSync(configFile, "utf8"));
   config.signIn = { admins: ["admin@fixture.test"], members: ["member@fixture.test"] };
@@ -202,14 +217,14 @@ it("honors outbound approval and Send without asking at Full access, and still r
   expect((await relay(token, "SLACK_SEND_MESSAGE", { channel: "fixture", text: "Sent without asking" })).body.result.isError).not.toBe(true);
   expect((await relay(token, "GMAIL_SEND_EMAIL", { to: "second@fixture.test" })).body.result.isError).not.toBe(true);
   expect((await cards(b.threadId)).filter(row => row.card?.outboundRequest)).toHaveLength(cardCount);
-  const opaque = relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print(1)" });
-  const opaqueCard = await pending(b.threadId);
-  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: opaqueCard.card.requestId, behavior: "deny" });
-  expect((await opaque).body.result.isError).toBe(true);
-  expect(relayed).toHaveLength(before + 3);
+  // A code run goes out without a card too, as it does at Full access with no rule.
+  expect((await relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: "print(1)" })).body.result.isError).not.toBe(true);
+  expect((await cards(b.threadId)).filter(row => row.card?.outboundRequest)).toHaveLength(cardCount);
+  expect(relayed).toHaveLength(before + 4);
   await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } });
   expect((await relay(token, "GMAIL_SEND_EMAIL")).body.result.isError).toBe(true);
-  expect(relayed).toHaveLength(before + 3);
+  expect((await relay(token, "COMPOSIO_REMOTE_WORKBENCH", { code_to_execute: 'run_tool("GMAIL_SEND_EMAIL", {})' })).body.result.isError).toBe(true);
+  expect(relayed).toHaveLength(before + 4);
 });
 
 it("honors Ask every time at Full access before the first send for any prompt language", async () => {
@@ -309,7 +324,7 @@ it("retains Gmail draft limits through delegated work and the requester's resume
   const b = draftBot;
   const helper = draftHelper;
   for (const bot of [b, helper]) {
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, peers: [b.id, helper.id].filter(id => id !== bot.id), acknowledgePeerScope: true, outbound: { policy: "ask" } })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, outbound: { policy: "ask" } })).status).toBe(200);
   }
   const draft = { thread_id: "continued-thread", recipient_email: "sam@example.test", subject: "Re: Continuation", body: "Draft response" };
   const write = { server: "composio", tool: "GMAIL_CREATE_EMAIL_DRAFT", arguments: draft };
@@ -348,7 +363,7 @@ it("honors Ask every time on Full-access delegated and resumed turns without rel
   const b = outboundPolicyBot;
   const helper = draftHelper;
   for (const bot of [b, helper]) {
-    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, peers: [b.id, helper.id].filter(id => id !== bot.id), acknowledgePeerScope: true, outbound: { policy: "ask" } })).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { modelSelection: { instanceId: "gmailFixture", model: "claude-sonnet-5" }, threadId: bot.threadId, outbound: { policy: "ask" } })).status).toBe(200);
   }
   const send = { server: "composio", tool: "GMAIL_REPLY_TO_THREAD", arguments: { thread_id: "ask-delegation" }, expectError: true };
   writeFileSync(join(fixture.info.dataDir, "gmail-plan.json"), JSON.stringify({
@@ -397,6 +412,24 @@ it("sends 35 in a day at Full access with no sending rule, with no refusal and n
   for (const thread of threads) expect((await cards(thread)).filter((row: any) => row.card?.outboundRequest), "no card waits on anyone").toEqual([]);
 }, 90_000);
 
+it("holds a bot to the connected accounts its scopes name", async () => {
+  const b = await bot("Account limits");
+  const token = await mint(b.id, b.threadId);
+  const before = relayed.length;
+  const fetchAs = (account: string) => relay(token, "COMPOSIO_MULTI_EXECUTE_TOOL", { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: {}, account }] });
+  expect((await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: ["other-account"] } } })).status).toBe(200);
+  const refused = await fetchAs("fixture-account");
+  expect(refused.body.result.isError).toBe(true);
+  expect(refused.body.result.content[0].text).toContain('may use only account id "other-account" in');
+  expect((await relay(token, "GMAIL_FETCH_EMAILS")).body.result.isError, "no account named").toBe(true);
+  expect(relayed).toHaveLength(before);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: ["fixture-account"] } } })).status).toBe(200);
+  expect((await fetchAs("fixture-account")).body.result.isError).not.toBe(true);
+  expect((await relay(token, "GMAIL_FETCH_EMAILS")).body.result.isError, "a limited app's call must name its account").toBe(true);
+  expect(relayed).toHaveLength(before + 1);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" }, accounts: { gmail: [] } } })).status).toBe(400);
+});
+
 it("shows each outbound batch recipient and amount with explicit preview truncation before consent", async () => {
   const b = await bot("Batch consent preview");
   const token = await mint(b.id, b.threadId);
@@ -438,6 +471,42 @@ it.each(["scope", "turn"])("rechecks %s revocation after project-session metadat
   if (revocation === "scope") expect(result.body.result.isError).toBe(true);
   else expect(result.status).toBe(401);
   expect(relayed).toHaveLength(before);
+});
+
+it.each(["scope", "turn"])("lists a send's file on its card and uploads nothing when %s revocation lands before the send", async (revocation) => {
+  const b = await bot("File upload race " + revocation);
+  const file = join(fixture.info.dataDir, "workspaces", b.id, "board deck.pdf");
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, "%PDF-1.4 deck");
+  const token = await mint(b.id, b.threadId);
+  const before = relayed.length, uploaded = uploads.length;
+  const send = () => relay(token, "GMAIL_SEND_EMAIL", { to: "board@fixture.test", body: "y".repeat(600), attachment: file });
+  const held = send();
+  const card = await pending(b.threadId);
+  expect(card.card.subtitle).toContain(`Uploads board deck.pdf (${file}, 13 B)`);
+  expect(card.card.subtitle.indexOf(file)).toBeLessThan(card.card.subtitle.indexOf("[arguments truncated]"));
+  expect(uploads, "nothing is uploaded while the card waits").toHaveLength(uploaded);
+  sessionEntered = false;
+  blockSession = () => {};
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: card.card.requestId, behavior: "allow" });
+  await expect.poll(() => sessionEntered, { timeout: 5_000 }).toBe(true);
+  if (revocation === "scope") await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } });
+  else await mint(b.id, b.threadId);
+  blockSession();
+  blockSession = undefined;
+  const result = await held;
+  if (revocation === "scope") expect(result.body.result.isError).toBe(true);
+  else expect(result.status).toBe(401);
+  expect(uploads, "a revoked send uploads nothing").toHaveLength(uploaded);
+  expect(relayed).toHaveLength(before);
+  if (revocation === "turn") return;
+  await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: null });
+  const allowed = send();
+  await api("POST", `/api/threads/${b.threadId}/respond`, { requestId: (await pending(b.threadId)).card.requestId, behavior: "allow" });
+  expect((await allowed).body.result.isError).not.toBe(true);
+  expect(uploads).toHaveLength(uploaded + 1);
+  expect(uploads.at(-1)).toMatchObject({ request: { toolkit_slug: "gmail", tool_slug: "GMAIL_SEND_EMAIL", filename: "board deck.pdf", mimetype: "application/pdf" }, bytes: "%PDF-1.4 deck" });
+  expect((relayed.at(-1) as any).params.arguments.attachment).toEqual({ name: "board deck.pdf", mimetype: "application/pdf", s3key: `fixture-files/${uploaded + 1}` });
 });
 
 it("does not consume a Gmail draft reservation when the fresh scope check refuses dispatch", async () => {
@@ -518,6 +587,43 @@ it("still asks before arbitrary workbench code under Send without asking", async
   await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "write" } } });
   expect((await relay(token, "COMPOSIO_REMOTE_BASH_TOOL", { command: "curl -X POST https://fixture.test/send" })).body.result.isError).toBe(true);
   expect(relayed).toHaveLength(before);
+});
+
+it("runs sandbox code for a bot with app grants only at Full access, only by a direct call, never past its scopes", async () => {
+  const b = sandboxBot;
+  expect((await api("PATCH", `/api/bots/${b.id}`, { connectorTools: { gmail: { tools: "*" } } })).status).toBe(200);
+  const token = await mint(b.id, b.threadId);
+  const before = relayed.length;
+  const code = { code_to_execute: "print(1)" };
+  const wrapped = () => relay(token, "COMPOSIO_MULTI_EXECUTE_TOOL", { tools: [{ tool_slug: "COMPOSIO_REMOTE_WORKBENCH", arguments: code }] });
+  const cardCount = (await cards(b.threadId)).filter(row => row.card?.outboundRequest).length;
+  expect((await relay(token, "COMPOSIO_REMOTE_WORKBENCH", code)).body.result.isError).not.toBe(true);
+  expect(relayed).toHaveLength(before + 1);
+  expect((await cards(b.threadId)).filter(row => row.card?.outboundRequest), "Full access runs it without a card").toHaveLength(cardCount);
+  const batched = await wrapped();
+  expect(batched.body.result.isError).toBe(true);
+  expect(JSON.stringify(batched.body.result)).toContain("only at Full access");
+  expect(relayed).toHaveLength(before + 1);
+  // Per-app scopes hold at Full access too: the code could reach Slack, which these scopes turn off.
+  expect((await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "write" } } })).status).toBe(200);
+  expect((await relay(token, "COMPOSIO_REMOTE_WORKBENCH", code)).body.result.isError).toBe(true);
+  expect((await api("PATCH", `/api/bots/${b.id}`, { connectorScopes: { apps: { gmail: "read" } } })).status).toBe(200);
+  for (const name of ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL"]) {
+    const limited = await relay(token, name, { code_to_execute: 'run_tool("GMAIL_SEND_EMAIL", {})' });
+    expect(limited.body.result.isError, "a read-only app holds even at Full access").toBe(true);
+    expect(JSON.stringify(limited.body.result)).toContain("read only");
+  }
+  expect(relayed).toHaveLength(before + 1);
+  const low = await bot("Sandbox below Full access");
+  expect((await api("PATCH", `/api/bots/${low.id}`, { connectorTools: { gmail: { tools: "*" } } })).status).toBe(200);
+  const lowToken = await mint(low.id, low.threadId);
+  for (const name of ["COMPOSIO_REMOTE_WORKBENCH", "COMPOSIO_REMOTE_BASH_TOOL"]) {
+    const below = await relay(lowToken, name, { command: "echo 1" });
+    expect(below.body.result.isError).toBe(true);
+    expect(JSON.stringify(below.body.result)).toContain("only at Full access");
+  }
+  expect(relayed).toHaveLength(before + 1);
+  expect((await cards(low.threadId)).filter(row => row.card?.outboundRequest), "refused outright, never asked").toHaveLength(0);
 });
 
 it("tells a scoped bot its multi-execute arguments were unreadable, not that it lacks access", async () => {

@@ -12,12 +12,14 @@ import {
   newlyPairedDevice,
   newlyPairedDeviceForFlow,
   normalizePhoneSetupActionError,
+  pairThroughRelayWithoutAddress,
   phonePairingGate,
   phoneSetupBaseline,
   phoneSetupReducer,
   preparePhonePairingRoute,
   invalidatePhonePairingAttempt,
   queuePhonePairingAttempt,
+  relayServesPairing,
   releasePhonePairingAttempt,
   secureAddressRequestLapsed,
   shouldArmPhoneSetupProvisioningTimeout,
@@ -220,6 +222,75 @@ describe("phone setup flow", () => {
     expect(secureAddressRequestLapsed(account("ready"), { enabled: false })).toBe(false);
     expect(secureAddressRequestLapsed(null, waiting)).toBe(false);
     expect(secureAddressRequestLapsed({ ...account("ready"), available: false }, waiting)).toBe(false);
+  });
+
+  it("lets the relay carry a pairing only with the encrypted connection on and a direct route to open on", () => {
+    const relayOn = {
+      enabled: true, port: 8810, endpoints: [], lan: "192.168.1.34",
+      routes: { relay: { on: true } }, e2e: { enabled: true },
+    };
+    const withAddress = { ...account("ready"), endpoint: "https://c-opaque.openmausbot.com" };
+    expect(relayServesPairing(account("ready"), relayOn)).toBe(true);
+    // A stored address that has not answered (yet) does not hold the code.
+    expect(relayServesPairing(withAddress, relayOn)).toBe(true);
+    // Encrypted connection off (never admitted to the relay yet): a plain Wi-Fi code is not opened silently.
+    expect(relayServesPairing(withAddress, { ...relayOn, e2e: { enabled: false } })).toBe(false);
+    expect(relayServesPairing(account("ready"), { ...relayOn, e2e: undefined })).toBe(false);
+    // No Wi-Fi address: nothing to open the code on, so no dead end either.
+    expect(relayServesPairing(account("ready"), { ...relayOn, lan: null })).toBe(false);
+    expect(relayServesPairing(account("ready"), { ...relayOn, routes: { relay: { on: false } } })).toBe(false);
+    expect(relayServesPairing(account("ready"), { ...relayOn, routes: undefined })).toBe(false);
+    expect(relayServesPairing(account("ready"), { ...relayOn, enabled: false })).toBe(false);
+    for (const status of ["connecting", "error", "signed-out"] as const) {
+      expect(relayServesPairing(account(status), relayOn)).toBe(false);
+    }
+    expect(relayServesPairing({ ...account("ready"), available: false }, relayOn)).toBe(false);
+    expect(relayServesPairing(null, relayOn)).toBe(false);
+  });
+
+  it("opens through the relay at once, or once the address request switched it on, and otherwise keeps waiting", async () => {
+    const relayOn = {
+      enabled: true, port: 8810, endpoints: [], lan: "192.168.1.34",
+      routes: { relay: { on: true } }, e2e: { enabled: true },
+    };
+    const keyless = { ...relayOn, e2e: { enabled: false } };
+    const relayOff = { ...relayOn, routes: { relay: { on: false } } };
+    const actions = (prepare: (() => Promise<CompanionAccountState>) | null, latest = relayOn) => ({
+      prepare, latest: vi.fn(async () => latest), isCurrent: () => true, setAccount: vi.fn(), setProvisioning: vi.fn(),
+    });
+
+    // Signed in, Anywhere and the encrypted connection on: no spinner, and the address request does not hold the code.
+    let finish: (next: CompanionAccountState) => void = () => {};
+    const pending = actions(vi.fn(() => new Promise<CompanionAccountState>((resolve) => { finish = resolve; })));
+    await expect(pairThroughRelayWithoutAddress("wait", account("ready"), relayOn, pending)).resolves.toBe(relayOn);
+    expect(pending.setProvisioning).not.toHaveBeenCalled();
+    finish(account("ready"));
+    await vi.waitFor(() => expect(pending.setAccount).toHaveBeenCalledWith(account("ready")));
+
+    // Anywhere off: it waits on the address request, as before.
+    const off = actions(vi.fn(async () => account("ready")), relayOff);
+    await expect(pairThroughRelayWithoutAddress("wait", account("ready"), relayOff, off)).resolves.toBeNull();
+    expect(off.setProvisioning).toHaveBeenCalledWith(true);
+    expect(off.setAccount).toHaveBeenCalledWith(account("ready"));
+
+    // The request switched the encrypted connection on (a fresh installation credential, then a relay token): the
+    // phone link read after it carries the code.
+    const keyed = actions(vi.fn(async () => account("ready")), relayOn);
+    await expect(pairThroughRelayWithoutAddress("wait", account("ready"), keyless, keyed)).resolves.toBe(relayOn);
+    expect(keyed.setProvisioning).toHaveBeenCalledWith(true);
+    expect(keyed.latest).toHaveBeenCalledOnce();
+
+    // Still no encrypted connection after it: keeps waiting.
+    const still = actions(vi.fn(async () => account("ready")), keyless);
+    await expect(pairThroughRelayWithoutAddress("wait", account("ready"), keyless, still)).resolves.toBeNull();
+
+    // Nothing to ask, or the request failed or was overtaken: it keeps waiting, and a failure reaches the caller.
+    await expect(pairThroughRelayWithoutAddress("wait", account("connecting"), relayOn, actions(null))).resolves.toBeNull();
+    const stale = { ...actions(vi.fn(async () => account("ready"))), isCurrent: () => false };
+    await expect(pairThroughRelayWithoutAddress("wait", account("connecting"), relayOn, stale)).resolves.toBeNull();
+    expect(stale.setAccount).not.toHaveBeenCalled();
+    const failing = actions(vi.fn(async () => Promise.reject(new Error("no route"))));
+    await expect(pairThroughRelayWithoutAddress("wait", account("connecting"), relayOn, failing)).rejects.toThrow("no route");
   });
 
   it("opens local pairing only after the explicit Wi-Fi fallback", () => {

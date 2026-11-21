@@ -18,6 +18,8 @@ vi.mock("@/state/store", async (importOriginal) => {
   }) };
 });
 vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
+// The model picker in Advanced mode's footer reads a store this file does not build.
+vi.mock("./ModelPicker", () => ({ ModelPicker: () => null }));
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("@/lib/use-slash-skills", () => ({
   useSlashSkills: (_botId: string | undefined, _threadId: string, active: boolean) =>
@@ -68,7 +70,7 @@ describe("the / menu in the composer", () => {
 
   it("offers the built-in commands and skills at the start of a message", () => {
     fill("/");
-    expect(labels()).toEqual(["/goal", "/learn", "/setup", "/standup"]);
+    expect(labels()).toEqual(["/goal", "/learn", "/setup", "/burst", "/standup"]);
   });
 
   it("offers only skills after a space later in the message, and puts the pick in place", () => {

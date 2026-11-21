@@ -287,6 +287,7 @@ the whole catalog in the same change.
 | turn (a bot's turn) | sessão | Feminine. Use “sessão de trabalho” only when the sentence also mentions a browser, sign-in or provider session. For calls, use “Um de cada vez” as the mode label and “falas alternadas” when describing it. |
 | turn on, turn off | ligar, desligar | Follow the English verb. |
 | upload | enviar | Never `upload` or `carregar`. |
+| Vault (Settings section) | Cofre | “Settings → Vault” → “Configurações → Cofre”. A saved key there is a `segredo`. |
 | wake, asleep | acordar, dormindo | Used for desktops and computers. |
 | webhook | webhook | Masculine. |
 | workspace | (do not use) | Say `instalação`, or leave it out. |

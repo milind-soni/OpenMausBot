@@ -118,4 +118,65 @@ describe("configured bot creation", () => {
     expect(f.approvals.setMode).toHaveBeenCalledTimes(1);
     expect(f.events.at(-1)).toBe("DELETE /api/bots/created");
   });
+
+  describe("a template with memory, skills and a routine", () => {
+    const skill = (name: string) => ({ name, description: "", warnings: [], source: `local:${name}`, text: `---\nname: ${name}\n---\n`, enabled: true });
+    const routine = { name: "Morning check", prompt: "Check the inbox", schedule: { type: "daily" as const, time: "09:00", weekdays: [1, 2, 3, 4, 5] } };
+    function templated(failing?: string) {
+      const draft = new BotCreationDraft({
+        profile: { name: "Fixture" },
+        memory: { "MEMORY.md": "index", "memory/notes.md": "notes" },
+        skills: [skill("first-skill"), skill("second-skill")],
+        routines: [routine],
+      }, vi.fn());
+      const events: string[] = [];
+      const open = new Set<string>();
+      let widest = 0;
+      const request = vi.fn(async (path: string, init?: RequestInit) => {
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        const event = `${init?.method} ${path}${body.path ? ` ${body.path}` : path.endsWith("/skill-template") ? ` ${body.name}` : ""}`;
+        events.push(event);
+        open.add(event);
+        widest = Math.max(widest, open.size);
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        open.delete(event);
+        if (event === failing) throw new Error("Refused");
+        if (path === "/api/routines") return { routine: { id: "routine-1" } };
+        return { bot: { ...draft.bot, id: "created", threadId: "initial", approvalMode: "ask" } };
+      }) as unknown as typeof api;
+      return { draft, events, request, widest: () => widest };
+    }
+    const setup = ["PUT /api/bots/created/memory/file MEMORY.md", "PUT /api/bots/created/memory/file memory/notes.md",
+      "POST /api/bots/created/skill-template first-skill", "POST /api/bots/created/skill-template second-skill", "POST /api/routines"];
+
+    it("sends each file once, each kind in its own order, the kinds side by side", async () => {
+      const f = templated();
+      const result = await createConfiguredBot(f.draft, f.request, persistBotUpdate, undefined);
+      expect(result.warnings).toEqual([]);
+      expect(f.events.slice(0, 2)).toEqual(["POST /api/bots", "PATCH /api/bots/created"]);
+      expect(f.events.at(-1)).toBe("PATCH /api/routines/routine-1");
+      expect(f.events.slice(2, -1).sort()).toEqual([...setup].sort());
+      const at = (event: string) => f.events.indexOf(event);
+      expect(at(setup[0]!)).toBeLessThan(at(setup[1]!));
+      expect(at(setup[2]!)).toBeLessThan(at(setup[3]!));
+      expect(f.events.slice(2, 5).sort()).toEqual([setup[0]!, setup[2]!, setup[4]!].sort());
+      expect(f.widest()).toBe(3);
+    });
+
+    it("removes the routine and the bot when a skill is refused, after every other request has answered", async () => {
+      const f = templated(setup[2]);
+      await expect(createConfiguredBot(f.draft, f.request, persistBotUpdate, undefined)).rejects.toThrow("Refused");
+      expect(f.events.slice(-2)).toEqual(["DELETE /api/routines/routine-1", "DELETE /api/bots/created"]);
+      expect(f.events).not.toContain(setup[3]);
+      expect(f.events).toContain(setup[1]);
+      expect(f.events).not.toContain("PATCH /api/routines/routine-1");
+    });
+
+    it("removes the bot when a memory file is refused", async () => {
+      const f = templated(setup[0]);
+      await expect(createConfiguredBot(f.draft, f.request, persistBotUpdate, undefined)).rejects.toThrow("Refused");
+      expect(f.events.slice(-2)).toEqual(["DELETE /api/routines/routine-1", "DELETE /api/bots/created"]);
+      expect(f.events).not.toContain(setup[1]);
+    });
+  });
 });

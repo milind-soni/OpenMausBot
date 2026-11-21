@@ -2,18 +2,21 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { LoaderCircle, Table2 } from "lucide-react";
 import { requestMessageFile, type MessageAttachmentContext } from "./AttachmentPreview";
 import { RichTable, TableDialog } from "./RichTable";
+import { useFileBesideChat } from "@/lib/file-preview";
 import { TABLE_FILE_MAX_BYTES, tableDelimiter, type TextTable } from "@/lib/table-data";
 import { t } from "@/lib/i18n";
 
-/** A preview limit, not a download limit: chunked responses are bounded too. */
-export async function readTableResponse(response: Response, signal: AbortSignal, maxBytes = TABLE_FILE_MAX_BYTES): Promise<string> {
+/** A preview limit, not a download limit: chunked responses are bounded too. Text that is not UTF-8 is refused, unless
+ * `fallback` names a single-byte encoding to read it in instead; a NUL byte (UTF-16, binary) is refused even
+ * then, since such an encoding would only show it as garbage. */
+export async function readTableResponse(response: Response, signal: AbortSignal, maxBytes = TABLE_FILE_MAX_BYTES, fallback?: string): Promise<string> {
   if (Number(response.headers.get("content-length")) > maxBytes) {
-    await response.body?.cancel(); throw new Error("size");
+    await response.body?.cancel().catch(() => {}); throw new Error("size"); // A body that already errored must not hide "size".
   }
   const reader = response.body?.getReader();
   if (!reader) return "";
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  let size = 0, text = "";
+  const parts: Uint8Array[] = [];
+  let size = 0;
   try {
     while (true) {
       signal.throwIfAborted();
@@ -21,24 +24,34 @@ export async function readTableResponse(response: Response, signal: AbortSignal,
       if (part.done) break;
       size += part.value.byteLength;
       if (size > maxBytes) throw new Error("size");
-      text += decoder.decode(part.value, { stream: true });
+      parts.push(part.value);
     }
-    return text + decoder.decode();
   } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  const bytes = new Uint8Array(await new Blob(parts as BlobPart[]).arrayBuffer());
+  // NUL is valid UTF-8, so UTF-16 without a byte order mark would pass the UTF-8 check: look for it first.
+  if (fallback && bytes.includes(0)) throw new Error("encoding");
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch (error) {
+    if (!fallback) throw error;
+    return new TextDecoder(fallback).decode(bytes);
+  }
 }
 
 export function TableFileButton({ path, name, message }: { path: string; name: string; message: MessageAttachmentContext }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const beside = useFileBesideChat();
   const delimiter = tableDelimiter(name) ?? tableDelimiter(path);
   if (!delimiter) return null;
+  const show = () => {
+    if (!beside({ kind: "table", path, name, message, opener: trigger.current })) setOpen(true);
+  };
   return <>
-    <button ref={trigger} type="button" className="table-action" title={t("table.preview", { name })} aria-label={t("table.preview", { name })} onClick={() => setOpen(true)}><Table2 size={14} /></button>
+    <button ref={trigger} type="button" className="table-action" title={t("table.preview", { name })} aria-label={t("table.preview", { name })} onClick={show}><Table2 size={14} /></button>
     {open && <TableDialog title={name} returnFocus={trigger.current} onClose={() => setOpen(false)}><TableFileContent key={`${message.threadId}:${message.messageId}:${path}`} path={path} name={name} message={message} delimiter={delimiter} /></TableDialog>}
   </>;
 }
 
-function TableFileContent({ path, name, message, delimiter }: {
+export function TableFileContent({ path, name, message, delimiter }: {
   path: string; name: string; message: MessageAttachmentContext; delimiter: "," | "\t";
 }) {
   const [attempt, setAttempt] = useState(0);

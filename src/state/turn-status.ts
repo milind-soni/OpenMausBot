@@ -8,18 +8,21 @@ import { progressKey, type TurnProgressActivity, type TurnProgressFields } from 
 
 export type LiveStatus =
   | ({ activity: TurnProgressActivity } & Omit<TurnProgressFields, "type" | "activity">)
-  | { activity: "thinking" | "reply"; itemId?: undefined };
+  | { activity: "thinking" | "reply" | "summarizing"; itemId?: undefined };
 
 export interface TurnLive {
   turnId?: string;
   /** The newest turn this thread showed has completed, failed or stopped. */
   ended: boolean;
   status: LiveStatus | null;
+  /** A summary started after this turn had ended (the Compact button); its end puts the ended state back. */
+  reopened?: true;
 }
 
 const UNKNOWN: TurnLive = { ended: false, status: null };
 const MAX_THREADS = 500;
 const threads = new Map<string, TurnLive>();
+const lastFrames = new Map<string, number>();
 const listeners = new Map<string, Set<() => void>>();
 
 function sameStatus(a: LiveStatus | null, b: LiveStatus | null): boolean {
@@ -41,6 +44,9 @@ function put(threadId: string, next: TurnLive): void {
  * the status describes: "Writing index.html · 14 KB" outlasts the call's own chip until the call finishes. */
 export function noteTurnEvent(event: RuntimeEvent): void {
   const { threadId } = event;
+  lastFrames.delete(threadId);
+  lastFrames.set(threadId, Date.now());
+  if (lastFrames.size > MAX_THREADS) lastFrames.delete(lastFrames.keys().next().value!);
   const current = threads.get(threadId);
   const sameTurn = current && (!event.turnId || event.turnId === current.turnId);
   const turnId = event.turnId ?? current?.turnId;
@@ -66,6 +72,12 @@ export function noteTurnEvent(event: RuntimeEvent): void {
     case "item.completed":
     case "request.opened":
       return put(threadId, { ...live, status: null });
+    case "context.summarizing": {
+      if (event.active) return put(threadId, { ...live, ended: false, status: { activity: "summarizing" }, ...(live.ended ? { reopened: true as const } : {}) });
+      const { reopened, ...rest } = live;
+      const stillSummarizing = rest.status?.activity === "summarizing";
+      return put(threadId, { ...rest, ended: rest.ended || (!!reopened && stillSummarizing), status: stillSummarizing ? null : rest.status });
+    }
     default:
       if (live !== current) put(threadId, live);
   }
@@ -73,6 +85,16 @@ export function noteTurnEvent(event: RuntimeEvent): void {
 
 export function turnLive(threadId: string | null | undefined): TurnLive {
   return (threadId && threads.get(threadId)) || UNKNOWN;
+}
+
+/** When this thread last sent any live frame, or, before its first one, when this window first asked. Read on a clock
+ * rather than subscribed, so streamed text never re-renders. */
+export function silentSince(threadId: string): number {
+  const at = lastFrames.get(threadId);
+  if (at !== undefined) return at;
+  const now = Date.now();
+  lastFrames.set(threadId, now);
+  return now;
 }
 
 function subscribe(threadId: string | null | undefined, listener: () => void): () => void {
@@ -97,4 +119,5 @@ export function useTurnLive(threadId: string | null | undefined): TurnLive {
 /** Tests only. */
 export function resetTurnLive(): void {
   threads.clear();
+  lastFrames.clear();
 }

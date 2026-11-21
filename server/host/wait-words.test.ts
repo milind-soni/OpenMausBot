@@ -31,6 +31,19 @@ describe("how a wait for memory reads", () => {
     expect(held).toEqual([["t", "memory: 1 running, 3 ahead, on Starter"], ["u", "plan: 2 at once, 1 ahead"]]);
   });
 
+  it("speaks of this server, not a Cloud or a plan, on a self-hosted one: room, or its number of tasks at once", () => {
+    expect(words(false).waits.text("t", { first: true, running: 6, ahead: 2, server: true }))
+      .toBe("Waiting for room on this server. Running now: 6. Ahead of this one: 2. It starts by itself when there's room.");
+    expect(words(false).waits.text("t", { first: false, running: 6, ahead: 0, server: true })).toBe("Still waiting for room on this server. Running now: 6. Ahead of this one: 0.");
+    expect(words(false).waits.text("t", { first: true, running: 7, ahead: 1, limit: 7, server: true }))
+      .toBe("Waiting for a turn: this server runs 7 tasks at once. Ahead of this one: 1. It starts by itself when one finishes.");
+    expect(words(false).waits.text("t", { first: false, running: 7, ahead: 0, limit: 7, server: true })).toBe("Still waiting: this server runs 7 tasks at once. Ahead of this one: 0.");
+    const { waits, held } = words(false);
+    waits.began("t", { running: 6, ahead: 2, server: true });
+    waits.began("u", { running: 7, ahead: 1, limit: 7, server: true });
+    expect(held).toEqual([["t", "room: 6 running, 2 ahead"], ["u", "server: 7 at once, 1 ahead"]]);
+  });
+
   it("names the plan's limit, not memory, when that is what the turn waits for", () => {
     expect(words(true).waits.text("t", { first: true, running: 2, ahead: 1, limit: 2 }))
       .toBe("Waiting for a turn: Starter runs 2 tasks at once on this Cloud. Ahead of this one: 1. It starts by itself when one finishes, and a bigger plan runs more at once.");
@@ -51,7 +64,7 @@ describe("a hand-off held a while", () => {
   const node = { id: "h", threadId: "t", botId: "b", lastProgressAt: 0, status: "queued" } as HandoffView;
   const notes = (over: Partial<QueuedNotesDeps> = {}, now = QUEUED_NOTE_AFTER_MS) => {
     const posted: string[] = [];
-    const note = createQueuedNotes({ now: () => now, language: () => undefined, botName: () => "Ops", parent: () => ({ threadId: "p" }) as HandoffView, post: (_p, _n, line) => posted.push(line), live: () => true,
+    const note = createQueuedNotes({ now: () => now, language: () => undefined, botName: () => "Ops", parent: () => ({ threadId: "p" }) as HandoffView, post: (_p, _n, line) => posted.push(line), node: () => node,
       threadBusy: () => false, slots: () => ({ busy: [], limit: 16 }), groupTurn: () => false, waitsForComputer: () => false, behindPerson: () => undefined, ...over });
     return { note, posted };
   };
@@ -70,6 +83,45 @@ describe("a hand-off held a while", () => {
     const room = notes({ groupTurn: () => true });
     room.note(node);
     expect(room.posted).toEqual(["Ops hasn't started this yet: it's finishing a turn in a room."]);
+  });
+
+  it("says it once for each of several hand-offs held behind the same turn, however often the queue is checked", () => {
+    const held = ["r1", "r2", "q"].map((id) => ({ ...node, id, status: id === "q" ? "queued" : "resume" }) as HandoffView);
+    const posted: string[] = [];
+    const { note } = notes({ threadBusy: () => true, node: (id) => held.find((n) => n.id === id), post: (_p, n) => posted.push(n.id) });
+    for (let tick = 0; tick < 4; tick++) for (const n of held) note(n);
+    expect(posted).toEqual(["r1", "r2", "q"]);
+  });
+
+  it("forgets a hand-off once it has started, so finished ones are not kept", () => {
+    const held = new Map(["a", "b", "c"].map((id) => [id, { ...node, id, status: "resume" } as HandoffView]));
+    const looked: string[] = [];
+    const posted: string[] = [];
+    const { note } = notes({ threadBusy: () => true, node: (id) => (looked.push(id), held.get(id)), post: (_p, n) => posted.push(n.id) });
+    note(held.get("a")!);
+    held.set("a", { ...held.get("a")!, status: "completed" });
+    looked.length = 0;
+    note(held.get("b")!);
+    expect(looked).toEqual(["a"]);
+    expect(posted).toEqual(["a", "b"]);
+    looked.length = 0;
+    note(held.get("c")!);
+    expect(looked).toEqual(["b"]);
+    expect(posted).toEqual(["a", "b", "c"]);
+  });
+
+  it("forgets a hand-off whose lookup is gone", () => {
+    const held = new Map(["a", "b", "c"].map((id) => [id, { ...node, id, status: "resume" } as HandoffView]));
+    const looked: string[] = [];
+    const posted: string[] = [];
+    const { note } = notes({ threadBusy: () => true, node: (id) => (looked.push(id), held.get(id)), post: (_p, n) => posted.push(n.id) });
+    note(held.get("a")!);
+    held.delete("a");
+    note(held.get("b")!);
+    looked.length = 0;
+    note(held.get("c")!);
+    expect(looked).toEqual(["b"]);
+    expect(posted).toEqual(["a", "b", "c"]);
   });
 
   it("stays quiet for a short hold, a room's own hand-off, a computer's wait and a person's open card, which say so themselves", () => {

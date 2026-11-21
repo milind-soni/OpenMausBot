@@ -16,6 +16,7 @@ const calls: Array<{ method: string; path: string; query: string; body: any; aut
 let nextProcessId = 41;
 let hold = false;
 let holdStatusAfterFirst = false;
+let statusHeld: (() => void) | undefined;
 let syncReply: Record<string, unknown> = { exitCode: 0, stdout: "done", stderr: "" };
 let startReply: { status: number; body: unknown } | undefined;
 let statusReply: { status: number; body: unknown } | undefined;
@@ -43,7 +44,7 @@ beforeAll(async () => {
       if (statusReply) return send(statusReply.status, statusReply.body);
       const process = processes.get(`${box}:${pid}`);
       if (!process) return send(404, { ok: false, code: "not_found", message: "No such process." });
-      if (holdStatusAfterFirst && process.polls > 0) return;
+      if (holdStatusAfterFirst && process.polls > 0) return statusHeld?.();
       const running = process.polls++ < process.runningFor;
       return send(200, {
         ok: true, type: "command.status", success: true, processId: Number(pid), status: running ? "running" : process.lost ? "lost" : "exited", running,
@@ -176,7 +177,7 @@ describe("background status deadlines", () => {
 });
 afterAll(async () => { vi.unstubAllEnvs(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); });
 beforeEach(() => {
-  calls.length = 0; processes.clear(); hold = false; holdStatusAfterFirst = false; startReply = undefined; statusReply = undefined;
+  calls.length = 0; processes.clear(); hold = false; holdStatusAfterFirst = false; statusHeld = undefined; startReply = undefined; statusReply = undefined;
   syncReply = { exitCode: 0, stdout: "done", stderr: "" };
 });
 
@@ -194,15 +195,28 @@ describe.each([
     vi.stubEnv("OMB_CLOUD_BOAT_TOKEN", INCLUDED);
   });
 
-  const call = (name: string, args: unknown, boxId = BOX, budgetMs?: number) => {
+  const call = (name: string, args: unknown, boxId = BOX, budgetMs?: number, hooks?: import("./cloud-computer-background.ts").BackgroundCommandHooks) => {
     let gated = 0, checks = 0;
     const done = tools.cloudComputerRpc({ method: "tools/call", params: { name, arguments: args } }, {
-      cfg, boxId: () => boxId, signal: new AbortController().signal, ...(budgetMs ? { budgetMs } : {}),
+      cfg, boxId: () => boxId, signal: new AbortController().signal, ...(budgetMs ? { budgetMs } : {}), ...(hooks ? { background: hooks } : {}),
       gate: async () => { gated++; return { held: false }; }, assertActive: () => { checks++; },
     }) as Promise<Result>;
     return { done, gated: () => gated, checks: () => checks };
   };
   const start = async (boxId = BOX) => json(await call("exec", { command: "python3 job.py > out.csv", background: true }, boxId).done).processId as string;
+
+  it("registers the started process and observes its checked terminal status without starting it again", async () => {
+    const hooks = { started: vi.fn(() => true), observed: vi.fn() };
+    const start = json(await call("exec", { command: "synthetic fixture", background: true }, BOX, undefined, hooks).done);
+    expect(start.next).toContain("Completion is tracked for this task");
+    expect(hooks.started).toHaveBeenCalledExactlyOnceWith(BOX, start.processId);
+    const process = processes.get(`${BOX}:${start.processId.split("-")[1]}`)!;
+    process.runningFor = 0;
+    const detail = json(await call("exec_status", { process_id: start.processId }, BOX, undefined, hooks).done);
+    expect(detail.status).toBe("finished");
+    expect(hooks.observed).toHaveBeenCalledExactlyOnceWith(BOX, start.processId, expect.stringContaining('"status":"finished"'));
+    expect(calls.filter(call => call.method === "POST" && call.path.endsWith("/commands"))).toHaveLength(1);
+  });
 
   it("starts a command detached, through the gate, and answers at once with a process id", async () => {
     const started = call("exec", { command: "python3 job.py > out.csv", background: true });
@@ -268,12 +282,14 @@ describe.each([
   it("propagates cancellation during a follow-up status read", async () => {
     const processId = await start();
     holdStatusAfterFirst = true;
+    const held = new Promise<void>(resolve => { statusHeld = resolve; });
+    const stoppedClock = { now: () => 0, sleep: async () => {}, timeout: () => new AbortController().signal };
     const controller = new AbortController();
-    const pending = background.backgroundStatus(cfg, BOX, { process_id: processId, wait_seconds: 1 }, controller.signal);
-    await expect.poll(() => calls.filter(entry => entry.method === "GET").length).toBe(2);
+    const pending = background.backgroundStatus(cfg, BOX, { process_id: processId, wait_seconds: 1 }, controller.signal, stoppedClock);
+    await held;
+    expect(calls.filter(entry => entry.method === "GET")).toHaveLength(2);
     controller.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
-    server.closeAllConnections();
   });
 
   it("returns only the end of long output, and never half a character", async () => {
@@ -419,8 +435,11 @@ describe.each([
     expect(background.EXEC_LATE).toMatch(/may still be running.*do not run it again blindly.*background: true.*exec_status/s);
     server.closeAllConnections();
     hold = false;
-    syncReply = { exitCode: null, stdout: "", stderr: "", timedOut: true };
-    expect(await call("exec", { command: "sleep 600" }).done).toEqual({ isError: true, content: [{ type: "text", text: background.EXEC_LATE }] });
+    // A relay that does not forward the detached flag runs the command itself, and the provider stops it at its limit.
+    startReply = { status: 200, body: { exitCode: 143, signal: "SIGTERM", stdout: "", stderr: "", timedOut: true } };
+    const stopped = await call("exec", { command: "sleep 600" }).done;
+    expect(stopped).toEqual({ isError: true, content: [{ type: "text", text: (await import("./cloud-computer-tools.ts")).EXEC_STOPPED_AT_LIMIT }] });
+    expect((stopped as { content: Array<{ text: string }> }).content[0]!.text).toMatch(/stopped this command after 30 seconds.*no longer running.*background: true/s);
     expect(calls.filter(entry => entry.method === "POST")).toHaveLength(2);
   });
 

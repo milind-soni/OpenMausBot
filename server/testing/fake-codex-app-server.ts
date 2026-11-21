@@ -6,6 +6,7 @@
 //     empty-question | malformed-question | config-profile | config-profile-unsupported | config-read-error |
 //     image | logged-in-stdout | logged-out | unauthorized | late-request | retry-then-complete | signin-refused |
 //     auth-recovery | mcp-401 | mcp-image | legacy-error | key-401 | recovered-403 | recovered-401 | recovering-403 | usage-limit
+//     | plan-unsupported-input (a resumed thread's turns fail as a ChatGPT plan refuses saved audio; a new thread works)
 //     | async-question (an agentMessage with delivery async and questions, as codex 0.160 sends request_user_input_async)
 //   FAKE_CODEX_MISSING_BEARER  the first N launches fail their turn as codex-cli 0.160.1 holding no login does (count in FAKE_CODEX_STATE)
 //   FAKE_CODEX_LAUNCH_CRASHES  the first N launches die pre-ack at turn/start, transient stderr, exit 1 (count in FAKE_CODEX_STATE)
@@ -23,8 +24,10 @@
 //   FAKE_CODEX_COMMAND  the happy turn's one call, this command (default: "ls -la" and a web search);
 //     FAKE_CODEX_COMMAND_OUTPUT  JSON chunks it prints as item/commandExecution/outputDelta notifications, one every
 //     FAKE_CODEX_COMMAND_OUTPUT_MS (default all at once); FAKE_CODEX_COMMAND_GATE  the turn finishes once this file exists
+//   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (as stream-script.ts)
 //   FAKE_CODEX_PATCH_BYTES  each turn first writes web/index.html by apply_patch, streamed as two
 //     item/fileChange/patchUpdated notifications (codex-cli 0.160.1's schema) of half and all this many bytes
+//   FAKE_CODEX_COMPACTION  "1": each turn first compacts its context, as codex-cli 0.160.1 reports it (a contextCompaction item)
 //   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
 //   FAKE_CODEX_SHELL_ENVIRONMENT_POLICY  JSON config/read reports, every field present and null unless set (codex-cli 0.160)
 //   FAKE_CODEX_APPROVAL_REQUEST  JSON {method, params} override in approval mode
@@ -32,6 +35,9 @@
 //   FAKE_CODEX_ACCOUNT_MODE  chatgpt (default) | api-key | none | unsupported | error | hang
 //   FAKE_CODEX_RESUME_ERROR  JSON-RPC error rejecting thread/resume
 //   FAKE_CODEX_ARCHIVED  "1": thread/resume says the session is archived until thread/unarchive; "unarchive-fails": unarchive is refused too
+//   FAKE_CODEX_INSTRUCTIONS_FILE  while this file exists, config/read reports its text as developer_instructions: the
+//     person's configuration changed while the process ran (codex-cli 0.160.1 reads the files on every config/read)
+//   FAKE_CODEX_DIE_ON_TURN  this process is killed as its Nth turn/start arrives, before any reply
 //   FAKE_CODEX_STARTUP_DELAY_MS  hold the initialize reply this long, like a loaded host
 //   FAKE_CODEX_STARTUP_LOG  append {pid, at, event: "initialize" | "turn/start"} per launch
 //   FAKE_CODEX_START_ERROR  JSON-RPC error rejecting thread/start
@@ -51,6 +57,8 @@
 //   FAKE_CODEX_TEXT_REFUSE  `codex exec`: comma-separated models answered with the 400 a ChatGPT account gets for gpt-5.4-mini
 //   FAKE_CODEX_TEXT_BLOCK  `codex exec`: comma-separated models answered with the 403 OpenAI sends a region it does not serve
 //   FAKE_CODEX_LUNA  "1": model/list also offers gpt-6-luna
+//   FAKE_CODEX_TIERS  "1": model/list rows list a Fast service tier, as codex-cli 0.167.2 does; gpt-page-two
+//     already runs on it by default
 //   FAKE_CODEX_UPDATED_FILE  while this file exists, the CLI was updated in place: --version answers codex-cli 0.162.1
 //     and model/list also offers gpt-6.1-sol
 //   FAKE_CODEX_MCP_START  "1": on thread/start, start each `-c mcp_servers.*` mount as codex-cli 0.160.1 does
@@ -63,7 +71,10 @@
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
+
 const mode = process.env.FAKE_CODEX_MODE ?? "happy";
+const tiers = process.env.FAKE_CODEX_TIERS === "1";
+const FAST_TIERS = [{ id: "priority", name: "Fast", description: "Fastest inference with increased plan usage" }];
 
 // Follow the spawning server down; on Windows ppid does not change after parent exit.
 {
@@ -173,10 +184,20 @@ if (process.argv[2] === "exec") {
   process.exit(0);
 }
 const calls: Array<{ method: string; params: unknown }> = [];
+/** A `-c` value as codex-cli reads it: JSON-compatible TOML, or an inline table of strings (`env`, `http_headers`). */
+const tomlValue = (raw: string): unknown => raw.startsWith("{")
+  ? Object.fromEntries([...raw.matchAll(/("(?:[^"\\]|\\.)*")\s*=\s*("(?:[^"\\]|\\.)*")/g)].map((pair) => [JSON.parse(pair[1]!), JSON.parse(pair[2]!)]))
+  : JSON.parse(raw);
 const mcpOverrides: Record<string, Record<string, unknown>> = {};
 for (let index = 0; process.env.FAKE_CODEX_MCP_OVERRIDES === "1" && index < process.argv.length; index++) {
+  if (process.argv[index - 1] === "-c" && process.argv[index]!.startsWith("mcp_servers=")) {
+    // The real CLI replaces its accumulated override table before later dotted-path fields apply.
+    for (const name of Object.keys(mcpOverrides)) delete mcpOverrides[name];
+    for (const [, key] of process.argv[index]!.matchAll(/("(?:[^"\\]|\\.)*") = \{ enabled = false \}/g)) mcpOverrides[JSON.parse(key!) as string] = { enabled: false };
+    continue;
+  }
   const match = process.argv[index - 1] === "-c" ? /^mcp_servers\.([^.]+)\.([^.]+)=(.*)$/.exec(process.argv[index]!) : null;
-  if (match) (mcpOverrides[match[1]!] ??= {})[match[2]!] = JSON.parse(match[3]!);
+  if (match) (mcpOverrides[match[1]!] ??= {})[match[2]!] = tomlValue(match[3]!);
 }
 // codex-cli 0.160 config/read reports every shell_environment_policy field, null when unset. A `-c
 // shell_environment_policy.exclude=[…]` override replaces the list and drops the lower `filters` (0.160.1).
@@ -202,7 +223,9 @@ let experimentalApi = false;
 
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 let nativeThreadId = "codex-thread-1";
-const nativeTurnId = "turn-1";
+let nativeTurnId = "turn-1";
+let turnsStarted = 0;
+let turnsFinished = 0;
 const notify = (method: string, params: any) => out({
   jsonrpc: "2.0", method,
   params: {
@@ -233,11 +256,7 @@ const mcpMounts = (): Record<string, Record<string, unknown>> => {
   process.argv.forEach((arg, index) => {
     const match = process.argv[index - 1] === "-c" ? /^mcp_servers\.([^.]+)\.([^.=]+)=(.*)$/.exec(arg) : null;
     if (!match) return;
-    const raw = match[3]!;
-    const value = raw.startsWith("{")
-      ? Object.fromEntries([...raw.matchAll(/("(?:[^"\\]|\\.)*")\s*=\s*("(?:[^"\\]|\\.)*")/g)].map((pair) => [JSON.parse(pair[1]!), JSON.parse(pair[2]!)]))
-      : JSON.parse(raw);
-    (mounts[match[1]!] ??= {})[match[2]!] = value;
+    (mounts[match[1]!] ??= {})[match[2]!] = tomlValue(match[3]!);
   });
   return mounts;
 };
@@ -271,6 +290,7 @@ const startUrlMcp = async (mount: Record<string, unknown>, handshake: unknown): 
   const headers: Record<string, string> = { "content-type": "application/json", accept: "application/json, text/event-stream" };
   if (typeof mount.bearer_token_env_var === "string") headers.authorization = `Bearer ${process.env[mount.bearer_token_env_var] ?? ""}`;
   for (const [header, variable] of Object.entries((mount.env_http_headers ?? {}) as Record<string, string>)) headers[header] = process.env[variable] ?? "";
+  Object.assign(headers, mount.http_headers ?? {});
   const post = async (frame: object) => {
     const response = await fetch(mount.url as string, { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", ...frame }), signal: AbortSignal.timeout(20_000) });
     const session = response.headers.get("mcp-session-id");
@@ -302,7 +322,8 @@ const announceMcpStartup = () => {
   const report = (name: string, status: string, error: string | null = null) =>
     out({ jsonrpc: "2.0", method: "mcpServer/startupStatus/updated", params: { threadId: null, name, status, error, failureReason: null } });
   mcpPending = Object.entries(mcpMounts())
-    .filter(([name, fields]) => "command" in fields && fields.enabled !== false && name !== process.env.FAKE_CODEX_MCP_FAILED)
+    // Every server it starts, by command or by URL (OpenMausBot's own, with OMB_OWN_MCP_HTTP=1).
+    .filter(([name, fields]) => ("command" in fields || "url" in fields) && fields.enabled !== false && name !== process.env.FAKE_CODEX_MCP_FAILED)
     .map(([name]) => name);
   for (const name of mcpPending) report(name, "starting");
   const settle = (name: string) => {
@@ -366,6 +387,10 @@ const dump = () => {
 };
 
 const finishTurn = () => {
+  if (process.env.FAKE_CODEX_COMPACTION === "1") {
+    notify("item/started", { item: { id: "c1", type: "contextCompaction" } });
+    notify("item/completed", { item: { id: "c1", type: "contextCompaction" } });
+  }
   const patchBytes = Number(process.env.FAKE_CODEX_PATCH_BYTES);
   if (patchBytes > 0) {
     const change = (bytes: number) => [{ path: `${process.cwd()}/web/index.html`, kind: { type: "add" }, diff: "+".repeat(bytes) }];
@@ -395,7 +420,7 @@ const finishTurn = () => {
   notify("item/completed", { item: { id: "m1", type: "agentMessage", text: "done from fake codex" } });
   const carried = process.env.FAKE_CODEX_RESTORED_USAGE ? { inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 } : { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
   notify("thread/tokenUsage/updated", { tokenUsage: {
-    total: { inputTokens: carried.inputTokens + 7, cachedInputTokens: carried.cachedInputTokens + 4, outputTokens: carried.outputTokens + 3 },
+    total: { inputTokens: carried.inputTokens + 7 * ++turnsFinished, cachedInputTokens: carried.cachedInputTokens + 4 * turnsFinished, outputTokens: carried.outputTokens + 3 * turnsFinished },
     last: { inputTokens: 7, cachedInputTokens: 4, outputTokens: 3 },
     modelContextWindow: 272000,
   } });
@@ -414,6 +439,54 @@ const finishTurn = () => {
   }
 };
 
+// The scripted replies every fake plays (FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE); inlined, since tests copy this fake
+// out of the repo.
+let streamTurn = 0;
+const streamScriptFor = (prompt: string): { steps: Array<Record<string, string>>; chars: number; ms: number } | null => {
+  if (!process.env.FAKE_STREAM_SCRIPT) return null;
+  let scripts: Record<string, Array<Record<string, string>>>;
+  try { scripts = JSON.parse(readFileSync(process.env.FAKE_STREAM_SCRIPT, "utf8")); } catch { return null; }
+  // A prompt can carry earlier requests as context: the newest marker in it is the request.
+  const marker = Object.keys(scripts).filter((key) => prompt.includes(key)).sort((a, b) => prompt.lastIndexOf(b) - prompt.lastIndexOf(a) || b.length - a.length)[0];
+  if (!marker) return null;
+  const [chars = 4, ms = 40] = (process.env.FAKE_STREAM_CADENCE ?? "4:40").split(":").map(Number);
+  return { steps: scripts[marker]!, chars: Math.max(1, chars), ms: Math.max(0, ms) };
+};
+const playStreamScript = (script: NonNullable<ReturnType<typeof streamScriptFor>>) => {
+  const turn = ++streamTurn;
+  const live = () => turn === streamTurn;
+  const queue = script.steps.slice();
+  let index = 0;
+  const next = () => {
+    if (!live()) return;
+    const step = queue.shift();
+    if (!step) return void notify("turn/completed", { turn: { status: "completed" } });
+    index += 1;
+    if (step.fail !== undefined) return void notify("turn/completed", { turn: { status: "failed", error: { message: step.fail } } });
+    if (step.tool !== undefined) {
+      notify("item/started", { item: { id: `c${index}`, type: "commandExecution", command: step.tool } });
+      notify("item/completed", { item: { id: `c${index}`, type: "commandExecution", status: "completed", aggregatedOutput: "ok", exitCode: 0 } });
+      return void setTimeout(next, script.ms);
+    }
+    const text = step.say ?? step.think ?? "";
+    const id = `m${index}`;
+    if (step.say !== undefined) notify("item/started", { item: { id, type: "agentMessage", text: "" } });
+    let at = 0;
+    const send = () => {
+      if (!live()) return;
+      if (at < text.length) {
+        const delta = text.slice(at, at += script.chars);
+        notify(step.say !== undefined ? "item/agentMessage/delta" : "item/reasoning/textDelta", { itemId: id, delta });
+        return void setTimeout(send, script.ms);
+      }
+      if (step.say !== undefined) notify("item/completed", { item: { id, type: "agentMessage", text } });
+      setTimeout(next, script.ms);
+    };
+    send();
+  };
+  next();
+};
+
 const playRoomPlanTurn = (msg: any, planPath: string) => {
   const ack = () => out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
   const early = process.env.FAKE_CODEX_COMPLETE_BEFORE_ACK === "1";
@@ -430,7 +503,8 @@ const playRoomPlanTurn = (msg: any, planPath: string) => {
   if (!early) ack();
   // Loaded only in this mode: other tests run a copy of this file on its own.
   void import("./room-handoff-agent.ts").then(({ runRoomHandoffAgent }) => runRoomHandoffAgent(process.argv.slice(2), planPath, { message: { content: text } },
-    { integration, system: developerInstructions, evidence: { resumedThread } }))
+    // A later turn of one process carries on the thread it has loaded, with no thread/resume.
+    { integration, system: developerInstructions, evidence: { resumedThread: resumedThread ?? (turnsStarted > 1 ? nativeThreadId : null) } }))
     .then((reply) => {
       notify("item/completed", { item: { id: "m1", type: "agentMessage", text: reply } });
       notify("turn/completed", { turn: { status: "completed" } });
@@ -510,7 +584,8 @@ process.stdin.on("data", (chunk) => {
             result: {
               data: [
                 { id: "gpt-hidden", displayName: "Hidden", hidden: true, isDefault: false },
-                { id: "gpt-page-two", displayName: "GPT Page Two", hidden: false, isDefault: false },
+                { id: "gpt-page-two", displayName: "GPT Page Two", hidden: false, isDefault: false,
+                  ...(tiers ? { serviceTiers: FAST_TIERS, defaultServiceTier: "priority" } : {}) },
               ],
               nextCursor: null,
             },
@@ -525,7 +600,8 @@ process.stdin.on("data", (chunk) => {
                 ...(hasAstra
                   ? [{ id: "gpt-6-astra", displayName: "GPT-6 Astra", hidden: false, isDefault: true }]
                   : []),
-                { id: "gpt-fake-default", displayName: "GPT Fake Default", hidden: false, isDefault: !hasAstra },
+                { id: "gpt-fake-default", displayName: "GPT Fake Default", hidden: false, isDefault: !hasAstra,
+                  ...(tiers ? { serviceTiers: FAST_TIERS, defaultServiceTier: null } : {}) },
                 ...(process.env.FAKE_CODEX_LUNA === "1"
                   ? [{ id: "gpt-6-luna", displayName: "GPT-6 Luna", hidden: false, isDefault: false }]
                   : []),
@@ -537,6 +613,7 @@ process.stdin.on("data", (chunk) => {
         }
         break;
       case "config/read":
+        logStartup("config/read");
         if (mode === "config-read-error") {
           dump();
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "config unavailable" } });
@@ -566,7 +643,8 @@ process.stdin.on("data", (chunk) => {
                     harmless_name: { env: { DISPLAY_LABEL: "innocuous-config-secret-7a9c" } },
                   },
                 }),
-              developer_instructions: process.env.FAKE_CODEX_INSTRUCTIONS ?? null,
+              developer_instructions: process.env.FAKE_CODEX_INSTRUCTIONS_FILE && existsSync(process.env.FAKE_CODEX_INSTRUCTIONS_FILE)
+                ? readFileSync(process.env.FAKE_CODEX_INSTRUCTIONS_FILE, "utf8") : process.env.FAKE_CODEX_INSTRUCTIONS ?? null,
               shell_environment_policy: shellEnvironmentPolicy(),
               features: Object.fromEntries(process.argv.flatMap((arg, index) => {
                 const match = process.argv[index - 1] === "-c" ? /^features\.(\w+)=(true|false)$/.exec(arg) : null;
@@ -590,7 +668,7 @@ process.stdin.on("data", (chunk) => {
           threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId }, sandbox: resolvedSandbox(msg.params ?? {}) } });
         } else if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
-        } else if (mode === "resume" || mode === "review-events" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" || mode === "async-question" ||
+        } else if (mode === "resume" || mode === "plan-unsupported-input" || mode === "review-events" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" || mode === "async-question" ||
             (mode === "resume-then-missing" && !existsSync(process.env.FAKE_CODEX_STATE ?? ""))) {
           threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId, ...(process.env.FAKE_CODEX_ROLLOUT ? { path: process.env.FAKE_CODEX_ROLLOUT } : {}) }, sandbox: resolvedSandbox(msg.params ?? {}) } });
         } else {
@@ -627,6 +705,7 @@ process.stdin.on("data", (chunk) => {
       }
       case "turn/interrupt":
         dump();
+        streamTurn += 1;
         if (process.env.FAKE_CODEX_INTERRUPT_SILENT) break;
         out({ jsonrpc: "2.0", id: msg.id, result: {} });
         notify("turn/completed", { turn: { status: "interrupted" } });
@@ -652,7 +731,9 @@ process.stdin.on("data", (chunk) => {
         break;
       case "turn/start": {
         if (process.env.FAKE_CODEX_MCP_READY_MS) mcpReadyAtTurnStart = mcpPending.length === 0;
+        nativeTurnId = `turn-${++turnsStarted}`;
         dump();
+        if (Number(process.env.FAKE_CODEX_DIE_ON_TURN) === turnsStarted) process.kill(process.pid, "SIGKILL");
         logStartup("turn/start");
         nativeThreadId = msg.params?.threadId ?? nativeThreadId;
         if (mode === "early-tool-timeout" || mode === "early-tool-error") {
@@ -793,6 +874,14 @@ process.stdin.on("data", (chunk) => {
           notify("turn/completed", { turn: { status: "failed", error } });
           break;
         }
+        if (mode === "plan-unsupported-input" && resumedThread) {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          // The reporter's words (2026-11-17): the resumed session holds an mp3 a ChatGPT plan will not take.
+          const error = { message: "unexpected status 400 Bad Request: {\"error\":{\"message\":\"User subscription sharing supports text, image, and file input. Remove unsupported content or use an API key instead.\",\"type\":\"invalid_request_error\",\"param\":\"input\",\"code\":\"subscription_sharing_unsupported_capability\"}}", codexErrorInfo: null, additionalDetails: null };
+          notify("error", { willRetry: false, error });
+          notify("turn/completed", { turn: { status: "failed", error } });
+          break;
+        }
         if (mode === "usage-limit") {
           out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
           const error = { message: "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:23 PM.", codexErrorInfo: "usageLimitExceeded", additionalDetails: null };
@@ -861,6 +950,11 @@ process.stdin.on("data", (chunk) => {
         }
         if (mode === "early-turn-events") finishTurn();
         out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+        const script = streamScriptFor((msg.params?.input ?? []).filter((item: any) => item?.type === "text").map((item: any) => item.text).join("\n"));
+        if (script) {
+          playStreamScript(script);
+          break;
+        }
         if (mode === "early-turn-events") break;
         if (process.env.FAKE_CODEX_ECHO_INPUT === "1") {
           const prompt = { type: "userMessage", id: "u1", content: msg.params?.input ?? [] };
@@ -1056,5 +1150,6 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
-// match the real app-server: stay alive until killed
+// codex-cli 0.160.1 stays up between turns and exits once its stdin closes.
+process.stdin.on("end", () => setTimeout(() => process.exit(0), 200));
 setInterval(() => {}, 1_000);

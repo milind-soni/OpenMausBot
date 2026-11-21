@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { BaseSequencer, type TestSequencerConstructor, type TestSpecification, type Vitest } from "vitest/node";
 import viteConfig from "../../vite.config.ts";
 import { VITEST_SHARDS } from "../ci-scope.mjs";
-import { DurationSequencer, SHARD_WEIGHTS_FILE, loadPlatformShardWeights, loadShardWeights, planShards, weightKey } from "./duration-sequencer.ts";
+import { DurationSequencer, NODE_TESTS_SECONDS, SHARD_WEIGHTS_FILE, loadPlatformShardWeights, loadShardWeights, planShards, weightKey } from "./duration-sequencer.ts";
 import { isPortableE2e } from "./host-e2e.ts";
 import { buildWeights, mergePlatformWeights, parseVitestLog, RUNNER_PLATFORMS } from "./update-shard-weights.mjs";
 
@@ -49,7 +49,7 @@ describe("vitest shard balance", () => {
   });
 
   it.each(CI_PLATFORMS)("gives no $os shard much more recorded time than the others", ({ platform, count, files }) => {
-    const { loads } = planShards(files, loadShardWeights(ROOT, platform), count);
+    const { loads } = planShards(files, loadShardWeights(ROOT, platform), count, NODE_TESTS_SECONDS[platform] ?? 0);
     const mean = loads.reduce((sum, load) => sum + load, 0) / loads.length;
     // equal file counts put three of the four slowest e2e files in one shard: ~1.4x the mean
     expect(Math.max(...loads) / mean, `recorded seconds per shard: ${loads.join(", ")}`).toBeLessThan(1.05);
@@ -64,11 +64,18 @@ describe("vitest shard balance", () => {
 
   it("never puts two of the slowest files in one shard while a shard is free", async () => {
     const slowest = Object.entries(WEIGHTS).sort(([, a], [, b]) => b - a).map(([file]) => file);
+    const nodeTests = NODE_TESTS_SECONDS[process.platform] ? 1 : 0;
     for (let count = 2; count <= 8; count++) {
       const shards = await split(DurationSequencer, FILES, count);
-      const owners = slowest.slice(0, count).map((file) => shards.findIndex((shard) => shard.includes(file)));
-      expect(new Set(owners).size, `${count} shards: ${slowest.slice(0, count).join(", ")}`).toBe(count);
+      const owners = slowest.slice(0, count - nodeTests).map((file) => shards.findIndex((shard) => shard.includes(file)));
+      expect(new Set(owners).size, `${count} shards: ${slowest.slice(0, count).join(", ")}`).toBe(count - nodeTests);
     }
+  });
+
+  it("starts the first shard at the node tests that run after its vitest", () => {
+    const weights = { "a.test.ts": 100, "b.test.ts": 100, "c.test.ts": 100 };
+    expect(planShards(Object.keys(weights), weights, 2, 120)).toEqual({ shardOf: [1, 1, 0], loads: [220, 200] });
+    expect(planShards(Object.keys(weights), weights, 2)).toEqual({ shardOf: [0, 1, 0], loads: [200, 100] });
   });
 
   it("plans the same split whatever order the files arrive in", () => {

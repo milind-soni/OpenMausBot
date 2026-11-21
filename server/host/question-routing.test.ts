@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { HandoffView } from "../coordinator.ts";
 import type { Answerer } from "../runtime/types.ts";
@@ -39,7 +39,7 @@ function world(options: { live?: string[]; privateTo?: string; steers?: boolean;
   const nodes = new Map<string, HandoffView>();
   const node = (over: Partial<HandoffView>): HandoffView => {
     const made = { id: "as_1", rootId: "root", parentId: "root", threadId: "work", botId: "dachs", key: "dachs", text: "Fix it", createdAt: 1_000,
-      status: "waiting", result: "", reported: false, executions: 1, approvalGranted: false, kind: "work", restarts: 0, mode: "work", reply: "resume", ...over } as HandoffView;
+      status: "waiting", result: "", reported: false, executions: 1, kind: "work", restarts: 0, mode: "work", reply: "resume", ...over } as HandoffView;
     nodes.set(made.id, made);
     return made;
   };
@@ -49,7 +49,7 @@ function world(options: { live?: string[]; privateTo?: string; steers?: boolean;
   const settled: string[] = [];
   const steered: Array<{ threadId: string; text: string }> = [];
   const deps: QuestionRoutingDeps = {
-    store: store as unknown as QuestionRoutingDeps["store"],
+    handedInUnproven: () => {}, store: store as unknown as QuestionRoutingDeps["store"],
     active: () => [...nodes.values()],
     node: (id) => nodes.get(id),
     parkedFor: (botId) => [...nodes.values()].filter((one) => one.botId === botId && one.status === "waiting" && one.question !== undefined),
@@ -61,6 +61,7 @@ function world(options: { live?: string[]; privateTo?: string; steers?: boolean;
       return true;
     },
     live: (_threadId, requestId) => (options.live ?? []).includes(requestId),
+    hasLive: () => (options.live ?? []).length > 0,
     unattended: (_botId, threadId) => (options.unattended ?? []).includes(threadId),
     answerLive: async (threadId, requestId, text) => { if (options.takesAnswers === false) return false; answeredLive.push({ threadId, requestId, text }); return true; },
     settleSignIns: (parked) => { settled.push(parked.id); },
@@ -119,6 +120,16 @@ describe("an answer passed on by another bot", () => {
     const node = parked(w);
     const turn = { id: "root", carrying: [node.id] } as HandoffView;
     expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: turn, target: DACHS, message: "Excel" })).toMatchObject({ outcome: "injected" });
+    expect(w.answeredNodes.map((one) => one.text)).toEqual(["Excel"]);
+  });
+
+  it("leaves a carried question alone when the sender chose another thread itself, and still answers it unnamed when it chose none", async () => {
+    const w = world();
+    const node = parked(w);
+    const turn = { id: "root", carrying: [node.id] } as HandoffView;
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: turn, target: DACHS, message: "Also check the tests.", threadId: "other-work", selected: true })).toBeUndefined();
+    expect(w.answeredNodes).toEqual([]);
+    expect(await w.routing.relay({ sender: FUCHS, senderThreadId: "inbox", senderNode: turn, target: DACHS, message: "Excel", threadId: "other-work" })).toMatchObject({ outcome: "injected", requestId: node.id });
     expect(w.answeredNodes.map((one) => one.text)).toEqual(["Excel"]);
   });
 
@@ -217,6 +228,21 @@ describe("a Chief's answer, for the person, to a question a teammate asks them",
     w.store.appendMessage(threadId, { role: "bot", kind: "options", text: question, card: { title: "Dachs has a question", subtitle: question, options: ["Ja", "Nein"], requestId, requestType: "question" } });
   const answer = (w: ReturnType<typeof world>, threadId: string) =>
     w.routing.answerForPerson({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, threadId, message: "Ja, behalten" });
+
+  it("reads no thread of the target's for a question no turn is waiting on, so a send does not parse every conversation it has", async () => {
+    const idle = world();
+    asks(idle, "work");
+    asks(idle, "other-work");
+    const read = vi.spyOn(idle.store, "messagesFor");
+    await idle.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Ja" });
+    expect(read).not.toHaveBeenCalled();
+
+    const waiting = world({ live: ["req-p"] });
+    asks(waiting, "work");
+    const readWaiting = vi.spyOn(waiting.store, "messagesFor");
+    await waiting.routing.relay({ sender: FUCHS, senderThreadId: "inbox", target: DACHS, message: "Ja" });
+    expect(readWaiting).toHaveBeenCalledWith("work");
+  });
 
   it("answers the card in the person's own chat with the teammate, and the card and the Chief's chat say who answered", async () => {
     const w = world({ live: ["req-p"] });

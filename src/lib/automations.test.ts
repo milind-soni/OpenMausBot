@@ -4,7 +4,7 @@ import { setLocale } from "@/lib/i18n";
 import type { Routine, RoutineRun } from "@/lib/routines";
 import type { WebhookTrigger } from "@/lib/webhooks";
 import {
-  automationSentence, automationsFrom, automationStatus, doesPhrase, lastReceived, lastWhen, nextWhen, orderAutomations, plainWhen, runLine, sourcePhrase, statusLine,
+  automationSentence, automationsFrom, automationStatus, doesPhrase, lastReceived, lastWhen, nextWhen, orderAutomations, plainWhen, runAwaitingAnswer, runLine, sourcePhrase, statusLine,
   webhookCalls, type Automation,
 } from "./automations";
 import type { WebhookAttempt } from "@/lib/webhooks";
@@ -107,6 +107,17 @@ describe("status: Working, Paused, Needs you", () => {
     expect(automationStatus(automation([run("failed", at(0, 9), { error: "Provider crashed" }), run("completed", at(-1, 9)), run("failed", at(-2, 9))])).state).toBe("working");
   });
 
+  it("does not take a row that only counts skipped occurrences for a failure, or for the latest run", () => {
+    const counted = run("missed", at(0, 9, 5), { error: "Skipped because the previous run of this routine is still running", seenAt: at(0, 9, 5), skipped: { count: 1, firstAt: at(0, 9, 5), lastAt: at(0, 9, 5) } });
+    const withOneFailure = automation([counted, run("failed", at(0, 9), { error: "Provider crashed" }), run("completed", at(-1, 9))]);
+    expect(automationStatus(withOneFailure).state).toBe("working");
+    expect(statusLine(automation([counted, run("completed", at(0, 9, 2))]), NOW)).toBe("On · last ran today 9:02 AM · next: Monday 9:00 AM");
+    expect(statusLine(automation([counted, run("running", at(0, 9, 2))]), NOW)).toContain("running now");
+    // One the owner was told about is a result like any other.
+    const told = { ...counted, seenAt: undefined, skipped: { ...counted.skipped!, told: true as const } };
+    expect(automationStatus(automation([told, run("failed", at(0, 9), { error: "Provider crashed" })])).state).toBe("needs-you");
+  });
+
   it("is Paused when switched off, whatever its runs", () => {
     expect(automationStatus(automation([run("failed", at(0, 9)), run("failed", at(-1, 9))], { enabled: false })).state).toBe("paused");
   });
@@ -127,6 +138,25 @@ describe("status: Working, Paused, Needs you", () => {
     expect(automationStatus(automation([run("waiting", at(0, 9), { attention: "Approve the reply?" })]))).toMatchObject({ state: "needs-you", fix: "answer" });
     expect(automationStatus(automation([run("failed", at(0, 9), { error: "Provider crashed" }), run("missed", at(-1, 9)), run("completed", at(-2, 9))])))
       .toMatchObject({ state: "needs-you", fix: "run", reason: "It didn't finish the last 2 times." });
+  });
+
+  it("is still working, not asking the person, while its last run waits only on work it handed to teammates", () => {
+    const handedOn = run("waiting", at(0, 9), { attention: "Waiting for work it handed on to finish" });
+    expect(automationStatus(automation([handedOn]))).toEqual({ state: "working" });
+    expect(runLine(handedOn, NOW)).toMatchObject({ mark: "…", text: "Waiting for work it handed on to finish" });
+    expect(runLine(run("waiting", at(0, 9), { attention: "Approve the reply?" }), NOW)).toMatchObject({ mark: "!", text: "It's waiting for your answer." });
+  });
+
+  it("still asks the person when an older run waits for an answer behind a newer run that waits on teammates", () => {
+    const asking = run("waiting", at(-1, 9), { attention: "Approve the reply?" });
+    const runs = [run("waiting", at(0, 9), { attention: "Waiting for work it handed on to finish" }), asking];
+    expect(automationStatus(automation(runs))).toMatchObject({ state: "needs-you", fix: "answer" });
+    expect(runAwaitingAnswer(automation(runs).runs)?.id).toBe(asking.id);
+    expect(automationStatus(automation([run("waiting", at(0, 9), { attention: "Waiting for work it handed on to finish" }), run("completed", at(-1, 9))])).state).toBe("working");
+  });
+
+  it("treats a room goal's own wait as a question even when its words match the hand-off line", () => {
+    expect(automationStatus(automation([run("waiting", at(0, 9), { target: "room-goal", attention: "Waiting for work it handed on to finish" })])).state).toBe("needs-you");
   });
 
   it("ignores runs still waiting to start and runs a person stopped when judging the last run", () => {

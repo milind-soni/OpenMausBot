@@ -1,5 +1,6 @@
 // The job runtime's public types: one record for every hand-off between bots, one lifecycle, one wake lane.
 import type { ApprovalMode } from "../../shared/approval-mode.ts";
+import type { HostFault } from "../host-fault.ts";
 
 /** Where the work ultimately started. Immutable down the whole tree. */
 export type OriginKind = "person" | "routine" | "outside";
@@ -108,6 +109,9 @@ export interface Assignment {
   status: Status;
   outcome?: Outcome;
   outcomeDetail?: string;
+  /** A failed turn's cause outside the work itself, read from the system's own failure words (never the bot's reply),
+   * when sending the same work again would meet it again. */
+  fault?: HostFault;
   level: Level;
   levelSource: LevelSource;
   /** Turns started for it, including resumes and reruns. */
@@ -119,7 +123,8 @@ export interface Assignment {
   restart?: "rerun" | "cut" | "teammates";
   createdAt: number;
   startedAt?: number;
-  /** Last durable progress: a dispatch, a settlement, a child's settlement. */
+  /** Last durable progress: a dispatch, a settlement, a child's settlement — and, while a turn
+   * runs, activity the host reports through progress(), written on a coarse cadence. */
   lastActivityAt: number;
   finishedAt?: number;
   /** What the assignee last said or how it ended (at most 12 000 characters). */
@@ -136,7 +141,9 @@ export interface Assignment {
   /** Its reply only acknowledged: its requester takes no turn for it (status-reply.ts). */
   statusOnly?: boolean;
   question?: string;
-  /** While parked under Full access ("Just do it"): the question is its requester's to answer, never the person's.
+  /** While parked: when the person was reminded of it, so a restart never reminds them twice. */
+  remindedAt?: number;
+  /** While parked under Full access: the question is its requester's to answer, never the person's.
    * Still unanswered when the requester's turn that carries it ends, the assignee goes on with `default`, or with its
    * own pick when it named none. */
   decide?: { default?: string };
@@ -145,7 +152,9 @@ export interface Assignment {
   /** Who gave `answer` when the person did not: a bot that passed one on or decided it, or nobody (the default). */
   answeredBy?: Answerer;
   /** On a root only: the budget window since its last durable progress. */
-  budgets?: { since: number; requests: number; executions: number; wakes: number };
+  /** `total`: every turn the root's tree has started, which no progress resets. `failed`: handed-off work that failed
+   * since any last completed. The rest count since the root's last progress. */
+  budgets?: { since: number; requests: number; executions: number; wakes: number; total?: number; failed?: number };
   /** While parked on the person's cards (a root): the ids of the cards the
    * turn left open; the answer arrives when the person acts on them. */
   cards?: string[];
@@ -163,6 +172,8 @@ export interface Assignment {
   approved?: boolean;
   /** A room brief shown once per call: every recipient of that call shares it. */
   batchKey?: string;
+  /** The call that handed this out, when one call reached several teammates. */
+  fanOut?: string;
   version: 1;
 }
 
@@ -185,7 +196,7 @@ export interface TurnEvidence {
 export type EventKind =
   | "enqueued" | "refused" | "admitted" | "started" | "progress" | "parked" | "answered"
   | "waiting" | "resume_due" | "settled" | "reported" | "woken" | "cancelled"
-  | "restart_reconciled" | "budget" | "stalled" | "continued" | "held";
+  | "restart_reconciled" | "budget" | "stalled" | "continued" | "held" | "reminded";
 
 export interface AssignmentEvent {
   id: number;
@@ -228,6 +239,8 @@ export interface EnqueueRequest {
   driverKind?: string;
   approved?: boolean;
   batchKey?: string;
+  /** One call that hands the same work to several teammates: it counts once against the request budget. */
+  fanOut?: string;
   /** A new thread of the requester's own bot (tree.ts ownThread): the requesting turn is not an ancestor it refuses. */
   ownThread?: boolean;
 }
@@ -263,7 +276,8 @@ export interface RunInput {
 export type RunResult =
   /** statusOnly: nothing in `text` for the requester to do (status-reply.ts). */
   | { kind: "completed"; text: string; evidence?: TurnEvidence; statusOnly?: boolean }
-  | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence }
+  /** failure: the system's own words for why the turn failed and the engine's stop reason, apart from anything the bot said. */
+  | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence; failure?: { text: string; stopReason?: string | null } }
   | { kind: "needs_input"; question: string; cards?: string[]; decide?: { default?: string }; evidence?: TurnEvidence }
   /** The turn stopped short (a step cap, a seat it could not get) and the
    * same node continues in place with its next execution. */
@@ -318,6 +332,8 @@ export interface TurnRunner {
   /** The assignment is parked on the person; show what it needs. `restored`
    * is the restart's re-park: show it again only if it never got shown. */
   park(a: Assignment, question: string, restored?: boolean): void;
+  /** Work parked on the person has waited inputRemindMs: remind them, once. `closesAt`: when it expires. */
+  remind?(a: Assignment, closesAt: number): void;
   /** A settled child, into its requester's conversation (a chip, a line), or
    * a root that ended alone, into its own. Called once per settlement. */
   report(a: Assignment, parent?: Assignment): void;
@@ -328,6 +344,9 @@ export interface TurnRunner {
   /** What the cut turn of this node already did outward, as short labels. Read at open() only: a
    * turn that acted outward is not run again. Absent or empty: the turn reruns once. */
   outward?(a: Assignment): string[];
+  /** The assignee lives in a place that cannot be reached now (a computer that is off or asleep). Queued work for it is
+   * held by no window: neither the queue bound nor the tree's stall window runs while this is true. */
+  away?(a: Assignment): boolean;
 }
 
 export interface Clock {
@@ -345,6 +364,10 @@ export interface Limits {
   requests: number;
   executions: number;
   wakes: number;
+  /** Turns one root's tree may start in all; progress does not renew it. */
+  totalExecutions: number;
+  /** Handed-off work that may fail in a row, with none completing between, before the root's tree is stopped. */
+  failedInARow: number;
   /** A queued assignment that never started within this is expired. */
   queueMs: number;
   /** No durable progress on a root for this long fails the tree. */
@@ -352,9 +375,12 @@ export interface Limits {
   /** A turn with no activity for this long is stalled (the host says what
    * counts as activity by touching progress()). */
   turnStallMs: number;
-  /** How long a parked assignment waits on the person's words before it expires: not run, not refused. Infinite
-   * unless a host sets it: a question waits for the person. */
+  /** How long handed-off work parked on the person waits before it expires: not run, not refused. On the wall clock,
+   * restarts included. Infinite unless a host sets it. A root waits on no one above it and has no such limit. */
   inputWaitMs: number;
+  /** How long that work waits before the person is reminded of it, once. The rest of inputWaitMs always follows the
+   * reminder, however late a restart let it go out. Infinite: no reminder. */
+  inputRemindMs: number;
 }
 
 export const DEFAULT_LIMITS: Limits = {
@@ -362,10 +388,13 @@ export const DEFAULT_LIMITS: Limits = {
   requests: 24,
   executions: 48,
   wakes: 48,
+  totalExecutions: 300,
+  failedInARow: 5,
   queueMs: 24 * 60 * 60_000,
   stallMs: 4 * 60 * 60_000,
   turnStallMs: 20 * 60_000,
   inputWaitMs: Number.POSITIVE_INFINITY,
+  inputRemindMs: Number.POSITIVE_INFINITY,
 };
 
 export interface LiveEdge {

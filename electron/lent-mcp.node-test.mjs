@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { createLentMcp, inheritedEnvironment, isLoopbackAddress, lentMcpRefusal, ownEnvironmentIds, ownPorts, validLentMcpServer, windowsLaunch } from "./lent-mcp.mjs";
+import { CALLER_META, createLentMcp, inheritedEnvironment, isLoopbackAddress, lentMcpRefusal, ownEnvironmentIds, ownPorts, validLentMcpServer, windowsLaunch } from "./lent-mcp.mjs";
 import { executeSharedOperation } from "./shared-computer-access.mjs";
 import { validSharedOperation } from "./computer-sharing.mjs";
 
@@ -53,6 +53,13 @@ test("takes a server only in the shape the Cloud sends, and an MCP job only with
   assert.equal(validSharedOperation({ computer_id: id, action: "mcp_call", server: command, tool_name: "x".repeat(200), arguments: {} }, id), true);
   assert.equal(validSharedOperation({ computer_id: id, action: "mcp_tools" }, id), false);
   assert.equal(validSharedOperation({ computer_id: id, action: "read_file", server: command }, id), false);
+  const caller = { botId: "kiwi", threadId: "t-1" };
+  assert.equal(validSharedOperation({ computer_id: id, action: "mcp_call", server: command, tool_name: "x", caller }, id), true);
+  for (const bad of [{ ...caller, extra: 1 }, { botId: "kiwi" }, { botId: "", threadId: "t" }, { botId: "k", threadId: "t".repeat(129) }, { botId: 1, threadId: "t" }, [], null, "kiwi"]) {
+    assert.equal(validSharedOperation({ computer_id: id, action: "mcp_call", server: command, tool_name: "x", caller: bad }, id), false, JSON.stringify(bad));
+  }
+  assert.equal(validSharedOperation({ computer_id: id, action: "mcp_tools", server: command, caller }, id), false, "only a tool call names its caller");
+  assert.equal(validSharedOperation({ computer_id: id, action: "read_file", path: "a", caller }, id), false);
 });
 
 test("security: only the person's own Cloud, a command only with the terminal lent, an address only on this computer, MCP only", () => {
@@ -180,6 +187,9 @@ test("an address on this computer gets MCP messages with its saved headers, as J
   assert.deepEqual(seen.map(request => request.message.method), ["initialize", "notifications/initialized", "tools/list", "tools/call"]);
   assert.ok(seen.every(request => request.method === "POST" && request.url === "/mcp" && request.headers.authorization === "Bearer saved-header"));
   assert.deepEqual(seen.slice(1).map(request => request.headers["mcp-session-id"]), ["s-1", "s-1", "s-1"]);
+  assert.equal("_meta" in seen[3].message.params, false, "no caller from the Cloud: no _meta");
+  await lent.call({ action: "mcp_call", server, tool_name: "search", arguments: { q: "plan" }, caller: { botId: "kiwi", threadId: "t-1" } }, signal());
+  assert.deepEqual(seen[4].message.params, { name: "search", arguments: { q: "plan" }, _meta: { [CALLER_META]: { botId: "kiwi", threadId: "t-1", verified: false } } }, "the caller goes to the MCP server as an unverified hint");
 });
 
 test("an address that refuses its keys, redirects or isn't there says so plainly, with no key in the words", async t => {

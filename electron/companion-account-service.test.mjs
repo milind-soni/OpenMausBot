@@ -8,6 +8,8 @@ import {
   COMPANION_ACCOUNT_USER_ID_FIELD,
   COMPANION_CLIENT_INSTANCE_FIELD,
   COMPANION_ENDPOINT_PAUSED_FIELD,
+  COMPANION_TUNNEL_RETIRED_FIELD,
+  COMPANION_TUNNEL_WAITING_FIELD,
   COMPANION_ENDPOINT_RELEASE_PENDING_FIELD,
   COMPANION_INSTALLATION_CREDENTIAL_FIELD,
   COMPANION_INSTALLATION_EXPIRY_FIELD,
@@ -142,6 +144,11 @@ describe("Companion account service", () => {
     });
   });
 
+  it("tells a build with no control plane apart from one that can't reach it", async () => {
+    const { service } = serviceFixture({ client: null });
+    await expect(service.state()).resolves.toMatchObject({ available: false, status: "signed-out", problem: "unconfigured" });
+  });
+
   it("hides account onboarding until the configured control plane is healthy", async () => {
     const client = readyClient({
       health: vi.fn(async () => {
@@ -174,6 +181,7 @@ describe("Companion account service", () => {
       email: "ada@example.com",
       endpoint: ENDPOINT,
       message: "Secure access is not available right now. Local pairing still works.",
+      problem: "unreachable",
     });
     expect(store.writes).toHaveLength(0);
   });
@@ -307,6 +315,7 @@ describe("Companion account service", () => {
       email: "ada@example.com",
     });
     expect(JSON.stringify(await service.state())).not.toContain("invalid_otp");
+    expect((await service.state()).problem).toBe("sign_in");
   });
 
   it("handles an expired account session without deleting recovery credentials", async () => {
@@ -1429,6 +1438,94 @@ describe("Companion account on demand", () => {
     f.service.dispose();
   });
 
+  it("stops the connector, forgets the address and says so when old phone apps no longer get a tunnel", async () => {
+    const retired = new ControlPlaneError("relay_capable", 409, "", 0, "retired");
+    expect(retired.tunnel).toBe("retired");
+    expect(new ControlPlaneError("relay_capable", 409, "", 0, "anything").tunnel).toBeNull();
+    expect(new ControlPlaneError("endpoint_capacity", 503, "", 0, "retired").tunnel).toBeNull();
+    const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(retired)) });
+    const f = onDemandFixture({ client, relay: { capable: () => true, legacyDevices: async () => 1 } });
+    f.companion.need = true;
+    const state = await f.service.retry();
+    expect(client.ensureEndpoint).toHaveBeenCalledWith(expect.any(String), { appVersion: "1.2.3", legacyDevices: 1 });
+    expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com", tunnelRetired: true });
+    expect(f.store.read()[COMPANION_TUNNEL_RETIRED_FIELD]).toBe(true);
+    expect(f.store.read()[COMPANION_TUNNEL_WAITING_FIELD]).toBe(true);
+    expect(f.store.read()).not.toHaveProperty(MANAGED_COMPANION_ENDPOINT_FIELD);
+    expect(f.stopManagedEndpoint).toHaveBeenCalled();
+    f.service.dispose();
+  });
+
+  it("keeps asking on the watchdog after the address ended or the accounts were full, so a relay outage hands it back", async () => {
+    for (const tunnel of ["retired", "full"]) {
+      const refused = new ControlPlaneError("relay_capable", 409, "", 0, tunnel);
+      const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(refused)) });
+      const f = onDemandFixture({ client, relay: { capable: () => true, legacyDevices: async () => 1 } });
+      f.companion.need = true;
+      await f.service.restore();
+      await f.service.retry();
+      expect(client.ensureEndpoint).toHaveBeenCalledTimes(1);
+      expect(f.store.read()[COMPANION_TUNNEL_WAITING_FIELD]).toBe(true);
+      expect(f.store.read()).not.toHaveProperty(MANAGED_COMPANION_ENDPOINT_FIELD);
+
+      // Nobody opens Phone & devices: each watchdog tick asks again, and after the hour a manual Retry counts for.
+      for (let tick = 2; tick <= 5; tick += 1) {
+        f.clock.now += HOUR_MS;
+        await f.watchdog();
+        expect(client.ensureEndpoint, `${tunnel} tick ${tick}`).toHaveBeenCalledTimes(tick);
+      }
+      expect(await f.service.state()).toEqual({
+        available: true, status: "ready", email: "ada@example.com", ...(tunnel === "retired" ? { tunnelRetired: true } : {}),
+      });
+
+      // The relay is switched off (or room frees up): the next tick gets the address back and the notice goes.
+      client.ensureEndpoint.mockImplementation(async () => ({ endpoint: { url: ENDPOINT }, connectorToken: CONNECTOR_TOKEN }));
+      f.clock.now += HOUR_MS;
+      await f.watchdog();
+      expect(f.store.read()[MANAGED_COMPANION_ENDPOINT_FIELD]).toBe(ENDPOINT);
+      expect(f.store.read()).not.toHaveProperty(COMPANION_TUNNEL_RETIRED_FIELD);
+      expect(f.store.read()).not.toHaveProperty(COMPANION_TUNNEL_WAITING_FIELD);
+      expect(await f.service.state()).not.toHaveProperty("tunnelRetired");
+      f.service.dispose();
+    }
+  });
+
+  it("stops asking once no old phone needs an address, and after a plain relay_capable", async () => {
+    const refused = new ControlPlaneError("relay_capable", 409, "", 0, "retired");
+    const client = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(refused)) });
+    const f = onDemandFixture({ client, relay: { capable: () => true, legacyDevices: async () => 1 } });
+    f.companion.need = true;
+    await f.service.restore();
+    await f.service.retry();
+    // The old phone was paired again on the encrypted connection: nothing needs the address.
+    f.companion.need = false;
+    for (let tick = 0; tick < 3; tick += 1) {
+      f.clock.now += HOUR_MS;
+      await f.watchdog();
+    }
+    expect(client.ensureEndpoint).toHaveBeenCalledTimes(1);
+    f.service.dispose();
+
+    const plain = readyClient({ ensureEndpoint: vi.fn(async () => Promise.reject(new ControlPlaneError("relay_capable", 409))) });
+    const g = onDemandFixture({ client: plain, relay: { capable: () => true, legacyDevices: async () => 1 } });
+    g.companion.need = true;
+    await g.service.restore();
+    await expect(g.service.retry()).resolves.toEqual({ available: true, status: "ready", email: "ada@example.com" });
+    expect(g.store.read()).not.toHaveProperty(COMPANION_TUNNEL_WAITING_FIELD);
+    expect(g.store.read()).not.toHaveProperty(COMPANION_TUNNEL_RETIRED_FIELD);
+    for (let tick = 0; tick < 3; tick += 1) {
+      g.clock.now += HOUR_MS;
+      await g.watchdog();
+    }
+    expect(plain.ensureEndpoint).toHaveBeenCalledTimes(1);
+    g.service.dispose();
+  });
+
+  it("tells a desktop below the minimum version to update", async () => {
+    const message = friendlyCompanionAccountError(new ControlPlaneError("update_required", 426));
+    expect(message).toBe("This version of MausBot can no longer make secure links. Update MausBot, then try again. Local Wi-Fi and Tailscale pairing still work.");
+  });
+
   it("signs a relay-capable computer in without a tunnel when no phone needs one", async () => {
     for (const relayCapable of [true, false]) {
       const f = onDemandFixture({ initial: {}, relay: { capable: () => relayCapable, legacyDevices: async () => 0 } });
@@ -1715,11 +1812,19 @@ describe("Companion account on demand", () => {
       [MANAGED_COMPANION_TOKEN_FIELD]: RECLAIMED_TOKEN,
     });
 
-    const stopped = onDemandFixture({ client: readyClient({ getEndpoint: vi.fn(async () => null) }) });
+    // A stopped connector dials its stored address only once the control plane still lists it, and asks once per
+    // half check interval.
+    const stopped = onDemandFixture({
+      client: readyClient({ getEndpoint: vi.fn(async () => ({ url: ENDPOINT, status: "ready" })) }),
+    });
     stopped.companion.connection = { status: "stopped", ready: false };
     await stopped.service.prepare();
+    expect(stopped.client.getEndpoint).toHaveBeenCalledOnce();
     expect(stopped.activatePersistedEndpoint).toHaveBeenCalledOnce();
-    for (const call of network) expect(stopped.client[call]).not.toHaveBeenCalled();
+    await stopped.service.prepare();
+    expect(stopped.client.getEndpoint).toHaveBeenCalledOnce();
+    expect(stopped.activatePersistedEndpoint).toHaveBeenCalledTimes(2);
+    for (const call of network.filter((name) => name !== "getEndpoint")) expect(stopped.client[call]).not.toHaveBeenCalled();
 
     for (const [initial, on] of [
       [signedInWithoutAddress(), false],
@@ -2153,5 +2258,239 @@ describe("Companion account on demand", () => {
     await expect(paired.service.restore()).resolves.toMatchObject({ status: "ready", endpoint: ENDPOINT });
     expect(paired.client.ensureEndpoint).toHaveBeenCalledOnce();
     paired.service.dispose();
+  });
+});
+
+describe("A stored address the control plane no longer holds", () => {
+  const relayCapable = () => new ControlPlaneError("relay_capable", 409);
+
+  it("prepare() asks while the connector is still starting, and forgets a deleted address for the relay", async () => {
+    for (const capable of [false, true]) {
+      const client = readyClient({
+        getEndpoint: vi.fn(async () => ({ url: ENDPOINT, status: "deleted" })),
+        ensureEndpoint: vi.fn(async () => Promise.reject(relayCapable())),
+      });
+      const f = onDemandFixture({ client, relay: { capable: () => capable, legacyDevices: async () => 0 } });
+      f.companion.connection = { status: "starting", ready: false };
+      const state = await f.service.prepare();
+      expect(client.getEndpoint).toHaveBeenCalledOnce();
+      expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com" });
+      for (const field of ADDRESS_FIELDS) expect(f.store.read()).not.toHaveProperty(field);
+      expect(f.stopManagedEndpoint).toHaveBeenCalled();
+      expect(f.activatePersistedEndpoint).not.toHaveBeenCalled();
+      f.service.dispose();
+    }
+  });
+
+  it("provisions again with the account when the installation credential is missing, instead of dialling", async () => {
+    const installationChanged = vi.fn();
+    const client = readyClient({
+      getEndpoint: vi.fn(async () => ({ url: ENDPOINT, status: "ready" })),
+      ensureEndpoint: vi.fn(async () => Promise.reject(relayCapable())),
+    });
+    const f = onDemandFixture({
+      initial: signedCredentials({ [COMPANION_INSTALLATION_CREDENTIAL_FIELD]: undefined }),
+      client,
+      installationChanged,
+      relay: { capable: () => false, legacyDevices: async () => 0 },
+    });
+    f.companion.connection = { status: "stopped", ready: false };
+    const state = await f.service.prepare();
+    expect(client.getEndpoint).not.toHaveBeenCalled();
+    expect(client.ensureInstallation).toHaveBeenCalledWith(expect.objectContaining({ currentCredential: "" }));
+    expect(installationChanged).toHaveBeenCalledOnce();
+    expect(f.store.read()[COMPANION_INSTALLATION_CREDENTIAL_FIELD]).toBe(INSTALLATION_CREDENTIAL);
+    for (const field of ADDRESS_FIELDS) expect(f.store.read()).not.toHaveProperty(field);
+    expect(f.activatePersistedEndpoint).not.toHaveBeenCalled();
+    expect(state).toEqual({ available: true, status: "ready", email: "ada@example.com" });
+    // Nothing secret reaches the log.
+    for (const line of f.lines()) {
+      expect(line).not.toContain(INSTALLATION_CREDENTIAL);
+      expect(line).not.toContain(ACCOUNT_TOKEN);
+      expect(line).not.toContain(CONNECTOR_TOKEN);
+      expect(line).not.toContain(ENDPOINT);
+    }
+    f.service.dispose();
+  });
+
+  it("checkStoredAddress() asks before the connector dials, once per half check interval", async () => {
+    const client = readyClient({
+      getEndpoint: vi.fn(async () => null),
+      ensureEndpoint: vi.fn(async () => Promise.reject(relayCapable())),
+    });
+    const f = onDemandFixture({ client, relay: { capable: () => true, legacyDevices: async () => 0 } });
+    f.companion.connection = { status: "stopped", ready: false };
+    await f.service.checkStoredAddress();
+    expect(client.getEndpoint).toHaveBeenCalledOnce();
+    for (const field of ADDRESS_FIELDS) expect(f.store.read()).not.toHaveProperty(field);
+    expect(f.activatePersistedEndpoint).not.toHaveBeenCalled();
+    // Nothing is stored any more: nothing to ask about.
+    await expect(f.service.checkStoredAddress()).resolves.toBeNull();
+    expect(client.getEndpoint).toHaveBeenCalledOnce();
+    f.service.dispose();
+
+    const kept = onDemandFixture({ client: readyClient({ getEndpoint: vi.fn(async () => ({ url: ENDPOINT, status: "ready" })) }) });
+    await expect(kept.service.checkStoredAddress()).resolves.toBeNull();
+    await expect(kept.service.checkStoredAddress()).resolves.toBeNull();
+    expect(kept.client.getEndpoint).toHaveBeenCalledOnce();
+    expect(kept.store.read()[MANAGED_COMPANION_ENDPOINT_FIELD]).toBe(ENDPOINT);
+    kept.clock.now += WATCHDOG_INTERVAL_MS;
+    await kept.service.checkStoredAddress();
+    expect(kept.client.getEndpoint).toHaveBeenCalledTimes(2);
+    kept.service.dispose();
+
+    const off = onDemandFixture({ client: readyClient({ getEndpoint: vi.fn(async () => null) }) });
+    off.companion.on = false;
+    await expect(off.service.checkStoredAddress()).resolves.toBeNull();
+    expect(off.client.getEndpoint).not.toHaveBeenCalled();
+    off.service.dispose();
+  });
+
+  it("checks the address after verify failures in a row, on a growing jittered interval a verified connection resets", async () => {
+    const client = readyClient({ getEndpoint: vi.fn(async () => ({ url: ENDPOINT, status: "ready" })) });
+    const f = onDemandFixture({ client, forcedCheckIntervalMs: 10 * WATCHDOG_INTERVAL_MS });
+    f.companion.need = true;
+    const failing = { status: "retrying", ready: false };
+    f.companion.connection = failing;
+    const checks = () => f.lines().filter((line) => line.endsWith("checking it with the control plane")).length;
+    const fail = async (times = 1) => {
+      for (let attempt = 0; attempt < times; attempt += 1) f.service.connectorChanged(failing);
+      await settle();
+    };
+
+    await fail();
+    expect(client.getEndpoint).not.toHaveBeenCalled();
+    await fail();
+    expect(client.getEndpoint).toHaveBeenCalledOnce();
+    expect(checks()).toBe(1);
+    // Listed by the control plane: kept, never re-provisioned, released or deleted because this computer can't reach it.
+    for (const call of ["ensureEndpoint", "deleteEndpoint", "ensureInstallation"]) expect(client[call]).not.toHaveBeenCalled();
+    expect(f.store.read()[MANAGED_COMPANION_ENDPOINT_FIELD]).toBe(ENDPOINT);
+    expect(f.stopManagedEndpoint).not.toHaveBeenCalled();
+
+    await fail(6);
+    expect(checks()).toBe(1);
+    // 10, then 30 intervals (random() is 0.5 here: no jitter).
+    f.clock.now += 10 * WATCHDOG_INTERVAL_MS;
+    await fail(2);
+    expect(checks()).toBe(2);
+    f.clock.now += 10 * WATCHDOG_INTERVAL_MS;
+    await fail(2);
+    expect(checks()).toBe(2);
+    f.clock.now += 20 * WATCHDOG_INTERVAL_MS;
+    await fail(2);
+    expect(checks()).toBe(3);
+
+    // A verified connection starts over: two failures check at once again.
+    f.service.connectorChanged({ status: "ready", ready: true });
+    await fail(2);
+    expect(checks()).toBe(4);
+    expect(client.ensureEndpoint).not.toHaveBeenCalled();
+    f.service.dispose();
+  });
+
+  it("acts on the control plane's answer after failures: listed is kept, gone is provisioned again or forgotten", async () => {
+    for (const [answer, need] of [["listed", true], ["listed", false], ["gone", true], ["gone", false]]) {
+      const client = readyClient({
+        getEndpoint: vi.fn(async () => (answer === "listed" ? { url: ENDPOINT, status: "ready" } : { url: ENDPOINT, status: "deleted" })),
+        ensureEndpoint: vi.fn(async () => ({ endpoint: { url: ENDPOINT }, connectorToken: RECLAIMED_TOKEN })),
+      });
+      const f = onDemandFixture({ client, relay: { capable: () => true, legacyDevices: async () => (need ? 1 : 0) } });
+      f.companion.need = need;
+      const failing = { status: "retrying", ready: false };
+      f.companion.connection = failing;
+      f.service.connectorChanged(failing);
+      f.service.connectorChanged(failing);
+      await settle();
+      const label = `${answer}, need ${need}`;
+      expect(client.getEndpoint, label).toHaveBeenCalledOnce();
+      expect(client.deleteEndpoint, label).not.toHaveBeenCalled();
+      if (answer === "listed") {
+        expect(client.ensureEndpoint, label).not.toHaveBeenCalled();
+        expect(f.store.read()[MANAGED_COMPANION_TOKEN_FIELD], label).toBe(CONNECTOR_TOKEN);
+        expect(f.stopManagedEndpoint, label).not.toHaveBeenCalled();
+      } else if (need) {
+        expect(client.ensureEndpoint, label).toHaveBeenCalledOnce();
+        expect(f.store.read()[MANAGED_COMPANION_TOKEN_FIELD], label).toBe(RECLAIMED_TOKEN);
+        expect(f.activatePersistedEndpoint, label).toHaveBeenCalledOnce();
+      } else {
+        expect(client.ensureEndpoint, label).not.toHaveBeenCalled();
+        for (const field of ADDRESS_FIELDS) expect(f.store.read(), label).not.toHaveProperty(field);
+        expect(f.stopManagedEndpoint, label).toHaveBeenCalled();
+        expect(await f.service.state(), label).toEqual({ available: true, status: "ready", email: "ada@example.com" });
+      }
+      f.service.dispose();
+    }
+  });
+
+  it("asks at most once per check interval when provisioning keeps failing without an installation credential", async () => {
+    const withoutCredential = signedCredentials({ [COMPANION_INSTALLATION_CREDENTIAL_FIELD]: undefined });
+    const failing = { status: "retrying", ready: false };
+    const storm = async (f, events) => {
+      for (let event = 0; event < events; event += 1) f.service.connectorChanged(failing);
+      await settle();
+    };
+
+    // The account session expired: one attempt, then nothing while signed out, however long the connector retries.
+    const expired = onDemandFixture({
+      initial: withoutCredential,
+      client: readyClient({ ensureInstallation: vi.fn(async () => Promise.reject(new ControlPlaneError("unauthorized", 401))) }),
+      forcedCheckIntervalMs: WATCHDOG_INTERVAL_MS,
+    });
+    expired.companion.connection = failing;
+    await storm(expired, 10);
+    expect(expired.client.ensureInstallation).toHaveBeenCalledOnce();
+    expect(await expired.service.state()).toMatchObject({ status: "signed-out" });
+    for (let interval = 0; interval < 3; interval += 1) {
+      expired.clock.now += 3 * WATCHDOG_INTERVAL_MS;
+      await storm(expired, 10);
+    }
+    expect(expired.client.ensureInstallation).toHaveBeenCalledOnce();
+    expired.service.dispose();
+
+    // An error that schedules no retry, and a credential that cannot be stored: once per interval, never a loop of
+    // rotations and revocations.
+    for (const [label, overrides] of [
+      ["no retry", { client: readyClient({ ensureInstallation: vi.fn(async () => Promise.reject(new ControlPlaneError("invalid_client_identity"))) }) }],
+      ["write fails", { client: readyClient() }],
+    ]) {
+      const f = onDemandFixture({ initial: withoutCredential, forcedCheckIntervalMs: WATCHDOG_INTERVAL_MS, ...overrides });
+      if (label === "write fails") {
+        const write = f.store.update.getMockImplementation();
+        f.store.update.mockImplementation(async (derive) => {
+          const probe = derive({ ...f.store.read() });
+          if (probe?.[COMPANION_INSTALLATION_CREDENTIAL_FIELD]) throw new Error("credential store unavailable");
+          return write(derive);
+        });
+      }
+      f.companion.connection = failing;
+      await storm(f, 10);
+      expect(f.client.ensureInstallation, label).toHaveBeenCalledOnce();
+      await storm(f, 10);
+      expect(f.client.ensureInstallation, label).toHaveBeenCalledOnce();
+      f.clock.now += WATCHDOG_INTERVAL_MS;
+      await storm(f, 10);
+      expect(f.client.ensureInstallation, label).toHaveBeenCalledTimes(2);
+      expect(f.client.revokeInstallation.mock.calls.length, label).toBeLessThanOrEqual(2);
+      f.service.dispose();
+    }
+  });
+
+  it("leaves a working or a signed-out computer alone", async () => {
+    const client = readyClient({ getEndpoint: vi.fn(async () => null) });
+    const working = onDemandFixture({ client });
+    working.service.connectorChanged({ status: "ready", ready: true });
+    working.service.connectorChanged({ status: "starting", ready: false });
+    await settle();
+    expect(client.getEndpoint).not.toHaveBeenCalled();
+    working.service.dispose();
+
+    const signedOut = onDemandFixture({ initial: { [COMPANION_CLIENT_INSTANCE_FIELD]: UUID }, client });
+    signedOut.companion.connection = { status: "retrying", ready: false };
+    signedOut.service.connectorChanged(signedOut.companion.connection);
+    signedOut.service.connectorChanged(signedOut.companion.connection);
+    await settle();
+    for (const call of ["getEndpoint", "ensureInstallation", "ensureEndpoint"]) expect(client[call]).not.toHaveBeenCalled();
+    signedOut.service.dispose();
   });
 });
