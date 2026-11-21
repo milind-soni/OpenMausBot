@@ -88,7 +88,7 @@ export function launchdPlist(spec: ServiceSpec): string {
     `\t\t<string>${xml(spec.dataDir)}</string>`,
     ...(spec.cliPrefix ? ["\t\t<key>OMB_CLI_PREFIX</key>", `\t\t<string>${xml(spec.cliPrefix)}</string>`] : []),
     "\t\t<key>PATH</key>",
-    "\t\t<string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>",
+    `\t\t<string>${xml(join(spec.home, ".local", "bin"))}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>`,
     "\t</dict>",
     "\t<key>WorkingDirectory</key>",
     `\t<string>${xml(spec.home)}</string>`,
