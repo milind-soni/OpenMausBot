@@ -189,6 +189,7 @@
   "server.runs.partlyDoneWhy": "這次執行只完成了一部分：{detail}",
   "server.runs.handoffApart": "{bot} 無法將這項工作交給 {target}，因為它們共享的對象不同。沒有傳送任何內容。",
   "server.runs.handoffRefusedTitle": "{bot} 的例行任務無法交接工作",
+  "server.runs.lentComputerUnconfirmed": "「{name}」無法使用你的{device}，因為它尚未確認為你的：它最近一次是在你自己的對話之外被修改或建立的。打開它並儲存，就能讓它重新成為你的。",
   "server.runs.recovered": "已恢復：{name} 已於 {time} 正常完成",
   "server.runs.card.line": "例行工作「{name}」{state}",
   "server.runs.state.needsInput": "需要你回覆",

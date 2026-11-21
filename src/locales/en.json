@@ -209,6 +209,7 @@
   "server.runs.partlyDoneWhy": "This run was partly done: {detail}",
   "server.runs.handoffApart": "{bot} couldn't hand this to {target}, because they're shared with different people. Nothing was sent.",
   "server.runs.handoffRefusedTitle": "{bot}'s routine couldn't hand off its work",
+  "server.runs.lentComputerUnconfirmed": "\"{name}\" can't use your {device} because it isn't confirmed as yours: it was last changed or made outside your own chats. Open it and save it to make it yours again.",
   "server.runs.recovered": "Recovered: {name} finished OK at {time}",
   "server.runs.card.line": "Routine “{name}” {state}",
   "server.runs.state.needsInput": "needs your input",
