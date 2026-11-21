@@ -3,6 +3,9 @@
 // authentication; every message is still checked here, on both sides, before anything acts on it.
 export const PANE_MESSAGE = "openmausbot:browser-pane";
 
+/** Tabs one profile's browser may have open, as for a launched Chrome. */
+export const PANE_TABS_PER_BROWSER = 8;
+
 /** A profile's partition: persistent per profile, or in memory with a nonce for a temporary one. */
 export const PANE_PARTITION = /^(?:persist:omb-pane-[0-9a-f]{24}|omb-pane-[0-9a-f]{24}-[0-9a-f]{8})$/;
 const BROWSER = /^(?:bot|shared|temp):[A-Za-z0-9._:@-]{1,200}$/;
@@ -10,9 +13,13 @@ const TAB = /^p[1-9]\d{0,9}$/;
 const SESSION = /^[\w.:-]{1,128}$/;
 const METHOD = /^[A-Z][A-Za-z]*\.[a-z][A-Za-z]*$/;
 const BOT = /^[\w.-]{1,128}$/;
+const GUID = /^[0-9a-f-]{36}$/;
+const DOWNLOAD_STATES = new Set(["begin", "inProgress", "completed", "canceled"]);
+/** An absolute folder or file path, POSIX or Windows, with no parent steps. */
+const ABSOLUTE = /^(?:\/|[A-Za-z]:[\\/])(?!.*(?:^|[\\/])\.\.(?:[\\/]|$))[^\0]{0,4095}$/;
 
-const TO_MAIN = new Set(["hello", "open", "create", "cdp", "front", "close-tab", "close", "erase", "resolved"]);
-const TO_SERVER = new Set(["hello", "opened", "failed", "created", "answer", "event", "tab", "tab-gone", "closed", "input", "which"]);
+const TO_MAIN = new Set(["hello", "open", "create", "cdp", "front", "close-tab", "close", "erase", "resolved", "cancel-download"]);
+const TO_SERVER = new Set(["hello", "opened", "failed", "created", "answer", "event", "tab", "tab-gone", "closed", "input", "which", "download"]);
 
 const isObject = (value) => Object.prototype.toString.call(value) === "[object Object]";
 const text = (value, pattern) => typeof value === "string" && pattern.test(value);
@@ -29,7 +36,12 @@ function fieldsValid(message) {
   if ("params" in message && !isObject(message.params)) return false;
   if ("partition" in message && !text(message.partition, PANE_PARTITION)) return false;
   switch (op) {
-    case "open": return text(message.partition, PANE_PARTITION) && Number.isInteger(message.egress) && message.egress > 0 && message.egress < 65_536;
+    case "open": return text(message.partition, PANE_PARTITION) && Number.isInteger(message.egress) && message.egress > 0 && message.egress < 65_536 && text(message.downloads, ABSOLUTE);
+    case "failed": return typeof message.error === "string" && (message.reason === undefined || message.reason === "no-window");
+    case "cancel-download": return text(message.guid, GUID);
+    case "download": return text(message.tab, TAB) && text(message.guid, GUID) && DOWNLOAD_STATES.has(message.state)
+      && optional(message.path, ABSOLUTE) && (message.url === undefined || typeof message.url === "string") && (message.name === undefined || typeof message.name === "string")
+      && (message.received === undefined || Number.isFinite(message.received)) && (message.total === undefined || Number.isFinite(message.total));
     case "erase": return text(message.partition, PANE_PARTITION);
     case "create": return count(message.req) && typeof message.url === "string" && message.url.length <= 8192;
     case "cdp": return count(message.req) && text(message.tab, TAB) && text(message.method, METHOD) && isObject(message.params);

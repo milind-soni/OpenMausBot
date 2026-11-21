@@ -2,7 +2,7 @@
 // speaks page-level CDP only (no Browser domain, no Target.createTarget): this endpoint answers the browser-level
 // commands itself and asks the main process for tabs, so the CDP driver runs on it unchanged.
 import type { Params } from "../cdp/connection.ts";
-import type { CdpTransport } from "../cdp/transport.ts";
+import type { CdpTransport, SendMeta } from "../cdp/transport.ts";
 
 export interface PaneTab {
   tab: string;
@@ -21,7 +21,20 @@ export interface PaneChannel {
   command(tab: string, method: string, params: Params, session?: string): Promise<Params>;
   front(tab: string): void;
   closeTab(tab: string): void;
+  cancelDownload(guid: string): void;
   close(): void;
+}
+
+/** A download in a pane, as the main process saved it (never through a Save dialog). */
+export interface PaneDownload {
+  tab: string;
+  guid: string;
+  state: "begin" | "inProgress" | "completed" | "canceled";
+  url?: string;
+  name?: string;
+  received?: number;
+  total?: number;
+  path?: string;
 }
 
 export interface PaneEndpointOptions {
@@ -38,6 +51,7 @@ interface Command {
   method: string;
   params: Params;
   sessionId?: string;
+  readOnly?: boolean;
 }
 
 interface TabState extends PaneTab {
@@ -60,8 +74,22 @@ export const PERSON_HOLDS_TAB = "The person is using this tab. Wait until they h
 class Refusal extends Error {}
 
 const PAGE_PREFIX = "pane-";
-/** What a held tab refuses: the bot's input, and leaving or closing the page. Reading it (and evaluating) still runs. */
-const ACTS = /^(?:Input\.|Page\.(?:navigate|reload|navigateToHistoryEntry|close)$|DOM\.(?:focus|setFileInputFiles)$)/;
+/** All a held tab lets the bot send, on its page and on its frames: reads, and the setup each new frame needs. */
+const HELD_READS = new Set([
+  "Page.getFrameTree", "Page.getLayoutMetrics", "Page.captureScreenshot", "Page.getNavigationHistory",
+  "DOM.getDocument", "DOM.describeNode", "DOM.resolveNode", "DOM.querySelector", "DOM.getContentQuads", "DOM.getBoxModel",
+  "DOM.getNodeForLocation", "DOM.getFrameOwner", "Accessibility.getFullAXTree", "Accessibility.queryAXTree", "Network.getCookies",
+  "Target.detachFromTarget",
+  // Fronting the held tab itself shows the person the page they hold.
+  "Page.bringToFront",
+]);
+const HELD_SETUP = /^(?:[A-Za-z]+\.(?:enable|disable)$|Page\.(?:setLifecycleEventsEnabled|setInterceptFileChooserDialog|addScriptToEvaluateOnNewDocument|removeScriptToEvaluateOnNewDocument|createIsolatedWorld)$|Emulation\.(?:setFocusEmulationEnabled|setUserAgentOverride)$|Network\.setUserAgentOverride$|Target\.setAutoAttach$|Fetch\.|WebAuthn\.|Runtime\.(?:runIfWaitingForDebugger|releaseObject|releaseObjectGroup)$)/;
+/** Runtime calls change whatever their script changes: only those the driver marked read-only pass a hold. */
+const RUNTIME_CALLS = new Set(["Runtime.evaluate", "Runtime.callFunctionOn"]);
+
+function heldAllows(method: string, readOnly: boolean): boolean {
+  return HELD_READS.has(method) || HELD_SETUP.test(method) || (readOnly && RUNTIME_CALLS.has(method));
+}
 const PRIMED = ["Network.enable", "Page.enable", "Page.setLifecycleEventsEnabled"] as const;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -87,11 +115,11 @@ export class PaneEndpoint implements CdpTransport {
   }
 
   // CdpTransport.
-  send(message: string): void {
+  send(message: string, meta?: SendMeta): void {
     if (this.#closed !== null) return;
     let command: Command;
     try {
-      command = JSON.parse(message) as Command;
+      command = { ...(JSON.parse(message) as Command), readOnly: meta?.readOnly === true };
     } catch {
       return;
     }
@@ -169,7 +197,19 @@ export class PaneEndpoint implements CdpTransport {
     if (state) state.lastPerson = this.#lastInput;
   }
 
-  /** While held the bot's input to that tab is refused; reading the page still works. */
+  /** A pane's download, as the driver's download tracking hears of one. */
+  download(event: PaneDownload): void {
+    const tab = this.#tabs.get(event.tab);
+    if (event.state === "begin") {
+      this.#event("Browser.downloadWillBegin", { frameId: tab?.target ?? "", guid: event.guid, url: event.url ?? "", suggestedFilename: event.name ?? "" });
+      return;
+    }
+    this.#event("Browser.downloadProgress", {
+      guid: event.guid, receivedBytes: event.received ?? 0, totalBytes: event.total ?? 0, state: event.state, ...(event.path ? { filePath: event.path } : {}),
+    });
+  }
+
+  /** While held, the bot may only read that tab, and may not bring another tab to the front. */
   hold(targetId: string, held: boolean): void {
     for (const tab of this.#tabs.values()) if (tab.target === targetId) tab.held = held;
   }
@@ -202,6 +242,7 @@ export class PaneEndpoint implements CdpTransport {
     const params = command.params ?? {};
     if (!command.sessionId) return this.#browser(command.method, params);
     const route = this.#route(command.sessionId);
+    if (route.kind !== "viewer" && route.tab.held && !heldAllows(command.method, command.readOnly === true)) throw new Refusal(PERSON_HOLDS_TAB);
     if (route.kind === "child") return this.#channel.command(route.tab.tab, command.method, unrenamed(command.method, params), route.child);
     if (route.kind === "viewer") return this.#viewer(route.tab, command.sessionId, command.method, params);
     return this.#page(route.tab, command.method, params);
@@ -232,7 +273,7 @@ export class PaneEndpoint implements CdpTransport {
       case "Target.getTargetInfo":
         return { targetInfo: this.#info(this.#tab(String(params.targetId))) };
       case "Target.createTarget": {
-        const created = await this.#channel.create(typeof params.url === "string" ? params.url : "about:blank", params.background === true);
+        const created = await this.#channel.create(typeof params.url === "string" ? params.url : "about:blank", params.background === true || this.#anyHeld());
         this.tabOpened(created);
         return { targetId: created.target };
       }
@@ -242,9 +283,12 @@ export class PaneEndpoint implements CdpTransport {
         this.#channel.closeTab(tab.tab);
         return { success: true };
       }
-      case "Target.activateTarget":
-        this.#channel.front(this.#tab(String(params.targetId)).tab);
+      case "Target.activateTarget": {
+        const tab = this.#tab(String(params.targetId));
+        this.#refuseFront(tab);
+        this.#channel.front(tab.tab);
         return {};
+      }
       case "Target.attachToTarget": {
         const tab = this.#tab(String(params.targetId));
         const sessionId = `${pageSession(tab.tab)}~v${++this.#viewerCount}`;
@@ -265,6 +309,10 @@ export class PaneEndpoint implements CdpTransport {
         return { protocolVersion: "1.3", product: `Chrome/${this.#channel.version}`, revision: "", userAgent: this.#channel.userAgent, jsVersion: "" };
       case "Browser.setPermission":
       case "Browser.resetPermissions":
+      case "Browser.setDownloadBehavior":
+        return {};
+      case "Browser.cancelDownload":
+        this.#channel.cancelDownload(String(params.guid));
         return {};
       case "Browser.getWindowForTarget":
         return { windowId: 1, bounds: {} };
@@ -279,8 +327,8 @@ export class PaneEndpoint implements CdpTransport {
   }
 
   async #page(tab: TabState, method: string, params: Params): Promise<Params> {
-    if (tab.held && ACTS.test(method)) throw new Refusal(PERSON_HOLDS_TAB);
     if (method === "Page.bringToFront") {
+      this.#refuseFront(tab);
       this.#channel.front(tab.tab);
       return {};
     }
@@ -335,6 +383,16 @@ export class PaneEndpoint implements CdpTransport {
     for (let wait = this.#lastInput + this.#quietMs - Date.now(); wait > 0 && Date.now() < until; wait = this.#lastInput + this.#quietMs - Date.now()) {
       await sleep(Math.min(wait, until - Date.now()));
     }
+  }
+
+  #anyHeld(): boolean {
+    for (const tab of this.#tabs.values()) if (tab.held) return true;
+    return false;
+  }
+
+  /** Bringing a tab to the front while the person holds another would take the page they use away from them. */
+  #refuseFront(tab: TabState): void {
+    for (const other of this.#tabs.values()) if (other.held && other !== tab) throw new Refusal(PERSON_HOLDS_TAB);
   }
 
   #tab(targetId: string): TabState {

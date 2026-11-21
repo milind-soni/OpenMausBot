@@ -101,6 +101,7 @@ export class ChromeEngine {
       sandbox,
       ...(options.log ? { log: options.log } : {}),
     });
+    options.pane?.backend.fallBackTo(backend);
     const maxRunning = Number(env.OMB_BROWSER_MAX_RUNNING) || MAX_RUNNING[options.host];
     this.service = new BrowserService({
       dataDir: options.dataDir,
@@ -168,10 +169,11 @@ export class ChromeEngine {
   /** A deleted bot's or profile's browser: stopped, and its folder, downloads and screenshots gone. */
   async erase(request: { kind: "bot" | "profile"; id: string; partitionId: string }): Promise<boolean> {
     const key = request.kind === "bot" ? `bot:${request.id}` : `shared:${request.partitionId}`;
-    if (!this.#everUsed() && !this.#options.pane) return true;
+    const paneUsed = this.#options.pane?.backend.used(key) === true;
+    if (!this.#everUsed() && !paneUsed) return true;
     try {
       await this.service.erase(key);
-      this.#options.pane?.backend.erase(key);
+      if (paneUsed) this.#options.pane?.backend.erase(key);
       return true;
     } catch (error) {
       this.#options.log?.(`browser cleanup: could not erase ${key}: ${error instanceof Error ? error.message : String(error)}`);

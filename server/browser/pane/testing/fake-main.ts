@@ -24,6 +24,13 @@ export class FakeMain implements PanePort {
   readonly toMain: PaneToMain[] = [];
   readonly partitions: string[] = [];
   readonly egress: number[] = [];
+  readonly downloadDirs: string[] = [];
+  /** No app window: opening answers that none can host a pane. */
+  noWindow = false;
+  /** Milliseconds before an open is answered. */
+  openDelayMs = 0;
+  /** Commands main never answers. */
+  hang: (command: PaneCommand) => boolean = () => false;
   readonly panes = new Map<string, FakePane>();
   /** Answers a pane's command before FakeChrome does; undefined lets it through. */
   answer: (command: PaneCommand) => Record<string, unknown> | undefined = () => undefined;
@@ -86,7 +93,10 @@ export class FakeMain implements PanePort {
       case "open":
         this.partitions.push(message.partition);
         this.egress.push(message.egress);
-        this.post({ op: "opened", browser: message.browser, version: "146.0.7680.0", userAgent: "Mozilla/5.0 Chrome/146.0.0.0 Safari/537.36" });
+        this.downloadDirs.push(message.downloads);
+        if (this.openDelayMs) await new Promise((resolve) => setTimeout(resolve, this.openDelayMs));
+        if (this.noWindow) this.post({ op: "failed", browser: message.browser, error: "The app window is closed.", reason: "no-window" });
+        else this.post({ op: "opened", browser: message.browser, version: "146.0.7680.0", userAgent: "Mozilla/5.0 Chrome/146.0.0.0 Safari/537.36" });
         return;
       case "create": {
         const pane = await this.#open(message.browser, message.url);
@@ -97,6 +107,7 @@ export class FakeMain implements PanePort {
       case "cdp": {
         const command = { tab: message.tab, method: message.method, params: message.params, ...(message.session ? { session: message.session } : {}) };
         this.commands.push(command);
+        if (this.hang(command)) return;
         const pane = this.panes.get(message.tab);
         const answered = this.answer(command);
         if (answered !== undefined) {

@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
@@ -7,9 +7,9 @@ import { PANE_PARTITION } from "../../../electron/browser-pane-wire.mjs";
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { CdpConnection } from "../cdp/connection.ts";
 import { BrowserService } from "../service.ts";
-import type { FakeDocument } from "../testing/fake-chrome.ts";
+import { FakeBackend, FakeChrome, type FakeDocument } from "../testing/fake-chrome.ts";
 import { PaneBackend, panePartition } from "./backend.ts";
-import { PaneEndpoint, type PaneChannel } from "./endpoint.ts";
+import { PaneEndpoint, PERSON_HOLDS_TAB, type PaneChannel } from "./endpoint.ts";
 import { PaneLink } from "./link.ts";
 import { FakeMain } from "./testing/fake-main.ts";
 
@@ -31,11 +31,11 @@ const services: BrowserService[] = [];
 afterEach(async () => { await Promise.all(services.splice(0).map((service) => service.closeAll())); });
 afterAll(async () => { for (const folder of folders) await removeTempDir(folder); });
 
-function setup({ quietMs = 1_000 } = {}) {
+function setup({ quietMs = 1_000, linkOptions = {} }: { quietMs?: number; linkOptions?: ConstructorParameters<typeof PaneLink>[1] } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-browser-pane-"));
   folders.push(dataDir);
   const main = new FakeMain(documents);
-  const link = new PaneLink(main, { quietMs, maxHoldMs: 2_000 });
+  const link = new PaneLink(main, { quietMs, maxHoldMs: 2_000, ...linkOptions });
   const backend = new PaneBackend(link, dataDir, async () => 41_000, "darwin");
   const service = new BrowserService({ dataDir, backend: () => backend, maxRunning: 4, idleMs: () => 600_000, takeoverMs: 200 });
   services.push(service);
@@ -172,6 +172,114 @@ describe("the bots' browser as desktop panes", () => {
   });
 });
 
+describe("what a held pane lets the bot do", () => {
+  it("reads only: no input, script writes, dialog answers or tab switches on the page or its frames", async () => {
+    const { main, service, call, text } = setup({ quietMs: 0 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    await call("agent_browser_open", { url: "https://example.com/other", tab: "new" });
+    const run = service.profiles()[0]!.run!;
+    const [first, second] = run.browser.pages();
+    run.opened.personControl!.hold(first!.targetId, true);
+    main.commands.length = 0;
+    // The person holds t1: the bot may not bring it back or switch the front tab away from them.
+    expect(text(await call("agent_browser_click", { selector: "#go", tab: "t1" }))).toContain("The person is using this tab.");
+    const connection = run.browser.connection;
+    const page = connection.session(first!.session.id!)!;
+    await expect(page.send("Runtime.callFunctionOn", { functionDeclaration: "function () { this.value = 1; }", objectId: "x" })).rejects.toThrow(PERSON_HOLDS_TAB);
+    await expect(page.send("Page.handleJavaScriptDialog", { accept: true })).rejects.toThrow(PERSON_HOLDS_TAB);
+    await expect(page.send("DOM.scrollIntoViewIfNeeded", { backendNodeId: 1 })).rejects.toThrow(PERSON_HOLDS_TAB);
+    await expect(connection.root.send("Target.activateTarget", { targetId: second!.targetId })).rejects.toThrow(PERSON_HOLDS_TAB);
+    await expect(second!.session.send("Page.bringToFront")).rejects.toThrow(PERSON_HOLDS_TAB);
+    // A frame of the held page is held too.
+    main.post({ op: "event", browser: "bot:a", tab: "p1", method: "Target.attachedToTarget", params: { sessionId: "IFRAME1", targetInfo: { targetId: "F", type: "iframe", url: "", title: "" }, waitingForDebugger: false } });
+    await sleep(5);
+    const frame = connection.session("pane-p1:IFRAME1")!;
+    await expect(frame.send("Input.dispatchKeyEvent", { type: "keyDown", key: "a" })).rejects.toThrow(PERSON_HOLDS_TAB);
+    // Reads still run, a script call the driver marks read-only included.
+    expect((await page.send<{ result: { value?: unknown } }>("Runtime.evaluate", { expression: "document.title", contextId: 1, returnByValue: true }, { readOnly: true })).result).toBeDefined();
+    const snapshot = await call("agent_browser_snapshot", { tab: "t1" });
+    expect(snapshot.isError, text(snapshot)).toBeUndefined();
+    expect(main.commands.some((command) => /^(?:Input\.|Page\.handleJavaScriptDialog|DOM\.scrollIntoViewIfNeeded)/.test(command.method))).toBe(false);
+    expect(main.commands.some((command) => command.method === "Runtime.callFunctionOn" && String(command.params.functionDeclaration).includes("this.value = 1"))).toBe(false);
+    expect(main.toMain.filter((message) => message.op === "front").map((message) => (message as { tab: string }).tab)).toEqual(["p1"]);
+  });
+
+  it("opens a bot's new tab behind the one the person holds", async () => {
+    const { main, service, call } = setup({ quietMs: 0 });
+    await call("agent_browser_open", { url: "https://example.com/a" });
+    const run = service.profiles()[0]!.run!;
+    run.opened.personControl!.hold(run.browser.activePage!.targetId, true);
+    await call("agent_browser_open", { url: "https://example.com/b", tab: "new" });
+    expect(main.toMain.filter((message) => message.op === "create").map((message) => (message as { background?: boolean }).background)).toEqual([undefined, true]);
+  });
+});
+
+describe("the pane's downloads", () => {
+  it("are saved to the profile's download folder by the app and tracked as a launched Chrome's are", async () => {
+    const { main, service, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/a" });
+    const run = service.profiles()[0]!.run!;
+    const folder = main.downloadDirs[0]!;
+    expect(folder).toBe(service.profiles()[0]!.downloadDir);
+    const guid = "0b7c4a52-4f0a-4b8e-9d55-0a1f2b3c4d5e";
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, guid), "report");
+    main.post({ op: "download", browser: "bot:a", tab: "p1", guid, state: "begin", url: "https://example.com/report.csv", name: "report.csv" });
+    main.post({ op: "download", browser: "bot:a", tab: "p1", guid, state: "completed", received: 6, total: 6, path: join(folder, guid) });
+    const done = await run.browser.downloads!.finished((download) => download.guid === guid, 2_000);
+    expect(done.state).toBe("completed");
+    expect(done.owner).toBe(run.browser.activePage!.targetId);
+    expect(readFileSync(done.path!, "utf8")).toBe("report");
+    await run.browser.connection.root.send("Browser.cancelDownload", { guid });
+    expect(main.toMain.some((message) => message.op === "cancel-download")).toBe(true);
+  });
+});
+
+describe("when the app cannot host a pane or does not answer", () => {
+  it("starts the browser on the launched Chrome while no app window can host a pane", async () => {
+    const { main, service, backend, call, text } = setup();
+    const fallback = new FakeBackend(() => new FakeChrome({ documents }));
+    backend.fallBackTo(fallback);
+    main.noWindow = true;
+    expect(text(await call("agent_browser_open", { url: "https://example.com/form" }))).toContain("Opened https://example.com/form in t1.");
+    expect(fallback.chromes).toHaveLength(1);
+    expect(main.panes.size).toBe(0);
+    expect(backend.used("bot:a")).toBe(false);
+    expect(service.profiles()[0]!.run).not.toBeNull();
+  });
+
+  it("fails a command the app never answers, and closes panes whose opening answered too late", async () => {
+    const { main, link } = setup({ linkOptions: { requestTimeoutMs: 50, openTimeoutMs: 50 } });
+    await sleep(5);
+    main.openDelayMs = 120;
+    await expect(link.open("bot:late", panePartition(folders.at(-1)!, "bot:late"), 41_000, folders.at(-1)!)).rejects.toThrow(/did not open the browser pane in time/);
+    await sleep(150);
+    expect(main.toMain.filter((message) => message.op === "close" && message.browser === "bot:late").length).toBeGreaterThanOrEqual(2);
+    main.openDelayMs = 0;
+    const opened = await link.open("bot:b", panePartition(folders.at(-1)!, "bot:b"), 41_000, folders.at(-1)!);
+    main.hang = () => true;
+    const connection = new CdpConnection(opened.endpoint, { defaultTimeoutMs: 0 });
+    opened.endpoint.tabOpened({ tab: "p1", target: "F1", url: "about:blank", title: "" });
+    await connection.root.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+    await expect(connection.session("pane-p1")!.send("Page.getFrameTree")).rejects.toThrow(/did not answer the browser pane in time/);
+    connection.close();
+  });
+});
+
+describe("deleting a bot's browser with the pane", () => {
+  it("clears a partition only for a profile whose panes ever opened here", async () => {
+    const { main, backend, call } = setup();
+    expect(backend.used("bot:a")).toBe(false);
+    await call("agent_browser_open", { url: "https://example.com/a" });
+    expect(backend.used("bot:a")).toBe(true);
+    backend.erase("bot:b");
+    expect(main.toMain.some((message) => message.op === "erase")).toBe(false);
+    backend.erase("bot:a");
+    expect(main.toMain.filter((message) => message.op === "erase")).toEqual([{ type: "openmausbot:browser-pane", op: "erase", partition: main.partitions[0] }]);
+    expect(backend.used("bot:a")).toBe(false);
+  });
+});
+
 describe("the pane partition", () => {
   it("is per profile and per data folder, and in memory for a temporary profile", async () => {
     const one = mkdtempSync(join(tmpdir(), "omb-browser-pane-"));
@@ -214,6 +322,7 @@ describe("the pane endpoint", () => {
       command: async (tab, method, params, session) => { sent.push({ tab, method, params, ...(session ? { session } : {}) }); return {}; },
       front: () => {},
       closeTab: () => {},
+      cancelDownload: () => {},
       close: () => {},
     };
   }
@@ -238,7 +347,7 @@ describe("the pane endpoint", () => {
     expect(sent.at(-1)).toEqual({ tab: "p1", method: "Target.setAutoAttach", params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true } });
     const version = await connection.root.send<{ product: string }>("Browser.getVersion");
     expect(version.product).toBe("Chrome/146.0.7680.0");
-    await expect(connection.root.send("Browser.setDownloadBehavior", { behavior: "allow" })).rejects.toThrow(/not available on a desktop pane/);
+    await expect(connection.root.send("Storage.getCookies", {})).rejects.toThrow(/not available on a desktop pane/);
     connection.close();
   });
 

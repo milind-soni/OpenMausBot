@@ -21,6 +21,13 @@ interface Pending {
   browser: string | null;
   resolve(value: Params | PaneTab): void;
   reject(error: Error): void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+export interface PaneLinkOptions extends PaneEndpointOptions {
+  openTimeoutMs?: number;
+  /** A command main never answers fails after this; the driver's own timeouts are usually shorter. */
+  requestTimeoutMs?: number;
 }
 
 interface Open {
@@ -29,6 +36,10 @@ interface Open {
 }
 
 const OPEN_TIMEOUT_MS = 15_000;
+const REQUEST_TIMEOUT_MS = 120_000;
+
+/** No app window can host a pane now (the window is closed); a launched Chrome can run the browser instead. */
+export class PaneUnavailable extends Error {}
 
 export class PaneProtocolError extends Error {
   readonly code: number | undefined;
@@ -41,7 +52,7 @@ export class PaneProtocolError extends Error {
 
 export class PaneLink {
   readonly #port: PanePort | null;
-  readonly #options: PaneEndpointOptions;
+  readonly #options: PaneLinkOptions;
   readonly #browsers = new Map<string, Open>();
   readonly #opening = new Map<string, { resolve(answer: { version: string; userAgent: string }): void; reject(error: Error): void }>();
   readonly #pending = new Map<number, Pending>();
@@ -49,7 +60,7 @@ export class PaneLink {
   #ready = false;
   #next = 0;
 
-  constructor(port: PanePort | null | undefined, options: PaneEndpointOptions = {}) {
+  constructor(port: PanePort | null | undefined, options: PaneLinkOptions = {}) {
     this.#port = port ?? null;
     this.#options = options;
     this.#port?.on("message", (event) => {
@@ -74,19 +85,21 @@ export class PaneLink {
     this.#resolver = resolver;
   }
 
-  async open(browser: string, partition: string, egress: number): Promise<OpenedPanes> {
-    if (!this.available) throw new Error("The desktop app does not show browser panes here.");
+  async open(browser: string, partition: string, egress: number, downloads: string): Promise<OpenedPanes> {
+    if (!this.available) throw new PaneUnavailable("The desktop app does not show browser panes here.");
     this.close(browser);
     const answer = await new Promise<{ version: string; userAgent: string }>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#opening.delete(browser);
+        // A late answer must not leave panes nobody drives.
+        this.#post({ op: "close", browser });
         reject(new Error("The desktop app did not open the browser pane in time."));
-      }, OPEN_TIMEOUT_MS);
+      }, this.#options.openTimeoutMs ?? OPEN_TIMEOUT_MS);
       this.#opening.set(browser, {
         resolve: (value) => { clearTimeout(timer); resolve(value); },
         reject: (error) => { clearTimeout(timer); reject(error); },
       });
-      this.#post({ op: "open", browser, partition, egress });
+      this.#post({ op: "open", browser, partition, egress, downloads });
     });
     const inputs = new Set<() => void>();
     const channel: PaneChannel = {
@@ -96,6 +109,7 @@ export class PaneLink {
       command: (tab, method, params, session) => this.#request(browser, (req) => ({ op: "cdp", browser, req, tab, method, params, ...(session ? { session } : {}) })) as Promise<Params>,
       front: (tab) => this.#post({ op: "front", browser, tab }),
       closeTab: (tab) => this.#post({ op: "close-tab", browser, tab }),
+      cancelDownload: (guid) => this.#post({ op: "cancel-download", browser, guid }),
       close: () => this.#post({ op: "close", browser }),
     };
     const endpoint = new PaneEndpoint(channel, [], this.#options);
@@ -132,7 +146,11 @@ export class PaneLink {
     if (!this.#browsers.has(browser)) return Promise.reject(new PaneProtocolError("Target closed"));
     const req = ++this.#next;
     return new Promise((resolve, reject) => {
-      this.#pending.set(req, { browser, resolve, reject });
+      const timer = setTimeout(() => {
+        this.#pending.delete(req);
+        reject(new PaneProtocolError("The app did not answer the browser pane in time."));
+      }, this.#options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS);
+      this.#pending.set(req, { browser, resolve: (value) => { clearTimeout(timer); resolve(value); }, reject: (error) => { clearTimeout(timer); reject(error); }, timer });
       this.#post(message(req));
     });
   }
@@ -163,8 +181,12 @@ export class PaneLink {
       case "failed": {
         const opening = this.#opening.get(message.browser);
         this.#opening.delete(message.browser);
-        if (message.op === "opened") opening?.resolve({ version: message.version, userAgent: message.userAgent });
-        else opening?.reject(new Error(message.error));
+        if (!opening) {
+          if (message.op === "opened" && !this.#browsers.has(message.browser)) this.#post({ op: "close", browser: message.browser });
+          return;
+        }
+        if (message.op === "opened") opening.resolve({ version: message.version, userAgent: message.userAgent });
+        else opening.reject(message.reason === "no-window" ? new PaneUnavailable(message.error) : new Error(message.error));
         return;
       }
       case "created":
@@ -194,6 +216,9 @@ export class PaneLink {
         return;
       case "tab-gone":
         open.endpoint.tabGone(message.tab, message.crashed === true);
+        return;
+      case "download":
+        open.endpoint.download(message);
         return;
       case "input":
         open.endpoint.personInput(message.tab);

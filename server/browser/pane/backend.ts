@@ -1,12 +1,20 @@
 // A profile's browser as panes in the desktop app: real pages the person uses directly, driven by the same CDP driver.
 import { randomBytes } from "node:crypto";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
+import { PANE_TABS_PER_BROWSER } from "../../../electron/browser-pane-wire.mjs";
 import type { Backend, BackendCaps, OpenedBrowser, OpenRequest } from "../backends.ts";
 import { CdpBrowser } from "../cdp/browser.ts";
-import { profileHash, profileKind, workspaceId } from "../chrome/profile.ts";
-import type { PaneLink } from "./link.ts";
+import { browserRoot, profileHash, profileKind, workspaceId } from "../chrome/profile.ts";
+import { PaneUnavailable, type OpenedPanes, type PaneLink } from "./link.ts";
 
-const PANE_CAPS: BackendCaps = { persistentProfile: true, window: true, egressGate: true, identityOverride: false, ownsAllTabs: true, downloads: "none", uploads: "path", botPasskeys: false };
+const PANE_CAPS: BackendCaps = { persistentProfile: true, window: true, egressGate: true, identityOverride: false, ownsAllTabs: true, downloads: "local", uploads: "path", botPasskeys: false };
+
+/** One empty file per profile whose panes ever opened in this data folder, so deleting a bot touches no partition it never had. */
+function marksDir(dataDir: string): string {
+  return join(browserRoot(dataDir), "panes");
+}
 
 /** Sign-ins are the profile's own and never shared between data folders; a temporary profile's die with the app. */
 export function panePartition(dataDir: string, key: string, nonce = () => randomBytes(4).toString("hex")): string {
@@ -21,6 +29,7 @@ export class PaneBackend implements Backend {
   readonly #dataDir: string;
   readonly #egressPort: (key: string) => Promise<number>;
   readonly #platform: NodeJS.Platform;
+  #fallback: Backend | null = null;
 
   /** `egressPort`: the profile's egress gate, which the panes' partition is proxied through as a launched Chrome is. */
   constructor(link: PaneLink, dataDir: string, egressPort: (key: string) => Promise<number>, platform: NodeJS.Platform = process.platform) {
@@ -34,11 +43,33 @@ export class PaneBackend implements Backend {
     return this.#link.available;
   }
 
+  /** Where a browser starts while no app window can host a pane (the window is closed to the tray). */
+  fallBackTo(backend: Backend): void {
+    this.#fallback = backend;
+  }
+
+  /** Whether this profile's panes ever opened in this data folder; reads only, so a never-used one writes nothing. */
+  used(key: string): boolean {
+    if (profileKind(key) === "temp" || !existsSync(marksDir(this.#dataDir))) return false;
+    return existsSync(join(marksDir(this.#dataDir), profileHash(workspaceId(this.#dataDir), key)));
+  }
+
   async open(request: OpenRequest): Promise<OpenedBrowser> {
-    const opened = await this.#link.open(request.key, panePartition(this.#dataDir, request.key), await this.#egressPort(request.key));
+    const partition = panePartition(this.#dataDir, request.key);
+    let opened: OpenedPanes;
+    try {
+      opened = await this.#link.open(request.key, partition, await this.#egressPort(request.key), request.downloadDir);
+    } catch (error) {
+      if (error instanceof PaneUnavailable && this.#fallback) return this.#fallback.open(request);
+      throw error;
+    }
+    if (profileKind(request.key) !== "temp") {
+      mkdirSync(marksDir(this.#dataDir), { recursive: true, mode: 0o700 });
+      writeFileSync(join(marksDir(this.#dataDir), profileHash(workspaceId(this.#dataDir), request.key)), "");
+    }
     let browser: CdpBrowser;
     try {
-      browser = await CdpBrowser.connect(opened.endpoint, { identity: null, headless: false, permissions: false, downloadDir: null, viewport: null, platform: this.#platform, maxPages: 8, handleAuth: true });
+      browser = await CdpBrowser.connect(opened.endpoint, { identity: null, headless: false, permissions: false, downloadDir: request.downloadDir, viewport: null, platform: this.#platform, maxPages: PANE_TABS_PER_BROWSER, handleAuth: true });
       if (browser.pages().length === 0 && browser.settingUp().length === 0) await browser.newPage();
     } catch (error) {
       this.#link.close(request.key);
@@ -70,8 +101,10 @@ export class PaneBackend implements Backend {
     };
   }
 
-  /** A deleted bot's or profile's pane sign-ins. */
+  /** A deleted bot's or profile's pane sign-ins, when its panes ever opened here. */
   erase(key: string): void {
-    if (profileKind(key) !== "temp") this.#link.erase(panePartition(this.#dataDir, key));
+    if (!this.used(key)) return;
+    this.#link.erase(panePartition(this.#dataDir, key));
+    rmSync(join(marksDir(this.#dataDir), profileHash(workspaceId(this.#dataDir), key)), { force: true });
   }
 }
