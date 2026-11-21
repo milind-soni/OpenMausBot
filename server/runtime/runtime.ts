@@ -120,10 +120,11 @@ export class Runtime {
         if (n.status !== "running") continue;
         const carried = n.carrying ?? [];
         const handedOut = childrenSince(this.store, n).length > 0;
-        const outward = handedOut ? [] : this.outwardOf(n);
+        const verifying = n.backgroundCommands?.some(command => command.verifying) === true;
+        const outward = !handedOut || verifying ? this.outwardOf(n) : [];
         if (outward.length > 0) {
           this.store.update(n, { kind: "restart_reconciled", at: now, detail: "failed: outward action done" });
-          this.settle(n, "failed", "interrupted", outwardDetail(outward));
+          this.cancelTree(n, outwardDetail(outward), "failed", "interrupted");
         } else if (handedOut || n.backgroundCommands?.some(c => !c.delivered || c.verifying)) {
           for (const command of n.backgroundCommands ?? []) if (command.verifying) { delete command.delivered; delete command.verifying; }
           n.status = "waiting"; n.restart = "cut"; n.lastActivityAt = now;

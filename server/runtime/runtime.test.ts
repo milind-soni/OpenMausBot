@@ -1233,51 +1233,52 @@ describe("Runtime: a root's later executions (every turn a root)", () => {
 });
 
 describe("Runtime: a cut turn that already acted outward (contract §5)", () => {
-  it.each(["outward", "no-receipt", "follow-up"])("reconciles interrupted background verification after SQLite close/reopen (%s)", async scenario => {
+  it.each(["outward", "no-receipt", "follow-up-with-receipt", "observed-before-reply"])("reconciles interrupted background verification after SQLite close/reopen (%s)", async scenario => {
     const dir = mkdtempSync(join(tmpdir(), "runtime-verification-restart-"));
     const file = join(dir, "runtime.db");
     let dispatches = 0;
     let sideEffects = 0;
+    const hasReceipt = scenario === "outward" || scenario === "follow-up-with-receipt";
+    const observed = scenario === "observed-before-reply";
     const script: Script = a => {
-      if (a.id === "verification") { dispatches += 1; if (scenario !== "no-receipt") sideEffects += 1; }
+      if (a.id === "verification") { dispatches += 1; if (hasReceipt) sideEffects += 1; }
       return "hold";
     };
-    const ports = { outward: (a: Assignment) => a.id === "verification" && scenario !== "no-receipt" ? ["GMAIL_SEND_EMAIL"] : [] };
+    const ports = { outward: (a: Assignment) => a.id === "verification" && hasReceipt ? ["GMAIL_SEND_EMAIL"] : [] };
     let w = world(script, {}, openRuntimeStore(file), ports);
     try {
       const root = w.runtime.begin(beginReq({ id: "verification" }));
       const command = { boxId: "box", processId: "command", expiresAt: w.clock.t + 60_000 };
       const result = '{"status":"finished","exitCode":7,"stdout":"original output"}';
       expect(w.runtime.trackBackground(root.id, command)).toBe(true);
-      w.runtime.end(root.id, { ok: true, text: "Running" });
-      expect(w.runtime.backgroundResult(root.id, command.boxId, command.processId, result)).toBe(true);
-      w.runtime.tick();
+      if (!observed) w.runtime.end(root.id, { ok: true, text: "Running" });
+      expect(w.runtime.backgroundResult(root.id, command.boxId, command.processId, result, observed)).toBe(true);
+      if (!observed) w.runtime.tick();
       expect(w.store.get(root.id)?.backgroundCommands?.[0]).toMatchObject({ result, delivered: true, verifying: true });
-      if (scenario === "follow-up") ok(w.runtime.enqueue(toBot("helper", root.id)));
+      if (scenario === "follow-up-with-receipt") ok(w.runtime.enqueue(toBot("helper", root.id)));
       w.runtime.close(); w.store.close();
 
       w = world(script, {}, openRuntimeStore(file), ports);
-      expect(w.store.get(root.id)).toMatchObject(scenario === "outward"
+      expect(w.store.get(root.id)).toMatchObject(hasReceipt
         ? { status: "failed", outcome: "interrupted", outcomeDetail: expect.stringContaining("GMAIL_SEND_EMAIL") }
         : { status: "waiting", restart: "cut" });
-      if (scenario === "follow-up") {
+      w.runtime.tick(); await flush();
+      if (hasReceipt) {
         expect(w.runner.runs).toEqual([]);
-        expect(w.store.children(root.id)[0]?.status).toBe("queued");
+        if (scenario === "follow-up-with-receipt") expect(w.store.children(root.id)[0]?.status).toBe("failed");
       } else {
-        w.runtime.tick(); await flush();
-        if (scenario === "no-receipt") {
-          expect(w.runner.runs[0]!.input.backgroundResults).toEqual([result]);
-          await w.runner.release(root.id, { kind: "completed", text: "Verified" });
-          w.runtime.tick();
-          expect(w.store.get(root.id)?.status).toBe("completed");
-          w.runtime.close(); w.store.close();
-          w = world(script, {}, openRuntimeStore(file), ports);
-          w.runtime.tick();
-          expect(w.runner.runs).toEqual([]);
-        } else expect(w.runner.runs).toEqual([]);
+        expect(w.runner.runs).toHaveLength(1);
+        expect(w.runner.runs[0]!.input.backgroundResults).toEqual([result]);
+        await w.runner.release(root.id, { kind: "completed", text: "Verified" });
+        w.runtime.tick();
+        expect(w.store.get(root.id)?.status).toBe("completed");
+        w.runtime.close(); w.store.close();
+        w = world(script, {}, openRuntimeStore(file), ports);
+        w.runtime.tick();
+        expect(w.runner.runs).toEqual([]);
       }
-      expect(dispatches).toBe(scenario === "no-receipt" ? 2 : 1);
-      expect(sideEffects).toBe(scenario === "no-receipt" ? 0 : 1);
+      expect(dispatches).toBe(observed ? 1 : hasReceipt ? 1 : 2);
+      expect(sideEffects).toBe(hasReceipt ? 1 : 0);
     } finally { w.runtime.close(); w.store.close(); await removeTempDir(dir); }
   });
 
