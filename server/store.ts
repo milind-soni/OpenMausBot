@@ -1229,11 +1229,17 @@ export class Store {
   setActiveLeaf(threadId: string, messageId: string): string | null {
     const t = this.thread(threadId);
     if (!t.messages.some((m) => m.id === messageId)) return null;
+    const newestChild = new Map<string, Message>();
+    for (const message of t.messages) {
+      if (typeof message.parentId !== "string") continue;
+      const previous = newestChild.get(message.parentId);
+      if (!previous || message.at >= previous.at) newestChild.set(message.parentId, message);
+    }
     let cur = messageId;
     for (;;) {
-      const children = t.messages.filter((m) => m.parentId === cur);
-      if (!children.length) break;
-      cur = children.reduce((a, b) => (b.at >= a.at ? b : a)).id;
+      const child = newestChild.get(cur);
+      if (!child) break;
+      cur = child.id;
     }
     t.activeLeafId = cur;
     mdb.setActiveLeaf(threadId, cur);
