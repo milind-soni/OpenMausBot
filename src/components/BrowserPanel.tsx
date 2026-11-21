@@ -77,6 +77,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const resume = useRef<LiveResume & { key: string }>({ key: "", viewer: "" });
   const keepNow = useRef(false);
   const signInHandled = useRef(0);
+  const signInWoken = useRef(0);
   const pageHandled = useRef(0);
   const signInPage = useRef<string | null>(null);
   const pageNow = useRef<string | null>(null);
@@ -186,6 +187,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     } else if (message.type === "starting") {
       setStarting(true);
     } else if (message.type === "asleep" || message.type === "awake") {
+      if (message.type === "asleep") pageNow.current = null;
       setAsleep(message.type === "asleep" ? "asleep" : "");
     }
   }, []);
@@ -200,13 +202,21 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     if (!pageNow.current || pageNow.current === "about:blank") interact({ type: "navigate", url });
   };
   latest.current = { openSignInPage, takeControl };
+  // Woken once per request: a browser that cannot start answers "asleep" again, and Wake stays for the person.
   useEffect(() => {
     if (!signIn || !connected || signInHandled.current === signIn.nonce) return;
+    if (asleep) {
+      if (asleep === "asleep" && signInWoken.current !== signIn.nonce && clientRef.current?.send({ type: "wake" })) {
+        signInWoken.current = signIn.nonce;
+        setAsleep("waking");
+      }
+      return;
+    }
     signInHandled.current = signIn.nonce;
     signInPage.current = signIn.url;
     latest.current.takeControl();
     latest.current.openSignInPage();
-  }, [signIn, connected]);
+  }, [signIn, connected, asleep]);
 
   // A new tab, so whatever the bot has open stays as it was; a sleeping browser is woken first.
   useEffect(() => {
