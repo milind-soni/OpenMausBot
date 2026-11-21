@@ -22,6 +22,14 @@ describe("codeLocation", () => {
     expect(codeLocation(frame("tick", "file:///srv/packages/other/y.ts", 1), root)).toBe("tick y.ts:2:5");
   });
 
+  it("finds the app's own folder in a Windows path or file URL", () => {
+    const root = "C:\\a\\OpenMausBot";
+    expect(codeLocation(frame("tick", "file:///C:/a/OpenMausBot/server/perf/x.ts", 1), root)).toBe("tick server/perf/x.ts:2:5");
+    expect(codeLocation(frame("tick", "C:\\a\\OpenMausBot\\server\\perf\\x.ts", 1), root)).toBe("tick server/perf/x.ts:2:5");
+    expect(codeLocation(frame("tick", "file:///c:/a/OpenMausBot/server/perf/x.ts", 1), root)).toBe("tick server/perf/x.ts:2:5");
+    expect(codeLocation(frame("tick", "file:///D:/elsewhere/y.ts", 1), root)).toBe("tick y.ts:2:5");
+  });
+
   it("never carries a function name that isn't an identifier", () => {
     expect(codeLocation(frame("evil\nname with \"quotes\"", "file:///app/server/a.ts"), "/app")).toBe("(anonymous) server/a.ts:1:5");
   });

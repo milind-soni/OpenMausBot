@@ -42,8 +42,13 @@ export function codeLocation(frame: ProfileFrame, appRoot = ""): string {
   const pseudo = /^\([a-z ]{1,40}\)$/.test(frame.functionName);
   const name = frame.functionName && (pseudo || SAFE_NAME.test(frame.functionName)) ? frame.functionName : "(anonymous)";
   if (!frame.url) return name;
-  const path = frame.url.replace(/^file:\/\//, "").replace(/\\/g, "/").split("?")[0]!;
-  const root = appRoot.replace(/\\/g, "/").replace(/\/?$/, "/");
+  // `file:///C:/x` and `C:\x` alike: forward slashes, no slash before a drive letter, which compares in either case.
+  const normal = (text: string) => text.replace(/\\/g, "/").replace(/^\/([A-Za-z]:)/, "$1").replace(/^([A-Za-z]):/, (_m, drive: string) => `${drive.toUpperCase()}:`);
+  const raw = frame.url.replace(/^file:\/\//, "").split("?")[0]!;
+  let decoded = raw;
+  try { decoded = decodeURI(raw); } catch {}
+  const path = normal(decoded);
+  const root = normal(appRoot).replace(/\/?$/, "/");
   const pkg = /node_modules\/((?:@[^/]+\/)?[^/]+\/.*)$/.exec(path)?.[1];
   const app = !pkg && root !== "/" && path.startsWith(root) ? path.slice(root.length) : undefined;
   const builtin = /^node:[\w/]+$/.test(path) ? path : null;

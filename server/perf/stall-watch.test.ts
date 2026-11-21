@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
+import type { StallRecord } from "./stall-sample.ts";
 import { readStallRecords, STALL_FILE, startStallWatch, stallReportLines, type StallWatch } from "./stall-watch.ts";
 
 const dirs: string[] = [];
@@ -38,17 +39,25 @@ describe("stall watch", () => {
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     // Long enough for a slow, busy machine (a shared CI runner): the record needs the threshold, a tick, and the profile.
     heldMainThreadForStallWatchTest(12_000);
-    await waitFor(() => readStallRecords(join(dir, STALL_FILE)).some((record) => record.kind !== "not-profiled"), 20_000);
-    const record = readStallRecords(join(dir, STALL_FILE)).find((kept) => kept.kind !== "not-profiled");
+    // Done: a profile, or the reason there is none (never "pending").
+    const done = (record: StallRecord) => record.kind !== "not-profiled" || record.why !== "pending";
+    await waitFor(() => readStallRecords(join(dir, STALL_FILE)).some(done), 20_000);
+    const record = readStallRecords(join(dir, STALL_FILE)).find(done);
     expect(record).toBeDefined();
-    expect(record!.kind).toBe("js");
     expect(record!.blockedSinceMs).toBeGreaterThanOrEqual(2_000);
-    // The loop's own frame, or the test's where V8 inlined it: this file, by its place in the app, either way.
-    expect(record!.top.some((frame) => /server\/perf\/stall-watch\.test\.ts/.test(frame.at))).toBe(true);
+    // On Linux (the Cloud's own platform) it must be profiled; elsewhere a runner short of memory may skip the profile,
+    // and then the record says so.
+    if (process.platform === "linux" || record!.kind !== "not-profiled") {
+      expect(record!.kind).toBe("js");
+      // The loop's own frame, or the test's where V8 inlined it: this file, by its place in the app, either way.
+      expect(record!.top.some((frame) => /server\/perf\/stall-watch\.test\.ts/.test(frame.at))).toBe(true);
+      expect(stallReportLines([record!])[1]).toMatch(/main thread blocked \d+s, in JavaScript: .*stall-watch\.test\.ts/);
+    } else {
+      expect(record!.why).toBe("memory");
+    }
     // Nothing of this machine's paths.
     expect(JSON.stringify(record)).not.toContain(dir);
     expect(JSON.stringify(record)).not.toContain(process.cwd());
-    expect(stallReportLines([record!])[1]).toMatch(/main thread blocked \d+s, in JavaScript: .*stall-watch\.test\.ts/);
   }, 60_000);
 
   it("saves the record at once and takes no profile while memory is short", async () => {
