@@ -130,6 +130,24 @@ describe("the browser panel's connection", () => {
     expect(host.querySelector("[data-browser-transport]")!.getAttribute("data-browser-transport")).toBe("live");
   });
 
+  it("reconnects by itself, on the stream, when its server restarts, and shows no Reconnect", async () => {
+    const socket = await streaming();
+    const before = FakeSocket.instances.length;
+    // The server stops: it closes the view with the reconnect code, then refuses while it starts again.
+    await act(async () => socket.dispatchEvent(Object.assign(new Event("close"), { code: 1012, reason: "The server is restarting." })));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+    expect(FakeSocket.instances.length).toBe(before + 1);
+    await act(async () => FakeSocket.instances.at(-1)!.refuse());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_100)); });
+    const next = FakeSocket.instances.at(-1)!;
+    expect(next).not.toBe(socket);
+    expect(button("Reconnect")).toBeUndefined();
+    expect(host.querySelector("[data-browser-transport]")!.getAttribute("data-browser-transport")).toBe("stream");
+    await act(async () => { next.open(); next.control("agent"); next.message(new ArrayBuffer(8)); });
+    await flush();
+    expect(button("Reconnect")).toBeUndefined();
+  });
+
   it("says the browser is starting until its first frame arrives", async () => {
     await render();
     const socket = FakeSocket.instances.at(-1)!;

@@ -28,6 +28,8 @@ export const browserEngineConfigSchema = z.object({
   engine: z.enum(["agent-browser", "chrome"]).optional(),
   /** "pane" shows the Chrome engine's browser on the desktop app as a real page the person uses directly, an early test; streamed when unset. */
   surface: z.enum(["stream", "pane"]).optional(),
+  /** The user agent the desktop pane presents: Electron's own ("native", the default) or without its Electron token ("cleaned"). */
+  paneIdentity: z.enum(["native", "cleaned"]).optional(),
 });
 
 export interface BrowserEngineConfig {
@@ -36,6 +38,7 @@ export interface BrowserEngineConfig {
   egress?: BrowserEgressConfig;
   engine?: BrowserEngineKind;
   surface?: "stream" | "pane";
+  paneIdentity?: "native" | "cleaned";
 }
 
 export function browserEngineKind(cfg: { browserEngine?: BrowserEngineConfig }): BrowserEngineKind {

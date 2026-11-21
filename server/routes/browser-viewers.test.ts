@@ -74,10 +74,12 @@ afterEach(async () => {
   for (const folder of folders.splice(0)) await removeTempDir(folder);
 });
 
-async function serve({ attach, current = () => true, download, audience = () => "team", action = async () => ({ ok: true }), inputLog }: {
+async function serve({ attach, current = () => true, download, audience = () => "team", action = async () => ({ ok: true }), inputLog, hold = () => null, authorize = async () => null }: {
   attach?: (options: ViewerOptions, push: (output: ViewerOutput) => void) => Promise<Viewer>;
   current?: () => boolean;
   download?: (id: string) => Download | undefined;
+  hold?: (tab: string, held: boolean) => string | null;
+  authorize?: BrowserViewerRouteDeps["authorize"];
   audience?: (threadId: string | null) => Audience | null;
   action?: (body: unknown) => Promise<unknown>;
   inputLog?: BrowserInputLog;
@@ -121,13 +123,14 @@ async function serve({ attach, current = () => true, download, audience = () => 
         return chooser === "chooser-1";
       },
       download: (_browser, id) => download?.(id),
+      hold: (_browser, tab, held) => hold(tab, held),
     },
     audience: (_auth, threadId) => audience(threadId),
     browser: async (botId, opened) => {
       fixture.opened.push(opened);
       return botId === "pepper" ? { botId, session: "bot-pepper", spec: { command: "omb-cdp", args: ["bot:pepper"], env: {} } } : { status: 404, error: "no such bot" };
     },
-    authorize: async () => null,
+    authorize,
     current: (_botId, _session, _auth, checked) => { fixture.checked.push(checked); return current(); },
     restartRefusal: () => null,
     ...(inputLog ? { inputLog } : {}),
@@ -220,6 +223,39 @@ describe("the v2 stream", () => {
       owner: "local-owner", person: "local-owner", canOperate: interactive, maxWidth: 1280, maxHeight: 800, quality: 70, pace: "hi", authPrompts: true, pagePopups: true,
       ...(interactive ? { size: { width: 1600, height: 1000 } } : {}),
     }]);
+  });
+
+  it("pauses a view the desktop app covers with its native view, unless another person's hold already hides it", async () => {
+    const hides: boolean[] = [];
+    const fixture = await serve({
+      attach: async (_options, push) => {
+        push({ type: "control", canOperate: true, controller: "unclaimed", held: false, owned: false, controlling: false, stale: false, generation: 1, dialog: null });
+        return { id: "viewer", input: async (message: unknown) => { fixture.inputs.push(message); }, hide: async (hidden: boolean) => { hides.push(hidden); }, close: async () => {} } as unknown as Viewer;
+      },
+    });
+    const socket = new WebSocket(`ws://${fixture.origin}/api/bots/pepper/browser/stream`);
+    await new Promise((resolve) => socket.addEventListener("message", resolve, { once: true }));
+    socket.send(JSON.stringify({ type: "covered", covered: true }));
+    socket.send(JSON.stringify({ type: "covered", covered: false }));
+    await until(() => hides.length === 2);
+    socket.close();
+    expect(hides).toEqual([true, false]);
+    // The covered message is the stream's own: it never reaches the page as input.
+    expect(fixture.inputs).toEqual([]);
+  });
+
+  it("closes every view for good when told to, and with a reconnect as the server stops", async () => {
+    const closes: number[] = [];
+    for (const stopping of [false, true]) {
+      const fixture = await serve();
+      const socket = new WebSocket(`ws://${fixture.origin}/api/bots/pepper/browser/stream`);
+      await new Promise((resolve) => socket.addEventListener("open", resolve, { once: true }));
+      await until(() => fixture.attachments.length === 1);
+      const closed = new Promise<number>((resolve) => socket.addEventListener("close", (event) => resolve(event.code)));
+      fixture.stream.closeAll({ stopping });
+      closes.push(await closed);
+    }
+    expect(closes).toEqual([4404, 1012]);
   });
 
   it("refuses an upgrade from another origin, and a plain request, before attaching a viewer", async () => {
@@ -500,5 +536,42 @@ describe("whose browser a view shows on a Team Cloud", () => {
     expect(fixture.isCurrent(), "an open view stops showing a conversation the person no longer sees").toBe(false);
     expect(await act()).toBe(404);
     expect(fixture.opened).toEqual(["member:p_ada", "member:p_ada"]);
+  });
+});
+
+describe("the person's hold on a desktop pane tab", () => {
+  const post = (fixture: Fixture, body: unknown, path = "/api/bots/pepper/browser/hold") =>
+    fetch(`http://${fixture.origin}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+  it("takes the tab named, and hands it back", async () => {
+    const holds: Array<[string, boolean]> = [];
+    const fixture = await serve({ hold: (tab, held) => { holds.push([tab, held]); return tab; } });
+    const taken = await post(fixture, { held: true, tab: "t1" });
+    expect(taken.status).toBe(200);
+    expect(await taken.json()).toEqual({ tab: "t1", held: true });
+    expect((await post(fixture, { held: false, tab: "t2" })).status).toBe(200);
+    expect(holds).toEqual([["t1", true], ["t2", false]]);
+  });
+
+  it("is checked as a view of the browser is: who may see it, a fresh sign-in, the browser still current", async () => {
+    const holds: unknown[] = [];
+    const hold = (tab: string) => { holds.push(tab); return tab; };
+    const body = { held: true, tab: "t1" };
+    expect((await post(await serve({ hold, audience: () => null }), body)).status).toBe(404);
+    expect((await post(await serve({ hold, authorize: async () => ({ status: 403, error: "Sign in again." }) }), body)).status).toBe(403);
+    expect((await post(await serve({ hold, current: () => false }), body)).status).toBe(409);
+    expect((await post(await serve({ hold }), body, "/api/bots/other/browser/hold")).status).toBe(404);
+    expect(holds).toEqual([]);
+  });
+
+  it("refuses a malformed request, and a browser that is not a desktop pane", async () => {
+    const fixture = await serve();
+    expect((await post(fixture, { held: "yes", tab: "t1" })).status).toBe(400);
+    expect((await post(fixture, { held: true, tab: "p1" })).status).toBe(400);
+    expect((await post(fixture, { held: true })).status).toBe(400);
+    expect((await fetch(`http://${fixture.origin}/api/bots/pepper/browser/hold`)).status).toBe(405);
+    const refused = await post(fixture, { held: true, tab: "t1" });
+    expect(refused.status).toBe(409);
+    expect((await refused.json() as { error: string }).error).toContain("desktop app");
   });
 });

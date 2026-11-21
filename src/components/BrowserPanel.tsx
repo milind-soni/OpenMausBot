@@ -18,7 +18,9 @@ import { createLiveStreamClient, type LiveResume, type LiveStreamClient } from "
 import { BROWSER_HELD_ELSEWHERE } from "../../shared/browser-held";
 import { passkeyWallAt } from "../../shared/passkey-wall";
 import { browserScope, withBrowserScope } from "@/lib/team-browser";
+import { followBounds } from "@/lib/follow-bounds";
 import { useNativeViewObscured } from "@/lib/native-view-obscured";
+import { CookieImportDialog, cookieImportAvailable, siteOfAddress } from "./browser/CookieImportDialog";
 
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed";
 const NO_NAV: BrowserNav = { url: "", loading: false, canGoBack: false, canGoForward: false };
@@ -60,6 +62,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const [kept, setKept] = useState(false);
   const [showProfiles, setShowProfiles] = useState(false);
   const [showTyping, setShowTyping] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [masked, setMasked] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [maximized, setMaximized] = useState(false);
@@ -170,6 +173,9 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     if (message.type === "tabs") {
       const next = tabsOf(message.tabs);
       setTabs(next);
+      // The browser runs once it lists its tabs: a view that never draws a frame (one the app's pane covers) is not
+      // left saying it is starting.
+      if (next.length) setStarting(false);
       const active = next.find((tab) => tab.active);
       if (active) {
         setNav((current) => ({ ...current, url: active.url }));
@@ -292,34 +298,49 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const typingReady = connected && you;
   // The desktop app shows this browser natively over the page area; the stream underneath shows through any overlay.
   const paneMode = stream && state.config?.browserEngine?.pane === true && Boolean(window.ogb?.browserPane);
-  const obscured = useNativeViewObscured(showProfiles || showTyping, paneMode);
-  const paneVisible = paneMode && shown && connected && !asleep && !heldElsewhere && !gone && !starting && !obscured;
+  const obscured = useNativeViewObscured(showProfiles || showTyping || showImport, paneMode);
+  const profile = state.config?.browserProfiles?.find((candidate) => candidate.id === bot.browserProfile);
+  const importable = cookieImportAvailable(state.config) && bot.browserProfile !== "guest"
+    && !(profile?.browser === "chrome" && state.config?.browserEngine?.myChrome === true);
+  // A page's alert, confirm or prompt is answered in the panel's own card, under where the native pane would be.
+  const paneVisible = paneMode && shown && connected && !asleep && !heldElsewhere && !gone && !starting && !obscured && !control?.dialog;
   const paneShown = useRef(paneVisible);
   const placePane = useRef<() => void>(() => {});
+  // While the app shows the pane, the stream underneath sends no frames; it resumes as soon as the pane hides.
+  const [paneUp, setPaneUp] = useState(false);
+  const covered = paneVisible && paneUp;
+  const coveredSent = useRef(false);
+  useEffect(() => {
+    if (!stream || (!covered && !coveredSent.current)) return;
+    clientRef.current?.send({ type: "covered", covered });
+    coveredSent.current = covered;
+  }, [stream, covered, connected]);
   paneShown.current = paneVisible;
   useEffect(() => {
     const bridge = window.ogb?.browserPane;
     if (!paneMode || !bridge) return;
     const threadId = scopedThread ?? null;
     const profile = bot.browserProfile ?? null;
+    let placed = 0;
     const place = () => {
       const rect = pageArea.current?.getBoundingClientRect();
       const bounds = rect && rect.width >= 1 && rect.height >= 1
         ? { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) } : null;
-      void bridge.show({ botId: bot.id, threadId, profile, bounds, visible: paneShown.current && bounds !== null }).catch(() => undefined);
+      const visible = paneShown.current && bounds !== null;
+      const asked = ++placed;
+      void bridge.show({ botId: bot.id, threadId, profile, bounds, visible }).then((answer) => { if (asked === placed) setPaneUp(visible && answer?.shown === true); }, () => { if (asked === placed) setPaneUp(false); });
     };
     placePane.current = place;
-    const observer = new ResizeObserver(place);
-    if (pageArea.current) observer.observe(pageArea.current);
-    window.addEventListener("resize", place);
+    const stop = pageArea.current ? followBounds(pageArea.current, place) : () => {};
     return () => {
       placePane.current = () => {};
-      observer.disconnect();
-      window.removeEventListener("resize", place);
+      stop();
+      setPaneUp(false);
       void bridge.show({ botId: bot.id, threadId, profile, bounds: null, visible: false }).catch(() => undefined);
     };
   }, [paneMode, bot.id, bot.browserProfile, scopedThread]);
-  useEffect(() => { placePane.current(); }, [paneVisible, paneMode, bot.id, bot.browserProfile, scopedThread]);
+  // A pane the app makes after the panel asked (as after a server restart) is shown once its tab is listed.
+  useEffect(() => { placePane.current(); }, [paneVisible, paneMode, bot.id, bot.browserProfile, scopedThread, tabs]);
   const pipSupported = stream && supportsBrowserPictureInPicture();
   const passkeyWall = passkeyWallAt(nav.url);
   return <div ref={panel} className={maximized
@@ -366,6 +387,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
         onPip={togglePip}
         onType={() => { setMasked(false); setShowTyping(true); }}
         onSecret={() => { setMasked(true); setShowTyping(true); }}
+        {...(importable ? { onImport: () => setShowImport(true) } : {})}
         onReconnect={reconnect}
         onRestart={restart}
       /></>}
@@ -406,6 +428,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       {(heldElsewhere || (you && takeStatus !== "")) && <p className="mb-3 text-[12px] text-ink-secondary">{t(heldElsewhere ? "browser.profiles.heldElsewhere" : "browser.profiles.busy")}</p>}
       <BrowserProfilesManager bot={bot} disabled={heldElsewhere || takeStatus === "pending" || takeStatus === "slow"} onProfileChanged={() => { setShowProfiles(false); reconnect(); }} />
     </dialog>
+    {importable ? <CookieImportDialog open={showImport} botId={bot.id} botName={bot.name} threadId={scopedThread ?? null} site={siteOfAddress(nav.url)} onClose={() => setShowImport(false)} /> : null}
     {/* Security: a password or code typed here goes only to the page's focused field; it is never held in state, logged or shown. */}
     <dialog ref={typingDialog} onClose={() => { const field = typingDialog.current?.querySelector("input"); if (field) field.value = ""; setShowTyping(false); }} className="m-auto w-[min(420px,calc(100%-32px))] rounded-2xl border border-hairline/50 bg-card p-5 text-ink shadow-2xl backdrop:bg-black/40">
       <div className="mb-3 flex items-center justify-between"><h2 className="text-[14px] font-medium">{masked ? t("browser.typeSecret.title") : t("browser.panel.typeTextTitle")}</h2><button className={button} aria-label={t("browser.panel.closeTyping")} onClick={() => setShowTyping(false)}><X size={16} /></button></div>

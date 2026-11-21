@@ -225,6 +225,8 @@ export interface BrowserEngineSummary {
   engine?: "agent-browser" | "chrome";
   /** The desktop app shows the Chrome engine's browsers as panes the person uses directly (browserEngine.surface "pane"). */
   pane?: true;
+  /** The person can import a site's sign-in from their own browsers into a bot's (the desktop app, Chrome engine). */
+  cookieImport?: true;
   /** Self-hosted servers only: whether bots' browsers may open this server's own sites and its local network
    * (browserEngine.egress.localNetwork, off by default). Absent on the desktop and on MausBot Cloud. */
   serverSites?: boolean;
