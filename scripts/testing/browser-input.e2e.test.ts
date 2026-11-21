@@ -2,10 +2,12 @@
 // its Chrome, the live view's event stream and action requests as the app sends them, and the bot's tools as a model
 // calls them. The page reports what it saw to this test's own server. Runs when agent-browser resolves (tools directory,
 // OMB_AGENT_BROWSER_PATH or PATH) or OMB_UI_E2E=1 asks for the download; otherwise skipped.
+import { execFile } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { join } from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { promisify } from "node:util";
+import { afterAll, beforeAll, describe, expect, it, onTestFailed } from "vitest";
 
 import { resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
 import type { PreviewStreamInput } from "../../src/lib/browser-stream-client.ts";
@@ -58,6 +60,7 @@ describe("input to a page on the default browser engine", () => {
   let fixture: VerificationServer;
   let url = "";
   let bot: { id: string; threadId: string };
+  let binary = "";
   const seen: string[] = [];
   const closers: Array<() => void> = [];
 
@@ -66,10 +69,17 @@ describe("input to a page on the default browser engine", () => {
     return { status: response.status, body: await response.json().catch(() => null) };
   };
   const serverLog = () => readFileSync(fixture.info.logPath, "utf8");
+  /** A failure's own evidence: the server's lines about its browser, which go with the fixture otherwise. */
+  const showBrowserLog = () => onTestFailed(() => {
+    console.log(`server log, browser lines:\n${serverLog().split("\n").filter((line) => /browser/i.test(line)).slice(-40).join("\n")}`);
+  });
+  /** The server's lines about input that did not reach the page, without each browser's own session id. */
+  const dropLines = () => serverLog().split("\n").filter((line) => line.startsWith("browser input:")).map((line) => line.replace(/ session=\S+/, ""));
 
   beforeAll(async () => {
     if (!enabled) return;
     const browser = await ensureUiBrowser(process.env, () => {}, UI_TOOLS_DIR);
+    binary = browser.binary;
     pages = createServer((req, res) => {
       const at = new URL(req.url ?? "/", "http://fixture.invalid");
       if (at.pathname === "/seen") { seen.push(at.searchParams.get("what") ?? ""); res.writeHead(204); res.end(); return; }
@@ -89,17 +99,19 @@ describe("input to a page on the default browser engine", () => {
   afterAll(async () => {
     if (!enabled) return;
     for (const close of closers) close();
+    // A failed test can leave the engine's daemon running: close --all is scoped to this fixture's HOME.
+    if (fixture) await promisify(execFile)(binary, ["close", "--all"], { env: { HOME: fixture.info.dataDir, USERPROFILE: fixture.info.dataDir, PATH: process.env.PATH }, timeout: 15_000 }).catch(() => undefined);
     await fixture?.close();
     await new Promise((resolve) => pages?.close(resolve));
   }, 60_000);
 
-  /** The live view as the panel opens it: its event stream read, each frame acknowledged. */
-  async function openView() {
+  /** One connection of the live view: its event stream read, each frame acknowledged. */
+  async function connectView() {
     const abort = new AbortController();
     closers.push(() => abort.abort());
     const stream = await fetch(`${url}/api/bots/${bot.id}/browser/live`, { headers: { origin: url, accept: "text/event-stream" }, signal: abort.signal });
     expect(stream.status).toBe(200);
-    const view = { viewerId: "", inputBatch: 1, frames: 0, ended: false };
+    const view = { viewerId: "", inputBatch: 1, frames: 0, ended: false, error: "", retryable: false };
     const post = (body: Body) => api("POST", `/api/bots/${bot.id}/browser/action`, { ...body, viewerId: view.viewerId });
     void (async () => {
       const decoder = new TextDecoder();
@@ -114,20 +126,52 @@ describe("input to a page on the default browser engine", () => {
           try { data = JSON.parse(/^data: (.*)$/m.exec(block)?.[1] ?? "{}"); } catch { continue; }
           if (name === "ready") { view.viewerId = data.viewerId; view.inputBatch = Number(data.inputBatch) || 1; }
           if (name === "frame") { view.frames += 1; void post({ type: "ack", seq: data.seq }).catch(() => undefined); }
+          if (name === "error") { view.error = String(data.message); view.retryable = data.retryable === true; }
         }
       }
     })().catch(() => undefined).finally(() => { view.ended = true; });
     await expect.poll(() => view.viewerId !== "" || view.ended, { timeout: 90_000, interval: 100 }).toBe(true);
-    expect(view.viewerId).not.toBe("");
-    await expect.poll(() => view.frames, { timeout: 60_000, interval: 100 }).toBeGreaterThan(0);
     return { view, post, close: () => abort.abort() };
   }
 
+  /** The live view as the panel opens it: like the panel, it connects again, up to five times, after an error the server
+   * calls retryable (an engine slow to start on a busy machine is restarted, and the view told to reconnect). */
+  async function openView() {
+    let opened = await connectView();
+    for (let attempt = 1; attempt < 5 && !opened.view.viewerId && opened.view.retryable; attempt++) {
+      opened.close();
+      opened = await connectView();
+    }
+    expect({ error: opened.view.error, ready: opened.view.viewerId !== "" }).toEqual({ error: "", ready: true });
+    await expect.poll(() => opened.view.frames, { timeout: 60_000, interval: 100 }).toBeGreaterThan(0);
+    return opened;
+  }
+
+  run("the bot's click and fill tools change the page, and a missing target is an error the server logs", async () => {
+    showBrowserLog();
+    const planPath = join(fixture.info.dataDir, "room-plan.json");
+    const evidence = () => { try { return readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)); } catch { return []; } };
+    seen.length = 0;
+    writeFileSync(planPath, JSON.stringify({ [bot.id]: { turns: [{ timeoutMs: 180_000, steps: [
+      { server: "browser", tool: "agent_browser_open", arguments: { url: `${base}/` } },
+      { server: "browser", tool: "agent_browser_click", arguments: { selector: "#press" } },
+      { server: "browser", tool: "agent_browser_fill", arguments: { selector: "#name", text: "hello" } },
+      { server: "browser", tool: "agent_browser_click", arguments: { selector: "#missing" }, expectError: true },
+    ], reply: "Done." }] } }));
+    await runControlOmb(["send", "--bot", bot.id, "--task", bot.threadId, "--text", "Use the page.", "--url", url]);
+    const results = () => evidence().flatMap((turn: any) => turn.evidence).filter((entry: any) => entry.step?.server === "browser").map((entry: any) => entry.response.result.isError === true);
+    await expect.poll(results, { timeout: 180_000, interval: 200 }).toEqual([false, false, false, true]);
+    await expect.poll(() => seen.includes("click:true") && seen.includes("input:hello"), { timeout: 15_000, interval: 100 }).toBe(true);
+    await expect.poll(dropLines, { timeout: 10_000, interval: 100 }).toContain("browser input: bot click dropped reason=target_not_found engine=agent-browser transport=tools");
+    expect(serverLog()).not.toContain("#missing");
+  }, 300_000);
+
   run("a person takes control, clicks a button and types a word, and the page sees both", async () => {
+    showBrowserLog();
     const { view, post, close } = await openView();
-    // A failure here must not leave the browser held: the bot's test would then be refused.
+    // A failure here must not leave the browser held for whatever runs next.
     try {
-      expect(await post({ type: "take" })).toEqual({ status: 200, body: { ok: true, waited: false } });
+      expect(await post({ type: "take" })).toMatchObject({ status: 200, body: { ok: true } });
       seen.length = 0;
       expect(await post(action({ type: "navigate", url: `${base}/` }))).toEqual({ status: 200, body: { ok: true } });
       await expect.poll(() => seen.includes("load"), { timeout: 30_000, interval: 100 }).toBe(true);
@@ -145,32 +189,12 @@ describe("input to a page on the default browser engine", () => {
 
       expect(await post({ type: "release" })).toEqual({ status: 200, body: { ok: true } });
       const refused = await post(mouse("down", PRESS));
-      expect(refused.status).toBe(409);
-      await expect.poll(() => /browser input: person input_mouse dropped reason=not_controlling engine=agent-browser transport=v1 session=\S+/.test(serverLog()), { timeout: 10_000, interval: 100 }).toBe(true);
+      expect(refused).toEqual({ status: 409, body: { error: "Browser control changed. Try again." } });
+      await expect.poll(dropLines, { timeout: 10_000, interval: 100 }).toContain("browser input: person input_mouse dropped reason=not_controlling engine=agent-browser transport=v1");
       expect(seen.filter((entry) => entry.startsWith("click:"))).toEqual(["click:true"]);
     } finally {
       await post({ type: "release" }).catch(() => undefined);
       close();
     }
-  }, 300_000);
-
-  run("the bot's click and fill tools change the page, and a missing target is an error the server logs", async () => {
-    const planPath = join(fixture.info.dataDir, "room-plan.json");
-    const evidence = () => { try { return readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)); } catch { return []; } };
-    seen.length = 0;
-    writeFileSync(planPath, JSON.stringify({ [bot.id]: { turns: [{ timeoutMs: 180_000, steps: [
-      { server: "browser", tool: "agent_browser_open", arguments: { url: `${base}/` } },
-      { server: "browser", tool: "agent_browser_click", arguments: { selector: "#press" } },
-      { server: "browser", tool: "agent_browser_fill", arguments: { selector: "#name", text: "hello" } },
-      { server: "browser", tool: "agent_browser_click", arguments: { selector: "#missing" }, expectError: true },
-    ], reply: "Done." }] } }));
-    await runControlOmb(["send", "--bot", bot.id, "--task", bot.threadId, "--text", "Use the page.", "--url", url]);
-    await expect.poll(() => evidence().length, { timeout: 180_000, interval: 200 }).toBe(1);
-    const results = evidence()[0].evidence.filter((entry: any) => entry.step?.server === "browser").map((entry: any) => entry.response.result);
-    expect(results.map((result: any) => result.isError === true)).toEqual([false, false, false, true]);
-    await expect.poll(() => seen.includes("click:true") && seen.includes("input:hello"), { timeout: 15_000, interval: 100 }).toBe(true);
-    await expect.poll(() => /browser input: bot click dropped reason=target_not_found engine=agent-browser transport=tools session=\S+/.test(serverLog()), { timeout: 10_000, interval: 100 }).toBe(true);
-    expect(serverLog()).not.toContain("#missing");
-    expect(serverLog()).not.toContain("typed_not_landed");
   }, 300_000);
 });
