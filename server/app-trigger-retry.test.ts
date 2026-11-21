@@ -6,6 +6,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { brokerClient, BrokerError, type AppTriggerBroker } from "./app-trigger-broker.ts";
 import { AppTriggerManager } from "./app-triggers.ts";
 
+// tsconfig.server.json targets ES2023: Promise.withResolvers is ES2024.
+function withResolvers<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void, reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
+}
+
 afterEach(() => vi.restoreAllMocks());
 
 describe("the app-event service's Retry-After", () => {
@@ -29,7 +36,7 @@ describe("the app-event service's Retry-After", () => {
     [429, undefined, 2_000], [401, 90, 2_000], [503, 0, 2_000],
   ])("uses the retry interval for HTTP %i with Retry-After %s", async (status, retryAfter, expected) => {
     const directory = mkdtempSync(join(tmpdir(), "omb-trigger-retry-"));
-    const sleeping = Promise.withResolvers<number>();
+    const sleeping = withResolvers<number>();
     const poll = vi.fn<AppTriggerBroker["poll"]>().mockRejectedValue(new BrokerError("Please wait", status!, retryAfter));
     const broker: AppTriggerBroker = {
       triggerTypes: async () => ({}),
