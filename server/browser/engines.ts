@@ -8,7 +8,7 @@ import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime, BrowserSpawnSpec } from "../browser-runtime.ts";
 import type { StepContext } from "../browser-steps.ts";
 import type { FillLoginDeps } from "../login-fill.ts";
-import { LocalBackend } from "./backends.ts";
+import { LocalBackend, type Backend } from "./backends.ts";
 import { sandboxDisabled } from "./chrome/host-setup.ts";
 import type { HostKind } from "./chrome/flags.ts";
 import { ChromeLauncher } from "./chrome/launcher.ts";
@@ -17,6 +17,7 @@ import { browserRoot } from "./chrome/profile.ts";
 import { browserLanguage, browserTimeZone, languageList } from "./chrome/wrapper.ts";
 import { displayScreen } from "./display.ts";
 import { botReason, browserInputLog, pageAction, type BotReason, type BrowserInputLog } from "./input-log.ts";
+import type { PaneBackend } from "./pane/backend.ts";
 import type { Download } from "./cdp/downloads.ts";
 import { BrowserService, type BrowserTarget } from "./service.ts";
 import { LiveV1 } from "./viewers/live-v1.ts";
@@ -51,7 +52,14 @@ export interface ChromeEngineOptions {
   held?(session: string): boolean;
   egressNotice(key: string): string | null;
   language?(): string | undefined;
+  /** The desktop app's panes, used for a browser that starts while they are wanted and the app shows them. */
+  pane?: { backend: PaneBackend; wanted(): boolean };
   log?: (line: string) => void;
+}
+
+/** Each start of a profile's browser picks again, so turning the pane on or off takes effect at the next start. */
+export function backendFor(local: Backend, pane: ChromeEngineOptions["pane"]): Backend {
+  return pane && pane.wanted() && pane.backend.available ? pane.backend : local;
 }
 
 /** The new engine: one Chrome launcher (no agent-browser wrapper), the browser service, its live views and its sweep. */
@@ -96,7 +104,7 @@ export class ChromeEngine {
     const maxRunning = Number(env.OMB_BROWSER_MAX_RUNNING) || MAX_RUNNING[options.host];
     this.service = new BrowserService({
       dataDir: options.dataDir,
-      backend: () => backend,
+      backend: () => backendFor(backend, options.pane),
       maxRunning,
       idleMs: options.idleMs,
       held: options.held,
@@ -160,6 +168,7 @@ export class ChromeEngine {
   /** A deleted bot's or profile's browser: stopped, and its folder, downloads and screenshots gone. */
   async erase(request: { kind: "bot" | "profile"; id: string; partitionId: string }): Promise<boolean> {
     const key = request.kind === "bot" ? `bot:${request.id}` : `shared:${request.partitionId}`;
+    this.#options.pane?.backend.erase(key);
     if (!this.#everUsed()) return true;
     try {
       await this.service.erase(key);

@@ -10,7 +10,7 @@ import { clearSingleton, staleSingletonLock, type ProcessRegistry } from "./chro
 import { languageList } from "./chrome/wrapper.ts";
 import { downgradeRefusal, ensureProfile, forgetOpenTabs, markCleanExit, profileDir, profileHash, recordOpenedBy, versionOf, workspaceId } from "./chrome/profile.ts";
 
-export type BackendKind = "local" | "my-chrome" | "cdp-url";
+export type BackendKind = "local" | "my-chrome" | "cdp-url" | "pane";
 
 export interface BackendCaps {
   persistentProfile: boolean;
@@ -43,6 +43,8 @@ export interface OpenedBrowser {
   readonly exited: Promise<void>;
   /** Chrome's own quit: session restore keeps the tabs and session cookies. */
   close(): Promise<void>;
+  /** Where the person uses the page directly: called as they press, type or scroll in it. */
+  onPersonInput?(listener: () => void): () => void;
 }
 
 export interface Backend {

@@ -39,10 +39,12 @@ import type { BrowserSitesRef } from "../routes/browser-sites.ts";
 import { chromeLauncher } from "../browser/chrome/launcher.ts";
 import { LAUNCHER_SECCOMP_FD, browserLanguage, type LauncherBox } from "../browser/chrome/wrapper.ts";
 import type { HostKind } from "../browser/chrome/flags.ts";
-import { browserEngineKind, type BrowserEngineKind } from "../browser/config.ts";
+import { browserEngineKind, browserPaneWanted, type BrowserEngineKind } from "../browser/config.ts";
 import { parseSocks5Proxy } from "../browser/egress/policy.ts";
 import { ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter } from "../browser/engines.ts";
 import { CHROME_BROWSER_SYSTEM_PROMPT } from "../browser/prompt.ts";
+import { PaneBackend } from "../browser/pane/backend.ts";
+import { desktopPaneLink } from "../browser/pane/link.ts";
 import { passkeyAnnotation } from "../browser/passkey-notice.ts";
 import { LentChromeDoors, lentChromeGuidance, type ChromeLender } from "../browser/lent-chrome.ts";
 import type { ChromeRoute } from "../device-links.ts";
@@ -162,9 +164,11 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const configured = browserIdleMs(cfg, { cloudHome: Boolean(CLOUD_HOME) });
     return idleAfter(configured, Math.min(configured, BROWSER_IDLE_FLOOR_MS), deps.engineMemory?.roomFactor?.() ?? 1);
   };
+  const paneLink = desktopPaneLink(DESKTOP_MANAGED);
   const chromeEngine = new ChromeEngine({
     dataDir: DATA_DIR,
     host,
+    ...(paneLink ? { pane: { backend: new PaneBackend(paneLink, DATA_DIR), wanted: () => browserPaneWanted(cfg) } } : {}),
     egressPort: (key) => browserEgress.open(key),
     egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs,
@@ -392,6 +396,13 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const target = profile && profile !== "guest" ? browserProfilePartitionTarget(cfg, profile) : null;
     return { session, spec: chromeEngine.spec(session, profileKey(botId + suffix, session, { guest: profile === "guest", partitionId: target ? target.partitionId + suffix : null })) };
   }
+  /** The profile a bot's panel shows as desktop panes, or null when its browser is not one. */
+  paneLink?.resolveWith((botId, threadId) => {
+    const bot = store.bot(botId);
+    if (!bot || bot.browser === false || !browserPaneWanted(cfg) || !onChrome(bot.browserProfile)) return null;
+    const { session, spec } = chromeSpec(botId, bot.browserProfile, browserAudience(threadId ?? undefined));
+    return chromeTarget(session, spec)?.key ?? null;
+  });
   /** Chrome for the new engine, the installed agent-browser otherwise. */
   function browserReady(profile: string | undefined): boolean {
     return onChrome(profile) ? chromeEngine.summary().kind === "engine" : browserEngineStatus().kind === "ready";
@@ -644,7 +655,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return { binaryPath: engine.binaryPath, session, env: browserSessionSpec(engine.binaryPath, session, profile, await browserEgress.open(session)).env, encryptionKey: browserEngineEncryptionKey() };
   }
   /** What Settings shows of the engine that runs bots' browsers here; My Chrome stays on agent-browser. */
-  function engineSummary<T extends { kind: "engine" | "unavailable"; myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; noChrome?: true; serverSites?: boolean; proxyConfigured?: boolean; proxySaved?: boolean } {
+  function engineSummary<T extends { kind: "engine" | "unavailable"; myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; pane?: true; noChrome?: true; serverSites?: boolean; proxyConfigured?: boolean; proxySaved?: boolean } {
     const serverSites = sitesSwitch ? { serverSites: cfg.browserEngine?.egress?.localNetwork === true } : {};
     const engine = browserEngineKind(cfg);
     const proxyValue = cfg.browserEngine?.egress?.proxy;
@@ -652,6 +663,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     const proxyConfigured = builtInBrowserEnabled(cfg) && !hostedServer && parseSocks5Proxy(proxyValue) !== null;
     return {
       ...(engine === "chrome" ? { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), engine } : { ...agentBrowser, engine }),
+      ...(paneLink?.available && browserPaneWanted(cfg) ? { pane: true as const } : {}),
       ...(engine !== "chrome" && agentBrowser.kind === "engine" && chromeLauncher.runsShellForWantOfChrome() ? { noChrome: true as const } : {}),
       ...serverSites,
       ...(proxyConfigured ? { proxyConfigured: true } : {}),

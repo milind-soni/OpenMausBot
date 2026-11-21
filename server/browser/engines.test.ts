@@ -13,7 +13,9 @@ import { removeTempDir } from "../testing/cleanup.ts";
 import { ProcessRegistry } from "./chrome/processes.ts";
 import { browserRoot } from "./chrome/profile.ts";
 import { createBrowserInputLog } from "./input-log.ts";
-import { CHROME_ENGINE, ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter, type RuntimeRouterOptions } from "./engines.ts";
+import type { Backend } from "./backends.ts";
+import type { PaneBackend } from "./pane/backend.ts";
+import { backendFor, CHROME_ENGINE, ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter, type RuntimeRouterOptions } from "./engines.ts";
 
 const AGENT_BROWSER = { command: "/opt/agent-browser", args: ["--session", "s"], env: { AGENT_BROWSER_SESSION: "s" } };
 const CHROME = { command: CHROME_ENGINE, args: ["bot:a"], env: {} };
@@ -317,5 +319,18 @@ describe("the new engine's minute", () => {
     exited();
     await vi.advanceTimersByTimeAsync(120_000);
     expect(closeIdle).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("which backend a profile's browser starts on", () => {
+  const local = { kind: "local" } as Backend;
+  const pane = (available: boolean) => ({ kind: "pane", available }) as unknown as PaneBackend;
+
+  it("stays on the local Chrome unless the pane is wanted and the desktop app shows panes", () => {
+    expect(backendFor(local, undefined)).toBe(local);
+    expect(backendFor(local, { backend: pane(true), wanted: () => false })).toBe(local);
+    expect(backendFor(local, { backend: pane(false), wanted: () => true })).toBe(local);
+    const shown = pane(true);
+    expect(backendFor(local, { backend: shown, wanted: () => true })).toBe(shown);
   });
 });
