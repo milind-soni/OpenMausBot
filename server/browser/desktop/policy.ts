@@ -26,6 +26,10 @@ export function desktopPolicy(fileRoots: readonly string[] = []): Record<string,
     PromptForDownloadLocation: false,
     TaskManagerEndProcessEnabled: false,
     DefaultBrowserSettingEnabled: false,
+    // Google Chrome's own first-run screens (the ad privacy notice, What's new and other promotions) would sit over the
+    // page a person sees on the display, as no headless Chrome shows them.
+    PrivacySandboxPromptEnabled: false,
+    PromotionsEnabled: false,
   };
 }
 

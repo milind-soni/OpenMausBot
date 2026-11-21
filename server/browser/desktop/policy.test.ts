@@ -17,6 +17,8 @@ describe("the lock-down policy of a Chrome on a private display", () => {
     expect(policy.IncognitoModeAvailability).toBe(1);
     expect(policy.AllowFileSelectionDialogs).toBe(false);
     expect(policy).not.toHaveProperty("DeveloperToolsAvailability");
+    expect(policy.PrivacySandboxPromptEnabled).toBe(false);
+    expect(policy.PromotionsEnabled).toBe(false);
   });
 
   it("lets through only the folders named, and nothing beside them", () => {

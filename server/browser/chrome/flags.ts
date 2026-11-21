@@ -111,7 +111,7 @@ export function chromeArgs(input: ChromeFlagsInput): string[] {
     args.push(`--user-agent=${input.userAgent}`);
   }
   if (headless) args.push(`--screen-info=${screenInfo(input.screen ?? SERVER_SCREEN)}`);
-  else if (fillsScreen(input)) args.push("--window-position=0,0", "--start-maximized", "--hide-crash-restore-bubble");
+  else if (fillsScreen(input)) args.push("--window-position=0,0", "--start-maximized", "--hide-crash-restore-bubble", "--disable-search-engine-choice-screen");
   else if (input.windowPosition) args.push(`--window-position=${Math.round(input.windowPosition.x)},${Math.round(input.windowPosition.y)}`);
   if (input.locale && LOCALE.test(input.locale)) args.push(`--lang=${input.locale}`);
   if (input.egressPort !== undefined && input.egressPort !== null) {
