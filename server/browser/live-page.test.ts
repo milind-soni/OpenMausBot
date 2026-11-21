@@ -7,6 +7,12 @@ describe("a view's key as Chrome's key event", () => {
     expect(keyEvent("keyDown", { key: "q", code: "KeyQ", text: "q" })).toMatchObject({ type: "keyDown", windowsVirtualKeyCode: 81, text: "q", unmodifiedText: "q" });
     expect(keyEvent("keyUp", { key: "7", code: "Digit7", text: "7" })).toEqual({ type: "keyUp", key: "7", code: "Digit7", windowsVirtualKeyCode: 55, modifiers: 0 });
   });
+  it("gives named keys sent without a code their code, and Enter its line break unless a shortcut holds it", () => {
+    expect(keyEvent("keyDown", { key: "Enter", code: "Enter" })).toEqual({ type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 0, text: "\r", unmodifiedText: "\r" });
+    expect(keyEvent("keyDown", { key: "Enter", code: "Enter", modifiers: 2 })).toEqual({ type: "rawKeyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 2 });
+    expect(keyEvent("keyDown", { key: "Backspace", code: "Backspace" })).toMatchObject({ type: "rawKeyDown", windowsVirtualKeyCode: 8 });
+    expect(keyEvent("keyDown", { key: "F7", code: "F7" })).toMatchObject({ windowsVirtualKeyCode: 0 });
+  });
   it("places right-hand modifiers and the number pad", () => {
     expect(keyEvent("keyDown", { key: "Control", code: "ControlRight", windowsVirtualKeyCode: 17, modifiers: 2 })).toMatchObject({ type: "rawKeyDown", location: 2 });
     expect(keyEvent("keyDown", { key: "1", code: "Numpad1", windowsVirtualKeyCode: 97, text: "1" })).toMatchObject({ location: 3, windowsVirtualKeyCode: 97 });

@@ -617,6 +617,8 @@ export class BrowserLive {
         ...(fields.code === undefined ? {} : { code: fields.code }), ...(fields.text === undefined ? {} : { text: fields.text }) };
       keys = [keyEvent(eventType === "keyUp" ? "keyUp" : "keyDown", fieldsOfKey)];
     }
+    // A key with no code to give a page goes as the engine sends it.
+    if (keys?.some((event) => !event.windowsVirtualKeyCode)) keys = undefined;
     if (command.action === "input_keyboard" && eventType === "keyDown") {
       if (viewer.pressedKeys.size >= 64 && !viewer.pressedKeys.has(key)) throw new BrowserLiveError("Too many keys are held. Restart the browser before continuing.", 409, "too_many_keys");
       viewer.pressedKeys.set(key, String(fields.key));
@@ -761,6 +763,7 @@ export class BrowserLive {
         let message: ObjectValue | null;
         let raw: ObjectValue | null;
         try { raw = object(JSON.parse(event.data)); message = normalizeBrowserLiveMessage(raw); } catch { this.close(viewer); return; }
+        this.progress.answered(viewer.session);
         const target = activeTargetOf(raw);
         if (target !== undefined) viewer.target = target;
         if (!message) { if (raw?.type === "frame") this.close(viewer); return; }
@@ -802,6 +805,7 @@ export class BrowserLive {
   }
 
   action(request: { viewerId: string; botId: string; owner: string; body: unknown }): Promise<unknown> {
+    if (!this.viewers.has(request.viewerId)) return this.act(request);
     return this.requests.run(request.viewerId, request.body, () => this.act(request));
   }
 

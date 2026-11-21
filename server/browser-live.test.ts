@@ -872,6 +872,19 @@ describe("authenticated browser viewer relay", () => {
       expect(runtime.abandonHumanInput).not.toHaveBeenCalled();
     });
 
+    it("gives a key an older view sent without its code the code a page reads, and sends one it cannot name through the engine", async () => {
+      const tools = devTools();
+      const a = await attachedView(tools);
+      nativeInput.mockClear();
+      await a.action({ type: "input_keyboard", eventType: "keyDown", key: "Enter", code: "Enter" });
+      await a.action({ type: "input_keyboard", eventType: "keyDown", key: "F7", code: "F7" });
+      expect(keyEvents(tools)).toEqual([
+        { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 0, text: "\r", unmodifiedText: "\r", sessionId: "page-1" },
+        { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, modifiers: 0, sessionId: "page-1" },
+      ]);
+      expect(nativeInput.mock.calls.map(([, options]) => JSON.parse(options.body))).toEqual([{ action: "input_keyboard", type: "keyDown", key: "F7", code: "F7" }]);
+    });
+
     it("sends keys through the engine when the active tab is not one its DevTools client is attached to", async () => {
       const tools = devTools();
       const a = await attachedView(tools);

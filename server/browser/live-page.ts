@@ -30,11 +30,16 @@ export function pressChord(fields: KeyFields): string {
   return [...chord.filter(([bit]) => modifiers & bit).map(([, key]) => key), fields.key].join("+");
 }
 
-/** A US layout's virtual key code for a key the view sent without one. */
+const NAMED_KEY_CODES: Record<string, number> = {
+  Backspace: 8, Tab: 9, Enter: 13, Shift: 16, Control: 17, Alt: 18, Escape: 27, " ": 32, PageUp: 33, PageDown: 34, End: 35, Home: 36,
+  ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Delete: 46, Meta: 91,
+};
+
+/** A US layout's virtual key code for a key the view sent without one; 0 when there is none to give. */
 function keyCodeOf(key: string): number {
   if (/^[a-z]$/iu.test(key)) return key.toUpperCase().charCodeAt(0);
   if (/^\d$/u.test(key)) return key.charCodeAt(0);
-  return key === " " ? 32 : 0;
+  return NAMED_KEY_CODES[key] ?? 0;
 }
 
 /** Chrome's `Input.dispatchKeyEvent` for a view's key: a key-down with text types it, one without is raw, as in Puppeteer. No
@@ -43,11 +48,14 @@ export function keyEvent(type: "keyDown" | "keyUp", fields: KeyFields): ObjectVa
   const key = String(fields.key);
   const code = typeof fields.code === "string" ? fields.code : "";
   const keyCode = Number(fields.windowsVirtualKeyCode) || keyCodeOf(key);
-  const text = type === "keyDown" && typeof fields.text === "string" && fields.text ? fields.text : undefined;
+  const modifiers = Number(fields.modifiers) || 0;
+  // Enter types a line break unless a shortcut holds it, as the engine's press does.
+  const given = typeof fields.text === "string" && fields.text ? fields.text : key === "Enter" && !(modifiers & 6) ? "\r" : undefined;
+  const text = type === "keyDown" ? given : undefined;
   const location = /(?:Left|Right)$/u.test(code) && MODIFIER_KEYS.has(key) ? (code.endsWith("Left") ? 1 : 2) : code.startsWith("Numpad") ? 3 : 0;
   return {
     type: type === "keyUp" ? "keyUp" : text ? "keyDown" : "rawKeyDown", key, code,
-    windowsVirtualKeyCode: keyCode, modifiers: Number(fields.modifiers) || 0,
+    windowsVirtualKeyCode: keyCode, modifiers,
     ...(location ? { location } : {}), ...(text ? { text, unmodifiedText: text } : {}),
   };
 }

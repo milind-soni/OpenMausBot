@@ -212,6 +212,9 @@ describe("around every bot's browser call", () => {
       expect(said(await run("fill", { selector, text }))).toEqual({ failed: false, text: "" });
     }
     expect(said(await run("click", { selector: "#go" }))).toEqual({ failed: false, text: "" });
+    // A line submitted, or a page left, may clear the field: nothing is claimed.
+    expect(said(await run("type", { selector: "@e2", text: "hello\n" }))).toEqual({ failed: false, text: "" });
+    expect(said(await run("fill", { selector: "@e2", text: "eve" }, () => { daemon.geometry.url = "https://app.example.com/next"; }))).toEqual({ failed: false, text: "" });
     // An element the engine cannot read, a refused action, or a fill with no target: nothing is claimed.
     expect(said(await run("fill", { selector: "#gone", text: "x" }))).toEqual({ failed: false, text: "" });
     expect(said(await run("click", { selector: "#off" }, undefined, { isError: true, content: [] }))).toEqual({ failed: false, text: "" });

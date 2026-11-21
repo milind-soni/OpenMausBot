@@ -65,6 +65,8 @@ interface StepState {
   target: { selector: string; role?: string; name?: string; inFrame: boolean } | null;
   /** The target was disabled just before the action. */
   disabled: boolean;
+  /** The page a fill or type started on: one it left, or a line it submitted, may clear its field. */
+  typedOn: { url: string; loadedAt?: number } | null;
 }
 
 const ACTIONS = new Set(["open", "click", "fill", "type", "press", "check", "uncheck", "select", "scroll", "back", "forward", "reload", "tab_new", "tab_switch", "tab_close", "eval", "close"]
@@ -72,6 +74,7 @@ const ACTIONS = new Set(["open", "click", "fill", "type", "press", "check", "unc
 /** Actions on a target whose success agent-browser 0.37.0 reports for a disabled one, and for a fill or type that landed
  * elsewhere (a non-text target writes into the field focused before; a ref whose element the page replaced writes nowhere). */
 const ON_TARGET = new Set(["click", "dblclick", "check", "uncheck", "fill", "type"].map((name) => `agent_browser_${name}`));
+const TYPING = new Set(["agent_browser_fill", "agent_browser_type"]);
 const verb = (tool: string) => tool.replace("agent_browser_", "");
 /** A disabled target, or text that is not in it afterwards: the bot hears it as an error. */
 export const disabledTarget = (tool: string) => `The ${verb(tool)} reported done, but its target was disabled, so nothing happened. Wait until the page enables it, or check what the page still needs first.`;
@@ -432,7 +435,7 @@ export class BrowserSteps {
     steps.image = null;
     const state: StepState = {
       startedAt: this.now(), actionAt: 0, action: ACTIONS.has(call.tool), recorded: call.ctx?.record === true && ACTIONS.has(call.tool),
-      aliveBefore: null, noDaemon: false, wasRunning: steps.running, late: null, geometry: null, box: null, target: null, disabled: false,
+      aliveBefore: null, noDaemon: false, wasRunning: steps.running, late: null, geometry: null, box: null, target: null, disabled: false, typedOn: null,
     };
     try {
       if (call.stopped()) return state;
@@ -446,6 +449,7 @@ export class BrowserSteps {
       await this.health.clear(call.session, read);
       if (ON_TARGET.has(call.tool) && typeof call.args.selector === "string" && call.args.selector) {
         state.disabled = (await read({ action: "isenabled", selector: call.args.selector }))?.data?.enabled === false;
+        if (TYPING.has(call.tool)) state.typedOn = parseGeometry((await read({ action: "evaluate", script: PAGE_SCRIPT }))?.data?.result);
       }
       if (!state.recorded) return state;
       state.geometry = parseGeometry((await read({ action: "evaluate", script: GEOMETRY_SCRIPT }))?.data?.result);
@@ -520,8 +524,10 @@ export class BrowserSteps {
       const raw = geometry ? null : (await read({ action: "evaluate", script: typing ? TYPED_PAGE_SCRIPT : PAGE_SCRIPT }))?.data?.result;
       const page = geometry ?? parseGeometry(raw);
       const selector = typeof call.args.selector === "string" ? call.args.selector : "";
+      const stayed = state.typedOn !== null && page !== null && page.url === state.typedOn.url && page.loadedAt === state.typedOn.loadedAt;
+      const checkable = typing && stayed && !/[\r\n]/u.test(String(call.args.text));
       const missed = !ok || !selector ? null : state.disabled ? disabledTarget(tool)
-        : typing && await holdsText(read, selector, String(call.args.text)) === false ? textNotLanded(tool) : null;
+        : checkable && await holdsText(read, selector, String(call.args.text)) === false ? textNotLanded(tool) : null;
       if (missed) {
         out.failed = true;
         out.parts.push({ type: "text", text: missed });
