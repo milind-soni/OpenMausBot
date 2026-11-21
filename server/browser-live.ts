@@ -238,7 +238,7 @@ export class BrowserLive {
   private readonly requests = new RequestOnce();
   private readonly progress: EngineProgress;
   private readonly engineAlive: (env: NodeJS.ProcessEnv) => boolean;
-  private readonly load: () => number;
+  private readonly statusReadMs: () => number;
   private order = 0;
   constructor({ runtime, devTools, holdLimits = HOLD_LIMITS, engine = {} }: { runtime: BrowserRuntime; devTools?: BrowserLiveDevTools; holdLimits?: HoldLimits;
     /** How a slow engine is told from a hung one: the clock, whether its daemon still runs, and the status read's limit. */
@@ -246,7 +246,7 @@ export class BrowserLive {
     this.runtime = runtime;
     this.progress = new EngineProgress(engine.now);
     this.engineAlive = engine.alive ?? engineDaemonAlive;
-    this.load = engine.statusReadMs ?? statusReadMs;
+    this.statusReadMs = engine.statusReadMs ?? statusReadMs;
     this.devTools = devTools;
     this.holdLimits = holdLimits;
     runtime.onIdleClose((session) => this.asleep(session));
@@ -540,7 +540,7 @@ export class BrowserLive {
       throw new BrowserLiveError(error instanceof Error ? error.message : "The browser is not ready yet.", 503);
     });
     let status: ObjectValue;
-    try { status = await this.command(viewer, ["stream", "status"], this.load()); }
+    try { status = await this.command(viewer, ["stream", "status"], this.statusReadMs()); }
     catch (error) {
       // A bot call or a person's action can hold the engine past this read; with neither, it is starting, slow or hung.
       if (!(error instanceof BrowserBusyError) || this.runtime.working(viewer.session)) throw error;
