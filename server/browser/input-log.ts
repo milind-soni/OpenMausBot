@@ -15,7 +15,7 @@ export const PERSON_REASONS = [
 export type PersonReason = typeof PERSON_REASONS[number];
 
 /** Input the app dropped before sending it, as its view reports them. */
-export const CLIENT_REASONS = ["stale_after_wait", "queue_full", "queue_halted", "send_failed", "take_failed", "not_connected", "held_elsewhere", "no_page_size"] as const;
+export const CLIENT_REASONS = ["stale_after_wait", "queue_full", "queue_halted", "send_failed", "take_failed", "not_connected", "held_elsewhere"] as const;
 export type ClientReason = typeof CLIENT_REASONS[number];
 
 export const BOT_REASONS = [
@@ -69,7 +69,10 @@ export function botReason(text: string): BotReason {
   return BOT_TEXT.find(([pattern]) => pattern.test(text))?.[1] ?? "engine_error";
 }
 
-export function createBrowserInputLog(print: (line: string) => void = (line) => console.warn(line), now: () => number = Date.now) {
+/** A person's lost input is a warning, which a bug report's recent log keeps; a bot's failed action is routine and is not. */
+const printByWho = (line: string, who: InputEvent["who"]) => (who === "bot" ? console.info(line) : console.warn(line));
+
+export function createBrowserInputLog(print: (line: string, who: InputEvent["who"]) => void = printByWho, now: () => number = Date.now) {
   const counts = new Map<string, { count: number; lastAt: number }>();
   const quiet = new Map<string, { until: number; held: number }>();
 
@@ -90,7 +93,7 @@ export function createBrowserInputLog(print: (line: string) => void = (line) => 
     quiet.delete(burst);
     quiet.set(burst, { until: now() + QUIET_MS, held: 0 });
     const repeats = times + (state?.held ?? 0);
-    print(`browser input: ${event.who} ${what} dropped reason=${event.reason} engine=${event.engine} transport=${event.transport} session=${session}${repeats > 1 ? ` times=${repeats}` : ""}`);
+    print(`browser input: ${event.who} ${what} dropped reason=${event.reason} engine=${event.engine} transport=${event.transport} session=${session}${repeats > 1 ? ` times=${repeats}` : ""}`, event.who);
   }
 
   return {

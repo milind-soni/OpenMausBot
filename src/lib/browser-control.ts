@@ -31,7 +31,8 @@ const DISCRETE_KEYS = new Set(["Backspace", "Enter", "Tab", "Escape", "Delete", 
 const COMMANDS = new Set<PreviewStreamInput["type"]>(["navigate", "history", "reload", "tabSelect", "tabNew", "tabClose"]);
 const ABSOLUTE_COMMANDS = new Set<PreviewStreamInput["type"]>(["navigate", "tabNew"]);
 
-function startsInteraction(input: PreviewStreamInput): boolean {
+/** Whether an input begins something a person means: a press, a typed key, text, a scroll or a toolbar action. */
+export function startsInteraction(input: PreviewStreamInput): boolean {
   if (COMMANDS.has(input.type)) return true;
   if (input.type === "mouse") return input.action === "down";
   if (input.type === "key") return input.action === "down" && !MODIFIER_KEYS.has(input.key);

@@ -140,8 +140,8 @@ describe("input to a page on the default browser engine", () => {
       // The panel sends what queued behind a request as one batch where the server said it takes batches.
       if (view.inputBatch >= typed.length) expect(await post({ type: "input_batch", events: typed })).toEqual({ status: 200, body: { ok: true } });
       else for (const body of typed) expect(await post(body)).toEqual({ status: 200, body: { ok: true } });
-      await expect.poll(() => seen.includes("input:word"), { timeout: 15_000, interval: 100 }).toBe(true);
-      expect(seen.filter((entry) => entry.startsWith("input:"))).toEqual(["input:w", "input:wo", "input:wor", "input:word"]);
+      // Each report is its own request, so they may arrive out of order.
+      await expect.poll(() => seen.filter((entry) => entry.startsWith("input:")).sort(), { timeout: 15_000, interval: 100 }).toEqual(["input:w", "input:wo", "input:wor", "input:word"]);
 
       expect(await post({ type: "release" })).toEqual({ status: 200, body: { ok: true } });
       const refused = await post(mouse("down", PRESS));

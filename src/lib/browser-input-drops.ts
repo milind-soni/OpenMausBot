@@ -1,5 +1,5 @@
 /** Why the app dropped a person's browser input before sending it. The server counts these for a bug report. */
-export type InputDropReason = "stale_after_wait" | "queue_full" | "queue_halted" | "send_failed" | "take_failed" | "not_connected";
+export type InputDropReason = "stale_after_wait" | "queue_full" | "queue_halted" | "send_failed" | "take_failed" | "not_connected" | "held_elsewhere";
 
 /**
  * Counts dropped input and hands the counts to `send` a little later, several drops in one request. Counts wait while
