@@ -65,6 +65,15 @@ describe("team library", () => {
     expect(() => parseTeamCatalog(unsafe)).toThrow("safe catalog path");
   });
 
+  it("accepts a catalog of hundreds of published templates", () => {
+    const entry = catalog.teams[0]!;
+    const teams = Array.from({ length: 500 }, (_, index) => {
+      const slug = `bot-${index}`;
+      return { ...entry, slug, manifest: `teams/${slug}/team.mausteam.json`, readme: `teams/${slug}/README.md`, skills: [] };
+    });
+    expect(parseTeamCatalog({ ...catalog, teams }).teams).toHaveLength(500);
+  });
+
   it("loads only the manifest selected by the trusted catalog", async () => {
     const fetcher = vi.fn(async (url: string | URL | Request) => {
       const target = String(url);

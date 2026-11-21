@@ -2,10 +2,10 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { decodeFrame, encodeFrame, FLAG, OPEN_WINDOW_DELTA, TYPE } from "../../../companion/src/e2e/yamux.ts";
 import { concat, fromB64u, utf8, type Bytes } from "./bytes.ts";
 import { credentialHash, keyId, psk } from "./credentials.ts";
 import { encodePayload1, newConn, phoneHello, TRANSPORT_DIRECT, TRANSPORT_RELAY, type SessionKeys, type TransportByte } from "./noise.ts";
+import { decodeFrame, encodeFrame, Mux } from "./yamux.ts";
 
 const SERVER = fileURLToPath(new URL("../../../companion/src/e2e/interop-server.ts", import.meta.url));
 const BOUND_MS = 10_000;
@@ -93,22 +93,35 @@ async function handshake(url: string, token: string, transport: TransportByte) {
   return { ws, finish: async () => hello.finish(await ws.next()) };
 }
 
-/** One HTTP request on stream 1, read until the origin closes the stream. */
+/** One HTTP request on a stream the browser mux opens, read until the origin ends the stream. */
 async function get(ws: ReturnType<typeof open>, keys: SessionKeys, path: string): Promise<string> {
-  const request = utf8(`GET ${path} HTTP/1.1\r\nHost: companion\r\nConnection: close\r\n\r\n`);
-  const sealed = await Promise.all([
-    keys.send.seal(new Uint8Array(encodeFrame({ type: TYPE.windowUpdate, flags: FLAG.syn, streamId: 1, length: OPEN_WINDOW_DELTA }))),
-    keys.send.seal(new Uint8Array(encodeFrame({ type: TYPE.data, flags: 0, streamId: 1, length: request.length, data: request }))),
-  ]);
-  for (const record of sealed) ws.send(record);
   const body: Uint8Array[] = [];
-  for (;;) {
-    const frame = decodeFrame(await keys.receive.open(await ws.next()));
-    if (frame.streamId !== 1) continue;
-    if (frame.type === TYPE.data && frame.data) body.push(frame.data);
-    if (frame.flags & FLAG.rst) throw new Error("stream 1 was reset");
-    if (frame.flags & FLAG.fin) return new TextDecoder().decode(concat(...body));
-  }
+  let sending = Promise.resolve();
+  let failSend!: (error: unknown) => void;
+  // A failed seal or send ends the wait for the reply at once instead of a receive timeout.
+  const sendFailed = new Promise<never>((_resolve, reject) => (failSend = reject));
+  let ended = false;
+  const mux = new Mux("phone", {
+    send: (frame) => {
+      const plaintext = encodeFrame(frame);
+      sending = sending.then(async () => ws.send(await keys.send.seal(plaintext)));
+      sending.catch(failSend);
+    },
+    data: (_id, data) => body.push(data.slice()),
+    ended: () => (ended = true),
+    reset: (id) => {
+      throw new Error(`stream ${id} was reset`);
+    },
+    writable: () => {},
+  });
+  const id = mux.open();
+  const request = utf8(`GET ${path} HTTP/1.1\r\nHost: companion\r\nConnection: close\r\n\r\n`);
+  expect(mux.write(id, request)).toBe(request.length);
+  while (!ended) mux.receive(decodeFrame(await keys.receive.open(await Promise.race([ws.next(), sendFailed]))));
+  mux.finish(id);
+  expect(mux.has(id)).toBe(false);
+  await sending;
+  return new TextDecoder().decode(concat(...body));
 }
 
 describe("the browser phone side against the Node computer", () => {

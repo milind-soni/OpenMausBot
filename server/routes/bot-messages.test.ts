@@ -18,6 +18,7 @@ import type { RequestAuth } from "../request-auth.ts";
 import { acceptedSendMatch, sendFingerprint, SendSequencer } from "../send-idempotency.ts";
 import { _queuedCount, drainSteeredMessages, queuedSteeredMessage, queueSteeredMessage } from "../steer-queue.ts";
 import { Store, type Message } from "../store.ts";
+import { sendingSession } from "../sending-sessions.ts";
 import { typedWords } from "../typed-sends.ts";
 import { USER_ERROR } from "../user-errors.ts";
 import { createBotMessageRoutes, type BotMessageRouteDeps } from "./bot-messages.ts";
@@ -77,6 +78,7 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
         if (match.kind === "conflict") throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
         if (match.kind === "match") return { ok: true as const, threadId: input.threadId, message: match.message };
         const waiting = queuedSteeredMessage(input.botId, input.threadId, input.sendId);
+        if (waiting && (waiting.text !== input.text || waiting.replyToId !== input.replyTo?.id)) throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
         if (waiting) return { ok: true as const, queued: true as const, queueId: waiting.id, threadId: input.threadId };
       }
       if (state.busy) {
@@ -134,7 +136,8 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
   const server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
-      const auth = { kind: "loopback", scopes: ["admin"] } as RequestAuth;
+      const session = req.headers["x-test-session"];
+      const auth = (typeof session === "string" ? { kind: "session", session: { id: session }, scopes: ["admin"] } : { kind: "loopback", scopes: ["admin"] }) as RequestAuth;
       const handled = await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody });
       if (!handled) json(res, 404, { from: "inline routes" });
     } catch (error) {
@@ -145,8 +148,8 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
   await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 
-  const post = async (body: unknown, suffix = "") => {
-    const response = await fetch(`${base}/api/bots/${bot.id}/messages${suffix}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const post = async (body: unknown, suffix = "", headers: Record<string, string> = {}) => {
+    const response = await fetch(`${base}/api/bots/${bot.id}/messages${suffix}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
   const edit = async (messageId: string, body: unknown) => {
@@ -340,6 +343,35 @@ describe("POST /api/bots/:id/messages and who typed it", () => {
     const relayed = await post({ threadId, sendId: OTHER_SEND, text: words, expectedActiveLeafId: store.activeLeaf(threadId), expectedApprovalMode: "ask" }, "/guarded");
     expect(relayed.status, JSON.stringify(relayed.body)).toBe(202);
     expect(typedWords(threadId, [relayed.body.message])).toBe("");
+  });
+
+  it("notes the signed-in session that sent a line, so a Cloud's bot knows which lent computer they type on", async () => {
+    const { threadId, post } = await fixture();
+    expect((await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "pc-session" })).status).toBe(202);
+    expect(sendingSession(threadId, SEND)).toBe("pc-session");
+    expect((await post({ threadId, sendId: OTHER_SEND, text: words })).status).toBe(202);
+    expect(sendingSession(threadId, OTHER_SEND)).toBeUndefined();
+  });
+
+  it("keeps the first sender's session when a conflicting send reuses a queued line's sendId", async () => {
+    const { threadId, post, state } = await fixture();
+    state.busy = true;
+    const first = await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "pc-session" });
+    expect(first.status).toBe(202);
+    expect(first.body).toMatchObject({ queued: true });
+    const conflict = await post({ threadId, sendId: SEND, text: "Something else" }, "", { "x-test-session": "laptop-session" });
+    expect(conflict.status, JSON.stringify(conflict.body)).toBe(409);
+    expect(sendingSession(threadId, SEND)).toBe("pc-session");
+  });
+
+  it("notes no session for a refused send, so an accepted retry from another session names its own", async () => {
+    const { threadId, post, state } = await fixture();
+    state.refuse = new DirectSendRefused(409, { error: "This workspace is at its spend limit.", code: "spend_cap" });
+    expect((await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "pc-session" })).status).toBe(409);
+    expect(sendingSession(threadId, SEND)).toBeUndefined();
+    state.refuse = null;
+    expect((await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "laptop-session" })).status).toBe(202);
+    expect(sendingSession(threadId, SEND)).toBe("laptop-session");
   });
 
   it("does not take a bare loopback send as a person's on a headless server, where it may be a bot's shell", async () => {
