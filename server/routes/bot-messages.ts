@@ -345,9 +345,9 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       if (personPresent && sendId && !guarded && !press && !appSent) noteTypedSend(threadId, sendId, text);
       const notedSession = auth.kind === "session" && sendId ? noteSendingSession(threadId, sendId, auth.session.id) : false;
       // The desktop app's own window: in the desktop app a loopback change needs its private capability.
-      // Only a new line the send itself adds: a repeat or a collision must not lend the proof to a line already there.
+      // Only a new line the send itself adds: a repeat or a collision must not lend the proof to a line already there or waiting.
       const ownWindowSend = DESKTOP_MANAGED && auth.kind === "loopback" && !auth.companionDevice && sendId && !guarded && !press && !appSent
-        && !store.messagesFor(threadId).some((line) => line.sendId === sendId);
+        && !store.messagesFor(threadId).some((line) => line.sendId === sendId) && !queuedSteeredMessage(bot.id, threadId, sendId);
       if (pressKey) pressesInFlight.set(pressKey, sendId);
       try {
         const receipt = await acceptDirectSend({

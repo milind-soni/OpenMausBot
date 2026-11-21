@@ -783,6 +783,23 @@ describe("POST /api/bots/:id/messages from the desktop app's own window", () => 
     expect(ownWindowLine(threadId, line)).toBe(false);
   });
 
+  it("notes no proof for a send that only repeats a press still waiting in the queue", async () => {
+    const { store, bot, threadId, state, post, show } = await fixture();
+    state.busy = true;
+    const widgetId = show("routineForm");
+    const pressed = await post({ threadId, sendId: SEND, widgetAction: { messageId: widgetId, ref: "confirm", values: { days: "mon,tue,wed,thu,fri,sat,sun", report: "discord:releases" } } });
+    expect(pressed.status, JSON.stringify(pressed.body)).toBe(202);
+    const waiting = queuedSteeredMessage(bot.id, threadId, SEND)!;
+    expect(waiting, "the press waits in the queue").toBeTruthy();
+    const repeat = await post({ threadId, sendId: SEND, text: waiting.text, replyToId: widgetId });
+    expect(repeat.status, JSON.stringify(repeat.body)).toBe(202);
+    expect(repeat.body.queueId).toBe(waiting.id);
+    drainSteeredMessages(store, () => {});
+    const line = store.messagesFor(threadId).find((message) => message.sendId === SEND);
+    expect(line?.text, "the press became the thread's line").toBe(waiting.text);
+    expect(ownWindowLine(threadId, line)).toBe(false);
+  });
+
   it("does not note a bare loopback send on a headless server, where it may be a bot's shell", async () => {
     const { threadId, post } = await fixture({}, false);
     const plain = await post({ threadId, sendId: SEND, text: words });
