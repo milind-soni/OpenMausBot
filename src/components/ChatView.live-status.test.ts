@@ -142,18 +142,18 @@ describe("the mascot and its status line through a long turn", () => {
     engine({ type: "turn.progress", activity: "command", itemId: "toolu_bash", bytes: 20 } as Partial<RuntimeEvent>);
     engine({ type: "item.started", itemType: "tool", itemId: "toolu_bash", title: "Bash" } as Partial<RuntimeEvent>);
     render(busyBot([ask, intro, bash]));
-    expect(statusLine()).toBe("Working · 1m 12s · Running a command");
+    expect(statusLine()).toBe("Working · 1m 12s · 1 step · Running a command");
     for (let beat = 0; beat < 20; beat++) {
       act(() => void vi.advanceTimersByTime(30_000));
       engine({ type: "item.updated", itemType: "tool" } as Partial<RuntimeEvent>);
     }
     expect(mascot()).not.toBeNull();
     // The phrase may rest on its alternate by now; the call is still the one running.
-    expect(statusLine()).toMatch(/^Working · 11m 12s · (Running a command|Checking the output)$/);
+    expect(statusLine()).toMatch(/^Working · 11m 12s · 1 step · (Running a command|Checking the output)$/);
 
     engine({ type: "item.completed", itemType: "tool", itemId: "toolu_bash", ok: true } as Partial<RuntimeEvent>);
     render(busyBot([ask, intro, { ...bash, tool: { ...bash.tool!, ok: true } }]));
-    expect(statusLine(), "with nothing reported, the line is its timer alone").toBe("Working · 11m 12s");
+    expect(statusLine(), "with nothing reported, the line is its timer and how many steps the turn took").toBe("Working · 11m 12s · 1 step");
   });
 
   it("clears when the turn ends, even before busy winds down", () => {
@@ -204,7 +204,7 @@ describe("what the bot is doing right now", () => {
     engine({ type: "item.started", itemType: "tool", itemId: "b1", title: "Bash" } as Partial<RuntimeEvent>);
     engine({ type: "turn.progress", activity: "command", itemId: "b1", target: "scrape.py", detail: "python3 scrape.py --pages 40", quiet: { kind: "busy" } } as Partial<RuntimeEvent>);
     render(busyBot([ask, search, bash]));
-    expect(statusLine()).toBe("Working · 1m 12s · Running scrape.py · busy, no output yet");
+    expect(statusLine()).toBe("Working · 1m 12s · 1 step · Running scrape.py · busy, no output yet");
     expect(host.querySelector("[data-turn-now]")?.getAttribute("title")).toBe("python3 scrape.py --pages 40");
     expect(toggle()?.getAttribute("aria-label")).toBe("What Pepper is doing");
     expect(host.querySelector("[data-now-card]")).toBeNull();
@@ -226,7 +226,7 @@ describe("what the bot is doing right now", () => {
     engine({ type: "turn.progress", activity: "command", itemId: "b1", target: "scrape.py", quiet: { kind: "output", at: started + 72_000 - 125_000 },
       tail: ["page 39 of 40", "page 40 of 40"] } as Partial<RuntimeEvent>);
     render(busyBot([ask, bash]));
-    expect(statusLine()).toBe("Working · 1m 12s · Running scrape.py · last output 2 min ago");
+    expect(statusLine()).toBe("Working · 1m 12s · 1 step · Running scrape.py · last output 2 min ago");
     act(() => toggle()!.click());
     expect(host.querySelector("[data-now-output]")?.textContent).toBe("page 39 of 40\npage 40 of 40");
   });

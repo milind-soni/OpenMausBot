@@ -2964,6 +2964,8 @@
   "chat.now.wroteFile": "Wrote a file",
   "chat.now.editedFile": "Edited a file",
   "chat.now.searchedFiles": "Searched files",
+  "chat.activity.stepsOne": "1 step",
+  "chat.activity.stepsMany": "{count} steps",
   "chat.activity.sizeKb": "{count} KB",
   "chat.activity.sizeMb": "{count} MB",
   "chat.activity.alt.mullingItOver": "Mulling it over",

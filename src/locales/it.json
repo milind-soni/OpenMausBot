@@ -2078,6 +2078,8 @@
   "chat.activity.thinking": "Pensando",
   "chat.activity.summarizing": "Riassumendo i messaggi precedenti…",
   "chat.activity.working": "Al lavoro",
+  "chat.activity.stepsOne": "1 passo",
+  "chat.activity.stepsMany": "{count} passi",
   "chat.activity.runCommand": "Esegue un comando",
   "chat.activity.readFile": "Legge un file",
   "chat.activity.writeFile": "Scrive un file",

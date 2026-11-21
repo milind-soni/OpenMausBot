@@ -64,11 +64,11 @@ describe("a thread's live turn", () => {
   it("ends with the turn, and a newer turn starts it over", () => {
     note({ type: "turn.progress", activity: "command", itemId: "c" } as Partial<RuntimeEvent>);
     note({ type: "turn.completed", ok: true } as Partial<RuntimeEvent>);
-    expect(turnLive("t")).toEqual({ turnId: "turn-1", ended: true, status: null });
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-1", ended: true, status: null });
     note({ type: "thread.token-usage.updated", input: 1, output: 1 } as Partial<RuntimeEvent>);
     expect(turnLive("t").ended, "a late frame of the ended turn does not reopen it").toBe(true);
     note({ type: "item.completed", itemType: "assistant_text", text: "late", turnId: "turn-2" } as Partial<RuntimeEvent>);
-    expect(turnLive("t")).toEqual({ turnId: "turn-2", ended: false, status: null });
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-2", ended: false, status: null });
   });
 
   it("says it is summarizing earlier messages until the summary is done, and leaves anything newer on the line", () => {
@@ -80,11 +80,24 @@ describe("a thread's live turn", () => {
     expect(turnLive("t").ended, "a summary after the turn ended (Compact button) leaves it ended").toBe(true);
     note({ type: "context.summarizing", active: true, turnId: undefined } as Partial<RuntimeEvent>);
     note({ type: "turn.started", turnId: "turn-2" } as Partial<RuntimeEvent>);
-    expect(turnLive("t")).toEqual({ turnId: "turn-2", ended: false, status: null });
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-2", ended: false, status: null });
     note({ type: "content.delta", streamKind: "reasoning_text", delta: "x", turnId: "turn-2" } as Partial<RuntimeEvent>);
     note({ type: "context.summarizing", active: false, turnId: undefined } as Partial<RuntimeEvent>);
     expect(turnLive("t").status, "a late end leaves the turn's own status").toEqual({ activity: "thinking" });
     expect(turnLive("t").ended, "a summary inside a running turn leaves it running").toBe(false);
+  });
+
+  it("counts each tool call once per turn and restarts on a new turn", () => {
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps).toBe(1);
+    note({ type: "item.started", itemType: "tool", itemId: "a", title: "Read" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps).toBe(1);
+    note({ type: "item.started", itemType: "tool", itemId: "b", title: "Bash" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps).toBe(2);
+    note({ type: "turn.started", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t")).toMatchObject({ turnId: "turn-2", toolSteps: 0 });
+    note({ type: "item.started", itemType: "tool", itemId: "c", title: "Write", turnId: "turn-2" } as Partial<RuntimeEvent>);
+    expect(turnLive("t").toolSteps).toBe(1);
   });
 
   it("carries what a call works on, how it is doing and its last output, and changes only when one of them does", () => {
