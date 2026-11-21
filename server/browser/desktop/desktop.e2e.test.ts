@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, wr
 import { createServer, type Server } from "node:http";
 import { connect, type AddressInfo, type Socket } from "node:net";
 import { dirname, join } from "node:path";
+import { crc32, deflateSync } from "node:zlib";
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
@@ -106,23 +107,59 @@ class RfbClient {
     this.#ws.send(bytes);
   }
 
-  /** The display's colour at one point as "r,g,b", read with raw pixels in the server's own format (Xvnc: 32 bits, red
-   * at bit 16). Xvnc answers a full request with the screen layout first when the client takes it, so this asks again. */
-  async pixel(x: number, y: number): Promise<string> {
+  /** The display's pixels in a rectangle as RGB rows, read raw in the server's own format (Xvnc: 32 bits, red at bit
+   * 16). Xvnc answers a full request with the screen layout first when the client takes it, so this asks again. */
+  async region(x: number, y: number, width: number, height: number): Promise<Buffer> {
     this.#buffer = Buffer.alloc(0);
-    const ask = (incremental: number) => { const m = Buffer.alloc(10); m[0] = 3; m[1] = incremental; m.writeUInt16BE(x, 2); m.writeUInt16BE(y, 4); m.writeUInt16BE(1, 6); m.writeUInt16BE(1, 8); this.send(m); };
+    const ask = (incremental: number) => { const m = Buffer.alloc(10); m[0] = 3; m[1] = incremental; m.writeUInt16BE(x, 2); m.writeUInt16BE(y, 4); m.writeUInt16BE(width, 6); m.writeUInt16BE(height, 8); this.send(m); };
+    const out = Buffer.alloc(width * height * 3);
     ask(0);
-    for (let updates = 0; updates < 5; updates++) {
+    for (let updates = 0; updates < 6; updates++) {
       const head = await this.read(4);
+      let pixels = false;
       for (let rect = 0; rect < head.readUInt16BE(2); rect++) {
         const r = await this.read(12);
-        const [w, h, encoding] = [r.readUInt16BE(4), r.readUInt16BE(6), r.readInt32BE(8)];
-        if (encoding === 0) { const data = await this.read(w * h * 4); return `${data[2]},${data[1]},${data[0]}`; }
-        if (encoding === -308) await this.read(16 * (await this.read(4))[0]!);
+        const [rx, ry, w, h, encoding] = [r.readUInt16BE(0), r.readUInt16BE(2), r.readUInt16BE(4), r.readUInt16BE(6), r.readInt32BE(8)];
+        if (encoding === -308) { await this.read(16 * (await this.read(4))[0]!); continue; }
+        if (encoding !== 0) continue;
+        const data = await this.read(w * h * 4);
+        pixels = true;
+        for (let row = 0; row < h; row++) for (let column = 0; column < w; column++) {
+          const [ox, oy] = [rx + column - x, ry + row - y];
+          if (ox < 0 || oy < 0 || ox >= width || oy >= height) continue;
+          const from = (row * w + column) * 4, to = (oy * width + ox) * 3;
+          [out[to], out[to + 1], out[to + 2]] = [data[from + 2]!, data[from + 1]!, data[from]!];
+        }
       }
+      if (pixels) return out;
       ask(1);
     }
-    return "no picture";
+    throw new Error("the display sent no picture");
+  }
+
+  /** The display's colour at one point as "r,g,b". */
+  async pixel(x: number, y: number): Promise<string> {
+    return [...await this.region(x, y, 1, 1)].join(",");
+  }
+
+  /** The whole display as a PNG. */
+  async png(): Promise<Buffer> {
+    const rgb = await this.region(0, 0, this.width, this.height);
+    const rows = Buffer.alloc((this.width * 3 + 1) * this.height);
+    for (let row = 0; row < this.height; row++) rgb.copy(rows, row * (this.width * 3 + 1) + 1, row * this.width * 3, (row + 1) * this.width * 3);
+    const chunk = (type: string, data: Buffer) => {
+      const typed = Buffer.concat([Buffer.from(type, "latin1"), data]);
+      const length = Buffer.alloc(4), check = Buffer.alloc(4);
+      length.writeUInt32BE(data.length);
+      check.writeUInt32BE(crc32(typed));
+      return Buffer.concat([length, typed, check]);
+    };
+    const header = Buffer.alloc(13);
+    header.writeUInt32BE(this.width, 0);
+    header.writeUInt32BE(this.height, 4);
+    header[8] = 8;
+    header[9] = 2;
+    return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", header), chunk("IDAT", deflateSync(rows)), chunk("IEND", Buffer.alloc(0))]);
   }
 
   click(x: number, y: number): void {
@@ -234,25 +271,58 @@ function usedMemory(): number {
   return Math.round((field("MemTotal") - field("MemAvailable")) / 1024);
 }
 
+/** Where pictures of the display are kept for a failed CI run to upload (DESKTOP_E2E_SHOTS); nowhere when unset. */
+async function keepPicture(desk: RfbClient, name: string): Promise<string> {
+  const folder = process.env.DESKTOP_E2E_SHOTS;
+  if (!folder) return "not kept (DESKTOP_E2E_SHOTS unset)";
+  try {
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(join(folder, `${name}.png`), await desk.png());
+    return `${name}.png`;
+  } catch (error) {
+    return `not kept: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
 /** What a display's browser shows besides the page, for a failure message: its targets, and the page's focus and size. */
 type Shown = { run: { browser: { connection: { root: { send<T>(method: string, params?: Record<string, unknown>): Promise<T> }; session(id: string): { send<T>(method: string, params?: Record<string, unknown>): Promise<T> } | undefined } } } | null; active(): { page: { evaluate(expression: string, options: { world: "page" }): Promise<unknown> } } | null };
 
 /** What sits at a point of the display, for a failure message: the display's own pixel there, what the page has there,
  * and whether Chrome's address bar dropdown (a window of its own over the page) is showing. */
+/** Chrome's address bar suggestions box, a page of Chrome's own in a window over the page: whether it shows, and what. */
+async function omniboxPopups(profile: Shown): Promise<Array<{ url: string; seen?: { visibility: string; size: [number, number]; at: [number, number]; text: string }; error?: string }>> {
+  const connection = profile.run?.browser.connection;
+  const all = await connection?.root.send<{ targetInfos: Array<{ targetId: string; type: string; url: string }> }>("Target.getTargets", { filter: [{}] }).catch(() => null);
+  const popups: Array<{ url: string; seen?: { visibility: string; size: [number, number]; at: [number, number]; text: string }; error?: string }> = [];
+  for (const info of all?.targetInfos.filter((target) => target.type === "page" && target.url.startsWith("chrome://omnibox-popup")) ?? []) {
+    const attached = await connection!.root.send<{ sessionId: string }>("Target.attachToTarget", { targetId: info.targetId, flatten: true }).catch(() => null);
+    const session = attached ? connection!.session(attached.sessionId) : undefined;
+    try {
+      if (!session) throw new Error("not attached");
+      // The driver evaluates only in an isolated world of a page's own.
+      const { frameTree } = await session.send<{ frameTree: { frame: { id: string } } }>("Page.getFrameTree");
+      const { executionContextId } = await session.send<{ executionContextId: number }>("Page.createIsolatedWorld", { frameId: frameTree.frame.id, worldName: "omb-e2e-diagnostic" });
+      const answer = await session.send<{ result: { value?: string } }>("Runtime.evaluate", { expression: "JSON.stringify({ visibility: document.visibilityState, size: [innerWidth, innerHeight], at: [screenX, screenY], text: document.body ? document.body.innerText.slice(0, 120) : '' })", contextId: executionContextId, returnByValue: true });
+      popups.push({ url: info.url, seen: JSON.parse(answer.result.value ?? "null") });
+    } catch (error) {
+      popups.push({ url: info.url, error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      if (attached) await connection!.root.send("Target.detachFromTarget", { sessionId: attached.sessionId }).catch(() => undefined);
+    }
+  }
+  return popups;
+}
+
 async function coveredAt(profile: Shown, desk: RfbClient, onDisplay: { x: number; y: number }, onPage: { x: number; y: number }): Promise<string> {
   const shown = await desk.pixel(onDisplay.x, onDisplay.y).catch((error: unknown) => String(error));
+  // Without a cursor encoding Xvnc draws the pointer into the picture, its tip at the click point: up and left of it is
+  // still the button, and clear of the arrow.
+  const beside = await desk.pixel(onDisplay.x - 20, onDisplay.y - 20).catch((error: unknown) => String(error));
   const page = await profile.active()?.page.evaluate(`(() => { const at = document.elementFromPoint(${onPage.x}, ${onPage.y}); return at ? at.id + " " + getComputedStyle(at).backgroundColor : "nothing"; })()`, { world: "page" }).catch((error: unknown) => String(error));
   const connection = profile.run?.browser.connection;
   const all = await connection?.root.send<{ targetInfos: Array<{ targetId: string; type: string; url: string }> }>("Target.getTargets", { filter: [{}] }).catch(() => null);
-  const popups: string[] = [];
-  for (const info of all?.targetInfos.filter((target) => target.url.startsWith("chrome://omnibox-popup")) ?? []) {
-    const attached = await connection!.root.send<{ sessionId: string }>("Target.attachToTarget", { targetId: info.targetId, flatten: true }).catch(() => null);
-    const session = attached ? connection!.session(attached.sessionId) : undefined;
-    const seen = await session?.send<{ result: { value?: string } }>("Runtime.evaluate", { expression: "JSON.stringify({ visibility: document.visibilityState, size: [innerWidth, innerHeight], at: [screenX, screenY] })", returnByValue: true }).then((answer) => answer.result.value, (error: unknown) => String(error));
-    popups.push(`${info.type} ${info.url} ${seen ?? "not attached"}`);
-    if (attached) await connection!.root.send("Target.detachFromTarget", { sessionId: attached.sessionId }).catch(() => undefined);
-  }
-  return JSON.stringify({ displayPixel: shown, pageThere: page, targets: all?.targetInfos.map((target) => `${target.type} ${target.url}`), omniboxPopups: popups });
+  const popups = (await omniboxPopups(profile)).map((popup) => JSON.stringify(popup));
+  return JSON.stringify({ displayPixel: shown, displayPixelBesidePointer: beside, pageThere: page, targets: all?.targetInfos.map((target) => `${target.type} ${target.url}`), omniboxPopups: popups });
 }
 
 async function shownState(profile: Shown): Promise<string> {
@@ -359,6 +429,8 @@ suite("a bot's browser on a private display", () => {
     const desk = await RfbClient.connect(url());
     expect([desk.width, desk.height]).toEqual([DESKTOP_SIZE.width, DESKTOP_SIZE.height]);
     await desk.picture();
+    // The display as the person first sees it; a failed CI run uploads it.
+    await keepPicture(desk, "first-case-start");
 
     const button = await onScreen(200, 140);
     desk.click(button.x, button.y);
@@ -370,7 +442,7 @@ suite("a bot's browser on a private display", () => {
     expect(real.text(await real.call(target, "agent_browser_snapshot"))).toContain('button "B"');
     desk.click(button.x, button.y);
     expect(await until(() => read<string | undefined>("document.body.dataset.clicks"), (value) => value === "1").catch(async (error: unknown) => {
-      throw new Error(`${error instanceof Error ? error.message : String(error)}; what the display's browser showed: ${await shownState(profile)}; at the click: ${await coveredAt(profile, desk, button, { x: 200, y: 140 })}`);
+      throw new Error(`${error instanceof Error ? error.message : String(error)}; what the display's browser showed: ${await shownState(profile)}; at the click (${button.x}, ${button.y}): ${await coveredAt(profile, desk, button, { x: 200, y: 140 })}; picture: ${await keepPicture(desk, "first-case-click-missed")}`);
     })).toBe("1");
     const field = await onScreen(250, 270);
     desk.click(field.x, field.y);
@@ -479,7 +551,7 @@ suite("a bot's browser on a private display", () => {
         const text = await tab.page.evaluate("document.documentElement.innerText", { world: "page" }).catch(() => "");
         return typeof text === "string" ? text : "";
       };
-      for (const address of ["file:///etc/passwd", "chrome://settings", "chrome://extensions", "chrome://settings/manageProfile", "chrome://inspect", "devtools://devtools/bundled/inspector.html", `view-source:${page}`, "about:settings"]) {
+      for (const address of ["file:///etc/passwd", "chrome://settings", "chrome://extensions", "chrome://settings/manageProfile", "chrome://inspect", "devtools://devtools/bundled/inspector.html", `view-source:${page}`, "about:settings", "chrome://customize-chrome-side-panel.top-chrome"]) {
         // Each address in a new tab of its own, typed into Chrome's own address bar; the new tab page itself is allowed.
         const before = profile.tabs.list().length;
         desk.chord([CONTROL], 0x74);
@@ -595,6 +667,26 @@ suite("a bot's browser on a private display", () => {
     expect(await until(() => read<string | undefined>("document.body.dataset.keys"), (value) => value === "k").catch(async (error: unknown) => {
       throw new Error(`${error instanceof Error ? error.message : String(error)}; the bot's view of it: ${JSON.stringify(await real.call(target, "agent_browser_status").then((result) => real.text(result).split("\n")[0]))}`);
     })).toBe("k");
+    desk.close();
+  }, hostTimeout(120_000));
+
+  it("leaves Chrome's own address bar suggestions free of the lock-down, so typing there shows suggestions, not a blocked page", async () => {
+    expect((await real.call(target, "agent_browser_open", { url: page })).isError).toBeUndefined();
+    startedOnDisplay();
+    const profile = real.service.profiles().find((candidate) => candidate.key === target.key)!;
+    const desk = await RfbClient.connect(url());
+    await desk.picture();
+    await profile.control.take(person);
+    desk.chord([CONTROL], 0x6c);
+    desk.type("zz");
+    // Chrome keeps the box's pages from its start. Allowed, they are its own UI (browser_ui); blocked, each is a page
+    // showing "This page is blocked", which the box then shows over the page.
+    const all = await profile.run!.browser.connection.root.send<{ targetInfos: Array<{ type: string; url: string }> }>("Target.getTargets", { filter: [{}] });
+    expect(all.targetInfos.some((info) => info.url.startsWith("chrome://omnibox-popup"))).toBe(true);
+    const popups = await omniboxPopups(profile);
+    await keepPicture(desk, "address-bar-suggestions");
+    expect(popups.filter((popup) => BLOCKED.test(popup.seen?.text ?? "")), JSON.stringify(popups)).toEqual([]);
+    desk.keys([0xff1b, 0xff1b]);
     desk.close();
   }, hostTimeout(120_000));
 
