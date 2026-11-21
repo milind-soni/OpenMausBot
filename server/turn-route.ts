@@ -35,7 +35,10 @@ export function classifyTurn(signals: TurnSignals): TurnTier {
 
 const FAST = /(^|[-_/. ])(haiku|flash|mini|nano|lite|small|fast|instant|spark|turbo|air)(?=$|[-_/. \d])/i;
 
-const family = (id: string) => id.split(/[-_./+]/)[0]?.toLowerCase();
+const vendor = (id: string) => {
+  const m = /^(gpt|claude|gemini|glm|deepseek|grok|qwen|mistral|llama|composer|kimi)/i.exec(id);
+  return m ? m[1]!.toLowerCase() : null;
+};
 
 /** Same upstream provider only; among several, the first listed wins since engines list their newest first. */
 export function fastModelFor(catalog: ModelCatalog | undefined, current: string, refused: ReadonlySet<string> = new Set()): string | undefined {
@@ -44,12 +47,14 @@ export function fastModelFor(catalog: ModelCatalog | undefined, current: string,
   if (!currentOption || currentOption.custom) return undefined;
   if (FAST.test(current)) return current;
   const provider = currentOption.provider;
-  const pick = catalog.options.find((option) =>
-    !option.custom &&
-    !refused.has(option.id) &&
-    FAST.test(option.id) &&
-    (provider || option.provider ? option.provider === provider : family(option.id) === family(current)),
-  );
+  const currentVendor = vendor(current);
+  const pick = catalog.options.find((option) => {
+    if (option.custom || refused.has(option.id) || !FAST.test(option.id)) return false;
+    if (provider || option.provider) return option.provider === provider;
+    const optionVendor = vendor(option.id);
+    if (currentVendor || optionVendor) return optionVendor === currentVendor;
+    return true;
+  });
   return pick?.id;
 }
 
