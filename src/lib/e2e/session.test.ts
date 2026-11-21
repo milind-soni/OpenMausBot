@@ -52,6 +52,10 @@ interface RelayNode {
   stall: boolean;
   /** Drop everything the computer sends from now on, as a dead path would. */
   mute: boolean;
+  /** Right after the computer's first message, also send the phone a record no key opens. */
+  junkAfterFirst: boolean;
+  /** Pass the computer's close on to the phone only once this settles. */
+  holdClose: Promise<void> | null;
   close(): Promise<void>;
 }
 
@@ -72,6 +76,8 @@ async function startNode(): Promise<RelayNode> {
     closeAfterFirst: null,
     stall: false,
     mute: false,
+    junkAfterFirst: false,
+    holdClose: null,
     close: () =>
       new Promise((resolve) => {
         for (const client of wss.clients) client.terminate();
@@ -105,6 +111,7 @@ async function startNode(): Promise<RelayNode> {
         data.on("message", (bytes: RawData) => {
           if (node.mute || phone.readyState !== NodeWebSocket.OPEN) return;
           phone.send(bytes as Buffer);
+          if (node.junkAfterFirst) phone.send(Buffer.alloc(40, 7));
           if (node.closeAfterFirst !== null) refuse(phone, node.closeAfterFirst);
         });
       });
@@ -112,7 +119,7 @@ async function startNode(): Promise<RelayNode> {
       const passClose = (to: NodeWebSocket) => (code: number) => {
         if (to.readyState === NodeWebSocket.OPEN) to.close(code >= 3000 ? code : 1000);
       };
-      data.on("close", passClose(phone));
+      data.on("close", (code: number) => void (node.holdClose ?? Promise.resolve()).then(() => passClose(phone)(code)));
       phone.on("close", passClose(data));
       data.on("error", () => phone.terminate());
     });
@@ -192,6 +199,32 @@ async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, want: 
   }
   return seen;
 }
+/** Holds the phone's check of message 2 until its socket has seen the close, so the close lands during the check. */
+function holdCheckUntilClose(): () => void {
+  const Native = globalThis.WebSocket;
+  let seen!: () => void;
+  const closed = new Promise<void>((resolve) => (seen = resolve));
+  vi.stubGlobal(
+    "WebSocket",
+    class extends Native {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        // Registered before dial's onclose, so dial has kept the close by the time the check goes on.
+        this.addEventListener("close", () => setTimeout(seen));
+      }
+    },
+  );
+  const decrypt = crypto.subtle.decrypt.bind(crypto.subtle);
+  const spy = vi.spyOn(crypto.subtle, "decrypt").mockImplementation(async (...args) => {
+    await closed;
+    return decrypt(...args);
+  });
+  return () => {
+    spy.mockRestore();
+    vi.unstubAllGlobals();
+  };
+}
+
 const health = async (session: PhoneSession) => text(await request(session, "GET /api/health HTTP/1.1\r\nHost: companion\r\nConnection: close\r\n\r\n"));
 
 describe("dialRelay: the browser phone through a relay node", () => {
@@ -275,13 +308,48 @@ describe("dialRelay: the browser phone through a relay node", () => {
   it("reads a GoAway(3) that comes with message 2 before the 4001 behind it, and says the device was removed", async () => {
     const { node, options } = await admittingNode();
     node.computer = ready.removed;
-    await expect(dialRelay({ ...options, urls: [node.url] })).rejects.toMatchObject({ code: 4001, removed: true });
+    const release = holdCheckUntilClose();
+    try {
+      await expect(dialRelay({ ...options, urls: [node.url] })).rejects.toMatchObject({ code: 4001, removed: true });
+    } finally {
+      release();
+    }
+  });
+
+  it("says the device was removed when the 4001 comes after the session started", async () => {
+    const { node, options } = await admittingNode();
+    node.computer = ready.removed;
+    let passClose!: () => void;
+    node.holdClose = new Promise((resolve) => (passClose = resolve));
+    const session = await dialRelay({ ...options, urls: [node.url] });
+    passClose();
+    expect(await session.closed).toBe(4001);
+    expect(session.removed).toBe(true);
   });
 
   it("keeps a bare 4001 right after message 2 as not removed: through the relay it may be the relay's own", async () => {
     const { node, options } = await admittingNode();
     node.closeAfterFirst = 4001;
-    await expect(dialRelay({ ...options, urls: [node.url] })).rejects.toMatchObject({ code: 4001, removed: false });
+    const release = holdCheckUntilClose();
+    try {
+      await expect(dialRelay({ ...options, urls: [node.url] })).rejects.toMatchObject({ code: 4001, removed: false });
+    } finally {
+      release();
+    }
+  });
+
+  it("reports its own 4000, not the node's 4404, when a record behind message 2 fails to open, and tries no other node", async () => {
+    const { node: closing, options } = await admittingNode();
+    closing.junkAfterFirst = true;
+    closing.closeAfterFirst = 4404;
+    const { node: next } = await admittingNode();
+    const release = holdCheckUntilClose();
+    try {
+      await expect(dialRelay({ ...options, urls: [closing.url, next.url] })).rejects.toMatchObject({ code: 4000 });
+    } finally {
+      release();
+    }
+    expect(next.firstMessages).toEqual([]);
   });
 
   it("stops hard on a message 2 that fails to verify, even when the node closes 4404 meanwhile", async () => {
