@@ -442,6 +442,11 @@ const __APP_VERSION__: string;
         close(contextId?: string): Promise<boolean>;
         onState(cb: (state: DesktopWorkspaceState) => void): () => void;
       };
+      /** A bot's browser as a native view over its Browser panel (browserEngine.surface "pane"). The main process asks
+       * the server which browser the bot's panel shows; the page never names one. */
+      browserPane?: {
+        show(input: { botId: string; threadId: string | null; bounds: DesktopWorkspaceBounds | null; visible: boolean }): Promise<{ shown: boolean }>;
+      };
       /** Native folder picker; resolves null when the user cancels. */
       pickFolder?(current?: string): Promise<string | null>;
       /** Writes the redacted diagnostics report to a user-chosen file;

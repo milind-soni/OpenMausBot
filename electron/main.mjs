@@ -1,4 +1,4 @@
-import { launchRecord } from "./launch-record-main.mjs"; import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, net, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess, nativeTheme } from "electron";
+import { launchRecord } from "./launch-record-main.mjs"; import { app, autoUpdater as nativeAutoUpdater, BrowserWindow, Tray, WebContentsView, clipboard, desktopCapturer, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, net, powerMonitor, powerSaveBlocker, safeStorage, screen, session, shell, systemPreferences, utilityProcess, nativeTheme } from "electron"; import { createBrowserPanes } from "./browser-pane-main.mjs";
 import { createRequire } from "node:module";
 import { randomBytes, randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -156,7 +156,7 @@ cloudEntry.fromLaunch(process.argv); const teamLinks = installTeamJoin({ argv: p
 let pendingPackageInstallUrl = pendingOrganizationEntry ? null : packageUrlFromCommandLine(process.argv);
 let pendingChatLink = pendingOrganizationEntry ? null : chatLinkFromCommandLine(process.argv);
 let organizationEntryReady = false;
-let mainWindow = null;
+let mainWindow = null; const browserPanes = createBrowserPanes({ createView: (options) => new WebContentsView(options), fromPartition: (name) => session.fromPartition(name), owner: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null), chromeVersion: process.versions.chrome, log: (line) => slog(line) });
 const serverUnavailableWindows = new WeakSet();
 let unreadCount = 0;
 let unreadOverlayIcon;
@@ -1151,7 +1151,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
       if (trustedApprovalMode.receive(proc, message)) return;
       if (managedDesktopRelay.receive(proc, message)) return;
       if (orgLibrary?.receive(message)) return;
-      if (receivePhoneSecretSave(proc, message) || oneHome.receive(proc, message) || tailnetShare.receive(message)) return;
+      if (receivePhoneSecretSave(proc, message) || oneHome.receive(proc, message) || tailnetShare.receive(message) || browserPanes.receive(proc, message)) return;
     } catch (error) {
       slog(`desktop private sync rejected: ${error?.message ?? error}`);
     }
@@ -1160,7 +1160,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     slog(`spawned pid=${proc.pid}`); launchAnalytics.stage("server_spawned"); launchRecord.mark("serverSpawned");
     if (!serverSupervisor.isCurrent(proc)) return;
     syncDesktopMutationToken(proc); void tailnetShare.attach(proc, port, companionSettings().routes.tailscale);
-    syncPhoneSecretKey(proc); grantLocalComputer(proc, (child) => serverSupervisor.isCurrent(child));
+    syncPhoneSecretKey(proc); grantLocalComputer(proc, (child) => serverSupervisor.isCurrent(child)); browserPanes.attach(proc);
   });
   let exited = false;
   proc.once("exit", (code) => {
@@ -2298,7 +2298,7 @@ ipcMain.handle("desktop-workspace:layout", localOnly("desktop-workspace:layout",
   const manager = desktopWorkspaceForEvent(event);
   if (!manager) return false;
   return manager.layout(items);
-}));
+})); ipcMain.handle("browser-pane:show", localOnly("browser-pane:show", (event, input) => { if (!mainWindow || event.sender !== mainWindow.webContents) throw new Error("The browser pane belongs to the main app window"); return browserPanes.show(input); }));
 ipcMain.handle("desktop-workspace:set-interactive", localOnly("desktop-workspace:set-interactive", (event, contextId) => {
   const manager = desktopWorkspaceForEvent(event);
   if (!manager) return contextId == null;
