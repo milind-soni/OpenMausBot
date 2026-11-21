@@ -37,6 +37,8 @@ export interface FakePage {
   focused: number | null;
   /** Emulation.setDeviceMetricsOverride's size, which the page then reports instead of its window's. */
   emulated?: { width: number; height: number } | null;
+  /** The size of an emulation that ended, and how many more measures answer with it. */
+  lagging?: { width: number; height: number; measures: number } | null;
   /** A bar of this height over the page, as Chrome's first tab has. */
   bar?: number;
   screencasts: Map<string, { params: Record<string, unknown>; acked: number; sent: number }>;
@@ -63,6 +65,8 @@ export class FakeChrome implements CdpTransport {
   hang: (method: string) => boolean = () => false;
   /** Milliseconds before a command answers, to stand for a slow page. */
   delay: (method: string) => number = () => 0;
+  /** How many measures a page still answers with an emulation's size after it ended, as a renderer that has not yet taken the end does. */
+  lateClears = 0;
   /** What the next navigations fail with, in order, such as net::ERR_ABORTED. */
   readonly navigationErrors: string[];
   readonly #documents: (url: string) => FakeDocument;
@@ -241,7 +245,11 @@ export class FakeChrome implements CdpTransport {
 
   #evaluate(page: FakePage, expression: string): unknown {
     const viewport = page.emulated ?? { width: this.viewport.width, height: this.viewport.height - (page.bar ?? 0) };
-    if (expression === "[innerWidth, innerHeight]") return [viewport.width, viewport.height];
+    if (expression === "[innerWidth, innerHeight]") {
+      const lagging = page.lagging;
+      if (!lagging || page.emulated || lagging.measures-- <= 0) return [viewport.width, viewport.height];
+      return [lagging.width, lagging.height];
+    }
     if (expression === "devicePixelRatio") return this.dpr;
     if (expression === "document.readyState") return "complete";
     if (expression === "document.title") return page.title;
@@ -276,6 +284,7 @@ export class FakeChrome implements CdpTransport {
         page.emulated = { width: Number(params.width), height: Number(params.height) };
         return {};
       case "Emulation.clearDeviceMetricsOverride":
+        page.lagging = page.emulated && this.lateClears > 0 ? { ...page.emulated, measures: this.lateClears } : null;
         page.emulated = null;
         return {};
       case "Page.createIsolatedWorld":

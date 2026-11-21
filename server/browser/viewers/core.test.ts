@@ -138,6 +138,20 @@ describe("the page fills the panel", () => {
     expect(chrome().window.height).toBeLessThanOrEqual(757 + 143);
   });
 
+  it("fits the window to the page's own size once a tall panel's emulation ends, though the page reports the emulated size a moment longer", async () => {
+    const { watch, chrome, page } = await setup({ pageLimit: { width: 1440, height: 757 } });
+    const { viewer } = await watch({ size: { width: 1600, height: 1000 } });
+    await viewer.input({ type: "resize", width: 400, height: 750 });
+    expect(page().emulated).toEqual({ width: 1280, height: 2400 });
+    chrome().lateClears = 2;
+    const before = chrome().sent.length;
+    await viewer.input({ type: "resize", width: 1280, height: 700 });
+    expect(page().emulated).toBeNull();
+    expect(chrome().viewport).toEqual({ width: 1280, height: 700 });
+    // One resize, from the window's own page: a measure of the emulated 2400 would ask for a window of no height.
+    expect(chrome().sent.slice(before).filter((sent) => sent.method === "Browser.setWindowBounds").map((sent) => sent.params.bounds)).toEqual([{ width: 1280, height: 843 }]);
+  });
+
   it("resizes the real window, so a page narrower than any window comes from a preset only, emulated", async () => {
     const { watch, chrome, page } = await setup();
     const { viewer } = await watch({ size: { width: 1600, height: 1000 } });
