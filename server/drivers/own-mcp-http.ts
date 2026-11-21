@@ -3,15 +3,18 @@
 // against a container's pids limit. The URL form is the endpoint those proxies forward to (routes/own-mcp-http.ts), with
 // the same capability token, so identity and permissions are the stdio form's. The permission prompt server (ogb, over the
 // turn's broker socket), the Android phone tools (which run adb themselves) and the person's own servers stay as they are.
+// In the bot box with its own network, the engine reaches that endpoint as its stdio proxies do: 127.0.0.1 at the server's
+// port is the box's bridge to the harness gate (bot-box/harness-gate.ts), which passes /api/internal/ only, and the box
+// keeps loopback out of its egress proxy (NO_PROXY).
 import { botBox } from "../bot-box/box.ts";
-import { ownMcpOverHttp } from "./turn-mcp.ts";
+import { acpOwnServersOverHttp, ownMcpOverHttp, type AcpMcpServer } from "./turn-mcp.ts";
 
-/** "1" turns the URL form on; off unless set, on every kind of server. */
+/** "1" turns the URL form on for every engine that can take it; "0" keeps every engine on stdio proxies, the ACP agents
+ * that take the URL form by default included. */
 export const OWN_MCP_HTTP_ENV = "OMB_OWN_MCP_HTTP";
 
-/** Whether engines get OpenMausBot's own servers by URL: only with OMB_OWN_MCP_HTTP=1, and never while the bot box is on
- * (a boxed engine reaches this server only through the box's relays, which carry the stdio proxies' requests, not an
- * engine's own). */
+/** Whether Claude, Codex and the ACP agents that do not take the URL form by default get OpenMausBot's own servers by URL:
+ * only with OMB_OWN_MCP_HTTP=1, and not while the bot box is on, where their HTTP clients have not been checked. */
 export function ownMcpHttpEnabled(env: NodeJS.ProcessEnv = process.env, boxed: boolean = botBox.enabled()): boolean {
   return !boxed && env[OWN_MCP_HTTP_ENV] === "1";
 }
@@ -54,18 +57,25 @@ export function claudeOwnMcpOverHttp(servers: Record<string, unknown>, enabled: 
   return converted;
 }
 
-/** ACP engine instances whose agent said, in its `initialize` answer, that it reaches MCP servers by URL
- * (`agentCapabilities.mcpCapabilities.http`). The ACP spec lets a client send an `http` server only to such an agent. */
-const acpHttpAgents = new Set<string>();
+/** How an ACP engine's turn gets OpenMausBot's own servers: `http` in every session, `advertised` in a session whose agent
+ * said in its `initialize` answer that it reaches MCP servers by URL (`agentCapabilities.mcpCapabilities.http`; the ACP spec
+ * lets a client send an `http` server only to such an agent), else `stdio`. */
+export type AcpOwnMcpTransport = "http" | "advertised" | "stdio";
 
-export function noteAcpMcpHttp(instanceId: string, init: unknown): void {
-  const http = (init as { agentCapabilities?: { mcpCapabilities?: { http?: unknown } } } | null | undefined)?.agentCapabilities?.mcpCapabilities?.http;
-  if (http === true) acpHttpAgents.add(instanceId);
-  else acpHttpAgents.delete(instanceId);
+export function acpOwnMcpTransport(support: { ownMcpOverHttp?: boolean | "advertised"; mcpServersFromLaunch?: boolean },
+  env: NodeJS.ProcessEnv = process.env, boxed: boolean = botBox.enabled()): AcpOwnMcpTransport {
+  if (support.mcpServersFromLaunch === true || env[OWN_MCP_HTTP_ENV] === "0") return "stdio";
+  if (support.ownMcpOverHttp === true) return "http";
+  if (support.ownMcpOverHttp === "advertised") return "advertised";
+  return ownMcpHttpEnabled(env, boxed) ? "advertised" : "stdio";
 }
 
-/** An ACP engine gets OpenMausBot's own servers by URL once its agent has said it can take them (its first session starts
- * with the stdio form), unless its servers come from the launcher's own configuration. */
-export function acpOwnMcpOverHttp(instanceId: string, fromLaunch: boolean, enabled: boolean = ownMcpHttpEnabled()): boolean {
-  return enabled && !fromLaunch && acpHttpAgents.has(instanceId);
+export function acpAgentTakesHttpMcp(init: unknown): boolean {
+  return (init as { agentCapabilities?: { mcpCapabilities?: { http?: unknown } } } | null | undefined)?.agentCapabilities?.mcpCapabilities?.http === true;
+}
+
+/** The servers a session/new or session/load sends: under `advertised`, OpenMausBot's own as this server's endpoints when
+ * the session's agent takes them. Deciding here, after `initialize`, lets an agent's first session use the URL form too. */
+export function acpSessionMcpServers(servers: AcpMcpServer[], transport: AcpOwnMcpTransport, init: unknown): AcpMcpServer[] {
+  return transport === "advertised" && acpAgentTakesHttpMcp(init) ? acpOwnServersOverHttp(servers) : servers;
 }
