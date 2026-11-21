@@ -10,7 +10,7 @@ const MSG = "openmausbot:browser-pane";
 const DOWNLOADS = "/tmp/omb-pane-downloads";
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function fakeElectron() {
+function fakeElectron(hints = null) {
   const views = [];
   const sessions = new Map();
   const window = {
@@ -29,7 +29,8 @@ function fakeElectron() {
     const sent = [];
     const contents = Object.assign(options.webContents ?? new EventEmitter(), {
       url: "about:blank",
-      loaded: [],
+      // A guest Electron made for a popup loads its own document.
+      loaded: options.webContents ? ["(popup)"] : [],
       closed: false,
       openHandler: null,
       webrtc: null,
@@ -44,6 +45,8 @@ function fakeElectron() {
       closeDevTools() { this.devtoolsClosed++; },
       agent: null,
       setUserAgent(agent) { this.agent = agent; },
+      captured: 0,
+      async capturePage() { this.captured++; return { isEmpty: () => false, getSize: () => ({ width: 2, height: 2 }), toPNG: () => Buffer.from("parked"), toJPEG: () => Buffer.from("parked") }; },
     });
     let attached = false;
     contents.debugger = Object.assign(debuggerEvents, {
@@ -53,7 +56,10 @@ function fakeElectron() {
       isAttached: () => attached,
       async sendCommand(method, params, sessionId) {
         sent.push({ method, params, sessionId });
+        // Electron 43: a webContents that never loaded a document answers no debugger command.
+        if (!contents.loaded.length) return new Promise(() => {});
         if (method === "Page.getFrameTree") return { frameTree: { frame: { id: `FRAME${views.length}` } } };
+        if (method === "Runtime.evaluate" && hints) return { result: { value: hints } };
         if (method === "DOM.fail") throw Object.assign(new Error("No node with given id found"), { code: -32000 });
         if (method === "Page.captureScreenshot") return contents.neverDraws ? new Promise(() => {}) : { data: "x", visibleDuring: view.visible };
         return {};
@@ -98,11 +104,29 @@ function fakeElectron() {
   return { views, sessions, window, createView, createPopup, popups, fromPartition };
 }
 
-function setup({ captureMs } = {}) {
-  const electron = fakeElectron();
+function fakeWindow() {
+  const window = {
+    destroyed: false,
+    children: [],
+    isDestroyed() { return this.destroyed; },
+    destroy() { this.destroyed = true; },
+    contentView: {
+      addChildView(view) { window.children = window.children.filter((child) => child !== view).concat(view); },
+      removeChildView(view) { window.children = window.children.filter((child) => child !== view); },
+    },
+  };
+  return window;
+}
+
+function setup({ captureMs, keepsRunning = false, hints = null, quitting = () => false } = {}) {
+  const electron = fakeElectron(hints);
   let clock = 0;
   const logged = [];
-  const panes = createBrowserPanes({ createView: electron.createView, createPopup: electron.createPopup, fromPartition: electron.fromPartition, owner: () => (electron.window.destroyed ? null : electron.window), chromeVersion: "146.0.7680.0", now: () => clock, log: (line) => logged.push(line), ...(captureMs ? { captureMs } : {}) });
+  const parkings = [];
+  const createParking = () => { const window = fakeWindow(); parkings.push(window); return window; };
+  electron.windowsMade = () => parkings.length + electron.popups.length + electron.views.length;
+  const panes = createBrowserPanes({ createView: electron.createView, createPopup: electron.createPopup, createParking, keepsRunning: () => keepsRunning, quitting, fromPartition: electron.fromPartition, owner: () => (electron.window.destroyed ? null : electron.window), chromeVersion: "146.0.7680.0", now: () => clock, log: (line) => logged.push(line), ...(captureMs ? { captureMs } : {}) });
+  electron.parkings = parkings;
   const posted = [];
   const server = { postMessage: (message) => posted.push(message) };
   panes.attach(server);
@@ -186,9 +210,11 @@ test("creates a sandboxed view per tab, attaches its debugger and relays its CDP
   assert.equal(view.options.webPreferences.partition, PARTITION);
   assert.equal(view.options.webPreferences.sandbox, true);
   assert.equal(view.options.webPreferences.nodeIntegration, false);
-  view.webContents.emit("devtools-opened");
-  assert.equal(view.webContents.devtoolsClosed, 1);
-  assert.deepEqual(view.webContents.loaded, ["https://example.com/"]);
+  assert.equal(view.options.webPreferences.devTools, false);
+  assert.deepEqual(view.webContents.loaded, ["about:blank", "https://example.com/"]);
+  const order = view.webContents.debugger.sent.map((command) => command.method);
+  assert.deepEqual(order.slice(0, 3), ["Page.addScriptToEvaluateOnNewDocument", "Runtime.evaluate", "Page.getFrameTree"]);
+  assert.equal(view.webContents.debugger.sent[0].params.worldName, undefined);
   assert.equal(view.webContents.webrtc, "disable_non_proxied_udp");
   assert.deepEqual(view.bounds, { x: 0, y: 0, width: 1280, height: 800 });
   assert.equal(view.visible, false);
@@ -549,4 +575,286 @@ test("takes an import request only from the app window's own top page", () => {
   assert.throws(() => fromAppWindow({ sender: window.webContents, senderFrame: {} }, window), /main app window/);
   assert.throws(() => fromAppWindow({ sender: { mainFrame }, senderFrame: mainFrame }, window), /main app window/);
   assert.throws(() => fromAppWindow({ sender: window.webContents, senderFrame: mainFrame }, null), /main app window/);
+});
+
+async function openedWith(options) {
+  const context = setup(options);
+  context.send({ op: "open", browser: "bot:a", partition: PARTITION, egress: 41000, downloads: DOWNLOADS, identity: "native" });
+  await tick();
+  context.send({ op: "create", browser: "bot:a", req: 1, url: "about:blank" });
+  await tick();
+  await tick();
+  return context;
+}
+
+test("gives each pane its user agent with Chromium's own client hints, so navigations and fetches carry the same", async () => {
+  const hints = { brands: [{ brand: "Not;A=Brand", version: "8" }, { brand: "Chromium", version: "150" }], mobile: false, platform: "macOS", platformVersion: "15.6.0", architecture: "arm", bitness: "64", model: "", wow64: false, fullVersionList: [{ brand: "Chromium", version: "150.0.7871.250" }] };
+  const { electron } = await openedWith({ hints });
+  const contents = electron.views[0].webContents;
+  const override = contents.debugger.sent.find((command) => command.method === "Emulation.setUserAgentOverride");
+  assert.equal(override.params.userAgent, "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.0 Electron/43.7.9 Safari/537.36");
+  assert.deepEqual(override.params.userAgentMetadata.brands, hints.brands);
+  assert.equal(override.params.userAgentMetadata.platformVersion, "15.6.0");
+  // A site with a whole-tab rule gets its user agent with the same hints.
+  contents.emit("did-start-navigation", {}, "https://www.chase.com/", false, true);
+  await tick();
+  const overrides = contents.debugger.sent.filter((command) => command.method === "Emulation.setUserAgentOverride");
+  assert.equal(overrides.length, 2);
+  assert.equal(overrides[1].params.userAgent, "Mozilla/5.0 (Macintosh) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.0 Safari/537.36");
+  assert.deepEqual(overrides[1].params.userAgentMetadata, overrides[0].params.userAgentMetadata);
+});
+
+test("keeps the panes running in a window never shown while the app window is closed, where the app keeps running", async () => {
+  const { electron, panes, posted } = await openedWith({ keepsRunning: true });
+  const [view] = electron.views;
+  electron.window.destroyed = true;
+  panes.windowClosed(electron.window);
+  assert.equal(electron.parkings.length, 1);
+  assert.equal(electron.parkings[0].children[0], view);
+  assert.equal(view.webContents.closed, false);
+  assert.equal(posted.some((message) => message.op === "closed"), false);
+});
+
+test("closes the panes with the window where the app quits with its last window", async () => {
+  const { electron, panes, last } = await openedWith({ keepsRunning: false });
+  electron.window.destroyed = true;
+  panes.windowClosed(electron.window);
+  assert.equal(electron.parkings.length, 0);
+  assert.equal(electron.views[0].webContents.closed, true);
+  assert.equal(last("closed").browser, "bot:a");
+});
+
+test("a person's key right after the bot's click is the person's; the bot's own echo is not", async () => {
+  const { send, posted, electron, advance } = await openedWith();
+  advance(5_000);
+  const contents = electron.views[0].webContents;
+  let finish;
+  contents.debugger.sendCommand = (method) => (method === "Input.dispatchMouseEvent" ? new Promise((resolve) => { finish = resolve; }) : Promise.resolve({}));
+  send({ op: "cdp", browser: "bot:a", req: 2, tab: "p1", method: "Input.dispatchMouseEvent", params: { type: "mousePressed", x: 10, y: 20 } });
+  contents.emit("input-event", {}, { type: "mouseDown", x: 10, y: 20 });
+  finish({});
+  await tick();
+  advance(22);
+  contents.emit("input-event", {}, { type: "keyDown" });
+  const pings = posted.filter((message) => message.op === "input");
+  assert.equal(pings.length, 1);
+});
+
+test("asks the server to hold the tab the panel shows, and lets every hold go when the window closes", async () => {
+  const { electron, panes, send, posted } = await openedWith({ keepsRunning: true });
+  // No panel shows this bot: there is no tab to hold.
+  assert.deepEqual(await panes.hold({ botId: "a", threadId: null, held: true }), { held: false });
+  const showing = panes.show({ botId: "a", threadId: null, bounds: { x: 0, y: 0, width: 800, height: 600 }, visible: true });
+  send({ op: "resolved", req: posted.find((message) => message.op === "which").req, browser: "bot:a" });
+  await showing;
+  const held = panes.hold({ botId: "a", threadId: null, held: true });
+  const asked = posted.at(-1);
+  assert.deepEqual({ op: asked.op, botId: asked.botId, threadId: asked.threadId, browser: asked.browser, tab: asked.tab, held: asked.held }, { op: "hold", botId: "a", threadId: null, browser: "bot:a", tab: "p1", held: true });
+  send({ op: "hold-result", req: asked.req, held: true });
+  assert.deepEqual(await held, { held: true });
+  await assert.rejects(panes.hold({ botId: "a", threadId: null, held: "yes" }), /invalid/);
+  electron.window.destroyed = true;
+  panes.windowClosed(electron.window);
+  assert.equal(posted.some((message) => message.op === "let-go"), true);
+});
+
+test("quits with the pane setting off: no pane was ever opened, so closing the window makes no window", () => {
+  let quitting = false;
+  const { electron, panes } = setup({ keepsRunning: true, quitting: () => quitting });
+  electron.window.destroyed = true;
+  panes.windowClosed(electron.window);
+  quitting = true;
+  panes.closeAll();
+  panes.windowClosed(electron.window);
+  assert.equal(electron.windowsMade(), 0);
+});
+
+test("quits with panes open: the panes close with the window and nothing is parked", async () => {
+  let quitting = false;
+  const { electron, panes, last } = await openedWith({ keepsRunning: true, quitting: () => quitting });
+  quitting = true;
+  panes.closeAll();
+  electron.window.destroyed = true;
+  panes.windowClosed(electron.window);
+  assert.equal(electron.parkings.length, 0);
+  assert.equal(electron.views[0].webContents.closed, true);
+  assert.equal(last("closed").browser, "bot:a");
+});
+
+test("quits with panes parked: the parking window is destroyed with them", async () => {
+  let quitting = false;
+  const { electron, panes } = await openedWith({ keepsRunning: true, quitting: () => quitting });
+  electron.window.destroyed = true;
+  panes.windowClosed(electron.window);
+  assert.equal(electron.parkings.length, 1);
+  quitting = true;
+  panes.closeAll();
+  assert.equal(electron.parkings[0].destroyed, true);
+  assert.equal(electron.views[0].webContents.closed, true);
+  assert.equal(electron.parkings.length, 1);
+});
+
+test("a window closed as the app quits never parks: the quit is not cancelled by a new window", async () => {
+  let quitting = false;
+  const { electron, panes } = await openedWith({ keepsRunning: true, quitting: () => quitting });
+  quitting = true;
+  electron.window.destroyed = true;
+  panes.windowClosed(electron.window);
+  assert.equal(electron.parkings.length, 0);
+  assert.equal(electron.views[0].webContents.closed, true);
+});
+
+test("a bot's scroll never reads as the person's", async () => {
+  const { send, posted, electron, advance } = await openedWith();
+  advance(5_000);
+  const contents = electron.views[0].webContents;
+  let finish;
+  contents.debugger.sendCommand = (method) => (method === "Input.dispatchMouseEvent" ? new Promise((resolve) => { finish = resolve; }) : Promise.resolve({}));
+  for (let scroll = 0; scroll < 25; scroll++) {
+    send({ op: "cdp", browser: "bot:a", req: 10 + scroll, tab: "p1", method: "Input.dispatchMouseEvent", params: { type: "mouseWheel", x: 200, y: 300, deltaX: 0, deltaY: 400 } });
+    for (const type of ["mouseWheel", "mouseWheel", "gestureScrollBegin", "gestureScrollUpdate"]) contents.emit("input-event", {}, { type, x: 200, y: 300 });
+    finish({});
+    await tick();
+    advance(100);
+    contents.emit("input-event", {}, { type: "gestureScrollEnd", x: 200, y: 300 });
+    advance(1_000);
+  }
+  assert.equal(posted.filter((message) => message.op === "input").length, 0);
+  contents.emit("input-event", {}, { type: "mouseWheel", x: 20, y: 30 });
+  assert.equal(posted.filter((message) => message.op === "input").length, 1);
+});
+
+test("takes a parked pane's screenshot although its window never draws", async () => {
+  const { electron, panes, send, last } = await openedWith({ keepsRunning: true });
+  const contents = electron.views[0].webContents;
+  contents.neverDraws = true;
+  electron.window.destroyed = true;
+  panes.windowClosed(electron.window);
+  send({ op: "cdp", browser: "bot:a", req: 7, tab: "p1", method: "Page.captureScreenshot", params: { format: "png" } });
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  assert.deepEqual(last("answer").result, { data: Buffer.from("parked").toString("base64") });
+  // One capture to make the page draw, one of the fresh frame.
+  assert.equal(contents.captured, 2);
+  // Nothing was shown for it.
+  assert.notEqual(electron.views[0].visible, true);
+});
+
+test("the bot leaving a page dismisses the alert it left open first, so the navigation is never held", async () => {
+  const { electron, send, last } = await openedWith();
+  const contents = electron.views[0].webContents;
+  const answers = [];
+  contents.emit("-run-dialog", { dialogType: "alert", messageText: "Hi" }, (ok) => answers.push(ok));
+  contents.debugger.emit("message", {}, "Page.javascriptDialogOpening", { type: "alert", message: "Hi" });
+  contents.debugger.sent.length = 0;
+  send({ op: "cdp", browser: "bot:a", req: 9, tab: "p1", method: "Page.navigate", params: { url: "https://example.com/next" } });
+  await tick();
+  await tick();
+  assert.deepEqual(contents.debugger.sent.map((command) => command.method), ["Page.handleJavaScriptDialog", "Page.navigate"]);
+  assert.deepEqual(contents.debugger.sent[0].params, { accept: false });
+  assert.equal(last("answer").req, 9);
+  // CDP closed it, and Electron's own callback is spent with it.
+  contents.debugger.emit("message", {}, "Page.javascriptDialogClosed", {});
+  assert.deepEqual(answers, []);
+  // One CDP never reported is let go as a dismissed box.
+  contents.emit("-run-dialog", { dialogType: "alert", messageText: "Again" }, (ok) => answers.push(ok));
+  contents.debugger.sent.length = 0;
+  send({ op: "cdp", browser: "bot:a", req: 10, tab: "p1", method: "Page.reload", params: {} });
+  await tick();
+  await tick();
+  assert.deepEqual(answers, [false]);
+  assert.deepEqual(contents.debugger.sent.map((command) => command.method), ["Page.reload"]);
+});
+
+test("a dialog that opens under the bot's click and its page read never holds them: both are answered at once", async () => {
+  const { electron, send, posted } = await openedWith();
+  const contents = electron.views[0].webContents;
+  const original = contents.debugger.sendCommand.bind(contents.debugger);
+  // Electron holds input and scripts while the page's alert is up; the answer to the dialog goes through.
+  contents.debugger.sendCommand = (method, params, session) => (/^(?:Input\.|Runtime\.)/.test(method) ? new Promise(() => {}) : original(method, params, session));
+  const answer = (req) => posted.find((message) => message.op === "answer" && message.req === req);
+  // The order seen live: the click's release, the driver's read of the page, then the alert opening.
+  send({ op: "cdp", browser: "bot:a", req: 20, tab: "p1", method: "Input.dispatchMouseEvent", params: { type: "mouseReleased", x: 10, y: 10, button: "left", clickCount: 1 } });
+  send({ op: "cdp", browser: "bot:a", req: 21, tab: "p1", method: "Runtime.callFunctionOn", params: { functionDeclaration: "function () { return document.title; }", objectId: "o" } });
+  await tick();
+  assert.equal(answer(20), undefined);
+  assert.equal(answer(21), undefined);
+  contents.debugger.emit("message", {}, "Page.javascriptDialogOpening", { type: "alert", message: "hello alert" });
+  await tick();
+  assert.deepEqual(answer(20).result, {});
+  assert.match(answer(21).error.message, /dialog is open/);
+  // A read sent while it is open is answered at once too, and the dialog's own answer is never held.
+  send({ op: "cdp", browser: "bot:a", req: 22, tab: "p1", method: "Runtime.evaluate", params: { expression: "1" } });
+  send({ op: "cdp", browser: "bot:a", req: 23, tab: "p1", method: "Page.handleJavaScriptDialog", params: { accept: false } });
+  await tick();
+  await tick();
+  assert.match(answer(22).error.message, /dialog is open/);
+  assert.deepEqual(answer(23).result, {});
+  // The driver's other reads of the page are answered too, not held for the link's timeout.
+  for (const [req, method] of [[24, "DOM.getBoxModel"], [25, "Accessibility.getFullAXTree"], [26, "Page.getLayoutMetrics"]]) {
+    send({ op: "cdp", browser: "bot:a", req, tab: "p1", method, params: {} });
+    await tick();
+    assert.match(answer(req).error.message, /dialog is open/, method);
+  }
+  // Leaving the page clears it, should the close event go missing.
+  contents.emit("did-start-navigation", {}, "https://example.com/next", false, true);
+  contents.debugger.sendCommand = original;
+  send({ op: "cdp", browser: "bot:a", req: 27, tab: "p1", method: "Runtime.evaluate", params: { expression: "1" } });
+  await tick();
+  await tick();
+  assert.deepEqual(answer(27).result, {});
+});
+
+test("takes a screenshot of a pane whose app window is minimised or hidden as it does a parked one", async () => {
+  const { electron, send, last } = await openedWith();
+  const contents = electron.views[0].webContents;
+  contents.neverDraws = true;
+  for (const [state, req] of [[{ isMinimized: () => true, isVisible: () => true }, 30], [{ isMinimized: () => false, isVisible: () => false }, 31]]) {
+    Object.assign(electron.window, state);
+    contents.captured = 0;
+    send({ op: "cdp", browser: "bot:a", req, tab: "p1", method: "Page.captureScreenshot", params: { format: "png" } });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    assert.deepEqual(last("answer").result, { data: Buffer.from("parked").toString("base64") });
+    assert.equal(contents.captured, 2);
+  }
+});
+
+test("a turn's preview tick under an open alert never holds the bot's navigate: the live wire's order", async () => {
+  const { electron, send, posted } = await openedWith();
+  const contents = electron.views[0].webContents;
+  const original = contents.debugger.sendCommand.bind(contents.debugger);
+  let open = false;
+  // Under the alert the page answers no screencast change, script, read or capture.
+  contents.debugger.sendCommand = (method, params, session) => {
+    if (method === "Page.handleJavaScriptDialog") open = false;
+    return open && !/^(?:Page\.(?:handleJavaScriptDialog|navigate)|Page\.getNavigationHistory)/.test(method) ? new Promise(() => {}) : original(method, params, session);
+  };
+  const answer = (req) => posted.find((message) => message.op === "answer" && message.req === req);
+  send({ op: "cdp", browser: "bot:a", req: 40, tab: "p1", method: "Input.dispatchMouseEvent", params: { type: "mouseReleased", x: 44, y: 97, button: "left", clickCount: 1 } });
+  open = true;
+  contents.debugger.emit("message", {}, "Page.javascriptDialogOpening", { type: "alert", message: "hello alert" });
+  // The preview tick: pause the panel's screencast, capture, resume.
+  send({ op: "cdp", browser: "bot:a", req: 41, tab: "p1", method: "Page.stopScreencast", params: {} });
+  send({ op: "cdp", browser: "bot:a", req: 42, tab: "p1", method: "Page.getLayoutMetrics", params: {} });
+  send({ op: "cdp", browser: "bot:a", req: 43, tab: "p1", method: "Page.captureScreenshot", params: { format: "jpeg" } });
+  send({ op: "cdp", browser: "bot:a", req: 44, tab: "p1", method: "Page.stopScreencast", params: {} });
+  send({ op: "cdp", browser: "bot:a", req: 45, tab: "p1", method: "Page.startScreencast", params: { format: "jpeg", quality: 70, maxWidth: 730, maxHeight: 1156 } });
+  await tick();
+  await tick();
+  assert.deepEqual(answer(40).result, {});
+  assert.deepEqual(answer(41).result, {});
+  assert.match(answer(42).error.message, /dialog is open/);
+  assert.match(answer(43).error.message, /dialog is open/);
+  assert.deepEqual(answer(44).result, {});
+  assert.deepEqual(answer(45).result, {});
+  // Then the bot navigates: the alert is dismissed, the page leaves, and the screencast the panel wanted starts again.
+  contents.debugger.sent.length = 0;
+  send({ op: "cdp", browser: "bot:a", req: 46, tab: "p1", method: "Page.navigate", params: { url: "https://example.com/next" } });
+  await tick();
+  contents.debugger.emit("message", {}, "Page.javascriptDialogClosed", { result: false });
+  await tick();
+  await tick();
+  assert.ok(answer(46).result);
+  const methods = contents.debugger.sent.map((command) => command.method);
+  assert.deepEqual(methods.slice(0, 2), ["Page.handleJavaScriptDialog", "Page.navigate"]);
+  assert.ok(methods.includes("Page.startScreencast"));
 });

@@ -60,6 +60,8 @@ export interface ToolContext {
   secretOnPage(tab: Tab): Promise<boolean>;
   saveScreenshot(data: Buffer, pageUrl: string): string;
   downloads(): Download[];
+  /** Whether the person holds a tab of this browser in the app: the bot's tabs then stay behind theirs. */
+  personHolds?(): boolean;
 }
 
 /** A typed address with its scheme: a bare host means https, loopback http. */
@@ -143,6 +145,17 @@ export function statusOf(context: Pick<ToolContext, "tabs" | "control" | "active
 
 function signInWait(tab: Tab, url: string, prompt: { origin: string; realm: string }): string {
   return `${tab.id} is waiting at ${sanitizeUrl(url) || url}: the site asks for a user name and password (HTTP sign-in for ${prompt.origin}${prompt.realm ? `, "${prompt.realm.slice(0, 100)}"` : ""}). The person watching this browser can answer it, and the page loads once they do; agent_browser_status shows the prompt until then. Do not try to answer it yourself.`;
+}
+
+/**
+ * Leaving a page with its alert, confirm or prompt open dismisses it first, as the page cannot unload under it; the
+ * bot is told. A beforeunload is the navigation's own and is accepted there.
+ */
+async function leaving(tab: Tab): Promise<string | null> {
+  const dialog = tab.page.dialogs.pending;
+  if (!dialog || dialog.type === "beforeunload") return null;
+  await tab.page.dialogs.answer({ accept: false });
+  return `Dismissed the page's open ${dialog.type} dialog ${JSON.stringify(dialog.message.slice(0, 300))} to leave the page.`;
 }
 
 /** A dialog the action opened ends its answer: nothing else runs on the tab until it is answered. */
@@ -247,13 +260,14 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
       const tab = existing ?? await context.control.agent(null, () => context.openTab());
       return context.control.agent(tab, async () => {
         await tab.page.bringToFront();
+        const dismissed = address ? await leaving(tab) : null;
         const opened = address ? await tab.page.navigate(address, { readiness: "load", timeoutMs: remaining(context) }) : null;
         if (opened?.signInPrompt) return textResult(signInWait(tab, opened.url, opened.signInPrompt));
         const lead = opened
           ? `Opened ${sanitizeUrl(opened.url) || opened.url} in ${tab.id}${opened.status && opened.status >= 400 ? `; the site answered HTTP ${opened.status}` : ""}.`
           : `${tab.id} is open at ${sanitizeUrl(tab.page.url()) || tab.page.url()}.`;
         const snapshot = await snapshotResult(context, tab);
-        return withParts(textResult(lead, "Page observed after navigation. Its refs are current, so act on them without another snapshot. Check this result for redirects, sign-in requirements or page errors before reporting task success:"), ...snapshot.content.map((part) => (part.type === "text" ? part.text : null)), dialogNote(tab));
+        return withParts(textResult(dismissed ? `${dismissed} ${lead}` : lead, "Page observed after navigation. Its refs are current, so act on them without another snapshot. Check this result for redirects, sign-in requirements or page errors before reporting task success:"), ...snapshot.content.map((part) => (part.type === "text" ? part.text : null)), dialogNote(tab));
       });
     }
     case "agent_browser_navigate": {
@@ -262,11 +276,12 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
       if ((url === undefined) === (action === undefined)) return errorResult("Pass url or action (back, forward or reload), not both.");
       return act(context, tab, async () => {
         const options = { readiness, timeoutMs: remaining(context) };
+        const dismissed = await leaving(tab);
         const result = url !== undefined
           ? await tab.page.navigate(agentUrl(url), options)
           : action === "back" ? await tab.page.back(options) : action === "forward" ? await tab.page.forward(options) : await tab.page.reload(options);
         if (result.signInPrompt) return textResult(signInWait(tab, result.url, result.signInPrompt));
-        return textResult(`${tab.id} is now at ${sanitizeUrl(result.url) || result.url}${result.status && result.status >= 400 ? ` (HTTP ${result.status})` : ""}. Refs from earlier snapshots do not apply to it; take a snapshot before acting on refs.`);
+        return textResult(`${dismissed ? `${dismissed} ` : ""}${tab.id} is now at ${sanitizeUrl(result.url) || result.url}${result.status && result.status >= 400 ? ` (HTTP ${result.status})` : ""}. Refs from earlier snapshots do not apply to it; take a snapshot before acting on refs.`);
       });
     }
     case "agent_browser_snapshot": {
@@ -280,8 +295,10 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
       const tab = tabOf(context, call.input.tab);
       return act(context, tab, async () => {
         await tab.page.bringToFront();
-        if (call.input.url !== undefined && call.input.url.trim() !== "") await tab.page.navigate(agentUrl(call.input.url), { readiness: "load", timeoutMs: remaining(context) });
-        return textResult(`${pageLabel(describe(tab))}\n${await readText(tab, call.input)}`);
+        const going = call.input.url !== undefined && call.input.url.trim() !== "";
+        const dismissed = going ? await leaving(tab) : null;
+        if (going) await tab.page.navigate(agentUrl(call.input.url!), { readiness: "load", timeoutMs: remaining(context) });
+        return textResult(`${dismissed ? `${dismissed}\n` : ""}${pageLabel(describe(tab))}\n${await readText(tab, call.input)}`);
       });
     }
     case "agent_browser_screenshot": {
@@ -422,12 +439,14 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         return act(context, tab, async () => {
           await tab.page.bringToFront();
           if (address) await tab.page.navigate(address, { readiness: "load", timeoutMs: remaining(context) });
-          return textResult(`Opened ${tab.id} at ${sanitizeUrl(tab.page.url()) || tab.page.url()}. It is in front; take a snapshot to act on it.`);
+          const where = context.personHolds?.() ? "It opened behind the tab the person is using" : "It is in front";
+          return textResult(`Opened ${tab.id} at ${sanitizeUrl(tab.page.url()) || tab.page.url()}. ${where}; take a snapshot to act on it.`);
         });
       }
       if (!which) return errorResult(`Pass tab for ${action}.`);
       const tab = tabOf(context, which);
       if (action === "close") return context.control.agent(null, async () => { await context.closeTab(tab); return textResult(`Closed ${tab.id}.`); });
+      if (context.personHolds?.()) return errorResult(`The person is using a tab of this browser, so ${tab.id} stays behind it. Act on ${tab.id} by passing tab, or wait until they hand the tab back.`);
       return context.control.agent(tab, async () => {
         await tab.page.bringToFront();
         return textResult(`${tab.id} is in front: ${pageLabel(describe(tab))}. Take a snapshot to act on it.`);

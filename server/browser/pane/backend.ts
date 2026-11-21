@@ -84,7 +84,9 @@ export class PaneBackend implements Backend {
     const offInput = opened.onPersonInput(() => {
       for (const page of browser.pages()) page.refs.invalidateAll();
     });
-    const exited = new Promise<void>((resolve) => { browser.connection.onClose(() => { offInput(); resolve(); }); });
+    // A tab the person hands back may have changed under the bot's refs.
+    const offHold = opened.endpoint.onHold((targetId, held) => { if (!held) browser.page(targetId)?.refs.invalidateAll(); });
+    const exited = new Promise<void>((resolve) => { browser.connection.onClose(() => { offInput(); offHold(); resolve(); }); });
     return {
       browser,
       pageLimit: null,
@@ -95,11 +97,9 @@ export class PaneBackend implements Backend {
       onSiteRefusal: (listener) => opened.endpoint.onRefusal(listener),
       onPersonInput: (listener) => opened.onPersonInput(listener),
       personControl: {
-        hold: (targetId, held) => {
-          opened.endpoint.hold(targetId, held);
-          if (!held) browser.page(targetId)?.refs.invalidateAll();
-        },
+        hold: (targetId, held) => opened.endpoint.hold(targetId, held),
         owner: (targetId) => opened.endpoint.owner(targetId),
+        holding: () => opened.endpoint.holding(),
       },
       close: async () => {
         await browser.close();

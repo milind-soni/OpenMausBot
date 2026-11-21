@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
@@ -8,7 +8,7 @@ import { removeTempDir } from "../../testing/cleanup.ts";
 import { importCookies, type CookieSink } from "./importer.ts";
 import { googleCookie, importSite, writable, type WritableCookie } from "./policy.ts";
 import { decryptChromium, deriveCbcKey, readChromium } from "./readers.ts";
-import { chromiumKey, firefoxProfiles, listSources, locate, systemKeyStore } from "./sources.ts";
+import { chromiumKey, firefoxProfiles, keyStoreFor, listSources, locate, systemKeyStore, TEST_COOKIE_KEY_ENV } from "./sources.ts";
 import { binaryCookies, chromiumDatabase, fakeKeys, firefoxProfile, fixtureFiles, gcmValue, localState } from "./testing/fixtures.ts";
 
 const folders: string[] = [];
@@ -277,6 +277,21 @@ describe("the cookies a bot's browser can take", () => {
 });
 
 describe("the system key stores", () => {
+  it("answer a live test's fixture password without ever calling a system tool, and only where it is set", async () => {
+    const calls: string[] = [];
+    const run = async (command: string) => { calls.push(command); return "system\n"; };
+    const fixture = keyStoreFor({ [TEST_COOKIE_KEY_ENV]: "fixture-password" }, run);
+    expect(await fixture.macPassword("Chrome Safe Storage", "Chrome")).toBe("fixture-password");
+    expect(await fixture.linuxPassword("chrome")).toBe("fixture-password");
+    await expect(fixture.windowsUnprotect(Buffer.from("blob"))).rejects.toThrow(/DPAPI/);
+    expect(calls).toEqual([]);
+    expect(await keyStoreFor({}, run).macPassword("Chrome Safe Storage", "Chrome")).toBe("system\n");
+    expect(calls).toEqual(["/usr/bin/security"]);
+    // The packaged app never hands the fixture key to its server.
+    const main = readFileSync(new URL("../../../electron/main.mjs", import.meta.url), "utf8");
+    expect(main).toContain(`if (app.isPackaged) delete childEnv.${TEST_COOKIE_KEY_ENV};`);
+  });
+
   it("ask each system's own tool by its absolute path, with nothing from a caller in a shell", async () => {
     const calls: Array<[string, readonly string[], string | undefined]> = [];
     const run = async (command: string, args: readonly string[], input?: string) => {

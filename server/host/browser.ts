@@ -50,7 +50,7 @@ import { CHROME_BROWSER_SYSTEM_PROMPT } from "../browser/prompt.ts";
 import { PaneBackend } from "../browser/pane/backend.ts";
 import { desktopPaneLink } from "../browser/pane/link.ts";
 import { cookieRequests } from "../browser/cookies/requests.ts";
-import { systemFiles, systemKeyStore } from "../browser/cookies/sources.ts";
+import { keyStoreFor, systemFiles } from "../browser/cookies/sources.ts";
 import { sweep as sweepCookieCopies } from "../browser/cookies/snapshot.ts";
 import { passkeyAnnotation } from "../browser/passkey-notice.ts";
 import { LentChromeDoors, lentChromeGuidance, type ChromeLender } from "../browser/lent-chrome.ts";
@@ -462,7 +462,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   if (paneLink) void sweepCookieCopies(cookieScratch);
   paneLink?.answerCookieRequests(cookieRequests({
     files: systemFiles,
-    keys: () => systemKeyStore(process.env),
+    keys: () => keyStoreFor(process.env),
     scratch: cookieScratch,
     destination: (botId, threadId) => {
       const bot = store.bot(botId);

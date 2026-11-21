@@ -20,6 +20,7 @@ export type PaneToMain = Base & (
   | { op: "cookie-sources-result"; req: number; sources: CookieSource[] }
   | { op: "cookie-import-result"; req: number; result: CookieImportResult }
   | { op: "cookie-offer-result"; req: number; offered: boolean; reason?: string }
+  | { op: "hold-result"; req: number; held: boolean }
 );
 
 /** Electron's cookies.set details. */
@@ -66,6 +67,9 @@ export type PaneToServer = Base & (
   | { op: "cookie-sources"; req: number }
   | { op: "cookie-offer"; req: number; botId: string; threadId: string | null; site: string }
   | { op: "cookie-import"; req: number; botId: string; threadId: string | null; site: string; source: string; profile: string }
+  /** The person takes the tab the panel shows from the bot, or hands it back; every hold ends when the window goes. */
+  | { op: "hold"; req: number; botId: string; threadId: string | null; browser: string; tab: string; held: boolean }
+  | { op: "let-go" }
   | { op: "download"; browser: string; tab: string; guid: string; state: "begin" | "inProgress" | "completed" | "canceled"; url?: string; name?: string; received?: number; total?: number; path?: string }
 );
 

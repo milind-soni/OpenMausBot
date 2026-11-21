@@ -18,6 +18,7 @@ import { createLiveStreamClient, type LiveResume, type LiveStreamClient } from "
 import { BROWSER_HELD_ELSEWHERE } from "../../shared/browser-held";
 import { passkeyWallAt } from "../../shared/passkey-wall";
 import { browserScope, withBrowserScope } from "@/lib/team-browser";
+import { followBounds } from "@/lib/follow-bounds";
 import { useNativeViewObscured } from "@/lib/native-view-obscured";
 import { CookieImportDialog, cookieImportAvailable, siteOfAddress } from "./browser/CookieImportDialog";
 
@@ -172,6 +173,9 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
     if (message.type === "tabs") {
       const next = tabsOf(message.tabs);
       setTabs(next);
+      // The browser runs once it lists its tabs: a view that never draws a frame (one the app's pane covers) is not
+      // left saying it is starting.
+      if (next.length) setStarting(false);
       const active = next.find((tab) => tab.active);
       if (active) {
         setNav((current) => ({ ...current, url: active.url }));
@@ -298,33 +302,45 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
   const profile = state.config?.browserProfiles?.find((candidate) => candidate.id === bot.browserProfile);
   const importable = cookieImportAvailable(state.config) && bot.browserProfile !== "guest"
     && !(profile?.browser === "chrome" && state.config?.browserEngine?.myChrome === true);
-  const paneVisible = paneMode && shown && connected && !asleep && !heldElsewhere && !gone && !starting && !obscured;
+  // A page's alert, confirm or prompt is answered in the panel's own card, under where the native pane would be.
+  const paneVisible = paneMode && shown && connected && !asleep && !heldElsewhere && !gone && !starting && !obscured && !control?.dialog;
   const paneShown = useRef(paneVisible);
   const placePane = useRef<() => void>(() => {});
+  // While the app shows the pane, the stream underneath sends no frames; it resumes as soon as the pane hides.
+  const [paneUp, setPaneUp] = useState(false);
+  const covered = paneVisible && paneUp;
+  const coveredSent = useRef(false);
+  useEffect(() => {
+    if (!stream || (!covered && !coveredSent.current)) return;
+    clientRef.current?.send({ type: "covered", covered });
+    coveredSent.current = covered;
+  }, [stream, covered, connected]);
   paneShown.current = paneVisible;
   useEffect(() => {
     const bridge = window.ogb?.browserPane;
     if (!paneMode || !bridge) return;
     const threadId = scopedThread ?? null;
     const profile = bot.browserProfile ?? null;
+    let placed = 0;
     const place = () => {
       const rect = pageArea.current?.getBoundingClientRect();
       const bounds = rect && rect.width >= 1 && rect.height >= 1
         ? { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) } : null;
-      void bridge.show({ botId: bot.id, threadId, profile, bounds, visible: paneShown.current && bounds !== null }).catch(() => undefined);
+      const visible = paneShown.current && bounds !== null;
+      const asked = ++placed;
+      void bridge.show({ botId: bot.id, threadId, profile, bounds, visible }).then((answer) => { if (asked === placed) setPaneUp(visible && answer?.shown === true); }, () => { if (asked === placed) setPaneUp(false); });
     };
     placePane.current = place;
-    const observer = new ResizeObserver(place);
-    if (pageArea.current) observer.observe(pageArea.current);
-    window.addEventListener("resize", place);
+    const stop = pageArea.current ? followBounds(pageArea.current, place) : () => {};
     return () => {
       placePane.current = () => {};
-      observer.disconnect();
-      window.removeEventListener("resize", place);
+      stop();
+      setPaneUp(false);
       void bridge.show({ botId: bot.id, threadId, profile, bounds: null, visible: false }).catch(() => undefined);
     };
   }, [paneMode, bot.id, bot.browserProfile, scopedThread]);
-  useEffect(() => { placePane.current(); }, [paneVisible, paneMode, bot.id, bot.browserProfile, scopedThread]);
+  // A pane the app makes after the panel asked (as after a server restart) is shown once its tab is listed.
+  useEffect(() => { placePane.current(); }, [paneVisible, paneMode, bot.id, bot.browserProfile, scopedThread, tabs]);
   const pipSupported = stream && supportsBrowserPictureInPicture();
   const passkeyWall = passkeyWallAt(nav.url);
   return <div ref={panel} className={maximized

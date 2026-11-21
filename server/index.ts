@@ -15241,7 +15241,7 @@ const gracefulShutdown = createGracefulShutdown({
       sharedComputers.close(); deviceLinks.close(); stopCloudTeamPolicy(); stopCloudTeamRoster();
       phones.close();
       sharedComputerControl.close();
-      browserLive.closeAll();
+      browserLive.closeAll({ stopping: true });
       desktopViewer.closeAll();
       upgrades.close();
       for (const idle of localVmIdles.values()) idle.cancel();
