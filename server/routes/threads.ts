@@ -283,6 +283,8 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         file = folderEntry
           ? await openMessageFolderEntry(href, folderEntry, roots, maxBytes)
           : kept ? await openMessageFile(kept, [KEPT_ORIGINALS_DIR], maxBytes) : await openMessageFile(href, roots, maxBytes);
+        // Says the bytes are exactly what the person sent, so a comparison may call them that.
+        if (kept) res.setHeader("x-openmausbot-kept-original", "1");
       } catch (error) {
         const code = (error as { code?: unknown } | null)?.code;
         const status = (error as { status?: unknown } | null)?.status;
@@ -449,7 +451,7 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         const chunks = req.iterator({ destroyOnReturn: false }) as AsyncIterable<Buffer>;
         const saved = rawType?.split(";")[0]!.trim().toLowerCase() === XMIND_MIME
           ? await saveXmindUpload(chunks, name, { uploadId })
-          : await saveFile(chunks, name, rawType ?? "", { uploadId, expectedBytes: declaredLength });
+          : await saveFile(chunks, name, rawType ?? "", { uploadId, expectedBytes: declaredLength, keepOriginal: true });
         deps.uploads.note(auth, basename(saved.path));
         return json(res, 201, saved);
       } catch (error) {

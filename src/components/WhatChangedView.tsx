@@ -47,9 +47,11 @@ export function changeBlocks(segments: readonly ChangeSegment[]): { blocks: Bloc
   return { blocks, changes };
 }
 
-async function readSide(file: ComparedFile, signal: AbortSignal): Promise<string> {
+/** `kept`: the server served the copy kept when the person sent the file, so it is exactly their original. */
+async function readSide(file: ComparedFile, signal: AbortSignal): Promise<{ text: string; kept: boolean }> {
   const response = await requestMessageFile(file.path, file.message, signal);
-  return readTableResponse(response, signal, WHAT_CHANGED_MAX_BYTES, "windows-1252");
+  const kept = response.headers.get("x-openmausbot-kept-original") === "1";
+  return { text: await readTableResponse(response, signal, WHAT_CHANGED_MAX_BYTES, "windows-1252"), kept };
 }
 
 const INS = "rounded-[3px] bg-success/15 text-ink no-underline";
@@ -86,7 +88,8 @@ const BlockView = memo(function BlockView({ block, index, open, current, onOpen 
  * a worker, never on the page's thread. */
 export default function WhatChangedContent({ original, edited, fill = false }: { original: ComparedFile; edited: ComparedFile; fill?: boolean }) {
   const [attempt, setAttempt] = useState(0);
-  const [result, setResult] = useState<TextComparison | null>(null);
+  const [result, setResult] = useState<TextComparison | { ok: false; reason: "failed" } | null>(null);
+  const [kept, setKept] = useState(false);
   const [error, setError] = useState<Failure | { reason: string } | null>(null);
   const [current, setCurrent] = useState(-1);
   const [opened, setOpened] = useState<ReadonlySet<number>>(new Set());
@@ -106,11 +109,12 @@ export default function WhatChangedContent({ original, edited, fill = false }: {
         controller.signal.throwIfAborted();
         worker = new Worker(new URL("../lib/text-changes.worker.ts", import.meta.url), { type: "module" });
         worker.onmessage = (event: MessageEvent<TextComparison | { ok: false; reason: "failed" }>) => {
-          if (!controller.signal.aborted) setResult(event.data as TextComparison);
+          if (!controller.signal.aborted) setResult(event.data);
           worker?.terminate();
         };
         worker.onerror = () => { if (!controller.signal.aborted) setError("failed"); worker?.terminate(); };
-        worker.postMessage({ original: before, edited: after });
+        setKept(before.kept);
+        worker.postMessage({ original: before.text, edited: after.text });
       } catch (reason) {
         if (controller.signal.aborted) return;
         if (reason instanceof Error && (reason.message === "size" || reason.message === "encoding")) setError(reason.message);
@@ -139,7 +143,7 @@ export default function WhatChangedContent({ original, edited, fill = false }: {
   const retry = <button type="button" className="mt-3 rounded-lg border border-hairline px-3 py-2 hover:bg-raised" onClick={() => setAttempt(attempt + 1)}>{t("chat.retry")}</button>;
   if (error || (result && !result.ok)) {
     const why = typeof error === "object" && error ? t("changes.refused", { reason: error.reason })
-      : t(error === "size" || (result && !result.ok && result.reason === "too_large") ? "changes.tooLarge" : error === "encoding" ? "changes.notText" : "changes.failed");
+      : t(error === "size" || (result && !result.ok && result.reason !== "failed") ? "changes.tooLarge" : error === "encoding" ? "changes.notText" : "changes.failed");
     return <div className="p-8 text-center text-sm"><p role="alert" className="text-ink-secondary">{why}</p>{retry}</div>;
   }
   if (!result?.ok || !view) return <div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("changes.loading")}</div>;
@@ -155,7 +159,7 @@ export default function WhatChangedContent({ original, edited, fill = false }: {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       <div className="min-w-0 flex-1 text-[13px] text-ink-secondary">
         <p role="status" className="text-ink">{total ? (["changed", "added", "removed", "moved"] as const).filter((kind) => counts[kind]).map((kind) => t(`changes.${kind}`, { count: counts[kind] })).join(" · ") : t("changes.none")}</p>
-        <p dir="auto" className="truncate">{t("changes.against", { name: original.name })}</p>
+        <p dir="auto" className={kept ? "truncate" : undefined}>{t(kept ? "changes.against" : "changes.notKept", { name: original.name })}</p>
       </div>
       {total > 0 && <div className="flex items-center gap-1">
         <span className="text-[12px] text-ink-secondary tabular-nums">{current >= 0 ? t("changes.position", { index: current + 1, count: total }) : null}</span>

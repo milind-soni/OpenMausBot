@@ -1,7 +1,6 @@
 import { constants, copyFileSync, existsSync, linkSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { decodeAttachmentAttribute, escapeAttribute } from "../src/lib/composer-attachments.ts";
-import { keepAttachedOriginals, keptOriginalsDir } from "./attachment-originals.ts";
 import { ATTACHMENTS_DIR } from "./attachments.ts";
 import { botBox } from "./bot-box/box.ts";
 import { boxUploadsDir, taskWorkspaceIds } from "./bot-box/plan.ts";
@@ -15,18 +14,10 @@ const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
  * Each upload the text names is linked into the conversation's uploads folder (plan.ts boxUploadsDir), which the server
  * owns and every box of the conversation sees read-only, and the path is rewritten to it. The bot can read the upload but
  * never write it or swap the folder for a link. Only the text sent to the engine changes; with the box off, or a working
- * folder that is not a conversation's own, nothing does. A path left pointing at the store is one an engine could save
- * over, so the documents it names are kept first (attachment-originals.ts).
+ * folder that is not a conversation's own, nothing does.
  */
 export function attachmentsForBox(text: string, cwd: string | undefined, boxed = botBox.enabled(), dataDir = DATA_DIR, attachmentsDir = ATTACHMENTS_DIR): string {
-  if (!text.includes("<attached-")) return text;
-  const shown = boxedPaths(text, cwd, boxed, dataDir, attachmentsDir);
-  keepAttachedOriginals(shown, attachmentsDir, keptOriginalsDir(dataDir));
-  return shown;
-}
-
-function boxedPaths(text: string, cwd: string | undefined, boxed: boolean, dataDir: string, attachmentsDir: string): string {
-  if (!boxed || !cwd) return text;
+  if (!boxed || !cwd || !text.includes("<attached-")) return text;
   const ids = taskWorkspaceIds(resolve(cwd), resolve(dataDir));
   if (!ids) return text;
   const uploads = resolve(attachmentsDir), shown = boxUploadsDir(resolve(dataDir), ids.botId, ids.threadId);

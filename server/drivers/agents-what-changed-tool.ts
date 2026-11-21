@@ -7,23 +7,29 @@ import type { Json } from "./agents-client.ts";
 
 export const WHAT_CHANGED_TOOL = "what_changed";
 
+/** The internal request carries at most 1 MB (harness/http.ts readBody), so text passed inline must fit under it. */
+export const WHAT_CHANGED_INLINE_MAX = 900_000;
+export const WHAT_CHANGED_INLINE_REFUSAL = "Text passed directly may be about 900 KB in all. Save it to a file in your working folder (up to 2 MB each) and pass original_file / edited_file.";
+
 export async function callWhatChangedTool(args: Json, context: ToolCallContext): Promise<ToolCallResult> {
-  const { ok, body } = await context.client.apiResponse("/api/internal/what-changed", { method: "POST", body: JSON.stringify(args) });
-  return ok ? { text: String(body.text ?? "") } : { text: String(body.error ?? "The comparison could not finish. Try again."), isError: true };
+  const body = JSON.stringify(args);
+  if (body.length > WHAT_CHANGED_INLINE_MAX) return { text: WHAT_CHANGED_INLINE_REFUSAL, isError: true };
+  const { ok, body: answer } = await context.client.apiResponse("/api/internal/what-changed", { method: "POST", body });
+  return ok ? { text: String(answer.text ?? "") } : { text: String(answer.error ?? "The comparison could not finish. Try again."), isError: true };
 }
 
 export const WHAT_CHANGED_TOOL_DEFINITION = {
   name: WHAT_CHANGED_TOOL,
-  description: "Exactly what differs between a text and its edited version: sentences changed ([-old-]{+new+}), added, removed or moved, by paragraph. Use before saying what you changed, or to check an edit.",
+  description: "What differs between a text and its edit: sentences changed ([-old-]{+new+}), added, removed, moved. Use before saying what you changed.",
   inputSchema: {
     type: "object",
     additionalProperties: false,
     properties: {
-      original_file: { type: "string", description: ".md or .txt in your working folder or attached here." },
+      original_file: { type: "string", description: "A .md/.txt you can read or attached here." },
       edited_file: { type: "string" },
-      original_text: { type: "string", description: "Instead of a file." },
+      original_text: { type: "string" },
       edited_text: { type: "string" },
-      start: { type: "integer", description: "Continue a long list from this change." },
+      start: { type: "integer" },
     },
   },
 };

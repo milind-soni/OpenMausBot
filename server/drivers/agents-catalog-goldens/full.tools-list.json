@@ -1225,28 +1225,26 @@
     },
     {
       "name": "what_changed",
-      "description": "Exactly what differs between a text and its edited version: sentences changed ([-old-]{+new+}), added, removed or moved, by paragraph. Use before saying what you changed, or to check an edit.",
+      "description": "What differs between a text and its edit: sentences changed ([-old-]{+new+}), added, removed, moved. Use before saying what you changed.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
         "properties": {
           "original_file": {
             "type": "string",
-            "description": ".md or .txt in your working folder or attached here."
+            "description": "A .md/.txt you can read or attached here."
           },
           "edited_file": {
             "type": "string"
           },
           "original_text": {
-            "type": "string",
-            "description": "Instead of a file."
+            "type": "string"
           },
           "edited_text": {
             "type": "string"
           },
           "start": {
-            "type": "integer",
-            "description": "Continue a long list from this change."
+            "type": "integer"
           }
         }
       },

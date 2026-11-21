@@ -11318,6 +11318,7 @@
   "changes.removed": "Removed {count}",
   "changes.moved": "Moved {count}",
   "changes.against": "Compared with {name}, as you sent it",
+  "changes.notKept": "Your original {name} wasn't kept when you sent it, so this compares with that file as it is now.",
   "changes.none": "No changes: the two versions say the same thing, sentence for sentence.",
   "changes.previous": "Previous change",
   "changes.next": "Next change",
@@ -11328,7 +11329,7 @@
   "changes.minor": "Punctuation or capitals only",
   "changes.loading": "Comparing…",
   "changes.failed": "Couldn't compare these files.",
-  "changes.tooLarge": "These files are too large to compare here (each up to 2 MB).",
+  "changes.tooLarge": "These files are too large to compare here (each up to 2 MB and 20,000 sentences).",
   "changes.notText": "One of these files isn't plain text.",
   "changes.refused": "Couldn't open a file to compare: {reason}",
   "changes.coarse": "Some long stretches differ too much to match sentence by sentence; they show as removed and added."

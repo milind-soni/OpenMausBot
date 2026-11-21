@@ -18,9 +18,9 @@ describe("findEditSource: when What changed is offered", () => {
     }
   });
 
-  it("pairs the only text file on each side whatever their names", () => {
+  it("does not pair files of other names, which may be different documents", () => {
     const messages = [person(`Tighten this\n\n${attached(id(1), "draft.txt")}`), reply()];
-    expect(findEditSource(messages, "b1", [file(id(5), "polished.md")]).get(id(5))?.path).toBe(id(1));
+    expect(findEditSource(messages, "b1", [file(id(5), "polished.md")]).size).toBe(0);
   });
 
   it("offers nothing when it is unsure: two candidates, two returned files with other names, other kinds of file", () => {

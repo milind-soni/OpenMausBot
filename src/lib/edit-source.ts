@@ -18,6 +18,17 @@ export function editStem(name: string): string {
 }
 
 const parsed = new WeakMap<object, TranscriptFileAttachment[]>();
+const positionsOf = new WeakMap<readonly Line[], Map<string, number>>();
+/** Where each message is, built once for each loaded conversation the store hands out. */
+function positions(messages: readonly Line[]): Map<string, number> {
+  let index = positionsOf.get(messages);
+  if (!index) {
+    index = new Map();
+    messages.forEach((line, at) => index!.set(line.id, at));
+    positionsOf.set(messages, index);
+  }
+  return index;
+}
 function attachedTextFiles(line: Line): TranscriptFileAttachment[] {
   let files = parsed.get(line);
   if (!files) {
@@ -31,15 +42,14 @@ function attachedTextFiles(line: Line): TranscriptFileAttachment[] {
  * The rule for offering "What changed" on a file a bot returned, from the conversation's structure alone (no file is
  * read to decide): the returned file is a stored .md, .markdown or .txt on a bot's message; going back from that
  * message, the nearest message of the person's that attached text files is found within the loaded conversation; and
- * exactly one of those files is the source, by the same name once edit words are set aside ("chapter-3 (edited).md" is
- * an edit of "chapter-3.md"), or as the only text file on each side. Anything less certain offers nothing.
+ * exactly one of those files has the same name once edit words are set aside ("chapter-3 (edited).md" is an edit of
+ * "chapter-3.md"). Anything less certain offers nothing: two files of other names may be different documents.
  */
 export function findEditSource(messages: readonly Line[], replyId: string, returned: readonly TranscriptFileAttachment[]): Map<string, EditSource> {
   const found = new Map<string, EditSource>();
   const texts = returned.filter((file) => file.private && isComparableTextName(file.name || attachmentBasename(file.path)));
   if (!texts.length) return found;
-  const index = new Map<string, number>();
-  messages.forEach((line, at) => index.set(line.id, at));
+  const index = positions(messages);
   let at = index.get(replyId);
   if (at === undefined || messages[at]!.role !== "bot") return found;
   let source: { line: Line; files: TranscriptFileAttachment[] } | null = null;
@@ -59,7 +69,7 @@ export function findEditSource(messages: readonly Line[], replyId: string, retur
   for (const file of texts) {
     const stem = editStem(file.name || attachmentBasename(file.path));
     const named = files.filter((candidate) => editStem(candidate.name || attachmentBasename(candidate.path)) === stem);
-    const match = named.length === 1 ? named[0]! : !named.length && files.length === 1 && texts.length === 1 ? files[0]! : null;
+    const match = named.length === 1 ? named[0]! : null;
     if (match && match.path !== file.path) found.set(file.path, { messageId: line.id, path: match.path, name: match.name });
   }
   return found;

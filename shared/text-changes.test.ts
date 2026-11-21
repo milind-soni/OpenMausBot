@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { compareTexts, formatTextChanges, splitSentences, TEXT_CHANGES_MAX_CHARS, wordParts, type TextChanges } from "./text-changes";
+import { compareTexts, formatTextChanges, splitSentences, TEXT_CHANGES_MAX_CHARS, TEXT_CHANGES_MAX_SENTENCES, wordParts, type TextChanges } from "./text-changes";
 
 function changes(before: string, after: string): TextChanges {
   const result = compareTexts(before, after);
@@ -111,13 +111,28 @@ describe("compareTexts bounds", () => {
     expect(result.counts.changed + result.counts.added).toBe(6_000);
   });
 
+  it("never calls a sentence moved in a stretch it could only align roughly", () => {
+    const short = ["The cat sat.", "He left.", "She smiled.", "It rained."];
+    const lines = Array.from({ length: 3_000 }, (_, i) => short[i % short.length]!);
+    const edited = [...lines];
+    edited[200] = "The dog sat.";
+    edited[2_802] = "She frowned.";
+    const result = changes(lines.join(" "), edited.join(" "));
+    expect(result.coarse).toBe(true);
+    expect(result.counts).toMatchObject({ moved: 0, changed: 2, added: 0, removed: 0, unchanged: 2_998 });
+  });
+
+  it("refuses more sentences than it can hold in bounded memory, before aligning anything", () => {
+    expect(compareTexts("A. ".repeat(TEXT_CHANGES_MAX_SENTENCES + 1), "A.")).toEqual({ ok: false, reason: "too_many_sentences" });
+  });
+
   it("keeps a near-identical long text exact through unique anchors", () => {
-    const sentences = Array.from({ length: 20_000 }, (_, i) => `Sentence number ${i} is here.`);
+    const sentences = Array.from({ length: 19_000 }, (_, i) => `Sentence number ${i} is here.`);
     const edited = [...sentences];
     edited[10_000] = "Sentence number 10000 is not here.";
     const result = changes(sentences.join(" "), edited.join(" "));
     expect(result.coarse).toBe(false);
-    expect(result.counts).toMatchObject({ changed: 1, unchanged: 19_999 });
+    expect(result.counts).toMatchObject({ changed: 1, unchanged: 18_999 });
     expect(result.work).toBeLessThan(500_000);
   });
 

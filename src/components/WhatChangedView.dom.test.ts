@@ -30,7 +30,8 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 
-const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+/** Polls until the page shows what the test waits for, letting React and the fake worker run in between. */
+const until = (check: () => void) => vi.waitFor(async () => { await act(async () => {}); check(); }, { timeout: 5_000, interval: 5 });
 
 describe("What changed view", () => {
   it("loads both files through their messages, counts the changes and marks them word by word", async () => {
@@ -38,18 +39,18 @@ describe("What changed view", () => {
     vi.stubGlobal("fetch", vi.fn(async (url: string, init: RequestInit) => {
       const { path } = JSON.parse(String(init.body)) as { path: string };
       asked.push({ url, path });
-      return new Response(path === SOURCE ? ORIGINAL : EDITED);
+      return new Response(path === SOURCE ? ORIGINAL : EDITED, path === SOURCE ? { headers: { "x-openmausbot-kept-original": "1" } } : {});
     }));
     await act(async () => root.render(createElement(WhatChangedContent, {
       original: { path: SOURCE, name: "chapter.md", message: { threadId: "t", messageId: "u1" } },
       edited: { path: RESULT, name: "chapter-edited.md", message: { threadId: "t", messageId: "b1" } },
     })));
-    await settle();
+    await until(() => expect(host.querySelector("[role=status]")?.textContent).toBe("Changed 1 · Added 1"));
     expect(asked).toEqual([
       { url: "/api/threads/t/messages/u1/file", path: SOURCE },
       { url: "/api/threads/t/messages/b1/file", path: RESULT },
     ]);
-    expect(host.querySelector("[role=status]")?.textContent).toBe("Changed 1 · Added 1");
+    expect(host.textContent).toContain("Compared with chapter.md, as you sent it");
     expect([...host.querySelectorAll("del")].map((node) => node.textContent)).toEqual(["walked"]);
     expect([...host.querySelectorAll("ins")].map((node) => node.textContent)).toEqual(["ran", "A stranger watched."]);
     // The unchanged middle is folded away beyond one paragraph of context on each side.
@@ -68,16 +69,16 @@ describe("What changed view", () => {
       original: { path: SOURCE, name: "a.md", message: { threadId: "t", messageId: "u1" } },
       edited: { path: RESULT, name: "b.md", message: { threadId: "t", messageId: "b1" } },
     })));
-    await settle();
-    expect(host.textContent).toContain("No changes: the two versions say the same thing");
+    await until(() => expect(host.textContent).toContain("No changes: the two versions say the same thing"));
+    // Served from the store, not from a copy kept when it was sent: the view says so.
+    expect(host.textContent).toContain("Your original a.md wasn't kept when you sent it");
     vi.stubGlobal("fetch", vi.fn(async () => new Response("x", { headers: { "content-length": String(3 * 1024 * 1024) } })));
     await act(async () => root.render(createElement(WhatChangedContent, {
       key: "again",
       original: { path: SOURCE, name: "a.md", message: { threadId: "t", messageId: "u1" } },
       edited: { path: RESULT, name: "b.md", message: { threadId: "t", messageId: "b2" } },
     })));
-    await settle();
-    expect(host.querySelector("[role=alert]")?.textContent).toBe("These files are too large to compare here (each up to 2 MB).");
+    await until(() => expect(host.querySelector("[role=alert]")?.textContent).toBe("These files are too large to compare here (each up to 2 MB and 20,000 sentences)."));
   });
 });
 
@@ -93,9 +94,8 @@ describe("the What changed control", () => {
     expect(labels()).toContain("What changed");
     vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => new Response(JSON.parse(String(init.body)).path === SOURCE ? ORIGINAL : EDITED)));
     await act(async () => [...host.querySelectorAll("button")].find((button) => button.textContent === "What changed")!.click());
-    await settle();
-    await settle();
-    expect(document.querySelector("dialog h2")?.textContent).toBe("What changed in chapter-edited.md");
+    await until(() => expect(document.querySelector("dialog h2")?.textContent).toBe("What changed in chapter-edited.md"));
+    await until(() => expect(document.querySelector("dialog [role=status]")?.textContent).toBe("Changed 1 · Added 1"));
     expect(document.querySelector("dialog [role=status]")?.textContent).toBe("Changed 1 · Added 1");
     await act(async () => root.render(createElement(StoreContext.Provider, { value: state([{ ...person, text: "Improve the dialogue" }, returned]) }, gallery())));
     expect(labels()).not.toContain("What changed");

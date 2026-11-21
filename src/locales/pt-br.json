@@ -11318,6 +11318,7 @@
   "changes.removed": "Removidas {count}",
   "changes.moved": "Movidas {count}",
   "changes.against": "Comparado com {name}, como você enviou",
+  "changes.notKept": "O seu {name} original não foi guardado quando você o enviou, então esta comparação usa o arquivo como está agora.",
   "changes.none": "Sem mudanças: as duas versões dizem a mesma coisa, frase por frase.",
   "changes.previous": "Mudança anterior",
   "changes.next": "Próxima mudança",
@@ -11328,7 +11329,7 @@
   "changes.minor": "Só pontuação ou maiúsculas",
   "changes.loading": "Comparando…",
   "changes.failed": "Não foi possível comparar estes arquivos.",
-  "changes.tooLarge": "Estes arquivos são grandes demais para comparar aqui (até 2 MB cada).",
+  "changes.tooLarge": "Estes arquivos são grandes demais para comparar aqui (até 2 MB e 20.000 frases cada).",
   "changes.notText": "Um destes arquivos não é texto simples.",
   "changes.refused": "Não foi possível abrir um arquivo para comparar: {reason}",
   "changes.coarse": "Alguns trechos longos diferem demais para alinhar frase por frase; aparecem como removidos e adicionados."

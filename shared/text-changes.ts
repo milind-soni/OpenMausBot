@@ -5,6 +5,9 @@
  * sentence (`coarse`), never left out. */
 
 export const TEXT_CHANGES_MAX_CHARS = 4 * 1024 * 1024;
+/** Sentences per side: past this a comparison is refused, which keeps its memory bounded (20,000 sentences is about
+ * 1.4 MB of ordinary prose, some 300 pages). */
+export const TEXT_CHANGES_MAX_SENTENCES = 20_000;
 const UNIT_MAX_CHARS = 800;
 const GAP_CELLS = 1_000_000;
 const WORK_BUDGET = 60_000_000;
@@ -30,10 +33,11 @@ export interface TextChanges {
   /** Work units spent, for the bounds tests. */
   work: number;
 }
-export type TextComparison = ({ ok: true } & TextChanges) | { ok: false; reason: "too_large" };
+export type TextComparison = ({ ok: true } & TextChanges) | { ok: false; reason: "too_large" | "too_many_sentences" };
 
-interface Unit { text: string; key: string; loose: string; para: number; words?: Set<string> }
-type Op = { op: "eq"; a: number; b: number } | { op: "del"; a: number } | { op: "ins"; b: number };
+interface Unit { text: string; key: string; loose: string; para: number; words?: Uint32Array }
+/** `rough`: from a stretch too costly to align, where a sentence's place says nothing. */
+type Op = { op: "eq"; a: number; b: number } | { op: "del"; a: number; rough?: true } | { op: "ins"; b: number; rough?: true };
 
 let sentences: Intl.Segmenter | undefined;
 let words: Intl.Segmenter | undefined;
@@ -70,32 +74,49 @@ function pushPiece(units: Unit[], text: string, para: number): void {
 
 /** Paragraphs are blocks between blank lines. A line break followed by a lower-case letter is a wrapped sentence, so
  * re-wrapping a paragraph changes nothing; any other line (dialogue, a list item) starts a new sentence. */
-export function splitSentences(text: string): Unit[] {
+export function splitSentences(text: string, max = Infinity): Unit[] | null {
   const units: Unit[] = [];
   let para = 0;
   for (const block of text.split(/\n[\t ]*\n\s*/)) {
     if (!block.trim()) continue;
     para += 1;
     const prepared = block.replace(/\n(?=[\t ]*\p{Ll})/gu, " ");
-    for (const { index, segment } of sentenceSegmenter().segment(prepared)) pushUnit(units, block.slice(index, index + segment.length), para);
+    for (const { index, segment } of sentenceSegmenter().segment(prepared)) {
+      pushUnit(units, block.slice(index, index + segment.length), para);
+      if (units.length > max) return null;
+    }
   }
   return units;
 }
 
-function wordSet(unit: Unit): Set<string> {
+/** A sentence's distinct words as sorted 32-bit hashes: a few bytes a word, where a Set of strings costs hundreds. */
+function wordSet(unit: Unit): Uint32Array {
   if (!unit.words) {
-    unit.words = new Set();
-    for (const part of wordSegmenter().segment(unit.loose)) if (part.isWordLike) unit.words.add(part.segment);
+    const hashes: number[] = [];
+    for (const part of wordSegmenter().segment(unit.loose)) {
+      if (!part.isWordLike) continue;
+      let hash = 2166136261;
+      for (let i = 0; i < part.segment.length; i++) hash = Math.imul(hash ^ part.segment.charCodeAt(i), 16777619);
+      hashes.push(hash >>> 0);
+    }
+    const sorted = Uint32Array.from(hashes).sort();
+    let size = 0;
+    for (let i = 0; i < sorted.length; i++) if (!i || sorted[i] !== sorted[i - 1]) sorted[size++] = sorted[i]!;
+    unit.words = sorted.slice(0, size);
   }
   return unit.words;
 }
 
 function similarity(a: Unit, b: Unit): number {
   const left = wordSet(a), right = wordSet(b);
-  if (!left.size || !right.size) return a.loose === b.loose ? 1 : 0;
+  if (!left.length || !right.length) return a.loose === b.loose ? 1 : 0;
   let shared = 0;
-  for (const word of left) if (right.has(word)) shared += 1;
-  return (2 * shared) / (left.size + right.size);
+  for (let i = 0, j = 0; i < left.length && j < right.length;) {
+    if (left[i] === right[j]) { shared += 1; i++; j++; }
+    else if (left[i]! < right[j]!) i++;
+    else j++;
+  }
+  return (2 * shared) / (left.length + right.length);
 }
 
 class Aligner {
@@ -141,8 +162,8 @@ class Aligner {
     const cells = (a1 - a0) * (b1 - b0);
     if (cells <= GAP_CELLS && this.work + cells <= WORK_BUDGET) return this.lcs(a0, a1, b0, b1);
     this.coarse = true;
-    for (let i = a0; i < a1; i++) out.push({ op: "del", a: i });
-    for (let j = b0; j < b1; j++) out.push({ op: "ins", b: j });
+    for (let i = a0; i < a1; i++) out.push({ op: "del", a: i, rough: true });
+    for (let j = b0; j < b1; j++) out.push({ op: "ins", b: j, rough: true });
   }
 
   /** Sentences that occur exactly once on each side, kept in an order both sides agree on (patience diff). */
@@ -291,25 +312,29 @@ function pairHunk(dels: number[], inss: number[], A: Unit[], B: Unit[], tally: {
 
 export function compareTexts(original: string, edited: string): TextComparison {
   if (original.length > TEXT_CHANGES_MAX_CHARS || edited.length > TEXT_CHANGES_MAX_CHARS) return { ok: false, reason: "too_large" };
-  const A = splitSentences(normalizeText(original)), B = splitSentences(normalizeText(edited));
+  const A = splitSentences(normalizeText(original), TEXT_CHANGES_MAX_SENTENCES);
+  const B = A && splitSentences(normalizeText(edited), TEXT_CHANGES_MAX_SENTENCES);
+  if (!A || !B) return { ok: false, reason: "too_many_sentences" };
   const aligner = new Aligner(A.map((unit) => unit.key), B.map((unit) => unit.key));
   aligner.run(0, A.length, 0, B.length, 0);
   const ops = aligner.out;
   const tally = { work: aligner.work + A.length + B.length };
 
   // A sentence removed in one place and added in another moved: word for word, or with only punctuation or case changed.
+  // A stretch aligned only roughly is left out: its sentences' places were never matched, so nothing there moved.
   const movedFrom = new Map<number, { a: number; exact: boolean }>(), movedAway = new Set<number>();
   for (const field of ["key", "loose"] as const) {
-    const removed = new Map<string, number[]>();
+    const removed = new Map<string, { at: number; list: number[] }>();
     for (const op of ops) {
-      if (op.op !== "del" || movedAway.has(op.a)) continue;
-      const list = removed.get(A[op.a]![field]);
-      if (list) list.push(op.a);
-      else removed.set(A[op.a]![field], [op.a]);
+      if (op.op !== "del" || op.rough || movedAway.has(op.a)) continue;
+      const entry = removed.get(A[op.a]![field]);
+      if (entry) entry.list.push(op.a);
+      else removed.set(A[op.a]![field], { at: 0, list: [op.a] });
     }
     for (const op of ops) {
-      if (op.op !== "ins" || movedFrom.has(op.b)) continue;
-      const from = removed.get(B[op.b]![field])?.shift();
+      if (op.op !== "ins" || op.rough || movedFrom.has(op.b)) continue;
+      const entry = removed.get(B[op.b]![field]);
+      const from = entry && entry.at < entry.list.length ? entry.list[entry.at++] : undefined;
       if (from === undefined) continue;
       movedFrom.set(op.b, { a: from, exact: field === "key" });
       movedAway.add(from);
@@ -364,6 +389,10 @@ export function compareTexts(original: string, edited: string): TextComparison {
       if (step.kind === "added") {
         counts.added += 1;
         segments.push({ kind: "added", para: B[step.b]!.para, text: B[step.b]!.text });
+      } else if (A[step.a]!.key === B[step.b]!.key) {
+        // Paired in a stretch aligned only roughly, and word for word the same: not a change.
+        counts.unchanged += 1;
+        segments.push({ kind: "same", para: B[step.b]!.para, text: B[step.b]!.text });
       } else {
         counts.changed += 1;
         segments.push(changedSegment(A[step.a]!, B[step.b]!));
@@ -381,29 +410,47 @@ const clip = (text: string, max: number) => {
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 };
 
-/** The `what_changed` tool's answer: a JSON line of counts, then one numbered line per change in reading order, words
- * marked `[-removed-]{+added+}`. A page never drops a change silently: its last line says how to list the rest. */
-export function formatTextChanges(result: TextChanges, options: { start?: number; limit?: number; maxChars?: number } = {}): string {
+/** The `what_changed` tool's lines: one per change in reading order, words marked `[-removed-]{+added+}`. */
+export function changeLines(result: TextChanges): string[] {
+  const lines: string[] = [];
+  let index = 0;
+  for (const change of result.segments) {
+    if (change.kind === "same") continue;
+    index += 1;
+    lines.push(change.kind === "changed"
+      ? `${index}. ${change.minor ? "changed (punctuation or case only)" : "changed"}, paragraph ${change.para}: ${clip(change.parts.map((part) => part.op === "same" ? part.text : part.op === "del" ? `[-${part.text}-]` : `{+${part.text}+}`).join(""), 600)}`
+      : change.kind === "added" ? `${index}. added, paragraph ${change.para}: {+${clip(change.text, 500)}+}`
+        : change.kind === "removed" ? `${index}. removed, was paragraph ${change.beforePara} of the original: [-${clip(change.text, 500)}-]`
+          : `${index}. moved, from paragraph ${change.beforePara} to paragraph ${change.para}: ${clip(change.text, 500)}`);
+  }
+  return lines;
+}
+
+export interface ChangeList { head: string; lines: readonly string[]; coarse: boolean }
+
+export function changeList(result: TextChanges): ChangeList {
+  return { head: JSON.stringify({ ...result.counts, ...(result.coarse ? { coarse: true } : {}) }), lines: changeLines(result), coarse: result.coarse };
+}
+
+/** The `what_changed` tool's answer: a JSON line of counts, then one numbered line per change in reading order. A page
+ * never drops a change silently: its last line says how to list the rest. */
+export function formatChangePage(list: ChangeList, options: { start?: number; limit?: number; maxChars?: number } = {}): string {
   const start = Math.max(1, Math.floor(options.start ?? 1)), limit = Math.max(1, options.limit ?? 150), maxChars = options.maxChars ?? 20_000;
-  const head = JSON.stringify({ ...result.counts, ...(result.coarse ? { coarse: true } : {}) });
-  const changes = result.segments.filter((segment) => segment.kind !== "same");
-  if (!changes.length) return `${head}\nNo changes: the two texts say the same thing, sentence for sentence.`;
+  const { head, lines: all } = list;
+  if (!all.length) return `${head}\nNo changes: the two texts say the same thing, sentence for sentence.`;
   const lines = [head];
   let used = head.length, shown = 0;
-  for (let index = start - 1; index < changes.length && shown < limit; index++) {
-    const change = changes[index]!;
-    const line = change.kind === "changed"
-      ? `${index + 1}. ${change.minor ? "changed (punctuation or case only)" : "changed"}, paragraph ${change.para}: ${clip(change.parts.map((part) => part.op === "same" ? part.text : part.op === "del" ? `[-${part.text}-]` : `{+${part.text}+}`).join(""), 600)}`
-      : change.kind === "added" ? `${index + 1}. added, paragraph ${change.para}: {+${clip(change.text, 500)}+}`
-        : change.kind === "removed" ? `${index + 1}. removed, was paragraph ${change.beforePara} of the original: [-${clip(change.text, 500)}-]`
-          : `${index + 1}. moved, from paragraph ${change.beforePara} to paragraph ${change.para}: ${clip(change.text, 500)}`;
+  for (let index = start - 1; index < all.length && shown < limit; index++) {
+    const line = all[index]!;
     if (shown && used + line.length > maxChars) break;
     lines.push(line);
     used += line.length + 1;
     shown += 1;
   }
   const next = start + shown;
-  if (next <= changes.length) lines.push(`${changes.length - next + 1} more not listed here; the counts above are complete. Call again with start: ${next} for the rest.`);
-  if (result.coarse) lines.push("Some long stretches differed too much to match sentence by sentence; their sentences are listed as removed and added.");
+  if (next <= all.length) lines.push(`${all.length - next + 1} more not listed here; the counts above are complete. Call again with start: ${next} for the rest.`);
+  if (list.coarse) lines.push("Some long stretches differed too much to match sentence by sentence; their sentences are listed as removed and added.");
   return lines.join("\n");
 }
+
+export const formatTextChanges = (result: TextChanges, options: { start?: number; limit?: number; maxChars?: number } = {}) => formatChangePage(changeList(result), options);
