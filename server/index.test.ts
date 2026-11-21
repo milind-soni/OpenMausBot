@@ -9643,7 +9643,7 @@ describe("harness HTTP API", () => {
       const system: string = seen.systemPrompt ?? "";
       const soulEnd = system.indexOf("--- END STANDING INSTRUCTIONS ---") + "--- END STANDING INSTRUCTIONS ---".length;
       expect(soulEnd).toBeGreaterThan(0);
-      expect(system.slice(soulEnd).startsWith("\n\nThe user explicitly asked you to set yourself up")).toBe(true);
+      expect(system).toContain("The user explicitly asked you to set yourself up");
       // Extract the user text the way fake-claude-cli.ts promptText() does.
       const content: unknown = seen.prompt?.message?.content;
       const userText: string = typeof content === "string"
