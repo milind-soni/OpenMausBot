@@ -165,8 +165,28 @@ async function openedNote(context: ToolContext, tab: Tab, known: ReadonlySet<str
   return opened.map((candidate) => `The page opened a new tab ${candidate.id} at ${sanitizeUrl(candidate.page.url()) || candidate.page.url()}${candidate === front ? ", now in front" : ""}; take a snapshot to act on it.`).join(" ");
 }
 
+/** The tools a bot may call while a person holds its browser, on the tab in front only: they change nothing there. */
+export const HOLD_READ_TOOLS = ["agent_browser_status", "agent_browser_snapshot", "agent_browser_screenshot", "agent_browser_read", "agent_browser_tabs"] as const;
+
+/** Whether this call is one of HOLD_READ_TOOLS in its reading form. */
+export function readsDuringHold(call: Pick<ToolCall, "name" | "input">): boolean {
+  const input = call.input as { url?: string; action?: string; ref?: string; selector?: string; fullPage?: boolean };
+  if (call.name === "agent_browser_read") return input.url === undefined || input.url.trim() === "";
+  if (call.name === "agent_browser_tabs") return input.action === "list";
+  // An element's picture scrolls it into view, and a whole page's resizes the view while it is taken.
+  if (call.name === "agent_browser_screenshot") return input.ref === undefined && input.selector === undefined && input.fullPage !== true;
+  return call.name === "agent_browser_status" || call.name === "agent_browser_snapshot";
+}
+
+/** A read the bot makes while a person holds the browser: of the tab in front only, which it must not bring forward. */
+function heldRead(context: ToolContext, tab: Tab | null): boolean {
+  if (context.control.owner === null) return false;
+  if (tab && tab !== context.active()) throw new Error(BROWSER_CONTROL_REFUSAL);
+  return true;
+}
+
 /** Runs `run` as bot work on `tab` (or the whole browser), with what the page did and reported after it. */
-async function act(context: ToolContext, tab: Tab | null, run: () => Promise<ToolResult>, { observeChange = false } = {}): Promise<ToolResult> {
+async function act(context: ToolContext, tab: Tab | null, run: () => Promise<ToolResult>, { observeChange = false, read = false } = {}): Promise<ToolResult> {
   return context.control.agent(tab, async () => {
     const known = new Set(context.tabs.list().map((candidate) => candidate.id));
     const before = observeChange && tab ? await observe(tab) : null;
@@ -178,7 +198,7 @@ async function act(context: ToolContext, tab: Tab | null, run: () => Promise<Too
     const after = before && !tab.page.dialogs.pending ? await observe(tab) : null;
     const opened = observeChange ? await openedNote(context, tab, known) : null;
     return withParts(result, before && after ? describePageChange(before, after) : null, opened, dialogNote(tab), context.health(tab));
-  });
+  }, { read });
 }
 
 /** How a picture's pixels map to the CSS pixels the point tools take, so a point read off it lands where it was seen. */
@@ -232,13 +252,14 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
   switch (call.name) {
     case "agent_browser_status": {
       const tab = call.input.tab ? tabOf(context, call.input.tab) : null;
+      const read = heldRead(context, tab);
       return context.control.agent(tab, async () => {
         await context.browser.refreshTargets().catch(() => undefined);
         const status = statusOf(context, tab);
         if (call.as === "url") return textResult(status.url ?? "about:blank");
         if (call.as === "title") return textResult(status.title);
         return textResult(JSON.stringify(status));
-      });
+      }, { read });
     }
     case "agent_browser_open": {
       const { url, tab: which } = call.input;
@@ -271,28 +292,31 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
     }
     case "agent_browser_snapshot": {
       const tab = tabOf(context, call.input.tab);
+      const read = heldRead(context, tab);
       return context.control.agent(tab, async () => {
-        await tab.page.bringToFront();
+        if (!read) await tab.page.bringToFront();
         return withParts(await snapshotResult(context, tab, call.input), dialogNote(tab));
-      });
+      }, { read });
     }
     case "agent_browser_read": {
       const tab = tabOf(context, call.input.tab);
+      const read = readsDuringHold(call) && heldRead(context, tab);
       return act(context, tab, async () => {
-        await tab.page.bringToFront();
+        if (!read) await tab.page.bringToFront();
         if (call.input.url !== undefined && call.input.url.trim() !== "") await tab.page.navigate(agentUrl(call.input.url), { readiness: "load", timeoutMs: remaining(context) });
         return textResult(`${pageLabel(describe(tab))}\n${await readText(tab, call.input)}`);
-      });
+      }, { read });
     }
     case "agent_browser_screenshot": {
       const tab = tabOf(context, call.input.tab);
       const target = call.input.ref !== undefined || call.input.selector !== undefined ? element(call.input, false) : undefined;
+      const read = readsDuringHold(call) && heldRead(context, tab);
       return act(context, tab, async () => {
-        await tab.page.bringToFront();
+        if (!read) await tab.page.bringToFront();
         const shot = await context.paused(tab, () => tab.page.screenshot({ fullPage: call.input.fullPage === true, ...(target && !("x" in target) ? { target } : {}) }));
         const note = pictureNote(shot, target ? "element" : call.input.fullPage === true ? "page" : "viewport");
         return { content: [{ type: "text", text: `Screenshot of ${pageLabel(describe(tab))}, ${note}` }, { type: "image", data: shot.data.toString("base64"), mimeType: "image/png" }] };
-      });
+      }, { read });
     }
     case "agent_browser_click": {
       const tab = tabOf(context, call.input.tab);
@@ -414,7 +438,7 @@ export async function executeTool(context: ToolContext, call: ToolCall): Promise
         return context.control.agent(null, async () => {
           await context.browser.refreshTargets().catch(() => undefined);
           return textResult(JSON.stringify(statusOf(context).tabs));
-        });
+        }, { read: heldRead(context, null) });
       }
       if (action === "new") {
         const address = url !== undefined && url.trim() !== "" ? agentUrl(url) : null;

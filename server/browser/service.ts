@@ -22,7 +22,7 @@ import { isUnanswered } from "./cdp/errors.ts";
 import type { CdpPage } from "./cdp/page.ts";
 import { browserRoot, profileDir, profileHash, profileKind, removeProfile, workspaceId } from "./chrome/profile.ts";
 import { BROWSER_CONTROL_REFUSAL, ProfileControl, type TakeResult } from "./control.ts";
-import { executeTool, personUrl, toolFailure, type ToolContext } from "./dispatch.ts";
+import { executeTool, personUrl, readsDuringHold, toolFailure, type ToolContext } from "./dispatch.ts";
 import { installedExtensions } from "./extensions.ts";
 import { HealthShown, pageHealthLine } from "./health.ts";
 import type { HoldLimits } from "./hold.ts";
@@ -478,7 +478,7 @@ export class BrowserService {
       return errorResult(`The browser could not start: ${error instanceof Error ? error.message : String(error)}`);
     }
     beforeDispatch?.();
-    if (control.owner !== null) throw new Error(BROWSER_CONTROL_REFUSAL);
+    if (control.owner !== null && !readsDuringHold(parsed.call)) throw new Error(BROWSER_CONTROL_REFUSAL);
     control.call = parsed.call.name;
     try {
       const result = await executeTool(this.#context(profile, run, deadline), parsed.call);
