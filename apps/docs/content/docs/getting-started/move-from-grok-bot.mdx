@@ -1,9 +1,9 @@
 ---
 title: Move from Grok Bot
-description: Bring your Grok Bot Bots to MausBot, on your computer or on My Cloud. What comes over (instructions, skills, routines, memories, apps, chats, pages, files), what doesn't, and each step.
+description: Bring your Grok Bot Bots to MausBot, on your computer or on My Cloud. What comes over (instructions, skills, routines, memories, a handover note, apps, chats, pages, files), what doesn't, and each step.
 ---
 
-MausBot is an open-source alternative to Grok Bot, with no tie to xAI. You can bring each of your Grok Bot Bots over, with its instructions, skills, routines, memories, the list of apps it used and, on the desktop app, its whole chat. It takes a few minutes per Bot, and nothing changes in Grok Bot.
+MausBot is an open-source alternative to Grok Bot, with no tie to xAI. You can bring each of your Grok Bot Bots over, with its instructions, skills, routines, memories, a handover note saying where its work stands, the list of apps it used and, on the desktop app, its whole chat. It takes a few minutes per Bot, and nothing changes in Grok Bot.
 
 Grok Bot has no export button. So MausBot gives you a message to send to each Bot, the Bot writes down its own setup, and MausBot reads what it wrote.
 
@@ -17,6 +17,7 @@ Grok Bot has no export button. So MausBot gives you a message to send to each Bo
 | Routines on a schedule | Routines in the same time zone, **paused**, up to 50 per bot. |
 | Routines that start on an event (Slack, GitHub, email, a webhook) or whose schedule can't be read | Saved as a note in the bot's memory, `memory/grok-bot-event-routines.md`, with their trigger and full instruction, so you can set each one up again. |
 | What it remembers, and what it knows about you | The bot's memory (`MEMORY.md`), under *Notes from Grok Bot*. |
+| A handover note: each project or piece of work it has going, where it stands, the next steps, open questions, decisions made, and the files it uses | The first section of the bot's memory (`MEMORY.md`), *Where things stand*, which the bot reads in every conversation. A note over 100 lines keeps its start there and comes over whole in `memory/grok-bot-handover.md`. For a Bot you moved before, moving it again puts its new note in the bot you have, in place of the earlier one, and changes nothing else in its memory. |
 | Connected apps and MCP servers | Listed as apps to connect again. Where the Bot gave a remote MCP server's `https` address, MausBot keeps that address with any key taken out. |
 | Its chat, from the first message (desktop app, with the Grok Bot app on the same computer) | A thread on the new bot called *Chat from Grok Bot*, with every message in order and with its time. A card the Bot showed (a question with choices, a shared template, a request to connect an app, images) comes over as a line saying what it was, with your answer to a question. Keys and tokens in the text are redacted. The bot doesn't reply to it or act on it: carry on in that thread when you're ready. |
 | Its pages: canvases and documents (desktop app, through the Grok Bot connector) | Each page becomes a live page in a thread on the bot called *Pages from Grok Bot*, and shows in the bot's Library. The Bot in Grok Bot rewrites the page for MausBot with the same content and numbers. It is kept in the bot's folder as `from-grok/pages/<title>/page.js`, with the original Grok Bot source beside it. When the bot edits that file, the page updates. |
@@ -50,7 +51,7 @@ A new install shows a *Move from Grok Bot* popup once, after your first chat. **
 
 Choose **Copy the message**, then paste it into your Bot's chat in Grok Bot and send it. Do this once per Bot.
 
-The message asks the Bot to write its whole setup as one file named `grok-bot-export-<its name>.json`: in your Downloads folder if it can write to your computer, otherwise attached to its reply, or as a JSON block in the reply. It also asks the Bot to change nothing, to leave out keys and passwords, and to say what it couldn't read instead of guessing.
+The message asks the Bot to write its whole setup as one file named `grok-bot-export-<its name>.json`: in your Downloads folder if it can write to your computer, otherwise attached to its reply, or as a JSON block in the reply. It also asks the Bot for a handover note, saying what it is working on and where each piece stands, and asks it to change nothing, to leave out keys and passwords, and to say what it couldn't read instead of guessing.
 
 If the setup is too long for one message, the Bot splits it into several parts. Bring back all of them: MausBot puts them together.
 
@@ -70,7 +71,8 @@ Then choose **Continue**.
 
 - that routines come over paused,
 - how many apps need connecting again,
-- which Bots are already here (moved before) and won't be added twice,
+- which Bots bring a handover note,
+- which Bots are already here (moved before) and won't be added twice, and whether their new handover note comes over into the bot you have,
 - on the desktop app, that each Bot's chat comes over too,
 - which skills a safety check keeps off,
 - anything that couldn't be read.
@@ -136,7 +138,8 @@ It never opens Grok Bot's sign-in files or cookies, or the chat of a Bot you are
 | *This has passwords or keys in it, so nothing was read.* | Ask the Bot to write it again without them. |
 | *This was written for a newer OpenMausBot.* | Update MausBot, then try again. |
 | *This couldn't be turned into a bot.* | Ask the Bot to write it again. |
-| *Already here* | That Bot was moved before. Delete the moved bot first if you want to move it again. |
+| *Already here* | That Bot was moved before, so it isn't added twice. Its new handover note still comes over into the bot you have. Delete the moved bot first if you want to move everything again. |
+| *Its handover note couldn't be saved to its memory.* | Move the Bot again. |
 | *No chat came over: the Grok Bot app isn't on this computer.* | Move from the desktop app on the computer where you use Grok Bot. |
 | *No chat came over: the Grok Bot app on this computer has no Bot with this name.* | The Bot wrote a different name from the one Grok Bot shows for it, or it's in the Grok Bot app on another computer. Ask it to write its setup again under the name Grok Bot shows, or move it from that computer. Delete the moved bot first. |
 | *No chat came over: several Bots in the Grok Bot app have this name.* | Ask the Bot to write its setup again with the first 8 characters of its ID after its name, or give it a name of its own in Grok Bot. Delete the moved bot, then move it again. |
