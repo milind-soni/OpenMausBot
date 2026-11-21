@@ -289,7 +289,7 @@ export class AppTriggerManager {
       if (duplicate) throw new AppTriggerError(`The same automation already exists (${duplicate.id}). Use trigger_info to review it, then change that one instead.`, 409);
       try {
         await this.bind(trigger);
-        if (!trigger.enabled) await this.applyEnabled(trigger.remote.triggerId);
+        await this.applyEnabled(trigger.remote.triggerId, trigger.enabled);
       } catch (error) {
         // Composio refused this config: nothing to save. Anything else is retried by reconciliation.
         if (error instanceof BrokerError && !error.transient && error.status !== 403) throw new AppTriggerError(error.message, 400);
@@ -400,7 +400,7 @@ export class AppTriggerManager {
     if (this.options.botState(entry.trigger.botId) === "missing") throw new AppTriggerError("The assigned bot no longer exists.", 410);
     const trigger: StoredTrigger = { ...structuredClone(entry.trigger), remote: { state: "pending" }, updatedAt: this.now() };
     await this.exclusive(async () => {
-      try { await this.bind(trigger); await this.applyEnabled(trigger.remote.triggerId); }
+      try { await this.bind(trigger); await this.applyEnabled(trigger.remote.triggerId, trigger.enabled); }
       catch (error) { this.markRemoteFailure(trigger, error); }
       this.deleted = this.deleted.filter((candidate) => candidate !== entry);
       this.triggers.unshift(trigger);
@@ -691,7 +691,11 @@ export class AppTriggerManager {
 
   /** Several automations with the same settings share one service copy; it goes only when the last one does. */
   private async release(triggerId: string | undefined): Promise<void> {
-    if (!triggerId || this.triggers.some((trigger) => trigger.remote.triggerId === triggerId)) return;
+    if (!triggerId) return;
+    if (this.triggers.some((trigger) => trigger.remote.triggerId === triggerId)) {
+      await this.applyEnabled(triggerId);
+      return;
+    }
     if (this.serviceOutOfReach()) {
       this.releasePending = true;
       return;
@@ -699,8 +703,9 @@ export class AppTriggerManager {
     await this.options.broker.remove(triggerId);
   }
 
-  private async applyEnabled(triggerId: string | undefined): Promise<void> {
-    if (triggerId && !this.serviceOutOfReach()) await this.options.broker.setEnabled(triggerId, this.wantsEnabled(triggerId));
+  /** A new or restored automation is not in this.triggers yet when its binding is configured. */
+  private async applyEnabled(triggerId: string | undefined, alsoEnabled = false): Promise<void> {
+    if (triggerId && !this.serviceOutOfReach()) await this.options.broker.setEnabled(triggerId, alsoEnabled || this.wantsEnabled(triggerId));
   }
 
   /** The owner's own key, or the service switched off. A service merely not reached yet still gets its calls and retries. */
