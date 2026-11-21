@@ -176,6 +176,27 @@ describe("the mark beside the ledger", () => {
     expect(mine.sync()).toBe(false);
   });
 
+  it("observes another writer's renewed lease after a same-size compaction", () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-ledger-compact-sync-"));
+    dirs.push(dir);
+    const file = join(dir, "routines.json");
+    const mine = new RoutineLedger(file, () => START, 0);
+    mine.open();
+    const lease = { machine: "other-machine", boot: "other-boot", until: START + HOUR };
+    const running = ran(START, { state: "running", endedAt: undefined, lease });
+    mine.write([running]);
+    mine.write([running], [], false);
+    const size = readFileSync(mine.file).length;
+    const theirs = new RoutineLedger(file, () => START, 0);
+    theirs.open();
+    theirs.write([{ ...running, lease: { ...lease, until: START + 2 * HOUR } }], [], false);
+    expect(readFileSync(mine.file)).toHaveLength(size);
+    expect(mine.sync()).toBe(true);
+    expect(mine.get("routine-1", START)?.lease?.until).toBe(START + 2 * HOUR);
+    expect(mine.sync()).toBe(false);
+    expect(mine.seq).toBe(theirs.seq);
+  });
+
   it("leaves memory as it was when a write fails, and when the file cannot be read again", () => {
     const w = world(), { ledger } = w.open();
     ledger.write([ran(START)]);
