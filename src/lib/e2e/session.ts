@@ -32,10 +32,13 @@ export class SessionClosed extends Error {
   readonly code: number;
   /** A 4503's `{"retryInMs":N}`. */
   readonly retryInMs?: number;
-  constructor(code: number, retryInMs?: number) {
+  /** The computer said, inside the encryption, that this device was removed (GoAway 3) just before the close. */
+  readonly removed: boolean;
+  constructor(code: number, retryInMs?: number, removed = false) {
     super(`e2e session closed (${code})`);
     this.code = code;
     this.retryInMs = retryInMs;
+    this.removed = removed;
   }
 }
 
@@ -82,7 +85,7 @@ export interface E2EStream {
 }
 
 /** Rejects with SessionClosed (the close code) or a NoiseError (a hard stop: the computer could not be verified). */
-export function dial(options: DialOptions): Promise<PhoneSession> {
+export async function dial(options: DialOptions): Promise<PhoneSession> {
   const { relay } = options;
   const hello = phoneHello(
     { remoteStatic: options.remoteStatic, psk: options.psk, transport: relay ? TRANSPORT_RELAY : TRANSPORT_DIRECT },
@@ -99,7 +102,7 @@ export function dial(options: DialOptions): Promise<PhoneSession> {
     /** Records that arrive while message 2 is checked go to the session in order. */
     const early: MessageEvent[] = [];
     /** A close while message 2 is checked: a failed check wins over it, since a node's 4404 must not hide a hard stop. */
-    let closedWhileFinishing: SessionClosed | null = null;
+    let closedWhileFinishing: CloseEvent | null = null;
     const fail = (error: Error, code?: number) => {
       if (stage === "done") return;
       stage = "done";
@@ -139,24 +142,30 @@ export function dial(options: DialOptions): Promise<PhoneSession> {
         .then(
           (keys) => {
             if (stage !== "finishing") return;
-            if (closedWhileFinishing) return fail(closedWhileFinishing);
             stage = "done";
             clearTimeout(timer);
             const session = new PhoneSession(socket, keys, options);
             for (const message of early) session.receive(message);
-            resolve(session);
+            if (!closedWhileFinishing) return resolve(session);
+            // Closed already: the records before the close are read first, so a GoAway(3) among them is told apart
+            // from a bare 4001 the relay may have sent on its own.
+            const event = closedWhileFinishing;
+            socket.onclose?.call(socket, event);
+            void session.closed.then(() => reject(closedBy(event, session.removed)));
           },
           (error: Error) => fail(error, CLOSE.protocol),
         );
     };
     socket.onclose = (event: CloseEvent) => {
-      const closed = new SessionClosed(event.code, event.code === CLOSE.relayBusy ? retryDelay(event.reason) : undefined);
-      if (stage === "finishing") closedWhileFinishing = closed;
-      else fail(closed);
+      if (stage === "finishing") closedWhileFinishing = event;
+      else fail(closedBy(event));
     };
     socket.onerror = () => {};
   });
 }
+
+const closedBy = (event: CloseEvent, removed = false) =>
+  new SessionClosed(event.code, event.code === CLOSE.relayBusy ? retryDelay(event.reason) : undefined, removed);
 
 /** `{"retryInMs":N}` with N a whole number of ms, at most a minute; anything else asks for no wait. */
 function retryDelay(reason: string): number | undefined {
@@ -328,6 +337,8 @@ export class PhoneSession {
   /** Records not yet sealed, which the socket's buffered amount does not count yet. */
   #unsealed = 0;
   #sending: Promise<void> = Promise.resolve();
+  /** Bytes handed to the socket so far; less its buffered amount, what has gone out. */
+  #handed = 0;
   #pingTimer: ReturnType<typeof setInterval>;
   #pongTimer: ReturnType<typeof setTimeout> | null = null;
   #awaitingPong: number | null = null;
@@ -476,7 +487,23 @@ export class PhoneSession {
     this.#pingCounter = (this.#pingCounter + 1) >>> 0;
     this.#awaitingPong = this.#pingCounter;
     this.#mux.ping(this.#pingCounter);
-    this.#pongTimer = setTimeout(() => this.close(CLOSE.goingAway), timeoutMs);
+    // The deadline is for the computer's answer, so it starts once the ping has gone out, not while the ping waits
+    // behind an upload. A socket that sends nothing for as long is stalled, and closes the same way.
+    const ping = this.#awaitingPong;
+    void this.#sending.then(() => {
+      const pingSent = this.#handed;
+      let gone = -Infinity;
+      let since = Date.now();
+      const check = () => {
+        if (this.#state !== "open" || this.#awaitingPong !== ping) return;
+        const now = this.#handed - this.#socket.bufferedAmount;
+        if (now >= pingSent) return void (this.#pongTimer = setTimeout(() => this.close(CLOSE.goingAway), timeoutMs));
+        if (now > gone) [gone, since] = [now, Date.now()];
+        else if (Date.now() - since >= timeoutMs) return this.close(CLOSE.goingAway);
+        this.#pongTimer = setTimeout(check, DRAIN_POLL_MS);
+      };
+      check();
+    });
   }
 
   /** Seals start now, in frame order, so each takes the next nonce; sends wait for every earlier record. A seal's
@@ -494,7 +521,9 @@ export class PhoneSession {
       this.#unsealed -= plaintext.length;
       // The counter ran out: close before it could repeat; the phone reconnects.
       if ("error" in result) return this.close(result.error instanceof NoiseError ? CLOSE.normal : CLOSE.protocol);
-      if (this.#state !== "closed") this.#socket.send(result.record);
+      if (this.#state === "closed") return;
+      this.#socket.send(result.record);
+      this.#handed += result.record.length;
     });
   }
 }
