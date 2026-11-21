@@ -15,6 +15,12 @@ export interface PersonWaitsDeps {
   /** The conversations that may hold an open card asked since then. */
   threadsWithCards(since: number): readonly string[];
   now?: () => number;
+  /** A card left open in handed-off work: the conversation that handed it on links to it. */
+  waitingElsewhere?(threadId: string, wait: PersonWait, asker: BotRecord): void;
+  /** That card no longer waits on the person. */
+  waitSettled?(threadId: string, cardMessageId: string): void;
+  /** That card waits on the person again. */
+  waitResumed?(threadId: string, cardMessageId: string): void;
 }
 
 const NOTIFIED_ELSEWHERE: ReadonlySet<PersonWait["kind"]> = new Set(["question", "approval"]);
@@ -50,8 +56,11 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
 
   function refresh(threadId: string): void {
     const wait = restsOn(threadId);
+    const before = resting.get(threadId);
     if (wait) resting.set(threadId, wait);
     else resting.delete(threadId);
+    if (before && before.messageId !== wait?.messageId) deps.waitSettled?.(threadId, before.messageId);
+    if (wait && wait.messageId !== before?.messageId) deps.waitResumed?.(threadId, wait.messageId);
     show(threadId, wait);
   }
 
@@ -59,6 +68,8 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
     const message = store.activePath(threadId).find((row) => row.id === messageId);
     const wait = message && personWait(message);
     if (!wait || NOTIFIED_ELSEWHERE.has(wait.kind)) return;
+    const asker = askerOf(threadId, wait);
+    if (asker && resting.get(threadId)?.messageId === wait.messageId) deps.waitingElsewhere?.(threadId, wait, asker);
     const detail = message.secret ? message.secret.reason ?? message.secret.description
       : message.signIn ? message.signIn.reason ?? serverLine(conversationLanguage(threadId), "server.notify.openToSignIn", { site: wait.label })
         : message.connector?.description ?? wait.label;

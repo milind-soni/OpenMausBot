@@ -215,16 +215,22 @@ export class Speaker {
         (error: unknown) => ({ error }),
       );
     };
+    // Renders not yet played, oldest first; the block playing now still holds its place in the window.
+    const queued: Promise<Rendered>[] = [];
+    let started = 0;
+    const fill = () => {
+      while (queued.length < PREFETCH_WINDOW && started < pending.length) {
+        queued.push(render(pending[started]!, started));
+        started += 1;
+      }
+    };
     const run = async (): Promise<void> => {
-      const inFlight: Promise<Rendered>[] = [];
-      let index = 0;
+      let at = 0;
       let playedAll = false;
       for (;;) {
-        while (inFlight.length < PREFETCH_WINDOW && index + inFlight.length < pending.length) {
-          const block = index + inFlight.length;
-          inFlight.push(render(pending[block]!, block));
-        }
-        if (!inFlight.length) {
+        fill();
+        const next = queued[0];
+        if (!next) {
           if (closed || !live()) {
             playedAll = closed;
             break;
@@ -233,10 +239,7 @@ export class Speaker {
           wake = null;
           continue;
         }
-        const current = inFlight.shift()!;
-        const at = index;
-        index += 1;
-        const rendered = await current;
+        const rendered = await next;
         if ("error" in rendered) {
           if (live()) {
             this.set({ ...IDLE, error: rendered.error instanceof Error ? rendered.error.message : String(rendered.error) });
@@ -255,6 +258,8 @@ export class Speaker {
           controller.abort();
           return;
         }
+        queued.shift();
+        at += 1;
       }
       if (playedAll && live() && !finished) this.set(IDLE);
       if (this.request === controller) this.request = null;
@@ -262,11 +267,13 @@ export class Speaker {
     const kick = () => {
       if (finished) return;
       wake?.();
-      if (running || (!pending.length && !closed)) return;
-      // A microtask lets one batch of pushes fill the prefetch window before
-      // the first render starts, the way the whole-text path always did.
+      if (running) {
+        if (live()) fill();
+        return;
+      }
+      if (!pending.length && !closed) return;
       running = true;
-      void Promise.resolve().then(run).finally(() => {
+      void run().finally(() => {
         running = false;
         finish();
       });
