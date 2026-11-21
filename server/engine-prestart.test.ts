@@ -188,4 +188,35 @@ describe("starting a new conversation's engine from the bot's last launch", () =
     expect(credentials.has(NEXT)).toBe(false);
     expect(prestart.waiting()).toEqual([]);
   });
+
+  it.each(["refused", "rejected", "started"] as const)("keeps a replacement reservation when an obsolete start %s", async (outcome) => {
+    const pending: Array<{ resolve: (up: boolean) => void; reject: (error: Error) => void }> = [];
+    const drop = vi.fn();
+    const { prestart, credentials } = host({
+      adapter: () => ({ prestart: {
+        start: () => new Promise<boolean>((resolve, reject) => pending.push({ resolve, reject })),
+        held: () => true, ready: () => false, drop,
+      } }),
+    });
+    prestart.note("claude", firstTurn(), true);
+    prestart.threadMade("bot", NEXT);
+    prestart.drop(NEXT);
+    prestart.threadMade("bot", NEXT);
+    const replacement = credentials.get(NEXT)!;
+    expect(pending).toHaveLength(2);
+    expect(drop).toHaveBeenCalledExactlyOnceWith(NEXT);
+
+    if (outcome === "rejected") pending[0]!.reject(new Error("old launch failed"));
+    else pending[0]!.resolve(outcome === "started");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(prestart.waiting()).toEqual([NEXT]);
+    expect(credentials.get(NEXT)).toBe(replacement);
+    expect(drop).toHaveBeenCalledOnce();
+
+    pending[1]!.resolve(false);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(prestart.waiting()).toEqual([]);
+    expect(credentials.has(NEXT)).toBe(false);
+    expect(drop).toHaveBeenCalledTimes(2);
+  });
 });
