@@ -41,3 +41,10 @@ export function providerToolAllowKey(
   const fingerprint = createHash("sha256").update(JSON.stringify(serverConfig)).digest("hex").slice(0, 16);
   return `provider-tool:${providerInstanceId}:${parsed.server}:${parsed.tool}:${fingerprint}`;
 }
+
+/** Whether `key` is saved for this turn: in the thread's own list, or in its bot's, which Settings → Access shows. A
+ * grant reaches every conversation of the bot, one opened before it was saved and one whose own list was reset alike;
+ * removing it there takes it from both. */
+export function savedToolGrant(key: string | null, ...lists: Array<readonly string[] | undefined>): boolean {
+  return key !== null && lists.some((list) => list?.includes(key) === true);
+}

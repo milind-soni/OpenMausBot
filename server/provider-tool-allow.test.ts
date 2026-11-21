@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { providerMcpTool, providerToolAllowKey, providerToolConfig } from "./provider-tool-allow.ts";
+import { providerMcpTool, providerToolAllowKey, providerToolConfig, savedToolGrant } from "./provider-tool-allow.ts";
 
 describe("provider MCP tool grants", () => {
   it("parses the server and exact tool from provider-facing names", () => {
@@ -46,5 +46,25 @@ describe("provider MCP tool grants", () => {
     const first = providerToolAllowKey("claude", "mcp__linear__list_issues", { url: "https://one.example/mcp" });
     const second = providerToolAllowKey("claude", "mcp__linear__list_issues", { url: "https://two.example/mcp" });
     expect(first).not.toBe(second);
+  });
+
+  it("finds a grant in the thread's list or its bot's, and nothing for a tool with no key", () => {
+    const key = providerToolAllowKey("claude", "mcp__linear__save_issue", { url: "https://linear.example/mcp" })!;
+    expect(savedToolGrant(key, [], [key])).toBe(true);
+    expect(savedToolGrant(key, [key], undefined)).toBe(true);
+    expect(savedToolGrant(key, [], [])).toBe(false);
+    expect(savedToolGrant(key.replace(":save_issue:", ":delete_issue:"), [key], [key])).toBe(false);
+    expect(savedToolGrant(null, [key], [key])).toBe(false);
+  });
+
+  it("keeps a saved grant on the bot when a thread starts with an empty list of its own", async () => {
+    const { Store } = await import("./store.ts");
+    const store = new Store(() => ({ instanceId: "fixture", model: "fixture" }));
+    const bot = store.createBot({ name: "Saved grants fixture" });
+    const key = providerToolAllowKey("fixture", "mcp__composio__COMPOSIO_MULTI_EXECUTE_TOOL", providerToolConfig("composio", {}))!;
+    store.patchBot(bot.id, { alwaysAllow: [key] });
+    const task = store.createTask(bot.id, "Later Ask thread", false, undefined, undefined, "ask");
+    expect(task?.alwaysAllow).toEqual([]);
+    expect(savedToolGrant(key, task?.alwaysAllow, store.bot(bot.id)?.alwaysAllow)).toBe(true);
   });
 });
