@@ -229,8 +229,7 @@ import {
   type GoalStepOutcome,
 } from "./group-goal-run.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
-import { createGoalTurns } from "./host/goal-turns.ts";
-import { createGrokHandoff } from "./host/grok-handoff.ts";
+import { createGoalTurns } from "./host/goal-turns.ts"; import { createGrokHandoff } from "./host/grok-handoff.ts";
 import { createGoalCards, type LiveGoalRun } from "./host/goal-cards.ts";
 import { createOneOnOneGoals } from "./host/one-on-one-goals.ts";
 
