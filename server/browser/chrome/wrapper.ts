@@ -34,6 +34,11 @@ export interface LauncherBox {
 /** agent-browser hands Chrome only stdio (it speaks to it over a port), so 9 is free for the filter. */
 export const LAUNCHER_SECCOMP_FD = 9;
 
+/** Headless Chrome 152–156 still keeps a renderer for its WebUI omnibox popups and reload button, which it never shows.
+ * agent-browser 0.37 passes --disable-features=Translate and Chrome keeps only the last value of a switch, so Translate
+ * stays in the list; agent-browser splits AGENT_BROWSER_ARGS at commas, so only the launcher can pass a list. */
+export const HEADLESS_DISABLED_FEATURES = "--disable-features=Translate,WebUIOmniboxPopup,WebUIOmniboxAimPopup,WebUIReloadButton";
+
 /** Last on the command line, so they win over any switch of the same name: Chrome keeps the last value of a switch. A bot's
  * Chrome never touches the person's keychain or keyring (agent-browser 0.37 passes these too). */
 export function launcherFlags(settings: LauncherSettings, platform: NodeJS.Platform = process.platform): string[] {
@@ -66,11 +71,14 @@ export function launcherScript(settings: LauncherSettings, platform: NodeJS.Plat
   if (platform === "win32") {
     return ["@echo off", `${batchQuote(settings.chrome)} %* ${flags.map(batchQuote).join(" ")}`, ""].join("\r\n");
   }
-  const chrome = `${shellQuote(settings.chrome)} "$@" ${flags.map(shellQuote).join(" ")}`;
+  // $headless holds one word without spaces or patterns, so it is expanded unquoted: nothing at all when Chrome has a window.
+  const chrome = `${shellQuote(settings.chrome)} "$@" ${flags.map(shellQuote).join(" ")} $headless`;
   return [
     "#!/bin/sh",
     ...(settings.home ? [`HOME=${shellQuote(settings.home)}`, "export HOME"] : []),
     ...(settings.timeZone ? [`TZ=${shellQuote(settings.timeZone)}`, "export TZ"] : []),
+    "headless=",
+    `for arg in "$@"; do case "$arg" in --headless|--headless=*) headless=${shellQuote(HEADLESS_DISABLED_FEATURES)} ;; esac; done`,
     ...(settings.box ? boxedLaunch(settings.box, chrome) : [`exec ${chrome}`]),
     "",
   ].join("\n");
