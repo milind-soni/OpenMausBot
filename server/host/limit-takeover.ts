@@ -14,7 +14,7 @@ import { engineFailureKind } from "../drivers/engine-errors.ts";
 import { classifyError } from "../drivers/retry.ts";
 import { failoverLine, limitBackupAllowed, signedOutLine, type LimitFailover } from "../limit-failover.ts";
 import { LimitNotices, limitNoticeText, signedOutNoticeText } from "../limit-notices.ts";
-import { UNNAMED_LIMIT_MS } from "../limit-resets.ts";
+import { UNNAMED_LIMIT_MS, type ObservedNamedRefusal } from "../limit-resets.ts";
 import { redactSecretsInText } from "../redact.ts";
 import type { ModelSelection } from "../../shared/wire.ts";
 
@@ -62,6 +62,7 @@ export interface LimitTakeoverDeps {
   /** Only the usage meter holds this engine, with no refusal of its own. */
   meterOnly?(instanceId: string, model?: string): boolean;
   namedRefusalAt?(instanceId: string): number | null;
+  observeNamedRefusal?(instanceId: string): ObservedNamedRefusal | undefined;
   /** The backups the person chose for this bot, or for every bot. */
   chosen(botId: string): ModelSelection[];
   /** The backups a signed-out AI's turns go to, as for a turn its AI never started: the bot's own list, or the
@@ -255,12 +256,14 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
 
   /** A conversation of `botId` moved from `from` to `to` because `from` was limited or signed out; it goes back once
    * that ends. */
-  const moved = (botId: string, threadId: string, from: ModelSelection, to: ModelSelection, resetsAt?: number, scope?: TakeoverScope): void => {
+  const moved = (botId: string, threadId: string, from: ModelSelection, to: ModelSelection, resetsAt?: number, scope?: TakeoverScope, observed?: ObservedNamedRefusal): void => {
     const meter = scope === "engine" && deps.meterOnly?.(from.instanceId, from.model);
-    const refusalResetAt = scope === "engine" && !meter ? deps.namedRefusalAt?.(from.instanceId) : undefined;
+    const recovered = scope === "engine" && !meter && observed?.recovered() === true;
+    const refusalResetAt = scope === "engine" && !meter ? (recovered ? observed?.reset : deps.namedRefusalAt?.(from.instanceId)) : undefined;
+    const engineRefusal = recovered ? "recovered" : "waiting";
     deps.record({ botId, threadId, from, to, resetsAt: resetsAt ?? null, at: now(), ...(scope === "signed-out" ? { why: "signed-out" } : {}),
       ...(meter ? { meter: true } : {}), ...(scope === "engine" && !meter && resetsAt !== undefined && refusalResetAt !== null
-        ? { engineRefusal: "waiting", ...(refusalResetAt !== undefined ? { refusalResetAt } : {}) } : {}) });
+        ? { engineRefusal, ...(refusalResetAt !== undefined ? { refusalResetAt } : {}) } : {}) });
   };
 
   /** A turn on `selection` worked for this bot: its engine's next limit is a new stretch, and it is plainly signed in. */
@@ -325,6 +328,7 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     },
     tell,
     moved,
+    observeNamedRefusal: deps.observeNamedRefusal,
     /** A turn refused at its start (a limit, or a sign-out) runs on `to` now: the conversation goes back once that ends,
      * the person hears it once, and these are the rows its conversation shows: one line, and for a sign-out told here,
      * the notice whose Sign in fixes it. */

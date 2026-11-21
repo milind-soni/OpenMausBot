@@ -110,6 +110,8 @@ function fixtureUsage(path: string, now: number): PlanUsageReport {
 /** With no reset time named, a usage limit holds its engine this long after its last refusal. */
 export const UNNAMED_LIMIT_MS = 60 * 60_000;
 
+export type ObservedNamedRefusal = { reset: number; recovered: () => boolean };
+
 export class LimitResetClock {
   private readonly options: LimitClockOptions;
   private readonly now: () => number;
@@ -117,6 +119,7 @@ export class LimitResetClock {
   /** When each engine's usage was last read successfully. */
   private readonly readAt = new Map<string, number>();
   private readonly refusals = new Map<string, number>();
+  private readonly observedRefusals = new Map<string, { reset: number; verified: boolean }>();
   /** Engines held by a refusal that named no reset time: the hold is a guess, never shown as a reset. */
   private readonly guessed = new Set<string>();
   /** When each hold began: a usage read from before it (a cached one) says nothing about whether it is over. */
@@ -159,6 +162,15 @@ export class LimitResetClock {
   /** The reset explicitly named by a refusal, independent of the usage meter. */
   namedRefusalAt(engine: string): number | null {
     return this.guessed.has(engine) ? null : this.refusal(engine);
+  }
+
+  /** Keep proof for a named refusal observed before an asynchronous backup check. No persisted token is needed. */
+  observeNamedRefusal(engine: string): ObservedNamedRefusal | undefined {
+    const reset = this.namedRefusalAt(engine);
+    if (reset === null) return undefined;
+    const observed = this.observedRefusals.get(engine) ?? { reset, verified: false };
+    this.observedRefusals.set(engine, observed);
+    return { reset, recovered: () => observed.verified && this.refusal(engine) === null };
   }
 
   /** Whether only the usage meter holds this engine now, with no refusal of its own. */
@@ -214,7 +226,7 @@ export class LimitResetClock {
     else if (event.type === "turn.completed" || event.type === "session.exited") {
       const ran = this.turnEngines.get(event.threadId) ?? engine;
       this.turnEngines.delete(event.threadId);
-      if (event.type === "turn.completed" && event.ok && ran && this.refusals.delete(ran)) { this.guessed.delete(ran); this.saveHolds(); this.options.onChange?.(); }
+      if (event.type === "turn.completed" && event.ok && ran && this.refusals.delete(ran)) { this.observedRefusals.delete(ran); this.guessed.delete(ran); this.saveHolds(); this.options.onChange?.(); }
     }
   }
 
@@ -232,11 +244,12 @@ export class LimitResetClock {
   noteRefusal(engine: string | undefined, resetsAt: number | undefined): void {
     if (!engine || resetsAt === undefined || !Number.isFinite(resetsAt) || resetsAt <= this.now()) return;
     // Without this refresh, a usage read between two refusals would end the hold.
-    if (this.refusals.get(engine) === resetsAt && !this.guessed.has(engine)) { this.heldAt.set(engine, this.now()); this.saveHolds(); return; }
+    if (this.refusals.get(engine) === resetsAt && !this.guessed.has(engine)) { this.observedRefusals.delete(engine); this.heldAt.set(engine, this.now()); this.saveHolds(); return; }
     this.hold(engine, resetsAt, false);
   }
 
   private hold(engine: string, until: number, guessed: boolean): void {
+    this.observedRefusals.delete(engine);
     if (guessed) this.guessed.add(engine);
     else this.guessed.delete(engine);
     this.refusals.set(engine, until);
@@ -264,10 +277,13 @@ export class LimitResetClock {
       this.readAt.set(limit.engine, this.now());
       const reset = this.refusals.get(limit.engine);
       if (reset !== undefined && meterHoldsEngine(row.driver) && fetchedAt >= (this.heldAt.get(limit.engine) ?? 0) && holdGone(row, limit, reset, this.guessed.has(limit.engine))) {
+        const observed = this.observedRefusals.get(limit.engine);
+        this.observedRefusals.delete(limit.engine);
         this.refusals.delete(limit.engine);
         this.heldAt.delete(limit.engine);
         released = true;
         if (row.driver === "codex" && this.options.accounts().some((account) => account.id === limit.engine && account.driver === "codex" && !account.noUsage)) {
+          if (observed?.reset === reset) observed.verified = true;
           recovered.push({ engine: limit.engine, reset });
         }
       }
@@ -292,6 +308,7 @@ export class LimitResetClock {
   /** The person's "Try again now": the engine's hold ends at once, so the next turn goes to it. A refusal holds it again. */
   release(engine: string): boolean {
     if (!this.refusals.delete(engine)) return false;
+    this.observedRefusals.delete(engine);
     this.guessed.delete(engine);
     this.heldAt.delete(engine);
     this.saveHolds();
@@ -365,6 +382,7 @@ export class LimitResetClock {
     const at = this.refusals.get(engine);
     if (at === undefined) return null;
     if (at < this.now() - REFUSAL_GRACE_MS) {
+      this.observedRefusals.delete(engine);
       this.refusals.delete(engine);
       this.guessed.delete(engine);
       this.saveHolds();

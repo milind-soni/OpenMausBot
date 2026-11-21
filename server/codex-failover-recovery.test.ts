@@ -50,7 +50,7 @@ function fixture(accounts = [account(codex.instanceId)]) {
   const takeover = createLimitTakeover({
     file: join(dir, "notices.json"), now: () => now, configs: () => ({}), engines: () => [], context: {},
     blockedUntil: deps.blockedUntil, resetAt: (engine, model) => clock.resetAt(engine, model),
-    namedRefusalAt: (engine) => clock.namedRefusalAt(engine), meterOnly: (engine, model) => clock.meterOnly(engine, model),
+    namedRefusalAt: (engine) => clock.namedRefusalAt(engine), observeNamedRefusal: (engine) => clock.observeNamedRefusal(engine), meterOnly: (engine, model) => clock.meterOnly(engine, model),
     record: (row) => failovers.record(row), chosen: () => [], engineName: deps.engineName, tell: () => {},
   });
   cleanups.push(() => { clock.stop(); rmSync(dir, { recursive: true, force: true }); });
@@ -115,6 +115,31 @@ it("recovers a turn-start refusal whose saved wait includes the later usage wind
   expect(restarted.list()[0]).toMatchObject({ resetsAt: later, refusalResetAt: RESET, engineRefusal: "recovered" });
   expect(restarted.restore("bot", "turn-start")).toBe(true);
   expect(f.switchBack).toHaveBeenCalledTimes(1);
+});
+
+it.each(["verified", "full", "manual", "replacement"] as const)("keeps exact recovery evidence across a pending backup probe (%s)", async (result) => {
+  const f = fixture();
+  f.clock.noteRefusal(codex.instanceId, RESET);
+  const observed = f.takeover.observeNamedRefusal?.(codex.instanceId);
+  let ready!: () => void;
+  const probe = new Promise<void>((resolve) => { ready = resolve; });
+  const move = probe.then(() => f.takeover.moved("bot", "late", codex, backup, RESET, "engine", observed));
+
+  f.advance(AT + 60_000);
+  if (result === "manual") f.clock.release(codex.instanceId);
+  else {
+    const metered = healthy(codex.instanceId);
+    if (result === "full") f.usage({ ...metered, fiveHour: { ...metered.fiveHour, usedPercent: 100, remainingPercent: 0 } });
+    await f.clock.refresh(true);
+    if (result === "replacement") f.clock.noteRefusal(codex.instanceId, RESET + HOUR);
+  }
+  expect(f.failovers.list()).toEqual([]);
+  ready();
+  await move;
+  expect(f.switchBack).not.toHaveBeenCalled();
+  const restarted = new LimitFailovers(f.deps);
+  expect(restarted.list()[0]?.engineRefusal === "recovered").toBe(result === "verified");
+  expect(restarted.restore("bot", "late")).toBe(result === "verified");
 });
 
 it("keeps the existing engine, model, sign-in and switch checks on the next turn", async () => {

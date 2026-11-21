@@ -123,7 +123,7 @@ export class LimitFailovers {
     const resetsAt = failover.resetsAt !== null && failover.resetsAt > failover.at ? failover.resetsAt : null;
     const { engineRefusal, refusalResetAt, ...row } = failover;
     this.rows = [...this.rows.filter((candidate) => candidate.threadId !== failover.threadId), {
-      ...row, from, resetsAt, ...(!chained && resetsAt !== null && engineRefusal === "waiting" ? { engineRefusal, ...(refusalResetAt !== undefined ? { refusalResetAt } : {}) } : {}),
+      ...row, from, resetsAt, ...(!chained && resetsAt !== null && engineRefusal !== undefined ? { engineRefusal, ...(refusalResetAt !== undefined ? { refusalResetAt } : {}) } : {}),
     }].slice(-500);
     this.save();
   }
