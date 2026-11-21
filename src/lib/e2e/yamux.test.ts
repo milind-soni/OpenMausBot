@@ -5,6 +5,7 @@ import { concat, utf8 } from "./bytes.ts";
 import {
   decodeFrame,
   encodeFrame,
+  GO_AWAY,
   INITIAL_WINDOW,
   MAX_DATA_PAYLOAD,
   Mux,
@@ -249,5 +250,35 @@ describe("the browser mux, after the peer's FIN and inside callbacks", () => {
     writable.mux.receive({ type: 1, flags: 2, streamId: second, length: 0 });
     writable.mux.receive({ type: 1, flags: 4, streamId: second, length: 10 });
     expect(writable.log).toEqual(["accepted 1", "writable 1", "reset 1"]);
+  });
+
+  it("refuses a second FIN on a WindowUpdate before granting its window", () => {
+    const { mux, log } = phoneWith();
+    const id = mux.open();
+    mux.receive({ type: 1, flags: 2 | 4, streamId: id, length: 0 });
+    expect(() => mux.receive({ type: 1, flags: 4, streamId: id, length: 10 })).toThrow(YamuxError);
+    expect(log).toEqual(["accepted 1", "ended 1"]);
+  });
+});
+
+describe("the browser mux, GoAway(removed)", () => {
+  const withGoAway = (role: Role) => {
+    const codes: number[] = [];
+    const mux = new Mux(role, { send: () => {}, data: () => {}, ended: () => {}, reset: () => {}, writable: () => {}, goAway: (code) => codes.push(code) });
+    return { mux, codes };
+  };
+
+  it("the phone takes GoAway(3) from the computer", () => {
+    const { mux, codes } = withGoAway("phone");
+    mux.receive({ type: 3, flags: 0, streamId: 0, length: GO_AWAY.removed });
+    expect(codes).toEqual([GO_AWAY.removed]);
+  });
+
+  it("the computer refuses GoAway(3) from a phone as a protocol error", () => {
+    const { mux, codes } = withGoAway("computer");
+    expect(() => mux.receive({ type: 3, flags: 0, streamId: 0, length: GO_AWAY.removed })).toThrow(YamuxError);
+    expect(codes).toEqual([]);
+    mux.receive({ type: 3, flags: 0, streamId: 0, length: GO_AWAY.normal });
+    expect(codes).toEqual([GO_AWAY.normal]);
   });
 });
