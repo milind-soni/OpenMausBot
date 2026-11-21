@@ -58,8 +58,8 @@ export interface QuotaSwitchDeps {
 }
 
 export interface QuotaSwitch {
-  /** Never rejects. Nothing moves to a backup before `settled` resolves: until the turn's conversation has settled it
-   * still reads busy, and a busy conversation's model cannot change. */
+  /** Never rejects. Nothing moves to a backup before `settled` resolves: until the turn's conversation has settled, and
+   * its send to the engine has returned, it still reads busy, and a busy conversation's model cannot change. */
   turnFailed(bot: BotRecord, event: SettledTurn, internal: boolean, settled?: Promise<unknown>): Promise<Message | null>;
   /** Never throws. */
   turnSucceeded(bot: BotRecord, threadId: string): void;

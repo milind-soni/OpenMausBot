@@ -136,13 +136,14 @@ function sentence(text: string): string {
 
 /**
  * True when the failed turn left nothing behind: no tool call, no reply, no file. Its own failure row, the
- * engine's limit sentence (`stopError`, sometimes sent as reply text), a summary of the conversation's earlier context
- * and the hand-off's request card, written just before the turn (sometimes in the same millisecond), do not count.
+ * engine's limit sentence (`stopError`, sometimes sent as reply text), a summary of the conversation's earlier context,
+ * the screen captured as the turn settles and the hand-off's request card, written just before the turn (sometimes in
+ * the same millisecond), do not count.
  */
 export function nothingRan(rows: readonly Message[], since: number, turnId: string | undefined, stopError?: string): boolean {
   const said = stopError?.trim();
   // The turn's digest is written after it ends and only sums it up.
-  return !rows.some((row) => row.at >= since && row.role === "bot" && row.kind !== "digest" && row.kind !== "compaction" && row.roomRequest?.phase !== "request" && (!turnId || !row.turnId || row.turnId === turnId) && (
+  return !rows.some((row) => row.at >= since && row.role === "bot" && row.kind !== "digest" && row.kind !== "compaction" && row.kind !== "screen" && row.roomRequest?.phase !== "request" && (!turnId || !row.turnId || row.turnId === turnId) && (
     row.kind === "activity" ? Boolean(row.tool?.itemId)
       : row.kind === "text" ? Boolean(row.text?.trim()) && row.text!.trim() !== said
         : true));

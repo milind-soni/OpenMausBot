@@ -301,6 +301,18 @@ describe("quota switch", () => {
       expect(resend).toHaveBeenCalledTimes(1);
     });
 
+    it("sends a request again when the screen captured as its refused turn settled is the only row after it", async () => {
+      const turn = begin(bot.threadId, { messageId: said("plan the launch") });
+      coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
+      let settle = () => {};
+      const failing = ranOut(turn, QUOTA, false, thread(), new Promise<void>((resolve) => { settle = resolve; }));
+      store.appendMessage(bot.threadId, { role: "bot", kind: "screen", png: "iVBORw0KGgo=", mime: "image/png" });
+      settle();
+      expect(await failing).toBeNull();
+      expect(thread().modelSelection).toEqual(CODEX);
+      expect(resend).toHaveBeenCalledTimes(1);
+    });
+
     it("sends a request again when a routine's report landed in the conversation while its refused turn settled", async () => {
       const turn = begin(bot.threadId, { messageId: said("plan the launch") });
       coordinator.endTurn(turn.id, { ok: false, text: QUOTA });
