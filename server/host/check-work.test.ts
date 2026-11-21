@@ -138,7 +138,7 @@ describe("check before done", () => {
     expect(readFileSync(brief.match(/- (\S*chapter\.md)/)![1]!, "utf8")).toContain("She left at dawn.");
     expect(brief).toContain(`<result>\n${CHAPTER.trim()}\n</result>`);
     expect(brief).toContain("with no source, a claim the answer gives no ground for");
-    expect(f.posted).toEqual([{ name: "Checked by Vera · passed in round 1", ok: true, input: "Vera · round 1 of 3", output: "Pass - no issues." }]);
+    expect(f.posted).toEqual([{ name: "Checked by Vera · passed in round 1", ok: true, input: "Vera · round 1 of 3", output: "Pass - no issues.", ref: { botId: "v", threadId: "check-1" } }]);
     expect(f.done).toEqual([CHAPTER.trim()]);
     expect(f.closed).toEqual([["check-1", true]]);
     expect(f.host.holds("chat")).toBe(false);
@@ -167,7 +167,7 @@ describe("check before done", () => {
     const f = fixture({ checkerReplies: [{ text: "issues: 2\n1. a\n2. b" }, { text: "issues: 1\n1. b" }, { text: "1 issue\n1. still b" }], fixes: [{ text: "Fix one." }, { text: "Fix two." }] });
     await f.start();
     expect(f.runs.map((run) => run.kind)).toEqual(["check", "fix", "check", "fix", "check"]);
-    expect(f.posted.at(-1)).toEqual({ name: "Checked by Vera · 1 issue still open after 3 rounds", ok: false, input: "Vera · round 3 of 3", output: "1 issue\n1. still b" });
+    expect(f.posted.at(-1)).toEqual({ name: "Checked by Vera · 1 issue still open after 3 rounds", ok: false, input: "Vera · round 3 of 3", output: "1 issue\n1. still b", ref: { botId: "v", threadId: "check-1" } });
     expect(f.done).toEqual(["Fix two."]);
   });
 
@@ -250,11 +250,12 @@ describe("check before done", () => {
     expect(f.posted[0]!.name).toBe("Checked by Other model, in a thread of its own · passed in round 1");
   });
 
-  it("delivers as not checked when the named checker was removed", async () => {
+  it("delivers as not checked when the named checker was removed, as a notice with no link to an empty thread", async () => {
     const f = fixture();
     f.bots.delete("v");
     await f.start();
     expect(f.runs).toEqual([]);
     expect(f.posted).toMatchObject([{ name: "Not checked: the bot chosen to check was removed", ok: false }]);
+    expect(f.posted[0]).not.toHaveProperty("ref");
   });
 });

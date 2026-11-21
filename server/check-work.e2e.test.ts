@@ -52,6 +52,7 @@ it("checks a finished answer with the named bot, has the issues fixed, and ends 
     expect(JSON.stringify(done[0])).toContain("dawn");
     const line = chat.at(-1);
     expect(line.tool).toMatchObject({ ok: true, input: "Vera · round 2 of 3", output: "pass" });
+    expect(line.threadRef).toMatchObject({ botId: checker.id, title: "Check before done" });
     // The fix is the harness's request, never a line the person wrote.
     expect(chat.filter((message) => message.role === "user").map((message) => message.text)).toEqual(["Improve the dialogue in this scene. The source says she left at dawn."]);
     const checks = turns().filter((turn) => turn.botId === checker.id);

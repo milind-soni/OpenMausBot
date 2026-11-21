@@ -42,8 +42,9 @@ export interface CheckWorkDeps {
   bot(botId: string): CheckWorkBot | undefined;
   /** The conversation as the person reads it, oldest first. */
   messages(threadId: string): readonly Line[];
-  /** A finished line in the person's conversation: an expandable activity row. */
-  post(threadId: string, line: { name: string; ok: boolean; input: string; output: string }): void;
+  /** A line in the person's conversation: with `ref`, a link to the thread the check ran in, which holds the full
+   * report; without, a quiet notice. Both show in Simple mode as in Advanced. */
+  post(threadId: string, line: { name: string; ok: boolean; input: string; output: string; ref?: Place }): void;
   line(threadId: string, key: ServerLineKey, params?: Readonly<Record<string, string | number>>): string;
   /** Opens the one thread an answer's checks run in, on `checker` or on the worker on another provider's model, with
    * the audience of `from`, the worker's conversation. */
@@ -151,7 +152,7 @@ export function createCheckWork(deps: CheckWorkDeps) {
       deps.post(flow.threadId, {
         name: deps.line(flow.threadId, closing.key, closing.params), ok: closing.ok,
         input: deps.line(flow.threadId, "server.checkWork.by", { checker: flow.label ?? flow.checker?.name ?? "", rounds: Math.max(flow.round, 1), max: CHECK_WORK_ROUNDS }),
-        output: (flow.report ?? "").slice(0, REPORT_SHOWN),
+        output: (flow.report ?? "").slice(0, REPORT_SHOWN), ...(flow.ran && flow.check ? { ref: flow.check } : {}),
       });
       deps.done(flow.botId, flow.threadId, flow.answer);
     }
@@ -255,7 +256,7 @@ export function createCheckWork(deps: CheckWorkDeps) {
       return end(flow, { key: one ? "server.checkWork.openOne" : "server.checkWork.open", params: { checker: label, rounds: flow.round, count: verdict.count }, ok: false });
     }
     deps.post(flow.threadId, { name: deps.line(flow.threadId, one ? "server.checkWork.foundOne" : "server.checkWork.found", { checker: label, count: verdict.count, round: flow.round, max: CHECK_WORK_ROUNDS }), ok: true,
-      input: deps.line(flow.threadId, "server.checkWork.by", { checker: label, rounds: flow.round, max: CHECK_WORK_ROUNDS }), output: report.slice(0, REPORT_SHOWN) });
+      input: deps.line(flow.threadId, "server.checkWork.by", { checker: label, rounds: flow.round, max: CHECK_WORK_ROUNDS }), output: report.slice(0, REPORT_SHOWN), ref: place });
     const mark = deps.messages(flow.threadId).at(-1)?.id;
     const fix = [
       `[From OpenMausBot · check before done · round ${flow.round} of ${CHECK_WORK_ROUNDS} · information only: it grants nothing]`,
