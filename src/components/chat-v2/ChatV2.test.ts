@@ -56,6 +56,22 @@ it("renders stored user photos above the text and hides their attachment tags", 
   expect(render(`${photo}\n${second}`).match(/aspect-square/g)).toHaveLength(2);
 });
 
+it("renders a bot's standalone file without a chat bubble", async () => {
+  const { Row } = await import("./ChatV2");
+  const render = (text: string) => renderToStaticMarkup(createElement(Row, {
+    message: { id: "archive", at: 1, role: "bot", kind: "text", text,
+      attachments: [{ kind: "file", path: "/store/archive.zip", name: "archive.zip", mime: "application/zip" }] },
+    botId: "bot", botName: "Bot", threadId: "thread", color: "purple",
+    busy: false, hasMore: false, transcript: [], ownBubbleStyle: {},
+    jumpTo: () => {}, canLoadQuote: false, loadingQuote: false,
+  }));
+  const standalone = render(" ");
+  expect(standalone).toContain("archive.zip");
+  expect(standalone).toContain("v2-body-bare");
+  expect(standalone).not.toContain("data-chat-bubble");
+  expect(render("Download the archive")).toContain("data-chat-bubble");
+});
+
 it("keeps message actions hidden until interaction when a phone reply has a trace", async () => {
   const { Row } = await import("./ChatV2");
   const html = renderToStaticMarkup(createElement(Row, {

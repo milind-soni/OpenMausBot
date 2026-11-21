@@ -1,3 +1,4 @@
+import { useDialogResize } from "@/hooks/use-dialog-resize";
 import { useLayoutEffect, useId, useRef, type ReactNode } from "react";
 import { overlayPortal as createPortal } from "@/components/ModalPresence";
 import { X } from "lucide-react";
@@ -17,6 +18,7 @@ export function FilePreviewDialog({ title, onClose, children, returnFocus }: { t
     dialog.showModal();
     return () => { dialog.close(); if (returnFocus?.isConnected) returnFocus.focus(); };
   }, [motion.open, returnFocus]);
+  useDialogResize(ref, motion.open);
   if (!motion.shown) return null;
   return createPortal(
     <dialog ref={ref} inert={!motion.open} aria-labelledby={id} onCancel={(event) => { event.preventDefault(); motion.dismiss(); }}

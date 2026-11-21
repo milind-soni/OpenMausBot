@@ -1,3 +1,4 @@
+import { useDialogResize } from "@/hooks/use-dialog-resize";
 import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { t } from "@/lib/i18n";
@@ -22,6 +23,8 @@ export function DialogTitle({ title, onClose }: { title: string; onClose: () => 
  * right with the one primary last. It keeps Escape and Tab to itself while open. */
 export function SettingsDialog({ title, onClose, children, footer, label }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; label?: string }) {
   const root = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  useDialogResize(panel);
   const close = useRef(onClose);
   close.current = onClose;
   useEffect(() => {
@@ -45,7 +48,7 @@ export function SettingsDialog({ title, onClose, children, footer, label }: { ti
     <Layer modal>
       <div ref={root} role="dialog" aria-modal="true" aria-label={label ?? title} data-settings-look="simple" data-settings-dialog=""
         className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-        <div className="relative flex max-h-full w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl border-[0.5px] border-(--settings-edge) bg-app p-6 text-ink shadow-xl">
+        <div ref={panel} className="relative flex max-h-full w-full max-w-[440px] flex-col gap-4 overflow-y-auto rounded-2xl border-[0.5px] border-(--settings-edge) bg-app p-6 text-ink shadow-xl">
           <DialogTitle title={title} onClose={onClose} />
           {children}
           {footer && <div className="flex items-center justify-end gap-2">{footer}</div>}

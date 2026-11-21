@@ -159,6 +159,9 @@ function RoomTextMessage({
   const cited = user && m.text ? splitTranscriptCitations(m.text) : null;
   const attachments = user && m.text ? splitTranscriptAttachments(cited?.display ?? m.text) : null;
   const display = attachments?.display ?? rawText;
+  const attachmentsOnly = !m.replyToId && !display.trim() && Boolean(user
+    ? attachments?.images.length || attachments?.files.length || cited?.citations.length
+    : m.attachments?.length);
   const [expanded, setExpanded] = useState(false);
   const [viewRaw, setViewRaw] = useState(false);
   const speech = useSpeech();
@@ -207,12 +210,12 @@ function RoomTextMessage({
           </MessageActions>
         )}
         <div
-          data-chat-bubble="" data-look={user ? "user-bubble" : "bot-bubble"}
+          data-chat-bubble={attachmentsOnly ? undefined : ""} data-look={attachmentsOnly ? undefined : user ? "user-bubble" : "bot-bubble"}
           className={cn(
             "w-fit",
             "max-w-[min(var(--chat-bubble-max),var(--chat-bubble-pct))] rounded-2xl text-[15px] leading-relaxed",
             !user && emerging && !streamedReply(m.id) && "turn-answer",
-            (!user && !m.text?.trim() && !m.replyToId && m.attachments?.length)
+            attachmentsOnly
               ? "text-ink"
               : !user && isFormattedReply(m.text ?? "")
                 ? cn(formattedReplyWidth(m.text ?? ""), "px-1 text-ink")
