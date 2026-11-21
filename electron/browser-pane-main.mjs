@@ -15,6 +15,7 @@ const HIDDEN_SIZE = { width: 1280, height: 800 };
 const GRANTED = new Set(["clipboard-sanitized-write", "fullscreen", "pointerLock"]);
 const BOT = /^[\w.-]{1,128}$/;
 
+const hostOf = (url) => { try { return new URL(url).hostname; } catch { return ""; } };
 const isObject = (value) => Object.prototype.toString.call(value) === "[object Object]";
 
 /**
@@ -46,7 +47,14 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
     const session = fromPartition(partition);
     if (configured.has(partition)) return session;
     configured.add(partition);
-    session.setUserAgent(paneUserAgent(session.getUserAgent()));
+    const electronAgent = session.getUserAgent();
+    const agent = paneUserAgent(electronAgent);
+    session.setUserAgent(agent);
+    session.webRequest.onBeforeSendHeaders((details, callback) => {
+      const host = hostOf(details.url);
+      const wanted = host ? paneUserAgent(electronAgent, host) : agent;
+      callback({ requestHeaders: wanted === agent ? details.requestHeaders : { ...details.requestHeaders, "User-Agent": wanted } });
+    });
     session.setPermissionRequestHandler((_contents, permission, callback) => callback(GRANTED.has(permission)));
     session.setPermissionCheckHandler((_contents, permission) => GRANTED.has(permission));
     return session;
@@ -93,11 +101,11 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
     };
   }
 
-  function ping(key) {
+  function ping(key, tab) {
     const last = pings.get(key);
-    if (last !== undefined && now() - last < PING_MS) return;
-    pings.set(key, now());
-    post({ op: "input", browser: key });
+    if (last !== undefined && last.tab === tab && now() - last.at < PING_MS) return;
+    pings.set(key, { tab, at: now() });
+    post({ op: "input", browser: key, tab });
   }
 
   async function targetOf(contents) {
@@ -131,7 +139,7 @@ export function createBrowserPanes({ createView, fromPartition, owner, chromeVer
     contents.on("render-process-gone", () => removeTab(key, entry.tab, true));
     contents.on("destroyed", () => removeTab(key, entry.tab));
     for (const event of ["did-navigate", "did-navigate-in-page", "page-title-updated"]) contents.on(event, () => info(key, entry));
-    contents.on("input-event", (_event, input) => { if (PERSON_INPUT.has(input?.type)) ping(key); });
+    contents.on("input-event", (_event, input) => { if (PERSON_INPUT.has(input?.type)) ping(key, entry.tab); });
     contents.setWindowOpenHandler(() => ({
       action: "allow",
       // OAuth pop-ups answer their opener, so the popup is the page's own child, made a tab here.

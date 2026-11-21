@@ -194,7 +194,7 @@ export class PaneLink {
         open.endpoint.tabGone(message.tab, message.crashed === true);
         return;
       case "input":
-        open.endpoint.personInput();
+        open.endpoint.personInput(message.tab);
         for (const listener of open.inputs) {
           try { listener(); } catch {}
         }

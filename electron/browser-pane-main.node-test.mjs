@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import test from "node:test";
 
 import { createBrowserPanes } from "./browser-pane-main.mjs";
+import { paneUserAgent } from "./browser-pane-wire.mjs";
 
 const PARTITION = "persist:omb-pane-0123456789abcdef01234567";
 const MSG = "openmausbot:browser-pane";
@@ -65,6 +66,7 @@ function fakeElectron() {
         setPermissionCheckHandler(handler) { this.check = handler; },
         async clearStorageData() { this.erased++; },
         async clearCache() {},
+        webRequest: { onBeforeSendHeaders(handler) { sessions.get(name).headers = handler; } },
       });
     }
     return sessions.get(name);
@@ -104,6 +106,17 @@ test("opens a profile on its partition with Electron's and the app's tokens out 
   assert.equal(granted, false);
   assert.equal(session.check(null, "fullscreen"), true);
   assert.equal(session.check(null, "notifications"), false);
+  let sent = null;
+  session.headers({ url: "https://accounts.example/", requestHeaders: { "User-Agent": opened.userAgent, Accept: "*/*" } }, (answer) => { sent = answer; });
+  assert.deepEqual(sent.requestHeaders, { "User-Agent": opened.userAgent, Accept: "*/*" });
+});
+
+test("can give one host Electron's own user agent, and every other the stripped one", () => {
+  const electronAgent = "Mozilla/5.0 Chrome/146.0.7680.0 Electron/43.7.9 OpenMausBot/0.1.175 Safari/537.36";
+  const hosts = new Map([["accounts.example", "electron"]]);
+  assert.equal(paneUserAgent(electronAgent, "Accounts.Example", hosts), electronAgent);
+  assert.equal(paneUserAgent(electronAgent, "example.com", hosts), "Mozilla/5.0 Chrome/146.0.7680.0 Safari/537.36");
+  assert.equal(paneUserAgent(electronAgent), "Mozilla/5.0 Chrome/146.0.7680.0 Safari/537.36");
 });
 
 test("refuses a partition outside the pane pattern", () => {
@@ -201,7 +214,9 @@ test("tells the server when the person uses a pane, at most four times a second"
   contents.emit("input-event", {}, { type: "keyDown" });
   advance(300);
   contents.emit("input-event", {}, { type: "char" });
-  assert.equal(posted.filter((message) => message.op === "input").length, 2);
+  const pings = posted.filter((message) => message.op === "input");
+  assert.equal(pings.length, 2);
+  assert.equal(pings[0].tab, "p1");
 });
 
 test("draws a hidden pane for a screenshot, then hides it again", async () => {

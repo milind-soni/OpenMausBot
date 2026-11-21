@@ -73,8 +73,8 @@ export class FakeMain implements PanePort {
     return created.tab;
   }
 
-  personInput(browser: string): void {
-    this.post({ op: "input", browser });
+  personInput(browser: string, tab?: string): void {
+    this.post({ op: "input", browser, ...(tab ? { tab } : {}) });
   }
 
   async #handle(message: PaneToMain): Promise<void> {

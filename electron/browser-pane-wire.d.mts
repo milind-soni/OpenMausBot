@@ -23,7 +23,7 @@ export type PaneToServer = Base & (
   | { op: "tab"; browser: string; tab: string; target: string; url: string; title: string; opener?: string }
   | { op: "tab-gone"; browser: string; tab: string; crashed?: boolean }
   | { op: "closed"; browser: string; reason: string }
-  | { op: "input"; browser: string }
+  | { op: "input"; browser: string; tab?: string }
   | { op: "which"; req: number; botId: string; threadId: string | null }
 );
 
@@ -31,4 +31,5 @@ export declare const PANE_MESSAGE: "openmausbot:browser-pane";
 export declare const PANE_PARTITION: RegExp;
 export declare function paneMessageToMain(raw: unknown): PaneToMain | null;
 export declare function paneMessageToServer(raw: unknown): PaneToServer | null;
-export declare function paneUserAgent(userAgent: string): string;
+export declare const PANE_UA_HOSTS: Map<string, "electron">;
+export declare function paneUserAgent(userAgent: string, host?: string, hosts?: ReadonlyMap<string, "electron">): string;

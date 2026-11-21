@@ -121,6 +121,30 @@ describe("the bots' browser as desktop panes", () => {
     expect(Date.now() - started).toBeGreaterThanOrEqual(250);
   });
 
+  it("lets the person hold a tab: the bot's input is refused, its refs drop on release, and the tab says who acted last", async () => {
+    const { main, service, call, text } = setup({ quietMs: 0 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const run = service.profiles()[0]!.run!;
+    const control = run.opened.personControl!;
+    const targetId = run.browser.activePage!.targetId;
+    expect(control.owner(targetId)).toBe(null);
+    control.hold(targetId, true);
+    expect(control.owner(targetId)).toBe("person");
+    const refused = await call("agent_browser_click", { selector: "#go" });
+    expect(refused.isError).toBe(true);
+    expect(text(refused)).toContain("The person is using this tab.");
+    expect(main.commands.some((command) => command.method.startsWith("Input."))).toBe(false);
+    control.hold(targetId, false);
+    const stale = await call("agent_browser_click", { ref: "e2" });
+    expect(text(stale)).toContain("Take a fresh snapshot");
+    expect((await call("agent_browser_click", { selector: "#go" })).isError).toBeUndefined();
+    expect(control.owner(targetId)).toBe("bot");
+    main.personInput("bot:a", "p1");
+    await sleep(5);
+    expect(control.owner(targetId)).toBe("person");
+    expect(main.commands.filter((command) => command.method === "Emulation.setFocusEmulationEnabled").map((command) => command.params)).toEqual([{ enabled: true }]);
+  });
+
   it("refuses to emulate a page size on a pane, which the app window sizes", async () => {
     const { main, call } = setup();
     await call("agent_browser_open", { url: "https://example.com/a" });

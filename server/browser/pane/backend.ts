@@ -53,6 +53,13 @@ export class PaneBackend implements Backend {
       version: opened.version,
       exited,
       onPersonInput: (listener) => opened.onPersonInput(listener),
+      personControl: {
+        hold: (targetId, held) => {
+          opened.endpoint.hold(targetId, held);
+          if (!held) browser.page(targetId)?.refs.invalidateAll();
+        },
+        owner: (targetId) => opened.endpoint.owner(targetId),
+      },
       close: async () => {
         await browser.close();
         this.#link.close(request.key);

@@ -46,7 +46,16 @@ interface TabState extends PaneTab {
   casting: Set<string>;
   /** Commands of the tab's own session go out in order behind a held input. */
   gate: Promise<void>;
+  /** The person holds the tab: the bot's input is refused until they let go. */
+  held: boolean;
+  lastPerson: number;
+  lastBot: number;
 }
+
+/** Who acted last in a tab, the person holding it counting as the person. */
+export type PaneOwner = "person" | "bot" | null;
+
+export const PERSON_HOLDS_TAB = "The person is using this tab. Wait until they hand it back, then take a fresh snapshot before acting.";
 
 class Refusal extends Error {}
 
@@ -114,7 +123,7 @@ export class PaneEndpoint implements CdpTransport {
       this.#event("Target.targetInfoChanged", { targetInfo: this.#info(known) });
       return;
     }
-    const state: TabState = { ...tab, announced: false, viewers: new Set(), casting: new Set(), gate: Promise.resolve() };
+    const state: TabState = { ...tab, announced: false, viewers: new Set(), casting: new Set(), gate: Promise.resolve(), held: false, lastPerson: 0, lastBot: 0 };
     this.#tabs.set(tab.tab, state);
     if (this.#autoAttach) this.#announce(state);
   }
@@ -151,9 +160,25 @@ export class PaneEndpoint implements CdpTransport {
     for (const viewer of state.viewers) this.#event(method, params, viewer);
   }
 
-  /** The person pressed, typed or scrolled in one of these panes. */
-  personInput(): void {
+  /** The person pressed, typed or scrolled in one of these panes (`tab` when the app knows which). */
+  personInput(tab?: string): void {
     this.#lastInput = Date.now();
+    const state = tab ? this.#tabs.get(tab) : undefined;
+    if (state) state.lastPerson = this.#lastInput;
+  }
+
+  /** While held the bot's input to that tab is refused; reading the page still works. */
+  hold(targetId: string, held: boolean): void {
+    for (const tab of this.#tabs.values()) if (tab.target === targetId) tab.held = held;
+  }
+
+  owner(targetId: string): PaneOwner {
+    for (const tab of this.#tabs.values()) {
+      if (tab.target !== targetId) continue;
+      if (tab.held || (tab.lastPerson > 0 && tab.lastPerson >= tab.lastBot)) return "person";
+      return tab.lastBot > 0 ? "bot" : null;
+    }
+    return null;
   }
 
   closed(reason: string): void {
@@ -259,13 +284,19 @@ export class PaneEndpoint implements CdpTransport {
     }
     if (method === "Emulation.setDeviceMetricsOverride") throw new Refusal("A desktop pane is sized by the app window.");
     const ahead = tab.gate;
-    if (method.startsWith("Input.")) {
+    const input = method.startsWith("Input.");
+    if (input) {
+      if (tab.held) throw new Refusal(PERSON_HOLDS_TAB);
       const released = ahead.then(() => this.#personStill());
       tab.gate = released;
       await released;
+      if (tab.held) throw new Refusal(PERSON_HOLDS_TAB);
+      tab.lastBot = Date.now();
     } else {
       await ahead;
     }
+    // Real input follows window focus; a pane the person is not in must still take the bot's keys (Chromium 146).
+    if (method === "Page.enable") void this.#channel.command(tab.tab, "Emulation.setFocusEmulationEnabled", { enabled: true }).catch(() => undefined);
     if (method === "Page.navigate" || method === "Page.reload") await this.#prime(tab.tab);
     // The person's page outlives this server: a frame paused for it would stay frozen after a server restart.
     const sent = method === "Target.setAutoAttach" ? { ...params, waitForDebuggerOnStart: false } : params;

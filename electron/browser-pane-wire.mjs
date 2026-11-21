@@ -57,7 +57,15 @@ export function paneMessageToServer(raw) {
   return read(raw, TO_SERVER);
 }
 
-/** The app's tokens taken out of Electron's user agent, so sites see the Chromium it is. */
-export function paneUserAgent(userAgent) {
+/**
+ * Hosts that get Electron's own user agent instead of the stripped one. Known open risk: sign-in walls (Google's
+ * "this browser may not be secure", Cloudflare Turnstile) judge embedded browsers by it, and which choice passes is not
+ * settled; a host goes here only after a live test in the app.
+ */
+export const PANE_UA_HOSTS = new Map();
+
+/** The user agent a pane sends to `host`: Electron's with the app's tokens taken out, so sites see the Chromium it is. */
+export function paneUserAgent(userAgent, host = "", hosts = PANE_UA_HOSTS) {
+  if (hosts.get(String(host).toLowerCase()) === "electron") return String(userAgent);
   return String(userAgent).replace(/\s(?:Electron|OpenMausBot|openmausbot)\/\S+/g, "").replace(/\s{2,}/g, " ").trim();
 }
