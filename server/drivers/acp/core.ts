@@ -703,7 +703,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               return send({ jsonrpc: "2.0", id: msg.id, result: { outcome: { outcome: "selected", optionId: allow } } });
             }
           }
-          const tool = kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool";
+          const mcpTitle = !isQuestion && !/^(?:execute|edit|delete|move)$/.test(kind) && typeof toolCall.title === "string" && /^mcp__[\w-]+__[\w.-]+$/.test(toolCall.title) ? toolCall.title : undefined; // an MCP call keeps its name, so a saved grant finds it
+          const tool = mcpTitle ?? (kind === "execute" ? "shell" : kind === "edit" ? "edit" : kind || "tool");
           const isShellCommand = !isQuestion && kind === "execute" && !/^mcp(?:__|[.:])/i.test(String(toolCall.title ?? ""));
           const rawSummary = String(toolCall.rawInput?.command ?? toolCall.title ?? tool);
           const summary = rawSummary.slice(0, isQuestion ? MAX_QUESTION_TEXT : 200);
@@ -771,8 +772,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             emit({ ...base(threadId, current.turnId), type: "runtime.error", message: DENY_TIMEOUT_NOTE });
             finish("deny", "timeout");
           }, 15 * 60_000);
-          timer.unref?.();
-          current.asks.set(requestId, finish);
+          timer.unref?.(); current.asks.set(requestId, finish);
           emit({
             ...base(threadId, current.turnId),
             type: "request.opened",

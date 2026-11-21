@@ -195,7 +195,7 @@ describe("the safety floor in the chat runtime", () => {
     const f = await fixture([WIPE]);
     await f.start({ approvalMode: "ask" });
     const card = await f.recorder.until((event) => event.type === "request.opened");
-    expect(card).toMatchObject({ requestType: "permission", tool: "shell_exec" });
+    expect(card).toMatchObject({ requestType: "permission", tool: "mcp__shell__exec" });
     expect(f.handed()).toEqual([]);
     expect(await f.instance.adapter.respondToRequest(f.threadId, card.requestId!, { behavior: "allow" })).toBe("allowed-once");
     expect(await f.completed()).toMatchObject({ ok: true });
@@ -209,7 +209,7 @@ describe("the safety floor in the chat runtime", () => {
     const f = await fixture(["ls", WIPE, "pwd"]);
     await f.start({ approvalMode: "ask" });
     const card = await f.recorder.until((event) => event.type === "request.opened");
-    expect(card).toMatchObject({ tool: "shell_exec", allowSession: true });
+    expect(card).toMatchObject({ tool: "mcp__shell__exec", allowSession: true });
     await f.instance.adapter.respondToRequest(f.threadId, card.requestId!, { behavior: "allow", always: true });
     await f.completed();
     // one card for the whole turn: the grant covered the rest, except the wipe
