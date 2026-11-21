@@ -78,6 +78,7 @@ async function fixture(over: Partial<Record<keyof BotMessageRouteDeps, unknown>>
         if (match.kind === "conflict") throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
         if (match.kind === "match") return { ok: true as const, threadId: input.threadId, message: match.message };
         const waiting = queuedSteeredMessage(input.botId, input.threadId, input.sendId);
+        if (waiting && (waiting.text !== input.text || waiting.replyToId !== input.replyTo?.id)) throw Object.assign(new Error("sendId already belongs to another message"), { status: 409 });
         if (waiting) return { ok: true as const, queued: true as const, queueId: waiting.id, threadId: input.threadId };
       }
       if (state.busy) {
@@ -353,11 +354,24 @@ describe("POST /api/bots/:id/messages and who typed it", () => {
   });
 
   it("keeps the first sender's session when a conflicting send reuses a queued line's sendId", async () => {
-    const { threadId, post } = await fixture();
-    expect((await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "pc-session" })).status).toBe(202);
+    const { threadId, post, state } = await fixture();
+    state.busy = true;
+    const first = await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "pc-session" });
+    expect(first.status).toBe(202);
+    expect(first.body).toMatchObject({ queued: true });
     const conflict = await post({ threadId, sendId: SEND, text: "Something else" }, "", { "x-test-session": "laptop-session" });
     expect(conflict.status, JSON.stringify(conflict.body)).toBe(409);
     expect(sendingSession(threadId, SEND)).toBe("pc-session");
+  });
+
+  it("notes no session for a refused send, so an accepted retry from another session names its own", async () => {
+    const { threadId, post, state } = await fixture();
+    state.refuse = new DirectSendRefused(409, { error: "This workspace is at its spend limit.", code: "spend_cap" });
+    expect((await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "pc-session" })).status).toBe(409);
+    expect(sendingSession(threadId, SEND)).toBeUndefined();
+    state.refuse = null;
+    expect((await post({ threadId, sendId: SEND, text: words }, "", { "x-test-session": "laptop-session" })).status).toBe(202);
+    expect(sendingSession(threadId, SEND)).toBe("laptop-session");
   });
 
   it("does not take a bare loopback send as a person's on a headless server, where it may be a bot's shell", async () => {
