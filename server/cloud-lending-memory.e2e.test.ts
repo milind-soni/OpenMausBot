@@ -1127,7 +1127,7 @@ it("an answer from a turn that can't use the Mac ends it for parked handed-on wo
   expect((await parkedThenAnswered(sender, receiver, () => toolsFor(() => say(owner, locked, "Go.", locked.threadId)))).computers).toHaveLength(0);
   await stopRunningTurns(true);
 }, 90_000);
-it("a conversation set to Ask on a Full bot can't hand the Mac to a Full teammate; the same bot on Full can", async () => {
+it("a conversation set to Ask on a Full bot never hands the Mac to work running above Ask; the same bot on Full can", async () => {
   const sender = await newBot("Thread at Ask", "held");
   const receiver = await newBot("Stays at Full", "held");
   await review(receiver);
@@ -1138,10 +1138,20 @@ it("a conversation set to Ask on a Full bot can't hand the Mac to a Full teammat
   const mine = await newThread(sender);
   const set = await api("PATCH", `/api/bots/${sender.id}/tasks/${mine}`, { token: owner, body: { approvalMode: "ask" } });
   expect(set.status, JSON.stringify(set.body)).toBe(200);
+  // The work thread it opens on the Full teammate takes the conversation's Ask, so that work runs at Ask, Mac and all.
   const atAsk = await handedThread({ id: sender.id, threadId: mine }, receiver);
-  expect((await sees(atAsk.tools)).computers).toHaveLength(0);
+  const levelOf = async (threadId: string) => ((await api("GET", "/api/bots", { token: owner })).body.bots.find((bot: any) => bot.id === receiver.id)
+    .tasks as any[]).find((task) => task.threadId === threadId)?.approvalMode;
+  expect(await levelOf(atAsk.thread)).toBe("ask");
+  expect((await sees(atAsk.tools)).computers).toHaveLength(1);
   await stopRunningTurns();
-}, 90_000);
+  // Raised to Full access, that thread runs above the conversation handing it more work: the Mac stays out of reach.
+  expect((await api("PATCH", `/api/bots/${receiver.id}/tasks/${atAsk.thread}`, { token: owner, body: { approvalMode: "full" } })).status).toBe(200);
+  const above = await handedThread({ id: sender.id, threadId: mine }, receiver);
+  expect(above.thread).toBe(atAsk.thread);
+  expect((await sees(above.tools)).computers).toHaveLength(0);
+  await stopRunningTurns();
+}, 120_000);
 it("work handed on with nothing coming back doesn't keep the Mac, since Stop on the sender doesn't reach it", async () => {
   const sender = await newBot("Notifies", "held");
   const receiver = await newBot("Gets a notice", "held");
