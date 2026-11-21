@@ -529,6 +529,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       await sleep(2_000);
     }
   }
+  /** When memory relief last asked each browser to close (engineBrowsers.reclaimUnused). */
+  const reclaimAsked = new Map<string, number>();
   const engineBrowsers: EngineBrowsers = {
     starts: (threadId) => {
       const browser = threadBrowser(threadId);
@@ -545,8 +547,12 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     },
     reclaimUnused: () => {
       let closing = 0;
+      const now = Date.now();
       for (const [session, spec] of usedBrowserSessions) {
+        // One asked a minute ago and still running is not counted again: its close failed or hangs.
+        if ((reclaimAsked.get(session) ?? -Infinity) > now - 60_000) continue;
         if (!turnResources.free(`browser:${session}`) || !browserRunning(session, spec)) continue;
+        reclaimAsked.set(session, now);
         closing += 1;
         void browserRuntime.closeUnused(session, spec).then((closed) => { if (closed) console.info(`browser ${session}: closed to free memory, no task was using it`); }, () => undefined);
       }

@@ -245,6 +245,7 @@ export class EngineMemory {
   /** Tasks waiting for memory now, and since when. */
   private readonly waitingSince = new Map<Waiter, number>();
   private lastRelief = -Infinity;
+  private lastBrowserRelief = -Infinity;
   private timer: ReturnType<typeof setInterval> | null = null;
   private browsers: EngineBrowsers | null = null;
   private personsOwn: (threadId: string) => boolean = () => false;
@@ -589,16 +590,19 @@ export class EngineMemory {
     if (this.kernelKilled(memory.oomKills)) return;
     const free = this.free(memory), count = this.busy();
     if (free < this.floor(memory)) for (const threadId of this.active) this.pressure.set(threadId, Math.max(this.pressure.get(threadId) ?? 1, count));
-    const thrashing = (memory.fullStall10 ?? 0) >= THRASH_PERCENT && free < this.floor(memory);
+    // Memory available, not counting swap: a home with gigabytes of swap free thrashes all the same (Nov 2026: memory
+    // available 0–100 MB, the stall at 40–98%, with 1.8–3.9 GB of swap free).
+    const thrashing = (memory.fullStall10 ?? 0) >= THRASH_PERCENT && memory.availableBytes < this.floor(memory);
     const critical = free < Math.max(160 * MB, memory.totalBytes * 0.04) || thrashing;
     if (!critical || this.now() - this.lastRelief < RELIEF_COOLDOWN_MS) return;
     const idle = this.idle();
-    if (!idle) {
-      // A browser no turn is using goes before any turn does: its idle time may be minutes away.
+    if (!idle && this.now() - this.lastBrowserRelief >= 2 * RELIEF_COOLDOWN_MS) {
+      // A browser no turn is using goes before any turn does: its idle time may be minutes away. Once per two cooldowns:
+      // if memory is still short after that, a busy engine goes, whatever the browsers say.
       let closing = 0;
       try { closing = this.browsers?.reclaimUnused?.() ?? 0; } catch {}
       if (closing > 0) {
-        this.lastRelief = this.now();
+        this.lastRelief = this.lastBrowserRelief = this.now();
         this.log(`closing ${closing} browser${closing === 1 ? "" : "s"} no task is using to make room; ${tasks(this.busy())} running`);
         return;
       }

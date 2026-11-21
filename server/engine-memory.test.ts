@@ -106,13 +106,13 @@ class FakeChild extends EventEmitter {
 function host(options: { available?: number; perEngine?: number; tickMs?: number } = {}) {
   let clock = 1_800_000_000_000, oomKills = 0;
   const perEngine = options.perEngine ?? 700 * MB;
-  const state = { available: options.available ?? 3.4 * GB, fullStall10: 0 };
+  const state = { available: options.available ?? 3.4 * GB, fullStall10: 0, swapFree: 0 };
   const children = new Map<number, FakeChild>();
   const signals: string[] = [];
   const logs: string[] = [];
   const memory = new EngineMemory({
     enabled: true, tickMs: options.tickMs ?? 5,
-    read: (): HostMemory => ({ totalBytes: 4 * GB, availableBytes: Math.max(0, state.available - children.size * perEngine), swapFreeBytes: 0, oomKills, fullStall10: state.fullStall10 }),
+    read: (): HostMemory => ({ totalBytes: 4 * GB, availableBytes: Math.max(0, state.available - children.size * perEngine), swapFreeBytes: state.swapFree, oomKills, fullStall10: state.fullStall10 }),
     groups: () => new Map([...children.keys()].map((pid) => [pid, perEngine])),
     now: () => clock,
     signal: (pid, signal) => {
@@ -404,7 +404,33 @@ describe("running short", () => {
     h.advance(20_000);
     h.memory.tick();
     await settle();
-    expect([asked, h.signals]).toEqual([2, ["SIGKILL -1001"]]);
+    expect([asked, h.signals]).toEqual([1, ["SIGKILL -1001"]]);
+  });
+
+  it("asks the browsers once per two cooldowns, so one that won't close never holds back a busy engine's stop", async () => {
+    const h = host();
+    let asked = 0;
+    h.memory.useBrowsers({ starts: () => false, running: () => false, stopped: () => undefined, reclaimUnused: () => { asked += 1; return 1; } });
+    for (const thread of ["a", "b"]) { h.memory.turnStarted(thread); h.spawn(thread); h.advance(1_000); }
+    h.state.available = 100 * MB + 2 * 700 * MB;
+    h.memory.tick();
+    await settle();
+    h.advance(20_000);
+    h.memory.tick();
+    await settle();
+    expect([asked, h.signals]).toEqual([1, ["SIGKILL -1001"]]);
+  });
+
+  it("sees a home thrash with swap free: memory available, not swap, decides", async () => {
+    const h = host();
+    h.memory.turnStarted("a"); h.spawn("a");
+    // 20 MB available, 3 GB of swap free (counted at half), and every task stalled most of the time.
+    h.state.available = 20 * MB + 700 * MB;
+    h.state.swapFree = 3 * GB;
+    h.state.fullStall10 = 80;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGKILL -1000"]);
   });
 
   it("stops an idle engine before closing any browser", async () => {
