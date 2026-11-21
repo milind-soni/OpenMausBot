@@ -4,7 +4,7 @@ import { Plus } from "lucide-react";
 import { stoppedAtBotLimit } from "@/lib/bot-limit";
 import { MausAvatar } from "./Avatar";
 import { NewBotDialog } from "./lazy-screens";
-import { READY_BOT_CATEGORIES, READY_BOTS, matchesReadyBot, readyBotCopy, type ReadyBotCategory } from "@/lib/ready-bots";
+import { READY_BOT_CATEGORIES, READY_BOTS, matchesReadyBot, readyBot, readyBotCopy, type ReadyBotCategory } from "@/lib/ready-bots";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
@@ -51,7 +51,7 @@ export function ReadyBotGallery({ search, onDialog, onAdded }: {
       </button>)}
     </div>
     <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-      {visible.map((bot) => { const copy = readyBotCopy(bot); return <article key={bot.id} data-ready-bot={bot.id} className="flex flex-col rounded-2xl border border-hairline/40 bg-card p-4">
+      {visible.map((bot) => { const copy = readyBotCopy(bot), partner = bot.partner ? readyBot(bot.partner) : undefined; return <article key={bot.id} data-ready-bot={bot.id} className="flex flex-col rounded-2xl border border-hairline/40 bg-card p-4">
         <div className="flex items-center gap-3">
           <MausAvatar color={bot.look.color} bodyId={bot.look.mascotBody} size={40} animated={false} label={bot.name} />
           <div className="min-w-0 flex-1">
@@ -65,9 +65,10 @@ export function ReadyBotGallery({ search, onDialog, onAdded }: {
         </div>
         <p className="mt-3 text-[13px] leading-[1.45] text-ink-secondary">{copy.description}</p>
         <p className="mt-2 text-[12px] italic text-ink-tertiary">{t("readyBots.try", { prompt: copy.tryAsking })}</p>
-        {(bot.apps.length > 0 || bot.routines?.length) && <p className="mt-auto pt-2 text-[12px] text-ink-tertiary">
+        {(bot.apps.length > 0 || bot.routines?.length || partner) && <p className="mt-auto pt-2 text-[12px] text-ink-tertiary">
           {[bot.apps.length > 0 && t("readyBots.worksWith", { apps: bot.apps.map((app) => APP_LABELS[app] ?? app).join(", ") }),
-            bot.routines?.length && t("readyBots.pausedRoutine")].filter(Boolean).join(" · ")}
+            bot.routines?.length && t("readyBots.pausedRoutine"),
+            partner && t("readyBots.pairsWith", { name: partner.name, title: readyBotCopy(partner).title })].filter(Boolean).join(" · ")}
         </p>}
       </article>; })}
     </div>

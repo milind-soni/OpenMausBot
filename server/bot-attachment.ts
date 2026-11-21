@@ -2,7 +2,9 @@
 // copied into the private store, so the chat never reaches into a bot's workspace or VM home afterwards.
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join, posix } from "node:path";
+import { realpath } from "node:fs/promises";
+import { basename, dirname, join, posix } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { DATA_DIR } from "./config.ts";
 import { openInboxFile, type InboxRead } from "./host/handoff-inbox.ts";
 import {
@@ -15,6 +17,7 @@ import {
   saveImage,
 } from "./attachments.ts";
 import { mimeFor, openFileSavedSince, openMessageFile, referencedPathIdentity, type OpenedMessageFile } from "./message-file.ts";
+import type { ConversationAttachment } from "./conversation-attachments.ts";
 import type { Message } from "./store.ts";
 
 export type BotAttachment = NonNullable<Message["attachments"]>[number];
@@ -67,6 +70,9 @@ export interface SaveBotAttachmentInput {
   /** The conversation's inbox of files other bots passed it: a place the bot may also send from, read without
    * following any link (server/host/handoff-inbox.ts). */
   inbox?: InboxRead;
+  /** Stored files attached to this conversation (server/conversation-attachments.ts): each may be sent by its exact path.
+   * Read only when a path is outside every other place a bot may send from. */
+  attached?: () => readonly ConversationAttachment[];
 }
 
 let nameKey: Buffer | undefined;
@@ -105,7 +111,7 @@ async function sha256Of(file: OpenedMessageFile): Promise<string> {
 /** Only the roots' outside_workspace refusal falls through, so a missing or oversized file in the folder says exactly that.
  * Opened at the store's limit, not the preview one: the copy streams, and a person may send the same size. A path the
  * roots do not hold is tried in the conversation's inbox before anything else. */
-async function openSource(path: string, roots: readonly string[], savedThisTurn: SaveBotAttachmentInput["savedThisTurn"], inbox: InboxRead | undefined): Promise<OpenedMessageFile> {
+async function openSource(path: string, roots: readonly string[], savedThisTurn: SaveBotAttachmentInput["savedThisTurn"], inbox: InboxRead | undefined, attached?: () => readonly ConversationAttachment[]): Promise<OpenedMessageFile> {
   const href = sourceFileLink(path);
   try {
     return await openMessageFile(href, roots, FILE_MAX_BYTES);
@@ -113,9 +119,28 @@ async function openSource(path: string, roots: readonly string[], savedThisTurn:
     const status = (error as { status?: unknown } | null)?.status, outside = (error as { code?: unknown } | null)?.code === "outside_workspace";
     const received = inbox && (outside || status === 404) ? await openInboxFile(path, inbox, FILE_MAX_BYTES) : null;
     if (received) return { ...received, mime: mimeFor(received.name) };
+    const stored = outside || status === 404 ? await openAttached(path, attached) : null;
+    if (stored) return stored;
     if (!savedThisTurn || !outside) throw error;
     return openFileSavedSince(href, savedThisTurn, FILE_MAX_BYTES);
   }
+}
+
+/** Opened under the name it was attached with, since the store names its files by an id. Security: only a file directly
+ * in the attachment store; a tag naming anything else on disk opens nothing. */
+async function openAttached(path: string, list: (() => readonly ConversationAttachment[]) | undefined): Promise<OpenedMessageFile | null> {
+  let local = path;
+  if (/^file:/i.test(path)) {
+    try { local = fileURLToPath(path); } catch { return null; }
+  }
+  const [wanted, store] = await Promise.all([realpath(local).catch(() => null), realpath(ATTACHMENTS_DIR).catch(() => null)]);
+  if (!wanted || !store || dirname(wanted) !== store) return null;
+  const attached = list?.() ?? [];
+  const listed = await Promise.all(attached.map((one) => realpath(one.path).catch(() => null)));
+  const index = listed.indexOf(wanted);
+  if (index < 0) return null;
+  const file = await openMessageFile(pathToFileURL(wanted).href, [dirname(wanted)], FILE_MAX_BYTES);
+  return { ...file, name: attached[index]!.name };
 }
 
 const contentSaves = new Map<string, Promise<unknown>>();
@@ -147,7 +172,7 @@ export async function saveBotAttachment(input: SaveBotAttachmentInput): Promise<
   // A bot with a VM works in it: a relative path means its VM workspace first.
   const roots = input.guest ? [input.guest.host, ...input.roots] : input.roots;
   // A VM turn's tools never wrote to the host, so it gets roots only.
-  const file = await openSource(guestHost ?? requested, roots, input.guest ? undefined : input.savedThisTurn, guestHost ? undefined : input.inbox);
+  const file = await openSource(guestHost ?? requested, roots, input.guest ? undefined : input.savedThisTurn, guestHost ? undefined : input.inbox, guestHost ? undefined : input.attached);
   try {
     const mime = mimeFor(file.name);
     const name = displayNameFor(input.name, file.name);
