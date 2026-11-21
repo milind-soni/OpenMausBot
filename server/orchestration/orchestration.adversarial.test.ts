@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import path from 'node:path';
 import {
   type BotTaskEnvelopeV3,
   type IntraBotSubagentEnvelope,
@@ -310,13 +311,13 @@ describe('Apex E2E QA Adversarial & Fuzzing Suite: Orchestration v3/v3.1', () =>
     });
 
     it('strictly isolates DISJOINT_BUILDER writes and protects forbidden shared root files', () => {
-      const projectRoot = 'C:\\workspace\\my-app';
-      const allowedPrefixes = [`${projectRoot}\\src\\features\\billing`];
-      const forbiddenFiles = ['package.json', 'pnpm-lock.yaml', 'tsconfig.json', 'src\\index.ts'];
+      const projectRoot = path.resolve(path.sep === '\\' ? 'C:\\workspace\\my-app' : '/workspace/my-app');
+      const allowedPrefixes = [path.join(projectRoot, 'src', 'features', 'billing')];
+      const forbiddenFiles = ['package.json', 'pnpm-lock.yaml', 'tsconfig.json', path.join('src', 'index.ts')];
 
       // Legitimate write inside allowed feature module
       const okWrite = IntraBotSubagentManager.isPathAllowedForBuilder(
-        `${projectRoot}\\src\\features\\billing\\calculator.ts`,
+        path.join(projectRoot, 'src', 'features', 'billing', 'calculator.ts'),
         allowedPrefixes,
         forbiddenFiles
       );
@@ -324,7 +325,7 @@ describe('Apex E2E QA Adversarial & Fuzzing Suite: Orchestration v3/v3.1', () =>
 
       // Attempt to modify forbidden shared package.json
       const forbiddenWrite = IntraBotSubagentManager.isPathAllowedForBuilder(
-        `${projectRoot}\\package.json`,
+        path.join(projectRoot, 'package.json'),
         allowedPrefixes,
         forbiddenFiles
       );
@@ -333,7 +334,7 @@ describe('Apex E2E QA Adversarial & Fuzzing Suite: Orchestration v3/v3.1', () =>
 
       // Attempt to write outside allowed directory
       const outsideWrite = IntraBotSubagentManager.isPathAllowedForBuilder(
-        `${projectRoot}\\src\\auth\\tokens.ts`,
+        path.join(projectRoot, 'src', 'auth', 'tokens.ts'),
         allowedPrefixes,
         forbiddenFiles
       );
