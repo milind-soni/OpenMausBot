@@ -7,10 +7,11 @@ import { copyText } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { isRoutineProblemRun } from "@/lib/routines";
 import { loadWebhookCredentials, webhookCredentialStore } from "@/lib/webhook-credentials";
-import { useStore } from "@/state/store";
 import { AppEventsSection } from "./AppEventsSection";
 import { useAllAutomationActions } from "./app-actions";
 import { FixButton, StatusMark } from "./parts";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useMinuteTick } from "@/lib/minute-tick";
 
 const RECENT = 5;
 const BUTTON = "flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[13px] font-medium disabled:opacity-50";
@@ -23,7 +24,8 @@ export function AutomationPanel({ automation, sentence, onClose, onEdit, onDelet
   onEdit: () => void;
   onDeleted: () => void;
 }) {
-  const { state, dispatch } = useStore();
+  useMinuteTick();
+  const state = useStoreSelector((s) => ({ bots: s.bots, config: s.config, webhookAttempts: s.webhookAttempts, webhookIngress: s.webhookIngress, webhooks: s.webhooks }), sameFields), dispatch = useStoreDispatch();
   const [unseenRunIds] = useState(() => new Set(automation.runs.filter((run) => isRoutineProblemRun(run) && !run.seenAt).map((run) => run.id)));
   const visibleRuns = automation.runs.filter((run, index) => index < RECENT || unseenRunIds.has(run.id) || (isRoutineProblemRun(run) && !run.seenAt));
   useEffect(() => {

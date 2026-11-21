@@ -28,6 +28,7 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 }));
 
 import { setLocale } from "@/lib/i18n";
+import { setAdvancedMode } from "@/lib/interface-mode";
 import { tilesClearCorner } from "./SidebarTiles";
 import { NotificationRail } from "./NotificationsPanel";
 import { UpdateIndicator } from "./UpdateIndicator";
@@ -38,6 +39,7 @@ let host: HTMLDivElement, root: Root | null = null;
 let place: Place | null;
 beforeEach(() => {
   setLocale("en");
+  setAdvancedMode(true);
   host = document.createElement("div");
   document.body.append(host);
   fixture.windowChrome = "mac-inset";
@@ -194,6 +196,44 @@ describe("the window frame's top bar", () => {
     fixture.windowChrome = "native";
     await act(async () => root!.render(createElement(UpdateIndicator)));
     expect(host.querySelector("[data-update-indicator='downloaded']"), "unframed, the sidebar keeps its own").not.toBeNull();
+  });
+
+  const simpleWindow = (sidebarUpdate: boolean) =>
+    createElement("div", null, createElement(WindowFrameBar, { sidebarUpdate }), createElement("aside", null, createElement(UpdateIndicator)));
+  const sidebarButton = () => host.querySelector<HTMLButtonElement>("aside [data-update-indicator]");
+
+  it("in Simple leaves the update to the sidebar's blue button, the only one, while the sidebar is on screen", async () => {
+    setAdvancedMode(false);
+    fixture.update = { status: "downloaded", version: "0.1.176" };
+    await mount(simpleWindow(true));
+    expect(bar()!.querySelector("[data-update-indicator]"), "no arrow on the bar").toBeNull();
+    expect(sidebarButton()!.className.split(" ")).toEqual(expect.arrayContaining(["bot-button", "size-9", "rounded-full"]));
+    expect(host.querySelectorAll("[data-update-indicator]")).toHaveLength(1);
+  });
+
+  it("in Simple keeps the bar's arrow while the sidebar is hidden, so an update always has a button", async () => {
+    setAdvancedMode(false);
+    fixture.update = { status: "downloaded", version: "0.1.176" };
+    await mount(createElement(WindowFrameBar, { sidebarUpdate: false }));
+    expect(bar()!.querySelector("[data-update-indicator='downloaded']")).not.toBeNull();
+  });
+
+  it("in Advanced keeps the bar's arrow and the sidebar's round buttons step aside", async () => {
+    fixture.update = { status: "downloading", percent: 10 };
+    await mount(simpleWindow(false));
+    expect(bar()!.querySelector("[data-update-indicator='downloading']")).not.toBeNull();
+    expect(sidebarButton()).toBeNull();
+  });
+
+  it("shows no update button anywhere while there is none, or once the app has updated", async () => {
+    for (const [advanced, update] of [[false, null], [false, { status: "idle" }], [false, { status: "checking" }], [true, { status: "idle" }], [false, { status: "handed-off" }]] as const) {
+      setAdvancedMode(advanced);
+      fixture.update = update;
+      await mount(simpleWindow(!advanced));
+      expect(host.querySelector("[data-update-indicator]"), `${advanced ? "Advanced" : "Simple"}, ${update?.status ?? "no updater"}`).toBeNull();
+      await act(async () => root!.unmount());
+      root = null;
+    }
   });
 });
 

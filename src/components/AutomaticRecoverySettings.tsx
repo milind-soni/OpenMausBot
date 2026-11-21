@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { LearnMore, SettingRow, SettingsRows, Switch } from "./SettingsPrimitives";
 import { Select } from "./Select";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 type Recovery = NonNullable<ConfigStatus["automaticRecovery"]>;
 
@@ -10,7 +11,7 @@ type Recovery = NonNullable<ConfigStatus["automaticRecovery"]>;
  * soon as a model is chosen; until then the model row says what is missing. The provider and model rows show only while
  * the switch is on. */
 export function AutomaticRecoverySettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config, instances: s.instances }), sameFields), dispatch = useStoreDispatch();
   const [draft, setDraft] = useState<Recovery | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");

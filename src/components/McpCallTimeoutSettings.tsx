@@ -8,11 +8,12 @@ import {
   mcpCallTimeoutMinutes,
   parseMcpCallTimeoutMinutes,
 } from "@/lib/mcp-call-timeout";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export function McpCallTimeoutSettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const confirmedMinutes = mcpCallTimeoutMinutes(state.config);
   const [value, setValue] = useState(String(confirmedMinutes));
   const [dirty, setDirty] = useState(false);

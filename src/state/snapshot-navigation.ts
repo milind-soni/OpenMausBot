@@ -22,6 +22,14 @@ export function visibleMessages(bot: Pick<Bot, "messages" | "activeLeafId">): Me
   return path;
 }
 
+/** The conversation a snapshot opens on: the one already open when the snapshot still has it, else the one to resume,
+ * else the first bot. */
+export function hydratedSelectedId(selectedId: string, bots: readonly Pick<Bot, "id" | "hidden">[], groups: readonly Pick<Group, "id">[], resumeId: string | undefined): string {
+  const known = (id: string) => bots.some((b) => b.id === id) || groups.some((g) => g.id === id);
+  const resumed = resumeId && (bots.some((b) => b.id === resumeId && !b.hidden) || groups.some((g) => g.id === resumeId)) ? resumeId : "";
+  return selectedId && known(selectedId) ? selectedId : resumed || (bots[0]?.id ?? "");
+}
+
 export function navigatedSince(
   owner: Pick<Bot, "threadId" | "switchingTo"> | undefined,
   since: Readonly<Record<string, number>> | undefined,

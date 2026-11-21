@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { addHeldSecretScrubber } from "../shared/redact.ts";
 import { BrowserEvidence } from "./browser-evidence.ts";
 import { RelayPorts, captureFrame } from "./browser-relay.ts";
-import { BrowserSteps, GEOMETRY_SCRIPT, RefIndex, SHELL_REFUSED, markerFor, stepLabel, type Geometry, type StepCall, type StepContext } from "./browser-steps.ts";
+import { BrowserSteps, GEOMETRY_SCRIPT, RefIndex, SHELL_REFUSED, TYPED_PAGE_SCRIPT, markerFor, stepLabel, type Geometry, type StepCall, type StepContext } from "./browser-steps.ts";
+import { createBrowserInputLog, type BrowserInputLog } from "./browser/input-log.ts";
 import { FakeRelay } from "./testing/fake-relay.ts";
 
 const cleanup: Array<() => Promise<void> | void> = [];
@@ -83,8 +84,25 @@ describe("what the geometry script reads from a page", () => {
     window.document.body.innerHTML = html;
     cleanup.push(() => window.happyDOM.close());
     const read = () => JSON.parse(window.eval(GEOMETRY_SCRIPT) as string) as Geometry;
-    return { document: window.document, read };
+    const typed = () => (JSON.parse(window.eval(TYPED_PAGE_SCRIPT) as string) as { typed: boolean | null }).typed;
+    return { document: window.document, read, typed };
   }
+
+  it("says whether typed text sits in the focused field: not with nothing focused, an empty or read-only field, and unknown in another site's frame", () => {
+    const { document, typed } = page('<input id="name"><input id="fixed" readonly value="kept"><div id="plain">text</div><iframe id="card"></iframe>');
+    const focus = (id: string) => (document.getElementById(id) as unknown as { focus(): void }).focus();
+    expect(typed()).toBe(false);
+    focus("name");
+    expect(typed()).toBe(false);
+    (document.getElementById("name") as unknown as { value: string }).value = "ada";
+    expect(typed()).toBe(true);
+    focus("fixed");
+    expect(typed()).toBe(false);
+    const frame = document.getElementById("card")!;
+    Object.defineProperty(frame, "contentDocument", { get() { throw new Error("cross-origin"); } });
+    focus("card");
+    expect(typed()).toBeNull();
+  });
 
   it("counts a secret field that shows what it holds, never a masked password or an empty field, in the page and its open shadow roots", () => {
     const { document, read } = page('<label>Password <input id="shown" type="text"></label><input type="password" value="masked" autocomplete="current-password"><input name="email" value="ada@example.com"><div id="host"></div>');
@@ -131,13 +149,13 @@ describe("the refs a bot holds", () => {
 });
 
 /** `clock`: time moves only when the steps wait, or when a test moves it. */
-async function setup(options: { record?: boolean; stopped?: () => boolean; clock?: boolean; shell?: boolean } = {}) {
+async function setup(options: { record?: boolean; stopped?: () => boolean; clock?: boolean; shell?: boolean; inputLog?: BrowserInputLog } = {}) {
   const daemon = await new FakeRelay("bot-steps").start();
   const root = join(mkdtempSync(join(tmpdir(), "omb-steps-")), "evidence");
   const evidence = new BrowserEvidence({ root, statfs: async () => ({ bavail: 1e9, bsize: 4096 }) });
   cleanup.push(() => daemon.close(), () => rmSync(join(root, ".."), { recursive: true, force: true }));
   const tick = { time: Date.now() };
-  const steps = new BrowserSteps({ ports: new RelayPorts(), evidence, ...(options.clock ? { now: () => tick.time } : {}), sleep: async (ms) => { tick.time += ms; }, shellForWantOfChrome: () => options.shell ?? false });
+  const steps = new BrowserSteps({ ports: new RelayPorts(), evidence, ...(options.clock ? { now: () => tick.time } : {}), sleep: async (ms) => { tick.time += ms; }, shellForWantOfChrome: () => options.shell ?? false, ...(options.inputLog ? { inputLog: options.inputLog } : {}) });
   const resize = vi.fn(async () => {});
   const ctx: StepContext = { botId: "bot-1", botName: "Ava", threadId: "thread-1", generation: "6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b", turnId: () => "turn-9", record: options.record ?? false };
   const call = (tool: string, args: Record<string, unknown> = {}): StepCall => ({
@@ -155,6 +173,56 @@ async function setup(options: { record?: boolean; stopped?: () => boolean; clock
 const failure = { requestId: "r1", url: "https://app.example.com/api/signup", method: "POST", status: 500, resourceType: "Fetch", postData: "password=fake-hunter2", timestamp: Date.now() };
 
 describe("around every bot's browser call", () => {
+  it("logs a fill or type the engine called done that left no text in the focused field, for any bot, and nothing it typed", async () => {
+    const lines: string[] = [];
+    const { daemon, run } = await setup({ inputLog: createBrowserInputLog((line) => lines.push(line)) });
+    daemon.geometry.typed = true;
+    await run("fill", { selector: "@e4", text: "ada@example.com" });
+    expect(lines).toEqual([]);
+    daemon.geometry.typed = false;
+    await run("click", { selector: "@e1" });
+    await run("fill", { selector: "@e4", text: "" });
+    await run("fill", { selector: "@e4", text: "ada@example.com" }, undefined, { isError: true, content: [{ type: "text", text: "Element not found" }] });
+    expect(lines).toEqual([]);
+    await run("fill", { selector: "@e4", text: "ada@example.com" });
+    expect(lines).toEqual([`browser input: bot fill dropped reason=typed_not_landed engine=agent-browser transport=tools session=${daemon.session}`]);
+    daemon.geometry.typed = null;
+    await run("type", { text: "ada@example.com" });
+    expect(lines).toHaveLength(1);
+    expect(lines.join("\n")).not.toContain("ada");
+  });
+
+  it("calls a click on a disabled target, and a fill or type whose text is not in its target, an error, as the engine does not", async () => {
+    const lines: string[] = [];
+    const { daemon, run } = await setup({ inputLog: createBrowserInputLog((line) => lines.push(line)) });
+    daemon.geometry.typed = true;
+    daemon.elements = {
+      "#off": { enabled: false }, "#go": {}, "@e2": { value: "" }, "#plain": { text: "Plain text" },
+      "#phone": { value: "(555) 123-4567" }, "#short": { value: "ada@ex" }, "#rich": { text: "Hello Ada" }, "#name": { value: "Ada Lovelace" },
+    };
+    const said = (out: { parts: Array<{ text: string }>; failed?: true }) => ({ failed: out.failed === true, text: out.parts.map((part) => part.text).join(" ") });
+    expect(said(await run("click", { selector: "#off" }))).toEqual({ failed: true, text: expect.stringContaining("its target was disabled") });
+    expect(said(await run("fill", { selector: "@e2", text: "eve" }))).toEqual({ failed: true, text: expect.stringContaining("does not hold the text") });
+    expect(said(await run("type", { selector: "#plain", text: "zzz" }))).toEqual({ failed: true, text: expect.stringContaining("Take a new snapshot") });
+    expect(lines.map((line) => line.split(" ").slice(3, 6).join(" "))).toEqual([
+      "click dropped reason=target_not_actionable", "fill dropped reason=typed_not_landed", "type dropped reason=typed_not_landed",
+    ]);
+    // What a field formats, cuts to its length, or adds to, and rich text, all hold the text.
+    for (const [selector, text] of [["#phone", "5551234567"], ["#short", "ada@example.com"], ["#rich", "Ada"], ["#name", "Lovelace"]]) {
+      expect(said(await run("fill", { selector, text }))).toEqual({ failed: false, text: "" });
+    }
+    expect(said(await run("click", { selector: "#go" }))).toEqual({ failed: false, text: "" });
+    // A line submitted, or a page left, may clear the field: nothing is claimed.
+    expect(said(await run("type", { selector: "@e2", text: "hello\n" }))).toEqual({ failed: false, text: "" });
+    expect(said(await run("fill", { selector: "@e2", text: "eve" }, () => { daemon.geometry.url = "https://app.example.com/next"; }))).toEqual({ failed: false, text: "" });
+    // An element the engine cannot read, a refused action, or a fill with no target: nothing is claimed.
+    expect(said(await run("fill", { selector: "#gone", text: "x" }))).toEqual({ failed: false, text: "" });
+    expect(said(await run("click", { selector: "#off" }, undefined, { isError: true, content: [] }))).toEqual({ failed: false, text: "" });
+    expect(said(await run("type", { text: "x" }))).toEqual({ failed: false, text: "" });
+    expect(lines).toHaveLength(3);
+    expect(lines.join("\n")).not.toMatch(/eve|zzz|#off|@e2/);
+  });
+
   it("tells every bot what its action made the page report, from the engine's lists, and records nothing", async () => {
     const { daemon, run } = await setup();
     daemon.console = [{ type: "error", text: "left over from before" }];

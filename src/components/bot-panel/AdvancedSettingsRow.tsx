@@ -3,12 +3,12 @@ import { SlidersHorizontal } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { setAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_ONLY } from "@/lib/simple-only";
-import { useStore } from "@/state/store";
 import { Card, NavRow } from "./rows";
+import { useStoreDispatch } from "@/state/store-select";
 
 /** Simple mode leaves out Sending on your behalf and per-app Access; this row says they exist and opens them in Advanced mode. */
 export function AdvancedSettingsRow() {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   if (SIMPLE_ONLY) return null;
   const open = () => {
     setAdvancedMode(true);

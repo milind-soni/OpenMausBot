@@ -193,8 +193,8 @@ describe("Antigravity sign-in lifecycle", () => {
       await instance.signOut!();
     } finally {
       await instance.dispose();
-      rmSync(profile, { recursive: true, force: true });
-      rmSync(antigravityProfileDirectory("antigravity-other"), { recursive: true, force: true });
+      await removeTempDir(profile);
+      await removeTempDir(antigravityProfileDirectory("antigravity-other"));
     }
   });
 

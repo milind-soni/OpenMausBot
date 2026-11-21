@@ -7,6 +7,7 @@ import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { openBot, useStore, type AppState, type Bot, type Group } from "@/state/store";
 import { listedSide, setTeamSide, showTeamSide, sideOfThread, teamSide, teamSideView, useTeamSide, type TeamSide } from "@/state/team-side";
+import { useStoreSelector } from "@/state/store-select";
 import { markTeamPrivateChatsLineSaid, sharedChatAudience } from "./TeamPrivateChatsLine";
 
 const SIDES = [{ side: "me", label: "teamSide.me", Icon: Lock }, { side: "team", label: "teamSide.team", Icon: Users }] as const;
@@ -32,9 +33,9 @@ export function useTeamSideLists(state: Pick<AppState, "bots" | "groups" | "conf
 
 /** The side the conversation a bot has on screen is listed on, on a team's Cloud; null anywhere else. */
 export function useConversationSide(bot: Bot): TeamSide | null {
-  const { state } = useStore();
+  const onTeam = useStoreSelector((state) => Boolean(state.config?.team));
   const { team } = useTeamSide();
-  return state.config?.team && team ? listedSide(bot, bot.threadId) : null;
+  return onTeam && team ? listedSide(bot, bot.threadId) : null;
 }
 
 function hintDue(teamId: string): boolean {

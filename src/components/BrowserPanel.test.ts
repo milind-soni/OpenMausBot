@@ -119,7 +119,7 @@ describe("the browser panel's connection", () => {
     fixture.state.config.browserEngine = { kind: "engine", engine: "agent-browser" };
     await render();
     expect(FakeSocket.instances).toHaveLength(0);
-    expect(FixtureEventSource.instances[0]!.url).toBe("/api/bots/pepper/browser/live?width=1600&height=1000");
+    expect(FixtureEventSource.instances[0]!.url).toBe("/api/bots/pepper/browser/live?selects=1&width=1600&height=1000");
     act(() => root.unmount());
     root = createRoot(host);
     fixture.state.config.browserEngine = { kind: "engine", engine: "chrome" };
@@ -216,7 +216,7 @@ describe("a v1 live view whose stream dropped", () => {
     expect(host.textContent).toContain("Browser disconnected");
     await act(async () => button("Reconnect").click());
     await flush();
-    expect(live().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&width=1600&height=1000");
+    expect(live().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&selects=1&width=1600&height=1000");
     await emit("ready", { viewerId: "new-viewer" });
     expect(host.textContent).not.toContain("Browser disconnected");
   });
@@ -251,7 +251,7 @@ describe("a v1 live view whose stream dropped", () => {
     expect(host.textContent).toContain("Browser disconnected");
     await act(async () => { window.dispatchEvent(new Event("focus")); });
     expect(FixtureEventSource.instances).toHaveLength(7);
-    expect(live().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&width=1600&height=1000");
+    expect(live().url).toBe("/api/bots/pepper/browser/live?resume=old-viewer&selects=1&width=1600&height=1000");
     await emit("ready", { viewerId: "back-viewer" });
     expect(host.textContent).not.toContain("Browser disconnected");
   });
@@ -392,6 +392,44 @@ describe("what the person does in the panel", () => {
     });
     await flush();
     expect(socket.sent).toEqual([{ type: "takeControl" }]);
+    await act(async () => socket.control("you"));
+    await flush();
+    expect(socket.sent.at(-1)).toEqual({ type: "navigate", url: "https://accounts.example.com/login" });
+  });
+
+  it("wakes a browser that sat unused before taking it for a sign-in", async () => {
+    await render({ signIn: { url: "https://accounts.example.com/login", site: "example.com", nonce: 1 } });
+    const socket = FakeSocket.instances.at(-1)!;
+    await act(async () => { socket.open(); socket.control("unclaimed"); socket.message({ type: "asleep" }); });
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }]);
+    await act(async () => socket.message({ type: "asleep" }));
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }]);
+    await act(async () => {
+      socket.message({ type: "awake" });
+      socket.message({ type: "tabs", tabs: [{ tabId: "t1", title: "", url: "about:blank", active: true }] });
+    });
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }, { type: "takeControl" }]);
+    await act(async () => socket.control("you"));
+    await flush();
+    expect(socket.sent.at(-1)).toEqual({ type: "navigate", url: "https://accounts.example.com/login" });
+  });
+  it("opens the sign-in page on the woken browser's blank tab, not the page it had before sleeping", async () => {
+    await render({ signIn: { url: "https://accounts.example.com/login", site: "example.com", nonce: 1 } });
+    const socket = FakeSocket.instances.at(-1)!;
+    await act(async () => {
+      socket.open();
+      socket.message({ type: "tabs", tabs: [{ tabId: "t1", title: "Docs", url: "https://docs.example.com/", active: true }] });
+      socket.control("unclaimed");
+      socket.message({ type: "asleep" });
+    });
+    await flush();
+    expect(socket.sent).toEqual([{ type: "wake" }]);
+    await act(async () => socket.message({ type: "awake" }));
+    await flush();
+    await act(async () => socket.message({ type: "tabs", tabs: [{ tabId: "t2", title: "", url: "about:blank", active: true }] }));
     await act(async () => socket.control("you"));
     await flush();
     expect(socket.sent.at(-1)).toEqual({ type: "navigate", url: "https://accounts.example.com/login" });

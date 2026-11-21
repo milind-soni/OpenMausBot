@@ -28,11 +28,9 @@ import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { nextRename } from "@/lib/rename";
 import { useDesktopCapabilities, windowFramed } from "./DesktopCapabilities";
 import { MIN_QUERY, SearchResults } from "./SearchResults";
-import { ImportDialog, ShareDepartmentDialog, TeamLibraryPanel } from "./lazy-screens";
+import { ImportDialog, ShareDepartmentDialog, TeamDialog, TeamLibraryPanel, TeamSettingsDialog } from "./lazy-screens";
 import { SidebarNewChatPanel } from "./SidebarNewChatPanel";
 import { openCommandPalette } from "./CommandPalette";
-import { TeamSettingsDialog } from "./TeamSettingsDialog";
-import { TeamDialog } from "./TeamDialog";
 import { RenameTitle } from "./RenameTitle";
 import { BotProjectDialog, FolderActions, FolderIcon, navigateThreadMenu } from "./BotProjects";
 import { NewTaskFolderDialog } from "./NewTaskFolderDialog";
@@ -450,7 +448,7 @@ export function currentArchivableBot(bots: readonly Bot[], id: string): Bot | un
 
 const NO_FOLDERS: BotProject[] = [];
 
-export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns, reveal, locale, dispatch, activityLabel, hidden = false }: BotRowProps & {
+export function BotThreadList({ bot, selected, drafting, query, pendingQueued, routineRuns, reveal, locale, dispatch, activityLabel, hidden = false }: BotRowProps & {
   activityLabel?: string;
   hidden?: boolean;
 }) {
@@ -514,7 +512,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns
   }), [botId, dispatch]);
   const renderThread = (task: (typeof tasks)[number]) => {
     const thread = currentTaskBot(bot, task.threadId);
-    return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && task.threadId === bot.threadId} folders={projects}
+    return <SidebarThreadRow key={task.threadId} task={{ ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates }} ownerId={bot.id} current={selected && !drafting && task.threadId === bot.threadId} folders={projects}
       activityLabel={task.threadId === bot.threadId ? activityLabel : undefined} now={stampClock(threadRecency(task), now)} locale={locale} {...actions}
       selectMode={bulk.active} checked={selection.has(task.threadId)} onToggleSelect={bulk.toggle} />;
   };
@@ -647,7 +645,7 @@ export function BotThreadList({ bot, selected, query, pendingQueued, routineRuns
 
 export interface BotRowProps {
   bot: Bot;
-  selected: boolean;
+  selected: boolean; drafting?: boolean;
   deleting: boolean;
   mascotMotion: AppState["mascotMotion"];
   reveal: AppState["revealThread"];
@@ -666,7 +664,7 @@ export interface BotRowProps {
   botDragging?: boolean;
 }
 
-export function botRowProps<State extends Pick<AppState, "activeView" | "selectedId" | "revealThread" | "deletingBots" | "mascotMotion" | "pendingQueued" | "routineRuns" | "instances" | "liveCall" | "config">>(
+export function botRowProps<State extends Pick<AppState, "activeView" | "selectedId" | "revealThread" | "deletingBots" | "mascotMotion" | "pendingQueued" | "routineRuns" | "instances" | "liveCall" | "config" | "newChat">>(
   state: State,
   dispatch: Dispatch<Action>,
   bot: Bot,
@@ -677,7 +675,7 @@ export function botRowProps<State extends Pick<AppState, "activeView" | "selecte
   return {
     ...layout,
     bot,
-    selected,
+    selected, drafting: state.newChat?.botId === bot.id,
     deleting: state.deletingBots[bot.id] === true,
     mascotMotion: selected && state.mascotMotion?.botId === bot.id ? state.mascotMotion : null,
     reveal: reveal && (bot.threadId === reveal.threadId || bot.tasks?.some((task) => task.threadId === reveal.threadId)) ? reveal : null,
@@ -833,7 +831,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
               )}
             </span>
           )}
-          {simpleRow && <BotEngineMark bot={bot} instances={instances} className="ms-auto" />}
+          {simpleRow && <BotEngineMark bot={bot} instances={instances} className="ms-auto opacity-0 transition-opacity duration-150 motion-reduce:transition-none group-hover:opacity-100 group-focus-within:opacity-100 touch:opacity-100" />}
           {!simpleRow && unread && <span className="size-2 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
         </div>}
         {simpleRow && <RowStatusText working={working} failed={failed} unread={unread} />}
@@ -918,10 +916,10 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   );
 });
 
-export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = false }: {
+export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = false, besidePanel = false }: {
   open: boolean;
   onClose: () => void;
-  collapseToIcons?: boolean;
+  collapseToIcons?: boolean; besidePanel?: boolean;
 }) {
   const state = useStoreSelector(sidebarState, sameFields), dispatch = useStoreDispatch();
   const now = useRelativeNow();
@@ -986,7 +984,7 @@ export const Sidebar = memo(function Sidebar({ open, onClose, collapseToIcons = 
   const simple = !advanced && density !== "icons";
   const simpleDesk = simple && !phone;
   const rail = !advanced && density === "icons";
-  const sidePanelOpen = state.computerOpen || state.inspectorOpen;
+  const sidePanelOpen = state.computerOpen || state.inspectorOpen || besidePanel;
   const sizing = useSidebarWidth({ simple: !advanced, sidePanelOpen, sidebarRef });
   const [searchOpen, setSearchOpen] = useState(false);
   const searchShown = searchOpen || query !== "";

@@ -9,6 +9,8 @@ export type SessionKind = "browser" | "page" | "frame" | "worker" | "other";
 export interface SendFlags {
   /** A deliberate main-world evaluation: the page can observe it. */
   pageWorld?: boolean;
+  /** The call only reads the page; a transport that holds a tab for the person still lets it through. */
+  readOnly?: boolean;
 }
 
 const NEVER: readonly RegExp[] = [

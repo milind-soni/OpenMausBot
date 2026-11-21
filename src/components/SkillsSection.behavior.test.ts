@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SkillsLibrarySkillWire } from "../../shared/wire";
 
 const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, modal: vi.fn(), request: vi.fn() }));
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {

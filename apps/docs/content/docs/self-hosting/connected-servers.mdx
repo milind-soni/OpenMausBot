@@ -44,7 +44,7 @@ Three things to know:
 
 - **Not on the list, so refused:** `export-disk` (uploads an archive of the data to MausBot) and `import-disk` (replaces the data with an archive from elsewhere). They exist in the connector for servers MausBot operates itself.
 - **`update` only moves forward.** An image whose version is older than the one your server runs, or that names no version, is refused: once by the connector, and again by the updater's runner on your server, outside any container. MausBot cannot roll your server back to an earlier release. A second floor, the first release with the hardened profile, is **planned**: no release has that profile yet.
-- **`update` needs your updater.** It works only when `update.sh` is in `/opt/openmausbot` and the connector's installer has set up the small systemd unit that runs it. Without either, the job is refused and nothing changes. A server installer that puts `update.sh` there is not released yet: **planned**.
+- **`update` needs your updater.** It works only when `update.sh` is in `/opt/openmausbot` and the connector's installer has set up the small systemd unit that runs it. Without either, the job is refused and nothing changes. The [server installer](/docs/self-hosting/deploy-vps) puts `update.sh` there.
 
 ## What only you can do: two more jobs
 

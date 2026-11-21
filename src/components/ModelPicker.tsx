@@ -3,7 +3,7 @@ import { modelLabel, modelProvider } from "@/lib/model-label";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, KeyRound, Loader2, RefreshCw, X } from "lucide-react";
-import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store"; import { sameFields, useStoreActions, useStoreSelector } from "@/state/store-select";
+import { currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store"; import { sameFields, useStoreActions, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import type { EffortLevel } from "../../shared/wire";
 import { filterCustomModels, partitionCustomModels, suggestedModels } from "@/lib/custom-models";
 import { configuredModelInstances, isClaudeAccount, isCustomOnly, modelsAwaitEngine, SIGN_IN_FAMILY_LABEL, signInFamily } from "@/lib/engine-rail";
@@ -66,7 +66,7 @@ export function EffortRow({
   label?: ReactNode;
   compact?: boolean;
 }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields), dispatch = useStoreDispatch();
   const selection = bot.modelSelection;
   const instance = state.instances.find((candidate) => candidate.instanceId === selection.instanceId);
   if (instance?.capabilities?.modelVariants) {
@@ -127,7 +127,7 @@ export function ModelVariantRow({ bot, threadId, updateBotDefault, className, la
   wide?: boolean;
   quiet?: boolean;
 }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances, modelVariantSessions: s.modelVariantSessions }), sameFields), dispatch = useStoreDispatch();
   const selection = bot.modelSelection;
   const choices = variantChoices(state, selection, threadId ?? bot.threadId);
   if (!choices) return null;

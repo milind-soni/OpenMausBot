@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { Check, Inbox, Maximize2, Minimize2, Search, X } from "lucide-react";
 import type { InboxRow } from "../../../shared/inbox";
@@ -7,12 +7,14 @@ import { useAdvancedMode } from "@/lib/interface-mode";
 import { t } from "@/lib/i18n";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { closeInbox, markAllInboxRead, readInboxLine, readInboxRow, useInboxMarkingAll, useInboxPanel, useInboxView, widenInbox } from "@/state/inbox";
-import { useStore } from "@/state/store";
+import { sameJson } from "@/state/same-json";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useActiveLocale } from "@/lib/use-active-locale";
 import { InboxActive, inboxAttentionEntries, inboxOpenThread, readNewsThreads, unreadConversations } from "./InboxActive";
 import { attentionJumpAction, attentionUnpinAction } from "../SidebarBotActivity";
 import { InboxReading } from "./InboxReading";
 import { InboxRowItem } from "./InboxRow";
-import { FinishedThreads } from "./FinishedThreads";
+import { FinishedThreads, finishedThreads } from "./FinishedThreads";
 import { PinnedThreads, pinnedThreadRows } from "./PinnedThreads";
 import { matchesSearch, nextAfter } from "./inbox-answer";
 import { listedRows, rowsIn, waitingCount } from "./inbox-view";
@@ -20,9 +22,10 @@ import { useInboxActions } from "./use-inbox-actions";
 import { roundButtonCls } from "../bot-panel/rows";
 
 
-export function InboxPanel() {
+export const InboxPanel = memo(function InboxPanel() {
   const view = useInboxView();
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  useActiveLocale();
   const panel = useInboxPanel();
   const markingAll = useInboxMarkingAll();
   const phone = useMediaQuery(PHONE_LAYOUT);
@@ -74,9 +77,12 @@ export function InboxPanel() {
     const row = rows[at + by];
     if (row) open(row);
   };
-  const pinnedThreads = new Set(pinnedThreadRows(state.bots, state.groups, state.pendingQueued).map((row) => row.task.threadId));
-  const count = waitingCount(view) + unreadConversations(inboxAttentionEntries(state, view), view);
-  const openThread = inboxOpenThread(state);
+  const pinnedRows = useStoreSelector((state) => pinnedThreadRows(state.bots, state.groups, state.pendingQueued), sameJson);
+  const pinnedThreads = useMemo(() => new Set(pinnedRows.map((row) => row.task.threadId)), [pinnedRows]);
+  const finishedRows = useStoreSelector((state) => finishedThreads(state.bots, state.groups, state.pendingQueued, undefined, readNewsThreads(view), pinnedThreads), sameJson);
+  const unread = useStoreSelector((state) => unreadConversations(inboxAttentionEntries(state, view), view));
+  const count = waitingCount(view) + unread;
+  const openThread = useStoreSelector((state) => inboxOpenThread(state), sameJson);
   const body = (
     <>
       <div className="flex h-[50px] shrink-0 items-start gap-2.5 px-[13px] pt-[13px]">
@@ -108,7 +114,7 @@ export function InboxPanel() {
           <>
             <div className="min-h-0 flex-1 overflow-y-auto">
               {/* The conversations each bot and room pinned, at the top of the list. */}
-              {!query.trim() && <PinnedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} onUnpin={(row) => dispatch(attentionUnpinAction(row))} />}
+              {!query.trim() && <PinnedThreads rows={pinnedRows} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} onUnpin={(row) => dispatch(attentionUnpinAction(row))} />}
               {listed.length > 0 && <label className="mx-[13px] my-2.5 flex h-8 items-center gap-2 rounded-lg bg-ink/[0.045] px-2.5 ring-[0.5px] ring-ink/[0.12] focus-within:ring-ink/30">
                 <Search size={14} aria-hidden="true" className="shrink-0 text-ink-tertiary" />
                 <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("inbox.search")} aria-label={t("inbox.search")}
@@ -129,7 +135,7 @@ export function InboxPanel() {
               </div>
               {!query.trim() && <InboxActive view={view} current={openThread} exclude={pinnedThreads} />}
               {/* The finished, already-read conversations. */}
-              {!query.trim() && <FinishedThreads bots={state.bots} groups={state.groups} queued={state.pendingQueued} readThreads={readNewsThreads(view)} exclude={pinnedThreads} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} />}
+              {!query.trim() && <FinishedThreads rows={finishedRows} now={now} current={openThread} onOpen={(row) => dispatch(attentionJumpAction(row))} />}
               {done.length > 0 && (
                 <section data-inbox-done className="px-1.5 pb-1.5">
                   <button type="button" data-inbox-done-toggle aria-expanded={showDone} onClick={() => setShowDone(!showDone)}
@@ -166,4 +172,4 @@ export function InboxPanel() {
       {body}
     </aside>
   );
-}
+});

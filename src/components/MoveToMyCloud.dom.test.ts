@@ -92,6 +92,7 @@ it("a bot's menu offers Move to My Cloud, and it goes after one confirm", async 
   await menu({ id: "ada", name: "Ada" });
   await click(q("[data-item]"));
   expect(q("[data-bot-move-confirm]")!.textContent).toContain("Ada's chats, skills, memory and routines go with it");
+  expect(q("[data-bot-move-confirm]")!.textContent).toContain("Tables Ada loaded in Data don't move: they stay on this computer, where Ada can't open them once it lives on My Cloud.");
   await click(all("button").find((button) => button.textContent === "Move") ?? null);
   expect(page.moveBots).toHaveBeenCalledWith(["ada"]);
 });

@@ -197,7 +197,7 @@ export const CLOUD_ENGINES_HERE = " The AIs bots run on (Claude, Codex, Cursor a
 
 /** `asks`: the person's own Cloud, whose bots ask them to turn on what their computer doesn't give now (ask_for_computer). */
 export function cloudHomePrompt(sharedComputerTools: boolean, synced: ReadonlyArray<{ computerName: string; pcPath: string; cloudPath: string }> = [],
-  lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null; online?: boolean; lent?: boolean; lastSeenAt?: number }> = [], asks = false): string {
+  lent: ReadonlyArray<{ name: string; platform: "darwin" | "win32" | "linux" | null; online?: boolean; lent?: boolean; lastSeenAt?: number; typing?: boolean }> = [], asks = false): string {
   const { theirs, device } = theirComputer(lent);
   const unavailable = asks
     ? ` If it isn't online, or doesn't lend what you need (its apps and screen, its files, running commands), call ask_for_computer with what you want to do and why: it shows them one card with a one-tap Turn on, and you carry on once it's on. Don't explain the fix yourself, and never do it on their cloud computer or in the built-in browser instead unless they ask you to.`

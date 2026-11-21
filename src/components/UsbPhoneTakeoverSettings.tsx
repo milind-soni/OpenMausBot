@@ -1,12 +1,12 @@
 import { usbPhoneTakeoverEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
-import { useStore } from "@/state/store";
 import { useConfigSave } from "./BrowserSettingsRows";
 import { MoreText, SettingRow, Switch } from "./SettingsPrimitives";
+import { sameFields, useStoreSelector } from "@/state/store-select";
 
 /** features.usbPhoneTakeover. Shown only where the server reports the flag: one with no USB port leaves it out. */
 export function UsbPhoneTakeoverSettings() {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const on = usbPhoneTakeoverEnabled(state.config);
   const { saving, error, save } = useConfigSave();
   if (state.config?.features?.usbPhoneTakeover === undefined) return null;
