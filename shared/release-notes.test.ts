@@ -79,6 +79,10 @@ describe("release notes Markdown to an entry", () => {
     expect(parseRelease(release, { strict: true }).ok).toBe(true);
   });
 
+  it("replaces every control or direction character, not only the first", () => {
+    expect(cleanReleaseLine("a\u202eb\u202ec\u200bd")).toBe("a b c d");
+  });
+
   it("each cleaned line is already clean", () => {
     for (const line of ["**A.** b `c` d", "Plain.", "x <b>y</b> [z](https://a.b)"]) expect(cleanReleaseLine(cleanReleaseLine(line))).toBe(cleanReleaseLine(line));
   });

@@ -1,7 +1,7 @@
 {
   "$schema": "./releases.schema.json",
   "version": 1,
-  "updatedAt": "2026-11-21T09:35:19Z",
+  "updatedAt": "2026-11-21T09:49:53Z",
   "releases": [
     {
       "version": "0.1.175",
@@ -209,48 +209,6 @@
       "version": "0.1.169",
       "date": "2026-11-17T20:13:30Z",
       "sections": [
-        {
-          "title": "Teams",
-          "items": [
-            "**Team files:** one shared folder for the team and its bots.",
-            "**Team templates:** a team library, templates from private GitHub repositories, and scripts that travel with their skills.",
-            "**Bitwarden in the Vault:** logins and secrets through Bitwarden, alongside 1Password.",
-            "**What's new for everyone,** and an Announcements page with a dot when there is something unread."
-          ]
-        },
-        {
-          "title": "Bots and skills",
-          "items": [
-            "**Bots can import a skill from GitHub or skills.sh.**",
-            "**Up to 10 connected accounts per app** (was 5).",
-            "**Rooms say where a queued teammate is busy** and that it starts when that work finishes.",
-            "**A bot reads its own hand-offs from any of its own chats.**",
-            "**Pause and Resume every bot** in the Advanced-mode bot menu.",
-            "**One set of names for approval levels** in Simple and Advanced mode."
-          ]
-        },
-        {
-          "title": "Chat",
-          "items": [
-            "**Right-click menu for media,** and large chat videos and audio now stream instead of loading whole.",
-            "**A new chat is suggested** under the latest context compaction.",
-            "**The computer panel grows as wide as the window allows,** and the bot's screen or info panel is remembered across restarts.",
-            "**Usage bars are green, orange and red** by how much is left."
-          ]
-        },
-        {
-          "title": "Fixes",
-          "items": [
-            "Windows: opening a bot's Local VM or VPS computer no longer pops up a terminal window.",
-            "A theme's Light or dark choice picks the right mode for themes that have both.",
-            "The Color picker stays when a bot's avatar is a photo; settings row titles stay readable on narrow phones.",
-            "Built-in ChatGPT account rows can be hidden.",
-            "Clearer messages when Node.js is too old for DeepSeek Harness, when a saved VPS is not chosen for a bot, and for models an engine has but won't run.",
-            "Devin catalogs with more than 128 models are listed in full.",
-            "A tool call with unreadable arguments no longer breaks the next turn on chat-engine bots.",
-            "Thirteen small reliability fixes in charts, memory, MCP sign-in and tool lists, webhooks, research and settings backups."
-          ]
-        },
         {
           "title": "More in this release",
           "items": [
@@ -953,12 +911,6 @@
           "title": "Security",
           "items": [
             "**A stronger bot sandbox on Clouds and shared servers.** Five fixes close ways a bot's files could affect the server outside the sandbox: server files named on a command line, background engine work and app connections, programs and npm or git settings in the home folder, and the server's own model-list checks for Pi, OpenCode, Hermes, DeepSeek and Muse."
-          ]
-        },
-        {
-          "title": "Known issue",
-          "items": [
-            "**On a server with the sandbox on, an engine installed only in the home folder can show as \"not installed\".** Reinstall it from Settings."
           ]
         }
       ]

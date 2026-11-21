@@ -21,6 +21,7 @@ const VERSION = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/;
 // Control characters, and the ones that reorder or hide text (bidi overrides and isolates, zero-width joiners).
 // eslint-disable-next-line no-control-regex
 const FORBIDDEN_CHARS = /[\u0000-\u001f\u007f-\u009f​-‏‪-‮⁠-⁩﻿]/u;
+const FORBIDDEN_ALL = new RegExp(FORBIDDEN_CHARS.source, "gu");
 const FUTURE_TOLERANCE_MS = 24 * 60 * 60 * 1000;
 
 export interface ReleaseMark { text: string; bold: boolean; code: boolean }
@@ -203,7 +204,7 @@ const HTML_TAG = /<\/?[a-zA-Z][^<>]*>/g;
  * marks that do not pair dropped. Code runs keep their text. */
 export function cleanReleaseLine(raw: string): string {
   const codes: string[] = [];
-  let text = raw.replace(FORBIDDEN_CHARS, " ")
+  let text = raw.replace(FORBIDDEN_ALL, " ")
     // A code run keeps its words; anything else that looks like markup goes.
     .replace(/`([^`\n]+)`/g, (_, code: string) => `\u0000${codes.push(code.replace(/`/g, "")) - 1}\u0000`);
   let before: string;
