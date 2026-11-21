@@ -404,12 +404,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       const backgroundEnds = new Map<string, Promise<void>>();
       const endBackground = (threadId: string, session: AcpSession) => {
         if (!backgroundWork || session.child.exitCode !== null) return;
-        const pending = backgroundEnds.get(threadId);
-        if (pending) return pending;
-        const ended = backgroundWork.end(threadId, session, (method, params, timeoutMs) => session.host.request(null, method, params, timeoutMs));
-        const cleanup = ended.then(async (complete) => {
-          if (complete === false) await endUncancelled(threadId, session);
-        }).finally(() => backgroundEnds.delete(threadId));
+        if (backgroundEnds.has(threadId)) return backgroundEnds.get(threadId);
+        const cleanup = backgroundWork.end(threadId, session, (method, params, timeoutMs) => session.host.request(null, method, params, timeoutMs))
+          .then(async (complete) => { if (complete === false) await endUncancelled(threadId, session); }).finally(() => backgroundEnds.delete(threadId));
         backgroundEnds.set(threadId, cleanup);
         return cleanup;
       };
