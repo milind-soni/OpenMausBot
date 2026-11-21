@@ -573,10 +573,10 @@ const heldMcp = new Set<ReturnType<typeof spawn>>();
 process.once("exit", () => { for (const child of heldMcp) child.kill(); });
 function holdSessionMcp(): void {
   if (process.env.FAKE_ACP_MCP_HOLD !== "1") return;
-  for (const entry of sessionMcp) void listMcpTools(entry, GROK_MCP_HANDSHAKE).catch(() => {});
+  for (const entry of sessionMcp) void listMcpTools(entry, GROK_MCP_HANDSHAKE, true).catch(() => {});
 }
 
-async function listMcpTools(entry: AnyMcpEntry, handshake: unknown): Promise<string[]> {
+async function listMcpTools(entry: AnyMcpEntry, handshake: unknown, hold = false): Promise<string[]> {
   const names = (result: any) => (result?.tools ?? []).map((tool: { name: string; inputSchema?: unknown }) =>
     process.env.FAKE_ACP_MCP_SCHEMA_BYTES === "1" ? `${tool.name}=${JSON.stringify(tool.inputSchema ?? {}).length}` : tool.name);
   if (typeof entry.url === "string") {
@@ -587,7 +587,6 @@ async function listMcpTools(entry: AnyMcpEntry, handshake: unknown): Promise<str
     const env = { ...process.env };
     for (const { name, value } of entry.env ?? []) env[name] = value;
     const child = spawn(entry.command!, entry.args ?? [], { env, stdio: ["pipe", "pipe", "ignore"] });
-    const hold = process.env.FAKE_ACP_MCP_HOLD === "1";
     if (hold) heldMcp.add(child);
     const finish = (error: Error | null, tools?: string[]) => { clearTimeout(timer); if (!hold || error) child.kill(); if (error) reject(error); else resolve(tools!); };
     const timer = setTimeout(() => finish(new Error("mcp timeout")), 20_000);

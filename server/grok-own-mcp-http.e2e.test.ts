@@ -65,6 +65,9 @@ it("gives a Grok turn OpenMausBot's own tools by URL, no proxy process each, eve
     const own = sent.filter((server) => server.type === "http");
     expect(own.map((server) => server.name).sort()).toEqual(stdioSent.filter(ownProxy).map((server) => server.name).sort());
     for (const server of own) expect(server.url).toBe(`${url}/api/internal/mcp-http/${server.name}`);
+    // A server that failed to list shows as "<name> failed" in both, which a comparison by name alone would miss.
+    expect(Object.keys(overStdio).sort()).toEqual(stdioSent.map((server) => server.name).sort());
+    expect(Object.keys(overUrl).sort()).toEqual(sent.map((server) => server.name).sort());
     for (const server of own) expect(overUrl[server.name], server.name).toEqual(overStdio[server.name]);
     expect(overUrl.agents).toEqual(expect.arrayContaining(["list_bots"]));
     expect(overUrl.data).toEqual(expect.arrayContaining(["data_sql"]));
