@@ -292,6 +292,11 @@ describe("the brief", () => {
     expect(s.card()!.id).not.toBe(yesterday.id);
     expect(s.shown()).toContain("Q3 numbers");
     s.restart();
+    // Sorted again after the restart, so the row is on today's card before the press and only the press takes it off.
+    s.items.set("chk-2", { mail: [ada], prep: [] });
+    await s.brief.consume(s.watchRun("chk-2", '{"important": [{"id": "m1", "why": "Needs a reply.", "needsReply": false}]}'), "turn-1");
+    expect(s.failed).toEqual([]);
+    expect(s.shown()).toContain("Q3 numbers");
     const dismiss = { type: "dismiss_row", payload: { messageId: "m1" } };
     expect(s.brief.serverPress(s.chief, s.thread(), yesterday.id, dismiss, guest)).toBe("refused");
     expect(s.brief.serverPress({ id: "someone-else" }, s.thread(), yesterday.id, dismiss, owner)).toBeNull();
