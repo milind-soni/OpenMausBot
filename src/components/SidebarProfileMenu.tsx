@@ -634,7 +634,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = fa
   const noteworthy = update && updateNoteworthy(update.phase, update.pending) && !updateHasButton(update.phase);
   const needsYou = account?.automationsNeedYou === true;
   const initials = profileInitials(profile);
-  const nameless = simple && initials === "?" ? <UserRound size={18} strokeWidth={1.75} aria-hidden /> : undefined;
+  const nameless = simple && initials === "?" ? <UserRound size={16} aria-hidden /> : undefined;
   const label = accountLabel(name, { automationsNeedYou: needsYou, update: simple && noteworthy && update ? update.label : null, move: move.kind, announcements: news.unread });
   const dot = accountDot({ automationsNeedYou: needsYou, update: noteworthy ? (update.phase === "error" ? "failed" : "news") : null, move: move.kind, announcements: news.unread });
   // Advanced's full row has its own update badge: its avatar's dot is the move's and the announcements' alone.

@@ -9,12 +9,13 @@ import { setLocale, t } from "@/lib/i18n";
 import { BUILT_IN_INSTANCE_DRIVERS } from "@/lib/built-in-instances";
 
 const server = vi.hoisted(() => ({
-  all: [] as InstanceInfo[], hidden: new Set<string>(), calls: [] as Array<{ method: string; path: string; body?: unknown }>, refuseUnhide: false,
+  all: [] as InstanceInfo[], hidden: new Set<string>(), calls: [] as Array<{ method: string; path: string; body?: unknown }>, refuseUnhide: false, refreshes: 0,
+  holdHidden: null as Promise<void> | null,
 }));
 const fixture = vi.hoisted(() => ({ state: { instances: [] as InstanceInfo[], bots: [] as Bot[], config: {} as Record<string, unknown> } }));
 vi.mock("@/state/store", async (original) => {
   const visible = () => server.all.filter((instance) => !server.hidden.has(instance.instanceId));
-  const refresh = async () => { fixture.state = { ...fixture.state, instances: visible() }; };
+  const refresh = async () => { server.refreshes++; fixture.state = { ...fixture.state, instances: visible() }; };
   return {
     ...await original<typeof import("@/state/store")>(),
     useStore: () => ({
@@ -26,6 +27,7 @@ vi.mock("@/state/store", async (original) => {
       const method = init?.method ?? "GET";
       server.calls.push({ method, path, ...(init?.body ? { body: JSON.parse(init.body) } : {}) });
       if (path === "/api/instances/hidden") {
+        await server.holdHidden;
         return { instances: server.all.filter((instance) => server.hidden.has(instance.instanceId)).map(({ instanceId, driverKind, displayName }) => ({ instanceId, driverKind, displayName })) };
       }
       const signOut = /^\/api\/instances\/([\w.-]+)\/auth\/sign-out$/.exec(path);
@@ -66,6 +68,8 @@ beforeEach(() => {
   server.hidden = new Set();
   server.calls = [];
   server.refuseUnhide = false;
+  server.refreshes = 0;
+  server.holdHidden = null;
   fixture.state = { instances: [...server.all], bots: [], config: {} };
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
 });
@@ -97,8 +101,10 @@ describe("Settings → AI: a provider hidden from its own card", () => {
 
     expect(rows()).not.toContain("kimi");
     expect(hiddenRows()).toEqual(["kimi"]);
+    expect(server.refreshes).toBe(0);
     expect(moreCount()).toContain("More providers");
-    expect(moreCount()).toContain("1");
+    // Hidden Kimi and the Google AI Studio row.
+    expect(moreCount()).toContain("2");
     const hiddenRow = container.querySelector('[data-hidden-engine="kimi"]')!;
     expect(hiddenRow.textContent).toContain("Kimi");
     expect(hiddenRow.textContent).toContain(t("settings.ai.hiddenStatus"));
@@ -109,13 +115,14 @@ describe("Settings → AI: a provider hidden from its own card", () => {
     expect(server.calls).toContainEqual({ method: "PATCH", path: "/api/instances/kimi", body: { hidden: false } });
     expect(rows()).toContain("kimi");
     expect(hiddenRows()).toEqual([]);
+    expect(server.refreshes).toBe(0);
   });
 
   it("keeps the More providers row while every provider left in it is hidden", async () => {
     server.hidden.add("kimi");
     fixture.state = { ...fixture.state, instances: [codex] };
     await render(false);
-    expect(moreCount()).toContain("1");
+    expect(moreCount()).toContain("2");
     expect(hiddenRows()).toEqual([]);
     await render(true);
     expect(hiddenRows()).toEqual(["kimi"]);
@@ -130,6 +137,25 @@ describe("Settings → AI: a provider hidden from its own card", () => {
     expect(container.querySelector('[role="alert"]')?.textContent).toBe("provider settings are already being updated");
     expect(hiddenRows()).toEqual(["kimi"]);
     expect(rows()).not.toContain("kimi");
+  });
+
+  it.each([
+    ["is still pending", (release: { done: () => void; fail: () => void }) => release.done()],
+    ["fails", (release: { done: () => void; fail: () => void }) => release.fail()],
+  ])("drops an unhidden provider from the hidden rows before the hidden list is read again, and when that read %s", async (_name, settle) => {
+    server.hidden.add("kimi");
+    fixture.state = { ...fixture.state, instances: [codex] };
+    await render();
+    expect(hiddenRows()).toEqual(["kimi"]);
+    const release = { done: () => {}, fail: () => {} };
+    server.holdHidden = new Promise<void>((resolve, reject) => { release.done = resolve; release.fail = () => reject(new Error("offline")); });
+    server.holdHidden.catch(() => {});
+    await click(container.querySelector('[data-unhide-engine="kimi"]'));
+    expect(rows().filter((id) => id === "kimi")).toEqual(["kimi"]);
+    expect(hiddenRows()).toEqual([]);
+    await act(async () => { settle(release); await server.holdHidden!.catch(() => {}); });
+    expect(rows().filter((id) => id === "kimi")).toEqual(["kimi"]);
+    expect(hiddenRows()).toEqual([]);
   });
 
   it("signs a connected CLI out from its card without hiding it", async () => {
@@ -260,6 +286,7 @@ describe("Settings → AI → ChatGPT: the built-in account rows can be hidden",
     expect(server.calls).toContainEqual({ method: "PATCH", path: "/api/instances/chatgpt", body: { hidden: false } });
     expect(accounts()).toEqual(["codex", "chatgpt", "chatgpt-work"]);
     expect(hiddenRows()).toEqual([]);
+    expect(server.refreshes).toBe(0);
   });
 
   it("offers Hide on the Codex row too", async () => {

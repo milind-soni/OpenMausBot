@@ -128,7 +128,9 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     return false;
   }
 
-  const lineTab = (line: Line): InboxRow["tab"] => (line.done || answeredThere(line) ? "done" : "info");
+  /** Finished work the person has read needs nothing more from them: it leaves the inbox. */
+  const readWork = (line: Line): boolean => line.kind === "result" && line.seen === true;
+  const lineTab = (line: Line): InboxRow["tab"] => (line.done || answeredThere(line) || readWork(line) ? "done" : "info");
   const lineFor = (auth: RequestAuth, line: Line): boolean => {
     const viewer = deps.viewer(auth);
     if (viewer.kind === "nobody" || !deps.sees(auth, line.threadId)) return false;
@@ -184,18 +186,28 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     return [...rows.values()];
   }
 
-  const lineRow = (line: Line): InboxRow => ({
-    id: line.id, kind: line.kind, tab: lineTab(line), from: { name: line.from, botId: line.botId }, ...(line.workingFor ? { workingFor: line.workingFor } : {}),
-    origin: { botId: line.botId, threadId: line.threadId, title: titleOf(line.botId, line.threadId), ...(line.groupId ? { groupId: line.groupId } : {}), messageId: line.id },
-    text: clip(line.text, ROW_TEXT_MAX), at: line.at, unread: !line.seen, ...(line.kind === "message" ? { replies: true as const } : {}),
-  });
+  /** The message a line points at: its own message, or the newest one in the conversation it came from, so a client
+   * can put the person at it. */
+  const focusOf = (line: Line): string | undefined => line.kind === "message" ? line.id : store.messagesFor(line.threadId).at(-1)?.id;
+
+  const lineRow = (line: Line): InboxRow => {
+    const focus = focusOf(line);
+    return {
+      id: line.id, kind: line.kind, tab: lineTab(line), from: { name: line.from, botId: line.botId }, ...(line.workingFor ? { workingFor: line.workingFor } : {}),
+      origin: { botId: line.botId, threadId: line.threadId, title: titleOf(line.botId, line.threadId), ...(line.groupId ? { groupId: line.groupId } : {}), ...(focus ? { messageId: focus } : {}) },
+      text: clip(line.text, ROW_TEXT_MAX), at: line.at, unread: !line.seen, ...(line.kind === "message" ? { replies: true as const } : {}),
+    };
+  };
 
   function view(auth: RequestAuth): InboxView {
-    const rows = [...askRows(auth), ...lines.filter((line) => lineFor(auth, line)).map(lineRow)].sort((a, b) => b.at - a.at).slice(0, VIEW_ROWS);
+    const visible = [...askRows(auth), ...lines.filter((line) => lineFor(auth, line)).map(lineRow)].sort((a, b) => b.at - a.at);
+    // What is still active comes first, so settled lines never push it out of the view; settled ones fill the rest.
+    const rows = [...visible.filter((row) => row.tab !== "done"), ...visible.filter((row) => row.tab === "done")].slice(0, VIEW_ROWS);
     return { botId: null, threadId: null, rows, anchor: null };
   }
 
   function addLine(line: Line): Line {
+    // A job's next unread result replaces its last one, so one job keeps one row; a line already read stays for Finished.
     if (line.job) lines = lines.filter((one) => one.job !== line.job || one.seen || one.done);
     lines.push(line);
     save();

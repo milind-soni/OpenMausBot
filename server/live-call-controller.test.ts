@@ -4,13 +4,18 @@ import {
   ATTACH_TIMEOUT_MS, CLOSE_TIMEOUT_MS, CONSENT_SETTLE_MS, DELEGATION_SETTLE_MS, FISH_ATTACH_TIMEOUT_MS, GOODBYE_MS, IDLE_CHECK_MS, PROGRESS_INTERVAL_MS,
   LIVE_FISH_NEEDS_APP, LIVE_ELEVENLABS_NEEDS_APP, LIVE_GEMINI_NEEDS_APP, LiveCallBusyError, LiveCallController, LiveCallSignedOutError, type LiveActivity, type LiveCallDeps, type LiveSocket,
 } from "./live-call-controller.ts";
+import { rmSync } from "node:fs";
 import { LIVE_COPY } from "../shared/live-approval.ts";
+import { DATA_DIR } from "./config.ts";
+import { recordLiveCall } from "./live-call-record.ts";
+import { flushLaterSaves } from "./save-batch.ts";
 import { LIVE_CUSTOM_REFUSAL } from "./live-access.ts";
 import { LIVE_NEEDS_AZURE, LIVE_NEEDS_KEY, LiveSessionError, type LiveEndpoint } from "./live-call.ts";
 import { FishRelays, FISH_AGENT_VOICE } from "./live-fish.ts";
 import type { LiveElevenLabsSession, LiveFishSessionToken, LiveGeminiSession } from "../shared/wire.ts";
+import { addHeldSecretScrubber, HELD_SECRET_MASK, redactSecretsInText } from "./redact.ts";
 import type { RequestAuth } from "./request-auth.ts";
-import type { Message, StoreChange } from "./store.ts";
+import { Store, type Message, type StoreChange } from "./store.ts";
 
 class FakeSocket implements LiveSocket {
   readyState = 0;
@@ -103,6 +108,14 @@ describe("LiveCallController lifecycle", () => {
     const other = setup({ botVoice: (botId) => voices[botId] });
     await other.controller.start({ auth: owner, ...BOT, botId: "bot2", client: "desktop", sdp: "a" });
     expect(other.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ botId: "bot2", voice: "sol" }));
+  });
+
+  it.each(["nuri", "juni", "flitz", "brise", "sillage", "nira", "harema", "shida", "noeul"])("starts the called bot's session in %s instead of the app's voice", async (voice) => {
+    const t = setup({ botVoice: () => voice });
+    const started = await t.controller.start({ auth: owner, ...BOT, client: "desktop", sdp: "a" });
+    expect(t.deps.createSession).toHaveBeenCalledWith(expect.objectContaining({ voice }));
+    expect(started.call.voice).toBe(voice);
+    await t.controller.shutdown();
   });
 
   it("uses the app's voice when the bot's own is not a GPT-Live voice", async () => {
@@ -1695,6 +1708,121 @@ describe("LiveCallController record", () => {
     }]);
     expect(recorded(t)[0]!.record.endedAt).toBeGreaterThanOrEqual(call.startedAt);
     expect(JSON.stringify(recorded(t))).not.toContain("calendar");
+  });
+
+  it("keeps what the bot said aloud, one line per stretch of speech, and still nothing the person said", async () => {
+    const t = setup({ recordCall: vi.fn() });
+    await t.start();
+    t.socket().receive({ type: "session.input_transcript.delta", delta: "what is on my calendar", start_ms: 100, end_ms: 900 });
+    t.socket().receive({ type: "session.output_transcript.delta", delta: "You have two ", start_ms: 1_000, end_ms: 1_500 });
+    t.socket().receive({ type: "session.output_transcript.delta", delta: "meetings.", start_ms: 1_500, end_ms: 2_000 });
+    t.socket().receive({ type: "session.input_transcript.delta", delta: "thanks bye", start_ms: 4_000, end_ms: 4_600 });
+    t.socket().receive({ type: "session.output_transcript.delta", delta: "Bye!", start_ms: 5_000, end_ms: 5_400 });
+    t.socket().drop();
+    const record = recorded(t)[0]!.record;
+    expect(record.spoken).toEqual([{ at: expect.any(Number), text: "You have two meetings." }, { at: expect.any(Number), text: "Bye!" }]);
+    expect(JSON.stringify(record)).not.toContain("calendar");
+    expect(JSON.stringify(record)).not.toContain("thanks");
+  });
+
+  it("masks a held code the bot read aloud when it is said, so it stays masked after the code is forgotten", async () => {
+    const code = "Q7XK-24LM";
+    const forget = addHeldSecretScrubber((text) => text.replaceAll(code, HELD_SECRET_MASK));
+    const t = setup({ recordCall: vi.fn() });
+    try {
+      await t.start();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Your code is Q7XK", start_ms: 1_000, end_ms: 1_500 });
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "-24LM.", start_ms: 1_500, end_ms: 2_000 });
+    } finally {
+      forget();
+    }
+    t.socket().drop();
+    const record = recorded(t)[0]!.record;
+    expect(record.spoken).toEqual([{ at: expect.any(Number), text: `Your code is ${HELD_SECRET_MASK}.` }]);
+    expect(JSON.stringify(record)).not.toContain("24LM");
+  });
+
+  it("masks a held code said across a pause, which splits it over two lines", async () => {
+    const code = "Q7XK-24LM";
+    const forget = addHeldSecretScrubber((text) => text.replaceAll(code, HELD_SECRET_MASK));
+    const t = setup({ recordCall: vi.fn() });
+    try {
+      await t.start();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Your code is Q7XK", start_ms: 1_000, end_ms: 1_500 });
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "-24", start_ms: 3_000, end_ms: 3_200 });
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "LM.", start_ms: 3_200, end_ms: 3_500 });
+    } finally {
+      forget();
+    }
+    t.socket().drop();
+    const record = recorded(t)[0]!.record;
+    expect(record.spoken).toEqual([{ at: expect.any(Number), text: `Your code is ${HELD_SECRET_MASK}.` }]);
+    expect(JSON.stringify(record)).not.toContain("Q7XK");
+  });
+
+  it("masks a held code said across two pauses, which splits it over three lines", async () => {
+    const code = "731942";
+    const forget = addHeldSecretScrubber((text) => text.replaceAll(code, HELD_SECRET_MASK));
+    const t = setup({ recordCall: vi.fn() });
+    try {
+      await t.start();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Your code is 73", start_ms: 1_000, end_ms: 1_500 });
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "19", start_ms: 3_000, end_ms: 3_200 });
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "42.", start_ms: 5_000, end_ms: 5_300 });
+    } finally {
+      forget();
+    }
+    t.socket().drop();
+    const record = recorded(t)[0]!.record;
+    expect(record.spoken).toEqual([{ at: expect.any(Number), text: `Your code is ${HELD_SECRET_MASK}.` }]);
+    expect(record.spoken?.map((line) => line.text).join(" ")).not.toMatch(/73|19|42/);
+  });
+
+  it("masks a held code split at a pause when the line after it is long", async () => {
+    const code = "731942";
+    const forget = addHeldSecretScrubber((text) => text.replaceAll(code, HELD_SECRET_MASK));
+    const t = setup({ recordCall: vi.fn() });
+    try {
+      await t.start();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Your code is 73", start_ms: 1_000, end_ms: 1_500 });
+      t.socket().receive({ type: "session.output_transcript.delta", delta: `1942${".".repeat(508)}`, start_ms: 3_000, end_ms: 3_500 });
+    } finally {
+      forget();
+    }
+    t.socket().drop();
+    const record = recorded(t)[0]!.record;
+    expect(record.spoken).toEqual([{ at: expect.any(Number), text: `Your code is ${HELD_SECRET_MASK}${".".repeat(508)}` }]);
+  });
+
+  it("stores the call row with a held code masked after the code stops being held", async () => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    const selection = () => ({ instanceId: "claude", model: "claude-sonnet-5" });
+    const store = new Store(selection);
+    const bot = store.createBot({}, { seedMessages: false });
+    const t = setup({ recordCall: (input) => recordLiveCall({ chatExists: () => true, appendMessage: (_threadId, message) => store.appendMessage(bot.threadId, message) }, input) });
+    const forget = addHeldSecretScrubber((text) => text.replaceAll("731942", HELD_SECRET_MASK));
+    try {
+      await t.start();
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "Your code is 7319", start_ms: 1_000, end_ms: 1_500 });
+      t.socket().receive({ type: "session.output_transcript.delta", delta: "42.", start_ms: 3_000, end_ms: 3_300 });
+    } finally {
+      forget();
+    }
+    t.socket().drop();
+    flushLaterSaves();
+    const row = new Store(selection).messagesFor(bot.threadId).find((message) => message.kind === "call");
+    expect(row?.call?.spoken).toEqual([{ at: expect.any(Number), text: `Your code is ${HELD_SECRET_MASK}.` }]);
+    expect(JSON.stringify(row?.call?.spoken)).not.toContain("7319");
+  });
+
+  it("leaves a credential shape whole until the record is redacted, so a key split across deltas is masked in full", async () => {
+    const t = setup({ recordCall: vi.fn() });
+    await t.start();
+    t.socket().receive({ type: "session.output_transcript.delta", delta: "Set service_key=Q7XK", start_ms: 1_000, end_ms: 1_500 });
+    t.socket().receive({ type: "session.output_transcript.delta", delta: "-24LM now.", start_ms: 1_500, end_ms: 2_000 });
+    t.socket().drop();
+    const spoken = recorded(t)[0]!.record.spoken!.map((line) => redactSecretsInText(line.text));
+    expect(spoken).toEqual(["Set service_key=«redacted 9 chars» now."]);
   });
 
   it("counts wall-clock seconds when OpenAI sent none", async () => {

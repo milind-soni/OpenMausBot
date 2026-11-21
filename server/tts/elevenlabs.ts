@@ -156,7 +156,7 @@ export interface Synthesis {
   audio: Promise<Audio>;
 }
 
-export function synthesize(text: string, voiceId: string, key: string, api: string, included = false): Synthesis {
+export function synthesize(text: string, voiceId: string, key: string, api: string, included = false, signal?: AbortSignal): Synthesis {
   const firstAudio = withResolvers<Audio>();
   const audio = withResolvers<Audio>();
   // Callers may consume only `audio`: a failure before the first chunk must not become an unhandled rejection.
@@ -168,7 +168,7 @@ export function synthesize(text: string, voiceId: string, key: string, api: stri
         headers: { "xi-api-key": key, "content-type": "application/json", accept: "audio/mpeg" },
         body: JSON.stringify({ text, model_id: speechModel(text, included) }),
         redirect: "error",
-        signal: AbortSignal.timeout(60_000),
+        signal: AbortSignal.any([AbortSignal.timeout(60_000), ...(signal ? [signal] : [])]),
       });
       if (!res.ok) throw new Error(message(res.status, "speaking", await safeJson(res)));
       if (!res.body) throw new Error("speaking failed: no audio came back");
@@ -192,9 +192,10 @@ export function synthesize(text: string, voiceId: string, key: string, api: stri
 }
 
 /** Speech-to-text with Scribe, for listening where no Fish Audio key is saved. Only the person's own key comes here. */
-export async function transcribe(audio: Uint8Array, mime: string, key: string, api: string): Promise<string> {
+export async function transcribe(audio: Uint8Array, mime: string, key: string, api: string, language?: string): Promise<string> {
   const form = new FormData();
   form.append("model_id", HEARING_MODEL);
+  if (language) form.append("language_code", language);
   form.append("tag_audio_events", "false");
   form.append("file", new Blob([audio as Uint8Array<ArrayBuffer>], { type: mime }), "speech.wav");
   let res: Response;

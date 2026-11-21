@@ -6,6 +6,7 @@ import type { ConnectorStatus } from "@/lib/connector-status";
 import { t } from "@/lib/i18n";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { useStore, type Action, type Bot, type InstanceInfo } from "@/state/store";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { EMAIL_SLUG } from "../../shared/email";
 import { BotAvatar } from "./Avatar";
 import { UndoToast } from "./bot-access/ShareBotButton";
@@ -29,6 +30,7 @@ function subscribe(watch: () => void) {
 /** The Apps pop-up, opened from inside a bot: an app connected there goes to that bot even if its apps were off. */
 export function connectAppFromBot(dispatch: (action: Action) => void, botId: string) {
   connectingFromBot = botId;
+  tell();
   dispatch({ type: "toggleSettings", open: false });
   dispatch({ type: "togglePlugins", open: true, surface: "apps" });
 }
@@ -81,14 +83,23 @@ function connectedAppSlugs(status: Record<string, ConnectorStatus>, emailConnect
 /** Security: only an owner or admin's connection gives an app to bots, and only they can change which bots use it. A bot
  * whose apps are off stays off, unless the connection was started from that bot. */
 export function useAppGrants({ status, emailConnected, inventoryReady }: { status: Record<string, ConnectorStatus>; emailConnected: boolean | null; inventoryReady: boolean }) {
-  const { state, dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  const everyBot = useStoreSelector((state) => state.bots);
+  const instances = useStoreSelector((state) => state.instances);
+  const allowed = useStoreSelector((state) => state.config?.managedPolicy?.apps);
   const admin = useOwnerOrAdmin();
-  const [startingBot] = useState(takeConnectingBot);
+  const [startingBot, setStartingBot] = useState(takeConnectingBot);
+  const handedBot = useSyncExternalStore(subscribe, () => connectingFromBot, () => null);
   const [changing, setChanging] = useState<string | null>(null);
   const requested = useSyncExternalStore(subscribe, () => changeRequested, () => null);
-  const bots = botsForApps(state.bots, state.instances);
+  const bots = botsForApps(everyBot, instances);
   const canChange = admin === true && inventoryReady && bots.length > 0;
-  const allowed = state.config?.managedPolicy?.apps;
+
+  useEffect(() => {
+    if (!handedBot) return;
+    setStartingBot(takeConnectingBot());
+    tell();
+  }, [handedBot]);
 
   useEffect(() => {
     if (!requested) return;
@@ -106,12 +117,15 @@ export function useAppGrants({ status, emailConnected, inventoryReady }: { statu
 
   const appConnected = useCallback((slug: string, app: string) => {
     const now = latest.current;
+    const fromBot = now.startingBot;
+    now.startingBot = null;
+    setStartingBot(null);
     if (now.admin !== true || !now.bots.length) return;
     if (now.allowed && !now.allowed.allowAll && !now.allowed.allowlist.includes(slug)) return;
     let using = 0;
     for (const bot of now.bots) {
       if (botAppScope(bot, slug) !== null) using += 1;
-      else if (bot.composio !== false || bot.id === now.startingBot) {
+      else if (bot.composio !== false || bot.id === fromBot) {
         now.write(bot, slug, true);
         using += 1;
       }

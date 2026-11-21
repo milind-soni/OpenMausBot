@@ -18,7 +18,7 @@ import type { MessagePage } from "./channels.ts";
 import { bulkDeleteThreadIds, type BulkDeleteRefusal } from "./bulk-delete.ts";
 import { forkMessageId } from "./fork-request.ts";
 import { PASS, type RouteHandler } from "./table.ts";
-import { sawThread } from "../thread-presence.ts";
+import { madeThread, sawThread } from "../thread-presence.ts";
 import { refusalBody, userError } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import { readThreadNotifications, type NotificationListed } from "./notifications.ts";
@@ -216,6 +216,7 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler & { deleteTa
       const task = store.createTask(bot.id, typeof body.title === "string" ? body.title : undefined, body.select !== false, body.projectId, undefined, body.approvalMode, undefined, cwd,
         auth.kind === "session" ? (created) => threadStarters.set(created.threadId, actorKey(auth)) : undefined);
       if (!task) return json(res, 500, { error: "couldn't create that task" });
+      madeThread(bot.id, task.threadId);
       return json(res, 201, { bot: publicBot(store.bot(bot.id)!), task: wireTask(task, store.bot(bot.id)!.modelSelection) } satisfies TaskResponse);
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/tasks\/delete$/);

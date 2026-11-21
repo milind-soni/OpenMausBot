@@ -38,7 +38,7 @@ describe("landing on a search hit older than the loaded page", () => {
       "/api/threads/t/messages?limit=200&before=m200",
     ]);
     expect(actions.map((action) => action.type)).toEqual(["select", "olderMessages", "focusMessage"]);
-    expect(actions[1]).toEqual({ type: "olderMessages", threadId: "t", generation: 3, messages: range(0, 400), hasMore: false });
+    expect(actions[1]).toEqual({ type: "olderMessages", threadId: "t", generation: 3, before: "m400", messages: range(0, 400), hasMore: false });
   });
 
   it("does the same in the room's open thread", async () => {
@@ -50,7 +50,7 @@ describe("landing on a search hit older than the loaded page", () => {
   it("stops at the page that holds the hit", async () => {
     await landOnSearchHit({ ...hit, botId: "scout", threadId: "t", messageId: "m300" }, state, dispatch, true);
     expect(fixture.api).toHaveBeenCalledOnce();
-    expect(actions[1]).toEqual({ type: "olderMessages", threadId: "t", generation: 3, messages: range(200, 400), hasMore: true });
+    expect(actions[1]).toEqual({ type: "olderMessages", threadId: "t", generation: 3, before: "m400", messages: range(200, 400), hasMore: true });
   });
 
   it("asks for nothing when the hit is already loaded", async () => {

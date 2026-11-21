@@ -2,11 +2,12 @@
 // under and held outside the app reducer, so a delta re-renders only the transcript that shows that thread. A streamed
 // item stays drawn until the transcript holds the message saved under the same id, so the saved bubble replaces it in
 // the same commit.
-import { createContext, useEffect, useMemo, useSyncExternalStore } from "react";
+import { createContext, useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import { isClientCancellation } from "../../shared/client-cancel";
 import { redactSecretsInText } from "../../shared/redact";
+import { isPureLeakedSystemHarnessMessage } from "../../shared/system-message-guard";
 import type { Message } from "@/state/store";
 
 export interface LiveReplyItem {
@@ -48,6 +49,7 @@ const streamed = new Set<string>();
  * turn boundary, since any item open across the gap lost its start. */
 let gapped = false;
 const boundarySinceGap = new Set<string>();
+const shapes = new Map<string, { items: readonly LiveReplyItem[]; shapes: readonly LiveRowShape[] }>();
 
 function put(threadId: string, next: ThreadReplies): void {
   const current = threads.get(threadId);
@@ -183,6 +185,13 @@ export function liveReplyText(item: Pick<LiveReplyItem, "text" | "done">): strin
   return isClientCancellation(text) ? "" : redactSecretsInText(text);
 }
 
+const shownTexts = new WeakMap<LiveReplyItem, string>();
+function shownText(item: LiveReplyItem): string {
+  let text = shownTexts.get(item);
+  if (text === undefined) shownTexts.set(item, (text = liveReplyText(item)));
+  return text;
+}
+
 function subscribe(threadId: string | null | undefined, listener: () => void): () => void {
   if (!threadId) return () => {};
   let set = listeners.get(threadId);
@@ -194,12 +203,16 @@ function subscribe(threadId: string | null | undefined, listener: () => void): (
   };
 }
 
-export function useLiveReplies(threadId: string | null | undefined): readonly LiveReplyItem[] {
-  return useSyncExternalStore(
-    (listener) => subscribe(threadId, listener),
-    () => liveReplies(threadId),
-    () => EMPTY,
-  );
+const noSubscription = () => () => {};
+
+/** `row` as drawn now: a live row's words so far, from its thread's stream, said by the speaker its stand-in names; any
+ * other row as it is, subscribing to nothing. */
+export function useLiveRow(threadId: string, row: Message): Message {
+  const live = isLiveReply(row);
+  const subscribeLive = useCallback((listener: () => void) => subscribe(threadId, listener), [threadId]);
+  const items = useSyncExternalStore(live ? subscribeLive : noSubscription, () => live ? liveReplies(threadId) : EMPTY, () => EMPTY);
+  const item = live ? items.find((one) => `${LIVE_ID}${one.key}` === row.id) : undefined;
+  return (item && liveRowOf(item, () => row.from)) || row;
 }
 
 export function useHasLiveReply(threadId: string | null | undefined): boolean {
@@ -226,9 +239,11 @@ export function roomLiveSpeaker(members: readonly RoomMember[], speakingNow?: st
   };
 }
 
-/** The transcript rows the live items draw, after `transcript`'s own: an item whose saved message `transcript` holds
- * draws nothing, so the two never show together. */
-export function liveReplyRows(items: readonly LiveReplyItem[], transcript: readonly (Pick<Message, "id"> & { itemId?: string })[], speaker?: LiveSpeaker): { rows: Message[]; settled: string[] } {
+type Drawable = Pick<LiveReplyItem, "key" | "itemId" | "savedAs">;
+
+/** The rows `entries` draw after `transcript`'s own: an entry whose saved message `transcript` holds draws nothing, so
+ * the two never show together. */
+function drawnAfter<T extends Drawable>(entries: readonly T[], transcript: readonly (Pick<Message, "id"> & { itemId?: string })[], row: (entry: T) => Message | null): { rows: Message[]; settled: string[] } {
   const rows: Message[] = [];
   const settled: string[] = [];
   const ids = new Set<string>(), itemIds = new Set<string>();
@@ -236,40 +251,110 @@ export function liveReplyRows(items: readonly LiveReplyItem[], transcript: reado
     ids.add(message.id);
     if (message.itemId !== undefined) itemIds.add(message.itemId);
   }
-  for (const item of items) {
-    if ((item.itemId !== undefined && itemIds.has(item.itemId)) || (item.savedAs !== undefined && ids.has(item.savedAs))) {
-      settled.push(item.key);
+  for (const entry of entries) {
+    if ((entry.itemId !== undefined && itemIds.has(entry.itemId)) || (entry.savedAs !== undefined && ids.has(entry.savedAs))) {
+      settled.push(entry.key);
       continue;
     }
-    const text = liveReplyText(item);
-    if (!text.trim()) continue;
-    const from = speaker?.(item.botId);
-    let row = rowCache.get(item);
-    if (!row || row.text !== text || !sameSpeaker(row.message.from, from)) {
-      row = { text, message: { id: `${LIVE_ID}${item.key}`, role: "bot", kind: "text", text, at: item.at, ...(item.turnId ? { turnId: item.turnId } : {}), ...(from ? { from } : {}) } as Message };
-      rowCache.set(item, row);
-    }
-    rows.push(row.message);
+    const drawn = row(entry);
+    if (drawn) rows.push(drawn);
   }
   return { rows, settled };
 }
 
-/** The rows a transcript window draws: `windowed` (a slice of the whole `transcript`), then the live items. An item is
- * matched against the whole transcript, so one saved outside the window is not drawn again; and live rows follow the
- * newest message, so a window that stops short of it (scrolled back, or opened at a found or pinned message) draws none. */
-export function withLiveRows(items: readonly LiveReplyItem[], windowed: Message[], transcript: readonly Message[], speaker?: LiveSpeaker): { rows: Message[]; settled: string[] } {
-  if (!items.length) return { rows: windowed, settled: [] };
-  const drawn = liveReplyRows(items, transcript, speaker);
+function liveRowOf(item: LiveReplyItem, speaker?: LiveSpeaker): Message | null {
+  const text = shownText(item);
+  if (!text.trim()) return null;
+  const from = speaker?.(item.botId);
+  let row = rowCache.get(item);
+  if (!row || row.text !== text || !sameSpeaker(row.message.from, from)) {
+    row = { text, message: { id: `${LIVE_ID}${item.key}`, role: "bot", kind: "text", text, at: item.at, ...(item.turnId ? { turnId: item.turnId } : {}), ...(from ? { from } : {}) } as Message };
+    rowCache.set(item, row);
+  }
+  return row.message;
+}
+
+/** The transcript rows the live items draw, after `transcript`'s own. */
+export function liveReplyRows(items: readonly LiveReplyItem[], transcript: readonly (Pick<Message, "id"> & { itemId?: string })[], speaker?: LiveSpeaker): { rows: Message[]; settled: string[] } {
+  return drawnAfter(items, transcript, (item) => liveRowOf(item, speaker));
+}
+
+/** `windowed` (a slice of the whole `transcript`) with `drawn` after it. An item is matched against the whole transcript,
+ * so one saved outside the window is not drawn again; and live rows follow the newest message, so a window that stops
+ * short of it (scrolled back, or opened at a found or pinned message) draws none. */
+function windowWith(drawn: { rows: Message[]; settled: string[] }, windowed: Message[], transcript: readonly Message[]): { rows: Message[]; settled: string[] } {
   const atEnd = windowed.at(-1)?.id === transcript.at(-1)?.id;
   return { rows: atEnd && drawn.rows.length ? [...windowed, ...drawn.rows] : windowed, settled: drawn.settled };
 }
 
-/** The `windowed` rows of `transcript` with the thread's streaming reply after them; in a room, each live row names its
- * speaker from `members`. */
-export function useLiveTranscript(threadId: string, windowed: Message[], transcript: readonly Message[], members?: readonly RoomMember[], speakingNow?: string | null): Message[] {
-  const items = useLiveReplies(threadId);
-  const speaker = useMemo(() => members && roomLiveSpeaker(members, speakingNow), [members, speakingNow]);
-  const live = useMemo(() => withLiveRows(items, windowed, transcript, speaker), [items, windowed, transcript, speaker]);
+/** The rows a transcript window draws: `windowed`, then the live items. */
+export function withLiveRows(items: readonly LiveReplyItem[], windowed: Message[], transcript: readonly Message[], speaker?: LiveSpeaker): { rows: Message[]; settled: string[] } {
+  if (!items.length) return { rows: windowed, settled: [] };
+  return windowWith(liveReplyRows(items, transcript, speaker), windowed, transcript);
+}
+
+/** A live item as the transcript's layout sees it: everything but its words, which change nothing there except whether
+ * the row shows at all and whether it is only a leaked harness message, which a transcript hides. */
+interface LiveRowShape extends Drawable {
+  turnId?: string;
+  botId?: string;
+  at: number;
+  shown: boolean;
+  /** The words when they are only a leaked harness message, else "". */
+  harness: string;
+}
+
+const NO_SHAPES: readonly LiveRowShape[] = [];
+const sameShape = (a: LiveRowShape, b: LiveRowShape) =>
+  a.key === b.key && a.itemId === b.itemId && a.savedAs === b.savedAs && a.turnId === b.turnId && a.botId === b.botId && a.at === b.at && a.shown === b.shown && a.harness === b.harness;
+
+function shapeOf(item: LiveReplyItem): LiveRowShape {
+  const text = shownText(item);
+  return { key: item.key, itemId: item.itemId, savedAs: item.savedAs, turnId: item.turnId, botId: item.botId, at: item.at, shown: text.trim() !== "", harness: isPureLeakedSystemHarnessMessage(text) ? text : "" };
+}
+
+/** The thread's live rows as shapes, the same array for as long as no shape changes: a new word keeps it. */
+function liveRowShapes(threadId: string): readonly LiveRowShape[] {
+  const items = liveReplies(threadId);
+  const cached = shapes.get(threadId);
+  if (cached?.items === items) return cached.shapes;
+  if (!items.length) {
+    shapes.delete(threadId);
+    return NO_SHAPES;
+  }
+  const previous = cached?.shapes ?? NO_SHAPES;
+  let changed = items.length !== previous.length;
+  const next = items.map((item, at) => {
+    const shape = shapeOf(item), before = previous[at];
+    if (before && sameShape(before, shape)) return before;
+    changed = true;
+    return shape;
+  });
+  shapes.delete(threadId);
+  shapes.set(threadId, { items, shapes: changed ? next : previous });
+  if (shapes.size > MAX_THREADS) shapes.delete(shapes.keys().next().value!);
+  return changed ? next : previous;
+}
+
+const standIns = new WeakMap<LiveRowShape, Message>();
+function standInFor(shape: LiveRowShape, speaker?: LiveSpeaker): Message | null {
+  if (!shape.shown) return null;
+  const from = speaker?.(shape.botId);
+  let row = standIns.get(shape);
+  if (!row || !sameSpeaker(row.from, from)) standIns.set(shape, (row = { id: `${LIVE_ID}${shape.key}`, role: "bot", kind: "text", text: shape.harness, at: shape.at, ...(shape.turnId ? { turnId: shape.turnId } : {}), ...(from ? { from } : {}) } as Message));
+  return row;
+}
+
+/** The `windowed` rows of `transcript` with the thread's live rows after them, for a list that must not draw again for
+ * each word: each live row is a stand-in without its words, which change only when a live row starts, settles or ends;
+ * the row's bubble draws the words with `useLiveRow`. In a room, `speaker` names each live row's member. */
+export function useLiveTranscriptLayout(threadId: string, windowed: Message[], transcript: readonly Message[], speaker?: LiveSpeaker): Message[] {
+  const subscribeThread = useCallback((listener: () => void) => subscribe(threadId, listener), [threadId]);
+  const shown = useSyncExternalStore(subscribeThread, () => liveRowShapes(threadId), () => NO_SHAPES);
+  const live = useMemo(
+    () => shown.length ? windowWith(drawnAfter(shown, transcript, (shape) => standInFor(shape, speaker)), windowed, transcript) : { rows: windowed, settled: [] },
+    [shown, windowed, transcript, speaker],
+  );
   useEffect(() => settleLiveReplies(threadId, live.settled), [threadId, live.settled]);
   return live.rows;
 }
@@ -281,4 +366,5 @@ export function resetLiveReplies(): void {
   streamed.clear();
   gapped = false;
   boundarySinceGap.clear();
+  shapes.clear();
 }

@@ -17,7 +17,9 @@ const recordSchema = z.object({
   state: z.enum(["needs-sign-in", "signed-in"]),
   issuer: z.string().optional(),
   clientId: z.string().optional(),
-  /** The secret stays in config.json; it is never kept here. */
+  /** Only a secret the server issued at dynamic registration. A configured app's secret stays in config.json and is
+   * never kept here. */
+  clientSecret: z.string().optional(),
   tokenAuth: z.enum(["client_secret_post", "client_secret_basic"]).optional(),
   redirectUri: z.string().optional(),
   tokenEndpoint: z.string().optional(),
@@ -27,11 +29,18 @@ const recordSchema = z.object({
 
 const fileSchema = z.object({
   servers: z.record(z.string(), recordSchema).default({}),
+  /** Refresh tokens already sent to a token endpoint, per server. Presenting one of them again can be a replay, so the
+   * mark is kept here and not in memory: a restart must not present it either. */
+  spentRefresh: z.record(z.string(), z.string().min(1)).default({}),
 });
 
 export type McpOAuthTokens = z.infer<typeof tokensSchema>;
 export type McpOAuthRecord = z.infer<typeof recordSchema>;
-type StoreFile = z.infer<typeof fileSchema>;
+/** The file as it is kept on disk. Both maps are always present: the schema fills the missing one in. */
+interface StoreFile {
+  servers: Record<string, McpOAuthRecord>;
+  spentRefresh: Record<string, string>;
+}
 
 /** One sign-in as this store keeps it, from anywhere else (a sign-in moved from the person's own computer); null if not. */
 export function parseMcpOAuthRecord(value: unknown): McpOAuthRecord | null {
@@ -59,8 +68,38 @@ export class McpOAuthStore {
 
   delete(name: string): void {
     const data = this.read();
-    if (!Object.hasOwn(data.servers, name)) return;
+    if (!Object.hasOwn(data.servers, name) && !Object.hasOwn(data.spentRefresh, name)) return;
     delete data.servers[name];
+    delete data.spentRefresh[name];
+    this.write(data);
+  }
+
+  /** Forget the refresh token marked as spent for this server: a new sign-in brings a new token. */
+  forgetSpentRefresh(name: string): void {
+    const data = this.read();
+    if (!Object.hasOwn(data.spentRefresh, name)) return;
+    delete data.spentRefresh[name];
+    this.write(data);
+  }
+
+  /** The refresh token already sent for this server, when presenting it again could be a replay. */
+  spentRefreshFor(name: string): string | undefined {
+    return this.read().spentRefresh[name];
+  }
+
+  /** Remember a refresh token that has been sent, before its answer arrives: a lost answer may mean the server
+   * rotated it, and a restart must not present it again. */
+  markSpentRefresh(name: string, token: string): void {
+    const data = this.read();
+    data.spentRefresh = { ...data.spentRefresh, [name]: token };
+    this.write(data);
+  }
+
+  /** Forget a sent refresh token once the server has answered and kept it: it is still valid. */
+  clearSpentRefresh(name: string, token: string): void {
+    const data = this.read();
+    if (data.spentRefresh[name] !== token) return;
+    delete data.spentRefresh[name];
     this.write(data);
   }
 
@@ -71,7 +110,7 @@ export class McpOAuthStore {
       if (parsed.success) return parsed.data;
     } catch {
     }
-    return { servers: {} };
+    return { servers: {}, spentRefresh: {} };
   }
 
   private write(data: StoreFile): void {

@@ -41,7 +41,7 @@ The app has three places: the **sidebar** (bots and conversations), the
 where they belong instead of adding new places.
 
 - **No new header buttons.** The chat header shows the bot, its model and its
-  screen. Anything else goes in the bot panel, a menu or the command palette.
+  screen; Advanced mode's composer shows the model under its field instead. Anything else goes in the bot panel, a menu or the command palette.
   A button that exists only while the conversation has what it shows (its
   pinned message) is fine: it opens a menu and is gone when there is nothing
   to show.
@@ -105,25 +105,38 @@ Midnight and Daylight use **Geist** for text and **Geist Mono** for code, keys
 and paths. A skin may choose its own face; components never set `font-family`
 and never add fonts.
 
+Regular text is weight 415 (`--font-weight-normal`, which `font-normal` uses):
+Geist is a variable font, so this sits a touch above 400 and a static face
+rounds it to 400. Text tracks at +0.012em (`--tracking-ui`, set once on
+`body`); a skin or a theme with its own face resets it to 0, and code and keys
+are never tracked. Titles of 17px and up keep `tracking-[-0.01em]`.
+
 | Use | Size / line height | Weight | Ink |
 |---|---|---|---|
 | Page or dialog title | 20px, `tracking-[-0.01em]` | 600 | `ink` |
-| Sheet or section title | 17px | 600 | `ink` |
-| Chat bubble (Simple) | 15 / 22px | 400 | `ink` |
-| Menu item (`MENU_ITEM`) | 14 / 18px | 400 | `ink` |
-| Body, rows, menu rows (`MENU_ROW`) | 13 / 18px | 400 | `ink` or `ink-secondary` |
-| Names in lists | 13 / 18px | 500 | `ink` |
+| Sheet, section or Settings page title | 17px | 600 | `ink` |
+| Chat text, both modes | 15 / 22px | 415 | `ink` |
+| Inline code | 0.93em of its text, on ink at 4% | 415 | `ink-secondary` |
+| Menu item (`MENU_ITEM`) | 14 / 18px; the composer's menu 14 / 20px in 32px rows | 415 | `ink` |
+| Body, rows, menu rows (`MENU_ROW`) | 13 / 18px | 415 | `ink` or `ink-secondary` |
+| Names in lists (bots in the sidebar 14 / 20px) | 13 / 18px | 500 | `ink` |
+| Sidebar group labels ("Bots", "Tools", a department) | 13 / 18px | 415 | `ink-secondary` |
+| Sidebar places (the rows under "Tools") | 14 / 20px | 415 | `ink` |
+| Pinned bot captions | 12 / 16px | 415 | `ink` |
 | Speaker names in transcripts (people and bots) | 13px | 600 | bot colour, else `ink-secondary` |
-| Meta, hints, group labels | 12 / 16px | 400 (group labels 500) | `ink-tertiary` |
-| Keycaps (`ShortcutHint`), tiny badges | 11px | 400 | `ink-secondary` or `ink-tertiary` |
+| Meta, hints, menu group labels | 12 / 16px | 415 (menu group labels 500) | `ink-tertiary` |
+| Timestamps | 12 / 16px | 500 | `ink-tertiary` or `ink-secondary` |
+| Keycaps (`ShortcutHint`), tiny badges | 11px | 415 | `ink-secondary` or `ink-tertiary` |
 
 Rules:
 
 - **Buttons size their own labels.** `.ui-button` and its variants set the
   size and weight; don't add text classes to them.
-- **Stick to the table.** No 16px or 18px body text, and no new text under 11px.
-- **Three weights:** 400 for text, 500 for names and labels, 600 for titles
-  and for speaker names in transcripts. No 700.
+- **Stick to the table.** No 16px or 18px body text. Nothing under 12px
+  except keycaps and tiny badges, in both modes: Advanced uses the same scale
+  as Simple.
+- **Three weights:** 415 for text (`font-normal`), 500 for names, labels and
+  timestamps, 600 for titles and for speaker names in transcripts. No 700.
 - **Sentence case everywhere.** Titles, buttons, menu items and labels.
   No ALL CAPS labels and no Title Case.
 - **One line for titles and rows.** Truncate with `truncate` and keep the
@@ -141,11 +154,11 @@ element's job and never a pixel value:
 |---|---|---|
 | Buttons, pills, chips, avatars | full | the button and chip classes, `rounded-full` |
 | Menu rows | 6px | `rounded-md` |
-| Fields, controls, sidebar rows | 8px | `rounded-lg` |
-| Cards, menus, popovers | 12px | `rounded-xl` |
+| Fields, controls | 8px | `rounded-lg` |
+| Cards, menus, popovers, sidebar rows and pinned bots | 12px | `rounded-xl` |
 | Dialogs | 14px | `.ui-modal` |
-| Bubbles, cards in the transcript | 18px | `rounded-4xl` |
-| Composer | 22px (18px once it wraps) | set by the composer |
+| Bubbles, cards in the transcript | 18px; a bubble in a run of its sender's bubbles keeps a 6px tail at its bottom corner on its own side (`joinedCorners`) | `rounded-4xl` |
+| Composer | 22px (18px once it wraps, and always in Advanced mode, whose field sits above a footer row) | set by the composer |
 | Window panes | 0 | |
 
 - **No in-between values** (`rounded-[10px]`, `rounded-[14px]`). Pick the step
@@ -163,8 +176,18 @@ element's job and never a pixel value:
   icon.
 - **Labels line up with their heading.** Put shortcut letters, counts and
   chevrons at the end of a row, not before the label.
-- **Control heights: 24, 28, 32 or 36px.** Menu rows are 30px. On touch
-  screens, targets grow to 40–44px with the `touch:` variant.
+- **Control heights: 24, 28, 32 or 36px.** Menu rows are 30px (32px in the
+  composer's menu). The chat header's controls and the sidebar's top buttons
+  are 36px. On touch screens, targets grow to 40–44px with the `touch:`
+  variant.
+- **Sidebar rows:** Simple's rows have 8px padding and a 10px gap after the
+  36px avatar; every row hovers at `bg-ink/[0.06]`. The sidebar is 280px wide
+  in both modes; pinned bots are 95 × 92px tiles with a 60px avatar. Pinned
+  pages never join them: a bot's pages are in its bot panel's Library tab.
+- **The sidebar stays open beside a side panel** while the chat keeps 440px:
+  from 1040px with a 320px panel (Simple's bot panel, a room, Simple's inbox,
+  Notifications), from 1280px with a wider one. Narrower, it folds to its
+  avatars.
 - **Group with space before you group with lines.** Add a divider only between
   groups that space alone can't separate. Never a divider under a heading.
 - **No cards inside cards.** If a card needs sections, use spacing and a group
@@ -180,10 +203,11 @@ element's job and never a pixel value:
 - **Use `lucide-react` only.** No emoji as icons, no icon fonts, no
   hand-drawn SVGs for things Lucide has. Product marks (the Maus, third-party
   logos) are the exception.
-- **Sizes:** 16px in menus, rows and toolbars; 14px next to 12–13px text.
-- **Don't set `strokeWidth`.** The stylesheet draws Lucide at 1.75, and menus
-  at 1.5 through `MENU_SHEET`. Menu code that passes `MENU_STROKE` is the one
-  exception.
+- **Sizes:** 16px in menus, rows and toolbars, and in every 36px or 28px
+  button; 14px next to 12–13px text; 12px for disclosure chevrons.
+- **Don't set `strokeWidth`.** The stylesheet draws every Lucide icon at 1.9,
+  menus included. The only exceptions are a glyph on a filled control (the
+  send arrow) and deliberately heavy marks (a check, a filled badge).
 - **Icons are bare.** Don't put them in tinted squares or circles. A bot's
   avatar is the only mark that gets a plate.
 - **Decorative icons get `aria-hidden="true"`.** An icon-only button needs an
@@ -195,10 +219,18 @@ element's job and never a pixel value:
 
 - **Only floating things cast shadows:** menus, popovers and dialogs. Use
   `menu-surface` or `popover-surface`, which carry each skin's shadow. Cards
-  in the page are flat, with a `hairline` border or a tint.
+  in the page are flat, with a `hairline` border or a tint. Two things in the
+  chat also float, over the scrolling transcript: the chat header's pill and
+  controls (`shadow-(--shadow-float)`, through `ELEVATED_FLOAT`) and the
+  composer (`shadow-(--shadow-composer)`, through `ELEVATED_COMPOSER`). The
+  lift shows on light grounds only; in Daylight the composer drops its 0.5px
+  ring at rest and gets it back on hover and focus.
 - **Borders are 1px `hairline`.** Panes meet on a 0.5px `edge`. An element in
   the page gets a border or a tint, not both, and no shadow. Floating surfaces
-  take their surface class, which already balances all three.
+  take their surface class, which already balances all three. One exception:
+  a bot's bubble is a tint finished with a faint top-lit sheen and a 0.5px
+  inset line of ink at 6% (`BOT_BUBBLE_FINISH`), on light grounds only; a
+  dark ground keeps the flat tint.
 - **Rich content in a reply stays in the bubble.** Tables, code and quotes are
   drawn alike: no fill of their own, a 1px hairline and a faint tint. One
   reply is one bubble.
@@ -236,9 +268,16 @@ Motion explains a change. It never decorates.
 - **300ms ceiling.** Only first-run onboarding may run longer.
 - **Nothing scales in from zero.** Things grow from about 96% and fade.
 - **Hover and press transitions are 120ms** on colour and opacity only. Don't
-  animate layout.
+  animate layout. One exception: buttons (`.ui-button`, `.ui-icon-button`)
+  and the sidebar's bot rows and pinned bots shrink to 98% while pressed, over
+  50ms, and not at all with reduced motion. The stylesheet does this; don't
+  add your own press scale.
 - **No loops** except a live status that is really live (a bot working).
   Never animate something just to draw the eye.
+- **Mascots hold still at rest.** A mascot moves while its bot is doing
+  something, for a beat that explains a change, and under the pointer (its
+  eyes follow, it blinks). Every change blends in over about 300ms, and it
+  settles and stops when the reason ends.
 - **Respect reduced motion.** Pair every transition with
   `motion-reduce:transition-none` and every animation with
   `motion-reduce:animate-none`, or gate it in CSS on
@@ -302,7 +341,9 @@ on. Simple is the default for new installs.
   One exception: where Advanced already shows something in place (a bot's
   threads as a tree under its row), Simple may offer a shortcut to the same
   thing there instead of a second copy of it: a menu that opens on a click
-  of a small chevron, never on hover.
+  of a small chevron, never on hover. A second: Advanced mode's composer puts
+  the field on its own line with a footer row under it, and the model and
+  effort picker sits in that footer, next to the + menu both modes share.
 - **Switching modes never loses data.**
 
 ## 14. Accessibility

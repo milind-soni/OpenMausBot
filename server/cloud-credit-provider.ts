@@ -177,6 +177,7 @@ export class CloudCreditProvider {
       },
       adapter: {
         ...instance.adapter,
+        prestart: undefined, // every start goes through the check below
         onEvent: listener => instance.adapter.onEvent(event => listener(this.plain(event))),
         sendTurn: async input => {
           const refused = blocked();

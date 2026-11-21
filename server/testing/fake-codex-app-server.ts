@@ -6,6 +6,7 @@
 //     empty-question | malformed-question | config-profile | config-profile-unsupported | config-read-error |
 //     image | logged-in-stdout | logged-out | unauthorized | late-request | retry-then-complete | signin-refused |
 //     auth-recovery | mcp-401 | mcp-image | legacy-error | key-401 | recovered-403 | recovered-401 | recovering-403 | usage-limit
+//     | plan-unsupported-input (a resumed thread's turns fail as a ChatGPT plan refuses saved audio; a new thread works)
 //     | async-question (an agentMessage with delivery async and questions, as codex 0.160 sends request_user_input_async)
 //   FAKE_CODEX_MISSING_BEARER  the first N launches fail their turn as codex-cli 0.160.1 holding no login does (count in FAKE_CODEX_STATE)
 //   FAKE_CODEX_LAUNCH_CRASHES  the first N launches die pre-ack at turn/start, transient stderr, exit 1 (count in FAKE_CODEX_STATE)
@@ -26,6 +27,7 @@
 //   FAKE_STREAM_SCRIPT, FAKE_STREAM_CADENCE  a scripted reply chosen by a marker in the prompt (as stream-script.ts)
 //   FAKE_CODEX_PATCH_BYTES  each turn first writes web/index.html by apply_patch, streamed as two
 //     item/fileChange/patchUpdated notifications (codex-cli 0.160.1's schema) of half and all this many bytes
+//   FAKE_CODEX_COMPACTION  "1": each turn first compacts its context, as codex-cli 0.160.1 reports it (a contextCompaction item)
 //   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
 //   FAKE_CODEX_SHELL_ENVIRONMENT_POLICY  JSON config/read reports, every field present and null unless set (codex-cli 0.160)
 //   FAKE_CODEX_APPROVAL_REQUEST  JSON {method, params} override in approval mode
@@ -33,6 +35,9 @@
 //   FAKE_CODEX_ACCOUNT_MODE  chatgpt (default) | api-key | none | unsupported | error | hang
 //   FAKE_CODEX_RESUME_ERROR  JSON-RPC error rejecting thread/resume
 //   FAKE_CODEX_ARCHIVED  "1": thread/resume says the session is archived until thread/unarchive; "unarchive-fails": unarchive is refused too
+//   FAKE_CODEX_INSTRUCTIONS_FILE  while this file exists, config/read reports its text as developer_instructions: the
+//     person's configuration changed while the process ran (codex-cli 0.160.1 reads the files on every config/read)
+//   FAKE_CODEX_DIE_ON_TURN  this process is killed as its Nth turn/start arrives, before any reply
 //   FAKE_CODEX_STARTUP_DELAY_MS  hold the initialize reply this long, like a loaded host
 //   FAKE_CODEX_STARTUP_LOG  append {pid, at, event: "initialize" | "turn/start"} per launch
 //   FAKE_CODEX_START_ERROR  JSON-RPC error rejecting thread/start
@@ -218,7 +223,9 @@ let experimentalApi = false;
 
 const out = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 let nativeThreadId = "codex-thread-1";
-const nativeTurnId = "turn-1";
+let nativeTurnId = "turn-1";
+let turnsStarted = 0;
+let turnsFinished = 0;
 const notify = (method: string, params: any) => out({
   jsonrpc: "2.0", method,
   params: {
@@ -380,6 +387,10 @@ const dump = () => {
 };
 
 const finishTurn = () => {
+  if (process.env.FAKE_CODEX_COMPACTION === "1") {
+    notify("item/started", { item: { id: "c1", type: "contextCompaction" } });
+    notify("item/completed", { item: { id: "c1", type: "contextCompaction" } });
+  }
   const patchBytes = Number(process.env.FAKE_CODEX_PATCH_BYTES);
   if (patchBytes > 0) {
     const change = (bytes: number) => [{ path: `${process.cwd()}/web/index.html`, kind: { type: "add" }, diff: "+".repeat(bytes) }];
@@ -409,7 +420,7 @@ const finishTurn = () => {
   notify("item/completed", { item: { id: "m1", type: "agentMessage", text: "done from fake codex" } });
   const carried = process.env.FAKE_CODEX_RESTORED_USAGE ? { inputTokens: 100, cachedInputTokens: 50, outputTokens: 10 } : { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0 };
   notify("thread/tokenUsage/updated", { tokenUsage: {
-    total: { inputTokens: carried.inputTokens + 7, cachedInputTokens: carried.cachedInputTokens + 4, outputTokens: carried.outputTokens + 3 },
+    total: { inputTokens: carried.inputTokens + 7 * ++turnsFinished, cachedInputTokens: carried.cachedInputTokens + 4 * turnsFinished, outputTokens: carried.outputTokens + 3 * turnsFinished },
     last: { inputTokens: 7, cachedInputTokens: 4, outputTokens: 3 },
     modelContextWindow: 272000,
   } });
@@ -492,7 +503,8 @@ const playRoomPlanTurn = (msg: any, planPath: string) => {
   if (!early) ack();
   // Loaded only in this mode: other tests run a copy of this file on its own.
   void import("./room-handoff-agent.ts").then(({ runRoomHandoffAgent }) => runRoomHandoffAgent(process.argv.slice(2), planPath, { message: { content: text } },
-    { integration, system: developerInstructions, evidence: { resumedThread } }))
+    // A later turn of one process carries on the thread it has loaded, with no thread/resume.
+    { integration, system: developerInstructions, evidence: { resumedThread: resumedThread ?? (turnsStarted > 1 ? nativeThreadId : null) } }))
     .then((reply) => {
       notify("item/completed", { item: { id: "m1", type: "agentMessage", text: reply } });
       notify("turn/completed", { turn: { status: "completed" } });
@@ -601,6 +613,7 @@ process.stdin.on("data", (chunk) => {
         }
         break;
       case "config/read":
+        logStartup("config/read");
         if (mode === "config-read-error") {
           dump();
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "config unavailable" } });
@@ -630,7 +643,8 @@ process.stdin.on("data", (chunk) => {
                     harmless_name: { env: { DISPLAY_LABEL: "innocuous-config-secret-7a9c" } },
                   },
                 }),
-              developer_instructions: process.env.FAKE_CODEX_INSTRUCTIONS ?? null,
+              developer_instructions: process.env.FAKE_CODEX_INSTRUCTIONS_FILE && existsSync(process.env.FAKE_CODEX_INSTRUCTIONS_FILE)
+                ? readFileSync(process.env.FAKE_CODEX_INSTRUCTIONS_FILE, "utf8") : process.env.FAKE_CODEX_INSTRUCTIONS ?? null,
               shell_environment_policy: shellEnvironmentPolicy(),
               features: Object.fromEntries(process.argv.flatMap((arg, index) => {
                 const match = process.argv[index - 1] === "-c" ? /^features\.(\w+)=(true|false)$/.exec(arg) : null;
@@ -654,7 +668,7 @@ process.stdin.on("data", (chunk) => {
           threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId }, sandbox: resolvedSandbox(msg.params ?? {}) } });
         } else if (msg.params?.permissions && (!experimentalApi || mode === "config-profile-unsupported")) {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
-        } else if (mode === "resume" || mode === "review-events" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" || mode === "async-question" ||
+        } else if (mode === "resume" || mode === "plan-unsupported-input" || mode === "review-events" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" || mode === "async-question" ||
             (mode === "resume-then-missing" && !existsSync(process.env.FAKE_CODEX_STATE ?? ""))) {
           threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId, ...(process.env.FAKE_CODEX_ROLLOUT ? { path: process.env.FAKE_CODEX_ROLLOUT } : {}) }, sandbox: resolvedSandbox(msg.params ?? {}) } });
         } else {
@@ -717,7 +731,9 @@ process.stdin.on("data", (chunk) => {
         break;
       case "turn/start": {
         if (process.env.FAKE_CODEX_MCP_READY_MS) mcpReadyAtTurnStart = mcpPending.length === 0;
+        nativeTurnId = `turn-${++turnsStarted}`;
         dump();
+        if (Number(process.env.FAKE_CODEX_DIE_ON_TURN) === turnsStarted) process.kill(process.pid, "SIGKILL");
         logStartup("turn/start");
         nativeThreadId = msg.params?.threadId ?? nativeThreadId;
         if (mode === "early-tool-timeout" || mode === "early-tool-error") {
@@ -854,6 +870,14 @@ process.stdin.on("data", (chunk) => {
           out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
           // The reporter's words (2026-11-03): ChatGPT lists gpt-6.1-sol, then refuses it for a ChatGPT account.
           const error = { message: "unexpected status 400 Bad Request: invalid_request_error model_not_found: The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.", codexErrorInfo: null, additionalDetails: null };
+          notify("error", { willRetry: false, error });
+          notify("turn/completed", { turn: { status: "failed", error } });
+          break;
+        }
+        if (mode === "plan-unsupported-input" && resumedThread) {
+          out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
+          // The reporter's words (2026-11-17): the resumed session holds an mp3 a ChatGPT plan will not take.
+          const error = { message: "unexpected status 400 Bad Request: {\"error\":{\"message\":\"User subscription sharing supports text, image, and file input. Remove unsupported content or use an API key instead.\",\"type\":\"invalid_request_error\",\"param\":\"input\",\"code\":\"subscription_sharing_unsupported_capability\"}}", codexErrorInfo: null, additionalDetails: null };
           notify("error", { willRetry: false, error });
           notify("turn/completed", { turn: { status: "failed", error } });
           break;
@@ -1126,5 +1150,6 @@ process.stdin.on("data", (chunk) => {
   }
 });
 
-// match the real app-server: stay alive until killed
+// codex-cli 0.160.1 stays up between turns and exits once its stdin closes.
+process.stdin.on("end", () => setTimeout(() => process.exit(0), 200));
 setInterval(() => {}, 1_000);

@@ -113,7 +113,7 @@ describe("opening Announcements and seeing a popup", () => {
   it("on a Team Cloud: the person's own record, which members may write too, then the place's record read back", async () => {
     vi.mocked(api).mockImplementation(async path => (path === "/api/config" ? { onboarding: { hintsSeen: [readMark(NOW)] } } : { welcome: {} }));
     const saved = vi.fn();
-    markAnnouncementsRead(NOW, record(["teams-2026-11"]), { team: true, saved });
+    markAnnouncementsRead(NOW, record(["teams-2026-11b"]), { team: true, saved });
     for (let i = 0; i < 5; i++) await Promise.resolve();
     expect(vi.mocked(api).mock.calls).toEqual([["/api/me/welcome", { method: "PUT", body: JSON.stringify({ hints: [readMark(NOW)] }) }], ["/api/config"]]);
     expect(saved).toHaveBeenCalledWith({ onboarding: { hintsSeen: [readMark(NOW)] } });

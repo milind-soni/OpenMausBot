@@ -109,7 +109,7 @@ export function PlaceMark({ place, size = TILE }: { place: MarkedPlace; size?: n
   return <span aria-hidden="true" data-rail-offline={place.offline ? "" : undefined} data-rail-ended={place.ended ? "" : undefined}
     className={cn("grid shrink-0 place-items-center font-semibold leading-none", color ? "text-white" : "bg-card text-ink", (place.offline || place.ended) && "opacity-55 grayscale")}
     style={{ width: size, height: size, borderRadius: tileRadius(size), fontSize: Math.round(size * 0.4), ...(color ? { background: cloudColorFill(color) } : {}) }}>
-    {place.kind === "computer" && !place.named ? <Laptop size={Math.round(size * 0.46)} strokeWidth={1.75} /> : place.kind === "account" ? <UserRound size={Math.round(size * 0.5)} strokeWidth={1.75} /> : placeInitials(place.name)}
+    {place.kind === "computer" && !place.named ? <Laptop size={Math.round(size * 0.46)} /> : place.kind === "account" ? <UserRound size={Math.round(size * 0.5)} /> : placeInitials(place.name)}
   </span>;
 }
 
@@ -211,7 +211,7 @@ function MakeHomeRow({ place, onStarted }: { place: RailPlace; onStarted: () => 
       {busy ? <Loader2 size={15} aria-hidden="true" className="mt-0.5 shrink-0 animate-spin motion-reduce:animate-none" /> : <House size={15} aria-hidden="true" className="mt-0.5 shrink-0" />}
       <span className="flex min-w-0 flex-col text-start">
         <span className="text-[13px] text-ink">{t("rail.makeHome", { name: place.name })}</span>
-        <span className="text-[12px] leading-snug text-ink-secondary">{t("rail.makeHomeSub", { name: place.name })}</span>
+        <span className="text-[12px] leading-snug text-ink-secondary">{t("rail.makeHomeSub", { name: place.name })} {t("rail.makeHomeDataStays", { name: place.name })}</span>
       </span>
     </button>
     {said && <p role="alert" className="px-1.5 pb-1 text-[12px] text-danger">{said}</p>}

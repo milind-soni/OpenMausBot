@@ -1,8 +1,9 @@
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import { TOOL_GROUP_TOKENS, TOOL_GROUPS, type ToolGroup } from "../../../shared/tool-groups";
 import { Switch } from "../SettingsPrimitives";
+import { sameFields, useStoreSelector } from "@/state/store-select";
 
 const GROUP_WORDS: Record<ToolGroup, [LocaleKey, LocaleKey]> = {
   meetings: ["botAccess.toolGroups.meetings", "botAccess.toolGroups.meetingsHint"],
@@ -18,7 +19,7 @@ export function shownToolGroups(available: readonly ToolGroup[] | undefined, off
 }
 
 export function ToolGroupsCard({ bot, patch }: { bot: Bot; patch: (patch: { toolsOff: ToolGroup[] }) => void }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const off = bot.toolsOff ?? [];
   const groups = shownToolGroups(state.config?.toolGroups, off);
   if (groups.length === 0) return null;

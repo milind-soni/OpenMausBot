@@ -386,15 +386,19 @@ describe("a searched MCP catalog", () => {
 
 describe("approvals that follow the other engines", () => {
   it("runs OpenMausBot's own agents tools without a card, while a configured server's tool still asks", async () => {
+    const auditReady = deferred();
     const f = await fixture((_body, response, round) => {
-      if (round === 1) sse(response, [chunk({ tool_calls: [toolCall("agents_write", '{"name":"peer","value":"sent"}', "call_agents")] }, "tool_calls")]);
+      if (round === 1) void auditReady.promise.then(() => sse(response, [chunk({ tool_calls: [toolCall("agents_write", '{"name":"peer","value":"sent"}', "call_agents")] }, "tool_calls")]));
       else if (round === 2) sse(response, [chunk({ tool_calls: [toolCall("audit_write", '{"name":"receipt","value":"done"}', "call_audit")] }, "tool_calls")]);
       else answer(response);
     });
     const agents = f.integrations!.custom!.audit as NonNullable<SendTurnInput["integrations"]>["agents"];
     await f.start({ integrations: { ...f.integrations, agents } });
+    await settledServer("audit");
+    auditReady.resolve();
     const opened = await f.recorder.until((event) => event.type === "request.opened");
     expect(opened).toMatchObject({ requestType: "permission", tool: "audit_write" });
+    expect(f.requests[1].tools?.map((tool) => tool.function.name)).toContain("audit_write");
     expect(f.effects()).toEqual([{ name: "peer", value: "sent" }]);
     await f.instance.adapter.respondToRequest(f.threadId, opened.requestId!, { behavior: "allow" });
     expect(await f.completed()).toMatchObject({ ok: true });
@@ -580,9 +584,10 @@ describe("optional built-in question compatibility", () => {
     });
     await f.start({ integrations: undefined });
     expect(await f.completed()).toMatchObject({ ok: false });
+    // A transient 429/500 is retried twice now; every attempt still carries the tools.
     expect(f.requests).toHaveLength(status === 429 || status === 500 ? 3 : 1);
     for (const request of f.requests) expect(request.tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
-  });
+  }, 20_000);
 
   it("retries a network failure as the same request, and never strips tools mounted by the person", async () => {
     for (const network of [false, true]) {
@@ -593,11 +598,13 @@ describe("optional built-in question compatibility", () => {
       });
       await f.start(network ? { integrations: undefined } : {});
       expect(await f.completed()).toMatchObject({ ok: false });
+      // A dropped connection is transient, so it goes again twice; the 400 stays a single attempt.
       expect(f.requests).toHaveLength(network ? 3 : 1);
-      for (const request of f.requests) expect(request.tools?.some(tool => tool.function.name === (network ? "ask_user" : "audit_write"))).toBe(true);
+      if (!network) expect(f.requests[0].tools?.some(tool => tool.function.name === "audit_write")).toBe(true);
+      else for (const request of f.requests) expect(request.tools?.map(tool => tool.function.name)).toEqual(["ask_user"]);
       expect(f.effects()).toEqual([]);
     }
-  });
+  }, 20_000);
 
   it("does not repeat an unsupported-tools rejection after its one plain retry", async () => {
     const f = await fixture((_body, response) => {

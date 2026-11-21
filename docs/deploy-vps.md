@@ -153,7 +153,7 @@ No domain, no proxy, no open port. The server gets an address like `https://c-7f
 
 ```sh
 npx openmausbot setup          # once: choose AI access, connect, and choose a model
-npx openmausbot login          # once: an emailed code signs this machine in and reserves its address
+npx openmausbot account login          # once: an emailed code signs this machine in and reserves its address
 npx openmausbot serve --tunnel # runs the server there and prints the pairing link with a QR code
 ```
 
@@ -163,7 +163,7 @@ chat-only connection. More engines can be added later. See [CLI setup](cli-onboa
 
 `login` asks for your email, sends an 8-digit code, and prints the address it reserved for this machine. `serve --tunnel` downloads `cloudflared` on the first run (a pinned version with a verified digest, into `~/.openmausbot`), starts the server, connects the tunnel, and after a few seconds prints `tunnel: live at https://…`. Leave it running; see "Keep it running" for a service.
 
-The account credentials live in `~/.openmausbot/tunnel-account.json`, readable only by your user. `npx openmausbot logout` releases the address.
+The account credentials live in `~/.openmausbot/tunnel-account.json`, readable only by your user. `npx openmausbot account logout` releases the address.
 
 Skip to "Install and sign the engines in".
 
@@ -292,7 +292,7 @@ Every paired device is a session:
 ```sh
 npx openmausbot devices               # id, device, scope, last seen, expires
 npx openmausbot devices revoke ID     # signs that device out and closes its stream at once
-npx openmausbot status                # the address others use, and whether it answers as this server
+npx openmausbot account status                # the address others use, and whether it answers as this server
 ```
 
 ## Keep it running
@@ -708,17 +708,17 @@ Read this before putting anything else in front of the server.
 
 - The server only ever listens on loopback (`127.0.0.1:8799`). Never publish that port yourself. The tunnel, Caddy and Tailscale each reach it from the same machine; path B's Caddy, in its own container, reaches it over a Unix socket (`OMB_TUNNEL_SOCKET`), and a request on that socket always counts as a remote one.
 - A request that arrives through a proxy or the tunnel is treated as remote and needs a session, whatever headers it carries. A proxy of your own (nginx, Traefik, Cloudflare Tunnel) must forward the real `Host` and add `X-Forwarded-For` and `X-Forwarded-Proto`, must not buffer the event stream, and must **not** rewrite `Host` to `127.0.0.1`.
-- Pairing is the login. Want a second wall in front of it? Path B's `Caddyfile` has a commented `basic_auth` block for a shared password.
+- Pairing is the login. Caddy adds no password: a `basic_auth` block would need variables neither Compose file passes to Caddy, the installer rewrites its `Caddyfile` on every run, and a password at Caddy would also refuse clients that send their own `Authorization` header. For a second wall, use path C or a firewall.
 - The session cookie is marked `Secure`; do not serve this over plain HTTP on the public internet.
 - The one thing a stranger can read is `/.well-known/openmausbot/environment` (the server's id, label, version, capabilities) and `/api/health` (only the app name). Everything else answers "pair this device".
 
 ## Troubleshooting
 
-**`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot login` on this machine first; the credentials are per machine.
+**`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot account login` on this machine first; the credentials are per machine.
 
 **The server does not start and says its data "was written by a newer OpenMausBot".** An older version was started on data a newer one had already changed, which happens when a version is put back without its data. Nothing was changed. Install the version the message names (or a newer one), or put back the copy of the data from before that update.
 
-**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot logout && npx openmausbot login` issues a fresh address.
+**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot account logout && npx openmausbot account login` issues a fresh address.
 
 **Path B: the page never loads or shows a certificate error.** Caddy could not get a certificate. Check that the name resolves to the server and that ports 80 and 443 are open; `docker compose logs caddy` shows the reason.
 
@@ -730,7 +730,7 @@ Read this before putting anything else in front of the server.
 
 **A bot says the engine is not signed in.** Sign that engine in again on the server.
 
-**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx openmausbot status` prints the same on the server.
+**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx openmausbot account status` prints the same on the server.
 
 **Something else.** `journalctl -u openmausbot --since -10m` (or `docker compose logs omb --tail 100`) shows the server's startup lines. Paste them with your question in the community channel.
 

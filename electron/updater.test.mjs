@@ -58,7 +58,7 @@ function mainRule() {
     app: { isPackaged: true, getPath: () => "/unused", getVersion: () => "1.0.0" }, process: { platform: "darwin", env: {} }, cloudTarget,
     path: { join: (...parts) => parts.join("/") }, os: { hostname: () => "mac" }, shell: {}, safeStorage: {},
     createCloudAccountStore: () => ({}), cloudEncryption: {}, cloudAccountStore: () => ({}), cloudSync: { accountChanged: () => {} }, accounts: { tell: () => {} }, rememberCloudHome: () => {}, rememberedCloudHome, computerSharing: null, updatesConsent: null, botLink,
-    sendUpdaterState: () => {}, refreshCloudMenus: () => {}, announceCloudReady: () => {}, installCloudPlanIpc: () => {},
+    sendUpdaterState: () => {}, refreshCloudMenus: () => {}, announceCloudReady: () => {}, installCloudPlanIpc: () => {}, slog: () => {},
     includedX: { onState: async () => {} }, includedPages: { onState: async () => {} }, cloudPower: { changed: () => {}, awaiting: () => false }, cloudLogins: { kick: () => {} },
     createCloudAccountClient: (options) => {
       signIn.options = options;

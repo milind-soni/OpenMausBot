@@ -107,6 +107,17 @@ describe("local computer UI eligibility", () => {
     );
   });
 
+  it("tells a Mac older than macOS 13 to update, not to grant permissions", () => {
+    const capabilities = {
+      host: { platform: "darwin" as const, label: "Mac" },
+      localComputer: { available: false, enabled: false, status: "unavailable", reasonCode: "macos-version-unsupported" },
+    } as DesktopCapabilities;
+    expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(
+      "Bots can't use this Mac: local desktop control needs macOS 13 Ventura or later. Update macOS to use it.",
+    );
+    expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(false);
+  });
+
   it("preserves the ready local fallback on supported non-Linux hosts", () => {
     expect(
       autoSelectsLocalComputer({

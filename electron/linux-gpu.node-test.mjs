@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { linuxDisablesGpu, SOFTWARE_RENDERING_ARG } from "./linux-gpu.mjs";
+import { disableWaylandColorManager, linuxDisablesGpu, SOFTWARE_RENDERING_ARG } from "./linux-gpu.mjs";
 
 const only = (...paths) => (p) => paths.includes(p);
 
@@ -29,4 +29,14 @@ test("the main window tells its page when it renders without a GPU, so pop-ups d
   assert.match(main, /linuxDisablesGpu\(\) \|\| app\.commandLine\.hasSwitch\("disable-gpu"\)/);
   // My Cloud's page is remote: it needs the flag too.
   assert.match(preload, /const REMOTE_SAFE = new Set\(\[[^\]]*"softwareRendering"/);
+});
+
+test("the Wayland color manager is disabled and an existing disable-features list is kept", () => {
+  const run = (existing) => {
+    const switches = new Map();
+    disableWaylandColorManager({ getSwitchValue: () => existing, appendSwitch: (name, value) => switches.set(name, value) });
+    return switches.get("disable-features");
+  };
+  assert.equal(run(""), "WaylandWpColorManagerV1");
+  assert.equal(run("Foo,Bar"), "Foo,Bar,WaylandWpColorManagerV1");
 });

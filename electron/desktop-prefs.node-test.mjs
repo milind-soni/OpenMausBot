@@ -26,7 +26,7 @@ test("a page on an older release keeps working with the longer list: its own ids
 });
 
 test("What's new, Boat's credit offer and the Grok Bot move are the notices a page can record; seen and analytics survive a restart; a broken record never stops the app", () => {
-  assert.deepEqual([...DESKTOP_NOTICES], [POPUP, BOAT, GROK, MODELGO, "teams-2026-11"]);
+  assert.deepEqual([...DESKTOP_NOTICES], [POPUP, BOAT, GROK, MODELGO, "teams-2026-11b"]);
   let saved = null;
   const writes = [];
   const prefs = createDesktopPrefs({ read: () => saved, write: value => { writes.push(value); saved = structuredClone(value); } });
@@ -73,13 +73,13 @@ test("an announcement card's mark and the last sponsor day are kept beside the f
 test("the Teams What's new is one the desktop keeps, and of when Announcements was last opened only the newest", () => {
   let saved = { seen: [POPUP] };
   const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
-  prefs.markSeen("teams-2026-11");
+  prefs.markSeen("teams-2026-11b");
   prefs.markSeen("announcements-read-1763380800000"); prefs.markSeen("announcements-read-1763467200000"); prefs.markSeen("announcements-read-1763300000000");
-  assert.deepEqual(prefs.seen(), [POPUP, "teams-2026-11", "announcements-read-1763467200000"]);
+  assert.deepEqual(prefs.seen(), [POPUP, "teams-2026-11b", "announcements-read-1763467200000"]);
   for (const id of ["announcements-read-", "announcements-read-x", `announcements-read-${"9".repeat(17)}`, "announcements-read-1:2"]) prefs.markSeen(id);
-  assert.deepEqual(prefs.seen(), [POPUP, "teams-2026-11", "announcements-read-1763467200000"], "nothing else of that shape");
+  assert.deepEqual(prefs.seen(), [POPUP, "teams-2026-11b", "announcements-read-1763467200000"], "nothing else of that shape");
   prefs.markSeen("announcement:phone-app");
-  assert.deepEqual(createDesktopPrefs({ read: () => saved, write: () => {} }).seen(), [POPUP, "teams-2026-11", "announcement:phone-app", "announcements-read-1763467200000"], "survives a restart");
+  assert.deepEqual(createDesktopPrefs({ read: () => saved, write: () => {} }).seen(), [POPUP, "teams-2026-11b", "announcement:phone-app", "announcements-read-1763467200000"], "survives a restart");
 });
 
 test("a write that fails leaves the last whole record on disk, analytics opt-out included", () => {

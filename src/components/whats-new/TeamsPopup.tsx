@@ -7,7 +7,8 @@ import type { MausColor } from "@/lib/mascot";
 import { reducedMotion } from "@/lib/onboarding";
 import type { TeamsAction, TeamsStep } from "@/lib/teams-whats-new";
 import type { LocaleKey } from "@/locales";
-import { CLOSE, PRIMARY, SHEET } from "../cloud-buy/parts";
+import { TEAM_PLANS_URL } from "@/lib/app-links";
+import { CLOSE, PRIMARY, QUIET, SHEET } from "../cloud-buy/parts";
 import { LinkButton, NotNowButton } from "../NoticeCard";
 
 export const TEAMS_POPUP = "[data-teams-popup]";
@@ -99,13 +100,14 @@ export function TeamsPopup({ action, onStep, onStart, onDone }: {
           <h2 id={TITLE} className="mt-1 text-[19px] font-semibold leading-6 tracking-[-0.012em] text-ink [text-wrap:balance]">{t("teamsNew.title")}</h2>
           <ul className="mt-3 flex flex-col gap-2 text-[14px] leading-5 text-ink">
             {POINTS.map(({ icon: Icon, text }) => <li key={text} className="flex items-start gap-2.5">
-              <span className="mt-px flex size-[18px] shrink-0 items-center justify-center text-ink-secondary"><Icon size={16} strokeWidth={1.75} aria-hidden="true" /></span>
+              <span className="mt-px flex size-[18px] shrink-0 items-center justify-center text-ink-secondary"><Icon size={16} aria-hidden="true" /></span>
               <span className="[text-wrap:pretty]">{t(text)}</span>
             </li>)}
           </ul>
           <p data-teams-price className="mt-3 text-[13px] leading-[18px] text-ink-secondary">{t("teamsNew.price")}</p>
           <div className="mt-5 flex flex-wrap items-center gap-3">
             <div data-primary="">{main}</div>
+            <LinkButton url={TEAM_PLANS_URL} label={t("teamsNew.seePlans")} className={cn(QUIET, "ui-button-lg gap-1.5")} onOpened={() => end("see_team_plans")} />
             {action.kind !== "got-it" && <NotNowButton onClick={() => end("not_now")} />}
           </div>
         </div>

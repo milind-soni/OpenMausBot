@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import { api, useStore } from "@/state/store";
+import { api } from "@/state/store";
+import { useShowInstances } from "@/state/use-show-instances";
 import { t } from "@/lib/i18n";
 import { InstanceProviderMark } from "./ProviderIcons";
 import { SettingsMark } from "./SettingsPrimitives";
+import { sameFields, useStoreSelector } from "@/state/store-select";
 
 /** A provider someone hid: the server leaves it out of /api/instances and every model list (withInstanceConfig), so
  * these lists are the only way back to it. */
@@ -11,7 +13,7 @@ export interface HiddenProvider { instanceId: string; driverKind?: string; displ
 
 /** GET /api/instances/hidden, read again whenever the instance list changes (a Hide or an Unhide refreshes it). */
 export function useHiddenProviders(): HiddenProvider[] {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances }), sameFields);
   const [hidden, setHidden] = useState<HiddenProvider[]>([]);
   useEffect(() => {
     let alive = true;
@@ -21,18 +23,18 @@ export function useHiddenProviders(): HiddenProvider[] {
       .catch(() => {});
     return () => { alive = false; };
   }, [state.instances]);
-  return hidden;
+  return useMemo(() => hidden.filter((entry) => !state.instances.some((instance) => instance.instanceId === entry.instanceId)), [hidden, state.instances]);
 }
 
 function useUnhide() {
-  const { refreshInstances } = useStore();
+  const showInstances = useShowInstances();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const unhide = (instanceId: string) => {
     setBusy(instanceId);
     setError(null);
     api(`/api/instances/${encodeURIComponent(instanceId)}`, { method: "PATCH", body: JSON.stringify({ hidden: false }) })
-      .then(() => Promise.resolve(refreshInstances()).catch(() => {}))
+      .then((answer) => showInstances(answer).catch(() => {}))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(null));
   };

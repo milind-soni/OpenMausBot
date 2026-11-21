@@ -4,9 +4,10 @@ import type { IdleCompactResult } from "../contracts.ts";
 import type { HandedState } from "../delta-context.ts";
 import type { Message } from "../store.ts";
 import { createJobSlots } from "../job-slots.ts";
-import { WARM_SUMMARY_GIVE_UP_MS, WARM_SUMMARY_IDLE_MS, WARM_SUMMARY_RETRY_MS, WARM_SUMMARY_SOON_MS } from "../warm-summary.ts";
+import { WARM_SUMMARY_GIVE_UP_MS, WARM_SUMMARY_IDLE_MS, WARM_SUMMARY_NOW_MS, WARM_SUMMARY_RETRY_MS, WARM_SUMMARY_SOON_MS } from "../warm-summary.ts";
 import { addServerLinePacks } from "../server-lines.ts";
-import { createWarmSummaryHost, keptAfterSummary, PRESENCE_HOLD_MS, summaryInstructions, type WarmSummaryHostDeps } from "./warm-summary-host.ts";
+import { autoCompactWindow } from "../drivers/claude.ts";
+import { COMPACTION_STARTED_LINE, createWarmSummaryHost, keptAfterSummary, PRESENCE_HOLD_MS, summaryInstructions, type WarmSummaryHostDeps } from "./warm-summary-host.ts";
 
 let at = 0;
 const line = (role: "user" | "bot", text: string, extra: Partial<Message> = {}): Message =>
@@ -119,6 +120,44 @@ function setup(overrides: Partial<WarmSummaryHostDeps> = {}, options: { tokens?:
 }
 
 describe("warm summaries for a Claude conversation", () => {
+  it("does not give an awaited summary's extra capacity to a queued background job", async () => {
+    const slots = createJobSlots(1);
+    let finishBackground!: () => void;
+    const background = slots.run(() => new Promise<void>((resolve) => { finishBackground = resolve; }));
+    let finishSummary!: (result: IdleCompactResult) => void;
+    const summary = new Promise<IdleCompactResult>((resolve) => { finishSummary = resolve; });
+    let summaryStarted!: () => void;
+    const started = new Promise<void>((resolve) => { summaryStarted = resolve; });
+    const f = setup({ slots, instance: () => ({ adapter: { cacheKeepWarm: {
+      hold: () => true, compact: () => { summaryStarted(); return summary; },
+    } } }) }, { tokens: 170_000 });
+    const next = vi.fn(async () => undefined);
+    let queued: Promise<void> | undefined;
+    let turn: Promise<string> | undefined;
+    try {
+      f.finishTurn();
+      await f.advance(WARM_SUMMARY_SOON_MS);
+      queued = slots.run(next);
+      turn = f.host.beforeTurn("t1");
+      await started;
+      expect(slots.running).toBe(2);
+      finishSummary({ ok: true, session: "fork-session", sessionBefore: "live-session", input: 4, cacheRead: 150_000, cacheWrite: 40, output: 2_400, costUsd: 0.2, model: "claude-opus-5-5" });
+      expect(await turn).toBe("waited");
+      expect(f.task.resumeCursors.claude).toBe("fork-session");
+      expect(next).not.toHaveBeenCalled();
+      expect(slots.running).toBe(1);
+      expect(slots.waiting).toBe(1);
+      finishBackground();
+      await Promise.all([background, queued]);
+      expect(next).toHaveBeenCalledOnce();
+    } finally {
+      finishBackground();
+      finishSummary({ ok: false, reason: "test finished" });
+      f.host.dispose();
+      await Promise.all([background, queued, turn]);
+    }
+  });
+
   it("skips a summary that waited for a free slot until its cache went cold, and writes one that waited less", async () => {
     let finish!: () => void;
     const slots = createJobSlots(1);
@@ -187,15 +226,88 @@ describe("warm summaries for a Claude conversation", () => {
     expect(f.appended).toEqual([]);
   });
 
-  it("does nothing below 100k tokens, and starts at once from 80% of the engine's own compaction point", async () => {
+  it("does nothing below 100k tokens, and starts at once close to the engine's own compaction point", async () => {
     const small = setup({}, { tokens: 60_000 });
     small.finishTurn();
     await small.advance(WARM_SUMMARY_IDLE_MS * 3);
     expect(small.compactCalls).toEqual([]);
     const near = setup({}, { tokens: 165_000 });
     near.finishTurn();
-    await near.advance(WARM_SUMMARY_SOON_MS);
+    await near.advance(WARM_SUMMARY_NOW_MS);
     expect(near.compactCalls).toHaveLength(1);
+  });
+
+  it("starts no summary ahead for Claude Opus 5.5 (1M) at 170k, whose own point is near 1M, and does for a 200k session at 165k", async () => {
+    const compactAt = (model: string) => () => Number(autoCompactWindow({}, model));
+    expect(compactAt("claude-opus-5-5[1m]")()).toBe(1_000_000);
+    const wide = setup({ nativeCompactAt: compactAt("claude-opus-5-5[1m]") }, { tokens: 170_000 });
+    wide.finishTurn();
+    await wide.advance(WARM_SUMMARY_SOON_MS);
+    expect(wide.compactCalls).toEqual([]);
+    const usual = setup({ nativeCompactAt: compactAt("claude-opus-5-5") }, { tokens: 165_000 });
+    usual.finishTurn();
+    await usual.advance(WARM_SUMMARY_NOW_MS);
+    expect(usual.compactCalls).toHaveLength(1);
+  });
+
+  it("places both points below where the engine compacts at a lower setting too", async () => {
+    const low = setup({ nativeCompactAt: () => 100_000 }, { tokens: 60_500 });
+    low.finishTurn();
+    await low.advance(WARM_SUMMARY_NOW_MS);
+    expect(low.compactCalls).toHaveLength(1);
+    const lower = setup({ nativeCompactAt: () => 100_000 }, { tokens: 52_000 });
+    lower.finishTurn();
+    await lower.advance(WARM_SUMMARY_NOW_MS);
+    expect(lower.compactCalls).toEqual([]);
+    await lower.advance(WARM_SUMMARY_SOON_MS);
+    expect(lower.compactCalls).toHaveLength(1);
+  });
+
+  it("writes the summary ahead from 27k below the engine's own point, after the pause of a quick reply, and minutes later below that", async () => {
+    const below = setup({}, { tokens: 139_000 });
+    below.finishTurn();
+    await below.advance(WARM_SUMMARY_IDLE_MS - 1);
+    expect(below.compactCalls).toEqual([]);
+    await below.advance(1);
+    expect(below.compactCalls).toHaveLength(1);
+    const ahead = setup({}, { tokens: 141_465 });
+    ahead.finishTurn();
+    await ahead.advance(WARM_SUMMARY_SOON_MS - 1);
+    expect(ahead.compactCalls).toEqual([]);
+    await ahead.advance(1);
+    expect(ahead.compactCalls).toHaveLength(1);
+  });
+
+  it("shows the engine's own compaction line to a person whose turn waits for the summary, then the summary's line", async () => {
+    let finish = (_result: IdleCompactResult): void => undefined;
+    const compact = vi.fn(() => new Promise<IdleCompactResult>((resolve) => { finish = resolve; }));
+    const s = setup({ instance: () => ({ adapter: { cacheKeepWarm: { compact, hold: () => true } } }) }, { tokens: 165_000 });
+    s.finishTurn();
+    await s.advance(WARM_SUMMARY_NOW_MS);
+    expect(compact).toHaveBeenCalledTimes(1);
+    expect(s.appended).toEqual([]);
+    const waiting = s.host.beforeTurn("t1");
+    await s.advance(0);
+    expect(s.appended.map((m) => m.tool?.name)).toEqual([COMPACTION_STARTED_LINE]);
+    finish({ ok: true, session: "fork-session", sessionBefore: "live-session", input: 4, cacheRead: 160_000, cacheWrite: 40, output: 2_400, costUsd: 0.2, model: "claude-opus-5-5" });
+    expect(await waiting).toBe("waited");
+    expect(s.appended.map((m) => m.kind)).toEqual(["activity", "activity"]);
+    expect(s.appended[1]!.tool?.name).toMatch(/summarized this conversation while it was idle/);
+    expect(s.task.resumeCursors.claude).toBe("fork-session");
+  });
+
+  it("lets a waiting turn go on, on its own session, when the summary fails", async () => {
+    let finish = (_result: IdleCompactResult): void => undefined;
+    const compact = vi.fn(() => new Promise<IdleCompactResult>((resolve) => { finish = resolve; }));
+    const s = setup({ instance: () => ({ adapter: { cacheKeepWarm: { compact, hold: () => true } } }) }, { tokens: 165_000 });
+    s.finishTurn();
+    await s.advance(WARM_SUMMARY_NOW_MS);
+    const waiting = s.host.beforeTurn("t1");
+    await s.advance(0);
+    finish({ ok: false, reason: "the summary failed: API error" });
+    expect(await waiting).toBe("waited");
+    expect(s.task.resumeCursors.claude).toBe("live-session");
+    expect(s.appended.map((m) => m.tool?.name)).toEqual([COMPACTION_STARTED_LINE]);
   });
 
   it("never summarizes a room, or with automatic compaction off", async () => {

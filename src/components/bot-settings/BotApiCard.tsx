@@ -5,10 +5,12 @@ import { cn } from "@/lib/cn";
 import { copyText } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
 import { relativeTime } from "@/lib/memory";
-import { api, useStore, type Bot } from "@/state/store";
+import { api, type Bot } from "@/state/store";
 import { BOT_API_KEY_PLACEHOLDER, BOT_API_UPGRADE, botApiCurl } from "../../../shared/bot-api";
 import { NoteLine, useCloudUsage, useUpgrade } from "../CloudUsageMeter";
 import { Switch } from "../SettingsPrimitives";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { useMinuteTick } from "@/lib/minute-tick";
 
 export interface BotApiCall {
   id: string;
@@ -89,12 +91,13 @@ function BotApiStarter({ className }: { className?: string }) {
 
 /** The Bot API, the same in the bot panel and in Bot settings: a switch, the key once, the command to paste. */
 export function BotApiCard(props: { bot: Bot; webhooksLink?: boolean; className?: string }) {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   return state.config?.cloudStarter === true ? <BotApiStarter className={props.className} /> : <BotApiSection {...props} />;
 }
 
 function BotApiSection({ bot, webhooksLink = false, className }: { bot: Bot; webhooksLink?: boolean; className?: string }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ webhooks: s.webhooks }), sameFields), dispatch = useStoreDispatch();
+  useMinuteTick();
   const [view, setView] = useState<BotApiView | null>(null);
   const [freshKey, setFreshKey] = useState<string | null>(null);
   const [confirmingNewKey, setConfirmingNewKey] = useState(false);

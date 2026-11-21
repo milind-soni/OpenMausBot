@@ -29,7 +29,14 @@ export interface LiveCallState {
   error?: string;
 }
 
-/** One finished Live call, written once when a call that went live ends. Never carries speech. */
+/** A line the bot said aloud on a Live call: when it began (epoch ms) and its words. */
+export interface LiveSpokenLine {
+  at: number;
+  text: string;
+}
+
+/** One finished Live call, written once when a call that went live ends. Of what was said it carries only the bot's own
+ * spoken lines; the person's words stay in the chat as the requests the bot received. */
 export interface LiveCallRecord {
   callId: string;
   botId: string;
@@ -43,6 +50,8 @@ export interface LiveCallRecord {
   endReason: LiveEndReason;
   /** only when LLM thread titles are on and the engine can generateText */
   title?: string;
+  /** what the bot said aloud, in order; absent when the voice session sent no words (Fish, Gemini, ElevenLabs) */
+  spoken?: LiveSpokenLine[];
 }
 
 /** Who runs a Live call's voice session: OpenAI itself, a GPT-Live deployment on the user's own Azure OpenAI / Foundry
@@ -130,6 +139,8 @@ export interface LiveElevenLabsSession {
   session_id: string;
   signed_url: string;
   instructions: string;
+  /** The bot's own ElevenLabs voice, sent as the conversation's voice override; absent when the call keeps the agent's voice. */
+  voice_id?: string;
   /** ISO time by which the client must connect */
   expires_at: string;
 }

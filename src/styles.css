@@ -56,6 +56,12 @@
   color: transparent;
   caret-color: var(--color-ink);
 }
+.mention-editor[data-composing] .mention-editor-mirror {
+  visibility: hidden;
+}
+.mention-editor[data-composing] textarea {
+  color: var(--color-ink);
+}
 .mention-editor textarea::selection {
   color: var(--color-ink);
   background: var(--color-raised-hover);
@@ -68,7 +74,7 @@
 }
 @media (forced-colors: active) {
   .mention-editor-mirror { display: none; }
-  .mention-editor textarea { color: CanvasText; caret-color: CanvasText; }
+  .mention-editor textarea, .mention-editor[data-composing] textarea { color: CanvasText; caret-color: CanvasText; }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -192,6 +198,8 @@
   /* Some engines map `ui-monospace` to a proportional face, so concrete names come first. */
   --font-mono: "Geist Mono Variable", "SF Mono", SFMono-Regular, ui-monospace, Menlo,
     Consolas, "Liberation Mono", monospace;
+  /* Geist's wght axis runs 100–900, so text sits between Regular and Medium; a static face rounds it to 400. */
+  --font-weight-normal: 415;
 
   --shadow-lg: 0 6px 16px -8px rgb(0 0 0 / 0.18), 0 1px 3px rgb(0 0 0 / 0.06);
   --shadow-xl: 0 10px 28px -12px rgb(0 0 0 / 0.24), 0 2px 6px -2px rgb(0 0 0 / 0.08);
@@ -215,6 +223,9 @@
   /* Menus; a phone rounds them like its sheets. */
   --radius-menu: 12px;
 }
+:root[data-font] {
+  --tracking-ui: 0;
+}
 :root[data-chat-width="wide"] {
   --chat-bubble-max: 64rem;
   --chat-bubble-pct: 92%;
@@ -232,6 +243,8 @@
 
 :root {
   --code-color-scheme: dark;
+  /* +0.012em suits Geist; a skin or a font choice with another face sets 0. */
+  --tracking-ui: 0.012em;
   /* ink carried by a filled accent / danger surface (see the rule at the
      bottom of this file, which is what makes them take effect) */
   --color-accent-ink: #ffffff;
@@ -244,6 +257,14 @@
   /* second speed line of the mascot — contrasts against the app ground */
   --color-maus-line: #f5f5f5;
   --shadow-float: 0 0 #0000;
+  /* The composer floats over the scrolling transcript: a soft lift with a 1px line of ink at 4%. One value for every
+     skin; on a dark ground it reads as nothing, so the dark skins keep their 0.5px ring alone. */
+  --shadow-composer: 0 2px 8px -1px rgb(0 0 0 / 0.05), 0 1px 2px rgb(0 0 0 / 0.03), 0 0 0 1px rgb(28 28 28 / 0.04);
+}
+/* Daylight's composer rests on that lift alone; its 0.5px ring comes back on hover and while it holds focus.
+   Unlayered, so it wins over the ring utility the shell carries. */
+:root[data-skin="daylight"] .composer-shell:not(:hover, :focus-within) {
+  --tw-ring-color: transparent;
 }
 
 /* ── Midnight ──────────────────────────────────────────────────────────────
@@ -292,6 +313,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   /* One radius scale, shared with Daylight. What takes which step: buttons
      and pills full; keycaps, chips and menu rows 6; fields, controls and
      sidebar rows 8; cards and menus 12; dialogs 16; bubbles and the cards in
@@ -369,6 +391,7 @@
   /* System faces rather than Geist: paper reads as the platform's own. */
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
+  --tracking-ui: 0;
   --radius-lg: 6px;
   --radius-xl: 10px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -444,6 +467,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 4px;
   --radius-xl: 8px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -526,6 +550,7 @@
 
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
+  --tracking-ui: 0;
   --radius-lg: 8px;
   --radius-xl: 14px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -588,6 +613,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 6px;
   --radius-xl: 10px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -650,6 +676,7 @@
 
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     Roboto, sans-serif;
+  --tracking-ui: 0;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -711,6 +738,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -787,6 +815,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -854,6 +883,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 10px;
   --radius-xl: 16px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -918,6 +948,7 @@
 
   --font-sans: "Plus Jakarta Sans", ui-rounded, "SF Pro Rounded", "Geist Variable",
     -apple-system, system-ui, "Segoe UI", sans-serif;
+  --tracking-ui: 0;
   --radius-lg: 12px;
   --radius-xl: 18px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -975,6 +1006,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -1032,6 +1064,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-xs: 2px; --radius-sm: 4px; --radius-md: 6px;
@@ -1092,6 +1125,7 @@
 
   --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont,
     "Segoe UI", system-ui, sans-serif;
+  --tracking-ui: 0.012em;
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
@@ -1121,7 +1155,7 @@
 }
 /* Lucide draws at 2px by default, heavy beside Geist; one lighter stroke for every icon left at that default. */
 :where(svg.lucide[stroke-width="2"]) {
-  stroke-width: 1.75;
+  stroke-width: 1.9;
 }
 :root[data-skin="midnight"] .popover-surface {
   box-shadow: 0 14px 32px -10px rgb(0 0 0 / 0.7), 0 2px 8px rgb(0 0 0 / 0.35);
@@ -1203,9 +1237,7 @@
   text-align: start;
 }
 
-/* Chat copy. 15px stays; the line box goes from Tailwind's leading-relaxed
-   (1.625) to 1.75 so Arabic and Latin both get a little more air without
-   moving the surrounding chrome. Arabic and Hebrew use a local face when
+/* Chat copy: 15px on a 22px line in both modes. Arabic and Hebrew use a local face when
    the machine has one. Geist and the UI stack do not carry those glyphs,
    and a generic family listed later would otherwise win. */
 @font-face {
@@ -1236,15 +1268,11 @@
 
 .chat-text,
 .chat-md {
-  line-height: 1.75;
+  line-height: 22px;
   font-family: "omb-chat", var(--font-sans);
 }
 .chat-md :is(strong, b) {
   font-weight: 600;
-}
-[data-chat-bubble="simple"] :is(.chat-md, .chat-text),
-[data-chat-bubble="simple"].chat-text {
-  line-height: 22px;
 }
 [data-chat-bubble="simple"] .chat-md > * + * {
   margin-top: 10px;
@@ -1254,10 +1282,10 @@
 .chat-md :is(p, li, blockquote) {
   text-wrap: pretty;
 }
-[data-chat-bubble="simple"] .chat-md > * + .md-heading {
+.chat-md > * + .md-heading {
   margin-top: 18px;
 }
-[data-chat-bubble="simple"] .chat-md > .md-heading:first-child {
+.chat-md > .md-heading:first-child {
   margin-top: 0;
 }
 /* A short line keeps the tight chat bubble; a structured reply gets room to breathe. */
@@ -1303,8 +1331,8 @@
 [data-simple-rows] > [data-tuck] > :first-child {
   margin-top: -4px;
 }
-/* Arabic and Hebrew script needs the taller line the rest of the app gives it. */
-[data-chat-bubble="simple"] .chat-md [dir="rtl"] {
+/* Arabic and Hebrew script needs a taller line than Latin. */
+.chat-md [dir="rtl"] {
   line-height: 1.75;
 }
 
@@ -1377,6 +1405,9 @@ body {
   background-color: var(--color-app);
   color: var(--color-ink);
   font-family: var(--font-sans);
+  font-weight: var(--font-weight-normal);
+  /* Declared once here, so an em value resolves at 16px and every size below inherits the same ~0.19px. */
+  letter-spacing: var(--tracking-ui);
   /* Chromium on macOS thickens every stem under the default (`auto`)
      smoothing, so regular text reads close to semibold on dark skins.
      Windows ignores both properties. */
@@ -1400,7 +1431,8 @@ body {
     font-size: 13px;
     font-weight: 500;
     line-height: 1.25rem;
-    transition: background-color 120ms ease, color 120ms ease;
+    /* transform: the press feedback below */
+    transition: background-color 120ms ease, color 120ms ease, transform 50ms cubic-bezier(0.165, 0.84, 0.44, 1);
   }
   .ui-button {
     /* 4px + 20px line + 4px + a 1px border each side = 30px, so the 32px
@@ -1438,7 +1470,7 @@ body {
   .ui-button-pill {
     border-radius: 9999px;
     font-size: 14px;
-    font-weight: 400;
+    font-weight: var(--font-weight-normal);
     line-height: 1.25rem;
   }
   .ui-button-lg {
@@ -1501,11 +1533,12 @@ body {
      an inline background already centers on the glyphs, and `clone` keeps
      the padding on every wrapped piece. */
   .ui-code-chip {
-    padding: 0.125em 0.35em;
+    padding: 0 0.27em;
     border-radius: 0.25rem;
-    background: color-mix(in srgb, var(--color-ink) 8%, transparent);
+    background: color-mix(in srgb, var(--color-ink) 4%, transparent);
+    color: var(--color-ink-secondary);
     font-family: var(--font-mono);
-    font-size: 0.86em;
+    font-size: 0.93em;
     line-height: 1;
     -webkit-box-decoration-break: clone;
     box-decoration-break: clone;
@@ -1521,7 +1554,7 @@ body {
     border-radius: 0.375rem;
     text-align: left;
     font-size: 14px;
-    font-weight: 400;
+    font-weight: var(--font-weight-normal);
     line-height: 18px;
   }
   .ui-menu-row:enabled:hover { background: var(--color-menu-hover); }
@@ -1594,7 +1627,46 @@ body {
     .ui-icon-button,
     .ui-pill { transition: none; }
   }
+  /* Press feedback: a button gives a little under the pointer, 98% over 50ms, and not at all with reduced motion
+     (DESIGN §10). Layered, so Pop's own sticker press still wins on its buttons. */
+  @media (prefers-reduced-motion: no-preference) {
+    :root:not([data-reduced-motion="true"]) :is(.ui-button, .ui-icon-button):not(:disabled):active {
+      transform: scale(0.98);
+    }
+  }
+  /* A bot's bubble on a light ground: its tint, a top-lit sheen and a 0.5px inset line of ink at 6% (DESIGN §8).
+     A dark ground keeps the flat tint: there the sheen would lift the bubble's top edge out of its tone. Layered, so
+     Pop's sticker outline on .bg-card still wins. */
+  .bubble-finish {
+    background-image: linear-gradient(rgb(255 255 255 / 0.16), transparent);
+    box-shadow:
+      inset 0 0.5px 0 rgb(255 255 255 / 0.16),
+      inset 0 -0.5px 0 rgb(255 255 255 / 0.16),
+      inset 0 0 0 0.5px color-mix(in srgb, var(--color-ink) 6%, transparent);
+  }
+  @container style(--code-color-scheme: dark) {
+    .bubble-finish { background-image: none; box-shadow: none; }
+  }
 }
+
+/* The sidebar's bot rows and pinned bots give under the pointer like a button (98% over 50ms), but not while a
+   button inside the row is the one pressed. The colour fade the rows already had is repeated here, because this
+   transition replaces theirs. */
+[data-sidebar-bot-row] {
+  transition-property: color, background-color, border-color, outline-color, fill, stroke, scale;
+  transition-duration: 150ms, 150ms, 150ms, 150ms, 150ms, 150ms, 50ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1),
+    cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.4, 0, 0.2, 1), cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+@media (prefers-reduced-motion: no-preference) {
+  :root:not([data-reduced-motion="true"]) [data-sidebar-bot-row]:active:not(:has(button:active)) {
+    scale: 0.98;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-sidebar-bot-row] { transition: none; }
+}
+:root[data-reduced-motion="true"] [data-sidebar-bot-row] { transition: none; }
 
 /* Liquid glass: the surface for centred pop-ups (Settings, Apps, Triggers).
    Every value is derived from the active skin's own tokens, so each of the
@@ -1891,7 +1963,7 @@ body {
   .glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup {
     width: min(920px, 100%);
     height: min(720px, 100%);
-    border-radius: 16px;
+    border-radius: 14px;
   }
 }
 
@@ -2010,7 +2082,7 @@ body {
   padding-bottom: calc(var(--glass-bottom, 0px) + var(--glass-bottom-reach, 0px));
 }
 /* The transcript and its composer share one centered column with a fixed cap. The transcript sits
-   inside the scroller's px-5; the dock spans the pane and holds the composer's own px-5, so it adds
+   inside the scroller's px-4; the dock spans the pane and holds the composer's own px-4, so it adds
    that padding to the same cap and the composer's edges meet the transcript's. */
 .chat-column {
   margin-inline: auto;
@@ -2018,7 +2090,7 @@ body {
 }
 .chat-column-dock {
   margin-inline: auto;
-  max-width: calc(var(--chat-column-max) + 2.5rem);
+  max-width: calc(var(--chat-column-max) + 2rem);
 }
 @media (prefers-reduced-transparency: reduce) {
   .glass-bar::before {
@@ -3308,7 +3380,10 @@ button:disabled.bg-danger {
   }
   /* lucide writes stroke-width="2" as an attribute, which any CSS outranks; an explicit strokeWidth prop is left alone. */
   :where(svg.lucide[stroke-width="2"]) {
-    stroke-width: 1.75;
+    stroke-width: 1.9;
+  }
+  :where(code, pre, kbd, samp, .font-mono) {
+    letter-spacing: 0;
   }
 }
 
@@ -3649,4 +3724,15 @@ button:disabled.bg-danger {
 :root[data-reduced-motion="true"] .teams-card-in,
 :root[data-reduced-motion="true"] .teams-face-in {
   animation: none !important;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .chat-run-log-actions {
+    animation: chat-run-log-reveal 160ms ease-out both;
+  }
+}
+
+@keyframes chat-run-log-reveal {
+  from { opacity: 0; transform: translateX(-0.375rem); }
+  to { opacity: 1; transform: translateX(0); }
 }

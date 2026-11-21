@@ -1,6 +1,7 @@
 // One section of the Apps page (PluginsPanel.tsx): its title, a note beside it, View all, and its apps in a grid.
-export function AppsSection({ id, title, note, viewAll, after, children }: {
+export function AppsSection({ id, gridRef, title, note, viewAll, after, children }: {
   id: string;
+  gridRef?: React.Ref<HTMLDivElement>;
   title: string;
   note?: string;
   viewAll?: { label: string; onClick: () => void };
@@ -24,7 +25,7 @@ export function AppsSection({ id, title, note, viewAll, after, children }: {
           </button>
         )}
       </div>
-      <div className="grid grid-cols-1 items-start gap-x-6 gap-y-1 @xl:grid-cols-2">{children}</div>
+      <div ref={gridRef} className="grid grid-cols-1 items-start gap-x-6 gap-y-1 @xl:grid-cols-2">{children}</div>
       {after}
     </section>
   );

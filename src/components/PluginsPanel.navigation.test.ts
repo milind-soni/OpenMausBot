@@ -62,6 +62,7 @@ vi.mock("./PostizCard", () => ({
 }));
 import { HOSTED_MCP_APPS } from "@/lib/hosted-mcp-apps";
 import { APPS_PREVIEW_COUNT, PluginsPanel, USED_BY_AVATAR_SIZE, botsUsingService } from "./PluginsPanel";
+import { AppTile, AppTileView, type AppTileProps } from "./AppTile";
 import { connectedInventoryCopy } from "@/lib/connector-status";
 import { FACE_BOX } from "./cursor-face-data";
 import { MASCOT_BODIES } from "../../shared/mascot-bodies";
@@ -84,7 +85,9 @@ function nodes(value: ReactNode): Node[] {
   return Children.toArray(value).flatMap((child) => {
     if (!isValidElement(child)) return [];
     const node = child as Node;
-    return [node, ...nodes(node.props.children)];
+    // A tile is its own component, of props alone: what it renders is walked as part of the panel's tree.
+    const inside = node.type === AppTile ? AppTileView(node.props as unknown as AppTileProps) : node.props.children;
+    return [node, ...nodes(inside)];
   });
 }
 function render() {

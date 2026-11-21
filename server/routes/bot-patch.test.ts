@@ -248,6 +248,16 @@ describe("PATCH /api/bots/:id vpsAlias relocation guard", () => {
   });
 });
 
+describe("PATCH /api/bots/:id defaultBot: null", () => {
+  it("demotes a hidden MausBot to a regular bot that shows in the sidebar again", async () => {
+    const { store, bot, patch } = fixture();
+    store.patchBot(bot.id, { defaultBot: {}, sidebarHidden: true });
+    expect((await patch(bot.id, { defaultBot: null })).status).toBe(200);
+    expect(store.bot(bot.id)?.defaultBot).toBeUndefined();
+    expect(store.bot(bot.id)?.sidebarHidden).toBeUndefined();
+  });
+});
+
 describe("PATCH /api/bots/:id toolsOff", () => {
   it("stores known groups once each in one order, clears them with null or an empty list, and refuses anything else", async () => {
     const { store, bot, patch } = fixture();
@@ -267,6 +277,14 @@ describe("PATCH /api/bots/:id toolsOff", () => {
 });
 
 describe("PATCH /api/bots/:id liveVoice", () => {
+  it.each(["nuri", "juni", "flitz", "brise", "sillage", "nira", "harema", "shida", "noeul"])("saves %s as the bot's Live call voice", async (liveVoice) => {
+    const { store, bot, patch } = fixture();
+    const response = await patch(bot.id, { liveVoice });
+    expect(response.status).toBe(200);
+    expect(response.body.bot.liveVoice).toBe(liveVoice);
+    expect(store.bot(bot.id)?.liveVoice).toBe(liveVoice);
+  });
+
   it("gives one bot its own Live call voice, leaves the others on the app's, clears it, and refuses a voice that is not a Live one", async () => {
     const { store, bot, patch } = fixture();
     const other = store.createBot({ name: "Echo" });

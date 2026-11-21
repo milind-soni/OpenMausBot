@@ -1,6 +1,6 @@
 // Append-only usage rows under <data>/usage/ (0600): bookkeeping never fails the turn, and rows never carry message text.
 import { personOf } from "./usage-attribution.ts";
-import { readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { TraceParent, TraceStatus, TraceUsageStatus } from "../shared/usage-trace.ts";
@@ -142,7 +142,12 @@ export function appendUsage(dataDir: string, row: Omit<UsageRow, "at"> & { at?: 
 
 async function write(dataDir: string, record: UsageRow): Promise<void> {
   await mkdir(join(dataDir, DIR), { recursive: true, mode: 0o700 });
-  await appendFile(usageFileFor(dataDir, new Date(record.at)), JSON.stringify(record) + "\n", { mode: 0o600 });
+  const file = usageFileFor(dataDir, new Date(record.at));
+  try {
+    await appendFile(file, JSON.stringify(record) + "\n", { mode: 0o600 });
+  } finally {
+    parsedFiles.delete(file);
+  }
 }
 
 export async function flushUsageLedger(dataDir: string): Promise<void> {
@@ -172,26 +177,63 @@ export function monthsBetween(from: Date, to: Date): string[] {
   return keys;
 }
 
+interface ParsedFile { stamp: string; rows: Array<{ at: number; row: UsageRow }> }
+/** A month file's rows as last parsed, kept while the file's stamp stays the same. A year of months for two data folders. */
+const parsedFiles = new Map<string, ParsedFile>();
+const PARSED_FILES_KEPT = 26;
+let parses = 0;
+/** How many times a month file has been parsed in this process. */
+export const usageLedgerParses = (): number => parses;
+
+function parseMonth(text: string): ParsedFile["rows"] {
+  const rows: ParsedFile["rows"] = [];
+  for (const line of text.split("\n")) {
+    if (!line) continue;
+    try {
+      const value: unknown = JSON.parse(line);
+      if (isUsageRow(value)) rows.push({ at: Date.parse(value.at), row: value });
+    } catch {
+    }
+  }
+  return rows;
+}
+
+/** The file's valid rows in file order, parsed again only when its size, times or identity changed. Callers share the
+ * row objects and must not change them. */
+function monthRows(file: string): ParsedFile["rows"] {
+  let fd: number;
+  try {
+    fd = openSync(file, "r");
+  } catch {
+    parsedFiles.delete(file);
+    return [];
+  }
+  try {
+    const stat = fstatSync(fd);
+    const stamp = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
+    const held = parsedFiles.get(file);
+    if (held?.stamp === stamp) return held.rows;
+    const rows = parseMonth(readFileSync(fd, "utf8"));
+    parses += 1;
+    parsedFiles.delete(file);
+    parsedFiles.set(file, { stamp, rows });
+    if (parsedFiles.size > PARSED_FILES_KEPT) parsedFiles.delete(parsedFiles.keys().next().value!);
+    return rows;
+  } catch {
+    parsedFiles.delete(file);
+    return [];
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function readUsage(dataDir: string, range: { from: Date; to: Date }): UsageRow[] {
   const rows: UsageRow[] = [];
   const from = range.from.getTime();
   const to = range.to.getTime();
   for (const key of monthsBetween(range.from, range.to)) {
-    let text: string;
-    try {
-      text = readFileSync(join(dataDir, DIR, `${key}.jsonl`), "utf8");
-    } catch {
-      continue;
-    }
-    for (const line of text.split("\n")) {
-      if (!line) continue;
-      try {
-        const value: unknown = JSON.parse(line);
-        if (!isUsageRow(value)) continue;
-        const at = Date.parse(value.at);
-        if (at >= from && at <= to) rows.push(value);
-      } catch {
-      }
+    for (const { at, row } of monthRows(join(dataDir, DIR, `${key}.jsonl`))) {
+      if (at >= from && at <= to) rows.push(row);
     }
   }
   return rows;
@@ -259,7 +301,7 @@ export function triggerLabel(trigger: UsageTrigger): string {
   }
 }
 
-function groupOf(row: UsageRow, groupBy: UsageGroupBy): { key: string; label: string } {
+export function usageGroupOf(row: UsageRow, groupBy: UsageGroupBy): { key: string; label: string } {
   switch (groupBy) {
     case "bot":
       return { key: `bot:${row.botId}`, label: row.botName || row.botId };
@@ -331,7 +373,7 @@ export function summarizeUsage(
   const splits = new Map<string, Map<string, UsageGroup>>();
   const split = splitBy && splitBy !== groupBy ? splitBy : null;
   for (const row of rows) {
-    const { key, label } = groupOf(row, groupBy);
+    const { key, label } = usageGroupOf(row, groupBy);
     let group = groups.get(key);
     if (!group) {
       group = emptyGroup(key, label);
@@ -345,7 +387,7 @@ export function summarizeUsage(
       inside = new Map();
       splits.set(key, inside);
     }
-    const pieceOf = groupOf(row, split);
+    const pieceOf = usageGroupOf(row, split);
     let piece = inside.get(pieceOf.key);
     if (!piece) {
       piece = emptyGroup(pieceOf.key, pieceOf.label);

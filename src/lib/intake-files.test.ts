@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { TURN_IMAGE_MAX_BYTES as SERVER_TURN_IMAGE_MAX_BYTES, TURN_IMAGE_MAX_COUNT as SERVER_TURN_IMAGE_MAX_COUNT } from "../../server/turn-images";
-import { fitImagesToSlots, IMAGE_MAX_BYTES, imageBytesLeft, imageSlotsLeft, imagesThatFit, intakeFiles, TURN_IMAGE_MAX_BYTES, TURN_IMAGE_MAX_COUNT, type Attachment } from "./composer-attachments";
+import { FILE_MAX_BYTES, fitImagesToSlots, IMAGE_MAX_BYTES, imageBytesLeft, imageSlotsLeft, imagesThatFit, intakeFiles, TURN_IMAGE_MAX_BYTES, TURN_IMAGE_MAX_COUNT, type Attachment } from "./composer-attachments";
 
 type Fake = { name: string; size: number; type: string; text: () => Promise<string> };
 const file = (name: string, type: string, size = 10): Fake => ({
@@ -33,6 +33,43 @@ describe("intakeFiles", () => {
       expect(out.attachments).toEqual([expect.objectContaining({ kind: "file", path: "/private/attachments/note.ogg" })]);
       expect(out.problems).toEqual([]);
       expect(getPath).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+  it("uploads a desktop video into the private store instead of attaching its disk path", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const type = new Headers(init?.headers).get("content-type");
+      const name = type === "video/quicktime" ? "Screen.mov" : "clip.mp4";
+      return new Response(JSON.stringify({ path: `/private/attachments/${name}`, name, bytes: 3 }), {
+        status: 201, headers: { "content-type": "application/json" },
+      });
+    });
+    const getPath = vi.fn(onDisk);
+    try {
+      const out = await intakeFiles([
+        new File(["mp4"], "clip.mp4", { type: "video/mp4" }),
+        new File(["mov"], "Screen.MOV", { type: "" }),
+      ], { allowImages: true, getPath, uploadImage: async () => null });
+      expect(fetch.mock.calls.map(([, init]) => new Headers(init?.headers).get("content-type")).sort()).toEqual(["video/mp4", "video/quicktime"]);
+      expect(out.attachments).toEqual([
+        expect.objectContaining({ kind: "file", path: "/private/attachments/clip.mp4" }),
+        expect.objectContaining({ kind: "file", path: "/private/attachments/Screen.mov" }),
+      ]);
+      expect(out.problems).toEqual([]);
+      expect(getPath).not.toHaveBeenCalled();
+    } finally {
+      fetch.mockRestore();
+    }
+  });
+  it("keeps a desktop video over the upload limit as its disk path", async () => {
+    const fetch = vi.spyOn(globalThis, "fetch");
+    try {
+      const big = { ...file("film.mp4", "video/mp4", FILE_MAX_BYTES + 1), arrayBuffer: async () => new ArrayBuffer(0) };
+      const out = await intakeFiles([big], { allowImages: true, getPath: onDisk, uploadImage: async () => null });
+      expect(out.attachments).toEqual([expect.objectContaining({ kind: "file", path: "/Users/me/film.mp4" })]);
+      expect(out.problems).toEqual([]);
+      expect(fetch).not.toHaveBeenCalled();
     } finally {
       fetch.mockRestore();
     }

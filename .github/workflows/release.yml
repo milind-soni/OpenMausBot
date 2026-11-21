@@ -442,7 +442,7 @@ jobs:
       - name: Install package validation and native smoke tools
         run: >-
           sudo apt-get update && sudo apt-get install -y
-          at-spi2-core dbus-x11 desktop-file-utils libxi6 libxkbcommon0 openbox squashfs-tools x11-utils xdotool xvfb
+          at-spi2-core cpio dbus-x11 desktop-file-utils libxi6 libxkbcommon0 openbox rpm squashfs-tools x11-utils xdotool xvfb
       - run: pnpm install --frozen-lockfile
       - name: Clean generated output
         run: pnpm clean
@@ -500,13 +500,15 @@ jobs:
           v=$(node -p "require('./package.json').version")
           cp "release/OpenMausBot-$v-amd64.deb" release/OpenMausBot-amd64.deb
           cp "release/OpenMausBot-$v-x86_64.AppImage" release/OpenMausBot.AppImage
-          (cd release && sha256sum OpenMausBot-$v-amd64.deb OpenMausBot-$v-x86_64.AppImage > SHA256SUMS-ubuntu-x64.txt)
+          cp "release/OpenMausBot-$v-x86_64.rpm" release/OpenMausBot-x86_64.rpm
+          (cd release && sha256sum OpenMausBot-$v-amd64.deb OpenMausBot-$v-x86_64.AppImage OpenMausBot-$v-x86_64.rpm OpenMausBot-amd64.deb OpenMausBot.AppImage OpenMausBot-x86_64.rpm > SHA256SUMS-ubuntu-x64.txt)
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: linux-release
           path: |
             release/*.deb
             release/*.AppImage
+            release/*.rpm
             release/SHA256SUMS-ubuntu-x64.txt
             release/latest-linux.yml
           if-no-files-found: error
@@ -548,7 +550,8 @@ jobs:
             "OpenMausBot-$VERSION-x64.zip"
             "OpenMausBot-$VERSION-x64.zip.blockmap"
             "OpenMausBot-$VERSION-x86_64.AppImage"
-            OpenMausBot-amd64.deb OpenMausBot-intel.dmg OpenMausBot-setup.exe
+            "OpenMausBot-$VERSION-x86_64.rpm"
+            OpenMausBot-amd64.deb OpenMausBot-intel.dmg OpenMausBot-setup.exe OpenMausBot-x86_64.rpm
             OpenMausBot.AppImage OpenMausBot.dmg SHA256SUMS-ubuntu-x64.txt
           )
           for file in "${required[@]}"; do
@@ -574,6 +577,7 @@ jobs:
             ["latest-linux.yml", [
               "OpenMausBot-${{ needs.prepare.outputs.version }}-x86_64.AppImage",
               "OpenMausBot-${{ needs.prepare.outputs.version }}-amd64.deb",
+              "OpenMausBot-${{ needs.prepare.outputs.version }}-x86_64.rpm",
             ]],
           ]);
           let bad = 0;

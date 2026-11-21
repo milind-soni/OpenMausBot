@@ -15,10 +15,12 @@ function ended(phase: "failed" | "expired"): DeviceSignInStatus {
 }
 
 /** A start button, a spinner while the person finishes in their browser, and the outcome. */
-export function EngineBrowserSignIn({ instanceId, autoStart = false, onDone }: {
+export function EngineBrowserSignIn({ instanceId, autoStart = false, onDone, onStart }: {
   instanceId: string;
   autoStart?: boolean;
   onDone?: (signedIn: boolean) => void;
+  /** A sign-in is starting. */
+  onStart?: () => void;
 }) {
   const { refreshInstances, refreshModels } = useStore();
   const [auth, setAuth] = useState<DeviceSignInStatus | null>(null);
@@ -72,6 +74,7 @@ export function EngineBrowserSignIn({ instanceId, autoStart = false, onDone }: {
   const start = async () => {
     setBusy(true);
     setError(null);
+    onStart?.();
     try {
       const { auth: next }: { auth: DeviceSignInStatus } = await api(`${base}/start`, { method: "POST" });
       setAuth(next);

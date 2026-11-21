@@ -172,7 +172,7 @@ would only send that person the same names and ids it can already read.
 ## Cloud homes
 
 A desktop has an installation credential once its owner turns on "Use your
-phone anywhere", and `openmausbot serve` has one after `openmausbot login` or
+phone anywhere", and `openmausbot serve` has one after `openmausbot account login` or
 from `OMB_INSTALLATION_CREDENTIAL`. A Cloud home has none, so today it cannot
 send.
 

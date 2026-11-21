@@ -186,9 +186,9 @@ export async function resolveAntigravityRuntime(
     if (found) return found;
   }
   if (!asset) {
-    throw new AntigravitySetupError(
-      `Google does not publish an Antigravity runtime for ${process.platform}-${process.arch}. Set a custom executable path.`,
-    );
+    throw new AntigravitySetupError(legacyCli
+      ? `Antigravity no longer runs the agy command, and Google does not publish its official runtime for ${process.platform}-${process.arch}. Set the custom executable path to ${names.executable}, with ${names.harness} in the same folder.`
+      : `Google does not publish an Antigravity runtime for ${process.platform}-${process.arch}. Set a custom executable path.`);
   }
   throw new AntigravitySetupError(legacyCli
     ? "Antigravity now uses Google's official runtime. Choose Install official Antigravity, then Sign in with Google. Your previous agy login is not copied."

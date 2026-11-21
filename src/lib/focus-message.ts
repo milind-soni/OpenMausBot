@@ -15,7 +15,8 @@ async function loadThroughMessage(
 ): Promise<void> {
   if (!owner.hasMore || owner.messages.some((message) => message.id === messageId)) return;
   const older: Message[] = [];
-  let before = owner.messages[0]?.id;
+  const heldFrom = owner.messages[0]?.id;
+  let before = heldFrom;
   let hasMore = true;
   let found = false;
   while (before && hasMore && !found) {
@@ -28,7 +29,7 @@ async function loadThroughMessage(
     hasMore = Boolean(page.hasMore) && messages.length > 0;
     before = messages[0]?.id;
   }
-  if (older.length) dispatch({ type: "olderMessages", threadId: owner.threadId, generation, messages: older, hasMore });
+  if (older.length) dispatch({ type: "olderMessages", threadId: owner.threadId, generation, before: heldFrom, messages: older, hasMore });
 }
 
 export async function landOnSearchHit(

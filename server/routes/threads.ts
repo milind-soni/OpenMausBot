@@ -25,6 +25,7 @@ import { resolveRequestAuth, type RequestAuth, type ResolveOptions } from "../re
 import type { queuedSteerSnapshot } from "../steer-queue.ts";
 import type { BotRecord, GroupRecord, Message, Store } from "../store.ts";
 import { answerAsleep, backgroundWhileAsleep } from "../cloud-power.ts";
+import { heldTail } from "../host/snapshot-tail.ts";
 import { createJobRoutes } from "./jobs.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
@@ -52,8 +53,9 @@ export interface ThreadRouteDeps {
   cliOwnerToken(): string | undefined;
   defaultPage: number;
   pageSize(raw: string | null): number | null | undefined;
-  messagePage(threadId: string, limit: number | undefined, before?: string | null): MessagePage;
-  messageWindow(threadId: string, messageId: string, limit: number): { messages: Array<Message | Record<string, unknown>>; hasMore: boolean } | null;
+  messagePage(threadId: string, limit: number | undefined): MessagePage;
+  messagePageBefore(threadId: string, before: string, limit: number): MessagePage | null;
+  messageWindow(threadId: string, messageId: string, limit: number): { messages: Array<Message | Record<string, unknown>>; hasMore: boolean; activeLeafId: string | null } | null;
   publicBotQueuedMessages(): ReturnType<typeof queuedSteerSnapshot>;
   publicGroupState(record: GroupRecord): WireGroup;
   wireBot(bot: BotRecord): WireBot;
@@ -78,16 +80,19 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
   const {
     store, userName: userNameFor, sessions, groupUsageReader, lendingEnabled,
     hostedWorkspace: HOSTED_WORKSPACE, sessionCookie: SESSION_COOKIE, loopback: LOOPBACK, defaultPage: DEFAULT_PAGE,
-    pageSize, messagePage, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot,
+    pageSize, messagePage, messagePageBefore, messageWindow, publicBotQueuedMessages, publicGroupState, wireBot,
     botComputerControlSnapshot, messageFileRootsForThread, viewerFor, visibleTo,
   } = deps;
   const mediaLinks = new MessageMediaLinks();
   // tasks stays explicit: clients expect [] where wireBot() would omit the key.
-  const shownBot = (bot: BotRecord, visible: VisibleSet, limit: number | undefined) => {
+  const shownBot = (bot: BotRecord, visible: VisibleSet, limit: number | undefined, tail?: number) => {
     const wired = wireBot(bot);
     // Narrowed first: on a Team Cloud the selected conversation may be someone else's, and its words never go out.
     const shown = memberBot({ ...wired, tasks: wired.tasks ?? [] }, visible);
-    return { ...shown, ...(typeof shown.threadId === "string" ? messagePage(shown.threadId, limit) : { messages: [], hasMore: false, activeLeafId: null }) };
+    const threadId = shown.threadId;
+    if (typeof threadId !== "string") return { ...shown, messages: [], hasMore: false, activeLeafId: null };
+    const cursor = shown.tasks?.find((task) => task.threadId === threadId)?.lastReadMessageId;
+    return { ...shown, ...(tail !== undefined && limit !== undefined && tail < limit ? heldTail((size) => messagePage(threadId, size), tail, limit, cursor) : messagePage(threadId, limit)) };
   };
   const jobs = createJobRoutes({ store, coordinator: deps.coordinator, groupThreadIsWorking: deps.groupThreadIsWorking, viewerFor, visibleTo, sessions });
   const handle = async ({ req, res, url, path, method, auth, json, readBody }: RouteContext): Promise<unknown> => {
@@ -104,10 +109,13 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       try { groupUsageReader.refresh(); } catch { }
       const limit = pageSize(url.searchParams.get("messages"));
       if (limit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
+      const tail = pageSize(url.searchParams.get("tail"));
+      if (tail === null) return json(res, 400, { error: "tail must be a non-negative whole number" });
+      const open = new Set(url.searchParams.get("open")?.split(",") ?? []);
       const shownBots = (deps.botOrderFor?.(auth, store.bots) ?? store.bots).filter((bot) => visible.bot(bot.id));
       const queued = publicBotQueuedMessages();
       return json(res, 200, {
-        bots: shownBots.map((bot) => shownBot(bot, visible, limit)),
+        bots: shownBots.map((bot) => shownBot(bot, visible, limit, open.has(bot.id) ? undefined : tail)),
         botQueuedMessages: visible.everything ? queued : Object.fromEntries(Object.entries(queued).filter(([threadId]) => visible.thread(threadId))),
         sections: visible.sections(store.sections),
         groups: store.groups.filter((g) => visible.group(g.id)).map((g) => {
@@ -150,13 +158,14 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       if (around) {
         const window = messageWindow(threadId, around, limit ?? DEFAULT_PAGE);
         if (!window) return json(res, 404, { error: "no such message" });
-        return json(res, 200, { ...window, activeLeafId: store.activeLeaf(threadId) });
+        return json(res, 200, window);
       }
       // An unknown cursor must not answer with the newest page: the client would paginate in a circle.
-      if (before && !store.messagesFor(threadId).some((msg) => msg.id === before)) {
-        return json(res, 404, { error: "no such message" });
+      if (before) {
+        const page = messagePageBefore(threadId, before, limit ?? DEFAULT_PAGE);
+        return page ? json(res, 200, page) : json(res, 404, { error: "no such message" });
       }
-      return json(res, 200, { ...messagePage(threadId, limit ?? DEFAULT_PAGE, before), activeLeafId: store.activeLeaf(threadId) });
+      return json(res, 200, messagePage(threadId, limit ?? DEFAULT_PAGE));
     }
 
     m = path.match(/^\/api\/threads\/([\w-]+)\/messages\/([\w-]+)\/image$/);
@@ -202,7 +211,10 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
 
       const message = store.messagesFor(threadId).find((candidate) => candidate.id === m![2]);
       if (!message) return json(res, 404, { error: "no such message" });
-      if (message.kind !== "text" || (!message.text && !message.attachments?.length)) {
+      if (!visible.thread(threadId)) return json(res, 404, { error: "no such conversation" });
+      // A non-text card (a hand-off result is an activity message) shares only what it explicitly attaches.
+      const attachmentsOnly = message.kind !== "text";
+      if ((attachmentsOnly && !message.attachments?.length) || (!message.text && !message.attachments?.length)) {
         return json(res, 403, { error: "that message does not share this file" });
       }
       const messageText = message.text ?? "";
@@ -210,6 +222,8 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       const mediaGrant = mediaId ? mediaLinks.use(mediaId, threadId, message.id, auth) : null;
       if (mediaId && !mediaGrant) return json(res, 404, { error: "that video link has expired", code: "media_link_expired" });
       const body = method === "POST" ? await readBody(req) : null;
+      // Access may have been revoked while the body was in flight; ask again before any file is opened.
+      if (body && !visibleTo(viewerFor(auth)).thread(threadId)) return json(res, 404, { error: "no such conversation" });
       const asksMediaLink = body?.media === true;
       const rawReference = streamsMessageImage ? url.searchParams.get("ref") : null;
       if (streamsMessageImage && (!rawReference || !/^\d+$/.test(rawReference))) {
@@ -227,6 +241,9 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
       const botAttachment = message.role === "bot"
         ? message.attachments?.find((attachment) => attachment.path === href)
         : undefined;
+      if (attachmentsOnly && !botAttachment) {
+        return json(res, 403, { error: "that message does not share this file" });
+      }
       if (message.role === "user") {
         downloadName = messageAttachmentName(messageText, href) ?? undefined;
         if (!downloadName) {

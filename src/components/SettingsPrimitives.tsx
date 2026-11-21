@@ -15,9 +15,10 @@ export const SIMPLE_CARD = "settings-card relative rounded-[12px] bg-menu after:
 
 export function Switch({
   checked,
+  compact = false,
   className,
   ...props
-}: Omit<ComponentProps<"button">, "children" | "role" | "aria-checked"> & { checked: boolean }) {
+}: Omit<ComponentProps<"button">, "children" | "role" | "aria-checked"> & { checked: boolean; compact?: boolean }) {
   return (
     <button
       {...props}
@@ -26,15 +27,17 @@ export function Switch({
       aria-checked={checked}
       data-switch="" data-look="switch"
       className={cn(
-        "relative cursor-pointer h-6 w-11 shrink-0 rounded-full transition-colors enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
+        "relative cursor-pointer shrink-0 rounded-full transition-colors enabled:hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none",
+        compact ? "h-4 w-7" : "h-6 w-11",
         checked ? "bg-accent" : "bg-control",
         className,
       )}
     >
       <span
         className={cn(
-          "absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white transition-[left] motion-reduce:transition-none",
-          checked ? "left-[21px]" : "left-[3px]",
+          "absolute rounded-full bg-white transition-[left] motion-reduce:transition-none",
+          compact ? "top-0.5 size-3" : "top-[3px] size-[18px]",
+          checked ? (compact ? "left-3.5" : "left-[21px]") : (compact ? "left-0.5" : "left-[3px]"),
         )}
       />
     </button>

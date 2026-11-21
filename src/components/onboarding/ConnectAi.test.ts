@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createElement } from "react";
+import { act, createElement, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ManagedDesktopBridge } from "../../../electron/managed-desktop.mjs";
@@ -34,10 +34,11 @@ const { useWelcomeAi } = await import("./welcome-ai");
 const { useStore } = await import("@/state/store");
 const { track } = await import("@/lib/analytics");
 
-/** As the first screen has it: the AI it stands on, tested once, handed to the block. */
+/** As the first screen has it: the AI it stands on, tested once, handed to the block, with the one picked there. */
 function FirstScreenAi({ hosted = false }: { hosted?: boolean }) {
   const { state } = useStore();
-  return createElement(ConnectAi, { hosted, tested: useWelcomeAi(state.instances, !hosted) });
+  const [chosen, setChosen] = useState<string | null>(null);
+  return createElement(ConnectAi, { hosted, tested: useWelcomeAi(state.instances, !hosted, chosen), onChoose: setChosen });
 }
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -45,6 +46,10 @@ const engine = (instanceId: string, driverKind: string, displayName: string, rea
   instanceId, driverKind, displayName, install: { docsUrl: "https://example.test" },
   snapshot: { state: ready ? "available" : "unavailable", authenticated: ready }, models: { default: "m", options: [] },
 });
+/** Not installed yet: the app installs its own copy. */
+const openCode = (): InstanceInfo => ({ ...engine("opencodeGo", "opencodeGo", "OpenCode", false),
+  install: { docsUrl: "https://example.test", server: { standalone: { version: "1", downloadBytes: 1 } } } } as InstanceInfo);
+const freeOpenCode = (): InstanceInfo => ({ ...openCode(), snapshot: { state: "available", authenticated: true, freeFallback: true } });
 const bridge = { onState: vi.fn(), state: vi.fn() } as unknown as ManagedDesktopBridge;
 let host: HTMLDivElement, root: Root;
 const text = () => host.textContent ?? "";
@@ -95,13 +100,13 @@ describe("connecting an AI on the first screen", () => {
     expect(text()).not.toContain("Couldn't check your AI connections");
   });
 
-  it("leads with one recommended way, then lists every other way, with no status list and no engine talk", async () => {
+  it("leads with Claude's, ChatGPT's and OpenCode's own setups, then lists every other way, with no status list and no engine talk", async () => {
+    f.instances.push(openCode());
     await show();
-    expect([...host.querySelectorAll("[data-engine-setup]")].map((node) => node.getAttribute("data-engine-setup"))).toEqual(["claude"]);
-    expect(host.querySelector("[data-ai-recommended]")?.getAttribute("data-ai-recommended")).toBe("claude");
+    expect([...host.querySelectorAll("[data-engine-setup]")].map((node) => node.getAttribute("data-engine-setup"))).toEqual(["claude", "codex", "opencodeGo"]);
+    expect([...host.querySelectorAll("[data-ai-recommended]")].map((node) => node.getAttribute("data-ai-recommended"))).toEqual(["claude", "codex", "opencodeGo"]);
     const rows = [...host.querySelectorAll("button[aria-expanded]")].map((node) => node.textContent);
-    expect(rows).toHaveLength(2);
-    expect(rows).toContain("Codex");
+    expect(rows).toEqual(["Grok"]);
     expect(text()).not.toContain("Other ways");
     for (const word of [/\bengines?\b/i, /\bReady\b/, /Needs setup/i, /to set up/i, /provider/i]) expect(text()).not.toMatch(word);
   });
@@ -116,11 +121,14 @@ describe("connecting an AI on the first screen", () => {
       engine("codex", "codex", "Codex", false),
       { ...engine("droid", "droidAgent", "Droid", false), install: { docsUrl: "https://example.test", server: { package: "droid" } } },
       { ...engine("local", "openai-compat", "Local models", false), access: "custom" },
+      openCode(),
     ];
     const setup = (id: string) => host.querySelector(`[data-engine-setup="${id}"]`);
     const plain = (name: string) => `Use the ${name} account you already have. You sign in on their own website, so your password stays with them.`;
     await show();
     expect(setup("claude")?.getAttribute("data-description")).toBe(plain("Claude"));
+    expect(setup("codex")?.hasAttribute("data-description"), "Codex is finished in Terminal: its setup keeps its own instructions").toBe(false);
+    expect(setup("opencodeGo")?.hasAttribute("data-description"), "OpenCode installs with nothing to sign in to").toBe(false);
     await otherWays();
     const openRow = async (name: string) => {
       const row = [...host.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")].find((button) => button.textContent?.includes(name))!;
@@ -130,10 +138,8 @@ describe("connecting an AI on the first screen", () => {
     expect(setup("grok")?.getAttribute("data-description")).toBe(plain("Grok"));
     await openRow("Droid");
     expect(setup("droid")?.getAttribute("data-description"), "the app installs it, then the sign-in follows").toBe(plain("Droid"));
-    for (const [id, name] of [["kimi", "Kimi"], ["codex", "Codex"]]) {
-      await openRow(name);
-      expect(setup(id)?.hasAttribute("data-description"), `${name} is finished in Terminal: its setup keeps its own instructions`).toBe(false);
-    }
+    await openRow("Kimi");
+    expect(setup("kimi")?.hasAttribute("data-description"), "Kimi is finished in Terminal: its setup keeps its own instructions").toBe(false);
     await openRow("Local models");
     expect(setup("local")?.getAttribute("data-intent")).toBe("inject");
     expect(setup("local")?.hasAttribute("data-description")).toBe(false);
@@ -214,6 +220,29 @@ describe("connecting an AI on the first screen", () => {
     expect(host.querySelector("[data-ai-connected]")).toBeNull();
     expect(host.querySelector("[data-ai-backup]")?.textContent).toBe("OpenCode's free model is ready as a backup. For the best answers, connect an AI you already use.");
     expect(host.querySelector("[data-ai-recommended]")?.getAttribute("data-ai-recommended")).toBe("claude");
+  });
+
+  it("counts OpenCode's free model once the person picked OpenCode here, after it answered its test message", async () => {
+    f.instances = [engine("claude", "claudeAgent", "Claude", false), openCode()];
+    await show();
+    await act(async () => { host.querySelector<HTMLElement>('[data-ai-recommended="opencodeGo"] [data-engine-setup]')!.click(); });
+    expect(f.checks, "nothing to test until it is installed").toEqual([]);
+    f.instances = [engine("claude", "claudeAgent", "Claude", false), freeOpenCode()];
+    await show();
+    expect(f.checks).toEqual(["/api/instances/opencodeGo/check"]);
+    expect(host.querySelector("[data-ai-connected]")?.textContent).toBe("Connected · OpenCode");
+    expect(host.querySelector("[data-ai-backup]")).toBeNull();
+  });
+
+  it("offers the ChatGPT plan's own sign-in for ChatGPT, and no ChatGPT setup once a ChatGPT account works", async () => {
+    const plan: InstanceInfo = { ...engine("chatgpt", "codex", "ChatGPT plan", false), authentication: { method: "browser-pkce" } } as InstanceInfo;
+    f.instances = [engine("claude", "claudeAgent", "Claude", false), engine("codex", "codex", "Codex", false), plan];
+    await show();
+    expect([...host.querySelectorAll("[data-ai-recommended]")].map((node) => node.getAttribute("data-ai-recommended"))).toEqual(["claude", "chatgpt"]);
+    f.check = () => Promise.resolve({ ok: false, error: "No answer." });
+    f.instances = [engine("claude", "claudeAgent", "Claude", false), engine("codex", "codex", "Codex", true), plan];
+    await show();
+    expect([...host.querySelectorAll("[data-ai-recommended]")].map((node) => node.getAttribute("data-ai-recommended"))).toEqual(["claude"]);
   });
 
   it("offers the organization sign-in under Other ways on this computer's own window only", async () => {

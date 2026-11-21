@@ -4,7 +4,7 @@
 // scheduler pass at a time, each step capped, so the hours a computer slept, or a clock that jumped, are in neither.
 import { ROUTINE_GOAL_RUN_LIMIT_MINUTES, ROUTINE_RUN_LIMIT_MINUTES } from "../shared/routines.ts";
 import { DUE_CLOCK_MS } from "./due-timer.ts";
-import { codedLine, fittedLine, type RoutineLine } from "./routine-lines.ts";
+import { codedLine, type RoutineLine } from "./routine-lines.ts";
 import { ROUTINE_BUSY_WAIT_MS } from "./routine-recovery.ts";
 import { activeMs } from "./routine-waits.ts";
 import type { RoutineManagerOptions, RoutineRun } from "./routines.ts";
@@ -78,7 +78,7 @@ export function runLimitAt(run: Started, now: number): number | null {
 export function runOverLimit(run: RoutineRun, clock: RunClock, now: number): RoutineLine | null {
   if (!started(run)) return null;
   const worked = run.status === "running" ? clock.count(run, "workedMs", now) : run.workedMs ?? 0;
-  if (run.timeoutMinutes != null) return activeMs(run, now) >= run.timeoutMinutes * 60_000 ? fittedLine("error", `Stopped after reaching the ${run.timeoutMinutes}-minute run limit`, undefined) : null;
+  if (run.timeoutMinutes != null) return activeMs(run, now) >= run.timeoutMinutes * 60_000 ? codedLine("error", "routines.server.overOwnLimit", { minutes: run.timeoutMinutes }) : null;
   return run.status === "running" && worked >= defaultLimitMs(run) ? codedLine("error", "routines.server.overLimit", { hours: defaultLimitMs(run) / 3_600_000 }) : null;
 }
 

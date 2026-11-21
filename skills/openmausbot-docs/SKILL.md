@@ -65,6 +65,7 @@ a hand edit races the next save.
 | Work one bot hands to another, and what wakes it | `runtime-contract.md` |
 | Teams, shared departments, incidents | `team-sharing.md`, `team-cloud.md`, `team-incidents.md` |
 | Self-hosting, a VPS, My Cloud | `self-hosting.md`, `deploy-vps.md`, `byo-vps.md`, `cloud-pro.md` |
+| The same bots on more than one computer or a phone, an empty Inbox on a new device | `multi-device.md` |
 | Where a bot's files go, and how to get them out | `files.md`, `bot-box.md` |
 | Browser and computer control | `computer-use-integration.md`, `browser-packaging.md` |
 | Voice, images, meeting notes | `voice-mode.md`, `image-generation.md`, `meeting-notes.md` |

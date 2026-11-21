@@ -1,15 +1,16 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { IntervalHistogram } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 
 import { writeFileAtomic } from "../atomic.ts";
-import { createLoopStalls, markRequestArrival, requestArrivedBefore, stallStats, timeBlocking } from "./loop-stalls.ts";
+import { createLoopStalls, markRequestArrival, requestArrivedBefore, STALL_RESOLUTION_MS, stallStats, timeBlocking } from "./loop-stalls.ts";
 import { PERF_HEALTH_MAX_BYTES, perfHealth, stallLines } from "./perf-report.ts";
 
 const tally = { n: 0, ms: 0, maxMs: 0 };
-const minute = (count: number, points: Array<[number, number]>) => ({ count, points, maxMs: points.at(-1)![1], saves: tally, runtimeReads: tally });
+const minute = (count: number, points: Array<[number, number]>) => ({ count, points, maxMs: points.at(-1)![1], saves: tally, runtimeReads: tally, pauses: tally });
 
 describe("loop stall percentiles", () => {
   it("weighs each minute by its samples, so one bad minute shows in the hour's tail and not its middle", () => {
@@ -56,6 +57,51 @@ describe("the loop stall recorder", () => {
     }
   });
 
+  it("counts a gap the loop only waited through as a sleep or a pause, and one it worked through as a stall", () => {
+    const delays: number[] = [];
+    const histogram = {
+      get count() { return delays.length; },
+      get max() { return delays.length ? (Math.max(...delays) + STALL_RESOLUTION_MS) * 1e6 : 0; },
+      get percentiles() { return new Map(delays.length ? [[0, 20.1e6], [99, 20.1e6], [100, (Math.max(...delays) + STALL_RESOLUTION_MS) * 1e6]] : []); },
+      reset() { delays.length = 0; }, enable: () => true, disable: () => true,
+    } as unknown as IntervalHistogram;
+    let mono = 0, waited: number | null = 0;
+    const resumed: number[] = [];
+    const stalls = createLoopStalls({ histogram, monotonic: () => mono, idle: () => waited, resumed: (ms) => resumed.push(ms) });
+    const minute = (gapMs: number, workedMs: number, rollAfter = true) => {
+      delays.push(0.1, 0.1, gapMs);
+      mono += 60_000 + gapMs;
+      if (waited !== null) waited += 60_000 + gapMs - workedMs;
+      if (rollAfter) stalls.roll();
+    };
+
+    const hour = 3_600_000;
+    minute(hour, 100);
+    expect(resumed).toEqual([hour]);
+    expect(stalls.report()).toMatchObject({ m1: null, h1: null, pauses: { h1: { n: 1, ms: hour, maxMs: hour } } });
+
+    minute(5_000, 5_100);
+    expect(resumed).toEqual([hour]);
+    expect(stalls.report()).toMatchObject({ m1: { max: 5_000 }, h1: { max: 5_000 }, pauses: { m1: { n: 0 }, h1: { n: 1 } } });
+
+    minute(10 * 60_000, 50, false);
+    expect(stalls.report()).toMatchObject({ h1: { max: 5_000 }, pauses: { h1: { n: 2, maxMs: hour } } });
+    stalls.roll();
+    expect(resumed).toEqual([hour, 10 * 60_000]);
+    expect(stallLines(stalls.report())[3]).toMatch(/^ {2}Sleeps or pauses, left out of the stalls: last minute 0 .*; last hour 2 /);
+
+    mono += 10_000;
+    stalls.roll();
+    minute(10_000, 0);
+    expect(resumed).toHaveLength(2);
+    expect(stalls.report().m1).toMatchObject({ max: 10_000 });
+
+    waited = null;
+    minute(hour, 100);
+    expect(resumed).toHaveLength(2);
+    expect(stalls.report().h1).toMatchObject({ max: hour });
+  });
+
   it("starts a message's wait when its request arrived, only for that request and only if recent", async () => {
     expect(requestArrivedBefore(Date.now())).toBeUndefined();
     await (async () => {
@@ -70,7 +116,7 @@ describe("the loop stall recorder", () => {
   it("fits the health report's budget with the rest of the timings, and holds numbers only", () => {
     const stalls = createLoopStalls();
     const report = stalls.report();
-    const body = perfHealth({ hour: { turns: 0, failed: 0, phases: {}, slow: [], partial: false }, day: { turns: 0, failed: 0, slow: [], phases: {}, tools: [], retries: { n: 0, turns: 0, backoffMs: 0, why: {} }, limits: {}, failovers: 0 } as never,
+    const body = perfHealth({ hour: { turns: 0, failed: 0, phases: {}, setup: {}, slow: [], partial: false }, day: { turns: 0, failed: 0, slow: [], phases: {}, setup: {}, tools: [], retries: { n: 0, turns: 0, backoffMs: 0, why: {} }, limits: {}, failovers: 0 } as never,
       live: [], limits: null, process: null, stalls: report });
     expect(JSON.stringify(body).length).toBeLessThanOrEqual(PERF_HEALTH_MAX_BYTES);
     expect(body.stalls).toEqual(report);

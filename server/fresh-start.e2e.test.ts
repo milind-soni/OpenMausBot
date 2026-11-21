@@ -53,7 +53,7 @@ it("sends the provider nothing from before the divider, while a warm session and
     // A summary written before the divider must not cross it either.
     await f.api(`/api/bots/${f.bot.id}/compact`, { method: "POST", body: JSON.stringify({ threadId: f.thread }) });
     await f.settled();
-    expect((await f.messages()).some((m) => m.kind === "compaction" && m.compaction && !m.compaction.fresh)).toBe(true);
+    expect((await f.messages()).some((m) => m.kind === "compaction" && m.engineCompaction && !m.compaction)).toBe(true);
 
     f.guard();
     const reset = await f.startFresh() as { message: WireMessage | null };

@@ -193,8 +193,8 @@ describe("Antigravity sign-in lifecycle", () => {
       await instance.signOut!();
     } finally {
       await instance.dispose();
-      rmSync(profile, { recursive: true, force: true });
-      rmSync(antigravityProfileDirectory("antigravity-other"), { recursive: true, force: true });
+      await removeTempDir(profile);
+      await removeTempDir(antigravityProfileDirectory("antigravity-other"));
     }
   });
 
@@ -409,6 +409,18 @@ describe("official Antigravity runtime", () => {
     expect(asset.url).toMatch(/^https:\/\/dl\.google\.com\/agy-extensions\/releases\//u);
     expect(asset.sha256).toMatch(/^[a-f0-9]{64}$/u);
     expect(asset.archiveBytes).toBeGreaterThan(100_000_000);
+  });
+
+  it("publishes Google's official runtime for Intel Macs like the other Mac and PC builds", () => {
+    const intelMac = resolveAntigravityReleaseAsset("darwin", "x64");
+    expect(intelMac).toMatchObject({
+      version: ANTIGRAVITY_RELEASE_VERSION,
+      url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.4.3-darwin-x86_64.zip",
+      sha256: "9392dbbdad7f0663dbfb5a0bf641297b0cf80d2ee9cd2d49a616bbbc7378731d",
+      archiveBytes: 119_801_100,
+    });
+    expect(intelMac?.executable.name).toBe(resolveAntigravityReleaseAsset("darwin", "arm64")?.executable.name);
+    expect(intelMac?.harness.name).toBe(resolveAntigravityReleaseAsset("darwin", "arm64")?.harness.name);
   });
 
   function testValidatesAcpInitializeResults() {

@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 // Simple mode's composer: one pill with a round + (attach, Work until done or Finish together, Teach a task), a chip for a
 // mode only while this conversation turns it on, and one round button in the bot's tone that calls, sends or stops.
-// Advanced keeps its row of buttons.
 import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -118,10 +117,11 @@ describe("the Simple composer in a bot chat", () => {
     const pill = container.querySelector('[data-tour="composer"]')!.className.split(" ");
     expect(pill).toEqual(expect.arrayContaining(["rounded-[22px]", "bg-composer", "p-2", "ring-[0.5px]", "hover:ring-ink/[0.22]", "focus-within:ring-ink/[0.22]",
       "[transition:border-radius_300ms,box-shadow_150ms]"]));
-    expect(pill.filter((name) => name.startsWith("shadow"))).toEqual(["shadow-[0_2px_8px_-1px_rgb(0_0_0/0.05),0_1px_2px_rgb(0_0_0/0.03),0_0_0_1px_rgb(228_228_228/0.04)]"]);
+    expect(pill.filter((name) => name.startsWith("shadow"))).toEqual(["shadow-(--shadow-composer)"]);
+    expect(pill).toContain("composer-shell");
     expect(container.querySelector("[data-composer-row]")!.className).not.toContain("flex-wrap");
     expect(container.querySelector("[data-composer-actions]")!.className.split(" ")).toContain("gap-2");
-    expect(container.querySelector("[data-composer-plus]")!.className.split(" ")).toEqual(expect.arrayContaining(["size-7", "bg-ink/[0.05]", "ring-inset", "text-ink-tertiary"]));
+    expect(container.querySelector("[data-composer-plus]")!.className.split(" ")).toEqual(expect.arrayContaining(["size-7", "bg-ink/[0.06]", "inset-ring-[0.5px]", "inset-ring-ink/[0.08]", "text-ink-tertiary"]));
     expect(container.querySelector('button[aria-label="Attach a file"]')).toBeNull();
     expect(container.querySelector("[data-goal-chip]")).toBeNull();
     expect(container.querySelector("[data-approval-chip]")).toBeNull();
@@ -131,7 +131,7 @@ describe("the Simple composer in a bot chat", () => {
     expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.getAttribute("data-menu-key"))).toEqual(["attach", "goal", "teach"]);
     expect([...menu()!.querySelectorAll("[data-menu-key]")].map((row) => row.textContent)).toEqual(["Attach files", "Work until done", "Teach a task"]);
     const row = menu()!.querySelector("[data-menu-key='attach']")!.className.split(" ");
-    expect(row).toEqual(expect.arrayContaining(["h-[34px]", "gap-2", "px-3", "text-[15px]"]));
+    expect(row).toEqual(expect.arrayContaining(["h-8", "gap-2", "px-2", "rounded-md", "text-[14px]", "leading-5"]));
     expect(menu()!.className.split(" ")).toEqual(expect.arrayContaining(["popover-surface", "rounded-[12px]", "w-max", "min-w-[200px]", "max-w-[280px]"]));
   });
 
@@ -173,7 +173,7 @@ describe("the Simple composer in a bot chat", () => {
   it("sets the composer on plain canvas from its top edge down, with no fade above it", () => {
     render({ bot });
     const backdrop = container.querySelector("[data-composer-backdrop]")!.className.split(" ");
-    expect(backdrop).toEqual(expect.arrayContaining(["bg-app", "top-0", "-bottom-4", "-left-5", "-right-5"]));
+    expect(backdrop).toEqual(expect.arrayContaining(["bg-app", "top-0", "-bottom-4", "-left-4", "-right-4"]));
     expect(backdrop.some((name) => /gradient|blur|^from-|^to-|^opacity/.test(name))).toBe(false);
   });
 
@@ -291,133 +291,23 @@ describe("the Simple composer in a group chat", () => {
   });
 });
 
-describe("the Advanced composer", () => {
-  it("keeps the paperclip, the approval shield and the split call button, with no +, on Simple's floating surface", () => {
-    fixture.advanced = true;
+describe("the Simple composer beside Advanced", () => {
+  it("keeps Advanced's footer and its quiet + out of the pill, and the call button's own mode menu", () => {
     render({ bot });
-    expect(plus()).toBeNull();
-    expect(container.querySelector('[data-tour="composer"]')!.className.split(" ")).toEqual(expect.arrayContaining(["rounded-2xl", "bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)"]));
-    expect(container.querySelector('button[aria-label="Attach a file"]')).not.toBeNull();
-    expect(container.querySelector('[aria-haspopup="menu"][aria-label$="for Claude"]')).not.toBeNull();
-    expect(fixture.call).toMatchObject({ placement: "composer" });
-    expect(fixture.call?.fill).toBeUndefined();
-    expect(container.querySelector("[data-composer-backdrop]")!.className.split(" ")).toContain("top-1/2");
+    expect(container.querySelector("[data-composer-tools]")).toBeNull();
+    expect(container.querySelector(".mention-editor")!.className.split(" ")).not.toContain("basis-full");
+    expect(fixture.call?.modeMenu).toBe(true);
   });
 
-  it("offers Teach a task as its own button, which starts a /learn draft ahead of anything typed", () => {
-    fixture.advanced = true;
-    restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "how I file expenses", attachments: [] });
+  it("never stacks the field over its buttons, however long the message", () => {
     render({ bot });
-    const teach = container.querySelector<HTMLButtonElement>('button[aria-label="Teach a task"]');
-    expect(teach).not.toBeNull();
-    click(teach);
-    expect(container.querySelector("textarea")!.value).toBe("/learn how I file expenses");
-  });
-
-  it("leaves Teach a task out when skill authoring is off", () => {
-    fixture.advanced = true;
-    fixture.config = { features: { skillAuthoring: false } };
-    render({ bot });
-    expect(container.querySelector('button[aria-label="Teach a task"]')).toBeNull();
-  });
-
-  it("leaves Teach a task out when the bot's engine can't run agents", () => {
-    fixture.advanced = true;
-    fixture.agentsMcp = false;
-    render({ bot });
-    expect(container.querySelector('button[aria-label="Teach a task"]')).toBeNull();
-  });
-
-  it("sends with the bot's own button too, and keeps the accent in a room", () => {
-    fixture.advanced = true;
-    restoreComposerDraft(`bot:${bot.id}:${bot.threadId}`, { text: "hello", attachments: [] });
-    render({ bot: { ...bot, color: "teal" } });
-    const send = sendButton()!;
-    expect(send.className.split(" ")).toContain("size-8");
-    expectBotButton(send, "teal");
-    expect(send.className).not.toMatch(/\bbg-accent\b|text-white/);
-    restoreComposerDraft(`group:${room.id}:${room.threadId}`, { text: "hello room", attachments: [] });
-    render({ group: room, members: [bot, peer] });
-    expect(sendButton()!.className.split(" ")).not.toContain(BOT_BUTTON);
-    expect(sendButton()!.style.backgroundColor).toBe("var(--color-accent)");
-  });
-
-  it("keeps the room's Goal chip and its header call button", () => {
-    fixture.advanced = true;
-    render({ group: room, members: [bot, peer] });
-    expect(container.querySelector('[aria-label="Finish together"]')?.getAttribute("aria-pressed")).toBe("false");
-    expect(fixture.groupCall).toBeNull();
-  });
-
-  describe("with a message longer than one line", () => {
-    const type = (value: string) => {
-      const field = container.querySelector("textarea")!;
-      flushSync(() => {
-        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, value);
-        field.dispatchEvent(new Event("input", { bubbles: true }));
-      });
-    };
-    const classes = (selector: string) => container.querySelector(selector)!.className.split(" ");
-    const stacked = () => classes(".mention-editor").includes("basis-full");
-    /** A field 20 characters wide: longer text wraps onto a second 24px line. */
-    const wrapPast20 = () => vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get")
-      .mockImplementation(function (this: HTMLTextAreaElement) { return this.value.length > 20 ? 48 : 24; });
-
-    it("gives the text the full width above the buttons, and puts it back beside them on one line", () => {
-      fixture.advanced = true;
-      render({ bot });
-      expect(stacked()).toBe(false);
-      type("Okay I have done my outreach.\nAnother line of text.");
-      expect(classes(".mention-editor")).toEqual(expect.arrayContaining(["order-first", "basis-full"]));
-      expect(classes("[data-composer-row]")).toContain("flex-wrap");
-      expect(classes("[data-composer-actions]")).toContain("ml-auto");
-      type("Okay I have done my outreach.");
-      expect(stacked()).toBe(false);
-      expect(classes("[data-composer-row]")).not.toContain("flex-wrap");
+    const field = container.querySelector("textarea")!;
+    flushSync(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(field, "a".repeat(25) + "\nb");
+      field.dispatchEvent(new Event("input", { bubbles: true }));
     });
-
-    it("stacks once the text wraps beside the buttons, and stays stacked until it is shorter than where it wrapped", () => {
-      wrapPast20();
-      fixture.advanced = true;
-      render({ bot });
-      type("a".repeat(25));
-      expect(stacked()).toBe(true);
-      // Wider on its own line, it would fit on one row there; it still must not flip back and forth.
-      type("a".repeat(30));
-      expect(stacked()).toBe(true);
-      type("a".repeat(24));
-      expect(stacked()).toBe(true);
-      type("a".repeat(10));
-      expect(stacked()).toBe(false);
-    });
-
-    it("measures each new message afresh, so a wrap from a narrower composer does not stick", () => {
-      const wrap = wrapPast20();
-      fixture.advanced = true;
-      render({ bot });
-      type("a".repeat(25));
-      expect(stacked()).toBe(true);
-      type("");
-      // Wider now: 30 characters fit on the one row.
-      wrap.mockImplementation(function (this: HTMLTextAreaElement) { return this.value.length > 40 ? 48 : 24; });
-      type("a".repeat(30));
-      expect(stacked()).toBe(false);
-    });
-
-    it("never stacks an empty field, even when its placeholder wraps", () => {
-      vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get").mockReturnValue(48);
-      fixture.advanced = true;
-      render({ bot });
-      expect(stacked()).toBe(false);
-    });
-
-    it("leaves Simple's pill alone", () => {
-      wrapPast20();
-      render({ bot });
-      type("a".repeat(25) + "\nb");
-      expect(stacked()).toBe(false);
-      expect(classes("[data-composer-row]")).not.toContain("flex-wrap");
-    });
+    expect(container.querySelector(".mention-editor")!.className.split(" ")).not.toContain("basis-full");
+    expect(container.querySelector("[data-composer-row]")!.className).not.toContain("flex-wrap");
   });
 });
 

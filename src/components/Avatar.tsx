@@ -5,13 +5,13 @@ import {
   useImperativeHandle,
   useRef,
   useState,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { cn } from "@/lib/cn";
 import { avatarMarks, type AvatarKind } from "@/lib/avatar-marks";
 import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
+import { ACTIVE_STATES } from "./mascot-motion";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, mascotFaceInk, type BotAvatarCrop, type MascotFaceColor } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isCarvedBody, type BotBodyId } from "../../shared/bot-body";
@@ -66,13 +66,16 @@ const gradientFor = (color: MausColor): [string, string, string] => {
   return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
 };
 
+const roomGradients = new Map<MausColor, [string, string, string]>();
+
+/** One array per colour, so a memoised mascot drawn with it does not draw again. */
 export function roomAvatarGradient(color: MausColor): [string, string, string] {
-  const fill = `var(--identity-${color})`;
-  return [
-    `color-mix(in srgb, ${fill} 82%, #ffffff)`,
-    fill,
-    `color-mix(in srgb, ${fill} 82%, #000000)`,
-  ];
+  let gradient = roomGradients.get(color);
+  if (!gradient) {
+    const fill = `var(--identity-${color})`;
+    roomGradients.set(color, (gradient = [`color-mix(in srgb, ${fill} 82%, #ffffff)`, fill, `color-mix(in srgb, ${fill} 82%, #000000)`]));
+  }
+  return gradient;
 }
 
 export type MausAvatarHandle = CursorAvatarHandle;
@@ -94,6 +97,7 @@ export type MausAvatarProps = {
   forward?: boolean;
   lookAround?: number;
   trackPointer?: boolean;
+  /** Left out, the mascot moves only while its state is an activity or a beat plays; at rest it holds still until the pointer comes near. */
   animated?: boolean;
   bodyId?: BotBodyId;
   gradient?: [string, string, string];
@@ -144,7 +148,7 @@ function GradientAvatarComponent(
     forward = true,
     lookAround,
     trackPointer = true,
-    animated = true,
+    animated,
     bodyId,
     gradient,
     faceColor,
@@ -164,7 +168,7 @@ function GradientAvatarComponent(
 
   const [motionState, setMotionState] = useState<MausState | null>(null);
   useEffect(() => {
-    if (motion === "none" || !animated) return;
+    if (motion === "none" || animated === false) return;
     const beat = MOTION_FACE[motion];
     if (!beat) return;
     if (beat.blink) inner.current?.blink();
@@ -175,24 +179,11 @@ function GradientAvatarComponent(
     return () => clearTimeout(timer);
   }, [motion, motionKey, animated]);
 
-  const [pointer, setPointer] = useState({ x: 0, y: 0 });
-  const range = forward ? POINTER_GAZE.forward : POINTER_GAZE.authored;
-  const onPointerMove = (event: ReactPointerEvent<HTMLSpanElement>) => {
-    if (!trackPointer || !animated) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    setPointer({
-      x: Math.max(-1, Math.min(1, ((event.clientX - rect.left) / rect.width) * 2 - 1)) * range,
-      y: Math.max(-1, Math.min(1, ((event.clientY - rect.top) / rect.height) * 2 - 1)) * range,
-    });
-  };
-  const onPointerLeave = () => setPointer({ x: 0, y: 0 });
-
+  const live = animated ?? (ACTIVE_STATES.has(state) || motionState !== null);
   return (
     <span
       {...avatarMarks(kind, "mascot")}
       className="inline-flex shrink-0"
-      onPointerMove={trackPointer && animated ? onPointerMove : undefined}
-      onPointerLeave={trackPointer && animated ? onPointerLeave : undefined}
     >
       <CursorAvatar
         ref={inner}
@@ -205,13 +196,14 @@ function GradientAvatarComponent(
         eyeColor={faceInk ?? (chrome ? CHROME_EYES : undefined)}
         title={label ?? null}
         lookAround={lookAround ?? (forward ? 0 : 1)}
-        gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
+        gaze={gaze}
         turn={turn}
         spring={spring}
         eyeScale={eyeScale}
         showMouth={showMouth}
         mouthStroke={mouthStroke}
-        paused={!animated}
+        resting={!live}
+        pointerGaze={trackPointer ? (forward ? POINTER_GAZE.forward : POINTER_GAZE.authored) : 0}
       />
     </span>
   );

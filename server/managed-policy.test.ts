@@ -169,3 +169,10 @@ describe("claim-time computer refusal in bindTurnComputer", () => {
     await expect(bind(managed)({}, "computer:vm:shared")).resolves.toBe("claimed");
   });
 });
+
+it.each(["_1password", "_" + "a".repeat(63)])("accepts app allowlist entry %s", (slug) => {
+  expect(parseManagedPolicy(policy({ apps: { allowAll: false, allowlist: [slug] } }))?.apps?.allowlist).toEqual([slug]);
+});
+it.each(["", "-x", "Bad Slug", "a/b", "__proto__", "Uppercase", "a".repeat(65)])("rejects invalid app allowlist entry %s", (slug) => {
+  expect(() => parseManagedPolicy(policy({ apps: { allowAll: false, allowlist: [slug] } }))).toThrow();
+});

@@ -218,7 +218,8 @@ export function useReplyDraft<T extends { id: string }>(
   useEffect(() => {
     setReplyState((current) => {
       if (current.threadId === threadId && current.message) return current;
-      return { threadId, message: resolveReplyMessage(threadId, messages) };
+      const message = resolveReplyMessage(threadId, messages);
+      return message || current.message ? { threadId, message } : current;
     });
   }, [messages, threadId]);
 

@@ -164,6 +164,11 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     OMB_TEST_SEALED_PATH: "1",
     // The project's live announcement cards would sit over the corner the UI tests click in.
     OMB_DISABLE_ANNOUNCEMENTS: "1",
+    // The bundled model list, as in-process tests use: a downloaded one that differs makes the engines read their status
+    // again mid-boot, so what a fixture probes would depend on what is published on main.
+    OMB_DISABLE_MODEL_MANIFEST_FETCH: "1",
+    // A save of bots.json that serializes only the bots it names is checked against the whole serialization.
+    OMB_BOTS_SAVE_CHECK: "1",
   });
   // The fake engines' knobs are the one thing a caller may script into the child.
   for (const [key, value] of Object.entries(parentEnv)) {

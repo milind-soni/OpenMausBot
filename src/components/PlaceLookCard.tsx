@@ -4,11 +4,11 @@ import type { PlaceColorOutcome } from "../../electron/place-look.mjs";
 import { t } from "@/lib/i18n";
 import { choosePlaceColor, usePlaceLook } from "@/lib/place-look";
 import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
-import { useStore } from "@/state/store";
 import { PlacePicture } from "./PlacePicture";
 import { SettingRow, SettingsRows } from "./SettingsPrimitives";
 import { SwatchRadios } from "./SwatchRadios";
 import { useSettingsPlace } from "./settings/settings-place";
+import { sameFields, useStoreSelector } from "@/state/store-select";
 
 /** The sidebar's look, as two rows of Settings: its colour, in the six swatches the rail's circles use, and its picture,
  * kept on the place's own server for everyone there. Both start plain. This computer's colour is the app's own; a
@@ -18,7 +18,7 @@ export function PlaceLookRows() {
   const look = usePlaceLook();
   // The place's name from the one source Settings, the rail and the title bar share: never the raw entry's "This Mac".
   const place = useSettingsPlace();
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields);
   const admin = useOwnerOrAdmin() === true;
   const computer = window.ogb?.app?.ownPage === true;
   const [pending, setPending] = useState<CloudSwatch | null>(null);

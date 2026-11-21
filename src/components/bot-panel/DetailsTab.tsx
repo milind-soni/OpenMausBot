@@ -2,7 +2,7 @@ import { Calendar, CalendarPlus, ChevronRight, Sparkles } from "lucide-react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
-import { useStore, type Bot } from "@/state/store";
+import { currentTaskBot, type Bot } from "@/state/store";
 import { useChatMoreItems } from "../ChatMoreMenu";
 import { EffortRow, ModelPicker } from "../ModelPicker";
 import type { SidebarMenuItem } from "../SidebarPopoverMenu";
@@ -11,6 +11,8 @@ import { BotConversations } from "./Conversations";
 import type { SimplePageId } from "./page-registry";
 import { TryAsking } from "./TryAsking";
 import { Card, CardLabel, LabelAction, panelActionCls, NavRow, RowIcon, rowCls, RowText } from "./rows";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
+import { newChatBot } from "@/state/new-chat";
 
 type Derived = ReturnType<typeof useBotSettingsDerived>;
 
@@ -46,7 +48,11 @@ export function DetailsTab({ bot, derived, onOpen }: {
   onOpen: (page: SimplePageId) => void;
 }) {
   const { items } = useChatMoreItems(bot);
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
+  // While a blank chat is open the chat shows it, not the conversation it covers: the Model and Reasoning rows show and
+  // set the blank chat's choices, which the first send applies to the conversation it makes.
+  const newChat = useStoreSelector((state) => state.newChat);
+  const thread = currentTaskBot(newChatBot(bot, newChat));
   const routinesOn = derived.botRoutines.filter((routine) => routine.enabled).length;
   const conversationItems = CONVERSATION_ITEMS.flatMap((key) => items.filter((item) => item.key === key));
 
@@ -56,16 +62,17 @@ export function DetailsTab({ bot, derived, onOpen }: {
       <section data-panel-card="model" className="pt-2">
         <div data-panel-row="model" className={cn(rowCls, "rounded-[8px]")}>
           <ModelPicker
-            bot={bot}
+            key={thread.threadId}
+            bot={thread}
             contained
-            threadId={bot.threadId}
+            threadId={thread.threadId}
             label={<span className="flex shrink-0 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.model")} /></span>}
           />
         </div>
         {/* The picker hides its own reasoning row when contained, so this tab draws it as its own row. */}
         <EffortRow
-          bot={bot}
-          threadId={bot.threadId}
+          bot={thread}
+          threadId={thread.threadId}
           compact
           className={cn(rowCls, "min-w-0 flex-1 rounded-[8px]")}
           label={<span className="flex shrink-0 items-center gap-2.5"><RowIcon icon={Sparkles} /><RowText title={t("model.simple.reasoning")} /></span>}

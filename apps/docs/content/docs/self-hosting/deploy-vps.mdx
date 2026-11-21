@@ -52,10 +52,10 @@ If Docker is missing, the installer asks before installing it with Docker's offi
 | Path | What |
 |---|---|
 | `compose.yaml`, `Caddyfile` | the same server-plus-Caddy setup as path B, Caddy in its own container reaching the server over a socket; written again on every run |
-| `.env` | your settings: `DOMAIN`, the pinned version (`OMB_IMAGE`) and anything you add, such as [who may sign in with an email](/docs/self-hosting). The installer keeps your lines |
+| `.env` | your settings: `DOMAIN`, the pinned version (`OMB_IMAGE`) and anything you add, such as who may sign in with an emailed code (`OMB_SIGNIN_EMAILS`, `OMB_SIGNIN_MEMBER_EMAILS`; see [Sign in with your email](https://github.com/milind-soni/OpenMausBot/blob/main/docs/self-hosting.md#sign-in-with-your-email)). The installer keeps your lines |
 | `data/` | everything MausBot stores: chats, bots, engine sign-ins, paired devices. Never touched once it exists |
 | `caddy/` | the HTTPS certificates |
-| `update.sh` | the update command, once this repository has it (see below) |
+| `update.sh` | the update command (see below) |
 | `compose.box.yaml`, `box/` | the sandbox's settings and the files that prepare the server for it |
 
 `update.sh` and the sandbox's files are this repository's own, taken from the tag of the version being installed so they match it, and from `main` only when that tag does not have them. The installer says which it used.
@@ -72,7 +72,7 @@ cd /opt/openmausbot && sudo docker compose exec omb openmausbot pair --label "Fi
 
 Open the link it prints, or paste it into the desktop app under **＋ → Connect to a server**. To sign in with an emailed code instead, run the installer with `--email you@example.com`.
 
-- **Update:** `sudo /opt/openmausbot/update.sh`, which backs the data up, checks the new version's health and puts the old one back if it fails. The installer places it once this repository has it and prints the command when it finishes; until then, running the install command again moves to the newest release. `update.sh` pins the version by digest in `.env`, and a later run of the installer keeps that pin.
+- **Update:** `sudo /opt/openmausbot/update.sh`, which backs the data up, checks the new version's health and puts the old one back if it fails. The installer places it and prints the command when it finishes. `update.sh` pins the version by digest in `.env`, and a later run of the installer keeps that pin.
 - **Repair:** run the install command again. It checks the server, rewrites its own files and leaves `.env` and `data/` alone. That also moves an install made before Caddy got its own container: Caddy then shared the server's network, and HTTPS went down whenever the server restarted without it.
 - **Stop:** `--uninstall` stops the server and removes its containers. It deletes nothing: your data stays in `/opt/openmausbot/data`.
 - **Every other command in this guide** that starts `docker compose` for path B works from `/opt/openmausbot`.
@@ -95,27 +95,9 @@ Three ways to make the server reachable are covered. Pick one; the rest of the g
 
 Whichever you pick, the login is the same: you **pair** each device once with a short code and it stays signed in. A session lasts 30 days; using it with half that or less left renews it to a full 30, up to 180 days from pairing (`OMB_SESSION_TTL_DAYS` and `OMB_SESSION_MAX_DAYS` change both numbers). There is no password.
 
-## Hetzner launch check (2026-09-07)
-
-Path A was exercised on a blank Hetzner CX43 (x86-64, Ubuntu 24.04), using
-Node 24.20.0 and Codex 0.153.4. The published 0.1.60 baseline was followed by
-local candidate fixes from this change; these results do not certify the
-unmodified published 0.1.60 package.
-
-The paired web UI completed a real GPT-6-Astra chat, two automatically
-scheduled routine runs, and a browser title/screenshot test. The browser
-needed the Ubuntu sandbox setup below. A full reboot restored the service
-and managed tunnel automatically; the existing paired device, bots, chats,
-and paused schedule remained available. A new real chat turn also succeeded.
-
-A stopped application-data backup restored with matching file hashes and
-SQLite integrity. The restored copy was not started; provider reauthentication
-and browser-login migration were not tested. Docker, Tailscale, ARM64, other
-providers, and capacity limits were outside this run.
-
 ## What runs on a server, and what does not
 
-Runs fully on the server: every engine CLI (Claude Code, Codex, Grok, custom ACP engines), chats, rooms, bot-to-bot coordination, routines, connected apps and custom MCP servers, webhooks, Company Brain, computer use on cloud or container computers, text-to-speech, and the web UI (the server serves it itself).
+Runs fully on the server: every engine CLI (Claude Code, Codex and others), chats, rooms, bot-to-bot coordination, routines, connected apps and custom MCP servers, webhooks, Company Brain, computer use on cloud computers (container computers only where the server itself can reach Docker or Podman, which the published Docker image cannot; see [Local VM](/docs/computers/local-vm)), text-to-speech, and the web UI (the server serves it itself).
 
 Needs the desktop app instead: dictation and controlling the server's own desktop. Bots browse on a server too, once the browser engine is installed (below).
 
@@ -156,13 +138,13 @@ root, sign in again as `maus`; those accounts have different homes and credentia
 No domain, no proxy, no open port. The server gets an address like `https://c-7f3a9c.openmausbot.com` through a Cloudflare tunnel; only traffic through the tunnel reaches it, and that traffic still has to pair.
 
 ```sh
-npx openmausbot login          # once: an emailed code signs this machine in and reserves its address
+npx openmausbot account login          # once: an emailed code signs this machine in and reserves its address
 npx openmausbot serve --tunnel # runs the server there and prints the pairing link with a QR code
 ```
 
 `login` asks for your email, sends an 8-digit code, and prints the address it reserved for this machine. `serve --tunnel` downloads `cloudflared` on the first run (a pinned version with a verified digest, into `~/.openmausbot`), starts the server, connects the tunnel, and after a few seconds prints `tunnel: live at https://…`. Leave it running; see "Keep it running" for a service.
 
-The account credentials live in `~/.openmausbot/tunnel-account.json`, readable only by your user. `npx openmausbot logout` releases the address.
+The account credentials live in `~/.openmausbot/tunnel-account.json`, readable only by your user. `npx openmausbot account logout` releases the address.
 
 Skip to "Install and sign the engines in".
 
@@ -185,18 +167,24 @@ The [installer](#quick-start-one-command-on-your-own-domain) does these steps fo
    ```sh
    git clone https://github.com/milind-soni/OpenMausBot && cd OpenMausBot/deploy
    cp .env.example .env
-   nano .env                # DOMAIN=maus.example.com ; ENGINES=@anthropic-ai/claude-code @openai/codex
+   nano .env                # DOMAIN=maus.example.com
    ```
 
-   `ENGINES` lists the engine CLIs baked into your image, separated by spaces. Change it later and rebuild if you add one.
+   `ENGINES` in `.env` is read only when you build the image yourself (`docker compose up -d --build`): it lists the engine CLIs baked into that image, separated by spaces. The published image that `docker compose pull` fetches has none of them; install and sign in your engines from **Settings → AI → Providers** once you have paired.
 
 4. **Start it:**
 
+   Pin a released version before the first start, so a build of `main` (the
+   `latest` image) never writes your data. Replace `vX.Y.Z` with the newest
+   version on [the releases page](https://github.com/milind-soni/OpenMausBot/releases/latest):
+
    ```sh
+   echo "OMB_IMAGE=ghcr.io/milind-soni/openmausbot:vX.Y.Z" >> .env
    docker compose pull omb && docker compose up -d
-   ./update.sh              # move to the stable version (see "Update")
    docker compose ps        # omb "healthy", caddy "running"
    ```
+
+   `./update.sh` later moves it forward and pins it by digest (see "Update").
 
    Caddy requests the certificate on its own; give it a minute. Then `https://maus.example.com` shows a page asking for a pairing code. That is correct: nothing works until you pair.
 
@@ -272,8 +260,9 @@ claude
 
 For Codex, use `@openai/codex` as the npm package and run `codex login --device-auth`
 to sign in from a headless server. Complete the CLI's account flow in your browser. Repeat only for the
-engines you use. For path B, run the installed CLI inside the container, for
-example `docker compose exec omb claude`.
+engines you use. For path B, install and sign in each engine from **Settings →
+AI → Providers** (**Install … here**), which puts it on the data volume; the
+published image has no engine CLI of its own to run with `docker compose exec`.
 
 Engine logins belong to the service user's home (for example `~/.codex` and
 `~/.claude`), separately from MausBot's `~/.openmausbot`. Keep that home when
@@ -308,7 +297,7 @@ Every paired device is a session:
 ```sh
 npx openmausbot devices               # id, device, scope, last seen, expires
 npx openmausbot devices revoke ID     # signs that device out and closes its stream at once
-npx openmausbot status                # what the server says about itself
+npx openmausbot account status                # what the server says about itself
 ```
 
 ## Keep it running
@@ -356,14 +345,21 @@ same release without an npm install prompt or an implicit upgrade.
 
 ## Update
 
-A self-hosted server follows the **stable** channel: a released version that
-MausBot's own Clouds have run for 48 hours first. The image tag `stable` and
-[`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json)
-name it. The tag `latest` follows every change on `main`; it is for trying
-things out, not for a server you rely on. **Check for updates** in the app
-compares your server with the stable version. To hear of every release as soon
-as it is published instead, set `OMB_UPDATE_CHANNEL=newest` in the server's
-environment.
+A self-hosted server is set to follow the **stable** channel: a released
+version that MausBot's own Clouds have run for 48 hours first, named by the
+image tag `stable` and
+[`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json).
+Until a first version is made stable, that tag and that file do not exist,
+and **Check for updates**, `update.sh` and the installer all take the newest
+release instead. The tag `latest` follows every change on `main`; it
+is for trying things out, not for a server you rely on. **Check for updates**
+in the app compares your server with the stable version, or with the newest
+release until there is one. To hear of every release as soon as it is
+published instead, set `OMB_UPDATE_CHANNEL=newest` in the server's
+environment: an `Environment=` line in the systemd unit for paths A and C.
+Neither Compose file passes it from `.env`: for path B, add it under the `omb`
+service's `environment:` in `docker-compose.yml`; the installer's
+`compose.yaml` is written again on every run.
 
 ### From the app: Update server
 
@@ -593,7 +589,7 @@ If you built the image yourself (`docker compose up -d --build`, with
 keep updating with `git pull && docker compose up -d --build`, or move to the
 published image with `./update.sh --replace-local-build`. Building needs about 6 GB of memory:
 on a smaller server, add swap first or use the published image. Engines you install
-from **Settings → Engines** live on the data volume and survive either way.
+from **Settings → AI → Providers** live on the data volume and survive either way.
 
 ### Paths A and C (npm with the service above): the same steps by hand
 
@@ -601,7 +597,10 @@ There is no one-command updater for an npm install yet. Do what the script
 does: copy the data first, install one named version, check it, and keep the
 way back. Take the stable version number from
 [`stable.json`](https://raw.githubusercontent.com/milind-soni/OpenMausBot/channels/stable.json)
-(`"version"`), and note the one you run now (`openmausbot --version`). From
+(`"version"`); until a first version is made stable that file does not exist,
+so take the newest one on
+[the releases page](https://github.com/milind-soni/OpenMausBot/releases/latest)
+instead. Note the one you run now (`openmausbot --version`). From
 the administrator shell, replacing `X.Y.Z`:
 
 ```sh
@@ -717,19 +716,19 @@ its own.
 
 Read this before putting anything else in front of the server.
 
-- The server only ever listens on loopback (`127.0.0.1:8799`). Never publish that port yourself. The tunnel, Caddy and Tailscale each reach it from the same machine; path B's Caddy, in its own container, reaches it over a Unix socket (`OMB_TUNNEL_SOCKET`), and a request on that socket always counts as a remote one.
+- The server listens only on loopback (`127.0.0.1:8799`), with two exceptions. Started with `--lan` (or `OMB_LAN=1`), it also listens on this machine's network addresses over plain http and drops every connection from a public address; none of the paths here uses it. With `--tailscale`, when `tailscale serve` cannot front it (HTTPS certificates off for the tailnet, no operator permission, or that name already fronting another server), it listens on its own tailnet addresses over plain http instead, which only your tailnet reaches and WireGuard encrypts. Never publish that port yourself. The tunnel, Caddy and Tailscale each reach it from the same machine; path B's Caddy, in its own container, reaches it over a Unix socket (`OMB_TUNNEL_SOCKET`), and a request on that socket always counts as a remote one.
 - A request that arrives through a proxy or the tunnel is treated as remote and needs a session, whatever headers it carries. A proxy of your own (nginx, Traefik, Cloudflare Tunnel) must forward the real `Host` and add `X-Forwarded-For` and `X-Forwarded-Proto`, must not buffer the event stream, and must **not** rewrite `Host` to `127.0.0.1`.
-- Pairing is the login. Want a second wall in front of it? Path B's `Caddyfile` has a commented `basic_auth` block for a shared password.
+- Pairing is the login. Caddy adds no password: a `basic_auth` block would need variables neither Compose file passes to Caddy, the installer rewrites its `Caddyfile` on every run, and a password at Caddy would also refuse clients that send their own `Authorization` header. For a second wall, use path C or a firewall.
 - The session cookie is marked `Secure`; do not serve this over plain HTTP on the public internet.
 - The one thing a stranger can read is `/.well-known/openmausbot/environment` (the server's id, label, version, capabilities) and `/api/health` (only the app name). Everything else answers "pair this device".
 
 ## Troubleshooting
 
-**`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot login` on this machine first; the credentials are per machine.
+**`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot account login` on this machine first; the credentials are per machine.
 
 **The server does not start and says its data "was written by a newer OpenMausBot".** An older version was started on data a newer one had already changed, which happens when a version is put back without its data. Nothing was changed. Install the version the message names (or a newer one), or put back the copy of the data from before that update.
 
-**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot logout && npx openmausbot login` issues a fresh address.
+**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot account logout && npx openmausbot account login` issues a fresh address.
 
 **Path B: the page never loads or shows a certificate error.** Caddy could not get a certificate. Check that the name resolves to the server and that ports 80 and 443 are open; `docker compose logs caddy` shows the reason.
 
@@ -739,7 +738,7 @@ Read this before putting anything else in front of the server.
 
 **A bot says the engine is not signed in.** Sign that engine in again on the server.
 
-**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx openmausbot status` prints the same on the server.
+**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx openmausbot account status` prints the same on the server.
 
 **Something else.** `journalctl -u openmausbot --since -10m` (or `docker compose logs omb --tail 100`) shows the server's startup lines. Paste them with your question in the community channel.
 

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { classifyProcesses, parseCgroupCpuMs, parseProcStat, parsePsLine, parsePsTime, parseReapedChildrenMs, type ProcessRow } from "./process-buckets.ts";
-import { createProcessSampler, linuxProcessList, type ProcessList } from "./process-sampler.ts";
+import { createProcessSampler, LATE_TIMER_MS, linuxProcessList, pausedNotStalled, type ProcessList } from "./process-sampler.ts";
 
 const SERVER = 100;
 const row = (pid: number, ppid: number, name: string, cpuMs = 0, rssBytes = 1_048_576): ProcessRow => ({ pid, ppid, name, cpuMs, rssBytes, start: `s${pid}` });
@@ -115,6 +115,53 @@ describe("the sampler", () => {
     expect(report.buckets.find((bucket) => bucket.bucket === "commands")).toMatchObject({ cpu60mS: 8 });
     expect(report.browsers).toBe(2);
     expect(report.unseen60mS).toBeNull();
+  });
+});
+
+describe("a late sampler timer", () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  const lateBy = async (lateMs: number, waitedMs: number | null) => {
+    vi.useFakeTimers();
+    let mono = 0, waited = 0;
+    const stalled: number[] = [], resumed: number[] = [];
+    const sampler = createProcessSampler({
+      list: () => ({ rows: [row(SERVER, 1, "node")], reapedMs: null, totalMs: null }), intervalMs: 60_000, scope: "tree", serverPid: SERVER,
+      now: () => 1_800_000_000_000 + mono, monotonic: () => mono, idle: () => (waitedMs === null ? null : waited),
+      stalled: (ms) => stalled.push(ms), resumed: (ms) => resumed.push(ms),
+    });
+    sampler.start();
+    await vi.advanceTimersByTimeAsync(0);
+    mono += 60_000 + lateMs; waited += waitedMs ?? 0;
+    await vi.advanceTimersByTimeAsync(60_000);
+    sampler.stop();
+    return { stalled, resumed, loop: sampler.report().loop };
+  };
+
+  it("is a sleep, not a stall, when the loop only waited through the gap, and stays out of the loop's lateness", async () => {
+    const hour = 3_600_000;
+    const slept = await lateBy(hour, 60_000 + hour - 40);
+    expect(slept).toMatchObject({ stalled: [], resumed: [hour], loop: { driftMaxMs: 0, driftP95Ms: 0 } });
+  });
+
+  it("is a stall when the loop worked through the lateness", async () => {
+    const held = await lateBy(5_000, 58_000);
+    expect(held).toMatchObject({ stalled: [5_000], resumed: [], loop: { driftMaxMs: 5_000 } });
+  });
+
+  it("is a stall where the loop's waiting time is not known", async () => {
+    expect(await lateBy(3_600_000, null)).toMatchObject({ stalled: [3_600_000], resumed: [] });
+  });
+
+  it("says nothing for a timer that is on time", async () => {
+    expect(await lateBy(40, 59_900)).toMatchObject({ stalled: [], resumed: [] });
+  });
+
+  it("needs the loop to have worked for at least half the lateness to call it a stall", () => {
+    expect(pausedNotStalled(60_000, 10_000, 65_001)).toBe(true);
+    expect(pausedNotStalled(60_000, 10_000, 65_000)).toBe(false);
+    expect(pausedNotStalled(60_000, LATE_TIMER_MS - 1, 60_000 + LATE_TIMER_MS - 1)).toBe(false);
+    expect(pausedNotStalled(60_000, 10_000, null)).toBe(false);
   });
 });
 

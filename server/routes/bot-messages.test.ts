@@ -221,6 +221,44 @@ describe("editing a message with no AI", () => {
   });
 });
 
+describe("Retry on a line a caller sent through the Bot API", () => {
+  const apiRetry = (calls: Array<[string, string, Message, string | undefined]>, store: () => Store) => ({
+    botApiRetry: async (botId: string, threadId: string, source: Message, sendId?: string) => {
+      calls.push([botId, threadId, source, sendId]);
+      if (source.via !== "api") return null;
+      return store().branchMessage(threadId, source.id, source.text!.trim(), sendId, undefined, undefined, { via: "api" });
+    },
+  });
+
+  it("hands the same words on a caller's line to the Bot API, which runs them as the call ran", async () => {
+    const calls: Array<[string, string, Message, string | undefined]> = [];
+    let held: Store | undefined;
+    const { store, bot, threadId, state, edit } = await fixture(apiRetry(calls, () => held!));
+    held = store;
+    const sent = store.appendMessage(threadId, { role: "user", kind: "text", text: "Sum up the report\n", via: "api" });
+    const answer = await edit(sent.id, { threadId, text: "Sum up the report", sendId: SEND });
+    expect(answer).toMatchObject({ status: 202, body: { ok: true, message: { text: "Sum up the report", via: "api", sendId: SEND } } });
+    expect(calls).toEqual([[bot.id, threadId, expect.objectContaining({ id: sent.id }), SEND]]);
+    expect(state.started).toEqual([]);
+  });
+
+  it("keeps new words on a caller's line, and the same words on a person's line, an ordinary edit", async () => {
+    const calls: Array<[string, string, Message, string | undefined]> = [];
+    let held: Store | undefined;
+    const { store, threadId, state, edit } = await fixture(apiRetry(calls, () => held!));
+    held = store;
+    const sent = store.appendMessage(threadId, { role: "user", kind: "text", text: "Sum up the report", via: "api" });
+    expect((await edit(sent.id, { threadId, text: "Sum up the other report" })).status).toBe(202);
+    const mine = store.appendMessage(threadId, { role: "user", kind: "text", text: "Mine" });
+    expect((await edit(mine.id, { threadId, text: "Mine" })).status).toBe(202);
+    expect(calls).toEqual([]);
+    expect(state.started).toMatchObject([
+      { text: "Sum up the other report", opts: { editedMessageId: sent.id } },
+      { text: "Mine", opts: { editedMessageId: mine.id } },
+    ]);
+  });
+});
+
 describe("running a request again where several people write", () => {
   const PRIYA = "p_priyapriyapriyapriyapr", TOM = "p_tomtomtomtomtomtomtomt";
   const team = (by: { person?: string; admin: boolean }, shared = true) => ({

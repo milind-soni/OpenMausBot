@@ -125,7 +125,8 @@ export async function startRelay(config: RelayConfig, options: RelayOptions = {}
       metrics.inc("relay_refused_total", "path");
       return refuse(socket, 404, "Not Found");
     }
-    if (req.headers.origin !== undefined) {
+    const origin = req.headers.origin;
+    if (origin !== undefined && !(route === "phone" && config.phoneOrigins.has(origin))) {
       metrics.inc("relay_refused_total", "origin");
       return refuse(socket, 403, "Forbidden");
     }

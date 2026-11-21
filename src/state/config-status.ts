@@ -99,6 +99,10 @@ export interface ConfigStatus {
     model?: string;
     /** Voice note with every reply, for every bot without its own choice. Absent from older servers. */
     everyReply?: boolean;
+    /** "elevenlabs": the person chose to be heard through their own ElevenLabs key (Scribe). Absent: the default. */
+    hearWith?: "elevenlabs";
+    /** The language the person speaks to Scribe (ISO 639 code); absent lets Scribe detect it. */
+    hearLanguage?: string;
     /** Fish Audio speech model; present only while Fish is the provider. */
     fishModel?: "s2.1-pro" | "s2.1-pro-free";
     /** ElevenLabs voice comes with Cloud Pro; no key is saved. */
@@ -206,6 +210,8 @@ export interface BrowserEngineSummary {
   /** The browser the engine starts, e.g. "Google Chrome 153 (installed)", or while Chrome for Testing downloads,
    * "Chrome for Testing 153.0.8010.47 (downloading: 52 of 182 MB)". */
   chrome?: string;
+  /** agent-browser runs Chromium's headless shell, which many sites refuse, only because no Google Chrome is installed here. */
+  noChrome?: true;
   installing?: boolean;
   installError?: string;
   /** Whether a browser profile can use "My Chrome", the person's own running

@@ -37,7 +37,7 @@ Talk to them like contacts. Watch them work. Approve what matters.
   <img src="https://img.shields.io/github/v/release/milind-soni/OpenMausBot?style=for-the-badge&label=%E2%AC%87%EF%B8%8F%20%20Download%20for%20Ubuntu&labelColor=070707&color=e95420&cacheSeconds=300" alt="Download the latest OpenMausBot for Ubuntu (.deb)" height="40">
 </a>
 
-<sub>[latest release](https://github.com/milind-soni/OpenMausBot/releases/latest) &nbsp;·&nbsp; macOS: Apple silicon & Intel · signed & notarized .dmg &nbsp;·&nbsp; Windows: x64 installer &nbsp;·&nbsp; Ubuntu 24.04 x64: .deb or AppImage beta &nbsp;·&nbsp; [all releases](https://github.com/milind-soni/OpenMausBot/releases)</sub>
+<sub>[latest release](https://github.com/milind-soni/OpenMausBot/releases/latest) &nbsp;·&nbsp; macOS: Apple silicon & Intel · signed & notarized .dmg &nbsp;·&nbsp; Windows: x64 installer &nbsp;·&nbsp; Ubuntu 24.04 x64: .deb or AppImage beta &nbsp;·&nbsp; Fedora x64: .rpm &nbsp;·&nbsp; [all releases](https://github.com/milind-soni/OpenMausBot/releases)</sub>
 
 <br>
 
@@ -343,8 +343,9 @@ See [Run OpenMausBot from scripts and CI](docs/headless-cli.md).
 |---|---|---|
 | **macOS** (Apple silicon) | [OpenMausBot.dmg](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.dmg) | Drag it to Applications, open it. Signed & notarized. |
 | **macOS** (Intel) | [OpenMausBot-intel.dmg](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-intel.dmg) | Same app, built for Intel Macs. Signed & notarized. |
-| **Windows** (x64) | [OpenMausBot-setup.exe](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. |
+| **Windows** (x64) | [OpenMausBot-setup.exe](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-setup.exe) | Run it — one-click, per-user, no admin rights. The installer isn't code-signed yet, so SmartScreen shows "unknown publisher": **More info → Run anyway**. By default the app installs to `%LOCALAPPDATA%\Programs\OpenMausBot`, and every update goes back to the folder the installer recorded, so keep it where the installer put it: a copy moved by hand (for example from C: to D:) is left behind, and the next update lands in the recorded folder again. |
 | **Ubuntu 24.04** (x64) | [OpenMausBot-amd64.deb](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-amd64.deb) · [OpenMausBot.AppImage](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot.AppImage) | Install the `.deb` with APT (recommended), or make the AppImage executable and run it. Beta; GNOME is the supported desktop. |
+| **Fedora** (x64) | [OpenMausBot-x86_64.rpm](https://github.com/milind-soni/OpenMausBot/releases/latest/download/OpenMausBot-x86_64.rpm) | Install with `sudo dnf install ./OpenMausBot-x86_64.rpm`. Community-supported; Ubuntu is the tested Linux. |
 
 See the [Ubuntu Desktop guide](docs/linux-desktop.md) for installation, capabilities, and troubleshooting.
 Any desktop build can also open the bots of another Windows, macOS, or Ubuntu computer over Tailscale; see [open one computer's bots from another computer](docs/desktop-companion.md).
@@ -370,7 +371,7 @@ Package the desktop application:
 ```sh
 pnpm package:mac      # macOS: DMG + ZIP; requires Swift/Xcode tools
 pnpm package:win      # Windows: installer + ZIP
-pnpm package:linux    # Ubuntu x64: .deb + AppImage + verified CUA runtime
+pnpm package:linux    # Linux x64: .deb + .rpm + AppImage + verified CUA runtime
 ```
 
 ### Desktop capability status
@@ -421,7 +422,7 @@ pnpm test          # unit, driver, API, and desktop capability tests
 pnpm build         # typecheck + production build
 pnpm check:electron # syntax-check Electron main/preload files
 pnpm package:win   # Windows installer + zip → release/
-pnpm package:linux # Ubuntu x64 .deb + AppImage → release/
+pnpm package:linux # Linux x64 .deb + .rpm + AppImage → release/
 ```
 
 ### Triggers: schedules and webhooks
@@ -532,7 +533,7 @@ For a server on a VPS or an always-on computer, run `npx openmausbot serve`
 with one way in: `--public-url` behind your own cloudflared, Caddy or nginx,
 `--domain` for a certificate on your own domain, `--tailscale` for your
 tailnet, `--lan` for this network only, or `--tunnel` (after
-`npx openmausbot login`) for a free MausBot web address. It prints one
+`npx openmausbot account login`) for a free MausBot web address. It prints one
 pairing link; paste it into the desktop app under **＋ → Connect to a
 server**. The short path for each install method (npx, Docker, a service) is
 at the top of [docs/self-hosting.md](docs/self-hosting.md); a server from

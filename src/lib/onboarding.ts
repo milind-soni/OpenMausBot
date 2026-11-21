@@ -176,15 +176,47 @@ export function aiChoices<Instance extends AiChoice>(instances: readonly Instanc
   return { recommended, others: instances.filter((instance) => instance !== recommended) };
 }
 
+export type FirstAiKind = "claude" | "chatgpt" | "opencode";
+
+interface FirstAi extends AiChoice {
+  authentication?: { method?: string };
+  snapshot?: { freeFallback?: boolean; authenticationUnavailableReason?: string };
+}
+
+const FIRST_AIS: ReadonlyArray<[FirstAiKind, string]> = [["claude", "claudeAgent"], ["chatgpt", "codex"], ["opencode", "opencodeGo"]];
+
+/** The welcome's three first ways to connect an AI, in this order: a Claude account, a ChatGPT account through Codex and
+ * OpenCode. Each is the provider's own sign-in that can work here: one already `ready` first, then ChatGPT's plan sign-in
+ * in the browser, else the first listed (on a Cloud, which refuses the plan sign-in, Codex's own). */
+export function firstAis<Instance extends FirstAi>(
+  instances: readonly Instance[],
+  ready: (instance: Instance) => boolean = () => false,
+): Array<{ kind: FirstAiKind; instance: Instance }> {
+  const own = instances.filter((instance) => !instance.readOnly && instance.access !== "api" && instance.access !== "custom"
+    && !instance.snapshot?.authenticationUnavailableReason);
+  return FIRST_AIS.flatMap(([kind, driverKind]) => {
+    const group = own.filter((instance) => instance.driverKind === driverKind);
+    const instance = group.find(ready) ?? group.find((candidate) => candidate.authentication?.method === "browser-pkce") ?? group[0];
+    return instance ? [{ kind, instance }] : [];
+  });
+}
+
+/** OpenCode's free models need no account, so its setup keeps its own words instead of the plain sign-in line. */
+export function signInFollows(instance: SignInStep & { driverKind: string }): boolean {
+  return plainSignIn(instance) && instance.driverKind !== "opencodeGo";
+}
+
 /** The AI the welcome's Connect an AI step stands on: the best ready AI (the same ranking) that isn't OpenCode's free
- * backup, passing over one whose test message got no answer. An AI not tested yet is `testing`; none ready is null. */
+ * backup unless the person `chose` it on the welcome, passing over one whose test message got no answer. An AI not
+ * tested yet is `testing`; none ready is null. */
 export function welcomeAi<Instance extends RankableAi>(
   instances: readonly Instance[],
   ready: (instance: Instance) => boolean,
   test: (instance: Instance) => AiTestState | undefined,
+  chose: (instance: Instance) => boolean = () => false,
 ): { instance: Instance; state: AiTestState } | null {
   let silent: Instance | undefined;
-  for (const instance of rankAis(instances.filter((candidate) => ready(candidate) && !freeFallback(candidate)))) {
+  for (const instance of rankAis(instances.filter((candidate) => ready(candidate) && (!freeFallback(candidate) || chose(candidate))))) {
     const state = test(instance) ?? "testing";
     if (state !== "failed") return { instance, state };
     silent ??= instance;

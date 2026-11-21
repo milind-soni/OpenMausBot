@@ -114,6 +114,8 @@ export function describeVoice(cfg: AppConfig) {
     ...(provider === "fish" ? { fishModel: cfg.tts?.fishModel ?? fish.DEFAULT_FISH_MODEL } : {}),
     ...(included ? { included: true as const } : {}),
     ...(cfg.tts?.everyReply ? { everyReply: true as const } : {}),
+    ...(cfg.tts?.hearWith === "elevenlabs" ? { hearWith: "elevenlabs" as const } : {}),
+    ...(cfg.tts?.hearLanguage ? { hearLanguage: cfg.tts.hearLanguage } : {}),
   };
 }
 
@@ -180,6 +182,7 @@ export async function addSharedVoice(cfg: AppConfig, publicOwnerId: string, voic
  * @param text The plain text to synthesize into spoken audio.
  * @param voiceId Optional override voice ID.
  * @param run Optional runner for system voices.
+ * @param signal Cancels network speech requests when the listener stops playback.
  * @returns Synthesized audio buffer or stream promise.
  */
 export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: systemVoices.Runner, signal?: AbortSignal) {
@@ -189,7 +192,7 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     if (!key) throw new NoVoiceConfigured("key", "Add a Gemini API key in Settings to use Gemini voice.");
     const voice = voiceId || cfg.tts?.voice;
     if (!voice) throw new NoVoiceConfigured("voice");
-    return gemini.synthesize(text, voice, key, cfg.tts?.model);
+    return gemini.synthesize(text, voice, key, cfg.tts?.model, signal);
   }
   if (provider === "openai") return openai.synthesize(text, voiceId || cfg.tts?.voice || "", cfg.openai?.key || "", signal);
   if (provider === "deepseek") return deepseek.synthesize(text, deepseekVoice(cfg, voiceId), cfg.deepseek?.key || "", signal);
@@ -198,7 +201,7 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     if (!key) throw new NoVoiceConfigured("key", "Add an xAI key in Settings to use Grok voice.");
     const voice = voiceId || cfg.tts?.voice;
     if (!voice) throw new NoVoiceConfigured("voice");
-    return grok.synthesize(text, voice, key);
+    return grok.synthesize(text, voice, key, signal);
   }
   if (provider === "system") {
     const voice = voiceId || cfg.tts?.voice;
@@ -216,7 +219,7 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     }
     const voice = voiceId || cfg.tts?.voice;
     if (!voice) throw new NoVoiceConfigured("voice");
-    return chatterbox.synthesizeChatterbox(text, voice, baseUrl, cfg.tts?.model);
+    return chatterbox.synthesizeChatterbox(text, voice, baseUrl, cfg.tts?.model, signal);
   }
   if (provider === "fish") {
     const key = cfg.tts?.fishKey;
@@ -228,13 +231,13 @@ export function speak(cfg: AppConfig, text: string, voiceId?: string, run?: syst
     }
     const voice = voiceId || cfg.tts?.voice;
     if (!voice) throw new NoVoiceConfigured("voice");
-    return fish.synthesize(text, voice, key, cfg.tts?.fishModel);
+    return fish.synthesize(text, voice, key, cfg.tts?.fishModel, signal);
   }
   const credential = elevenLabs(cfg);
   if (!credential) throw new NoVoiceConfigured("key");
   const voice = voiceId || cfg.tts?.voice;
   if (!voice) throw new NoVoiceConfigured("voice");
-  return elevenlabs.synthesize(text, voice, credential.token, credential.api, credential.included).audio;
+  return elevenlabs.synthesize(text, voice, credential.token, credential.api, credential.included, signal).audio;
 }
 
 export type { Voice } from "./elevenlabs.ts";

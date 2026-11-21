@@ -348,7 +348,9 @@ export async function readMessage(account: EmailAccount, guard: EmailGuard, inpu
       const { simpleParser } = await import("mailparser");
       const parsed = await simpleParser(full.source, { skipImageLinks: true, skipTextLinks: true });
       const text = (parsed.text ?? (typeof parsed.html === "string" ? parsed.html.replace(/<[^>]*>/gu, " ") : "")).trim();
-      const list = (value: typeof parsed.to) => (Array.isArray(value) ? value : value ? [value] : []).flatMap((group) => group.value.map((one) => named({ ...(one.name ? { name: one.name } : {}), ...(one.address ? { address: one.address } : {}) }))).filter(Boolean);
+      const list = (value: typeof parsed.to) => (Array.isArray(value) ? value : value ? [value] : [])
+        .flatMap((header) => header.value.flatMap((one) => one.group ?? [one]))
+        .map(named).filter(Boolean);
       return {
         ...summary(head),
         from: list(parsed.from)[0] ?? summary(head).from,
@@ -412,7 +414,8 @@ export function inlineAttachments(images: InlineImage[] = []) {
 export interface SendInput { to: string[]; cc?: string[]; bcc?: string[]; subject: string; text: string; html?: string; inline_images?: InlineImage[]; inReplyTo?: string; references?: string }
 
 /** Sends as the mailbox's own address and files a copy in its Sent folder when it has one. */
-export async function sendMessage(account: EmailAccount, guard: EmailGuard, input: SendInput): Promise<{ messageId: string; accepted: string[]; rejected: string[]; filed: boolean }> {
+export async function sendMessage(account: EmailAccount, guard: EmailGuard, input: SendInput, assertActive?: () => void): Promise<{ messageId: string; accepted: string[]; rejected: string[]; filed: boolean }> {
+  assertActive?.();
   checkSendBudget({ ...input, inReplyTo: undefined, references: undefined });
   const attachments = inlineAttachments(input.inline_images);
   const server = account.smtp;
@@ -430,6 +433,7 @@ export async function sendMessage(account: EmailAccount, guard: EmailGuard, inpu
   let transport: Awaited<ReturnType<typeof smtpTransport>> | undefined;
   try {
     transport = await smtpTransport(account, server, guard);
+    assertActive?.();
     sent = await transport.sendMail({ envelope, raw });
   } catch (error) { throw sendingError(error, server); } finally { transport?.close(); }
   const text = (list: unknown[] | undefined) => (list ?? []).map((entry) => (typeof entry === "string" ? entry : (entry as Address).address ?? "")).filter(Boolean);
@@ -438,7 +442,9 @@ export async function sendMessage(account: EmailAccount, guard: EmailGuard, inpu
     filed = await imapSession(account, guard, async (client) => {
       const sentBox = (await client.list()).find((box) => box.specialUse === "\\Sent");
       if (!sentBox) return false;
-      await client.append(sentBox.path, raw, ["\\Seen"]);
+      // Bcc belongs in the private Sent copy, never in the SMTP message.
+      composed.keepBcc = true;
+      await client.append(sentBox.path, input.bcc?.length ? await composed.build() : raw, ["\\Seen"]);
       return true;
     });
   } catch {}

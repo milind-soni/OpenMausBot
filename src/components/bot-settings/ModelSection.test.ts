@@ -6,6 +6,7 @@ import type { Bot, InstanceInfo } from "@/state/store";
 
 const instances = vi.hoisted(() => [] as InstanceInfo[]);
 const recovery = vi.hoisted(() => ({ enabled: true }));
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({ state: { ...original.initialState, instances, config: { automaticRecovery: recovery } }, dispatch: vi.fn() }) };

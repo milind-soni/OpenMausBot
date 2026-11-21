@@ -186,14 +186,14 @@ export function CodePlate({ copied, onCopy, copyLabel, items }: {
       <button type="button" onClick={onCopy} className={PLATE_BUTTON}
         title={copied === "copied" ? t("code.copiedTitle") : copied === "failed" ? t("common.copyFailed") : copyLabel}
         aria-label={copied === "copied" ? t("code.copiedTitle") : copied === "failed" ? t("common.copyFailed") : copyLabel}>
-        {copied === "failed" ? <X size={14} className="text-danger" aria-hidden="true" />
-          : copied === "copied" ? <Check size={14} className="text-success" aria-hidden="true" />
-            : <Copy size={14} aria-hidden="true" />}
+        {copied === "failed" ? <X size={16} className="text-danger" aria-hidden="true" />
+          : copied === "copied" ? <Check size={16} className="text-success" aria-hidden="true" />
+            : <Copy size={16} aria-hidden="true" />}
       </button>
       {copied !== "idle" && <span role="status" className="sr-only">{copied === "failed" ? t("common.copyFailed") : t("code.copiedTitle")}</span>}
       <SidebarPopoverMenu items={items} ariaLabel={t("chat.more")} placement="above" align="end" triggerTitle={t("chat.more")}
         triggerClassName="rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60"
-        renderTrigger={() => <span className={PLATE_BUTTON}><MoreHorizontal size={14} aria-hidden="true" /></span>} />
+        renderTrigger={() => <span className={PLATE_BUTTON}><MoreHorizontal size={16} aria-hidden="true" /></span>} />
     </div>
   );
 }

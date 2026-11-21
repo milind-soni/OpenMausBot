@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { resolve } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -28,7 +29,7 @@ afterEach(async () => {
 interface FakeModel { name: string; size?: number; details?: Record<string, unknown>; capabilities?: string[]; thinking?: unknown }
 
 /** A server speaking Ollama's own routes and its OpenAI-compatible chat, recording each chat request. */
-async function fakeOllama(options: { models?: FakeModel[]; version?: string | null; tags?: boolean } = {}) {
+async function fakeOllama(options: { models?: FakeModel[]; version?: string | null; tags?: boolean; refuseThinkingTools?: boolean } = {}) {
   // Read per request, so a test can change what the server answers.
   const models = options.models ?? [];
   const chats: Array<{ model: string; tools?: unknown[]; reasoning_effort?: string }> = [];
@@ -53,6 +54,9 @@ async function fakeOllama(options: { models?: FakeModel[]; version?: string | nu
     if (path === "/v1/models") return json({ data: models.map((model) => ({ id: model.name })) });
     if (path === "/v1/chat/completions") {
       chats.push(JSON.parse(data) as { model: string; tools?: unknown[]; reasoning_effort?: string });
+      if (options.refuseThinkingTools && chats.at(-1)?.tools?.length && chats.at(-1)?.reasoning_effort !== "none") {
+        return json({ error: { message: "Tools with reasoning_effort need /v1/responses or reasoning_effort none." } }, 400);
+      }
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.write(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "Hi." }, finish_reason: "stop" }] })}\n\n`);
       return response.end("data: [DONE]\n\n");
@@ -306,12 +310,41 @@ describe("the chat engine on Ollama", () => {
     const recorder = recordEvents(instance.adapter);
     try {
       const threadId = randomUUID();
-      const started = instance.adapter.sendTurn({ threadId, text: "hi", model: "gemma2:2b" });
+      const started = instance.adapter.sendTurn({ threadId, text: "hi", model: "gemma2:2b", images: [{ path: "/not-read.png", mime: "image/png", bytes: 1 }] });
       release();
       await started;
-      await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId);
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId)).toMatchObject({ ok: true });
       expect(chats[0]!.tools).toBeUndefined();
+      expect(JSON.stringify(chats[0])).toContain("this model cannot see images");
+      expect(JSON.stringify(chats[0])).not.toContain("image_url");
     } finally {
+      recorder.stop();
+      await instance.dispose();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("sends an image when the initial catalog discovers vision support", async () => {
+    const vision: FakeModel = { name: "vision:latest", size: GB, capabilities: ["completion", "vision"] };
+    const { url, chats } = await fakeOllama({ models: [vision] });
+    const real = globalThis.fetch;
+    let release = () => {};
+    const held = new Promise<void>((resolveHeld) => { release = resolveHeld; });
+    vi.stubGlobal("fetch", (async (input, init) => {
+      if (String(input).endsWith("/api/show")) await held;
+      return real(input, init);
+    }) as typeof fetch);
+    const instance = await create({ url: `${url}/v1`, catalog: "ollama" });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      const threadId = randomUUID();
+      const started = instance.adapter.sendTurn({ threadId, text: "hi", model: "vision:latest", images: [{ path: resolve("server/testing/fixtures/banner-metadata.png"), mime: "image/png", bytes: 1 }] });
+      release();
+      await started;
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId)).toMatchObject({ ok: true });
+      expect(JSON.stringify(chats[0])).toContain("image_url");
+    } finally {
+      release();
       recorder.stop();
       await instance.dispose();
       vi.unstubAllGlobals();
@@ -335,7 +368,10 @@ describe("the chat engine on Ollama", () => {
     const instance = await create({ url: `${url}/v1`, apiKeyEnv: "FIXTURE_KEY" }, { FIXTURE_KEY: "fixture-key" });
     try {
       await instance.refreshModels?.();
-      expect(instance.models.options).toEqual([{ id: "llama3.2:latest", label: "llama3.2:latest", custom: true }]);
+      expect(instance.models.options).toEqual([{
+        id: "llama3.2:latest", label: "llama3.2:latest", custom: true,
+        variants: ["low", "medium", "high", "xhigh", "max"].map((id) => ({ id, label: id })),
+      }]);
       expect(await instance.snapshot()).toMatchObject({ state: "available" });
       expect(instanceLook({ driver: "openai-compat", displayName: "Local", config: { url: `${url}/v1` } })).toEqual({});
     } finally { await instance.dispose(); }
@@ -358,13 +394,19 @@ describe("the chat engine on Ollama", () => {
     }
   });
 
-  it("tells a text-only model on the network about an attachment instead of refusing the turn", async () => {
+  it.each([
+    ["text-only", ["completion"], true],
+    ["vision-capable", ["completion", "vision"], false],
+  ])("checks image transport after discovering a %s model on the network", async (_name, capabilities, canSend) => {
     const replies: Record<string, unknown> = {
-      "/api/tags": { models: [GEMMA] }, "/api/version": { version: "0.12.6" }, "/api/show": { capabilities: ["completion"] }, "/api/ps": { models: [] }, "/api/create": { status: "success" },
+      "/api/tags": { models: [GEMMA] }, "/api/version": { version: "0.12.6" }, "/api/show": { capabilities }, "/api/ps": { models: [] }, "/api/create": { status: "success" },
     };
     const bodies: string[] = [];
+    let release = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
     vi.stubGlobal("fetch", vi.fn<typeof fetch>(async (url, init) => {
       const path = new URL(String(url)).pathname;
+      if (path === "/api/show") await held;
       if (path === "/v1/chat/completions") {
         bodies.push(String(init!.body));
         return new Response(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "Hi." }, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
@@ -374,12 +416,20 @@ describe("the chat engine on Ollama", () => {
     const instance = await create({ url: "http://192.168.1.20:11434/v1", catalog: "ollama" });
     const recorder = recordEvents(instance.adapter);
     try {
-      await instance.refreshModels?.();
       const threadId = randomUUID();
-      await instance.adapter.sendTurn({ threadId, text: "what is this?", model: "gemma2:2b", images: [{ path: "/not-read.png", mime: "image/png", bytes: 1 }] });
-      await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId);
-      expect(bodies[0]).toContain("this model cannot see images");
+      const started = instance.adapter.sendTurn({ threadId, text: "what is this?", model: "gemma2:2b", images: [{ path: "/not-read.png", mime: "image/png", bytes: 1 }] });
+      release();
+      await started;
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === threadId)).toMatchObject({ ok: canSend });
+      if (canSend) {
+        expect(bodies[0]).toContain("this model cannot see images");
+        expect(bodies[0]).not.toContain("image_url");
+      } else {
+        expect(bodies).toHaveLength(0);
+        expect(recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: expect.stringContaining("require HTTPS") }));
+      }
     } finally {
+      release();
       recorder.stop();
       await instance.dispose();
       vi.unstubAllGlobals();
@@ -417,6 +467,45 @@ describe("the chat engine on Ollama", () => {
       recorder.stop();
       await instance.dispose();
     }
+  });
+
+  it("keeps configured effort choices when Ollama uses a context alias", async () => {
+    const thinker: FakeModel = { name: "qwen3:4b", size: GB, capabilities: ["completion", "tools", "thinking"] };
+    const { url, chats } = await fakeOllama({ models: [thinker] });
+    const instance = await create({ url: `${url}/v1`, catalog: "ollama", reasoningEfforts: { "qwen3:4b": ["low", "max"] } });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      expect(instance.models.options.find((option) => option.id === "qwen3:4b")?.variants?.map((option) => option.id)).toEqual(["low", "max"]);
+      await instance.adapter.sendTurn({ threadId: "configured", text: "hi", model: "qwen3:4b", variant: "max" });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      expect(chats[0]).toMatchObject({ model: expect.stringMatching(/^qwen3:4b-omb-\d+k$/), reasoning_effort: "max" });
+    } finally { recorder.stop(); await instance.dispose(); }
+  });
+
+  it("does not disable an explicit undescribed thinking choice when a provider refuses tools", async () => {
+    const thinker: FakeModel = { name: "qwen3:4b", size: GB, capabilities: ["completion", "tools", "thinking"] };
+    const { url, chats } = await fakeOllama({ models: [thinker, LLAMA], refuseThinkingTools: true });
+    const instance = await create({ url: `${url}/v1`, catalog: "ollama" });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "on", text: "hi", model: "qwen3:4b", variant: "on" });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "on")).toMatchObject({ ok: false });
+      expect(chats).toHaveLength(1);
+      expect(chats[0]).not.toHaveProperty("reasoning_effort");
+      expect(recorder.events).toContainEqual(expect.objectContaining({ type: "runtime.error", message: expect.stringContaining("selected effort was not changed") }));
+
+      await instance.adapter.sendTurn({ threadId: "default", text: "hi", model: "qwen3:4b" });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "default")).toMatchObject({ ok: true });
+      expect(chats[1]).toHaveProperty("reasoning_effort", "none");
+
+      await instance.adapter.sendTurn({ threadId: "off", text: "hi", model: "qwen3:4b", variant: "off" });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "off")).toMatchObject({ ok: true });
+      expect(chats[2]).toHaveProperty("reasoning_effort", "none");
+
+      await instance.adapter.sendTurn({ threadId: "unrelated", text: "hi", model: "llama3.2:latest", variant: "on" });
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.threadId === "unrelated")).toMatchObject({ ok: true });
+      expect(chats.slice(3).map((chat) => chat.reasoning_effort)).toEqual([undefined, "none"]);
+    } finally { recorder.stop(); await instance.dispose(); }
   });
 
   it("asks nothing of a server on this network that has a fixed model list", async () => {

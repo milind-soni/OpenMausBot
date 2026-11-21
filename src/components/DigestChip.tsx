@@ -2,12 +2,13 @@ import { useState } from "react";
 import { ClipboardList } from "lucide-react";
 
 import { t } from "@/lib/i18n";
+import { memoInLocale } from "@/lib/locale-memo";
 import type { LocaleKey } from "@/locales";
 import { formatDuration } from "@/lib/usage-trace";
 import type { Message } from "@/state/store";
 import { traceRootId } from "../../shared/usage-trace";
 import { EXCERPT_SUMMARY_HEADER } from "../../shared/wire";
-import { TraceDialog } from "./usage/TraceView";
+import { TraceDialog } from "./lazy-screens";
 
 const WORK_KEY: Record<"noFiles" | "oneFile" | "files", Record<"oneTool" | "tools", LocaleKey>> = {
   noFiles: { oneTool: "chat.digestChipNoFilesOne", tools: "chat.digestChipNoFiles" },
@@ -16,7 +17,7 @@ const WORK_KEY: Record<"noFiles" | "oneFile" | "files", Record<"oneTool" | "tool
 };
 const one = (count: number | string) => String(count) === "1";
 
-export function DigestChip({ message }: { message: Message }) {
+export const DigestChip = memoInLocale(function DigestChip({ message }: { message: Message }) {
   const [tracing, setTracing] = useState(false);
   const digest = message.digest;
   if (!digest) return null;
@@ -43,7 +44,7 @@ export function DigestChip({ message }: { message: Message }) {
       {tracing && <TraceDialog id={traceRootId(digest.threadId, digest.turnId)} at={digest.at} onClose={() => setTracing(false)} />}
     </div>
   );
-}
+});
 
 const COMPACTION_CHIP = "max-w-[600px] rounded-xl border border-hairline/40 bg-panel px-3 py-2 text-[12px] text-ink-secondary";
 

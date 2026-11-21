@@ -9,7 +9,7 @@ import type { BrowserCleanupCoordinator, BrowserCleanupRequest } from "../browse
 import { finalizeBrowserCleanupMutation, requireBrowserCleanupAcknowledged } from "../browser-lifecycle-cleanup.ts";
 import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime } from "../browser-runtime.ts";
-import { boatAccountResourceChangeError, vpsAliasResourceChangeError } from "../cloud-backend.ts";
+import { boatAccountResourceChangeError, vpsAliasLeftBehindNotice, vpsAliasResourceChangeError } from "../cloud-backend.ts";
 import * as composio from "../composio.ts";
 import {
   browserProfilePartitionTarget,
@@ -46,6 +46,7 @@ import * as vps from "../vps-computer.ts";
 import { refusalBody, userError, userErrorFields } from "../user-errors.ts";
 import type { ServerErrorBody } from "../../shared/server-text.ts";
 import type { Postiz } from "../postiz/service.ts";
+import { patchMayChangeEngineStatus } from "./config-engine-effect.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 export interface BusyFlag {
@@ -114,6 +115,11 @@ export interface ConfigRouteDeps {
   drainQueuedSends(): void;
   /** Postiz: a key is checked at its address before it is saved, and the `postiz` server follows the saved key. */
   postiz?: Pick<Postiz, "configCheck" | "configSaved">;
+}
+
+/** The label that lists only this installation's VPS computers, or null when its ID can't be read. */
+function vpsEnvironmentFilter(): string | null {
+  try { return `label=${vps.VPS_ENVIRONMENT_LABEL}=${vps.vpsEnvironmentId()}`; } catch { return null; }
 }
 
 export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
@@ -270,6 +276,8 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       providerConfigBusy.set(true);
       const changingLocalVmMode = patch.localVm?.mode !== undefined && patch.localVm.mode !== localVmMode(cfg);
       if (changingLocalVmMode) localVmModeChangeBusy.set(true);
+      // Set once the alias change is saved: every reply after that, a failed one too, must carry it.
+      let savedVpsNotice: string | null = null;
       try {
         for (const provider of transitioningProviders) {
           const conflict = providerOperationConflict(provider);
@@ -277,18 +285,22 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         }
         for (const provider of transitioningProviders) computerProviderConfigTransitions.add(provider);
 
+        let vpsLeftOn: string | null = null;
         if (changingVpsAlias && currentVpsAlias) {
           const inventory = await vps.listManagedVpsComputers(
             { vps: { sshAlias: currentVpsAlias } },
             managedBoatOwners(),
           );
-          if (!inventory.available) {
+          if (inventory.unreachable) {
+            vpsLeftOn = currentVpsAlias;
+          } else if (!inventory.available) {
             return json(res, 503, {
               error: `${inventory.problem ?? "VPS computer inventory is unavailable"}. Keep the current SSH config alias and retry`,
             });
+          } else {
+            const resourceError = vpsAliasResourceChangeError(inventory.instances.length);
+            if (resourceError) return json(res, 409, { error: resourceError });
           }
-          const resourceError = vpsAliasResourceChangeError(inventory.instances.length);
-          if (resourceError) return json(res, 409, { error: resourceError });
         }
 
         let boatRecovery = changingBoatToken ? boatCreateRecoverySnapshot() : [];
@@ -543,6 +555,10 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         return spec ? [{ session, spec }] : [];
       });
       let configWriteCommitted = false;
+      // Ready before the save: once it commits, nothing that fails later may lose what the old server may still hold.
+      const vpsNotice = vpsLeftOn
+        ? vpsAliasLeftBehindNotice(nextVpsAlias ? "Saved" : "Removed", vpsLeftOn, vpsEnvironmentFilter(), `label=${vps.VPS_MANAGED_LABEL}=1`)
+        : null;
       const enginesBefore = engineLaunches(providerConfigs());
       const localVmModeChanged = changingLocalVmMode ? localVmModeChanging() : null;
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
@@ -583,11 +599,13 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           if (persisted.postiz?.key !== undefined) persisted.postiz.key = "";
           saveConfig(persisted);
           configWriteCommitted = true;
+          savedVpsNotice = vpsNotice;
           syncCredentialEnv(patch);
           Object.assign(cfg, loadConfig());
         } else {
           saveConfig(patch);
           configWriteCommitted = true;
+          savedVpsNotice = vpsNotice;
           // loadConfig prefers env over the file for credentials, so the env must follow the save.
           syncCredentialEnv(patch);
           Object.assign(cfg, loadConfig());
@@ -607,7 +625,7 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       localVmModeChanged?.();
       postiz?.configSaved(patch);
       // A saved key reaches an engine through the environment its status read uses, often with no reload.
-      registry.forgetSnapshots();
+      if (patchMayChangeEngineStatus(patch)) registry.forgetSnapshots();
       if (patch.localVm?.idleTimeoutMinutes !== undefined) {
         for (const idle of localVmIdles.values()) idle.setIdleMs(localVmIdleMs());
       }
@@ -683,7 +701,12 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
         finalized.acknowledgements.every(Boolean),
         removedBrowserProfileIds.length === 1 ? "The browser profile" : "The browser profiles",
       );
-      return json(res, 200, configForAccess(finalized.value, auth));
+      return json(res, 200, { ...(configForAccess(finalized.value, auth) as object), ...(savedVpsNotice ? { notice: savedVpsNotice } : {}) });
+      } catch (error) {
+        if (!savedVpsNotice) throw error;
+        // The alias change is already saved, so this reply is the only place left to say what the old server may still hold.
+        const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
+        return json(res, status, { error: error instanceof Error ? error.message : String(error), notice: savedVpsNotice });
       } finally {
         for (const provider of transitioningProviders) computerProviderConfigTransitions.delete(provider);
         if (changingLocalVmMode) localVmModeChangeBusy.set(false);

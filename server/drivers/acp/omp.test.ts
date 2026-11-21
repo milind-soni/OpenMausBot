@@ -96,6 +96,12 @@ describe("OMP ACP driver", () => {
     expect(existsSync(join(scratch, "launch.json"))).toBe(false);
   });
 
+  it("offers OMP's own default before its models are read, so the picker lists it", async () => {
+    const { instance } = await create();
+    expect(instance.models).toEqual({ default: "agent-default", options: [{ id: "agent-default", label: "OMP default (configured)", custom: true }] });
+    expect(instance.modelsUnconfirmed).toBe(true);
+  });
+
   it("runs `omp acp` with its local credentials and the picked model", async () => {
     const { instance, recorder } = await create({ ANTHROPIC_API_KEY: "engine-fixture-key", OPENCODE_API_KEY: "workspace-fixture-key" });
     const { turnId } = await instance.adapter.sendTurn({

@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 
 import { t } from "@/lib/i18n";
 import { api } from "@/state/store";
-import { readSessionState, type SessionState } from "../lib/session";
+import type { SessionState } from "../lib/session";
+import { readSharedSessionState } from "../lib/shared-session";
 import { canPairDevices } from "./ServerPairingCard";
 import { Card } from "./SettingsPrimitives";
 
@@ -54,7 +55,7 @@ export function SignInAccessCard() {
   }
 
   useEffect(() => {
-    void readSessionState().then((state) => {
+    void readSharedSessionState().then((state) => {
       setSession(state);
       if (canPairDevices(state)) void load();
     });

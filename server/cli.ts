@@ -6,9 +6,9 @@
 //                     [--public-url https://host] [--tailscale | --tunnel | --domain HOST] [--relay] [--no-pair]
 //   openmausbot pair  [--label "My MacBook"] [--client] [--public-url https://host]
 //   openmausbot sessions [revoke <id>]
-//   openmausbot status
-//   openmausbot login [--email you@example.com] [--relay]
-//   openmausbot logout
+//   openmausbot account status
+//   openmausbot account login [--email you@example.com] [--relay]
+//   openmausbot account logout
 //   openmausbot run | send | wait | doctor | team apply | export | …
 //
 // This module only exports: openmausbot.ts runs main(), so bundling this file into other entries never runs it twice.
@@ -38,10 +38,10 @@ import { startFleetAgent } from "./fleet-agent.ts";
 import { fleetLayout } from "./fleet.ts";
 import { clearLeftoverTailscaleServe, explainTailscaleFailure, tailnetListenFallback, tailscaleServe, tailscaleStatus, type TailscaleStatus } from "./tailscale.ts";
 import { defaultSetupIo, SetupCancelled, type SetupIo } from "./cli-prompts.ts";
-import { HEADLESS_VERB_NAMES, usage } from "./cli-usage.ts";
+import { routeCli, usage } from "./cli-usage.ts"; import { savedSessionHeaders } from "./headless/saved-servers.ts";
 import { normalizePhoneOrigin, phonePairingInstructions, runPhoneSetup } from "./cli-phone-setup.ts";
 import { browserSignInLines, desktopOwnedRefusal, formatSessions, pairingBlock, RELAY_NOT_WITH_TUNNEL, relayPairingBlock, showRelayPairing } from "./cli-pairing.ts";
-import { cliCommand, cliPrefix } from "./cli-invocation.ts";
+import { cliCommand, cliPrefix } from "./cli-invocation.ts"; import { defaultDataDir, type DataHomes } from "./data-dir.ts";
 import { checkReach, envPublicUrl, lanProblem, localLinkBase, noRouteLines, publicUrlProblem, reachLines, waitForReach, type Route } from "./cli-reach.ts";
 import { lanUrl } from "./lan-address.ts";
 import { isLoopbackHost } from "../electron/server-address.mjs";
@@ -124,7 +124,7 @@ export interface CliOptions {
 
 const COMMANDS = ["setup", "start", "serve", "pair", "sessions", "devices", "status", "login", "logout", "access", "service", "browser", "fleet", "help", "--help", "-h", "--version", "-v", "version"];
 
-export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env): CliOptions | { error: string } {
+export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env, homes: DataHomes = {}): CliOptions | { error: string } {
   const implicitStart = !argv.length || (argv[0]!.startsWith("--") && argv[0] !== "--help" && argv[0] !== "--version");
   const [command = "start", ...rest] = implicitStart ? ["start", ...argv] : argv;
   if (!COMMANDS.includes(command)) {
@@ -133,7 +133,7 @@ export function parseArgs(argv: string[], env: NodeJS.ProcessEnv = process.env):
   const options: CliOptions = {
     command: command === "--help" || command === "-h" ? "help" : command === "--version" || command === "-v" ? "version" : command === "devices" ? "sessions" : (command as CliOptions["command"]),
     port: Number(env.OMB_PORT || 8799),
-    dataDir: env.OMB_DATA_DIR || join(homedir(), ".openmausbot"),
+    dataDir: rest.includes("--data-dir") ? "" : defaultDataDir(env, homes.under, homes.realHome),
     tailscale: false,
     tunnel: false,
     client: false,
@@ -255,7 +255,7 @@ let serveOwnerToken: string | undefined;
 
 async function api(port: number, path: string, init: { method?: string; body?: string } = {}): Promise<{ status: number; body: any }> {
   // x-openmausbot-cli names the tool in the activity log; on loopback it grants nothing.
-  const headers: Record<string, string> = { "content-type": "application/json", "x-openmausbot-cli": "1", ...(serveOwnerToken ? { "x-openmausbot-cli-owner": serveOwnerToken } : {}) };
+  const headers: Record<string, string> = { "content-type": "application/json", "x-openmausbot-cli": "1", ...(serveOwnerToken ? { "x-openmausbot-cli-owner": serveOwnerToken } : path.startsWith("/api/auth/") ? await savedSessionHeaders(`http://127.0.0.1:${port}`) : {}) };
   const res = await fetch(`http://127.0.0.1:${port}${path}`, { method: init.method, body: init.body, headers, signal: AbortSignal.timeout(3000) });
   const body: unknown = await res.json().catch(() => ({}));
   return { status: res.status, body };
@@ -388,7 +388,7 @@ export async function runSessions(options: CliOptions): Promise<number> {
       return 1;
     }
     if (status !== 200) {
-      console.error(`could not revoke: ${typeof body?.error === "string" ? body.error : status}`);
+      console.error(desktopOwnedRefusal(status, body) ?? `could not revoke: ${typeof body?.error === "string" ? body.error : status}`);
       return 1;
     }
     console.log(`revoked ${options.revoke}: that device is signed out and its stream is closed`);
@@ -642,18 +642,18 @@ async function planTunnel(options: CliOptions, log: (line: string) => void, reco
     account = createTunnelAccount({ dataDir: options.dataDir, version: reportableServerVersion(), recovery, log: (line) => log(`tunnel: ${line}`) });
     if (account.credentials.status === "unavailable") return fail(`${account.credentials.file} exists but could not be read; fix or remove it`);
     if (!describeTunnelAccount(account.credentials.read()).email) {
-      return fail(`no account on this machine yet: run ${cliCommand("login")} first, then ${cliCommand("serve --tunnel")}`);
+      return fail(`no account on this machine yet: run ${cliCommand("account login")} first, then ${cliCommand("serve --tunnel")}`);
     }
     try {
       const state = await account.service.retry();
       const saved = tunnelAccess(account.credentials.read()) !== null;
-      if (state.status === "signed-out") log(`tunnel: the sign-in on this machine expired; run ${cliCommand("login")} to renew it${saved ? " (serving the saved address until then)" : ""}`);
+      if (state.status === "signed-out") log(`tunnel: the sign-in on this machine expired; run ${cliCommand("account login")} to renew it${saved ? " (serving the saved address until then)" : ""}`);
       else if (state.message) log(`tunnel: ${state.message}${saved ? " Serving the saved address for now." : ""}`);
     } catch (error) {
       log(`tunnel: control plane not reachable right now (${message(error)}); using the saved address`);
     }
     access = tunnelAccess(account.credentials.read());
-    if (!access) return fail(`this machine has no public address; run ${cliCommand("login")} again`);
+    if (!access) return fail(`this machine has no public address; run ${cliCommand("account login")} again`);
   }
   let binary: string;
   try {
@@ -975,7 +975,7 @@ export async function runOnboardingCommand(
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (argv[0] === "sentinel") return runSentinelCli(argv.slice(1));
   if (argv[0] === "config") return runConfigCli(argv.slice(1));
-  if (HEADLESS_VERB_NAMES.has(argv[0] ?? "") || (argv[0] === "help" && HEADLESS_VERB_NAMES.has(argv[1] ?? ""))) return (await import("./headless/main.ts")).runHeadless(argv);
+  const routed = routeCli(argv); if (routed.headless) return (await import("./headless/main.ts")).runHeadless(routed.argv); argv = routed.argv;
   const options = parseArgs(argv);
   if ("error" in options) {
     console.error(`${options.error}\nAll commands and options: ${cliCommand("--help")}`);

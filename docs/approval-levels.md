@@ -30,12 +30,53 @@ library. A level a person picks stays until someone changes it. On a hosted
 company workspace the default stays Ask, because Full access there comes only
 from the operator's dedicated policy.
 
+**A thread a bot opens from a conversation takes that conversation's level**
+when the conversation has one of its own that differs from the bot's: its own
+`start_thread` (with `report_back` too), a burst's parts, and a teammate's new
+thread or work thread opened by a hand-off (`coordinate_bots`, `start_thread`
+on a teammate). It works both ways: a chat set to Full access in its composer
+opens Full access threads even on a bot saved at Ask, and a chat at Ask opens
+Ask threads even on a bot at Full access, so nothing a bot opens runs above
+what the person chose in that chat. The level is saved on the new thread, which
+keeps it like any thread's own level; the bots' own defaults do not move.
+The resolver is `server/host/spawn-level.ts`.
+
+The floors stay:
+
+- **No level a person chose.** What a conversation without a level of its
+  own opens starts at the bot's level as before, and so does what a routine
+  run's conversation opens (it only copies its bot's level), a room job's
+  thread (a room keeps no level: room jobs open only from inside a room), a
+  consultation's thread (`consult: true` acts on nothing), and a thread an
+  external runtime's hand-off opens.
+- **Being confirmed.** A level change the desktop is still confirming never
+  travels: a composer change in progress leaves the new thread at its bot's
+  level, and while a bot-wide change is unconfirmed the new thread follows the
+  bot, so it gets the new level once confirmed and Ask if it rolls back.
+- **Engines.** The level is capped by the engine the new thread runs on, as
+  an engine switch would: Auto-accept edits opens a Codex thread at Ask.
+  Custom is never copied: a thread opened from a Custom chat starts at Ask,
+  unless it is the same bot, itself on Custom. A bot on Custom keeps Custom
+  in the threads opened on it, whatever the chat handing it work is set to.
+- **A turn held at Ask opens Ask threads.** A guest's turn on a Cloud, a Bot
+  API key's thread, a fenced proactive turn, or an engine that cannot run the
+  level opens its threads at Ask. A Bot API thread itself stays at Ask.
+- **No raise without the right to set it.** Only someone who may set a level
+  there can carry one above the bot's: on a Cloud only its owner, never work
+  from outside (a webhook, an app event), and on a hosted company workspace
+  only under the operator's Full access policy. Anyone else's chat still lowers
+  what it opens, never raises it.
+
+The guards Full access cannot skip (the [safety floor](verification/safety-floor.md),
+guarded sends, a Cloud guest's or webhook's confinement) apply in the new
+thread exactly as in any other.
+
 | Level | Behavior |
 | --- | --- |
 | **Ask for approval** | Requests approval for commands and file changes, the way the provider's supervised mode does. |
 | **Auto-accept edits** | Approves file edits automatically; other actions can still require approval. Offered where the provider has such a mode (Claude, Grok, Antigravity). |
 | **Approve for me** | Uses the provider's automatic review on Codex, Claude, Cursor, and Grok to approve routine actions and ask about others. Providers without an equivalent fall back to asking. |
-| **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Residual native permission prompts are answered for you. OMB profile changes, routine actions, team setup, bot deletion, and enabled skill authoring apply without a second approval. Peer-review prompts are skipped within the bot's authorized scope. Sends through connected apps (email, messages, posts, payments) follow the bot's Sending on your behalf setting: Ask every time requires consent, and Send without asking, or no setting at all, sends with no daily limit. Apps outside the bot's connected-app scope are still refused. Work handed on with `coordinate_bots` uses the receiving bot's setting, never the sender's — except from a Chief of Staff, whose level flows down (below). Actual questions and missing credentials still need your input. |
+| **Full access** | Enables the provider's permissive mode for commands, edits, and selected-computer actions, including potentially destructive or sensitive work. Residual native permission prompts are answered for you. OMB profile changes, routine actions, team setup, bot deletion, and enabled skill authoring apply without a second approval. Peer-review prompts are skipped within the bot's authorized scope. Sends through connected apps (email, messages, posts, payments) follow the bot's Sending on your behalf setting: Ask every time requires consent, and Send without asking, or no setting at all, sends with no daily limit. Apps outside the bot's connected-app scope are still refused. Work handed on with `coordinate_bots` runs at the level of the receiving bot's thread: a new thread or work thread it opens takes the sending conversation's own level (above), and a Chief of Staff's level flows down (below). Actual questions and missing credentials still need your input. |
 | **Custom (`config.toml`)** | Codex only. OpenMausBot reads and reapplies the effective approval and sandbox settings from your Codex configuration. |
 
 Full access applies the moment you pick it: no confirmation dialog, no second
@@ -108,6 +149,15 @@ set a level on follows the default, and so does each of its threads without a
 level of its own. Bots and threads that saved Ask before Full access became
 the default keep it: choose Full access in the bot's settings, or **Set for
 all bots in this team…**, to move a bot and every one of its threads at once.
+The one exception is a teammate's standing work thread (the "@Sender · work"
+thread every hand-off from one conversation reuses), which nobody chose a
+level for: once, on the first start of a build with this change, such a thread
+created before 2026-10-14 and still saved at Ask drops that saved level and
+follows its bot's from then on (`server/legacy-work-threads.ts`; a marker file
+in the data folder records that it ran). Conversations a person opened, new
+threads a hand-off opened, room jobs, and work threads made on or after that
+day keep their level, and a bot whose level change was still being confirmed
+at shutdown is left to that change's own recovery.
 OpenMausBot adds no review card of its own at any level: a bot's profile,
 working folder, model, skill, team setup and team memory changes apply at
 once and leave a one-line receipt with Undo, so the bot continues in the same
@@ -180,13 +230,19 @@ nearest Chief conversation (`server/host/delegated-level.ts`). The level is
 computed once when the assignment is written and recorded on it
 (docs/runtime-contract.md §3); the turn runs with exactly that level.
 
-It only ever raises: a teammate already on a higher level keeps it, a teammate
-on Custom keeps its own configuration, and a Chief handing work out from an
-Ask conversation passes nothing on. Every engine runs Full access, so only
+The flow-down only ever raises: a thread already on a higher level keeps it, a
+teammate on Custom keeps its own configuration, and a Chief handing work out
+from an Ask conversation passes nothing on this way. A new thread the hand-off
+opens is different: it starts at the Chief conversation's own level, like a
+thread any conversation opens (above), so a Chief chat on Approve for me opens
+a teammate's new thread at Approve for me even when that teammate is saved at
+Full access, and one on Ask opens it at Ask. Every engine runs Full access, so only
 Auto-accept edits can be capped: a teammate on an engine without it (Codex,
 whose Ask already writes the workspace) stays on its own level. The teammate's
-own default and its other conversations do not change, and an ordinary bot's
-hand-off, with no Chief up its chain, still uses the recipient's setting. A consultation (`consult: true`)
+own default and its other conversations do not change. An ordinary bot's
+hand-off, with no Chief up its chain, uses the level of the recipient's thread:
+the sending conversation's own when the hand-off opens that thread (above), and
+the thread's own when it reuses one. A consultation (`consult: true`)
 answers from what the teammate knows and acts on nothing, so no level travels
 with it. Questions and missing credentials still reach you.
 
