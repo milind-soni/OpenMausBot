@@ -72,6 +72,8 @@ export type SharedComputerStatus = {
 export type KnownLentComputer = {
   id: string; name: string; platform: "darwin" | "win32" | "linux" | null; online: boolean; busy: boolean; lent: boolean;
   lastSeenAt: number; lastUsedAt: number | null; scopes: { folders: number; terminal: boolean; screen: boolean; internet: boolean; chrome: boolean };
+  /** The person typed this turn's line on it: the session that sent the line lends it, online now. */
+  typing?: true;
 };
 /** The bot an action is for, so the lent computer's menu can name it with its colour. */
 export type ActingBot = { name: string; color: string };
@@ -281,15 +283,28 @@ export class SharedComputers {
       .map((entry) => ({ id: entry.registration.id, name: entry.registration.name, platform: entry.registration.platform ?? null, session: entry.owner.session, environmentId: entry.registration.environments![0]!, seen: entry.seen }))
       .sort((a, b) => b.seen - a.seen);
   }
-  /** Every computer this person lent, now or before, newest first: online, offline since, or no longer lent. */
-  known(principal: string | null): KnownLentComputer[] {
+  /** Every computer this person lent, now or before, newest first: online, offline since, or no longer lent.
+   * `sending`: the session that sent this turn's line. The desktop lends its computer with its window's own session, so
+   * an online computer lent by that session is the one they type on: marked, and put first. */
+  known(principal: string | null, sending?: string): KnownLentComputer[] {
     if (!principal) return [];
-    return (this.lent?.list(principal) ?? []).map(record => {
+    const typing = sending === undefined ? undefined
+      : [...this.computers.values()].find(entry => entry.owner.person === principal && entry.owner.session === sending && this.online(entry));
+    const records = this.lent?.list(principal) ?? [];
+    const known = records.map((record): KnownLentComputer => {
       const entry = this.chosen(principal, record.id);
-      return { id: record.id, name: record.name, platform: record.platform, online: entry ? this.online(entry) : false, busy: (entry?.jobs.size ?? 0) > 0,
+      return { ...(record.id === typing?.registration.id ? { typing: true as const } : {}), id: record.id, name: record.name, platform: record.platform, online: entry ? this.online(entry) : false, busy: (entry?.jobs.size ?? 0) > 0,
         lent: record.stoppedAt === null, lastSeenAt: entry ? Math.max(entry.seen, record.lastSeenAt) : record.lastSeenAt, lastUsedAt: record.lastUsedAt,
         scopes: { folders: record.folders, terminal: record.terminal, screen: record.screen, internet: record.internet === true, chrome: record.chrome === true } };
     });
+    // Two computers with one name share one record, kept for the newer, so the one they type on can have none: listed live.
+    const unrecorded = typing && !records.some(record => record.id === typing.registration.id) ? [typing] : [];
+    return [
+      ...unrecorded.map(({ registration, jobs, seen }): KnownLentComputer => ({ typing: true, id: registration.id, name: registration.name, platform: registration.platform ?? null,
+        online: true, busy: jobs.size > 0, lent: true, lastSeenAt: seen, lastUsedAt: null,
+        scopes: { folders: registration.folders.length, terminal: registration.terminal, screen: registration.computer, internet: registration.internet === true, chrome: registration.chrome === true } })),
+      ...known.filter(computer => computer.typing), ...known.filter(computer => !computer.typing),
+    ];
   }
   /** For a bot: which known computer is offline and since when, and the sentence to say; nothing while one is online. */
   away(principal: string | null) {

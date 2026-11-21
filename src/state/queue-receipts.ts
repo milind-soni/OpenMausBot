@@ -8,7 +8,8 @@ export function rememberConsumedQueueId(
   consumed: AppState["consumedQueueIds"],
   queueId: string,
 ): AppState["consumedQueueIds"] {
-  const next = { ...consumed, [queueId]: true as const };
+  const { [queueId]: _older, ...previous } = consumed;
+  const next = { ...previous, [queueId]: true as const };
   const overflow = Object.keys(next).length - MAX_CONSUMED_QUEUE_IDS;
   if (overflow > 0) {
     for (const id of Object.keys(next).slice(0, overflow)) delete next[id];

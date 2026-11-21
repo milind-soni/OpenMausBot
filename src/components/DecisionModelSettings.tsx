@@ -299,7 +299,7 @@ export function DecisionModelSettings() {
         </SettingsRows>
       </SettingsGroup>
       <WorkersAiKeyCard failureText={(result) => deciderFailureText(result, false, "workersai")} />
-      <SettingsGroup label={t("decider.provider.label")} block="routing-key">
+      <SettingsGroup label={t("decider.provider.label")} description={t("decider.provider.line")} block="routing-key">
         <SettingsRows selectWidth={200}>
           <SettingRow title={t("decider.provider.title")}>
             <Select

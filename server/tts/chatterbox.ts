@@ -41,46 +41,35 @@ async function request(url: string, init: RequestInit, what: string, baseUrl: st
   }
 }
 
-export async function listChatterboxVoices(baseUrl: string): Promise<Voice[]> {
+async function fetchVoiceList(url: string, baseUrl: string, read: (body: any) => Voice[]): Promise<Voice[]> {
   try {
-    try {
-      const res = await request(
-        `${apiRoot(baseUrl)}/models`,
-        { headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) },
-        "listing voices",
-        baseUrl,
-      );
-      if (res.ok) {
-        const body = await safeJson(res);
-        const voices = (body?.data ?? [])
-          .map((m: any): Voice => ({ id: String(m?.id ?? ""), label: String(m?.id ?? "") }))
-          .filter((v: Voice) => v.id);
-        if (voices.length) return voices;
-      }
-    } catch {
-    }
-    // Some servers (Chatterbox-TTS-Server) list voices here instead.
-    const voicesRes = await request(
-      `${apiRoot(baseUrl)}/audio/voices`,
+    const res = await request(
+      url,
       { headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) },
       "listing voices",
       baseUrl,
     );
-    if (voicesRes.ok) {
-      const body = await safeJson(voicesRes);
-      const voices = (body?.voices ?? [])
-        .map((entry: any): Voice => {
-          // Chatterbox-TTS-Server returns filename strings; its docs describe { filename, display_name } objects.
-          if (typeof entry === "string") return { id: entry, label: entry };
-          const id = String(entry?.filename ?? entry?.id ?? "");
-          return { id, label: String(entry?.display_name ?? entry?.name ?? id) };
-        })
-        .filter((v: Voice) => v.id);
-      if (voices.length) return voices;
-    }
+    return res.ok ? read(await safeJson(res)).filter((v) => v.id) : [];
   } catch {
+    return [];
   }
-  return FALLBACK_VOICES;
+}
+
+/** /audio/voices names real voices; /models names models (Kokoro-FastAPI answers both), so it is only a fallback. */
+export async function listChatterboxVoices(baseUrl: string): Promise<Voice[]> {
+  const voices = await fetchVoiceList(`${apiRoot(baseUrl)}/audio/voices`, baseUrl, (body) =>
+    (body?.voices ?? []).map((entry: any): Voice => {
+      // Chatterbox-TTS-Server returns filename strings; its docs describe { filename, display_name } objects.
+      if (typeof entry === "string") return { id: entry, label: entry };
+      const id = String(entry?.filename ?? entry?.id ?? "");
+      return { id, label: String(entry?.display_name ?? entry?.name ?? id) };
+    }),
+  );
+  if (voices.length) return voices;
+  const models = await fetchVoiceList(`${apiRoot(baseUrl)}/models`, baseUrl, (body) =>
+    (body?.data ?? []).map((m: any): Voice => ({ id: String(m?.id ?? ""), label: String(m?.id ?? "") })),
+  );
+  return models.length ? models : FALLBACK_VOICES;
 }
 
 /** wav: every browser plays it and every compatible server makes it. The server's own content-type wins. */

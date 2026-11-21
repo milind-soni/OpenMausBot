@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { z } from "zod";
+import type { WorkspaceBackupExportStatus } from "../shared/workspace-backup.ts";
 import { WORKSPACE_BACKUP_CLIENT_KEYS } from "../shared/workspace-backup-client.ts";
 import {
   createWorkspaceBackup, stageWorkspaceBackup, commitPendingWorkspaceRestore,
@@ -15,14 +16,28 @@ import {
 import type { RequestAuth } from "./request-auth.ts";
 import { userErrorFields } from "./user-errors.ts";
 
+/** For the gate's flush (server/index.ts): each bot's Data tables written into their files and let go. */
+export { releaseDataForBackup } from "./workspace-backup-databases.ts";
+
 const PREFIX = "/api/workspace-backup";
 const MAX_UPLOAD_BYTES = MAX_WORKSPACE_BACKUP_UPLOAD_BYTES;
 const MAX_CLIENT_STATE_BYTES = 2 * 1024 ** 2;
 const EXPIRES_MS = 60 * 60_000;
 const passwordSchema = z.string().min(12, "Use a password of at least 12 characters.").max(1024);
+const exportSchema = z.object({ password: passwordSchema, clientState: z.record(z.string(), z.string()).default({}) });
 const failure = (message: string, status = 400) => Object.assign(new Error(message), { status });
-type Artifact = { owner: string; kind: "download" | "upload" | "staged"; path?: string; expires: number; summary?: WorkspaceBackupSummary };
+type Artifact = { owner: string; kind: "download" | "upload" | "staged"; path?: string; expires: number; summary?: WorkspaceBackupSummary; keepUntilExpiry?: boolean };
 type RestoreResult = { id?: string; restored?: boolean; safetyCopyPath?: string; clientState?: Record<string, string> };
+type ExportJob =
+  | Exclude<WorkspaceBackupExportStatus, { state: "ready" }>
+  | { state: "ready"; id: string; filename: string; expiresAt: number };
+
+function backupError(error: unknown) {
+  return {
+    error: error instanceof z.ZodError ? error.issues[0]?.message ?? "Invalid backup request." : error instanceof Error ? error.message : "Backup failed.",
+    ...userErrorFields(error),
+  };
+}
 
 export function isWorkspaceBackupSessionControl(method: string, path: string): boolean {
   return (method === "GET" && path === "/api/auth/sessions") ||
@@ -44,6 +59,7 @@ export function createWorkspaceBackupRoutes(options: {
   restart?: () => void;
 }) {
   const artifacts = new Map<string, Artifact>();
+  const exportJobs = new Map<string, ExportJob>();
   let operating = false;
   const json = (res: ServerResponse, status: number, body: unknown) => {
     res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
@@ -64,8 +80,11 @@ export function createWorkspaceBackupRoutes(options: {
     if (!existsSync(root) || lstatSync(root).isSymbolicLink()) return;
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory() || !/^[a-f0-9-]{36}$/.test(entry.name)) continue;
-      if (statSync(join(root, entry.name)).mtimeMs + EXPIRES_MS > Date.now()) continue;
-      try { removeWorkspaceBackupJob(options.dataDir, entry.name); } catch {}
+      const directory = join(root, entry.name);
+      const delay = statSync(directory).mtimeMs + EXPIRES_MS - Date.now();
+      const reclaim = () => { try { removeWorkspaceBackupJob(options.dataDir, entry.name); } catch {} };
+      if (delay <= 0) reclaim();
+      else setTimeout(reclaim, Math.min(delay, EXPIRES_MS)).unref();
     }
     const uploads = join(root, "uploads");
     if (!existsSync(uploads) || lstatSync(uploads).isSymbolicLink()) return;
@@ -84,7 +103,9 @@ export function createWorkspaceBackupRoutes(options: {
   }
   function replacePrevious(auth: RequestAuth, kinds: Artifact["kind"][]) {
     expire();
-    for (const [id, artifact] of artifacts) if (artifact.owner === owner(auth) && kinds.includes(artifact.kind)) remove(id, artifact);
+    for (const [id, artifact] of artifacts) {
+      if (artifact.owner === owner(auth) && kinds.includes(artifact.kind) && !artifact.keepUntilExpiry) remove(id, artifact);
+    }
   }
   const get = (id: unknown, auth: RequestAuth, kind: Artifact["kind"]) => {
     expire();
@@ -98,6 +119,42 @@ export function createWorkspaceBackupRoutes(options: {
     if (operating) throw failure("Another backup operation is in progress. Wait for it to finish.", 409);
     operating = true;
     try { return await work(); } finally { operating = false; }
+  }
+  async function readExport(req: IncomingMessage) {
+    const body = exportSchema.parse(await options.readBody(req, MAX_CLIENT_STATE_BYTES + 8 * 1024));
+    if (Buffer.byteLength(JSON.stringify(body.clientState)) > MAX_CLIENT_STATE_BYTES) throw failure("Saved drafts exceed the 2 MB backup preference limit.", 413);
+    const clientState = Object.fromEntries(Object.entries(body.clientState).filter(([key]) => WORKSPACE_BACKUP_CLIENT_KEYS.includes(key as typeof WORKSPACE_BACKUP_CLIENT_KEYS[number])));
+    return { password: body.password, clientState };
+  }
+  function runExport(req: IncomingMessage, auth: RequestAuth, input: z.infer<typeof exportSchema>, keepUntilExpiry = false) {
+    return operate(async () => {
+      const result = await options.exclusive(async () => {
+        check(req, auth);
+        if (keepUntilExpiry) expire();
+        else replacePrevious(auth, ["download"]);
+        if (artifacts.size >= 4) throw failure("There are already four backup files in progress. Restart or wait an hour before creating another.", 409);
+        return createWorkspaceBackup(options.dataDir, { ...input, appVersion: options.appVersion });
+      });
+      try {
+        check(req, auth);
+        const bytes = statSync(result.path).size, expiresAt = Date.now() + EXPIRES_MS;
+        artifacts.set(result.id, { owner: owner(auth), kind: "download", path: result.path, summary: result.summary, expires: expiresAt, keepUntilExpiry });
+        return { id: result.id, filename: `OpenMausBot-${result.summary.createdAt.slice(0, 10)}.ombbackup`, bytes, summary: result.summary, expiresAt };
+      } catch (error) {
+        removeWorkspaceBackupJob(options.dataDir, result.id);
+        throw error;
+      }
+    });
+  }
+  function finishExport(key: string, status: Exclude<ExportJob, { state: "running" }>) {
+    exportJobs.set(key, status);
+    setTimeout(() => {
+      exportJobs.delete(key);
+      if (status.state === "ready") {
+        const artifact = artifacts.get(status.id);
+        if (artifact) remove(status.id, artifact);
+      }
+    }, EXPIRES_MS).unref();
   }
   return async (req: IncomingMessage, res: ServerResponse, path: string, auth: RequestAuth): Promise<boolean> => {
     if (!path.startsWith(`${PREFIX}/`)) return false;
@@ -122,18 +179,37 @@ export function createWorkspaceBackupRoutes(options: {
         return true;
       }
       if (method === "POST" && path === `${PREFIX}/export`) {
-        const body = z.object({ password: passwordSchema, clientState: z.record(z.string(), z.string()).default({}) }).parse(await options.readBody(req, MAX_CLIENT_STATE_BYTES + 8 * 1024));
-        if (Buffer.byteLength(JSON.stringify(body.clientState)) > MAX_CLIENT_STATE_BYTES) throw failure("Saved drafts exceed the 2 MB backup preference limit.", 413);
-        const clientState = Object.fromEntries(Object.entries(body.clientState).filter(([key]) => WORKSPACE_BACKUP_CLIENT_KEYS.includes(key as typeof WORKSPACE_BACKUP_CLIENT_KEYS[number])));
-        const result = await operate(() => options.exclusive(async () => {
-          check(req, auth);
-          replacePrevious(auth, ["download"]);
-          if (artifacts.size >= 4) throw failure("There are already four backup files in progress. Restart or wait an hour before creating another.", 409);
-          return createWorkspaceBackup(options.dataDir, { password: body.password, clientState, appVersion: options.appVersion });
-        }));
-        try { check(req, auth); } catch (error) { removeWorkspaceBackupJob(options.dataDir, result.id); throw error; }
-        artifacts.set(result.id, { owner: owner(auth), kind: "download", path: result.path, summary: result.summary, expires: Date.now() + EXPIRES_MS });
-        json(res, 200, { id: result.id, filename: `OpenMausBot-${result.summary.createdAt.slice(0, 10)}.ombbackup`, bytes: statSync(result.path).size, summary: result.summary });
+        const { id, filename, bytes, summary } = await runExport(req, auth, await readExport(req));
+        json(res, 200, { id, filename, bytes, summary });
+        return true;
+      }
+      const exportJob = /^\/api\/workspace-backup\/export-jobs\/([\w-]+)$/.exec(path);
+      if (exportJob && (method === "GET" || method === "POST")) {
+        const id = z.string().uuid().parse(exportJob[1]).toLowerCase();
+        const input = method === "POST" ? await readExport(req) : null;
+        check(req, auth);
+        const key = `${owner(auth)}/${id}`;
+        const existing = exportJobs.get(key);
+        if (existing) {
+          const status: WorkspaceBackupExportStatus = existing.state === "ready"
+            ? { state: "ready", id: existing.id, filename: existing.filename, expiresInMs: existing.expiresAt - Date.now() }
+            : existing;
+          if (status.state === "ready" && status.expiresInMs <= 0) throw failure("This backup has expired. Start another export.", 404);
+          json(res, input ? 202 : 200, status);
+          return true;
+        }
+        if (!input) throw failure("This backup export is no longer available. Start another export.", 404);
+        const { busy, pendingRestore } = options.status();
+        if (operating || busy || pendingRestore) {
+          throw failure("Another backup operation is in progress. Wait for it to finish.", 409);
+        }
+        const running = { state: "running" } as const;
+        exportJobs.set(key, running);
+        void runExport(req, auth, input, true).then(
+          ({ id, filename, expiresAt }) => finishExport(key, { state: "ready", id, filename, expiresAt }),
+          (error: unknown) => finishExport(key, { state: "failed", ...backupError(error) }),
+        );
+        json(res, 202, running);
         return true;
       }
       const download = /^\/api\/workspace-backup\/download\/([\w-]+)$/.exec(path);
@@ -206,10 +282,7 @@ export function createWorkspaceBackupRoutes(options: {
       json(res, 404, { error: "Unknown backup operation." });
     } catch (error) {
       if (res.headersSent) { res.destroy(); return true; }
-      json(res, error instanceof z.ZodError ? 400 : (error as { status?: number }).status ?? 400, {
-        error: error instanceof z.ZodError ? error.issues[0]?.message ?? "Invalid backup request." : error instanceof Error ? error.message : "Backup failed.",
-        ...userErrorFields(error),
-      });
+      json(res, error instanceof z.ZodError ? 400 : (error as { status?: number }).status ?? 400, backupError(error));
     }
     return true;
   };

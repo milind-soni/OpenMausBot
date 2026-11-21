@@ -23,6 +23,7 @@ export function isMarkdownFile(name: string): boolean {
 
 // Lazy, so the chat's Markdown renderer (which uses this file's chips) is not imported back into it.
 const MarkdownFileContent = lazy(() => import("./MarkdownFilePreview"));
+const WhatChangedContent = lazy(() => import("./WhatChangedView"));
 
 // React 19 caches a rejected lazy import until the page reloads; without a boundary it would replace the whole message.
 class MarkdownPreviewBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -76,8 +77,9 @@ export function useHtmlPreview(path: string, name: string, message?: MessageAtta
 }
 
 /** A file's preview, in the dialog or in the pane beside the chat, which it fills. */
-export function FilePreviewContent({ kind, path, name, message, fill = false }: Pick<FilePreview, "kind" | "path" | "name" | "message"> & { fill?: boolean }) {
+export function FilePreviewContent({ kind, path, name, message, original, fill = false }: Pick<FilePreview, "kind" | "path" | "name" | "message" | "original"> & { fill?: boolean }) {
   const key = `${message.threadId}:${message.messageId}:${path}`;
+  if (kind === "changes") return original ? <MarkdownPreviewBoundary><Suspense fallback={<div role="status" className="flex items-center justify-center gap-2 p-12 text-sm text-ink-secondary"><LoaderCircle size={16} className="animate-spin" />{t("changes.loading")}</div>}><WhatChangedContent key={`${key}:${original.path}`} edited={{ path, name, message }} original={{ path: original.path, name: original.name, message: { threadId: message.threadId, messageId: original.messageId } }} fill={fill} /></Suspense></MarkdownPreviewBoundary> : null;
   if (kind === "html") return <HtmlFileContent key={key} path={path} name={name} message={message} fill={fill} />;
   if (kind === "table") {
     const delimiter = tableDelimiter(name) ?? tableDelimiter(path);

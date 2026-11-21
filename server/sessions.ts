@@ -396,6 +396,12 @@ export class SessionRegistry {
     return this.pairings.map((p) => ({ id: p.id, label: p.label, scopes: [...p.scopes], createdAt: p.createdAt, expiresAt: p.expiresAt }));
   }
 
+  hasChatOnlyAccess(): boolean {
+    this.prune();
+    const chatOnly = ({ scopes }: Pick<SessionRecord, "scopes">) => !scopes.includes("admin");
+    return this.sessions.some(chatOnly) || this.pairings.some(chatOnly);
+  }
+
   /** Only a browser sign-in's 256-bit credential matches, so this consumes nothing and counts toward no lockout. */
   previewBrowserSignIn(credential: string): { owner: string | null; expiresAt: number } | null {
     this.prune();

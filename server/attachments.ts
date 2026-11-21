@@ -14,6 +14,7 @@ import { link, open, unlink } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
 import { DATA_DIR } from "./config.ts";
+import { dropKeptOriginals, dropOrphanKeptOriginals, keepUploadedOriginal, keptOriginalsBytes } from "./attachment-originals.ts";
 import { boxUploadsDir } from "./bot-box/plan.ts";
 
 export { FILE_MAX_BYTES, PREVIEW_MAX_BYTES } from "../shared/upload-limits.ts";
@@ -213,13 +214,16 @@ export function deleteAttachment(path: string): void {
     // An upload still on disk (a busy file on Windows) keeps its box copies; one already gone loses them.
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
   }
-  if (resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)) dropBoxUploadCopies([basename(path)]);
+  if (resolve(dirname(path)) === resolve(ATTACHMENTS_DIR)) {
+    dropBoxUploadCopies([basename(path)]);
+    dropKeptOriginals([basename(path)]);
+  }
 }
 
 /** Settings → General: what the store holds against its ceiling, rescanned so files removed outside the app count. */
 export function attachmentStorageUsage(): { usedBytes: number; maxBytes: number } {
   invalidateAttachmentAccounting();
-  return { usedBytes: committedBytes(), maxBytes: ATTACHMENTS_MAX_BYTES };
+  return { usedBytes: committedBytes() + keptOriginalsBytes(), maxBytes: ATTACHMENTS_MAX_BYTES };
 }
 
 /** What a Settings clear leaves, as stored names: pictures given by their /api/attachments/ url (bot and profile
@@ -267,6 +271,8 @@ export function clearAttachments(kept: ReadonlySet<string>, now = Date.now()): {
     }
   }
   dropBoxUploadCopies(gone);
+  dropKeptOriginals(gone);
+  dropOrphanKeptOriginals(ATTACHMENTS_DIR);
   invalidateAttachmentAccounting();
   return { removed, freedBytes, failed };
 }
@@ -447,7 +453,8 @@ export async function saveFile(
   chunks: AsyncIterable<Uint8Array>,
   originalName: string,
   mime: string,
-  options: { uploadId?: string; expectedBytes?: number } = {},
+  /** keepOriginal: the person's own upload, kept as sent (attachment-originals.ts). */
+  options: { uploadId?: string; expectedBytes?: number; keepOriginal?: boolean } = {},
 ): Promise<SavedFile> {
   const known = extensionForFileMime(mime);
   const normalized = known ? normalizedMime(mime)! : GENERIC_FILE_MIME;
@@ -532,6 +539,7 @@ export async function saveFile(
         }
         await unlink(partialPath);
       }
+      if (options.keepOriginal) await keepUploadedOriginal(path);
       return { path, name, mime: normalized, bytes };
     } catch (error) {
       if (file && !closed) await file.close().catch(() => undefined);
@@ -553,6 +561,16 @@ export async function saveNamedAttachment(name: string, chunks: AsyncIterable<Ui
   if (expectedBytes !== undefined && expectedBytes > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
   ensureAttachmentsDir();
   const path = join(ATTACHMENTS_DIR, name);
+  if (statSizeIfFile(path) !== null) {
+    // A retried move already owns these bytes. Drain its request without reserving another copy at a full store.
+    let bytes = 0;
+    for await (const chunk of chunks) {
+      bytes += chunk.byteLength;
+      if (bytes > FILE_MAX_BYTES) throw statusError(413, `attachments are limited to ${FILE_MAX_BYTES} bytes`);
+    }
+    if (statSizeIfFile(path) === null) throw statusError(409, "The attachment was removed during the retry. Retry the upload.");
+    return { stored: false };
+  }
   const partialPath = join(ATTACHMENTS_DIR, `.openmaus-upload-${randomUUID()}-${randomUUID()}.partial`);
   const reservation = new AttachmentReservation();
   activePartials.add(partialPath);

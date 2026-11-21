@@ -4,7 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
-import { LocalBackend } from "../backends.ts";
+import { LocalBackend, type LocalBackendOptions } from "../backends.ts";
 import { calibrateIdentity, chromeFingerprint, type CalibratedIdentity } from "../chrome/calibrate.ts";
 import type { ScreenSpec } from "../chrome/flags.ts";
 import { sandboxDisabled } from "../chrome/host-setup.ts";
@@ -39,7 +39,7 @@ export interface RealService {
   close(): Promise<void>;
 }
 
-export async function startService({ screen, egressPort, ...options }: Partial<BrowserServiceOptions> & { screen?: ScreenSpec; egressPort?: (key: string) => Promise<number | null> } = {}): Promise<RealService> {
+export async function startService({ screen, egressPort, display, displayFailed, ...options }: Partial<BrowserServiceOptions> & { screen?: ScreenSpec; egressPort?: (key: string) => Promise<number | null>; display?: LocalBackendOptions["display"]; displayFailed?: LocalBackendOptions["displayFailed"] } = {}): Promise<RealService> {
   if (!CHROME) throw new Error("No Chrome to test with.");
   const executablePath = CHROME;
   const sandbox = !sandboxDisabled(process.env);
@@ -54,6 +54,8 @@ export async function startService({ screen, egressPort, ...options }: Partial<B
     egressPort: egressPort ?? (async () => null),
     sandbox,
     handshakeTimeoutMs: FIRST_LAUNCH_MS,
+    ...(display ? { display } : {}),
+    ...(displayFailed ? { displayFailed } : {}),
   });
   const service = new BrowserService({ dataDir, backend: () => backend, maxRunning: 4, idleMs: () => 600_000, ...options });
   const call = (target: BrowserTarget, name: string, args: Record<string, unknown> = {}) =>

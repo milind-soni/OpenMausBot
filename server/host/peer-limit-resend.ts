@@ -6,7 +6,7 @@ import type { hostedModelPolicy } from "../hosted-models.ts";
 import { limitBackupAllowed } from "../limit-failover.ts";
 import { turnLimitScope, type QuotaSwitchDeps, type SettledTurn } from "../quota-switch.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
-import type { TurnStops } from "../turn-outcome.ts";
+import { nothingRan, type TurnStops } from "../turn-outcome.ts";
 import type { LimitTakeover, TakeoverScope } from "./limit-takeover.ts";
 
 /** The start options a bot-to-bot turn keeps when it is resent: all of them, so it never gains authority. */
@@ -78,20 +78,6 @@ export interface PeerLimitResendDeps<Opts, Outcome> {
   /** Lets go of the failed attempt's hand-off: the resend owns its result. */
   release(generation: string): void;
   startTurn(botId: string, text: string, opts: Opts): Promise<unknown>;
-}
-
-/**
- * True when the failed turn left nothing behind: no tool call, no reply, no file. Its own failure row, the
- * engine's limit sentence (`stopError`, sometimes sent as reply text) and the hand-off's request card, written
- * just before the turn (sometimes in the same millisecond), do not count.
- */
-export function nothingRan(rows: readonly Message[], since: number, turnId: string | undefined, stopError?: string): boolean {
-  const said = stopError?.trim();
-  // The turn's digest is written after it ends and only sums it up.
-  return !rows.some((row) => row.at >= since && row.role === "bot" && row.kind !== "digest" && row.roomRequest?.phase !== "request" && (!turnId || !row.turnId || row.turnId === turnId) && (
-    row.kind === "activity" ? Boolean(row.tool?.itemId)
-      : row.kind === "text" ? Boolean(row.text?.trim()) && row.text!.trim() !== said
-        : true));
 }
 
 /**

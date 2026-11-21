@@ -3,6 +3,7 @@
 // the chat, a restart, another branch) reads the same. A card a person isn't looking at reaches them by notification,
 // and a turn that ends resting on them says so instead of "finished".
 import { openPersonWait, personWait, personWrote, restingOnPerson, type PersonWait } from "../../shared/person-wait.ts";
+import { isHandoff } from "../../shared/sign-in-request.ts";
 import type { Notification } from "../../shared/notification.ts";
 import { NEEDS_YOU_WINDOW_MS } from "../../shared/today.ts";
 import { buildNotification } from "../notify.ts";
@@ -15,6 +16,12 @@ export interface PersonWaitsDeps {
   /** The conversations that may hold an open card asked since then. */
   threadsWithCards(since: number): readonly string[];
   now?: () => number;
+  /** A card left open in handed-off work: the conversation that handed it on links to it. */
+  waitingElsewhere?(threadId: string, wait: PersonWait, asker: BotRecord): void;
+  /** That card no longer waits on the person. */
+  waitSettled?(threadId: string, cardMessageId: string): void;
+  /** That card waits on the person again. */
+  waitResumed?(threadId: string, cardMessageId: string): void;
 }
 
 const NOTIFIED_ELSEWHERE: ReadonlySet<PersonWait["kind"]> = new Set(["question", "approval"]);
@@ -50,8 +57,11 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
 
   function refresh(threadId: string): void {
     const wait = restsOn(threadId);
+    const before = resting.get(threadId);
     if (wait) resting.set(threadId, wait);
     else resting.delete(threadId);
+    if (before && before.messageId !== wait?.messageId) deps.waitSettled?.(threadId, before.messageId);
+    if (wait && wait.messageId !== before?.messageId) deps.waitResumed?.(threadId, wait.messageId);
     show(threadId, wait);
   }
 
@@ -59,11 +69,16 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
     const message = store.activePath(threadId).find((row) => row.id === messageId);
     const wait = message && personWait(message);
     if (!wait || NOTIFIED_ELSEWHERE.has(wait.kind)) return;
+    const asker = askerOf(threadId, wait);
+    if (asker && resting.get(threadId)?.messageId === wait.messageId) deps.waitingElsewhere?.(threadId, wait, asker);
     const detail = message.secret ? message.secret.reason ?? message.secret.description
-      : message.signIn ? message.signIn.reason ?? serverLine(conversationLanguage(threadId), "server.notify.openToSignIn", { site: wait.label })
+      : message.signIn ? message.signIn.instruction || (message.signIn.reason ?? serverLine(conversationLanguage(threadId), "server.notify.openToSignIn", { site: wait.label }))
         : message.connector?.description ?? wait.label;
     deps.notify(cardNotification(threadId, wait, detail));
   }
+
+  const handoffOf = (threadId: string, wait: PersonWait): boolean =>
+    isHandoff(store.activePath(threadId).find((row) => row.id === wait.messageId)?.signIn);
 
   function cardNotification(threadId: string, wait: PersonWait, detail: string): Notification | null {
     const bot = askerOf(threadId, wait);
@@ -73,7 +88,7 @@ export function createPersonWaits(deps: PersonWaitsDeps) {
     const target = { ...bot, threadId };
     switch (wait.kind) {
       case "password": return buildNotification("secret", target, threadId, detail, { ...extra, label: wait.label });
-      case "sign-in": return buildNotification("sign-in", target, threadId, detail, { ...extra, site: wait.label });
+      case "sign-in": return buildNotification("sign-in", target, threadId, detail, { ...extra, ...(handoffOf(threadId, wait) ? { handoff: true } : { site: wait.label }) });
       case "connect": return buildNotification("sign-in", target, threadId, detail, { ...extra, app: wait.label });
       case "question": return buildNotification("question", target, threadId, detail, extra);
       default: return buildNotification("approval", target, threadId, detail, extra);

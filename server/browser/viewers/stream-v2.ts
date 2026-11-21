@@ -12,8 +12,10 @@ import type { Socket } from "node:net";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 
 import { hostSetupOf } from "../chrome/host-setup.ts";
+import { browserInputLog } from "../input-log.ts";
 import type { BrowserService, BrowserTarget } from "../service.ts";
 import { FRAME_CAP_LIMITS, type Viewer, type ViewerOptions, type ViewerOutput } from "./core.ts";
+import { coverView } from "./cover.ts";
 import { requestedSize } from "./viewport.ts";
 import { displayUrl } from "./live-v1.ts";
 
@@ -108,6 +110,8 @@ class StreamSession {
   closing = false;
   #early: unknown[] = [];
   #restarting = false;
+  /** Another person's hold hides this view, as its last control message said. */
+  #heldElsewhere = false;
 
   constructor(request: StreamRequest, ws: WebSocket) {
     this.request = request;
@@ -143,6 +147,7 @@ class StreamSession {
       this.close(STREAM_CLOSE.reconnect, "reconnect", { dropped: true });
       return;
     }
+    if (output.type === "control") this.#heldElsewhere = output.held && !output.owned;
     const message = wireMessage(output);
     if (!message) return;
     const text = JSON.stringify(message);
@@ -177,6 +182,7 @@ class StreamSession {
     }
     if (!this.viewer) {
       if (this.#early.length < EARLY_INPUT_LIMIT) this.#early.push(message);
+      else browserInputLog.record({ who: "person", reason: "too_many_pending", what: String((message as { type?: unknown } | null)?.type), engine: "chrome", transport: "v2", session: this.request.target.session });
       return;
     }
     this.#input(message, service);
@@ -188,8 +194,14 @@ class StreamSession {
   }
 
   #input(message: unknown, service: BrowserService): void {
-    if ((message as { type?: unknown } | null)?.type === "restart") {
+    const type = (message as { type?: unknown } | null)?.type;
+    if (type === "restart") {
       void this.#restart(service);
+      return;
+    }
+    // The desktop app shows its native view of this browser over the panel, or hides it again.
+    if (type === "covered") {
+      if (this.viewer) void coverView(this.viewer, (message as { covered?: unknown }).covered === true, this.#heldElsewhere).catch(() => undefined);
       return;
     }
     void this.viewer?.input(message);
@@ -299,6 +311,8 @@ export class StreamV2 {
       pace: "hi",
       authPrompts: true,
       pagePopups: true,
+      // The panel shows this browser's window on a remote desktop instead: the stream still carries its hold and tabs.
+      ...(params.get("frames") === "0" ? { frames: false } : {}),
       ...(size && request.canOperate ? { size } : {}),
     };
     try {
@@ -320,7 +334,11 @@ export class StreamV2 {
   closeForSession(session: string): void { this.#closeWhere((request) => request.target.session === session); }
   closeForOwner(owner: string): void { this.#closeWhere((request) => request.owner === owner); }
   closeForBot(botId: string): void { this.#closeWhere((request) => request.botId === botId); }
-  closeAll(): void { this.#closeWhere(() => true); }
+  /** Every view closes: for good, or, as the server stops (`stopping`), with the close that has panels reconnect. */
+  closeAll({ stopping = false }: { stopping?: boolean } = {}): void {
+    if (!stopping) return this.#closeWhere(() => true);
+    for (const session of this.#sessions) session.close(STREAM_CLOSE.reconnect, "The server is restarting.");
+  }
   /** Closes now every view the 5 s recheck would close. */
   recheck(): void { for (const session of this.#sessions) if (!session.request.isCurrent()) session.close(STREAM_CLOSE.gone, GONE); }
 

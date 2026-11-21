@@ -41,7 +41,7 @@ export interface ChatToolDefinition {
 export interface ChatToolResult { text: string; ok: boolean; images?: ChatImagePart[] }
 /** How a call is shown and granted. A grant names the exact tool on the server as launched; the
  * person's own computer never gets a session-wide one. */
-export interface ChatToolCallView { title: string; input: Record<string, unknown>; ask: boolean; grant?: string }
+export interface ChatToolCallView { title: string; /** mcp__<server>__<tool>: the name a saved grant knows it by. */ permissionTool?: string; input: Record<string, unknown>; ask: boolean; grant?: string }
 /** A dispatched operation may already have taken effect: never retry it through a new round. */
 export class ChatToolSessionError extends Error {}
 export interface SkippedChatMcpServer { server: string; reason: string }
@@ -840,9 +840,9 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const viewOf = (tool: RegisteredTool, args: Record<string, unknown>, title: string): ChatToolCallView => {
     const runs = target(tool, args);
     if (runs === undefined || tool.agents) return { title, input: args, ask: false };
-    const grant = !tool.hostComputer ? JSON.stringify([tool.server, tool.launch, runs]) : undefined;
-    if (!tool.searched || tool.name !== CALL_TOOL) return { title, input: args, ask: true, ...(grant ? { grant } : {}) };
-    return { title: chatToolName(tool.server, runs), input: object(args.arguments) ? args.arguments : {}, ask: true, ...(grant ? { grant } : {}) };
+    const grant = !tool.hostComputer ? JSON.stringify([tool.server, tool.launch, runs]) : undefined, permissionTool = `mcp__${tool.server}__${runs}`;
+    if (!tool.searched || tool.name !== CALL_TOOL) return { title, permissionTool, input: args, ask: true, ...(grant ? { grant } : {}) };
+    return { title: chatToolName(tool.server, runs), permissionTool, input: object(args.arguments) ? args.arguments : {}, ask: true, ...(grant ? { grant } : {}) };
   };
   const view = (name: string, args: Record<string, unknown>): ChatToolCallView => {
     if (name === standIn?.definition.function.name) return { title: name, input: args, ask: false };

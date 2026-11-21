@@ -675,6 +675,14 @@ const commitsSinceGc = new Map<string, number>();
 /** Packs grow between collections because `git add` writes files over core.bigFileThreshold straight into packs. */
 const packBaselineKib = new Map<string, number>();
 
+/** A collection that failed by itself (not stopped to make way): owed, with how many failed in a row. The next snapshot
+ * that adds a commit queues it again, after 1, 2, 4… up to GC_EVERY_COMMITS commits, so one that keeps failing costs
+ * a try now and then, never one per turn. A collection decided due resets the counts above; this keeps it owed. */
+const owedCollections = new Map<string, number>();
+
+/** The pack baseline a due collection set aside, put back when that collection fails. */
+const baselineBeforeCollection = new Map<string, number | undefined>();
+
 /** Held until that turn's settled diff is queued or its pin is released, whichever comes first. */
 const pendingCollections = new Map<string, (stop: AbortController) => Promise<void>>();
 
@@ -708,7 +716,9 @@ async function collectionDue(shadow: string, result: CommitResult, cwd: string, 
   if (!result.advanced && !freed) return false;
   const commits = (commitsSinceGc.get(shadow) ?? 0) + (result.advanced ? 1 : 0);
   commitsSinceGc.set(shadow, commits);
-  let due = freed || commits >= GC_EVERY_COMMITS;
+  const failed = owedCollections.get(shadow);
+  const owed = failed !== undefined && commits >= Math.min(GC_EVERY_COMMITS, 2 ** (failed - 1));
+  let due = freed || owed || commits >= GC_EVERY_COMMITS;
   if (!due) {
     const counted = await runGit(["count-objects", "-v"], cwd, env).catch(() => "");
     if (counted !== "") {
@@ -721,6 +731,7 @@ async function collectionDue(shadow: string, result: CommitResult, cwd: string, 
   }
   if (due) {
     commitsSinceGc.set(shadow, 0);
+    if (!baselineBeforeCollection.has(shadow)) baselineBeforeCollection.set(shadow, packBaselineKib.get(shadow));
     packBaselineKib.delete(shadow);
   }
   return due;
@@ -733,14 +744,33 @@ async function collectObsolete(shadow: string, cwd: string, env: NodeJS.ProcessE
   const signal = process.platform === "win32" ? undefined : stop.signal;
   const marker = join(shadow, ".git", COLLECTING);
   const before = Math.floor(Date.now() / 1000);
-  try {
-    writeFileSync(marker, String(before), { mode: 0o600 });
+  const collect = async () => {
     await runGit(["reflog", "expire", "--expire=now", "--all"], cwd, env, signal);
     stop.signal.throwIfAborted();
     await runGit(["gc", `--prune=${before}`, "--quiet"], cwd, env, signal);
-  } catch {
-    if (!stop.signal.aborted) console.warn("checkpoint cleanup deferred; the latest snapshot is preserved");
-    else if (!pendingCollections.has(shadow)) pendingCollections.set(shadow, (again) => collectObsolete(shadow, cwd, env, again));
+  };
+  try {
+    writeFileSync(marker, String(before), { mode: 0o600 });
+    // Once more, without whatever lock a git stopped by force left behind; a git that ran out of time is not tried again.
+    await collect().catch(async (e: unknown) => {
+      if (e instanceof GitTimeoutError || stop.signal.aborted) throw e;
+      await clearStaleLocks(shadow, 0);
+      stop.signal.throwIfAborted();
+      await collect();
+    });
+    owedCollections.delete(shadow);
+    baselineBeforeCollection.delete(shadow);
+  } catch (e) {
+    if (stop.signal.aborted) {
+      if (!pendingCollections.has(shadow)) pendingCollections.set(shadow, (again) => collectObsolete(shadow, cwd, env, again));
+      return;
+    }
+    // Still owed: a later snapshot queues it again, and the growth it was due for still counts.
+    owedCollections.set(shadow, (owedCollections.get(shadow) ?? 0) + 1);
+    const baseline = baselineBeforeCollection.get(shadow);
+    baselineBeforeCollection.delete(shadow);
+    if (baseline !== undefined && !packBaselineKib.has(shadow)) packBaselineKib.set(shadow, baseline);
+    console.warn(`checkpoint cleanup deferred; the latest snapshot is preserved: ${e instanceof Error ? e.message : String(e)}`);
   } finally {
     rmSync(marker, { force: true });
   }

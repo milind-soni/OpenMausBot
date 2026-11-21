@@ -70,6 +70,16 @@ afterAll(async () => {
   if (stub) rmSync(stub.dir, { recursive: true, force: true });
 });
 
+it("lets only the owner or an admin turn the browser's desktop view on, as every browser setting", async () => {
+  const set = (token: string, browserEngine: Record<string, unknown>) => team.as(token, "PATCH", "/api/config", { browserEngine });
+  expect((await set(ada, { cloudDisplay: true })).status).toBe(403);
+  expect((await set(ada, { idleTimeoutMinutes: 5 })).status).toBe(403);
+  const byAdmin = await set(admin, { cloudDisplay: true });
+  expect(byAdmin.status, JSON.stringify(byAdmin.body)).toBe(200);
+  const byOwner = await set(owner, { cloudDisplay: false });
+  expect(byOwner.status, JSON.stringify(byOwner.body)).toBe(200);
+});
+
 /** The live view's first answer: a refusal names its reason; an open view (a real browser) is cut off after its headers. */
 async function liveView(token: string, threadId?: string): Promise<{ status: number; error?: string }> {
   const abort = new AbortController();
