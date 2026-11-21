@@ -216,16 +216,35 @@ describe("the Responses request", () => {
       ],
     });
     expect(body).toEqual({
-      model: MODEL, stream: true, store: false, instructions: "Be brief.",
+      model: MODEL, stream: true, store: false,
       reasoning: { summary: "auto" },
       tools: [{ type: "function", name: "audit_write", description: "Writes", parameters: { type: "object" }, strict: false }],
       input: [
+        { role: "developer", content: "Be brief." },
         { role: "user", content: [{ type: "input_text", text: "Look" }, { type: "input_image", image_url: "data:image/png;base64,AAAA", detail: "auto" }] },
         { role: "assistant", content: "Looking." },
         { type: "function_call", call_id: "call_9", name: "audit_write", arguments: "{}" },
         { type: "function_call_output", call_id: "call_9", output: '{"ok":true}' },
       ],
     });
+  });
+
+  it("migrates system messages to input[0] as developer role and leaves top-level instructions unset", () => {
+    const body = responsesRequest({
+      model: MODEL,
+      summaries: false,
+      replay: () => undefined,
+      tools: [],
+      messages: [
+        { role: "system", content: "Static developer instructions." },
+        { role: "user", content: "Hi" },
+      ],
+    });
+    expect(body).not.toHaveProperty("instructions");
+    expect(body.input).toEqual([
+      { role: "developer", content: "Static developer instructions." },
+      { role: "user", content: "Hi" },
+    ]);
   });
 });
 
@@ -321,17 +340,17 @@ describe("tool rounds over Responses", () => {
       expect(call.body).not.toHaveProperty("reasoning_effort");
       expect(call.body).not.toHaveProperty("messages");
     }
-    expect(first!.body.input.map((item: any) => item.type ?? item.role)).toEqual(["user"]);
-    expect(first!.body.tools[0]).toMatchObject({ type: "function", name: "audit_write", strict: false, parameters: { required: ["name"] } });
+    expect(first!.body.input.map((item: any) => item.type ?? item.role)).toEqual(["developer", "user"]);
+    expect(first!.body.tools.find((t: any) => t.name === "audit_write")).toMatchObject({ type: "function", name: "audit_write", strict: false, parameters: { required: ["name"] } });
     expect(first!.body.tools[0]).not.toHaveProperty("function");
 
-    expect(second!.body.input.slice(1)).toEqual([
+    expect(second!.body.input.slice(2)).toEqual([
       reasoningItem(),
       callItem(),
       { type: "function_call_output", call_id: "call_1", output: JSON.stringify({ ok: true, result: "Stored." }) },
     ]);
-    expect(third!.body.input.slice(1, 3)).toEqual([reasoningItem(), callItem()]);
-    expect(third!.body.input.slice(4)).toEqual([
+    expect(third!.body.input.slice(2, 4)).toEqual([reasoningItem(), callItem()]);
+    expect(third!.body.input.slice(5)).toEqual([
       reasoningItem("rs_2"),
       messageItem("Checking once more.", "msg_2", "commentary"),
       callItem("audit_write", '{"name":"second"}', "call_2", "fc_2"),

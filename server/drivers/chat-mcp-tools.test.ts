@@ -1668,4 +1668,28 @@ describe("Chat MCP servers starting in the background", () => {
       expect(await session.join()).toBeUndefined();
     }
   });
+
+  it("sorts definitions in full lexicographical order and ensures joinLateChatTools preserves prefix order", async () => {
+    const multi = fixture(`if (message.method === "tools/list") {
+      reply(message, { tools: [
+        { name: "zebra", description: "Z", inputSchema: schema },
+        { name: "apple", description: "A", inputSchema: schema },
+        { name: "mango", description: "M", inputSchema: schema },
+      ] });
+      continue;
+    }`);
+    const session = await mountChatTools({ custom: { zoo: multi.server } }, multi.controller.signal);
+    sessions.push(session);
+    expect(names(session)).toEqual(["zoo_apple", "zoo_mango", "zoo_zebra"]);
+
+    const ask: ChatToolDefinition = {
+      type: "function",
+      function: { name: "ask_user", description: "ask", parameters: { type: "object" } },
+    };
+    session.definitions.push(ask);
+    expect(names(session)).toEqual(["zoo_apple", "zoo_mango", "zoo_zebra", "ask_user"]);
+    await joinLateChatTools(session, [ask]);
+    expect(names(session).slice(0, 3)).toEqual(["zoo_apple", "zoo_mango", "zoo_zebra"]);
+    expect(names(session).at(-1)).toBe("ask_user");
+  });
 });

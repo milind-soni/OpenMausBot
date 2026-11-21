@@ -99,7 +99,7 @@ function inputContent(content: ChatContentPart[]) {
 }
 
 function inputItems(message: OpenAIChatMessage, replay: ResponseItem[] | undefined): ResponseItem[] {
-  if (message.role === "system") return [];
+  if (message.role === "system" || message.role === "developer") return [];
   // A stateless reasoning model needs every output item back untouched, its reasoning and assistant `phase` included:
   // https://developers.openai.com/api/docs/guides/reasoning#keeping-reasoning-items-in-context
   if (replay) return replay;
@@ -125,14 +125,14 @@ export function responsesRequest(input: {
   /** The reasoning level the person picked, as the Chat Completions body would carry it in `reasoning_effort`. */
   effort?: unknown;
 }): Record<string, unknown> {
-  const instructions = input.messages.filter((message) => message.role === "system" && typeof message.content === "string")
+  const instructions = input.messages.filter((message) => (message.role === "system" || message.role === "developer") && typeof message.content === "string")
     .map((message) => message.content).join("\n\n");
+  const developerItems: ResponseItem[] = instructions ? [{ role: "developer", content: instructions }] : [];
   return {
     model: input.model,
     stream: true,
     store: false,
-    ...(instructions ? { instructions } : {}),
-    input: input.messages.flatMap((message) => inputItems(message, input.replay(message))),
+    input: [...developerItems, ...input.messages.flatMap((message) => inputItems(message, input.replay(message)))],
     ...(input.summaries || typeof input.effort === "string" ? { reasoning: {
       ...(typeof input.effort === "string" ? { effort: input.effort } : {}), ...(input.summaries ? { summary: "auto" } : {}),
     } } : {}),

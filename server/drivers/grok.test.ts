@@ -206,6 +206,25 @@ describe("GrokDriver turns (fake fetch)", () => {
     await create();
     await expect(instance.adapter.respondToRequest("t-x", "r", { behavior: "allow" })).resolves.toBe("unavailable");
   });
+
+  it("injects x-grok-conv-id header with threadId on requests", async () => {
+    script = [];
+    let capturedHeaders: Record<string, string> | undefined;
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url, init) => {
+      capturedHeaders = init?.headers as Record<string, string> | undefined;
+      return sseResponse(SSE_BODY("done from fake grok"));
+    }) as typeof fetch;
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-sticky-node-123", text: "hi" });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(capturedHeaders).toBeDefined();
+      expect((capturedHeaders as Record<string, string>)["x-grok-conv-id"]).toBe("t-sticky-node-123");
+    } finally {
+      globalThis.fetch = origFetch;
+    }
+  });
 });
 
 it("grok preserves an explicit tools-off connection and rejects ambiguous flags", () => {

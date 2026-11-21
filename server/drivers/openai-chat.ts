@@ -38,7 +38,7 @@ import { KEY_REJECTED_REASON, keyRejected, noteKeyAccepted, noteKeyRejected, rej
 import { FETCH_LIMIT_MS, fetchPastLimit, prepareChatModel } from "./openai-chat-fetch.ts";
 import { announcesAction } from "./chat-announcement.ts";
 export interface OpenAIChatMessage {
-  role: "system" | "user" | "assistant" | "tool";
+  role: "system" | "user" | "assistant" | "tool" | "developer";
   content: string | ChatContentPart[] | null;
   tool_calls?: ChatToolCall[];
   tool_call_id?: string;
@@ -109,8 +109,7 @@ interface RuntimeOptions<Config> {
   billing?: "metered";
   includeUsageInCompleted?: boolean;
   noBodyError?: string;
-  retryScale?: number;
-  tools?: boolean;
+  retryScale?: number; tools?: boolean; headers?: (threadId?: string, model?: string) => Record<string, string>;
   computerUse?: boolean;
   /** A text-only model keeps the computer and browser tools but never receives a screenshot or attachment. */
   imageInput?: (model: string) => boolean; /** Bytes of video clips a turn may send as they are; unset sends frames. */ videoBytes?: number;
@@ -290,7 +289,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       const response = await send(`${options.apiUrl}/${route === "responses" ? "responses" : "chat/completions"}`, {
         method: "POST",
         ...(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url")) ? { redirect: "error" as const } : {}),
-        headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
+        headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json", ...((options.driverKind === "grok" || options.apiUrl.includes("api.x.ai")) && threadId ? { "x-grok-conv-id": threadId } : {}), ...options.headers?.(threadId, model) },
         body: payload,
         signal: activeSignal,
       });
@@ -618,7 +617,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         const questionAllowed = !toolsOff && allowsTool(scope, { kind: "native", name: ASK_USER_TOOL });
           // An MCP server squatting ask_user cannot shadow it (dispatch intercepts the name); skip its definition.
         if (questionAllowed && !tools.definitions.some((definition) => definition.function.name === ASK_USER_TOOL)) {
-          tools.definitions.push(ASK_USER_TOOL_DEFINITION);
+          tools.definitions.push(ASK_USER_TOOL_DEFINITION); tools.definitions.sort((a, b) => a.function.name.localeCompare(b.function.name));
         }
         for (let round = 0; ; round++) {
           abort.signal.throwIfAborted();

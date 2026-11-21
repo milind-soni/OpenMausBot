@@ -9492,7 +9492,7 @@ describe("harness HTTP API", () => {
       const persona = "You are Kiwi, a personal bot in OpenMausBot. Role: Tracker.";
       const afterPersona = system.slice(persona.length);
       expect(afterPersona.startsWith("\n\nYour standing instructions follow.")).toBe(true);
-      expect(system).toContain("--- BEGIN STANDING INSTRUCTIONS (SOUL.md, 28 bytes) ---\nFile bugs. Never file noise.\n--- END STANDING INSTRUCTIONS ---");
+      expect(system).toContain("--- BEGIN STANDING INSTRUCTIONS (SOUL.md) ---\nFile bugs. Never file noise.\n--- END STANDING INSTRUCTIONS ---");
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/bots/${bot.id}`);

@@ -372,9 +372,18 @@ export async function refitChatTools(session: ChatToolSession, error: unknown, k
 /** Between rounds, lists the tools of servers that finished starting in the background, the runtime's own `runtime`
  * definitions kept after them. Undefined when none did. */
 export async function joinLateChatTools(session: ChatToolSession, runtime: readonly ChatToolDefinition[]): Promise<string[] | undefined> {
-  const kept = session.definitions.filter((definition) => runtime.includes(definition));
+  const runtimeSet = new Set(runtime);
+  const initial = session.definitions.slice();
+  const kept = initial.filter((definition) => runtimeSet.has(definition));
+  const priorNonRuntime = initial.filter((definition) => !runtimeSet.has(definition));
+  const priorNames = new Set(priorNonRuntime.map((d) => d.function.name));
   const lines = await session.join();
-  if (lines !== undefined) session.definitions.push(...kept);
+  if (lines !== undefined) {
+    const lateTools = session.definitions.filter((d) => !priorNames.has(d.function.name) && !runtimeSet.has(d));
+    lateTools.sort((a, b) => a.function.name.localeCompare(b.function.name));
+    session.definitions.length = 0;
+    session.definitions.push(...priorNonRuntime, ...lateTools, ...kept);
+  }
   return lines;
 }
 
@@ -723,6 +732,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       }
     }
     budget.listed = definitions.length;
+    definitions.sort((a, b) => a.function.name.localeCompare(b.function.name));
   };
   type Mounted = { origin: ToolOrigin; tools: unknown[]; host: HostComputerStart | undefined };
   const outcomes: Array<PromiseSettledResult<Mounted> | undefined> = [];
@@ -914,6 +924,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
     offeredTools.push({ origin: waiting.origin, tools: checkedTools(tools, waiting.origin.server) });
     await layout(budget.limit);
     definitions.push(...runtime);
+    definitions.sort((a, b) => a.function.name.localeCompare(b.function.name));
     return { ok: true, text: HOST_COMPUTER_READY };
   };
   return {

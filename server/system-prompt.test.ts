@@ -5,6 +5,7 @@ import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import {
   longCommandsPrompt,
   buildSystemPrompt,
+  VOLATILE_SECTIONS,
   CONVERSATIONAL_STYLE_PROMPT,
   CLOUD_HOME_PLACE,
   CLOUD_ENGINES_HERE,
@@ -145,7 +146,7 @@ describe("buildSystemPrompt", () => {
     expect(built.volatile).toBe(" This turn you may choose. Your memory: likes tea.");
   });
 
-  it("keeps a turn's switched-on instructions volatile, and setup and the webhook's untrusted-data rule stable", () => {
+  it("keeps a turn's switched-on instructions and setup volatile, and the webhook's untrusted-data rule stable", () => {
     const built = buildSystemPrompt("You are Kiwi.", "", [
       { id: "setup", label: "Setup", text: " Set yourself up." },
       { id: "skill-instructions", label: "Skill instructions", text: " Use the deploy skill." },
@@ -153,11 +154,12 @@ describe("buildSystemPrompt", () => {
       { id: "automation-reply", label: "Automation reply", text: AUTOMATION_REPLY_PROMPT },
       { id: "webhook", label: "Webhook provenance", text: WEBHOOK_PROMPT },
     ]);
+    expect(built.volatile).toContain("Set yourself up.");
     expect(built.volatile).toContain("Use the deploy skill.");
     expect(built.volatile).toContain(ROUTINE_EXECUTION_PROMPT);
     // a routine run that reports elsewhere reads the bot's own cached prefix
     expect(built.volatile).toContain(AUTOMATION_REPLY_PROMPT);
-    expect(built.stable).toBe(`You are Kiwi. Set yourself up.${WEBHOOK_PROMPT}${REPLY_HABITS_PROMPT}`);
+    expect(built.stable).toBe(`You are Kiwi.${WEBHOOK_PROMPT}${REPLY_HABITS_PROMPT}`);
   });
 
   it("keeps the phone part stable and where the person is volatile, so a turn from the phone keeps the cached prefix", () => {
@@ -632,5 +634,49 @@ describe("a heavy bot", () => {
     // a long Soul with little memory: tidying would not help
     expect(heavyPrompt([section("memory", 1_000), section("soul", HEAVY_PROMPT_BYTES)])).toBe(false);
   });
-});
+  it("keeps volatile sections (team-memory, skills, setup, to-connect, mcp, people, cloud-home) out of systemStable", () => {
+    for (const id of ["team-memory", "skills", "setup", "to-connect", "mcp", "people", "cloud-home"]) {
+      expect(VOLATILE_SECTIONS.has(id), `VOLATILE_SECTIONS should have ${id}`).toBe(true);
+    }
+    const built = buildSystemPrompt("You are Kiwi.", "My soul.", [
+      { id: "team-memory", label: "Team memory", text: " Shared facts." },
+      { id: "skills", label: "Skills index", text: " Available skills." },
+      { id: "setup", label: "Setup", text: " Setup instructions." },
+      { id: "to-connect", label: "To connect", text: " Apps to connect." },
+      { id: "mcp", label: "MCP", text: " MCP servers." },
+      { id: "people", label: "People", text: " Team people." },
+      { id: "cloud-home", label: "My Cloud", text: " Cloud home facts." },
+      { id: "computer", label: "Computer", text: " Computer rules." },
+    ]);
+    expect(built.volatile).toContain("Shared facts.");
+    expect(built.volatile).toContain("Available skills.");
+    expect(built.volatile).toContain("Setup instructions.");
+    expect(built.volatile).toContain("Apps to connect.");
+    expect(built.volatile).toContain("MCP servers.");
+    expect(built.volatile).toContain("Team people.");
+    expect(built.volatile).toContain("Cloud home facts.");
 
+    // systemStable must stay pure and not contain any of the volatile sections
+    expect(built.stable).not.toContain("Shared facts.");
+    expect(built.stable).not.toContain("Available skills.");
+    expect(built.stable).not.toContain("Setup instructions.");
+    expect(built.stable).not.toContain("Apps to connect.");
+    expect(built.stable).not.toContain("MCP servers.");
+    expect(built.stable).not.toContain("Team people.");
+    expect(built.stable).not.toContain("Cloud home facts.");
+    expect(built.stable).toContain("Computer rules.");
+  });
+
+  it("adjusts array order so soul precedes user-profile", () => {
+    const profile = userProfileSystemPrompt({ aboutMe: "Prefer concise code." });
+    const built = buildSystemPrompt("Persona", "Strict instructions.", [
+      { id: "user-profile", label: "About the user", text: profile },
+      { id: "computer", label: "Computer", text: " Computer." },
+    ]);
+    const soulIdx = built.sections.findIndex((s) => s.id === "soul");
+    const profileIdx = built.sections.findIndex((s) => s.id === "user-profile");
+    expect(soulIdx).toBeGreaterThanOrEqual(0);
+    expect(profileIdx).toBeGreaterThanOrEqual(0);
+    expect(soulIdx).toBeLessThan(profileIdx);
+  });
+});

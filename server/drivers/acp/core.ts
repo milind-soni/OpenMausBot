@@ -277,8 +277,8 @@ const ACP_STUCK_AFTER_MS = 180_000;
 const SHARED_SESSIONS_MAX = 6, SHARED_SESSIONS_LIFETIME = 12;
 /** Closing a session for these leaves its process fit for other threads' sessions; any other reason retires it. */
 const HEALTHY_CLOSE = new Set(["idle", "reset", "contract", "stop", "stopAll", "dispose", "approval-unconfirmed"]);
-/** ACP agents may compact their history silently; re-send the full prompt after this many bare turns. */
-const ACP_PROMPT_RE_ANCHOR_TURNS = 8;
+/** Only genuine compaction drops the receipt to trigger re-anchoring; blind periodic re-anchoring is disabled. */
+const ACP_PROMPT_RE_ANCHOR_TURNS = 0;
 function isHermesReasoningReplay(chunk: string, streamed: string): boolean {
   const reply = streamed.trim();
   const replay = chunk.trim();

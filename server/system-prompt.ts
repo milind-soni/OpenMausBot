@@ -46,8 +46,11 @@ export function heavyPrompt(sections: readonly PromptSection[]): boolean {
 // Two more ride the volatile half so a bot's stable half is the same bytes across its runs: the bridge rule (on for some
 // runs of a bot and not others) and an automation run's reply rule ("automation-reply"), which otherwise makes every
 // routine run write a new cached prefix.
-const VOLATILE_SECTIONS = new Set(["memory", "mentions", "outstanding", "teammate-questions", "long-waits", "recent", "availability", "active-routines",
-  "plan", "assignment", "routine-execution", "automation-reply", "skill-instructions", "playbooks", "device-place", "files", "tool-bridge"]);
+export const VOLATILE_SECTIONS = new Set([
+  "memory", "mentions", "outstanding", "teammate-questions", "long-waits", "recent", "availability", "active-routines",
+  "plan", "assignment", "routine-execution", "automation-reply", "skill-instructions", "playbooks", "device-place", "files", "tool-bridge",
+  "team-memory", "skills", "setup", "to-connect", "mcp", "people", "cloud-home",
+]);
 /** In the stable half, so it is not sent again whenever availability changes, but no part of what a per-thread process is
  * keyed on: a warm process gets a changed roster as a note instead of a relaunch (SendTurnInput.systemRoster). */
 const ROSTER_SECTION = "roster";
@@ -93,14 +96,17 @@ export function buildSystemPrompt(
   agents?: { env?: Record<string, string | undefined> },
   opts?: { replyStyle?: ReplyStyle; rules?: string },
 ): { text: string; sections: PromptSection[]; stable: string; volatile: string; roster: string } {
+  const userProfilePart = parts.find((part) => part.id === "user-profile");
+  const otherParts = parts.filter((part) => part.id !== "user-profile");
   const ordered: PromptPart[] = [
     { id: "persona", label: "Identity", text: persona },
     { id: "every-bot-rules", label: "Rules for every bot", text: everyBotRulesPrompt(opts?.rules) },
     { id: "soul", label: "Standing instructions (SOUL.md)", text: soulSystemPrompt(soul) },
+    ...(userProfilePart ? [userProfilePart] : []),
     // Right after the soul: on a direct turn, ahead of every section that names a tool.
     { id: "tool-bridge", label: "Tool search", text: agentsToolBridged(agents) ? AGENTS_TOOL_BRIDGE_PROMPT : "" },
     { id: "reply-style", label: "Reply style", text: replyStylePrompt(opts?.replyStyle) },
-    ...parts,
+    ...otherParts,
     { id: "reply-habits", label: "How to reply", text: REPLY_HABITS_PROMPT },
   ];
   const sections = ordered
