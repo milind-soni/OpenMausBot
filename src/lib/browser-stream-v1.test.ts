@@ -173,6 +173,30 @@ describe("the v1 live client", () => {
     expect(post).toHaveBeenLastCalledWith({ type: "release" }, "v1");
   });
 
+  it("stops sending presses after one refused request until it reconnects, and tells the server how many it dropped", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { client, post, handlers, source } = open();
+      source.emit("ready", { viewerId: "v1" });
+      source.emit("control", { held: true, owned: true, controlling: true });
+      const press = { type: "mouse", action: "down", x: 1, y: 2, button: "left", buttons: 1, clickCount: 1, modifiers: 0 } as const;
+      post.mockRejectedValueOnce(Object.assign(new Error("Browser control changed. Try again."), { status: 409 }));
+      client.transport.send(press);
+      await client.transport.settle();
+      expect(client.transport.stopped()).toBe(true);
+      expect(handlers.onMessage).toHaveBeenCalledWith({ type: "notice", message: "Browser control changed. Try again." });
+      post.mockClear();
+      client.transport.send(press);
+      client.transport.send({ type: "text", text: "typed words" });
+      client.transport.send({ type: "mouse", action: "move", x: 3, y: 4, button: "none", buttons: 0, clickCount: 0, modifiers: 0 });
+      await client.transport.settle();
+      expect(post).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(post.mock.calls).toEqual([[{ type: "client_drops", counts: { send_failed: 1, queue_halted: 2 } }, "v1"]]);
+      client.stop();
+    } finally { vi.useRealTimers(); }
+  });
+
   it("batches the input queued behind a request only for a server that said it takes batches", async () => {
     for (const [ready, batched] of [[{ viewerId: "v1", inputBatch: 64 }, true], [{ viewerId: "v1" }, false]] as const) {
       const { client, post, source } = open();

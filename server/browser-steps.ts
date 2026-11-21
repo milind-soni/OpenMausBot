@@ -13,6 +13,7 @@ import { RelayPorts, RelayTimeout, relay, relayPorts, relayTarget, type RelayTar
 import { attachesToChrome, type BrowserSpawnSpec } from "./browser-runtime.ts";
 import { sanitizeUrl, scrubBrowserResult } from "./browser-tool-shape.ts";
 import { browserEgress } from "./browser/egress/registry.ts";
+import { browserInputLog, type BrowserInputLog } from "./browser/input-log.ts";
 import { chromeLauncher } from "./browser/chrome/launcher.ts";
 
 export interface StepContext {
@@ -146,6 +147,38 @@ export const GEOMETRY_SCRIPT = `(() => {
 })()`;
 
 const PAGE_SCRIPT = "JSON.stringify({ url: location.href, loadedAt: performance.timeOrigin })";
+
+/** PAGE_SCRIPT with `typed`: whether the focused element is an editable field holding text; null inside a frame of another site. */
+export const TYPED_PAGE_SCRIPT = `(() => {
+  let a = document.activeElement;
+  let typed = false;
+  for (let depth = 0; a && depth < 20; depth++) {
+    if (a.shadowRoot && a.shadowRoot.activeElement) { a = a.shadowRoot.activeElement; continue; }
+    const t = String(a.tagName || "").toLowerCase();
+    if (t !== "iframe" && t !== "frame") break;
+    let doc = null;
+    try { doc = a.contentDocument; } catch {}
+    if (!doc) { a = null; typed = null; break; }
+    a = doc.activeElement;
+  }
+  if (a) {
+    const t = String(a.tagName || "").toLowerCase();
+    const editable = a.isContentEditable || ((t === "input" || t === "textarea") && !a.readOnly && !a.disabled);
+    typed = Boolean(editable && (typeof a.value === "string" ? a.value.length : (a.innerText || "").length) > 0);
+  }
+  return JSON.stringify({ url: location.href, loadedAt: performance.timeOrigin, typed });
+})()`;
+
+/** False when a fill or type the engine called done left no text in the focused field; null when that cannot be told. */
+function typedLanded(geometry: Geometry | null, raw: unknown): boolean | null {
+  if (geometry) return geometry.focus?.frame === "cross" ? null : Boolean(geometry.focus?.editable && geometry.focus.valueLength > 0);
+  let parsed: unknown = raw;
+  for (let depth = 0; depth < 2 && typeof parsed === "string"; depth++) {
+    try { parsed = JSON.parse(parsed); } catch { return null; }
+  }
+  const typed = record(parsed)?.typed;
+  return typeof typed === "boolean" ? typed : null;
+}
 
 const FRAME_SCRIPT = "new Promise((r) => { const t = setTimeout(() => r(0), 250); requestAnimationFrame(() => requestAnimationFrame(() => { clearTimeout(t); r(1); })); })";
 
@@ -319,9 +352,11 @@ export class BrowserSteps {
   private now: () => number;
   private sleep: (ms: number) => Promise<void>;
   private shellForWantOfChrome: () => boolean;
+  private inputLog: BrowserInputLog;
 
-  constructor(options: { ports: RelayPorts; evidence: BrowserEvidence | null; health?: PageHealthReader; now?: () => number; sleep?: (ms: number) => Promise<void>; shellForWantOfChrome?: () => boolean }) {
+  constructor(options: { ports: RelayPorts; evidence: BrowserEvidence | null; health?: PageHealthReader; now?: () => number; sleep?: (ms: number) => Promise<void>; shellForWantOfChrome?: () => boolean; inputLog?: BrowserInputLog }) {
     this.ports = options.ports;
+    this.inputLog = options.inputLog ?? browserInputLog;
     this.shellForWantOfChrome = options.shellForWantOfChrome ?? (() => chromeLauncher.runsShellForWantOfChrome());
     this.evidence = options.evidence;
     this.health = options.health ?? new PageHealthReader();
@@ -452,7 +487,12 @@ export class BrowserSteps {
         geometry = parseGeometry(answer?.data?.result);
         failure = answer?.error;
       }
-      const page = geometry ?? parseGeometry((await read({ action: "evaluate", script: PAGE_SCRIPT }))?.data?.result);
+      const typing = ok && (tool === "agent_browser_fill" || tool === "agent_browser_type") && typeof call.args.text === "string" && call.args.text !== "";
+      const raw = geometry ? null : (await read({ action: "evaluate", script: typing ? TYPED_PAGE_SCRIPT : PAGE_SCRIPT }))?.data?.result;
+      const page = geometry ?? parseGeometry(raw);
+      if (typing && (geometry || raw !== undefined) && typedLanded(geometry, raw) === false) {
+        this.inputLog.record({ who: "bot", reason: "typed_not_landed", what: tool, engine: "agent-browser", transport: "tools", session: call.session });
+      }
       this.health.setPage(call.session, page?.url ?? null, page?.loadedAt ?? null);
       const delta = await this.health.read(call.session, read, call.ctx?.threadId ?? null, state.noDaemon);
       if (this.ports.takeStarted(call.session)) await this.started(call, steps, true, out);

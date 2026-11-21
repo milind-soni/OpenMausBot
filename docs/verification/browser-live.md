@@ -129,6 +129,14 @@ from the menu (new engine) still shows bands on purpose.
 `scripts/testing/browser-fill.e2e.test.ts` runs the agent-browser side against the pinned engine and
 `server/browser/viewers/viewers.e2e.test.ts` the new engine's (`OMB_CDP_CHROME`).
 
+`scripts/testing/browser-input.e2e.test.ts` drives input on the pinned engine through the real server: a person takes
+control, clicks a button and types a word with the action requests the panel sends, and a bot's click and fill tools
+change the page; a refused action leaves a `browser input:` line in the server log. CI's `ui-smoke` job runs it.
+
+Input that does not reach a page is logged as `browser input: <who> <what> dropped reason=<code> engine=<engine>
+transport=<v1|v2|tools> session=<id>`, counted since the server started, and the counts go into a `@devs` report.
+The codes are listed in `server/browser/input-log.ts`. A line never carries page content, typed text or an address.
+
 Focused automated coverage:
 
 ```sh

@@ -9,6 +9,8 @@ export interface FakeGeometry {
   url: string; title: string; vw: number; vh: number; dpr: number; sx: number; sy: number;
   focus: null | { role: string; name: string; editable: boolean; valueLength: number; secret: boolean; rect: { x: number; y: number; w: number; h: number }; frame?: "same" | "cross" | null };
   unmasked: number;
+  /** What the typed-text read answers: whether the focused field holds text. */
+  typed?: boolean | null;
 }
 
 export class FakeRelay {
