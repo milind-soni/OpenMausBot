@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // On the desktop app with browserEngine.surface "pane", the panel tells the app where its page area is, and the
 // app's native view hides whenever an overlay covers it; with the setting off the panel never asks.
-import { createElement } from "react";
+import { act, createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,11 +14,17 @@ vi.mock("@/state/store", async (importOriginal) => {
 });
 vi.mock("@/lib/page-visible", () => ({ usePageVisible: () => true }));
 vi.mock("@/lib/browser-pip", () => ({ supportsBrowserPictureInPicture: () => false, useBrowserPictureInPicture: () => "" }));
+const streamed = vi.hoisted(() => [] as unknown[]);
+const surface = vi.hoisted(() => ({ props: null as null | { onConnectedChange(next: boolean): void; onMessage?(message: Record<string, unknown>): void } }));
 vi.mock("./browser/StreamSurface", async () => {
   const { useEffect } = await import("react");
   return {
-    StreamSurface: (props: { onConnectedChange(next: boolean): void }) => {
-      useEffect(() => { props.onConnectedChange(true); }, []);
+    StreamSurface: (props: { onConnectedChange(next: boolean): void; onClient?(client: unknown): void; onMessage?(message: Record<string, unknown>): void }) => {
+      surface.props = props;
+      useEffect(() => {
+        props.onClient?.({ send: (message: unknown) => { streamed.push(message); return true; }, stop: () => {} });
+        props.onConnectedChange(true);
+      }, []);
       return null;
     },
   };
@@ -88,5 +94,50 @@ describe("the browser panel's native pane", () => {
     flushSync(() => root.unmount());
     expect(show.mock.calls.at(-1)?.[0]).toEqual({ botId: "scout", threadId: null, profile: null, bounds: null, visible: false });
     root = createRoot(host);
+  });
+
+  it("stops the stream's frames while the app shows the pane, and has them again once it hides", async () => {
+    engine.pane = true;
+    streamed.length = 0;
+    flushSync(() => root.render(createElement(LiveBrowser, { bot })));
+    await settle();
+    const covers = () => streamed.filter((message) => (message as { type?: string }).type === "covered").map((message) => (message as { covered: boolean }).covered);
+    await vi.waitFor(() => expect(covers().at(-1)).toBe(true));
+    const overlay = document.createElement("div");
+    overlay.setAttribute("role", "menu");
+    overlay.style.opacity = "1";
+    document.body.append(overlay);
+    await vi.waitFor(() => expect(covers().at(-1)).toBe(false));
+    overlay.remove();
+    await vi.waitFor(() => expect(covers().at(-1)).toBe(true));
+  });
+
+  it("keeps the frames where the app did not show the pane", async () => {
+    engine.pane = true;
+    streamed.length = 0;
+    show.mockImplementation(async () => ({ shown: false }));
+    flushSync(() => root.render(createElement(LiveBrowser, { bot })));
+    await settle();
+    expect(streamed.some((message) => (message as { type?: string; covered?: boolean }).type === "covered" && (message as { covered: boolean }).covered)).toBe(false);
+  });
+
+  it("shows the pane again by itself after its server restarts and the stream reconnects", async () => {
+    engine.pane = true;
+    flushSync(() => root.render(createElement(LiveBrowser, { bot })));
+    await settle();
+    expect(show.mock.calls.at(-1)?.[0]).toMatchObject({ visible: true });
+    // The server restarts: the stream drops and reconnects, the new server says its browser is starting, and the
+    // covered view draws no frame; then the browser lists its tab.
+    await act(async () => surface.props!.onConnectedChange(false));
+    await settle();
+    expect(show.mock.calls.at(-1)?.[0]).toMatchObject({ visible: false });
+    await act(async () => { surface.props!.onConnectedChange(true); surface.props!.onMessage?.({ type: "starting" }); });
+    await settle();
+    expect(show.mock.calls.at(-1)?.[0]).toMatchObject({ visible: false });
+    const asked = show.mock.calls.length;
+    await act(async () => surface.props!.onMessage?.({ type: "tabs", tabs: [{ tabId: "t1", title: "", url: "about:blank", active: true }] }));
+    await settle();
+    expect(show.mock.calls.length).toBeGreaterThan(asked);
+    expect(show.mock.calls.at(-1)?.[0]).toMatchObject({ visible: true });
   });
 });

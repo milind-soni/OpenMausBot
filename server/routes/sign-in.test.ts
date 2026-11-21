@@ -18,7 +18,7 @@ function context(path: string, method = "POST", body: unknown = {}): RouteContex
 describe("internal sign-in route", () => {
   const result = { messageId: "card-1", site: "example.com", place: "browser" as const };
 
-  it("awaits the guarded reader before dispatching only site and reason", async () => {
+  it("awaits the guarded reader before dispatching only the ask's own fields", async () => {
     let release!: (body: { site: string; reason: string }) => void;
     const readBody = vi.fn(() => new Promise<{ site: string; reason: string }>(resolve => { release = resolve; }));
     const request = vi.fn(() => result);
@@ -26,9 +26,9 @@ describe("internal sign-in route", () => {
     const pending = dispatchRoutes([createInternalSignInRoutes({ readBody, request })], ctx);
     expect(readBody).toHaveBeenCalledOnce();
     expect(request).not.toHaveBeenCalled();
-    release({ site: "https://example.com/login", reason: "Fixture task" });
+    release({ site: "https://example.com/login", reason: "Fixture task", fromBotId: "other" } as never);
     expect(await pending).toBe(true);
-    expect(request).toHaveBeenCalledExactlyOnceWith("https://example.com/login", "Fixture task");
+    expect(request).toHaveBeenCalledExactlyOnceWith({ site: "https://example.com/login", reason: "Fixture task", instruction: undefined, kind: undefined, target: undefined });
     expect(ctx.readBody).not.toHaveBeenCalled();
     expect(ctx.json).toHaveBeenCalledExactlyOnceWith(ctx.res, 201, result);
   });
@@ -112,5 +112,5 @@ it.each(["createInternalSignInRoutes", "createInternalThreadRoutes", "createInte
 it("hands the internal sign-in route the guarded reader and the caller's own thread", () => {
   const { call, source } = internalDispatch("createInternalSignInRoutes");
   expect(call.arguments[0]!.getText(source)).toContain("readBody: readInternalBody");
-  expect(call.arguments[0]!.getText(source)).toContain("requestSignIn(internalSender, internalCapability.threadId, site, reason)");
+  expect(call.arguments[0]!.getText(source)).toContain("handoffRequests.request(internalSender, internalCapability.threadId, body)");
 });

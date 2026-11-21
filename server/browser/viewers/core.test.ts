@@ -5,6 +5,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
 import { BrowserService } from "../service.ts";
+import type { DesktopDisplay } from "../desktop/displays.ts";
 import type { HoldLimits } from "../hold.ts";
 import { FakeBackend, FakeChrome, type FakeDocument } from "../testing/fake-chrome.ts";
 import { personUrl } from "../dispatch.ts";
@@ -33,12 +34,12 @@ const same = (expected: unknown) => (actual: unknown) => JSON.stringify(actual) 
 
 const PAGE: FakeDocument = { title: "Page", text: "hello", elements: [{ role: "textbox", name: "Name", selector: "#name", editable: true, box: [10, 10, 200, 30] }] };
 
-type WatchOptions = { owner?: string; size?: { width: number; height: number }; maxWidth?: number; maxHeight?: number; pace?: "hi" | "lo"; ack?: boolean; authPrompts?: boolean; pointer?: boolean };
+type WatchOptions = { owner?: string; size?: { width: number; height: number }; maxWidth?: number; maxHeight?: number; pace?: "hi" | "lo"; ack?: boolean; authPrompts?: boolean; pointer?: boolean; frames?: boolean };
 
-async function setup({ pageLimit = null, document = PAGE, holdLimits }: { pageLimit?: { width: number; height: number } | null; document?: FakeDocument; holdLimits?: HoldLimits } = {}) {
+async function setup({ pageLimit = null, document = PAGE, holdLimits, display = null }: { pageLimit?: { width: number; height: number } | null; document?: FakeDocument; holdLimits?: HoldLimits; display?: DesktopDisplay | null } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "omb-viewers-"));
   folders.push(dataDir);
-  const backend = new FakeBackend(() => new FakeChrome({ documents: () => ({ ...document, elements: document.elements.map((element) => ({ ...element })) }) }), { pageLimit });
+  const backend = new FakeBackend(() => new FakeChrome({ documents: () => ({ ...document, elements: document.elements.map((element) => ({ ...element })) }) }), { pageLimit, display });
   const service = new BrowserService({ dataDir, backend: () => backend, maxRunning: 4, idleMs: () => 600_000, takeoverMs: 200, ...(holdLimits ? { holdLimits } : {}) });
   services.push(service);
   const target = { session: "bot-a", key: "bot:a" };
@@ -46,7 +47,7 @@ async function setup({ pageLimit = null, document = PAGE, holdLimits }: { pageLi
   await call("agent_browser_open", { url: "https://example.com/" });
   const watch = async (options: WatchOptions = {}) => {
     const outputs: ViewerOutput[] = [];
-    const viewer = await service.attachViewer(target, { owner: options.owner ?? "local-owner", canOperate: true, maxWidth: options.maxWidth ?? 3200, maxHeight: options.maxHeight ?? 2000, pace: options.pace ?? "hi", authPrompts: options.authPrompts === true, ...(options.pointer === false ? { pointer: false } : {}), ...(options.size ? { size: options.size } : {}) }, (output) => {
+    const viewer = await service.attachViewer(target, { owner: options.owner ?? "local-owner", canOperate: true, maxWidth: options.maxWidth ?? 3200, maxHeight: options.maxHeight ?? 2000, pace: options.pace ?? "hi", authPrompts: options.authPrompts === true, ...(options.pointer === false ? { pointer: false } : {}), ...(options.frames === false ? { frames: false } : {}), ...(options.size ? { size: options.size } : {}) }, (output) => {
       outputs.push(output);
       if (output.type === "frame" && options.ack !== false) output.ack();
     });
@@ -68,6 +69,35 @@ describe("the page fills the panel", () => {
     expect(chrome().viewport).toEqual({ width: 1280, height: 960 });
     await viewer.close();
     await until(() => chrome().viewport, same(UNATTACHED_VIEWPORT));
+  });
+
+  it("sends no pictures to a view whose person sees the window on a remote desktop, and keeps its hold and tabs", async () => {
+    const { watch, chrome, page } = await setup();
+    const pictured = await watch();
+    const desktop = await watch({ frames: false });
+    await until(() => pictured.outputs, (seen) => seen.some((output) => output.type === "frame"));
+    expect(desktop.outputs.some((output) => output.type === "control")).toBe(true);
+    expect(desktop.outputs.some((output) => output.type === "tabs")).toBe(true);
+    await desktop.viewer.input({ type: "takeControl" });
+    await until(() => desktop.viewer.controlState().controlling, (controlling) => controlling);
+    expect(desktop.outputs.filter((output) => output.type === "frame")).toEqual([]);
+    const casts = chrome().sentTo(page()).filter((sent) => sent.method === "Page.startScreencast").length;
+    await pictured.viewer.close();
+    expect(chrome().sentTo(page()).filter((sent) => sent.method === "Page.startScreencast").length).toBe(casts);
+    await desktop.viewer.close();
+  });
+
+  it("leaves a window on a private display as it is: the person sees that display, not a page sized to their panel", async () => {
+    const display: DesktopDisplay = { number: 21, socket: "/d21/rfb", env: { DISPLAY: ":21", XAUTHORITY: "/d21/Xauthority" }, size: { width: 1280, height: 800 }, wrap: { command: "/usr/bin/bwrap", args: ["--"] }, exited: new Promise(() => {}), release: async () => {} };
+    const { watch, chrome, page } = await setup({ display });
+    const before = { ...chrome().window };
+    const { viewer } = await watch({ size: { width: 1600, height: 1000 } });
+    await viewer.input({ type: "resize", width: 400, height: 750 });
+    await viewer.input({ type: "takeControl" });
+    await viewer.input({ type: "zoom", factor: 1.5 });
+    expect(chrome().window).toEqual(before);
+    expect(page().emulated ?? null).toBeNull();
+    await viewer.close();
   });
 
   it("gives a narrow panel a desktop page of its shape, never a phone's, and no taller than twice its width", async () => {

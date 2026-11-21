@@ -11,6 +11,7 @@ import { FakeBackend, FakeChrome, type FakeDocument } from "../testing/fake-chro
 import { PaneBackend, panePartition } from "./backend.ts";
 import { PaneEndpoint, PERSON_HOLDS_TAB, type PaneChannel } from "./endpoint.ts";
 import { PaneLink } from "./link.ts";
+import { withPasskeyNotice } from "../passkey-notice.ts";
 import { FakeMain } from "./testing/fake-main.ts";
 
 const FORM: FakeDocument = {
@@ -36,7 +37,7 @@ function setup({ quietMs = 1_000, linkOptions = {} }: { quietMs?: number; linkOp
   folders.push(dataDir);
   const main = new FakeMain(documents);
   const link = new PaneLink(main, { quietMs, maxHoldMs: 2_000, ...linkOptions });
-  const backend = new PaneBackend(link, dataDir, async () => 41_000, "darwin");
+  const backend = new PaneBackend(link, dataDir, async () => 41_000, { platform: "darwin" });
   const service = new BrowserService({ dataDir, backend: () => backend, maxRunning: 4, idleMs: () => 600_000, takeoverMs: 200 });
   services.push(service);
   const target = { session: "bot-a", key: "bot:a" };
@@ -146,6 +147,93 @@ describe("the bots' browser as desktop panes", () => {
     expect(control.owner(targetId)).toBe("person");
   });
 
+  it("takes a hold from the app's panel only for the tab that panel shows, and ends every hold when the window goes", async () => {
+    const { main, link, service, call, text } = setup({ quietMs: 0 });
+    link.resolveWith((botId) => (botId === "a" ? "bot:a" : null));
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const control = service.profiles()[0]!.run!.opened.personControl!;
+    const answered = async (fields: Record<string, unknown>) => {
+      const req = 900 + main.toMain.length;
+      main.post({ op: "hold", req, threadId: null, tab: "p1", ...fields });
+      await sleep(5);
+      return main.toMain.find((message) => message.op === "hold-result" && (message as { req: number }).req === req) as { held: boolean } | undefined;
+    };
+    // Another bot's panel cannot hold this browser's tab.
+    expect(await answered({ botId: "b", browser: "bot:a", held: true })).toMatchObject({ held: false });
+    expect(control.holding()).toBe(false);
+    expect(await answered({ botId: "a", browser: "bot:a", held: true })).toMatchObject({ held: true });
+    expect(text(await call("agent_browser_click", { selector: "#go" }))).toContain("The person is using this tab.");
+    main.post({ op: "let-go" });
+    await sleep(5);
+    expect(control.holding()).toBe(false);
+    expect((await call("agent_browser_click", { selector: "#go" })).isError).toBeUndefined();
+  });
+
+  it("holds the tab the HTTP route names, not the bot's active one", async () => {
+    const { service, target, call, text } = setup({ quietMs: 0 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    expect(service.holdTab(target.session, "t1", true)).toBe("t1");
+    expect(text(await call("agent_browser_click", { selector: "#go" }))).toContain("The person is using this tab.");
+    // The bot's tab opened behind the person's is the bot's active one; the person's hold stays on theirs.
+    await call("agent_browser_tabs", { action: "new" });
+    expect(text(await call("agent_browser_click", { selector: "#go", tab: "t1" }))).toContain("The person is using this tab.");
+    expect(service.holdTab(target.session, "t1", false)).toBe("t1");
+    expect(text(await call("agent_browser_click", { ref: "e2", tab: "t1" }))).toContain("Take a fresh snapshot");
+    expect(service.holdTab(target.session, "t9", true)).toBe(null);
+    expect(service.holdTab("no-such-session", "t1", true)).toBe(null);
+  });
+
+  it("answers the page's dialog at once, never behind input waiting for the person to finish", async () => {
+    const { main, service, call } = setup({ quietMs: 1_500 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const page = service.profiles()[0]!.run!.browser.activePage!;
+    main.personInput("bot:a", "p1");
+    await sleep(5);
+    void page.session.send("Input.dispatchKeyEvent", { type: "keyDown", key: "a" }).catch(() => undefined);
+    main.commands.length = 0;
+    const started = Date.now();
+    await page.session.send("Page.handleJavaScriptDialog", { accept: false });
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(main.commands.map((command) => command.method)).toEqual(["Page.handleJavaScriptDialog"]);
+  });
+
+  it("never holds the bot's navigate behind a turn's preview of a page under an alert, with the panel watching", async () => {
+    const { main, service, target, call, text } = setup({ quietMs: 0 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const viewer = await service.attachViewer(target, { owner: "local-owner", canOperate: true, maxWidth: 730, maxHeight: 1156 }, (output) => { if (output.type === "frame") output.ack(); });
+    await sleep(20);
+    main.post({ op: "event", browser: "bot:a", tab: "p1", method: "Page.javascriptDialogOpening", params: { type: "alert", message: "hello alert", url: "https://example.com/form" } });
+    await sleep(5);
+    // Under the alert the page answers no screencast change, script, read or capture, as Electron's did live.
+    let open = true;
+    main.hang = (command) => {
+      if (command.method === "Page.handleJavaScriptDialog") open = false;
+      return open && /^(?:Page\.(?:startScreencast|stopScreencast|getLayoutMetrics|captureScreenshot)|Runtime\.|DOM\.|Accessibility\.)/.test(command.method);
+    };
+    const preview = service.previewFrame("bot-a").then(() => "pictured", (error: Error) => error.message);
+    const started = Date.now();
+    const result = await call("agent_browser_open", { url: "https://example.com/next" });
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(text(result)).toContain("Dismissed the page's open alert dialog");
+    expect(await preview).toMatch(/dialog/);
+    await viewer.close();
+  });
+
+  it("dismisses the alert a page left open when the bot navigates away, and says so", async () => {
+    const { main, call, text } = setup({ quietMs: 0 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    main.post({ op: "event", browser: "bot:a", tab: "p1", method: "Page.javascriptDialogOpening", params: { type: "alert", message: "Saved!", url: "https://example.com/form" } });
+    await sleep(5);
+    main.commands.length = 0;
+    const result = await call("agent_browser_navigate", { url: "https://example.com/next" });
+    expect(result.isError, text(result)).toBeUndefined();
+    expect(text(result)).toContain(`Dismissed the page's open alert dialog "Saved!" to leave the page.`);
+    const methods = main.commands.map((command) => command.method);
+    expect(methods.indexOf("Page.handleJavaScriptDialog")).toBeGreaterThanOrEqual(0);
+    expect(methods.indexOf("Page.handleJavaScriptDialog")).toBeLessThan(methods.indexOf("Page.navigate"));
+    expect(main.commands.find((command) => command.method === "Page.handleJavaScriptDialog")!.params).toEqual({ accept: false });
+  });
+
   it("keeps every pane emulating focus, so a pane the person is not in still takes the bot's keys", async () => {
     const { main, call } = setup();
     await call("agent_browser_open", { url: "https://example.com/a" });
@@ -189,7 +277,8 @@ describe("what a held pane lets the bot do", () => {
     await expect(page.send("Page.handleJavaScriptDialog", { accept: true })).rejects.toThrow(PERSON_HOLDS_TAB);
     await expect(page.send("DOM.scrollIntoViewIfNeeded", { backendNodeId: 1 })).rejects.toThrow(PERSON_HOLDS_TAB);
     await expect(connection.root.send("Target.activateTarget", { targetId: second!.targetId })).rejects.toThrow(PERSON_HOLDS_TAB);
-    await expect(second!.session.send("Page.bringToFront")).rejects.toThrow(PERSON_HOLDS_TAB);
+    // The driver's own fronting before a navigation leaves the page behind the person's.
+    await second!.session.send("Page.bringToFront");
     // A frame of the held page is held too.
     main.post({ op: "event", browser: "bot:a", tab: "p1", method: "Target.attachedToTarget", params: { sessionId: "IFRAME1", targetInfo: { targetId: "F", type: "iframe", url: "", title: "" }, waitingForDebugger: false } });
     await sleep(5);
@@ -204,13 +293,39 @@ describe("what a held pane lets the bot do", () => {
     expect(main.toMain.filter((message) => message.op === "front").map((message) => (message as { tab: string }).tab)).toEqual(["p1"]);
   });
 
-  it("opens a bot's new tab behind the one the person holds", async () => {
-    const { main, service, call } = setup({ quietMs: 0 });
-    await call("agent_browser_open", { url: "https://example.com/a" });
+  it("takes the same reads as a held browser does, and refuses every other tool on the held tab before it reaches the pane", async () => {
+    const { main, service, call, text } = setup({ quietMs: 0 });
+    await call("agent_browser_open", { url: "https://example.com/form" });
     const run = service.profiles()[0]!.run!;
     run.opened.personControl!.hold(run.browser.activePage!.targetId, true);
-    await call("agent_browser_open", { url: "https://example.com/b", tab: "new" });
+    for (const [name, args] of [["agent_browser_status", {}], ["agent_browser_snapshot", {}], ["agent_browser_screenshot", {}], ["agent_browser_read", {}], ["agent_browser_tabs", { action: "list" }]] as const) {
+      const answer = await call(name, args);
+      expect(answer.isError, `${name}: ${text(answer)}`).toBeUndefined();
+    }
+    main.commands.length = 0;
+    for (const [name, args] of [["agent_browser_wait", { text: "Sign up" }], ["agent_browser_eval", { expression: "1" }], ["agent_browser_screenshot", { fullPage: true }], ["agent_browser_click", { selector: "#go" }]] as const) {
+      expect(text(await call(name, args)), name).toContain(PERSON_HOLDS_TAB);
+    }
+    expect(main.commands).toEqual([]);
+  });
+
+  it("opens a bot's new tab behind the one the person holds, and says so", async () => {
+    const { main, service, call, text } = setup({ quietMs: 0 });
+    await call("agent_browser_open", { url: "https://example.com/a" });
+    const run = service.profiles()[0]!.run!;
+    const held = run.browser.activePage!.targetId;
+    run.opened.personControl!.hold(held, true);
+    const opened = await call("agent_browser_open", { url: "https://example.com/b", tab: "new" });
+    expect(opened.isError, text(opened)).toBeUndefined();
     expect(main.toMain.filter((message) => message.op === "create").map((message) => (message as { background?: boolean }).background)).toEqual([undefined, true]);
+    expect(main.commands.some((command) => command.tab === "p2" && command.method === "Page.navigate")).toBe(true);
+    const listed = text(await call("agent_browser_tabs", { action: "new", url: "https://example.com/c" }));
+    expect(listed).toContain("behind the tab the person is using");
+    expect(listed).not.toContain("in front");
+    expect(text(await call("agent_browser_tabs", { action: "switch", tab: "t2" }))).toContain("stays behind it");
+    expect(main.toMain.filter((message) => message.op === "front").map((message) => (message as { tab: string }).tab).filter((tab) => tab !== "p1")).toEqual([]);
+    run.opened.personControl!.hold(held, false);
+    expect(text(await call("agent_browser_tabs", { action: "new" }))).toContain("It is in front");
   });
 });
 
@@ -277,6 +392,93 @@ describe("deleting a bot's browser with the pane", () => {
     backend.erase("bot:a");
     expect(main.toMain.filter((message) => message.op === "erase")).toEqual([{ type: "openmausbot:browser-pane", op: "erase", partition: main.partitions[0] }]);
     expect(backend.used("bot:a")).toBe(false);
+  });
+});
+
+describe("the pane's identity", () => {
+  it("is Electron's Chromium as it is: the driver sends no user agent, client hint, automation switch or main-world script", async () => {
+    const { main, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    await call("agent_browser_fill", { selector: "#name", text: "Ada" });
+    await call("agent_browser_click", { selector: "#go" });
+    await call("agent_browser_open", { url: "https://example.com/b", tab: "new" });
+    expect(main.toMain.filter((message) => message.op === "open").map((message) => (message as { identity: string }).identity)).toEqual(["native"]);
+    const sent = main.commands;
+    expect(sent.filter((command) => /UserAgentOverride|setDeviceMetricsOverride|setAutomationOverride/.test(command.method))).toEqual([]);
+    expect(sent.filter((command) => command.method === "Page.addScriptToEvaluateOnNewDocument" && !command.params.worldName)).toEqual([]);
+    expect(sent.filter((command) => (command.method === "Runtime.evaluate" || command.method === "Runtime.callFunctionOn") && command.params.contextId === undefined && command.params.objectId === undefined)).toEqual([]);
+    expect(JSON.stringify(sent)).not.toMatch(/Firefox|webdriver|AutomationControlled|Google Chrome/);
+    FORM.elements[1]!.value = "";
+  });
+
+  it("refuses a user agent override that would blank Chromium's client hints", async () => {
+    const { main, service, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/a" });
+    const page = service.profiles()[0]!.run!.browser.activePage!;
+    await expect(page.session.send("Emulation.setUserAgentOverride", { userAgent: "Mozilla/5.0 Chrome/146.0.0.0" })).rejects.toThrow(/needs userAgentMetadata/);
+    await expect(page.session.send("Network.setUserAgentOverride", { userAgent: "x" })).rejects.toThrow(/needs userAgentMetadata/);
+    expect(main.commands.some((command) => command.method.endsWith("UserAgentOverride"))).toBe(false);
+  });
+
+  it("passes the cleaned identity to the app when the config asks for it", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-browser-pane-"));
+    folders.push(dataDir);
+    const main = new FakeMain(documents);
+    const link = new PaneLink(main);
+    await sleep(5);
+    const backend = new PaneBackend(link, dataDir, async () => 41_000, { identity: () => "cleaned" });
+    const opened = await backend.open({ key: "bot:c", mode: "headless", fresh: false, viewport: { width: 1280, height: 720 }, downloadDir: dataDir });
+    expect(main.toMain.find((message) => message.op === "open")).toMatchObject({ identity: "cleaned" });
+    await opened.close();
+  });
+
+  it("turns a passkey request down at once instead of leaving the page waiting for a sheet Electron never draws", async () => {
+    const { main, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/a" });
+    expect(main.commands.filter((command) => command.method.startsWith("WebAuthn.")).map((command) => command.method)).toEqual(["WebAuthn.enable", "WebAuthn.addVirtualAuthenticator"]);
+  });
+});
+
+describe("the pane's debugger and its frames", () => {
+  it("never leaves a frame waiting: auto-attach never pauses, and a frame that arrives paused is run at once", async () => {
+    const sent: Array<{ tab: string; method: string; params: Record<string, unknown>; session?: string }> = [];
+    const endpoint = new PaneEndpoint({
+      version: "146", userAgent: "ua", create: async () => ({ tab: "p9", target: "F9", url: "", title: "" }),
+      command: async (tab, method, params, session) => { sent.push({ tab, method, params, ...(session ? { session } : {}) }); return {}; },
+      front: () => {}, closeTab: () => {}, cancelDownload: () => {}, close: () => {},
+    }, [{ tab: "p1", target: "F1", url: "https://a.test/", title: "A" }]);
+    const connection = new CdpConnection(endpoint);
+    await connection.root.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
+    endpoint.pageEvent("p1", "Target.attachedToTarget", { sessionId: "IFR", targetInfo: { targetId: "X", type: "iframe", url: "https://accounts.google.com/", title: "" }, waitingForDebugger: true });
+    await sleep(1);
+    expect(sent).toContainEqual({ tab: "p1", method: "Runtime.runIfWaitingForDebugger", params: {}, session: "IFR" });
+    await connection.session("pane-p1:IFR")!.send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: true, flatten: true });
+    expect(sent.at(-1)).toEqual({ tab: "p1", method: "Target.setAutoAttach", params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }, session: "IFR" });
+    connection.close();
+  });
+});
+
+describe("a site turning the pane away", () => {
+  it("is reported when Google refuses sign-in or asks for a passkey, and the bot is told to use My Chrome", async () => {
+    const { main, service, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/a" });
+    const run = service.profiles()[0]!.run!;
+    const refusals: Array<{ kind: string; url: string }> = [];
+    run.opened.onSiteRefusal!((refusal) => refusals.push({ kind: refusal.kind, url: refusal.url }));
+    const frame = (url: string) => main.post({ op: "event", browser: "bot:a", tab: "p1", method: "Page.frameNavigated", params: { frame: { id: run.browser.activePage!.targetId, url, loaderId: "L" } } });
+    frame("https://accounts.google.com/v3/signin/rejected?continue=x");
+    frame("https://accounts.google.com/v3/signin/challenge/pk?TL=1");
+    frame("https://accounts.google.com/v3/signin/identifier");
+    await sleep(5);
+    expect(refusals).toEqual([
+      { kind: "google-rejected", url: "https://accounts.google.com/v3/signin/rejected?continue=x" },
+      { kind: "passkey", url: "https://accounts.google.com/v3/signin/challenge/pk?TL=1" },
+    ]);
+    const told = withPasskeyNotice({ content: [{ type: "text", text: "Opened https://accounts.google.com/v3/signin/rejected in t1." }] }, "pane") as { content: Array<{ text: string }> };
+    expect(told.content.at(-1)!.text).toContain("My Chrome");
+    expect(told.content.at(-1)!.text).toContain("this app's built-in browser");
+    const passkey = withPasskeyNotice({ content: [{ type: "text", text: "https://accounts.google.com/v3/signin/challenge/pk" }] }, "pane") as { content: Array<{ text: string }> };
+    expect(passkey.content.at(-1)!.text).toContain("My Chrome");
   });
 });
 
