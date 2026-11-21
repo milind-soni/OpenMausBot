@@ -151,14 +151,40 @@ describe("LiveCallSettings", () => {
     };
     const base = { voice: "marin", readTypedReplies: true, idleMinutes: 5 };
     const fromApiKeys = withLive({ ...base, configured: true, keySource: "openai" });
-    expect(fromApiKeys).toContain("Uses your OpenAI API key from Settings → API keys.");
+    expect(fromApiKeys).toContain("Uses your OpenAI API key from Settings → AI → Other services.");
     expect(fromApiKeys).not.toContain("Remove key");
     const own = withLive({ ...base, configured: true, keySource: "live" });
     expect(own).toContain("Remove key");
     expect(own).not.toContain("Settings → API keys");
     const none = withLive({ ...base, configured: false });
-    expect(none).toContain("Live calls use your own OpenAI key. Add it in Settings → API keys.");
+    expect(none).toContain("Live calls use your own OpenAI key. Add it in Settings → AI → Other services.");
     expect(none).not.toContain("Remove key");
+  });
+
+  it("offers Gemini's own voices for Gemini calls, not GPT-Live's", () => {
+    const withLive = (live: LiveSettings) => {
+      const value = { state: { ...initialState, config: { live } as AppState["config"] }, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
+      return renderToStaticMarkup(createElement(BotEditorStore, { value, children: createElement(LiveCallSettings, { onClose: vi.fn() }) }));
+    };
+    const base = { configured: true, provider: "gemini" as const, keySource: "gemini" as const, voice: "marin", readTypedReplies: true, idleMinutes: 5 };
+    const plain = withLive(base);
+    expect(plain).toMatch(/<option value="Puck" selected="">Puck — upbeat \(default\)<\/option>/);
+    expect(plain).toContain("Charon — informative");
+    expect(plain).not.toContain("Marin (default)");
+    expect(withLive({ ...base, geminiVoice: "Kore" })).toMatch(/<option value="Kore" selected="">/);
+  });
+
+  it("offers the bot on the call a voice of its own beside the default for every other bot", () => {
+    const withBot = (liveVoice?: string) => render(createElement(LiveCallSettings, { bot: { id: "atlas", name: "Atlas", liveVoice }, onClose: vi.fn() }));
+    const unset = withBot();
+    expect(unset).toContain("Voice for Atlas");
+    expect(unset).toContain("Default voice");
+    expect(unset).toMatch(/<option value="" selected="">Same as the default<\/option>/);
+    expect(withBot("cedar")).toMatch(/<option value="cedar" selected="">/);
+    expect(withBot("Kore")).toMatch(/<option value="" selected="">Same as the default<\/option>/);
+    const plain = render(createElement(LiveCallSettings, { onClose: vi.fn() }));
+    expect(plain).not.toContain("Voice for");
+    expect(plain).not.toContain("Default voice");
   });
 
   it("says the key stays on the Cloud when the chat is on the person's Cloud", () => {

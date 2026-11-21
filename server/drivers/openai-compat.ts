@@ -1,11 +1,13 @@
 // Transcript-replay driver for OpenRouter, Groq, Together, llama.cpp, and
 // other endpoints that speak the OpenAI chat-completions contract.
-import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
+import { titleCaseModelId, type ModelCatalog, type ProviderDriver } from "../contracts.ts";
+import { operatorEnvKey } from "../credential-env.ts";
 import { isLoopback } from "../provider-key-check.ts";
 import { lmStudioV1Catalog } from "./local-inject.ts";
-import { isContextName, isOllama, serveWithWindow } from "./ollama-context.ts";
-import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, ollamaOrigin, ollamaUnavailable, onOllamaPort, probeOllama, type OllamaModel, type OllamaStatus } from "./ollama.ts";
+import { isContextName, isOllama, pickedName, serveWithWindow } from "./ollama-context.ts";
+import { isOllamaServer, OLLAMA_PLACEHOLDER_KEY, ollamaOrigin, ollamaUnavailable, onOllamaPort, probeOllama, thinkingEffort, type OllamaModel, type OllamaStatus } from "./ollama.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
+import { decodeReasoningEfforts, reasoningBody, reasoningCatalog, reasoningChoices, rememberReasoning, waitForCatalog, type ReasoningChoices } from "./compat-reasoning.ts";
 import {
   freeDefault, freeFallbackCatalog, freeLabel, freeToolModels, freeToolsFirst, isOpenRouterOrigin, openRouterFreeTier,
   withOpenRouterTurns, type OpenRouterModelRow,
@@ -40,6 +42,12 @@ const DEFAULT_MODELS: ModelCatalog = {
 
 const NO_MODELS: ModelCatalog = { default: "", options: [] };
 const OLLAMA_STATUS_MS = 5_000;
+const OLLAMA_FIRST_LIST_MS = 2_000;
+
+const withEffort = (effort: string | undefined) => effort ? { reasoning_effort: effort } : {};
+const EFFORT_CHOICES = ["low", "medium", "high"].map((id) => ({ id, label: titleCaseModelId(id, /[-_ ]+/) }));
+/** OpenAI's reasoning models, gpt-5 onward. o1-mini, o1-preview and the chat aliases refuse `reasoning_effort`. */
+const OPENAI_REASONING = /^(?:o1(?!-mini|-preview)|o[3-9]|gpt-(?:[5-9]|[1-9]\d)(?![\d.]*-chat))/i;
 
 const localFacts = ({ bytes, parameters, quantization, tools, vision }: OllamaModel) => ({
   ...(bytes ? { bytes } : {}), ...(parameters ? { parameters } : {}), ...(quantization ? { quantization } : {}),
@@ -58,6 +66,9 @@ const OPENAI_MODELS: ModelCatalog = {
     { id: "gpt-5-mini", label: "gpt-5-mini" },
   ],
 };
+
+/** Gemini takes a clip inline in the request; a larger one keeps going as sampled frames. */
+const GEMINI_VIDEO_BYTES = 12 * 1024 * 1024;
 
 /** Google's Gemini API, added as an OpenAI-compatible server (Settings → API keys → Other). */
 function isGeminiOrigin(url: string): boolean {
@@ -91,6 +102,8 @@ export interface OpenAICompatConfig {
   model?: string;
   provider?: string;
   managedModels?: string[];
+  /** Optional model-specific reasoning choices for endpoints that do not advertise them. */
+  reasoningEfforts?: Record<string, string[]>;
   /** How long a turn waits for the next piece of a reply before giving up; unset follows the server's default. */
   replyWaitMinutes?: number;
 }
@@ -122,6 +135,14 @@ function isOpenRouterUrl(url: string): boolean {
   }
 }
 
+const isClaudeModel = (model: string) => /^anthropic\//iu.test(model);
+
+/** OpenRouter caches a Claude prompt only when asked; `session_id` keeps one thread on the provider that holds its cache.
+ * https://openrouter.ai/docs/features/prompt-caching */
+function openRouterPromptCache(threadId: string | undefined): Record<string, unknown> {
+  return { cache_control: { type: "ephemeral" }, ...(threadId ? { session_id: threadId } : {}) };
+}
+
 function loopbackLmStudioV1Url(baseUrl: string): string | null {
   try {
     const url = new URL(baseUrl);
@@ -136,6 +157,7 @@ function loopbackLmStudioV1Url(baseUrl: string): string | null {
 
 function decodeConfig(raw: unknown): OpenAICompatConfig {
   const config = (raw ?? {}) as Record<string, unknown>;
+  const reasoningEfforts = decodeReasoningEfforts(config.reasoningEfforts);
   if (config.tools !== undefined && typeof config.tools !== "boolean") throw new Error("tools must be a boolean");
   if (config.managedModels !== undefined && (!Array.isArray(config.managedModels) || !config.managedModels.length || config.managedModels.some(model => typeof model !== "string" || !model.trim()))) throw new Error("Invalid managed models.");
   const ownKey = typeof config.apiKeyEnv === "string" && OWN_KEY_ENVS.has(config.apiKeyEnv);
@@ -145,6 +167,7 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
   return {
     ...(config.tools !== undefined ? { tools: config.tools as boolean } : {}),
     ...(config.managedModels ? { managedModels: config.managedModels as string[] } : {}),
+    ...(reasoningEfforts ? { reasoningEfforts } : {}),
     ...(isReplyWait(config.replyWaitMinutes) ? { replyWaitMinutes: config.replyWaitMinutes } : {}),
     url: (typeof config.url === "string" && config.url ? config.url : envUrl || "https://openrouter.ai/api/v1")
       .replace(/\/+$/, ""),
@@ -174,7 +197,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
   install: {
     docsUrl: "https://openrouter.ai/keys",
     settings: "connections",
-    signInCommand: "Save an OpenAI-compatible API key in Settings → API keys, or set OPENAI_COMPAT_API_KEY on the server.",
+    signInCommand: "Save an OpenAI-compatible API key in Settings → AI → Providers, or set OPENAI_COMPAT_API_KEY on the server.",
   },
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
@@ -187,8 +210,8 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       config.key ??
       input.environment[config.apiKeyEnv] ??
       (ownKeyVariable ? undefined : input.environment[DEFAULT_KEY_ENV]) ??
-      process.env[config.apiKeyEnv] ??
-      (ownKeyVariable ? undefined : process.env[DEFAULT_KEY_ENV]) ??
+      operatorEnvKey(config.apiKeyEnv) ??
+      (ownKeyVariable ? undefined : operatorEnvKey(DEFAULT_KEY_ENV)) ??
       "";
     // A server someone gave a fixed model list to is not asked what else it might be, unless it is on Ollama's own port.
     const ollamaCandidate = config.catalog === "ollama" || (config.catalog === undefined && (onOllamaPort(config.url) || (onThisNetwork(config.url) && !config.managedModels)));
@@ -197,7 +220,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     if (!savedKey && ollamaCandidate && !isOllamaServer(config) && await answersAsOllama()) await probeOllama(config.url, { timeoutMs: 1_500 });
     const apiKey = savedKey || (ollamaCandidate && isOllamaServer(config) ? OLLAMA_PLACEHOLDER_KEY : "");
     const missingKey = !ownKeyVariable || OWN_KEY_ENVS.has(config.apiKeyEnv)
-      ? "No API key — open Settings → API keys."
+      ? "No API key — open Settings → AI → Providers."
       : `no API key — set ${config.apiKeyEnv} or add it to the instance config`;
     const seeded = config.catalog === "openai" ? OPENAI_MODELS : isOllamaServer(config) ? NO_MODELS : DEFAULT_MODELS;
     let catalog: ModelCatalog = config.managedModels
@@ -215,6 +238,12 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
     const freeTier = () => openRouter ? openRouterFreeTier(apiKey, config.url) : Promise.resolve(null);
 
     const facts = new Map<string, OllamaModel>();
+    const reasoningMetadata = new Map<string, ReasoningChoices>();
+    const reasoningFor = (model: string) => reasoningChoices({
+      model, catalog, metadata: reasoningMetadata, configured: config.reasoningEfforts,
+      manual: config.catalog !== "openai" && !isOllamaServer(config),
+      wire: isOpenRouterOrigin(config.url) ? "nested" : "flat",
+    });
     const fact = (model: string) => facts.get(model) ?? facts.get(`${model}:latest`);
     let ollama: { at: number; status: Promise<OllamaStatus> } | null = null;
     const checkOllama = () => {
@@ -229,10 +258,26 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       facts.clear();
       for (const model of status.models) facts.set(model.name, model);
       if (config.managedModels) return true;
-      const options: ModelCatalog["options"] = status.models.map((model) => ({ id: model.name, label: model.name, custom: true, local: localFacts(model) }));
+      const options: ModelCatalog["options"] = status.models.map((model) => ({
+        id: model.name, label: model.name, custom: true, local: localFacts(model),
+        ...(model.thinking ? { variants: model.thinking.choices.map((id) => ({ id, label: titleCaseModelId(id, /[-_ ]+/) })) } : {}),
+      }));
       if (config.model && !options.some((model) => model.id === config.model)) options.unshift({ id: config.model, label: config.model, custom: true });
       catalog = { default: config.model ?? options[0]?.id ?? "", options };
       return true;
+    };
+
+    const takesEffort = (id: string, row: OpenRouterModelRow) => config.catalog === "openai" ? OPENAI_REASONING.test(id)
+      : openRouter && Array.isArray(row.supported_parameters) && row.supported_parameters.includes("reasoning");
+    const apiEffort = (model: string, variant: string | undefined) => {
+      const selected = reasoningFor(model);
+      const listed = catalog.options.find((option) => option.id === model)?.variants;
+      // An OpenAI or OpenRouter level the model no longer lists is left out, as before, so a saved level never fails the turn.
+      if (variant && (config.catalog === "openai" || openRouter) && !(selected?.choices ?? listed ?? []).some((choice) => choice.id === variant)) return {};
+      const explicit = reasoningBody(selected, variant);
+      if (explicit) return explicit;
+      if (!variant || !listed?.some((choice) => choice.id === variant)) return {};
+      return config.catalog === "openai" ? { reasoning_effort: variant } : openRouter ? { reasoning: { effort: variant } } : {};
     };
 
     const fetchModels = async () => {
@@ -279,6 +324,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
         type Row = OpenRouterModelRow & Record<string, unknown> & { name?: unknown; created?: unknown; owned_by?: unknown };
         const json = await response.json() as { data?: Row[] } | Row[];
         let rows = Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
+        rememberReasoning(reasoningMetadata, rows, (id) => gemini ? geminiChatModelId(id) : id);
         // OpenAI lists its catalog unordered and mixed with non-chat models.
         if (config.catalog === "openai") {
           rows = rows
@@ -298,6 +344,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
             id,
             label: openRouter ? freeLabel(label, row) : label,
             ...(contextWindow ? { contextWindow } : {}),
+            ...(takesEffort(id, row) ? { variants: EFFORT_CHOICES } : {}),
             ...(config.catalog === "openai" ? {} : { custom: true }),
           });
         }
@@ -341,6 +388,9 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       return served.model;
     } : undefined;
 
+    // The first list says which models can call tools, and is what the engine list shows right after adding Ollama.
+    if (loading && isOllamaServer(config)) await Promise.race([loading, new Promise((done) => { setTimeout(done, OLLAMA_FIRST_LIST_MS).unref(); })]);
+
     const runtime = createOpenAIChatRuntime({
       input,
       driverKind: DRIVER_KIND,
@@ -350,23 +400,33 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       tools: config.tools,
       computerUse: true,
       nudgeAnnouncedAction: true,
-      models: () => catalog,
+      models: () => reasoningCatalog(catalog, reasoningFor),
+      prepareTurn: (turn, signal) => loading && (turn.variant || isOllamaServer(config)) ? waitForCatalog(loading, signal) : undefined,
+      selectedReasoning: (model, variant) => Boolean(variant && fact(model)?.thinking?.choices.includes(variant)),
       refreshModels: fetchModels,
       imageInput: (model) => fact(model)?.vision ?? true,
+      ...(gemini ? { videoBytes: GEMINI_VIDEO_BYTES } : {}),
       toolUse: (model) => fact(model)?.tools ?? true,
       ...(ollamaCandidate ? {
         serverUnavailable: async () => {
-          return isOllamaServer(config) ? ollamaUnavailable(await checkOllama()) : null;
+          if (!isOllamaServer(config)) return null;
+          const status = await checkOllama();
+          const reason = ollamaUnavailable(status, config.catalog === "ollama");
+          return reason ? { reason, ollama: { state: status.state, url: status.url, ...(status.problem ? { problem: status.problem } : {}) } } : null;
         },
       } : {}),
-      requestBody: (model, messages, stream) => ({
+      modelVariants: true,
+      requestBody: (model, messages, stream, variant, threadId, selectedModel) => ({
         model,
         messages,
         stream,
         stream_options: stream ? { include_usage: true } : undefined,
+        ...withEffort(thinkingEffort(fact(pickedName(model))?.thinking, variant)),
+        ...apiEffort(selectedModel ?? model, variant),
         ...(config.provider && isOpenRouterUrl(config.url)
           ? { provider: { order: [config.provider], allow_fallbacks: false } }
           : {}),
+        ...(isOpenRouterUrl(config.url) && isClaudeModel(model) ? openRouterPromptCache(threadId) : {}),
       }),
       httpErrorLabel: "upstream",
       missingKeyError: missingKey,
@@ -376,6 +436,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       reasoning: true,
       billing: "metered",
       includeUsageInCompleted: true,
+      retryScale: Number(process.env.FAKE_OPENAI_COMPAT_RETRY_SCALE ?? "1"),
       nativeLog: {
         source: "openai-compat.chat.completions",
         outgoing: (_turn, messages, model, tools) => ({

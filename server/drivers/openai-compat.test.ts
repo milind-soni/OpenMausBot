@@ -1,3 +1,7 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordEvents } from "../testing/events.ts";
 import { buildTurnContext, replaysNatively } from "../turn-context.ts";
@@ -157,6 +161,42 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   });
 
+  it("sends an attached video to Gemini as the clip itself, and to no other server", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-gemini-video-"));
+    const clip = join(dir, "clip.mp4");
+    writeFileSync(clip, Buffer.from("00000018667479706d703432", "hex"));
+    const bodies: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/models")) return Response.json({ data: [{ id: "models/gemini-2.5-flash" }] });
+      bodies.push(String(init?.body));
+      return new Response('data: {"choices":[{"index":0,"delta":{"content":"seen"},"finish_reason":"stop"}]}\n\n', { headers: { "content-type": "text/event-stream" } });
+    }));
+    const gemini = await OpenAICompatDriver.create({
+      instanceId: "gemini-video", displayName: "Google Gemini", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://generativelanguage.googleapis.com/v1beta/openai", key: "gemini-fixture" }),
+      environment: {},
+    });
+    const proxy = await OpenAICompatDriver.create({
+      instanceId: "proxy-video", displayName: "Proxy", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://llm.example.com/v1", key: "sk-fixture" }), environment: {},
+    });
+    try {
+      expect(gemini.adapter.capabilities.nativeVideoBytes).toBeGreaterThan(0);
+      expect(proxy.adapter.capabilities.nativeVideoBytes).toBeUndefined();
+      const recorder = recordEvents(gemini.adapter);
+      await gemini.adapter.sendTurn({ threadId: "video", text: "What happens in this clip?", model: "gemini-2.5-flash",
+        videos: [{ path: clip, mime: "video/mp4", bytes: 12 }] });
+      await recorder.until((event) => event.type === "turn.completed");
+      recorder.stop();
+      const content = JSON.parse(bodies[0]!).messages.at(-1).content;
+      expect(content).toContainEqual({ type: "image_url", image_url: { url: `data:video/mp4;base64,${readFileSync(clip).toString("base64")}` } });
+    } finally {
+      await gemini.dispose();
+      await proxy.dispose();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps other servers' model IDs as they list them", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ data: [{ id: "models/gemini-2.5-pro" }, { id: "text-embedding-3-small" }] })));
     const inst = await OpenAICompatDriver.create({
@@ -181,16 +221,16 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   });
 
-  it("sends setup to Settings → API keys instead of a terminal", async () => {
+  it("sends setup to Settings → AI → Providers instead of a terminal", async () => {
     expect(OpenAICompatDriver.install?.command).toBeUndefined();
     expect(OpenAICompatDriver.install?.settings).toBe("connections");
-    expect(OpenAICompatDriver.install?.signInCommand).toContain("Settings → API keys");
+    expect(OpenAICompatDriver.install?.signInCommand).toContain("Settings → AI → Providers");
     const inst = await OpenAICompatDriver.create({
       instanceId: "test-setup", displayName: "Router", enabled: true,
       config: { url: "https://openrouter.ai/api/v1", apiKeyEnv: "OPENAI_COMPAT_API_KEY" }, environment: {},
     });
     const snap = await inst.snapshot();
-    expect(snap).toMatchObject({ state: "unavailable", reason: expect.stringContaining("Settings → API keys") });
+    expect(snap).toMatchObject({ state: "unavailable", reason: expect.stringContaining("Settings → AI → Providers") });
     expect(JSON.stringify(snap)).not.toContain("config.json");
     await inst.dispose();
   });
@@ -217,6 +257,24 @@ describe("OpenAICompatDriver", () => {
     await inst.refreshModels?.();
     await inst.snapshot();
     for (const secret of absent) expect(JSON.stringify(seen)).not.toContain(secret);
+    await inst.dispose();
+  });
+
+  it("keeps the desktop store's workspace key away from an instance with its own URL", async () => {
+    vi.stubEnv("OMB_DESKTOP_PARENT", "1");
+    process.env.OPENAI_COMPAT_API_KEY = "sk-or-STORE";
+    const seen: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      seen.push(JSON.stringify(init?.headers ?? {}));
+      return new Response('{"data":[]}', { headers: { "content-type": "application/json" } });
+    }));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "router", displayName: "Router", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://third-party.example.test/v1" }), environment: {},
+    });
+    await inst.refreshModels?.();
+    await inst.snapshot();
+    expect(JSON.stringify(seen)).not.toContain("STORE");
     await inst.dispose();
   });
 
@@ -263,6 +321,30 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   }, 20_000);
 
+  it.each([
+    ["a network failure", () => { throw new TypeError("fetch failed"); }],
+    ["a provider 503", () => new Response("overloaded", { status: 503 })],
+  ])("retries %s instead of failing the turn", async (_label, firstAnswer) => {
+    const reply = 'data: {"choices":[{"index":0,"delta":{"content":"done"}}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n';
+    let completions = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+      completions += 1;
+      return completions === 1 ? firstAnswer() : new Response(reply, { status: 200, headers: { "content-type": "text/event-stream" } });
+    }));
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "compat-retry", displayName: "Compat", enabled: true,
+      config: { url: "https://api.example.com/v1", apiKeyEnv: "OPENAI_COMPAT_API_KEY" }, environment: { OPENAI_COMPAT_API_KEY: "secret" },
+    });
+    const recorder = recordEvents(inst.adapter);
+    await inst.adapter.sendTurn({ threadId: "thread", text: "hi", model: "vendor/model" });
+    expect(await recorder.until((event) => event.type === "turn.retrying")).toMatchObject({ attempt: 1 });
+    expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+    expect(completions).toBe(2);
+    recorder.stop();
+    await inst.dispose();
+  });
+
   it("exposes a refreshed model catalog", async () => {
     vi.stubGlobal(
       "fetch",
@@ -292,8 +374,8 @@ describe("OpenAICompatDriver", () => {
     expect(inst.models).toEqual({
       default: "vendor/model-a",
       options: [
-        { id: "vendor/model-a", label: "Model A", custom: true },
-        { id: "vendor/model-b", label: "vendor/model-b", custom: true },
+        { id: "vendor/model-a", label: "Model A", custom: true, variants: ["low", "medium", "high", "xhigh", "max"].map((id) => ({ id, label: id })) },
+        { id: "vendor/model-b", label: "vendor/model-b", custom: true, variants: ["low", "medium", "high", "xhigh", "max"].map((id) => ({ id, label: id })) },
       ],
     });
     await inst.dispose();
@@ -623,6 +705,42 @@ describe("OpenAICompatDriver", () => {
     expect(sentBody?.provider).toEqual({ order: ["fireworks"], allow_fallbacks: false });
     recorder.stop();
     await inst.dispose();
+  });
+
+  it("asks OpenRouter to cache the prompt of a Claude model, keyed to the thread, and leaves every other model as it was", async () => {
+    const sent: any[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        if (String(input).endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+        sent.push(JSON.parse(String(init?.body)));
+        return new Response('data: {"choices":[{"delta":{"content":"hi"}}]}\n' + "data: [DONE]\n", { status: 200, headers: { "content-type": "text/event-stream" } });
+      }),
+    );
+    const turn = async (url: string, model: string) => {
+      const inst = await OpenAICompatDriver.create({
+        instanceId: "test-cache", displayName: "Cache", enabled: true,
+        config: { url, apiKeyEnv: "TEST_KEY", model }, environment: { TEST_KEY: "secret" },
+      });
+      const recorder = recordEvents(inst.adapter);
+      await inst.adapter.sendTurn({ threadId: "thread-c", text: "prompt", model });
+      await recorder.until((e) => e.type === "turn.completed");
+      recorder.stop();
+      await inst.dispose();
+      return sent.at(-1);
+    };
+
+    const claude = await turn("https://openrouter.ai/api/v1", "anthropic/claude-sonnet-4.5");
+    expect(claude.cache_control).toEqual({ type: "ephemeral" });
+    expect(claude.session_id).toBe("thread-c");
+
+    for (const body of [
+      await turn("https://openrouter.ai/api/v1", "deepseek/deepseek-v4-flash-0731"),
+      await turn("https://api.example.com/v1", "anthropic/claude-sonnet-4.5"),
+    ]) {
+      expect(body).not.toHaveProperty("cache_control");
+      expect(body).not.toHaveProperty("session_id");
+    }
   });
 
   it("U24 retest: requests stream_options.include_usage on a streamed turn, like minimax.ts does", async () => {

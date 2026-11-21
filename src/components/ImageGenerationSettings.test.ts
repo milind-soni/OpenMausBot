@@ -88,7 +88,29 @@ describe("Image generation settings", () => {
   it("offers every provider but the base as the backup, and None", async () => {
     const view = await mount({ configured: true, ready: true, primary: { provider: "openai", model: "gpt-image-2", configured: true }, fallback: null });
     const options = [...view.querySelectorAll<HTMLOptionElement>('select[aria-label="Backup provider"] option')].map((option) => option.value);
-    expect(options).toEqual(["", "xai", "gemini", "openrouter", "custom"]);
+    expect(options).toEqual(["", "xai", "gemini", "openrouter", "higgsfield", "custom"]);
+  });
+
+  it("shows a Higgsfield card with its connection and no key field, and opens Plugins", async () => {
+    const view = await mount({ configured: false, ready: false, primary: { provider: "higgsfield", model: "nano_banana_pro", configured: false }, fallback: null });
+    expect(view.textContent).toContain("Needs Higgsfield connected: connect it below.");
+    expect(view.textContent).toContain("Not connected, or the sign-in ended");
+    expect(view.querySelector('input[type="password"]')).toBeNull();
+    const open = [...view.querySelectorAll("button")].find((button) => button.textContent === "Open Plugins")!;
+    await act(async () => { open.click(); });
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "togglePlugins", open: true, surface: "apps" });
+  });
+
+  it("says Higgsfield is connected once the slot can run", async () => {
+    const view = await mount({ configured: false, ready: true, primary: { provider: "higgsfield", model: "nano_banana_pro", configured: true }, fallback: null });
+    expect(view.textContent).toContain("Connected to your Higgsfield account");
+    expect(view.textContent).toContain("Ready · images are made with Higgsfield");
+  });
+
+  it("offers Higgsfield's models", async () => {
+    const view = await mount({ configured: false, ready: true, primary: { provider: "higgsfield", model: "nano_banana_pro", configured: true }, fallback: null });
+    const models = [...view.querySelectorAll<HTMLOptionElement>('[data-testid="image-gen-primary-model"] option')].map((option) => option.value);
+    expect(models).toEqual(expect.arrayContaining(["nano_banana_pro", "gpt_image_2_6", "seedream_v5_pro", "flux_3_image"]));
   });
 
   it("saves a chosen base, a cleared backup and the per-reply limit", async () => {

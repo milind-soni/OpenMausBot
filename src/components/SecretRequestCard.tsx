@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { ExternalLink, KeyRound, Loader2, LockKeyhole, RefreshCw, X } from "lucide-react";
 
-import { CUSTOM_SECRET_TARGET, credentialResumeOutcome, credentialSaveRequest, desktopCredentialSlot, isConfigCredentialTarget } from "../../shared/credential-request";
+import { CUSTOM_SECRET_TARGET, credentialResumeOutcome, credentialSaveRequest, desktopCredentialSlot, isConfigCredentialTarget, isProviderCredentialTarget } from "../../shared/credential-request";
 import { credentialProvider } from "@/lib/analytics-allowlist";
 import { cn } from "@/lib/cn";
 import { activeLocale, t } from "@/lib/i18n";
@@ -13,6 +13,7 @@ import { EmailOutgoingRequestForm, EmailRequestSettled } from "./EmailRequestCar
 import type { EmailConnectRequest, EmailOutgoingFields } from "../../shared/email";
 import { productName } from "@/lib/brand";
 import { VaultChoices } from "./VaultChoices";
+import { desktopStore } from "./keys/key-save";
 
 // Security: the value goes straight to the host's settings, never into the chat.
 
@@ -33,9 +34,10 @@ export function SecretRequestCard({
   const secret = message.secret!;
   const localize = activeLocale() !== "en";
   const greenference = localize && secret.target === "greenferenceApiKey";
+  const modelgo = localize && secret.target === "modelgoApiKey";
   const gemini = localize && secret.target === "geminiTtsKey";
-  const label = greenference ? t("keys.greenference.label") : gemini ? t("keys.label.geminiTts") : secret.label;
-  const placeholder = greenference ? t("keys.greenference.placeholder") : gemini ? t("voice.gemini.keyPlaceholder") : secret.placeholder;
+  const label = greenference ? t("keys.greenference.label") : modelgo ? t("keys.modelgo.label") : gemini ? t("keys.label.geminiTts") : secret.label;
+  const placeholder = greenference ? t("keys.greenference.placeholder") : modelgo ? t("keys.modelgo.placeholder") : gemini ? t("voice.gemini.keyPlaceholder") : secret.placeholder;
   const parts = secret.descriptionParts;
   const suppliedDescription = localize && parts
     ? [t(parts.baseCode), parts.reason, t("server.connect.secretNeverRead", { bot: parts.bot })].filter(Boolean).join(" ")
@@ -50,7 +52,7 @@ export function SecretRequestCard({
   const custom = secret.target === CUSTOM_SECRET_TARGET;
   // A page reached through a desktop paired to another computer: a key that computer keeps in its own encrypted store can
   // only be typed there. Anything its server keeps, a custom secret or a provider key, is typed here like on any page.
-  const onlyOnHost = window.ogb?.remoteClient?.active === true && secret.target !== CUSTOM_SECRET_TARGET && desktopCredentialSlot(secret.target) !== null;
+  const onlyOnHost = window.ogb?.remoteClient?.active === true && secret.target !== CUSTOM_SECRET_TARGET && desktopCredentialSlot(secret.target) !== null && !isProviderCredentialTarget(secret.target);
   const outcome = credentialResumeOutcome(secret);
   const provided = outcome === "provided";
   const declined = outcome === "dismissed";
@@ -156,10 +158,10 @@ export function SecretRequestCard({
         const target = secret.target;
         // The 1Password token goes to this server's Logins, which checks it with 1Password first, never the settings file.
         const request = credentialSaveRequest(target, next);
-        const slot = desktopCredentialSlot(target);
+        const store = desktopStore(desktopCredentialSlot(target));
         if (isConfigCredentialTarget(target)) {
-          const status: ConfigStatus = slot && window.ogb?.setCredential
-            ? await window.ogb.setCredential(slot, next)
+          const status: ConfigStatus = store
+            ? await store(next, target === "anthropicApiKey" ? { everyClaudeBot: false } : undefined)
             : await api(request.path, { method: request.method, body: JSON.stringify(request.body) });
           dispatch({ type: "configStatus", config: status });
         } else await api(request.path, { method: request.method, body: JSON.stringify(request.body) });

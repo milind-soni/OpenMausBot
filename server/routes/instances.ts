@@ -1,6 +1,7 @@
 import { agentEndpointAddress, discoverAgentEndpointModels, hasExplicitModel, isGatewayEndpoint } from "../agent-endpoint-models.ts";
 import { codexEndpointSchema, codexEndpointUpdateSchema, newCodexEndpoint, updateCodexEndpoint, withCodexEndpointInfo, isCodexEndpoint } from "../codex-endpoints.ts";
 import { userError, userErrorFields } from "../user-errors.ts";
+import { modelManifest } from "../model-manifest/manifest.ts";
 import { randomUUID } from "node:crypto";
 import { providerIconError } from "../../shared/provider-icon.ts";
 import {
@@ -18,19 +19,28 @@ import {
   updateClaudeEndpoint,
   withClaudeEndpointInfo,
 } from "../claude-endpoints.ts";
+import {
+  claudeBedrockSchema,
+  claudeBedrockUpdateSchema,
+  newClaudeBedrock,
+  updateClaudeBedrock,
+  withClaudeBedrockInfo,
+} from "../claude-bedrock.ts";
 import { updateClaudeCli } from "../claude-update.ts";
 import { persistableInstanceConfigs, saveConfig, withInstanceCli, type AppConfig } from "../config.ts";
-import { addEndpoint, addEndpointSchema, isAddedEndpoint, withEndpointUrls } from "../openai-compat-endpoints.ts";
+import { addEndpoint, addEndpointSchema, changeEndpointAddress, endpointBaseUrl, endpointModelsReadable, isAddedEndpoint, localServerAlreadyAdded, withEndpointUrls } from "../openai-compat-endpoints.ts";
+import { findOllama, probeOllama } from "../drivers/ollama.ts";
 import type { InstanceConfigMap, ModelSelection, ProviderInstance } from "../contracts.ts";
 import { removeAntigravityProfile } from "../drivers/antigravity-acp.ts";
 import { BUILT_IN_DRIVERS } from "../drivers/builtIn.ts";
 import { findCliCandidates, resetPathCache } from "../env-path.ts";
 import type { ProviderRegistry } from "../harness/registry.ts";
+import { productName } from "../brand.ts";
 import { checkEngine, type EngineCheck } from "../engine-check.ts";
 import { HOSTED_PROVIDER_SETTINGS_ERROR } from "../hosted-models.ts";
 import type { ProviderAuthSessions } from "../provider-auth-sessions.ts";
 import { providerIconPatchSchema, withInstanceIcon } from "../provider-icon.ts";
-import { isLoopbackHost, isProxied } from "../request-auth.ts";
+import { isLoopbackHost, isProxied, ownerOrAdmin } from "../request-auth.ts";
 import type { SessionRegistry } from "../sessions.ts";
 import type { Store } from "../store.ts";
 import type { BusyFlag, ConfigStatus } from "./config.ts";
@@ -56,6 +66,8 @@ export interface InstanceRouteDeps {
   activeGroupTurnForBot(botId: string): { threadId: string } | null;
   /** The server's tested-AI record (server/tested-ai.ts): a check there also settles the new-bot default. */
   checkInstance?(instance: ProviderInstance): Promise<EngineCheck>;
+  /** Whether an added server lists its models (server/openai-compat-endpoints.ts); replaced in tests. */
+  endpointModelsReadable?(config: { url: string; key: string; catalog?: unknown }): Promise<boolean>;
 }
 
 export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
@@ -64,8 +76,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
     persistProviderInstance, configStatus, broadcast, testCliBinary, cliProbeEnvironment, threadBusy,
     botForThread, activeGroupTurnForBot,
   } = deps;
+  const detectModels = deps.endpointModelsReadable ?? endpointModelsReadable;
   const describeInstances = async () => hostedModels ? deps.describeInstances()
-    : withEndpointUrls(withCodexEndpointInfo(withClaudeEndpointInfo(await deps.describeInstances(), cfg.instances ?? {}), cfg.instances ?? {}), cfg.instances ?? {});
+    : withEndpointUrls(withCodexEndpointInfo(withClaudeBedrockInfo(withClaudeEndpointInfo(await deps.describeInstances(), cfg.instances ?? {}), cfg.instances ?? {}), cfg.instances ?? {}), cfg.instances ?? {});
   /** Bots, their backups and threads, the new-bot default, or a turn running on it: a provider in use can't go away. */
   const providerInUse = (instanceId: string): boolean => cfg.defaultModelSelection?.instanceId === instanceId || store.bots.some((bot) =>
     bot.modelSelection.instanceId === instanceId || bot.fallback?.some(candidate => candidate.instanceId === instanceId) || store.tasks(bot.id).some((task) => task.modelSelection?.instanceId === instanceId)) ||
@@ -107,7 +120,23 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       // Rescan PATH: Windows never pushes PATH changes into a live process, so a CLI installed since launch stays invisible.
       resetPathCache();
       if (url.searchParams.get("fresh") === "1") registry.forgetSnapshots();
+      // Whatever this download brings shows on the next open; the answer does not wait for it.
+      void modelManifest().refreshOnDemand().catch(() => {});
       return json(res, 200, { instances: await describeInstances() });
+    }
+    if (method === "GET" && path === "/api/instances/ollama") {
+      if (hostedModels || !ownerOrAdmin(auth)) return json(res, 403, { error: "Only the owner of this server can look for Ollama." });
+      const asked = url.searchParams.get("url")?.trim();
+      const address = asked ? endpointBaseUrl(asked) : null;
+      if (asked && !address) return json(res, 400, { error: "Enter an http or https address, such as http://127.0.0.1:11434." });
+      return json(res, 200, { status: address ? await probeOllama(address) : await findOllama() });
+    }
+    // How many engines could start a bot now, never which: the check an update makes that the new version still can
+    // (deploy/update.sh), which a shared server lets a local caller without a session make (SERVICE_ALLOW).
+    if (method === "GET" && path === "/api/health/engines") {
+      const described = await describeInstances();
+      const available = Array.isArray(described) ? described.filter((instance) => Object(Object(instance).snapshot).state === "available").length : 0;
+      return json(res, 200, { app: "openmausbot", engines: available });
     }
     const companyMutation = /^\/api\/instances\/(company\.[\w.-]+)(?:\/|$)/.exec(path);
     if (hostedModels && path.startsWith("/api/instances/") && method !== "GET") return json(res, 403, { error: HOSTED_PROVIDER_SETTINGS_ERROR });
@@ -166,6 +195,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       providerConfigBusy.set(true);
       try {
         const instances = persistableInstanceConfigs(cfg);
+        // Checked again here, inside the busy section, so two quick adds cannot both pass the settings check.
+        const duplicate = parsed.data.catalog ? localServerAlreadyAdded(instances, parsed.data.url) : null;
+        if (duplicate) return json(res, 409, { error: duplicate });
         const added = addEndpoint(instances, parsed.data);
         if ("error" in added) return json(res, 400, { error: added.error });
         await persistProviderInstance(added.instanceId, instances);
@@ -213,6 +245,51 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
         const previous = persistableInstanceConfigs(cfg)[instanceId];
         const addressChanged = agentEndpointAddress(previous) !== agentEndpointAddress(instances[instanceId]);
         if (!parsed.data.model && !hasExplicitModel(previous) && (parsed.data.token !== undefined || addressChanged)) await discoverAgentEndpointModels(instances[instanceId]);
+        await persistProviderInstance(instanceId, instances);
+        return json(res, 200, { instances: await describeInstances() });
+      } catch (error) {
+        const status = (error as { status?: unknown }).status;
+        return json(res, typeof status === "number" ? status : 400, { error: error instanceof Error ? error.message : String(error) });
+      } finally {
+        providerInstancesChanging.delete(instanceId);
+        providerConfigBusy.set(false);
+      }
+    }
+
+    if (method === "POST" && path === "/api/instances/claude-bedrock") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const parsed = claudeBedrockSchema.safeParse(await readBody(req, 16384));
+      if (!parsed.success) return json(res, 400, { error: parsed.error.issues[0]?.message ?? "Enter a name, an AWS profile and a region." });
+      if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      providerConfigBusy.set(true);
+      try {
+        const { instanceId, instances } = newClaudeBedrock(cfg, parsed.data);
+        await persistProviderInstance(instanceId, instances);
+        return json(res, 201, { instanceId, instances: await describeInstances() });
+      } catch (error) {
+        const status = (error as { status?: unknown }).status;
+        return json(res, typeof status === "number" ? status : 400, { error: error instanceof Error ? error.message : String(error) });
+      } finally { providerConfigBusy.set(false); }
+    }
+
+    const bedrockPatch = /^\/api\/instances\/([\w.-]+)\/claude-bedrock$/.exec(path);
+    if (method === "PATCH" && bedrockPatch) {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      const instanceId = bedrockPatch[1];
+      const parsed = claudeBedrockUpdateSchema.safeParse(await readBody(req, 16384));
+      if (!parsed.success) return json(res, 400, { error: parsed.error.issues[0]?.message ?? "Check the AWS profile, region and models." });
+      if (providerConfigBusy.get()) return json(res, 409, { error: "provider settings are already being updated" });
+      if (busyProviderSelections().some((selection) => selection.instanceId === instanceId)) {
+        return json(res, 409, { error: "Wait for bots using this engine to finish before changing its settings." });
+      }
+      providerConfigBusy.set(true);
+      providerInstancesChanging.add(instanceId);
+      try {
+        const { instances } = updateClaudeBedrock(cfg, instanceId, parsed.data);
         await persistProviderInstance(instanceId, instances);
         return json(res, 200, { instances: await describeInstances() });
       } catch (error) {
@@ -287,7 +364,11 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           const instance = registry.get(instanceId);
           if (!instance) return json(res, 404, { error: "unknown instance" });
           // The official local OAuth callback terminates on this machine, not a phone or a remote browser.
-          if (instance.authenticationMethod === "browser-pkce" && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress))) {
+          if ((instance.authenticationMethod === "browser-pkce" || instance.authenticationMethod === "browser")
+            && (isProxied(req) || !isLoopbackHost(req.socket.remoteAddress))) {
+            if (instance.authenticationMethod === "browser") {
+              return json(res, 403, { error: `This sign-in happens in a browser on the computer running ${productName()}. Open ${productName()} there to sign in.` });
+            }
             return json(res, 403, { error: "Continue with ChatGPT on the computer running OpenMausBot. Hosted Pro sign-in requires OpenAI's hosted-app approval." });
           }
           const started = await providerAuthSessions.start(instance, owner);
@@ -383,7 +464,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       }
     }
 
-    // PATCH /api/instances/:id {cli: "/path/to/cli" | ""}: "" reverts to the driver default.
+    // PATCH /api/instances/:id {cli: "/path/to/cli" | ""}: "" reverts to the driver default. An added OpenAI-compatible
+    // server also takes {url, apiKey}: its address changes in place, and its key stays unless the host changes.
     const instancePatch = /^\/api\/instances\/([\w.-]+)$/.exec(path);
     if (method === "PATCH" && instancePatch) {
       // JSON-only, so a hostile page cannot send it as a simple request.
@@ -398,6 +480,9 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
       if (busyProviderSelections().some((selection) => selection.instanceId === instanceId)) {
         return json(res, 409, { error: "Wait for bots using this account to finish before changing its settings." });
       }
+      /** Set when the model list is read again from a new address or with a new key: after the busy guard, so bots on
+       * this server are not refused while a slow server answers. */
+      let detect: { url: string; key: string; catalog?: unknown } | null = null;
       providerConfigBusy.set(true);
       providerInstancesChanging.add(instanceId);
       try {
@@ -416,8 +501,8 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           else delete entry.hidden;
         }
         if (body.tools !== undefined) {
-          if (!["openai-compat", "grok", "minimax", "mistral", "cerebras", "groq", "greenference", "meta"].includes(entry.driver)) {
-            return json(res, 400, { error: "The tools setting is available for OpenAI-compatible, Grok API, MiniMax API, Mistral API, Cerebras API, Groq API, Greenference API and Meta API instances only." });
+          if (!["openai-compat", "grok", "minimax", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta"].includes(entry.driver)) {
+            return json(res, 400, { error: "The tools setting is available for OpenAI-compatible, Grok API, MiniMax API, Mistral API, Cerebras API, Groq API, Greenference API, ModelGo API and Meta API instances only." });
           }
           entry.config = { ...entry.config as Record<string, unknown>, tools: body.tools };
         }
@@ -436,6 +521,15 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           }
           entry.config = models.length ? { ...rest, managedModels: models } : rest;
         }
+        if (body.url !== undefined || body.apiKey !== undefined) {
+          if (!ownerOrAdmin(auth)) return json(res, 403, { error: "Only the owner or an admin can change a server's address or key." });
+          if (!isAddedEndpoint(instanceId, entry)) return json(res, 400, { error: "The base URL and key can be changed here for added OpenAI-compatible servers only." });
+          const changed = changeEndpointAddress(instances, instanceId, { url: body.url, apiKey: body.apiKey });
+          if ("error" in changed) return json(res, changed.status, { error: changed.error });
+          // A model list read from the server's /models is read again from the new address or with the new key.
+          const config = entry.config as { url: string; key: string; catalog?: unknown; managedModels?: unknown };
+          if ((changed.addressChanged || body.apiKey !== undefined) && !Array.isArray(config.managedModels)) detect = { url: config.url, key: config.key, catalog: config.catalog };
+        }
         if (body.displayName !== undefined) entry.displayName = body.displayName;
         if (body.configDir !== undefined) {
           let previousDir: string | undefined;
@@ -449,11 +543,17 @@ export function createInstanceRoutes(deps: InstanceRouteDeps): RouteHandler {
           }
         }
         await persistProviderInstance(instanceId, instances);
-        return json(res, 200, { instances: await describeInstances() });
+        if (!detect) return json(res, 200, { instances: await describeInstances() });
       } finally {
         providerInstancesChanging.delete(instanceId);
         providerConfigBusy.set(false);
       }
+      // Saved either way; a list that can't be read leaves sample models in the picker, so the answer says so.
+      const [, readable] = await Promise.all([registry?.refreshModels(instanceId).catch(() => {}), detectModels(detect)]);
+      return json(res, 200, {
+        instances: await describeInstances(),
+        ...(readable ? {} : { warning: "Saved. The model list could not be read at this address with this key, so the model picker may show sample models. Check the address and key, or enter the model IDs." }),
+      });
     }
 
     if (method === "DELETE" && instancePatch) {

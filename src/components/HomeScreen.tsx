@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { activeLocale, t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import type { HomeView, HomeBridge } from "../../electron/home-window.mjs";
@@ -27,7 +27,9 @@ export function homeScreenText(view: HomeView | null, now = Date.now()): { title
   const name = view?.name ?? null;
   const named = (plain: LocaleKey, withName: LocaleKey) => (name ? t(withName, { name }) : t(plain));
   if (view?.screen === "setup") return { title: named("homeScreen.setup", "homeScreen.setupNamed"), body: t(view.slow ? "cloudHome.slow" : "homeScreen.setupBody"), reason: null, action: null, busy: true };
-  if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), reason: view.cause && Object.hasOwn(UNREACHABLE, view.cause) ? t(UNREACHABLE[view.cause]!) : view.reason ?? null, action: "retry", busy: false };
+  if (view?.screen === "offline") return { title: named("homeScreen.offline", "homeScreen.offlineNamed"), body: t("homeScreen.offlineBack"), action: "retry", busy: false,
+    reason: view.cause === "network" && view.host ? t("homeScreen.offlineNetwork", { host: view.host }) : view.cause && Object.hasOwn(UNREACHABLE, view.cause) ? t(UNREACHABLE[view.cause]!)
+      : view.retryAt && view.retryAt > now ? t("homeScreen.offlineWait", { time: new Intl.DateTimeFormat(activeLocale(), { timeStyle: "short" }).format(new Date(view.retryAt)) }) : view.reason ?? null };
   if (view?.screen === "signin") return { title: named("homeScreen.signIn", "homeScreen.signInNamed"), body: t(view.other ? "homeScreen.signInOther" : "homeScreen.signInEnded"), reason: null, action: "sign-in", busy: false };
   if (view?.screen === "plan" && view.member && view.machine !== "failed") return { title: named("homeScreen.plan", "homeScreen.planNamed"), body: t("cloudHome.stoppedMember"), reason: null, action: null, busy: false };
   if (view?.screen === "plan") return { title: named("homeScreen.plan", "homeScreen.planNamed"), body: t(MACHINE[view.machine] ?? "cloudHome.failed"), reason: null, action: view.machine === "failed" ? null : "manage", busy: false };
@@ -79,6 +81,8 @@ function RemoveFromList({ name, remove }: { name: string; remove: () => Promise<
 export function HomeScreen({ bridge, manage }: { bridge: HomeBridge; manage?: () => Promise<void> }) {
   const [view, setView] = useState<HomeView | null>(null);
   const [failed, setFailed] = useState(false);
+  // Try again is pressed once at a time: a held key or fast clicks never stack looks (main also keeps codes apart).
+  const [trying, setTrying] = useState(false), pressing = useRef(false);
   useEffect(() => {
     let alive = true;
     const stop = bridge.onState((next) => setView(next));
@@ -94,7 +98,11 @@ export function HomeScreen({ bridge, manage }: { bridge: HomeBridge; manage?: ()
   // Its checkout's page again when this app keeps it (the Cloud it is buying), else the Cloud page, where it can be paid.
   const reopen = window.ogb?.cloudAdd?.reopen;
   const run: Partial<Record<HomeAction, () => Promise<unknown>>> = {
-    retry: () => bridge.retry().then((next) => setView(next)),
+    retry: () => {
+      if (pressing.current) return Promise.resolve();
+      pressing.current = true; setTrying(true);
+      return bridge.retry(true).then((next) => setView(next)).finally(() => { pressing.current = false; setTrying(false); });
+    },
     ...(manage ? { manage, buy: manage, card: manage, continue: async () => { if (!(reopen && await reopen().catch(() => false))) await manage(); } } : {}),
   };
   const button = text.action && text.action !== "sign-in" && text.action !== "manage" ? text.action : null;
@@ -112,7 +120,7 @@ export function HomeScreen({ bridge, manage }: { bridge: HomeBridge; manage?: ()
         {text.action === "sign-in" && <button type="button" className="ui-button ui-button-primary mt-2" onClick={() => act(() => bridge.signIn())}>{t("homeScreen.signInButton")}</button>}
         {text.action === "manage" && manage && <button type="button" className="ui-button mt-2" onClick={() => act(manage)}>{t("cloudAccount.manageInBrowser")}</button>}
         {button && run[button] && <button type="button" data-home-action={button} className={button === "retry" ? "ui-button mt-2" : "ui-button ui-button-primary mt-2"}
-          onClick={() => act(run[button]!)}>{t(BUTTON[button])}</button>}
+          disabled={button === "retry" && trying} onClick={() => act(run[button]!)}>{t(BUTTON[button])}</button>}
         {removable && <RemoveFromList name={view.name ?? t("cloudSetup.myCloud")} remove={() => bridge.remove!()} />}
         {failed && <p role="alert" className="text-[13px] text-danger">{t("cloudAccount.actionFailed")}</p>}
       </div>

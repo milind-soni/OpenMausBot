@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { flag, oneOf, parseDuration, usageError, type Flags } from "./args.ts";
 import type { HeadlessClient } from "./client.ts";
 import type { HeadlessIo, Output } from "./output.ts";
+import type { SavedServers } from "./saved-servers.ts";
 
 export interface VerbContext {
   verb: string;
@@ -15,6 +16,16 @@ export interface VerbContext {
   client(): Promise<HeadlessClient>;
   signal: AbortSignal;
   defaultWaitMs: number;
+  /** Running in a bot's own shell: it acts as that bot (bot-shell.ts). */
+  botShell: boolean;
+  /** What `openmausbot login` saved; null in a bot's shell. */
+  saved: SavedServers | null;
+  /** Someone is at a terminal to answer a question. */
+  interactive: boolean;
+  /** Asks a yes-or-no question on the terminal; only called when `interactive`. */
+  confirm(question: string): Promise<boolean>;
+  /** Opens a web page in the person's browser; false when it could not. */
+  openBrowser(url: string): Promise<boolean>;
 }
 
 export interface VerbOutcome {

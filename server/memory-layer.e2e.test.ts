@@ -75,6 +75,15 @@ it("recalls, captures, suggests, forgets and tidies a bot's memory", async () =>
     expect(sentSince(before)).toContain("Bluebird");
     expect(sentSince(before)).toMatch(/your main chat|chat \\"[^"\\]+\\"/);
 
+    await api(`/api/bots/${bot.id}/memory/file`, "PUT", { path: "memory/home.md", text: "- 净水器的滤芯每六个月更换一次，上次是五月初换的。\n" });
+    before = sentCount();
+    await turn(bot.id, second, "滤芯多久要换一次？");
+    expect(sentSince(before)).toContain("滤芯每六个月更换一次");
+    await turn(bot.id, bot.threadId, "备忘：周三下午三点去社区图书馆还书。");
+    before = sentCount();
+    await turn(bot.id, second, "借的书哪天去图书馆还？");
+    expect(sentSince(before)).toContain("社区图书馆还书");
+
     await api(`/api/bots/${bot.id}`, "PATCH", { memoryEnabled: false });
     before = sentCount();
     await turn(bot.id, second, "Can you suggest some restaurants for Friday?");

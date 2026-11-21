@@ -60,7 +60,7 @@ describe("create_trigger when=limit_reset", () => {
         return { ok: true, status: 201, body: { resultId: "r-1", summary: "When Claude's usage limit resets" } };
       },
     };
-    return { calls, context: { botId: "scout", threadId: "thread-1", depth: 0, externalRuntime: false, sharedComputers: false, client } as unknown as ToolCallContext };
+    return { calls, context: { botId: "scout", threadId: "thread-1", externalRuntime: false, sharedComputers: false, client } as unknown as ToolCallContext };
   }
 
   it("sends a limit-reset schedule for the bot's own engine unless it names one", async () => {
@@ -153,14 +153,14 @@ describe("the limit-reset routes", () => {
     return { ...h, call, created };
   }
 
-  it("forces an explicit refresh even when the clock was just checked", async () => {
-    const { call, clock } = routes(null);
-    await clock.refresh(false);
-    const refresh = vi.spyOn(clock, "refresh");
-    expect(await call("GET", "/api/limit-resets?refresh=1")).toMatchObject({ status: 200 });
-    expect(refresh).toHaveBeenCalledExactlyOnceWith(true);
-    await call("GET", "/api/limit-resets");
-    expect(refresh).toHaveBeenCalledTimes(1);
+  it("Try again now ends the engine's hold and answers with the limits as they are now (emails 1a1c2500, 1a1c136d)", async () => {
+    const { call, clock } = routes();
+    clock.noteRefusal("claude", NOW + 5 * HOUR);
+    expect(clock.blockedUntil("claude")).not.toBeNull();
+    const response = await call("POST", "/api/limit-resets/release", { engine: "claude" });
+    expect(response).toMatchObject({ status: 200, body: { engines: expect.any(Array) } });
+    expect(clock.blockedUntil("claude")).toBeNull();
+    expect(await call("POST", "/api/limit-resets/release", {})).toMatchObject({ status: 400 });
   });
 
   it("Continue creates a one-time limit-reset automation in that same conversation, told the turn hit the limit", async () => {

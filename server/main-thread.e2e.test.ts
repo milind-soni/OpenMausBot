@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { readRegistry } from "./testing/registry.ts";
 
 async function launch() {
   const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
@@ -19,7 +20,7 @@ async function launch() {
   const cli = (...args: string[]) => runControlOmb([...args, "--url", url]) as Promise<any>;
   const wire = async (botId: string) => (await api("GET", "/api/bots")).bots.find((bot: any) => bot.id === botId);
   const tasks = async (botId: string) => (await wire(botId)).tasks as any[];
-  const stamps = (botId: string) => Object.fromEntries((JSON.parse(readFileSync(join(dataDir, "bots.json"), "utf8")) as any[])
+  const stamps = (botId: string) => Object.fromEntries((readRegistry(dataDir).bots as any[])
     .find((bot) => bot.id === botId).tasks.filter((task: any) => task.askedAt !== undefined).map((task: any) => [task.threadId, task.askedAt]));
   const thread = async (botId: string, title: string) => {
     await expect.poll(async () => (await tasks(botId)).some((task) => task.title === title), { timeout: 20_000 }).toBe(true);

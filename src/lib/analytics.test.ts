@@ -178,7 +178,7 @@ describe("loading the client", () => {
   it("says which app sent every event, and from which page, before the first one", async () => {
     const fresh = await freshAnalytics();
     await fresh.initAnalytics();
-    expect(ph.registered).toEqual([{ app_version: appVersion(), surface: "server" }]);
+    expect(ph.registered).toEqual([{ app_version: appVersion(), surface: "server", platform: "browser" }]);
     expect(appVersion()).toMatch(/^\d+\.\d+\.\d+/);
     expect(ph.calls.indexOf("register")).toBeLessThan(ph.calls.indexOf("capture app_first_open"));
     vi.stubGlobal("window", { ogb: { environments: {} } });
@@ -382,7 +382,7 @@ describe("app_active", () => {
     await page.load();
     expect(ph.calls).toEqual([...OPENED, "capture app_active"]);
     expect(active()).toEqual([{ event: "app_active", props: { platform: "browser", mode: "simple" } }]);
-    expect(ph.registered).toEqual([{ app_version: appVersion(), surface: "server" }]);
+    expect(ph.registered).toEqual([{ app_version: appVersion(), surface: "server", platform: "browser" }]);
     expect(store.get(DAY)).toBe("2026-10-23");
 
     page.fire("focus");
@@ -399,13 +399,13 @@ describe("app_active", () => {
     expect(ph.calls.filter((call) => call === "capture app_opened")).toHaveLength(3);
   });
 
-  it("says Simple, the only mode, even where the page was on Advanced before", async () => {
+  it("says which mode the page is in that day, Simple or Advanced", async () => {
     await page.load();
     expect(active()).toEqual([{ event: "app_active", props: { platform: "browser", mode: "simple" } }]);
     store.set("omb-advanced-mode", "1");
     vi.setSystemTime(new Date(2026, 9, 24, 9, 0));
     await page.load();
-    expect(active()[1]).toEqual({ event: "app_active", props: { platform: "browser", mode: "simple" } });
+    expect(active()[1]).toEqual({ event: "app_active", props: { platform: "browser", mode: "advanced" } });
   });
 
   it("is sent again after midnight by the ten-minute check, then not again that day", async () => {

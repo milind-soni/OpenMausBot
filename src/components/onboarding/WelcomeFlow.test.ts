@@ -36,6 +36,8 @@ const freeOpenCode: InstanceInfo = {
   instanceId: "opencodeGo", driverKind: "opencodeGo", displayName: "OpenCode", install: { docsUrl: "https://example.test" },
   snapshot: { state: "available", authenticated: true, freeFallback: true }, models: { default: "opencode/big-pickle", options: [] }, aiTest: "passed",
 };
+const notInstalledOpenCode = { ...freeOpenCode, snapshot: { state: "unavailable" }, aiTest: undefined,
+  install: { docsUrl: "https://example.test", server: { standalone: { version: "1", downloadBytes: 1 } } } } as InstanceInfo;
 const signIn = (): InstanceInfo => ({ ...claude(false), snapshot: { state: "available", authenticated: false }, authentication: { method: "paste-code" } } as InstanceInfo);
 const maus = { id: "maus", threadId: "t", name: "MausBot", title: "", description: "", notifications: true, color: "chrome", unread: false,
   modelSelection: { instanceId: "claude", model: "m" }, messages: [], defaultBot: {}, chiefOfStaff: true };
@@ -190,6 +192,63 @@ describe("with no AI working yet", () => {
     expect(host.querySelector("[data-engine-setup]"), "no setup card on the screen itself").toBeNull();
     await toChief("Set up later");
     expect(text()).toContain("Introducing your Chief of Staff");
+  });
+
+  it("offers Claude, ChatGPT and OpenCode as equal pills, Claude first and the one Enter presses", async () => {
+    const plan = { instanceId: "chatgpt", driverKind: "codex", displayName: "ChatGPT plan", install: { docsUrl: "https://example.test" },
+      snapshot: { state: "available", authenticated: false }, authentication: { method: "browser-pkce" }, models: { default: "m", options: [] } } as InstanceInfo;
+    f.state = { ...f.state, instances: [signIn(), plan, notInstalledOpenCode] };
+    await show();
+    const pills = [...host.querySelectorAll("[data-first-ais] button")].map((node) => node.textContent);
+    expect(pills).toEqual(["Sign in with Claude", "Sign in with ChatGPT", "Install OpenCode"]);
+    expect([...host.querySelectorAll("[data-primary]")].map((node) => node.textContent), "one primary pill").toEqual(["Sign in with Claude"]);
+    expect(button("Other ways to connect")).toBeDefined();
+    expect(button("Set up later")).toBeDefined();
+  });
+
+  it("says Set up ChatGPT, not Install, while Codex isn't on this computer yet", async () => {
+    const plan = { instanceId: "chatgpt", driverKind: "codex", displayName: "ChatGPT plan", snapshot: { state: "unavailable" },
+      install: { docsUrl: "https://example.test", server: { package: "@openai/codex" } }, authentication: { method: "browser-pkce" }, models: { default: "m", options: [] } } as InstanceInfo;
+    const claudeToInstall = { ...claude(false), install: { docsUrl: "https://example.test", server: { package: "@anthropic-ai/claude-code" } } } as InstanceInfo;
+    f.state = { ...f.state, instances: [claudeToInstall, plan, { ...plan, instanceId: "codex", install: { docsUrl: "https://example.test" } }] };
+    await show();
+    expect([...host.querySelectorAll("[data-first-ais] button")].map((node) => node.textContent)).toEqual(["Install Claude", "Set up ChatGPT"]);
+    await press("Set up ChatGPT");
+    expect(f.api).toHaveBeenCalledWith("/api/instances/chatgpt/install", { method: "POST" });
+    // Without an install the app can run, it opens the dialog under the same label.
+    f.state = { ...f.state, instances: [claudeToInstall, { ...plan, install: { docsUrl: "https://example.test" } }] };
+    await show();
+    await press("Set up ChatGPT");
+    expect(host.querySelector("[data-connect-ai]")).not.toBeNull();
+  });
+
+  it("installs OpenCode from its pill and counts its free model once it answered, since the person picked it", async () => {
+    f.state = { ...f.state, instances: [signIn(), notInstalledOpenCode] };
+    await show();
+    await press("Install OpenCode");
+    expect(f.api).toHaveBeenCalledWith("/api/instances/opencodeGo/install", { method: "POST" });
+    // Installed, still listing its models: its pill waits.
+    f.state = { ...f.state, instances: [signIn(), { ...freeOpenCode, snapshot: { state: "available", authenticated: true }, models: { default: "", options: [] }, aiTest: undefined }] };
+    await show();
+    expect(button("Waiting for OpenCode…")).toBeDefined();
+    expect(button("Next")).toBeUndefined();
+    expect(f.checks).toEqual([]);
+    f.state = { ...f.state, instances: [signIn(), { ...freeOpenCode, aiTest: undefined }] };
+    await show();
+    await act(async () => {});
+    expect(f.checks).toEqual(["/api/instances/opencodeGo/check"]);
+    expect(text()).toContain("Connected to OpenCode");
+    expect(button("Next")!.disabled).toBe(false);
+  });
+
+  it("uses an OpenCode that already works once its pill is pressed, and not before", async () => {
+    f.state = { ...f.state, instances: [freeOpenCode, claude(false)] };
+    await show();
+    expect(button("Next")).toBeUndefined();
+    await press("Connect OpenCode");
+    await act(async () => {});
+    expect(text()).toContain("Connected to OpenCode");
+    expect(button("Next")!.disabled).toBe(false);
   });
 
   it("opens every other way in the Connect an AI dialog, where OpenCode's free model is only a backup", async () => {

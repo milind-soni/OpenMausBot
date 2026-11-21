@@ -22,10 +22,10 @@ const dispatch = vi.fn();
 let host: HTMLDivElement;
 let root: Root;
 
-function render(bot: Bot, trustedModesAvailable = false, others: Bot[] = []) {
+function render(bot: Bot, trustedModesAvailable = false, others: Bot[] = [], driverKind = "claudeAgent") {
   const derived = {
     patch: (patch: object) => dispatch({ type: "updateBot", botId: bot.id, patch }),
-    engine: { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude" },
+    engine: { instanceId: "claude", driverKind, displayName: "Claude" },
     canCoordinate: true, approvalMode: bot.approvalMode ?? "ask", trustedModesAvailable,
     sectionName: "General", currentChief: undefined,
   } as unknown as Derived;
@@ -78,6 +78,46 @@ describe("Full access in bot settings", () => {
     });
   });
 
+  it("applies Ask to every thread, so a chat that ran at Full asks from its next turn", () => {
+    render({ ...base, approvalMode: "full" });
+    choose("Ask for approval");
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({
+      type: "updateBot", botId: "pepper", patch: { approvalMode: "ask", applyToAllThreads: true },
+    });
+  });
+
+  it("re-applies Ask to a thread still at Full when the bot is already on Ask, and stays quiet when every thread matches", () => {
+    render({ ...base, tasks: [{ threadId: "current", title: "Current thread", createdAt: 1, approvalMode: "full" }] });
+    choose("Ask for approval");
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({
+      type: "updateBot", botId: "pepper", patch: { approvalMode: "ask", applyToAllThreads: true },
+    });
+    dispatch.mockReset();
+    render(base);
+    choose("Ask for approval");
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it("sets Ask on the bot alone when a thread on Custom can only leave it from the desktop app", () => {
+    render({ ...base, approvalMode: "edits", tasks: [{ threadId: "current", title: "Current thread", createdAt: 1, approvalMode: "custom" }] });
+    choose("Ask for approval");
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "updateBot", botId: "pepper", patch: { approvalMode: "ask" } });
+  });
+
+  it("sets a level some engines lack on the bot alone", () => {
+    render(base);
+    choose("Auto-accept edits");
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({
+      type: "updateBot", botId: "pepper", patch: { approvalMode: "edits" },
+    });
+    dispatch.mockReset();
+    render(base, true, [], "codex");
+    choose("Custom");
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({
+      type: "updateBot", botId: "pepper", patch: { approvalMode: "custom" },
+    });
+  });
+
   it("still warns before Auto on this computer", () => {
     render({ ...base, computer: "local" });
     choose("Approve for me");
@@ -102,7 +142,7 @@ describe("on a team", () => {
 });
 
 describe("PermissionsSection parts", () => {
-  it("leaves Chief of Staff and peer checks out of a page that asks only for approvals", () => {
+  it("leaves Chief of Staff out of a page that asks only for approvals", () => {
     const derived = {
       patch: vi.fn(), engine: { instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude" },
       canCoordinate: true, approvalMode: "ask", trustedModesAvailable: false, sectionName: "General", currentChief: undefined,
@@ -115,10 +155,8 @@ describe("PermissionsSection parts", () => {
     expect(host.textContent).toContain("Approval level");
     expect(host.textContent).toContain("Sending on your behalf");
     expect(host.textContent).not.toContain("Chief of Staff");
-    expect(host.textContent).not.toContain("Ask me before contacting other bots");
     render(base);
     expect(host.textContent).toContain("Chief of Staff");
-    expect(host.textContent).toContain("Ask me before contacting other bots");
   });
 });
 
@@ -132,6 +170,12 @@ describe("Sending on your behalf", () => {
     expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "updateBot", botId: "pepper", patch: { outbound: { policy: "allow" } } });
   });
 
+  it("saves Ask as the bot's own rule when it already shows Ask, so a thread at Full asks too", () => {
+    render(base);
+    flushSync(() => option("Ask every time")!.click());
+    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "updateBot", botId: "pepper", patch: { outbound: { policy: "ask" } } });
+  });
+
   it("has no limit to set or count, even for a rule saved with a daily cap", () => {
     const fetched = vi.fn(() => new Promise(() => {}));
     vi.stubGlobal("fetch", fetched);
@@ -143,29 +187,5 @@ describe("Sending on your behalf", () => {
     expect(fetched).not.toHaveBeenCalled();
     flushSync(() => option("Ask every time")!.click());
     expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "updateBot", botId: "pepper", patch: { outbound: { policy: "ask" } } });
-  });
-});
-
-describe("who a bot talks to", () => {
-  const quill: Bot = { ...base, id: "quill", name: "Quill", threadId: "quill-main", tasks: [] };
-  const button = () => [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === "Let it talk to every bot");
-
-  it("says nothing more for a bot that talks to every bot, the default", () => {
-    render(base, false, [quill]);
-    expect(host.textContent).not.toContain("Set up to talk only to");
-    expect(button()).toBeUndefined();
-  });
-
-  it("names the bots a peers list keeps it to, and lets a person open it to every bot in one click", () => {
-    render({ ...base, peers: ["quill", "deleted-bot"] }, false, [quill]);
-    expect(host.textContent).toContain("Set up to talk only to Quill.");
-    flushSync(() => button()!.click());
-    expect(dispatch).toHaveBeenCalledExactlyOnceWith({ type: "updateBot", botId: "pepper", patch: { peers: null, acknowledgePeerScope: true } });
-  });
-
-  it("says so when the list leaves it no one to talk to", () => {
-    render({ ...base, peers: [] }, false, [quill]);
-    expect(host.textContent).toContain("Set up not to talk to other bots.");
-    expect(button()).toBeDefined();
   });
 });

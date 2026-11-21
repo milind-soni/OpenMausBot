@@ -32,7 +32,7 @@ export function Heading({ title, sub }: { title: string; sub?: ReactNode }) {
 export function BackLink({ label, onClick }: { label: string; onClick: () => void }) {
   return <button type="button" onClick={onClick}
     className="-ms-1.5 inline-flex items-center gap-0.5 self-start rounded-full py-1 pe-2.5 ps-1 text-[13px] leading-[18px] text-ink-secondary transition-colors hover:bg-ink/[0.06] hover:text-ink motion-reduce:transition-none">
-    <ChevronLeft size={16} strokeWidth={1.5} aria-hidden="true" className="rtl:-scale-x-100" />{label}
+    <ChevronLeft size={16} aria-hidden="true" className="rtl:-scale-x-100" />{label}
   </button>;
 }
 

@@ -24,6 +24,9 @@ export interface CloudAccountState {
   machine?: import("./cloud-home.mjs").CloudMachine;
   /** Connected: the teams this account is in, each with its Cloud; absent while it is in none. */
   teams?: import("./cloud-home.mjs").CloudTeam[];
+  /** Connected, with no Cloud of the account's own: the team it was invited into, which opens first, before any plan is
+   * offered (the Admin's `landing`). */
+  landing?: { teamId: string };
   /** Connected to an Admin that lists every Cloud of the person's (contract v1 `clouds`): each of them, My Cloud first.
    * Absent from an older Admin, whose `machine` and `teams` say everything. */
   clouds?: import("./cloud-list.mjs").CloudListEntry[];
@@ -56,6 +59,11 @@ export interface CloudAccountState {
   checkout?: { plan: string; startedAt: number; signIn?: true; link?: true; done?: true };
   /** This app talks to the staging Admin (OMB_CLOUD_STAGING=1): test payments, test Clouds. */
   staging?: true;
+  /** Unavailable: the saved sign-in can't be read (`restore-failed`, offered after a few tries) or removed
+   * (`signout-storage-failed`); `resetSaved()` clears it so the person can sign in again. */
+  reset?: true;
+  /** Signed in for this run only: the sign-in couldn't be saved on this computer after the person cleared the old one. */
+  unsaved?: true;
   /** Connected: opening My Cloud waits for it to wake. */
   waking?: true;
   /** Connected: the plan's renewal, only while this account pays for a plan that runs: what Cancel and Keep act on (display only). */
@@ -78,13 +86,15 @@ export type CloudRenewalResult =
  * in only in the browser (single sign-on there, or an older Admin). */
 export type CloudSignInStart =
   | { outcome: "sent"; email: string; expiresAt: number; resendAt: number; /** False: new accounts are closed, so only an existing one gets a code. */ signupOpen: boolean }
-  | { outcome: import("./cloud-signin.mjs").CloudSignInStartFailure };
+  | { outcome: import("./cloud-signin.mjs").CloudSignInStartFailure }
+  | import("./cloud-signin.mjs").CloudSignInBlocked;
 /** `signed-in`: stored and read like the browser sign-in; `wrong-code` says
  * the tries left; `expired` needs a new code. */
 export type CloudSignInVerify =
   | { outcome: "signed-in"; state: CloudAccountState }
   | { outcome: "wrong-code"; triesLeft: number }
-  | { outcome: Exclude<import("./cloud-signin.mjs").CloudSignInVerifyFailure, "wrong-code"> };
+  | { outcome: Exclude<import("./cloud-signin.mjs").CloudSignInVerifyFailure, "wrong-code"> }
+  | import("./cloud-signin.mjs").CloudSignInBlocked;
 /** How the Cloud is shown in this app's switcher and Settings → Servers. */
 export interface CloudHomeLook { name: string; color: import("./cloud-buy.mjs").CloudColor }
 /** Why the Admin opens no other Cloud's checkout now (contract v1 `addBlocked`). */
@@ -144,6 +154,8 @@ export interface CloudAccountBridge {
   signInStart?(email: string): Promise<CloudSignInStart>;
   signInVerify?(code: string): Promise<CloudSignInVerify>;
   signInCancel?(): Promise<void>;
+  /** Clears a saved sign-in this computer can't read or remove (state `reset`), so a new one can start. Absent on an older app. */
+  resetSaved?(): Promise<CloudAccountState>;
   /** The checkout this app opened, again (never a new one while main keeps it); the plan and source only when none is kept. */
   reopenCheckout?(plan: string, source: string): Promise<CloudCheckoutResult>;
   /** Copies that checkout's page to the clipboard in main; false when none is kept. */
@@ -182,7 +194,8 @@ export interface RailOpenResult { outcome: "switched" | "moving" | "sign-in" | "
 export type AccountAddResult =
   | { outcome: "switched" | "added" | "already"; email?: string; view: AccountsView }
   | { outcome: "wrong-code"; triesLeft: number }
-  | { outcome: Exclude<import("./cloud-signin.mjs").CloudSignInVerifyFailure, "wrong-code"> };
+  | { outcome: Exclude<import("./cloud-signin.mjs").CloudSignInVerifyFailure, "wrong-code"> }
+  | import("./cloud-signin.mjs").CloudSignInBlocked;
 /** This app's own pages only: main refuses any other page. Absent on an older app. */
 export interface AccountsBridge {
   list(): Promise<AccountsView>;
@@ -286,6 +299,7 @@ export interface CloudAccountClient {
   emailStart(email: string): Promise<CloudSignInStart>;
   emailVerify(code: string): Promise<CloudSignInVerify>;
   emailCancel(): void;
+  resetSaved(): Promise<CloudAccountState>;
   reopenCheckout(plan?: string, source?: string): Promise<CloudCheckoutResult>;
   /** Main only (the clipboard): the kept checkout page, or null. */
   checkoutLink(): string | null;
@@ -365,6 +379,8 @@ export interface CloudAccountClient {
   reload(): Promise<CloudAccountState>;
   /** Ends a sign-in that waits on this device, at the Admin. */
   revokeSaved(record: unknown): Promise<void>;
+  /** For cloud-accounts.mjs only, never a page: the active sign-in when it is kept in memory only, as its file would hold it. */
+  memorySignIn(): unknown;
   close(): void;
 }
 export declare function createCloudAccountClient(options: {
@@ -384,6 +400,8 @@ export declare function createCloudAccountClient(options: {
   /** Files or lending waits for a sleeping Cloud to wake: the session is read every 15 s. */
   awaitingWake?: () => boolean;
   t?: (key: string, params?: Record<string, string | number>) => string;
+  /** How long Clear waits for a read of the saved sign-in already under way (READ_WAIT_MS). */
+  readWaitMs?: number;
 }): CloudAccountClient;
 export declare function cloudPlanSnapshot(state: CloudAccountState | null | undefined, extra?: { notice?: import("./cloud-home.mjs").CloudTrialState | null }): CloudPlanSnapshot;
 /** My Cloud's line under its name in the server menus, or null for none. */

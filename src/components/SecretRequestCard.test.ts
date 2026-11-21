@@ -329,15 +329,23 @@ describe("SecretRequestCard key analytics", () => {
     expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "xai", via: "chat_request", result: "unverified" }]]);
   });
 
-  // Settings keeps an AI provider key in the server's settings, not the desktop's store: the card does the same.
-  it("saves an Anthropic key where Settings does, never through the desktop store, keeping Claude sign-ins", async () => {
-    const setCredential = vi.fn();
+  it("saves an Anthropic key in the desktop store as Settings does, keeping Claude sign-ins", async () => {
+    const setCredential = vi.fn().mockResolvedValue({ anthropic: { configured: true } });
     vi.stubGlobal("window", { ogb: { setCredential } });
+    fixture.api.mockResolvedValueOnce({ ok: true });
+    await submit("anthropicApiKey", "sk-ant-ZZtestSECRET0123456789");
+    expect(setCredential).toHaveBeenCalledExactlyOnceWith("anthropicApiKey", "sk-ant-ZZtestSECRET0123456789", { everyClaudeBot: false });
+    expect(fixture.api.mock.calls.map(([path]) => path)).toEqual(["/api/bots/bot-1/secret-cards/secret-card/provided"]);
+    expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "anthropic", via: "chat_request", result: "unverified" }]]);
+  });
+
+  it("sends a provider key typed on a desktop paired to another computer to that computer's server", async () => {
+    const setCredential = vi.fn();
+    vi.stubGlobal("window", { ogb: { setCredential, remoteClient: { active: true } } });
     fixture.api.mockResolvedValueOnce({ anthropic: { configured: true } }).mockResolvedValueOnce({ ok: true });
     await submit("anthropicApiKey", "sk-ant-ZZtestSECRET0123456789");
     expect(setCredential).not.toHaveBeenCalled();
     expect(fixture.api.mock.calls[0]).toEqual(["/api/config", { method: "PUT", body: JSON.stringify({ anthropic: { key: "sk-ant-ZZtestSECRET0123456789", everyClaudeBot: false } }) }]);
-    expect(fixture.track.mock.calls).toEqual([["api_key_saved", { provider: "anthropic", via: "chat_request", result: "unverified" }]]);
   });
 
   it("saves the Composio key in the desktop store's slot, as Settings does", async () => {

@@ -64,7 +64,7 @@ The examples below assume a global install; prefix them with `npx` otherwise.
 | `openmausbot pair` | Create another phone invitation while the configured workspace and HTTPS connection are running. |
 | `openmausbot devices` | List paired devices; `openmausbot devices revoke ID` signs one out. |
 | `openmausbot serve` | Start without onboarding prompts or automatic browser opening; specify remote-access flags explicitly for a service. |
-| `openmausbot login` | Sign in to an OpenMausBot account for `--tunnel`; this does not sign in to an AI provider or start the tunnel. |
+| `openmausbot account login` | Sign in to an OpenMausBot account for `--tunnel`; this does not sign in to an AI provider or start the tunnel. |
 
 `start` accepts the same server options as `serve`, including `--port`, `--data-dir`, `--tailscale`, `--tunnel`, and `--public-url`. Keep using your custom data directory and port when starting or pairing:
 
@@ -78,6 +78,8 @@ Setup needs an interactive terminal. Later starts can run without one once setup
 ## Credentials and cancellation
 
 API keys are hidden while typed or pasted. New API connections save their key in the data directory's `config.json` as **plaintext, not encrypted**, with owner-only permissions (`0600`) on Unix. Managed-access account credentials in `tunnel-account.json` are also plaintext with `0600` permissions on Unix. Keep these files and backups private. Native provider sign-in credentials are managed by the provider's own CLI.
+
+The packaged desktop app does not keep your AI provider and service keys there: it encrypts them with the operating system (Keychain on macOS, DPAPI on Windows, the system secret store on Linux, where a desktop without one gets only Electron's fixed-key obfuscation) in `credentials.bin` and moves keys it finds in `config.json` into that store at startup. Keys entered through this CLI setup, OpenCode provider keys, keys given to one engine (`environment` or `key`), and MCP header values stay plaintext in `config.json`, on desktop too. `mcp-oauth.json` is also plaintext.
 
 Ctrl-C during AI setup leaves unsaved OMB changes unapplied. Installations and provider sign-ins already completed remain available. Ctrl-C during the later phone step keeps the AI setup you already saved, exits without starting a server, and does not undo an account sign-in already completed. Run `openmausbot setup` to continue; no destructive reset is needed.
 

@@ -122,28 +122,41 @@ async function passFromScout(message: string) {
     body: JSON.stringify({ to: "Ben", message }) });
   expect(answer.status, await answer.clone().text()).toBe(200);
 }
+/** A failed wait in askedOfBen, with Reporter's latest rows and the servers' output. */
+async function withLogs(what: string, cause: unknown): Promise<Error> {
+  const rows = (await messages(cleo, reporter.threadId)).rows.slice(-4);
+  return new Error(`${what}; Reporter's last rows: ${JSON.stringify(rows)}\n${fx.logs().slice(-6_000)}`, { cause });
+}
 /** Cleo's message holds Reporter's turn in its main chat while it asks Ben's approval through its permission socket. */
 const approvalFromReporter = (command: string) => askedOfBen((id) => ({ t: "ask", id, tool: "Bash", input: { command } }));
 /** Cleo's message holds Reporter's turn in its main chat while it asks Ben a card through its permission socket. Every
- * other turn has ended first, so the turn that writes the dump next is this one. */
+ * engine shares one dump, and another bot may still be carrying on from an answer, so the socket is read from the dump
+ * of the turn that has Cleo's message. */
 async function askedOfBen(ask: (requestId: string) => Record<string, unknown>) {
   await until(idle);
   writeFileSync(file("hang-mode"), "");
   rmSync(file("release"), { force: true });
   rmSync(file("dump.json"), { force: true });
-  const sent = await team.as(cleo, "POST", `/api/bots/${reporter.id}/messages`, { text: "Clean the build", threadId: reporter.threadId });
+  const text = `Clean the build ${randomUUID()}`;
+  const sent = await team.as(cleo, "POST", `/api/bots/${reporter.id}/messages`, { text, threadId: reporter.threadId });
   expect(sent.status, JSON.stringify(sent.body)).toBe(202);
-  const socketPath = await expect.poll(() => {
-    try { return JSON.parse(readFileSync(file("dump.json"), "utf8")).mcpConfig?.mcpServers?.ogb?.args?.[1] as string | undefined; } catch { return undefined; }
-  }, { timeout: 20_000 }).toEqual(expect.any(String)).then(() => JSON.parse(readFileSync(file("dump.json"), "utf8")).mcpConfig.mcpServers.ogb.args[1] as string);
+  let socketPath: string | undefined;
+  await until(() => {
+    try {
+      const dump = JSON.parse(readFileSync(file("dump.json"), "utf8")) as { prompt?: unknown; mcpConfig?: { mcpServers?: { ogb?: { args?: string[] } } } };
+      if (JSON.stringify(dump.prompt).includes(text)) socketPath = dump.mcpConfig?.mcpServers?.ogb?.args?.[1];
+    } catch { /* not written yet */ }
+    return socketPath !== undefined;
+  }, 20_000).catch(async (error: unknown) => { throw await withLogs("Reporter's turn with Cleo's message never started", error); });
   rmSync(file("hang-mode"), { force: true });
-  const socket = connect(socketPath);
+  const socket = connect(socketPath!);
   sockets.push(socket);
   socket.on("error", () => {});
   await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
   const requestId = randomUUID();
   socket.write(`${JSON.stringify(ask(requestId))}\n`);
-  await expect.poll(async () => (await messages(cleo, reporter.threadId)).rows.some((row) => row.card?.requestId === requestId), { timeout: 10_000 }).toBe(true);
+  await until(async () => (await messages(cleo, reporter.threadId)).rows.some((row) => row.card?.requestId === requestId), 10_000)
+    .catch(async (error: unknown) => { throw await withLogs(`no card for the ask sent on ${socketPath}`, error); });
   return requestId;
 }
 
@@ -156,7 +169,7 @@ beforeAll(async () => {
   ben = (await team.pair(BEN)).token!;
   await bots(ben);
   const create = async (body: Record<string, unknown>) => {
-    const created = await team.as(cleo, "POST", "/api/bots", body);
+    const created = await team.as(cleo, "POST", "/api/bots", { visibility: "everyone", ...body });
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     return created.body.bot as Bot;
   };
@@ -295,6 +308,11 @@ it("never lets the assistant decide or approve for Ben, and never shows it his p
   expect(prompt).toContain("Reporter");
   expect(prompt).not.toContain(SECRET);
   expect(prompt).not.toContain("Globex");
+  await until(async () => {
+    const rows = (await messages(cleo, cleoThread)).rows;
+    const answered = rows.findLastIndex((row) => row.relay?.kind === "assistant" && row.text?.includes("Q4 report"));
+    return answered >= 0 && rows.slice(answered).some((row) => row.role === "bot" && row.kind === "text") && await idle();
+  });
 }, hostTimeout(180_000));
 
 it("counts the asks waiting on Ben on his inbox, live, and drops one as soon as he answers it in the bot's own chat", async () => {

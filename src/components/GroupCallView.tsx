@@ -16,14 +16,13 @@ import { cn } from "@/lib/cn";
 import { BotAvatar } from "./Avatar";
 import { CallTargetButton, type CallButtonPlacement } from "./CallView";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { speechBridge } from "@/lib/speech";
+import { CALL_ENDPOINT_MS, speechBridge } from "@/lib/speech";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { titledCard } from "./ApprovalCard";
 
 const YES = /^(yes|yeah|yep|yup|sure|ok|okay|go ahead|do it|allow|approve|approved|fine|please do)\b/i;
 const NO = /^(no|nope|don'?t|do not|stop|deny|denied|cancel|never|skip it)\b/i;
-const CALL_ENDPOINT_MS = 850;
 
 type Phase = "listening" | "sending" | "working" | "speaking";
 
@@ -71,14 +70,16 @@ function questionIn(messages: Message[]): Message | undefined {
 }
 
 function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
-  const { dispatch } = useStore();
+  const { state, dispatch } = useStore();
+  // One bridge for the whole call: a voice change mid-call must not stop or hear through another.
+  const [bridge] = useState(() => speechBridge(state.config));
   const speech = useSpeech();
   const initialPhase: Phase = group.working || group.busyBotId ? "working" : "listening";
   const [phase, setPhase] = useState<Phase>(initialPhase);
   const [heard, setHeard] = useState("");
   const [note, setNote] = useState<string | null>(null);
   const [speakingMemberId, setSpeakingMemberId] = useState<string | null>(null);
-  const pushToTalk = usePushToTalk(group.id, phase === "listening", () => {
+  const pushToTalk = usePushToTalk(group.id, bridge, phase === "listening", () => {
     setNote(t("call.turns.pushToTalkFailed"));
   });
 
@@ -124,8 +125,8 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   }, []);
 
   const hush = useCallback(() => {
-    void speechBridge()?.speechStop();
-  }, []);
+    void bridge?.speechStop();
+  }, [bridge]);
 
   const listen = useCallback(() => {
     if (!alive.current || currentCall() !== group.id) return;
@@ -133,12 +134,12 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     setSpeakingMemberId(null);
     setHeard("");
     setNote(null);
-    void speechBridge()?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
+    void bridge?.speechStart({ endpointMs: CALL_ENDPOINT_MS }).catch(() => {
       if (alive.current && currentCall() === group.id) {
         setNote(t("call.turns.micFailed"));
       }
     });
-  }, [group.id, move]);
+  }, [bridge, group.id, move]);
 
   const scheduleListen = useCallback(
     (force = false, delay = 140) => {
@@ -216,7 +217,6 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
   }, [group.id]);
 
   useEffect(() => {
-    const bridge = speechBridge();
     if (!bridge) return;
     const offTranscript = bridge.onSpeechTranscript((line) => {
       if (!alive.current || currentCall() !== group.id || phaseRef.current !== "listening") return;
@@ -338,10 +338,10 @@ function GroupCall({ group, members }: { group: Group; members: Bot[] }) {
     return () => {
       offTranscript();
       offEnd();
-      void speechBridge()?.speechStop();
+      void bridge.speechStop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispatch, enqueueSpeech, group.id, group.threadId, hush, listen, move, scheduleListen]);
+  }, [bridge, dispatch, enqueueSpeech, group.id, group.threadId, hush, listen, move, scheduleListen]);
 
   useEffect(() => {
     let resumeAfterRoutine = false;

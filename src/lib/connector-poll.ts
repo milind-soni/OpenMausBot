@@ -32,7 +32,7 @@ export function pollConnector(
     clearInterval(timer);
   };
   const timer = setInterval(() => {
-    void read().then((state) => {
+    void Promise.resolve().then(read).catch(() => undefined).then((state) => {
       if (ended) return;
       const result = connectorPollEnd(before, state, ++tries);
       if (!result) return;

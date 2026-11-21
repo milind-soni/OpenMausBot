@@ -5,25 +5,25 @@ afterEach(() => vi.clearAllMocks());
 const actions = { signOut: vi.fn(), add: vi.fn() };
 const a = { id: "a", email: "a@example.test" };
 
-it("the You menu: just the address and Sign out, with no list of accounts", () => {
+it("the You menu: just Sign out; the menu's header already names the account", () => {
   const items = accountMenuItems({ view: { active: a }, openSheet: null, noRail: false, ...actions });
-  expect(items.map((item) => item.label)).toEqual(["a@example.test", "Sign out"]);
-  expect(items[0].disabled).toBe(true);
-  items[1].onSelect();
+  expect(items.map((item) => item.label)).toEqual(["Sign out"]);
+  items[0].onSelect();
   expect(actions.signOut).toHaveBeenCalledWith("a");
 });
 
 it("with no rail beside the page, its ＋ can't be reached, so Add another account stays here", () => {
   const items = accountMenuItems({ view: { active: a }, openSheet: null, noRail: true, ...actions });
-  expect(items.map((item) => item.label)).toEqual(["a@example.test", "Add another account", "Sign out"]);
-  items[1].onSelect();
+  expect(items.map((item) => item.label)).toEqual(["Add another account", "Sign out"]);
+  items[0].onSelect();
   expect(actions.add).toHaveBeenCalledWith();
 });
 
 it("an account whose sign-in ended says so, and its tap goes to the sign-in", () => {
   const items = accountMenuItems({ view: { active: { ...a, signIn: true as const } }, openSheet: null, noRail: false, ...actions });
+  expect(items[0].label).toBe("a@example.test");
   expect(items[0].subtitle).toBe("Sign in again");
-  expect(items[0].disabled).toBe(false);
+  expect(items[0].disabled).toBeFalsy();
   items[0].onSelect();
   expect(actions.add).toHaveBeenCalledWith("a@example.test");
 });

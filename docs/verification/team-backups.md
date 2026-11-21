@@ -3,7 +3,7 @@
 ## User path
 
 This is the legacy partial team-copy format. The sidebar no longer offers it;
-use **Settings → Backups** for a [full workspace backup](workspace-backups.md).
+use **Settings → Import & export** for a [full workspace backup](workspace-backups.md).
 Existing `.mausbackup.json` files remain importable through
 Teams → Import → choose the file → review → **Import backup**.
 Import always adds independent copies; existing bots, Chiefs, rooms and chats
@@ -85,7 +85,7 @@ The output includes the fixture log path and a sidebar screenshot saved at
 
 This section is the original whole-installation Markdown export. Sharing one
 team with everything but its chat history (all its skills by default) is
-**Share team…**, covered in [team-sharing.md](team-sharing.md).
+sharing a template, covered in [team-sharing.md](team-sharing.md).
 
 The existing package export API accepts an explicit list of imported skill names:
 `POST /api/teams/export` with

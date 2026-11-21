@@ -3,10 +3,11 @@
 // Before such a desktop is removed, its Firefox profile is copied into the workspace, where the new image points ~/.mozilla.
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { lstat, mkdir, readdir, rename, rm, rmdir } from "node:fs/promises";
+import { lstat, mkdir, open, readdir, readlink, rename, rm, rmdir, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import { shellQuote } from "./browser/chrome/wrapper.ts";
 import type { ContainerComputerStatus, LocalVmTarget } from "./container-computer.ts";
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 
@@ -15,6 +16,17 @@ const PROFILE_IN_CONTAINER = "/home/cua/.mozilla";
 const APPS_IN_CONTAINER = "/home/cua/.local";
 // docker: "Could not find the file … in container"; podman: "… could not be found on container …: no such file or directory".
 const NOT_IN_CONTAINER = /could not (?:be )?f(?:ou|i)nd|no such file/iu;
+const PERMISSION_DENIED = /EACCES|EPERM|permission denied|operation not permitted/iu;
+
+/** A desktop made before cua took the host's ids ran as uid 1000 and may have left folders this server cannot change.
+ * The update then names the one command that hands them back instead of a bare EACCES. */
+function withOwnershipStep(error: unknown, workspaceDir: string): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  if (!PERMISSION_DENIED.test(message) || !process.getuid || !process.getgid) return error instanceof Error ? error : new Error(message);
+  return new Error(
+    `an older desktop left files this app (uid ${process.getuid()}) cannot change; run sudo chown -R ${process.getuid()}:${process.getgid()} ${shellQuote(workspaceDir)} and it retries on its own (${message.slice(0, 80)})`,
+  );
+}
 
 async function isEmptyDirectory(path: string): Promise<boolean> {
   try {
@@ -22,6 +34,53 @@ async function isEmptyDirectory(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function readChunk(file: FileHandle, buffer: Buffer): Promise<number> {
+  let filled = 0;
+  while (filled < buffer.length) {
+    const { bytesRead } = await file.read(buffer, filled, buffer.length - filled, null);
+    if (!bytesRead) break;
+    filled += bytesRead;
+  }
+  return filled;
+}
+
+async function sameFileBytes(a: string, b: string, deadline: number): Promise<boolean> {
+  const left = await open(a, "r");
+  try {
+    const right = await open(b, "r");
+    try {
+      const leftBuffer = Buffer.allocUnsafe(64 * 1024), rightBuffer = Buffer.allocUnsafe(64 * 1024);
+      for (;;) {
+        if (Date.now() > deadline) throw new Error("installed-app comparison timed out");
+        const [leftRead, rightRead] = await Promise.all([readChunk(left, leftBuffer), readChunk(right, rightBuffer)]);
+        if (leftRead !== rightRead || !leftBuffer.subarray(0, leftRead).equals(rightBuffer.subarray(0, rightRead))) return false;
+        if (!leftRead) return true;
+      }
+    } finally { await right.close(); }
+  } finally { await left.close(); }
+}
+
+async function sameAppTree(a: string, b: string): Promise<boolean> {
+  const pending: [string, string][] = [[a, b]];
+  const deadline = Date.now() + 5 * 60_000;
+  while (pending.length) {
+    if (Date.now() > deadline) throw new Error("installed-app comparison timed out");
+    const [left, right] = pending.pop()!;
+    const [ls, rs] = await Promise.all([lstat(left), lstat(right)]);
+    if (ls.isSymbolicLink() && rs.isSymbolicLink()) {
+      if (await readlink(left) !== await readlink(right)) return false;
+    } else if (ls.isDirectory() && rs.isDirectory()) {
+      const [leftNames, rightNames] = await Promise.all([readdir(left), readdir(right)]);
+      const names = new Set(rightNames);
+      if (leftNames.length !== rightNames.length || leftNames.some((name) => !names.has(name))) return false;
+      for (const name of leftNames) pending.push([join(left, name), join(right, name)]);
+    } else if (ls.isFile() && rs.isFile()) {
+      if (ls.size !== rs.size || !await sameFileBytes(left, right, deadline)) return false;
+    } else return false;
+  }
+  return true;
 }
 
 /** Works on a stopped container. "kept": the workspace already has a Firefox profile, which is never overwritten.
@@ -32,7 +91,9 @@ export async function rescueFirefoxProfile(runtime: string, target: LocalVmTarge
   await mkdir(profiles, { recursive: true, mode: 0o700 });
   const existing = await lstat(durable).catch(() => null);
   if (existing && !(existing.isDirectory() && await isEmptyDirectory(durable))) return "kept";
-  const staging = join(profiles, `.mozilla-rescue-${randomBytes(6).toString("hex")}`);
+  // Staged in the workspace root, which this server made: an older desktop may own .browser-profiles, and a desktop whose
+  // ~/.mozilla is already a link into the workspace must update without writing there.
+  const staging = join(target.workspaceDir, `.mozilla-rescue-${randomBytes(6).toString("hex")}`);
   try {
     const { command, args } = resolveCliSpawn(runtime, ["cp", `${target.containerName}:${PROFILE_IN_CONTAINER}`, staging]);
     try {
@@ -62,7 +123,7 @@ export async function keepFirefoxProfileBeforeRemove(
 ): Promise<"rescued" | "kept" | "none"> {
   if (!status.runtime || status.container === "missing" || !status.managed || status.imageMatches) return "none";
   if (status.container === "running") await stop();
-  return rescueFirefoxProfile(status.runtime, target);
+  return rescueFirefoxProfile(status.runtime, target).catch((error: unknown) => { throw withOwnershipStep(error, target.workspaceDir); });
 }
 
 /** User-installed desktop applications conventionally live in ~/.local. Rescue that directory before replacing a legacy
@@ -72,7 +133,7 @@ export async function rescueInstalledApps(runtime: string, target: LocalVmTarget
   const durable = join(apps, "local");
   await mkdir(apps, { recursive: true, mode: 0o700 });
   const existing = await lstat(durable).catch(() => null);
-  const staging = join(apps, `.local-rescue-${randomBytes(6).toString("hex")}`);
+  const staging = join(target.workspaceDir, `.local-rescue-${randomBytes(6).toString("hex")}`); // the root, as for Firefox
   try {
     const { command, args } = resolveCliSpawn(runtime, ["cp", `${target.containerName}:${APPS_IN_CONTAINER}`, staging]);
     try {
@@ -86,7 +147,7 @@ export async function rescueInstalledApps(runtime: string, target: LocalVmTarget
     if (!copied.isDirectory()) return "none";
     if (existing && !(existing.isDirectory() && await isEmptyDirectory(durable))) {
       try {
-        await run("/usr/bin/diff", ["-qr", staging, durable], { timeout: 5 * 60_000, maxBuffer: 1024 * 1024 });
+        if (!await sameAppTree(staging, durable)) throw new Error("different app trees");
       } catch {
         throw new Error("could not preserve installed desktop apps because the durable app area differs from the old desktop");
       }
@@ -107,5 +168,5 @@ export async function keepInstalledAppsBeforeRemove(
 ): Promise<"rescued" | "kept" | "none"> {
   if (!status.runtime || status.container === "missing" || !status.managed || status.imageMatches) return "none";
   if (status.container === "running") await stop();
-  return rescueInstalledApps(status.runtime, target);
+  return rescueInstalledApps(status.runtime, target).catch((error: unknown) => { throw withOwnershipStep(error, target.workspaceDir); });
 }

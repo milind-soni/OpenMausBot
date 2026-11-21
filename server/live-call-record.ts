@@ -1,4 +1,4 @@
-// Never holds anything said on a call beyond the requests the bot already received.
+// Of what was said on a call, holds only the bot's own spoken lines; the person's words are the requests already in the chat.
 // steer-queue.ts imports this at runtime, so it stays light: store and title machinery arrive as injected deps.
 import { liveCallRowText } from "../shared/live-call.ts";
 import type { LiveCallRecord } from "../shared/wire.ts";

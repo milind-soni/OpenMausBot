@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { ModelCatalog, ProviderDriver } from "../contracts.ts";
+import { operatorEnvKey } from "../credential-env.ts";
 import { createOpenAIChatRuntime } from "./openai-chat.ts";
 
 const DEFAULT_URL = "https://api.cerebras.ai/v1";
@@ -42,13 +43,13 @@ export const CerebrasDriver: ProviderDriver<CerebrasConfig> = {
   install: {
     docsUrl: "https://cloud.cerebras.ai/",
     settings: "connections",
-    signInCommand: "Save a Cerebras API key in Settings → API keys, or set CEREBRAS_API_KEY on the server.",
+    signInCommand: "Save a Cerebras API key in Settings → AI → Providers, or set CEREBRAS_API_KEY on the server.",
   },
   decodeConfig,
   defaultConfig: () => decodeConfig({}),
   async create(input) {
     const { config } = input;
-    const apiKey = (input.environment.CEREBRAS_API_KEY ?? process.env.CEREBRAS_API_KEY ?? "").trim();
+    const apiKey = (input.environment.CEREBRAS_API_KEY ?? operatorEnvKey("CEREBRAS_API_KEY") ?? "").trim();
     const known = new Map(DEFAULT_MODELS.options.map((option) => [option.id, option]));
     const withConfiguredModel = (options: ModelCatalog["options"]): ModelCatalog => {
       const preferred = config.model ?? DEFAULT_MODELS.default;
@@ -92,8 +93,8 @@ export const CerebrasDriver: ProviderDriver<CerebrasConfig> = {
         ...(stream ? { stream_options: { include_usage: true } } : {}),
       }),
       httpErrorLabel: "Cerebras",
-      missingKeyError: "Save a Cerebras API key in Settings → API keys, or set CEREBRAS_API_KEY.",
-      unavailableReason: "No Cerebras API key — open Settings → API keys.",
+      missingKeyError: "Save a Cerebras API key in Settings → AI → Providers, or set CEREBRAS_API_KEY.",
+      unavailableReason: "No Cerebras API key — open Settings → AI → Providers.",
       timeoutMs: 180_000, billing: "metered", includeUsageInCompleted: true,
       nativeLog: {
         source: "cerebras.chat.completions",

@@ -98,7 +98,6 @@ beforeAll(async () => {
   writeFileSync(titleFile, "Safari footer fix");
   writeFileSync(join(data, "config.json"), JSON.stringify({
     // a room task's first message is titled by the engine of whoever answers it
-    features: { llmThreadTitles: true },
     instances: {
       quick: {
         driver: "claudeAgent", displayName: "Quick fixture", config: { cli: FAKE_CLAUDE },

@@ -13,7 +13,7 @@ function storage(): Storage | undefined {
   }
 }
 
-function showRunCard(): boolean {
+export function showRunCard(): boolean {
   if (sessionChoice !== undefined) return sessionChoice;
   try {
     return storage()?.getItem(RUN_CARD_KEY) !== "0";

@@ -13,9 +13,7 @@ export { AFTER_RESET_MS, nearLimit, NEAR_LIMIT_PERCENT, isLimitResetSchedule, ty
 const POLL_MS = 60_000;
 const names = new Map<string, string>();
 let report: EngineLimitsReport | null = null;
-let loading: Promise<boolean> | null = null;
-let refreshing: Promise<boolean> | null = null;
-let requestId = 0;
+let loading: Promise<void> | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 const listeners = new Set<(next: EngineLimitsReport) => void>();
 
@@ -26,33 +24,27 @@ export function engineName(engine: string): string {
 
 /** A server that predates limit resets answers without engines: that reads as none. */
 export function rememberLimits(next: Partial<EngineLimitsReport> | null | undefined): void {
-  report = { checkedAt: next?.checkedAt ?? 0, engines: Array.isArray(next?.engines) ? next.engines : [], errors: next?.errors, checkedEngines: next?.checkedEngines };
+  report = { checkedAt: next?.checkedAt ?? 0, engines: Array.isArray(next?.engines) ? next.engines : [] };
   for (const limit of report.engines) names.set(limit.engine, limit.name);
   for (const listener of listeners) listener(report);
 }
 
-function readLimits(request: () => Promise<EngineLimitsReport>, reportErrors = false): Promise<boolean> {
-  const id = ++requestId;
+function readLimits(request: () => Promise<EngineLimitsReport>): Promise<void> {
   return unlessRefused("/api/limit-resets", request, null)
-    .then((next) => { if (next && id === requestId) rememberLimits(next); return next !== null; }, (cause: unknown) => { if (reportErrors) throw cause; return false; });
+    .then((next) => { if (next) rememberLimits(next); }, () => undefined);
 }
 
-/** A person's refresh bypasses the cache; overlapping reads of the same kind share one request. */
-export function loadLimits(refresh = false): Promise<boolean> {
-  if (refresh) {
-    refreshing ??= readLimits(() => api<EngineLimitsReport>("/api/limit-resets?refresh=1"), true).finally(() => { refreshing = null; });
-    return refreshing;
-  }
-  if (refreshing) return refreshing.catch(() => false);
+/** A person's refresh always asks again; a background read joins the one already on its way. */
+export function loadLimits(refresh = false): Promise<void> {
+  if (refresh) return readLimits(() => api<EngineLimitsReport>("/api/limit-resets?refresh=1"));
   loading ??= readLimits(() => api<EngineLimitsReport>("/api/limit-resets", { background: true })).finally(() => { loading = null; });
   return loading;
 }
 
-/** Whether the last check successfully read this engine's own provider. */
-export const limitWasChecked = (engine: string) => report?.checkedEngines?.includes(engine) ?? false;
-
-/** A failed usage read for one engine, when the server reports it. */
-export const limitRefreshError = (engine: string) => report?.errors?.[engine] ?? null;
+/** "Try again now": the server ends the engine's limit hold, so the next turn goes to it; a refusal holds it again. */
+export async function releaseLimit(engine: string): Promise<void> {
+  rememberLimits(await api<EngineLimitsReport>("/api/limit-resets/release", { method: "POST", body: JSON.stringify({ engine }) }));
+}
 
 /** When the server last read the engines' usage; 0 before any read. */
 export const limitsCheckedAt = () => report?.checkedAt ?? 0;
@@ -83,11 +75,15 @@ export function resetTime(at: number, now = Date.now()): string {
 
 /** "Claude: 92% used · resets 3:40 PM", or "Claude: at its limit · resets 3:40 PM"; a screen reader's copy joins with a comma. */
 export function limitLine(limit: EngineLimit, now = Date.now(), separator = " · "): string {
-  const used = limit.blocked ? t("limits.atLimit", { engine: limit.name }) : t("limits.used", { engine: limit.name, percent: Math.round(limit.usedPercent ?? 0) });
+  const engine = limit.meter ? t("limits.meterName", { engine: limit.name, meter: limit.meter }) : limit.name;
+  const used = limit.blocked ? t("limits.atLimit", { engine }) : t("limits.used", { engine, percent: Math.round(limit.usedPercent ?? 0) });
   return limit.resetsAt !== null && limit.resetsAt > now ? `${used}${separator}${t("limits.resets", { time: resetTime(limit.resetsAt, now) })}` : used;
 }
 
-export const nearLimitEngines = (engines: readonly EngineLimit[]) => engines.filter(nearLimit);
+/** An engine whose windows are its own, so its reset is the engine's; Antigravity's are Gemini's alone, shown only. */
+export const timesEngineReset = (limit: EngineLimit) => !limit.meter;
+
+export const nearLimitEngines = (engines: readonly EngineLimit[]) => engines.filter((limit) => timesEngineReset(limit) && nearLimit(limit));
 
 export type UsageTone = "fine" | "near" | "out";
 
@@ -133,7 +129,9 @@ export function usageRows(limit: EngineLimit): UsageRow[] {
   });
 }
 
-export function windowLabel(window: LimitWindowName): string {
+/** "5-hour", or "Gemini 5-hour" when the windows measure one allowance of the engine's (EngineLimit.meter). */
+export function windowLabel(window: LimitWindowName, meter?: string): string {
+  if (meter && window !== "other") return t(window === "5-hour" ? "limits.meterFiveHour" : "limits.meterWeekly", { meter });
   return window === "5-hour" ? t("planUsage.fiveHour") : window === "weekly" ? t("planUsage.weekly") : t("usage.title");
 }
 
@@ -141,7 +139,7 @@ export interface ResetMarker { engine: string; name: string; at: number }
 
 /** The calendar's markers: each engine's next known reset inside the range. */
 export function resetMarkers(engines: readonly EngineLimit[], from: number, to: number, now = Date.now()): ResetMarker[] {
-  return engines.flatMap((limit) => limit.resetsAt !== null && limit.resetsAt >= Math.max(from, now) && limit.resetsAt < to
+  return engines.flatMap((limit) => timesEngineReset(limit) && limit.resetsAt !== null && limit.resetsAt >= Math.max(from, now) && limit.resetsAt < to
     ? [{ engine: limit.engine, name: limit.name, at: limit.resetsAt }] : []);
 }
 

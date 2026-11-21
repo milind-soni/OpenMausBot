@@ -4,7 +4,9 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { ServerMode } from "./protocol.ts";
 import { HOME_SECRET_ENV, HOME_SECRETS_DIR, HOME_SECRETS_FILE } from "./settings.ts";
+import { registerHomeSecrets, registerSecret } from "./log.ts";
 
 export interface AgentRecord {
   version: 2;
@@ -17,6 +19,14 @@ export interface AgentRecord {
   /** The Admin's signing keys by id, pinned at enrolment; only a hello signed by one of them replaces them. */
   adminKeys: Record<string, string>;
   enrolledAt: number;
+  /** Who runs this server (protocol.ts `ServerMode`), set when it enrolled; absent on a record made before modes: `operated`. */
+  mode?: ServerMode;
+}
+
+/** The server's admin paused remote management (`mausbot-connector pause`): every job and request from MausBot is refused. */
+export interface PauseRecord {
+  paused: boolean;
+  at: number;
 }
 
 /** The Admin's newest signed config this box verified (protocol.ts `ConfigPayload`), kept as signed. */
@@ -82,6 +92,7 @@ const FILES = {
   selfUpdate: "self-update.json",
   count: "connect-count.json",
   config: "admin-config.json",
+  pause: "pause.json",
 } as const;
 
 export class StateStore {
@@ -90,6 +101,14 @@ export class StateStore {
   constructor(dir: string) {
     this.dir = dir;
     privateDir(dir);
+    this.restoreSecrets();
+  }
+
+  private restoreSecrets(): void {
+    const env = this.read<Record<string, string>>(FILES.env);
+    if (env) registerHomeSecrets(env);
+    const agent = this.read<AgentRecord | { version: 1 }>(FILES.agent);
+    if (agent && "privateKey" in agent && agent.privateKey) registerSecret(agent.privateKey);
   }
 
   path(name: string): string {
@@ -121,7 +140,11 @@ export class StateStore {
   /** Null until enrolled; a record from protocol v1 (a bearer token, no key) counts as not enrolled. */
   agent(): AgentRecord | null {
     const record = this.read<AgentRecord | { version: 1 }>(FILES.agent);
-    return record?.version === 2 ? record : null;
+    if (record?.version === 2) {
+      registerSecret(record.privateKey);
+      return record;
+    }
+    return null;
   }
 
   /**
@@ -145,6 +168,7 @@ export class StateStore {
 
   saveAgent(record: AgentRecord): void {
     this.write(FILES.agent, record);
+    registerSecret(record.privateKey);
   }
 
   home(): HomeRecord {
@@ -156,12 +180,15 @@ export class StateStore {
   }
 
   homeEnv(): Record<string, string> | null {
-    return this.read<Record<string, string>>(FILES.env);
+    const env = this.read<Record<string, string>>(FILES.env);
+    if (env) registerHomeSecrets(env);
+    return env;
   }
 
   saveHomeEnv(env: Record<string, string>): void {
     this.write(FILES.env, env);
     this.saveHomeSecrets(env);
+    registerHomeSecrets(env);
   }
 
   /** The folder holding only the home's secrets file. */
@@ -182,6 +209,15 @@ export class StateStore {
 
   saveStatus(patch: Partial<StatusRecord>): void {
     this.write(FILES.status, { ...this.status(), ...patch });
+  }
+
+  /** Read from the disk each time: `mausbot-connector pause` is another process. */
+  paused(): boolean {
+    return this.read<PauseRecord>(FILES.pause)?.paused === true;
+  }
+
+  savePause(paused: boolean, now = Date.now()): void {
+    this.write(FILES.pause, { paused, at: now } satisfies PauseRecord);
   }
 
   selfUpdate(): SelfUpdateRecord | null {

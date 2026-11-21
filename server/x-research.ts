@@ -47,10 +47,10 @@ export const TREG_TOP_UP_URL = "https://treg.to";
 
 /** Every sentence a bot or the Settings page can be shown about X research. */
 export const X_MESSAGES = {
-  noKey: "Research isn't set up on this server. Add a treg key in Settings → API keys, or use a paid MausBot Cloud plan.",
+  noKey: "Research isn't set up on this server. Add a treg key in Settings → AI → Other services, or use a paid MausBot Cloud plan.",
   botOff: "Research is off for this bot. Turn it on in this bot's settings under Access.",
   badKey: "Sign in to MausBot Cloud again in Settings to use X research.",
-  ownBadKey: "treg rejected your key. Check it in Settings → API keys.",
+  ownBadKey: "treg rejected your key. Check it in Settings → AI → Other services.",
   /** A Cloud home's relay token is the Admin's to replace; the person has no sign-in to redo there. */
   homeBadKey: "X research isn't connected on this Cloud right now. It comes with your plan, so there is nothing to sign in to: try again later, and tell MausBot support if it keeps happening.",
   noPlan: "X research comes with MausBot Cloud plans, and this account's plan isn't active.",
@@ -445,6 +445,8 @@ export function createXRelayClient(options: { url: string; token: string; own?: 
   async function list(endpoint: string, body: Row, opts: ListOptions): Promise<XPostList> {
     const since = opts.sinceId === undefined ? undefined : BigInt(opts.sinceId);
     const posts: XPost[] = [];
+    const postIds = new Set<string>();
+    const cursors = new Set<string>();
     let cursor: string | undefined;
     let more = false;
     for (let page = 0; page < opts.pages; page++) {
@@ -461,11 +463,17 @@ export function createXRelayClient(options: { url: string; token: string; own?: 
           if (opts.newestFirst && index > 0 && at(raw, "isPinned") !== true) reachedSeen = true;
           return;
         }
-        posts.push(post);
+        if (!postIds.has(post.id)) {
+          postIds.add(post.id);
+          posts.push(post);
+        }
       });
       cursor = cursorOf(answer);
       more = Boolean(cursor) && rows.length > 0 && !reachedSeen;
       if (!more || posts.length >= opts.limit) break;
+      // A provider may repeat its cursor; do not pay for the same page again.
+      if (cursor && cursors.has(cursor)) break;
+      if (cursor) cursors.add(cursor);
     }
     if (posts.length > opts.limit) {
       posts.length = opts.limit;

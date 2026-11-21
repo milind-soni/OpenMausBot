@@ -22,6 +22,8 @@ export function installOneHome(deps: Omit<SendDeps, "local" | "move" | "moveSess
     movedTo?(origin: string): Promise<"deleted" | "ended" | "live" | "unknown" | null>;
     reportMoveStatus?(report: import("./move-status.mjs").MoveStatusReport): Promise<boolean>;
     pairTeam(teamId: string): Promise<{ origin: string; code: string; expiresAt?: number }> } | null;
+  /** The person is asked which bots go before the first move starts. */
+  chooses?: boolean;
   journalFile(): string;
   tempRoot(): string;
   lend?(projects: string[]): Promise<unknown>;

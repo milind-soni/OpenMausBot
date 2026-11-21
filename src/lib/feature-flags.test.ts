@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { builtInBrowserEnabled, llmThreadTitlesEnabled, parseSkillReviewSteps, roomMemoryCaptureEnabled, savedStepsEnabled, shareLearnedSkillsMode, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillReviewEnabled, skillReviewSteps, skillReviewUnavailableEngines } from "./feature-flags";
+import { builtInBrowserEnabled, parseSkillReviewSteps, roomMemoryCaptureEnabled, savedStepsEnabled, shareLearnedSkillsMode, sharedComputersEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillReviewEnabled, skillReviewSteps, skillReviewUnavailableEngines, usbPhoneTakeoverEnabled } from "./feature-flags";
 
 describe("experimental feature flags", () => {
   it("keeps skill authoring on by default, before and after the config arrives", () => {
@@ -69,17 +69,17 @@ describe("experimental feature flags", () => {
     expect(sharedComputersEnabled({ features: { sharedComputers: true } })).toBe(true);
   });
 
-  it("offers Regenerate title only while the server has generated titles on", () => {
-    expect(llmThreadTitlesEnabled(null)).toBe(false);
-    expect(llmThreadTitlesEnabled({ features: {} })).toBe(false);
-    expect(llmThreadTitlesEnabled({ features: { llmThreadTitles: false } })).toBe(false);
-    expect(llmThreadTitlesEnabled({ features: { llmThreadTitles: true } })).toBe(true);
-  });
-
   it("keeps Learn from group chats off until it is switched on", () => {
     expect(roomMemoryCaptureEnabled(null)).toBe(false);
     expect(roomMemoryCaptureEnabled({ features: {} })).toBe(false);
     expect(roomMemoryCaptureEnabled({ features: { roomMemoryCapture: true } })).toBe(true);
+  });
+
+  it("keeps the USB phone's screen and takeover off until switched on", () => {
+    expect(usbPhoneTakeoverEnabled(null)).toBe(false);
+    expect(usbPhoneTakeoverEnabled({ features: {} })).toBe(false);
+    expect(usbPhoneTakeoverEnabled({ features: { usbPhoneTakeover: false } })).toBe(false);
+    expect(usbPhoneTakeoverEnabled({ features: { usbPhoneTakeover: true } })).toBe(true);
   });
 
   it("offers sharing learned skills only with the skills library, asking by default", () => {

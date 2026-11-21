@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import ts from "typescript";
+import ts from "@typescript/typescript6";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cloudHomePlaceRefusal } from "./cloud-home.ts";
 import { computerKindForResource, ManagedDesktopPolicy, mcpEntryMatches, parseManagedPolicy, type ManagedPolicy } from "./managed-policy.ts";
@@ -168,4 +168,11 @@ describe("claim-time computer refusal in bindTurnComputer", () => {
     await expect(bind(managed)({}, "computer:host")).resolves.toBe("claimed");
     await expect(bind(managed)({}, "computer:vm:shared")).resolves.toBe("claimed");
   });
+});
+
+it.each(["_1password", "_" + "a".repeat(63)])("accepts app allowlist entry %s", (slug) => {
+  expect(parseManagedPolicy(policy({ apps: { allowAll: false, allowlist: [slug] } }))?.apps?.allowlist).toEqual([slug]);
+});
+it.each(["", "-x", "Bad Slug", "a/b", "__proto__", "Uppercase", "a".repeat(65)])("rejects invalid app allowlist entry %s", (slug) => {
+  expect(() => parseManagedPolicy(policy({ apps: { allowAll: false, allowlist: [slug] } }))).toThrow();
 });

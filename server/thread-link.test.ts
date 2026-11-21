@@ -1,11 +1,11 @@
-import { readFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import { launchVerificationServer, type VerificationServer } from "../scripts/control-omb.ts";
 import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { Store } from "./store.ts";
+import { readRegistry } from "./testing/registry.ts";
 
 describe("thread link through an isolated HTTP fixture", () => {
   let fixture: VerificationServer;
@@ -17,7 +17,7 @@ describe("thread link through an isolated HTTP fixture", () => {
     });
     return { status: response.status, body: await response.json() as any };
   };
-  const persistedTask = (botId: string, threadId: string) => JSON.parse(readFileSync(join(fixture.info.dataDir, "bots.json"), "utf8"))
+  const persistedTask = (botId: string, threadId: string) => readRegistry(fixture.info.dataDir).bots
     .find((bot: any) => bot.id === botId).tasks.find((task: any) => task.threadId === threadId);
 
   beforeAll(async () => {

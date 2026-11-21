@@ -11,9 +11,7 @@ import {
   saveSidebarWidth,
 } from "@/lib/sidebar-preferences";
 
-export function sidebarDefaultWidth(simple: boolean): number {
-  return simple ? 280 : 320;
-}
+export const SIDEBAR_DEFAULT_WIDTH = 280;
 
 /** Narrower than this, the sidebar's dragged edge leaves its column of avatars; wider again, the sidebar opens. */
 export const AVATARS_BELOW = 160;
@@ -37,7 +35,7 @@ export function useSidebarWidth({ simple, sidePanelOpen, sidebarRef }: {
   sidebarRef: RefObject<HTMLElement | null>;
 }) {
   const key = simple ? SIMPLE_SIDEBAR_WIDTH_KEY : SIDEBAR_WIDTH_KEY;
-  const defaultWidth = sidebarDefaultWidth(simple);
+  const defaultWidth = SIDEBAR_DEFAULT_WIDTH;
   const cap = simple ? 400 : 480;
   const maxWidth = sidePanelOpen ? defaultWidth : Math.min(cap, window.innerWidth - 320);
   const [savedWidth, setSavedWidth] = useState<number | null>(() => loadSidebarWidth(undefined, key));

@@ -25,6 +25,16 @@ test("the private ask takes its answer only from the process it asked, and gives
   await assert.rejects(createLoginHandoffClient().request(null, { kind: "1password" }), /not running/);
 });
 
+test("a saved secret's answer is taken like a login's, only from the process asked", async () => {
+  const client = createLoginHandoffClient({ randomId: () => "request-0001" });
+  const posted = [];
+  const proc = { postMessage: (message) => posted.push(message) };
+  const answer = client.request(proc, { kind: "secret", id: "s1" });
+  assert.deepEqual(posted[0].what, { kind: "secret", id: "s1" });
+  client.receive(proc, { type: "openmausbot:login-handoff-result", requestId: "request-0001", ok: true, secret: { id: "s1", value: "sk_fake" } });
+  assert.deepEqual((await answer).secret, { id: "s1", value: "sk_fake" });
+});
+
 test("a login kept to some bots keeps only those My Cloud has, and every bot stays every bot", () => {
   const cloud = new Set(["quill", "pepper"]);
   assert.equal(botsOnCloud("all", cloud), "all");

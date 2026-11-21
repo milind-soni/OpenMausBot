@@ -107,7 +107,7 @@ it("the bot menu has one Move to item per team, none without a team or for a bot
   hook.items(SCOUT, item);
   items[0]!.onClick!();
   const confirm = html(menu);
-  for (const said of ["Move Scout to Acme?", "Everyone in Acme can use Scout. Only Acme's admins can change it.",
+  for (const said of ["Move Scout to Acme?", "Only you and Acme's admins can use Scout until you share it.",
     "Goes with Scout: instructions, skills, files, routines, and your chats with Scout", "Your chats stay private there: only you can see them.",
     "Stays on My Cloud: what Scout remembers, your connections, and MausBot", "There's no way back: you can't move it back to My Cloud.", "Move to Acme"]) expect(confirm).toContain(said);
   expect(page.moveToTeam, "nothing moves until the confirm").not.toHaveBeenCalled();

@@ -15,6 +15,7 @@ import localOriginModule from "./local-origin.cjs";
 import { createLocalComputerGrant } from "./local-computer-grant.mjs";
 import { driverFailure } from "./cua-failure.mjs";
 import { createHelperRestarts, followLinuxConnection } from "./cua-restart.mjs";
+import { watchDriver } from "./cua-watch.mjs";
 import { missingPermissions } from "./lent-screen-failures.mjs";
 
 const { localOnly } = localOriginModule;
@@ -31,7 +32,7 @@ const {
   reapStaleAppImageCuaBundles,
   stageAppImageCuaBundle,
 } = require("./cua-linux-bundle.cjs");
-const { driverBlocked, linuxLocalControlSupport } = require("./capabilities.cjs");
+const { driverBlocked, linuxLocalControlSupport, macDriverUnsupported } = require("./capabilities.cjs");
 const { probeCuaHyprlandPlugin } = require("./cua-hyprland.cjs");
 
 const INSTALLED_DRIVER = "/Applications/CuaDriver.app/Contents/MacOS/cua-driver";
@@ -56,6 +57,7 @@ let startupAbort = null;
  * is tried again by itself after these waits; a blocked or missing helper is not. */
 const RETRY_AFTER_MS = [15_000, 60_000];
 let retryTimer = null;
+let driverWatch = null;
 let lifecycleGeneration = 0;
 let macRetry = null;
 let linuxRuntime = null;
@@ -317,6 +319,8 @@ async function startEmbedded(binary, signal) {
 
 export async function startCua({ attempt = 0 } = {}) {
   if (process.platform === "linux") return (await ensureLinuxRuntime()).initialize();
+  const tooOld = macDriverUnsupported(process.platform, os.release());
+  if (tooOld) return persistAndNotify({ mode: "unavailable", ...tooOld });
   clearTimeout(retryTimer);
   retryTimer = null;
   lifecycleGeneration++;
@@ -380,6 +384,7 @@ export async function startCua({ attempt = 0 } = {}) {
     retryTimer = setTimeout(() => { retryTimer = null; void startCua({ attempt: attempt + 1 }).catch(() => {}); }, RETRY_AFTER_MS[attempt]);
     retryTimer.unref?.();
   }
+  watchMacDriver(nextConnection);
   return persistAndNotify(nextConnection);
 }
 
@@ -396,6 +401,25 @@ function watchEmbeddedHost(host, generation) {
     (exit) => gone(`code ${exit?.code ?? "none"}`),
     (error) => gone(driverFailure(error)),
   );
+}
+
+/** A Mac driver that stopped answering without exiting, or a standalone one whose exit nothing here sees, counts as one that
+ * died: the helper's bounded restarts take it from there (cua-restart.mjs), the same as an embedded host that exited. */
+function watchMacDriver(connection) {
+  driverWatch?.stop();
+  driverWatch = null;
+  if (process.platform !== "darwin" || (connection.mode !== "embedded" && connection.mode !== "standalone")) return;
+  const host = connection.mode === "embedded" ? embeddedHost : null;
+  driverWatch = watchDriver({ alive: () => socketAlive(connection.socketPath), restart: () => {
+    if (host) {
+      // Already gone and handled by the exit watch, or replaced since.
+      if (host !== embeddedHost) return;
+      embeddedHost = null;
+      embeddedGeneration = null;
+      void host.stop().catch(() => {}).finally(() => host.uniffiDestroy?.());
+    }
+    helperRestarts.exited("its socket stopped answering");
+  } });
 }
 
 export async function cuaPermissionsStatus() {
@@ -419,6 +443,8 @@ export async function stopCua() {
   helperRestarts.reset();
   clearTimeout(retryTimer);
   retryTimer = null;
+  driverWatch?.stop();
+  driverWatch = null;
   lifecycleGeneration++;
   startupAbort?.abort();
   startupAbort = null;
@@ -460,7 +486,7 @@ function restartCua() {
       return {
         enabled: ready,
         status: ready ? "ready" : "error",
-        reasonCode: ready ? undefined : "permissions-required",
+        reasonCode: ready ? undefined : connection?.reasonCode ?? "permissions-required",
         message: connection?.reason,
       };
     } catch (error) {

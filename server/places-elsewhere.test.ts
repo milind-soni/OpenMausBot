@@ -29,7 +29,7 @@ describe("where the person's other bots live", () => {
     expect(here.explain("@scout")).toEqual({ where: "Scout lives on Work laptop, the person's computer, not here. Bots work together only within one place, so it can't be reached from here. "
       + "Tell the person plainly. Offer to bring their bots together on Garage server: in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\"." });
     expect((here.explain("reviewer-2") as { where: string }).where, "named loosely, as models slug names").toMatch(/^Reviewer 2 lives on Work laptop/u);
-    expect((here.explain("Chief") as { where: string }).where, "two places of theirs that are no computer: by hand").toContain("export a backup in Settings → Backups on one place and import it on the other");
+    expect((here.explain("Chief") as { where: string }).where, "two places of theirs that are no computer: by hand").toContain("export a backup in Settings → Import & export on one place and import it on the other");
     expect(here.explain("Nobody"), "told, and nowhere: no such bot, as before").toBeNull();
   });
 
@@ -38,7 +38,7 @@ describe("where the person's other bots live", () => {
     here.write({ v: 1, self: { name: "this computer", kind: "computer" }, places: [GARAGE, CLOUD] });
     expect((here.explain("Ledger") as { where: string }).where).toBe("Ledger lives on Garage server, not here. Bots work together only within one place, so it can't be reached from here. "
       + "Tell the person plainly. Offer to bring their bots together on Garage server: in the app, right-click Garage server's icon on the left of the app and choose \"Make Garage server my home\".");
-    expect((here.explain("Chief") as { where: string }).where).toContain("Offer to bring their bots together on My Cloud: in the app, choose \"Bring them together\", or turn off \"Keep this computer's bots on this computer\" in Settings → MausBot Cloud.");
+    expect((here.explain("Chief") as { where: string }).where).toContain("Offer to bring their bots together on My Cloud: in the app, choose \"Bring them together\", or turn off \"Keep this computer's bots on this computer\" in Settings → Import & export → Move to My Cloud.");
   });
 
   it("an @mention of a bot that lives elsewhere: told to the bot answering it, and said once to the person in a room; never for a bot named like one here", () => {

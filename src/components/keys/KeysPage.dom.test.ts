@@ -11,6 +11,7 @@ const fx = vi.hoisted(() => ({
   listeners: new Set<() => void>(),
   api: vi.fn(),
   dispatch: vi.fn(),
+  refreshModels: vi.fn(),
 }));
 vi.mock("@/state/store", async (original) => {
   const actual = await original<typeof import("@/state/store")>();
@@ -21,7 +22,7 @@ vi.mock("@/state/store", async (original) => {
     api: (...args: unknown[]) => fx.api(...args),
     useStore: () => {
       const config = useSyncExternalStore(subscribe, () => fx.config);
-      return { state: { ...actual.initialState, config, instances: fx.instances as never }, dispatch: fx.dispatch };
+      return { state: { ...actual.initialState, config, instances: fx.instances as never }, dispatch: fx.dispatch, refreshModels: fx.refreshModels };
     },
   };
 });
@@ -59,6 +60,12 @@ function type(input: HTMLInputElement, value: string) {
   });
 }
 
+async function answered(reply: () => void) {
+  reply();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync(() => {});
+}
+
 function paste(input: HTMLInputElement, text: string) {
   const event = new Event("paste", { bubbles: true, cancelable: true });
   Object.defineProperty(event, "clipboardData", { value: { getData: () => text } });
@@ -69,6 +76,8 @@ beforeEach(() => {
   setLocale("en");
   fx.api.mockReset();
   fx.dispatch.mockReset();
+  fx.refreshModels.mockReset();
+  fx.refreshModels.mockResolvedValue(undefined);
   fx.dispatch.mockImplementation((action: { type: string; config?: Record<string, unknown> }) => {
     if (action.type === "configStatus") setConfig(action.config!);
   });
@@ -95,13 +104,26 @@ describe("the keys page", () => {
     expect(rowsShown()).not.toContain("elevenlabs");
   });
 
-  it("offers the Live calls service, OpenAI or Azure OpenAI, on the separate live key row", () => {
+  it("offers the Live calls service, OpenAI, Azure OpenAI, Fish Audio, Gemini, ElevenLabs or a custom endpoint, on the separate live key row", () => {
     setConfig({ ...fx.config, live: { configured: false, provider: "azure", voice: "", readTypedReplies: true, idleMinutes: 5 } });
     page();
     const select = row("liveKey")!.querySelector<HTMLSelectElement>("select")!;
-    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure"]);
+    expect([...select.options].map((option) => option.value)).toEqual(["openai", "azure", "fish", "gemini", "elevenlabs", "custom"]);
     expect(select.value).toBe("azure");
     expect(row("liveKey")!.querySelector('input[type="url"]')).not.toBeNull();
+  });
+
+  it("with a custom endpoint chosen, the Live key row asks for that endpoint's key, with its address and model, and no OpenAI page", () => {
+    const live = { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live: { ...live, provider: "custom", customEndpoint: "https://gateway.example.com/v1", customModel: "my-live" } });
+    page();
+    const custom = row("liveKey")!;
+    expect(custom.textContent).toContain("Custom endpoint key for Live calls");
+    expect(custom.textContent).toContain("Required");
+    expect(custom.querySelector<HTMLInputElement>('input[type="url"]')!.value).toBe("https://gateway.example.com/v1");
+    expect([...custom.querySelectorAll("input")].map((input) => input.value)).toContain("my-live");
+    expect(custom.querySelector<HTMLAnchorElement>('a[href*="platform.openai.com"]')).toBeNull();
+    expect(row("liveCalls")).toBeNull();
   });
 
   it("with Azure chosen, the Live key row asks for an Azure key: required, no OpenAI wording, and no row saying Live uses the OpenAI key", () => {
@@ -126,6 +148,50 @@ describe("the keys page", () => {
     expect(row("liveCalls")).not.toBeNull();
   });
 
+  it("with Fish Audio chosen, the Live key row is the required Fish Audio key, with no OpenAI wording and nothing else to fill in", () => {
+    setConfig({ ...fx.config, live: { configured: false, provider: "fish", voice: "", readTypedReplies: true, idleMinutes: 5 } });
+    page();
+    const fish = row("liveKey")!;
+    expect(fish.textContent).toContain("Fish Audio");
+    expect(fish.textContent).toContain("Required");
+    expect(fish.textContent).not.toContain("instead of your OpenAI key");
+    expect([...fish.querySelectorAll("input")].map((input) => input.placeholder)).not.toContain("sk-…");
+    expect(fish.querySelector<HTMLAnchorElement>('a[href*="platform.openai.com"]')).toBeNull();
+    expect(fish.querySelector<HTMLAnchorElement>('a[href*="fish.audio"]')).not.toBeNull();
+    expect([...fish.querySelectorAll<HTMLInputElement>("input")].every((input) => input.type === "password")).toBe(true);
+    expect(row("liveCalls")).toBeNull();
+  });
+
+  it("drops a key typed on the Live key row when the Live calls service changes, so it is never saved for the other service", () => {
+    const live = { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live: { ...live, provider: "fish" } });
+    page();
+    const field = () => row("liveKey")!.querySelector<HTMLInputElement>('input[type="password"]')!;
+    type(field(), "typed-for-fish-audio");
+    expect(field().value).toBe("typed-for-fish-audio");
+
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, provider: "elevenlabs" } }));
+    expect(row("liveKey")!.textContent).toContain("ElevenLabs");
+    expect(field().value).toBe("");
+  });
+
+  it("shows nothing of a key save that finishes after the Live calls service changed", async () => {
+    const live = { configured: false, voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live: { ...live, provider: "fish" } });
+    let answer: (value: unknown) => void = () => {};
+    fx.api.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    page();
+    const field = () => row("liveKey")!.querySelector<HTMLInputElement>('input[type="password"]')!;
+    paste(field(), "typed-for-fish-audio");
+    expect(fx.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({ body: JSON.stringify({ tts: { fishKey: "typed-for-fish-audio" } }) }));
+
+    flushSync(() => setConfig({ ...fx.config, live: { ...live, provider: "elevenlabs" } }));
+    await answered(() => answer({ ...fx.config }));
+    expect(row("liveKey")!.textContent).toContain("ElevenLabs");
+    expect(row("liveKey")!.textContent).not.toContain("didn't stay saved");
+    expect(fx.api).toHaveBeenCalledTimes(1);
+  });
+
   it("opens a section that holds a saved key, and counts what is connected", () => {
     setConfig({ ...fx.config, box: { configured: true, last4: "c3d4" } });
     page();
@@ -147,10 +213,38 @@ describe("the keys page", () => {
     expect(host.querySelector("[data-keys-empty]")!.textContent).toBe("No keys match “zzz”.");
   });
 
+  it("saves a Fish key as the Fish Audio key, holding the Live provider while it saves and the key while a provider change does", async () => {
+    const live = { configured: false, provider: "fish", voice: "", readTypedReplies: true, idleMinutes: 5 };
+    setConfig({ ...fx.config, live });
+    let answer: (value: unknown) => void = () => {};
+    fx.api.mockImplementation(() => new Promise((resolve) => { answer = resolve; }));
+    render(() => createElement(LiveKeyNeeded, { key: "notice" }));
+    const provider = () => host.querySelector<HTMLSelectElement>("select")!;
+    const saveKey = () => host.querySelector<HTMLInputElement>('input[type="password"]')!.closest("form")!.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+    type(host.querySelector<HTMLInputElement>('input[type="password"]')!, "fish-key");
+    flushSync(() => saveKey().click());
+    expect(fx.api).toHaveBeenCalledWith("/api/config", expect.objectContaining({ method: "PUT", body: JSON.stringify({ tts: { fishKey: "fish-key" } }) }));
+    expect(provider().disabled).toBe(true);
+    expect(fx.api).toHaveBeenCalledTimes(1);
+    await answered(() => answer({ ...fx.config, live: { ...live, keySource: "fishAudio" } }));
+    expect(provider().disabled).toBe(false);
+
+    setConfig({ ...fx.config, live });
+    flushSync(() => {
+      provider().value = "openai";
+      provider().dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(fx.api).toHaveBeenLastCalledWith("/api/live/settings", expect.objectContaining({ method: "PATCH" }));
+    type(host.querySelector<HTMLInputElement>('input[type="password"]')!, "fish-key");
+    expect(saveKey().disabled).toBe(true);
+    await answered(() => answer({ live }));
+    expect(saveKey().disabled).toBe(false);
+  });
+
   it("lands the live-call notice's button on the OpenAI row in Voice and calls, focused and lit", async () => {
     render(() => createElement(LiveKeyNeeded, { key: "notice" }), () => createElement(KeysPage, { key: "page" }));
     expect(expanded("voice")).toBe("false");
-    const button = [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === "Open API keys")!;
+    const button = [...host.querySelectorAll("button")].find((candidate) => candidate.textContent === "Open AI › Other services")!;
     flushSync(() => button.click());
     expect(fx.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });
     const live = () => row("liveCalls")!.querySelector<HTMLInputElement>("[data-key-input]")!;
@@ -221,6 +315,180 @@ describe("the OpenAI-compatible server row", () => {
   });
 });
 
+describe("the OpenAI-compatible key check", () => {
+  it("checks the saved key again at the base URL typed after it, such as Venice", async () => {
+    fx.config = { ...fx.config, openaiCompat: { configured: true, last4: "1234" } };
+    const tested: Array<string | undefined> = [];
+    fx.api.mockImplementation(async (path: string, init: { body: string }) => {
+      if (path === "/api/config") return { ...fx.config, openaiCompat: { ...(fx.config.openaiCompat as object), ...JSON.parse(init.body).openaiCompat } };
+      if (path !== "/api/keys/test") return {};
+      const url = (fx.config.openaiCompat as { url?: string }).url;
+      tested.push(url);
+      return url === "https://api.venice.ai/api/v1" ? { ok: true, check: "models", models: ["venice-uncensored"] } : { ok: false, reason: "rejected" };
+    });
+    page();
+    flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    const url = row("openaiCompat")!.querySelector<HTMLInputElement>('input[aria-label="OpenAI-compatible base URL"]')!;
+    type(url, "https://api.venice.ai/api/v1");
+    flushSync(() => url.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+    await vi.waitFor(() => expect(row("openaiCompat")!.textContent).toContain("venice-uncensored"));
+    expect(tested).toEqual(["https://api.venice.ai/api/v1"]);
+    expect(row("openaiCompat")!.textContent).not.toContain("Didn't work");
+  });
+
+  it("checks again when the base URL changes while a check is still running", async () => {
+    fx.config = { ...fx.config, openaiCompat: { configured: true, last4: "1234" } };
+    const tested: Array<string | undefined> = [];
+    let answerFirst: (result: unknown) => void = () => {};
+    fx.api.mockImplementation((path: string) => {
+      if (path !== "/api/keys/test") return Promise.resolve({});
+      const url = (fx.config.openaiCompat as { url?: string }).url;
+      tested.push(url);
+      if (tested.length === 1) return new Promise((resolve) => { answerFirst = resolve; });
+      return Promise.resolve({ ok: true, check: "models", models: ["venice-uncensored"] });
+    });
+    page();
+    flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.example.test/v1" } }));
+    await vi.waitFor(() => expect(tested).toEqual(["https://api.example.test/v1"]));
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.venice.ai/api/v1" } }));
+    answerFirst({ ok: false, reason: "rejected" });
+    await vi.waitFor(() => expect(row("openaiCompat")!.textContent).toContain("venice-uncensored"));
+    expect(tested).toEqual(["https://api.example.test/v1", "https://api.venice.ai/api/v1"]);
+    expect(row("openaiCompat")!.textContent).not.toContain("Didn't work");
+  });
+
+  it("checks again when the base URL changes while a check that then fails is still running", async () => {
+    fx.config = { ...fx.config, openaiCompat: { configured: true, last4: "1234" } };
+    const tested: Array<string | undefined> = [];
+    let failFirst: (cause: Error) => void = () => {};
+    fx.api.mockImplementation((path: string) => {
+      if (path !== "/api/keys/test") return Promise.resolve({});
+      const url = (fx.config.openaiCompat as { url?: string }).url;
+      tested.push(url);
+      if (tested.length === 1) return new Promise((_resolve, reject) => { failFirst = reject; });
+      return Promise.resolve({ ok: true, check: "models", models: ["venice-uncensored"] });
+    });
+    page();
+    flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.example.test/v1" } }));
+    await vi.waitFor(() => expect(tested).toEqual(["https://api.example.test/v1"]));
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.venice.ai/api/v1" } }));
+    failFirst(new Error("network down"));
+    await vi.waitFor(() => expect(row("openaiCompat")!.textContent).toContain("venice-uncensored"));
+    expect(tested).toEqual(["https://api.example.test/v1", "https://api.venice.ai/api/v1"]);
+    expect(row("openaiCompat")!.textContent).not.toContain("network down");
+  });
+
+  it("does not check the key when the page opens or nothing about the address changed", async () => {
+    fx.config = { ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.venice.ai/api/v1" } };
+    fx.api.mockResolvedValue({});
+    page();
+    flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    flushSync(() => setConfig({ ...fx.config, openaiCompat: { configured: true, last4: "1234", url: "https://api.venice.ai/api/v1" } }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fx.api.mock.calls.map(([path]) => path)).not.toContain("/api/keys/test");
+  });
+
+  it("does not check when no key is saved yet", async () => {
+    fx.api.mockImplementation(async (path: string, init: { body: string }) => (path === "/api/config" ? { ...fx.config, openaiCompat: JSON.parse(init.body).openaiCompat } : {}));
+    page();
+    flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+    const url = row("openaiCompat")!.querySelector<HTMLInputElement>('input[aria-label="OpenAI-compatible base URL"]')!;
+    type(url, "https://api.venice.ai/api/v1");
+    flushSync(() => url.dispatchEvent(new FocusEvent("focusout", { bubbles: true })));
+    await vi.waitFor(() => expect(fx.api.mock.calls.map(([path]) => path)).toContain("/api/config"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(fx.api.mock.calls.map(([path]) => path)).not.toContain("/api/keys/test");
+  });
+
+  it("is found by searching for Venice", () => {
+    page();
+    const search = host.querySelector<HTMLInputElement>("[data-keys-search]")!;
+    type(search, "venice");
+    expect(rowsShown()).toContain("openaiCompat");
+  });
+});
+
+describe("the Ollama row", () => {
+  const openServers = () => flushSync(() => section("servers").querySelector<HTMLButtonElement>("button[aria-expanded]")!.click());
+  const button = (text: string) => [...row("ollama")!.querySelectorAll("button")].find((candidate) => candidate.textContent === text)!;
+  const found = (state: string) => vi.waitFor(() => expect(row("ollama")!.querySelector(`[data-ollama-state="${state}"]`)).not.toBeNull());
+  const answer = (state: string, url = "http://127.0.0.1:11434", models: unknown[] = []) => {
+    fx.api.mockImplementation(async (path: string) => path.startsWith("/api/instances/ollama") ? { status: { state, url, models } } : { instances: [] });
+  };
+
+  it("looks only once its section is open, and adds what it found with no key or address to type", async () => {
+    answer("ready", undefined, [{ name: "llama3.2:latest" }]);
+    page();
+    expect(fx.api).not.toHaveBeenCalled();
+    openServers();
+    await found("ready");
+    expect(row("ollama")!.textContent).toContain("Pulled models: 1.");
+    expect(fx.api.mock.calls.map(([path]) => path)).toEqual(["/api/instances/ollama"]);
+    flushSync(() => button("Add Ollama").click());
+    await vi.waitFor(() => expect(fx.api).toHaveBeenCalledTimes(2));
+    expect(fx.api.mock.calls[1]![0]).toBe("/api/instances/openai-compat");
+    expect(JSON.parse(fx.api.mock.calls[1]![1].body)).toEqual({ displayName: "Ollama", url: "http://127.0.0.1:11434/v1", key: "ollama", catalog: "ollama" });
+  });
+
+  it("asks at the address someone enters", async () => {
+    answer("no-models");
+    page();
+    openServers();
+    await found("no-models");
+    expect(row("ollama")!.textContent).toContain("ollama pull llama3.2");
+    answer("ready", "http://gpu-box.local:11434", [{ name: "qwen3:4b" }]);
+    type(row("ollama")!.querySelector<HTMLInputElement>("input")!, "http://gpu-box.local:11434");
+    flushSync(() => button("Check again").click());
+    await found("ready");
+    expect(fx.api.mock.calls.at(-1)![0]).toBe(`/api/instances/ollama?url=${encodeURIComponent("http://gpu-box.local:11434")}`);
+  });
+
+  it("offers nothing to add while Ollama isn't running, only how to start or get it", async () => {
+    answer("not-running");
+    page();
+    openServers();
+    await found("not-running");
+    expect(button("Add Ollama").disabled).toBe(true);
+    expect(row("ollama")!.querySelector<HTMLAnchorElement>('a[href="https://ollama.com/download"]')).not.toBeNull();
+    expect(row("ollama")!.textContent).toContain("ollama serve");
+  });
+
+  it("says when this Ollama is already added, through the built-in server or an added one", async () => {
+    answer("ready", undefined, [{ name: "llama3.2:latest" }]);
+    fx.config = { ...fx.config, openaiCompat: { url: "http://127.0.0.1:11434/v1/" } };
+    page();
+    openServers();
+    await found("ready");
+    expect(row("ollama")!.textContent).toContain("already added");
+    expect(button("Add Ollama").disabled).toBe(true);
+  });
+
+  it("reloads the added Ollama's model list when a check finds a model it lacks, as after ollama pull", async () => {
+    const served = (instanceId: string, url: string) => ({
+      instanceId, driverKind: "openai-compat", displayName: "Ollama", url, snapshot: { state: "available" },
+      models: { default: "qwen3.5:9b", options: [{ id: "qwen3.5:9b", label: "qwen3.5:9b" }, { id: "bonsai-2:9b", label: "bonsai-2:9b" }] },
+    });
+    fx.instances = [served("openai-compat-here", "http://127.0.0.1:11434/v1"), served("openai-compat-elsewhere", "http://gpu-box.local:11434/v1")];
+    answer("ready", undefined, [{ name: "qwen3.5:9b" }, { name: "bonsai-2:9b" }]);
+    page();
+    openServers();
+    await found("ready");
+    expect(fx.refreshModels).not.toHaveBeenCalled();
+    const [here, elsewhere] = fx.instances as Array<ReturnType<typeof served>>;
+    fx.instances = [{ ...here!, models: { ...here!.models, options: here!.models.options.slice(0, 1) } }, elsewhere!];
+    setConfig({ ...fx.config });
+    await Promise.resolve();
+    expect(fx.refreshModels, "a list that changes after a check that needed no reload is not reloaded from that old check").not.toHaveBeenCalled();
+    answer("ready", undefined, [{ name: "qwen3.5:9b" }, { name: "bonsai-2:9b" }, { name: "nemotron-3.5-bolt:e4b" }]);
+    flushSync(() => button("Check again").click());
+    await vi.waitFor(() => expect(row("ollama")!.textContent).toContain("Pulled models: 3."));
+    await vi.waitFor(() => expect(fx.refreshModels).toHaveBeenCalledWith("openai-compat-here"));
+    expect(fx.refreshModels).toHaveBeenCalledOnce();
+  });
+});
+
 describe("Boat's credit offer on the Boat card", () => {
   const offer = () => row("box")!.querySelector<HTMLElement>("[data-boat-offer]");
   const buttons = () => [...offer()!.querySelectorAll<HTMLButtonElement>("button")];
@@ -273,5 +541,16 @@ describe("Boat's credit offer on the Boat card", () => {
     applyBrand({ brand: { name: "Acme Bots" }, source: "file", file: "brand.json" });
     page();
     expect(row("box")).not.toBeNull(); expect(offer()).toBeNull();
+  });
+});
+
+describe("Self-hosted VPS alias", () => {
+  it("says any Linux machine with Docker over SSH works, including one on a Tailscale network", async () => {
+    const { VpsConnection } = await import("./KeyPanels");
+    render(() => createElement(VpsConnection, { key: "vps" }));
+    const field = host.querySelector<HTMLInputElement>('input[aria-label="Self-hosted VPS SSH config alias"]')!;
+    const text = field.closest("div.flex-col")!.textContent!;
+    expect(text).toContain("Any Linux machine with Docker that you reach over SSH works");
+    expect(text).toContain("Tailscale name as the alias's HostName");
   });
 });

@@ -1,6 +1,6 @@
 // OpenCode's model discovery probe: an `opencode acp` in its own folder, opened just long enough to list the models.
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { writeFileAtomic } from "../../atomic.ts";
@@ -59,14 +59,16 @@ export function catalogFromOpenCodeSession(result: unknown): { options: ModelCat
     : null;
 }
 
+/** Security: the folder is the boxed probe's to write, and HOME may be a boxed bot's, so git reads no config but the
+ * fresh repository's own, and none that runs a program. */
 function runGit(directory: string, args: string[]): Promise<void> {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_")));
   return new Promise((resolveRun, rejectRun) => {
     execFile("git", [
       "-c", "user.name=OpenMaus", "-c", "user.email=model-discovery@openmaus.invalid",
-      "-c", "commit.gpgsign=false", "-c", `core.hooksPath=${join(directory, ".git", "no-hooks")}`,
+      "-c", "commit.gpgsign=false", "-c", `core.hooksPath=${join(directory, ".git", "no-hooks")}`, "-c", "core.fsmonitor=false",
       ...args,
-    ], { cwd: directory, env: { ...env, GIT_TERMINAL_PROMPT: "0" }, timeout: 10_000, windowsHide: true }, (error) => {
+    ], { cwd: directory, env: { ...env, GIT_TERMINAL_PROMPT: "0", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" }, timeout: 10_000, windowsHide: true }, (error) => {
       if (error) rejectRun(error);
       else resolveRun();
     });
@@ -88,6 +90,8 @@ export function discoveryDirectory(): Promise<string> {
     const marker = join(directory, ".openmaus-project");
     if (!existsSync(marker)) {
       try {
+        rmSync(directory, { recursive: true, force: true });
+        mkdirSync(directory, { recursive: true });
         await runGit(directory, ["init", "-q"]);
         await runGit(directory, ["commit", "-q", "--allow-empty", "--no-verify", "-m", "OpenMaus model discovery"]);
         writeFileSync(marker, "OpenCode files this folder's sessions under its own project.\n");
@@ -155,18 +159,21 @@ async function deleteProbeSessions(
 
 /** `settleMs` keeps the process open that long after it starts, then lists again: OpenCode 2's own catalog refresh
  * reaches a running process's later sessions only. */
+/** Security: OpenCode starts the plugins and MCP servers its config names (~/.config/opencode), so while the bot box is
+ * on the probe runs in the box, as a bot's turn does. `allowEnv`: the keys the instance's own settings put in `environment`. */
 export async function probeOpenCodeSession(
   cli: string,
   environment: Record<string, string | undefined>,
   timeoutMs = DISCOVERY_TIMEOUT_MS,
   settleMs = 0,
+  allowEnv: readonly string[] = [],
 ): Promise<OpenCodeSessionProbe> {
   const cwd = await discoveryDirectory();
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawnCli>;
     try {
-      child = spawnCli(cli, ["acp"], { cwd, env: environment, stdio: ["pipe", "pipe", "pipe"] });
+      child = spawnCli(cli, ["acp"], { cwd, env: environment, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv } });
     } catch (error) {
       reject(error);
       return;

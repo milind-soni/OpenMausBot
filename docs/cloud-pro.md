@@ -59,7 +59,7 @@ Contract version: `1` (`cloudContractVersion` on the wire).
       Start fresh and says that the desktop app brings bots from a computer. On
       a Cloud that already has bots or chats of its own (a chat from a phone,
       say), it says **Your bots are already here**, and **Continue** moves on.
-      A backup file is imported from Settings → Backups, as on any server.
+      A backup file is imported from Settings → Import & export, as on any server.
    2. **Connect your AI**: the engine sign-in's own tiles and sign-in panel
       (below), with **Connected** on one that can run. While the trial's Claude
       credit lasts and nothing of the person's own can run, a line says so
@@ -139,9 +139,8 @@ sign-in instead of the welcome flow, which describes the person's own computer
 
 ### Use My Cloud on your phone
 
-1. Get the phone app: the menu under your name → **Get the phone app** (App
-   Store for iPhone, APK for Android).
-2. The same menu → **Connect your phone · to your Cloud (always on)**, or
+1. Install MausBot on your phone from the App Store or Google Play.
+2. The menu under your name → **Connect your phone · to your Cloud (always on)**, or
    **Settings → MausBot Cloud → Use My Cloud on your phone**. The Cloud opens in
    the app window at its phone pairing.
 3. **Create pairing code**, and scan the QR code with the phone app.
@@ -633,8 +632,8 @@ The grant (`automaticGrant`) is the same for every Cloud of the person's own:
 - **Never the terminal**: no command runs on this computer for a Cloud, and a
   bot that asks is told not to run it another way.
 
-Nothing asks for a confirmation: each bot's own approval level (Ask first or
-Just do it) governs what it does with this computer, as with any tool. The move
+Nothing asks for a confirmation: each bot's own approval level (Ask for approval
+or Full access) governs what it does with this computer, as with any tool. The move
 to My Cloud lends each moved bot's own project folder with editing on top
 (`lendProjects`); while lending is paused, or before My Cloud is signed in, the
 move tries again later.
@@ -970,7 +969,7 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
   | --- | --- |
   | Claude Code (2.1.257 or newer) | `--restricted` and only Read, Grep, Glob, Edit, Write and WebSearch: no Bash, PowerShell or WebFetch; reads outside its folder refused outright (`blockReadsOutsideWorkingDirectories`, plus deny rules); the folder's own `.mcp.json` and settings never load; only the harness's own MCP tools are pre-allowed, every other call asks the owner. The session's `init` must list no command-running tool, or the turn stops. An older Claude Code refuses. |
   | Codex / ChatGPT (codex-cli 0.159) | no environment (`environments: []`: no `exec_command`, `apply_patch` or `view_image`, and calls to them are refused), `features.shell_tool`, `unified_exec` and `view_image` off and web search disabled, proven in `config/read` before the turn starts, or the turn refuses. |
-  | API models (OpenAI-compatible, MiniMax, Mistral, Grok API) | no shell or file tool on the machine at all; only the harness's own agents tools are pre-allowed, every other MCP call asks the owner, and no owner's "Always allow this session" applies or is kept. |
+  | API models (OpenAI-compatible, MiniMax, Mistral, Grok API) | no shell or file tool on the machine at all; only the harness's own agents tools are pre-allowed, every other MCP call asks the owner, and no owner's "Allow for this session" applies or is kept. |
   | Cursor, Qwen, Gemini, Hermes, Pi, OpenCode, Grok Build, Antigravity, Droid, Kimi, a custom ACP engine, Boat | refused: each runs its own shell or reads files outside its folder without asking in Ask (Qwen, Gemini, OpenCode and Pi could have it switched off; that needs a separate process per guest conversation, a follow-up). |
 - Everything the owner's own devices write carries one owner identity, so
   pairing a device again (or revoking one) never makes the owner's earlier
@@ -1123,12 +1122,15 @@ boot id while its pids start again from 1, so the lease names its pid
 namespace and its process's start time too), and runs two children as `maus`: the
 server on `127.0.0.1:8799` (webhooks on `127.0.0.1:8800`) and Caddy on
 `:8080`. It stays a small root supervisor: if either child exits, both stop
-and Fly restarts the machine. The one exception: after a restore commits
-(a backup restored in Settings), the server exits with code 75
-(`server/restart.ts`) and the launcher starts only the server again.
+and Fly restarts the machine. Two exceptions (`server/restart.ts`): after a restore
+commits (a backup restored in Settings), the server exits with code 75 and the
+launcher starts only the server again; after a crash (exit 70 from
+`server/crash-guard.ts`, or killed by the system, as out of memory) it starts the
+server again after 1, 2, 5, 15 and 30 s, then gives up so Fly restarts the machine.
 
 The machine's secrets (`OMB_CLOUD_BOOTSTRAP_SECRET` and the relay tokens
-`OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`, `OMB_CLOUD_X_TOKEN`)
+`OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`, `OMB_CLOUD_X_TOKEN`,
+`OMB_CLOUD_HOSTING_TOKEN`)
 arrive as the launcher's environment, from the Fly app secrets the Admin
 sets. The launcher never puts them in a child's environment, because
 `/proc/<pid>/environ` keeps a process's starting environment for anything
@@ -1178,16 +1180,24 @@ provider outage. So on a Cloud home (`server/engine-memory.ts`):
   signed `POST /api/cloud/plan` `{"v":1,"tier":"starter"}` (`server/host/cloud-plan-tier.ts`), and a
   home it never told has no such limit. What a bot's own turn starts always goes through,
   and a teammate's hand-off never takes that one thread from the person.
-- **How many bots a Starter Cloud makes.** Five beside its MausBot, one number in
-  `server/host/starter-bot-limit.ts`, from the same signed plan. An archived bot or one
-  that moved away takes no room. Making one past it answers `409` with
-  `{"code":"bot_limit","error":"…"}` from `POST /api/bots`, `POST /api/teams/import`,
-  `POST /api/org-library/add` and a Chief's `create_bot` and `propose_team_setup`; a group that
-  doesn't fit is refused whole, before anything is written. The app opens its upgrade popup
-  when a create button is pressed with no room, and on that refusal. A bot is never taken away:
-  a Cloud over the limit (a downgrade, a move) keeps every one and only making a new one stops.
-  A bot arriving with its own id (a move) and a backup restored are never refused. The limit
-  lifts as soon as the Admin tells the home its new plan, with no restart.
+- **How many bots a Starter Cloud makes and keeps awake.** Any number; five of them,
+  beside its MausBot and its Chief of Staff, take turns (`STARTER_AWAKE_LIMIT` in
+  `server/host/starter-awake.ts`), from the same signed plan, and the rest are paused with
+  everything they know kept. An archived bot or one that moved away isn't counted. The awake
+  set is written down (`starter-awake.json`) while every bot still fits, so a bot made past
+  the five starts paused and never pushes out one the person was using: `POST /api/bots`
+  answers it with `"paused": true`, and the app opens **Keep these awake** with the new bot
+  chosen in place of the least recently active one that isn't working (`POST /api/starter/awake`).
+  A Chief's `create_bot` answers with a `paused` line for the person. A restore or a move into a
+  Cloud that never wrote a set down wakes the most recently active. A paused bot's turn answers
+  `409` `{"code":"bot_paused"}`, a hand-off to it is refused, a routine or webhook run for it
+  fails at once with that line (no conversation is made, and it never wakes a sleeping Cloud),
+  and its daily memory upkeep waits. Every bot wakes as soon as the Admin tells the home its new
+  plan, with no restart. An older server refuses a sixth bot with `409` `{"code":"bot_limit"}`;
+  the app still shows its upgrade popup for that. Every plan holds at most 100 bots
+  (`MAX_WORKSPACE_BOTS`), counted on `POST /api/bots`, a package import and a Chief's setup.
+- **How much a Starter Cloud runs at once.** Two turns Cloud-wide, and four hand-offs waiting
+  beyond them; past that a new hand-off is refused (`server/host/starter-caps.ts`).
 - **Who goes first.** The gate only changes the order, never how much it lets in. A
   person's own work goes first: their line, or a turn going on from what they answered.
   Bot work that has waited 5 minutes takes its place by arrival, so it is never starved
@@ -1431,6 +1441,8 @@ For each service the Admin has configured, it also sets:
 | `OMB_CLOUD_DECIDER_TOKEN` | secret | This machine's decision relay token (`omb_decide_…`). It is not a Jev key and works only through the relay. |
 | `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools, and `GET /usage` for the month's calls on the Apps page's X card (`GET /api/x/status`). The home asks `GET /research/search` with no job at start, which spends nothing: a 400 means research is on, an off answer hides the research tools (x_search stays) until an hour later or a restart, and a research call refused as off does the same. A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
 | `OMB_CLOUD_X_TOKEN` | secret | This machine's X research relay token (`omb_x_…`). Not a treg key; it works only through the relay, within the plan's monthly X research calls. A signed-in desktop gets its own (`omb_xd_…`) from `POST /api/cloud/desktop/services/x` and hands it to its server in memory. |
+| `OMB_CLOUD_HOSTING_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/hosting/v1`, the Admin's app hosting relay, set only where the Admin has included app hosting on and the plan is paid. The server lists the Cloud's apps and the plan's count (`GET /apps`), publishes a bot's folder (`PUT /apps/<key>`, then each file the relay asks for) and deletes (`DELETE /apps/<key>`); `server/host/included-hosting.ts`. Absent: bots publish to the person's own Netlify account, as on a computer. |
+| `OMB_CLOUD_HOSTING_TOKEN` | secret | This machine's app hosting relay token (`omb_host_…`). Not a Netlify token; it works only through the relay, within the plan's apps and monthly publishes. Bots never get it: they call `publish_app`, and the server publishes. |
 
 A service is included only when both its URL and its token are set
 (`server/included-services.ts`). The real Boat, ElevenLabs and Jev keys stay
@@ -1483,10 +1495,10 @@ computers belong to this machine on every request.
   Workers AI or OpenRouter) until the relay accepts it too. For decisions the
   relay speaks Jev's API only: included decisions are Jev's. An own Jev or
   Workers AI key comes before them; an OpenRouter key comes after them,
-  whichever provider is selected in **Settings → Decision and extraction**.
+  whichever provider is selected in **Settings › AI › Routing and extraction**.
 - **Included decisions are on until switched off.** While the decision model
   runs on the included token, its master switch counts as on unless the person
-  switched it off in **Settings → Decision and extraction**; an explicit off
+  switched it off in **Settings › AI › Routing and extraction**; an explicit off
   always wins, and switching it back on needs no key. The per-job switches keep
   their defaults, so rooms set to Auto ask who answers, and new rooms start on
   Auto, as with a saved key. An own Jev key is on once saved, as anywhere else,
@@ -1709,6 +1721,10 @@ wait for the next read, `truncated: true`):
     "botId": "<uuid>", "threadId": "<uuid>", "seq": 12 }],
   "turns": { "started15m": 6, "failed15m": 3, "started24h": 40, "failed24h": 5 },
   "routines": [{ "routineId": "<uuid>", "status": "failed", "at": 1790000200000, "consecutiveFailures": 2 }],
+  "schedule": { "v": 1, "seq": 4182, "unreadable": false, "nextDueAt": 1790086400000, "oldestUnconfirmed": null,
+    "lastConfirmed": { "dueAt": 1790000000000, "startedAt": 1790000001250, "state": "ran" },
+    "due": { "boot": { "ran": 1, "failed": 0, "missed": 0, "late": 0, "retried": 0 },
+             "day":  { "ran": 1, "failed": 0, "missed": 0, "late": 0, "retried": 0 } }, "slowStops": 0 },
   "engines": [{ "kind": "codex", "used": true, "available": true, "authenticated": false, "version": "0.130.0" }],
   "connectors": { "checkedAt": 1790000000000, "failed": false, "items": [{ "slug": "gmail", "connected": false }] },
   "browser": { "available": true, "installing": false, "interrupted": 0 },
@@ -1717,9 +1733,32 @@ wait for the next read, `truncated: true`):
   "firstHour": { "startedAt": 1790000000000, "apps": ["gmail"], "look": "delivered",
     "ms": { "seen": 41000, "firstMessage": 52000, "offered": 61000, "firstApp": 118000, "firstLook": 171000, "briefOn": 172000, "phoneOffered": 172000 } },
   "value": { "sorted": 40, "drafted": 6, "prepped": 4, "routines": 0, "minutes": 110 },
-  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2 }
+  "room": { "waits": 3, "waitMs": 360000, "stopped": 1, "killed": 1, "stallMinutes": 2 },
+  "speed": { "windowS": 300, "steal": 1.2, "psi": { "cpu": 3.4, "memory": 0, "io": 0.8 }, "bootMs": 5400, "wakeMs": null,
+    "turnStarts": [12, 3, 1, 0, 0, 0] }
 }
 ```
+
+**`speed`** says how fast the machine is for this home (`server/cloud-speed.ts`),
+read from `/proc` when the report is built, with no timer or sampler of its
+own. `windowS` is how many seconds the CPU figures cover: since the previous
+read at least a minute before (a read sooner, such as the next page of the
+same poll, repeats the last figures), or since the process started. `steal`
+is the percent of all CPU time in that window the hypervisor ran something
+else on this machine's CPUs (`/proc/stat`). `psi` is the percent of the window
+in which some task waited for CPU, memory or disk (the kernel's pressure
+`some` line, the home's own cgroup's in a container, else the machine's).
+Each is `null` where the kernel doesn't expose it, and for a window whose
+counter went down. `bootMs` is this process's start to its server listening;
+`wakeMs`, on a boot that woke the home from a sleep it was stopped for with
+a request waiting, the time from the machine's start (the process's, in a
+container on a long-running server) to that request reaching the server.
+Fly's own start before that, and a resume from a suspend, are not in it.
+`turnStarts` counts people's messages since boot by how long each waited
+from being stored to its engine's turn starting: up to 0.5, 1, 2, 5 and 15
+seconds, and longer. A message sent while its thread runs a turn, a bot's, a
+routine's and a steer are not counted. Older homes don't send `speed`: the
+Admin reads that as unknown, never as zero.
 
 **`room`** is the last day's memory pressure where the home watches it (a Cloud
 home on Linux, `server/engine-memory.ts`), else `null`: how many tasks had to
@@ -1761,7 +1800,42 @@ place's state (`shared/place-view.ts`); a cause the server words itself
 else `unknown`. A turn that ends in `shutdown_timeout`, `auth_required`,
 `update_required`, `spawn_error` or `rpc_error` without a failed row of its own
 counts once too. `turns` counts turns started and failed rows per minute;
-`routines` keeps each routine's last outcome and its failures in a row.
+`routines` gives, for each routine that is on and each outside trigger, its last
+outcome and its failures in a row, counted from the saved run rows at every read,
+so a restart does not start the count again. A row that only counts occurrences
+skipped while the routine was at work is not a result and is left out.
+
+**`schedule`** says what is due on this home, what has not started and what
+last did (`server/routine-schedule-report.ts`), worked out from the occurrence
+ledger (docs/routine-schedules.md) each time the report is read, on every page
+of a truncated one too. It is about scheduled occurrences only: one firing of a
+routine that is on and runs by the clock. Runs a person, a start-up, a webhook
+or a connected-app event started are not in it, and neither are routines with
+checks, which make no run when nothing is new. Times are this home's clock in
+epoch milliseconds; counters run from 0 to 1e9.
+
+| Field | Meaning |
+| --- | --- |
+| `v` | `1` |
+| `seq` | Goes up by at least 1 with every change to this section other than the day's window moving: a row made, started, finished or closed, a routine added, changed, turned on or off or deleted, `unreadable` changing. It is saved with the ledger, so a restart never lowers it; a lower value means the schedule was restored from a backup. Renewing a run's lease does not raise it |
+| `unreadable` | The saved routines cannot be read, so nothing runs; or the ledger cannot be written, so runs start without it and this section cannot say what is due. The next three fields are then `null` |
+| `nextDueAt` | The earliest scheduled-for time among occurrences that have no run row yet, over routines whose bot takes runs now; `null` when nothing is scheduled. It may be past |
+| `oldestUnconfirmed` | The due occurrence with the earliest scheduled-for time of which no attempt has started: `{ dueAt, state, since }`, with `state` `due` (no run row yet; `since` is `dueAt`) or `queued` (a row waits to start; `since` is when it was made). `null` when every due occurrence is decided. A routine whose bot is paused counts here too |
+| `lastConfirmed` | The decided occurrence with the latest scheduled-for time: `{ dueAt, startedAt, state }`. `state` is `running` (started and not finished: waiting on a person, or for its retry, included), `ran`, `failed`, `missed` or `skipped`; `startedAt` is when its first attempt started, `null` for `missed` and `skipped`. A record that counts several occurrences stands at the last of them |
+| `due.boot`, `due.day` | `{ ran, failed, missed, late, retried }` since this process started, and over the last 24 hours from the saved ledger: occurrences that finished well; that finished failed (a run someone stopped after it started counts here); that were closed without starting (`missed` and `skipped` together, each occurrence a record counts); whose first attempt started more than 5 minutes after its time; and starts after the first. Occurrences passed over only because the scheduler was held up starting another run are not counted as missed |
+| `slowStops` | Since boot, the times stopping a turn took the scheduler longer than 10 seconds and it went on without waiting |
+
+What a reader may rely on: an occurrence that is due and has not started
+shows in `oldestUnconfirmed` at or before its time; a past `nextDueAt` always
+comes with it; the report right after an occurrence's first start names it in
+`lastConfirmed` (the start is written to the ledger before the turn begins, unless the ledger cannot be written),
+unless one due later is already decided; and after a boot an overdue
+occurrence shows as `due` or `queued` until the scheduler starts it or closes
+it as missed, never moved past in silence. Two gaps are known: a routine that
+also runs at start-up and is found more than 12 hours late runs its start-up
+run in place of the missed occurrence, which gets no record; and occurrences
+that fall while a routine is held (its owner left) are not recorded, because a
+held routine is off.
 
 **What it never carries:** a failure's words, a bot's name, a thread's title,
 a prompt, a URL, an email address, a token, or an engine's account
@@ -2391,7 +2465,7 @@ all arrived, and freezes this computer's copy so nothing runs in two places
 (`server/move-freeze.ts`). An older desktop's Copy this computer here gets
 `410` with "Update OpenMausBot to bring your bots here by itself."
 (`server/cloud-move-http.ts`); a backup file still restores from Settings →
-Backups. [docs/verification/cloud-send.md](verification/cloud-send.md) has the
+Import & export. [docs/verification/cloud-send.md](verification/cloud-send.md) has the
 tests.
 
 The move's journal names the Cloud by its address and, once the session lists

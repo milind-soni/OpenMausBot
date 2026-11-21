@@ -12,6 +12,18 @@ function announcesChineseAction(prose: string): boolean {
   return Boolean(match && !/^[了过過完]/u.test(action.slice(match[0].length)));
 }
 
+const ACTION_VERBS = "execute|send|type|press|launch|open|check|inspect|read|fetch|run|create|write|verify|pull|look|search|navigate|load";
+const ANNOUNCING_SENTENCE = new RegExp(`^(?:now,?\\s+)?(?:let me|i['\\u2019]ll|i will|i(?:['\\u2019]m| am) going to)\\s+(?:now\\s+)?(?:${ACTION_VERBS})\\b`, "i");
+
+const WAITS_FOR_USER = /\b(?:after|once|when|if|until|before)\s+you\b|\bwait(?:ing)?\s+for\s+you\b/i;
+
+function endsWithAnnouncingSentence(reply: string): boolean {
+  const sentences = blankCode(reply).trim().split(/(?<=[.!])\s+/);
+  if (sentences.length < 2) return false;
+  const last = sentences.at(-1)!.replace(/^[*_]+/, "");
+  return ANNOUNCING_SENTENCE.test(last) && !WAITS_FOR_USER.test(last);
+}
+
 export function announcesAction(text: string): boolean {
   const reply = text.trim();
   if (!reply || reply.length > 4_000 || reply.includes("?")) return false;
@@ -24,7 +36,7 @@ export function announcesAction(text: string): boolean {
     const tail = reply.split(/\n\s*\n/).at(-1)!.trim();
     return tail.length <= 400 && /^(?:let me|i['\u2019]ll|i will|i(?:['\u2019]m| am) going to)\s+(?:now\s+)?(?:execute|send|type|press|launch|open|check|inspect|read|fetch|run|create|write|verify)\b/i.test(tail);
   }
-  return /(?:[:\u2014\u2013]|\.\.\.|\u2026)$/.test(reply) ||
+  return /(?:[:\u2014\u2013]|\.\.\.|\u2026)$/.test(reply) || endsWithAnnouncingSentence(reply) ||
     /^(?:checking|let me(?! know\b)|i'll|i will|i'm going to|i am going to|opening|pulling|looking|searching|navigating|reading|fetching|loading|now (?:i'll|let me|opening|checking|pulling|reading))\b/i.test(reply) ||
     /^i(?:['\u2019]m| am)\b[^.!?\n]*\band (?:i )?will\s+(?:launch|open|check|pull|look|search|navigate|read|fetch|load|run|inspect)\b/i.test(reply);
 }

@@ -131,11 +131,18 @@ export function fakeComposio() {
       const slugs = url.searchParams.get("toolkit_slugs")?.split(",");
       return reply({ items: accounts.filter((account) => account.user_id === user && (!slugs || slugs.includes(account.toolkit.slug))), next_cursor: null });
     }
+    const accountId = path.match(/^\/connected_accounts\/([^/]+)$/)?.[1];
+    if (method === "DELETE" && accountId) {
+      const index = accounts.findIndex((account) => account.id === decodeURIComponent(accountId));
+      if (index < 0) return reply({ error: { message: "Connected account not found" } }, 404);
+      accounts.splice(index, 1);
+      return reply({ status: "success" });
+    }
     if (method === "GET" && path === "/auth_configs") return reply({ items: [], next_cursor: null });
     const sessionPayload = (session: FakeSession) => ({
       session_id: session.id,
       mcp: { type: "http", url: `https://backend.composio.dev/tool_router/${session.id}/mcp` },
-      config: { user_id: session.user_id, multi_account: { enable: true, max_accounts_per_toolkit: 5, require_explicit_selection: true } },
+      config: { user_id: session.user_id, multi_account: { enable: true, max_accounts_per_toolkit: 10, require_explicit_selection: true } },
     });
     if (method === "POST" && path === "/tool_router/session" && body) {
       const session = { id: `trs_${next++}`, user_id: String(body.user_id) };

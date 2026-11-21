@@ -71,7 +71,7 @@ describe("default skin", () => {
 
   it("keeps Midnight for an earlier install whose saved skin is missing or no longer exists", async () => {
     values.set("omb-installed", "2026-01-01T00:00:00.000Z");
-    expect(await boot()).toEqual({ skin: "midnight", advanced: false, stored: "midnight" });
+    expect(await boot()).toEqual({ skin: "midnight", advanced: true, stored: "midnight" });
     values.set("omb-skin", "retired-skin");
     expect(await boot()).toMatchObject({ skin: "midnight", stored: "midnight" });
   });
@@ -94,5 +94,15 @@ describe("default skin", () => {
     expect(pressed).toEqual(["Midnight"]);
     const theme = renderToStaticMarkup(createElement(ThemeRow));
     expect([...theme.matchAll(/aria-checked="true"[^>]*>([^<]+)</g)].map(([, label]) => label)).toEqual(["System"]);
+  });
+
+  it("reports the chosen skin in Settings as a checked radio, not a pressed button", async () => {
+    os.dark = true;
+    await boot();
+    const [{ SkinPicker }, { SettingsLook }] = await Promise.all([import("@/components/SkinPicker"), import("@/components/SettingsPrimitives")]);
+    const picker = renderToStaticMarkup(createElement(SettingsLook.Provider, { value: true }, createElement(SkinPicker)));
+    const radios = [...picker.matchAll(/<button[^>]*role="radio"[^>]*>/g)].map(([radio]) => radio);
+    expect(radios.filter((radio) => radio.includes('aria-checked="true"'))).toHaveLength(1);
+    expect(radios.filter((radio) => radio.includes("aria-pressed"))).toEqual([]);
   });
 });

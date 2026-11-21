@@ -18,6 +18,10 @@ export interface CloudSignedHostDeps {
   box: () => BoxReport;
   /** A Team Cloud's shared connections and AI for its admins; used only when the home is a Team Cloud. */
   teamAdmin?: { summary(): Promise<TeamAdminSummary> };
+  /** A Team Cloud's pairing claim said who invited this member: kept for their welcome (team-welcome.ts). */
+  invited?: (member: string, by: string) => void;
+  /** The team's rule turned remote access off: no browser sign-in for a User. */
+  memberBrowserOff?: () => boolean;
   /** A Team Cloud's member left (the Admin's signed request): delete what was theirs alone. */
   memberLeft?: (email: string) => Promise<Record<string, unknown>>;
   /** A Team Cloud's rules changed on the Admin (its signed nudge): fetch them now. */
@@ -32,7 +36,7 @@ export function createCloudSignedHost(deps: CloudSignedHostDeps): { cloudHealth:
   const cloudHealth = deps.cloudHome ? createCloudHealth({ ...deps.health, box: deps.box }) : null;
   const cloudSigned = deps.cloudHome && cloudHealth
     ? createCloudSignedRoutes({ secret: deps.cloudHome.bootstrapSecret, sessions: deps.sessions, team: deps.cloudHome.team, health: cloudHealth, power: deps.power, box: deps.box,
-      ...(deps.cloudHome.team && deps.teamAdmin ? { teamAdmin: deps.teamAdmin } : {}),
+      ...(deps.cloudHome.team && deps.teamAdmin ? { teamAdmin: deps.teamAdmin } : {}), ...(deps.cloudHome.team && deps.invited ? { invited: deps.invited } : {}), ...(deps.cloudHome.team && deps.memberBrowserOff ? { memberBrowserOff: deps.memberBrowserOff } : {}),
       ...(deps.cloudHome.team && deps.memberLeft ? { memberLeft: deps.memberLeft } : {}), ...(deps.cloudHome.team && deps.policyChanged ? { policyChanged: deps.policyChanged } : {}), ...(deps.plan ? { plan: deps.plan } : {}), ...(deps.planTier ? { planTier: deps.planTier } : {}) })
     : null;
   return { cloudHealth, cloudSigned };

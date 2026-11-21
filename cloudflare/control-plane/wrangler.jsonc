@@ -87,8 +87,8 @@
     // RELAY_TUNNEL_RELEASE_PERCENT (0-100): the share of computers, by the same stable hash as the relay rollout,
     // whose tunnel is released once every paired phone has used the encrypted connection and no old phone has been
     // reported for RELAY_TUNNEL_RELEASE_DAYS. Raise it 10, 50, 100.
-    "RELAY_TUNNEL_RELEASE_PERCENT": "0",
-    "RELAY_TUNNEL_RELEASE_DAYS": "3",
+    "RELAY_TUNNEL_RELEASE_PERCENT": "100",
+    "RELAY_TUNNEL_RELEASE_DAYS": "1",
     // The cutoffs, the last step. TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT (0-100, the same stable hash): on that share
     // of the computers the relay serves, the tunnel is given up whatever phones are paired. An old phone app no
     // longer connects from outside the home network: the phone is updated and paired again, and the desktop says so
@@ -97,12 +97,12 @@
     // TUNNEL_MIN_APP_VERSION (x.y.z): a desktop below it neither gets nor keeps a tunnel and is answered
     // 426 update_required. The cron removes a tunnel only from a computer seen in the last two days, whose stored
     // release is therefore current. Empty: no minimum.
-    "TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT": "0",
-    "TUNNEL_MIN_APP_VERSION": "",
+    "TUNNEL_LEGACY_PHONE_CUTOFF_PERCENT": "100",
+    "TUNNEL_MIN_APP_VERSION": "0.1.145",
     // The first desktop release that reads `tunnel` on 409 relay_capable and keeps asking afterwards (x.y.z). From
     // it, a relay-served desktop with an old phone is answered relay_capable ("full") at the tunnel limit instead of
     // 503 endpoint_capacity; earlier releases keep the 503 they show and retry on. Empty: always the 503.
-    "TUNNEL_REASON_MIN_VERSION": ""
+    "TUNNEL_REASON_MIN_VERSION": "0.1.152"
   },
   "secrets": {
     "required": ["BETTER_AUTH_SECRET", "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_TOKEN_MAUSBOT_SI", "RELAY_TOKEN_SIGNING_KEY"]

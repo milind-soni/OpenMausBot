@@ -110,6 +110,21 @@ describe("provider key check", () => {
     expect(await checkProviderKey({ provider: "xai", key: "good-key", url: "http://127.0.0.1:1" })).toEqual({ ok: false, reason: "unreachable" });
   });
 
+  it.each([{}, { error: { message: "invalid key" } }, { data: null }, { data: {} }, { models: "unavailable" }])(
+    "does not report a successful model check for HTTP 200 with %j",
+    async body => {
+      const provider: typeof fetch = async () => Response.json(body);
+      expect(await checkProviderKey({ provider: "openaiCompat", key: "fixture", url: "https://models.example.test/v1" }, provider))
+        .toEqual({ ok: false, reason: "unexpected", status: 200 });
+    },
+  );
+
+  it.each([[], { data: [] }, { models: [] }])("accepts a structurally valid empty catalog %j", async body => {
+    const provider: typeof fetch = async () => Response.json(body);
+    expect(await checkProviderKey({ provider: "mistral", key: "fixture" }, provider))
+      .toEqual({ ok: true, check: "models", models: [] });
+  });
+
   it("never approves an absent key even when a provider's catalog is public", async () => {
     let calls = 0;
     const publicCatalog: typeof fetch = async () => { calls++; return Response.json({ data: [] }); };
@@ -168,6 +183,15 @@ describe("provider key check", () => {
   });
 
   // Its /models answers without a key, but a wrong key gets 401 (checked 2026-10-30), so a key's own list proves it.
+  it("checks ModelGo at its preset endpoint and only there", async () => {
+    const modelgo: typeof fetch = async (input, init) => {
+      expect(String(input)).toBe("https://api.modelgo.ai/v1/models");
+      expect(new Headers(init?.headers).get("authorization")).toBe("Bearer fixture-modelgo");
+      return Response.json({ object: "list", data: [{ id: "fixture-model" }] });
+    };
+    expect(await checkProviderKey({ provider: "modelgo", key: "fixture-modelgo" }, modelgo)).toEqual({ ok: true, check: "models", models: ["fixture-model"] });
+  });
+
   it("checks Greenference at its preset endpoint", async () => {
     const greenference: typeof fetch = async (input, init) => {
       expect(String(input)).toBe("https://llm.eu.greenference.com/v1/models");

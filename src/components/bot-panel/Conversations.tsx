@@ -2,14 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Search, SquarePen } from "lucide-react";
 
 import { cn } from "@/lib/cn";
-import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 import { activeLocale, t } from "@/lib/i18n";
 import { SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-media-query";
-import { api, currentTaskBot, openBotThread, useStore, visibleMessages, type Bot, type Message } from "@/state/store";
+import { api, currentTaskBot, openBotThread, visibleMessages, type Bot, type Message } from "@/state/store";
 import { lastLine } from "../sidebar-preview";
 import { isArchived, orderedThreadList, SidebarThreadRow, stampClock, threadRecency, threadRowActions, useRelativeNow } from "../SidebarThreadRow";
 import { filterTasks } from "../TaskPicker";
+import { useConversationSide } from "../TeamSideSwitch";
+import { tasksOfSide } from "@/state/team-side";
 import { CardLabel, panelActionCls } from "./rows";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 export const CONVERSATIONS_SHOWN = 3;
 const PANEL_ROW_LOOK = "[&_.font-semibold]:font-medium [&_time]:text-[12px] [&_time]:text-ink-tertiary [&_span.bg-accent]:size-2";
@@ -54,20 +56,21 @@ export function forgetConversationLines(): void {
 }
 
 export function BotConversations({ bot }: { bot: Bot }) {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ instances: s.instances, pendingQueued: s.pendingQueued }), sameFields), dispatch = useStoreDispatch();
   const now = useRelativeNow();
   const phone = !useMediaQuery(SIDEBAR_INLINE, true);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const generatedTitles = llmThreadTitlesEnabled(state.config);
   const actions = useMemo(() => {
-    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch, generatedTitles);
+    const { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive } = threadRowActions(bot.id, dispatch);
     return { onRename, onRegenerateTitle, onDelete, onMove, onPin, onArchive };
-  }, [bot.id, dispatch, generatedTitles]);
+  }, [bot.id, dispatch]);
 
-  const threads = (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])
+  const side = useConversationSide(bot);
+  const tasks = bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }];
+  const threads = (side ? tasksOfSide({ ...bot, tasks }, side) : tasks)
     .filter((task) => !task.routineRunId)
     .map((task) => {
       const thread = currentTaskBot(bot, task.threadId);
@@ -79,7 +82,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const conversations = orderedThreadList(threads.filter((task) => !isArchived(task) || task.threadId === bot.threadId));
   const archived = orderedThreadList(threads.filter((task) => isArchived(task) && task.threadId !== bot.threadId));
   const needle = query.trim();
-  const collapsed = conversations.filter((task, index) => index < CONVERSATIONS_SHOWN || task.threadId === bot.threadId);
+  const collapsed = conversations.filter((task, index) => index < CONVERSATIONS_SHOWN || task.threadId === bot.threadId || task.threadId === bot.mainThreadId);
   const recent = useRecentMessages(bot, [...(needle || expanded ? conversations : collapsed), ...(showArchived ? archived : [])]);
   const preview = (threadId: string) => {
     const messages = recent(threadId);
@@ -115,7 +118,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const row = (task: (typeof threads)[number]) => (
     <div role="listitem" key={task.threadId} data-conversation={task.threadId}>
       <SidebarThreadRow panel preview={preview(task.threadId)} task={task} ownerId={bot.id} current={task.threadId === bot.threadId}
-        folders={bot.projects} now={stampClock(threadRecency(task), now)} locale={activeLocale()} onSelect={select} {...actions} />
+        main={task.threadId === bot.mainThreadId} folders={bot.projects} now={stampClock(threadRecency(task), now)} locale={activeLocale()} onSelect={select} {...actions} />
     </div>
   );
 
@@ -135,7 +138,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
         </button>
       )}>{t("botPanel.conversations.title")}</CardLabel>
       <div className={cn("flex items-center gap-2", listed && "mb-2")}>
-        {bot.yourAccess !== "view" && (
+        {bot.yourAccess !== "view" && side !== "team" && (
           <button
             type="button"
             data-conversations-new

@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MAX_REMOTE_MCP_BYTES } from "./mcp-http.ts";
-import { probeMcpServer, SIGN_IN_CHECK_TOOL } from "./mcp-probe.ts";
+import { probeEnvironment, probeMcpServer, SIGN_IN_CHECK_TOOL } from "./mcp-probe.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
 import { startFakeHttpMcp } from "./testing/fake-http-mcp-server.ts";
 import { startFakeOAuth } from "./testing/fake-oauth-server.ts";
@@ -49,6 +49,17 @@ function watch<T>(pending: Promise<T>): { done: boolean; value?: T } {
 afterEach(() => { vi.useRealTimers(); });
 
 describe("custom MCP probe", () => {
+  it("keeps an npm cache that works and preserves a per-server override", () => {
+    const cache = mkdtempSync(join(tmpdir(), "omb-npm-cache-"));
+    try {
+      const inherited = { npm_config_cache: cache, PATH: "/bin" };
+      expect(probeEnvironment({ env: {} }, inherited).npm_config_cache).toBe(cache);
+      expect(probeEnvironment({ env: { npm_config_cache: "/tmp/custom-npm-cache" } }, inherited).npm_config_cache).toBe("/tmp/custom-npm-cache");
+    } finally {
+      rmSync(cache, { recursive: true, force: true });
+    }
+  });
+
   it("performs an MCP handshake and returns the bounded public tool list", async () => {
     await expect(probeMcpServer({
       command: process.execPath,
@@ -69,11 +80,11 @@ describe("custom MCP probe", () => {
       return spawned[0]!.opts;
     };
     const anyBot = await opts({ asBot: {} });
-    expect(anyBot.box).toEqual({ allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"] });
+    expect(anyBot.box).toEqual({ allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"], configured: true });
     expect(anyBot).not.toHaveProperty("cwd");
     const folder = mkdtempSync(join(tmpdir(), "omb-probe-bot-"));
     try {
-      expect(await opts({ asBot: { id: "ada", cwd: folder } })).toMatchObject({ cwd: folder, box: { botId: "ada", allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"] } });
+      expect(await opts({ asBot: { id: "ada", cwd: folder } })).toMatchObject({ cwd: folder, box: { botId: "ada", allowEnv: ["OP_SERVICE_ACCOUNT_TOKEN"], configured: true } });
     } finally { await removeTempDir(folder); }
     const plain = await opts({});
     expect(plain).not.toHaveProperty("box");
@@ -560,4 +571,41 @@ describe("remote MCP probe", () => {
       await fake.close();
     }
   });
+
+  it("redacts complete credentials when configured values contain one another", async () => {
+    const fake = await startFakeHttpMcp({ tools: [{
+      name: "read_prefix-sensitive-suffix",
+      description: "prefix-sensitive-suffix / prefix / a.b+c / acted",
+      inputSchema: { type: "object" },
+    }] });
+    try {
+      await expect(probeMcpServer({
+        type: "http", url: fake.url,
+        headers: { "X-Short": "prefix", "X-Long": "prefix-sensitive-suffix", "X-Symbols": "a.b+c", "X-Fragment": "acted" },
+        enabled: false,
+      }, 2_000)).resolves.toEqual({
+        ok: true,
+        tools: [{ name: "read_[redacted]", description: "[redacted] / [redacted] / [redacted] / [redacted]" }],
+      });
+    } finally {
+      await fake.close();
+    }
+  });
+
+  for (const { label, text, headers } of [
+    { label: "crossing configured values", text: "abcdefghi", headers: { "X-First": "abc", "X-Second": "bcdefghi" } },
+    { label: "overlapping occurrences of one value", text: "ababa", headers: { "X-First": "aba", "X-Second": "" } },
+  ]) {
+    it(`redacts the whole matched range for ${label}`, async () => {
+      const fake = await startFakeHttpMcp({ tools: [{
+        name: `read_${text}`, description: `before ${text} after`, inputSchema: { type: "object" },
+      }] });
+      try {
+        await expect(probeMcpServer({ type: "http", url: fake.url, headers, enabled: false }, 2_000))
+          .resolves.toEqual({ ok: true, tools: [{ name: "read_[redacted]", description: "before [redacted] after" }] });
+      } finally {
+        await fake.close();
+      }
+    });
+  }
 });

@@ -4,19 +4,21 @@ import { Hourglass } from "lucide-react";
 import { t } from "@/lib/i18n";
 import { dueBeforeReset, limitLine, nearLimitEngines, useEngineLimits, type EngineLimit } from "@/lib/limit-resets";
 import type { Routine } from "@/lib/routines";
-import { api, useStore } from "@/state/store";
+import { api } from "@/state/store";
+import { useBotsApartFromTurns } from "@/state/apart-from-turns";
+import { useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 /** Each engine near its limit, with the automations due before it resets and one button that moves just their next
  * run to after the reset. */
 export function LimitWarnings({ botFilter = "all" }: { botFilter?: string }) {
-  const { state, dispatch } = useStore();
+  const allRoutines = useStoreSelector((state) => state.routines), bots = useBotsApartFromTurns(), dispatch = useStoreDispatch();
   const engines = nearLimitEngines(useEngineLimits());
   const [busy, setBusy] = useState<string | null>(null);
   const [moved, setMoved] = useState<string | null>(null);
   const [error, setError] = useState("");
   if (!engines.length) return null;
-  const botEngine = (botId: string) => state.bots.find((bot) => bot.id === botId)?.modelSelection?.instanceId;
-  const routines = state.routines.filter((routine) => botFilter === "all" || routine.botId === botFilter);
+  const botEngine = (botId: string) => bots.find((bot) => bot.id === botId)?.modelSelection?.instanceId;
+  const routines = allRoutines.filter((routine) => botFilter === "all" || routine.botId === botFilter);
   const move = async (limit: EngineLimit, due: Routine[]) => {
     setBusy(limit.engine);
     setError("");

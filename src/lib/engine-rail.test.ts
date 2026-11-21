@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { InstanceInfo } from "@/state/store";
-import { configuredModelInstances, modelsAwaitEngine, splitEngineRail } from "./engine-rail";
+import { backupNote, configuredModelInstances, isClaudeAccount, modelsAwaitEngine, signInFamily, splitEngineRail } from "./engine-rail";
 
 describe("splitEngineRail", () => {
   it("groups sign-in plans, pasted provider keys and Local engines", () => {
@@ -163,5 +163,40 @@ describe("modelsAwaitEngine", () => {
     expect(modelsAwaitEngine({ snapshot })).toBe(false);
     expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot: { ...snapshot, authenticated: false } })).toBe(false);
     expect(modelsAwaitEngine({ modelsUnconfirmed: true, snapshot: { state: "unavailable", reason: "missing" } })).toBe(false);
+  });
+});
+
+describe("signInFamily", () => {
+  it("groups official Claude sign-ins but keeps custom endpoints and Bedrock apart", () => {
+    expect(signInFamily({ driverKind: "claudeAgent" })).toBe("claude");
+    expect(signInFamily({ driverKind: "claudeAgent", access: "subscription" })).toBe("claude");
+    expect(signInFamily({ driverKind: "claudeAgent", access: "custom" })).toBeUndefined();
+    expect(signInFamily({ driverKind: "claudeAgent", access: "api" })).toBeUndefined();
+    expect(isClaudeAccount({ driverKind: "claudeAgent", access: "custom" })).toBe(false);
+    expect(signInFamily({ driverKind: "codex" })).toBe("openai");
+  });
+});
+
+describe("backupNote", () => {
+  const engine = (instanceId: string, driverKind: string, overrides: Partial<InstanceInfo> = {}): InstanceInfo => ({
+    instanceId, driverKind, displayName: instanceId, snapshot: { state: "available" },
+    models: { default: "m", options: [{ id: "m", label: "M" }] }, ...overrides,
+  });
+  const main = engine("codex", "codex");
+
+  it("says another sign-in to the main subscription AI is used only while the main one is signed out", () => {
+    expect(backupNote(main, engine("codex-sub1", "codex"))).toBe(
+      "Another sign-in to the main AI: used only while the main one is signed out, never at its usage limit (provider terms).");
+    expect(backupNote(engine("claude", "claudeAgent"), engine("claude-2", "claudeAgent"))).toMatch(/^Another sign-in/);
+    // A key the CLI stored itself is not pay-per-use to the server's limit rule, so the note still applies.
+    expect(backupNote(main, engine("codex-stored-key", "codex", { snapshot: { state: "available", account: { method: "api-key" } } }))).toMatch(/^Another sign-in/);
+  });
+
+  it("keeps the same-account note and says nothing for other AIs or pay-per-use keys", () => {
+    expect(backupNote(main, main)).toBe("Same account as the main AI: it shares the usage limit.");
+    expect(backupNote(main, engine("claude", "claudeAgent"))).toBeUndefined();
+    expect(backupNote(main, engine("codex-key", "codex", { access: "api" }))).toBeUndefined();
+    expect(backupNote(engine("ollama", "openaiChat"), engine("ollama-2", "openaiChat"))).toBeUndefined();
+    expect(backupNote(undefined, engine("codex-sub1", "codex"))).toBeUndefined();
   });
 });

@@ -3,14 +3,13 @@ import { type ServerText } from "../shared/server-text.ts";
 // its own engine once that limit has reset or it is signed in again.
 import { readFileSync } from "node:fs";
 
+import { otherSignInOfSameSubscription } from "../shared/limit-backup.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 import type { ModelSelection } from "../shared/wire.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import type { InstanceConfig } from "./contracts.ts";
 import { hostTimeZone } from "./turn-clock.ts";
 
-/** Engines a person signs in to with a subscription whose usage limit refuses turns. */
-const SUBSCRIPTION_DRIVERS = new Set(["claudeAgent", "codex", "grokAgent"]);
 /** An engine instance with one of these keys bills each use instead of drawing on a subscription's limit. */
 const PAY_PER_USE_KEYS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY", "CODEX_API_KEY", "XAI_API_KEY"];
 
@@ -21,7 +20,7 @@ type Engine = { instanceId: string; driverKind: string };
  * accounts closed. Another engine, or a pay-per-use key on the same one, is fine. */
 export function limitBackupAllowed(from: Engine, to: Engine, toConfig?: Pick<InstanceConfig, "environment" | "access">): boolean {
   if (to.instanceId === from.instanceId) return false;
-  if (to.driverKind !== from.driverKind || !SUBSCRIPTION_DRIVERS.has(from.driverKind)) return true;
+  if (!otherSignInOfSameSubscription(from, to)) return true;
   return billsEachUse(toConfig);
 }
 
@@ -65,6 +64,9 @@ export interface LimitFailover {
   at: number;
   /** `from` was signed out, not limited: the conversation goes back once it is signed in again. */
   why?: "signed-out";
+  /** Only the usage meter held `from`, not a refusal: the conversation goes back once the meter no longer holds it. */
+  meter?: true;
+  engineRefusal?: "waiting" | "recovered";
 }
 
 /** With no reset time known, a conversation tries its own engine again no sooner than this. */
@@ -74,10 +76,10 @@ export interface LimitFailoverDeps {
   file: string;
   now?: () => number;
   /** Until when this engine refuses work; null when it should be working. */
-  blockedUntil: (engine: string) => number | null;
-  modelHeld?: (selection: ModelSelection) => boolean;
+  blockedUntil: (engine: string, model?: string) => number | null;
   /** This engine refused a turn because it is signed out, and has not been signed in again since. */
   signedOut?: (engine: string) => boolean;
+  modelHeld?: (selection: ModelSelection) => boolean;
   /** The thread's model now, or null when the thread is gone. */
   threadModel: (botId: string, threadId: string) => ModelSelection | null;
   /** Switches the thread back; false when that is not allowed now (a busy thread, a permission change). */
@@ -92,7 +94,8 @@ function load(file: string): LimitFailover[] {
     const rows = JSON.parse(readFileSync(file, "utf8")) as unknown;
     return Array.isArray(rows) ? rows.filter((row): row is LimitFailover => typeof row?.botId === "string" && typeof row?.threadId === "string" &&
       typeof row?.from?.instanceId === "string" && typeof row?.to?.instanceId === "string" && (row.resetsAt === null || Number.isFinite(row.resetsAt)) &&
-      Number.isFinite(row.at) && (row.why === undefined || row.why === "signed-out")) : [];
+      Number.isFinite(row.at) && (row.why === undefined || row.why === "signed-out") && (row.meter === undefined || row.meter === true) &&
+      (row.engineRefusal === undefined || row.engineRefusal === "waiting" || row.engineRefusal === "recovered")) : [];
   } catch {
     return [];
   }
@@ -111,10 +114,14 @@ export class LimitFailovers {
   record(failover: LimitFailover): void {
     const earlier = this.rows.find((row) => row.threadId === failover.threadId);
     // A second failover keeps the engine the conversation started on, so it still goes back there.
-    const from = earlier && sameModelSelection(earlier.to, failover.from) ? earlier.from : failover.from;
+    const chained = earlier && sameModelSelection(earlier.to, failover.from);
+    const from = chained ? earlier.from : failover.from;
     // A reset already past when the limit refused names no time: the engine's own hold decides when it goes back.
     const resetsAt = failover.resetsAt !== null && failover.resetsAt > failover.at ? failover.resetsAt : null;
-    this.rows = [...this.rows.filter((row) => row.threadId !== failover.threadId), { ...failover, from, resetsAt }].slice(-500);
+    const { engineRefusal, ...row } = failover;
+    this.rows = [...this.rows.filter((candidate) => candidate.threadId !== failover.threadId), {
+      ...row, from, resetsAt, ...(!chained && resetsAt !== null && engineRefusal === "waiting" ? { engineRefusal } : {}),
+    }].slice(-500);
     this.save();
   }
 
@@ -126,8 +133,10 @@ export class LimitFailovers {
     const now = this.deps.now?.() ?? Date.now();
     const current = this.deps.threadModel(botId, threadId);
     if (!current || !sameModelSelection(current, row.to)) return this.forget(threadId);
-    const waitUntil = row.why === "signed-out" ? row.at : row.resetsAt ?? row.at + UNKNOWN_RESET_WAIT_MS;
-    if (waitUntil > now || this.deps.blockedUntil(row.from.instanceId) !== null || this.deps.modelHeld?.(row.from)) return false;
+    const blocked = this.deps.blockedUntil(row.from.instanceId, row.from.model) !== null;
+    const waitUntil = row.why === "signed-out" ? row.at : row.meter ? row.at : row.resetsAt ?? row.at + UNKNOWN_RESET_WAIT_MS;
+    const recovered = row.engineRefusal === "recovered" && !this.deps.signedOut?.(row.from.instanceId) && !this.deps.modelHeld?.(row.from);
+    if (blocked || (waitUntil > now && !recovered)) return false;
     if (row.why === "signed-out" && this.deps.signedOut?.(row.from.instanceId)) return false;
     if (!this.deps.switchBack(row)) return false;
     this.forget(threadId);
@@ -135,13 +144,12 @@ export class LimitFailovers {
     return true;
   }
 
-  usageRecovered(engine: string, previousReset: number): void {
-    const now = this.deps.now?.() ?? Date.now();
+  usageRecovered(engine: string, reset: number): void {
     let changed = false;
     this.rows = this.rows.map((row) => {
-      if (row.from.instanceId !== engine || row.why === "signed-out" || row.resetsAt !== previousReset || row.resetsAt <= now || this.deps.modelHeld?.(row.from)) return row;
+      if (row.engineRefusal !== "waiting" || row.from.instanceId !== engine || row.resetsAt !== reset || row.why || row.meter) return row;
       changed = true;
-      return { ...row, resetsAt: now };
+      return { ...row, engineRefusal: "recovered" };
     });
     if (changed) this.save();
   }

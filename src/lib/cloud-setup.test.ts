@@ -21,6 +21,8 @@ describe("cloudWelcomeStage", () => {
     expect(cloudWelcomeStage(facts({ viewer: { hosted: false, canSave: true } }))).toBe("none");
     expect(cloudWelcomeStage(facts({ viewer: { ...owner, canSave: false } }))).toBe("none");
     expect(cloudWelcomeStage(facts({ viewer: null }))).toBe("none");
+    expect(cloudWelcomeStage(facts({ viewer: { ...owner, teamRole: "admin" } })), "a team's invited admin").toBe("none");
+    expect(cloudWelcomeStage(facts({ viewer: { ...owner, teamRole: "owner" } })), "a team's Owner").toBe(cloudWelcomeStage(facts()));
     expect(cloudWelcomeStage(facts({ connected: false }))).toBe("waiting");
     expect(cloudWelcomeStage(facts({ enginesKnown: false }))).toBe("waiting");
     expect(cloudWelcomeStage(facts({ onboarding: undefined }))).toBe("waiting");
@@ -71,6 +73,8 @@ describe("cloudSetupStage", () => {
     expect(cloudSetupStage(facts())).toBe("shown");
     expect(cloudSetupStage(facts({ viewer: { hosted: false, canSave: true } }))).toBe("none");
     expect(cloudSetupStage(facts({ viewer: { ...owner, canSave: false } }))).toBe("none");
+    expect(cloudSetupStage(facts({ viewer: { ...owner, teamRole: "admin" } })), "a team's invited admin gets no setup list").toBe("none");
+    expect(cloudSetupStage(facts({ viewer: { ...owner, teamRole: "owner" } }))).toBe(cloudSetupStage(facts()));
     expect(cloudSetupStage(facts({ viewer: null }))).toBe("none");
   });
 

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   BotAvatar,
+  InitialsAvatar,
   MausAvatar,
   resolveBotAvatarOutcome,
   type BotAvatarProps,
@@ -58,10 +59,12 @@ describe("mascot facial feature colors", () => {
     }
   });
 
-  it("keeps default inks when an override is reset or comes from an older profile", () => {
+  it("cuts the features out of the body when no colour is set", () => {
     expect(renderBot({ color: "chrome", mascotFaceColor: null })).toContain('stroke="#1E2833"');
-    expect(renderBot({ mascotBody: "pumpkin" })).toContain('stroke="#0d0a10"');
-    expect(renderBot({})).toContain('stroke="#ffffff"');
+    for (const markup of [renderBot({ mascotBody: "ghost" }), renderBot({})]) {
+      expect(markup).toContain("<mask");
+      expect(markup).not.toMatch(/stroke="#(?:ffffff|0d0a10)"/);
+    }
   });
 
   it("does not paint features over an uploaded image", () => {
@@ -109,6 +112,20 @@ describe("BotAvatar's two avatar outcomes", () => {
     const markup = renderBot({ avatarUrl: undefined, avatarCrop: "circle" });
     expect(markup).not.toContain("<img");
     expect(markup).toContain("<svg");
+  });
+});
+
+describe("theme hooks on faces", () => {
+  it("marks a bot's picture, its gradient mascot and its carved mascot, and leaves a decorative mascot unmarked", () => {
+    expect(renderBot({ avatarUrl: "/api/attachments/a.png", avatarCrop: "circle" })).toMatch(/<span data-avatar="picture" data-avatar-kind="bot"/);
+    expect(renderBot({})).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
+    expect(renderBot({ mascotBody: "ghost" })).toMatch(/<span data-avatar="mascot" data-avatar-kind="bot"/);
+    expect(render({})).not.toContain("data-avatar");
+  });
+
+  it("marks the person's picture and their initials", () => {
+    expect(renderToStaticMarkup(createElement(InitialsAvatar, { initials: "AL", avatarUrl: "/api/attachments/me.png" }))).toMatch(/<img data-avatar="picture" data-avatar-kind="person"/);
+    expect(renderToStaticMarkup(createElement(InitialsAvatar, { initials: "AL" }))).toMatch(/<div data-avatar="initials" data-avatar-kind="person"/);
   });
 });
 

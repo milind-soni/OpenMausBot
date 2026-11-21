@@ -126,3 +126,75 @@ it("closes the text when the person moves to another bot, so coming back shows t
   expect(textarea()).toBeNull();
   expect(host.querySelector('[data-panel-link="memory-text"]')).toBeTruthy();
 });
+
+it("keeps every earlier draft when Reload is needed twice", async () => {
+  await open();
+  await type("# Memory\n\n- First draft.\n");
+  files["MEMORY.md"] += "- The bot's note.\n";
+  await click(host.querySelector('[data-panel-done="memory-text"]'));
+  await click(button("Reload"));
+  await type("# Memory\n\n- Second draft.\n");
+  files["MEMORY.md"] += "- Another bot note.\n";
+  await click(host.querySelector('[data-panel-done="memory-text"]'));
+  await click(button("Reload"));
+  const kept = host.querySelector("[data-memory-draft] pre")?.textContent;
+  expect(kept).toContain("First draft.");
+  expect(kept).toContain("Second draft.");
+});
+
+it("locks the text while it saves, so nothing typed after Save is lost", async () => {
+  await open();
+  let finish!: () => void;
+  const fetchMock = vi.mocked(fetch);
+  const real = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementationOnce((input, init) => new Promise((resolve) => { finish = () => resolve(real(input as string, init)); }));
+  await type("# Memory\n\n- Saved.\n");
+  await click(host.querySelector('[data-panel-done="memory-text"]'));
+  expect(textarea()?.readOnly).toBe(true);
+  await act(async () => finish());
+  await settle();
+  expect(textarea()).toBeNull();
+});
+
+it("a save that finishes after moving to another bot does not show in that bot's notes", async () => {
+  await open();
+  let finish!: () => void;
+  const fetchMock = vi.mocked(fetch);
+  const real = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementationOnce((input, init) => new Promise((resolve) => { finish = () => resolve(real(input as string, init)); }));
+  await type("# Memory\n\n- Late note.\n");
+  await click(host.querySelector('[data-panel-done="memory-text"]'));
+  const other = { ...bot, id: "atlas", name: "Atlas" } as Bot;
+  await act(async () => root.render(createElement(MemoryPage, { bot: other, derived: {} as never })));
+  await settle();
+  await act(async () => finish());
+  await settle();
+  expect(files["MEMORY.md"]).toContain("Late note.");
+  expect(host.textContent).toContain("Prefers short replies.");
+  expect(host.textContent).not.toContain("Late note.");
+});
+
+it("opens the same text full window and back, keeping what was typed, and saves from there", async () => {
+  await open();
+  await type("# Memory\n\n- Typed in the panel.\n");
+  await click(host.querySelector("[data-memory-wide]"));
+  const full = () => document.querySelector<HTMLElement>('[data-memory-full-window][role="dialog"]');
+  // Over the whole window, not squeezed inside the panel.
+  expect(full()).toBeTruthy();
+  expect(host.contains(full())).toBe(false);
+  const wideField = full()!.querySelector<HTMLTextAreaElement>("[data-memory-text]");
+  expect(wideField?.value).toBe("# Memory\n\n- Typed in the panel.\n");
+  expect(document.activeElement).toBe(wideField);
+
+  await act(async () => { full()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  await settle();
+  expect(full()).toBeNull();
+  expect(textarea()?.value).toBe("# Memory\n\n- Typed in the panel.\n");
+  expect(puts).toEqual([]);
+
+  await click(host.querySelector("[data-memory-wide]"));
+  await click(full()!.querySelector('[data-panel-done="memory-text"]'));
+  expect(files["MEMORY.md"]).toBe("# Memory\n\n- Typed in the panel.\n");
+  expect(full()).toBeNull();
+  expect(host.textContent).toContain("Typed in the panel.");
+});

@@ -16,7 +16,10 @@ the chat it reports to (the bot's main chat unless the routine chose another):
   it reaches the bot in that chat with the report in hand.
 - **A copy of a card** the run waits on (a question, an approval, a proposal).
   Answering the copy, or giving it a 👍 or 👎, answers the run in its own
-  conversation; both cards then show the same answer.
+  conversation. A copied question clears "needs you" when its original is
+  answered, dismissed or expired, including after the person continues the
+  run's conversation as a normal chat. Startup checks existing question copies
+  against their originals for runs still in history.
 - **One line naming a sign-in, connection or credential** the run waits on
   ("I need you to sign in to example.com."), marked "needs you" until that card
   is settled; **See run** opens it. A sign-in can also be finished from the
@@ -62,7 +65,7 @@ fake engine (`FAKE_CLAUDE_ROOM_PLAN`), reaching the permission broker the way
 the CLI's proxy does: quiet and reporting runs, a report held behind the
 person's running turn, a question copied into the chat and answered there, by a reply or a 👍,
 a `NEEDS INPUT` answer (typed or a 👍) reaching the bot with the report in its context, a
-webhook run, failures said once, Chief escalations, and a person's turn in a
+webhook run, failures said once, and a person's turn in a
 waiting run's conversation.
 On a shared workspace, only someone who may answer in the chat a run reports
 to can answer the copy of its card there (`server/card-answerers.e2e.test.ts`).

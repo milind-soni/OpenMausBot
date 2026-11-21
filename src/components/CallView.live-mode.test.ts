@@ -106,15 +106,15 @@ describe("call modes", () => {
         close() {},
       }) as unknown as RTCPeerConnection,
       request: async () => {
-        throw new ApiError("Live calls use your own OpenAI key. Add it in Settings → API keys.", 409, { needsKey: true });
+        throw new ApiError("Live calls use your own OpenAI key. Add it in Settings → AI → Other services.", 409, { needsKey: true });
       },
       stopRemote: () => {},
     });
     setCallMode("live");
     await startLiveCall({ botId: bot.id, threadId: bot.threadId });
     const header = render(createElement(CallButton, { bot }));
-    expect(header).toContain("Live calls use your own OpenAI key. Add it in Settings → API keys.");
-    expect(header).toContain(">Open API keys</button>");
+    expect(header).toContain("Live calls use your own OpenAI key. Add it in Settings → AI → Other services.");
+    expect(header).toContain(">Open AI › Other services</button>");
     // no plan to buy and no key field: the key goes in Settings → API keys
     for (const gone of ["Pro plan", "Start free trial", 'type="password"']) expect(header).not.toContain(gone);
     expect(header).toMatch(/aria-expanded="true" aria-controls="[^"]+"[^>]*aria-label="Live call with Atlas"/);
@@ -126,7 +126,7 @@ describe("call modes", () => {
     expect(composer).toContain("bottom-full");
     expect(render(createElement(CallButton, { bot: { ...bot, id: "juniper" } }))).not.toContain("OpenAI key");
     dismissStartPrompt("juniper");
-    expect(render(createElement(CallButton, { bot }))).toContain("Open API keys");
+    expect(render(createElement(CallButton, { bot }))).toContain("Open AI › Other services");
     dismissStartPrompt(bot.id);
     expect(render(createElement(CallButton, { bot }))).not.toContain("OpenAI key");
   });
