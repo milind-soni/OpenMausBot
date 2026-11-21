@@ -281,6 +281,24 @@ describe("the brief", () => {
     expect(s.brief.dismissedFrom()).toEqual(["ada@x.test"]);
   });
 
+  it("Dismiss on an earlier day's brief takes the row off today's, with no turn, after a restart too", async () => {
+    const s = setup();
+    await s.brief.active("desktop", "UTC");
+    s.items.set("chk-1", { mail: [ada], prep: [] });
+    await s.brief.consume(s.watchRun("chk-1", '{"important": [{"id": "m1", "why": "Needs a reply.", "needsReply": false}]}'), "turn-1");
+    const yesterday = s.card()!;
+    s.advance(24 * 60 * MINUTE);
+    await s.brief.active("desktop");
+    expect(s.card()!.id).not.toBe(yesterday.id);
+    expect(s.shown()).toContain("Q3 numbers");
+    s.restart();
+    const dismiss = { type: "dismiss_row", payload: { messageId: "m1" } };
+    expect(s.brief.serverPress(s.chief, s.thread(), yesterday.id, dismiss, guest)).toBe("refused");
+    expect(s.brief.serverPress({ id: "someone-else" }, s.thread(), yesterday.id, dismiss, owner)).toBeNull();
+    expect(s.brief.serverPress(s.chief, s.thread(), yesterday.id, dismiss, owner)).toBe("handled");
+    await vi.waitFor(() => expect(s.shown()).not.toContain("Q3 numbers"));
+  });
+
   it("a Draft a reply press carries the email as records, by its id only", async () => {
     const s = setup();
     await s.brief.active("desktop", "UTC");
