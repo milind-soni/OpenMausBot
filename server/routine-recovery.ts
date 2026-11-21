@@ -50,6 +50,10 @@ export type RoutineFailureClass =
   | { kind: "owner"; cause: RoutineOwnerCause; resetsAt?: number }
   | { kind: "final" };
 
+/** Why a run that ended well fails instead, when more than its words: `partial: false` reads "didn't finish" whatever the
+ * bot said; `lendingRefused` marks a run only the owner can fix (server/host/refused-lending.ts). */
+export interface RefusedRunLine { text: string; partial?: false; lendingRefused?: true }
+
 /** A failure notification's own words; null stays quiet because the owner was already told. */
 export interface RoutineAlert { detail: string }
 
