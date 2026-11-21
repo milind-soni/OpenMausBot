@@ -10,6 +10,7 @@ import { ExtensionsMenu, extensionsOf, type BrowserExtension } from "./browser/E
 import { MoreMenu } from "./browser/MoreMenu";
 import { PasskeyNotice } from "./browser/PasskeyNotice";
 import { StreamSurface, type StreamSurfaceHandle, type SurfaceConnect } from "./browser/StreamSurface";
+import { BrowserViewerPill } from "./viewer-pill-host";
 import { createBrowserControl, startsInteraction, streamTransport, type BrowserControl, type BrowserTakeStatus } from "@/lib/browser-control";
 import { resolveAddressBarInput } from "@/lib/browser-address";
 import { closeBrowserPictureInPicture, openBrowserPictureInPicture, supportsBrowserPictureInPicture, useBrowserPictureInPicture } from "@/lib/browser-pip";
@@ -27,7 +28,8 @@ const BrowserDesktop = lazy(() => import("./browser/BrowserDesktop").then((modul
 const button = "rounded-md p-1.5 text-ink-secondary hover:bg-inset hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed";
 const NO_NAV: BrowserNav = { url: "", loading: false, canGoBack: false, canGoForward: false };
 
-export type BrowserSignIn = { url: string; site: string; nonce: number };
+/** `expand`: open the browser full size, as a handoff's Take over does. */
+export type BrowserSignIn = { url: string; site: string; nonce: number; expand?: boolean };
 /** A page to open in a new tab once the view is connected and awake: a published page's Open (usePageOpener). */
 export type BrowserPage = { url: string; nonce: number };
 
@@ -237,7 +239,8 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
       return;
     }
     signInHandled.current = signIn.nonce;
-    signInPage.current = signIn.url;
+    signInPage.current = signIn.url || null;
+    if (signIn.expand) setMaximized(true);
     latest.current.takeControl();
     latest.current.openSignInPage();
   }, [signIn, connected, asleep]);
@@ -452,6 +455,7 @@ export function LiveBrowser({ bot, signIn, page }: { bot: Bot; signIn?: BrowserS
         </div>
       ) : null}
     </div>
+    {maximized && <BrowserViewerPill bot={bot} you={you} pending={takeStatus === "pending" || takeStatus === "slow"} onTake={takeControl} onStop={handBack} onCollapse={() => setMaximized(false)} />}
     <dialog ref={profilesDialog} onClose={() => setShowProfiles(false)} onClick={(e) => { if (e.target === e.currentTarget) setShowProfiles(false); }} className="m-auto w-[min(420px,calc(100%-32px))] max-h-[80vh] overflow-auto rounded-2xl border border-hairline/50 bg-card p-5 text-ink shadow-2xl backdrop:bg-black/40">
       <div className="mb-4 flex items-center justify-between"><h2 className="text-[15px] font-medium">{t("browser.panel.profiles")}</h2><button className={button} aria-label={t("browser.panel.closeProfiles")} onClick={() => setShowProfiles(false)}><X size={16} /></button></div>
       {(heldElsewhere || (you && takeStatus !== "")) && <p className="mb-3 text-[12px] text-ink-secondary">{t(heldElsewhere ? "browser.profiles.heldElsewhere" : "browser.profiles.busy")}</p>}
