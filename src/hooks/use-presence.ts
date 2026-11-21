@@ -11,7 +11,7 @@ const ACTIVITY = ["focus", "pointerdown", "keydown"] as const;
 function selection(state: AppState): string {
   const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
   const threadId = bot ? bot.switchingTo ?? bot.threadId : state.groups.find((group) => group.id === state.selectedId)?.threadId;
-  return `${state.selectedId}\n${threadId ?? ""}`;
+  return `${state.selectedId}\n${threadId ?? ""}\n${state.newChat?.session ?? ""}`;
 }
 
 /** The bot conversation open in front of the person, if one is. */
@@ -42,7 +42,7 @@ export function usePresence(state: AppState, dispatch: (action: Action) => void)
       void api("/api/presence/active", { method: "POST", body: JSON.stringify(body) }).then((answer) => {
         const live = latest.current;
         const target = existingThreadTarget(openTarget(answer), live.state);
-        if (target && selection(live.state) === sentFrom) openThread(live.dispatch, target, live.state, live.showThreads);
+        if (target && !live.state.newChat && selection(live.state) === sentFrom) openThread(live.dispatch, target, live.state, live.showThreads);
       }, () => {});
     };
     const onActivity = () => ping();

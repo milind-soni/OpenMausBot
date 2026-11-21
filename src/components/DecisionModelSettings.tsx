@@ -1,6 +1,6 @@
 // Security: the key is write-only; the server reports configured-or-not, never the value.
 import { useEffect, useState } from "react";
-import { api, useStore, type ConfigStatus } from "@/state/store";
+import { api, type ConfigStatus } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
@@ -8,6 +8,7 @@ import { LearnMore, SETTINGS_INPUT, SettingRow, SettingsField, SettingsFormFoot,
 import { Select } from "./Select";
 import { WorkersAiKeyCard } from "./WorkersAiKeyCard";
 import { openKeySettings } from "./keys/key-focus";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 
 type CustomApi = "systemone" | "decisions" | "chat";
 const customApiOf = (api: string | undefined): CustomApi => (api === "decisions" || api === "chat" ? api : "systemone");
@@ -152,7 +153,7 @@ function SavedText({ saved, onSave, disabled, label, placeholder, testId }: {
 }
 
 export function DecisionModelSettings() {
-  const { state, dispatch } = useStore();
+  const state = useStoreSelector((s) => ({ config: s.config }), sameFields), dispatch = useStoreDispatch();
   const decider = state.config?.decider;
   const provider = asProvider(decider?.chosen ?? decider?.provider);
   const openrouter = provider === "openrouter";

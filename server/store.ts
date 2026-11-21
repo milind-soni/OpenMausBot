@@ -557,8 +557,8 @@ export class Store {
   /** In memory only: message writes must not rewrite bots.json. */
   private noteThreadActivity(threadId: string, at: number, forOrder = false, orderAt = at): void {
     if (!Number.isFinite(at)) return;
-    for (const task of [...this.bots, ...this.groups].map((owner) => owner.tasks?.find((candidate) => candidate.threadId === threadId))) {
-      if (!task) continue;
+    for (const [kind, owner] of [...this.bots.map((bot) => ["bot", bot] as const), ...this.groups.map((group) => ["group", group] as const)]) {
+      const task = owner.tasks?.find((candidate) => candidate.threadId === threadId); if (!task) continue; this.registry.changedInPlace({ kind, id: owner.id });
       task.updatedAt = Math.max(task.updatedAt ?? 0, at);
       if (forOrder) task.lastThreadOrderAt = Math.max(task.lastThreadOrderAt ?? 0, orderAt);
     }
@@ -1506,7 +1506,7 @@ export class Store {
       // New authority goes live only after its durable save succeeds.
       this.saveBots(this.bots.map((candidate) => candidate === bot ? { ...bot, toolScope: nextToolScope } : candidate));
       bot.toolScope = nextToolScope;
-    } else this.saveBots();
+    } else this.saveBotThread(id, undefined, "now");
     this.emit({ type: "bot", botId: id });
     return bot;
   }

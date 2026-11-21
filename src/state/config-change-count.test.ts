@@ -17,8 +17,8 @@ class FixtureEventSource {
   send(frame: object, id?: string) { this.onmessage?.({ data: JSON.stringify(frame), lastEventId: id }); }
 }
 
-/** What a config frame carries into the store. */
-const framed = (savedSteps: boolean) => ({
+/** What the server says about each setting. */
+const settingsOf = (savedSteps: boolean) => ({
   xai: { configured: false }, anthropic: { configured: true, everyClaudeBot: true }, openai: { configured: false },
   composio: { configured: false, mode: "hosted" }, box: { configured: false }, vps: { configured: false, sshAlias: "" },
   rooms: { turnTimeoutMinutes: 10 }, mcp: { callTimeoutMinutes: 5 }, threads: { maxConcurrentPerBot: 3 },
@@ -29,9 +29,9 @@ const framed = (savedSteps: boolean) => ({
   edition: { edition: "community", features: [] }, browserProfiles: [{ id: "work", name: "Work" }],
   budgets: {}, billing: { currency: "USD", prices: {} }, pausedBots: [], heldBots: [],
 });
-/** What GET and PATCH /api/config answer: the same, and the sections a frame leaves out. */
+/** What GET and PATCH /api/config answer and a config frame carries: the settings and what it says about the place. */
 const answered = (savedSteps: boolean) => ({
-  ...framed(savedSteps), computerName: "Studio", newBots: {}, signIn: { admins: [], members: [] },
+  ...settingsOf(savedSteps), computerName: "Studio", newBots: {}, signIn: { admins: [], members: [] },
   membership: { authority: "local", pairingCodes: true }, decisions: { retentionDays: 30 }, safetyFloor: { enabled: true },
 });
 const INSTANCES = [{ instanceId: "codex", driverKind: "codex", displayName: "Codex", enabled: true, snapshot: { state: "available", authenticated: true, models: [{ id: "m", name: "M" }] } }];
@@ -113,32 +113,37 @@ describe("a switched setting reaches the store's readers", () => {
     expect(seen).toBe(held);
   });
 
-  it("draws once for the frame and once for the answer, and not again for the same engine list", async () => {
+  it("draws once for a switch: the frame, then nothing for the answer that says the same, nor for the same engine list", async () => {
     config = answered(true);
-    const counted = await flip(framed(true), answered(true));
+    const counted = await flip(answered(true), answered(true));
     expect(seen.config).toEqual(answered(true));
-    expect(counted).toBe(2);
+    expect(counted).toBe(1);
   });
 
-  it("draws once for a frame that repeats the answer, as it drops the sections a frame leaves out", async () => {
-    const before = renders, reads = instanceReads;
-    configFrame(framed(true));
+  it("draws nothing for a frame from an older server that leaves out what it says about the place", async () => {
+    const before = renders, held = seen, reads = instanceReads;
+    configFrame(settingsOf(true));
     await paint();
     expect(instanceReads).toBe(reads + 1);
-    expect(seen.config).toEqual(framed(true));
-    expect(renders - before).toBe(1);
+    expect(seen.config).toEqual(answered(true));
+    expect(renders - before).toBe(0);
+    expect(seen).toBe(held);
   });
 
-  it("draws once when the answer says no more than the frame did", async () => {
-    config = framed(false);
-    const counted = await flip(framed(false), framed(false));
+  it("draws once when the answer comes before the frame", async () => {
+    config = answered(false);
+    const before = renders;
+    flushSync(() => dispatch({ type: "configStatus", config: structuredClone(answered(false)) as unknown as ConfigStatus }));
+    await paint();
+    configFrame(answered(false));
+    await paint();
     expect(seen.config?.features?.savedSteps).toBe(false);
-    expect(counted).toBe(1);
+    expect(renders - before).toBe(1);
   });
 
   it("draws nothing for a config frame that repeats the last one, nor for the engine list read after it", async () => {
     const before = renders, held = seen, reads = instanceReads;
-    configFrame(framed(false));
+    configFrame(answered(false));
     await paint();
     expect(instanceReads).toBe(reads + 1);
     expect(renders - before).toBe(0);
@@ -148,7 +153,7 @@ describe("a switched setting reaches the store's readers", () => {
   it("still takes a changed engine list", async () => {
     const before = renders;
     INSTANCES[0]!.snapshot.models.push({ id: "n", name: "N" });
-    configFrame(framed(false));
+    configFrame(answered(false));
     await paint();
     expect(seen.instances).toEqual(INSTANCES);
     expect(renders - before).toBe(1);

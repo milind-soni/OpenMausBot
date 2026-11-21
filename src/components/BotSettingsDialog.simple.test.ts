@@ -667,6 +667,46 @@ describe("the Details tab", () => {
         type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...haiku, effort: "high" },
       });
     });
+
+    describe("while a blank chat is open", () => {
+      const blank = (held: unknown[] = []) => {
+        fixture.storeState = { ...fixture.storeState, newChat: { session: 1, botId: "scout", held } };
+      };
+
+      it.each([true, false, null] as const)("sets the reasoning level on the blank chat, not the conversation it covers (owner: %s)", (ownerOrAdmin) => {
+        fixture.ownerOrAdmin = ownerOrAdmin;
+        blank();
+        const haiku = { instanceId: "claude", model: "claude-haiku-4-5", effort: "max" as const };
+        expect(pickHigh(thread(haiku))).toEqual({ type: "setModel", botId: "scout", threadId: "new-chat-scout", selection: { ...opus, effort: "high" } });
+      });
+
+      it("shows the blank chat's choices in both rows, and a held level as picked", () => {
+        blank([{ type: "setModel", botId: "scout", threadId: "new-chat-scout", selection: { ...opus, effort: "high" } }]);
+        const rendered = botTab(thread({ instanceId: "claude", model: "claude-haiku-4-5", effort: "max" }));
+        const picker = ofType(rendered, ModelPicker)!;
+        expect(picker.props.threadId).toBe("new-chat-scout");
+        expect(picker.key).toMatch(/new-chat-scout$/);
+        expect((picker.props.bot as Bot).modelSelection).toEqual({ ...opus, effort: "high" });
+        const row = ofType(rendered, EffortRow)!;
+        expect(row.props.threadId).toBe("new-chat-scout");
+        expect(capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).html).toMatch(/<option value="high" selected="">/);
+      });
+
+      it("hands a model-variant engine's row the blank chat too", () => {
+        fixture.storeState = { ...fixture.storeState, instances: [engine({ capabilities: { modelVariants: true },
+          models: { default: opus.model, options: [{ id: opus.model, label: "Opus", variants: [{ id: "deep", label: "Deep" }] }] } } as Partial<InstanceInfo>)] };
+        blank();
+        const row = ofType(botTab(thread({ ...opus, variant: "deep" })), EffortRow)!;
+        const variants = capture(() => EffortRow(row.props as Parameters<typeof EffortRow>[0])).nodes[0]!;
+        expect(variants.props.threadId).toBe("new-chat-scout");
+        expect((variants.props.bot as Bot).modelSelection).toEqual({ ...opus, effort: "low" });
+      });
+
+      it("leaves another bot's blank chat alone", () => {
+        fixture.storeState = { ...fixture.storeState, newChat: { session: 1, botId: "pepper", held: [] } };
+        expect(pickHigh(thread())).toEqual({ type: "setModel", botId: "scout", threadId: "thread-scout", selection: { ...opus, effort: "high" } });
+      });
+    });
   });
 
   it("offers Add a routine, which says what routines are, and Automations while the bot has none, and lists them once it has some", () => {

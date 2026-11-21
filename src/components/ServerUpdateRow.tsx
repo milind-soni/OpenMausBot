@@ -5,10 +5,11 @@ import { openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 import { serverUpdateConfirmBody, serverUpdateView, type ServerUpdateCheck, type ServerUpdateStatus, type ServerUpdateView } from "@/lib/server-update";
 import { ApiError } from "@/state/api";
-import { api, useStore } from "@/state/store";
+import { api } from "@/state/store";
 import type { AppUpdateAnswer } from "@/types/ogb";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { SettingRow } from "./SettingsPrimitives";
+import { sameFields, useStoreSelector } from "@/state/store-select";
 
 const STATUS = "/api/updates/server";
 const POLL_MS = 4_000;
@@ -24,7 +25,7 @@ const settled = (status: ServerUpdateStatus | null) => status?.run?.outcome !== 
 /** The check every session may read, the admin's button state, and the press. While the server restarts the page's
  * connection drops; the store's own reconnect brings it back (`state.connected`), and only then is the server asked again. */
 export function useServerUpdate() {
-  const { state } = useStore();
+  const state = useStoreSelector((s) => ({ connected: s.connected }), sameFields);
   const connected = state.connected !== false;
   const [check, setCheck] = useState<ServerUpdateCheck | null>(null);
   const [status, setStatus] = useState<ServerUpdateStatus | null>(null);

@@ -9,8 +9,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const screens = await import("./lazy-screens");
 const { lazyScreen, preloadScreens } = screens;
+/** A screen is a function, or a memo object when it draws from its props alone. */
+const isScreen = (value: unknown): value is ReturnType<typeof lazyScreen> =>
+  (typeof value === "function" || (typeof value === "object" && value !== null)) && "preload" in value;
 const stubPreloads = () => Object.values(screens)
-  .filter((value): value is ReturnType<typeof lazyScreen> => typeof value === "function" && "preload" in value)
+  .filter(isScreen)
   .map((screen) => vi.spyOn(screen, "preload").mockResolvedValue(() => null));
 
 let root: Root | null = null;
@@ -201,7 +204,7 @@ describe("preloadScreens", () => {
     for (const preload of preloads) expect(preload).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(60_000);
     const rarelyOpened = [screens.CloudAddDialog, screens.GrokMoveDialog, screens.PhoneAppDialog, screens.ShareDepartmentDialog, screens.ImportDialog, screens.TeamLibraryPanel, screens.TeamFilesPage, screens.AnnouncementsPage];
-    const stubbed = Object.values(screens).filter((value): value is ReturnType<typeof lazyScreen> => typeof value === "function" && "preload" in value);
+    const stubbed = Object.values(screens).filter(isScreen);
     for (const screen of stubbed) expect(screen.preload).toHaveBeenCalledTimes(rarelyOpened.includes(screen as never) ? 0 : 1);
     expect(preloads.length).toBe(stubbed.length);
   });

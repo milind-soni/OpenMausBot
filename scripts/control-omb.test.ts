@@ -19,6 +19,10 @@ describe("a fixture driven from a real browser", () => {
     expect(childEnv({}).OMB_DISABLE_MODEL_MANIFEST_FETCH).toBe("1");
     expect(childEnv({ OMB_DISABLE_MODEL_MANIFEST_FETCH: "0" }).OMB_DISABLE_MODEL_MANIFEST_FETCH).toBe("1");
   });
+
+  it("checks every narrowed save of bots.json against the whole serialization", () => {
+    expect(childEnv({}).OMB_BOTS_SAVE_CHECK).toBe("1");
+  });
 });
 
 describe("the fixture's fake engine knobs", () => {

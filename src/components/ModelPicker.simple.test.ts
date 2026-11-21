@@ -27,6 +27,7 @@ const fixture = vi.hoisted(() => {
     refreshInstances: (() => Promise.resolve()) as () => Promise<void>,
   };
 });
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {

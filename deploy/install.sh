@@ -715,12 +715,10 @@ write_caddyfile() {
 	}
 
 	handle {
-		# Optional second wall in front of pairing (a shared password):
-		#   basic_auth {
-		#     {$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
-		#   }
-		# and set both variables in .env (hash with `caddy hash-password`,
-		# every `$` doubled for Compose).
+		# No password here: pairing is the login. A basic_auth block would need
+		# variables neither Compose file passes to Caddy, the installer rewrites
+		# this file on every run, and it would refuse clients that send their own
+		# Authorization header. For a second wall, use a tailnet or a firewall.
 		reverse_proxy unix//run/openmausbot/http.sock {
 			# SSE: stream events as they arrive
 			flush_interval -1
