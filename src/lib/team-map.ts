@@ -36,6 +36,8 @@ export type TeamMapEdge = {
 export interface TeamMapStatus {
   label: string;
   tone: "success" | "warning" | "danger" | "idle";
+  /** Set when the line names the site the bot's browser shows; clicking the line opens that browser. */
+  browsing?: string;
 }
 
 export const EMPTY_TEAM_MAP_SNAPSHOT: TeamMapSnapshot = {
@@ -105,10 +107,13 @@ export function buildTeamMapEdges(bots: TeamMapBot[], snapshot: TeamMapSnapshot)
   });
 }
 
-export function teamMapStatus(bot: TeamMapBot): TeamMapStatus {
+/** The card's one status line; a working bot whose browser shows `browsing` says so instead of plain "Working". */
+export function teamMapStatus(bot: TeamMapBot, browsing?: string): TeamMapStatus {
   if (bot.activity === "waiting-on-you") return { label: t("canvas.status.waiting"), tone: "warning" };
   if (bot.activity === "dead" || bot.activity === "no-signal") return { label: t("canvas.status.noSignal"), tone: "danger" };
-  if (bot.busy || bot.activity === "working") return { label: t("canvas.status.working"), tone: "success" };
+  if (bot.busy || bot.activity === "working") return browsing
+    ? { label: t("canvas.browsing", { site: browsing }), tone: "success", browsing }
+    : { label: t("canvas.status.working"), tone: "success" };
   return { label: t("canvas.status.ready"), tone: "idle" };
 }
 

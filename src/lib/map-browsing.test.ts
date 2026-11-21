@@ -27,7 +27,7 @@ function memoryStorage(): Storage {
   };
 }
 
-describe("the Team map's Browsing chip", () => {
+describe("the Team map's Browsing status line", () => {
   it("names the site only while the bot works", () => {
     const sites = { ada: "github.com" };
     expect(browsingSiteOf(bot, sites)).toBe("github.com");

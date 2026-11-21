@@ -34,7 +34,7 @@ export async function readMapBrowsing(working: () => WorkingTurns): Promise<Read
   return Object.fromEntries(next.bots.filter(({ botId }) => ownEntry(sent, botId) !== undefined && ownEntry(now, botId) === ownEntry(sent, botId)).map((entry) => [entry.botId, entry.site]));
 }
 
-/** The chip's click: the bot's chat, with the Browser view of its panel open. */
+/** A click on the card's "Browsing <site>" status line: the bot's chat, with the Browser view of its panel open. */
 export function openBotBrowser(dispatch: (action: Action) => void, bot: Parameters<typeof openBot>[1], threadsShown: boolean, opener: HTMLElement, keyboard: boolean): void {
   openBot(dispatch, bot, threadsShown);
   openComputerPanelOn(dispatch, bot.id, "browser", opener, keyboard);
@@ -61,7 +61,7 @@ export function useMapBrowsing(enabled: boolean, busyBotIds: string): Readonly<R
         const next = await readMapBrowsing(() => working.current);
         if (!stopped) setSites(next);
       } catch {
-        // A read that fails confirms nothing: no chip until one succeeds.
+        // A read that fails confirms nothing: no site on the card until one succeeds.
         if (!stopped) setSites({});
       } finally {
         inFlight = false;

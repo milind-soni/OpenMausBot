@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, BookOpen, Brain, Crown, Globe, MessageCircle, Minus, Monitor, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-react";
+import { ArrowRight, BookOpen, Brain, Crown, MessageCircle, Minus, Monitor, MoreHorizontal, Pencil, Plus, Trash2, Users } from "lucide-react";
 import { api, openBot, useStore, type Bot } from "@/state/store";
 import { teamBotName, useTeamPeople } from "@/state/team-people";
 import { useShowThreads } from "@/lib/thread-preferences";
@@ -37,14 +37,14 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, brows
   tagged?: boolean;
   /** Set while a message just sent from the map acknowledges this card; a new value restarts it. */
   sent?: number;
-  /** The site the bot's built-in browser shows while it works. */
+  /** The site the bot's built-in browser shows while it works; it takes the card's status line. */
   browsing?: string;
   onComputer?: (bot: Bot) => void;
   onArrange?: (bot: Bot, delta: number) => void;
 }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
-  const status = teamMapStatus(bot);
+  const status = teamMapStatus(bot, browsing);
   const name = teamBotName(bot, useTeamPeople());
   const instance = state.instances.find((item) => item.instanceId === bot.modelSelection.instanceId);
   const model = instance?.models.options.find((item) => item.id === bot.modelSelection.model)?.label ?? bot.modelSelection.model;
@@ -67,19 +67,20 @@ function BotCard({ bot, selected, moving, connected, tagged = false, sent, brows
         <span className="mt-1 block truncate text-[11px] text-ink-secondary">{bot.title || (bot.chiefOfStaff ? t("chat.chiefOfStaff") : t("canvas.bot"))}</span>
       </span>
     </button>
-    {browsing && <button data-browsing-chip aria-label={t("canvas.browsingOpen", { name, site: browsing })} title={t("canvas.browsingOpen", { name, site: browsing })}
-      onClick={(event) => openBotBrowser(dispatch, bot, showThreads, event.currentTarget, event.detail === 0)}
-      className="absolute -top-2.5 right-3 flex h-5 max-w-[170px] items-center gap-1 rounded-full border border-accent/40 bg-card px-2 text-[11px] text-ink-secondary shadow-sm hover:border-accent hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
-      <Globe size={10} className="shrink-0 text-accent" aria-hidden />
-      <span className="truncate">{t("canvas.browsing", { site: browsing })}</span>
-    </button>}
     <div className="flex h-[43px] items-center gap-1 border-t border-hairline/30 px-2">
       <button className={cn(iconButton, "size-8")} aria-label={t("canvas.openBotChat", { name: bot.name })} title={t("canvas.openChat")}
         onClick={() => openBot(dispatch, bot, showThreads)}><MessageCircle size={13} /></button>
-      {status.tone !== "idle" && <span className="flex items-center gap-1.5 text-[10px] text-ink-secondary" title={status.label}>
-        <span className={cn("size-1.5 rounded-full", status.tone === "success" ? "bg-success" : status.tone === "warning" ? "bg-warning" : status.tone === "danger" ? "bg-danger" : "bg-ink-secondary/35")} />
-        {status.label}
-      </span>}
+      {status.browsing
+        ? <button data-browsing-status aria-label={t("canvas.browsingOpen", { name, site: status.browsing })} title={t("canvas.browsingOpen", { name, site: status.browsing })}
+          onClick={(event) => openBotBrowser(dispatch, bot, showThreads, event.currentTarget, event.detail === 0)}
+          className="flex h-8 min-w-0 items-center gap-1.5 rounded-md px-1 text-[10px] text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
+          <span className="size-1.5 shrink-0 rounded-full bg-success" />
+          <span className="truncate">{status.label}</span>
+        </button>
+        : status.tone !== "idle" && <span className="flex items-center gap-1.5 text-[10px] text-ink-secondary" title={status.label}>
+          <span className={cn("size-1.5 rounded-full", status.tone === "success" ? "bg-success" : status.tone === "warning" ? "bg-warning" : status.tone === "danger" ? "bg-danger" : "bg-ink-secondary/35")} />
+          {status.label}
+        </span>}
       {selected && onComputer && <button className={cn(iconButton, "size-8")} aria-label={t("canvas.botComputer", { name: bot.name })} title={t("computer.tab.computer")}
         onClick={() => onComputer(bot)}><Monitor size={13} /></button>}
       <button aria-label={t("canvas.changeModel", { name: bot.name })} title={`${t("canvas.defaultModel")}: ${model}`}
