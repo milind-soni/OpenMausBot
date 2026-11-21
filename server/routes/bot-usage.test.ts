@@ -31,7 +31,7 @@ async function query(args: string, deps: Partial<Parameters<typeof createBotUsag
   const json = vi.fn();
   const route = createBotUsageRoute({ dataDir, env: {}, now: () => now, guestDriven: () => false, caps: () => undefined,
     readableFrom, crossThreadReads: () => true, knownThread: (_botId, threadId) => audiences.has(threadId),
-    bot: (id) => ({ id, name: id }), onPlan: () => false, ...deps });
+    canReadCapTotals: () => false, onPlan: () => false, ...deps });
   const url = new URL(`http://localhost${path}${args}`);
   url.searchParams.set("scope", "bot");
   await route({ method: "GET", path, url, res: {} as ServerResponse, json, botId, threadId: "here", requireActive() {} });
@@ -63,20 +63,46 @@ it("reports only the caller's visible usage and never returns the ledger row", a
   expect((await query("", {}, "other")).result.totals).toMatchObject({ turns: 1, input: 222 });
 });
 
-it("shows exact cap headroom only when all contributing rows are readable", async () => {
+it("uses enforcement's cap totals for a reply authorized to read the entire cap scope", async () => {
   await appendUsage(dataDir, row({ costUsd: 0.01 }));
   await appendUsage(dataDir, row({ threadId: "private", costUsd: 0.10 }));
   const caps = () => ({ server: { dailyUsd: 0.20 }, bots: { scout: { dailyTokens: 18, monthlyUsd: 0.11 }, other: { dailyTokens: 45 } } });
-  const own = await query("", { caps, readableFrom: () => () => true });
+  const own = await query("?thread=this", { caps, canReadCapTotals: () => true });
   expect(own.result.capsComplete).toBe(true);
   expect(own.result.caps).toEqual([
     expect.objectContaining({ scope: "server", used: 0.11, reached: false }),
     expect.objectContaining({ scope: "bot", unit: "usd", remaining: 0, reached: true, resetsAt: Date.parse("2026-12-01T00:00:00Z") }),
     expect.objectContaining({ scope: "bot", unit: "tokens", used: 18, remaining: 0, reached: true, resetsAt: Date.parse("2026-11-19T00:00:00Z") }),
   ]);
-  const shared = await query("", { caps });
-  expect(shared.result).toMatchObject({ caps: [], capsComplete: false, stops: null, totals: { turns: 1, costUsd: 0.01 } });
-  expect(shared.body.text).not.toContain("0.11");
+  expect(own.result.totals).toMatchObject({ turns: 1, costUsd: 0.01 });
+});
+
+it("keeps cap output stable for hidden usage until the cap that would block work is reached", async () => {
+  await appendUsage(dataDir, row({ costUsd: 0.01 }));
+  const caps = () => ({ bots: { scout: { dailyTokens: 20, monthlyTokens: 28 } } });
+  const initial = await query("", { caps });
+  expect(initial.result).toMatchObject({ caps: [], capsComplete: false, stops: null, totals: { turns: 1, costUsd: 0.01 } });
+  await appendUsage(dataDir, row({ threadId: "private", input: 9, output: 0, cachedInput: 0 }));
+  const read = (seconds: number) => query("", { caps, now: () => new Date(now.getTime() + seconds * 1000) });
+  expect((await read(20)).result).toEqual(initial.result);
+
+  await appendUsage(dataDir, row({ at: "2026-11-18T13:00:00Z", threadId: "private", input: 20, output: 0, cachedInput: 0 }));
+  const reached = await read(40);
+  expect(reached.result.caps).toEqual([
+    { scope: "bot", period: "month", unit: "tokens", limit: 28, reached: true, resetsAt: Date.parse("2026-12-01T00:00:00Z") },
+  ]);
+  expect(reached.result).toMatchObject({ capsComplete: false, stops: "unattended", totals: { turns: 1, costUsd: 0.01 } });
+});
+
+it("keeps the current conversation's latest context across the UTC month boundary", async () => {
+  await appendUsage(dataDir, row({ at: "2026-10-30T23:59:59Z", contextTokens: 18, contextWindow: 120 }));
+  await appendUsage(dataDir, row({ at: "2026-10-31T23:59:59Z", contextTokens: 53, contextWindow: 120 }));
+  await appendUsage(dataDir, row({ at: "2026-11-01T00:00:00Z", threadId: "private", contextTokens: 90, contextWindow: 200 }));
+  await appendUsage(dataDir, row({ at: "2026-11-02T00:00:00Z", contextTokens: 100, contextWindow: 120 }));
+  const deps = { now: () => new Date("2026-11-01T00:05:00Z") };
+  const expected = { totals: { turns: 0 }, context: { contextTokens: 53, contextWindow: 120 } };
+  expect((await query("", deps)).result).toMatchObject(expected);
+  expect((await query("?period=month&thread=this", deps)).result).toMatchObject(expected);
 });
 
 it("refuses guest turns and unbounded filters", async () => {
@@ -89,7 +115,7 @@ it("refuses guest turns and unbounded filters", async () => {
 
 it("reports a failed month read without claiming zero usage or full headroom", async () => {
   const caps = () => ({ server: { dailyTokens: 20 } });
-  expect((await query("", { caps })).result.caps[0]).toMatchObject({ used: 0, remaining: 20 });
+  expect((await query("", { caps, canReadCapTotals: () => true })).result.caps[0]).toMatchObject({ used: 0, remaining: 20 });
   mkdirSync(join(dataDir, "usage", "2026-11.jsonl"), { recursive: true });
   const failed = await query("", { caps });
   expect(failed.status).toBe(503);

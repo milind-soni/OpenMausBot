@@ -34,6 +34,21 @@ describe("the usage_limits tool", () => {
     expect(asked.client.apiResponse).not.toHaveBeenCalled();
   });
 
+  it("normalizes omitted and variant optional arguments before validating them", async () => {
+    const asked = context({ ok: true, body: { text: "{}" } });
+    await expect(callTool(USAGE_LIMITS_TOOL, { scope: " Bot ", period: null, thread: " " }, asked))
+      .resolves.toEqual({ text: "{}" });
+    expect(asked.client.apiResponse).toHaveBeenLastCalledWith("/api/internal/engine-limits?scope=bot");
+    await callTool(USAGE_LIMITS_TOOL, { scope: "BOT", period: " MONTH ", thread: " THIS " }, asked);
+    expect(asked.client.apiResponse).toHaveBeenLastCalledWith("/api/internal/engine-limits?scope=bot&period=month&thread=this");
+    await callTool(USAGE_LIMITS_TOOL, { scope: null, period: "", thread: null }, asked);
+    expect(asked.client.apiResponse).toHaveBeenLastCalledWith("/api/internal/engine-limits");
+
+    await expect(callTool(USAGE_LIMITS_TOOL, { scope: "bot", period: false }, asked))
+      .resolves.toEqual({ text: expect.stringContaining('{"scope":"bot","period":"today","thread":"this"}'), isError: true });
+    expect(asked.client.apiResponse).toHaveBeenCalledTimes(3);
+  });
+
   it("hands the bot the route's answer, and its refusal as an error", async () => {
     const asked = context({ ok: true, body: { text: '{"accounts":[]}' } });
     await expect(callUsageLimitsTool(asked)).resolves.toEqual({ text: '{"accounts":[]}' });

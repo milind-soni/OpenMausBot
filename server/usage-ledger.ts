@@ -1,6 +1,6 @@
 // Append-only usage rows under <data>/usage/ (0600): bookkeeping never fails the turn, and rows never carry message text.
 import { personOf } from "./usage-attribution.ts";
-import { closeSync, fstatSync, openSync, readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readdirSync, readFileSync } from "node:fs";
 import { appendFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { TraceParent, TraceStatus, TraceUsageStatus } from "../shared/usage-trace.ts";
@@ -239,6 +239,31 @@ export function readUsage(dataDir: string, range: { from: Date; to: Date }, { re
     }
   }
   return rows;
+}
+
+export function readLatestUsage(dataDir: string, now: Date, matches: (row: UsageRow) => boolean): UsageRow | undefined {
+  const directory = join(dataDir, DIR);
+  const current = `${monthKey(now)}.jsonl`;
+  const before = now.getTime();
+  const latestIn = (file: string) => {
+    let latestAt = -Infinity;
+    let latest: UsageRow | undefined;
+    for (const { at, row } of monthRows(join(directory, file), false)) {
+      if (at <= before && at >= latestAt && matches(row)) {
+        latestAt = at;
+        latest = row;
+      }
+    }
+    return latest;
+  };
+  const latest = latestIn(current);
+  if (latest) return latest;
+  let files: string[];
+  try { files = readdirSync(directory); } catch { return undefined; }
+  for (const file of files.filter((name) => /^\d{4}-\d{2}\.jsonl$/.test(name) && name < current).sort().reverse()) {
+    const row = latestIn(file);
+    if (row) return row;
+  }
 }
 
 export function parseUsageRange(from: string | null | undefined, to: string | null | undefined, now = new Date()): { from: Date; to: Date } | null {

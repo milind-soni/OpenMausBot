@@ -2,12 +2,22 @@ import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 
 export const USAGE_LIMITS_TOOL = "usage_limits";
 
+function optionalChoice(value: unknown): unknown {
+  if (typeof value === "string") return value.trim().toLowerCase() || undefined;
+  return value ?? undefined;
+}
+
 export async function callUsageLimitsTool(context: Pick<ToolCallContext, "client">, args: Record<string, unknown> = {}): Promise<ToolCallResult> {
-  const { scope, period, thread } = args;
-  if (scope !== undefined && scope !== "subscription" && scope !== "bot") return { text: "scope must be subscription or bot.", isError: true };
-  if (scope !== "bot" && (period !== undefined || thread !== undefined)) return { text: "period and thread require scope: bot.", isError: true };
-  if (period !== undefined && period !== "today" && period !== "month") return { text: "period must be today or month.", isError: true };
-  if (thread !== undefined && thread !== "this") return { text: "thread must be this or omitted.", isError: true };
+  const scope = optionalChoice(args.scope);
+  const period = optionalChoice(args.period);
+  const thread = optionalChoice(args.thread);
+  const error = (message: string): ToolCallResult => ({
+    text: `${message} Try {} for subscription limits or {"scope":"bot","period":"today","thread":"this"} for bot usage.`, isError: true,
+  });
+  if (scope !== undefined && scope !== "subscription" && scope !== "bot") return error("scope must be subscription or bot.");
+  if (scope !== "bot" && (period !== undefined || thread !== undefined)) return error("period and thread require scope: bot.");
+  if (period !== undefined && period !== "today" && period !== "month") return error("period must be today or month.");
+  if (thread !== undefined && thread !== "this") return error("thread must be this or omitted.");
 
   const path = "/api/internal/engine-limits";
   const query = new URLSearchParams({ scope: "bot", ...(period ? { period } : {}), ...(thread ? { thread } : {}) });

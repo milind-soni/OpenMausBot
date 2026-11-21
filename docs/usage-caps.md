@@ -36,10 +36,13 @@ cost and usage cap headroom. The UTC period defaults to `today` and also
 supports `month`. Pass `thread: "this"` to limit the usage totals to the
 current conversation.
 
-The tool includes exact cap totals only when the calling turn can read all
-usage counted toward that cap. If `capsComplete` is false, some cap totals
-are unavailable in the conversation. A running turn can still read visible
-headroom and the reset time after a cap is reached.
+Context occupancy comes from the latest visible reading in the current
+conversation, regardless of the requested usage period.
+
+Exact cap totals are available to owner-only conversations on a single-user
+server or personal Cloud. In shared conversations, `capsComplete: false` means
+exact headroom is unavailable. If a cap would refuse unattended work, the tool
+still shows that cap's configured limit, `reached: true` and reset time.
 
 ## What a reached cap stops
 
