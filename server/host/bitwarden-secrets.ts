@@ -120,6 +120,7 @@ export class BitwardenSecrets implements VaultProvider {
   /** Checks a new connection by reading its list; it replaces the current one only once `save` has kept its token. */
   async connect(candidate: BitwardenSecretsCredentials, save: () => void): Promise<BitwardenSecretsStatus> {
     const generation = ++this.generation;
+    this.refreshing = null;
     let catalog: Catalog;
     try { catalog = await this.catalog(candidate); }
     catch (error) { throw problemOf(error); }
@@ -137,6 +138,7 @@ export class BitwardenSecrets implements VaultProvider {
 
   clear(): void {
     this.generation++;
+    this.refreshing = null;
     this.client = null;
     this.logins = [];
     this.entries = new Map();
@@ -240,8 +242,8 @@ export class BitwardenSecrets implements VaultProvider {
     if (login) {
       const secret = await this.secret(login.secretId);
       const note = secret ? loginFromNote(secret.note) : null;
-      // Security: the note may name another site by now; the password goes only to the site it still names.
-      if (!secret?.value || !note?.hosts.some((host) => loginSite(host) === login.site)) return {};
+      // Security: the note may name another site or account by now; the password goes only to the site and username it still names.
+      if (!secret?.value || note?.username !== login.username || !note.hosts.some((host) => loginSite(host) === login.site)) return {};
       return { password: secret.value, totp: parseTotpKey(note.totp) };
     }
     const id = itemId.startsWith(ID_PREFIX) ? itemId.slice(ID_PREFIX.length) : "";

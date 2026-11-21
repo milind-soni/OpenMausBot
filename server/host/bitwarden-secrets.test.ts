@@ -252,6 +252,36 @@ describe("Bitwarden Secrets Manager in the Vault", () => {
     expect((await candidate!.secrets()).password, "a new password on the same site").toBe("fake-rotated-Passw0rd");
   });
 
+  it("gives a login's password only while its note still names the same username", async () => {
+    const { vault, fake } = setup();
+    await vault.refresh();
+    const [candidate] = linkedCandidates(vault, "github.com", "pepper");
+    fake.secrets[0]!.note = "url: https://github.com/login\nusername: replacement-bot";
+    fake.secrets[0]!.value = "fake-replacement-Passw0rd";
+    await expect(candidate!.secrets()).rejects.toThrow("no longer in");
+  });
+
+  it("reads the new connection on a refresh asked for after a reconnect, not the old one still being read", async () => {
+    const old = fakeBws({ secrets: SECRETS });
+    const next = fakeBws({ secrets: [{ key: "NEXT_KEY", value: "fake-next" }], serverUrl: "https://bw.example.test" });
+    const fetch: SecretsFetch = (url, init) => (url.startsWith("https://bw.example.test") ? next.fetch(url, init) : old.fetch(url, init));
+    let saved: { serverUrl: string; accessToken: string } | null = { serverUrl: SERVER, accessToken: old.accessToken };
+    const vault = new BitwardenSecrets({ credentials: () => saved, fetch });
+    let open!: () => void;
+    old.state.gate = new Promise((done) => { open = done; });
+    try {
+      const oldList = vault.refresh();
+      saved = null;
+      vault.clear();
+      saved = { serverUrl: "https://bw.example.test", accessToken: next.accessToken };
+      expect((await vault.refresh()).items).toBe(1);
+      expect(linkedSecrets(vault).map((secret) => secret.name)).toEqual(["NEXT_KEY"]);
+      open();
+      await oldList.catch(() => undefined);
+      expect(linkedSecrets(vault).map((secret) => secret.name)).toEqual(["NEXT_KEY"]);
+    } finally { open(); }
+  });
+
   it("reads a login only from the note's url: or site: lines, its username and 2FA key", () => {
     expect(loginFromNote("Site: example.com\nUSERNAME: a@example.com\nurl: https://login.example.com/x")).toEqual({ hosts: ["example.com", "login.example.com"], username: "a@example.com", totp: null });
     expect(loginFromNote("username: someone\njust words")).toBeNull();
