@@ -39,10 +39,25 @@ export async function connectDesktop(screen: HTMLElement, target: string, option
   if (!response.ok) throw new DesktopUnreachable();
   const config = await response.json();
   cancelled.throwIfAborted();
-  const websocket = new URL(`${path}/websockify`, location.href);
+  return openDesktop(screen, socketUrl(`${path}/websockify`), { password: config.password ?? "", signal: cancelled, events });
+}
+
+/** A same-origin WebSocket address for `path`. */
+export function socketUrl(path: string): string {
+  const websocket = new URL(path, location.href);
   websocket.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  const client = new RFB(screen, websocket.href, {
-    credentials: { password: config.password ?? "", username: "", target: "" },
+  return websocket.href;
+}
+
+/** The app's noVNC client on an RFB WebSocket the server proxies, scaled into `screen`, with the local paste shortcut
+ * carried over. A bot's computer and a bot's browser window on a Cloud both show through it. */
+export function openDesktop(screen: HTMLElement, socket: string | WebSocket, { password = "", signal: cancelled, events }: {
+  password?: string;
+  signal: AbortSignal;
+  events: DesktopConnectionEvents;
+}): RFB {
+  const client = new RFB(screen, socket, {
+    credentials: { password, username: "", target: "" },
   });
   client.scaleViewport = true;
   client.background = "var(--color-inset)";
