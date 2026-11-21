@@ -101,3 +101,41 @@ describe("a table in a reply", () => {
   });
 
 });
+
+it("reveals only clipped cells on hover or tap, and closes on Escape or outside tap", async () => {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const text = "完整的内容，连同被省略的部分";
+  const dispatch = (target: Element, event: Event) => flushSync(() => { target.dispatchEvent(event); });
+  const enter = (target: Element, pointerType: string) => dispatch(target, new PointerEvent("pointerover", { bubbles: true, pointerType }));
+  const tap = (target: Element) => dispatch(target, new PointerEvent("click", { bubbles: true, pointerType: "touch" }));
+  const tooltip = () => document.querySelector('[role="tooltip"]');
+  try {
+    flushSync(() => root.render(createElement(RichTable, { columns: [{ text: "Result" }], rows: [[{ text }], [{ text }]] })));
+    const wrap = host.querySelector('button[aria-pressed]')!;
+    dispatch(wrap, new MouseEvent("click", { bubbles: true }));
+    const [short, clipped] = host.querySelectorAll("td > div");
+    Object.defineProperties(short!, { clientWidth: { value: 200 }, scrollWidth: { value: 180 } });
+    Object.defineProperties(clipped!, { clientWidth: { value: 100 }, scrollWidth: { value: 180 } });
+    enter(short!, "mouse");
+    tap(short!);
+    expect(tooltip()).toBeNull();
+    enter(clipped!, "mouse");
+    await vi.waitFor(() => expect(tooltip()).not.toBeNull());
+    expect(tooltip()?.textContent).toBe(text);
+    expect(clipped!.getAttribute("aria-describedby")).toBe(tooltip()?.id);
+    expect(short!.hasAttribute("aria-describedby")).toBe(false);
+    dispatch(clipped!, new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(tooltip()).toBeNull();
+    enter(clipped!, "touch");
+    expect(tooltip()).toBeNull();
+    tap(clipped!);
+    expect(tooltip()?.textContent).toBe(text);
+    dispatch(host, new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }));
+    expect(tooltip()).toBeNull();
+  } finally {
+    root.unmount();
+    host.remove();
+  }
+});

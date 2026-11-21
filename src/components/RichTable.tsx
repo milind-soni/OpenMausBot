@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp, Check, Copy, Download, Search, WrapText } from "lucide-react";
 import { isTableAmount, tableCsv, tableRowOrder, type TableSort } from "@/lib/table-data";
@@ -6,6 +6,8 @@ import { intlLocale, t } from "@/lib/i18n";
 import { copyText } from "@/lib/copy-text";
 import { columnMinimums, fitsColumns } from "@/lib/table-fit";
 import { cn } from "@/lib/cn";
+import { overlayPortal } from "./ModalPresence";
+import { HOVER_CLOSE_GRACE_MS, placeCard } from "./LinkHoverCard";
 
 
 export interface TableCell { text: string; content?: ReactNode; align?: TableAlign; vAlign?: "top" | "middle" | "bottom" }
@@ -72,9 +74,91 @@ export function RichTable({ columns, rows, name = t("table.title"), filePreview 
   </div>;
 }
 
+function useTableTooltip() {
+  const [preview, setPreview] = useState<{ anchor: HTMLElement; key: string; text: string; hover: boolean } | null>(null);
+  const close = useCallback(() => setPreview(null), []);
+  const tooltip = useRef<HTMLDivElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const id = useId();
+  const clipped = (element: HTMLElement) => element.scrollWidth > element.clientWidth;
+  const closeSoon = (anchor: HTMLElement) => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setPreview(current => current?.anchor === anchor ? null : current), HOVER_CLOSE_GRACE_MS);
+  };
+  useEffect(() => () => clearTimeout(timer.current), []);
+  useLayoutEffect(() => {
+    if (!preview) return;
+    const { anchor } = preview;
+    const update = () => {
+      const card = tooltip.current;
+      if (!anchor.isConnected || !clipped(anchor)) { close(); return; }
+      if (!card) return;
+      const { left, top } = placeCard(anchor.getBoundingClientRect(), card.getBoundingClientRect(), { width: window.innerWidth, height: window.innerHeight });
+      card.style.left = `${left}px`;
+      card.style.top = `${top}px`;
+    };
+    const outside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !anchor.contains(event.target) && !tooltip.current?.contains(event.target)) close();
+    };
+    const scroll = (event: Event) => { if (event.target !== tooltip.current) close(); };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.stopPropagation();
+      close();
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", scroll, true);
+    document.addEventListener("pointerdown", outside, true);
+    document.addEventListener("keydown", escape, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", scroll, true);
+      document.removeEventListener("pointerdown", outside, true);
+      document.removeEventListener("keydown", escape, true);
+      clearTimeout(timer.current);
+    };
+  }, [preview, close]);
+  const bind = (key: string, text: string) => ({
+    tabIndex: 0,
+    "aria-describedby": preview?.key === key ? id : undefined,
+    onPointerEnter(event: React.PointerEvent<HTMLElement>) {
+      if (event.pointerType === "touch") return;
+      clearTimeout(timer.current);
+      const anchor = event.currentTarget;
+      setPreview(clipped(anchor) ? { anchor, key, text, hover: true } : null);
+    },
+    onPointerLeave(event: React.PointerEvent<HTMLElement>) {
+      if (event.pointerType !== "touch" && preview?.hover) closeSoon(event.currentTarget);
+    },
+    onFocus(event: React.FocusEvent<HTMLElement>) {
+      const anchor = event.currentTarget;
+      if (anchor === event.target && anchor.matches(":focus-visible") && clipped(anchor)) setPreview({ anchor, key, text, hover: false });
+    },
+    onBlur(event: React.FocusEvent<HTMLElement>) {
+      if (preview?.anchor === event.currentTarget && event.currentTarget === event.target) setPreview(null);
+    },
+    onClick(event: React.MouseEvent<HTMLElement>) {
+      const anchor = event.currentTarget;
+      if (event.defaultPrevented || (event.target instanceof Element && event.target.closest("a, button, input, select, textarea"))) return;
+      if (!clipped(anchor) || window.getSelection()?.type === "Range") return;
+      setPreview(current => current?.anchor === anchor ? (current.hover ? current : null) : { anchor, key, text, hover: false });
+    },
+  });
+  return { bind, close, card: preview && overlayPortal(
+    <div ref={tooltip} id={id} role="tooltip" data-look="tooltip" dir="auto"
+      className="fixed z-50 max-h-[min(50dvh,20rem)] w-max max-w-[min(28rem,calc(100vw-1rem))] overflow-auto overscroll-contain whitespace-pre-wrap rounded-xl bg-composer px-3 py-2 text-sm leading-5 text-ink shadow-lg ring-1 ring-hairline/40 [overflow-wrap:anywhere]"
+      onPointerEnter={() => clearTimeout(timer.current)}
+      onPointerLeave={() => { if (preview.hover) closeSoon(preview.anchor); }}>
+      {preview.text}
+    </div>, document.body,
+  ) };
+}
+
 function TableViewport({ columns, rows, order, name, wrap, large, sort, onSort, direction, headless = false }: RichTableProps & {
   order: number[]; wrap: boolean; large: boolean; sort: TableSort; onSort: (column: number) => void;
 }) {
+  const { bind, close, card } = useTableTooltip();
   const scroll = useRef<HTMLDivElement>(null);
   const heading = useRef<HTMLTableSectionElement>(null);
   const [headingHeight, setHeadingHeight] = useState(40);
@@ -105,6 +189,7 @@ function TableViewport({ columns, rows, order, name, wrap, large, sort, onSort, 
   const virtualizer = useVirtualizer({ count: order.length, getScrollElement: () => scroll.current, estimateSize: () => 42,
     getItemKey: (index) => order[index]!, overscan: 6, enabled: virtual, initialRect: { width: 800, height: 400 }, scrollMargin: headingHeight });
   useEffect(() => { if (scroll.current) scroll.current.scrollTop = 0; }, [order]);
+  useEffect(close, [close, order, wrap]);
   useEffect(() => { virtualizer.measure(); }, [wrap, widths, virtualizer]);
   const items = virtual ? virtualizer.getVirtualItems() : order.map((id, index) => ({ key: id, index, start: 0, end: 0 }));
   const before = virtual && items.length ? Math.max(0, items[0]!.start - headingHeight) : 0;
@@ -122,7 +207,7 @@ function TableViewport({ columns, rows, order, name, wrap, large, sort, onSort, 
         {columns.map((column, index) => <th key={index} scope="col" aria-sort={sort?.column === index ? sort.descending ? "descending" : "ascending" : "none"}
           className={"h-10 border-b border-hairline/60 px-3 py-2 font-medium"} style={{ textAlign: alignment(column, index) }}>
           <div className="inline-flex max-w-full items-center gap-1 whitespace-nowrap" style={fit ? { minWidth: minimums[index] } : undefined}>
-            <span dir="auto" className="min-w-0 truncate" title={column.text}>{header(column, index)}</span>
+            <span dir="auto" className="min-w-0 truncate" {...(column.text ? bind(`heading:${index}`, column.text) : {})}>{header(column, index)}</span>
             <button type="button" className="inline-flex shrink-0 rounded interaction:bg-raised/50 focus-visible:outline-accent" aria-label={sortLabel(column, index)} title={sortLabel(column, index)} onClick={() => onSort(index)}>{arrow(index)}</button>
           </div>
         </th>)}
@@ -134,13 +219,14 @@ function TableViewport({ columns, rows, order, name, wrap, large, sort, onSort, 
           {columns.map((column, index) => {
             const cell = rows[order[item.index]!]![index];
             return <td key={index} className={"border-b border-hairline/20 px-3 py-2.5 align-top tabular-nums"} style={{ textAlign: cell?.align ?? alignment(column, index), verticalAlign: cell?.vAlign }}>
-              <div dir="auto" title={!wrap ? cell?.text : undefined} className={wrap ? "whitespace-pre-wrap break-words [overflow-wrap:anywhere]" : "truncate"}>{cell?.content ?? cell?.text}</div>
+              <div dir="auto" {...(!wrap && cell?.text ? bind(`${item.key}:${index}`, cell.text) : {})} className={wrap ? "whitespace-pre-wrap break-words [overflow-wrap:anywhere]" : "truncate"}>{cell?.content ?? cell?.text}</div>
             </td>;
           })}
         </tr>)}
         {after > 0 && <tr aria-hidden="true"><td colSpan={columns.length} style={{ height: after, padding: 0 }} /></tr>}
       </tbody>
     </table>
+    {card}
     {order.length === 0 && <p className="p-8 text-center text-sm text-ink-secondary">{t(rows.length ? "table.noResults" : "table.empty")}</p>}
   </div>;
 }
