@@ -23,7 +23,12 @@ these checks. What is being verified is content direction, per block.
    for the rest. The inner element holding the text must have `chat-text`:
    `unicode-bidi` does not inherit from the outer bubble.
 2. In the Arabic reply, the heading, paragraphs, list and quote all read
-   right-to-left — bullets on the right, the quote's rule on the right.
+   right-to-left — bullets on the right, the quote's rule on the right. That
+   includes the paragraph opening on "Chrome 158" and the list whose items
+   open on "Node 24" and "pnpm 10": the script with more words decides a
+   block, so a Latin name at the start does not turn it left-to-right. Bare
+   addresses and technical tokens (versions, paths, flags, camelCase names)
+   are not counted.
 3. Its table's columns run right-to-left, and every header sits over its own
    data. A header drifting to the opposite edge from its column means cells
    are resolving individually instead of inheriting the table.

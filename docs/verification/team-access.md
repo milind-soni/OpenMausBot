@@ -10,7 +10,11 @@ Selection alone changes nothing before Save. Specialists do not inherit their
 Chief's authority or permissions. Persisted empty departments are selectable
 too, as is General. A new grant must name an existing department exactly.
 Renaming or deleting an empty department revokes its old grants; recreating
-its name never restores them. A no-op rename preserves them.
+its name never restores them. A no-op rename preserves them. A Chief in charge
+of every department (General and every other one selected) gets each new
+department added to its list as it is made; one in charge of only some does
+not, and a department unselected later stays unselected. A Chief someone owns
+on a Team Cloud never gets one this way.
 
 Run these checks against disposable fixtures only:
 

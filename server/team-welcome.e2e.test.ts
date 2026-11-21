@@ -70,7 +70,7 @@ it("tells a signed-in member, never anyone before sign-in, where their team page
 
 it("the welcome's one action, a chat with a bot, is the person's own private chat: the new conversation is marked private on the wire at once", async () => {
   const ada = (await team.pair(ADA)).token!, cleo = (await team.pair(CLEO)).token!;
-  const made = await team.as(ada, "POST", "/api/bots", { name: "Research", description: "Briefs before a call." });
+  const made = await team.as(ada, "POST", "/api/bots", { name: "Research", description: "Briefs before a call.", visibility: "everyone" });
   expect(made.status, JSON.stringify(made.body)).toBe(201);
   const botId = made.body.bot.id as string;
   const opened = await team.as(cleo, "POST", `/api/bots/${botId}/tasks`, {});
@@ -83,7 +83,7 @@ it("the welcome's one action, a chat with a bot, is the person's own private cha
 
 it("a User's copy of a team bot carries what the welcome's one line reads, and a removed person's page is told why", async () => {
   const ada = (await team.pair(ADA)).token!;
-  const made = await team.as(ada, "POST", "/api/bots", { name: "Seedling" });
+  const made = await team.as(ada, "POST", "/api/bots", { name: "Seedling", visibility: "everyone" });
   await team.as(ada, "PATCH", `/api/bots/${made.body.bot.id}`, { soul: "You look after the team's plants." });
   const dee = (await team.pair({ email: "dee@acme.test", role: "member" })).token!;
   const copy = ((await team.as(dee, "GET", "/api/bots?messages=0")).body.bots as Array<{ id: string; soul?: string }>).find((bot) => bot.id === made.body.bot.id);
@@ -95,4 +95,20 @@ it("a User's copy of a team bot carries what the welcome's one line reads, and a
   // A session that simply ended says what it always said.
   const expired = await team.as("omb_sess_" + "x".repeat(43), "GET", "/api/auth/session");
   expect(expired.body.error).not.toBe(TEAM_LEFT_REFUSAL);
+});
+
+it("the Teams What's new and the last look at Announcements are each person's own, a member's included", async () => {
+  const cleo = (await team.pair(CLEO)).token!, bob = (await team.pair(BOB)).token!;
+  const hints = async (token: string) => ((await team.as(token, "GET", "/api/config")).body.onboarding as { hintsSeen: string[] }).hintsSeen;
+  expect((await team.as(cleo, "PUT", "/api/config", { onboarding: { hintsSeen: ["teams-2026-11b"] } })).status, "a member cannot change the team's record").toBe(403);
+  expect((await team.as(cleo, "PUT", "/api/me/welcome", { hints: ["teams-2026-11b", "announcements-read-1763380800000"] })).status).toBe(200);
+  expect((await team.as(cleo, "PUT", "/api/me/welcome", { hints: ["announcements-read-1763467200000"] })).status).toBe(200);
+  const cleos = await hints(cleo);
+  expect(cleos).toEqual(expect.arrayContaining(["teams-2026-11b", "announcements-read-1763467200000"]));
+  expect(cleos.filter((hint) => hint.startsWith("announcements-read-")), "the newest only").toEqual(["announcements-read-1763467200000"]);
+  expect(await hints(bob), "nobody else's").not.toEqual(expect.arrayContaining(["teams-2026-11b"]));
+  const saved = await team.as(bob, "PUT", "/api/config", { onboarding: { hintsSeen: [...await hints(bob), "teams-2026-11b", "announcements-read-1763380800000"] } });
+  expect(saved.status, JSON.stringify(saved.body)).toBe(200);
+  expect(await hints(bob)).toEqual(expect.arrayContaining(["teams-2026-11b", "announcements-read-1763380800000"]));
+  expect((await hints(cleo)).filter((hint) => hint.startsWith("announcements-read-")), "an admin's save stays theirs").toEqual(["announcements-read-1763467200000"]);
 });

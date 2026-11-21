@@ -31,8 +31,8 @@ export function limitNoticeText(facts: LimitNoticeFacts, timeZone?: string): str
   const what = facts.credits ? `${facts.engine}'s extra usage credits are used up` : `${facts.engine} reached its limit${until}`;
   if (facts.backup) return `${what}, so ${facts.bot} is using ${facts.backup} meanwhile.`;
   return facts.resetsAt && !facts.credits
-    ? `${what}, so ${facts.bot} waits until then: no other AI you have set up can take over.`
-    : `${what}, so ${facts.bot} waits: no other AI you have set up can take over.`;
+    ? `${what}, so ${facts.bot} waits until then: no backup you chose can take over.`
+    : `${what}, so ${facts.bot} waits: no backup you chose can take over.`;
 }
 
 /** "Claude is signed out on the Cloud. Sign in again in Settings → AI to keep using it.", and who carries on meanwhile

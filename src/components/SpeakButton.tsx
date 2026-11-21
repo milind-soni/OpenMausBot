@@ -16,10 +16,15 @@ type SpeakArgs = {
   localVoice: boolean;
 };
 
+/** Whether a message can be read aloud now: this device's own voice, or a set-up voice service with a voice picked. */
+export function speakReady(tts: ConfigStatus["tts"], voiceId: string | undefined, localVoice: boolean): boolean {
+  return localVoice || (Boolean(tts?.configured) && Boolean(voiceId || tts?.voice));
+}
+
 export function useSpeakAction({ text, botId, messageId, voiceId, tts, localVoice }: SpeakArgs) {
   const speech = useSpeech();
   const configured = localVoice || Boolean(tts?.configured);
-  const ready = localVoice || (configured && Boolean(voiceId || tts?.voice));
+  const ready = speakReady(tts, voiceId, localVoice);
   const mine = speech.messageId === messageId && speech.status !== "idle";
   const preparing = mine && speech.status === "preparing";
   const label = !configured

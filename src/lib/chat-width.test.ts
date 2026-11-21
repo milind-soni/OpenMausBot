@@ -60,7 +60,7 @@ describe("chat width", () => {
 
   it("centers the transcript and the composer in one column, in a chat and in a room", () => {
     expect(css).toMatch(/\.chat-column \{[^}]*margin-inline: auto;[^}]*max-width: var\(--chat-column-max\);/);
-    expect(css).toMatch(/\.chat-column-dock \{[^}]*margin-inline: auto;[^}]*max-width: calc\(var\(--chat-column-max\) \+ 2\.5rem\);/);
+    expect(css).toMatch(/\.chat-column-dock \{[^}]*margin-inline: auto;[^}]*max-width: calc\(var\(--chat-column-max\) \+ 2rem\);/);
     for (const f of ["ChatView", "GroupView"]) {
       const source = readFileSync(join(root, "components", `${f}.tsx`), "utf8");
       expect(source, f).toMatch(/className="glass-scroller-content chat-column /);

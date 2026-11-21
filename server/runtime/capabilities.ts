@@ -6,21 +6,20 @@ export interface EngineCapabilities {
   nativeReviewer: boolean;
   full: boolean;
   edits: boolean;
-  stepCap?: number;
   subagents: boolean;
 }
 
-const CHAT_STEP_CAP = 64;
-
 // transcript: the engine sends the thread as SendTurnInput.transcript messages, so the turn text must not replay it inline too.
-type EngineRow = Pick<EngineCapabilities, "resume" | "stepCap"> & { transcript?: true };
+type EngineRow = Pick<EngineCapabilities, "resume"> & { transcript?: true };
 
-const CHAT_ROW: EngineRow = { resume: false, stepCap: CHAT_STEP_CAP, transcript: true };
+const CHAT_ROW: EngineRow = { resume: false, transcript: true };
 
 const ENGINES: Readonly<Record<string, EngineRow>> = {
   claudeAgent: { resume: true },
   codex: { resume: true },
   piAgent: { resume: true },
+  ompAgent: { resume: true },
+  mistralVibeAgent: { resume: true },
   antigravityAgent: { resume: true },
   grokAgent: { resume: true },
   geminiAgent: { resume: true },
@@ -36,6 +35,7 @@ const ENGINES: Readonly<Record<string, EngineRow>> = {
   copilotAgent: { resume: true },
   commandCodeAgent: { resume: true },
   kiroAgent: { resume: true },
+  devinAgent: { resume: true },
   customAcp: { resume: true },
   "openai-compat": CHAT_ROW,
   grok: CHAT_ROW,
@@ -61,7 +61,6 @@ export function engineCapabilities(driverKind: string | undefined): EngineCapabi
     nativeReviewer: hasNativeAutoReview(driverKind),
     full: supportsApprovalMode(driverKind, "full"),
     edits: supportsApprovalMode(driverKind, "edits"),
-    ...(row?.stepCap === undefined ? {} : { stepCap: row.stepCap }),
     subagents: false,
   };
 }

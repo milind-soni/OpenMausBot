@@ -1,7 +1,8 @@
 // The inbox of a place that is no team's: this computer, or a Cloud of one person. There is one person here, so nothing is
 // copied and nothing routed. An ask is the open card itself, read where it was asked, so one tap answers the one card
 // however many surfaces show it, and whatever was waiting before this inbox existed is listed. What a bot sent the person
-// is a line of its conversation, and a reply there is an ordinary line of theirs.
+// is a line of its conversation, and a reply there is an ordinary line of theirs. Work one bot handed another files no line
+// when it finishes: that is the asking bot's news, and its own answer to the person is what lands here.
 // Security: a guest's conversation stays out of the owner's lines, and the owner's stays out of a guest's. An ask is listed
 // only for someone who may answer it, so a guest's questions reach the owner labelled with who asked, never as their own.
 import { readFileSync } from "node:fs";
@@ -10,7 +11,7 @@ import { z } from "zod";
 
 import type { InboxItem, InboxRow, InboxView } from "../../shared/inbox.ts";
 import type { Notification } from "../../shared/notification.ts";
-import { personWait, type PersonWait } from "../../shared/person-wait.ts";
+import { overtakenQuestions, personWait, type PersonWait } from "../../shared/person-wait.ts";
 import type { OptionCardData } from "../../shared/wire.ts";
 import { ASK_NOTIFICATIONS } from "../ask-routing.ts";
 import { writeFileAtomic } from "../atomic.ts";
@@ -39,6 +40,8 @@ const lineSchema = z.object({
   text: z.string().max(NOTICE_TEXT_MAX), at: z.number(), seen: z.boolean().optional(), done: z.boolean().optional(),
   /** The conversation this result is news for: its next unread result replaces this line, so one job keeps one row. */
   job: id.optional(),
+  /** A message posted in a room: only a reply to it (or Done) answers it, not the person's other talk there. */
+  untilReply: z.boolean().optional(),
 });
 const fileSchema = z.object({ version: z.literal(1), lines: z.array(lineSchema).max(MAX_LINES), seenAsks: z.array(id).max(MAX_SEEN_ASKS) });
 type Line = z.infer<typeof lineSchema>;
@@ -59,8 +62,10 @@ export function placeInboxViewer(auth: RequestAuth, cloud: { personal: boolean; 
 
 export interface PlaceInboxDeps {
   dataDir: string;
-  store: Pick<Store, "bot" | "botByThread" | "taskByThread" | "groupByThread" | "appendMessage" | "patchTask" | "patchGroup" | "messagesFor" | "onChange">;
+  store: Pick<Store, "bot" | "botByThread" | "taskByThread" | "groupByThread" | "appendMessage" | "patchTask" | "patchGroup" | "messagesFor" | "activePath" | "onChange">;
   openCards(): OpenCardRow[];
+  /** A running turn waits on this card's answer. */
+  live(threadId: string, requestId: string): boolean;
   viewer(auth: RequestAuth): InboxViewer;
   sees(auth: RequestAuth, threadId: string): boolean;
   /** Whose answer counts on this card; decided where cards are answered, so a row never offers what the answer would refuse. */
@@ -88,7 +93,8 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
   let seenAsks = new Set<string>();
   try {
     const parsed = fileSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
-    if (parsed.success) { lines = parsed.data.lines; seenAsks = new Set(parsed.data.seenAsks); }
+    // A hand-off result filed before hand-offs stopped filing lines (its job is the asking conversation, not its own) goes.
+    if (parsed.success) { lines = parsed.data.lines.filter((line) => !(line.kind === "result" && line.workingFor && line.job && line.job !== line.threadId)); seenAsks = new Set(parsed.data.seenAsks); }
     else console.warn(`place inbox: ${file} is not an inbox file; starting fresh`);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`place inbox: ${file} is unreadable; starting fresh`);
@@ -110,18 +116,21 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
 
   const titleOf = (botId: string, threadId: string): string => store.groupByThread(threadId)?.name ?? store.taskByThread(botId, threadId)?.title ?? store.bot(botId)?.name ?? "";
 
-  /** The person wrote in the conversation after a bot's message reached them: that is their answer. */
+  /** The person wrote in the conversation after a bot's message reached them: that is their answer. In a room they keep
+   * talking to the others, so there only a reply to that very line answers it (or Done in the Inbox). */
   function answeredThere(line: Line): boolean {
     if (line.kind !== "message") return false;
     const said = store.messagesFor(line.threadId);
     for (let index = said.length - 1; index >= 0 && said[index]!.at >= line.at; index--) {
       const one = said[index]!;
-      if (one.role === "user" && !one.peerAsk && !one.relayed && one.via !== "api") return true;
+      if (one.role === "user" && !one.peerAsk && !one.relayed && one.via !== "api" && (!line.untilReply || one.replyToId === line.id)) return true;
     }
     return false;
   }
 
-  const lineTab = (line: Line): InboxRow["tab"] => (line.done || answeredThere(line) ? "done" : "info");
+  /** Finished work the person has read needs nothing more from them: it leaves the inbox. */
+  const readWork = (line: Line): boolean => line.kind === "result" && line.seen === true;
+  const lineTab = (line: Line): InboxRow["tab"] => (line.done || answeredThere(line) || readWork(line) ? "done" : "info");
   const lineFor = (auth: RequestAuth, line: Line): boolean => {
     const viewer = deps.viewer(auth);
     if (viewer.kind === "nobody" || !deps.sees(auth, line.threadId)) return false;
@@ -131,10 +140,17 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
   function askRows(auth: RequestAuth): InboxRow[] {
     if (deps.viewer(auth).kind === "nobody") return [];
     const rows = new Map<string, InboxRow>();
+    const passed = new Map<string, Set<string>>();
+    const overtaken = (threadId: string, messageId: string): boolean => {
+      let questions = passed.get(threadId);
+      if (!questions) passed.set(threadId, questions = overtakenQuestions(store.activePath(threadId), Boolean(store.groupByThread(threadId))));
+      return questions.has(messageId);
+    };
     for (const row of deps.openCards()) {
       let card: OptionCardData | null = null;
       try { card = row.card ? JSON.parse(row.card) as OptionCardData : null; } catch { continue; }
       if (!card || !personWait({ id: row.id, at: row.at, kind: "options", card }) || !deps.sees(auth, row.threadId) || !deps.mayAnswer(auth, row.threadId, card.requestId!)) continue;
+      if (overtaken(row.threadId, row.id) && !deps.live(row.threadId, card.requestId!)) continue;
       const bot = (row.fromBotId ? store.bot(row.fromBotId) : undefined) ?? store.botByThread(row.threadId);
       if (!bot) continue;
       const group = store.groupByThread(row.threadId);
@@ -170,18 +186,28 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     return [...rows.values()];
   }
 
-  const lineRow = (line: Line): InboxRow => ({
-    id: line.id, kind: line.kind, tab: lineTab(line), from: { name: line.from, botId: line.botId }, ...(line.workingFor ? { workingFor: line.workingFor } : {}),
-    origin: { botId: line.botId, threadId: line.threadId, title: titleOf(line.botId, line.threadId), ...(line.groupId ? { groupId: line.groupId } : {}), messageId: line.id },
-    text: clip(line.text, ROW_TEXT_MAX), at: line.at, unread: !line.seen, ...(line.kind === "message" ? { replies: true as const } : {}),
-  });
+  /** The message a line points at: its own message, or the newest one in the conversation it came from, so a client
+   * can put the person at it. */
+  const focusOf = (line: Line): string | undefined => line.kind === "message" ? line.id : store.messagesFor(line.threadId).at(-1)?.id;
+
+  const lineRow = (line: Line): InboxRow => {
+    const focus = focusOf(line);
+    return {
+      id: line.id, kind: line.kind, tab: lineTab(line), from: { name: line.from, botId: line.botId }, ...(line.workingFor ? { workingFor: line.workingFor } : {}),
+      origin: { botId: line.botId, threadId: line.threadId, title: titleOf(line.botId, line.threadId), ...(line.groupId ? { groupId: line.groupId } : {}), ...(focus ? { messageId: focus } : {}) },
+      text: clip(line.text, ROW_TEXT_MAX), at: line.at, unread: !line.seen, ...(line.kind === "message" ? { replies: true as const } : {}),
+    };
+  };
 
   function view(auth: RequestAuth): InboxView {
-    const rows = [...askRows(auth), ...lines.filter((line) => lineFor(auth, line)).map(lineRow)].sort((a, b) => b.at - a.at).slice(0, VIEW_ROWS);
+    const visible = [...askRows(auth), ...lines.filter((line) => lineFor(auth, line)).map(lineRow)].sort((a, b) => b.at - a.at);
+    // What is still active comes first, so settled lines never push it out of the view; settled ones fill the rest.
+    const rows = [...visible.filter((row) => row.tab !== "done"), ...visible.filter((row) => row.tab === "done")].slice(0, VIEW_ROWS);
     return { botId: null, threadId: null, rows, anchor: null };
   }
 
   function addLine(line: Line): Line {
+    // A job's next unread result replaces its last one, so one job keeps one row; a line already read stays for Finished.
     if (line.job) lines = lines.filter((one) => one.job !== line.job || one.seen || one.done);
     lines.push(line);
     save();
@@ -204,14 +230,16 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     const wire: InboxItem = { kind: "message", from: { name: bot.name, botId: bot.id }, replies: true };
     const posted = store.appendMessage(threadId, { role: "bot", kind: "text", text, inbox: wire, ...(group ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {}) });
     addLine({ id: posted.id, botId: bot.id, threadId, ...(group ? { groupId: group.id } : {}), kind: "message", from: bot.name.slice(0, 200), ...(handed ? { workingFor: handed } : {}),
-      ...(guest ? { guest } : {}), text: clip(text, NOTICE_TEXT_MAX), at: now() });
+      ...(guest ? { guest } : {}), ...(group ? { untilReply: true } : {}), text: clip(text, NOTICE_TEXT_MAX), at: now() });
     if (group) store.patchGroup(group.id, { unread: true });
     else store.patchTask(bot.id, threadId, { unread: true });
     if (!guest && bot.notifications !== false) {
       deps.send({ kind: "mention", botId: bot.id, botName: bot.name, threadId, title: handed ? serverLine(conversationLanguage(threadId), "server.notify.workingFor", { who: bot.name, other: handed.name }) : serverLine(conversationLanguage(threadId), "server.notify.message", { who: bot.name }), body: oneLine(text, 200),
         ...(group ? { groupId: group.id } : {}), ...(bot.avatarUrl ? { avatarUrl: bot.avatarUrl } : {}) });
     }
-    return { status: 200, text: "It is in their Inbox and they were notified. Their answer comes back here, and you carry on from it." };
+    return { status: 200, text: group
+      ? "It is posted in this room and in their Inbox, and they were notified; it stays open there until they reply to it or mark it done. Their answer comes back here, and you carry on from it."
+      : "It is in their Inbox and they were notified. Their answer comes back here, and you carry on from it." };
   }
 
   /** A routine's report, the answer that sums up work handed out, or a failure of work nobody is watching gets a line; the
@@ -230,18 +258,6 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     return notification;
   }
 
-  /** Work handed on finished: one line, so the result is here even if the conversation that asked never reports back. It
-   * sends nothing, and that conversation's next result or its summary replaces it. */
-  function handedResult(work: { botId: string; threadId: string; groupId?: string; text: string }, requester: { botId: string; threadId: string }): void {
-    const bot = store.bot(work.botId);
-    const text = work.text.trim();
-    if (!bot || bot.notifications === false || !text) return;
-    const asked = store.bot(requester.botId);
-    const guest = deps.guestOf(requester.threadId);
-    addLine({ id: crypto.randomUUID(), botId: bot.id, threadId: work.threadId, ...(work.groupId ? { groupId: work.groupId } : {}), kind: "result", from: bot.name.slice(0, 200),
-      ...(asked ? { workingFor: { botId: asked.id, name: asked.name } } : {}), ...(guest ? { guest } : {}), text: clip(text, NOTICE_TEXT_MAX), at: now(), job: requester.threadId });
-  }
-
   const unsubscribe = store.onChange((change: StoreChange) => {
     if (change.type !== "thread.deleted") return;
     const before = lines.length;
@@ -253,7 +269,6 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
     view,
     message,
     route,
-    handedResult,
     /** What waits on this viewer: every open ask, and news they have not read. */
     count(auth: RequestAuth): number {
       return view(auth).rows.filter((row) => row.tab === "needs-you" || (row.tab === "info" && row.unread)).length;
@@ -267,6 +282,14 @@ export function createPlaceInbox(deps: PlaceInboxDeps) {
       if (!askRows(auth).some((row) => row.id === lineId)) return false;
       if (!seenAsks.has(lineId)) { seenAsks.add(lineId); save(); }
       return true;
+    },
+    /** Every line and open ask this viewer lists is read; an ask is only marked read, never answered. */
+    markAllRead(auth: RequestAuth): number {
+      let changed = 0;
+      for (const line of lines) if (!line.seen && lineFor(auth, line)) { line.seen = true; changed++; }
+      for (const row of askRows(auth)) if (!seenAsks.has(row.id)) { seenAsks.add(row.id); changed++; }
+      if (changed) save();
+      return changed;
     },
     markDone(auth: RequestAuth, lineId: string): "done" | "unknown" | "an ask" {
       const line = lines.find((one) => one.id === lineId && lineFor(auth, one));

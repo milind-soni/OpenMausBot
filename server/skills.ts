@@ -52,7 +52,7 @@ export const INDEX_MAX_BYTES = 4_000;
 const loggedIndexOmissions = new Map<string, string>();
 export const MAX_STAGED_SKILLS = 20;
 export const STAGED_GIST_MAX = 240;
-interface SkillManifestEntry {
+export interface SkillManifestEntry {
   description: string;
   enabled: boolean;
   source: string;
@@ -82,7 +82,7 @@ export interface SkillPackageStamp {
   via?: "preset";
 }
 
-interface SkillManifest {
+export interface SkillManifest {
   [name: string]: SkillManifestEntry;
 }
 
@@ -142,7 +142,7 @@ function existingSkillDirectory(botId: string, name: string): string | null {
   return directoryEntryState(directory) === "directory" ? directory : null;
 }
 
-function skillDirectory(botId: string, name: string, entry: SkillManifestEntry): string | null {
+export function skillDirectory(botId: string, name: string, entry: SkillManifestEntry): string | null {
   if (!entry.storageRevision) return existingSkillDirectory(botId, name);
   const root = existingSkillsRoot(botId);
   if (!root) return null;
@@ -211,7 +211,7 @@ function manifestFromFile(path: string): SkillManifest | null {
   }
 }
 
-function readManifest(botId: string): SkillManifest {
+export function readManifest(botId: string): SkillManifest {
   const securePath = manifestPath(botId);
   // Corrupt protected state fails closed; never fall back to the agent-writable legacy manifest.
   if (existsSync(securePath)) return manifestFromFile(securePath) ?? {};

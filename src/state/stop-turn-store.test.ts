@@ -86,4 +86,21 @@ describe("Stop in the store", () => {
     await settle();
     expect(stops().at(-1)).toEqual({ threadId: "thread" });
   });
+
+  it("does not bring back a turn whose frame was still waiting for a paint when the stream restarted", async () => {
+    now += 5_000;
+    // Sent together: the turn's frame is queued for the next paint when the restart arrives.
+    stream().send({ kind: "runtime", event: { eventId: "e2", provider: "fake", threadId: "thread", turnId: "turn-2", createdAt: "", type: "turn.started" } } satisfies ServerFrame, `run:${++cursor}`);
+    stream().send({ kind: "hello", resumed: false, cursor: "run:90" });
+    await settle();
+    dispatch({ type: "interrupt", botId: "bot", threadId: "thread" });
+    await settle();
+    expect(stops().at(-1)).toEqual({ threadId: "thread" });
+
+    now += 5_000;
+    await send({ kind: "runtime", event: { eventId: "e3", provider: "fake", threadId: "thread", turnId: "turn-3", createdAt: "", type: "turn.started" } } satisfies ServerFrame);
+    dispatch({ type: "interrupt", botId: "bot", threadId: "thread" });
+    await settle();
+    expect(stops().at(-1)).toEqual({ threadId: "thread", turnId: "turn-3" });
+  });
 });

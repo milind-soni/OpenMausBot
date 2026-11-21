@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { UpdaterState } from "@/lib/updater";
 
 const fixture = vi.hoisted(() => ({ update: { status: "idle" } as UpdaterState }));
-vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: {} }, dispatch: vi.fn() }) }));
+vi.mock("@/state/store", () => ({ useStore: () => ({ state: { config: {}, routines: [], webhooks: [], routineRuns: [], bots: [] }, dispatch: vi.fn() }) }));
 vi.mock("@/lib/updater", async (original) => ({ ...(await original<typeof import("@/lib/updater")>()), useUpdaterState: () => fixture.update }));
 vi.mock("./SidebarPhoneButton", () => ({ useSidebarPhoneStatus: () => ({ kind: "unavailable" }) }));
 

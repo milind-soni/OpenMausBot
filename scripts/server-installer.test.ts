@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -19,7 +19,7 @@ const BOX_PASSED = '{"box":"bwrap","total":31,"passed":31,"failed":[],"results":
 const BOX_FAILED = '{"box":"bwrap","total":31,"passed":30,"failed":["config-hidden"],"results":[{"id":"config-hidden","ok":false}]}';
 const FILES = "https://raw.githubusercontent.com/milind-soni/OpenMausBot";
 const SOURCE = `${FILES}/v0.1.151`;
-const REAL_TOOLS = ["sed", "awk", "grep", "cat", "head", "tail", "tr", "sort", "cut", "mkdir", "mktemp", "chmod", "chown", "mv", "rm", "dirname", "sh", "install", "find"];
+const REAL_TOOLS = ["sed", "awk", "grep", "cat", "head", "tail", "tr", "sort", "cut", "mkdir", "mktemp", "chmod", "chown", "mv", "rm", "dirname", "sh", "stat", "install", "find"];
 
 /** A server that passes every check: Ubuntu 24.04, x86-64, 4 cores, 8 GB, 80 GB free, Docker 27, free ports, a domain that points here. */
 const HEALTHY = {
@@ -62,6 +62,7 @@ esac`,
   curl: `echo "curl $*" >> "$FAKE_LOG"
 blocked() { case " \${FAKE_BLOCKED:-} " in *" $1 "*) return 0 ;; esac; return 1; }
 case "$*" in
+  *"-K -"*releases/latest*) cat >> "$FAKE_LOG.stdin"; [ -z "\${FAKE_TOKEN_REFUSED:-}" ] || exit 22; printf '{\\n  "tag_name": "%s",\\n  "name": "x"\\n}\\n' "$FAKE_RELEASE" ;;
   *"-K - -fsSL"*) cat >> "$FAKE_LOG.stdin"
     case "$*" in
       */manifests/sha256:*) printf '%s' "\${FAKE_MANIFEST:-}" ;;
@@ -84,6 +85,7 @@ case "$*" in
     for last; do :; done
     case "$*" in
       *deploy/box/prepare-host.sh*) printf '#!/bin/sh\\necho "prepare-host profiles=$MAUSBOT_PROFILES_DIR" >> "$FAKE_LOG"\\nexit "\${FAKE_PREPARE:-0}"\\n' > "$last" ;;
+      *deploy/update-runner.sh*) printf '#!/bin/sh\\necho "update-runner $*" >> "$FAKE_LOG"\\nexit "\${FAKE_RUNNER:-0}"\\n' > "$last" ;;
       *) printf 'the repository file\\n' > "$last" ;;
     esac ;;
   *"get.docker.com -o "*) exit 22 ;;
@@ -319,6 +321,7 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
       'docker image inspect -f {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/milind-soni/openmausbot:v0.1.151',
       "docker run --rm --network none --entrypoint id ghcr.io/milind-soni/openmausbot:v0.1.151 -u",
       "docker run --rm --network none --entrypoint id ghcr.io/milind-soni/openmausbot:v0.1.151 -g",
+      'docker image inspect -f {{index .Config.Labels "org.opencontainers.image.version"}} ghcr.io/milind-soni/openmausbot:v0.1.151',
       "docker compose up -d --remove-orphans",
       "docker compose exec -T omb node dist-server/bot-box/box-check.js --public=none",
     ]);
@@ -352,6 +355,37 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     // Asked for no sandbox, or a registry that does not say: nothing to add.
     expect(run(["--check", "--domain", "maus.example.com", "--no-sandbox"], registry("")).stdout).not.toContain("no bots' sandbox");
     expect(run(["--check", "--domain", "maus.example.com"]).stdout).not.toContain("no bots' sandbox");
+  });
+
+  it("reads the newest release without a token, and sends one only when a test run's OMB_INSTALL_GITHUB_TOKEN gives it, never on a command line", () => {
+    const stdin = (dir: string) => (existsSync(join(dir, "calls.log.stdin")) ? readFileSync(join(dir, "calls.log.stdin"), "utf8") : "");
+    const lookups = (result: { calls: string[] }) => result.calls.filter((call) => call.includes("releases/latest"));
+    const PLAIN = "curl -fsS --max-time 15 https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest";
+    const WITH_TOKEN = "curl -K - -fsS --max-time 15 https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest";
+    const plain = run(["--check", "--domain", "maus.example.com"]);
+    expect(plain.stdout).toContain("  ok    version: v0.1.151, the newest release");
+    expect(lookups(plain)).toEqual([PLAIN]);
+    // Only the registry's pull token goes to curl's standard input.
+    expect(stdin(plain.dir).split("\n").filter((line) => line.includes("Authorization") && !line.includes(TOKEN))).toEqual([]);
+
+    const token = run(["--check", "--domain", "maus.example.com"], { env: { OMB_INSTALL_GITHUB_TOKEN: "ghs_apiToken123" } });
+    expect(token.stdout).toContain("  ok    version: v0.1.151, the newest release");
+    expect(lookups(token)).toEqual([WITH_TOKEN]);
+    expect(token.calls.some((call) => call.includes("ghs_apiToken123"))).toBe(false);
+    expect(stdin(token.dir)).toContain('header = "Authorization: Bearer ghs_apiToken123"\n');
+
+    // A token GitHub refuses: the lookup is made once more without it, and the version is found.
+    const refused = run(["--check", "--domain", "maus.example.com"], { env: { OMB_INSTALL_GITHUB_TOKEN: "ghs_expired", FAKE_TOKEN_REFUSED: "1" } });
+    expect(refused.stdout).toContain("  ok    version: v0.1.151, the newest release");
+    expect(refused.fixes).toEqual([]);
+    expect(lookups(refused)).toEqual([WITH_TOKEN, PLAIN]);
+  });
+
+  it.each(['abc"def', "abc def", "abc\ndef", "abc\\def", "abc-def"])("never puts a token with anything but letters, digits and _ into curl's config (%j)", (bad) => {
+    const result = run(["--check", "--domain", "maus.example.com"], { env: { OMB_INSTALL_GITHUB_TOKEN: bad } });
+    expect(result.stdout).toContain("  ok    version: v0.1.151, the newest release");
+    expect(result.calls.filter((call) => call.includes("releases/latest"))).toEqual(["curl -fsS --max-time 15 https://api.github.com/repos/milind-soni/OpenMausBot/releases/latest"]);
+    expect(existsSync(join(result.dir, "calls.log.stdin")) ? readFileSync(join(result.dir, "calls.log.stdin"), "utf8") : "").not.toContain(bad);
   });
 
   it("uses the stable channel once it is published, and never the latest tag", () => {
@@ -440,6 +474,20 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(mode(first.install)).toBe(0o755);
     expect(mode(join(first.install, "data"))).toBe(0o755);
     expect(again.stdout).toContain(`  note  ${first.install} could be changed by others on this server; now only its owner can change it.`);
+    // A folder its owner made tighter keeps its mode; a link to the folder is judged by the folder, not the link.
+    chmodSync(first.install, 0o700);
+    const tight = run([], { umask: "000" }, { dir: first.dir });
+    expect(tight.status, tight.all).toBe(0);
+    expect(mode(first.install)).toBe(0o700);
+    expect(tight.stdout).not.toContain("could be changed by others");
+    chmodSync(first.install, 0o755);
+    const real = join(first.dir, "elsewhere");
+    renameSync(first.install, real);
+    symlinkSync(real, first.install);
+    const linked = run([], { umask: "000" }, { dir: first.dir });
+    expect(linked.status, linked.all).toBe(0);
+    expect(linked.stdout).not.toContain("could be changed by others");
+    expect(mode(real)).toBe(0o755);
   });
 
   it("--uninstall stops the server and keeps the data, saying where it is", () => {
@@ -592,6 +640,23 @@ describe.skipIf(!posix)("deploy/install.sh", () => {
     expect(unpublished.status).toBe(0);
     expect(existsSync(join(unpublished.install, "update.sh"))).toBe(false);
     expect(unpublished.stdout).toContain("To update later, run this command again.");
+  });
+
+  it("adds the Update server button with update-runner.sh, before the server starts, and says when it could not", () => {
+    const first = run(["--domain", "maus.example.com"]);
+    expect(first.calls.some((call) => call.includes(`${SOURCE}/deploy/update-runner.sh -o `))).toBe(true);
+    const ids = `${process.getuid?.()}:${process.getgid?.()}`;
+    const button = first.calls.findIndex((call) => call === `update-runner --install --dir ${first.install} --user ${ids} --no-restart`);
+    expect(button).toBeGreaterThan(-1);
+    expect(button).toBeLessThan(first.calls.indexOf("docker compose up -d --remove-orphans"));
+    expect(first.stdout).toContain("  note  The app can update this server: Settings, Updates, Update server.");
+    const compose = readFileSync(join(first.install, "compose.yaml"), "utf8");
+    expect(compose).toContain("      - /var/lib/openmausbot-update/request:/run/omb-update/request\n      - /var/lib/openmausbot-update/status:/run/omb-update/status:ro\n");
+    const refused = run(["--domain", "maus.example.com"], { env: { FAKE_RUNNER: "1" } });
+    expect(refused.status).toBe(0);
+    expect(refused.stdout).toContain(`Update it with: sudo ${refused.install}/update.sh`);
+    const removed = run(["--uninstall"], {}, { dir: first.dir });
+    expect(removed.calls).toContain(`update-runner --remove --dir ${first.install}`);
   });
 
   // update.sh moves an install from before Caddy had its own container, writing these two files as the installer does.

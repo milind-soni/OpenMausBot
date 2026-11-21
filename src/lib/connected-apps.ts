@@ -22,6 +22,11 @@ export interface ConnectorInventory {
 
 const REFUSED_INVENTORY: ConnectorInventory = { services: {}, authoritative: true, refused: true };
 
+function unavailableInventory(fallback: Record<string, ConnectorStatus> = {}): ConnectorInventory {
+  cachedConnectorStatusAuthoritative = false;
+  return { services: cachedConnectorStatus ?? readCachedInventory()?.services ?? fallback, authoritative: false };
+}
+
 export function preloadConnectedApps(force = false, background = false): Promise<ConnectorInventory> { // background: src/state/api.ts
   if (!force && cachedConnectorStatus !== null && Date.now() - cachedConnectorStatusAt < CONNECTOR_STATUS_CACHE_MS) {
     return Promise.resolve({
@@ -31,13 +36,12 @@ export function preloadConnectedApps(force = false, background = false): Promise
   }
   if (connectorStatusRequest) return connectorStatusRequest;
   type ConnectedAnswer = { services?: Record<string, ConnectorStatus>; credentialStore?: string; inventoryComplete?: boolean };
-  connectorStatusRequest = unlessRefused<ConnectedAnswer | null>("/api/connectors/connected", () => api("/api/connectors/connected", background ? { background: true } : undefined), null)
+  connectorStatusRequest = unlessRefused<ConnectedAnswer | null>("/api/connectors/connected", () => api("/api/connectors/connected", force || background ? { ...(force ? { headers: { "cache-control": "no-cache" } } : {}), ...(background ? { background: true } : {}) } : undefined), null)
     .then((response): ConnectorInventory => {
       if (!response) return REFUSED_INVENTORY;
       const services: Record<string, ConnectorStatus> = response.services ?? {};
       if (response.credentialStore === "unavailable" || response.inventoryComplete === false) {
-        cachedConnectorStatusAuthoritative = false;
-        return { services: readCachedInventory()?.services ?? services, authoritative: false };
+        return unavailableInventory(services);
       }
       cachedConnectorStatus = services;
       cachedConnectorStatusAt = Date.now();
@@ -45,7 +49,7 @@ export function preloadConnectedApps(force = false, background = false): Promise
       writeCachedInventory(services, Date.now());
       return { services, authoritative: true };
     })
-    .catch(() => ({ services: readCachedInventory()?.services ?? {}, authoritative: false }))
+    .catch(() => unavailableInventory())
     .finally(() => {
       connectorStatusRequest = null;
     });

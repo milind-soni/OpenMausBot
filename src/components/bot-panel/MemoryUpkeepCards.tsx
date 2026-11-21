@@ -2,14 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 
 import { t } from "@/lib/i18n";
 import { fetchMemoryJournal, fetchMemoryOverview, markMemoryReviewed, revertMemoryChange, type LendingReview, type MemoryJournalRow } from "@/lib/memory";
-import { ApiError, useStore, type Bot } from "@/state/store";
+import { ApiError, type Bot } from "@/state/store";
 import { LendingReviewNotice, MemoryJournalList } from "../bot-settings/MemorySection";
 import { Card, SwitchRow } from "./rows";
+import { useStoreDispatch } from "@/state/store-select";
 
 const SHOWN = 5;
 
 export function MemoryUpkeepCards({ bot, onChanged }: { bot: Bot; onChanged: () => Promise<void> }) {
-  const { dispatch } = useStore();
+  const dispatch = useStoreDispatch();
   const [rows, setRows] = useState<MemoryJournalRow[]>([]);
   const [review, setReview] = useState<{ value: LendingReview; stale: boolean } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);

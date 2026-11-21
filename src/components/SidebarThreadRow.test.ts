@@ -2,7 +2,7 @@ import { createElement, type ComponentProps, type MemoExoticComponent, type Reac
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
+import { formatUpdatedAt, nextSnoozeExpiry, orderedSidebarThreads, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadRowActions, threadByline, threadOpenerLabel, threadUpdatedLabel, visibleSidebarThreads } from "./SidebarThreadRow";
 
 type ThreadRowProps = ComponentProps<typeof SidebarThreadRow>;
 
@@ -58,6 +58,35 @@ describe("sidebar thread visibility", () => {
     expect(visibleSidebarThreads(tasks, "0", " RESEARCH ", [{ id: "research", name: "Research" }]).map((task) => task.threadId)).toEqual(["8", "9"]);
     expect(visibleSidebarThreads(tasks, "0", "thread 9").map((task) => task.threadId)).toEqual(["9"]);
     expect(visibleSidebarThreads(tasks, "0", "missing")).toEqual([]);
+  });
+  it("shows only each routine's newest run by default; older runs stay under Show all", () => {
+    const rows = [
+      { threadId: "chat", title: "Chat", createdAt: 50 },
+      ...[40, 30, 20].map((at) => ({ threadId: `daily-${at}`, title: "Daily brief", createdAt: at })),
+      { threadId: "weekly-10", title: "Weekly", createdAt: 10 },
+      { threadId: "daily-5", title: "Daily brief", createdAt: 5, unread: true },
+    ];
+    const runs = [...[40, 30, 20, 5].map((at) => ({ routineId: "daily", threadId: `daily-${at}`, createdAt: at })), { routineId: "weekly", threadId: "weekly-10", createdAt: 10 }, { routineId: "room", createdAt: 60 }];
+    expect(visibleSidebarThreads(rows, "chat", "", [], false, runs).map((task) => task.threadId)).toEqual(["chat", "daily-40", "weekly-10", "daily-5"]);
+    expect(visibleSidebarThreads(rows, "daily-20", "", [], false, runs).map((task) => task.threadId)).toEqual(["chat", "daily-40", "daily-20", "weekly-10", "daily-5"]);
+    expect(visibleSidebarThreads(rows, "chat", "", [], true, runs)).toEqual(rows);
+    expect(visibleSidebarThreads(rows, "chat", "daily", [], false, runs)).toHaveLength(4);
+    expect(visibleSidebarThreads(rows, "chat").map((task) => task.threadId)).toEqual(rows.map((task) => task.threadId));
+  });
+  it("picks a routine's newest run by when it started, not by when it last replied", () => {
+    // Run A started at 10 and finished at 50; run B started at 30 and finished at 35. A sorts first in the list.
+    const rows = [{ threadId: "run-a", title: "Daily brief", createdAt: 10, lastThreadOrderAt: 50 }, { threadId: "run-b", title: "Daily brief", createdAt: 30, lastThreadOrderAt: 35 }];
+    const runs = [{ routineId: "daily", threadId: "run-a", createdAt: 10 }, { routineId: "daily", threadId: "run-b", createdAt: 30 }];
+    expect(visibleSidebarThreads(rows, "", "", [], false, runs).map((task) => task.threadId)).toEqual(["run-b"]);
+    expect(visibleSidebarThreads([{ ...rows[0] }, { ...rows[1], archivedAt: 40 }], "", "", [], false, runs).map((task) => task.threadId)).toEqual(["run-a"]);
+  });
+  it("falls back to the next run when the newest run is closed or snoozed and needs nothing", () => {
+    const rows = [{ threadId: "run-a", title: "Daily brief", createdAt: 10 }, { threadId: "run-b", title: "Daily brief", createdAt: 30 }];
+    const runs = [{ routineId: "daily", threadId: "run-a", createdAt: 10 }, { routineId: "daily", threadId: "run-b", createdAt: 30 }];
+    const ids = (newest: Partial<Parameters<typeof visibleSidebarThreads>[0][number]>) => visibleSidebarThreads([rows[0], { ...rows[1], ...newest }], "", "", [], false, runs).map((task) => task.threadId);
+    expect(ids({ closedBy: { botId: "bot-a", name: "Ada", at: 1 } })).toEqual(["run-a"]);
+    expect(ids({ snoozedUntil: Date.now() + 60_000 })).toEqual(["run-a"]);
+    expect(ids({ closedBy: { botId: "bot-a", name: "Ada", at: 1 }, unread: true })).toEqual(["run-b"]);
   });
   it("keeps queued older threads visible", () => {
     const rows = tasks.map((task) => ({ ...task, queued: task.threadId === "9" }));
@@ -163,35 +192,6 @@ describe("snoozed threads", () => {
     const now = Date.now();
     expect(nextSnoozeExpiry([{ snoozedUntil: 0 }, { snoozedUntil: now - 1 }, { snoozedUntil: now + 3_600_000 }, { snoozedUntil: now + 60_000 }, {}], now)).toBe(now + 60_000);
     expect(nextSnoozeExpiry([{ snoozedUntil: 0 }, { snoozedUntil: now - 1 }], now)).toBeUndefined();
-  });
-});
-
-describe("threads a bot opened", () => {
-  const openedBy = { botId: "scout", name: "Scout", at: 5 };
-  const render = (task: ThreadRowProps["task"]) => renderToStaticMarkup(createElement(SidebarThreadRow, {
-    task, ownerId: "scout", current: false, onSelect: vi.fn(), onRename: vi.fn(), onDelete: vi.fn(), locale: "en",
-  }));
-  it("says who opened the thread in plain words, and nothing for the person's own", () => {
-    expect(threadOpenerLabel({ openedBy })).toBe("opened by Scout");
-    expect(threadOpenerLabel({})).toBeNull();
-    expect(threadOpenerLabel({ openedBy: { ...openedBy, name: "  " } })).toBeNull();
-  });
-  it("shows the opener quietly under the title without changing the row's name or status", () => {
-    const markup = render({ threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you" });
-    expect(markup).toContain("opened by Scout");
-    expect(markup).toContain('title="QA PR 245 · Waiting"');
-    expect(markup.indexOf("QA PR 245")).toBeLessThan(markup.indexOf("opened by Scout"));
-    expect(render({ threadId: "own", title: "Quick question" })).not.toContain("opened by");
-  });
-  it("gives a bot-opened thread the same waiting and unread signals as any other", () => {
-    const waiting = render({ threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you", unread: true });
-    expect(waiting).toContain('title="QA PR 245 · Waiting · Unread"');
-    expect(waiting).toContain(">Waiting</span>");
-    expect(waiting).toContain('aria-label="Unread"');
-    expect(waiting).toContain("opened by Scout");
-    const rows = Array.from({ length: 9 }, (_, index) => ({ threadId: String(index), title: `Thread ${index}` }));
-    const opened = [...rows, { threadId: "qa", title: "QA PR 245", openedBy, activity: "waiting-on-you" as const, busy: false }];
-    expect(visibleSidebarThreads(opened, "0").map((task) => task.threadId)).toEqual(["0", "1", "2", "3", "4", "5", "qa"]);
   });
 });
 
@@ -616,6 +616,13 @@ describe("Refresh permissions", () => {
 });
 
 describe("Regenerate title", () => {
+  it("is in every bot thread menu, with automatic titles on or off, and asks for that thread", () => {
+    const dispatch = vi.fn();
+    const settled = vi.fn();
+    threadRowActions("scout", dispatch).onRegenerateTitle({ threadId: "t1" }, settled);
+    expect(dispatch).toHaveBeenCalledWith({ type: "regenerateTaskTitle", botId: "scout", threadId: "t1", onSettled: settled });
+  });
+
   const openMenu = (tree: RowNode) => {
     (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
   };

@@ -34,6 +34,23 @@ Docker access is root-equivalent on that server. Use a dedicated VPS, keep its
 inbound firewall limited to SSH, and verify the host key yourself. MausBot never
 auto-accepts it. See the [detailed SSH setup and security notes](https://github.com/milind-soni/OpenMausBot/blob/main/docs/byo-vps.md).
 
+### A computer on your Tailscale network
+
+The server can be any x86_64 Linux machine with Docker that you reach over SSH,
+including a home server on your Tailscale network. Install Docker and Tailscale
+on it, then point the alias's `HostName` at its Tailscale name:
+
+```
+Host home-box
+  HostName home-box.your-tailnet.ts.net
+  User deploy
+```
+
+Check `ssh home-box true` and `docker -H ssh://home-box info`, then enter
+`home-box` in **App Settings → API keys**. The bot gets its own desktop
+container there, not that machine's own screen, and the same Docker trust rules
+apply. Tailscale does not close ports that are already open, so firewall the machine to accept SSH and Docker only from the tailnet.
+
 ## Select it for a bot
 
 Create a bot normally, then open **Bot settings → Computer → Where … works**.

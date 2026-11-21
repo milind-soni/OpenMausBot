@@ -1,24 +1,31 @@
-// The OpenMausBot package file ("openmaus.package"), v1 or v2; every reader
-// returns v2. The single validation gate for the server, the renderer and the
-// Admin upload, so it imports only zod, yaml, croner and pure shared modules
-// (no Buffer, no node:*). The schema has no field for chat history, secrets,
-// model choices, computers, visibility or personal settings, and unknown
-// fields are stripped.
+// The OpenMausBot package file ("openmaus.package"), v1, v2 or v3 (v2 with
+// more skills); every reader returns v2 or v3. The single validation gate for
+// the server, the renderer and the Admin upload, so it imports only zod, yaml,
+// croner and pure shared modules (no Buffer, no node:*). The schema has no
+// field for chat history, secrets, model choices, computers, visibility or
+// personal settings, and unknown fields are stripped.
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
 import { BOT_PROFILE_LIMITS, fitsOnOneLine } from "./bot-profile.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { normalizeCronSchedule } from "./routine-schedule.ts";
+import { isToolGroup } from "./tool-groups.ts";
 import { MAUS_COLOR_NAMES } from "./wire.ts";
 import { isSkillName, parseSkillMd, scanSkillText, SKILL_FILE_MAX_BYTES } from "./skill-md.ts";
+import { skillFilesSchema } from "./skill-files.ts";
 
 export const PACKAGE_FORMAT = "openmaus.package";
 /** The newest version this module reads and writes. */
-export const PACKAGE_VERSION = 2;
+export const PACKAGE_VERSION = 3;
+/** Every writer stamps v2 unless the package needs v3's larger skill cap, so
+ * apps that read only v2 still open everything they can represent and say
+ * "update the app" for the rest. */
+export const PACKAGE_V2_VERSION = 2;
+export const PACKAGE_V2_MAX_SKILLS = 60;
 /** Canonical UTF-8 bytes of the whole document. */
 export const PACKAGE_MAX_BYTES = 4 * 1024 * 1024;
-export const PACKAGE_MAX_SKILLS = 60, AGENT_MAX_SKILLS = 30, PACKAGE_MAX_PRESETS = 20, PACKAGE_MAX_CONNECTIONS = 20;
+export const PACKAGE_MAX_SKILLS = 120, AGENT_MAX_SKILLS = 30, PACKAGE_MAX_PRESETS = 20, PACKAGE_MAX_CONNECTIONS = 20;
 /** Decoded picture bytes. */
 export const AVATAR_MAX_BYTES = 64 * 1024;
 export const SEED_FILE_MAX_BYTES = 256 * 1024, SEED_MAX_FILES = 100, SEED_MAX_BYTES = 1024 * 1024;
@@ -28,6 +35,8 @@ export const TEAM_BRIEF_MAX_BYTES = 24_000, RELEASE_NOTES_MAX = 4_000;
 export const PACKAGE_V1_VERSION = 1;
 export const PACKAGE_V1_MAX_SKILLS = 20;
 export const BOTMRR_MARKDOWN_VERSION = 1;
+/** A template folder's bot.md or team.md (shared/share-folder.ts): v2 package fields, with skills and pictures in files. */
+export const BOTMRR_FOLDER_VERSION = 2;
 const BOTMRR_MARKDOWN_MAX_BYTES = 1_000_000;
 
 export const NEWER_PACKAGE_MESSAGE = "This file was made by a newer OpenMausBot. Update the app, then import it again.";
@@ -52,7 +61,6 @@ const encoder = new TextEncoder();
 export function utf8Bytes(value: string): number {
   return encoder.encode(value).length;
 }
-
 
 export const requiredText = (max: number) =>
   z.string({ error: "must be text" }).trim().min(1, { message: "is required" }).max(max, { message: "is too long" });
@@ -90,6 +98,7 @@ const portableSkillSchema = z.object({
   license: optionalText(200),
   compatibility: optionalText(200),
   instructions: skillInstructions,
+  files: skillFilesSchema,
 });
 const soulSchema = z.string().refine((value) => utf8Bytes(value) <= BOT_PROFILE_LIMITS.soul, {
   error: "standing instructions must be at most 24000 bytes",
@@ -157,7 +166,7 @@ const playbookSchema = z.object({
 });
 const requirementsSchema = z.object({
   apps: z.array(z.object({
-    slug: key,
+    slug: requiredText(64).regex(/^(?!__proto__$)[a-z0-9_][a-z0-9_-]*$/, { message: "may only contain lowercase letters, numbers, - and _" }),
     label: requiredText(100),
     reason: requiredText(240),
     optional: z.boolean().optional(),
@@ -239,7 +248,7 @@ const packageDocumentV1Schema = z.object({
       runOn: z.enum(["maus", "cloud"]),
       schedule: packageRoutineScheduleSchema,
       durationMinutes: z.number().int().min(5).max(240),
-      timeoutMinutes: z.number().int().min(5).max(240).optional(),
+      timeoutMinutes: z.number().int().min(5).max(1_440).optional(),
       overlap: z.enum(["skip", "queue"]).optional(),
       enabledAfterInstall: z.literal(false),
     })).max(50).optional(),
@@ -253,7 +262,6 @@ const packageDocumentV1Schema = z.object({
 });
 
 export type PackageDocumentV1 = z.output<typeof packageDocumentV1Schema>;
-
 
 const semver = z.string({ error: "must be text" }).regex(/^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})$/, {
   message: "must be a version like 1.2.3",
@@ -352,6 +360,10 @@ const agentSchema = z.object({
   skills: z.array(skillName).max(AGENT_MAX_SKILLS).optional(),
   connections: z.array(connKey).max(PACKAGE_MAX_CONNECTIONS).optional(),
   seed: seedSchema.optional(),
+  /** Tool groups the bot has switched off. It only narrows what the bot is shown; a group this app doesn't know is dropped. */
+  tools: z.object({
+    off: z.array(z.string({ error: "must be text" }).max(40)).max(20).transform((groups) => [...new Set(groups.filter(isToolGroup))]),
+  }).optional(),
 });
 
 const routineSchema = z.object({
@@ -427,7 +439,7 @@ const connectionSchema = z.object({
 
 export const packageDocumentSchema = z.object({
   format: z.literal(PACKAGE_FORMAT, { error: "This is not an OpenMaus package" }),
-  version: z.literal(PACKAGE_VERSION, { error: "Package version is not supported" }),
+  version: z.union([z.literal(PACKAGE_V2_VERSION), z.literal(PACKAGE_VERSION)], { error: "Package version is not supported" }),
   package: z.object({
     /** The package slug: its identity across releases. */
     id: slug,
@@ -729,6 +741,11 @@ function validateV2(source: unknown): PackageDocument {
   return parsed.data;
 }
 
+/** The version a writer stamps: v3 only when the skills outgrow v2. */
+export function packageVersionFor(pkg: { skills?: { entries: readonly unknown[] } }): typeof PACKAGE_V2_VERSION | typeof PACKAGE_VERSION {
+  return (pkg.skills?.entries.length ?? 0) > PACKAGE_V2_MAX_SKILLS ? PACKAGE_VERSION : PACKAGE_V2_VERSION;
+}
+
 /** Normalize a v1 release ("01.2.03" → "1.2.3"): numeric parts, no leading zeros. */
 function normalizedRelease(release: string): string {
   return release.split(".").map((part) => String(Number.parseInt(part, 10))).join(".");
@@ -740,7 +757,7 @@ export function upgradeV1(document: PackageDocumentV1): PackageDocument {
   const { chiefOfStaff, ...pkg } = document.package;
   return validateV2({
     format: PACKAGE_FORMAT,
-    version: PACKAGE_VERSION,
+    version: PACKAGE_V2_VERSION,
     package: {
       ...pkg,
       release: normalizedRelease(pkg.release),
@@ -766,7 +783,7 @@ export function parsePackageDocument(value: unknown, options: { trust?: PackageT
     if (typeof version === "number" && Number.isInteger(version) && version > PACKAGE_VERSION) {
       throw new PackageFormatError("newer_version", NEWER_PACKAGE_MESSAGE);
     }
-    if (version !== PACKAGE_V1_VERSION && version !== PACKAGE_VERSION) {
+    if (version !== PACKAGE_V1_VERSION && version !== PACKAGE_V2_VERSION && version !== PACKAGE_VERSION) {
       throw new PackageFormatError("unsupported_version", "Package version is not supported");
     }
     // A cheap guard before any schema work; the exact cap is re-checked on
@@ -805,7 +822,8 @@ export function downgradeToV1(document: PackageDocument):
   for (const preset of pkg.presets ?? []) dropped.push(`presets[${preset.key}]`);
   for (const connection of pkg.connections ?? []) dropped.push(`connections[${connection.key}]`);
   const agents = pkg.agents.map((agent) => {
-    const { approval, connections, seed, appearance, ...kept } = agent;
+    const { approval, connections, seed, appearance, tools, ...kept } = agent;
+    if (tools?.off.length) dropped.push(`agents[${agent.key}].tools`);
     const { avatar, ...look } = appearance;
     if (avatar) dropped.push(`agents[${agent.key}].appearance.avatar`);
     if (approval !== undefined) dropped.push(`agents[${agent.key}].approval`);
@@ -865,7 +883,7 @@ function visitText(document: PackageDocument, visit: TextVisitor): void {
     if (!value || typeof value !== "object") return;
     const record = value as Record<string, unknown>;
     for (const name of Object.keys(record)) {
-      if (part.endsWith(".appearance.avatar") && name === "data") continue;
+      if ((part.endsWith(".appearance.avatar") && name === "data") || (name === "content" && /^skills\[[^\]]*\]\.files\[\d+\]$/.test(part))) continue;
       walk(record, name, part.endsWith(".seed.memory") ? `${part}[${JSON.stringify(name)}]` : `${part}.${name}`);
     }
   };

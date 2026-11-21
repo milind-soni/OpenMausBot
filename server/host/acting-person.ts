@@ -13,6 +13,7 @@ import { z } from "zod";
 import { writeFileAtomic } from "../atomic.ts";
 import { answeredByPerson } from "../cloud-lending.ts";
 import type { WorkOrigin } from "../peer-provenance.ts";
+import { needsInputQuestion } from "../runtime-coordinator.ts";
 
 export const HANDED_PEOPLE_FILE = "handed-people.json";
 
@@ -166,7 +167,6 @@ type Place = { child: string | null; parent: string | null };
 
 /** Work in one person's private chat, for a requester whose chat is not that one: its words stay with that person. */
 export const keptPrivate = (place: Place): boolean => Boolean(place.child) && place.parent !== place.child;
-const lastLineAsks = (text: string) => /^needs input:/i.test(text.trimEnd().split(/\r?\n/).at(-1)?.trim() ?? "");
 
 /** What work that ran in one person's private chat hands back to a place others read: where its result is, never the
  * result, which may hold what their own apps brought back or their private notes (a private chat never reaches a room:
@@ -177,7 +177,7 @@ export function privateHandBack<T extends HandedBack>(outcome: T, place: Place &
   const where = `${place.bot}'s chat with ${place.person}`;
   const question = `${place.bot} has a question for ${place.person}, in ${where}.`;
   const { evidence: _evidence, ...rest } = outcome;
-  const asks = lastLineAsks(outcome.text);
+  const asks = needsInputQuestion(outcome.text) !== undefined;
   return {
     ...rest,
     text: asks ? `NEEDS INPUT: ${question}` : `${outcome.ok ? "Done" : "It stopped before it finished"}. The result is in ${where}.`,

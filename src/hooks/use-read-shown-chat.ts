@@ -10,8 +10,8 @@ export function useReadShownChatOnFocus(): void {
   latest.current = state;
   useEffect(() => {
     const readShownChat = () => {
-      const { selectedId } = latest.current;
-      if (selectedId && shownChatIsUnread(latest.current)) dispatch({ type: "select", id: selectedId });
+      const { selectedId, newChat } = latest.current;
+      if (selectedId && newChat?.botId !== selectedId && shownChatIsUnread(latest.current)) dispatch({ type: "select", id: selectedId });
     };
     window.addEventListener("focus", readShownChat);
     return () => window.removeEventListener("focus", readShownChat);

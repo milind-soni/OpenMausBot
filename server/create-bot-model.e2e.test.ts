@@ -42,6 +42,9 @@ it("Chief creation uses the workspace default or a validated explicit model with
       expect(result).toMatchObject({ state: "applied", applied: true });
       return { id: result.id as string, modelSelection: result.modelSelection };
     };
+    // A bot whose model the installed CLI can no longer run; a copy of it falls back to the workspace default.
+    const staleModel = { instanceId: "claude", model: claude.models.options.find((item: any) => item.needsCliUpdate).id };
+    const stale = (await api("POST", "/api/bots", { name: "Stale specialist", section: "Design", modelSelection: staleModel }, 201)).bot;
     const before = (await api("GET", "/api/bots")).bots.length;
     const first = applied(await create("Default specialist"));
     // The installed CLI is too old for the newest model: a proposal may not name it, and the explicit pick is one it can run.
@@ -55,8 +58,14 @@ it("Chief creation uses the workspace default or a validated explicit model with
       { ...explicit, variant: "a-variant" }, { instanceId: "claude", model: tooNew.id }]) {
       await create("Invalid specialist", invalid, 400);
     }
-    await create("Third specialist");
-    await create("Fourth specialist");
+    // A replacement copies a managed bot's soul, role and model; extra instructions come after.
+    const copyOf = (copyFromBotId: string, expected = 201, extra = {}) => api("POST", "/api/internal/create-bot", {
+      fromBotId: chief.id, fromThreadId: chief.threadId, name: "Fourth specialist", copyFromBotId, instructions: "Pick up the open work.", ...extra,
+    }, expected, token);
+    const staleCopy = applied(await copyOf(stale.id, 201, { name: "Third specialist", role: "Specialist" }));
+    expect(staleCopy.modelSelection).toEqual(defaultModel);
+    await copyOf("missing-bot", 404);
+    const copy = applied(await copyOf(second.id));
     await create("Fifth specialist", undefined, 429);
     writeFileSync(gate, "finish");
     await idle();
@@ -72,6 +81,9 @@ it("Chief creation uses the workspace default or a validated explicit model with
         soul: "Complete assigned work.",
       });
     }
+    expect(bots.find((bot: any) => bot.id === copy.id)).toMatchObject({
+      title: "Specialist", modelSelection: explicit, soul: "Complete assigned work.\n\nPick up the open work.",
+    });
     await api("PATCH", "/api/config", { defaultModelSelection: explicit });
     unlinkSync(gate);
     unlinkSync(fixture.fixtureDumpPath);

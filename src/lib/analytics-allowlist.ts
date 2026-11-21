@@ -32,7 +32,7 @@ export function credentialProvider(target: unknown): KeyProvider | "other" {
 
 export const ENGINE = [
   "claude", "codex", "gemini", "cursor", "opencode", "qwen", "hermes", "cline", "custom_acp", "pi", "openai_compat", "grok",
-  "grok_api", "kimi", "droid", "antigravity", "minimax", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "muse_code", "deepseek", "copilot", "command_code", "kiro",
+  "grok_api", "kimi", "droid", "antigravity", "minimax", "mistral", "cerebras", "groq", "greenference", "modelgo", "meta", "muse_code", "deepseek", "copilot", "command_code", "kiro", "devin", "omp", "mistral_vibe",
 ] as const;
 export type Engine = (typeof ENGINE)[number];
 
@@ -41,7 +41,7 @@ const ENGINE_BY_DRIVER = new Map<string, Engine>(Object.entries({
   qwenAgent: "qwen", hermesAgent: "hermes", clineAgent: "cline", customAcp: "custom_acp", piAgent: "pi",
   "openai-compat": "openai_compat", grokAgent: "grok", grok: "grok_api", kimiAgent: "kimi", droidAgent: "droid",
   antigravityAgent: "antigravity", minimax: "minimax", mistral: "mistral", cerebras: "cerebras", groq: "groq", greenference: "greenference", modelgo: "modelgo",
-  meta: "meta", museCode: "muse_code", deepseekAgent: "deepseek", copilotAgent: "copilot", commandCodeAgent: "command_code", kiroAgent: "kiro",
+  meta: "meta", museCode: "muse_code", deepseekAgent: "deepseek", copilotAgent: "copilot", commandCodeAgent: "command_code", kiroAgent: "kiro", devinAgent: "devin", ompAgent: "omp", mistralVibeAgent: "mistral_vibe",
 } satisfies Record<string, Engine>));
 
 export function engineForDriver(driverKind: unknown): Engine | "other" {
@@ -68,7 +68,7 @@ export const KEY_VIA = ["settings", "computer_panel", "chat_request", "apps", "m
 export type KeyVia = (typeof KEY_VIA)[number];
 export const KEY_RESULT = ["ok", "rejected", "unverified", "error"] as const;
 export type KeyResult = (typeof KEY_RESULT)[number];
-export const SIGN_IN_ENGINE = ["claude", "codex", "grok", "kimi", "cursor"] as const;
+export const SIGN_IN_ENGINE = ["claude", "codex", "grok", "kimi", "cursor", "mistral_vibe"] as const;
 export const SIGN_IN_METHOD = ["code", "device_code", "browser"] as const;
 export type SignInMethod = (typeof SIGN_IN_METHOD)[number];
 export const BOT_SOURCE = ["blank", "template", "preset"] as const;
@@ -78,7 +78,7 @@ export type ConnectorResult = (typeof CONNECTOR_RESULT)[number];
 export const CALL_MODE = ["turns", "live"] as const;
 export const ROOM_MODE = ["chat", "goal"] as const;
 export const CLOUD_COMPUTER_SOURCE = ["own_key", "included", "none"] as const;
-export const VOICE = ["elevenlabs", "fish", "system", "chatterbox", "xai", "gemini", "openai", "none"] as const;
+export const VOICE = ["elevenlabs", "fish", "system", "chatterbox", "xai", "gemini", "openai", "deepseek", "none"] as const;
 export const DECIDER = ["jev", "openrouter", "off"] as const;
 export const CONNECTORS_MODE = ["managed", "self_hosted", "unavailable"] as const;
 export const LOCAL_VM_MODE = ["shared", "per_bot", "pool"] as const;
@@ -86,3 +86,9 @@ export const TRIAL_CREDIT = ["active", "used_up", "ended", "none"] as const;
 export const CLOUD_PLAN = ["starter", "personal", "pro", "max", "other", "none", "unknown"] as const;
 export const EDITION = ["oss", "enterprise"] as const;
 export const PLATFORM = ["desktop", "browser"] as const;
+export const CONNECT_AI_PLACE = ["meet", "chat", "home_line", "cloud_welcome"] as const;
+export type ConnectAiPlace = (typeof CONNECT_AI_PLACE)[number];
+export const CONNECT_AI_STEP = ["opened", "dialog_opened", "chosen", "sign_in_started", "test_started", "test_ok", "test_failed", "later"] as const;
+export type ConnectAiStep = (typeof CONNECT_AI_STEP)[number];
+export { AI_TEST_REASONS as AI_TEST_REASON } from "../../shared/ai-ranking";
+export const APP_LOAD_WAITING = ["server", "data", "settings"] as const;

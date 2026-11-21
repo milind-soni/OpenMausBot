@@ -64,6 +64,22 @@ test("a failed Pause save stops active sharing and reports that the pause is not
   assert.match(f.summaries.at(-1).pauseError, /not saved/i);
 });
 
+test("lendingSomewhere: anything lent, running or not, to a Cloud or a server of the person's own; nothing while paused", t => {
+  const f = fixture(t), sharing = f.make();
+  assert.equal(sharing.lendingToCloud(), false, "not running");
+  assert.equal(sharing.lendingSomewhere(), true, "still lent, so its login item stays");
+  sharing.pause();
+  assert.equal(sharing.lendingSomewhere(), false);
+  sharing.close();
+  const saved = f.saved();
+  const [id] = Object.keys(saved.records);
+  const { cloud: _cloud, ...grant } = saved.records[id];
+  fs.writeFileSync(f.file, JSON.stringify({ ...saved, records: { [id]: { ...grant, own: true } }, automatic: { paused: false } }));
+  assert.equal(f.make().lendingSomewhere(), true, "a server of the person's own");
+  fs.writeFileSync(f.file, JSON.stringify({ ...saved, records: {}, automatic: { paused: false } }));
+  assert.equal(f.make().lendingSomewhere(), false, "nothing lent");
+});
+
 test("Pause retries a failed save while sharing stays paused", async t => {
   const f = fixture(t), sharing = f.make();
   f.block();

@@ -2,13 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 
 import { t } from "@/lib/i18n";
 import { fetchSoulChanges, undoSoulChange, type MemoryJournalRow } from "@/lib/memory";
-import { useStore, type Bot } from "@/state/store";
+import { type Bot } from "@/state/store";
 import { MemoryJournalList } from "../bot-settings/MemorySection";
+import { useStoreActions, useStoreDispatch } from "@/state/store-select";
 
 const SHOWN = 5;
 
 export function SoulChanges({ bot }: { bot: Bot }) {
-  const { dispatch, flushBotPatches } = useStore();
+  const dispatch = useStoreDispatch(), { flushBotPatches } = useStoreActions();
   const [rows, setRows] = useState<MemoryJournalRow[]>([]);
   const [reverting, setReverting] = useState<string | null>(null);
   const load = useCallback(() => fetchSoulChanges(bot.id).then((list) => setRows(list.rows.slice(0, SHOWN)), () => {}), [bot.id]);

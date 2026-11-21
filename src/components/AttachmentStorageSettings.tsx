@@ -49,7 +49,7 @@ export function AttachmentStorageSettings() {
       title={t("settings.attachments.title")}
       subtitle={<>
         <span data-attachments-used className="block">{t("settings.attachments.used", { used: size(usage.usedBytes), max: size(usage.maxBytes) })}</span>
-        <span className="block">{t(confirming ? "settings.attachments.confirmText" : "settings.attachments.help")}</span>
+        {confirming && <span className="block">{t("settings.attachments.confirmText")}</span>}
       </>}
       message={result && <p role={result.kind === "error" ? "alert" : "status"} className={cn(result.kind === "error" ? "text-danger" : "text-success")}>
         {result.message}
@@ -58,10 +58,10 @@ export function AttachmentStorageSettings() {
       <div className="flex flex-wrap gap-2">
         {confirming ? <>
           <button type="button" onClick={() => setConfirming(false)} disabled={clearing} className="ui-button">{t("settings.attachments.cancel")}</button>
-          <button type="button" onClick={() => void clear()} disabled={clearing} className="ui-button text-danger">
+          <button type="button" onClick={() => void clear()} disabled={clearing} className="ui-button !bg-danger !text-danger-ink">
             {clearing ? t("settings.attachments.clearing") : t("settings.attachments.confirm")}
           </button>
-        </> : <button type="button" onClick={() => { setResult(null); setConfirming(true); }} className="ui-button">{t("settings.attachments.clear")}</button>}
+        </> : <button type="button" title={t("settings.attachments.help")} onClick={() => { setResult(null); setConfirming(true); }} className="ui-button">{t("settings.attachments.clear")}</button>}
       </div>
     </SettingRow>
   );

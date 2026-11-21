@@ -78,7 +78,7 @@ export const HIDEPID_CAPABILITIES = ["SYS_ADMIN", "SETPCAP"] as const;
 /** The home's secrets: kept out of its container's environment (docker inspect shows that) once its launcher reads the file. */
 export const HOME_SECRET_ENV = [
   "OMB_CLOUD_BOOTSTRAP_SECRET", "OMB_CLOUD_BOAT_TOKEN", "OMB_CLOUD_VOICE_TOKEN", "OMB_CLOUD_DECIDER_TOKEN", "OMB_CLOUD_AI_TOKEN",
-  "OMB_CLOUD_CONNECTED_APPS_GRANT", "OMB_CLOUD_X_TOKEN", "OMB_CLOUD_TUNNEL_TOKEN",
+  "OMB_CLOUD_CONNECTED_APPS_GRANT", "OMB_CLOUD_X_TOKEN", "OMB_CLOUD_HOSTING_TOKEN", "OMB_CLOUD_TUNNEL_TOKEN",
 ] as const;
 /** In the home: a read-only folder holding only `secrets.json`, root's alone. The launcher reads it at start. */
 export const HOME_SECRETS_TARGET = "/run/mausbot";

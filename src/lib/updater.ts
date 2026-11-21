@@ -36,3 +36,8 @@ export function updaterMessage(state: UpdaterState | null | undefined, { restart
   const text = key ? missing ? state.message : t(key as LocaleKey, params) : code ? t(code) : state.message;
   return text && (key || code) && restart && state.status === "error" && state.retryable === false ? `${text} ${t("update.error.restartFirst")}` : text;
 }
+
+/** Restarts into the downloaded update (or, for a handed-off install, copies its command), as the update card's button does. */
+export function installUpdate(): Promise<void> {
+  return window.ogb?.updater?.install() ?? Promise.resolve();
+}

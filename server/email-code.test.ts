@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { extractCode, senderDomain, sentBySite, waitForEmailCode, type CodeMailbox, type MailSummary } from "./email-code.ts";
 
@@ -28,6 +28,12 @@ describe("extractCode", () => {
     ["Code", "Enter this code: 123-456", "123456"],
     ["Verify", "Your security code: A1B2C3", "A1B2C3"],
     ["Código", "Seu código de verificação é 553211", "553211"],
+    ["登录验证码", "您的验证码为：483920，5 分钟内有效。", "483920"],
+    ["登入驗證碼", "您的驗證碼是 483920，有效時間為 5 分鐘。", "483920"],
+    ["登录通知", "您的验证码是483920，请勿分享。", "483920"],
+    ["登入通知", "您的驗證碼為A1B2C3，請勿分享。", "A1B2C3"],
+    ["", "<p>您的验证码是 <b>483920</b>，5 分钟内有效</p>", "483920"],
+    ["483920是您的验证码", "", "483920"],
     ["Code", "Your code is 900100. Again: 900100.", "900100"],
   ])("takes the one code named as one in %s", (subject, body, code) => {
     expect(extractCode(subject, body)).toEqual({ kind: "code", code });
@@ -39,12 +45,16 @@ describe("extractCode", () => {
     ["a zip code", "Hello", "Delivered to zip code 94103."],
     ["a code inside a link", "Welcome", "Your code: https://acme.test/v?c=482913 was generated."],
     ["a year in the footer", "Your code", "Use the app. © 2026 Acme. Your code is below."],
+    ["a Chinese postal address", "送货通知", "邮政编码为 100000。"],
+    ["a Chinese label beside a link", "验证码", "请访问 https://acme.test/v?c=483920 获取验证码。"],
+    ["a number inside a longer Latin identifier", "验证码", "abc483920 和 483920abc 都不是验证码。"],
   ])("finds none in %s", (_name, subject, body) => {
     expect(extractCode(subject, body).kind).toBe("none");
   });
 
   it("calls two different codes ambiguous rather than guessing", () => {
     expect(extractCode("Code", "Your code is 111222 or use code 333444")).toEqual({ kind: "ambiguous" });
+    expect(extractCode("验证码", "验证码为111222，或使用验证码333444。")).toEqual({ kind: "ambiguous" });
   });
 
   it("keeps only codes that fit the boxes on the page", () => {
@@ -93,6 +103,12 @@ describe("waitForEmailCode", () => {
     expect(await waitForEmailCode([mailbox([mail({ from: "no-reply@evil.test" })])], options(clocked()))).toEqual({ kind: "miss", why: "wrong-sender" });
   });
 
+  it("does not read a Chinese verification email from another site", async () => {
+    const box = mailbox([mail({ from: "no-reply@evil.test", subject: "登录验证码", text: "您的验证码为：483920。" })]);
+    expect(await waitForEmailCode([box], options(clocked()))).toEqual({ kind: "miss", why: "wrong-sender" });
+    expect(box.read).toEqual([]);
+  });
+
   it("ignores a message from before the code was asked for, past the clock skew", async () => {
     expect(await waitForEmailCode([mailbox([mail({ at: ASKED - 31_000 })])], options(clocked()))).toEqual({ kind: "miss", why: "not-found" });
     expect(await waitForEmailCode([mailbox([mail({ at: ASKED - 29_000 })])], options(clocked()))).toEqual({ kind: "code", code: "483920" });
@@ -127,6 +143,42 @@ describe("waitForEmailCode", () => {
     const time = clocked();
     await waitForEmailCode([mailbox([])], { ...options(time), active: () => false });
     expect(time.now()).toBe(ASKED);
+  });
+
+  it("does not read a mailbox when the turn has already ended", async () => {
+    const box = { list: vi.fn(async () => [mail()]), body: vi.fn(async () => mail().text) };
+    expect(await waitForEmailCode([box], { ...options(clocked()), active: () => false })).toEqual({ kind: "miss", why: "not-found" });
+    expect(box.list).not.toHaveBeenCalled();
+    expect(box.body).not.toHaveBeenCalled();
+  });
+
+  it("does not read message bodies when the turn ends during the mailbox listing", async () => {
+    let active = true;
+    const box = {
+      list: async () => { active = false; return [mail()]; },
+      body: vi.fn(async () => mail().text),
+    };
+    expect(await waitForEmailCode([box], { ...options(clocked()), active: () => active })).toEqual({ kind: "miss", why: "not-found" });
+    expect(box.body).not.toHaveBeenCalled();
+  });
+
+  it("discards a late code and reads no further messages after the turn ends", async () => {
+    let active = true;
+    const box = {
+      list: async () => [mail(), mail({ id: "m2" })],
+      body: vi.fn(async () => { active = false; return mail().text; }),
+    };
+    expect(await waitForEmailCode([box], { ...options(clocked()), active: () => active })).toEqual({ kind: "miss", why: "not-found" });
+    expect(box.body).toHaveBeenCalledExactlyOnceWith("m1");
+  });
+
+  it("does not start another poll after the turn ends while waiting", async () => {
+    let active = true;
+    const box = { list: vi.fn(async () => []), body: vi.fn(async () => null) };
+    expect(await waitForEmailCode([box], {
+      ...options(clocked()), active: () => active, sleep: async () => { active = false; },
+    })).toEqual({ kind: "miss", why: "not-found" });
+    expect(box.list).toHaveBeenCalledTimes(1);
   });
 
   it("says the mailbox couldn't be read when every look fails", async () => {

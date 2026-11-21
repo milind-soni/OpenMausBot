@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Lock, Users } from "lucide-react";
 
 import { cn } from "@/lib/cn";
+import { hiddenFromSidebar } from "@/lib/default-bot";
 import { t } from "@/lib/i18n";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { openBot, useStore, type AppState, type Bot, type Group } from "@/state/store";
-import { setTeamSide, showTeamSide, sideOfThread, teamSide, teamSideView, useTeamSide, type TeamSide } from "@/state/team-side";
+import { listedSide, setTeamSide, showTeamSide, sideOfThread, teamSide, teamSideView, useTeamSide, type TeamSide } from "@/state/team-side";
+import { useStoreSelector } from "@/state/store-select";
 import { markTeamPrivateChatsLineSaid, sharedChatAudience } from "./TeamPrivateChatsLine";
 
 const SIDES = [{ side: "me", label: "teamSide.me", Icon: Lock }, { side: "team", label: "teamSide.team", Icon: Users }] as const;
@@ -29,11 +31,11 @@ export function useTeamSideLists(state: Pick<AppState, "bots" | "groups" | "conf
   return last.current.view;
 }
 
-/** The side of the conversation a bot has on screen, on a team's Cloud; null anywhere else. */
+/** The side the conversation a bot has on screen is listed on, on a team's Cloud; null anywhere else. */
 export function useConversationSide(bot: Bot): TeamSide | null {
-  const { state } = useStore();
+  const onTeam = useStoreSelector((state) => Boolean(state.config?.team));
   const { team } = useTeamSide();
-  return state.config?.team && team ? sideOfThread(bot, bot.threadId) : null;
+  return onTeam && team ? listedSide(bot, bot.threadId) : null;
 }
 
 function hintDue(teamId: string): boolean {
@@ -72,7 +74,7 @@ export function TeamSideSwitch({ compact, listOnly = false }: { compact: boolean
     if (listOnly || state.activeView !== "chat") return;
     const there = teamSideView(state.bots, state.groups, team, next);
     if (there.groups.some((group) => group.id === state.selectedId)) return;
-    const target = there.bots.find((bot) => bot.id === state.selectedId) ?? there.bots.find((bot) => !bot.sidebarHidden);
+    const target = there.bots.find((bot) => bot.id === state.selectedId) ?? there.bots.find((bot) => !hiddenFromSidebar(bot, team.person));
     const bot = target && state.bots.find((candidate) => candidate.id === target.id);
     if (bot) openBot(dispatch, bot, showThreads);
     else if (there.groups[0]) dispatch({ type: "select", id: there.groups[0].id });
@@ -90,7 +92,7 @@ export function TeamSideSwitch({ compact, listOnly = false }: { compact: boolean
               className={cn("relative flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium transition-colors", FOCUS,
                 compact ? "size-9 rounded-xl" : "h-8 min-w-0 flex-1 px-3 text-[13px]",
                 on ? "bg-composer text-ink shadow-[0_1px_2px_rgb(0_0_0/0.12)] ring-[0.5px] ring-ink/10" : "text-ink-secondary hover:text-ink")}>
-              {compact ? <Icon size={16} strokeWidth={1.75} aria-hidden="true" /> : t(label)}
+              {compact ? <Icon size={16} aria-hidden="true" /> : t(label)}
               {unread && <span role="img" data-team-side-unread={option} aria-label={t("task.unread")}
                 className={cn("size-1.5 rounded-full bg-accent", compact && "absolute right-1.5 top-1.5")} />}
             </button>
@@ -126,7 +128,8 @@ export function TeamAudienceLabel({ bot, group }: { bot?: Bot; group?: Group }) 
   const { team } = useTeamSide();
   noteStart(state, team);
   const teamName = state.config?.team?.name;
-  const side: TeamSide | null = !team || !teamName ? null : group ? "team" : bot ? sideOfThread(bot, bot.threadId) : null;
+  const readers: TeamSide | null = !team || !teamName ? null : group ? "team" : bot ? sideOfThread(bot, bot.threadId) : null;
+  const side: TeamSide | null = readers && bot && !group ? listedSide(bot, bot.threadId) : readers;
   const shown = group?.threadId ?? bot?.threadId;
   const person = team?.person;
   useEffect(() => {
@@ -143,16 +146,17 @@ export function TeamAudienceLabel({ bot, group }: { bot?: Bot; group?: Group }) 
     if (group || movedHere || askedFor || (justMade && side === "me")) { setTeamSide(side, team); return; }
     const lists = teamSideView(state.bots, state.groups, team, showing);
     const there = lists.switchable ? lists.bots : [];
-    const target = there.find((candidate) => candidate.id === chat) ?? there.find((candidate) => !candidate.sidebarHidden);
+    const target = there.find((candidate) => candidate.id === chat) ?? there.find((candidate) => !hiddenFromSidebar(candidate, person));
     const landing = target && state.bots.find((candidate) => candidate.id === target.id);
     if (landing) openBot(dispatch, landing, showThreads);
     else showTeamSide(side, team);
   }, [team?.teamId, person, shown, side, bot?.switchingTo]);
-  if (!side || !teamName) return null;
-  const Icon = side === "me" ? Lock : Users;
-  const label = side === "me" ? t("team.privateHeader") : group ? t("teamSide.groupAudience") : sharedChatAudience(teamName, bot?.onlyPeopleAdded);
+  if (!readers || !teamName) return null;
+  const Icon = readers === "me" ? Lock : Users;
+  const sharedWith = bot?.tasks?.find((task) => task.threadId === bot.threadId)?.sharedWith?.name;
+  const label = readers === "me" ? t("team.privateHeader") : group ? t("teamSide.groupAudience") : sharedChatAudience(teamName, bot?.onlyPeopleAdded, sharedWith);
   return (
-    <div role="note" data-team-audience={side} className="relative z-[1] flex items-center gap-1 px-2 pb-1 text-[12px] leading-4 text-ink-secondary">
+    <div role="note" data-team-audience={readers} className="relative z-[1] flex items-center gap-1 px-2 pb-1 text-[12px] leading-4 text-ink-secondary">
       <Icon size={12} aria-hidden="true" className="shrink-0" /><span className="truncate">{label}</span>
     </div>
   );

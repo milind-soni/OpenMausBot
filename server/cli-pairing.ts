@@ -5,6 +5,13 @@ import qrcode from "qrcode-terminal";
 import { cliCommand } from "./cli-invocation.ts";
 import type { PhoneRelayStatus } from "./phone-relay.ts";
 
+/** The desktop app owns this server, so only the app (or a paired device) may mint a code: say where pairing works instead. */
+export function desktopOwnedRefusal(status: number, body: unknown): string | null {
+  const error = (body as { error?: unknown } | null)?.error;
+  if (status !== 403 || typeof error !== "string" || !error.includes("must come from the desktop app")) return null;
+  return `The OpenMausBot desktop app runs this server, so a command here needs you signed in first: run ${cliCommand("login")} once and press Allow in the app. To pair a phone or another computer, use Settings → Phone & devices in the app.`;
+}
+
 /** A clock time a code works until: "11:22", or "tomorrow 11:22" / a date when it runs past today. */
 export function untilText(expiresAt: number, now = Date.now()): string {
   const end = new Date(expiresAt);

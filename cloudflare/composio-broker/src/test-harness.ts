@@ -142,7 +142,7 @@ export function fakeComposio() {
     const sessionPayload = (session: FakeSession) => ({
       session_id: session.id,
       mcp: { type: "http", url: `https://backend.composio.dev/tool_router/${session.id}/mcp` },
-      config: { user_id: session.user_id, multi_account: { enable: true, max_accounts_per_toolkit: 5, require_explicit_selection: true } },
+      config: { user_id: session.user_id, multi_account: { enable: true, max_accounts_per_toolkit: 10, require_explicit_selection: true } },
     });
     if (method === "POST" && path === "/tool_router/session" && body) {
       const session = { id: `trs_${next++}`, user_id: String(body.user_id) };

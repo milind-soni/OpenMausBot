@@ -27,6 +27,7 @@ const fixture = vi.hoisted(() => {
     refreshInstances: (() => Promise.resolve()) as () => Promise<void>,
   };
 });
+vi.mock("@/state/store-select", async (importOriginal) => (await import("@/testing/plain-store-select")).plainStoreSelect(await importOriginal()));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {
@@ -369,7 +370,7 @@ describe("the model picker in Simple mode", () => {
     expect(markup.replace(/title="[^"]*"/, "")).not.toContain("High");
     expect(String(chip.props.title)).toContain("High thinking");
     expect(String(chip.props.title)).not.toContain("effort");
-    expect(String(chip.props.className)).toContain("h-8");
+    expect(String(chip.props.className)).toContain("h-9");
     expect(String(chip.props.className)).toContain("rounded-full");
     expect(String(chip.props.className)).not.toMatch(/\bborder\b|bg-control/);
     expect(markup).not.toContain("@max-4xl/chathead");
@@ -545,6 +546,20 @@ describe("the model picker in Simple mode", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       type: "setModel", selection: { instanceId: "antigravity", model: "gemini-3.8-flash" },
     }));
+  });
+
+  it.each([true, false] as const)("lets the bot panel's picker return its conversation's variant to the session setting, in that conversation only (owner: %s)", (ownerOrAdmin) => {
+    fixture.ownerOrAdmin = ownerOrAdmin;
+    const variants = [{ id: "low", label: "Low" }, { id: "high", label: "High" }];
+    fixture.instances = [{ ...engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-4-neon", label: "Gemini 4 Neon", variants },
+    ]), capabilities: { modelVariants: true } }];
+    const neon = { instanceId: "antigravity", model: "gemini-4-neon" };
+    const simple = pane(open({ ...bot(), modelSelection: { ...neon, variant: "low" } }, { contained: true, thread: true }))!;
+    (simple.props as { onResetVariant: () => void }).onResetVariant();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({
+      type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: false, selection: neon,
+    });
   });
 
   it("shows the picked Antigravity thinking level on the closed picker, so the pick visibly lands (#4160)", () => {

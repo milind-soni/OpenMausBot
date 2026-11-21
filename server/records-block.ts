@@ -43,7 +43,12 @@ export function recordsText(source: string, text: string, max = 48_000): string 
 }
 
 export const CARD_RECORDS_SOURCE = "a card shown to the person in this chat, built from their mail, calendar or other bots' work; not your own words";
-export const SETUP_RECORDS_SOURCE = "a suggestion the app itself showed to the person in this chat; not your own words";
+/** The app's own tip: say so, so the bot neither disowns it as a stranger's message nor calls it suspicious when asked about it. */
+export const SETUP_RECORDS_SOURCE =
+  "a tip MausBot (the app) itself showed to the person in this chat, labelled as such; genuine, not your own words and not from a stranger. Jev (typesafe.ai) and Cloudflare Workers AI are helper-model services whose key is added in Settings";
+
+export const SETTINGS_CARD_RECORDS_SOURCE =
+  "a settings control MausBot (the app) showed to the person in this chat because you asked for it; the person works it themselves, and nothing it shows is sent to you";
 
 /** Security invariant: a card the server built from records replays into a turn only through this block. */
 export function cardRecords(text: string, source = CARD_RECORDS_SOURCE): string {

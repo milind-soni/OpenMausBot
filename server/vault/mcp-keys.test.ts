@@ -35,6 +35,14 @@ describe("a Vault key behind a vault: pointer in an MCP server", () => {
     }
   });
 
+  it("never reads a Team Cloud member's own secret, for any bot or for a test", () => {
+    const { store, keys } = setup();
+    const own = store.saveSecret({ name: "Ada's Stripe key", value: "sk_test_fake-ada-own", source: "card", bots: ["ledger"], person: "p_ada0000000000000000000" });
+    store.grantMcpKeys("stripe", [own.id]);
+    const server = stdio({ STRIPE_KEY: vaultPointer(own.id) });
+    for (const bot of ["ledger", undefined]) expect(keys.resolve("stripe", server, bot), String(bot)).toMatchObject({ ok: false, reason: "removed" });
+  });
+
   it("reads the value where the server is started, for a bot the item lets use it", () => {
     const { keys, pointer } = setup();
     const server = stdio({ STRIPE_KEY: pointer, OTHER: "kept" });

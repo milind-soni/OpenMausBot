@@ -13,6 +13,7 @@ import {
   sweepManagedEndpointCleanup,
 } from "./endpoints";
 import { registerPushDevice, sendPush, unregisterPushDevice } from "./push";
+import { sendActivityPush } from "./push-activity";
 import { issueRelayToken, relayAdoption } from "./relay";
 import { releaseTunnels, tunnelReleaseHealth } from "./tunnel-release";
 import { capacityHealth, reportEndpointAccountProblems, scanTunnelCapacity } from "./tunnel-capacity";
@@ -72,7 +73,7 @@ async function route(
   config: ControlPlaneConfig,
   requestId: string,
   cloudflareFetch: CloudflareFetch,
-  apnsFetch: typeof fetch,
+  pushFetch: typeof fetch,
 ) {
   const url = new URL(request.url);
   if (request.method === "OPTIONS") return preflight(request, config);
@@ -145,7 +146,10 @@ async function route(
     return unregisterPushDevice(request, env);
   }
   if (request.method === "POST" && url.pathname === "/v1/installations/self/push/send") {
-    return sendPush(request, env, apnsFetch, requestId);
+    return sendPush(request, env, pushFetch, requestId);
+  }
+  if (request.method === "POST" && url.pathname === "/v1/installations/self/push/activity") {
+    return sendActivityPush(request, env, pushFetch, requestId);
   }
 
   const rotate = url.pathname.match(ROTATE_ROUTE);
@@ -175,7 +179,7 @@ async function route(
 
 export function createWorker(
   cloudflareFetch: CloudflareFetch = fetch,
-  apnsFetch: typeof fetch = fetch,
+  pushFetch: typeof fetch = fetch,
 ) {
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -212,7 +216,7 @@ export function createWorker(
         }
         const boundedRequest = await withBoundedRequestBody(request);
         return secureResponse(
-          await route(boundedRequest, env, ctx, config, requestId, cloudflareFetch, apnsFetch),
+          await route(boundedRequest, env, ctx, config, requestId, cloudflareFetch, pushFetch),
           request,
           config,
           requestId,

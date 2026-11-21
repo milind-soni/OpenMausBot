@@ -6,7 +6,7 @@
 // and a fake 1Password SDK; no network.
 import { randomBytes } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -18,11 +18,14 @@ import { installOneHome } from "../../electron/one-home-main.mjs";
 import type { OneHomeView } from "../../electron/one-home.mjs";
 import { cloudPairingSignature, cloudRequestSignature } from "../../server/cloud-home.ts";
 import type { TeamMember } from "../../server/cloud-team.ts";
+import { bitwardenCliPath } from "../../server/host/bitwarden-cli.ts";
 import { removeTempDir, waitForExit } from "../../server/testing/cleanup.ts";
+import type { FakeBwAccount } from "../../server/testing/fake-bw.ts";
 import { freePortBlock } from "../../server/testing/ports.ts";
 
 const SERVER_DIR = fileURLToPath(new URL("../../server/", import.meta.url));
 export const CLOUD_HOST = "omb-t-5e6d7c8b9a0f.fly.dev";
+const CLOUD_MACHINE_ID = "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
 const EDGE = { host: CLOUD_HOST, "x-forwarded-for": "203.0.113.9", "x-forwarded-proto": "https", origin: `https://${CLOUD_HOST}` };
 const parse = (text: string) => { try { return JSON.parse(text); } catch { return null; } };
 
@@ -33,6 +36,9 @@ export interface CloudSendFixture {
   /** The owner's own device on My Cloud, through the edge: what the window's Cloud session is. */
   owner: string;
   ownerCapability: string;
+  /** What the Admin signs with and My Cloud reports with, and the machine id My Cloud reports as. */
+  secret: string;
+  cloudMachineId: string;
   edge: typeof EDGE;
   /** Every answer either server gave, for the no-secret check. */
   answers: string[];
@@ -124,6 +130,9 @@ export interface CloudTeamFixture {
   home: string;
   id: string;
   name: string;
+  /** What the Admin signs with and this Cloud reports with, and the machine id it reports as. */
+  secret: string;
+  machineId: string;
   /** The Admin's signed pairing for one member, as the Admin hands it to the app: a one-time code, not redeemed. */
   grant(member: TeamMember): Promise<{ origin: string; code: string; expiresAt: number }>;
   /** The Admin's signed pairing for one member, redeemed into a bearer. `body` replaces the member and team claims
@@ -140,16 +149,37 @@ export interface CloudTeamFixture {
   relaunch(env?: NodeJS.ProcessEnv): Promise<void>;
 }
 
-function fakeOnePassword(at: string, token: string): string {
+const TEAM_MACHINE_ID = "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a";
+
+/** The fake `bw` where the server installs the real one (server/host/bitwarden-cli.ts), so it is used as installed. */
+function installFakeBw(dataDir: string, account: FakeBwAccount): void {
+  const tool = bitwardenCliPath(dataDir, { asset: "fake", bytes: 0, sha256: "", executable: process.platform === "win32" ? "bw.exe" : "bw" });
+  mkdirSync(join(tool, ".."), { recursive: true });
+  const vault = join(tool, "..", "fake-bw-vault.json");
+  writeFileSync(vault, JSON.stringify(account));
+  writeFileSync(tool, `#!/usr/bin/env node
+process.env.FAKE_BW_VAULT = ${JSON.stringify(vault)};
+import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-bw-process.ts")).href)});
+`, { mode: 0o755 });
+}
+
+/** One item in the fake 1Password's one vault, in the SDK's shapes (no website: a secret, not a login). */
+export interface FakeOnePasswordItem { id: string; title: string; category: string; fields: Array<{ id: string; title: string; fieldType: string; value: string }> }
+
+function fakeOnePassword(at: string, token: string, items: readonly FakeOnePasswordItem[] = []): string {
   const sdk = join(at, "node_modules", "@1password", "sdk");
   mkdirSync(sdk, { recursive: true });
   writeFileSync(join(sdk, "package.json"), JSON.stringify({ name: "@1password/sdk", version: "0.5.0", main: "index.js" }));
   writeFileSync(join(sdk, "index.js"), `"use strict";
+const ITEMS = ${JSON.stringify(items)};
 exports.createClient = async ({ auth }) => {
   if (auth !== ${JSON.stringify(token)}) throw new Error("error authenticating: invalid service account token");
   return {
     vaults: { list: async () => [{ id: "v1", title: "Shared with OpenMausBot" }] },
-    items: { list: async () => [], getAll: async () => ({ individualResponses: [] }) },
+    items: {
+      list: async () => ITEMS.map(({ id, title, category }) => ({ id, title, category, websites: [] })),
+      getAll: async (vaultId, ids) => ({ individualResponses: ITEMS.filter((item) => ids.includes(item.id)).map(({ id, fields }) => ({ content: { id, fields } })) }),
+    },
   };
 };
 `);
@@ -162,10 +192,17 @@ exports.createClient = async ({ auth }) => {
  * with an installation of its own as the desktop app registers one, My Cloud registering itself as a Cloud home does.
  * `env`: more of both servers' environment. `cloudEngine`: lines run at the start of My Cloud's synthetic Claude CLI, to
  * script its turns (fake-claude-cli.ts). */
-export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space, cloudSignedIn = true, team }: {
+export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswordToken = onePasswordToken, onePasswordItems = [], bitwarden, toolCalls = 0, broker, env = {}, cloudEnv = {}, cloudEngine = "", desktopEngine = "", space, cloudSignedIn = true, team }: {
   onePasswordToken: string; cloudOnePasswordToken?: string; toolCalls?: number;
+  /** A fake Bitwarden tool already in each server's data folder, holding this one account (no download, no network). */
+  bitwarden?: FakeBwAccount;
+  /** What every server's fake 1Password vault ("Shared with OpenMausBot") holds; empty by default. */
+  onePasswordItems?: readonly FakeOnePasswordItem[];
   /** A Team Cloud too (OMB_CLOUD_ROLE=team), with its own environment and synthetic Claude CLI lines. */
-  team?: { id: string; name: string; env?: NodeJS.ProcessEnv; engine?: string; noAi?: boolean };
+  team?: { id: string; name: string; env?: NodeJS.ProcessEnv; engine?: string; noAi?: boolean;
+    /** Scopes of this checkout's node_modules (`@duckdb`) linked into the Team Cloud's native tree before it starts: the
+     * server can load DuckDB at its first config broadcast, and a failed load stays failed for the server's life. */
+    native?: string[] };
   broker?: { url: string; install(): Promise<{ id: string; token: string; userId: string }> };
   env?: NodeJS.ProcessEnv;
   /** My Cloud's own environment only (a store limit, say). */
@@ -191,6 +228,7 @@ export async function launchCloudSendFixture({ onePasswordToken, cloudOnePasswor
     const home = join(root, name);
     const dataDir = join(home, ".openmausbot");
     mkdirSync(dataDir, { recursive: true });
+    if (bitwarden) installFakeBw(dataDir, bitwarden);
     const cli = join(home, "fixture-claude.mjs");
     const tools = calls ? JSON.stringify(Array.from({ length: calls }, (_, i) => ({ name: "Bash", input: { command: `echo step ${i}` } }))) : "";
     writeFileSync(cli, `#!/usr/bin/env node
@@ -209,7 +247,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     const child = spawn(process.execPath, ["--import", offline, ...extra, join(SERVER_DIR, "index.ts")], {
       cwd: join(SERVER_DIR, ".."),
       env: { PATH: process.env.PATH, ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}), HOME: home, USERPROFILE: home, OMB_DATA_DIR: dataDir,
-        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_DUCKDB_DIR: fakeOnePassword(join(home, "native"), acceptedToken), ...env, ...own },
+        OMB_PORT: String(port), OMB_WEBHOOK_PORT: String(port + 1), OMB_DUCKDB_DIR: fakeOnePassword(join(home, "native"), acceptedToken, onePasswordItems), ...env, ...own },
       stdio: ["ignore", "pipe", "pipe", ...(ipc ? ["ipc" as const] : [])],
     });
     children.add(child);
@@ -246,7 +284,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   let desktop = await startDesktop();
   const cloudPort = await freePortBlock([0, 1]);
   const cloudBase = `http://127.0.0.1:${cloudPort}`;
-  const startCloud = (more: NodeJS.ProcessEnv = {}) => start("cloud", { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: "7c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
+  const startCloud = (more: NodeJS.ProcessEnv = {}) => start("cloud", { OMB_CLOUD_ROLE: "home", OMB_CLOUD_MACHINE_ID: CLOUD_MACHINE_ID, OMB_CLOUD_ADMIN_URL: "https://cloud.example.test",
     OMB_CLOUD_BOOTSTRAP_SECRET: secret, OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...cloudEnv, ...more }, cloudPort, [], false, cloudOnePasswordToken, 0, cloudEngine, cloudSignedIn);
   let cloud = await startCloud();
 
@@ -286,16 +324,25 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       mkdirSync(join(root, "team", ".openmausbot"), { recursive: true });
       writeFileSync(join(root, "team", ".openmausbot", "config.json"), JSON.stringify({ instances: Object.fromEntries(["claude", "codex", "cursor", "githubCopilot", "openaiCompat", "qwen", "hermes", "pi", "grok"].map((id) => [id, { driver: "not-a-real-driver" }])) }));
     }
+    for (const scope of team.native ?? []) {
+      mkdirSync(join(root, "team", "native", "node_modules"), { recursive: true });
+      symlinkSync(join(SERVER_DIR, "..", "node_modules", scope), join(root, "team", "native", "node_modules", scope), "junction");
+    }
     const startTeam = (more: NodeJS.ProcessEnv = {}) => start("team", { OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: team.id, OMB_CLOUD_TEAM_NAME: team.name,
-      OMB_CLOUD_MACHINE_ID: "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: secret,
+      OMB_CLOUD_MACHINE_ID: TEAM_MACHINE_ID, OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: secret,
       OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, OMB_TEST_INTERNAL_CAPABILITY_KEY: CAPABILITY_KEY, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...team.env, ...more },
       teamPort, stopOverIpc ? ["--import", stopOnMessage] : [], stopOverIpc, onePasswordToken, 0, team.engine ?? "", true);
     let teamServer = await startTeam();
+    const teamFetch = (path: string, init: RequestInit) => fetch(`${teamBase}${path}`, init).catch(async (error: unknown) => {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const state = teamServer.exitCode === null && teamServer.signalCode === null ? "is still running" : `exited (${teamServer.exitCode ?? teamServer.signalCode})`;
+      throw new Error(`${init.method ?? "GET"} ${path} on the Team Cloud got no answer, and the Team Cloud ${state}. The servers' output:\n${logs.slice(-8_000)}`, { cause: error });
+    });
     const as: CloudTeamFixture["as"] = async (token, method, path, body, headers = {}) => {
       const init: RequestInit = { method, headers: { ...EDGE, authorization: `Bearer ${token}`, ...headers,
         ...(body === undefined || body instanceof Uint8Array ? {} : { "content-type": "application/json" }) } };
       if (body !== undefined) init.body = body instanceof Uint8Array ? body : JSON.stringify(body);
-      const response = await remember(await fetch(`${teamBase}${path}`, init));
+      const response = await remember(await teamFetch(path, init));
       return { status: response.status, body: parse(await response.text()) };
     };
     // A new Team Cloud's Chief gets a name at random, so one run in 64 it would share a name with a bot the test makes.
@@ -308,7 +355,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
       if (renamed.status !== 200) throw new Error(`could not name the team's Chief: ${renamed.status} ${JSON.stringify(renamed.body)}`);
     };
     teamFixture = {
-      base: teamBase, home: join(root, "team"), id: team.id, name: team.name,
+      base: teamBase, home: join(root, "team"), id: team.id, name: team.name, secret, machineId: TEAM_MACHINE_ID,
       async grant(member) {
         const body = JSON.stringify({ label: "OpenMausBot app (Team Cloud)", ttlSeconds: 300, team: { id: team.id, name: team.name }, member });
         const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
@@ -321,11 +368,11 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
         const claims = options.body ?? { team: { id: team.id, name: team.name }, ...(member ? { member } : {}) };
         const body = JSON.stringify({ label: options.label ?? "OpenMausBot app (Team Cloud)", ttlSeconds: 300, ...claims });
         const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(16).toString("base64url");
-        const minted = await remember(await fetch(`${teamBase}/api/cloud/pairing`, { method: "POST", headers: { ...EDGE, "content-type": "application/json",
+        const minted = await remember(await teamFetch("/api/cloud/pairing", { method: "POST", headers: { ...EDGE, "content-type": "application/json",
           "x-omb-cloud-timestamp": timestamp, "x-omb-cloud-nonce": nonce, "x-omb-cloud-signature": `v1=${cloudPairingSignature(options.secret ?? secret, timestamp, nonce, body)}` }, body }));
         const grant = parse(await minted.text());
         if (minted.status !== 200) return { status: minted.status, body: grant, token: null };
-        const paired = await remember(await fetch(`${teamBase}/api/auth/pair`, { method: "POST", headers: { ...EDGE, "content-type": "application/json" }, body: JSON.stringify({ code: grant.code }) }));
+        const paired = await remember(await teamFetch("/api/auth/pair", { method: "POST", headers: { ...EDGE, "content-type": "application/json" }, body: JSON.stringify({ code: grant.code }) }));
         const session = parse(await paired.text());
         if (paired.status !== 200) return { status: paired.status, body: session, token: null };
         if (!chiefNamed && member && member.role !== "member") {
@@ -532,7 +579,7 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
   listen();
 
   return {
-    root, desktopBase, cloudBase, get owner() { return owner; }, ownerCapability, edge: EDGE, answers, labels, logs: () => logs, local, onCloud, desktopInstallation,
+    root, desktopBase, cloudBase, get owner() { return owner; }, ownerCapability, secret, cloudMachineId: CLOUD_MACHINE_ID, edge: EDGE, answers, labels, logs: () => logs, local, onCloud, desktopInstallation,
     account, journalFile, spies, teamJournalFile,
     get beforeTeamJournalWrite() { return fixture.beforeTeamJournalWrite; },
     set beforeTeamJournalWrite(hook) { fixture.beforeTeamJournalWrite = hook; },

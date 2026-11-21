@@ -17,7 +17,7 @@ import { deviceWord, type LentPlatform } from "./lent-computers.ts";
 import type { McpProbeResult } from "./mcp-probe.ts";
 import { isRemoteMcpServer, mcpServerServes, parseStoredMcpServer, type McpRunsOn, type StoredMcpServer } from "./mcp-registry.ts";
 import { PASS } from "./routes/table.ts";
-import type { LentMcpServer, SharedComputers } from "./shared-computers.ts";
+import type { LentMcpServer, McpCaller, SharedComputers } from "./shared-computers.ts";
 import type { McpKeys } from "./vault/mcp-keys.ts";
 
 export const LENT_MCP_PATH = "/api/internal/lent/mcp/";
@@ -85,7 +85,7 @@ export function lentDefinition(name: string, server: StoredMcpServer): LentMcpSe
 const definitionKey = (definition: LentMcpServer) => createHash("sha256").update(JSON.stringify(definition)).digest("hex");
 
 type ElsewhereServer = StoredMcpServer & { runsOn: McpRunsOn };
-type Bot = { id: string; mcpServers?: string[]; toolScope?: unknown };
+type Bot = { id: string; name?: string; color?: string; mcpServers?: string[]; toolScope?: unknown };
 
 /** The saved servers that run on another computer and that this bot's turns use: on, for this bot, in its list and its
  * tool selection. */
@@ -130,6 +130,11 @@ export function lentLine(name: string, state: Exclude<LentState, { kind: "ready"
 }
 
 type Turn = { botId: string; threadId: string; generation: string };
+/** Which bot and conversation made a call, for the MCP server: left out when an id isn't in the shape the desktop takes,
+ * so a hint never costs the call itself. */
+const callerId = (id: string): boolean => id.length > 0 && id.length <= 128;
+const callerOf = (turn: Turn): { caller?: McpCaller } =>
+  callerId(turn.botId) && callerId(turn.threadId) ? { caller: { botId: turn.botId, threadId: turn.threadId } } : {};
 type Rpc = { jsonrpc?: unknown; id?: string | number | null; method?: unknown; params?: unknown };
 
 export interface LentMcpDeps {
@@ -223,7 +228,7 @@ export function createLentMcp(deps: LentMcpDeps) {
       const params = (message.params ?? {}) as { name?: unknown; arguments?: unknown };
       if (typeof params.name !== "string" || !params.name) return callError(id, "Name the tool to call.");
       const args = params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments) ? params.arguments as Record<string, unknown> : {};
-      const result = await deps.computers.request({ computer_id: state.computerId, action: "mcp_call", server: definition, tool_name: params.name, arguments: args }, principal, active);
+      const result = await deps.computers.request({ computer_id: state.computerId, action: "mcp_call", server: definition, tool_name: params.name, arguments: args, ...callerOf(turn) }, principal, active, bot?.name && bot.color ? { name: bot.name, color: bot.color } : null);
       return reply(id, result && typeof result === "object" ? result : { content: [] });
     } catch (error) {
       return refuse(error instanceof Error ? error.message : `${name} did not answer.`);

@@ -94,6 +94,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "GET", path: /^\/api\/bots$/ },
   { method: "POST", path: /^\/api\/bots$/ },
   { method: "PATCH", path: /^\/api\/bots\/[\w-]+$/ },
+  // The desktop's own delete. A paired phone can remove one bot it can see,
+  // including through a public tunnel. The harness still refuses the default bot.
+  { method: "DELETE", path: /^\/api\/bots\/[\w-]+$/ },
   // Display order only; the harness accepts just the bots the device can see.
   { method: "PUT", path: /^\/api\/bots\/order$/ },
   // Can only file visible bots; cannot alter execution policy.
@@ -129,6 +132,14 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // Names and on/off only. The MCP settings list, which carries commands and
   // addresses, stays closed.
   { method: "GET", path: /^\/api\/bots\/[\w-]+\/mcp-servers$/ },
+  // Read-only: a bot's skills by name, with what each is for and whether it is on. Adding, editing and switching them
+  // stay on the host.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/skills$/ },
+  // The bot's Data, read-only: the sheet and tables, a page of rows (a POST
+  // only for its body), a chart card's picture. Running SQL stays on the host.
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/data$/ },
+  { method: "POST", path: /^\/api\/bots\/[\w-]+\/data\/page$/ },
+  { method: "GET", path: /^\/api\/bots\/[\w-]+\/data\/cards\/c_\d+\/image$/ },
   // Team memory edits are content, not execution policy. The section rides as
   // a query string.
   { method: "GET", path: /^\/api\/team-memory$/ },
@@ -182,6 +193,9 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "POST", path: /^\/api\/attachments$/ },
   // The harness honors Range on voice notes so a phone player can seek.
   { method: "GET", path: /^\/api\/attachments\/[\w-]+\.(?:png|jpe?g|gif|webp|mp3|wav)$/i },
+  // Discarding a file before it is sent. The harness records which device uploaded each file and deletes only that
+  // device's own, and only while no message uses it.
+  { method: "DELETE", path: /^\/api\/attachments\/[\w-]+\.[A-Za-z0-9]{1,10}$/ },
   // Raw upload, capped and stored under a generated filename by the harness.
   { method: "POST", path: /^\/api\/files$/ },
 
@@ -203,6 +217,13 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   { method: "DELETE", path: /^\/api\/phones\/self$/ },
   { method: "GET", path: /^\/api\/phones\/self\/jobs$/ },
   { method: "POST", path: /^\/api\/phones\/self\/jobs\/[\w-]+\/(?:lease|result)$/ },
+  // The phone's closed-app alert registration: its own device token, never another phone's.
+  { method: "PUT", path: /^\/api\/push\/device$/ },
+  { method: "GET", path: /^\/api\/push\/device$/ },
+  { method: "DELETE", path: /^\/api\/push\/device$/ },
+  { method: "PUT", path: /^\/api\/push\/activity$/ },
+  { method: "GET", path: /^\/api\/push\/activity$/ },
+  { method: "DELETE", path: /^\/api\/push\/activity$/ },
 
   // The harness records only the owner's activation; a guest's is answered and
   // dropped.

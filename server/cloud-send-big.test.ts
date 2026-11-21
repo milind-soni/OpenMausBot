@@ -9,7 +9,8 @@ import { cloudSendManifest } from "./cloud-send-manifest.ts";
 import { attachmentNamesOf, linkedPath, threadLinks } from "./cloud-send-rows.ts";
 import { DATA_DIR } from "./config.ts";
 import { deleteThread, threadHeads } from "./message-db.ts";
-import { Store, type Message } from "./store.ts";
+import { Store, type Message, type TaskRecord } from "./store.ts";
+import { buildTask } from "./task-record.ts";
 
 const BOTS = 100, TASKS = 20, ROWS = 12;
 
@@ -27,14 +28,19 @@ function counted(store: Store) {
 }
 
 /** 100 bots with 20 conversations each, 12 rows to a conversation, every fourth line with a stored attachment; a few rows
- * stored without a parent, as an old app stored them. */
+ * stored without a parent, as an old app stored them. Each bot is saved once with all its threads, newest first as
+ * createTask leaves them: a save per thread would rewrite the whole of bots.json 2,000 times (464 MB, each synced). */
 function bigWorkspace() {
   const store = new Store(() => ({ instanceId: "fixture", model: "fixture-model" }));
   const threads: string[] = [];
   let at = 1_000, attachment = 0;
   for (let b = 0; b < BOTS; b++) {
-    const bot = store.createBot({ name: `Bot ${b}` }, { seedMessages: false });
-    const conversations = [bot.threadId, ...Array.from({ length: TASKS - 1 }, (_, i) => store.createTask(bot.id, `Task ${i}`, false)!.threadId)];
+    const added: TaskRecord[] = [];
+    const bot = store.createBot({ name: `Bot ${b}` }, { seedMessages: false, settle: (made) => {
+      added.push(...Array.from({ length: TASKS - 1 }, (_, i) => buildTask(made, `Task ${i}`)));
+      made.tasks = [...[...added].reverse(), ...made.tasks!];
+    } });
+    const conversations = [bot.threadId, ...added.map((task) => task.threadId)];
     for (const threadId of conversations) {
       const rows: Message[] = [];
       for (let r = 0; r < ROWS; r++) {

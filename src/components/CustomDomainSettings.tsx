@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import { Check, ExternalLink, Globe, Loader2 } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { api } from "@/state/store";
+import { useCopyFeedback } from "@/lib/copy-text";
 import { t } from "@/lib/i18n";
-import { Card, CommandLine } from "./SettingsPrimitives";
+import { LearnMore, SETTINGS_INPUT, SettingRow, SettingsEmptyRow, SettingsField, SettingsGroup, SettingsRows } from "./SettingsPrimitives";
+import { SettingsSkeletonRows } from "./settings/SettingsStates";
 
 export interface CustomDomainStatus {
   publicUrl: string | null;
@@ -29,30 +31,44 @@ export function customDomainDnsName(raw: string): string | null {
   } catch { return null; }
 }
 
+/** The DNS record to copy, as plain lines with a copy button each: no box of its own inside the card. */
 export function CustomDomainDnsRecord({ domain, serverIpv4 }: { domain: string; serverIpv4?: string | null }) {
   const name = customDomainDnsName(domain);
-  if (!name) return <p className="text-[12px] text-ink-secondary">{t("settings.domain.enterDomain")}</p>;
+  if (!name) return <p className="text-[12px] leading-4 text-ink-secondary">{t("settings.domain.enterDomain")}</p>;
   const rows = [
     [t("settings.domain.recordType"), "A"],
     [t("settings.domain.recordName"), name],
     [t("settings.domain.recordValue"), serverIpv4],
   ] as const;
   return (
-    <section aria-label={t("settings.domain.dnsRecord")} className="space-y-2 rounded-lg border border-hairline/50 p-3">
-      <p className="text-[12px] font-medium text-ink">{t("settings.domain.dnsRecord")}</p>
-      <dl className="space-y-2">
+    <section aria-label={t("settings.domain.dnsRecord")} className="flex flex-col gap-1.5">
+      <p className="text-[13px] font-medium leading-[18px] text-ink">{t("settings.domain.dnsRecord")}</p>
+      <dl className="flex flex-col">
         {rows.map(([label, value]) => (
-          <div key={label} className="grid grid-cols-[80px_minmax(0,1fr)] items-center gap-2">
-            <dt className="text-[12px] text-ink-secondary">{label}</dt>
+          <div key={label} className="grid min-h-7 grid-cols-[96px_minmax(0,1fr)] items-center gap-2">
+            <dt className="text-[12px] leading-4 text-ink-secondary">{label}</dt>
             <dd className="min-w-0">{value
-              ? <CommandLine key={value} command={value} copyLabel={t("settings.domain.copyField", { field: label })} />
-              : <p className="text-[12px] text-warning">{t("settings.domain.missingIp")}</p>}
+              ? <CopyValue key={value} value={value} label={t("settings.domain.copyField", { field: label })} />
+              : <p className="text-[12px] leading-4 text-ink-secondary">{t("settings.domain.missingIp")}</p>}
             </dd>
           </div>
         ))}
       </dl>
-      <p className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.domain.recordHint")}</p>
+      <p className="text-[12px] leading-4 text-ink-secondary">{t("settings.domain.recordHint")}</p>
     </section>
+  );
+}
+
+function CopyValue({ value, label }: { value: string; label: string }) {
+  const { state, copy } = useCopyFeedback(value);
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <code className="min-w-0 select-all truncate font-mono text-[12px] leading-4 text-ink">{value}</code>
+      <button type="button" onClick={copy} aria-label={state === "failed" ? t("common.copyFailed") : label}
+        className="flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-ink-secondary hover:bg-menu-hover hover:text-ink focus-visible:outline-2 focus-visible:outline-focus">
+        {state === "copied" ? <Check size={12} className="text-success" /> : <Copy size={12} />}
+      </button>
+    </span>
   );
 }
 
@@ -70,28 +86,9 @@ export function customDomainProxyExample(status: Pick<CustomDomainStatus, "appPo
 }`;
 }
 
-export function CustomDomainGuide({ status }: { status: CustomDomainStatus }) {
-  return (
-    <details className="rounded-lg border border-hairline/50 bg-inset px-3 py-2.5 text-[12px] text-ink-secondary">
-      <summary className="cursor-pointer font-medium text-ink">{t("settings.domain.guide")}</summary>
-      <ol className="mt-3 list-decimal space-y-3 pl-4 leading-relaxed">
-        <li>{t("settings.domain.dns")}</li>
-        <li>
-          {t("settings.domain.proxy")}
-          <pre className="mt-2 overflow-x-auto rounded-md bg-app p-3 text-[11px] leading-relaxed text-ink"><code>{customDomainProxyExample(status)}</code></pre>
-          <p className="mt-2">{t("settings.domain.proxyHint")}</p>
-        </li>
-        <li>{t("settings.domain.verifyHint")}</li>
-      </ol>
-      <p className="mt-3 text-warning">{t("settings.domain.loopbackWarning")}</p>
-      {!status.serverIpv4 && <p className="mt-3">{t("settings.domain.ipAdminHint")}</p>}
-      <p className="mt-3">{t("settings.domain.scope")}</p>
-      <a className="mt-3 inline-flex items-center gap-1.5 text-accent hover:underline" href="https://github.com/milind-soni/OpenMausBot/blob/main/docs/self-hosting.md#connect-a-custom-domain-in-settings" target="_blank" rel="noopener noreferrer">
-        {t("settings.domain.fullGuide")} <ExternalLink size={12} />
-      </a>
-    </details>
-  );
-}
+/** The self-hosting guide's section on custom domains: the server steps (DNS, the HTTPS proxy, ports) live there, behind
+ * the row's Learn more, never inline in Settings. */
+export const CUSTOM_DOMAIN_GUIDE_URL = "https://github.com/milind-soni/OpenMausBot/blob/main/docs/self-hosting.md#connect-a-custom-domain-in-settings";
 
 export function CustomDomainSettings() {
   const [status, setStatus] = useState<CustomDomainStatus | null>(null);
@@ -99,6 +96,7 @@ export function CustomDomainSettings() {
   const [busy, setBusy] = useState<"loading" | "saving" | "removing" | null>("loading");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -132,34 +130,42 @@ export function CustomDomainSettings() {
     } finally { setBusy(null); }
   };
 
+  // Address (§2.2): one row, "Your domain", with Connect domain opening the form in a fold under a divider: the field,
+  // the DNS record to copy, one helper line, and Save right-aligned 8 below. Only a self-hosted server shows it.
+  const connected = Boolean(status?.customDomain);
   return (
-    <Card title={t("settings.domain.title")} subtitle={t("settings.domain.subtitle")}>
-      <div className="space-y-3" data-custom-domain-settings>
-        {busy === "loading" && <p role="status" className="flex items-center gap-2 text-[13px] text-ink-secondary"><Loader2 size={14} className="animate-spin" />{t("settings.domain.loading")}</p>}
-        {status && !status.supported && <p className="text-[13px] leading-relaxed text-ink-secondary">{t("settings.domain.serverOnly")}</p>}
-        {status?.supported && (
-          <>
-            <form onSubmit={(event) => { event.preventDefault(); if (domain.trim() && !busy) void save(false); }} className="space-y-2">
-              <label htmlFor="custom-domain" className="block text-[13px] font-medium text-ink">{t("settings.domain.label")}</label>
-              <input id="custom-domain" type="text" value={domain} disabled={busy !== null} onChange={(event) => { setDomain(event.target.value); setNotice(null); setError(null); }} placeholder="bots.yourcompany.com" autoCapitalize="none" autoCorrect="off" spellCheck={false} className="w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[13px] text-ink placeholder:text-ink-secondary focus:border-accent focus:outline-none disabled:opacity-50" />
+    <SettingsGroup label={t("settings.domain.title")} block="address">
+      <SettingsRows>
+        {busy === "loading" && <SettingsSkeletonRows />}
+        {status && !status.supported && <SettingsEmptyRow>{t("settings.domain.serverOnly")}</SettingsEmptyRow>}
+        {status?.supported && <>
+          <SettingRow title={t("settings.domain.label")}
+            subtitle={connected && status.publicUrl ? <span className="break-all">{status.publicUrl}</span>
+              : <>{t("settings.domain.rowLine")}{" "}<LearnMore href={CUSTOM_DOMAIN_GUIDE_URL} /></>}
+            message={!open && notice ? <span role="status">{notice}</span> : undefined}>
+            <button type="button" className="ui-button" aria-expanded={open} data-custom-domain-open="" onClick={() => setOpen(!open)}>
+              {t(open ? "common.close" : connected ? "settings.domain.change" : "settings.domain.verify")}
+            </button>
+          </SettingRow>
+          {open && (
+            <form data-custom-domain-settings="" onSubmit={(event) => { event.preventDefault(); if (domain.trim() && !busy) void save(false); }} className="flex flex-col gap-2 px-4 pb-4 pt-3">
+              <SettingsField label={t("settings.domain.title")} hint={error ? <span role="alert" className="text-danger">{error}</span> : notice ? <span role="status">{notice}</span> : t("settings.domain.httpsFirst")}>
+                <input id="custom-domain" type="text" value={domain} disabled={busy !== null} onChange={(event) => { setDomain(event.target.value); setNotice(null); setError(null); }}
+                  placeholder="bots.yourcompany.com" autoCapitalize="none" autoCorrect="off" spellCheck={false} className={SETTINGS_INPUT} />
+              </SettingsField>
               <CustomDomainDnsRecord domain={domain} serverIpv4={status.serverIpv4} />
-              <p className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.domain.httpsNeeded")}</p>
-              <div className="flex flex-wrap gap-2 pt-1">
-                <button type="submit" disabled={!domain.trim() || busy !== null} className="ui-button ui-button-primary">
-                  {busy === "saving" ? <Loader2 size={14} className="animate-spin" /> : <Globe size={14} />}
+              <div className="flex items-center justify-end gap-2" data-settings-form-foot="">
+                {status.customDomain && <button type="button" disabled={busy !== null} onClick={() => void save(true)} data-danger="" className="settings-quiet mr-auto -ms-1.5 cursor-pointer">{busy === "removing" ? t("settings.domain.removing") : t("settings.domain.remove")}</button>}
+                <button type="submit" disabled={!domain.trim() || busy !== null} className="ui-button ui-button-md ui-button-primary rounded-full">
                   {busy === "saving" ? t("settings.domain.verifying") : t("settings.domain.verify")}
                 </button>
-                {status.customDomain && <button type="button" disabled={busy !== null} onClick={() => void save(true)} className="rounded-lg bg-control px-3 py-2 text-[12px] font-medium text-ink hover:bg-raised-hover disabled:opacity-50">{busy === "removing" ? t("settings.domain.removing") : t("settings.domain.remove")}</button>}
               </div>
             </form>
-            {status.publicUrl && <p className="break-all text-[12px] text-ink-secondary">{t("settings.domain.current")}: <span className="text-ink">{status.publicUrl}</span></p>}
-            {status.customDomain && <p className="text-[12px] leading-relaxed text-ink-secondary">{status.fallbackUrl ? t("settings.domain.fallback", { url: status.fallbackUrl }) : t("settings.domain.noFallback")}</p>}
-            <CustomDomainGuide status={status} />
-          </>
-        )}
-        {notice && <p role="status" className="flex items-start gap-1.5 text-[12px] leading-relaxed text-success"><Check size={14} className="mt-0.5 shrink-0" />{notice}</p>}
-        {error && <p role="alert" className="text-[12px] leading-relaxed text-danger">{error}</p>}
-      </div>
-    </Card>
+          )}
+          {open && status.customDomain && <SettingsEmptyRow>{status.fallbackUrl ? t("settings.domain.fallback", { url: status.fallbackUrl }) : t("settings.domain.noFallback")}</SettingsEmptyRow>}
+        </>}
+        {!status?.supported && error && <SettingsEmptyRow><span role="alert" className="text-danger">{error}</span></SettingsEmptyRow>}
+      </SettingsRows>
+    </SettingsGroup>
   );
 }

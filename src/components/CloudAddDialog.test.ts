@@ -54,7 +54,7 @@ const nodes = (value: ReactNode): Node[] => {
 const text = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 const label = (node: Node) => text(renderToStaticMarkup(node));
 const button = (tree: Node[], name: string) => tree.find(node => node.type === "button" && (label(node) === name || label(node).startsWith(name) || node.props["aria-label"] === name));
-const actions = (): CloudAddActions => Object.fromEntries(["start", "signIn", "back", "email", "sendCode", "changeEmail", "code", "resend", "browser", "reopenBrowser",
+const actions = (): CloudAddActions => Object.fromEntries(["start", "signIn", "back", "email", "sendCode", "resetSaved", "cancelBrowser", "changeEmail", "code", "resend", "browser", "reopenBrowser",
   "cancelSignIn", "reopenCheckout", "copyLink", "changePlan", "retry", "name", "color", "openCloud", "openTeam", "notNow", "interest", "close"].map(name => [name, vi.fn()])) as unknown as CloudAddActions;
 const baseUi = (extra: Partial<CloudAddUi> = {}): CloudAddUi => ({ chosen: null, current: null, offerShown: TRIAL, now: NOW, busy: false, openFailed: false, email: EMAIL, code: "", profileEmail: EMAIL,
   look: { typed: "Studio", name: "Studio", color: "teal" }, counting: null, copied: false, payFailed: false, interest: null, ...extra });
@@ -215,6 +215,20 @@ describe("each screen of the sheet says one thing and offers one next step", () 
     const phase = { step: "code" as const, intent: true, email: EMAIL, resendAt: NOW + 21_000, problem: null, triesLeft: null };
     expect(text(panel({ kind: "sign-in", phase: { ...phase, signupOpen: false } }).html)).toContain("New MausBot accounts aren't open yet: a code comes only if this email already has one.");
     expect(text(panel({ kind: "sign-in", phase }).html)).not.toContain("aren't open yet");
+  });
+
+  it("a sign-in that can't start says why truthfully, never 'couldn't reach', with its one way on", () => {
+    const email = (problem: any): CloudAddView => ({ kind: "sign-in", phase: { step: "email", intent: false, problem } });
+    const saved = panel(email("saved"));
+    expect(text(saved.html)).toContain("This computer has a saved MausBot Cloud sign-in that it can't read, so a new sign-in can't start.");
+    expect(text(saved.html)).not.toContain("Couldn't reach");
+    button(saved.tree, "Clear it and send the code")!.props.onClick(); expect(saved.handlers.resetSaved).toHaveBeenCalledOnce();
+    const waiting = panel(email("saved-wait"));
+    expect(text(waiting.html)).toContain("The app tries again by itself"); expect(button(waiting.tree, "Clear it and send the code")).toBeUndefined();
+    const browser = panel(email("connecting"));
+    expect(text(browser.html)).toContain("A sign-in is still under way in your browser.");
+    button(browser.tree, "Cancel it and send the code")!.props.onClick(); expect(browser.handlers.cancelBrowser).toHaveBeenCalledOnce();
+    expect(text(panel(email("busy")).html)).toContain("Try again in a moment.");
   });
 
   it("Sign in: the Admin's answers in plain words, with the one way on", () => {
@@ -420,6 +434,19 @@ describe("the sheet", () => {
     vi.stubGlobal("window", { ogb: { cloudAccount: bridge, cloudAdd: { state: vi.fn(), start: vi.fn() } }, addEventListener: vi.fn(), removeEventListener: vi.fn() });
     await settle();
     expect(render()).toContain('data-add-cloud-flow="app_whats_new_team"');
+  });
+
+  it("Send code with a saved sign-in this computer can't read: one click clears it and sends the code", async () => {
+    await settle(); await buy("pro");
+    bridge.signInStart.mockResolvedValueOnce({ outcome: "blocked", reason: "saved", reset: true });
+    bridge.resetSaved = vi.fn(async () => ({ status: "signed-out" }));
+    tree().find(node => node.type === "form")!.props.onSubmit({ preventDefault() {} }); await flush();
+    const html = await settle();
+    expect(html).toContain("saved MausBot Cloud sign-in that it can't read"); expect(html).not.toContain("Couldn't reach");
+    await press("Clear it and send the code");
+    expect(bridge.resetSaved).toHaveBeenCalledOnce();
+    expect(bridge.signInStart).toHaveBeenCalledTimes(2);
+    expect(await settle()).toContain(`Enter the 8-digit code sent to ${EMAIL}`);
   });
 
   it("the Admin's word that new accounts are closed reaches the code step", async () => {

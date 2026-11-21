@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { WAIT_KINDS } from "../../shared/waits.ts";
 import type { NewWait, WaitRecord } from "../waits.ts";
-import { createWaitRoutes, findWaitPeer, hostWaitRefusal, isNetworkPath, parseWaitRequest, waitSourceRefusal, WAIT_MESSAGES } from "./waits.ts";
+import { createWaitRoutes, findWaitPeer, handedAssignment, hostWaitRefusal, isNetworkPath, parseWaitRequest, waitSourceRefusal, WAIT_MESSAGES } from "./waits.ts";
 import { PASS } from "./table.ts";
 
 const HOME = "/home/maus";
@@ -63,6 +63,10 @@ describe("the waits route", () => {
   it("answers 200 for a condition already true and the manager's status for a refusal, and appends a note", async () => {
     waits.create.mockResolvedValueOnce({ state: "already", text: "It exists already." } as never);
     expect(await call("POST", "/api/internal/waits", FILE_WAIT)).toMatchObject({ status: 200, payload: { text: "It exists already." } });
+    waits.create.mockResolvedValueOnce({ state: "already", text: "It exists already." } as never);
+    expect(await call("POST", "/api/internal/waits", { ...FILE_WAIT, follow_up: "Read the report and continue." })).toMatchObject({
+      status: 200, payload: { text: "It exists already.\nCarry out follow_up now in this turn: Read the report and continue." },
+    });
     waits.create.mockResolvedValueOnce({ state: "refused", status: 409, error: "Too many." } as never);
     expect(await call("POST", "/api/internal/waits", FILE_WAIT)).toMatchObject({ status: 409, payload: { error: "Too many." } });
     waits.create.mockResolvedValueOnce({ state: "created", wait: { id: "w2", label: "l", expiresAt: 0 }, note: "Slow page." } as never);
@@ -185,6 +189,88 @@ describe("the waits route", () => {
     for (const other of [{ depth: 1 }, { handedOff: true }, { routineRun: true }, { outsideDriven: true }, { personStarted: false }]) {
       expect(waitSourceRefusal({ ...person, ...other }), JSON.stringify(other)).toBe(WAIT_MESSAGES.notPerson);
     }
+  });
+  it("lets work a bot handed on make one wait, never stop one, only when the person's own request started it", () => {
+    const handed = { owned: true, room: false, depth: 1, handedOff: false, routineRun: false, outsideDriven: false, personStarted: true, guest: false, assignmentId: "a1" };
+    expect(waitSourceRefusal({ ...handed, op: "create" })).toBeNull();
+    expect(waitSourceRefusal({ ...handed, depth: 0, handedOff: true, op: "create" })).toBeNull();
+    expect(waitSourceRefusal({ ...handed, op: "cancel" })).toBe(WAIT_MESSAGES.handedStop);
+    expect(waitSourceRefusal(handed)).toBe(WAIT_MESSAGES.handedStop);
+    for (const other of [{ personStarted: false }, { guest: true }, { assignmentId: undefined }, { routineRun: true }, { outsideDriven: true }]) {
+      expect(waitSourceRefusal({ ...handed, ...other, op: "create" }), JSON.stringify(other)).toBe(WAIT_MESSAGES.notPerson);
+    }
+    expect(waitSourceRefusal({ ...handed, room: true, op: "create" })).toBe(WAIT_MESSAGES.room);
+    expect(waitSourceRefusal({ ...handed, owned: false, op: "create" })).toBe(WAIT_MESSAGES.notYours);
+  });
+
+  it("lets a proved wait continuation create the next wait in its own direct chat", () => {
+    const continuation = { owned: true, room: false, depth: 0, handedOff: false, routineRun: true, outsideDriven: true, personStarted: false, guest: false, waitContinuation: true, op: "create" as const };
+    expect(waitSourceRefusal(continuation)).toBeNull();
+    for (const patch of [
+      { waitContinuation: false }, { owned: false }, { room: true }, { guest: true },
+      { depth: 1 }, { handedOff: true }, { routineRun: false }, { op: "cancel" as const },
+    ]) expect(waitSourceRefusal({ ...continuation, ...patch })).not.toBeNull();
+  });
+  it("holds a handed-on wait to its running assignment, never a root or one that ended", () => {
+    const nodes: Record<string, { id: string; parentId?: string; status: string }> = {
+      child: { id: "child", parentId: "root", status: "running" },
+      root: { id: "root", status: "running" },
+      done: { id: "done", parentId: "root", status: "completed" },
+    };
+    const node = (id: string) => nodes[id];
+    expect(handedAssignment("child", node)).toBe("child");
+    expect([handedAssignment("root", node), handedAssignment("done", node), handedAssignment("gone", node), handedAssignment(undefined, node)])
+      .toEqual([undefined, undefined, undefined, undefined]);
+  });
+  it("asks for making or stopping, and records the handed-on assignment with the wait", async () => {
+    waits.create.mockClear();
+    const ops: string[] = [];
+    const sourceRefusal = (op: "create" | "cancel") => { ops.push(op); return op === "cancel" ? WAIT_MESSAGES.handedStop : null; };
+    expect((await call("POST", "/api/internal/waits", FILE_WAIT, { sourceRefusal, assignmentId: () => "a1" })).status).toBe(201);
+    expect(waits.create).toHaveBeenCalledWith(expect.objectContaining({ assignmentId: "a1" }));
+    expect(await call("POST", "/api/internal/waits/cancel", { id: "w1" }, { sourceRefusal, assignmentId: () => "a1" })).toMatchObject({ status: 403, payload: { error: WAIT_MESSAGES.handedStop } });
+    expect(ops).toEqual(["create", "cancel"]);
+    waits.create.mockClear();
+    await call("POST", "/api/internal/waits", FILE_WAIT);
+    expect(waits.create.mock.calls[0]![0]).not.toHaveProperty("assignmentId");
+  });
+  it("reads the handed-on assignment once, before the body, and refuses if it ends meanwhile", async () => {
+    waits.create.mockClear();
+    let reads = 0;
+    const seen: (string | undefined)[] = [];
+    const sourceRefusal = (_op: "create" | "cancel", assignment: string | undefined) => { seen.push(assignment); return null; };
+    expect((await call("POST", "/api/internal/waits", FILE_WAIT, { sourceRefusal, assignmentId: () => "a1" })).status).toBe(201);
+    expect(seen).toEqual(["a1"]);
+    expect(waits.create).toHaveBeenCalledWith(expect.objectContaining({ assignmentId: "a1" }));
+    waits.create.mockClear();
+    expect(await call("POST", "/api/internal/waits", FILE_WAIT, { sourceRefusal, assignmentId: () => (reads++ === 0 ? "a1" : undefined) })).toMatchObject({ status: 403, payload: { error: WAIT_MESSAGES.notPerson } });
+    expect(waits.create).not.toHaveBeenCalled();
+  });
+  it("has the manager ask once more, right before storing, whether the handed-on work still runs", async () => {
+    waits.create.mockClear();
+    let current: string | undefined = "a1";
+    await call("POST", "/api/internal/waits", FILE_WAIT, { assignmentId: () => current });
+    const { stillAllowed } = waits.create.mock.calls[0]![0];
+    expect(stillAllowed?.()).toBeNull();
+    current = undefined;
+    expect(stillAllowed?.()).toBe(WAIT_MESSAGES.notPerson);
+    current = "a2";
+    expect(stillAllowed?.()).toBe(WAIT_MESSAGES.notPerson);
+    waits.create.mockClear();
+    await call("POST", "/api/internal/waits", FILE_WAIT);
+    expect(waits.create.mock.calls[0]![0]).not.toHaveProperty("stillAllowed");
+  });
+  it("rechecks a continuation before storing while leaving ordinary top-level waits unchanged", async () => {
+    waits.create.mockClear();
+    let allowed = true;
+    await call("POST", "/api/internal/waits", FILE_WAIT, { continuationAllowed: () => allowed });
+    const { stillAllowed } = waits.create.mock.calls[0]![0];
+    expect(stillAllowed?.()).toBeNull();
+    allowed = false;
+    expect(stillAllowed?.()).toBe(WAIT_MESSAGES.notPerson);
+    waits.create.mockClear();
+    await call("POST", "/api/internal/waits", FILE_WAIT, { continuationAllowed: () => false });
+    expect(waits.create.mock.calls[0]![0]).not.toHaveProperty("stillAllowed");
   });
   it("offers files and programs only on the bot's own computer", () => {
     const own = { cloudHome: false, hosted: false, guest: false, place: null };

@@ -84,6 +84,14 @@ export function schedulableBots<T extends { id: string; hidden?: boolean; yourAc
     && (!bot.defaultBot?.person || bot.defaultBot.person.trim().toLowerCase() === me)))));
 }
 
+/** Whether this person may rename a bot: anyone off a team; on one an admin, whoever can edit it, and a person their own
+ * MausBot. */
+export function mayRename(bot: { yourAccess?: string; defaultBot?: { person?: string } | null }, team: Pick<TeamPeople, "admin" | "me"> | null): boolean {
+  if (!team || team.admin || bot.yourAccess === "edit") return true;
+  const person = bot.defaultBot?.person?.trim().toLowerCase();
+  return Boolean(person) && person === team.me?.email.toLowerCase();
+}
+
 export function mayChangeOwner(bot: { createdBy?: string; reportsTo?: string; defaultBot?: { person?: string } }, team: TeamPeople | null): boolean {
   return Boolean(team && !bot.defaultBot?.person && (team.admin || (team.me && botOwner(bot) === team.me.email)));
 }

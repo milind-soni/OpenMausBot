@@ -1,6 +1,7 @@
 import { userError } from "../user-errors.ts";
 import { savedLoginResumePrompt } from "../../shared/logins.ts";
 import { signInOutcome, signInResumePrompt, signInWaits } from "../../shared/sign-in-request.ts";
+import type { ComputerHelpRef } from "../../shared/wire.ts";
 import type { HandoffView } from "../coordinator.ts";
 import type { BotRecord, Message, Store } from "../store.ts";
 import type { Surface } from "../surface.ts";
@@ -17,7 +18,12 @@ export interface SignInSettleDeps {
   settleHelp(messageId: string): string[];
   handBackBrowser(bot: BotRecord, threadId: string): void;
   releaseComputer(key: string): void;
-  computerKey(bot: BotRecord): string;
+  /** The control key a person's hold on this conversation's computer sits on. */
+  computerKey(bot: BotRecord, threadId: string): string;
+  /** True when several bots drive the computer behind this control key, so no one bot's card may hand it back alone. */
+  sharedKey(key: string): boolean;
+  /** The sign-in cards on this control key that still wait for the person. */
+  pleas(key: string): ComputerHelpRef[];
 }
 
 export type SignInSettled = { status: number; body: Record<string, unknown> };
@@ -30,11 +36,15 @@ export function signInChatPrompt(site: string, line: string): string {
 export function createSignInSettle(deps: SignInSettleDeps) {
   const { store } = deps;
 
-  /** The person is through with the place the card lent them: its plea goes, and the browser or computer goes back to the bot. */
-  const handPlaceBack = (bot: BotRecord, threadId: string, messageId: string, place: Surface): void => {
+  /** The person is through with the place the card lent them: its plea goes, and the browser or computer goes back to the
+   * bot. A computer several bots share goes back only when the person pressed Done or Cancel and no other card waits for it.
+   * Their Done also hands back where the conversation works now, which a repin since the card may have moved. */
+  const handPlaceBack = (bot: BotRecord, threadId: string, messageId: string, place: Surface, byPerson: boolean): void => {
     const pleaded = deps.settleHelp(messageId);
     if (place === "browser") deps.handBackBrowser(bot, threadId);
-    else for (const key of pleaded.length ? pleaded : [deps.computerKey(bot)]) deps.releaseComputer(key);
+    else for (const key of new Set([...pleaded, ...(byPerson || !pleaded.length ? [deps.computerKey(bot, threadId)] : [])])) {
+      if (!deps.sharedKey(key) || (byPerson && !deps.pleas(key).length)) deps.releaseComputer(key);
+    }
   };
 
   const settle = (botId: string, threadId: string, messageId: string, outcome: "done" | "cancelled", saved?: { site: string }): SignInSettled => {
@@ -49,7 +59,7 @@ export function createSignInSettle(deps: SignInSettleDeps) {
       return { status: 409, body: { ...userError(settled === "done" ? "serverError.signIn.alreadyDone" : "serverError.signIn.alreadyCancelled") } };
     }
     if (settled && card.resumed) return { status: 200, body: { [outcome]: true, resumed: true } };
-    if (!settled) handPlaceBack(bot, threadId, message.id, card.place);
+    if (!settled) handPlaceBack(bot, threadId, message.id, card.place, true);
     const savedLogin = saved?.site ?? card.savedLogin;
     const resumed = deps.answerCardNode(threadId, message.id, savedLogin ? savedLoginResumePrompt(savedLogin) : signInResumePrompt(card.site, outcome));
     store.patchMessage(threadId, message.id, {
@@ -64,7 +74,7 @@ export function createSignInSettle(deps: SignInSettleDeps) {
     for (const message of store.activePath(threadId)) {
       const card = message.signIn;
       if (message.kind !== "signin" || !card || card.stopped || !signInWaits(card) || (only && !only.includes(message.id))) continue;
-      handPlaceBack(bot, threadId, message.id, card.place);
+      handPlaceBack(bot, threadId, message.id, card.place, false);
       store.patchMessage(threadId, message.id, { signIn: { ...card, answeredInChat: true, error: undefined } });
       settled.push({ id: message.id, site: card.site });
     }
@@ -103,7 +113,7 @@ export function createSignInSettle(deps: SignInSettleDeps) {
       const site = card.site.toLowerCase();
       const used = path.slice(index + 1).some((row) => row.kind === "activity" && row.tool?.ok === true && (row.tool.input ?? "").toLowerCase().includes(site));
       if (!used) return;
-      handPlaceBack(bot, threadId, message.id, card.place);
+      handPlaceBack(bot, threadId, message.id, card.place, false);
       store.patchMessage(threadId, message.id, { signIn: { ...card, done: true, resumed: true, error: undefined } });
     });
   };

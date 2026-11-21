@@ -48,14 +48,24 @@ describe("Settings → Engines → ChatGPT accounts", () => {
     expect(render(true)).toContain(">Signed in<");
   });
 
+  it("names a Codex API-key login as an API key and offers no ChatGPT sign-out it cannot confirm", () => {
+    render(true, { signOut: true });
+    const keyed = fixture.instances[0]!;
+    keyed.snapshot.account = { method: "api-key" };
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html).toContain("Uses an API key");
+    expect(html).not.toContain(">Signed in<");
+    expect(accountActions("chatgpt", keyed).signOut).toBe(false);
+  });
+
   it("offers sign-out only for a signed-in account the server can sign out, and removal only for added accounts", () => {
     const account = (instanceId: string, authenticated: boolean, signOut: boolean): InstanceInfo => ({
       instanceId, driverKind: "codex", displayName: "Plan", snapshot: { state: "available", authenticated, chatgptPlan: true },
       models: { default: "gpt", options: [] }, authentication: { method: "browser-pkce", signOut },
     });
-    expect(accountActions("chatgpt", account("chatgpt", true, true))).toEqual({ signOut: true, remove: false });
-    expect(accountActions("chatgpt", account("chatgpt-work", true, false))).toEqual({ signOut: false, remove: true });
-    expect(accountActions("chatgpt", account("chatgpt-work", false, true))).toEqual({ signOut: false, remove: true });
+    expect(accountActions("chatgpt", account("chatgpt", true, true))).toEqual({ signOut: true, remove: false, hide: true });
+    expect(accountActions("chatgpt", account("chatgpt-work", true, false))).toEqual({ signOut: false, remove: true, hide: false });
+    expect(accountActions("chatgpt", account("chatgpt-work", false, true))).toEqual({ signOut: false, remove: true, hide: false });
     fixture.instances = [{ ...account("chatgpt-work", true, false), cliDefault: "codex" }];
     fixture.bots = [];
     expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Remove<");
@@ -186,7 +196,7 @@ describe("Settings → Engines → setup cards", () => {
     const account = (instanceId: string, authenticated: boolean, signOut: boolean): InstanceInfo => ({
       instanceId, driverKind: "antigravityAgent", displayName: "Google account", cliDefault: "agy_acp_server",
       snapshot: { state: "available", authenticated }, models: { default: "gemini", options: [] },
-      authentication: { method: "browser", signOut },
+      authentication: { method: "callback-url", signOut },
     });
     fixture.instances = [account("antigravity", true, true)];
     expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Sign out<");
@@ -300,7 +310,7 @@ describe("Settings → Engines → setup cards", () => {
 
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     const remote = renderToStaticMarkup(createElement(EnginesSettings));
-    expect(remote).toContain("open Settings → API keys on the computer running MausBot");
+    expect(remote).toContain("open Settings → AI on the computer running MausBot");
     expect(remote).not.toContain("data-key-row");
 
     vi.stubGlobal("window", {});
@@ -407,9 +417,9 @@ describe("Settings → Engines → Claude accounts", () => {
   });
 
   it("keeps the default account and signs out only a signed-in account the server can sign out", () => {
-    expect(accountActions("claude", claude("claude", "Personal", true))).toEqual({ signOut: true, remove: false });
-    expect(accountActions("claude", claude("claude-work", "Work", false))).toEqual({ signOut: false, remove: true });
-    expect(accountActions("claude", claude("claude-work", "Work", true, { authentication: { method: "paste-code", signOut: false } }))).toEqual({ signOut: false, remove: true });
+    expect(accountActions("claude", claude("claude", "Personal", true))).toEqual({ signOut: true, remove: false, hide: false });
+    expect(accountActions("claude", claude("claude-work", "Work", false))).toEqual({ signOut: false, remove: true, hide: false });
+    expect(accountActions("claude", claude("claude-work", "Work", true, { authentication: { method: "paste-code", signOut: false } }))).toEqual({ signOut: false, remove: true, hide: false });
     expect(renderClaude(claude("claude-work", "Work", true))).toContain(">Remove<");
   });
 
@@ -442,17 +452,19 @@ describe("Settings → AI in Simple mode", () => {
       engine("kimi", "kimiAgent", false),
     ];
     const html = simple();
-    expect(html).toContain(">Your AI</h3>");
+    expect(html).toContain(">Providers</h3>");
     expect(rows(html)).toEqual(["claude", "codex"]);
     expect(html).toMatch(/data-simple-engine="claude"[\s\S]*?>Manage<\/button>/);
     expect(html).toMatch(/data-simple-engine="codex"[\s\S]*?>Set up<\/button>/);
     expect(html).not.toContain("Model providers and accounts");
   });
 
-  it("folds every other provider under More AI providers, with the count", () => {
+  it("folds every other provider under More providers, in the same card, with the count", () => {
     fixture.instances = [engine("claude", "claudeAgent", true), engine("kimi", "kimiAgent", false), engine("mistral", "mistral", false)];
-    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More AI providers \(2\)/);
-    expect(simple(true)).toContain('data-engine-card="kimi"');
+    // Kimi, Mistral and the Google AI Studio row (a Gemini key).
+    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More providers[\s\S]*?>3</);
+    expect(simple()).not.toContain('data-simple-engine="kimi"');
+    expect(simple(true)).toContain('data-simple-engine="kimi"');
   });
 });
 

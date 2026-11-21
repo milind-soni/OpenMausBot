@@ -40,6 +40,21 @@ export function seenWithin(threadId: string, ms: number, now: number = Date.now(
   return now - (sightings.get(threadId) ?? -Infinity) <= ms;
 }
 
+const madeListeners = new Set<(botId: string, threadId: string) => void>();
+
+/** A person made this conversation themselves, just now: its first message is probably on its way. */
+export function madeThread(botId: string, threadId: string): void {
+  for (const listener of madeListeners) {
+    try { listener(botId, threadId); } catch (error) { console.warn(`thread presence: ${(error as Error).message}`); }
+  }
+}
+
+/** Hears every conversation a person makes; returns the unsubscribe. */
+export function onThreadMade(listener: (botId: string, threadId: string) => void): () => void {
+  madeListeners.add(listener);
+  return () => madeListeners.delete(listener);
+}
+
 export function forgetPresence(): void {
   sightings.clear();
   personAsks.clear();

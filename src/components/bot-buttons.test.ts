@@ -65,14 +65,14 @@ const question: Message = {
 };
 
 describe("a bot's cards answer in its own colour", () => {
-  it("paints Allow once in the asking bot's colour, while Deny is the neutral second answer and Always allow stays quiet", () => {
+  it("paints Allow once in the asking bot's colour, while Deny is the neutral second answer and the allow that lasts stays quiet", () => {
     const html = approval({ id: "scout", name: "Scout", color: "pink" } as Bot);
     expectOwn(button(html, t("approval.action.allowOnce")), "pink");
     const deny = button(html, t("approval.action.deny"));
     expectPlain(deny);
     expect(classes(deny)).toEqual(expect.arrayContaining(["bg-ink/[0.07]", "text-ink"]));
     expect(classes(deny).some((name) => name.includes("danger"))).toBe(false);
-    const always = button(html, t("approval.action.alwaysAllow"));
+    const always = button(html, t("approval.action.allowSession"));
     expectPlain(always);
     expect(classes(always)).toContain("text-ink-secondary");
     expect(classes(button(approval(), t("approval.action.allowOnce")))).toContain("bg-accent");

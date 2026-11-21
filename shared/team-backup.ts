@@ -149,7 +149,7 @@ const backupSchema = z.object({
     target: z.enum(["bot", "room-goal"]), botId: key, groupId: key.optional(),
     runOn: z.enum(["maus", "cloud"]), schedule,
     durationMinutes: z.number().finite().positive(),
-    timeoutMinutes: z.number().int().min(5).max(240).optional(),
+    timeoutMinutes: z.number().int().min(5).max(1_440).optional(),
     checks: z.array(z.enum(["calendar", "mail", "runs"])).max(3).optional(),
     access: z.literal("read-and-draft").optional(),
     deliver: z.literal("brief").optional(),

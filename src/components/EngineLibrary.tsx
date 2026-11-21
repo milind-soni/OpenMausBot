@@ -1,10 +1,12 @@
-import { useState, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
+import { SettingsLook } from "./SettingsPrimitives";
 import { useUpdatedOnce } from "@/hooks/use-updated-once";
 import { ArrowUpRight, Check, ChevronDown, RefreshCw } from "lucide-react";
-import { useStore, type InstanceInfo } from "@/state/store";
+import { type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { InstanceProviderMark } from "./ProviderIcons";
+import { useStoreActions } from "@/state/store-select";
 
 export function engineReady(instance: InstanceInfo): boolean {
   if (instance.driverKind === "clineAgent") {
@@ -18,7 +20,7 @@ const providers: Record<string, string> = {
   claudeAgent: "Anthropic", codex: "OpenAI", grok: "xAI", grokAgent: "xAI",
   kimiAgent: "Moonshot AI", droidAgent: "Factory", cursorAgent: "Cursor",
   antigravityAgent: "Google", opencodeGo: "OpenCode", qwenAgent: "Qwen",
-  hermesAgent: "Nous Research", clineAgent: "Cline", copilotAgent: "GitHub", commandCodeAgent: "Command Code", kiroAgent: "Amazon Web Services", piAgent: "pi.dev", mistral: "Mistral AI", cerebras: "Cerebras", groq: "Groq", greenference: "Greenference", modelgo: "ModelGo", meta: "Meta", museCode: "Meta", deepseekAgent: "DeepSeek",
+  hermesAgent: "Nous Research", clineAgent: "Cline", copilotAgent: "GitHub", commandCodeAgent: "Command Code", kiroAgent: "Amazon Web Services", devinAgent: "Cognition", piAgent: "pi.dev", mistral: "Mistral AI", mistralVibeAgent: "Mistral AI", cerebras: "Cerebras", groq: "Groq", greenference: "Greenference", modelgo: "ModelGo", meta: "Meta", museCode: "Meta", deepseekAgent: "DeepSeek",
 };
 
 export function providerName(instance: InstanceInfo): string {
@@ -100,19 +102,29 @@ export function EngineSections({ instances, renderEngine, isReady = engineReady 
 }
 
 export function RefreshEngines() {
-  const { refreshInstances } = useStore();
+  const { refreshInstances } = useStoreActions();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
+  const settings = useContext(SettingsLook);
+  const check = async () => {
+    setBusy(true);
+    setError(null);
+    setChecked(false);
+    try { await refreshInstances({ reportErrors: true }); setChecked(true); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setBusy(false); }
+  };
+  // In Settings it is a section header's quiet button, a direct child of the header's action slot, so its text ends on
+  // the card's control edge like every other quiet button; a failure is the button's tooltip and its status.
+  if (settings) {
+    return <button type="button" disabled={busy} onClick={() => void check()} className="settings-quiet cursor-pointer disabled:opacity-40"
+      title={error ? t("engineSetup.checkFailed", { reason: error }) : undefined} aria-live="polite">
+      {busy ? t("common.checking") : error ? t("common.tryAgain") : t("engines.library.refresh")}
+    </button>;
+  }
   return <div>
-    <button type="button" disabled={busy} onClick={async () => {
-      setBusy(true);
-      setError(null);
-      setChecked(false);
-      try { await refreshInstances({ reportErrors: true }); setChecked(true); }
-      catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
-      finally { setBusy(false); }
-    }} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] font-medium text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
+    <button type="button" disabled={busy} onClick={() => void check()} className="inline-flex shrink-0 items-center gap-1.5 rounded-lg px-2.5 py-2 text-[12px] font-medium text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-50">
       <RefreshCw size={13} aria-hidden="true" className={cn(busy && "animate-spin")} />
       {busy ? t("common.checking") : t("engines.library.refresh")}
     </button>

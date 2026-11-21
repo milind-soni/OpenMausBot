@@ -1,4 +1,5 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { closeSync, constants, mkdirSync, mkdtempSync, openSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -15,6 +16,7 @@ import {
   messageReferencesFile,
   listMessageFolder,
   messageFolderEntryName,
+  mimeFor,
   openMessageFile,
   openMessageFolderEntry,
 } from "./message-file.ts";
@@ -34,6 +36,27 @@ beforeEach(() => {
 afterAll(() => rmSync(suite, { recursive: true, force: true }));
 
 describe("message-linked files", () => {
+  it.skipIf(process.platform === "win32")("rejects a named pipe without waiting for a writer", async () => {
+    const fifo = join(workspace, "waiting-pipe");
+    execFileSync("mkfifo", [fifo]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const opened = openMessageFile(fifo, [workspace]).then(
+      async (file) => { await file.handle.close(); return null; },
+      (error: unknown) => error,
+    );
+    const result = await Promise.race([
+      opened,
+      new Promise<"blocked">((resolve) => { timer = setTimeout(() => resolve("blocked"), 1_000); }),
+    ]);
+    try {
+      expect(result).toMatchObject({ status: 400, message: "the link does not point to a regular file" });
+    } finally {
+      clearTimeout(timer);
+      if (result === "blocked") closeSync(openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK));
+      await opened;
+    }
+  });
+
   it("resolves a Markdown image from an opaque source offset", () => {
     const markdown = [
       "See this:",
@@ -447,6 +470,28 @@ describe("message-linked files", () => {
     expect(header).toContain("filename*=UTF-8''r%C3%A9sum%C3%A9%20%22final%22.md");
     expect(header).not.toContain("\r");
     expect(header).not.toContain("\n");
+  });
+
+  it("types an archive by its extension alone and serves it as a download", async () => {
+    for (const [name, mime] of [
+      ["a.zip", "application/zip"], ["a.rar", "application/vnd.rar"], ["a.7z", "application/x-7z-compressed"],
+      ["a.tar", "application/x-tar"], ["a.gz", "application/gzip"], ["a.tgz", "application/x-compressed-tar"],
+      ["a.bz2", "application/x-bzip2"], ["a.xz", "application/x-xz"],
+      ["build.tar.gz", "application/gzip"], ["BUILD.ZIP", "application/zip"], ["Site.Tar.Gz", "application/gzip"],
+      ["a.cab", "application/octet-stream"], ["a.tar.zst", "application/octet-stream"], ["zip", "application/octet-stream"],
+    ] as const) expect(mimeFor(name), name).toBe(mime);
+    // Content never decides the type: zip bytes under a .txt name stay text, text under a .zip name stays an archive.
+    writeFileSync(join(workspace, "really-zip.txt"), "PK\x03\x04");
+    writeFileSync(join(workspace, "really-text.zip"), "hello");
+    for (const [name, mime] of [["really-zip.txt", "text/plain; charset=utf-8"], ["really-text.zip", "application/zip"]] as const) {
+      const opened = await openMessageFile(name, [workspace]);
+      await opened.handle.close();
+      expect(opened.mime).toBe(mime);
+    }
+    expect(messageFileDisposition("build.tar.gz")).toMatch(/^attachment; filename="build\.tar\.gz"/);
+    expect(messageFileDownloadName("build.tar.gz", "4e8d.gz")).toBe("build.tar.gz");
+    expect(messageFileDownloadName("BUILD.ZIP", "4e8d.zip")).toBe("BUILD.ZIP");
+    expect(messageFileDownloadName("setup.exe", "4e8d.zip")).toBe("setup.zip");
   });
 
   it("never lets a display name disguise the canonical file extension", () => {

@@ -21,7 +21,7 @@ import { cloudSendSummary, partHash, type CloudSendSources } from "../cloud-send
 import { cloudSendChatsRoute, type CloudSendChatsDeps } from "../cloud-send-chats.ts";
 import { loginFingerprints, VERIFY_NONCE } from "../cloud-send-verify.ts";
 import type { AppConfig } from "../config.ts";
-import type { VaultStore } from "../vault-store.ts";
+import { TEAM_READER, type VaultStore } from "../vault-store.ts";
 import type { MoveAutomations } from "../move-freeze.ts";
 import { threadHeads } from "../message-db.ts";
 import type { LineLanguage } from "../server-lines.ts";
@@ -32,7 +32,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 
 export interface CloudSendRouteDeps extends Pick<CloudSendSources, "appVersion" | "bots" | "skills"> {
   messagesTail(threadId: string, limit: number): { messages: ReadonlyArray<{ role: string; text?: string }>; hasMore: boolean };
-  logins: Pick<VaultStore, "changes" | "get" | "listSecrets" | "secret" | "onePasswordConnectedAt" | "onePasswordGrants" | "onePasswordToken">;
+  logins: Pick<VaultStore, "changes" | "get" | "listSecrets" | "secret" | "onePasswordConnectedAt" | "onePasswordGrants" | "onePasswordItemGrants" | "onePasswordToken">;
   config(): Pick<AppConfig, "profile" | "language">;
   lineLanguage?: LineLanguage;
   chats?: CloudSendChatsDeps;
@@ -69,10 +69,10 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     skills: deps.skills,
     picture: (avatarUrl) => botAvatarUrlSchema.safeParse(avatarUrl).success ? readAttachment(avatarUrl.slice("/api/attachments/".length))?.bytes ?? null : null,
     logins: () => deps.logins.changes(),
-    secrets: () => deps.logins.listSecrets(),
+    secrets: () => deps.logins.listSecrets(TEAM_READER),
     onePassword: () => {
       const connectedAt = deps.logins.onePasswordConnectedAt();
-      return connectedAt === null ? null : { connectedAt, grants: deps.logins.onePasswordGrants() };
+      return connectedAt === null ? null : { connectedAt, grants: deps.logins.onePasswordGrants(), itemGrants: deps.logins.onePasswordItemGrants() };
     },
     settings: () => { const { profile, language } = deps.config(); return { profile, language }; },
     ...(deps.move ? { move: { items: (bots: ReadonlySet<string>, only?: BotRecord) => moveItems(deps.move!, bots, only), botParts: (bot: BotRecord) => moveBotParts(bot, partHash) } } : {}),
@@ -85,6 +85,8 @@ export function createCloudSendRoutes(deps: CloudSendRouteDeps): RouteHandler {
     if (path !== "/api/cloud-send" && !path.startsWith("/api/cloud-send/")) return PASS;
     const home = deps.cloudHome === true || deps.ownHome?.(ctx.auth) === true;
     const scoped = deps.scope?.(ctx.auth) ?? null;
+    // Downstream handlers rely on this outer wrapper as the sole gate: team refusal rejects callers unless
+    // scoped to a specific bot move session.
     if (deps.refusal && !scoped) { req.resume(); return json(res, 403, deps.refusal); }
     // A move of one bot into a team reads that bot only, on both sides.
     const bot = scoped ?? (/^[\w-]{1,128}$/u.test(url.searchParams.get("bot") ?? "") ? url.searchParams.get("bot")! : undefined);

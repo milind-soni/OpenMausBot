@@ -8,10 +8,12 @@ import { useEffect, useRef, useState } from "react";
 
 import { openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
+import { SITE_FRAME_SANDBOX } from "@/lib/published-apps";
 import { setWebPanels, useWebPanels } from "@/lib/web-panel-preferences";
 import { isAppOrigin, type PinnedChatPage, type WebPanel } from "@/lib/web-panels";
 import { api } from "@/state/api";
 import { useStore, type Bot } from "@/state/store";
+import { useAppPagePatch } from "@/state/held-tails";
 import type { AppDocument } from "../../shared/app";
 import { AppDocumentError, fetchAppDocument } from "./app/app-api";
 import { AppFrame, type AppFrameHandle } from "./app/AppFrame";
@@ -85,7 +87,7 @@ export function WebPanelPage() {
           key={`${panel.id}:${reloads}`}
           src={panel.url}
           title={panel.name}
-          sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+          sandbox={SITE_FRAME_SANDBOX}
           referrerPolicy="no-referrer"
           onLoad={() => setStatus("loaded")}
           onError={() => setStatus("failed")}
@@ -110,7 +112,8 @@ function storedPageVersion(bots: readonly Bot[] | undefined, page: PinnedChatPag
 function PinnedChatPageView({ panel, page, panels }: { panel: WebPanel; page: PinnedChatPage; panels: readonly WebPanel[] }) {
   const { state, dispatch } = useStore();
   // Only a new stored version means the page changed: while its chat is not loaded (switching threads) it stays put.
-  const stored = storedPageVersion(state.bots, page);
+  const patched = useAppPagePatch(page.threadId, page.messageId);
+  const stored = storedPageVersion(state.bots, page) || patched;
   const [version, setVersion] = useState(stored);
   if (stored && stored !== version) setVersion(stored);
   const [reloads, setReloads] = useState(0);

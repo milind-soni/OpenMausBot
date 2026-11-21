@@ -1,10 +1,13 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "../config.ts";
 import { mcpServerConfigHash } from "../mcp-app-catalog.ts";
+import { McpOAuthManager } from "../mcp-oauth.ts";
+import { providerToolAllowKey } from "../provider-tool-allow.ts";
 import { VaultStore } from "../vault-store.ts";
 import { createMcpKeys } from "../vault/mcp-keys.ts";
 import { claimedNotice, createMcpServersHost, startCheckTimeout } from "./mcp-servers-host.ts";
@@ -186,6 +189,100 @@ it("starts a server with its key read from the Vault, tells a bot the item keeps
   expect(told.join()).not.toContain("doesn't start");
 });
 
+it("ties a saved grant to the server as config.json holds it: a restart or a new key value keeps it, a changed server ends it", async () => {
+  const data = mkdtempSync(join(tmpdir(), "omb-mcp-host-"));
+  dirs.push(data);
+  const vault = new VaultStore({ dataDir: data });
+  const secret = vault.saveSecret({ name: "Stripe secret key", value: "sk_fake-first", source: "card", bots: "all" });
+  vault.grantMcpKeys("stripe", [secret.id]);
+  const keys = createMcpKeys({ store: vault, linked: { fresh: async () => {}, byId: () => null } });
+  const cfg = { mcpServers: {
+    stripe: { command: "npx", args: ["stripe-mcp"], env: { STRIPE_KEY: `vault:${secret.id}` }, enabled: true },
+    twin: { command: "npx", args: ["stripe-mcp"], env: { STRIPE_KEY: "plain" }, enabled: true },
+  } } as unknown as AppConfig;
+  const saved = new Map<string, string[]>();
+  const host = createMcpServersHost({
+    dataDir: data, cfg: () => cfg, persist: (next) => { cfg.mcpServers = next; }, bots: () => [IRIS, PAUL], startsServers: () => true, boxed: () => false, policy: (servers) => servers,
+    tell: () => {}, keys, start: async () => ({ ok: true }),
+    moveGrants: (bot, move) => { goneOver.push(bot.id); const next = move(saved.get(bot.id) ?? []); if (next) saved.set(bot.id, next); },
+  });
+  const goneOver: string[] = [];
+  const key = (bot: typeof IRIS, server = "stripe", tool = "list_charges") => providerToolAllowKey("claude", `mcp__${server}__${tool}`, host.grantSpecs(host.mounted(bot))[server]);
+  /** What earlier versions saved: the fingerprint of the server as started, key value and restart count included. */
+  const earlier = (bot: typeof IRIS) => `provider-tool:claude:stripe:list_charges:${createHash("sha256").update(JSON.stringify(host.mounted(bot).stripe)).digest("hex").slice(0, 16)}`;
+  await host.prepare(IRIS);
+  const first = key(IRIS)!;
+  expect(first).toMatch(/^provider-tool:claude:stripe:list_charges:[a-f0-9]{16}$/);
+  expect(JSON.stringify(host.grantSpecs(host.mounted(IRIS)))).not.toContain("sk_fake");
+  expect(JSON.stringify(host.grantSpecs(host.mounted(IRIS)))).toContain(`vault:${secret.id}`);
+  expect(key(PAUL), "the same server is the same grant key for each bot, which keeps its own list").toBe(first);
+  expect(key(IRIS, "twin"), "another server, though started by the same command, has its own").not.toBe(first);
+  expect(key(IRIS, "stripe", "list_refunds")).not.toBe(first);
+
+  const beforeRestart = earlier(IRIS);
+  expect(beforeRestart).not.toBe(first);
+  saved.set(IRIS.id, [beforeRestart, "Bash:git status"]);
+  saved.set(PAUL.id, [beforeRestart]);
+  host.health.changed("stripe");
+  host.health.changed("stripe");
+  expect((host.mounted(IRIS).stripe as { env: Record<string, string> }).env.OMB_MCP_RESTART, "the restart still reaches the engine").toBe("2");
+  expect(earlier(IRIS), "the old key changed with every restart").not.toBe(beforeRestart);
+  expect(key(IRIS)).toBe(first);
+  expect(host.grantSpecs(host.mounted(IRIS)).stripe).not.toHaveProperty("env.OMB_MCP_RESTART");
+
+  vault.updateSecret(secret.id, { value: "sk_fake-rotated" });
+  host.keyChanged(secret.id);
+  expect((host.mounted(IRIS).stripe as { env: Record<string, string> }).env.STRIPE_KEY).toBe("sk_fake-rotated");
+  expect(key(IRIS), "a new key value is the same server").toBe(first);
+  // A grant saved under the first key value cannot be told apart from one for another server now, so it is left as it is.
+  await host.prepare(IRIS);
+  expect(saved.get(IRIS.id)).toEqual([beforeRestart, "Bash:git status"]);
+  // One saved under today's value, at a restart count from before, moves when the bot's next turn starts: this bot's only.
+  vault.updateSecret(secret.id, { value: "sk_fake-first" });
+  await host.prepare(IRIS);
+  expect(saved.get(IRIS.id)).toEqual([first, "Bash:git status"]);
+  expect(saved.get(PAUL.id)).toEqual([beforeRestart]);
+  expect(JSON.stringify([...saved])).not.toContain("sk_fake");
+  // A turn whose servers are as they were at the bot's last one goes over nothing: no hashing of its keys, no save.
+  const before = goneOver.length;
+  await host.prepare(IRIS);
+  await host.prepare(IRIS);
+  expect(goneOver.length).toBe(before);
+  host.health.changed("stripe");
+  await host.prepare(IRIS);
+  expect(goneOver.slice(before), "servers changed: once more, for that bot").toEqual([IRIS.id]);
+  await host.prepare(PAUL);
+  await host.prepare(PAUL);
+  expect(goneOver.slice(before)).toEqual([IRIS.id, PAUL.id]);
+  expect(saved.get(PAUL.id), "and Paul's own turn moves Paul's").toEqual([first]);
+
+  (cfg.mcpServers!.stripe as { args: string[] }).args = ["stripe-mcp", "--live"];
+  expect(key(IRIS), "changed arguments are another server").not.toBe(first);
+  (cfg.mcpServers!.stripe as { args: string[] }).args = ["stripe-mcp"];
+  expect(key(IRIS)).toBe(first);
+  (cfg.mcpServers!.stripe as { command: string }).command = "node";
+  expect(key(IRIS), "so is a changed command").not.toBe(first);
+  (cfg.mcpServers!.stripe as { command: string }).command = "npx";
+  (cfg.mcpServers!.stripe as { env: Record<string, string> }).env.STRIPE_ACCOUNT = "acct_other";
+  expect(key(IRIS), "and a changed variable").not.toBe(first);
+});
+
+it("keeps a turn starting when its bot's grants cannot be saved in their new form", async () => {
+  const cfg = { mcpServers: { plain: { command: "npx", args: ["plain-mcp"], env: {}, enabled: true } } } as unknown as AppConfig;
+  const data = mkdtempSync(join(tmpdir(), "omb-mcp-host-"));
+  dirs.push(data);
+  const host = createMcpServersHost({
+    dataDir: data, cfg: () => cfg, persist: () => {}, bots: () => [IRIS], startsServers: () => true, boxed: () => false, policy: (servers) => servers, tell: () => {},
+    start: async () => ({ ok: true }), moveGrants: () => { throw new Error("fixture disk full"); },
+  });
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  await expect(host.prepare(IRIS)).resolves.toBeUndefined();
+  expect(logged).toHaveBeenCalledExactlyOnceWith("[mcp] Could not move this bot's saved tool permissions to their new form.");
+  await host.prepare(IRIS);
+  expect(logged, "a failed move is tried again at the next turn").toHaveBeenCalledTimes(2);
+  logged.mockRestore();
+});
+
 it("forgets which Vault items a server could read when its bot's own server goes with the bot", () => {
   const data = mkdtempSync(join(tmpdir(), "omb-mcp-host-"));
   dirs.push(data);
@@ -197,4 +294,28 @@ it("forgets which Vault items a server could read when its bot's own server goes
   host.botDeleted("iris");
   expect(cfg.mcpServers).toEqual({});
   expect(vault.mcpServerKeys("bot-server")).toEqual([]);
+});
+
+it("forgets the sign-in of a bot's own web connection when it goes with the bot, so a new one by that name starts signed out", () => {
+  const data = mkdtempSync(join(tmpdir(), "omb-mcp-host-"));
+  dirs.push(data);
+  const url = "https://mcp.linear.app/mcp";
+  const oauth = new McpOAuthManager({ file: join(data, "mcp-oauth.json") });
+  oauth.adopt("linear_iris", url, { url, state: "signed-in", tokens: { access: "token" } });
+  const cfg = { mcpServers: { linear_iris: { type: "http", url, headers: {}, enabled: true, bot: "iris" } } } as unknown as AppConfig;
+  const host = createMcpServersHost({ dataDir: data, cfg: () => cfg, persist: (next) => { cfg.mcpServers = next; }, bots: () => [IRIS], startsServers: () => true, boxed: () => false, policy: (servers) => servers, tell: () => {}, forgetSignIn: (name) => oauth.forget(name) });
+  host.botDeleted("iris");
+  expect(cfg.mcpServers).toEqual({});
+  expect(oauth.authState("linear_iris", url)).not.toBe("signed-in");
+});
+
+it("still forgets the sign-in when forgetting the server's Vault items fails", () => {
+  const data = mkdtempSync(join(tmpdir(), "omb-mcp-host-"));
+  dirs.push(data);
+  const forgotten: string[] = [];
+  const cfg = { mcpServers: { linear_iris: { type: "http", url: "https://mcp.linear.app/mcp", headers: {}, enabled: true, bot: "iris" } } } as unknown as AppConfig;
+  const keys = { forgetServer: () => { throw new Error("vault write failed"); } } as unknown as ReturnType<typeof createMcpKeys>;
+  const host = createMcpServersHost({ dataDir: data, cfg: () => cfg, persist: (next) => { cfg.mcpServers = next; }, bots: () => [IRIS], startsServers: () => true, boxed: () => false, policy: (servers) => servers, tell: () => {}, keys, forgetSignIn: (name) => forgotten.push(name) });
+  expect(() => host.botDeleted("iris")).toThrow("vault write failed");
+  expect(forgotten).toEqual(["linear_iris"]);
 });

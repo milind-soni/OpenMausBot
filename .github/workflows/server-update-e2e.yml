@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - deploy/update.sh
+      - deploy/update-runner.sh
       - deploy/e2e/update.sh
       - deploy/docker-compose.yml
       - .github/workflows/server-update-e2e.yml
@@ -34,7 +35,7 @@ jobs:
         with:
           persist-credentials: false
       - name: shellcheck
-        run: shellcheck -S warning deploy/update.sh deploy/e2e/update.sh
+        run: shellcheck -S warning deploy/update.sh deploy/update-runner.sh deploy/e2e/update.sh
       - name: Update, roll back and recover
         env:
           LAYOUT: ${{ matrix.layout }}

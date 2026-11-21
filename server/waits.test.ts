@@ -1,8 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createWaitRoutes, WAIT_MESSAGES } from "./routes/waits.ts";
 import type { FileStamp, PageResult, ProcessEntry } from "./wait-probes.ts";
 import { CLOUD_IDLE_AWAKE_MS, createCloudPower } from "./cloud-power.ts";
 import { describeCondition, WAIT_WAKE_MS, WaitManager, waitList, type NewWaitCondition, type WaitManagerOptions, type WaitNotice, type WaitRecord } from "./waits.ts";
@@ -90,6 +91,102 @@ function harness(options: Partial<WaitManagerOptions> = {}) {
 }
 
 describe("WaitManager", () => {
+  it.each([
+    ["ended", ""], ["new generation", ""], ["different run", ""],
+    ["ended", "done"], ["new generation", "done"], ["different run", "done"],
+  ])("refuses a revoked continuation after a URL probe (%s, page %j)", async (change, text) => {
+    const h = harness();
+    h.page = { ok: true, text };
+    const route = createWaitRoutes({ waits: h.manager });
+    const json = vi.fn();
+    const turn = { active: true, generation: "generation-1", runId: "run-1" };
+    const continuationAllowed = () => turn.active && turn.generation === "generation-1" && turn.runId === "run-1";
+    let finishProbe!: () => void;
+    h.pageGate = new Promise<void>((resolve) => { finishProbe = resolve; });
+    const pending = route({
+      method: "POST", path: "/api/internal/waits", res: {} as never, json,
+      botId: "bot-1", threadId: "t-1",
+      readBody: async () => ({ label: "the build", kind: "url_contains", url: "https://example.test/build", text: "done", follow_up: "Run tests." }),
+      sourceRefusal: () => null, continuationAllowed, hostRefusal: () => null, guest: () => false, peer: () => null,
+    });
+    try {
+      await expect.poll(() => h.pageInFlight).toBe(1);
+      if (change === "ended") turn.active = false;
+      if (change === "new generation") turn.generation = "generation-2";
+      if (change === "different run") turn.runId = "run-2";
+    } finally {
+      finishProbe();
+      await pending;
+    }
+    expect(json).toHaveBeenCalledWith(expect.anything(), 403, { error: WAIT_MESSAGES.notPerson });
+    expect(h.manager.list("bot-1")).toEqual([]);
+    expect(existsSync(h.file)).toBe(false);
+    expect(h.showCard).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("returns an immediate follow-up for an authorized request (continuation %s)", async (continuation) => {
+    const h = harness();
+    h.page = { ok: true, text: "done" };
+    const route = createWaitRoutes({ waits: h.manager });
+    const json = vi.fn();
+    await route({
+      method: "POST", path: "/api/internal/waits", res: {} as never, json,
+      botId: "bot-1", threadId: "t-1",
+      readBody: async () => ({ label: "the build", kind: "url_contains", url: "https://example.test/build", text: "done", follow_up: "Run tests." }),
+      sourceRefusal: () => null, continuationAllowed: () => continuation, hostRefusal: () => null, guest: () => false, peer: () => null,
+    });
+    expect(json).toHaveBeenCalledWith(expect.anything(), 200, { text: expect.stringContaining("Carry out follow_up now in this turn: Run tests.") });
+    expect(h.manager.list("bot-1")).toEqual([]);
+    expect(existsSync(h.file)).toBe(false);
+    expect(h.showCard).not.toHaveBeenCalled();
+  });
+
+  it("keeps work a bot handed on to one open wait per assignment, across a restart, until it ends", async () => {
+    const h = harness();
+    const handed = (assignmentId: string) => h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" }, assignmentId });
+    const first = await handed("a1");
+    expect(first).toMatchObject({ state: "created", wait: { assignmentId: "a1" } });
+    const id = (first as { wait: WaitRecord }).wait.id;
+    expect(h.waitOf(id).assignmentId).toBe("a1");
+    const again = await handed("a1");
+    expect(again).toMatchObject({ state: "refused", status: 409 });
+    expect((again as { error: string }).error).toMatch(/^Work handed to you keeps one wait at a time, and this work already has one:\n- /);
+    expect(await handed("a2")).toMatchObject({ state: "created" });
+    expect(await h.create({ kind: "file_exists", path: "/r.txt" })).toMatchObject({ state: "created" });
+    h.reload();
+    expect(await handed("a1")).toMatchObject({ state: "refused", status: 409 });
+    expect(h.manager.cancel(id, "bot-1")).toMatchObject({ id });
+    expect(await handed("a1")).toMatchObject({ state: "created" });
+  });
+
+  it("stores no handed-on wait when the work ends while its first check is still running", async () => {
+    const h = harness();
+    let open!: () => void, running = true;
+    h.pageGate = new Promise((resolve) => { open = resolve; });
+    const pending = h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the page", condition: { kind: "url_contains", url: "https://example.com/", text: "done" }, assignmentId: "a1", stillAllowed: () => (running ? null : "ended") });
+    await vi.waitFor(() => expect(h.pageCalls).toBe(1));
+    running = false;
+    open();
+    expect(await pending).toEqual({ state: "refused", status: 403, error: "ended" });
+    expect(h.manager.list("bot-1")).toEqual([]);
+    expect(h.showCard).not.toHaveBeenCalled();
+    h.pageGate = null;
+    const kept = await h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" }, assignmentId: "a2", stillAllowed: () => null });
+    expect(kept).toMatchObject({ state: "created", wait: { assignmentId: "a2" } });
+    expect(h.waitOf((kept as { wait: WaitRecord }).wait.id)).not.toHaveProperty("stillAllowed");
+  });
+
+  it("lets handed-on work set a new wait once its wait has ended, even before the ending is posted", async () => {
+    const h = harness();
+    const handed = () => h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" }, assignmentId: "a1" });
+    const first = await handed();
+    const id = (first as { wait: WaitRecord }).wait.id;
+    h.stamp = { size: 1, mtimeMs: 1 }; h.postOk = false; h.advance(5_000); await h.manager.tick();
+    expect(h.waitOf(id).ending).toMatchObject({ status: "fired" });
+    h.stamp = null;
+    expect(await handed()).toMatchObject({ state: "created", wait: { assignmentId: "a1" } });
+  });
+
   it("creates a wait with a 24-hour default and its first check due, and keeps it across a restart", async () => {
     const h = harness();
     const created = await h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" } });

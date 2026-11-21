@@ -20,10 +20,10 @@ describe("links to ModelGo's site", () => {
     expect(MODELGO_URL).toBe("https://modelgo.ai/?utm_source=openmausbot&utm_medium=sponsorship&utm_content=app&campaign_id=openmausbot&ad_group_id=app");
   });
 
-  it("is the only ModelGo address anywhere in src/ and shared/", () => {
-    const found = files("src", "shared").flatMap((file) => mentions(file).map((mention) => [file, mention]));
+  it("is the only ModelGo address anywhere in src/, shared/ and the phone protocol", () => {
+    const found = files("src", "shared", "packages/phone-protocol/src").flatMap((file) => mentions(file).map((mention) => [file, mention]));
     expect(found.filter(([, mention]) => mention !== MODELGO_URL)).toEqual([]);
-    expect(found.map(([file]) => file)).toEqual(["shared/modelgo.ts"]);
+    expect(found.map(([file]) => file)).toEqual(["packages/phone-protocol/src/modelgo.ts"]);
   });
 
   it("is the only link the driver and the secret card offer; the server otherwise names only the API base", () => {

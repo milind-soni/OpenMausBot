@@ -222,7 +222,7 @@ export function createRoutineChecks(deps: RoutineChecksDeps): RoutineChecks & {
     const held = new Set(Object.values(entry.pending ?? {}).flatMap((one) => [...one.mail, ...one.prep]));
     let wakeAt: number | undefined;
     const apps = checks.includes("calendar") || checks.includes("mail") ? await deps.reads.connected().catch(() => null) : null;
-    const session = deps.reads.session();
+    const session = deps.reads.session(routine.botId);
     report.session = session;
     const readable = (app: ReadApp): boolean => apps?.[app] === true && deps.mayRead(routine.botId, app) && !trouble.some((one) => one.app === app) &&
       (context.manual || !readsBackOff(entry, app));

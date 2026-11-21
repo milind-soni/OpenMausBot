@@ -135,7 +135,8 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
     t,
   });
   /** The chosen server as the move sees a Cloud: always ready, never ended once home is there, since nothing ends it; until
-   * then, a server forgotten in this app ends the move before anything runs there. */
+   * then, a server forgotten in this app ends the move before anything runs there. Once the move is done the bots' files
+   * stay there: this copy is never deleted, so a later pass must not send them again. */
   const target = () => {
     const picked = chosen();
     if (!picked) return null;
@@ -145,7 +146,13 @@ export function installOwnHome({ localRequest, fetch: fetchImpl, environments, h
   const home = createOneHome({
     journal,
     cloud: target,
-    send: { move: (options) => send.send({ reason: "move", final: options?.final === true }), check: () => send.check(), switches: () => send.switches(), snapshot: () => send.snapshot() },
+    send: {
+      move(options) {
+        const done = parseJournal(journal.read())?.phase === "done";
+        return send.send({ reason: "move", final: options?.final === true, ...(options?.files === false || done ? { files: false } : {}) });
+      },
+      check: () => send.check(), switches: () => send.switches(), snapshot: () => send.snapshot(),
+    },
     local: {
       ...local,
       freeze: async (origin) => freezeAnswer(await local.call("POST", "/api/move/freeze", { cloud: origin, place: chosen()?.name })),

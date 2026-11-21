@@ -95,4 +95,14 @@ describe("default skin", () => {
     const theme = renderToStaticMarkup(createElement(ThemeRow));
     expect([...theme.matchAll(/aria-checked="true"[^>]*>([^<]+)</g)].map(([, label]) => label)).toEqual(["System"]);
   });
+
+  it("reports the chosen skin in Settings as a checked radio, not a pressed button", async () => {
+    os.dark = true;
+    await boot();
+    const [{ SkinPicker }, { SettingsLook }] = await Promise.all([import("@/components/SkinPicker"), import("@/components/SettingsPrimitives")]);
+    const picker = renderToStaticMarkup(createElement(SettingsLook.Provider, { value: true }, createElement(SkinPicker)));
+    const radios = [...picker.matchAll(/<button[^>]*role="radio"[^>]*>/g)].map(([radio]) => radio);
+    expect(radios.filter((radio) => radio.includes('aria-checked="true"'))).toHaveLength(1);
+    expect(radios.filter((radio) => radio.includes("aria-pressed"))).toEqual([]);
+  });
 });

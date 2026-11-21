@@ -160,6 +160,7 @@ describe("VisibleSet", () => {
     expect(pathSubject("/api/bots/hr")).toEqual({ kind: "bot", id: "hr" });
     expect(pathSubject("/api/threads/t-hr/export")).toEqual({ kind: "thread", id: "t-hr" });
     expect(pathSubject("/api/groups/room-mixed/read")).toEqual({ kind: "group", id: "room-mixed" });
+    expect(pathSubject("/api/groups/order"), "the room order is not a room").toBeNull();
     expect(pathSubject("/api/routines/r1/run")).toEqual({ kind: "routine", id: "r1" });
     expect(pathSubject("/api/routines/wake")).toBeNull();
     expect(pathSubject("/api/routine-runs/run1/seen")).toEqual({ kind: "routine-run", id: "run1" });
@@ -233,6 +234,7 @@ describe("live frames for a member", () => {
     expect(frameForMember({ kind: "sections", sections: ["Ops", "People"] }, ctx, seen())).toEqual({ kind: "sections", sections: ["Ops"] });
     expect(frameForMember({ kind: "bot.queued", queues: { "t-pub": [1], "t-hr": [2] } }, ctx, seen())).toEqual({ kind: "bot.queued", queues: { "t-pub": [1] } });
     expect(frameForMember({ kind: "bots.order", botIds: ["hr", "pub", "corp"] }, ctx, seen())).toEqual({ kind: "bots.order", botIds: ["pub", "corp"] });
+    expect(frameForMember({ kind: "groups.order", groupIds: ["room-mixed", "room-pub"] }, ctx, seen())).toEqual({ kind: "groups.order", groupIds: ["room-pub"] });
     const config = { kind: "config", membership: {} };
     expect(frameForMember(config, ctx, seen())).toBe(config);
     expect(frameForMember({ kind: "bot", bot: { id: "corp", visibility: { people: ["@example.test"] } } }, ctx, seen()))

@@ -64,3 +64,43 @@ export function verifyFailure(error) {
   if (noEmailRoute(error)) return "browser";
   return "failed";
 }
+
+/** Why a new sign-in can't start now, or null: `busy` (a saved sign-in is being read or saved: a moment), `signed-in`,
+ * `saved` (a saved sign-in this computer can't read or remove, until it is cleared) or `connecting` (one in the browser). */
+export function signInBlock({ closed, restoring, issued, grant, cleanupNeeded, connecting = false }) {
+  if (closed || restoring || issued) return "busy";
+  if (grant) return "signed-in";
+  if (cleanupNeeded) return "saved";
+  return connecting ? "connecting" : null;
+}
+
+/** A saved sign-in that can't be read is never removed by itself (a keychain or keyring may only be locked or not up yet, a
+ * file only held for a moment): clearing it is offered only after RESET_AFTER_TRIES failed reads AND RESET_AFTER_MS, on every
+ * platform. A key that can never open it (Windows after a reinstall) is removed by itself already, so this is the rare rest. */
+export const RESET_AFTER_TRIES = 3, RESET_AFTER_MS = 2 * 60_000;
+export const resetOffered = ({ failures, since, now }) => failures >= RESET_AFTER_TRIES && now - since >= RESET_AFTER_MS;
+
+/** How long Clear waits for a read of the saved sign-in already under way (an unanswered keychain prompt, a keyring that
+ * hangs) before it clears anyway. */
+export const READ_WAIT_MS = 5_000;
+/** Resolves once `promise` settles, or after `ms`, whichever is first; never rejects. */
+export const settledWithin = (promise, ms) => new Promise((done) => {
+  const timer = setTimeout(done, ms); timer.unref?.();
+  Promise.resolve(promise).then(done, done).finally(() => clearTimeout(timer));
+});
+
+/** A request to the Admin that failed, for the log: its status (and whether the answer was the Admin's own), or the network
+ * error's code (a certificate, a name not found, a timeout). Never an address, an email or a token. */
+export function failureKind(error) {
+  if (Number.isSafeInteger(error?.status)) return `HTTP ${error.status}${error.opaque ? " (not the Admin's own answer)" : /^[a-z_]{1,40}$/.test(error.code ?? "") ? ` ${error.code}` : ""}`;
+  const named = [error?.cause?.code, error?.code, error?.cause?.name, error?.name].find(value => typeof value === "string" && /^[A-Za-z_]{1,60}$/.test(value));
+  return named ?? "error";
+}
+
+/** An answer's Retry-After in whole seconds (seconds or an HTTP date), or undefined. */
+export function retryAfterSeconds(headers, now = Date.now()) {
+  const value = headers?.get?.("retry-after")?.trim();
+  if (!value) return undefined;
+  const seconds = /^\d{1,7}$/.test(value) ? Number(value) : Math.ceil((Date.parse(value) - now) / 1000);
+  return Number.isFinite(seconds) ? Math.max(0, seconds) : undefined;
+}

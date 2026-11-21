@@ -36,6 +36,7 @@ describe.skipIf(!available)(`an attached file inside a real box (${available ? "
   it("is unreadable at its upload path, and readable but never writable at the path the engine is given", () => {
     mkdirSync(uploads, { recursive: true });
     mkdirSync(cwd, { recursive: true });
+    mkdirSync(join(dataDir, "workspaces", "bot-a"), { recursive: true });
     const upload = join(uploads, "5c1e0d2a.md");
     writeFileSync(upload, "quarterly notes\n");
     const tag = `<attached-file path="${upload}" name="notes.md" />`;

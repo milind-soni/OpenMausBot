@@ -153,7 +153,7 @@ No domain, no proxy, no open port. The server gets an address like `https://c-7f
 
 ```sh
 npx openmausbot setup          # once: choose AI access, connect, and choose a model
-npx openmausbot login          # once: an emailed code signs this machine in and reserves its address
+npx openmausbot account login          # once: an emailed code signs this machine in and reserves its address
 npx openmausbot serve --tunnel # runs the server there and prints the pairing link with a QR code
 ```
 
@@ -163,7 +163,7 @@ chat-only connection. More engines can be added later. See [CLI setup](cli-onboa
 
 `login` asks for your email, sends an 8-digit code, and prints the address it reserved for this machine. `serve --tunnel` downloads `cloudflared` on the first run (a pinned version with a verified digest, into `~/.openmausbot`), starts the server, connects the tunnel, and after a few seconds prints `tunnel: live at https://…`. Leave it running; see "Keep it running" for a service.
 
-The account credentials live in `~/.openmausbot/tunnel-account.json`, readable only by your user. `npx openmausbot logout` releases the address.
+The account credentials live in `~/.openmausbot/tunnel-account.json`, readable only by your user. `npx openmausbot account logout` releases the address.
 
 Skip to "Install and sign the engines in".
 
@@ -292,7 +292,7 @@ Every paired device is a session:
 ```sh
 npx openmausbot devices               # id, device, scope, last seen, expires
 npx openmausbot devices revoke ID     # signs that device out and closes its stream at once
-npx openmausbot status                # the address others use, and whether it answers as this server
+npx openmausbot account status                # the address others use, and whether it answers as this server
 ```
 
 ## Keep it running
@@ -349,6 +349,115 @@ compares your server with the stable version. To hear of every release as soon
 as it is published instead, set `OMB_UPDATE_CHANNEL=newest` in the server's
 environment.
 
+### From the app: Update server
+
+On a Docker install, the server's admins can update it from **Settings →
+Updates → Update server**, in the desktop app or a browser. It runs the
+`update.sh` described below: the stable version, a copy of the data first, and
+the old version and its data back when the new one is not healthy. The app asks
+first (the server restarts, so anything running stops, and it says how many
+chats have a bot answering), shows "Updating the server…" while the server is
+away, reconnects by itself, then says which version it runs now, or that it
+went back and why. After 15 minutes without the server it says so, with the
+commands to see its log and to go back. In the desktop app, once the server is
+newer than the app, the same row offers the app's own update. With
+`OMB_UPDATE_CHANNEL=newest` the app shows the command instead, because
+`update.sh` takes the stable version. A server on a build of main (the `latest`
+image, which a checkout runs when `.env` names no `OMB_IMAGE`) gets no button:
+the app says so, with `sudo ./update.sh`, which moves it to the stable version
+once that is newer than the build.
+
+The installer sets this up, and every run of the installer refreshes it. In a
+checkout of this repository, add it from `OpenMausBot/deploy` (it needs
+systemd, and restarts the server once), and run the same command again after
+each `git pull`: until you do, the button runs nothing and the app shows this
+command.
+
+```sh
+git pull && sudo ./update-runner.sh --install
+```
+
+That places `/usr/local/sbin/openmausbot-update-runner`, the systemd units
+`openmausbot-update.path` and `openmausbot-update.service`, and root's folder
+`/var/lib/openmausbot-update`: root's own copy of `update.sh`, which is what
+the button runs, `request`, which the server's container writes, and `status`,
+which it reads and cannot write. One install per server: a second folder is
+refused until `--remove` on the first, and `--remove` for any other folder
+removes nothing. A checkout gets
+`docker-compose.override.yml` to mount the two (an override of your own, or a
+link, is left alone, and the script says what to add). `sudo
+./update-runner.sh --remove` takes it all away.
+
+**A checkout's owner decides what root runs.** The button's update runs as
+root, but in your checkout: its Compose files and `.env` decide what `docker
+compose up` starts. So whoever owns that folder can change what root runs
+when the app asks for an update. `--install` accepts a folder owned by root or
+by someone in the `docker` group (who can run anything as root through Docker
+already), and anyone else only with `--trust-folder-owner`. The folder, and
+every folder above it, may be changed by root and that owner only: not by
+everyone (unless it has its sticky bit, as `/tmp` does), and not by a group
+other than root's or the owner's own private group (the one Ubuntu and Fedora
+give each user, which their default umask makes new folders writable by). The
+runner checks all this again at every run, and runs nothing when it no longer
+holds; the refusal names the folder, its owner, group and mode, and the app
+shows it with the `--install` command. A fresh server installed with the
+installer passes as it is. On an update the
+app asked for, `update.sh` writes nothing through a link there (`.update`,
+`.env`, the Compose files and its temporary files), nor into a `.update` that
+belongs to anyone but you or the folder's owner; your own run of
+`./update.sh` uses links there as before.
+
+**Who can ask.** Only an admin's own signed-in session sees and presses the
+button; members never see it, and Clouds that MausBot runs never show it. The
+request itself is a file in a folder of the server's user, and until the bots'
+sandbox is on for self-hosted servers, bots run as that user: anything running
+on the server as that user, a bot or a prompt injection included, can leave the
+same file. So the runner treats whoever asks as hostile. What any number of
+requests can cause:
+
+- For each stable image that is out, at most one update: the server stops, its
+  data is copied, the new version starts, and if it is not healthy the old
+  version and the copy come back. That stable image is then not tried again
+  from the app on this server until you run `./update.sh` yourself or another
+  stable image is out. So a compromised server can keep one stable release from
+  being tried from the app, by making it fail on purpose; whoever presses the
+  button is told, with the command to try it by hand. It is taken only when
+  the running image's own label is
+  not newer (never by the version the server says it runs; when the two
+  disagree nothing changes); a stable image that names the same version as the
+  running one under a new digest (a re-published image) is taken too.
+- At most three copies of the data: the two newest that updates from the app
+  made, and the last one your own run of `./update.sh` made, which an update
+  from the app never removes. While the next copy is made and checked, that is
+  about three times the data plus the new copy; `update.sh` refuses to start
+  when the disk has no room for it, and the app then says so, with the commands
+  to list and remove old copies (below).
+- Updates that stop the server at most once every four minutes. A run with
+  nothing to do stops nothing and does not count, and for five minutes the
+  same answer is given without asking GitHub or the registry again (when the
+  server's own check knows of a newer version, only GitHub is asked whether
+  the stable image changed); any two runs are at least 30 seconds apart. A run during which the server restarts
+  by itself counts as one that stopped it, so it can delay an admin's press by
+  up to four minutes.
+- Nothing while `/etc/mausbot/policy.json` holds updates
+  (`"updates": "hold"`).
+
+It cannot choose a version, image, URL, flag or path, cannot downgrade or roll
+back (an update an earlier run left unfinished waits for you at a terminal), and
+cannot write the runner's status, `update.sh`, `.env` or the Compose files. So
+the most it can cause is one stop, copy and restart (and rollback, when the
+version fails here) per stable release, which the admins would have pressed for
+anyway.
+
+**Copies of the data.** An update asked for from the app keeps your own last
+copy and its own two newest ones. A run of `./update.sh` at a terminal removes all
+but its own once that one has been checked, as above. To see them:
+`docker volume ls --filter label=com.mausbot.role=update-backup`; to remove one
+yourself: `docker volume rm <name>`.
+
+Without the runner (no systemd, an npm install, Podman) the app shows the
+command to run on the server instead.
+
 ### Path B (Docker): one command, with a way back
 
 From `OpenMausBot/deploy`:
@@ -401,6 +510,11 @@ every file's owner and mode either way. The script then:
    before (the server's own count of ready engines, `GET /api/health/engines`,
    which a hardened server answers too; `openmausbot doctor` on a version
    without it), and Caddy runs again.
+   If it does not, the new version's doctor runs on the data
+   (`openmausbot doctor --data --fix`: in the server's container while it is up,
+   else in a one-off one with the server stopped). When the doctor repaired
+   something, the new version is started once more and step 4 is tried again.
+   [What the doctor checks and repairs](self-hosting.md#the-doctor-checking-and-repairing-the-data).
 5. If any of that fails: puts back the data from the copy, `.env` and the old
    image, starts the old version, and tells you what went wrong. Your server
    is as it was before step 1, `.env` included, byte for byte. Only when `.env`
@@ -594,17 +708,17 @@ Read this before putting anything else in front of the server.
 
 - The server only ever listens on loopback (`127.0.0.1:8799`). Never publish that port yourself. The tunnel, Caddy and Tailscale each reach it from the same machine; path B's Caddy, in its own container, reaches it over a Unix socket (`OMB_TUNNEL_SOCKET`), and a request on that socket always counts as a remote one.
 - A request that arrives through a proxy or the tunnel is treated as remote and needs a session, whatever headers it carries. A proxy of your own (nginx, Traefik, Cloudflare Tunnel) must forward the real `Host` and add `X-Forwarded-For` and `X-Forwarded-Proto`, must not buffer the event stream, and must **not** rewrite `Host` to `127.0.0.1`.
-- Pairing is the login. Want a second wall in front of it? Path B's `Caddyfile` has a commented `basic_auth` block for a shared password.
+- Pairing is the login. Caddy adds no password: a `basic_auth` block would need variables neither Compose file passes to Caddy, the installer rewrites its `Caddyfile` on every run, and a password at Caddy would also refuse clients that send their own `Authorization` header. For a second wall, use path C or a firewall.
 - The session cookie is marked `Secure`; do not serve this over plain HTTP on the public internet.
 - The one thing a stranger can read is `/.well-known/openmausbot/environment` (the server's id, label, version, capabilities) and `/api/health` (only the app name). Everything else answers "pair this device".
 
 ## Troubleshooting
 
-**`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot login` on this machine first; the credentials are per machine.
+**`serve --tunnel` says "no account on this machine yet".** Run `npx openmausbot account login` on this machine first; the credentials are per machine.
 
 **The server does not start and says its data "was written by a newer OpenMausBot".** An older version was started on data a newer one had already changed, which happens when a version is put back without its data. Nothing was changed. Install the version the message names (or a newer one), or put back the copy of the data from before that update.
 
-**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot logout && npx openmausbot login` issues a fresh address.
+**The tunnel stays on "retrying".** The server is running and usable locally; the public hop is not verified yet. Wait a minute (Cloudflare needs a moment on a fresh address), then check `journalctl`/the terminal for the reason. If it never comes up, `npx openmausbot account logout && npx openmausbot account login` issues a fresh address.
 
 **Path B: the page never loads or shows a certificate error.** Caddy could not get a certificate. Check that the name resolves to the server and that ports 80 and 443 are open; `docker compose logs caddy` shows the reason.
 
@@ -616,7 +730,7 @@ Read this before putting anything else in front of the server.
 
 **A bot says the engine is not signed in.** Sign that engine in again on the server.
 
-**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx openmausbot status` prints the same on the server.
+**What does the server think it is?** `https://<address>/.well-known/openmausbot/environment` is public and shows its id, label, version and capabilities; `npx openmausbot account status` prints the same on the server.
 
 **Something else.** `journalctl -u openmausbot --since -10m` (or `docker compose logs omb --tail 100`) shows the server's startup lines. Paste them with your question in the community channel.
 

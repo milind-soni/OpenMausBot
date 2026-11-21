@@ -9,6 +9,8 @@ export const GROUP_GOAL_WAIT_MAX_MS = Math.max(1_000, Number(process.env.OMB_GOA
 const GROUP_GOAL_MAX_WAIT_EXHAUSTIONS = 3;
 export const GROUP_GOAL_CONTROL_OPEN = "<openmaus-goal>";
 export const GROUP_GOAL_CONTROL_CLOSE = "</openmaus-goal>";
+/** A close tag the model sometimes escapes; it ends an envelope exactly like the plain one. */
+const ESCAPED_GOAL_CONTROL_CLOSE = "<\\/openmaus-goal>";
 
 export type GroupGoalDecision =
   | { status: "continue"; next: string; instruction: string; detail?: string }
@@ -40,49 +42,130 @@ const bounded = (value: unknown, max: number): string =>
 export function visibleCoordinatorText(text: string): string {
   let visible = text;
   for (;;) {
-    const closeAt = visible.indexOf(GROUP_GOAL_CONTROL_CLOSE);
+    // An envelope ends at the earliest plain or escaped close tag, so an escaped
+    // envelope is stripped exactly like a plain one and any visible text after it is kept.
+    let closeAt = -1;
+    let closeLen = 0;
+    for (const close of [GROUP_GOAL_CONTROL_CLOSE, ESCAPED_GOAL_CONTROL_CLOSE]) {
+      const at = visible.indexOf(close);
+      if (at >= 0 && (closeAt < 0 || at < closeAt)) {
+        closeAt = at;
+        closeLen = close.length;
+      }
+    }
     if (closeAt < 0) break;
     const openAt = visible.lastIndexOf(GROUP_GOAL_CONTROL_OPEN, closeAt);
     if (openAt < 0) {
-      visible = `${visible.slice(0, closeAt)}${visible.slice(closeAt + GROUP_GOAL_CONTROL_CLOSE.length)}`;
+      visible = `${visible.slice(0, closeAt)}${visible.slice(closeAt + closeLen)}`;
       continue;
     }
-    visible = `${visible.slice(0, openAt)}${visible.slice(closeAt + GROUP_GOAL_CONTROL_CLOSE.length)}`;
+    visible = `${visible.slice(0, openAt)}${visible.slice(closeAt + closeLen)}`;
   }
   // Never expose a half-written control marker or JSON fragment.
   const danglingOpen = visible.indexOf(GROUP_GOAL_CONTROL_OPEN);
   if (danglingOpen >= 0) visible = visible.slice(0, danglingOpen);
-  return visible.replaceAll(GROUP_GOAL_CONTROL_CLOSE, "").trim();
+  return visible.replaceAll(GROUP_GOAL_CONTROL_CLOSE, "").replaceAll(ESCAPED_GOAL_CONTROL_CLOSE, "").trim();
+}
+
+/** The first balanced {...} object at the start of s (after whitespace), or null if none is complete. */
+function leadingJsonObject(s: string): string | null {
+  let i = 0;
+  while (i < s.length && /\s/.test(s[i] as string)) i++;
+  if (s[i] !== "{") return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let k = i; k < s.length; k++) {
+    const c = s[k] as string;
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (c === "\\") escaped = true;
+      else if (c === "\"") inString = false;
+    } else if (c === "\"") inString = true;
+    else if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) return s.slice(i, k + 1);
+    }
+  }
+  return null;
+}
+
+/** Validate one decision object against the goal protocol; null when it is not a usable decision. */
+function parseDecisionPayload(payload: string): GroupGoalDecision | null {
+  const object = leadingJsonObject(payload);
+  if (!object) return null;
+  let raw: Record<string, unknown>;
+  try {
+    raw = JSON.parse(object) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  // Only minor prose may follow the first decision object. A second decision object or a
+  // control marker means the reply contradicts itself (a correction that cancels the first),
+  // so reject rather than silently take the first object.
+  const rest = payload.slice(object.length);
+  if (
+    rest.includes(GROUP_GOAL_CONTROL_OPEN) ||
+    rest.includes(GROUP_GOAL_CONTROL_CLOSE) ||
+    rest.includes(ESCAPED_GOAL_CONTROL_CLOSE) ||
+    rest.includes("{")
+  ) {
+    return null;
+  }
+  const status = raw.status;
+  const detail = bounded(raw.detail, 500);
+  if (status === "continue") {
+    const next = bounded(raw.next, 100);
+    const instruction = bounded(raw.instruction, 2_000);
+    if (!next || !instruction) return null;
+    return { status, next, instruction, ...(detail ? { detail } : {}) };
+  }
+  if (status === "completed" || status === "needs-input" || status === "blocked") {
+    if (!detail) return null;
+    return { status, detail };
+  }
+  return null;
+}
+
+/** True when the open tag at index sits at the start of its line (only whitespace precedes it). */
+function isAtLineStart(text: string, index: number): boolean {
+  for (let i = index - 1; i >= 0; i--) {
+    const c = text[i] as string;
+    if (c === "\n" || c === "\r") return true;
+    if (!/\s/.test(c)) return false;
+  }
+  return true;
 }
 
 /** The last complete envelope wins, so a quoted example earlier in the reply cannot steer the run. */
 export function parseGroupGoalDecision(text: string): ParsedGroupGoalDecision {
-  const closeAt = text.lastIndexOf(GROUP_GOAL_CONTROL_CLOSE);
-  const openAt = closeAt < 0 ? -1 : text.lastIndexOf(GROUP_GOAL_CONTROL_OPEN, closeAt);
-  if (openAt < 0 || closeAt < 0) return { visibleText: visibleCoordinatorText(text), decision: null };
-
   const visibleText = visibleCoordinatorText(text);
-  const payload = text.slice(openAt + GROUP_GOAL_CONTROL_OPEN.length, closeAt).trim();
-  try {
-    const raw = JSON.parse(payload) as Record<string, unknown>;
-    const status = raw.status;
-    const detail = bounded(raw.detail, 500);
-    if (status === "continue") {
-      const next = bounded(raw.next, 100);
-      const instruction = bounded(raw.instruction, 2_000);
-      if (!next || !instruction) return { visibleText, decision: null };
-      return {
-        visibleText,
-        decision: { status, next, instruction, ...(detail ? { detail } : {}) },
-      };
-    }
-    if (status === "completed" || status === "needs-input" || status === "blocked") {
-      if (!detail) return { visibleText, decision: null };
-      return { visibleText, decision: { status, detail } };
-    }
-  } catch {
+  const fail = (): ParsedGroupGoalDecision => ({ visibleText, decision: null });
+
+  // An envelope ends at the later of the plain or escaped close tag.
+  const closeAt = Math.max(
+    text.lastIndexOf(GROUP_GOAL_CONTROL_CLOSE),
+    text.lastIndexOf(ESCAPED_GOAL_CONTROL_CLOSE),
+  );
+  const openAt = closeAt < 0 ? -1 : text.lastIndexOf(GROUP_GOAL_CONTROL_OPEN, closeAt);
+  if (openAt >= 0 && closeAt > openAt) {
+    const payload = text.slice(openAt + GROUP_GOAL_CONTROL_OPEN.length, closeAt);
+    const decision = parseDecisionPayload(payload);
+    if (decision) return { visibleText, decision };
   }
-  return { visibleText, decision: null };
+
+  // Truncation recovery: the close tag never arrived (EOF), or the chosen envelope carried
+  // trailing prose. Recover only from a single unambiguous open tag on its own line whose
+  // following text is exactly one complete, valid decision object, so a quoted example
+  // (an open tag preceded by prose on the same line) or a second envelope cannot steer
+  // the run.
+  const open = text.lastIndexOf(GROUP_GOAL_CONTROL_OPEN);
+  if (open >= 0 && open === text.indexOf(GROUP_GOAL_CONTROL_OPEN) && isAtLineStart(text, open)) {
+    const decision = parseDecisionPayload(text.slice(open + GROUP_GOAL_CONTROL_OPEN.length));
+    if (decision) return { visibleText, decision };
+  }
+  return fail();
 }
 
 /** A goal run never recruits somebody outside the room. */

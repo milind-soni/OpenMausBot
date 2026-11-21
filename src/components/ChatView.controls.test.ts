@@ -2,7 +2,6 @@ import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
-import type { ApprovalModeSelector } from "./ApprovalModeSelector";
 import type { ModelPicker } from "./ModelPicker";
 import { CODEX_USAGE_LIMIT_REACHED, CODEX_USAGE_URL } from "../../shared/codex-usage-limit";
 import { failedTurnTool } from "../../shared/failed-turn";
@@ -12,9 +11,10 @@ import { en } from "@/locales";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
-    approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
+  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: MenuRow[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  };
 });
+type MenuRow = { key: string; disabled?: boolean; heading?: string; active?: boolean; note?: string; submenu?: MenuRow[]; onSelect?: () => void };
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({
@@ -51,10 +51,6 @@ vi.mock("./ModelPicker", () => ({ ModelPicker: (props: ComponentProps<typeof Mod
   fixture.model = props;
   return createElement("span", { "data-test-model-control": true });
 } }));
-vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: (props: ComponentProps<typeof ApprovalModeSelector>) => {
-  fixture.approval = props;
-  return createElement("span", { "data-test-approval-control": true });
-} }));
 
 const { ChatView, ErrorRow, FailedTurnRow } = await import("./ChatView");
 const { claudeUpdateTarget } = await import("@/lib/failed-turn");
@@ -85,7 +81,7 @@ describe("the header's right side", () => {
       expect(controls).toContain("data-test-model-control");
       expect(fixture.model).toMatchObject({ threadId: "selected" });
       const computer = controls.match(/<button[^>]*data-tour="computer"[^>]*>/)?.[0] ?? "";
-      expect(computer.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "size-8"]));
+      expect(computer.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "size-9", "shadow-(--shadow-float)"]));
       expect(markup).not.toContain('data-testid="chat-more"');
       expect(fixture.menus.find((menu) => menu.ariaLabel === "More")).toBeUndefined();
       expect(markup).toContain("data-chathead-pill");
@@ -105,14 +101,14 @@ describe("the header's right side", () => {
       expect(markup).toContain('data-tour="computer"');
       expect(markup).toContain('data-testid="chat-more"');
       const more = fixture.menus.find((menu) => menu.ariaLabel === "More")!;
-      expect(more.items.map((item) => item.key)).toEqual(["find", "new-thread", "start-fresh", "copy", "download"]);
+      expect(more.items.map((item) => item.key)).toEqual(["find", "new-thread", "start-fresh", "as-template", "copy", "download"]);
     } finally {
       delete window.ogb;
       fixture.advanced = true;
     }
   });
 
-  it("moves Stop out of the Simple header into the composer's round button while a turn runs", () => {
+  it("moves Stop out of the Simple header into the composer's round button while a turn runs, Call beside it", () => {
     fixture.advanced = false;
     try {
       const busy = { ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) };
@@ -120,7 +116,7 @@ describe("the header's right side", () => {
       expect(controls).not.toContain("Stop this turn");
       const stop = markup.match(/<button[^>]*data-composer-stop="slot"[^>]*>/)?.[0] ?? "";
       expect(stop).toContain('aria-label="Stop this turn"');
-      expect(markup).not.toContain('data-call-button="composer"');
+      expect(markup).toContain('data-call-button="composer"');
       expect(header({ ...busy, waitingForTeammates: true, busy: false, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: false, waitingForTeammates: true })) }).markup)
         .toContain('data-composer-stop="slot"');
     } finally {
@@ -140,7 +136,7 @@ describe("the header's right side", () => {
     expect(markup).toContain('data-tour="computer"');
     expect(markup).toContain('data-testid="chat-more"');
     const more = fixture.menus.find((menu) => menu.ariaLabel === "More")!;
-    expect(more.items.map((item) => item.key)).toEqual(["find", "start-fresh", "copy", "download", "activity", "inspector"]);
+    expect(more.items.map((item) => item.key)).toEqual(["find", "start-fresh", "as-template", "copy", "download", "activity", "inspector"]);
     const inspector = more.items.find((item) => item.key === "inspector")!;
     expect(inspector.disabled).toBeFalsy();
     expect(inspector.heading).toBeUndefined();
@@ -158,7 +154,7 @@ describe("the Simple header", () => {
       expect(identity.replace(pill[0], "").replace(/<span role="status"[^>]*>[^<]*<\/span>/, "")).not.toMatch(/<(button|a|span)[\s>]/);
       expect(pill[1]).toContain(">Pepper</span>");
       expect(pill[1]).toContain('data-chathead-elsewhere="true"');
-      expect(pill[0].match(/class="([^"]*)"/)![1]!.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-composer", "ring-[0.5px]", "py-[7.5px]", "pr-[13.5px]"]));
+      expect(pill[0].match(/class="([^"]*)"/)![1]!.split(" ")).toEqual(expect.arrayContaining(["rounded-full", "bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)", "py-[7.5px]", "pr-[13.5px]"]));
       // Away from the bot's main conversation, the pill names the one on screen.
       expect(pill[1]).toContain("data-chathead-conversation");
       for (const gone of ["data-chathead-role", "data-background-activity", "data-chathead-back", 'data-testid="chat-more"']) {
@@ -339,6 +335,10 @@ describe("glass header", () => {
   });
 });
 
+/** The approval levels in the composer's + menu, from the newest render. */
+const levelRows = () => fixture.menus.findLast((menu) => menu.ariaLabel === "Add")!.items.find((row) => row.key === "approval")!.submenu!;
+const pickLevel = (mode: string) => levelRows().find((row) => row.key === `approval:${mode}`)!.onSelect!();
+
 describe("thread control placement", () => {
   it.each([true, false])("leaves All threads out of the header in both modes (advanced: %s)", (advanced) => {
     fixture.advanced = advanced;
@@ -360,15 +360,13 @@ describe("thread control placement", () => {
     fixture.advanced = true;
   });
 
-  it("keeps the editor and its controls on one line, wrapping only in a narrow composer", () => {
+  it("gives the editor its own line above the composer's footer of controls", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup).toContain("@container/composer");
     const row = /data-composer-row="[^"]*" class="([^"]*)"/.exec(markup)!.at(1)!.split(" ");
-    expect(row).toContain("@max-[30rem]/composer:flex-wrap");
-    expect(row).not.toContain("flex-wrap");
+    expect(row).toContain("flex-wrap");
     const editor = /class="mention-editor ([^"]*)"/.exec(markup)!.at(1)!.split(" ");
-    expect(editor).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "@max-[30rem]/composer:order-first", "@max-[30rem]/composer:basis-full"]));
-    expect(editor).not.toContain("basis-full");
+    expect(editor).toEqual(expect.arrayContaining(["min-w-0", "flex-1", "basis-full"]));
     const textarea = /<textarea[^>]*class="([^"]*)"/.exec(markup)!.at(1)!.split(" ");
     expect(textarea).toContain("min-h-6");
     expect(textarea).not.toContain("min-h-14");
@@ -385,8 +383,7 @@ describe("thread control placement", () => {
     window.ogb = { approvals: { setMode: vi.fn() } } as unknown as NonNullable<Window["ogb"]>;
     expect(renderToStaticMarkup(createElement(ChatView, { bot: fullBot }))).not.toContain("Use bot’s Full access for this thread");
     renderToStaticMarkup(createElement(ChatView, { bot }));
-    expect(fixture.approval?.trustedModesAvailable).toBe(true);
-    fixture.approval!.onSelect("custom");
+    pickLevel("custom");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "custom" } });
     delete window.ogb;
   });
@@ -396,16 +393,12 @@ describe("thread control placement", () => {
       if (bridge) window.ogb = { approvals: { setMode: vi.fn() } } as unknown as NonNullable<Window["ogb"]>;
       fixture.dispatch.mockClear();
       const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
-      expect(fixture.approval?.trustedModesAvailable).toBe(bridge);
-      fixture.approval!.onSelect("full");
+      expect(levelRows().some((row) => row.key === "approval:custom")).toBe(bridge);
+      pickLevel("full");
       expect(fixture.dispatch).toHaveBeenCalledExactlyOnceWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "full" } });
       expect(markup).not.toContain('role="alertdialog"');
       delete window.ogb;
     }
-    fixture.dispatch.mockClear();
-    renderToStaticMarkup(createElement(ChatView, { bot }));
-    fixture.approval!.onSelect("custom");
-    expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
   it("explains provider safety errors without offering an ineffective Retry", () => {
@@ -653,24 +646,37 @@ describe("thread control placement", () => {
     expect(badge[2].split(" ")).toContain("@max-4xl/chathead:sr-only");
   });
 
-  it("keeps the selected thread's model in the header and permissions inside the composer pill", () => {
+  it("shows the selected thread's model and its level under the composer's field in Advanced", () => {
+    fixture.menus = [];
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     expect(markup.match(/data-test-model-control/g)).toHaveLength(1);
-    expect(markup.indexOf("data-test-model-control")).toBeLessThan(markup.indexOf('role="log"'));
-    expect(markup.indexOf('data-tour="composer"')).toBeGreaterThan(-1);
-    expect(markup.indexOf("data-test-approval-control")).toBeGreaterThan(markup.indexOf('data-tour="composer"'));
-    expect(markup.indexOf("data-test-approval-control")).toBeLessThan(markup.indexOf("<textarea"));
+    expect(markup.indexOf("data-test-model-control")).toBeGreaterThan(markup.indexOf("<textarea"));
+    expect(markup.slice(markup.indexOf("data-chathead-controls"), markup.indexOf('role="log"'))).not.toContain("data-test-model-control");
     expect(markup).not.toContain('aria-label="Thread settings"');
-    expect(fixture.model).toMatchObject({ threadId: "selected", bot: { busy: false, modelSelection: { model: "thread-model" } } });
-    expect(fixture.approval).toMatchObject({ approvalMode: "ask", busy: false, trustedModesAvailable: false });
-    fixture.approval!.onSelect("auto");
+    expect(fixture.model).toMatchObject({ threadId: "selected", quiet: true, bot: { busy: false, modelSelection: { model: "thread-model" } } });
+    expect(levelRows().find((row) => row.key === "approval:ask")?.active).toBe(true);
+    pickLevel("auto");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "auto" } });
   });
 
+  it("keeps the model in Simple mode's header", () => {
+    fixture.advanced = false;
+    try {
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
+      expect(markup.match(/data-test-model-control/g)).toHaveLength(1);
+      expect(markup.indexOf("data-test-model-control")).toBeLessThan(markup.indexOf('role="log"'));
+      expect(fixture.model?.quiet).toBeUndefined();
+    } finally {
+      fixture.advanced = true;
+    }
+  });
+
   it("changes a working thread's level from the composer, saying the bot is working", () => {
+    fixture.menus = [];
     renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: true, tasks: (bot.tasks ?? []).map((task) => ({ ...task, busy: true })) } }));
-    expect(fixture.approval).toMatchObject({ approvalMode: "ask", busy: true });
-    fixture.approval!.onSelect("full");
+    const level = fixture.menus.findLast((menu) => menu.ariaLabel === "Add")!.items.find((row) => row.key === "approval")!;
+    expect(level.note).toBe(en["approvalMode.whileWorking"]);
+    pickLevel("full");
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "updateTask", botId: "bot", threadId: "selected", patch: { approvalMode: "full" } });
   });
 
@@ -678,10 +684,11 @@ describe("thread control placement", () => {
     window.ogb = { remoteClient: { active: true } } as NonNullable<Window["ogb"]>;
     try {
       fixture.model = null;
+      fixture.menus = [];
       const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
       expect(markup).toContain("data-test-model-control");
       expect(fixture.model).toMatchObject({ bot: { id: "bot" }, threadId: "selected" });
-      expect(markup).not.toContain("data-test-approval-control");
+      expect(fixture.menus.findLast((menu) => menu.ariaLabel === "Add")!.items.map((row) => row.key)).not.toContain("approval");
     } finally {
       delete window.ogb;
     }
@@ -689,10 +696,13 @@ describe("thread control placement", () => {
 
   it.each([true, false])("pins a place per conversation from the composer only in Advanced (advanced: %s)", (advanced) => {
     fixture.advanced = advanced;
+    fixture.menus = [];
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
-    const pill = markup.slice(markup.indexOf('data-tour="composer"'), markup.indexOf("<textarea"));
-    expect(pill.match(/data-testid="place-chip"/g) ?? []).toHaveLength(advanced ? 1 : 0);
-    expect(markup.includes("Where this conversation works")).toBe(advanced);
+    const plus = fixture.menus.findLast((menu) => menu.ariaLabel === "Add");
+    expect(plus?.items.some((row) => row.key === "place") ?? false).toBe(advanced);
+    expect(markup).not.toContain('data-testid="place-chip"');
+    const pinned = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, tasks: (bot.tasks ?? []).map((task) => ({ ...task, surface: "browser" as const })) } }));
+    expect(pinned.match(/data-testid="place-chip"/g) ?? []).toHaveLength(advanced ? 1 : 0);
     fixture.advanced = true;
   });
 });

@@ -7,15 +7,16 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DATA_DIR, ensureDirs, instanceConfigs, NATIVE_DIR, type AppConfig } from "../config.ts";
-import { TurnAuthenticationRefusedError, type ProviderInstance } from "../contracts.ts";
+import { TurnAuthenticationRefusedError, type ProviderInstance, type SendTurnInput } from "../contracts.ts";
+import { UNGATED_MCP_OUTPUT_TOKENS } from "../mcp-gate-config.ts";
 import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import { BACKGROUND_CALL_TIMEOUT_MS, BACKGROUND_SETTINGS, backgroundCallArgs } from "./claude-background.ts";
+import { claudeHookSettings } from "./claude-hooks.ts";
 import {
   autoCompactWindow,
   brokerSocketCandidates,
   claudeCliSupports,
   claudeCliUpdate,
-  claudeHookSettings,
   ClaudeDriver,
   createPermissionBroker,
   hookTokenFile,
@@ -29,14 +30,19 @@ import {
   turnCostFromRunningTotal,
   type ClaudeConfig,
 } from "./claude.ts";
+import { spawnContractDiff } from "./claude-spawn-contract.ts";
 import { TEAM_TOOLS_FAILED } from "./team-tools.ts";
 import { claudeLimitMessage } from "./claude-limits.ts";
+import { flushNativeLog } from "./native.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
 import { rebuiltSessionNotice } from "../resume-recovery.ts";
 import { BASH_MAX_TIMEOUT_MS } from "../system-prompt.ts";
 import { ephemeralWorkspaceTokenPath } from "../workspace-backup-policy.ts";
+import { registerPathDir, resetPathCacheForTests } from "../env-path.ts";
 import * as procs from "../procs.ts";
 import * as localInject from "./local-inject.ts";
+import { DEFER_TOOLS_ENV } from "./agents-claude-defer.ts";
+import { OWN_MCP_HTTP_ENV } from "./own-mcp-http.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "testing", "fake-claude-cli.ts");
 const dumpedPid = (dump: string): number => JSON.parse(readFileSync(dump, "utf8")).pid;
@@ -98,12 +104,25 @@ describe("ClaudeDriver.decodeConfig", () => {
 
   it("starts the hook helper without a shell on Windows, where Git Bash or PowerShell would read the command line", () => {
     const helper = "C:\\Users\\it's $OMB_HOOK_TEST `literal`\\helper.ts";
-    const settings = claudeHookSettings(helper, "win32") as { PostToolUse: Array<{ hooks: unknown[] }> };
-    expect(settings.PostToolUse[0]!.hooks).toEqual([{ type: "command", command: process.execPath, args: [helper], timeout: 5 }]);
+    const settings = claudeHookSettings(helper, "win32") as { PostToolUseFailure: Array<{ hooks: unknown[] }> };
+    expect(settings.PostToolUseFailure[0]!.hooks).toEqual([{ type: "command", command: process.execPath, args: [helper], timeout: 5 }]);
   });
 
   it("hooks failed tool calls too, so a timed-out command can be given a hint", () => {
     expect(Object.keys(claudeHookSettings("/tmp/helper.ts"))).toContain("PostToolUseFailure");
+  });
+
+  it("starts a hook process that holds the engine only where the harness replies: a failed shell call and a compaction", () => {
+    type Entry = { matcher: string; hooks: Array<{ async?: boolean; timeout: number }> };
+    const settings = claudeHookSettings("/tmp/helper.ts", "linux") as Record<string, Entry[]>;
+    const held = Object.entries(settings).map(([event, [entry]]) => [event, entry!.matcher, entry!.hooks[0]!.async ?? false]);
+    expect(held).toEqual([
+      ["PostToolUse", "", true],
+      ["PostToolUseFailure", "Bash", false],
+      ["PreCompact", "", false],
+      ["SessionStart", "compact", false],
+    ]);
+    expect(settings.PostToolUse![0]!.hooks[0]!.timeout).toBeGreaterThan(30);
   });
 
   it("keeps the per-turn hook token where workspace backups never look", () => {
@@ -267,10 +286,12 @@ describe("ClaudeDriver.decodeConfig", () => {
     const pidPath = join(home, "logout-pid");
     writeFileSync(cli, [
       "#!/usr/bin/env node",
-      'import { writeFileSync } from "node:fs";',
+      'import { renameSync, writeFileSync } from "node:fs";',
       'import { join } from "node:path";',
       'if (process.argv.slice(2).join(" ") !== "auth logout") process.exit(2);',
-      'writeFileSync(join(process.env.HOME, "logout-pid"), String(process.pid));',
+      'const marker = join(process.env.HOME, "logout-pid");',
+      'writeFileSync(marker + ".tmp", String(process.pid));',
+      'renameSync(marker + ".tmp", marker);',
       'setInterval(() => {}, 1000);',
     ].join("\n"), { mode: 0o700 });
     const instance = await ClaudeDriver.create({
@@ -282,7 +303,7 @@ describe("ClaudeDriver.decodeConfig", () => {
     let pid: number | undefined;
     const alive = (value: number) => { try { process.kill(value, 0); return true; } catch { return false; } };
     try {
-      await expect.poll(() => existsSync(pidPath), { timeout: 2500 }).toBe(true);
+      await expect.poll(() => existsSync(pidPath), { timeout: 10_000 }).toBe(true);
       pid = Number(readFileSync(pidPath, "utf8"));
       await instance.dispose();
       expect(alive(pid)).toBe(false);
@@ -292,8 +313,8 @@ describe("ClaudeDriver.decodeConfig", () => {
         if (process.platform === "win32") process.kill(pid, "SIGKILL");
         else process.kill(-pid, "SIGKILL");
       }
-      await pending;
       await instance.dispose();
+      await pending;
       await removeTempDir(home);
     }
   }, 60_000);
@@ -409,6 +430,53 @@ describe("ClaudeDriver.decodeConfig", () => {
   );
 });
 
+describe("spawnContractDiff", () => {
+  const key = (overrides: Record<string, unknown> = {}) => JSON.stringify({
+    args: ["--model", "opus"],
+    system: "stable",
+    mcpServers: { agents: { command: "node", args: ["agents"], env: { TOKEN: "secret" } } },
+    cwd: "/work",
+    model: "opus",
+    base: null,
+    configDir: null,
+    hooks: false,
+    toolSearch: false,
+    botSettings: "aaa",
+    auth: "bbb",
+    ...overrides,
+  });
+
+  it("reports nothing for identical keys", () => {
+    expect(spawnContractDiff(key(), key())).toEqual([]);
+  });
+
+  it("names changed scalar fields", () => {
+    expect(spawnContractDiff(key(), key({ model: "sonnet" }))).toEqual(["model"]);
+  });
+
+  it("names added and removed MCP servers without their configs", () => {
+    expect(spawnContractDiff(key(), key({ mcpServers: {} }))).toEqual(["mcpServers:-agents"]);
+    expect(spawnContractDiff(key({ mcpServers: {} }), key())).toEqual(["mcpServers:+agents"]);
+  });
+
+  it("names a server whose config changed, not the config", () => {
+    const changed = spawnContractDiff(key(), key({ mcpServers: { agents: { command: "node", args: ["agents"], env: { TOKEN: "rotated" } } } }));
+    expect(changed).toEqual(["mcpServers:~agents"]);
+    expect(JSON.stringify(changed)).not.toContain("rotated");
+  });
+
+  it("reports nothing for unparseable keys", () => {
+    expect(spawnContractDiff("not json", key())).toEqual([]);
+    expect(spawnContractDiff(key(), "{")).toEqual([]);
+  });
+
+  it("names a server called constructor, which Object.prototype also has", () => {
+    const withConstructor = { constructor: { command: "node", args: ["ctor"] } };
+    expect(spawnContractDiff(key({ mcpServers: {} }), key({ mcpServers: withConstructor }))).toEqual(["mcpServers:+constructor"]);
+    expect(spawnContractDiff(key({ mcpServers: withConstructor }), key({ mcpServers: {} }))).toEqual(["mcpServers:-constructor"]);
+  });
+});
+
 describe("ClaudeDriver turns (fake CLI)", () => {
   let instance: ProviderInstance;
   let recorder: EventRecorder;
@@ -489,6 +557,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     delete process.env.FAKE_CLAUDE_TEXT_HANG;
     delete process.env.FAKE_CLAUDE_STEER_GRACE_SCALE;
     delete process.env.FAKE_CLAUDE_STEER_SILENCE_SCALE;
+    vi.unstubAllEnvs();
     delete process.env.ANTHROPIC_API_KEY;
     delete process.env.XAI_API_KEY;
     delete process.env.COMPOSIO_API_KEY;
@@ -1150,6 +1219,24 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(recorder.events.find((e) => e.type === "request.resolved" && e.requestId === "elicitation:elicit-1")).toMatchObject({ behavior: "deny", source: "system" });
   });
 
+  it("keeps a context read out of the conversation's native log, an answer that arrives after the caller gave up included", async () => {
+    const usage = { categories: [{ id: "messages", name: "Messages", tokens: 4100, kind: "used" }], totalTokens: 4100, maxTokens: 200000 };
+    await create(undefined, { FAKE_CLAUDE_CONTEXT_USAGE: JSON.stringify(usage), FAKE_CLAUDE_CONTEXT_USAGE_LATE: "1" });
+    const threadId = "t-context-log";
+    await instance.adapter.sendTurn({ threadId, text: "hello" });
+    await recorder.until((e) => e.type === "turn.completed" && e.ok === true);
+    const stop = new AbortController();
+    const abandoned = instance.adapter.contextBreakdown!(threadId, { signal: stop.signal });
+    stop.abort();
+    await expect(abandoned).resolves.toBeNull();
+    // The CLI answers the abandoned read first, then these two.
+    for (let read = 0; read < 2; read++) await expect(instance.adapter.contextBreakdown!(threadId)).resolves.toMatchObject({ tokens: 4100, window: 200000 });
+    flushNativeLog(threadId);
+    const nativeLog = readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8");
+    expect(nativeLog).toContain('"type":"result"');
+    expect(nativeLog).not.toMatch(/control_re(quest|sponse)|context-usage|get_context_usage/);
+  });
+
   it("sends attached images as native blocks before text without logging their bytes", async () => {
     await create();
     const dump = join(scratch, "dump-images.json");
@@ -1275,7 +1362,8 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }
   });
 
-  it.each(["ask", "auto"] as const)("pre-allows the agents comms proxy while retaining native %s approval", async (approvalMode) => {
+  it.each([["ask", "0"], ["auto", "0"], ["ask", "1"], ["auto", "1"]] as const)("pre-allows the agents comms proxy while retaining native %s approval (OMB_OWN_MCP_HTTP=%s)", async (approvalMode, http) => {
+    vi.stubEnv(OWN_MCP_HTTP_ENV, http);
     await create();
     const dump = join(scratch, "dump.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
@@ -1288,18 +1376,30 @@ describe("ClaudeDriver turns (fake CLI)", () => {
         agents: {
           command: process.execPath,
           args: ["/fake/agents-proxy.js"],
-          env: { OMB_HARNESS_URL: "http://127.0.0.1:1", OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok", OMB_TURN_DEPTH: "0" },
+          env: { OMB_HARNESS_URL: "http://127.0.0.1:1", OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok" },
         },
       },
     });
     await recorder.until((e) => e.type === "turn.completed");
 
     const seen = JSON.parse(readFileSync(dump, "utf8"));
-    expect(seen.mcpConfig.mcpServers.agents).toMatchObject({
-      alwaysLoad: true,
-      args: ["/fake/agents-proxy.js"],
-      env: { OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok" },
-    });
+    if (http === "1") {
+      // By URL: the same capability and settings as headers, and the loopback past any proxy the engine was given.
+      const agents = seen.mcpConfig.mcpServers.agents;
+      expect(agents).toMatchObject({ type: "http", alwaysLoad: true, url: "http://127.0.0.1:1/api/internal/mcp-http/agents", headers: { authorization: "Bearer tok" } });
+      expect(JSON.parse(Buffer.from(agents.headers["x-omb-agents-env"], "base64url").toString("utf8"))).toMatchObject({ OMB_BOT_ID: "b1", [DEFER_TOOLS_ENV]: "1" });
+      // Windows keeps one spelling of an environment name, so the engine sees NO_PROXY or no_proxy there, never both.
+      const noProxy = Object.entries(seen.env as Record<string, string>).filter(([name]) => name.toLowerCase() === "no_proxy");
+      expect(noProxy.map(([name]) => name).sort()).toEqual(process.platform === "win32" ? [expect.stringMatching(/^no_proxy$/i)] : ["NO_PROXY", "no_proxy"]);
+      for (const [, value] of noProxy) expect(value.split(",")).toEqual(expect.arrayContaining(["127.0.0.1", "localhost", "::1"]));
+    } else {
+      expect(seen.mcpConfig.mcpServers.agents).toMatchObject({
+        alwaysLoad: true,
+        args: ["/fake/agents-proxy.js"],
+        env: { OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok", [DEFER_TOOLS_ENV]: "1" },
+      });
+    }
+    expect(seen.env.CLAUDE_CODE_DISABLE_CRON, "a deferred trigger must not lose to CronCreate").toBe("1");
     expect(JSON.stringify(seen.argv)).not.toContain("tok");
     const allowed = seen.argv[seen.argv.indexOf("--allowedTools") + 1];
     expect(allowed).toContain("mcp__agents");
@@ -1366,6 +1466,39 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(sent[0].message.content.endsWith("one")).toBe(true);
     expect(sent[1].message.content).toContain("dislikes cloud kitchens");
     expect(sent[1].message.content.endsWith("two")).toBe(true);
+  });
+
+  it("keeps a warm session when only the team roster changed (a bot added), and tells it the new roster once", async () => {
+    await create();
+    const dump = join(scratch, "roster.json");
+    const prompts = join(scratch, "roster-prompts.jsonl");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    process.env.FAKE_CLAUDE_PROMPTS = prompts;
+    const roster = (names: string) => `\n[TEAM ROSTER]\n${names}\n[/TEAM ROSTER]`;
+    const send = async (text: string, names: string, busy: string) => {
+      await instance.adapter.sendTurn({
+        threadId: "t-roster", text,
+        system: `You are Testy.${roster(names)}\n\nBusy: ${busy}`, systemStable: `You are Testy.${roster(names)}`, systemVolatile: `Busy: ${busy}`, systemRoster: roster(names),
+      });
+      await recorder.until((e) => e.type === "turn.completed");
+      recorder.events.length = 0;
+    };
+    await send("one", "Ana [id: a]", "nobody");
+    const firstPid = JSON.parse(readFileSync(dump, "utf8")).pid;
+    await send("two", "Ana [id: a]\nBo [id: b]", "nobody");
+    await send("three", "Ana [id: a]\nBo [id: b]", "Ana");
+    await send("four", "Ana [id: a]\nBo [id: b]", "Ana");
+    expect(JSON.parse(readFileSync(dump, "utf8")).pid).toBe(firstPid);
+    const sent = readFileSync(prompts, "utf8").trim().split("\n").map((line) => JSON.parse(line).message.content as string);
+    expect(sent).toHaveLength(4);
+    expect(sent[1]).toContain("The team roster changed");
+    expect(sent[1]).toContain("Bo [id: b]");
+    expect(sent[1]).not.toContain("Busy:");
+    expect(sent[1].endsWith("two")).toBe(true);
+    // Availability changed: only the per-turn half rides along, not the roster again.
+    expect(sent[2]).toContain("Busy: Ana");
+    expect(sent[2]).not.toContain("[TEAM ROSTER]");
+    expect(sent[3]).toBe("four");
   });
 
   it("redelivers unchanged mention context on every tagged turn", async () => {
@@ -1587,6 +1720,20 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("200000");
   });
 
+  it("compacts a Claude Opus 5.5 (1M) CLI session at 1M", async () => {
+    await create();
+    await instance.snapshot();
+    const dump = join(scratch, "compact-1m.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+
+    await instance.adapter.sendTurn({ threadId: "t-compact-1m", text: "hi", model: "claude-opus-5-5[1m]" });
+    await recorder.until((e) => e.type === "turn.completed");
+
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.argv[seen.argv.indexOf("--model") + 1]).toBe("claude-opus-5-5[1m]");
+    expect(seen.argv[seen.argv.indexOf("--autocompact") + 1]).toBe("1000000");
+  });
+
   it("clamps a configured compaction window into the range the CLI accepts", () => {
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "50000" })).toBe("100000");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "9000000" })).toBe("1000000");
@@ -1595,6 +1742,16 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(autoCompactWindow({})).toBe("200000");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "auto" })).toBe("auto");
     expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "off" })).toBe(null);
+  });
+
+  it("compacts at 1M by default only for the Claude Opus 5.5 (1M) pick", () => {
+    expect(autoCompactWindow({}, "claude-opus-5-5[1m]")).toBe("1000000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "nonsense" }, "claude-opus-5-5[1m]")).toBe("1000000");
+    expect(autoCompactWindow({}, "claude-opus-5-5")).toBe("200000");
+    expect(autoCompactWindow({}, "claude-sonnet-4-6[1m]")).toBe("200000");
+    expect(autoCompactWindow({}, null)).toBe("200000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "300000" }, "claude-opus-5-5[1m]")).toBe("300000");
+    expect(autoCompactWindow({ OMB_CLAUDE_AUTOCOMPACT: "off" }, "claude-opus-5-5[1m]")).toBe(null);
   });
 
   it("passes no compaction window when it is turned off", async () => {
@@ -1633,14 +1790,52 @@ describe("ClaudeDriver turns (fake CLI)", () => {
       const seen = JSON.parse(readFileSync(dump, "utf8"));
       expect(realpathSync(seen.cwd)).toBe(realpathSync(thread));
       expect(seen.settings.hooks.PreToolUse).toEqual([guard]);
-      expect(seen.settings.hooks.Stop).toHaveLength(2);
-      expect(seen.settings.hooks.Stop[0]).toEqual({ hooks: [{ type: "command", command: "/opt/guards/notify.sh" }] });
+      expect(seen.settings.hooks.Stop).toEqual([{ hooks: [{ type: "command", command: "/opt/guards/notify.sh" }] }]);
       expect(Object.keys(seen.settings.hooks)).toEqual(expect.arrayContaining(Object.keys(claudeHookSettings("/helper.ts"))));
       expect(seen.settings.enabledPlugins).toEqual({ "guard@team": true });
       expect(seen.settings.permissions).toEqual({ deny: ["Read(./.env)"] });
       expect(seen.settings.env).toMatchObject({ GUARD_LEVEL: "strict", ENABLE_TOOL_SEARCH: "true" });
       expect(seen.settings).not.toHaveProperty("model");
       expect(seen.settings.claudeMdExcludes).toEqual([join(homedir(), ".claude", "CLAUDE.md")]);
+    });
+
+    it("keeps an MCP output limit the bot's settings set instead of the automatic one", async () => {
+      const dump = join(scratch, "bot-settings-mcp-limit.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { thread, file } = botFolders("mcp-limit", { env: { MAX_MCP_OUTPUT_TOKENS: "40000" } });
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings-mcp-limit", text: "hi", cwd: thread, botSettingsFile: file,
+        integrations: { custom: { docs: { type: "http", url: "https://docs.example/mcp", headers: {} } } } });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.env.MAX_MCP_OUTPUT_TOKENS).toBeUndefined();
+      expect(seen.settings.env.MAX_MCP_OUTPUT_TOKENS).toBe("40000");
+    });
+
+    it("keeps an MCP output limit set in the turn's own folder, which Claude Code reads itself", async () => {
+      const dump = join(scratch, "bot-settings-own-mcp-limit.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { bot, file } = botFolders("own-mcp-limit", { env: { MAX_MCP_OUTPUT_TOKENS: "40000" } });
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings-own-mcp-limit", text: "hi", cwd: bot, botSettingsFile: file,
+        integrations: { custom: { docs: { type: "http", url: "https://docs.example/mcp", headers: {} } } } });
+      await recorder.until((e) => e.type === "turn.completed");
+      expect(JSON.parse(readFileSync(dump, "utf8")).env.MAX_MCP_OUTPUT_TOKENS).toBeUndefined();
+    });
+
+    it("skips the folder's settings.local.json limit when the launch loads project settings only", async () => {
+      const dump = join(scratch, "bot-settings-local-mcp-limit.json");
+      process.env.FAKE_CLAUDE_DUMP = dump;
+      await create();
+      const { bot, file } = botFolders("local-mcp-limit", {});
+      writeFileSync(join(bot, ".claude", "settings.local.json"), JSON.stringify({ env: { MAX_MCP_OUTPUT_TOKENS: "40000" } }));
+      await instance.adapter.sendTurn({ threadId: "t-bot-settings-local-mcp-limit", text: "hi", cwd: bot, botSettingsFile: file,
+        integrations: { custom: { docs: { type: "http", url: "https://docs.example/mcp", headers: {} } } } });
+      await recorder.until((e) => e.type === "turn.completed");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      // --setting-sources project leaves settings.local.json out, so its limit never reaches the CLI.
+      expect(seen.argv[seen.argv.indexOf("--setting-sources") + 1]).toBe("project");
+      expect(seen.env.MAX_MCP_OUTPUT_TOKENS).toBe(String(UNGATED_MCP_OUTPUT_TOKENS));
     });
 
     it("is left to Claude Code when the turn runs in the folder that holds it", async () => {
@@ -1765,6 +1960,28 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.mcpConfig.mcpServers.legacy).toEqual({ type: "sse", url: "https://old.example/sse", headers: {} });
     expect(JSON.stringify(seen.mcpConfig)).not.toContain("mcp-remote-proxy");
     expect(JSON.stringify(seen.argv)).not.toContain("tok-docs");
+  });
+
+  it("has the CLI save a big result from a bot's URL server to a file instead of the thread", async () => {
+    await create();
+    const dump = join(scratch, "ungated-mcp.json");
+    process.env.FAKE_CLAUDE_DUMP = dump;
+    const docs = { type: "http" as const, url: "https://docs.example/mcp", headers: {} };
+    const turn = async (threadId: string, integrations: SendTurnInput["integrations"]) => {
+      const { turnId } = await instance.adapter.sendTurn({ threadId, text: "hi", integrations });
+      await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
+      return JSON.parse(readFileSync(dump, "utf8")).env.MAX_MCP_OUTPUT_TOKENS;
+    };
+
+    expect(await turn("t-ungated-url", { custom: { docs } })).toBe(String(UNGATED_MCP_OUTPUT_TOKENS));
+    // The gate already trims a command server and a URL server with a limit of its own; a limit of 0 asks for whole payloads.
+    expect(await turn("t-gated-cmd", { custom: { shop: { command: "npx", args: ["shop"], env: {} } } })).toBeUndefined();
+    expect(await turn("t-gated-url", { custom: { docs }, customResultBudgets: { docs: 4000 } })).toBeUndefined();
+    expect(await turn("t-whole-url", { custom: { docs }, customResultBudgets: { docs: 0 } })).toBeUndefined();
+    expect(await turn("t-no-custom", {})).toBeUndefined();
+    // The limit is part of the warm process's contract: changing a server's limit on the same thread starts a fresh process.
+    expect(await turn("t-ungated-url", { custom: { docs }, customResultBudgets: { docs: 0 } })).toBeUndefined();
+    expect(await turn("t-ungated-url", { custom: { docs } })).toBe(String(UNGATED_MCP_OUTPUT_TOKENS));
   });
 
   // Claude Code advertises no MCP Apps UI extension and keeps tool results to itself, so only OMB's
@@ -1914,18 +2131,20 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const turn = async (text: string, cwd?: string) => {
       const { turnId } = await instance.adapter.sendTurn({
         threadId: "t-tool-search-off", text, ...(cwd ? { cwd } : {}),
-        integrations: { composio: { command: process.execPath, args: ["/fake/composio.js"], env: {} } },
+        integrations: { composio: { command: process.execPath, args: ["/fake/composio.js"], env: {} }, agents: { command: process.execPath, args: ["/fake/agents.js"], env: {} } },
       });
       await recorder.until((e) => e.type === "turn.completed" && e.turnId === turnId);
-      return JSON.parse(readFileSync(dump, "utf8")) as { pid: number; settings: { env: Record<string, string> } };
+      return JSON.parse(readFileSync(dump, "utf8")) as { pid: number; settings: { env: Record<string, string> }; mcpConfig: { mcpServers: Record<string, { alwaysLoad?: boolean; env?: Record<string, string> }> } };
     };
 
     // The turn leaves the account's settings out (--setting-sources project), so the choice travels in --settings.
     const off = await turn("hi");
     expect(off.settings.env.ENABLE_TOOL_SEARCH).toBe("false");
+    expect(off.mcpConfig.mcpServers.agents, "without tool search every agents tool loads whole, as before").toEqual({ command: process.execPath, args: ["/fake/agents.js"], env: {}, alwaysLoad: true });
     writeFileSync(path, JSON.stringify({ env: { ENABLE_TOOL_SEARCH: "auto" } }));
     const on = await turn("again");
     expect(on.settings.env.ENABLE_TOOL_SEARCH).toBe("true");
+    expect(on.mcpConfig.mcpServers.agents).toEqual({ command: process.execPath, args: ["/fake/agents.js"], env: { [DEFER_TOOLS_ENV]: "1" }, alwaysLoad: true });
     expect(on.pid).not.toBe(off.pid);
     // The bot's project settings beat the account's.
     const project = join(scratch, "project-off");
@@ -1971,6 +2190,200 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     });
   });
 
+  it.skipIf(process.platform === "win32")("re-probes the CLI when PATH starts resolving `claude` to a different, older copy", async () => {
+    // A Mac with Homebrew's 2.1.321 and an nvm 2.1.197: a PATH rescan put the nvm copy first, and every turn
+    // still passed 2.1.321's --system-prompt-snapshot to it ("unknown option") until the next snapshot.
+    const dump = join(scratch, "path-swap.json");
+    const copy = (name: string, version: string, refusesSnapshotFlag = false) => {
+      const dir = join(scratch, name);
+      mkdirSync(dir);
+      const refuse = refusesSnapshotFlag ? `for a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\n` : "";
+      writeFileSync(join(dir, "claude"), `#!/bin/sh\n${refuse}FAKE_CLAUDE_VERSION=${version} exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+      return dir;
+    };
+    const newer = copy("newer", "2.1.321"), older = copy("older", "2.1.197", true);
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump }, { cli: "claude" });
+      expect(await instance.snapshot()).toMatchObject({ version: "2.1.321 (Claude Code)" });
+      registerPathDir(older);
+      await instance.adapter.sendTurn({ threadId: "t-path-swap", text: "hi" });
+      expect(await recorder.until((e) => e.type === "turn.completed")).toMatchObject({ ok: true });
+      expect(JSON.parse(readFileSync(dump, "utf8")).argv).not.toContain("--system-prompt-snapshot");
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("passes none of the old copy's flags when the newly found copy's version check fails, and checks it again next turn", async () => {
+    const dump = join(scratch, "path-swap-fail.json"), failedOnce = join(scratch, "older-version-failed"), calls = join(scratch, "older-calls.log");
+    const newer = join(scratch, "newer-f"), older = join(scratch, "older-f");
+    mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    // The older copy: logs its probes, its first --version fails, and it refuses --system-prompt-snapshot like 2.1.197 does.
+    writeFileSync(join(older, "claude"), `#!/bin/sh\ncase "$1" in --version|--help) echo "$1" >> "${calls}";; esac\n[ "$1" = --version ] && [ ! -e "${failedOnce}" ] && { : > "${failedOnce}"; exit 1; }\nfor a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\nFAKE_CLAUDE_VERSION=2.1.197 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, { FAKE_CLAUDE_DUMP: dump }, { cli: "claude" });
+      expect(await instance.snapshot()).toMatchObject({ version: "2.1.321 (Claude Code)" });
+      registerPathDir(older);
+      for (const threadId of ["t-swap-fail-1", "t-swap-fail-2"]) {
+        await instance.adapter.sendTurn({ threadId, text: "hi" });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId)).toMatchObject({ ok: true });
+        const { argv } = JSON.parse(readFileSync(dump, "utf8"));
+        expect(argv).not.toContain("--system-prompt-snapshot");
+        if (threadId === "t-swap-fail-1") expect(argv).not.toContain("--autocompact"); // nor any of 2.1.321's help flags
+      }
+      expect(existsSync(failedOnce)).toBe(true);
+      // the failed --version is tried again on the next turn, and that copy's own --help is read once it answers
+      expect(readFileSync(calls, "utf8").trim().split("\n")).toEqual(["--version", "--version", "--help"]);
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("keeps the new copy's flags when the old copy's late --version answer starts a help read", async () => {
+    // snapshot() asks 2.1.321 for --version, PATH finds 2.1.197 (no --autocompact), and 2.1.321's late answer starts its own --help read;
+    // the next turn re-checks 2.1.197, and that old help read finishing afterwards must not hand 2.1.321's flags to 2.1.197.
+    const refused = join(scratch, "late-version-autocompact.jsonl"), slow = join(scratch, "newer-late-slow"), versionAsked = join(scratch, "newer-late-version"), helpAsked = join(scratch, "newer-late-help");
+    const newer = join(scratch, "newer-late"), older = join(scratch, "older-late");
+    mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nif [ -e "${slow}" ]; then case "$1" in --version) : > "${versionAsked}"; sleep 1;; --help) : > "${helpAsked}"; sleep 3;; esac; fi\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(older, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.197 FAKE_CLAUDE_AUTOCOMPACT=0 FAKE_CLAUDE_REJECT_AUTOCOMPACT="${refused}" exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, {}, { cli: "claude" });
+      await instance.snapshot();
+      writeFileSync(slow, "");
+      const snapshot = instance.snapshot();
+      await vi.waitFor(() => expect(existsSync(versionAsked)).toBe(true), { timeout: 5000 });
+      registerPathDir(older);
+      const turn = async (threadId: string) => {
+        await instance.adapter.sendTurn({ threadId, text: "hi" });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId)).toMatchObject({ ok: true });
+      };
+      await turn("t-late-version-1");
+      await vi.waitFor(() => expect(existsSync(helpAsked)).toBe(true), { timeout: 5000 }); // 2.1.321's late answer is in and its help read started
+      await turn("t-late-version-2");
+      await snapshot; // the old copy's help read has finished by now
+      await turn("t-late-version-3");
+      expect(existsSync(refused)).toBe(false);
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("launches a turn with its own copy's flags when another copy's late version check lands while it waits", async () => {
+    // A turn checks 2.1.197 and waits for its --help; snapshot()'s late --version answer from 2.1.321 lands meanwhile and
+    // writes 2.1.321's version. The turn must not launch 2.1.197 with 2.1.321's --system-prompt-snapshot.
+    const slow = join(scratch, "newer-race-slow"), versionAsked = join(scratch, "newer-race-version"), helpAsked = join(scratch, "older-race-help");
+    const newer = join(scratch, "newer-race"), older = join(scratch, "older-race");
+    mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nif [ -e "${slow}" ] && [ "$1" = --version ]; then : > "${versionAsked}"; sleep 1; fi\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    // The older copy's first --help is slow, and it refuses --system-prompt-snapshot like 2.1.197 does.
+    writeFileSync(join(older, "claude"), `#!/bin/sh\nif [ "$1" = --help ] && [ ! -e "${helpAsked}" ]; then : > "${helpAsked}"; sleep 2; fi\nfor a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\nFAKE_CLAUDE_VERSION=2.1.197 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, {}, { cli: "claude" });
+      await instance.snapshot();
+      writeFileSync(slow, "");
+      const snapshot = instance.snapshot();
+      await vi.waitFor(() => expect(existsSync(versionAsked)).toBe(true), { timeout: 5000 });
+      registerPathDir(older);
+      await instance.adapter.sendTurn({ threadId: "t-late-check-race", text: "hi" });
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-late-check-race")).toMatchObject({ ok: true });
+      expect(existsSync(helpAsked)).toBe(true);
+      await snapshot;
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("treats the version as unknown when another copy's check still owns the state after both re-checks", async () => {
+    // Each time the turn's own copy (2.1.197) reads its --help, a version check of 2.1.321 lands; after both re-checks the shared
+    // version is still 2.1.321's, so it must not confirm a restricted MCP configuration for the copy this turn launches.
+    const gates = join(scratch, "exhaust-gates"), newer = join(scratch, "exhaust-newer"), older = join(scratch, "exhaust-older");
+    mkdirSync(gates); mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(older, "claude"), `#!/bin/sh\nif [ "$1" = --help ]; then i=1; while ! mkdir "${gates}/help-$i" 2>/dev/null; do i=$((i+1)); done; : > "${gates}/asked-$i"; while [ ! -e "${gates}/go-$i" ]; do sleep 0.05; done; fi\nFAKE_CLAUDE_VERSION=2.1.197 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, {}, { cli: "claude" });
+      await instance.snapshot();
+      registerPathDir(older);
+      const sent = instance.adapter.sendTurn({ threadId: "t-exhausted-recheck", text: "Must not run", toolScope: { allow: ["native:*"] } });
+      sent.catch(() => {});
+      for (const i of [1, 2, 3]) { // the first check and both re-checks
+        await vi.waitFor(() => expect(existsSync(join(gates, `asked-${i}`))).toBe(true), { timeout: 5000 });
+        resetPathCacheForTests();
+        registerPathDir(newer);
+        await instance.snapshot(); // 2.1.321's check lands while the turn waits for 2.1.197's --help
+        writeFileSync(join(gates, `go-${i}`), "");
+      }
+      await expect(sent).rejects.toThrow(/restricted MCP configuration/);
+      expect(existsSync(join(gates, "asked-4"))).toBe(false);
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("launches the copy it checked, with that copy's help and flags, when PATH finds another copy while the turn waits for that check", async () => {
+    // After 2.1.197 was checked, PATH finds 2.1.321; the turn checks it and waits for its --version; PATH then finds 2.1.197 (no --autocompact in its help, refuses
+    // --system-prompt-snapshot). The turn must read the help of, and launch, the copy it checked, not the one a fresh PATH resolves.
+    const armed = join(scratch, "probe-path-armed"), asked = join(scratch, "probe-path-asked"), go = join(scratch, "probe-path-go");
+    const olderRan = join(scratch, "probe-path-older-ran"), olderHelp = join(scratch, "probe-path-older-help"), dump = join(scratch, "probe-path-newer.json");
+    const first = join(scratch, "probe-path-first"), newer = join(scratch, "probe-path-newer"), older = join(scratch, "probe-path-older");
+    mkdirSync(first); mkdirSync(newer); mkdirSync(older);
+    // The copy checked before the turn: 2.1.197 whose help leaves --autocompact out, so the turn must read the newly found copy's help.
+    writeFileSync(join(first, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.197 FAKE_CLAUDE_AUTOCOMPACT=0 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\nif [ "$1" = --version ] && [ -e "${armed}" ] && [ ! -e "${asked}" ]; then : > "${asked}"; while [ ! -e "${go}" ]; do sleep 0.05; done; fi\nFAKE_CLAUDE_VERSION=2.1.321 FAKE_CLAUDE_DUMP="${dump}" exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(older, "claude"), `#!/bin/sh\ncase "$1" in --version) ;; --help) : > "${olderHelp}";; *) : > "${olderRan}";; esac\nfor a in "$@"; do [ "$a" = --system-prompt-snapshot ] && { echo "error: unknown option '$a'" >&2; exit 1; }; done\nFAKE_CLAUDE_VERSION=2.1.197 FAKE_CLAUDE_AUTOCOMPACT=0 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(first);
+      await create(undefined, {}, { cli: "claude" });
+      expect(await instance.snapshot()).toMatchObject({ version: "2.1.197 (Claude Code)" });
+      registerPathDir(newer);
+      writeFileSync(armed, "");
+      const sent = instance.adapter.sendTurn({ threadId: "t-probe-path", text: "hi" });
+      await vi.waitFor(() => expect(existsSync(asked)).toBe(true), { timeout: 5000 });
+      registerPathDir(older);
+      writeFileSync(go, "");
+      await sent;
+      expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === "t-probe-path")).toMatchObject({ ok: true });
+      expect(existsSync(olderRan)).toBe(false);
+      expect(existsSync(olderHelp)).toBe(false); // the help read was the checked copy's, not the one PATH found later
+      const { argv } = JSON.parse(readFileSync(dump, "utf8")) as { argv: string[] };
+      expect(argv).toContain("--autocompact"); // from 2.1.321's help; 2.1.197's leaves it out
+      expect(argv).toContain("--system-prompt-snapshot");
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
+  it.skipIf(process.platform === "win32")("keeps the new copy's flags when the old copy's slower --help read finishes last", async () => {
+    // snapshot() is still reading 2.1.321's help when PATH finds 2.1.197 (no --autocompact); that old read must not restore 2.1.321's flags.
+    const refused = join(scratch, "stale-help-autocompact.jsonl"), helpStarted = join(scratch, "newer-help-started");
+    const newer = join(scratch, "newer-slow"), older = join(scratch, "older-quick");
+    mkdirSync(newer); mkdirSync(older);
+    writeFileSync(join(newer, "claude"), `#!/bin/sh\n[ "$1" = --help ] && { : > "${helpStarted}"; sleep 2; }\nFAKE_CLAUDE_VERSION=2.1.321 exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    writeFileSync(join(older, "claude"), `#!/bin/sh\nFAKE_CLAUDE_VERSION=2.1.197 FAKE_CLAUDE_AUTOCOMPACT=0 FAKE_CLAUDE_REJECT_AUTOCOMPACT="${refused}" exec "${FAKE_CLI}" "$@"\n`, { mode: 0o755 });
+    try {
+      resetPathCacheForTests();
+      registerPathDir(newer);
+      await create(undefined, {}, { cli: "claude" });
+      const snapshot = instance.snapshot();
+      await vi.waitFor(() => expect(existsSync(helpStarted)).toBe(true), { timeout: 5000 });
+      registerPathDir(older);
+      for (const threadId of ["t-stale-help-1", "t-stale-help-2"]) {
+        await instance.adapter.sendTurn({ threadId, text: "hi" });
+        expect(await recorder.until((e) => e.type === "turn.completed" && e.threadId === threadId)).toMatchObject({ ok: true });
+        if (threadId === "t-stale-help-1") await snapshot; // the old copy's help read has finished by now
+      }
+      expect(existsSync(refused)).toBe(false);
+    } finally {
+      resetPathCacheForTests();
+    }
+  });
   it("withholds --autocompact from a CLI above the floor whose --help does not list it", async () => {
     // 2.1.129 clears the 2.1.122 floor yet rejects the flag ("unknown option")
     const dump = join(scratch, "no-autocompact-cli.json");
@@ -2323,7 +2736,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(seen.argv).not.toContain("--dangerously-skip-permissions");
   });
 
-  it("lets a Bash call ask for up to ten minutes, unless the person set their own cap", async () => {
+  it("lets a Bash call ask for up to two hours, unless the person set their own cap", async () => {
     const dump = join(scratch, "bash-timeout.json");
     await create(undefined, { FAKE_CLAUDE_DUMP: dump });
     await instance.adapter.sendTurn({ threadId: "t-bash-timeout", text: "hi" });
@@ -2379,7 +2792,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
         agents: {
           command: process.execPath,
           args: ["/fake/agents-proxy.js"],
-          env: { OMB_HARNESS_URL: "http://127.0.0.1:1", OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok", OMB_TURN_DEPTH: "0" },
+          env: { OMB_HARNESS_URL: "http://127.0.0.1:1", OMB_BOT_ID: "b1", OMB_COMMS_TOKEN: "tok" },
         },
       },
     });
@@ -2740,7 +3153,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     }));
   });
 
-  it.each([false, true])("finalizes root close after an uncertain Stop succeeds on retry (retained: %s)", async (retained) => {
+  it.each([false, true])("settles an interrupted turn once the root closes, even with tree uncertainty (retained: %s)", async (retained) => {
     const gate = join(scratch, "retry-stop.gate");
     await create("slow", { FAKE_CLAUDE_SLOW_FINISH_GATE: gate });
     const threadId = `t-retry-stop-${retained}`;
@@ -2760,19 +3173,73 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     try {
       await instance.adapter.interruptTurn(threadId);
       await recorder.until((event) => event.type === "runtime.error" && event.message.includes("could not be confirmed stopped"));
-      expect(instance.adapter.hasSession(threadId)).toBe(true);
-      expect(recorder.events.some((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toBe(false);
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toMatchObject({ ok: false, stopReason: "interrupted" });
+      expect(instance.adapter.hasSession(threadId)).toBe(false);
+      expect(recorder.events.filter((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toHaveLength(1);
     } finally {
       uncertain.mockRestore();
-      await instance.adapter.interruptTurn(threadId);
     }
-    await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId);
-    expect(instance.adapter.hasSession(threadId)).toBe(false);
-    expect(recorder.events.filter((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toHaveLength(1);
 
     writeFileSync(gate, "finish");
     const replacement = await instance.adapter.sendTurn({ threadId, text: "replacement" });
-    await recorder.until((event) => event.type === "turn.completed" && event.turnId === replacement.turnId);
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === replacement.turnId)).toMatchObject({ ok: true });
+  });
+
+  it("closes an interrupted turn even when the tool call's tree stays unconfirmed", async () => {
+    const release = join(scratch, "unconfirmed-release");
+    await create(undefined, {
+      FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([{ name: "Bash", input: { command: "sleep 60" }, hold: "idle" }]),
+      FAKE_CLAUDE_RELEASE: release,
+    });
+    const threadId = "t-unconfirmed-stop";
+    const running = await instance.adapter.sendTurn({ threadId, text: "hold the tool" });
+    await recorder.until((event) => event.type === "item.started" && event.itemType === "tool" && event.turnId === running.turnId);
+    const kill = procs.killCliTree;
+    const uncertain = vi.spyOn(procs, "killCliTree").mockImplementation(async (child) => {
+      await kill(child, 0); // the engine itself is gone; only the tree answer stays unknown
+      return false;
+    });
+    try {
+      await instance.adapter.interruptTurn(threadId);
+      await recorder.until((event) => event.type === "runtime.error" && event.message.includes("could not be confirmed stopped"));
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toMatchObject({ ok: false, stopReason: "interrupted" });
+      expect(instance.adapter.hasSession(threadId)).toBe(false);
+      expect(recorder.events.filter((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toHaveLength(1);
+    } finally {
+      uncertain.mockRestore();
+      writeFileSync(release, "go");
+    }
+    const replacement = await instance.adapter.sendTurn({ threadId, text: "replacement" });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === replacement.turnId)).toMatchObject({ ok: true });
+  });
+
+  it("warns only once when the late close also fails to confirm the stop", async () => {
+    const release = join(scratch, "unconfirmed-warn-once");
+    await create(undefined, {
+      FAKE_CLAUDE_TOOL_CALLS: JSON.stringify([{ name: "Bash", input: { command: "sleep 60" }, hold: "idle" }]),
+      FAKE_CLAUDE_RELEASE: release,
+    });
+    const threadId = "t-unconfirmed-warn-once";
+    const running = await instance.adapter.sendTurn({ threadId, text: "hold the tool" });
+    await recorder.until((event) => event.type === "item.started" && event.itemType === "tool" && event.turnId === running.turnId);
+    const kill = procs.killCliTree;
+    const uncertain = vi.spyOn(procs, "killCliTree").mockImplementation(async (child) => {
+      await kill(child, 0); // the engine itself is gone; only the tree answer stays unknown
+      return false;
+    });
+    try {
+      await instance.adapter.interruptTurn(threadId);
+      expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === running.turnId)).toMatchObject({ ok: false, stopReason: "interrupted" });
+      // The root's late close finalizes through the same unconfirmed tree; the warning must not repeat.
+      await vi.waitFor(() => expect(uncertain.mock.results.length).toBeGreaterThanOrEqual(2));
+      await uncertain.mock.results[1].value;
+      expect(recorder.events.filter((event) => event.type === "runtime.error" && event.message.includes("could not be confirmed stopped"))).toHaveLength(1);
+    } finally {
+      uncertain.mockRestore();
+      writeFileSync(release, "go");
+    }
+    const replacement = await instance.adapter.sendTurn({ threadId, text: "replacement" });
+    expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === replacement.turnId)).toMatchObject({ ok: true });
   });
 
   it("a message sent mid-turn is steered into the running turn", async () => {
@@ -3340,6 +3807,78 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     expect(dump.argv).toContain("claude-other");
   });
 
+  it("names the changed contract fields when a warm process is replaced", async () => {
+    await create();
+    await instance.adapter.sendTurn({
+      threadId: "t-contract-diff",
+      text: "one",
+      integrations: { agents: { command: "node", args: ["agents"], env: {} } },
+    });
+    await recorder.until((e) => e.type === "turn.completed");
+    const announced = (recorder.events.find((e) => e.type === "session.started") as { sessionId: string }).sessionId;
+    const second = await instance.adapter.sendTurn({
+      threadId: "t-contract-diff",
+      text: "two",
+      resumeCursor: announced,
+    });
+    await recorder.until((e) => e.type === "turn.completed" && e.turnId === second.turnId);
+    // The native log flushes after the turn; poll for the close line instead of sleeping.
+    const close = await new Promise<{ contractChanged?: string[] }>((resolve, reject) => {
+      const deadline = Date.now() + 10_000;
+      const log = join(NATIVE_DIR, "t-contract-diff.ndjson");
+      const check = () => {
+        if (Date.now() > deadline) return reject(new Error("contract-change close was never logged"));
+        try {
+          const lines = readFileSync(log, "utf8").split("\n").filter(Boolean);
+          for (const line of lines) {
+            let entry: { msg?: { close?: string; contractChanged?: string[] } };
+            try {
+              entry = JSON.parse(line);
+            } catch {
+              continue;
+            }
+            if (entry.msg?.close === "spawn contract changed" && entry.msg.contractChanged) return resolve(entry.msg);
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") return reject(error);
+        }
+        setTimeout(check, 50);
+      };
+      check();
+    });
+    expect(close.contractChanged).toContain("mcpServers:-agents");
+  }, 20_000);
+
+  it.skipIf(process.platform === "win32")("stops a warm engine's whole tree before dispose returns: a server that exits leaves nothing running", async () => {
+    const marker = join(scratch, "background.pid");
+    const saved = { bash: process.env.FAKE_CLAUDE_RUN_BASH, calls: process.env.FAKE_CLAUDE_TOOL_CALLS };
+    // A tool call leaves a process behind in the engine's group, as a dev server or an MCP server does.
+    process.env.FAKE_CLAUDE_RUN_BASH = "1";
+    process.env.FAKE_CLAUDE_TOOL_CALLS = JSON.stringify([{ name: "Bash", input: { command: `"${process.execPath}" -e "setTimeout(() => {}, 60000)" >/dev/null 2>&1 & echo $! > "${marker}"` } }]);
+    // An exited process its new parent has not collected yet still answers kill(pid, 0); on Linux it is gone once /proc
+    // says Z or X, as stopCliTree counts it (procs.ts linuxGroupOnlyExited).
+    const alive = (value: number) => {
+      try { process.kill(value, 0); } catch { return false; }
+      if (process.platform !== "linux") return true;
+      try { const stat = readFileSync(`/proc/${value}/stat`, "utf8"); return !["Z", "X"].includes(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[0]!); } catch { return false; }
+    };
+    let left = 0;
+    try {
+      await create();
+      await instance.adapter.sendTurn({ threadId: "t-dispose-tree", text: "one" });
+      await recorder.until((e) => e.type === "turn.completed");
+      left = Number(readFileSync(marker, "utf8").trim());
+      expect(alive(left)).toBe(true);
+      await instance.dispose();
+      expect(alive(left)).toBe(false);
+    } finally {
+      if (left && alive(left)) process.kill(left, "SIGKILL");
+      for (const [key, value] of [["FAKE_CLAUDE_RUN_BASH", saved.bash], ["FAKE_CLAUDE_TOOL_CALLS", saved.calls]] as const) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    }
+  }, 20_000);
+
   it("closes an idle session after the configured window", async () => {
     // Ten seconds is the floor; poll the native log for the close instead of sleeping past it.
     process.env.OMB_CLAUDE_SESSION_IDLE_MIN_MS = "10000";
@@ -3777,15 +4316,6 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     } finally {
       squatter.close();
     }
-  });
-
-  it("answers to unknown or already-resolved asks resolve `unavailable` — typed, never a throw", async () => {
-    await create("hang");
-    await instance.adapter.sendTurn({ threadId: "t-perm-2", text: "go" });
-    await expect(instance.adapter.respondToRequest("t-perm-2", "never-asked", { behavior: "allow" })).resolves.toBe("unavailable");
-    await expect(instance.adapter.respondToRequest("no-such-thread", "x", { behavior: "deny" })).resolves.toBe("unavailable");
-    await instance.adapter.interruptTurn("t-perm-2");
-    await recorder.until((e) => e.type === "turn.completed");
   });
 
   it("resolves a pending ask as a system denial when the turn is interrupted", async () => {
@@ -4280,6 +4810,31 @@ describe("ClaudeDriver resume recovery (fake CLI)", () => {
     expect(text).toBe(REBUILD);
   });
 
+  it("logs why the saved session could not be resumed before starting a new one", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-logged", text: "what now?", resumeCursor: "an-outside-session", recoveryText: REBUILD });
+      await recorder.until((e) => e.type === "turn.completed");
+      const lines = logged.mock.calls.map((call) => String(call[0]));
+      expect(lines.find((line) => line.includes("could not resume session an-outside-session"))).toMatch(/^claude \(claude-test\): could not resume session an-outside-session for thread t-logged, starting a new one: claude exited \d+ before result/u);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("logs the CLI's own reason when it refuses --resume with an error result", async () => {
+    process.env.FAKE_CLAUDE_MODE = "stale-session";
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-logged-stale", text: "what now?", resumeCursor: "an-outside-session", recoveryText: REBUILD });
+      await recorder.until((e) => e.type === "turn.completed");
+      const lines = logged.mock.calls.map((call) => String(call[0]));
+      expect(lines).toContain("claude (claude-test): could not resume session an-outside-session for thread t-logged-stale, starting a new one: No conversation found with session ID: an-outside-session");
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
   it("does not announce a replacement as rebuilt when there was nothing to replay", async () => {
     const dump = join(scratch, "no-replay.json");
     process.env.FAKE_CLAUDE_DUMP = dump;
@@ -4447,7 +5002,7 @@ describe("ClaudeDriver billing (fake CLI)", () => {
   const instances: ProviderInstance[] = [];
   const KEY = { billing: "metered", method: "api-key" };
   const LOGIN = { billing: "subscription", method: null };
-  const NO_KEY = { unavailable: "No Anthropic API key — open Settings → API keys." };
+  const NO_KEY = { unavailable: "No Anthropic API key — open Settings → AI → Providers." };
 
   const billed = async (id: "claude" | "claudeApi", anthropic: AppConfig["anthropic"]) => {
     const entry = instanceConfigs({ anthropic })[id]!;

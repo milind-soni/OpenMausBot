@@ -26,6 +26,7 @@ export interface FillLoginDeps {
   remember(value: string, kind: "password" | "code"): void;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  turnActive?(): boolean;
   /** Looks in the person's connected mailbox for a code the page asks for. Absent: no mailbox can be read in this turn. */
   emailCode?(ask: EmailCodeAsk): Promise<EmailCodeAnswer>;
 }
@@ -84,21 +85,36 @@ const NEXT_STEP_WAIT_MS = 10_000;
 const FILL_BUDGET_MS = 25_000;
 const POLL_MS = 250;
 const MAX_STEPS = 3;
+const TURN_ENDED = "Stopped filling this login because the turn ended.";
+
+class LoginTurnEnded extends Error {}
 
 const MARK = "data-omb-login";
 
 // Shared by every page script: what a person could see, which fields this fill marked, a site's error line, a CAPTCHA.
 const PAGE_HELPERS = `
   const MARK = ${JSON.stringify(MARK)};
+  const queryAllDeep = (root, selector) => {
+    const found = Array.from(root.querySelectorAll(selector));
+    for (const host of root.querySelectorAll("*")) {
+      if (host.shadowRoot) found.push(...queryAllDeep(host.shadowRoot, selector));
+    }
+    return found;
+  };
+  const all = (selector) => queryAllDeep(document, selector);
+  const hostOf = (el) => {
+    const root = el.getRootNode ? el.getRootNode() : null;
+    return root && root.host ? root.host : null;
+  };
   const visible = (el) => {
     if (!(el instanceof Element) || !el.isConnected || el.getClientRects().length === 0) return false;
-    for (let node = el; node instanceof Element; node = node.parentElement) {
+    for (let node = el; node; node = node.parentElement || hostOf(node)) {
       const style = getComputedStyle(node);
       if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.opacity === "0") return false;
     }
     return true;
   };
-  const marked = (prefix) => Array.from(document.querySelectorAll("[" + MARK + "]")).filter((el) => (el.getAttribute(MARK) || "").startsWith(prefix));
+  const marked = (prefix) => all("[" + MARK + "]").filter((el) => (el.getAttribute(MARK) || "").startsWith(prefix));
   const secretField = (el) => /:(?:password|code\\d+)$/.test(el.getAttribute(MARK) || "");
   const alertText = () => {
     for (const el of document.querySelectorAll('[role="alert"], [aria-live="assertive"], [aria-live="polite"], .error, .alert, [class*="error" i]')) {
@@ -127,13 +143,20 @@ const PAGE_HELPERS = `
 const FIND_FIELDS = `((nonce, step) => {
   ${PAGE_HELPERS}
   const key = nonce + ":" + step + ":";
-  for (const old of document.querySelectorAll("[" + MARK + "]")) {
+  for (const old of all("[" + MARK + "]")) {
     const owner = old.getAttribute(MARK) || "";
     if (!owner.startsWith(nonce + ":") || owner.startsWith(key)) old.removeAttribute(MARK);
   }
   const usable = (el) => el instanceof HTMLInputElement && !el.disabled && !el.readOnly && el.type !== "hidden" && visible(el);
   const tokens = (el) => (el.getAttribute("autocomplete") || "").toLowerCase().split(/\\s+/);
-  const hint = (el) => [el.name, el.id, el.getAttribute("aria-label"), el.placeholder, el.getAttribute("autocomplete")].join(" ").toLowerCase();
+  const hint = (el) => {
+    const host = hostOf(el);
+    const labels = el.labels ? Array.from(el.labels).map((label) => label.innerText || label.textContent || "").join(" ") : "";
+    return [el.name, el.id, el.getAttribute("aria-label"), el.placeholder, el.getAttribute("autocomplete"),
+      host && host.getAttribute("name"), host && host.getAttribute("id"), host && host.getAttribute("label"),
+      host && host.getAttribute("aria-label"), host && host.getAttribute("placeholder"), host && host.getAttribute("autocomplete"),
+      labels].join(" ").toLowerCase();
+  };
   const plain = (el) => el.type === "text" || el.type === "email" || el.type === "tel";
   // A strong hint makes even a password-type box a code box; a weak one
   // ("verify", "code") only a plain one, so a sign-up form's "verify
@@ -144,7 +167,7 @@ const FIND_FIELDS = `((nonce, step) => {
   const isCode = (el) => tokens(el).includes("one-time-code") ||
     ((plain(el) || el.type === "number" || el.type === "password") && STRONG.test(hint(el)) && !NOT_CODE.test(hint(el))) ||
     ((plain(el) || el.type === "number") && WEAK.test(hint(el)) && !NOT_CODE.test(hint(el)));
-  const inputs = Array.from(document.querySelectorAll("input")).filter(usable);
+  const inputs = all("input").filter(usable);
   const codes = inputs.filter(isCode);
   const rest = inputs.filter((el) => !codes.includes(el));
   const passwords = rest.filter((el) => el.type === "password" && !tokens(el).includes("new-password"));
@@ -179,7 +202,12 @@ const FIND_FIELDS = `((nonce, step) => {
  * and listens for the form being sent. */
 const FOCUS_FIELD = `((nonce, key, mode, keep) => {
   ${PAGE_HELPERS}
-  const el = document.querySelector("[" + MARK + "=\\"" + key + "\\"]");
+  const activeElement = () => {
+    let node = document.activeElement;
+    while (node && node.shadowRoot && node.shadowRoot.activeElement) node = node.shadowRoot.activeElement;
+    return node;
+  };
+  const el = all("[" + MARK + "=\\"" + key + "\\"]")[0] || null;
   if (!(el instanceof HTMLInputElement)) return JSON.stringify({ href: location.href, focused: false, same: false });
   if (mode === "type" && typeof keep === "string" && el.value === keep) return JSON.stringify({ href: location.href, focused: true, same: true });
   if (mode === "submit" && !window["__ombLogin" + nonce]) {
@@ -195,7 +223,7 @@ const FOCUS_FIELD = `((nonce, key, mode, keep) => {
     el.dispatchEvent(new Event("input", { bubbles: true }));
   }
   const busy = mode === "submit" && sending(marked(nonce + ":").filter((field) => field instanceof HTMLInputElement));
-  return JSON.stringify({ href: location.href, focused: document.activeElement === el, same: false, busy });
+  return JSON.stringify({ href: location.href, focused: activeElement() === el, same: false, busy });
 })`;
 
 const CHECK_FIELDS = `((key) => {
@@ -210,14 +238,18 @@ const MARK_SUBMIT = `((key) => {
   ${PAGE_HELPERS}
   const fields = marked(key).filter((el) => el instanceof HTMLInputElement);
   const field = fields.find((el) => /:password$/.test(el.getAttribute(MARK) || "")) || fields[fields.length - 1];
-  const label = (el) => (el.innerText || el.value || el.getAttribute("aria-label") || el.title || "").replace(/\\s+/g, " ").trim();
+  const label = (el) => {
+    const host = hostOf(el);
+    return (el.innerText || el.value || el.getAttribute("aria-label") || el.title ||
+      (host && (host.innerText || host.textContent || host.getAttribute("aria-label"))) || "").replace(/\\s+/g, " ").trim();
+  };
   const NAMED = /^(?:sign ?in|log ?in|log ?on|sign ?on|continue|next|submit|verify|confirm)$/i;
   const enabled = (el) => visible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true";
   const inForm = field && field.form
     ? Array.from(field.form.querySelectorAll("button, input[type=submit], input[type=image]")).filter((el) => enabled(el) && (el.type === "submit" || el.type === "image"))
     : [];
   const control = inForm.find((el) => NAMED.test(label(el))) || inForm[0] ||
-    Array.from(document.querySelectorAll('button, [role="button"], input[type=submit], input[type=button]')).find((el) => enabled(el) && NAMED.test(label(el)));
+    all('button, [role="button"], input[type=submit], input[type=button]').find((el) => enabled(el) && NAMED.test(label(el)));
   if (!control) return JSON.stringify({ found: false });
   control.setAttribute(MARK, key + "submit");
   return JSON.stringify({ found: true });
@@ -316,6 +348,7 @@ function pageState(value: Record<string, unknown> | null): PageState | null {
 }
 
 export async function fillLogin(input: FillLoginInput, deps: FillLoginDeps): Promise<FillLoginOutcome> {
+  if (deps.turnActive?.() === false) return { ok: false, text: TURN_ENDED };
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const page = await deps.engine(["get", "url"]);
@@ -428,6 +461,10 @@ class LoginRun {
     return loginOriginCheck(href, this.login).ok;
   }
 
+  private checkActive(): void {
+    if (this.deps.turnActive?.() === false) throw new LoginTurnEnded(TURN_ENDED);
+  }
+
   private async page(script: string, ...args: unknown[]): Promise<Record<string, unknown> | null> {
     try { return evaluated(await this.deps.engine(["eval", call(script, ...args)])); } catch { return null; }
   }
@@ -483,9 +520,11 @@ class LoginRun {
 
   async run(): Promise<FillLoginOutcome> {
     try {
+      this.checkActive();
       return await this.steps();
     } catch (error) {
       await this.clear();
+      if (error instanceof LoginTurnEnded) return this.outcome(false, TURN_ENDED);
       throw error;
     }
   }
@@ -509,7 +548,7 @@ class LoginRun {
       }
       if ((fields.password && this.done.has("password")) || (fields.code > 0 && this.done.has("code"))) {
         const said = fields.alert ? ` It said: “${fields.alert}”.` : "";
-        return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}: it asked for it again, and nothing was submitted twice.${said} Check the saved login in Settings → Logins, or call request_sign_in.`);
+        return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}: it asked for it again, and nothing was submitted twice.${said} Check the saved login in Settings → Vault, or call request_sign_in.`);
       }
       if (step > 0 && !fields.password && fields.code === 0) {
         if (fields.human) return this.finish(true, `Submitted ${this.filledWords()} for ${this.who()}, and a human check (CAPTCHA) appeared. Call request_sign_in so the person finishes signing in.`);
@@ -542,14 +581,15 @@ class LoginRun {
       let sent: Submitted;
       try {
         sent = await this.submitStep(step, typed.last, fields.alert);
-      } catch {
+      } catch (error) {
+        if (error instanceof LoginTurnEnded) throw error;
         return this.failed(`Filled ${this.filledWords()} for ${this.who()} on ${this.host}, but the browser did not take the Enter key or the click to submit it.`);
       }
       if (sent.kind === "no-control") return this.leave(`It was not submitted: Enter did nothing and the page has no sign-in button to press. Press the page's own sign-in button now.${codeNote}`);
       if (sent.human) return this.failed(`A human check (CAPTCHA) appeared on ${this.host} after the login for ${this.who()} was submitted. Call request_sign_in so the person finishes signing in.`);
       if (!sent.changed) {
         const said = sent.alert ? ` It said: “${sent.alert}”.` : " The page did not change.";
-        return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}.${said} Check the saved login in Settings → Logins, or call request_sign_in.`);
+        return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}.${said} Check the saved login in Settings → Vault, or call request_sign_in.`);
       }
       if (step + 1 >= MAX_STEPS) return this.finish(true, this.signedIn(sent.href, sent.title));
       const waitMs = !this.done.has("password") && !(this.addressOnly && this.done.has("code")) ? NEXT_STEP_WAIT_MS : this.secretsHaveTotp() && !this.done.has("code") ? 5_000 : 1_500;
@@ -577,15 +617,19 @@ class LoginRun {
   }
 
   private async type(key: string, text: string, keep?: string): Promise<"typed" | "kept" | "missed" | "moved"> {
+    this.checkActive();
     const focus = await this.page(FOCUS_FIELD, this.nonce, key, "type", keep ?? null);
+    this.checkActive();
     if (!focus || typeof focus.href !== "string" || !this.stillHere(focus.href)) return "moved";
     if (focus.same === true) return "kept";
     if (focus.focused !== true) return "missed";
     await this.deps.insertText(text);
+    this.checkActive();
     return "typed";
   }
 
   private async fillStep(step: number, fields: Found): Promise<{ kind: "typed"; last: string } | { kind: "none" } | { kind: "moved" }> {
+    this.checkActive();
     const key = `${this.nonce}:${step}:`;
     const typed: Array<[FilledField, string]> = [];
     let moved = false;
@@ -605,6 +649,7 @@ class LoginRun {
     if (fields.username && this.login.username && await fill("username", this.login.username, this.login.username)) typed.push(["username", "username"]);
     if (!moved && (fields.password || fields.code > 0)) {
       this.secrets ??= await this.login.secrets();
+      this.checkActive();
       this.deps.remember(this.secrets.password, "password");
       if (this.secrets.totp) this.deps.remember(this.secrets.totp.secret, "password");
     }
@@ -643,6 +688,7 @@ class LoginRun {
     if (!this.deps.emailCode || site === null) return null;
     const waitStarted = this.now();
     const answer = await this.deps.emailCode({ site, boxes: fields.code, askedAt: this.submittedAt, via: fields.via, now: this.now, sleep: this.sleep });
+    this.checkActive();
     this.deadline += this.now() - waitStarted;
     if (answer.kind === "miss") this.codeHelp = `${CODE_MISS[answer.why]} ${CODE_FROM_INBOX}`;
     if (answer.kind === "no-mailbox") {
@@ -654,8 +700,10 @@ class LoginRun {
 
   /** Enter in the step's last field; when that sends nothing within two seconds, the form's sign-in button. */
   private async submitStep(step: number, last: string, alertBefore: string): Promise<Submitted> {
+    this.checkActive();
     const key = `${this.nonce}:${step}:`;
     const focus = await this.page(FOCUS_FIELD, this.nonce, key + last, "submit", null);
+    this.checkActive();
     const before = typeof focus?.href === "string" ? focus.href : "";
     const busyBefore = focus?.busy === true;
     const sending = (state: PageState) => state.submitted || (state.busy && !busyBefore);
@@ -667,7 +715,9 @@ class LoginRun {
       const until = Math.min(this.deadline, this.now() + ms);
       for (;;) {
         await this.sleep(POLL_MS);
+        this.checkActive();
         const state = pageState(await this.page(PAGE_STATE, this.nonce));
+        this.checkActive();
         if (state && (settled(state) || (untilSent && sending(state)))) return state;
         if (this.now() >= until) return state ?? "silent";
       }
@@ -677,6 +727,7 @@ class LoginRun {
     let state = await watch(ENTER_WAIT_MS, true);
     if (!settled(state) && !(state !== "silent" && sending(state))) {
       const control = await this.page(MARK_SUBMIT, key);
+      this.checkActive();
       if (control?.found !== true) return { kind: "no-control" };
       await this.deps.click(`[${MARK}="${key}submit"]`);
     }

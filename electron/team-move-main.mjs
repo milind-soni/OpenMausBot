@@ -44,10 +44,11 @@ export function teamMoveConfirmWords(names, t = nativeText.englishText.t) {
   return {
     message: t("teamMove.title", names),
     detail: [
-      t("teamMove.everyone", names),
+      t("teamMove.yours", names),
       t("teamMove.goes", names),
       t("teamMove.private"),
       t("teamMove.staysOnMyCloud", names),
+      t("teamMove.dataStays", names),
       t("teamMove.noWayBack"),
     ].join("\n\n"),
     buttons: [t("teamMove.confirm", names), t("native.common.cancel")],

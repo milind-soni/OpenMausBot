@@ -4,6 +4,7 @@ import type { BurstCardData } from "../../shared/burst.ts";
 import type { ModelSelection } from "../../shared/wire.ts";
 import { INSTRUCTIONS_MAX, ITEM_MAX, type BurstRefusal } from "../burst/manager.ts";
 import type { RequestAuth } from "../request-auth.ts";
+import { refusalText } from "../user-errors.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 const LIST_MAX = 1_000;
@@ -37,7 +38,7 @@ export function createBurstRoutes(deps: BurstRoutesDeps): RouteHandler {
     }
     if (method !== "POST") return json(res, 405, { error: "method not allowed" });
     const refused = deps.refusal(auth, owner.threadId, id!);
-    if (refused) return json(res, 403, { error: refused });
+    if (refused) return json(res, 403, refusalText(refused));
     let result: BurstCardData | BurstRefusal;
     if (action === "edit") {
       const parsed = editSchema.safeParse(await readBody(req));

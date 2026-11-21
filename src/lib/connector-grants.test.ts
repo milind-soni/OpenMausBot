@@ -12,7 +12,9 @@ describe("connector grant shapes", () => {
   it("accepts the wildcard and explicit well-formed name lists only", () => {
     expect(isConnectorToolGrantShape({ tools: "*" })).toBe(true);
     expect(isConnectorToolGrantShape({ tools: ["GMAIL_SEND_EMAIL", "SLACK_POST_MESSAGE"] })).toBe(true);
+    expect(isConnectorToolGrantShape({ tools: ["_1PASSWORD_GET_ITEM"] })).toBe(true);
     expect(isConnectorToolGrantShape({ tools: [] })).toBe(false);
+    expect(isConnectorToolGrantShape({ tools: ["__PROTO__"] })).toBe(false);
     expect(isConnectorToolGrantShape({ tools: ["gmail_send_email"] })).toBe(false);
     expect(isConnectorToolGrantShape({ tools: "GMAIL_SEND_EMAIL" })).toBe(false);
     expect(isConnectorToolGrantShape(null)).toBe(false);
@@ -25,6 +27,7 @@ describe("verb classes for tool names", () => {
     expect(classifyConnectorTool("SLACK_DELETE_MESSAGE")).toBe("delete");
     expect(classifyConnectorTool("NOTION_CREATE_PAGE")).toBe("draft");
     expect(classifyConnectorTool("GMAIL_FETCH_EMAILS")).toBe("read");
+    expect(classifyConnectorTool("_1PASSWORD_GET_ITEM")).toBe("read");
     expect(classifyConnectorTool("SLACK_UPDATE_MESSAGE")).toBe("modify");
   });
 

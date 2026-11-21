@@ -75,7 +75,7 @@ export const CLOUD_BACKGROUND_HEADER = "x-omb-background";
 export const CLOUD_POWER_HEADER = "x-omb-cloud-power";
 const MARKER = "cloud-sleep.json";
 /** Long-polls and streams that stay open by design: never "in flight" work. */
-const HELD = [/^\/api\/events$/, /^\/api\/sync\/changes$/, /^\/api\/shared-computers\/asks$/, /^\/api\/shared-computers\/[\w-]+\/(?:poll|link)$/];
+const HELD = [/^\/api\/events$/, /^\/api\/sync\/changes$/, /^\/api\/shared-computers\/asks$/, /^\/api\/shared-computers\/[\w-]+\/(?:poll|link)$/, /^\/api\/bot-link\/sync$/];
 
 /** The answer a held poll (Files sync, lending) gets once the home agreed to sleep: the desktop pauses until it wakes. */
 export function answerAsleep(res: ServerResponse, json: (res: ServerResponse, status: number, body: unknown) => void) {
@@ -248,3 +248,9 @@ export type CloudPower = ReturnType<typeof createCloudPower>;
 let registered: Pick<CloudPower, "sleeping" | "sleepSignal" | "sleptUntil"> | null = null;
 export function registerCloudPower(power: Pick<CloudPower, "sleeping" | "sleepSignal" | "sleptUntil"> | null) { registered = power; }
 export const cloudPowerNow = () => registered;
+
+/** A read the client marked as background, on a home that agreed to sleep: it gets `answerAsleep` and nothing more, so a
+ * list kept fresh in the background never holds the home awake or finds it half asleep. A person's own request never does. */
+export function backgroundWhileAsleep(path: string, headers: Record<string, string | string[] | undefined>): boolean {
+  return Boolean(registered?.sleeping()) && !countsAsActivity(path, headers);
+}

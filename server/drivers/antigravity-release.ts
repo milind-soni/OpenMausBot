@@ -1,6 +1,8 @@
 // URLs and hashes come from Google's official ACP registry entry. Archive and
 // member sizes were read from Google's servers on 2026-10-25; the win32-x64
-// archive was downloaded and its hash checked independently.
+// archive was downloaded and its hash checked independently. The darwin-x64
+// archive was added on 2026-11-17 from the same registry commit; it was
+// downloaded and its hash and member sizes checked independently.
 // Registry: agentclientprotocol/registry@06229c691d24d039e2363ba12abe5c9dfae5bc66
 export const ANTIGRAVITY_RELEASE_VERSION = "1.4.3";
 
@@ -23,6 +25,17 @@ const RELEASES = new Map<string, AntigravityReleaseAsset>([
       archiveBytes: 114_147_623,
       executable: { name: "agy_acp_server.par", bytes: 282_446_160 },
       harness: { name: "localharness_external", bytes: 122_957_936 },
+    },
+  ],
+  [
+    "darwin-x64",
+    {
+      version: ANTIGRAVITY_RELEASE_VERSION,
+      url: "https://dl.google.com/agy-extensions/releases/macos/agy-acp-server-1.4.3-darwin-x86_64.zip",
+      sha256: "9392dbbdad7f0663dbfb5a0bf641297b0cf80d2ee9cd2d49a616bbbc7378731d",
+      archiveBytes: 119_801_100,
+      executable: { name: "agy_acp_server.par", bytes: 286_653_712 },
+      harness: { name: "localharness_external", bytes: 127_612_208 },
     },
   ],
   [

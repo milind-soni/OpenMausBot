@@ -49,6 +49,30 @@ prove real OAuth login or native Windows execution.
   provider.
 - Model-picker rendering is Electron UI and remains outside this first map.
 
+## OMP (Oh My Pi)
+
+Install with `npm install -g @oh-my-pi/pi-coding-agent`, then run `omp login` or configure a provider in `~/.omp/agent/models.yml`. OpenMausBot launches `omp acp`, discovers its advertised models and per-model thinking choices, and resumes each thread's native OMP session. OMP remains responsible for its own provider credentials and approvals; OpenMausBot answers ACP permission requests through the normal approval cards.
+
+```sh
+pnpm exec vitest run server/drivers/acp/omp.test.ts server/drivers/acp/custom-model-catalog.test.ts server/runtime/capabilities.test.ts server/drivers/tool-scope-coverage.test.ts server/agents-bridge-switch.test.ts server/engine-updates.test.ts server/built-in-instances.test.ts src/lib/analytics-allowlist.test.ts server/engine-memory.test.ts
+```
+
+The contract tests use the repository's fake ACP CLI and disposable folders. They cover fresh and existing fleets, catalogs larger than 128 models without per-model discovery prompts, temporary discovery-session cleanup, model selection, local credential forwarding and denied permissions. Model discovery uses `PI_CODING_AGENT_SESSION_DIR` in a temporary directory so refreshes do not add empty sessions to the person's OMP history.
+
+The following is a one-time author qualification against OMP 18.13.1, not a checked-in repeatable native fixture: with isolated homes and keyless synthetic providers, ACP initialization and authentication, model and thinking selection, a 2,000-model catalog, discovery-session isolation, a streamed turn through the production driver, and a second turn after recreating that driver with the same native session. The loopback provider received both turns and the resumed request contained the first turn's history. These checks do not prove a real provider account, a paid turn, native Windows behavior or packaged desktop integration.
+
+## Mistral Vibe
+
+Install `vibe-acp` from `mistral.ai/vibe/install.sh` (the vendor's `mistral-vibe` package through uv), from [github.com/mistralai/mistral-vibe/releases](https://github.com/mistralai/mistral-vibe/releases), or through the app's install pin (`mistral-vibe-release.ts`), then either run a first `vibe` session once so the browser sign-in saves `$VIBE_HOME/whoami_cache.json`, or let the workspace Mistral key from Settings → Connections reach the CLI as `MISTRAL_API_KEY`. OpenMausBot launches `vibe-acp` (ACP by default, no extra arguments), picks the `browser-auth` method when the sign-in gate fires — the CLI opens the browser itself and the authenticate request blocks until the person finishes — and selects models through session/new's `model` config option. Model refresh runs in a temporary working directory and never sends a prompt, so it leaves no record in the person's Vibe history, and threads resume their native Vibe sessions.
+
+```sh
+pnpm exec vitest run server/drivers/acp/mistral-vibe.test.ts server/drivers/acp/custom-model-catalog.test.ts server/runtime/capabilities.test.ts server/drivers/tool-scope-coverage.test.ts server/built-in-instances.test.ts src/lib/analytics-allowlist.test.ts server/engine-memory.test.ts server/config.test.ts
+```
+
+The contract tests use the repository's fake ACP CLI and disposable folders. They cover fleet registration, live model discovery from session/new's config options with no per-model switching or discovery-session residue, sign-in gating via `whoami_cache.json` / `MISTRAL_API_KEY`, workspace-key forwarding without leaking a second instance's key, and denied permissions.
+
+The following is a one-time author qualification against vibe-acp 3.1.1 on macOS (darwin-aarch64), not a checked-in repeatable native fixture: initialize answers protocolVersion 1 with `browser-auth` as the only auth method; an unauthenticated session/new fails with -32000 "Missing API key for mistral provider."; the authenticate request stays pending while the CLI opens https://console.mistral.ai/codestral/cli/authenticate, honours `$BROWSER`, and completes after the person signs in; session/new exposes `mode`, `model` (zai-glm-5-3-flash, Mistral Large, Codestral, mistral-medium-3.5), and `thinking` (off | high); an `MISTRAL_API_KEY` satisfies the gate with no sign-in. These checks do not prove a real paid turn, native Windows behavior or packaged desktop integration.
+
 ## Slow or empty CLI version responses
 
 ```sh

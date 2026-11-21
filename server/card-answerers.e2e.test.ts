@@ -14,7 +14,9 @@ import { workerPort } from "./testing/worker-port.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLI = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
-const PORT = workerPort(28800, 10_000);
+// Below 32768, where Linux starts handing out ephemeral ports (net.ipv4.ip_local_port_range), so an outgoing
+// connection elsewhere on the runner never holds this port or the one above it.
+const PORT = workerPort(28800, 3_900);
 const BASE = `http://127.0.0.1:${PORT}`;
 const posixOnly = describe.skipIf(process.platform === "win32");
 const BOSS = "boss@example.test";
@@ -152,7 +154,7 @@ posixOnly("who may answer a card on a shared workspace", () => {
     expect(answered.body.outcome).not.toBe("unavailable");
     const row = await decision(requestId, "user-approved");
     expect(row?.actor).toEqual({ kind: "session", sessionId: sessionIds[ADA], label: "ada's laptop", email: ADA });
-    expect((await settledCard(bot.threadId, requestId))?.card.answeredBy).toEqual({ kind: "session", name: ADA, person: expect.stringMatching(/^p_/u) });
+    expect((await settledCard(bot.threadId, requestId))?.card.answeredBy).toEqual({ kind: "session", name: "Ada", person: expect.stringMatching(/^p_/u) });
   }, 90_000);
 
   it("lets a member answer any card on a thread they started", async () => {
@@ -231,7 +233,7 @@ posixOnly("who may answer a card on a shared workspace", () => {
     const answered = await api("POST", `/api/threads/${threadId}/respond`, { requestId, behavior: "allow" }, BOB);
     expect(answered.status, JSON.stringify(answered.body)).toBe(200);
     expect((await decision(requestId, "user-approved"))?.actor).toMatchObject({ kind: "session", email: BOB });
-    expect((await settledCard(copy.automation.executionThreadId, requestId))?.card.answeredBy).toEqual({ kind: "session", name: BOB, person: expect.stringMatching(/^p_/u) });
+    expect((await settledCard(copy.automation.executionThreadId, requestId))?.card.answeredBy).toEqual({ kind: "session", name: "Bob", person: expect.stringMatching(/^p_/u) });
   }, 90_000);
 
   it("lets any member answer a card that names nobody, as before", async () => {
@@ -247,7 +249,7 @@ posixOnly("who may answer a card on a shared workspace", () => {
     const first = await cardFrom(bot, bot.threadId, ADA);
     expect((await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: first, behavior: "allow" }, BOSS)).status).toBe(200);
     expect((await decision(first, "user-approved"))?.actor).toMatchObject({ kind: "session", email: BOSS });
-    expect((await settledCard(bot.threadId, first))?.card.answeredBy).toEqual({ kind: "session", name: BOSS, person: expect.stringMatching(/^p_/u) });
+    expect((await settledCard(bot.threadId, first))?.card.answeredBy).toEqual({ kind: "session", name: "Boss", person: expect.stringMatching(/^p_/u) });
 
     const second = await cardFrom(bot, bot.threadId, BOB);
     expect((await api("POST", `/api/threads/${bot.threadId}/respond`, { requestId: second, behavior: "deny" })).status).toBe(200);

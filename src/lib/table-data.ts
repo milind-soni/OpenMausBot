@@ -39,19 +39,37 @@ const AMOUNT = /^[+-]?[$€£¥₹]?\d{1,3}(?:,?\d{3})*(?:\.\d+)?%?$/;
 /** A cell that reads as a quantity (a plain number, a price, a percentage), so its column lines up on the right. */
 export function isTableAmount(text: string): boolean { return isTableNumber(text) || AMOUNT.test(text.trim()); }
 
+function decimalParts(text: string): { sign: number; order: bigint; digits: string } {
+  const negative = text.startsWith("-");
+  const [mantissa = "", exponent = "0"] = text.replace(/^[+-]/, "").toLowerCase().split("e");
+  const dot = mantissa.indexOf(".");
+  const decimals = dot < 0 ? 0 : mantissa.length - dot - 1;
+  const digits = mantissa.replace(".", "").replace(/^0+/, "");
+  if (!digits) return { sign: 0, order: 0n, digits: "" };
+  return { sign: negative ? -1 : 1, order: BigInt(exponent) + BigInt(digits.length - decimals), digits: digits.replace(/0+$/, "") };
+}
+
+/** Different floating-point values keep decimal order; equal rounded values need their original decimal digits. */
+function compareTableNumbers(left: string, right: string): number {
+  const l = Number(left), r = Number(right);
+  if (l < r) return -1;
+  if (l > r) return 1;
+  const a = decimalParts(left.trim()), b = decimalParts(right.trim());
+  if (a.sign !== b.sign) return a.sign - b.sign;
+  if (!a.sign) return 0;
+  const magnitude = a.order < b.order ? -1 : a.order > b.order ? 1
+    : a.digits < b.digits ? -1 : a.digits > b.digits ? 1 : 0;
+  return a.sign * magnitude;
+}
+
 export function tableRowOrder(rows: readonly (readonly string[])[], query: string, sort: TableSort): number[] {
   const needle = query.trim().toLocaleLowerCase();
   const order = rows.flatMap((row, index) => !needle || row.some((cell) => cell.toLocaleLowerCase().includes(needle)) ? [index] : []);
   if (sort) order.sort((a, b) => {
     const left = rows[a]![sort.column] ?? "", right = rows[b]![sort.column] ?? "";
     if (!left.trim() || !right.trim()) return Number(!left.trim()) - Number(!right.trim()) || a - b;
-    const numeric = isTableNumber(left) && isTableNumber(right);
-    let difference: number;
-    if (numeric && /^[+-]?\d+$/.test(left.trim()) && /^[+-]?\d+$/.test(right.trim())) {
-      const l = BigInt(left.trim()), r = BigInt(right.trim());
-      difference = l < r ? -1 : l > r ? 1 : 0;
-    } else difference = numeric ? Number(left) - Number(right) : collator.compare(left, right);
-    return (Number.isFinite(difference) ? difference : collator.compare(left, right)) * (sort.descending ? -1 : 1) || a - b;
+    const difference = isTableNumber(left) && isTableNumber(right) ? compareTableNumbers(left, right) : collator.compare(left, right);
+    return difference * (sort.descending ? -1 : 1) || a - b;
   });
   return order;
 }

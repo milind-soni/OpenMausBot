@@ -3,7 +3,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ api: vi.fn(), dispatch: vi.fn(), admin: true as boolean | null, config: null as { cloudHome?: boolean } | null }));
+const fixture = vi.hoisted(() => ({ api: vi.fn(), dispatch: vi.fn(), admin: true as boolean | null, config: null as { cloudHome?: boolean; team?: { id: string; name: string } } | null }));
 vi.mock("@/state/store", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/state/store")>(),
   api: fixture.api,
@@ -40,10 +40,12 @@ async function render() {
   await act(async () => root.render(createElement(VaultSettings)));
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
-const button = (label: string) => [...host.querySelectorAll("button")].find((candidate) => (candidate.getAttribute("aria-label") ?? candidate.textContent) === label)!;
+const button = (label: string) => [...document.body.querySelectorAll("button")].find((candidate) => (candidate.getAttribute("aria-label") ?? candidate.textContent) === label)!;
+/** The password manager's token is asked for in a small dialog over Settings. */
+const inDialog = (label: string) => [...document.body.querySelectorAll("[data-settings-dialog] button")].find((candidate) => candidate.textContent === label) as HTMLButtonElement;
 async function click(label: string) { await act(async () => button(label).click()); }
 async function type(name: string, value: string) {
-  const input = host.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
+  const input = document.body.querySelector<HTMLInputElement>(`input[name="${name}"]`)!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
@@ -125,6 +127,25 @@ describe("Settings → Vault: logins", () => {
     expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/l1", { method: "PATCH", body: JSON.stringify({ bots: ["pepper"], exactHost: true }) });
   });
 
+  it("moves a login to another site, and sends the site only when it changed", async () => {
+    fixture.api.mockResolvedValueOnce({ logins: [SHARED_LOGIN], onePassword: OFF }).mockResolvedValueOnce({ login: SHARED_LOGIN }).mockResolvedValueOnce({ logins: [SHARED_LOGIN], onePassword: OFF });
+    await render();
+    await click("Change the login for example.org");
+    expect(host.querySelector<HTMLInputElement>('input[name="site"]')!.value).toBe("crm.example.org");
+    await type("site", "d1abc.cloudfront.net");
+    await submit();
+    expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/l2", { method: "PATCH", body: JSON.stringify({ site: "d1abc.cloudfront.net", bots: "all" }) });
+  });
+
+  it("keeps every sign-in host when the site is only written differently", async () => {
+    fixture.api.mockResolvedValueOnce({ logins: [CARD_LOGIN], onePassword: OFF }).mockResolvedValueOnce({ login: CARD_LOGIN }).mockResolvedValueOnce({ logins: [CARD_LOGIN], onePassword: OFF });
+    await render();
+    await click("Change the login for example.com");
+    await type("site", "https://EXAMPLE.com/login");
+    await submit();
+    expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/l1", { method: "PATCH", body: JSON.stringify({ bots: ["pepper"] }) });
+  });
+
   it("deletes only on a second click", async () => {
     fixture.api.mockResolvedValueOnce({ logins: [CARD_LOGIN], onePassword: OFF }).mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ logins: [], onePassword: OFF });
     await render();
@@ -143,11 +164,13 @@ describe("Settings → Vault: logins", () => {
       .mockResolvedValueOnce({ onePassword: OFF })
       .mockResolvedValueOnce({ logins: [], onePassword: OFF });
     await render();
-    expect(host.querySelector("[data-onepassword]")!.textContent).toContain("create a service account that can read one vault only");
-    const field = host.querySelector<HTMLInputElement>('input[name="onePasswordToken"]')!;
+    expect(host.querySelector('input[name="onePasswordToken"]'), "no token field on the page itself").toBeNull();
+    await click("Connect 1Password");
+    expect(document.body.querySelector("[data-settings-dialog]")!.textContent).toContain("create a service account that can read one vault only");
+    const field = document.body.querySelector<HTMLInputElement>('input[name="onePasswordToken"]')!;
     expect(field.type).toBe("password");
     await type("onePasswordToken", "ops_fake-typed-token");
-    await click("Connect 1Password");
+    await act(async () => inDialog("Connect 1Password").click());
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/1password", { method: "POST", body: JSON.stringify({ token: "ops_fake-typed-token" }) });
     expect(host.querySelector("[data-onepassword]")!.textContent).toContain("Connected to Shared with OMB · 1 logins, keys and secrets");
@@ -158,7 +181,8 @@ describe("Settings → Vault: logins", () => {
     await click("Disconnect");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(fixture.api).toHaveBeenNthCalledWith(4, "/api/logins/1password", { method: "DELETE" });
-    expect(host.querySelector<HTMLInputElement>('input[name="onePasswordToken"]')!.value).toBe("");
+    await click("Connect 1Password");
+    expect(document.body.querySelector<HTMLInputElement>('input[name="onePasswordToken"]')!.value).toBe("");
   });
 
   it("keeps a 1Password vault to the bots chosen for it, on the same screen", async () => {
@@ -171,24 +195,126 @@ describe("Settings → Vault: logins", () => {
       .mockResolvedValueOnce({ logins: [{ ...VAULT_LOGIN, bots: ["quill"] }], onePassword: narrowed });
     await render();
     const row = () => host.querySelector('[data-vault="Shared with OMB"]')!;
-    expect(row().textContent).toContain("2 logins · All bots");
+    expect(row().textContent).toContain("2 website logins · All bots");
     await click("Change who can use Shared with OMB");
     await act(async () => { [...row().querySelectorAll<HTMLInputElement>('input[type="radio"]')][1]!.click(); });
     await act(async () => { [...row().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')][1]!.click(); });
     await click("Save changes");
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/1password/vaults/v1", { method: "PATCH", body: JSON.stringify({ bots: ["quill"] }) });
-    expect(row().textContent).toContain("2 logins · Quill");
+    expect(row().textContent).toContain("2 website logins · Quill");
     expect(host.querySelector('[data-login-row="example.com"]')!.textContent).toContain("From 1Password · Quill");
+  });
+
+  it("keeps one 1Password item to its own bots ahead of its vault's, and hands it back to the vault's choice", async () => {
+    const on = { connected: true, vaults: [{ id: "v1", title: "Shared with OMB", items: 1, bots: "all" }], items: 1 };
+    const follows = { ...VAULT_LOGIN, onePassword: { item: "v1:i1", ownBots: false } };
+    const own = { ...VAULT_LOGIN, bots: ["quill"], onePassword: { item: "v1:i1", ownBots: true } };
+    fixture.api
+      .mockResolvedValueOnce({ logins: [follows], onePassword: on })
+      .mockResolvedValueOnce({ logins: [own], onePassword: on })
+      .mockResolvedValueOnce({ logins: [own], onePassword: on })
+      .mockResolvedValueOnce({ logins: [follows], onePassword: on })
+      .mockResolvedValueOnce({ logins: [follows], onePassword: on });
+    await render();
+    const row = () => host.querySelector('[data-login-row="example.com"]')!;
+    const editor = () => host.querySelector('[data-onepassword-item="v1:i1"]')!;
+    const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(row().textContent).toContain("From 1Password · All bots (its vault's choice)");
+    await click("Change who can use example.com");
+    expect(host.querySelector("[data-login-form]"), "a 1Password item's password is not changed here").toBeNull();
+    expect(button("Use the vault's choice"), "it already follows its vault").toBeUndefined();
+    await act(async () => { [...editor().querySelectorAll<HTMLInputElement>('input[type="radio"]')][1]!.click(); });
+    await act(async () => { [...editor().querySelectorAll<HTMLInputElement>('input[type="checkbox"]')][1]!.click(); });
+    await click("Save changes");
+    await flush();
+    expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/1password/items/v1/i1", { method: "PATCH", body: JSON.stringify({ bots: ["quill"] }) });
+    expect(row().textContent).toContain("From 1Password · Quill");
+    expect(row().textContent).not.toContain("vault's choice");
+    await click("Change who can use example.com");
+    await click("Use the vault's choice");
+    await flush();
+    expect(fixture.api).toHaveBeenNthCalledWith(4, "/api/logins/1password/items/v1/i1", { method: "PATCH", body: JSON.stringify({ bots: null }) });
+    expect(row().textContent).toContain("From 1Password · All bots (its vault's choice)");
+    expect(host.querySelector("[data-onepassword-item]")).toBeNull();
   });
 
   it("says why 1Password refused a token", async () => {
     fixture.api.mockResolvedValueOnce({ logins: [], onePassword: OFF }).mockRejectedValueOnce(new Error("1Password did not accept the token."));
     await render();
-    await type("onePasswordToken", "ops_fake-wrong");
     await click("Connect 1Password");
+    await type("onePasswordToken", "ops_fake-wrong");
+    await act(async () => inDialog("Connect 1Password").click());
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    expect(host.querySelector("[data-onepassword] [role=alert]")!.textContent).toBe("1Password did not accept the token.");
+    expect(document.body.querySelector("[data-settings-dialog] [role=alert]")?.textContent).toBe("1Password did not accept the token.");
+  });
+
+  it("on a Team Cloud, has an admin connect 1Password for the whole team, with the setup to use in one line", async () => {
+    const hint = "Use a dedicated vault and a read-only service account.";
+    fixture.config = { team: { id: "acme", name: "Acme" } };
+    fixture.api.mockResolvedValueOnce({ logins: [], secrets: [], onePassword: OFF });
+    await render();
+    expect(host.querySelector("[data-onepassword-team]")!.textContent).toBe(`For the whole team: its bots use it in shared and private chats. ${hint}`);
+    await click("Connect 1Password");
+    expect(document.body.querySelector("[data-settings-dialog]")!.textContent).toContain(hint);
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    fixture.config = null;
+    fixture.api.mockResolvedValueOnce({ logins: [], secrets: [], onePassword: OFF });
+    await render();
+    expect(host.querySelector("[data-onepassword]"), "off a team: the same row").not.toBeNull();
+    expect(host.textContent, "off a team").not.toContain(hint);
+  });
+
+  it("connects Bitwarden with its server, API key and master password, sent once and forgotten, with the setup to use in one line", async () => {
+    const on = { connected: true, server: "vw.example.test", account: "bots@acme.test", items: 2 };
+    const linked = { id: "bitwarden:i1", name: "Stripe", fields: [], source: "linked", provider: "bitwarden", bots: "all", readOnly: true };
+    const login = { ...VAULT_LOGIN, id: "bitwarden:i2:github.com", site: "github.com", hosts: ["github.com"], source: "bitwarden" };
+    fixture.config = { team: { id: "acme", name: "Acme" } };
+    fixture.api
+      .mockResolvedValueOnce({ logins: [], secrets: [], onePassword: OFF, bitwarden: OFF })
+      .mockResolvedValueOnce({ bitwarden: on })
+      .mockResolvedValueOnce({ logins: [login], secrets: [linked], onePassword: OFF, bitwarden: on })
+      .mockResolvedValueOnce({ bitwarden: OFF })
+      .mockResolvedValueOnce({ logins: [], secrets: [], onePassword: OFF, bitwarden: OFF });
+    await render();
+    expect(host.querySelector("[data-bitwarden-team]")!.textContent).toContain("Use a dedicated Bitwarden account that can only see one collection.");
+    await click("Connect Bitwarden");
+    const dialog = () => document.body.querySelector("[data-settings-dialog]")!;
+    expect(dialog().querySelector("[data-bitwarden-guide]")!.textContent).toMatch(/^Use a dedicated Bitwarden account that can only see one collection\./u);
+    expect(dialog().querySelector('input[name="bitwardenServerUrl"]'), "no address field for bitwarden.com").toBeNull();
+    await act(async () => {
+      const select = dialog().querySelector<HTMLSelectElement>('select[name="bitwardenServer"]')!;
+      select.value = "self-hosted";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await type("bitwardenServerUrl", "https://vw.example.test");
+    await type("bitwardenClientId", "user.fake-id");
+    await type("bitwardenClientSecret", "fake-client-secret");
+    await type("bitwardenPassword", "fake-master");
+    for (const name of ["bitwardenClientSecret", "bitwardenPassword"]) expect(document.body.querySelector<HTMLInputElement>(`input[name="${name}"]`)!.type).toBe("password");
+    await act(async () => [...dialog().querySelectorAll("button")].find((one) => one.textContent === "Connect Bitwarden")!.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/logins/bitwarden", { method: "POST",
+      body: JSON.stringify({ serverUrl: "https://vw.example.test", clientId: "user.fake-id", clientSecret: "fake-client-secret", password: "fake-master" }) });
+    expect(host.querySelector("[data-bitwarden-line]")!.textContent).toBe("Connected as bots@acme.test · 2 logins and secrets");
+    expect(host.innerHTML).not.toContain("fake-master");
+    expect(host.querySelector('[data-secret-row="Stripe"]')!.textContent).toContain("From Bitwarden · All bots");
+    const row = host.querySelector('[data-login-row="github.com"]')!;
+    expect(row.textContent).toContain("From Bitwarden");
+    expect(row.querySelectorAll("button"), "read-only here").toHaveLength(0);
+    await click("Disconnect Bitwarden");
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(fixture.api).toHaveBeenNthCalledWith(4, "/api/logins/bitwarden", { method: "DELETE" });
+    await click("Connect Bitwarden");
+    expect(document.body.querySelector<HTMLInputElement>('input[name="bitwardenPassword"]')!.value).toBe("");
+  });
+
+  it("shows no Bitwarden row where the server does not offer it", async () => {
+    fixture.api.mockResolvedValueOnce({ logins: [], secrets: [], onePassword: OFF });
+    await render();
+    expect(host.querySelector("[data-onepassword]")).not.toBeNull();
+    expect(host.querySelector("[data-bitwarden]")).toBeNull();
   });
 
   it("is for admins only", async () => {
@@ -196,6 +322,23 @@ describe("Settings → Vault: logins", () => {
     await render();
     expect(fixture.api).not.toHaveBeenCalled();
     expect(host.textContent).toContain("Only an admin of this installation can see and change the Vault.");
+  });
+
+  it("shows a Team Cloud member only the secrets they gave bots in their own chats, which they can delete and nothing more", async () => {
+    fixture.admin = false;
+    fixture.config = { team: { id: "acme", name: "Acme" } };
+    const own = { id: "s9", name: "Stripe secret key", source: "card", bots: ["pepper"], createdAt: 1, updatedAt: 1 };
+    fixture.api.mockResolvedValueOnce({ logins: [], secrets: [own], onePassword: OFF }).mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({ logins: [], secrets: [], onePassword: OFF });
+    await render();
+    expect(fixture.api).toHaveBeenCalledWith("/api/vault");
+    expect(host.textContent).toContain("Only you can use them, in your own chats with that bot");
+    expect([...host.querySelectorAll("[data-secret-row]")].map((row) => row.textContent)).toEqual([expect.stringContaining("Saved from a chat · Pepper")]);
+    for (const absent of ["Add", "Change Stripe secret key"]) expect(button(absent), absent).toBeUndefined();
+    for (const selector of ["[data-onepassword]", "[data-vault-keys]", "[data-vault-filter]"]) expect(host.querySelector(selector), selector).toBeNull();
+    await click("Delete Stripe secret key");
+    await click("Delete for good");
+    expect(fixture.api).toHaveBeenNthCalledWith(2, "/api/vault/secrets/s9", { method: "DELETE" });
+    expect(host.textContent).toContain("A key you type into a bot's card in your own chat shows here.");
   });
 });
 

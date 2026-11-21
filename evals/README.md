@@ -63,6 +63,23 @@ bridge, a shorter description, a removed built-in.
 
 Each case is one real turn on your account, so name the cases you need. It is closed unless `OMB_EVAL_LIVE=1`, never runs in CI, and its data folder is temporary. Add `OMB_AGENTS_TOOL_BRIDGE=1 OMB_EVAL_LIVE_PASS_ENV=OMB_AGENTS_TOOL_BRIDGE` to try the bridge. Only the scoring has an offline test.
 
+On Claude with tool search on, a turn sends a few agents tools whole and the rest by name only, so the model has to look them up with ToolSearch. Ten cases that check it still finds them:
+
+    --only remember-this,daily-automation,jobs-per-pull-request,publish-a-page,ask-me-which-day,which-triggers,ask-the-chief,show-a-chart,what-did-we-decide,tell-the-team
+
+`--context` runs no model and prints the bytes a Claude turn sends of the agents tools up front, whole against deferred.
+
+## Dream — what a nightly dream keeps
+
+`evals/dream` grades a dream's answer as `runDream` keeps it: `parseDream`, then the fact checks, before anything is written. Each case in `cases.json` holds a few chats, the notebook as it stands, the lines a dream should save (any of a few words, ignoring case) and words no saved line may contain. A case passes when the answer is JSON, every expected line is saved and nothing forbidden is; forbidden words are matched through width, invisible characters and digits that stand for letters, so a disguised line still counts. Saved lines no expectation covers are listed as `unexpected`, for a person or a judge to read, and fail a case marked `nothingElse`. Cases cover cross-chat preferences, single-chat facts, tasks, outdated notes, pasted and disguised instructions, a pasted key, exact times, Spanish, and chats with nothing in common. Only the scoring runs offline, in the evals suite; nothing calls a model yet.
+
+    npx vitest run --config evals/vitest.config.ts evals/dream
+
+`evals/dream/run-dream.ts` sends each case to a real model with the dream's own prompt and scores the answer the same way, with time and cost per case. It talks to the engine directly through its driver, with no server, and the server code it loads gets a temporary data folder. It is closed unless `OMB_EVAL_LIVE=1`, never runs in CI, and writes its report under the gitignored `evals/reports/runs/`. The instance uses the live tier's shape:
+
+    OMB_EVAL_LIVE=1 OMB_EVAL_LIVE_INSTANCE='{"instanceId":"claude","driver":"claudeAgent","model":"claude-haiku-5-5","config":{"cli":"/path/to/claude"},"environmentFrom":["HOME","USER","PATH"]}' \
+        node --experimental-strip-types evals/dream/run-dream.ts [--only id,id]
+
 ## Tier 3 — opt-in live-model smoke
 
 Live-model runs never execute by default: `pnpm eval --live` prints one skip line and exits 0 unless the gate is open.
@@ -82,3 +99,9 @@ The skill bench measures one fixture skill against its own prompts through the s
     node --experimental-strip-types evals/runners/run-skill-bench.ts [--fixture bench-triage-handoff] [--replicates 2]
 
 The alpha report gives per-arm pass rates, duration and estimated tokens (chars/4 over evidence turns; the scripted provider makes no API calls) with mean and standard deviation, a delta-per-assertion table, and two flags: non-discriminating assertions (identical verdicts in both arms — controls, not effects) and high-variance assertions (verdicts that flip across replicates of the same prompt and arm, assessable from two replicates on). `evals/skill-bench/fixtures/` holds bench fixtures; `evals/skill-bench/triggers/` holds the trigger-eval sets (should-trigger / should-not-trigger with train and held-out splits, plus near misses) that a later router slice validates against — data only, no router code.
+
+## Turn routing — which turns can a quick model take
+
+`evals/turn-routing` runs `classifyTurn` (`server/turn-route.ts`) over labelled messages. Each case says the tier a person would pick: `simple` when a quick model answers as well as the full one. A miss is `cautious` (the full model for a simple turn, which costs only money) or `eager` (the quick model for a turn that needed the full one, which costs the answer). The cases lean towards the hard ones: short weighty decisions, tool requests whose verb is not in the action list, and other languages. So the counts are a baseline for a router to beat, not an accuracy rate. The test pins today's misses; a router change updates them in the same PR.
+
+    npx vitest run --config evals/vitest.config.ts evals/turn-routing

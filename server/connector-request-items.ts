@@ -2,7 +2,7 @@ import { AUTH_CONFIG_ID } from "../shared/connector-availability.ts";
 import { inputError } from "./composio-project.ts";
 import { normalizeAccountAlias } from "./composio.ts";
 
-const CONNECTOR_SLUG = /^[a-z0-9][a-z0-9_-]{0,80}$/;
+const CONNECTOR_SLUG = /^(?!__proto__$)[a-z0-9_][a-z0-9_-]{0,80}$/;
 
 export interface ConnectorRequestItem {
   slug: string;

@@ -310,17 +310,34 @@ function libraryOptOutPath(botId: string): string | null {
   return join(DATA_DIR, "skill-state", botId, "library-opt-out.json");
 }
 
-/** Names this bot has taken off its own list. An explicit assignment still wins; the shared copy stays. */
+const unreadableOptOutsWarned = new Set<string>();
+
+function noLibraryOptOuts(path: string, why: string): ReadonlySet<string> {
+  if (!unreadableOptOutsWarned.has(path)) {
+    unreadableOptOutsWarned.add(path);
+    console.warn(`Library opt-outs at ${path} can't be read (${why}); every every-bot skill stays on for that bot until one is switched off again.`);
+  }
+  return new Set();
+}
+
+/** Names this bot has taken off its own list. An explicit assignment still wins; the shared copy stays. A list that is
+ * there but cannot be read counts as none, so the bot keeps working with every every-bot skill; the server logs it once. */
 export function librarySkillOptOuts(botId: string): ReadonlySet<string> {
   const path = libraryOptOutPath(botId);
-  if (!path || !existsSync(path)) return new Set();
+  if (!path) return new Set();
+  let text: string;
   try {
-    const parsed = libraryOptOutSchema.safeParse(JSON.parse(readFileSync(path, "utf8")));
-    if (!parsed.success) return new Set();
-    return new Set(parsed.data.filter(isSkillName));
-  } catch {
-    return new Set();
+    text = readFileSync(path, "utf8");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return new Set();
+    return noLibraryOptOuts(path, code ?? "read failed");
   }
+  try {
+    const parsed = libraryOptOutSchema.safeParse(JSON.parse(text));
+    if (parsed.success) return new Set(parsed.data.filter(isSkillName));
+  } catch {}
+  return noLibraryOptOuts(path, "not a list of skill names");
 }
 
 export function setLibrarySkillOptOut(botId: string, name: string, optedOut: boolean): void {

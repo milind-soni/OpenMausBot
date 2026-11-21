@@ -34,6 +34,9 @@ export function httpErrorDetail(body: string, limit = 500): string {
 
 export class UnsupportedChatToolsError extends Error {}
 
+/** The provider closed the stream with neither finish_reason nor [DONE]; resending repeats nothing. */
+export class StreamTruncatedError extends ChatProtocolError {}
+
 export function rejectsToolsParameter(status: number, body: string): boolean {
   if (status !== 400 && status !== 422) return false;
   let envelope: Record<string, unknown> | undefined;
@@ -61,7 +64,9 @@ export function rejectsReasoningReplay(status: number, body: string): boolean {
 }
 
 /** Groq fails a completion with `tool_use_failed` when a generated tool call is invalid: usually a
- *  tool it was not offered (gpt-oss inventing a "json" tool), sometimes arguments missing the schema. */
+ *  tool it was not offered (gpt-oss inventing a "json" tool), sometimes arguments missing the schema.
+ *  oMLX ends the stream with `invalid_tool_call` or `incomplete_tool_call` when it cannot parse the
+ *  model's tool call. */
 export class RejectedToolCallError extends ChatProtocolError {
   readonly refusal: Record<string, unknown>;
   constructor(message: string, refusal: Record<string, unknown>) {
@@ -70,9 +75,11 @@ export class RejectedToolCallError extends ChatProtocolError {
   }
 }
 
+const TOOL_CALL_FAILURES = new Set(["tool_use_failed", "invalid_tool_call", "incomplete_tool_call"]);
+
 export const toolCallRefusal = (error: unknown) => {
   const body = object(error);
-  return body?.code === "tool_use_failed" ? body : undefined;
+  return typeof body?.code === "string" && TOOL_CALL_FAILURES.has(body.code) ? body : undefined;
 };
 
 export function refusedToolCall(status: number, body: string) {
@@ -96,4 +103,17 @@ export function completionError(json: ProviderBody, label: string): ChatProtocol
   const text = `provider returned a ${label}: ${message.slice(0, 200)}`;
   const refusal = toolCallRefusal(json.error);
   return refusal ? new RejectedToolCallError(text, refusal) : new ChatProtocolError(text);
+}
+
+/** The data of an SSE `data:` line, or undefined for any other line. llama.cpp before b7200 (seen on b6500) refuses a
+ * streamed request with HTTP 200 and an `error:` event holding the bare error: that throws what `failure` makes of it. */
+export function sseData(line: string, failure: (status: number, body: string) => Error): string | undefined {
+  if (line.startsWith("error:")) {
+    const event = line.slice("error:".length).trim();
+    let error: Record<string, unknown> | undefined;
+    try { error = object(JSON.parse(event)); } catch { error = undefined; }
+    throw typeof error?.code === "number" ? failure(error.code, JSON.stringify({ error }))
+      : new ChatProtocolError(`provider returned a streaming error: ${event.slice(0, 200)}`);
+  }
+  return line.startsWith("data:") ? line.slice("data:".length).trim() : undefined;
 }

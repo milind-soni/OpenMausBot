@@ -4,6 +4,7 @@ import { asleepAnswer, BACKGROUND_HEADER, cloudAsleep, markCloudAsleep, markClou
 import { lacksAdminScope } from "../lib/admin-scope";
 import { isBotLimitRefusal, isBotPausedRefusal, showBotLimit } from "../lib/bot-limit";
 import { noteRefusedRequest } from "../lib/session-ended";
+import { forgetSharedSession } from "../lib/session-reuse";
 import { serverErrorText } from "../lib/server-error";
 
 export class ApiError extends Error {
@@ -34,6 +35,10 @@ export async function api<T = any>(path: string, init?: ApiInit): Promise<T> {
   }
   const sent = new Headers(headers ?? { "content-type": "application/json" });
   if (background) sent.set(BACKGROUND_HEADER, "1");
+  // A write, or whatever made the server refuse, may have changed who is signed in or what they may do: no session
+  // answer from before it is served again.
+  const writes = (rest.method ?? "GET").toUpperCase() !== "GET";
+  if (writes) forgetSharedSession();
   const res = await fetch(path, {
     ...rest,
     headers: sent,
@@ -42,7 +47,8 @@ export async function api<T = any>(path: string, init?: ApiInit): Promise<T> {
       : signal
         ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
         : AbortSignal.timeout(timeoutMs),
-  });
+  }).finally(() => { if (writes) forgetSharedSession(); });
+  if (res.status === 401 || res.status === 403) forgetSharedSession();
   if (asleepAnswer(res)) markCloudAsleep();
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {

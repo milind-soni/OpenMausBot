@@ -1,10 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { AppConfig } from "../config.ts";
+import { DATA_DIR, type AppConfig } from "../config.ts";
 import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { installLibrarySkill, readLibrarySkillFile, setLibrarySkillEveryBot } from "../skill-library.ts";
@@ -164,5 +164,72 @@ describe("removing a skill from one bot", () => {
     });
     expect(cleared.status).toBe(200);
     expect(resolveBotSkills(first, []).map((skill) => skill.name)).toContain(shared);
+  });
+
+  async function twinFixture(botId: string, name: string) {
+    const bot = { id: botId, name: "Twin", assignedSkills: [name] as string[] | undefined };
+    expect(installSkill(botId, "private:test", [{ path: "SKILL.md", content: learned(name) }])).toMatchObject({ name });
+    expect(installLibrarySkill({ name, instructions: learned(name), source: "lib", reviewState: "approved" })).toMatchObject({ name });
+    const store = {
+      bot: (id: string) => (id === botId ? bot : undefined),
+      get bots() { return [bot]; },
+      patchBot(_id: string, patch: { assignedSkills?: string[] }) { return Object.assign(bot, patch); },
+    } as unknown as Store;
+    const routes = [createBotSkillsRoutes({
+      store,
+      cfg: { features: { skillsLibrary: true } } as AppConfig,
+      listBotSkills: () => [],
+      readBotSkillFile: () => null,
+      stagedSkillListing: (staged) => staged,
+    })];
+    const server = createServer(async (req, res) => {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const auth = { kind: "loopback", scopes: ["admin"] } as unknown as RequestAuth;
+      if (!await dispatchRoutes(routes, { req, res, url, path: url.pathname, method: req.method ?? "GET", auth, json, readBody })) json(res, 404, {});
+    });
+    servers.push(server);
+    await new Promise<void>((ready) => server.listen(0, "127.0.0.1", ready));
+    const remove = async () => {
+      const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/bots/${botId}/skills/${name}`, { method: "DELETE" });
+      return { status: response.status, error: (await response.json() as { error?: string }).error };
+    };
+    return { bot, remove };
+  }
+
+  it("refuses a private skill it cannot remove instead of unassigning the shared skill of the same name", async () => {
+    const { bot, remove } = await twinFixture("route-twin-unsafe-root", "twin-unsafe-root");
+    const skillsRoot = join(workspaceDir(bot.id), "skills");
+    renameSync(skillsRoot, `${skillsRoot}-real`);
+    symlinkSync(`${skillsRoot}-real`, skillsRoot, process.platform === "win32" ? "junction" : "dir");
+
+    expect(await remove()).toMatchObject({ status: 409, error: expect.stringMatching(/refusing to remove/) });
+    expect(bot.assignedSkills).toEqual(["twin-unsafe-root"]);
+    expect(listSkills(bot.id).map((skill) => skill.name)).toContain("twin-unsafe-root");
+  });
+});
+
+describe("a bot's opt-outs from every-bot skills", () => {
+  const optOutFile = (botId: string) => join(DATA_DIR, "skill-state", botId, "library-opt-out.json");
+
+  it("keeps every-bot skills on for a bot whose opt-out list is damaged or can't be read", () => {
+    const shared = "everyone-opt-out-check";
+    expect(installLibrarySkill({ name: shared, instructions: learned(shared), source: "lib", reviewState: "approved" })).toMatchObject({ name: shared });
+    expect(setLibrarySkillEveryBot(shared, true)).toMatchObject({ everyBot: true });
+    mkdirSync(dirname(optOutFile("opt-out-damaged")), { recursive: true });
+    writeFileSync(optOutFile("opt-out-damaged"), "[\"half-written");
+
+    expect(resolveBotSkills("opt-out-none", []).map((skill) => skill.name)).toContain(shared);
+    expect(resolveBotSkills("opt-out-damaged", []).map((skill) => skill.name)).toContain(shared);
+    expect(resolveBotSkills("opt-out-damaged", [shared]).map((skill) => skill.name)).toContain(shared);
+
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    mkdirSync(dirname(optOutFile("opt-out-unreadable")), { recursive: true });
+    writeFileSync(optOutFile("opt-out-unreadable"), "[]");
+    chmodSync(dirname(optOutFile("opt-out-unreadable")), 0o000);
+    try {
+      expect(resolveBotSkills("opt-out-unreadable", []).map((skill) => skill.name)).toContain(shared);
+    } finally {
+      chmodSync(dirname(optOutFile("opt-out-unreadable")), 0o700);
+    }
   });
 });

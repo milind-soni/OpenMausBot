@@ -15,7 +15,11 @@ export function useMediaQuery(query: string, fallback = false): boolean {
 
 export const TWO_SIDE_PANELS_FIT = "(min-width: 1536px)";
 
+/** The open sidebar, a chat of at least 440 and any side panel (the widest are up to 460). */
 export const SIDEBAR_AND_PANEL_FIT = "(min-width: 1280px)";
+
+/** The open sidebar (280), a chat of at least 440 and a side panel of 320 or less (sidebar-fold.ts). */
+export const SIDEBAR_AND_NARROW_PANEL_FIT = "(min-width: 1040px)";
 
 /** Tailwind's md breakpoint. */
 export const SIDEBAR_INLINE = "(min-width: 768px)";

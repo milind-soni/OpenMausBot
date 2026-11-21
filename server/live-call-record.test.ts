@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 import type { LiveCallRecord } from "../shared/wire.ts";
+import { redactBotAuthored } from "./message-redaction.ts";
 import { recordLiveCall, spokenLineFields, titleLiveCall, type LiveCallRecordDeps, type LiveCallTitleDeps } from "./live-call-record.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { Message } from "./store.ts";
@@ -40,6 +41,13 @@ describe("recordLiveCall", () => {
     const row = recordLiveCall(deps, { threadId: "t1", botName: "Ada", record: record() });
     expect(deps.appendMessage).toHaveBeenCalledWith("t1", { role: "bot", kind: "call", text: "Call with Ada · 1:42", call: record() });
     expect(appended).toEqual([row]);
+  });
+
+  it("scrubs a secret the bot read aloud before its line is stored", () => {
+    const key = "sk-proj-" + "a1B2c3D4e5F6g7H8i9J0".repeat(3);
+    const row = redactBotAuthored({ role: "bot", kind: "call", text: "Call with Ada · 1:42", call: record({ spoken: [{ at: 2_000, text: `Your key is ${key}.` }] }) });
+    expect(row.call?.spoken).toEqual([{ at: 2_000, text: redactSecretsInText(`Your key is ${key}.`) }]);
+    expect(JSON.stringify(row)).not.toContain(key);
   });
 
   it("writes nothing when the call's chat or bot was deleted during the call", () => {

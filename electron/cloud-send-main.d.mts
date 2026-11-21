@@ -29,7 +29,7 @@ export function installCloudSend(deps: {
   receive(proc: unknown, message: unknown): boolean;
   /** This computer's server's private port, asked as a send asks it: another move's sends share it. */
   handoff(what: { kind: string; [key: string]: unknown }): Promise<any>;
-  move(options?: { final?: boolean; scope?: string }): Promise<CloudSendOutcome>;
+  move(options?: { final?: boolean; scope?: string; files?: boolean }): Promise<CloudSendOutcome>;
   check(options?: { scope?: string; stopped?(): boolean }): Promise<CloudMoveCheck>;
   switches(): Record<string, boolean>;
   snapshot(): CloudSendSnapshot;

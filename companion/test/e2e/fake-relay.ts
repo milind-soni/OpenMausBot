@@ -32,6 +32,10 @@ export interface FakeRelay {
   closes: Array<{ kind: string; code: number }>;
   /** Token refreshes accepted on a live control socket. */
   refreshes: number;
+  /** Plays a relay whose sockets open but never answer: no `hello`, to an auth or a refresh. */
+  silent: boolean;
+  /** Refuses every token refresh on a live control socket (4401), as for an expired token. */
+  refuseRefresh: boolean;
   /** Plays a malicious relay on every session spliced from now on; null passes bytes through. */
   tamper: FakeRelayOptions["tamper"] | null;
   admitted(hid: string): Set<string>;
@@ -48,7 +52,7 @@ const toBuffer = (data: RawData): Buffer => (Array.isArray(data) ? Buffer.concat
 
 export async function startFakeRelay(options: FakeRelayOptions): Promise<FakeRelay> {
   const hosts = new Map<string, Host>();
-  const relay = { refreshes: 0, tamper: options.tamper ?? null } as FakeRelay;
+  const relay = { refreshes: 0, silent: false, refuseRefresh: false, tamper: options.tamper ?? null } as FakeRelay;
   const closes: FakeRelay["closes"] = [];
   const server = createServer((_req, res) => res.writeHead(404).end());
   const wss = new WebSocketServer({
@@ -101,6 +105,7 @@ export async function startFakeRelay(options: FakeRelayOptions): Promise<FakeRel
 
   const hostControl = (socket: WebSocket) =>
     onFirst(socket, "host", (message) => {
+      if (relay.silent) return;
       if (message.t !== "auth" || typeof message.token !== "string") return close(socket, "host", 4400);
       const verified = verifyRelayToken(message.token, options.keys, now());
       if (!verified.ok) return close(socket, "host", 4401);
@@ -115,8 +120,11 @@ export async function startFakeRelay(options: FakeRelayOptions): Promise<FakeRel
         const next = JSON.parse(toBuffer(raw).toString("utf8")) as Record<string, unknown>;
         if (next.t === "auth") {
           const refreshed = typeof next.token === "string" ? verifyRelayToken(next.token, options.keys, now(), hid) : null;
-          if (!refreshed?.ok) close(socket, "host", 4401);
-          else relay.refreshes += 1;
+          if (!refreshed?.ok || relay.refuseRefresh) close(socket, "host", 4401);
+          else if (!relay.silent) {
+            relay.refreshes += 1;
+            socket.send(JSON.stringify({ t: "hello", v: 1, node: "relay1", sessionsMax: 16 }));
+          }
         } else if (next.t === "admit" && Array.isArray(next.set) && next.set.length <= 32) {
           host.set = new Set(next.set as string[]);
           for (const session of host.sessions) {

@@ -267,9 +267,12 @@ describe("an OpenCode model typed by hand", () => {
   const opencode: InstanceInfo = {
     instanceId: "opencode", driverKind: "opencodeGo", displayName: "OpenCode", access: "subscription",
     snapshot: { state: "available", version: "1.19.4", authenticated: true },
-    models: { default: "opencode/big-pickle", options: [{ id: "opencode/big-pickle", label: "Zen · Big Pickle" }] },
+    models: { default: "opencode/big-pickle", options: [
+      { id: "opencode/big-pickle", label: "Zen · Big Pickle" }, { id: "venice/deepseek-v4-flash", label: "Venice · DeepSeek V4 Flash" },
+    ] },
   };
   const onOpenCode = (model: string): Bot => ({ ...scout(), modelSelection: { instanceId: "opencode", model } });
+  const typedRows = () => [...document.querySelectorAll<HTMLElement>("[data-menu-row]")].filter((candidate) => candidate.textContent?.includes("typed by hand"));
 
   it.each([false, true])("is picked from the search box (advanced: %s) and then named as typed by hand", async (advanced) => {
     fixture.advanced = advanced;
@@ -283,6 +286,15 @@ describe("an OpenCode model typed by hand", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", selection: { instanceId: "opencode", model: `typed::${typed}` } }));
     render(onOpenCode(`typed::${typed}`));
     expect(chip().textContent).toContain(`${typed} · typed by hand`);
+  });
+
+  it.each([false, true])("is never offered under a provider OpenCode lists no model of (advanced: %s)", async (advanced) => {
+    fixture.advanced = advanced;
+    fixture.instances = [opencode];
+    render(onOpenCode("opencode/big-pickle"));
+    await openWith("click");
+    type(document.querySelector<HTMLInputElement>("[data-menu-search]")!, "chutes/deepseek-ai/DeepSeek-V4.1-Flash-1017");
+    expect(typedRows()).toEqual([]);
   });
 });
 
@@ -315,6 +327,33 @@ describe("picking a model that has reasoning levels", () => {
       expect(menu()).toBeNull();
     });
   }
+});
+
+describe("DeepSeek thinking choices before a conversation starts", () => {
+  it("offers catalog choices, saves the chosen variant, and restores it after remount without session events", async () => {
+    const model = "deepseek-official/deepseek-v4-flash";
+    const models = { default: model, options: [{ id: model, label: "DeepSeek V4 Flash",
+      variants: ["off", "low", "high", "max"].map(id => ({ id, label: id })) }] };
+    fixture.instances = [{ instanceId: "deepseek", driverKind: "deepseekAgent", displayName: "DeepSeek Harness",
+      snapshot: { state: "available", authenticated: true }, capabilities: { modelVariants: true }, models }];
+    const selected = { ...scout(), modelSelection: { instanceId: "deepseek", model } };
+    render(selected);
+    await openWith("click");
+    const select = document.querySelector<HTMLSelectElement>('select[aria-label="Reasoning variant"]')!;
+    expect(select).not.toBeNull();
+    expect([...select.options].map(option => option.textContent)).toEqual(["Use session setting", "off", "low", "high", "max"]);
+    select.value = "1";
+    flushSync(() => select.dispatchEvent(new Event("change", { bubbles: true })));
+    const saved = fixture.dispatch.mock.lastCall![0];
+    expect(saved).toMatchObject({ type: "setModel", botId: selected.id, threadId: selected.threadId,
+      selection: { instanceId: "deepseek", model, variant: "low" } });
+    flushSync(() => root.unmount());
+    root = createRoot(host);
+    render({ ...selected, modelSelection: saved.selection });
+    await openWith("click");
+    const restored = document.querySelector<HTMLSelectElement>('select[aria-label="Reasoning variant"]')!;
+    expect(restored.selectedOptions[0].textContent).toBe("low");
+  });
 });
 
 describe("clearing a search after a pick that keeps the menu open", () => {

@@ -12,7 +12,7 @@ its database, its settings, other bots' folders and other turns' processes are n
 | `/usr`, `/etc`, `/opt`, the server's own code folder, read-only | The image: engine CLIs, node, python, git, the bots' browser |
 | `HOME`, read-write | The engines' own logins and settings (`~/.claude`, `~/.codex`, `~/.grok`). On a Team Cloud this is the turn's audience's engine home instead, with the team's engine sign-in files bound into it, and the server's HOME is not there at all ([team-cloud.md](team-cloud.md#engine-homes)) |
 | the data folder (`~/.openmausbot`), **an empty private folder** | `messages.db`, `config.json`, logins, the server's sockets, every other bot's folders are not there |
-| put back inside it: the turn's working folder and the bot's own folder (`workspaces/<bot>`), read-write | What the turn works on, and the bot's memory and skills |
+| put back inside it: the turn's working folder and the bot's own folder (`workspaces/<bot>`), read-write | What the turn works on, and the bot's memory and skills. On a Team Cloud a turn that is not the team's has the bot's own folder read-only, and its own memory layer read-write ([team-cloud.md](team-cloud.md#the-audience-rule)) |
 | put back: this turn's permission socket (the engine's question and approval helper reaches the server through it), and, read-only, the conversation's own hook token folder (the hook helper's bearer, renewed each turn) and the files its command line names (MCP config, system prompt) | What the driver made for this one process |
 | private `/tmp`, `/var/tmp`, `/run`, `/dev`, `/proc` | Its own PID namespace: other turns' processes do not exist for it |
 | `/sys/devices/system/cpu/possible` and `online`, read-only; nothing else of `/sys` | The machine's CPU count. Programs built with TCMalloc (Google's Antigravity runtime) stop themselves at start without it (exit 134) |
@@ -101,7 +101,10 @@ ends. A server that answers directly but not through the broker fails the test w
 server", never "Connected", and says the fault is ours. A tool call a URL server refuses with HTTP 401 is answered by the
 broker as a failed tool result that names the server and what to do (`server/bot-box/broker-mcp-refusal.ts`): passed through,
 the 401 starts the engine's own sign-in, which cannot work because the broker drops any `Authorization` the engine sends, and
-Claude Code then says only "Error dialing <address>", since the address holds a token. Connected apps (Composio) were already behind the harness
+Claude Code then says only "Error dialing <address>", since the address holds a token. When nobody signed in and the server
+is one a connected app covers (Gmail or Google Calendar, known by its address or name, `server/mcp-server-app.ts`), and the
+turn can use that app, the answer offers the app's connect card first, or says to use the app when it is already connected.
+Connected apps (Composio) were already behind the harness
 (`/api/internal/connectors/*` with a per-turn bearer) and stay there.
 
 A key whose CLI takes no base URL from the environment (xAI, Mistral, Groq, Greenference, ModelGo, Cerebras, MiniMax, Kimi, Cursor, Factory,

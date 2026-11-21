@@ -62,6 +62,11 @@ async function remoteFixture(mode: "http" | "event-stream" | "sse") {
         }
         const refusedWith = (frame.params?.arguments as Record<string, unknown>)?.status;
         if (typeof refusedWith === "number") return res.writeHead(refusedWith).end(TOKEN);
+        if ((frame.params?.arguments as Record<string, unknown>)?.html) return res.writeHead(200, { "content-type": "text/html" }).end("<html><body>Sign in required</body></html>");
+        if ((frame.params?.arguments as Record<string, unknown>)?.drop) {
+          if (mode === "event-stream") return res.writeHead(200, { "content-type": "text/event-stream", "mcp-session-id": "disposable-session" }).end();
+          return res.writeHead(200, { "content-type": "application/json", "mcp-session-id": "disposable-session" }).end(JSON.stringify({ jsonrpc: "2.0", id: "not-the-request", result: {} }));
+        }
         if ((frame.params?.arguments as Record<string, unknown>)?.error) error = { code: -32000, message: TOKEN };
         else result = { content: [{ type: "text", text: (frame.params?.arguments as Record<string, unknown>)?.large ? "x".repeat(2_000_000) : "read completed" }] };
       } else {
@@ -199,6 +204,26 @@ describe("scoped remote MCP subprocess", () => {
     expect(reply.error.message).toContain(hint);
     expect(JSON.stringify(reply)).not.toContain(TOKEN);
     expect(JSON.stringify(reply)).not.toContain(fixture.spec.url);
+  });
+
+  it("names a protocol failure instead of the bare remote error", async () => {
+    fixture = await remoteFixture("http");
+    start(gateServer({ name: "notes", server: fixture.spec, budget: 0, threadId: "fixture", toolScope: { allow: ["mcp:notes:read"] } })!);
+    await initialize();
+    send({ id: 2, method: "tools/call", params: { name: "read", arguments: { html: true } } });
+    const reply = await answer();
+    expect(reply.error).toEqual({ code: -32603, message: "unexpected content type" });
+    expect(JSON.stringify(reply)).not.toContain("Sign in required");
+    expect(JSON.stringify(reply)).not.toContain(fixture.spec.url);
+  });
+
+  it("names an event stream that ended without the response", async () => {
+    fixture = await remoteFixture("event-stream");
+    start(gateServer({ name: "notes", server: fixture.spec, budget: 0, threadId: "fixture", toolScope: { allow: ["mcp:notes:read"] } })!);
+    await initialize();
+    send({ id: 2, method: "tools/call", params: { name: "read", arguments: { drop: true } } });
+    const reply = await answer();
+    expect(reply.error).toEqual({ code: -32603, message: "event stream ended without the response" });
   });
 
   it("says when the remote server cannot be reached", async () => {
@@ -499,7 +524,7 @@ describe("remote MCP tool directory", () => {
   it("reads its settings from a private record when mounts share one environment", async () => {
     fake = await startFakeHttpMcp({ tools: catalog });
     const record = `OMB_REMOTE_MCP_CONFIG_${"a".repeat(64)}`;
-    const descriptor = mcpStdioServer(spec(fake.url), { directory: { name: "whop" }, configEnvName: record })!;
+    const descriptor = mcpStdioServer(spec(fake.url), { sourceEnv: {}, directory: { name: "whop" }, configEnvName: record })!;
     expect(descriptor.args!.slice(1)).toEqual(["--config-env", record]);
     expect(Object.keys(descriptor.env!)).toEqual([record]);
     expect(descriptor.args!.join(" ")).not.toContain("directory-fixture-token");

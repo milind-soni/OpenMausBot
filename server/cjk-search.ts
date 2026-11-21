@@ -3,7 +3,8 @@ import type { DatabaseSync } from "node:sqlite";
 // FTS5's unicode61 tokenizer has no CJK dictionary and indexes a whole Han or kana run as one token, so a word in the
 // middle of a sentence can never match. Each CJK character becomes its own token instead (split by U+200B, which
 // unicode61 treats as a separator and a reader never sees), and a query asks for its characters as phrases.
-const CJK = "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}";
+// Unicode puts the long vowel mark (ー, ｰ) and the half-width voicing marks (ﾞ, ﾟ) in the Common script, not kana.
+const CJK = "\\p{Script=Han}\\p{Script=Hiragana}\\p{Script=Katakana}\\u30fc\\uff70\\uff9e\\uff9f";
 const CJK_CHAR = new RegExp(`[${CJK}]`, "u");
 const HAN = /\p{Script=Han}/u;
 const CJK_RUNS = new RegExp(`[${CJK}]+|[^${CJK}]+`, "gu");
@@ -11,9 +12,10 @@ const CJK_BOUNDARY = new RegExp(`(?<=[${CJK}])(?=[\\p{L}\\p{N}])|(?<=[\\p{L}\\p{
 /** U+200B ZERO WIDTH SPACE, written escaped so no editor or formatter can drop it unseen. */
 export const SEARCH_MARK = "\u200b";
 
-/** Particles and filler words say nothing about what a note is about; they also end a run, so no bigram straddles one. */
+/** Particles, filler words and a stretched vowel (えーーー) say nothing about what a note is about; they also end a run,
+ * so no bigram straddles one. */
 const FILLER = new RegExp(
-  "我们|你们|他们|她们|它们|这个|那个|一下|一个|可以|时候|现在|知道|告诉|记得|还是|就是|不是|没有|已经|因为|所以|但是|如果|然后|还有|请问|帮我|怎样|这样|那样|哪里|哪个|应该|一些|[的了是吗呢吧啊呀哦嗯么]",
+  "[ーｰ]{2,}|我们|你们|他们|她们|它们|这个|那个|一下|一个|可以|时候|现在|知道|告诉|记得|还是|就是|不是|没有|已经|因为|所以|但是|如果|然后|还有|请问|帮我|怎样|这样|那样|哪里|哪个|应该|一些|[的了是吗呢吧啊呀哦嗯么]",
   "gu",
 );
 

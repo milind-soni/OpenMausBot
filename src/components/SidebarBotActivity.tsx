@@ -7,6 +7,9 @@ import { t } from "@/lib/i18n";
 import { isArchived, orderedSidebarThreads, orderedThreadList, threadRecency, threadUpdatedLabel } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { localizedTaskTitle } from "@/lib/task-title";
+import { endedOnFailure } from "@/lib/mascot";
+import { rowSelectedSurface } from "./SidebarRowMarkers";
+import { handoffStatusText } from "./HandoffStatusChip";
 
 export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>, archivedApprovals = false): Array<Task & { queued: boolean }> {
   const tasks = bot.tasks ?? [{
@@ -29,12 +32,15 @@ export function runningRoutineRuns(bot: Bot): Array<Task & { queued: boolean }> 
   return orderedThreadList((bot.tasks ?? []).filter(runningRoutineRun).map((task) => ({ ...task, queued: false })));
 }
 
-export function sidebarBotStatus(bot: Bot, queued: Record<string, unknown[]>) {
+/** `visible` is the bot's shown conversation: when it ended on an error (a turn that failed, or an engine that could not
+ * start, both end on the failed-turn row), the bot is `failed` (red), kept apart from `waiting` (orange, it needs your answer). */
+export function sidebarBotStatus(bot: Bot, queued: Record<string, unknown[]>, visible?: Bot["messages"]) {
   const tasks = sidebarBotActivityTasks(bot, queued);
   const waiting = bot.activity === "waiting-on-you" || tasks.some((task) => task.activity === "waiting-on-you");
   const working = !waiting && (Boolean(bot.busy) || tasks.some((task) => task.busy || task.activity === "working"));
-  const teammateWait = !waiting && !working && (Boolean(bot.waitingForTeammates) || tasks.some((task) => Boolean(task.waitingForTeammates)));
-  return { waiting, working, teammateWait, queued: tasks.some((task) => task.queued) };
+  const failed = !waiting && !working && endedOnFailure(visible);
+  const teammateWait = !waiting && !working && !failed && (Boolean(bot.waitingForTeammates) || tasks.some((task) => Boolean(task.waitingForTeammates)));
+  return { waiting, working, failed, teammateWait, queued: tasks.some((task) => task.queued) };
 }
 
 export function threadsWhenTreeHidden(bot: Bot, queued: Record<string, unknown[]>) {
@@ -60,7 +66,7 @@ export function sidebarGroupActivityTasks(group: Group, bots: Bot[], queued: Rec
     const speakerId = roomThreadSpeakerId(group, task.threadId);
     const waiting = Boolean(speakerId) && bots.find((bot) => bot.id === speakerId)?.activity === "waiting-on-you";
     return {
-      ...task, busy: roomThreadWorking(group, task.threadId), unread: task.threadId === group.threadId && Boolean(group.unread),
+      ...task, busy: roomThreadWorking(group, task.threadId), unread: task.unread ?? (task.threadId === group.threadId && Boolean(group.unread)),
       activity: waiting || task.activity === "waiting-on-you" ? "waiting-on-you" as const : undefined,
     };
   });
@@ -71,6 +77,20 @@ export function sidebarGroupActivityTasks(group: Group, bots: Bot[], queued: Rec
 export type AttentionThread =
   | { kind: "bot"; botId: string; botName: string; task: Task & { queued: boolean } }
   | { kind: "group"; groupId: string; groupName: string; groupThreadId: string; task: Task & { queued: boolean } };
+
+/** The conversation the chat window has open, matched against the rows these lists render. */
+export type OpenThread =
+  | { kind: "bot"; botId: string; threadId: string }
+  | { kind: "group"; groupId: string; threadId: string };
+
+export function isOpenThread(entry: AttentionThread, open: OpenThread | undefined): boolean {
+  if (!open || entry.task.threadId !== open.threadId) return false;
+  if (entry.kind === "bot") return open.kind === "bot" && entry.botId === open.botId;
+  return open.kind === "group" && entry.groupId === open.groupId;
+}
+
+/** The row of the conversation the chat window has open: the plain fill a selected sidebar row has. */
+export const openThreadRow = rowSelectedSurface;
 
 export function attentionOwnerName(entry: AttentionThread): string {
   return entry.kind === "bot" ? entry.botName : entry.groupName;
@@ -107,7 +127,8 @@ export function attentionRowStatus(task: AttentionThread["task"]): { active: boo
   const teammateWait = !waiting && task.waitingForTeammates === true;
   const working = !waiting && !teammateWait && (task.busy || task.activity === "working");
   const active = waiting || teammateWait || working || task.queued || task.unread === true;
-  const label = waiting ? t("task.waiting") : working ? t("chat.activity.working") : teammateWait ? t("task.waitingOnTeammate") : task.queued ? t("task.queued") : t("task.unread");
+  const handoff = task.handoff && (waiting ? task.handoff.state === "waiting" : true) ? handoffStatusText(task.handoff) : undefined;
+  const label = handoff ?? (waiting ? t("task.waiting") : working ? t("chat.activity.working") : teammateWait ? t("task.waitingOnTeammate") : task.queued ? t("task.queued") : t("task.unread"));
   const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || task.queued ? Clock3 : BellDot;
   const colorClass = cn(working && "animate-spin text-success", (waiting || teammateWait) && "text-warning");
   return { active, Icon, colorClass, label };
@@ -156,20 +177,30 @@ export function crossBotPinnedThreads(bots: Bot[], groups: Group[], queued: Reco
       : { kind: "bot", botId: botId!, botName: botName!, task });
 }
 
-export function AttentionThreadRows({ entries, onJump, inset = false }: { entries: AttentionThread[]; onJump: (entry: AttentionThread) => void; inset?: boolean }) {
+export function AttentionThreadRows({ entries, onJump, inset = false, unreadDot = false, current }: {
+  entries: AttentionThread[]; onJump: (entry: AttentionThread) => void; inset?: boolean;
+  /** Mark an unread conversation with a dot and a heavier title, the way the Inbox's own rows are marked. */
+  unreadDot?: boolean;
+  /** The conversation the chat window has open, marked like a selected sidebar row. */
+  current?: OpenThread;
+}) {
   return <>
     {entries.map((entry) => {
       const { Icon, colorClass, label: status } = attentionRowStatus(entry.task);
       const name = attentionOwnerName(entry);
       const label = t("attention.item", { title: entry.task.title, name, status });
+      const unread = unreadDot && entry.task.unread === true;
+      const open = isOpenThread(entry, current);
       return <button key={`${entry.kind}-${entry.kind === "bot" ? entry.botId : entry.groupId}-${entry.task.threadId}`} type="button" aria-label={label} title={label}
+        aria-current={open ? "page" : undefined} data-open-thread={open || undefined}
         onClick={() => onJump(entry)}
-        className={cn("flex w-full items-center gap-2.5 text-left text-[13px] text-ink hover:bg-menu-hover", inset ? "rounded-md px-2 py-1.5" : "px-3.5 py-2")}>
+        className={cn("flex w-full items-center gap-2.5 text-left text-[13px] text-ink hover:bg-menu-hover", inset ? "rounded-md px-2 py-1.5" : "px-3.5 py-2", open && openThreadRow)}>
         <Icon size={inset ? 16 : 15} aria-hidden="true" className={cn("shrink-0", colorClass)} />
         <span className="min-w-0 flex-1">
-          <span className="block truncate">{entry.task.title}</span>
-          <span className="block truncate text-[11px] text-ink-secondary">{name} · {status}</span>
+          <span className={cn("block truncate", unread && "font-medium text-ink")}>{entry.task.title}</span>
+          <span className="block truncate text-[12px] leading-4 text-ink-secondary">{name} · {status}</span>
         </span>
+        {unread && <span data-attention-unread-dot aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-accent" />}
       </button>;
     })}
   </>;
@@ -193,7 +224,7 @@ export function PinnedThreadRows({ entries, now, onJump, onUnpin }: { entries: A
           <Icon size={15} aria-hidden="true" className={cn("shrink-0", status.active ? status.colorClass : "text-ink-secondary")} />
           <span className="min-w-0 flex-1">
             <span className="block truncate">{entry.task.title}</span>
-            <span className="block truncate text-[11px] text-ink-secondary">{byline}</span>
+            <span className="block truncate text-[12px] leading-4 text-ink-secondary">{byline}</span>
           </span>
         </button>
         <button type="button" aria-label={unpinLabel} title={unpinLabel} onClick={() => onUnpin(entry)}
@@ -216,15 +247,17 @@ export function SidebarBotActivity({ bot, rowThreadId, density, pendingQueued, d
       const waiting = task.activity === "waiting-on-you";
       const teammateWait = !waiting && task.waitingForTeammates === true;
       const working = !waiting && !teammateWait && (task.busy || task.activity === "working");
-      const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : task.queued ? t("task.queued") : t("task.unread");
+      // A collapsed bot keeps its pinned threads listed here; one with nothing going on is shown as pinned, not unread.
+      const pinnedOnly = !waiting && !working && !teammateWait && !task.queued && !task.unread && task.pinned === true;
+      const status = waiting ? t("sidebar.preview.waiting") : working ? t("chat.activity.working") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : task.queued ? t("task.queued") : pinnedOnly ? t("task.pinned") : t("task.unread");
       const title = localizedTaskTitle(task.title);
       const label = `${bot.name}: ${title} · ${status}${task.unread && (waiting || working || teammateWait || task.queued) ? ` · ${t("task.unread")}` : ""}`;
-      const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || task.queued ? Clock3 : BellDot;
+      const Icon = waiting ? CircleAlert : working ? Loader2 : teammateWait || task.queued ? Clock3 : pinnedOnly ? Pin : BellDot;
       return <button key={task.threadId} type="button" data-sidebar-activity-row={task.threadId} aria-label={label} title={label}
         onClick={() => dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId })}
-        className={cn("flex min-h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-left text-[11px] outline-none hover:bg-raised/50 focus-visible:ring-1 focus-visible:ring-accent/60", iconOnly && "justify-center", waiting ? "text-warning" : "text-ink-secondary")}>
-        <Icon size={12} aria-hidden="true" className={cn("shrink-0", working && "animate-spin text-success", teammateWait && "text-warning", task.unread && !waiting && !working && !teammateWait && "text-accent")} />
-        {!iconOnly && <><span className="min-w-0 flex-1 truncate">{title}</span><span className="shrink-0 text-[10px]">{waiting ? t("task.waiting") : status}</span>
+        className={cn("flex min-h-7 w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1 text-left text-[13px] leading-[18px] outline-none hover:bg-ink/[0.06] focus-visible:ring-1 focus-visible:ring-accent/60", iconOnly && "justify-center", waiting ? "text-warning" : "text-ink-secondary")}>
+        <Icon size={14} aria-hidden="true" className={cn("shrink-0", working && "animate-spin text-success", teammateWait && "text-warning", task.unread && !waiting && !working && !teammateWait && "text-accent")} />
+        {!iconOnly && <><span className="min-w-0 flex-1 truncate">{title}</span>{!pinnedOnly && <span className="shrink-0 text-[12px] leading-4">{waiting ? t("task.waiting") : status}</span>}
           {task.unread && (waiting || working || teammateWait || task.queued) && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}</>}
       </button>;
     })}

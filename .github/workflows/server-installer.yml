@@ -2,7 +2,8 @@ name: Server installer
 
 # The self-hosted server's installer (deploy/install.sh) on a stock ubuntu-24.04 runner, as a person runs it on a fresh
 # server: shellcheck, its checks against made-up servers, then the checks and a real install of the published image
-# (deploy/e2e/run.sh). It talks to no production service and needs no secret.
+# (deploy/e2e/run.sh). It talks to no production service and needs no secret of its own: only the workflow's own
+# GITHUB_TOKEN, read-only, for the installer's lookup of the newest release (OMB_INSTALL_GITHUB_TOKEN).
 on:
   pull_request:
     paths:
@@ -10,6 +11,7 @@ on:
       - deploy/e2e/**
       - deploy/box/**
       - deploy/update.sh
+      - deploy/update-runner.sh
       - connector/profiles/**
       - deploy/Caddyfile
       - deploy/docker-compose.yml
@@ -34,7 +36,7 @@ jobs:
         with:
           persist-credentials: false
       - name: shellcheck
-        run: shellcheck deploy/install.sh deploy/e2e/run.sh
+        run: shellcheck deploy/install.sh deploy/update-runner.sh deploy/e2e/run.sh
       - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -74,6 +76,9 @@ jobs:
         env:
           OUT: ${{ runner.temp }}/server-installer
           OMB_INSTALL_IMAGE: ${{ steps.image.outputs.image }}
+          # The installer's lookup of the newest release, authenticated: unauthenticated, api.github.com refuses this
+          # runner's shared address once others have used up its hourly reads. A person's install sends no token.
+          OMB_INSTALL_GITHUB_TOKEN: ${{ github.token }}
         run: bash deploy/e2e/run.sh
       - name: Keep the evidence
         if: always()

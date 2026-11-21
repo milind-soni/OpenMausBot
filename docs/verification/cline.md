@@ -1,9 +1,14 @@
 # Cline engine
 
-Install the standalone Cline CLI (`npm install -g cline`) and run `cline auth`
-in a terminal to choose its provider, model and account. OpenMausBot's **Cline**
-model provider uses **Cline default (configured)**; provider/model selection
-stays in Cline. A missing CLI or unconfigured account remains unavailable.
+Install the standalone Cline CLI (`npm install -g cline`) and sign in with
+`cline auth` in a terminal; OpenMausBot reads that saved login and has no sign-in
+of its own. The picker offers **Cline default (configured)** plus Cline's
+ClinePass and free models, read from Cline's public recommended-models list
+(a bundled list when it can't be reached). A tier model switches the session's `provider` option to `cline-pass` or
+`cline`; the default puts the saved provider back. A ClinePass limit
+("You have reached your weekly Clinepass limit. The limit resets in 8h 30m")
+is a usage limit held until the stated reset plus a minute.
+A missing CLI or unconfigured account remains unavailable.
 Use **Set CLI** for a wrapper with `--config` or `--data-dir` when needed.
 
 The driver reads only the selected entry of Cline's version-1

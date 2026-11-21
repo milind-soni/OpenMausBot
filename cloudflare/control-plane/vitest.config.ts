@@ -38,7 +38,7 @@ export default defineConfig({
         },
         // An empty database for migration tests that need data written by an
         // older schema before the next migration runs.
-        d1Databases: ["MIGRATION_DB"],
+        d1Databases: ["MIGRATION_DB", "PUSH_MIGRATION_DB"],
       },
     })),
   ],

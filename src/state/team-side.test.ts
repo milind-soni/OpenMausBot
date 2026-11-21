@@ -10,7 +10,7 @@ vi.mock("./api", () => ({
 
 import { openBot } from "./thread-navigation";
 import { rememberOwnChat, setTeamChats, type TeamChats } from "./team-chats";
-import { botOnSide, savedTeamSide, setTeamSide, showTeamSide, sideOfThread, tasksOfSide, teamSide, teamSideView, teamThreadOf } from "./team-side";
+import { botOnSide, listedSide, savedTeamSide, setTeamSide, sharedWithOthers, showTeamSide, sideOfThread, tasksOfSide, teamSide, teamSideView, teamThreadOf, teamThreadToOpen } from "./team-side";
 
 const ADA: TeamChats = { teamId: "team-acme", member: true, opened: [], person: "ada@acme.test" };
 const BEN: TeamChats = { ...ADA, person: "ben@acme.test" };
@@ -50,6 +50,13 @@ describe("the side of a conversation is the server's answer", () => {
     expect(sideOfThread(scout(), "scout-main")).toBe("team");
     expect(teamThreadOf({ tasks: [{ threadId: "t1", sharedChat: true, private: true }] }), "a private chat is never the team thread").toBeNull();
     expect(teamThreadOf(mausbot()), "a person's own MausBot has none").toBeNull();
+  });
+
+  it("moves a conversation its person shared to Team at once, even on a page whose session still lists it as theirs", () => {
+    setTeamChats({ ...ADA, opened: ["handed", "widened"] });
+    const bot = scout([{ threadId: "handed", shared: true, sharedWith: { name: "Marta", byYou: true }, createdAt: 2 }, { threadId: "widened", shared: true, createdAt: 3 }]);
+    expect(sideOfThread(bot, "handed"), "shared with one person").toBe("team");
+    expect(sideOfThread(bot, "widened"), "shared with the team").toBe("team");
   });
 
   it("does not move with the switch: the same conversation is the same side whichever side the sidebar shows", () => {
@@ -115,6 +122,60 @@ describe("what each side of the sidebar lists", () => {
     expect(botOnSide(scout([], { yourAccess: "view" }), ADA, "me")).toBe(false);
     expect(botOnSide(scout([], { yourAccess: "view" }), ADA, "team")).toBe(true);
     expect(botOnSide(scout([{ threadId: "ada-old", private: true, createdAt: 2 }], { yourAccess: "view" }), ADA, "me")).toBe(true);
+  });
+
+  it("knows a bot is shared from what this copy of it says: its sharing for someone who can edit it, having it at all for anyone else", () => {
+    const owner = { createdBy: "ada@acme.test", yourAccess: "edit" };
+    expect(sharedWithOthers({ ...owner, access: { everyone: "none", people: {} } }), "only its owner and the admins").toBe(false);
+    expect(sharedWithOthers({ ...owner, access: { everyone: "none", people: { "ada@acme.test": "edit" } } }), "the owner's own entry is nobody else").toBe(false);
+    expect(sharedWithOthers({ ...owner, access: { everyone: "none", people: { "ben@acme.test": "view" } } })).toBe(true);
+    expect(sharedWithOthers({ ...owner, access: { everyone: "chat", people: {} } })).toBe(true);
+    expect(sharedWithOthers({ ...owner, visibility: "admins" }), "set up before levels, admins only").toBe(false);
+    expect(sharedWithOthers({ ...owner, visibility: { people: ["ada@acme.test"] } })).toBe(false);
+    expect(sharedWithOthers({ ...owner }), "set up before levels, everyone").toBe(true);
+    for (const yourAccess of ["view", "chat"]) expect(sharedWithOthers({ createdBy: "ada@acme.test", yourAccess }), "it was shared with this person").toBe(true);
+    expect(sharedWithOthers({ defaultBot: { person: "ada@acme.test" }, yourAccess: "edit" })).toBe(false);
+  });
+
+  it("lists a bot nobody else can use under Just me only, its main chat with it, and never under Team", () => {
+    const mine = scout([{ threadId: "ada-own", private: true, createdAt: 2 }], { createdBy: "ada@acme.test", yourAccess: "edit", access: { everyone: "none", people: {} } });
+    const shared = { ...scout([], { yourAccess: "chat" }), id: "payroll", threadId: "payroll-main", mainThreadId: "payroll-main", tasks: [{ ...MAIN, threadId: "payroll-main" }] };
+    expect(botOnSide(mine, ADA, "team")).toBe(false);
+    expect(botOnSide(mine, ADA, "me")).toBe(true);
+    const me = teamSideView([mine, shared, mausbot()], [], ADA, "me"), team = teamSideView([mine, shared, mausbot()], [], ADA, "team");
+    expect(ids(team.bots)).toEqual(["payroll"]);
+    expect(ids(me.bots)).toEqual(["scout", "payroll", "mine"]);
+    expect(me.bots[0]!.tasks.map((task) => task.threadId), "nothing of it is left where no list shows it").toEqual(["scout-main", "ada-own"]);
+    expect(me.bots[0]!.messages, "its main chat on screen is on this side").toEqual([{ id: "m1" }]);
+    expect(listedSide(mine, "scout-main")).toBe("me");
+    expect(sideOfThread(mine, "scout-main"), "who reads it is still the server's answer: its owner and the admins, so never called private").toBe("team");
+    setTeamChats(ADA);
+    setTeamSide("team");
+    expect(teamThreadToOpen(mine, ADA), "Team opens no shared chat of it").toBeNull();
+    expect(teamThreadToOpen(shared, ADA)).toBe("payroll-main");
+
+    const nowShared = { ...mine, access: { everyone: "none", people: { "ben@acme.test": "chat" } } };
+    expect(ids(teamSideView([nowShared, mausbot()], [], ADA, "team").bots), "shared with one person, it is the team's too").toEqual(["scout"]);
+    expect(teamSideView([nowShared, mausbot()], [], ADA, "me").bots[0]!.tasks.map((task) => task.threadId)).toEqual(["ada-own"]);
+  });
+
+  it("keeps a private bot under Just me whole, a conversation of it shared with someone included; what that conversation says of its readers is still the server's", () => {
+    const mine = scout([{ threadId: "with-ada", shared: true, createdAt: 2 }, { threadId: "ada-own", private: true, createdAt: 3 }],
+      { createdBy: "ada@acme.test", yourAccess: "edit", access: { everyone: "none", people: {} } });
+    expect(sideOfThread(mine, "with-ada"), "read by someone else: never called private").toBe("team");
+    expect(listedSide(mine, "with-ada")).toBe("me");
+    expect(botOnSide(mine, ADA, "team")).toBe(false);
+    expect(teamSideView([mine, mausbot()], [room()], ADA, "me").bots[0]!.tasks.map((task) => task.threadId)).toEqual(["scout-main", "with-ada", "ada-own"]);
+    expect(ids(teamSideView([mine, mausbot()], [room()], ADA, "team").bots)).toEqual([]);
+    const shared = { ...mine, access: { everyone: "chat" as const, people: {} } };
+    expect(listedSide(shared, "with-ada"), "on a shared bot it is on the Team side, as main lists it").toBe("team");
+  });
+
+  it("offers no switch when the only bots are ones nobody else can use", () => {
+    const mine = scout([], { createdBy: "ada@acme.test", yourAccess: "edit", access: { everyone: "none", people: {} } });
+    const view = teamSideView([mine, mausbot()], [], ADA, "me");
+    expect(view.switchable).toBe(false);
+    expect(ids(view.bots)).toEqual(["scout", "mine"]);
   });
 
   it("offers no switch, and hides nothing, when one side would be empty", () => {

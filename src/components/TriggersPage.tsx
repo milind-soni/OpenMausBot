@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ArrowLeft, Plus, Zap } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Plus, Zap } from "lucide-react";
 
-import { useDesktopCapabilities, windowFramed } from "@/components/DesktopCapabilities";
 import { automationsFrom, automationSentence, automationStatus, orderAutomations, runLine, statusLine, type Automation } from "@/lib/automations";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { isRoutineProblemRun } from "@/lib/routines";
 import { saveWebhookCredential, webhookCredentialStore } from "@/lib/webhook-credentials";
 import { botInDepartment, filterableDepartments, GENERAL_DEPARTMENT } from "@/lib/department-filter";
-import { useStore } from "@/state/store";
+import { type Bot } from "@/state/store";
+import { useBotsApartFromTurns } from "@/state/apart-from-turns";
+import { sameFields, useStoreDispatch, useStoreSelector } from "@/state/store-select";
 import { useAppTriggers } from "@/lib/app-triggers";
+import { useMinuteTick } from "@/lib/minute-tick";
 import { AppEventEditor } from "./automations/AppEventEditor";
 import { useAllAutomationActions } from "./automations/app-actions";
 import { AutomationPanel } from "./automations/AutomationPanel";
@@ -20,17 +22,22 @@ import { FixButton, StatusMark } from "./automations/parts";
 import { RoutineEditor } from "./RoutineCalendarPage";
 import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
+import { TOOL_PAGE_TITLE, ToolPage, ToolPageActions, ToolPageHeader } from "./ToolPageShell";
 import { WebhookEditor } from "./WebhookTrigger";
 import { schedulableBots, useTeamPeople } from "@/state/team-people";
 
 /** The bot filter earns its place only on a long list shared by several bots. */
 const FILTER_FROM = 9;
+const NO_BOTS: Bot[] = [];
 
 /** Automations: every schedule and every "when another app sends something", each as one plain sentence. */
 export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpenRoom: (id: string) => void }) {
-  const { state, dispatch } = useStore();
-  const { capabilities } = useDesktopCapabilities();
+  const state = useStoreSelector((s) => ({
+    routinesFocus: s.routinesFocus, routines: s.routines, webhooks: s.webhooks, routineRuns: s.routineRuns, sections: s.sections,
+    routinesUnreadable: s.config?.routinesUnreadable, routinesLoadState: s.routinesLoadState, hydrated: s.hydrated,
+  }), sameFields), bots = useBotsApartFromTurns(), dispatch = useStoreDispatch();
   const actions = useAllAutomationActions();
+  useMinuteTick();
   const appTriggers = useAppTriggers();
   const backButtonRef = useRef<HTMLButtonElement>(null);
   const focus = state.routinesFocus;
@@ -41,9 +48,11 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const [newText, setNewText] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ kind: SetUpKind; id?: string; botId?: string } | null>(null);
   const routinesOnly = window.ogb?.remoteClient?.active === true;
-  const visibleBots = state.bots.filter((bot) => !bot.hidden);
+  const visibleBots = bots.filter((bot) => !bot.hidden);
+  // An editor reads each bot's threads, so while one is open the page follows every change to the bots.
+  const editorBots = useStoreSelector((s) => editing ? s.bots : NO_BOTS).filter((bot) => !bot.hidden);
   const team = useTeamPeople();
-  const botName = (botId: string) => state.bots.find((bot) => bot.id === botId)?.name ?? t("routines.unavailableBot");
+  const botName = (botId: string) => bots.find((bot) => bot.id === botId)?.name ?? t("routines.unavailableBot");
 
   useEffect(() => {
     setBotFilter(focus?.botId ?? "all");
@@ -52,9 +61,9 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   }, [focus]);
   useEffect(() => { backButtonRef.current?.focus({ preventScroll: true }); }, []);
 
-  const all = useMemo(() => automationsFrom({ routines: state.routines, webhooks: routinesOnly ? [] : state.webhooks, appTriggers: appTriggers.triggers, runs: state.routineRuns, bots: state.bots }),
-    [state.routines, state.webhooks, appTriggers.triggers, state.routineRuns, state.bots, routinesOnly]);
-  const departments = filterableDepartments(state.bots, [...new Set([...(state.sections ?? []), ...state.bots.flatMap((bot) => bot.section ? [bot.section] : [])])]);
+  const all = useMemo(() => automationsFrom({ routines: state.routines, webhooks: routinesOnly ? [] : state.webhooks, appTriggers: appTriggers.triggers, runs: state.routineRuns, bots }),
+    [state.routines, state.webhooks, appTriggers.triggers, state.routineRuns, bots, routinesOnly]);
+  const departments = filterableDepartments(bots, [...new Set([...(state.sections ?? []), ...bots.flatMap((bot) => bot.section ? [bot.section] : [])])]);
   const showDepartments = departments.names.length + (departments.hasGeneral ? 1 : 0) > 1;
   const activeDepartment = department === "all" || (department === GENERAL_DEPARTMENT ? departments.hasGeneral : departments.names.includes(department)) ? department : "all";
   useEffect(() => {
@@ -62,27 +71,22 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
     setDepartment("all");
     setBotFilter("all");
   }, [activeDepartment, department]);
-  const inDepartment = (botId: string) => botInDepartment(state.bots.find((bot) => bot.id === botId), activeDepartment);
+  const inDepartment = (botId: string) => botInDepartment(bots.find((bot) => bot.id === botId), activeDepartment);
   const departmentBots = visibleBots.filter((bot) => botInDepartment(bot, activeDepartment));
   const showFilter = all.length >= FILTER_FROM && new Set(all.map((automation) => automation.botId)).size > 1;
   const listed = orderAutomations(all.filter((automation) => inDepartment(automation.botId) && (!showFilter || botFilter === "all" || automation.botId === botFilter)));
   const open = all.find((automation) => automation.id === openId) ?? null;
   const sentenceOf = (automation: Automation) => automationSentence(automation, botName(automation.botId));
 
-  const macInset = capabilities.windowChrome === "mac-inset";
-  const windowDragStyle = macInset ? ({ WebkitAppRegion: "drag" } as CSSProperties) : undefined;
-  const windowNoDragStyle = macInset ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
   const editRoutine = editing?.kind === "schedule" ? state.routines.find((routine) => routine.id === editing.id) : undefined;
   const editWebhook = editing?.kind === "webhook" ? state.webhooks.find((webhook) => webhook.id === editing.id) : undefined;
   const editApp = editing?.kind === "app" ? appTriggers.triggers.find((trigger) => trigger.id === editing.id) : undefined;
 
   return (
-    <main className="flex h-full min-w-0 flex-1 flex-col bg-app animate-workspace-in">
-      <header className={cn("shrink-0 border-b border-hairline/35 bg-app py-3 pr-4", macInset && !windowFramed(capabilities) && view === "calendar" ? "pl-[86px]" : view === "list" ? "pl-12 md:pl-4" : "pl-4")} style={windowDragStyle}>
-        <div className="flex flex-wrap items-center gap-2">
-          <button type="button" ref={backButtonRef} onClick={onBack} aria-label={t("automations.back")} title={t("automations.back")} className="flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-raised hover:text-ink" style={windowNoDragStyle}><ArrowLeft size={18} /></button>
-          <h1 data-tour="automations-page" className="mr-1 text-[18px] font-semibold tracking-tight text-ink">{t("automations.title")}</h1>
-          <div className="ml-auto flex items-center gap-3" style={windowNoDragStyle}>
+    <ToolPage>
+      <ToolPageHeader backLabel={t("automations.back")} onBack={onBack} backRef={backButtonRef} besideSidebar={view === "list"}>
+          <h1 data-tour="automations-page" className={TOOL_PAGE_TITLE}>{t("automations.title")}</h1>
+          <ToolPageActions>
             {showDepartments && (
               <Select size="sm" aria-label={t("automations.allDepartments")} value={activeDepartment} onChange={(event) => { setDepartment(event.target.value); setBotFilter("all"); }} className="max-w-[180px]">
                 <option value="all">{t("automations.allDepartments")}</option>
@@ -105,16 +109,16 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
               ))}
             </div>
             <button type="button" onClick={() => setNewText("")} className="flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-[13px] font-semibold text-accent-ink hover:brightness-110"><Plus size={15} aria-hidden="true" />{t("automations.new")}</button>
-          </div>
-        </div>
-      </header>
+          </ToolPageActions>
+      </ToolPageHeader>
 
       <div className="relative flex min-h-0 flex-1">
         {view === "calendar" ? <AutomationsCalendar botFilter={botFilter} department={activeDepartment} selectedAutomationId={openId} onOpenAutomation={setOpenId} onOpenRoom={onOpenRoom} /> : (
           <div className="min-h-0 flex-1 overflow-y-auto">
             <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
               <LimitWarnings botFilter={showFilter ? botFilter : "all"} />
-              {all.length === 0 && state.routinesLoadState !== "loading" && state.hydrated ? (
+              {state.routinesUnreadable && <div role="alert" className="mb-4 rounded-lg bg-danger/10 p-3 text-[12px] leading-relaxed text-danger" data-routines-unreadable="">{t("routines.unreadable")}</div>}
+              {all.length === 0 && !state.routinesUnreadable && state.routinesLoadState !== "loading" && state.hydrated ? (
                 <section aria-label={t("automations.empty.title")} className="px-6 py-16 text-center">
                   <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-accent/10 text-accent"><Zap size={22} /></div>
                   <h2 className="text-[17px] font-semibold text-ink">{t("automations.empty.title")}</h2>
@@ -129,21 +133,22 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
                     const unseenProblem = automation.runs.find((run) => isRoutineProblemRun(run) && !run.seenAt);
                     const problemLine = unseenProblem && runLine(unseenProblem);
                     return (
-                      <li key={automation.id} data-automation={automation.id} data-automation-status={status.state} className={cn("flex items-start gap-3 px-4 py-3.5", openId === automation.id && "bg-raised/60")}>
+                      <li key={automation.id} data-automation={automation.id} data-automation-status={status.state} className={cn("relative flex items-start gap-3 px-4 py-3.5", openId === automation.id && "bg-raised/60")}>
                         <StatusMark status={status} className="mt-[5px]" />
                         <div className="min-w-0 flex-1">
-                          <button type="button" onClick={() => setOpenId(automation.id)} className="block text-left text-[15px] font-medium leading-snug text-ink hover:text-accent-text">{name || sentenceOf(automation)}</button>
+                          <button type="button" onClick={() => setOpenId(automation.id)} className="block text-left text-[15px] font-medium leading-snug text-ink after:absolute after:inset-0 hover:text-accent-text">{name || sentenceOf(automation)}</button>
                           {name && <div className="mt-0.5 text-[13px] text-ink">{sentenceOf(automation)}</div>}
                           {status.state === "needs-you"
-                            ? <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px] text-warning">{t("automations.needsYou", { reason: status.reason ?? "" })}<FixButton automation={automation} status={status} actions={actions} onEdit={() => setEditing({ kind: automation.kind, id: automation.id })} /></div>
+                            ? <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[13px] text-warning">{t("automations.needsYou", { reason: status.reason ?? "" })}<FixButton automation={automation} status={status} actions={actions} onEdit={() => setEditing({ kind: automation.kind, id: automation.id })} className="relative z-10" /></div>
                             : <div className="mt-0.5 text-[13px] text-ink-secondary">{statusLine(automation)}</div>}
                           {problemLine && <button type="button" onClick={() => setOpenId(automation.id)} className="mt-1 flex items-baseline gap-2 text-left text-[13px] text-danger">
                             <span aria-hidden="true" className="size-2 shrink-0 self-center rounded-full bg-danger" />
                             <span>{problemLine.when} {problemLine.mark} {problemLine.text}</span>
                           </button>}
+                          {!!automation.noStartStreak && <div className="mt-1 text-[13px] text-warning" data-automation-no-start="">{t("routines.noStartStreak", { count: automation.noStartStreak })}</div>}
                           {actions.error && actions.errorFor?.endsWith(`:${automation.id}`) && <p role="alert" className="mt-1 text-[12px] text-danger">{actions.error}</p>}
                         </div>
-                        {status.state !== "done" && <Switch checked={automation.enabled} disabled={actions.busy === `toggle:${automation.id}`} aria-label={t("automations.toggle", { name: automation.name })} onClick={() => void actions.toggle(automation)} className="mt-0.5 shrink-0" />}
+                        {status.state !== "done" && <Switch checked={automation.enabled} disabled={actions.busy === `toggle:${automation.id}`} aria-label={t("automations.toggle", { name: automation.name })} onClick={() => void actions.toggle(automation)} className="relative z-10 mt-0.5 shrink-0" />}
                       </li>
                     );
                   })}
@@ -164,12 +169,12 @@ export function TriggersPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
       {newText !== null && (
         <NewAutomation initialText={newText} onClose={() => setNewText(null)} onSetUpYourself={(kind, botId) => { setNewText(null); setEditing({ kind, botId }); }} />
       )}
-      {editing?.kind === "schedule" && (editRoutine || !editing.id) && <RoutineEditor routine={editRoutine} bots={schedulableBots(visibleBots, team, editRoutine?.botId)} initialBotId={editing.botId} plain onClose={() => setEditing(null)} />}
+      {editing?.kind === "schedule" && (editRoutine || !editing.id) && <RoutineEditor routine={editRoutine} bots={schedulableBots(editorBots, team, editRoutine?.botId)} initialBotId={editing.botId} plain onClose={() => setEditing(null)} />}
       {editing?.kind === "webhook" && (editWebhook || !editing.id) && (
-        <WebhookEditor webhook={editWebhook} bots={visibleBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onCredential={(credential, id) => { saveWebhookCredential(webhookCredentialStore(), id, credential); setOpenId(id); }} />
+        <WebhookEditor webhook={editWebhook} bots={editorBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onCredential={(credential, id) => { saveWebhookCredential(webhookCredentialStore(), id, credential); setOpenId(id); }} />
       )}
-      {editing?.kind === "app" && (editApp || !editing.id) && <AppEventEditor trigger={editApp} bots={visibleBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onSaved={(trigger) => setOpenId(trigger.id)} />}
-    </main>
+      {editing?.kind === "app" && (editApp || !editing.id) && <AppEventEditor trigger={editApp} bots={editorBots} initialBotId={editing.botId} onClose={() => setEditing(null)} onSaved={(trigger) => setOpenId(trigger.id)} />}
+    </ToolPage>
   );
 }
 

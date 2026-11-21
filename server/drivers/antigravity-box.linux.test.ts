@@ -9,7 +9,8 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { botBox } from "../bot-box/box.ts";
 import { detectBox } from "../bot-box/detect.ts";
-import { AntigravityAuthController, antigravityProfileAuthenticated, forwardAntigravityCallback, prepareAntigravityProfile } from "./antigravity-acp.ts";
+import { antigravityProfileAuthenticated, forwardAntigravityCallback, prepareAntigravityProfile } from "./antigravity-acp.ts";
+import { AntigravityAuthController } from "./antigravity-auth.ts";
 import { resolveAntigravityRuntime } from "./antigravity-runtime.ts";
 
 const detection = detectBox({ env: { ...process.env, OMB_BOT_BOX: "1" } });

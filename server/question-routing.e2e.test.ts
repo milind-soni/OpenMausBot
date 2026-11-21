@@ -1,8 +1,8 @@
 // Who answers a teammate's question, end to end on a Team Cloud (docs/runtime-contract.md §2, docs/team-cloud.md):
-// Marco's Chief Fuchs, whose chat is his inbox, hands work to Dachs and Otter. At Full access ("Just do it", every
+// Marco's Chief Fuchs, whose chat is his inbox, hands work to Dachs and Otter. At Full access (every
 // bot's default) nothing a bot can settle reaches Marco: Dachs's question goes to Fuchs, and Dachs goes on with its
 // default when Fuchs sends no answer; only a sign-in, which only Marco can do, reaches him, once, while the rest of the
-// work moves on. On "Ask me first" a question waits for Marco however long it takes: an answer he gives through Fuchs
+// work moves on. On "Ask for approval" a question waits for Marco however long it takes: an answer he gives through Fuchs
 // settles it, a restart neither drops nor posts it again, and a question whose turn is gone leaves Needs you and his
 // inbox. The engine is the scripted synthetic Claude CLI, so this proves where things land, not a model's judgement.
 import { randomBytes } from "node:crypto";
@@ -101,7 +101,7 @@ afterAll(async () => {
   if (browserTools) await removeTempDir(browserTools);
 });
 
-describe("Just do it: nothing a bot can settle reaches the person", () => {
+describe("Full access: nothing a bot can settle reaches the person", () => {
   it("hands Dachs's question to Fuchs, and with no answer from Fuchs Dachs goes on with its default and says so: no card, notification or inbox line for Marco", async () => {
     script(fuchs.id, handOn("JD1", dachs, "JD1-BRIEF: Exportiere den Monatsbericht."), done("JD1"),
       { key: "JD1-L-ASKED", match: ["yours to answer", "JD1-JOB"], reply: "JD1-L-ASKED: keine Vorgabe von mir." });
@@ -189,7 +189,7 @@ describe("Just do it: nothing a bot can settle reaches the person", () => {
   }, hostTimeout(180_000));
 });
 
-describe("Ask me first: a question waits for the person, and an answer counts wherever they give it", () => {
+describe("Ask for approval: a question waits for the person, and an answer counts wherever they give it", () => {
   beforeAll(async () => {
     for (const bot of [fuchs, dachs]) expect((await team.as(marco, "PATCH", `/api/bots/${bot.id}`, { approvalMode: "ask", applyToAllThreads: true })).status).toBe(200);
   });

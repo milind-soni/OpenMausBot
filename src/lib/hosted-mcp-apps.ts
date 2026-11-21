@@ -1,5 +1,6 @@
-import { CreditCard, Mail, PhoneCall, RadioTower, Smartphone, type LucideIcon } from "lucide-react";
+import { Clapperboard, CreditCard, Mail, PhoneCall, RadioTower, Smartphone, type LucideIcon } from "lucide-react";
 
+import bubblavLogo from "@/assets/bubblav/logo.png";
 import whopLogo from "@/assets/whop/logo.png";
 import type { LocaleKey } from "@/locales";
 import { POSTIZ_SERVER } from "../../shared/postiz";
@@ -83,6 +84,25 @@ export const HOSTED_MCP_APPS = [
     description: "agentphone.description",
     notice: "agentphone.notice",
     keywords: "agentphone phone number sms text call calls",
+  },
+  {
+    id: "bubblav",
+    label: "BubblaV",
+    url: "https://www.bubblav.com/mcp",
+    icon: { image: bubblavLogo },
+    description: "bubblav.description",
+    notice: "bubblav.notice",
+    keywords: "bubblav chatbot chat widget website customer support service knowledge base conversations leads analytics",
+  },
+  {
+    id: "higgsfield",
+    label: "Higgsfield",
+    url: "https://mcp.higgsfield.ai/mcp",
+    // Higgsfield publishes no logo licence we have checked, so a neutral glyph stands in.
+    icon: { glyph: Clapperboard },
+    description: "higgsfield.description",
+    notice: "higgsfield.notice",
+    keywords: "higgsfield ai image video generate generation picture clip film soul kling seedance",
   },
 ] as const satisfies readonly HostedMcpApp[];
 

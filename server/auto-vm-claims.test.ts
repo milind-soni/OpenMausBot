@@ -93,10 +93,10 @@ describe("startAutoVmClaim", () => {
 
   it("keeps the rejection's message so the refusal can say why", async () => {
     const table: AutoVmClaimTable = new Map();
-    table.set("t1", slot(async () => { throw new Error("the Local VM is not ready (App Settings → Computers)"); }));
+    table.set("t1", slot(async () => { throw new Error("the Local VM is not ready (Settings → Desktops & browser)"); }));
     startAutoVmClaim(table, "t1", "gen-1");
     await table.get("t1")!.begin;
-    expect(table.get("t1")!.failure).toBe("the Local VM is not ready (App Settings → Computers)");
+    expect(table.get("t1")!.failure).toBe("the Local VM is not ready (Settings → Desktops & browser)");
     expect(table.get("t1")!.claimed).toBeUndefined();
   });
 
@@ -205,6 +205,13 @@ describe("lazyClaimFailedText", () => {
     expect(lazyClaimFailedText({ ...boat, cause: "the cloud computer didn't start in time." })).toBe(
       "The cloud computer could not be started: the cloud computer didn't start in time. This call was not performed. " +
       "Do not retry computer work in this turn; tell the person what you could not do.");
+  });
+
+  it("names the plan's limit in its own sentence when the Admin turned the computer away", () => {
+    expect(lazyClaimFailedText({ ...boat, cause: "Your Pro free trial's 20 cloud computer hours are used up.",
+      limit: "This Cloud's free trial cloud computer hours are used up; they come back on 14 Nov.", backOnAuto: true })).toBe(
+      "The cloud computer could not be started. This Cloud's free trial cloud computer hours are used up; they come back on 14 Nov. " +
+      "This call was not performed. This conversation is back on Auto. Do not retry computer work in this turn; tell the person what you could not do.");
   });
 
   it("keeps the claim wording for a computer the turn does not start", () => {

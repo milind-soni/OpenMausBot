@@ -69,6 +69,9 @@ afterAll(async () => {
 });
 
 describe("a cloud computer goes to sleep after its idle window", () => {
+  /** One stop was sent and the sleep it belongs to has finished: a test that ended at the stop itself left that sleep's
+   * log line to land in the next test's log. */
+  const asleep = () => waitFor(() => stops().length === 1 && !power.awake());
   let power: ReturnType<typeof import("./host/cloud-computer-power.ts").createCloudComputerPower>;
   let logs: string[];
   let busy: boolean;
@@ -113,7 +116,7 @@ describe("a cloud computer goes to sleep after its idle window", () => {
     power.used(botId);
     await new Promise(resolve => setTimeout(resolve, 600));
     expect(stops()).toEqual([]);
-    await waitFor(() => stops().length === 1);
+    await asleep();
     expect(stops()[0]).toMatchObject({ path: `/boat/api/v1/sandboxes/${boxId}/stop`, auth: `Bearer ${OWN}` });
     const quiesce = requests.findIndex(request => request.path.endsWith("/commands"));
     expect(requests[quiesce]?.command).toContain("kill -TERM");
@@ -125,7 +128,7 @@ describe("a cloud computer goes to sleep after its idle window", () => {
   it("with the cloud computer a Cloud plan includes, stops it through the Admin relay only", async () => {
     await powerFor({});
     power.used(botId);
-    await waitFor(() => stops().length === 1);
+    await asleep();
     expect(stops()[0]).toMatchObject({ path: `/relay/api/box/v1/boxes/${boxId}/stop`, auth: `Bearer ${INCLUDED}` });
     expect(requests.every(request => request.path.startsWith("/relay/"))).toBe(true);
   });
@@ -134,7 +137,7 @@ describe("a cloud computer goes to sleep after its idle window", () => {
     await powerFor({});
     await power.armRunning();
     expect(requests.map(request => `${request.method} ${request.path}`)).toEqual(["GET /relay/api/box/v1/boxes"]);
-    await waitFor(() => stops().length === 1);
+    await asleep();
     expect(stops()[0]?.path).toBe(`/relay/api/box/v1/boxes/${boxId}/stop`);
   });
 
@@ -161,11 +164,11 @@ describe("a cloud computer goes to sleep after its idle window", () => {
     await background.startInBackground(cfg, boxId, "python3 job.py", new AbortController().signal);
     power.used(botId);
     await new Promise(resolve => setTimeout(resolve, 3_500));
+    await waitFor(() => requests.filter(request => request.path === `${root}/${boxId}/commands/7`).length >= 2);
     expect(stops()).toEqual([]);
-    expect(requests.filter(request => request.path === `${root}/${boxId}/commands/7`).length).toBeGreaterThanOrEqual(2);
     expect(power.awake()).toBe(true);
     jobRunning = false;
-    await waitFor(() => stops().length === 1);
+    await asleep();
     expect(stops()[0]?.path).toBe(`${root}/${boxId}/stop`);
   });
 

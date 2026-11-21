@@ -107,6 +107,16 @@ const __APP_VERSION__: string;
     at: number | null;
     onBattery: boolean;
   }
+  /** Use this computer as an always-on home, as main reads it now. `available`: a packaged app, where Open at login works.
+   * `awake`: held awake on power, let sleep on battery, or off. `updates`: how an update arrives with nobody at the computer. */
+  interface AlwaysOnHomeState {
+    available: boolean;
+    on: boolean;
+    platform: string;
+    openAtLogin: boolean;
+    awake: "holding" | "battery" | "off";
+    updates: "by-itself" | "restart" | "package" | "none";
+  }
   interface DesktopRemoteClientState {
     active: boolean;
     endpoint?: string;
@@ -134,6 +144,8 @@ const __APP_VERSION__: string;
         dismiss(key: string): Promise<{ suggest: import("../lib/two-places").TwoPlacesSuggestion | null }>;
         onChanged(callback: () => void): () => void;
       };
+      /** This computer's page and My Cloud's own page: the other one's bots in this sidebar (electron/places-together.mjs). */
+      placesTogether?: import("../../electron/places-together.mjs").PlacesTogetherBridge;
       /** Settings on the person's own Cloud: the plan, read only. */
       cloudPlan?: import("../../electron/cloud-account.mjs").CloudPlanBridge;
       /** This computer's page, and My Cloud's own page once it is the person's home: the window onto My Cloud. */
@@ -196,6 +208,8 @@ const __APP_VERSION__: string;
         remove?: (id: string) => Promise<{ outcome: import("../../electron/cloud-account.mjs").CloudRemoveOutcome }>;
         /** Make a server of the person's own, which the rail lists with `makeHome`, their bots' home: the move starts. */
         makeHome?: (id: string) => Promise<{ started: true }>;
+        /** The ids of the servers main offers Make … my home for now (none once a move is done). Absent on an older app. */
+        homeOffers?: () => Promise<string[]>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
         /** A workspace of this computer's own (main refuses any page but the rail's and this computer's own): a new one,
@@ -398,7 +412,7 @@ const __APP_VERSION__: string;
        * app Settings. Every server's page in the window receives it, and the
        * bridge is absent in the browser. "cloud" is the
        * openmausbot://cloud link (Settings → OMB Cloud, opened by the link). */
-      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto") => void): () => void;
+      onOpenAppSettings?(cb: (section?: "organization" | "cloud" | "cloud-settings" | "cloud-add" | "cloud-add-howto" | import("../state/store").SettingsPageId) => void): () => void;
       /** Updates the native Dock/taskbar unread indicator. */
       setUnreadCount?(count: number): void;
       /** Opens a live desktop as a sandboxed window owned by OpenMausBot. */
@@ -448,6 +462,8 @@ const __APP_VERSION__: string;
       openLogsFolder?(): Promise<{ folder: string; opened: boolean; error?: string }>;
       /** This app's own login item, which opens the window. `available`: false in a build that cannot add one. */
       openAtLogin?: { state(): Promise<{ available: boolean; on: boolean }>; set(on: boolean): Promise<{ available: boolean; on: boolean }> };
+      /** Use this computer as an always-on home (this computer's own page only). Absent on an older app. */
+      alwaysOnHome?: { state(): Promise<AlwaysOnHomeState>; set(on: boolean): Promise<AlwaysOnHomeState> };
       /** Saved keys this launch could not read (this app's own page only). `reset` asks the person, moves the unreadable
        * file aside and restarts; it resolves "cancelled" when they say no, "quitting" (doing nothing) when the app began
        * to quit while they decided, "failed" (after telling them) when the file could not be moved, and "readable"
@@ -455,7 +471,7 @@ const __APP_VERSION__: string;
       credentialStore?: { unreadable(): Promise<boolean>; reset(): Promise<"reset" | "cancelled" | "quitting" | "failed" | "readable"> };
       /** Save a provider credential through Electron's OS-backed store. */
       setCredential?(
-        name: "openaiApiKey" | "anthropicApiKey" | "openrouterApiKey" | "mistralApiKey" | "cerebrasApiKey" | "groqApiKey" | "greenferenceApiKey" | "modelgoApiKey" | "metaApiKey" | "deepseekApiKey" | "openaiCompatApiKey" | "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
+        name: "openaiApiKey" | "anthropicApiKey" | "openrouterApiKey" | "mistralApiKey" | "cerebrasApiKey" | "groqApiKey" | "greenferenceApiKey" | "modelgoApiKey" | "metaApiKey" | "deepseekApiKey" | "openaiCompatApiKey" | "composioApiKey" | "xaiApiKey" | "boxToken" | "opencodeGoApiKey" | "ttsKey" | "fishAudioKey" | "geminiTtsKey" | "jevApiKey" | "openrouterDeciderKey" | "workersAiToken" | "customDeciderKey" | "openaiImageApiKey" | "customImageApiKey" | "openaiLiveKey" | "tregApiKey" | "postizApiKey" | "geminiImageApiKey",
         value: string,
         options?: { everyClaudeBot?: false },
       ): Promise<ConfigStatus>;
@@ -471,6 +487,11 @@ const __APP_VERSION__: string;
         /** The person saw the line that the app updated itself: it is not shown again. */
         seen?(): Promise<void>;
         onState(cb: (s: UpdaterState) => void): () => void;
+      };
+      /** On a server's page from the Server menu: asks for this app's own update, from the person's click. The page
+       * learns only what was done; the app asks in its own dialog before it restarts. Absent in older desktop builds. */
+      appUpdate?: {
+        request(): Promise<AppUpdateAnswer>;
       };
     };
   }
@@ -488,6 +509,9 @@ export interface LinuxLocalControlStatus {
   compositor?: "gnome-mutter" | "hyprland";
   warnings?: Array<{ label: string; status: string; message: string; detail?: string }>;
 }
+
+/** What asking for this app's update from a server's page did (electron/updater.mjs `updateForServerPage`). */
+export type AppUpdateAnswer = "installing" | "later" | "downloading" | "current" | "failed" | "unavailable";
 
 export interface UpdaterState {
   status:
@@ -543,6 +567,8 @@ export interface CompanionAccountState {
   /** The secure address was ended for old phone apps: a phone that has not used the encrypted connection must be
    * updated and paired again. */
   tunnelRetired?: boolean;
+  /** What failed, as one fixed word for the connection diagnosis. Absent on older builds. */
+  problem?: "unconfigured" | "unreachable" | "sign_in" | "busy" | "limit" | "update" | "address" | "failed";
 }
 
 export type AndroidUsbDevice = {

@@ -82,7 +82,7 @@ export function missingOf(report: unknown): string;
 export function createOneHome(deps: {
   journal: { read(): unknown; write(value: unknown): void };
   cloud(): OneHomeCloud | null;
-  send: { move(options?: { final?: boolean }): Promise<unknown>; check(options?: { stopped?(): boolean }): Promise<{ ok: boolean }>; switches(): Record<string, boolean>; snapshot(): any };
+  send: { move(options?: { final?: boolean; files?: boolean }): Promise<unknown>; check(options?: { stopped?(): boolean }): Promise<{ ok: boolean }>; switches(): Record<string, boolean>; snapshot(): any };
   local: {
     freeze(origin: string): Promise<{ frozen: true } | { busy: string; what?: string }>;
     unfreeze(options?: { automations?: "off" }): Promise<void>;

@@ -75,7 +75,7 @@ describe("local computer UI eligibility", () => {
     expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(true);
     expect(localComputerSelectable({ capabilities, providerSupportsLocal: false })).toBe(false);
     expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(
-      "Bots can't use this PC right now. Restart MausBot, and if that doesn't help, open Settings → Diagnostics.",
+      "Bots can't use this PC right now. Restart MausBot, and if that doesn't help, open Settings → This app → Help.",
     );
   });
 
@@ -105,6 +105,17 @@ describe("local computer UI eligibility", () => {
     ).toBe(
       "Bots can't use this computer in this kind of desktop session yet. Sign out, choose “Ubuntu on Xorg” on the sign-in screen, and sign back in.",
     );
+  });
+
+  it("tells a Mac older than macOS 13 to update, not to grant permissions", () => {
+    const capabilities = {
+      host: { platform: "darwin" as const, label: "Mac" },
+      localComputer: { available: false, enabled: false, status: "unavailable", reasonCode: "macos-version-unsupported" },
+    } as DesktopCapabilities;
+    expect(localComputerDisabledReason({ capabilities, providerSupportsLocal: true })).toBe(
+      "Bots can't use this Mac: local desktop control needs macOS 13 Ventura or later. Update macOS to use it.",
+    );
+    expect(localComputerSelectable({ capabilities, providerSupportsLocal: true })).toBe(false);
   });
 
   it("preserves the ready local fallback on supported non-Linux hosts", () => {

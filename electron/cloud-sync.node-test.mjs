@@ -61,6 +61,42 @@ test("shares a folder: registered on My Cloud, copied there, and up to date", as
   assert.deepEqual(state.shared.map(({ id, name, status, files, done }) => ({ id, name, status, files, done })), [{ id: cloudFolder.id, name: "Clients", status: "synced", files: 1, done: 1 }]);
 });
 
+test("repeated upload failures become a folder problem and clear after a successful retry", async (t) => {
+  const s = setup(t);
+  const upload = s.cloud.client.upload;
+  s.cloud.client.upload = async () => { throw new Error("The file is locked"); };
+  await s.service.share(s.project);
+  assert.equal(s.service.state().shared[0].status, "copying");
+  await s.service.pass();
+  assert.equal(s.service.state().shared[0].status, "copying");
+  await s.service.pass();
+  assert.equal(s.service.state().shared[0].status, "problem");
+  assert.equal(s.service.state().shared[0].problem, "brief.md: The file is locked");
+  s.cloud.client.upload = upload;
+  await s.service.pass();
+  assert.equal(s.service.state().shared[0].status, "synced");
+  assert.equal(s.service.state().shared[0].problem, null);
+});
+
+test("repeated output failures reach the Files state and clear after a successful retry", async (t) => {
+  const s = setup(t);
+  s.cloud.setBots({ bots: [{ id: "owl", name: "Owl", tasks: [{ threadId: "t1", title: "Report" }] }], groups: [] });
+  const folder = s.cloud.addFolder({ id: "bot-owl-t1", kind: "bot", botId: "owl", threadId: "t1", cloudPath: "/work/owl", newestMs: AT + 120_000 });
+  s.cloud.put(folder.id, "report.md", "the report");
+  const download = s.cloud.client.download;
+  s.cloud.client.download = async () => { throw new Error("Could not write this file"); };
+  await s.service.pass();
+  assert.equal(s.service.state().outputs.problem, null);
+  await s.service.pass();
+  assert.equal(s.service.state().outputs.problem, null);
+  await s.service.pass();
+  assert.equal(s.service.state().outputs.problem, "report.md: Could not write this file");
+  s.cloud.client.download = download;
+  await s.service.pass();
+  assert.equal(s.service.state().outputs.problem, null);
+  assert.equal(readFileSync(join(s.home, "Documents", "MausBot", "Owl", "Report", "report.md"), "utf8"), "the report");
+});
+
 test("only a folder this computer shared is ever synced: one My Cloud names for it is never read or written", async (t) => {
   const s = setup(t);
   const ssh = join(s.home, ".ssh");

@@ -64,10 +64,11 @@ export function useMoveToTeam({ blocked }: { blocked: (bot: Bot) => string | und
       icon={<Users size={18} />}
       title={t("teamMove.title", names)}
       body={<span className="flex flex-col gap-2" data-team-move-confirm>
-        <span>{t("teamMove.everyone", names)}</span>
+        <span>{t("teamMove.yours", names)}</span>
         <span>{t("teamMove.goes", names)}</span>
         <span>{t("teamMove.private", names)}</span>
         <span>{t("teamMove.staysOnMyCloud", names)}</span>
+        <span>{t("teamMove.dataStays", names)}</span>
         <span data-team-move-final className="font-medium text-ink">{t("teamMove.noWayBack", names)}</span>
         {error && <span role="alert" className="text-danger">{error}</span>}
       </span>}

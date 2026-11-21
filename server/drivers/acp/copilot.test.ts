@@ -12,7 +12,7 @@ import { BUILT_IN_DRIVERS } from "../builtIn.ts";
 import { SPAWNED_PROXIES } from "../../proxy-paths.ts";
 import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
 import {
-  classifyCopilotError, CopilotAgentDriver, copilotModelLabel, copilotSignedIn, forgetCopilotDiscoverySession, resolveCopilotModels,
+  classifyCopilotError, CopilotAgentDriver, copilotModelLabel, copilotServerNames, copilotSignedIn, forgetCopilotDiscoverySession, resolveCopilotModels,
 } from "./copilot.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "../../testing/fake-acp-cli.ts");
@@ -289,8 +289,18 @@ describe("GitHub Copilot ACP driver", () => {
       expect(text).toContain("agents:");
       expect(text).toContain("trigger");
       expect(text).toContain("trigger_info");
-      expect(text).toContain("browser: agent_browser_open");
+      // Copilot refuses functions in its reserved `browser` namespace, so the built-in browser server is renamed for it.
+      expect(text).toContain("maus_browser: agent_browser_open");
+      const launch = JSON.parse(readFileSync(join(scratch, "launch.json"), "utf8"));
+      const path = launch.argv[launch.argv.indexOf("--additional-mcp-config") + 1].slice(1) as string;
+      expect(Object.keys(JSON.parse(readFileSync(path, "utf8")).mcpServers).sort()).toEqual(["agents", "maus_browser"]);
     } finally { await browser.close(); }
+  });
+
+  it("keeps Copilot's MCP server names out of its reserved browser and computer namespaces", () => {
+    expect(copilotServerNames(["agents", "browser", "computer", "data"])).toEqual(["agents", "maus_browser", "maus_computer", "data"]);
+    expect(copilotServerNames(["browser", "maus_browser", "Computer"])).toEqual(["maus_browser_2", "maus_browser", "maus_Computer"]);
+    expect(copilotServerNames(["agents", "my_browser", "computers"])).toEqual(["agents", "my_browser", "computers"]);
   });
 
   it("isolates native MCP configuration by thread and refreshes scoped tools and credentials on resume", async () => {

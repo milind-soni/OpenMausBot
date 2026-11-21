@@ -33,7 +33,7 @@ beforeAll(async () => {
   admin = (await team.pair(ADMIN)).token!;
   ada = (await team.pair(MEMBER_A)).token!;
   cleo = (await team.pair(MEMBER_C)).token!;
-  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout" });
+  const created = await team.as(owner, "POST", "/api/bots", { name: "Scout", visibility: "everyone" });
   expect(created.status, JSON.stringify(created.body)).toBe(201);
   bot = created.body.bot;
 }, hostTimeout(120_000));
@@ -105,8 +105,9 @@ it("keeps every member's session across a restart, waits to sleep only while it 
   expect(sleep.body.busy).not.toContain("team");
   expect((await team.signed("GET", "/api/cloud/power")).status).toBe(200);
   expect((await team.signed("GET", "/api/cloud/health")).status).toBe(200);
-  // A member reaches nothing an admin does: the team's setup is the admins'.
-  expect((await team.as(ada, "POST", "/api/bots", { name: "Nope" })).status).toBe(403);
+  // A member reaches nothing an admin does: the team's setup is the admins', and so is what a bot may do.
+  expect((await team.as(ada, "POST", "/api/webhooks", { name: "Nope" })).status).toBe(403);
+  expect((await team.as(ada, "POST", "/api/bots", { name: "Nope", approvalMode: "full" })).status).toBe(403);
 }, hostTimeout(90_000));
 
 let adaThread = "", roomId = "", roomThread = "";
@@ -336,4 +337,25 @@ it("a member's private chat keeps its own folder when the team's bot is given a 
   } finally {
     expect((await team.as(owner, "PATCH", `/api/bots/${bot.id}`, { cwd: null })).status).toBe(200);
   }
+}, hostTimeout(120_000));
+
+it("a signed-in member can fork her bot and room conversations, but not another member's private chat", async () => {
+  const own = await newThread(ada, "Ada's fork source");
+  await turn(ada, own, "A forkable question");
+  const ownAnchor = ((await messages(ada, own)).body.messages as Array<{ id: string; role: string; text?: string }>)
+    .find((message) => message.role === "user" && message.text === "A forkable question")!;
+  const botFork = await team.as(ada, "POST", `/api/bots/${bot.id}/tasks/${own}/forks`, { messageId: ownAnchor.id });
+  expect(botFork.status, JSON.stringify(botFork.body)).toBe(201);
+  expect(botFork.body.task.origin).toEqual({ threadId: own, messageId: ownAnchor.id });
+  expect((await team.as(cleo, "POST", `/api/bots/${bot.id}/tasks/${own}/forks`, { messageId: ownAnchor.id })).status).not.toBe(201);
+
+  const roomTask = await team.as(ada, "POST", `/api/groups/${roomId}/tasks`, { title: "Ada's room fork source" });
+  expect(roomTask.status, JSON.stringify(roomTask.body)).toBe(201);
+  const roomSource = roomTask.body.task.threadId as string;
+  await turn(ada, roomSource, "@Scout a room forkable question", roomId);
+  const roomAnchor = ((await messages(ada, roomSource)).body.messages as Array<{ id: string; role: string; text?: string }>)
+    .find((message) => message.role === "user" && message.text === "@Scout a room forkable question")!;
+  const roomFork = await team.as(ada, "POST", `/api/groups/${roomId}/tasks/${roomSource}/forks`, { messageId: roomAnchor.id });
+  expect(roomFork.status, JSON.stringify(roomFork.body)).toBe(201);
+  expect(roomFork.body.task.origin).toEqual({ threadId: roomSource, messageId: roomAnchor.id });
 }, hostTimeout(120_000));

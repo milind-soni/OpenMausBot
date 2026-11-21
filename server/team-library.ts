@@ -1,6 +1,7 @@
 import { parseJson, type JsonValue } from "./schema.ts";
 import { isBotPackage, parseBotPackage, parsePackageDocument, upgradeV1, type PackageDocument, type ParsedBotPackage } from "./bot-package.ts";
 import { PACKAGE_V1_VERSION } from "../shared/package-format.ts";
+import { fetchGithubFolder } from "./share-github.ts";
 import { parseTeamManifest, type ParsedTeamManifest } from "./team-manifest.ts";
 
 export const TEAM_LIBRARY_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
@@ -21,6 +22,8 @@ export interface TeamCatalogEntry {
   package?: string;
   manifest: string;
   readme: string;
+  /** A template folder (`teams/<slug>`): read whole, with its skills and pictures, instead of the files made from it. */
+  folder?: string;
   members: number;
   skills: string[];
   requires: { apps: string[] };
@@ -97,6 +100,7 @@ export function parseTeamCatalog(value: unknown): TeamCatalog {
         ? { package: relativeFile(raw.package, `${field}.package`, ".md", "packages/") }
         : {}),
       manifest: relativeFile(raw.manifest, `${field}.manifest`, ".mausteam.json", prefix),
+      ...(raw.folder === `teams/${slug}` ? { folder: `teams/${slug}` } : {}),
       readme: relativeFile(raw.readme, `${field}.readme`, "README.md", prefix),
       members:
         typeof raw.members === "number" && Number.isSafeInteger(raw.members) && raw.members > 0 && raw.members <= 200
@@ -177,6 +181,10 @@ export async function fetchLibraryTeam(slug: string, fetcher: Fetcher = fetch): 
   const catalog = await fetchTeamCatalog(fetcher);
   const entry = catalog.teams.find((team) => team.slug === slug);
   if (!entry) throw Object.assign(new Error("That library team was not found"), { status: 404 });
+  if (entry.folder) {
+    const folder = await fetchGithubFolder(`${TEAM_LIBRARY_RAW_ROOT}/${entry.folder}`, fetcher);
+    return folder.kind === "package" ? folder.document : parseTeamManifest(folder.manifest as Parameters<typeof parseTeamManifest>[0]);
+  }
   return fetchShareable(`${TEAM_LIBRARY_RAW_ROOT}/${entry.package ?? entry.manifest}`, fetcher);
 }
 

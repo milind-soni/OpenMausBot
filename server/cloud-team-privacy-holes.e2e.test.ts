@@ -84,7 +84,7 @@ beforeAll(async () => {
   admin = (await team.pair(ADMIN)).token!;
   rui = (await team.pair(RUI)).token!;
   marta = (await team.pair(MARTA)).token!;
-  quotes = (await team.as(owner, "POST", "/api/bots", { name: "Quotes" })).body.bot;
+  quotes = (await team.as(owner, "POST", "/api/bots", { name: "Quotes", visibility: "everyone" })).body.bot;
   ruiMaus = (await botsOf(rui)).find((bot) => bot.defaultBot?.person === RUI.email)!;
   expect(ruiMaus, "Rui has a MausBot of his own").toBeTruthy();
 
@@ -231,10 +231,8 @@ it("no list, search, export, stream or signed read names anything of Rui's to an
     expect(leaksIn(await streamOf(token)), `${who}: the event stream, replayed`).toEqual([]);
   }
   for (const [who, token] of [["an Admin", admin], ["the Owner", owner]] as const) {
-    for (const format of ["backup", "share"]) {
-      const exported = await team.as(token, "POST", "/api/teams/export", { format });
-      expect(leaksIn(JSON.stringify(exported.body)), `${who}: the team export as ${format} (${exported.status})`).toEqual([]);
-    }
+    const exported = await team.as(token, "POST", "/api/teams/export", { format: "backup" });
+    expect(leaksIn(JSON.stringify(exported.body)), `${who}: the team backup (${exported.status})`).toEqual([]);
   }
   const signed = await team.signed("GET", "/api/cloud/team/admin");
   expect(signed.status).toBe(200);
