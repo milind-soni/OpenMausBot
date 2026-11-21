@@ -36,7 +36,9 @@ export function requestHead(method: string, path: string, headers: Headers, leng
   if (!path.startsWith("/") || [...path].some((char) => char <= " " || char === "\x7f" || char === "#")) {
     throw new TypeError("e2e http: path must be origin-form with no spaces, controls or fragment");
   }
-  let head = `${method} ${path} HTTP/1.1\r\nHost: companion\r\n`;
+  // A path's non-ASCII goes out percent-encoded UTF-8, as fetch's URL parser sends it.
+  const target = path.replace(/[\u0080-\uffff]+/g, (run) => Array.from(utf8(run), (byte) => `%${byte.toString(16).toUpperCase().padStart(2, "0")}`).join(""));
+  let head = `${method} ${target} HTTP/1.1\r\nHost: companion\r\n`;
   // Headers already refuses names that are not tokens and values with CR, LF or NUL.
   for (const [name, value] of headers) {
     if (OWN.has(name)) throw new TypeError(`e2e http: ${name} is set by the stream client`);
@@ -73,7 +75,7 @@ class ByteReader {
         this.#held = this.#held.subarray(at + delimiter.length);
         return line;
       }
-      if (this.#held.length > max + delimiter.length) throw new HttpError(`${what} is over ${max} bytes`);
+      if (this.#held.length >= max + delimiter.length) throw new HttpError(`${what} is over ${max} bytes`);
       from = Math.max(0, this.#held.length - delimiter.length + 1);
       if (!(await this.#more())) throw new HttpError(`the stream ended inside the ${what}`);
     }
@@ -100,6 +102,9 @@ function indexOf(bytes: Uint8Array, delimiter: number[], from: number): number {
   return -1;
 }
 
+/** Head characters as bytes, the way fetch writes header values: one character, one byte (Headers holds only 0-255). */
+const latin1 = (text: string): Uint8Array => Uint8Array.from(text, (char) => char.charCodeAt(0));
+
 /** Header bytes as fetch reads them: one byte, one character. */
 const byteString = (bytes: Uint8Array): string => {
   let text = "";
@@ -119,7 +124,7 @@ function appendField(headers: Headers, line: string): void {
   const name = line.slice(0, colon);
   if (colon < 1 || !TOKEN.test(name)) throw new HttpError("bad header line");
   try {
-    headers.append(name, line.slice(colon + 1).trim());
+    headers.append(name, line.slice(colon + 1).replace(/^[ \t]+|[ \t]+$/g, ""));
   } catch {
     throw new HttpError(`bad value for ${name}`);
   }
@@ -194,7 +199,7 @@ export async function streamFetch(open: () => E2EStream, request: StreamRequest)
   signal?.addEventListener("abort", abort, { once: true });
 
   // No FIN after the request: Node's HTTP server cuts a reply short when the client half-closes first.
-  const sent = Promise.all([stream.write(utf8(head)), body?.length ? stream.write(Uint8Array.from(body)) : undefined]);
+  const sent = Promise.all([stream.write(latin1(head)), body?.length ? stream.write(Uint8Array.from(body)) : undefined]);
   try {
     const received = (async () => {
       for (;;) {

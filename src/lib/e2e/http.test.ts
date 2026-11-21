@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { fromB64u, utf8 } from "./bytes.ts";
 import { credentialHash, keyId, psk } from "./credentials.ts";
-import { HttpError, streamFetch } from "./http.ts";
+import { HttpError, MAX_HEAD, streamFetch } from "./http.ts";
 import { dial, type E2EStream, type PhoneSession } from "./session.ts";
 
 const SERVER = fileURLToPath(new URL("../../../companion/src/e2e/interop-server.ts", import.meta.url));
@@ -189,6 +189,27 @@ describe("streamFetch framing (fake computer)", () => {
     const fake = fakeStream(["HTTP/1.1 204 No Content\r\n\r\n"]);
     await streamFetch(fake.open, { path: "/a%23b?q=%23&r=1" });
     expect(fake.sent().startsWith("GET /a%23b?q=%23&r=1 HTTP/1.1\r\n")).toBe(true);
+  });
+
+  it("writes header values as their bytes and percent-encodes a path's non-ASCII as UTF-8, as fetch does", async () => {
+    const fake = fakeStream(["HTTP/1.1 204 No Content\r\n\r\n"]);
+    await streamFetch(fake.open, { path: "/\u00e9?q=\u65e5", headers: { "X-Label": "\u00e9" } });
+    const head = Uint8Array.from(fake.state.written.flatMap((part) => [...part]));
+    expect(String.fromCharCode(...head)).toBe("GET /%C3%A9?q=%E6%97%A5 HTTP/1.1\r\nHost: companion\r\nx-label: \u00e9\r\nConnection: close\r\n\r\n");
+  });
+
+  it("strips only spaces and tabs around a reply header value, keeping its 0xA0 bytes", async () => {
+    const wire = "HTTP/1.1 204 No Content\r\nX-Label: \t\u00a0v\u00a0 \t\r\n\r\n";
+    const res = await streamFetch(fakeStream([Uint8Array.from(wire, (char) => char.charCodeAt(0))]).open, { path: "/" });
+    expect(res.headers.get("x-label")).toBe("\u00a0v\u00a0");
+  });
+
+  it("refuses a head the moment no ending can still fit, without waiting for more bytes", async () => {
+    const line = "HTTP/1.1 200 OK\r\nX-Big: ";
+    const fake = fakeStream([line + "a".repeat(MAX_HEAD + 4 - line.length)], { endAfter: false });
+    const tooLate = new Promise<string>((resolve) => setTimeout(() => resolve("still waiting"), 500));
+    expect(await Promise.race([streamFetch(fake.open, { path: "/" }).catch((error: Error) => error.message), tooLate])).toContain("reply head is over");
+    expect(fake.state.reset).toBe(true);
   });
 
   it.each([
