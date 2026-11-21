@@ -329,7 +329,10 @@ describe("dial: the direct route", () => {
 });
 
 /** A socket that records what the session sends, and records sealed and opened as themselves. */
-function fakeSession(seal: (plaintext: Bytes) => Promise<Bytes> = async (plaintext) => plaintext) {
+function fakeSession(
+  seal: (plaintext: Bytes) => Promise<Bytes> = async (plaintext) => plaintext,
+  timers?: ConstructorParameters<typeof PhoneSession>[2],
+) {
   const sent: Bytes[] = [];
   const closes: Array<number | undefined> = [];
   const socket = {
@@ -340,13 +343,14 @@ function fakeSession(seal: (plaintext: Bytes) => Promise<Bytes> = async (plainte
     onclose: null as ((event: CloseEvent) => void) | null,
   };
   const keys = { send: { seal }, receive: { open: async (record: Bytes) => record } } as unknown as SessionKeys;
-  const session = new PhoneSession(socket as unknown as WebSocket, keys);
+  const session = new PhoneSession(socket as unknown as WebSocket, keys, timers);
   const record = (...bytes: number[]) => session.receive({ data: Uint8Array.from(bytes).buffer } as MessageEvent);
   const remoteClose = (code: number) => socket.onclose!({ code } as CloseEvent);
   return { session, sent, closes, record, remoteClose };
 }
 
 const GO_AWAY_REMOVED = [0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3];
+const GO_AWAY_NORMAL = [0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 const GO_AWAY_PROTOCOL = [0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
 /** A WindowUpdate {SYN} on stream 2: the computer may not open streams. */
 const COMPUTER_OPEN = [0, 1, 0, 1, 0, 0, 0, 2, 0, 0, 0, 0];
@@ -366,6 +370,27 @@ describe("PhoneSession records and closes", () => {
     expect(await session.closed).toBe(4000);
     expect(sent).toEqual([Uint8Array.from(GO_AWAY_PROTOCOL)]);
     expect(closes).toEqual([4000]);
+  });
+
+  it("keeps a graceful close at 1000 when an unanswered ping times out while its GoAway is still being sealed", async () => {
+    let release!: () => void;
+    let calls = 0;
+    const { session, sent, closes } = fakeSession(
+      (plaintext) => {
+        calls += 1;
+        if (calls === 1) return Promise.resolve(plaintext);
+        return new Promise((resolve) => (release = () => resolve(plaintext)));
+      },
+      { pingIntervalMs: 10, pingTimeoutMs: 30 },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(sent).toHaveLength(1);
+    session.shutdown();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    release();
+    expect(await session.closed).toBe(1000);
+    expect(sent.at(-1)).toEqual(Uint8Array.from(GO_AWAY_NORMAL));
+    expect(closes).toEqual([1000]);
   });
 
   it("handles a seal that fails while an earlier one is pending, and keeps send order", async () => {
