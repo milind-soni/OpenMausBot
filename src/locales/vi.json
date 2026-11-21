@@ -1786,7 +1786,7 @@
   "composer.dictation.start": "Bắt đầu đọc chính tả",
   "composer.dictation.stop": "Dừng đọc chính tả",
   "composer.dictation.stopHint": "Dừng đọc chính tả (Esc)",
-  "composer.dictation.hint": "Đọc chính tả",
+  "composer.dictation.hintKey": "Đọc chính tả ({keys})",
   "composer.failed.notSent": "Chưa gửi: “{text}”",
   "composer.failed.attachment": "tệp đính kèm",
   "composer.failed.dismiss": "Bỏ qua",

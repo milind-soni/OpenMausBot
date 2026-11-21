@@ -2386,7 +2386,7 @@
   "composer.dictation.start": "받아쓰기 시작",
   "composer.dictation.stop": "받아쓰기 중지",
   "composer.dictation.stopHint": "받아쓰기 중지(Esc)",
-  "composer.dictation.hint": "받아쓰기",
+  "composer.dictation.hintKey": "받아쓰기 ({keys})",
   "composer.failed.notSent": "보내지 못함: “{text}”",
   "composer.failed.attachment": "첨부 파일",
   "composer.failed.dismiss": "닫기",

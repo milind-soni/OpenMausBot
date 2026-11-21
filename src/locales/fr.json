@@ -958,7 +958,7 @@
   "composer.dictation.start": "Démarrer la dictée",
   "composer.dictation.stop": "Arrêter la dictée",
   "composer.dictation.stopHint": "Arrêter la dictée (Échap)",
-  "composer.dictation.hint": "Dicter",
+  "composer.dictation.hintKey": "Dicter ({keys})",
   "composer.failed.notSent": "Non envoyé : « {text} »",
   "composer.failed.attachment": "pièce jointe",
   "composer.failed.dismiss": "Ignorer",

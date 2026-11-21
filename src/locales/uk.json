@@ -1120,7 +1120,7 @@
   "composer.dictation.start": "Почати диктування",
   "composer.dictation.stop": "Зупинити диктування",
   "composer.dictation.stopHint": "Зупинити диктування (Esc)",
-  "composer.dictation.hint": "Диктувати",
+  "composer.dictation.hintKey": "Диктувати ({keys})",
   "composer.failed.notSent": "Не надіслано: «{text}»",
   "composer.failed.attachment": "вкладення",
   "composer.failed.dismiss": "Приховати",

@@ -2245,7 +2245,7 @@
   "composer.dictation.start": "Начать диктовку",
   "composer.dictation.stop": "Остановить диктовку",
   "composer.dictation.stopHint": "Остановить диктовку (Esc)",
-  "composer.dictation.hint": "Диктовать",
+  "composer.dictation.hintKey": "Диктовать ({keys})",
   "composer.failed.notSent": "Не отправлено: «{text}»",
   "composer.failed.attachment": "вложение",
   "composer.failed.dismiss": "Скрыть",

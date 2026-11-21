@@ -2498,7 +2498,7 @@
   "composer.dictation.start": "音声入力を開始",
   "composer.dictation.stop": "音声入力を停止",
   "composer.dictation.stopHint": "音声入力を停止（Esc）",
-  "composer.dictation.hint": "音声入力",
+  "composer.dictation.hintKey": "音声入力 ({keys})",
   "composer.failed.notSent": "未送信：「{text}」",
   "composer.failed.attachment": "添付ファイル",
   "composer.failed.dismiss": "閉じる",
