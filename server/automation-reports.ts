@@ -114,6 +114,8 @@ export interface AutomationReportDeps {
   brief?(run: RoutineRun, turnId?: string): void;
   /** The language a line in this conversation is written in (server/server-lines.ts); absent, English. */
   threadLanguage?(threadId: string): string | undefined;
+  /** The app's own sentence a run's line ends with, whatever the bot wrote (host/no-terminal.ts); null for none. */
+  appNote?(run: RoutineRun, language: string | undefined): string | null;
 }
 
 export function createAutomationReports(deps: AutomationReportDeps) {
@@ -240,7 +242,8 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       deps.routines()?.noteReport(run.id, { state: "quiet" });
       return true;
     }
-    const reply: Extract<RunReply, { quiet: false }> = said.quiet ? { quiet: false, text: recoveredText(run.routineName, run.finishedAt ?? Date.now(), language) } : said;
+    const note = said.quiet ? null : deps.appNote?.(run, language);
+    const reply: Extract<RunReply, { quiet: false }> = said.quiet ? { quiet: false, text: recoveredText(run.routineName, run.finishedAt ?? Date.now(), language) } : note ? { ...said, text: `${said.text}\n\n${note}` } : said;
     const files = recovered ? [] : sentWith(run, source);
     const posted = store.appendMessage(target.threadId, {
       role: "bot", kind: "text", text: reply.text,
