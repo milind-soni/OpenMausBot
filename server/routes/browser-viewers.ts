@@ -12,7 +12,8 @@ import { BROWSER_UPLOAD_MAX_BYTES as UPLOAD_MAX_BYTES } from "../../shared/uploa
 import type { Audience } from "../audience.ts";
 import { storeUploads } from "../browser-upload.ts";
 import type { BrowserLive } from "../browser-live.ts";
-import type { LiveRouter } from "../browser/engines.ts";
+import { chromeTarget, type LiveRouter } from "../browser/engines.ts";
+import { browserInputLog, type BrowserInputLog, type PersonReason } from "../browser/input-log.ts";
 import { requestedSize } from "../browser/viewers/viewport.ts";
 import { messageFileDisposition } from "../message-file.ts";
 import { isSameOrigin, type RequestAuth } from "../request-auth.ts";
@@ -47,7 +48,13 @@ export interface BrowserViewerRouteDeps {
   /** Why a person may not restart this browser now, or null. */
   restartRefusal(session: string): string | null;
   dataDir: string;
+  /** Where a person's refused input is counted; the server's own log when unset. */
+  inputLog?: BrowserInputLog;
 }
+
+/** What the app's view sends, beside its actions, to say which input it dropped before sending. */
+const APP_DROPS = "client_drops";
+const STATUS_REASONS: Record<number, PersonReason> = { 400: "invalid_action", 404: "view_gone", 429: "too_many_pending" };
 
 const ownerOf = (auth: RequestAuth) => (auth.kind === "session" ? auth.session.id : "local-owner");
 
@@ -132,15 +139,35 @@ export function createBrowserViewerRoutes(deps: BrowserViewerRouteDeps): RouteHa
       if (method === "GET" && live[2] === "live") {
         req.socket.setTimeout(0);
         const size = requestedSize(Number(url.searchParams.get("width")), Number(url.searchParams.get("height")));
-        return await deps.viewers.open({ botId: browser.botId, session: browser.session, spec: browser.spec, owner, person, isCurrent, res, resume: url.searchParams.get("resume"), size });
+        return await deps.viewers.open({ botId: browser.botId, session: browser.session, spec: browser.spec, owner, person, isCurrent, res, resume: url.searchParams.get("resume"), size, drawsSelects: url.searchParams.get("selects") === "1" });
       }
       if (method === "POST" && live[2] === "action") {
         const body = await readBody(req, 32_768);
-        if (!isCurrent()) return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
+        const log = deps.inputLog ?? browserInputLog;
+        const seen = { engine: chromeTarget(browser.session, browser.spec) ? "chrome" : "agent-browser", transport: "v1", session: browser.session } as const;
+        const dropped = (reason: PersonReason) => { if (body?.type !== "ack" && body?.type !== "resize") log.record({ who: "person", reason, what: String(body?.type), ...seen }); };
+        if (body?.type === APP_DROPS) {
+          log.fromApp(body.counts, seen);
+          return json(res, 200, { ok: true });
+        }
+        if (!isCurrent()) {
+          dropped("session_changed");
+          return json(res, 409, { error: "This browser session changed. Reopen the browser panel." });
+        }
         if (typeof body?.viewerId !== "string") return json(res, 400, { error: "A live browser connection is required." });
         const refused = body.type === "restart" && deps.restartRefusal(browser.session);
         if (refused) return json(res, 409, { error: refused });
-        return json(res, 200, await deps.viewers.action({ viewerId: body.viewerId, botId: browser.botId, owner, body }));
+        let answer: unknown;
+        try { answer = await deps.viewers.action({ viewerId: body.viewerId, botId: browser.botId, owner, body }); }
+        catch (error) {
+          const known = error as { reason?: PersonReason; status?: number } | null;
+          dropped(known?.reason ?? STATUS_REASONS[known?.status ?? 0] ?? "other");
+          throw error;
+        }
+        if (typeof (answer as { notice?: unknown } | null)?.notice === "string") dropped("page_refused");
+        // Its v1 view shows no page question, so an answer to one is answered and not applied.
+        else if (seen.engine === "chrome" && body.type === "dialog") dropped("not_handled");
+        return json(res, 200, answer);
       }
       return json(res, 405, { error: "method not allowed" });
     }

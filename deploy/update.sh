@@ -551,14 +551,29 @@ last_words() { compose logs --no-color --no-log-prefix --tail 40 "$SERVICE" 2>/d
 
 # The server runs image $1, answers /api/health three times in a row, and (with $2) says it is version $2. Sets WHY.
 wait_healthy() {
-  local want=$1 version=${2:-} deadline=$(($(date +%s) + WAIT_S)) streak=0 cid state status restarts image said
+  local want=$1 version=${2:-} deadline=$(($(date +%s) + WAIT_S)) streak=0 cid last_cid="" state status restarts image said
   WHY=""
   while :; do
     cid=$(container)
     # A Podman install's container goes with the process it ran (systemd starts a new one): gone is stopped.
     if [ -z "$cid" ] && [ -n "$UNIT" ]; then WHY="it stopped as it started ($(last_words))"; return 1; fi
     if [ -z "$cid" ]; then WHY="its container is gone"; return 1; fi
+    # Three answers in a row count only from one container: a new one (systemd starts another) begins the count again.
+    if [ "$cid" != "$last_cid" ]; then streak=0; last_cid=$cid; fi
     state=$(inspect '{{.State.Status}} {{.RestartCount}} {{.Image}}' "$cid")
+    # Gone between the two reads: Podman removes a container that exits as it starts, so the next read says what became
+    # of it. An empty answer is never taken for a container on another image.
+    if [ -z "$state" ]; then
+      streak=0
+      if [ "$(date +%s)" -ge "$deadline" ]; then
+        if [ -n "$UNIT" ]; then WHY="it stopped as it started ($(last_words))"
+        elif [ -n "$(container)" ]; then WHY="its container could not be inspected ($STORE answered nothing about $cid)"
+        else WHY="its container is gone"; fi
+        return 1
+      fi
+      sleep "$POLL_S"
+      continue
+    fi
     status=${state%% *}
     restarts=$(printf '%s' "$state" | cut -d' ' -f2)
     image=${state##* }

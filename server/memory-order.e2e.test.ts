@@ -79,6 +79,30 @@ it("on Starter, hand-offs to busy bots start at once: one thread per bot holds o
   await expect.poll(() => nodes().map((node: any) => node.status), { timeout: 60_000 }).toEqual(["completed", "completed"]);
 }), 180_000);
 
+it("on Starter, a routine for a bot the plan paused runs: it waits for one of the two places at once and never fails", () => fixture(async (f) => {
+  const bots: any[] = [];
+  for (let at = 0; at < 7; at += 1) bots.push(await f.bot(`Teammate ${at}`));
+  writeFileSync(join(f.dataDir, "test-starter"), "");
+  const config = await f.api("/api/config", undefined, "GET");
+  expect(config.cloudStarter).toBe(true);
+  const asleep = bots.find((bot) => config.pausedBots.includes(bot.id)), [one, two] = bots.filter((bot) => !config.pausedBots.includes(bot.id));
+  expect(asleep).toBeTruthy();
+  const gate = join(f.dataDir, "busy-may-finish");
+  writeFileSync(f.planPath, JSON.stringify({ [one.id]: { gateFile: gate, reply: "Done" }, [two.id]: { gateFile: gate, reply: "Done" }, [asleep.id]: { reply: "Inbox checked" } }));
+  f.free(8 * GB);
+  for (const busy of [one, two]) await f.cli("send", "--bot", busy.id, "--task", busy.activeTaskId, "--text", "Keep busy.");
+  await expect.poll(async () => (await f.api("/api/bots?messages=0", undefined, "GET")).bots.filter((bot: any) => [one.id, two.id].includes(bot.id) && bot.busy).length, { timeout: 30_000 }).toBe(2);
+  // Every awake bot was used moments ago, so nothing is swapped, and the run goes ahead anyway.
+  const routine = (await f.api("/api/routines", { name: "Inbox", prompt: "Check the inbox.", botId: asleep.id, enabled: true, schedule: { type: "interval", everyMinutes: 180, anchorAt: Date.now() + 3 * 3_600_000 } })).routine;
+  const run = (await f.api(`/api/routines/${routine.id}/run`, {})).run;
+  const current = async () => ((await f.api("/api/routines", undefined, "GET")).runs as any[]).find((each) => each.id === run.id);
+  await expect.poll(async () => { const now = await current(); return now?.threadId ? (await f.messages(now.threadId)).some((message: any) => message.tool?.name?.includes("Starter runs 2 tasks at once")) : false; }, { timeout: 30_000 }).toBe(true);
+  expect((await current()).status).toBe("running");
+  writeFileSync(gate, "finish");
+  await expect.poll(async () => (await current())?.status, { timeout: 60_000 }).toBe("completed");
+  expect((await f.api("/api/config", undefined, "GET")).pausedBots).toContain(asleep.id);
+}), 180_000);
+
 it("a typed stop ends a turn waiting for memory at once and never starts it, and a stop for an idle bot starts nothing", () => fixture(async (f) => {
   const [running, waiting, idle] = [await f.bot("Running"), await f.bot("Waiting"), await f.bot("Idle")];
   const gate = join(f.dataDir, "running-may-finish");

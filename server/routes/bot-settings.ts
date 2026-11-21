@@ -55,6 +55,8 @@ export interface BotSettingsRouteDeps {
   /** A Team Cloud: marks a bot's shared conversation read or unread for this person alone (host/room-reads.ts); false
    * for a private chat, which keeps its one mark. */
   personMarkThread?(auth: RequestAuth, threadId: string, unread: boolean): boolean;
+  /** A bot's model changed (host/no-terminal.ts). */
+  modelSwitched?(botId: string, threadId: string, before: ModelSelection, after: ModelSelection, routinesFollow: boolean): void;
 }
 
 export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandler {
@@ -162,6 +164,7 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       if (!bot) return json(res, 404, { error: "no such bot" });
       store.patchTask(bot.id, selected.threadId, { modelSelection: undefined,
         ...hostedModels?.resetTask(selected.modelSelection, checked.selection) });
+      deps.modelSwitched?.(bot.id, selected.threadId, selected.modelSelection, checked.selection, true);
       return json(res, 200, { bot: wireBot(bot) });
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/read$/);

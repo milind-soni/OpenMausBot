@@ -106,13 +106,14 @@ class FakeChild extends EventEmitter {
 function host(options: { available?: number; perEngine?: number; tickMs?: number } = {}) {
   let clock = 1_800_000_000_000, oomKills = 0;
   const perEngine = options.perEngine ?? 700 * MB;
-  const state = { available: options.available ?? 3.4 * GB, fullStall10: 0 };
+  const state: { available: number; fullStall10: number; swapFree: number; stallScope?: "host" } = { available: options.available ?? 3.4 * GB, fullStall10: 0, swapFree: 0 };
   const children = new Map<number, FakeChild>();
   const signals: string[] = [];
   const logs: string[] = [];
   const memory = new EngineMemory({
     enabled: true, tickMs: options.tickMs ?? 5,
-    read: (): HostMemory => ({ totalBytes: 4 * GB, availableBytes: Math.max(0, state.available - children.size * perEngine), swapFreeBytes: 0, oomKills, fullStall10: state.fullStall10 }),
+    read: (): HostMemory => ({ totalBytes: 4 * GB, availableBytes: Math.max(0, state.available - children.size * perEngine), swapFreeBytes: state.swapFree, oomKills, fullStall10: state.fullStall10,
+      ...(state.stallScope ? { stallScope: state.stallScope } : {}) }),
     groups: () => new Map([...children.keys()].map((pid) => [pid, perEngine])),
     now: () => clock,
     signal: (pid, signal) => {
@@ -370,6 +371,161 @@ describe("running short", () => {
     expect(h.memory.stopText("a")).toBeNull();
   });
 
+  /** A stand-in for the browser host: `unused` browsers no task uses; `close` resolves each stopped thread's close. */
+  function reclaimer(h: ReturnType<typeof host>, options: { unused?: number; running?: boolean; close?: Promise<unknown> } = {}) {
+    const asks: Array<{ thrashing: boolean; busy: readonly string[] }> = [];
+    let unused = options.unused ?? 0;
+    h.memory.useBrowsers({ starts: () => false, running: () => false, stopped: () => options.close, anyRunning: () => options.running ?? false,
+      reclaimUnused: (pressure) => { asks.push(pressure); const asked = unused; unused = 0; return asked; } });
+    return asks;
+  }
+
+  it("stops the only busy engine once the machine has thrashed for a cooldown, and its turn says it was the only one", async () => {
+    const h = host();
+    h.memory.turnStarted("a"); h.spawn("a");
+    h.state.available = 100 * MB + 700 * MB;
+    // Short, but not stalled: the only busy engine keeps running.
+    h.state.fullStall10 = 10;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual([]);
+    // Thrashing on one look: still kept, a burst may pass.
+    h.state.fullStall10 = 70;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual([]);
+    h.advance(15_000);
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGKILL -1000"]);
+    expect(h.memory.stopText("a")).toBe(memoryStopText(false, true));
+    expect(memoryStopText(false, true)).toBe("Ran out of room, so I stopped this task to keep everything here from freezing.");
+    expect(memoryStopped(memoryStopText(false, true))).toBe(true);
+  });
+
+  it("leaves the only busy engine alone through a burst: 40% stalled with 400 MB of 4 GB available", async () => {
+    const h = host();
+    h.memory.turnStarted("a"); h.spawn("a");
+    h.state.available = 400 * MB + 700 * MB;
+    h.state.fullStall10 = 40;
+    for (let look = 0; look < 4; look++) { h.memory.tick(); await settle(); h.advance(16_000); }
+    expect(h.signals).toEqual([]);
+  });
+
+  it("never stops the only busy engine on a host's stall it borrowed (a cgroup without its own)", async () => {
+    const h = host();
+    h.memory.turnStarted("a"); h.spawn("a");
+    h.state.available = 20 * MB + 700 * MB;
+    h.state.fullStall10 = 90;
+    h.state.stallScope = "host";
+    for (let look = 0; look < 3; look++) { h.memory.tick(); await settle(); h.advance(16_000); }
+    expect(h.signals).toEqual([]);
+  });
+
+  it("sees a home thrash with swap free: memory available, not swap, decides", async () => {
+    const h = host();
+    h.memory.turnStarted("a"); h.spawn("a");
+    // 20 MB available, 3 GB of swap free (counted at half), and every task stalled most of the time.
+    h.state.available = 20 * MB + 700 * MB;
+    h.state.swapFree = 3 * GB;
+    h.state.fullStall10 = 80;
+    h.memory.tick();
+    h.advance(15_000);
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGKILL -1000"]);
+  });
+
+  it("closes the browsers no task is using before it stops a busy engine, and asks them once per two cooldowns", async () => {
+    const h = host();
+    const asks = reclaimer(h, { unused: 1 });
+    for (const thread of ["a", "b"]) { h.memory.turnStarted(thread); h.spawn(thread); h.advance(1_000); }
+    h.state.available = 100 * MB + 2 * 700 * MB;
+    h.memory.tick();
+    await settle();
+    expect([asks.length, h.signals]).toEqual([1, []]);
+    expect(asks[0]).toEqual({ thrashing: false, busy: ["a", "b"] });
+    // Within the cooldown nothing more; past it, the browsers aren't asked again so soon: the newest busy engine goes.
+    h.memory.tick();
+    await settle();
+    expect(asks).toHaveLength(1);
+    h.advance(20_000);
+    h.memory.tick();
+    await settle();
+    expect([asks.length, h.signals]).toEqual([1, ["SIGKILL -1001"]]);
+  });
+
+  it("stops an idle engine before closing any browser, and asks the browsers in the same look once the machine thrashes", async () => {
+    const calm = host();
+    const calmAsks = reclaimer(calm, { unused: 1 });
+    calm.memory.turnStarted("a"); calm.spawn("a"); calm.memory.turnEnded("a");
+    calm.state.available = 100 * MB + 700 * MB;
+    calm.memory.tick();
+    await settle();
+    expect([calmAsks.length, calm.signals]).toEqual([0, ["SIGTERM -1000"]]);
+    // One idle engine, an unused browser, stalled 80% with 100 MB available: both in one look.
+    const h = host();
+    const asks = reclaimer(h, { unused: 1 });
+    h.memory.turnStarted("a"); h.spawn("a"); h.memory.turnEnded("a");
+    h.state.available = 100 * MB + 700 * MB;
+    h.state.fullStall10 = 80;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGTERM -1000"]);
+    expect(asks).toEqual([{ thrashing: true, busy: [] }]);
+  });
+
+  it("keeps watching memory while a bot's browser runs after the last engine is gone", async () => {
+    const h = host({ tickMs: 5 });
+    const asks = reclaimer(h, { unused: 1, running: true });
+    h.memory.turnStarted("a"); h.spawn("a"); h.memory.turnEnded("a");
+    [...h.children.values()][0]!.exit(null);
+    await settle();
+    expect(h.children.size).toBe(0);
+    h.state.available = 50 * MB;
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(asks.length).toBeGreaterThan(0);
+  });
+
+  it("stops one busy engine at a time: none while a stop or its browser's close is under way, and two cooldowns after", async () => {
+    const h = host();
+    let closed!: () => void;
+    reclaimer(h, { close: new Promise((resolve) => { closed = () => resolve(undefined); }) });
+    for (const thread of ["a", "b", "c"]) { h.memory.turnStarted(thread); h.spawn(thread); h.advance(1_000); }
+    h.state.available = 100 * MB + 3 * 700 * MB;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGKILL -1002"]);
+    // Still short after it (what it freed went to the others), and its browser's close still runs: nothing more, however long.
+    h.state.available = 100 * MB + 2 * 700 * MB;
+    h.advance(60_000);
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toHaveLength(1);
+    closed();
+    await settle();
+    // Closed now: two cooldowns from then.
+    h.advance(20_000);
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toHaveLength(1);
+    h.advance(11_000);
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGKILL -1002", "SIGKILL -1001"]);
+  });
+
+  it("stops a bot's own work before a turn a person started", async () => {
+    const h = host();
+    h.memory.useTurnOrder((threadId) => threadId === "person");
+    h.memory.turnStarted("bot"); h.spawn("bot"); h.advance(1_000);
+    h.memory.turnStarted("person"); h.spawn("person");
+    h.state.available = 100 * MB + 2 * 700 * MB;
+    h.memory.tick();
+    await settle();
+    expect(h.signals).toEqual(["SIGKILL -1000"]);
+  });
+
   it("lets the memory the kernel's OOM killer just freed come back before stopping anything itself", async () => {
     const h = host({ tickMs: 60_000 });
     for (const thread of ["a", "b", "c"]) { h.memory.turnStarted(thread); h.spawn(thread); h.advance(1_000); }
@@ -402,7 +558,7 @@ describe("bots' browsers", () => {
   /** Threads whose bot may browse and whose browser is not running yet, and the threads whose browser was told to close. */
   function browsers(h: ReturnType<typeof host>, starting: Iterable<string>, open: Iterable<string> = []) {
     const pending = new Set(starting), running = new Set(open), closed: string[] = [];
-    h.memory.useBrowsers({ starts: (threadId) => pending.has(threadId), running: (threadId) => running.has(threadId), stopped: (threadId) => closed.push(threadId) });
+    h.memory.useBrowsers({ starts: (threadId) => pending.has(threadId), running: (threadId) => running.has(threadId), stopped: (threadId) => { closed.push(threadId); } });
     return { pending, closed };
   }
 

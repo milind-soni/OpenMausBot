@@ -491,3 +491,28 @@ describe("deliveredCopy", () => {
     expect(deliveredCopy([ask, peer, reply], reply, "README.md", "D:\\AI\\openmausbot-skills\\README.md")).toBeNull();
   });
 });
+
+describe("saveBotAttachment for a file attached to the conversation", () => {
+  it("passes on a stored file by the name it was attached with", async () => {
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    const stored = join(ATTACHMENTS_DIR, "0b7f6a52-3c1d-4e8f-9a2b-5c6d7e8f9a0b.md");
+    writeFileSync(stored, "# Chapter 3");
+    const saved = await saveBotAttachment({ path: stored, roots: [WORK], attached: () => [{ path: stored, name: "chapter-3.md" }] });
+    expect(saved.attachment).toMatchObject({ kind: "file", name: "chapter-3.md" });
+    expect(readFileSync(saved.attachment.path, "utf8")).toBe("# Chapter 3");
+    const byLink = await saveBotAttachment({ path: pathToFileURL(stored).href, roots: [WORK], attached: () => [{ path: stored, name: "chapter-3.md" }] });
+    expect(byLink.attachment).toMatchObject({ name: "chapter-3.md" });
+  });
+
+  it("opens nothing outside the attachment store, whatever a tag names, and nothing in it that was not attached", async () => {
+    mkdirSync(ATTACHMENTS_DIR, { recursive: true });
+    mkdirSync(process.env.OMB_DATA_DIR!, { recursive: true });
+    const config = join(process.env.OMB_DATA_DIR!, "config.json");
+    writeFileSync(config, "{\"secret\":true}");
+    await expect(saveBotAttachment({ path: config, roots: [WORK], attached: () => [{ path: config, name: "config.json" }] }))
+      .rejects.toMatchObject({ status: 403 });
+    const other = join(ATTACHMENTS_DIR, "1c8e7b63-4d2e-4f9a-8b3c-6d7e8f9a0b1c.md");
+    writeFileSync(other, "Someone else's");
+    await expect(saveBotAttachment({ path: other, roots: [WORK], attached: () => [] })).rejects.toMatchObject({ status: 403 });
+  });
+});

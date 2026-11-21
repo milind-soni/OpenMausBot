@@ -227,7 +227,7 @@ export function configChangeRows(before: unknown, after: unknown): Array<Omit<Ad
 export const BOT_AUDIT_FIELDS = [
   "approvalMode", "autoApprove", "alwaysAllow", "toolScope", "connectorScopes", "connectorTools", "computer", "cloudBackend", "autoStartVps", "vpsAlias",
   "cwd", "composio", "browser", "browserProfile", "mcpServers", "chiefOfStaff", "managedSections", "section",
-  "parkDirectMessages", "hidden", "modelSelection", "helperModel", "visibility",
+  "parkDirectMessages", "hidden", "modelSelection", "helperModel", "checkWork", "visibility",
 ] as const;
 
 /** A Team Cloud's bots are everyone's: who renamed one, recoloured it or changed its instructions is recorded too. */

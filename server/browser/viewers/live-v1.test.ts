@@ -159,6 +159,16 @@ describe("the v1 live view on the new browser", () => {
     expect(keys).toContainEqual(expect.objectContaining({ type: "keyUp", key: "Enter" }));
   });
 
+  it("applies every input of a batch, in order", async () => {
+    const { open, backend } = setup();
+    const { action } = await open();
+    await action({ type: "take" });
+    const key = (eventType: string, letter: string) => ({ type: "input_keyboard", eventType, key: letter, code: `Key${letter.toUpperCase()}`, windowsVirtualKeyCode: letter.toUpperCase().charCodeAt(0), modifiers: 0, ...(eventType === "keyDown" ? { text: letter } : {}) });
+    await expect(action({ type: "input_batch", events: [key("keyDown", "o"), key("keyUp", "o"), key("keyDown", "k"), key("keyUp", "k")] })).resolves.toEqual({ ok: true });
+    const keys = backend.chrome.sent.filter((sent) => sent.method === "Input.dispatchKeyEvent").map((sent) => `${sent.params.type}:${sent.params.key}`);
+    expect(keys).toEqual(["keyDown:o", "keyUp:o", "keyDown:k", "keyUp:k"]);
+  });
+
   it("tells a phone its browser closed unused and ends its view for good, so it does not reconnect and start it again", async () => {
     const { open, service, backend } = setup();
     const { sse } = await open();
