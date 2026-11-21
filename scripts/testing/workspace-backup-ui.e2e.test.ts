@@ -99,8 +99,8 @@ describe("full backup Settings in the real renderer", () => {
     await click("Close templates");
     await click("You");
     await click("Settings");
-    await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "Data"');
-    await click("Data");
+    await expect.poll(snapshot, { timeout: 10_000 }).toContain('button "Import & export"');
+    await click("Import & export");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Export full backup");
     await click("Learn more");
     expect(await snapshot()).toContain("Saved account credentials and connections are not included");
