@@ -98,7 +98,7 @@ export class CdpConnection {
         : undefined;
       this.#pending.set(id, { method, session, resolve, reject, timer });
       try {
-        this.#transport.send(JSON.stringify(message));
+        this.#transport.send(JSON.stringify(message), options.readOnly ? { readOnly: true } : undefined);
       } catch (error) {
         this.#pending.delete(id);
         if (timer) clearTimeout(timer);

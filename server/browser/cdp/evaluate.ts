@@ -124,7 +124,7 @@ export async function callOnNode<T>(
   handle: NodeHandle,
   fn: string,
   args: readonly unknown[] = [],
-  { awaitPromise = false }: { awaitPromise?: boolean } = {},
+  { awaitPromise = false, readOnly = false }: { awaitPromise?: boolean; readOnly?: boolean } = {},
 ): Promise<T> {
   return frames.inWorld(handle.frameId, async (session, contextId) => {
     const objectId = await resolveInWorld(session, handle.backendNodeId, contextId);
@@ -135,7 +135,7 @@ export async function callOnNode<T>(
         arguments: args.map((value) => ({ value })),
         returnByValue: true,
         awaitPromise,
-      });
+      }, { readOnly });
       if (result.exceptionDetails) throw new DriverError("execution", exceptionText(result.exceptionDetails));
       return valueOf(result.result) as T;
     } finally {
@@ -158,7 +158,7 @@ export async function resolveInWorld(session: CdpSession, backendNodeId: number,
 /** Runs a function in a frame's isolated world and keeps the result as a remote object (for nodes). */
 export async function callInWorld(frames: FrameTree, frameId: string, fn: string, args: readonly unknown[] = []): Promise<{ session: CdpSession; result: RemoteObject }> {
   return frames.inWorld(frameId, async (session, contextId) => {
-    const found = await session.send<EvaluationResult>("Runtime.evaluate", { expression: "document", contextId, returnByValue: false });
+    const found = await session.send<EvaluationResult>("Runtime.evaluate", { expression: "document", contextId, returnByValue: false }, { readOnly: true });
     const documentId = found.result.objectId;
     if (!documentId) throw new DriverError("not-found", "The frame has no document.");
     try {
@@ -167,7 +167,7 @@ export async function callInWorld(frames: FrameTree, frameId: string, fn: string
         functionDeclaration: fn,
         arguments: args.map((value) => ({ value })),
         returnByValue: false,
-      });
+      }, { readOnly: true });
       if (result.exceptionDetails) throw new DriverError("execution", exceptionText(result.exceptionDetails));
       return { session, result: result.result };
     } finally {
@@ -176,10 +176,10 @@ export async function callInWorld(frames: FrameTree, frameId: string, fn: string
   });
 }
 
-/** A plain value computed in a frame's isolated world. */
-export async function valueInWorld<T>(frames: FrameTree, frameId: string, expression: string, { awaitPromise = false } = {}): Promise<T> {
+/** A plain value computed in a frame's isolated world; `readOnly` false when the expression changes the page. */
+export async function valueInWorld<T>(frames: FrameTree, frameId: string, expression: string, { awaitPromise = false, readOnly = true } = {}): Promise<T> {
   const result = await frames.inWorld(frameId, (session, contextId) =>
-    session.send<EvaluationResult>("Runtime.evaluate", { expression, contextId, returnByValue: true, awaitPromise }));
+    session.send<EvaluationResult>("Runtime.evaluate", { expression, contextId, returnByValue: true, awaitPromise }, { readOnly }));
   if (result.exceptionDetails) throw new DriverError("execution", exceptionText(result.exceptionDetails));
   return valueOf(result.result) as T;
 }
