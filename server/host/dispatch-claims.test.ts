@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DispatchClaims } from "./dispatch-claims.ts";
+import { createDispatchClaims } from "./dispatch-claims.ts";
 
 type Claim = { id: string; phase: "setup" | "dispatching" };
 
@@ -10,13 +10,13 @@ const settledYet = async (promise: Promise<void>): Promise<boolean> => {
   return done;
 };
 
-describe("DispatchClaims", () => {
+describe("createDispatchClaims", () => {
   it("resolves at once when the thread holds no claim", async () => {
-    expect(await settledYet(new DispatchClaims<Claim>().released("t1"))).toBe(true);
+    expect(await settledYet(createDispatchClaims<Claim>().released("t1"))).toBe(true);
   });
 
   it("waits through a phase change of the same claim and resolves when it is cleared", async () => {
-    const claims = new DispatchClaims<Claim>();
+    const claims = createDispatchClaims<Claim>();
     claims.set("t1", { id: "c1", phase: "setup" });
     const released = claims.released("t1");
     claims.set("t1", { id: "c1", phase: "dispatching" });
@@ -28,7 +28,7 @@ describe("DispatchClaims", () => {
   });
 
   it("resolves when another turn's claim replaces it, and then waits on that one only for a new caller", async () => {
-    const claims = new DispatchClaims<Claim>();
+    const claims = createDispatchClaims<Claim>();
     claims.set("t1", { id: "c1", phase: "dispatching" });
     const first = claims.released("t1");
     claims.set("t1", { id: "c2", phase: "setup" });

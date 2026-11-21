@@ -1,8 +1,15 @@
 /** The direct turns being set up or sent to their engine, by thread. A thread holding a claim reads busy. */
-export class DispatchClaims<Claim extends { id: string }> extends Map<string, Claim> {
+export type DispatchClaims<Claim extends { id: string }> = Map<string, Claim> & {
+  released(threadId: string): Promise<void>;
+};
+
+export function createDispatchClaims<Claim extends { id: string }>(): DispatchClaims<Claim> {
+  return new ClaimsByThread<Claim>();
+}
+
+class ClaimsByThread<Claim extends { id: string }> extends Map<string, Claim> {
   private readonly waiting = new Map<string, Array<() => void>>();
 
-  /** Resolves once the claim the thread holds now is gone: cleared, or replaced by another turn's. */
   released(threadId: string): Promise<void> {
     const claim = this.get(threadId);
     if (!claim) return Promise.resolve();

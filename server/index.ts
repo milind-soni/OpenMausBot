@@ -333,7 +333,7 @@ import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnse
 import { extractReplayImages, extractTurnImages, nativeClips, turnMedia, videoFramesWithin } from "./turn-images.ts";
 import { callTitleExcerpt } from "./thread-title.ts";
 import { generateThreadTitle } from "./thread-title-generate.ts";
-import { engineCommandCpuMs, engineProcessExited, engineProcessGone, ENGINE_EXIT_STALL_MS, stallLimitMs, stallNotice, TurnWatchdog } from "./turn-watchdog.ts"; import { createIdleThreads } from "./host/idle-threads.ts"; import { DispatchClaims } from "./host/dispatch-claims.ts";
+import { engineCommandCpuMs, engineProcessExited, engineProcessGone, ENGINE_EXIT_STALL_MS, stallLimitMs, stallNotice, TurnWatchdog } from "./turn-watchdog.ts"; import { createIdleThreads } from "./host/idle-threads.ts"; import { createDispatchClaims } from "./host/dispatch-claims.ts";
 import { TurnResources, type TurnOwner } from "./turn-resources.ts";
 import { createPhoneHold } from "./phone-screen/hold.ts"; import { createPhoneGate } from "./routes/phone-gate.ts";
 import { endHoldUnlessOn, usbPhoneOffered, usbPhoneTakeoverEnabled } from "./phone-screen/flag.ts"; import { dataPrompts } from "./data-prompt.ts";
@@ -1882,7 +1882,7 @@ async function cloudComputerHolders(botId: string): Promise<string[]> {
 function boatNotConfigured(bot: { name: string }, source: PlaceSource): PlaceUnavailableError {
   return placeUnavailable("cloud", { state: CLOUD_HOME ? "cc-unavailable" : "cc-needs-key", params: { bot: bot.name }, source }, Boolean(CLOUD_HOME));
 }
-const directTurnDispatchClaims = new DispatchClaims<DirectTurnDispatchClaim>();
+const directTurnDispatchClaims = createDispatchClaims<DirectTurnDispatchClaim>();
 const directTurnGenerationByThread = new Map<string, string>();
 // Latest direct request per thread, kept past Stop until completion or failure cleanup; unknown continuations deliberately lose proof.
 const directRequestOwners = new Map<string, {
